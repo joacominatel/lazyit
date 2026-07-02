@@ -30,6 +30,7 @@ export const PERMISSION_DOMAINS = [
   "asset",
   "application",
   "accessGrant",
+  "accessRequest", // self-service access requests (ADR-0085) — request → approve/deny → grant
   "consumable",
   "article", // the Knowledge Base (KB) — articles
   "location",
@@ -95,6 +96,19 @@ export const PERMISSIONS = [
   "accessGrant:write",
   "accessGrant:delete",
   "accessGrant:grant",
+  // accessRequest (self-service access requests, ADR-0085) — the request → approve/deny → grant flow
+  // that closes the ADR-0023 deferral. Two verbs only:
+  //   - `accessRequest:create` — raise a request for access to an application. A SELF-SERVICE capability
+  //     seeded to ALL THREE roles incl VIEWER (see SELF_SERVICE_CAPABILITIES): anyone may ask, even a
+  //     read-only user. NOT a coarse/admin verb — granting it is not an escalation. Human-only at the
+  //     controller (a service account never raises a request).
+  //   - `accessRequest:read`   — list/see access requests across the estate (who asked for what). A
+  //     sensitive read like `accessGrant:read`, so PRE-TIGHTENED to ADMIN + MEMBER (VIEWER denied — see
+  //     VIEWER_DENIED_READS). A requester can ALWAYS read their OWN requests via `GET /access-requests/mine`
+  //     regardless of this permission (a self-scope carve-out in the service, like draft privacy).
+  // DECIDING (approve/deny) reuses the existing `accessGrant:grant` — there is deliberately NO decide verb.
+  "accessRequest:create",
+  "accessRequest:read",
   // consumable
   "consumable:read",
   "consumable:write",
@@ -240,12 +254,28 @@ export const WRITE_PERMISSIONS: readonly Permission[] = PERMISSIONS.filter(
  * behavior (all GETs are reachable by any authenticated user, including VIEWER) — EXCEPT these two,
  * which are the worst read-exposure and are restricted to ADMIN + MEMBER (VIEWER loses them):
  *   - `accessGrant:read` — who has access to what (and to critical apps) is sensitive.
+ *   - `accessRequest:read` — who requested access to what is sensitive in the same way (ADR-0085);
+ *     pre-tightened to ADMIN + MEMBER alongside `accessGrant:read`. VIEWER can still raise + read its
+ *     OWN requests (`accessRequest:create` + `GET /access-requests/mine`), just not the estate-wide list.
  *   - `user:read`        — the user directory (emails, roles, externalId linkage) is sensitive.
  * This is the ONLY read-behavior change in the v2 foundation; it is intentional and CEO-approved.
  */
 export const VIEWER_DENIED_READS = [
   "accessGrant:read",
+  "accessRequest:read",
   "user:read",
+] as const satisfies readonly Permission[];
+
+/**
+ * SELF-SERVICE capabilities — verbs seeded to EVERY role by default (incl VIEWER) that let a user act on
+ * their OWN behalf, distinct from the admin-gated coarse verbs. Granting one is NOT an escalation (it is
+ * a default-for-all), so — unlike the coarse verbs — it carries no above-default-tier warning.
+ *   - `accessRequest:create` — any authenticated human may REQUEST access to an application (ADR-0085).
+ *     The DECISION (approve/deny) stays gated on `accessGrant:grant`; requesting is open to all.
+ * These are the ONLY non-`:read`/`:write` permissions that enter the MEMBER and VIEWER seed sets.
+ */
+export const SELF_SERVICE_CAPABILITIES = [
+  "accessRequest:create",
 ] as const satisfies readonly Permission[];
 
 /**
@@ -322,7 +352,9 @@ export function buildDefaultRolePermissions(): RolePermissionMatrix {
     VIEWER_DENIED_READS.includes(p as (typeof VIEWER_DENIED_READS)[number]);
 
   // MEMBER gets every read+write EXCEPT the admin-only reads (the pre-tightened reads stay — they are
-  // ADMIN + MEMBER). VIEWER gets every read minus BOTH the pre-tightened and the admin-only reads.
+  // ADMIN + MEMBER). VIEWER gets every read minus BOTH the pre-tightened and the admin-only reads. Both
+  // ALSO get the self-service capabilities (SELF_SERVICE_CAPABILITIES) — verbs any role may hold (ADMIN
+  // already holds them via the complete catalog).
   const memberReads = READ_PERMISSIONS.filter((p) => !isAdminOnlyRead(p));
   const viewerReads = READ_PERMISSIONS.filter(
     (p) => !isViewerDeniedRead(p) && !isAdminOnlyRead(p),
@@ -330,8 +362,12 @@ export function buildDefaultRolePermissions(): RolePermissionMatrix {
 
   return {
     ADMIN: sorted(PERMISSIONS),
-    MEMBER: sorted([...memberReads, ...WRITE_PERMISSIONS]),
-    VIEWER: sorted(viewerReads),
+    MEMBER: sorted([
+      ...memberReads,
+      ...WRITE_PERMISSIONS,
+      ...SELF_SERVICE_CAPABILITIES,
+    ]),
+    VIEWER: sorted([...viewerReads, ...SELF_SERVICE_CAPABILITIES]),
   };
 }
 

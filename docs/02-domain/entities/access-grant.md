@@ -23,6 +23,9 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
 - **belongs to** one [[application]] (`applicationId`, **required** FK, `onDelete: Restrict`).
 - **optionally references** a [[user]] as `grantedBy` and/or `revokedBy` — audit of who acted
   (`onDelete: SetNull`; `null` when the system acted or it's unknown).
+- **may be produced by** an approved [[access-request]] — the approval creates the grant through the
+  same write path (in one transaction) and back-links it via `AccessRequest.grantId`
+  ([[0085-access-request-flow]]). A directly-created grant has no such request.
 
 ## Business rules
 
@@ -139,8 +142,6 @@ Plus the natural sub-resource endpoints on the related entities:
 
 ## Not yet implemented (deferred)
 
-- [[access-request]] (approval workflow) — grants are created directly for now
-  ([[0023-access-management-design]]).
 - **Auto-revoke on `expiresAt`** via a scheduler/worker; a soft-delete-time guard on apps/users with
   active grants; **retrofitting [[asset-assignment]]** to the same `X-User-Id` actor pattern.
 

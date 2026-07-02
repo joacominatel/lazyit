@@ -113,6 +113,14 @@ const TYPE_META: Record<
     tone: "bg-pillar-access/10 text-pillar-access",
     href: () => "/settings/instance",
   },
+  // A self-service access request was raised (ADR-0085, #948) — admin-broadcast to the holders of
+  // accessGrant:grant who can approve/deny. Deep-links to the target application (the request review UI
+  // is the frontend follow-up; this entry keeps the closed-enum map exhaustive so the type is renderable).
+  "access_request.created": {
+    icon: KeyIcon,
+    tone: "bg-pillar-access/10 text-pillar-access",
+    href: (n) => (n.entityId ? `/applications/${n.entityId}` : "/applications"),
+  },
 };
 
 /** Fallback meta for an unknown future type (defensive — the closed enum should make this unreachable). */

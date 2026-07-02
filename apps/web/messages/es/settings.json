@@ -306,6 +306,7 @@
           "asset": "Activos",
           "application": "Aplicaciones",
           "accessGrant": "Concesiones de acceso",
+          "accessRequest": "Solicitudes de acceso",
           "consumable": "Consumibles",
           "article": "Base de conocimiento",
           "location": "Ubicaciones",
@@ -568,6 +569,8 @@
       "accessGrant:write": { "label": "Editar registros de acceso (reservado)" },
       "accessGrant:delete": { "label": "Eliminar registros de acceso" },
       "accessGrant:grant": { "label": "Otorgar y revocar acceso" },
+      "accessRequest:create": { "label": "Solicitar acceso a aplicaciones" },
+      "accessRequest:read": { "label": "Ver solicitudes de acceso" },
       "article:read": { "label": "Leer la base de conocimiento" },
       "article:write": { "label": "Escribir y editar artículos" },
       "article:delete": { "label": "Eliminar artículos" },
@@ -634,7 +637,15 @@
       },
       "accessGrant:grant": {
         "label": "Otorgar y revocar acceso",
-        "description": "Abrir, revocar y editar concesiones de acceso para cualquier usuario — incluso a aplicaciones sensibles."
+        "description": "Abrir, revocar y editar concesiones de acceso para cualquier usuario — incluso a aplicaciones sensibles. También aprobar y denegar solicitudes de acceso."
+      },
+      "accessRequest:create": {
+        "label": "Solicitar acceso",
+        "description": "Pedir acceso a una aplicación (con un nivel y una justificación opcionales). Aprobar o denegar la solicitud es la capacidad separada de Otorgar y revocar acceso."
+      },
+      "accessRequest:view": {
+        "label": "Ver solicitudes de acceso",
+        "description": "Ver la lista de solicitudes de acceso de toda la organización (quién pidió qué). Quien solicita siempre puede ver sus propias solicitudes, independientemente de esto."
       },
       "article:view": {
         "label": "Leer la base de conocimiento",

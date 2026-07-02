@@ -57,6 +57,12 @@ import { pageSchema } from "./pagination";
  *     feed (the audience that can act); deep-links to Settings → Instance. De-duped per newly-observed
  *     latest version (one email per version, never a weekly re-nag) and suppressed when current.
  *     INV-6-safe — carries only the version strings + count, no host-identifying data.
+ *   - `access_request.created` — a self-service access request was raised (ADR-0085, issue #948): a
+ *     user asked to be granted access to an application. Broadcast to the admin feed (the audience that
+ *     holds `accessGrant:grant` and can approve/deny); deep-links to the application. De-duped per
+ *     request (`access_request.created:<requestId>`). Metadata is REDACTED (requester + app names/ids
+ *     only). Decision notifications are NOT emitted in v1 — the requester tracks the outcome in their
+ *     own request list (the bell is ADMIN-broadcast; a targeted per-user decision nudge is a follow-up).
  */
 export const NOTIFICATION_TYPES = [
   "critical_app_access",
@@ -68,6 +74,7 @@ export const NOTIFICATION_TYPES = [
   "permission_widened",
   "infra.agent_offline",
   "update.available",
+  "access_request.created",
 ] as const;
 
 /** A single known notification type. The wire shape validates against this enum (→ 400 otherwise). */
