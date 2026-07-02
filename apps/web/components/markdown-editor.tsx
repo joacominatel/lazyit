@@ -3,18 +3,26 @@
 import {
   CodeBracketIcon,
   EyeIcon,
+  PhotoIcon,
   ViewColumnsIcon,
 } from "@heroicons/react/24/outline";
+import type { Attachment } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import {
+  type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent,
   useCallback,
+  useEffect,
   useReducer,
   useRef,
   useState,
 } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownView } from "@/components/markdown-view";
+import { ArticleAttachmentProvider } from "@/components/markdown-attachment-image-view";
+import { notifyError } from "@/lib/api/notify-error";
+import { toast } from "sonner";
 import { MarkdownSyntaxHelp } from "@/components/markdown-syntax-help";
 import {
   type WikiLinkAutocomplete,
@@ -55,6 +63,24 @@ interface MarkdownEditorProps {
    * suggestion inserts `{{ lazyit_secret.HANDLE }}`. Omit for a plain editor without chip support.
    */
   secretChip?: SecretChipAutocomplete;
+  /**
+   * Optional KB inline-image upload (ADR-0082 §5). When present, pasting or dropping an image into
+   * the source pane — or using the toolbar image button — uploads it and inserts an
+   * `![name](attachment:<id>)` ref at the caret (Marta's paste-from-clipboard flow). `articleId` is
+   * the saved article's id: it drives real uploads AND the live-preview image provider. On a
+   * not-yet-saved draft (`/kb/new`) `upload` is omitted, so a paste shows a "save the draft first"
+   * hint instead of silently failing. Omit the whole prop for a plain editor without image support.
+   */
+  image?: {
+    articleId?: string;
+    upload?: (file: File) => Promise<Attachment>;
+  };
+}
+
+/** Collect image files from a paste/drop DataTransfer (type `image/*`). Empty → not an image event. */
+function imageFilesFrom(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  return Array.from(data.files).filter((file) => file.type.startsWith("image/"));
 }
 
 /** The three editor layouts. `split` = source + live preview side-by-side; `write` = source
@@ -161,10 +187,21 @@ export function MarkdownEditor({
   invalid,
   wikiLink,
   secretChip,
+  image,
 }: MarkdownEditorProps) {
   const t = useTranslations("shared");
+  const ti = useTranslations("attachments");
   const [mode, setMode] = useState<ViewMode>("split");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Latest value for the async upload callbacks: the closed-over `value` is stale by the time an
+  // upload resolves (the author kept typing), so token→ref replacement reads/writes through this ref.
+  // Synced from the prop via an effect (never assigned during render); `uploadImages` also writes it
+  // directly inside its event handler so a same-tick replace reads the value it just inserted.
+  const valueRef = useRef(value);
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
   // Wiki-link + secret-chip autocomplete state grouped into one machine — see `autocompleteReducer`.
   // Includes the caret-aware popup placement (issue #797): the `{ top, left }` for whichever picker is
@@ -270,6 +307,68 @@ export function MarkdownEditor({
     });
   };
 
+  /**
+   * Upload each pasted/dropped/picked image and swap an inserted placeholder for its
+   * `![name](attachment:<id>)` ref (ADR-0082 §5). The placeholder (a plain-text `![uploading …]()`
+   * token with a nonce so concurrent uploads never collide) is visible in the source pane while the
+   * blob uploads; on success it becomes the real ref, on failure it's removed and the error toasted.
+   * When `image.upload` is absent (a not-yet-saved draft) we surface the "save first" hint instead.
+   */
+  const uploadImages = (files: File[]) => {
+    if (!image?.upload) {
+      toast.error(ti("paste.saveFirst"));
+      return;
+    }
+    const upload = image.upload;
+    for (const file of files) {
+      const nonce = Math.random().toString(36).slice(2, 8);
+      const placeholder = `![${ti("paste.uploadingAlt", { name: file.name })}](uploading:${nonce})`;
+      // Insert the placeholder at the caret (or append when the textarea isn't focused).
+      const el = textareaRef.current;
+      const caret = el?.selectionStart ?? valueRef.current.length;
+      const before = valueRef.current.slice(0, caret);
+      const after = valueRef.current.slice(caret);
+      const next = `${before}${placeholder}${after}`;
+      valueRef.current = next;
+      onChange(next);
+      upload(file)
+        .then((attachment) => {
+          const ref = `![${attachment.originalName}](attachment:${attachment.id})`;
+          const swapped = valueRef.current.replace(placeholder, ref);
+          valueRef.current = swapped;
+          onChange(swapped);
+        })
+        .catch((error) => {
+          const removed = valueRef.current.replace(placeholder, "");
+          valueRef.current = removed;
+          onChange(removed);
+          notifyError(error, ti("paste.uploadError"));
+        });
+    }
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!image) return; // no image support → default text paste
+    const files = imageFilesFrom(event.clipboardData);
+    if (files.length === 0) return; // not an image → let the default paste through
+    event.preventDefault();
+    uploadImages(files);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLTextAreaElement>) => {
+    if (!image) return;
+    const files = imageFilesFrom(event.dataTransfer);
+    if (files.length === 0) return;
+    event.preventDefault();
+    uploadImages(files);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLTextAreaElement>) => {
+    // `dataTransfer.files` is empty during dragover (only populated on drop), so gate on `types`
+    // instead — claim only file drags so text/URL drags keep their normal behavior.
+    if (image && event.dataTransfer.types.includes("Files")) event.preventDefault();
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (!anyOpen) return;
     // Wiki-link popup takes priority when both are somehow open simultaneously.
@@ -330,6 +429,9 @@ export function MarkdownEditor({
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
+        onPaste={image ? handlePaste : undefined}
+        onDrop={image ? handleDrop : undefined}
+        onDragOver={image ? handleDragOver : undefined}
         // Keep the open-token queries in sync when the caret moves without an edit (arrow/click).
         onKeyUp={(e) =>
           syncQuery(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)
@@ -368,10 +470,19 @@ export function MarkdownEditor({
     </div>
   );
 
+  // The preview resolves `attachment:<id>` images against the saved article (ADR-0082 §5). On a
+  // not-yet-saved draft there's no id, so images fall back to the provider-less placeholder.
+  const rendered = value.trim() ? <MarkdownView content={value} /> : null;
   const preview = (
     <div className="min-h-[420px] overflow-auto rounded-md border bg-muted/30 p-4">
-      {value.trim() ? (
-        <MarkdownView content={value} />
+      {rendered ? (
+        image?.articleId ? (
+          <ArticleAttachmentProvider articleId={image.articleId}>
+            {rendered}
+          </ArticleAttachmentProvider>
+        ) : (
+          rendered
+        )
       ) : (
         <p className="text-sm text-muted-foreground">{t("editor.previewHint")}</p>
       )}
@@ -412,7 +523,36 @@ export function MarkdownEditor({
           })}
         </div>
 
-        <MarkdownSyntaxHelp />
+        <div className="flex items-center gap-1">
+          {/* Keyboard-accessible upload (the ADR's secondary path beside paste/drag-drop). Hidden
+              only when the editor has no image support at all. */}
+          {image ? (
+            <>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[0.8rem] font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <PhotoIcon className="size-3.5" aria-hidden />
+                {ti("paste.insertImage")}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                multiple
+                className="sr-only"
+                aria-label={ti("paste.insertImage")}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length > 0) uploadImages(files);
+                  e.target.value = ""; // allow re-picking the same file
+                }}
+              />
+            </>
+          ) : null}
+          <MarkdownSyntaxHelp />
+        </div>
       </div>
 
       <div

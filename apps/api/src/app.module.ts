@@ -27,6 +27,7 @@ import { AuditModule } from './audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
+import { InstanceModule } from './instance/instance.module';
 import { QueueModule } from './queue/queue.module';
 import { ServiceAccountsModule } from './service-accounts/service-accounts.module';
 import { WorkflowEngineModule } from './workflow-engine/workflow-engine.module';
@@ -35,6 +36,7 @@ import { SmtpModule } from './smtp/smtp.module';
 import { SecretManagerModule } from './secret-manager/secret-manager.module';
 import { InfraModule } from './infra/infra.module';
 import { AgentDistModule } from './agent-dist/agent-dist.module';
+import { AttachmentsModule } from './attachments/attachments.module';
 import { SearchModule } from './search/search.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
@@ -61,6 +63,9 @@ import { buildLoggerParams } from './logging/logging.config';
     // In-app first-run setup (ADR-0043 Phase 3): @Public() GET /config/status + the idempotent,
     // CSRF + rate-limited POST /config/setup that bootstraps the first ADMIN. No migration.
     ConfigModule,
+    // Version identity (ADR-0083): the authenticated GET /instance/version read of the build-time
+    // APP_VERSION / GIT_SHA env baked into the image. No service, no schema.
+    InstanceModule,
     AssetHistoryModule,
     UsersModule,
     LocationsModule,
@@ -113,6 +118,10 @@ import { buildLoggerParams } from './logging/logging.config';
     // Agent distribution (ADR-0074 §6, #831): token-gated GET /agent/download streaming the baked
     // reporting-agent binary. Separate from InfraModule by design — distribution is its own concern.
     AgentDistModule,
+    // File attachments (ADR-0082, #906): asset documents + KB inline images. Blobs on the
+    // attachments volume (content-addressed by sha256), API-only serving behind the PARENT's authz
+    // with hardened headers; sandboxed sharp re-encode + the daily four-pin GC sweep.
+    AttachmentsModule,
   ],
   controllers: [AppController],
   providers: [

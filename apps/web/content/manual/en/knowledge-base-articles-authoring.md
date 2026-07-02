@@ -87,6 +87,24 @@ Publish from the article itself:
 A **Draft** badge marks unpublished articles on their page. Editing the body never changes the
 published/draft state — publishing and unpublishing are their own explicit actions.
 
+## Adding images
+
+You can put screenshots and diagrams straight into an article. The fastest way is to **paste**: copy
+an image to your clipboard and paste it into the editor's source pane — lazyit uploads it and inserts
+an image reference at the cursor. You can also **drag and drop** an image file onto the editor, or use
+the **Insert image** button in the editor toolbar to pick one from disk.
+
+- Supported types are **PNG, JPEG, GIF and WebP**, up to **10 MB** each. Other formats — including
+  **SVG** — are rejected; export diagrams to PNG.
+- Images belong to the article, so **save the draft first**. On a brand-new article that has never
+  been saved there is nowhere to attach an image yet, so a paste shows a "save the draft first" hint.
+- While an image uploads you see a short `![uploading …]()` placeholder in the source pane; it is
+  swapped for the real reference automatically once the upload finishes.
+- Images render on the published article and in the live preview, and are served **only** to people
+  who can already read the article — an image is never exposed on a public URL.
+- Only files you paste, drop or upload are stored. A hand-written link to an image on the web is **not**
+  displayed (no external image loading), so keep runbook screenshots as uploaded attachments.
+
 ## Editing and deleting
 
 - **Edit** opens the same form on the existing article. Saving updates the body; it does not change

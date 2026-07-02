@@ -41,7 +41,11 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { statusTone } from "@/lib/infra/canvas";
 import { AgentOnboarding } from "./agent-onboarding";
-import { AgentBadge, AgentFreshness } from "./agent-provenance";
+import {
+  AgentBadge,
+  AgentFreshness,
+  AgentOutdatedBadge,
+} from "./agent-provenance";
 import { CreateAgentWizard } from "./create-agent-wizard";
 import { PendingReviewTray } from "./pending-review-tray";
 
@@ -354,7 +358,10 @@ export function ServersTableView() {
                     className="col-span-2"
                   >
                     <div className="flex flex-col items-start gap-1">
-                      <AgentBadge />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <AgentBadge />
+                        <AgentOutdatedBadge agentVersion={node.agentVersion} />
+                      </div>
                       <AgentFreshness
                         reportingSource={node.reportingSource}
                         lastReportedAt={node.lastReportedAt}
@@ -380,6 +387,9 @@ export function ServersTableView() {
                     {node.label}
                   </Link>
                   {node.source === "AGENT" ? <AgentBadge /> : null}
+                  {node.source === "AGENT" ? (
+                    <AgentOutdatedBadge agentVersion={node.agentVersion} />
+                  ) : null}
                 </div>
                 {node.source === "AGENT" ? (
                   <AgentFreshness

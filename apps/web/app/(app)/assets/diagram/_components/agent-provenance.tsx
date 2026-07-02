@@ -1,9 +1,14 @@
 "use client";
 
-import { CpuChipIcon } from "@heroicons/react/24/outline";
+import {
+  CpuChipIcon,
+  ExclamationTriangleIcon,
+} from "@heroicons/react/24/outline";
 import type { InfraNodeStatus } from "@lazyit/shared";
+import { isMajorBehind } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { useInstanceVersion } from "@/lib/api/hooks/use-instance-version";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +29,40 @@ export function AgentBadge({ className }: { className?: string }) {
     <Badge variant="outline" className={cn("gap-1", className)}>
       <CpuChipIcon className="size-3" aria-hidden />
       {t("badge")}
+    </Badge>
+  );
+}
+
+/**
+ * A subtle "Agent outdated" hint (ADR-0074/0083, issue #907). Self-contained: it fetches the running
+ * server version (`GET /instance/version`, cached ~1h so mounting it per-row is cheap — TanStack
+ * dedupes) and renders NOTHING unless the node's reported `agentVersion` is a MAJOR behind the server.
+ * `isMajorBehind` is fail-soft (a `dev`/unstamped agent or an unparseable version ⇒ never behind), so
+ * this only surfaces on a real, meaningful contract gap — display-only, never a gate (v1). Caller gates
+ * on `source === 'AGENT'`; a manual node has no `agentVersion`.
+ */
+export function AgentOutdatedBadge({
+  agentVersion,
+  className,
+}: {
+  agentVersion: string | null;
+  className?: string;
+}) {
+  const t = useTranslations("infra.agent");
+  const { data: version } = useInstanceVersion();
+  const serverVersion = version?.current ?? null;
+  if (!isMajorBehind(agentVersion, serverVersion)) return null;
+  return (
+    <Badge
+      variant="warning"
+      className={cn("gap-1", className)}
+      title={t("outdatedTooltip", {
+        agentVersion: agentVersion ?? "?",
+        serverVersion: serverVersion ?? "?",
+      })}
+    >
+      <ExclamationTriangleIcon className="size-3" aria-hidden />
+      {t("outdated")}
     </Badge>
   );
 }

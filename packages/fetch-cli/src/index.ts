@@ -19,9 +19,16 @@
 import {
   ServiceAccountVaultFetchSchema,
   SecretVaultSchema,
+  InstanceVersionSchema,
+  isMajorBehind,
   type ServiceAccountVaultFetch,
 } from "@lazyit/shared";
 import { decryptVault, selfCheck } from "./crypto";
+
+// Build-time version stamp (ADR-0083 mechanism, issue #907): the compile scripts bake `APP_VERSION`
+// via `bun build --define` (git describe → env). A plain `bun run`/an unstamped compile falls back to
+// "dev", which suppresses the skew warning entirely (never nag a dev build). Mirrors the agent.
+const CLI_VERSION = process.env.APP_VERSION || "dev";
 
 interface Args {
   token?: string;
@@ -159,6 +166,35 @@ async function apiGet(
   return res.json();
 }
 
+/**
+ * Best-effort version handshake (ADR-0083, issue #907): probe `GET /instance/version` and, when this
+ * CLI is a MAJOR behind the server, print a non-blocking hint to STDERR (never stdout — the `.env`
+ * output must stay clean for `lazyit-fetch --vault v > .env`). Warn-only, NOT a gate: a stale CLI keeps
+ * working. Silent on any failure (old server without the endpoint, no access, network, timeout) and on
+ * an unstamped/dev build — a version hint must never break or noticeably slow a fetch. `isMajorBehind`
+ * fail-soft handles `dev`/unparseable on either side (returns false), so PATCH/MINOR drift is not nagged.
+ */
+async function warnIfOutdated(api: string, token: string): Promise<void> {
+  if (CLI_VERSION === "dev") return; // unstamped build: nothing meaningful to compare — skip the probe
+  try {
+    const res = await fetch(`${api}/instance/version`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return;
+    const parsed = InstanceVersionSchema.safeParse(await res.json());
+    if (!parsed.success) return;
+    if (isMajorBehind(CLI_VERSION, parsed.data.current)) {
+      process.stderr.write(
+        `lazyit-fetch: warning — this CLI (${CLI_VERSION}) is a major version behind your lazyit ` +
+          `server (${parsed.data.current}); update lazyit-fetch to stay compatible.\n`,
+      );
+    }
+  } catch {
+    // A version hint is strictly best-effort — swallow every error so it never affects the fetch.
+  }
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
@@ -177,6 +213,10 @@ async function main(): Promise<void> {
   }
 
   const { token, api } = resolveConfig(args);
+
+  // Best-effort compatibility hint before any real work (both --list and vault fetch reach here). It
+  // reuses the SA token + api base and never blocks — see warnIfOutdated. (#907)
+  await warnIfOutdated(api, token);
 
   // List the vaults this SA may fetch (discovery).
   if (args.list) {

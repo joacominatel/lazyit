@@ -3,7 +3,7 @@ title: Entities — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-07-01
 ---
 
 # Entities — Map of Content
@@ -90,6 +90,7 @@ access changes — fired **after** the [[access-grant]] commits, decoupled (the 
 - 🟢 [[folder]] — the flat [[article-category]] evolved: a self-referential hierarchy (`parentId`) that is an article's **one home folder**; live-only partial-unique name within a parent. [[0059-kb-folders-links-and-import]]
 - 🟢 [[article-alias]] — a nav-only symlink to an article living elsewhere (`createdAt`-only, hard-delete; never widens access). [[0059-kb-folders-links-and-import]]
 - 🟢 [[article-wiki-link]] — a materialized article↔article `[[slug]]` edge computed on save (powers backlinks + fast resolution; hard-rebuilt). [[0059-kb-folders-links-and-import]]
+- 🟢 [[attachment]] — a user-uploaded file (polymorphic: asset documents + KB inline images); metadata row + content-addressed blob on the `attachments_data` volume. [[0082-attachments-storage]]
 
 ## Dashboard (derived)
 

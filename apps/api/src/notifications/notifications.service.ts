@@ -339,6 +339,7 @@ export class NotificationsService {
         return 'warning';
       case 'workflow.manual_task':
       case 'secret.vault_setup':
+      case 'update.available':
         return 'info';
       default:
         return 'info';

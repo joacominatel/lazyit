@@ -236,3 +236,5 @@ would be a separate ADR and arguably a separate product).
 - Deployment/origin: [[0026-reverse-proxy-tls]] · Auditing: [[0006-soft-delete-and-auditing]]
 - Ingestion precedent: [[0069-migrator-import]] · Zero-knowledge boundary: [[0061-secret-manager-zero-knowledge]]
 - Epic: #831
+- Version handshake (agent stamps + reports its build; `InfraNode.agentVersion` + an "Agent outdated"
+  hint when a MAJOR behind the server): [[0083-versioning-and-releases]] Amendment (2026-07-02), issue #907.

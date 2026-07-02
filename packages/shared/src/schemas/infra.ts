@@ -92,6 +92,10 @@ export const InfraNodeSchema = z.object({
   reportingSource: z.string().nullable(),
   externalId: z.string().nullable(),
   lastReportedAt: z.iso.datetime().nullable(),
+  // The reporting agent's own build version at its last check-in (ADR-0074/0083, issue #907). Null
+  // for manual nodes + pre-stamp agents; the UI compares it to `GET /instance/version` to show an
+  // "agent outdated" hint when the agent is a MAJOR behind the server (display-only, never a gate).
+  agentVersion: z.string().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),

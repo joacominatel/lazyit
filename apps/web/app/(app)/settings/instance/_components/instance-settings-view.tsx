@@ -13,9 +13,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api/client";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
+import { useInstanceVersion } from "@/lib/api/hooks/use-instance-version";
 import { AdminGate } from "../../_components/admin-gate";
 import { AssetTagSchemeEditor } from "./asset-tag-scheme-editor";
 import { SmtpSettingsEditor } from "./smtp-settings-editor";
+import { UpdatePanel } from "./update-panel";
 
 /** Stable empty breadcrumb for the instance settings PageHeader. */
 const BREADCRUMB = <Breadcrumb />;
@@ -44,6 +46,8 @@ export function InstanceSettingsView() {
   const tc = useTranslations("common");
   const { data, isLoading, isError, error, refetch, isFetching } =
     useConfigStatus();
+  // Version identity (ADR-0083) — its own tiny read; a failure degrades to an em dash, never the card.
+  const { data: version } = useInstanceVersion();
 
   const requestId = error instanceof ApiError ? error.requestId : undefined;
 
@@ -79,6 +83,9 @@ export function InstanceSettingsView() {
 
         <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
           <div className="space-y-6">
+            {/* Version & updates — the FIRST card (ADR-0084 §5). */}
+            <UpdatePanel />
+
             <Card>
               <CardHeader>
                 <CardTitle>{t("instance.cardTitle")}</CardTitle>
@@ -128,6 +135,22 @@ export function InstanceSettingsView() {
                       <StatusBadge tone={posture.tone} dot>
                         {posture.label}
                       </StatusBadge>
+                    </InfoRow>
+                    <InfoRow label={t("instance.rows.version")}>
+                      {version ? (
+                        <span className="font-mono text-xs">
+                          {version.current}
+                          {version.gitSha !== "unknown" &&
+                            !version.current.includes(version.gitSha) && (
+                              <span className="text-muted-foreground">
+                                {" "}
+                                ({version.gitSha})
+                              </span>
+                            )}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </InfoRow>
                   </div>
                 ) : null}

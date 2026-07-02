@@ -45,7 +45,8 @@
       "configured": "Configured",
       "identityProvider": "Identity provider",
       "administrators": "Administrators",
-      "runtimePosture": "Runtime posture"
+      "runtimePosture": "Runtime posture",
+      "version": "Version"
     },
     "configuredBadge": "Configured",
     "setupPending": "Setup pending",
@@ -56,6 +57,59 @@
     "identityProvider": {
       "zitadel": "Zitadel (bundled)",
       "generic-oidc": "Generic OIDC (bring your own)"
+    },
+    "updates": {
+      "title": "Version & updates",
+      "subtitle": "Check for new lazyit releases and run a guided, backed-up update from the host.",
+      "rows": {
+        "current": "Current version",
+        "status": "Status",
+        "latest": "Latest release",
+        "viewRelease": "View release notes",
+        "lastChecked": "Last checked",
+        "never": "Never"
+      },
+      "state": {
+        "checksOff": "Update checks off",
+        "notChecked": "Couldn't check",
+        "upToDate": "Up to date",
+        "behind": "{count, plural, one {# version behind} other {# versions behind}}",
+        "securityBehind": "{count, plural, one {# version behind — security} other {# versions behind — security}}"
+      },
+      "security": {
+        "title": "Security update available",
+        "description": "A release in this gap addresses security-relevant issues. Updating promptly is recommended."
+      },
+      "optIn": {
+        "label": "Check for updates weekly",
+        "description": "Anonymously check github.com for new releases. Off by default; no instance data is ever sent, and it fails silently if blocked.",
+        "smtpHint": "To also get emailed when you fall behind, configure SMTP in the card below."
+      },
+      "cta": {
+        "update": "Update to {version}",
+        "hint": "This records the update and shows the exact command to run on the host — nothing runs automatically."
+      },
+      "command": {
+        "instruction": "Run this on the host to apply the update. It backs up both databases (verified) before anything, and won't proceed if the backup fails:",
+        "reconnecting": "Update in progress — the app may be briefly unreachable while it restarts. This page reconnects automatically."
+      },
+      "history": {
+        "title": "Update history"
+      },
+      "runStatus": {
+        "requested": "Update requested — run the command below on the host",
+        "backing_up": "Backing up both databases…",
+        "migrating": "Running database migrations…",
+        "building": "Building the new version…",
+        "restarting": "Restarting the stack…",
+        "verifying": "Verifying the new version…",
+        "done": "Done",
+        "failed": "Failed",
+        "rolled_back": "Rolled back"
+      },
+      "toast": {
+        "enqueued": "Update queued. Run the shown command on the host to apply it."
+      }
     }
   },
   "assetTagScheme": {

@@ -37,10 +37,12 @@ describe('email allowlist (curated)', () => {
     // Sensitive-audit alerts (#852) — now INCLUDED (ADR-0079 fork #1):
     expect(isEmailableNotificationType('permission_widened')).toBe(true);
     expect(isEmailableNotificationType('infra.agent_offline')).toBe(true);
+    // The weekly update nudge (ADR-0084 §2) — emailed (the whole point is an admin inbox):
+    expect(isEmailableNotificationType('update.available')).toBe(true);
     // Still bell-only — the per-user login nudge is not inbox-worthy:
     expect(isEmailableNotificationType('secret.vault_setup')).toBe(false);
   });
-  it('the allowlist is the seven emailed types', () => {
+  it('the allowlist is the eight emailed types', () => {
     expect([...EMAIL_NOTIFICATION_TYPES].sort()).toEqual(
       [
         'admin_granted',
@@ -48,6 +50,7 @@ describe('email allowlist (curated)', () => {
         'infra.agent_offline',
         'low_stock',
         'permission_widened',
+        'update.available',
         'workflow.manual_task',
         'workflow.run_failed',
       ].sort(),

@@ -20,6 +20,7 @@ import {
   offsetOf,
   pageOf,
 } from '@lazyit/shared';
+import { provenanceStampLine } from '../common/export-provenance';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';
@@ -286,6 +287,9 @@ export class AssetsService {
     filters: AssetFilters = {},
     deleted: DeletedFilter = 'active',
   ): AsyncGenerator<string> {
+    // Leading provenance stamp (#909): names the build that wrote the file. The migrator strips it on
+    // re-import and gates on major compatibility; other tools treat it as a leading `#` comment row.
+    yield `${provenanceStampLine()}\n`;
     yield `${ASSET_INVENTORY_CSV_HEADER}\n`;
 
     const where = {

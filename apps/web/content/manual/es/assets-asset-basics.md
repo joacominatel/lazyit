@@ -149,6 +149,25 @@ cuál es de un vistazo. (Solo ves esto si tenés permiso para ver la topología.
 también existe: el panel de detalle de un nodo enlaza su *nombre de inventario* de vuelta a este
 activo, así te movés entre un activo y su nodo en cualquier dirección.
 
+## Documentos
+
+Un activo puede llevar **documentos** — PDFs de garantía, recibos de compra, fotos de daños —
+guardados en el propio registro del activo en lugar de dispersos por unidades y chats. La sección
+**Documentos** de la página de detalle los lista con su nombre, tamaño y fecha de subida.
+
+- **Sube** con el botón, o **arrastra y suelta** archivos sobre la sección. Los tipos admitidos son
+  **PDF, PNG, JPEG, WebP, GIF, TXT, CSV, DOCX y XLSX**, hasta **25 MB** cada uno.
+- **Descargar** abre el archivo. Los documentos se sirven **solo** a quienes pueden leer el activo —
+  nunca quedan en un enlace público.
+- **Eliminar** quita un documento tras una confirmación. Como el resto de lazyit es reversible en la
+  capa de almacenamiento; se conserva el registro de quién lo subió.
+- Subir y eliminar requieren el permiso de escritura de activos; quien pueda ver el activo puede
+  descargar.
+
+> **Copias de seguridad.** Los adjuntos se guardan en el volumen de archivos del servidor, que
+> **aún no está cubierto por la copia de seguridad de la base de datos**. Hasta que llegue el
+> soporte de copias, conserva una copia independiente de todo lo irremplazable.
+
 ## Editar, clonar y desactivar
 
 - **Editar** actualiza el activo en su lugar; cada cambio relevante (estado, ubicación, modelo, campos

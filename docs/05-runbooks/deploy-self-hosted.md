@@ -110,6 +110,16 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
 > `docker compose up` (no `-f`) is now the **dev** backing-services stack (Postgres + Meilisearch +
 > Zitadel for native `bun run dev`), not the full prod stack — see [[setup]].
 
+> [!note] Version identity ([[0083-versioning-and-releases]])
+> The guided `infra/start.sh` exports `LAZYIT_VERSION=$(git describe --tags --always)` and
+> `LAZYIT_GIT_SHA=$(git rev-parse --short HEAD)` before `up`, so the api/web images bake the running
+> version (shown on **Settings → Instance** and by `GET /instance/version`). When running the compose
+> command **by hand**, export both first — otherwise the build honestly reports `dev`/`unknown`:
+>
+> ```sh
+> export LAZYIT_VERSION=$(git describe --tags --always) LAZYIT_GIT_SHA=$(git rev-parse --short HEAD)
+> ```
+
 Caddy obtains a certificate automatically (Let's Encrypt for a public FQDN on :443, or its internal
 CA otherwise). The one-shot `migrate` service applies migrations and seeds before the API starts.
 
@@ -166,8 +176,28 @@ Full procedure: **[[auth-bootstrap]]**. JIT provisioning creates the `User` row 
 
 ## 4. Updating to a new version
 
+Releases are the `vX.Y.Z` tags + GitHub Releases cut on every dev→master promotion
+([[0083-versioning-and-releases]]): a **patch/minor** is one-click-safe; a **major** requires reading
+the Release's *⚠️ Upgrade actions* section first. Check the running version on **Settings →
+Instance** before and after.
+
+> [!note] Support is latest-only, and version jumps are safe ([[0083-versioning-and-releases]] amendment)
+> Only the newest `vX.Y.Z` is supported — stay current; there is no LTS branch or backporting. You can jump
+> across several versions at once (e.g. `1.2 → 1.9`) in **one** update: the `migrate` job runs
+> `prisma migrate deploy`, which applies every pending migration **in sequence** ([[prisma-migrations]]), so
+> you never step through intermediate versions by hand. The **only** stop is a **major** in the range — apply
+> its *⚠️ Upgrade actions* before jumping past it. The guided **`infra/update.sh`**
+> ([[0084-update-awareness-and-guided-update]]) automates the pull → verified dual backup → `verify-tag` →
+> build → migrate → health-gate sequence and blocks one-click across a major.
+
+> [!note] Deprecation policy ([[0083-versioning-and-releases]] amendment)
+> Anything user- or operator-facing (an endpoint, a config/env var, an import/export format) is
+> **deprecated in a MINOR** — announced in that release's notes as "deprecated, will be removed in X.0" and
+> still working — and **removed only in the next MAJOR** (listed in that major's *⚠️ Upgrade actions*). Watch
+> the release notes for deprecations so a major never removes something you still rely on unannounced.
+
 ```sh
-git pull                                                       # or ship a new build/image
+git pull                                                       # or `git fetch --tags && git checkout vX.Y.Z`
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
   --profile prod --env-file infra/env/.env.prod up -d --build  # rebuilds; migrate re-runs (deploy)
 ```

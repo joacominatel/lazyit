@@ -18,8 +18,9 @@ en uno, o todo un árbol de Markdown a la vez. Usa **Importar** desde la Base de
 | `.docx` (Word) | Un artículo — el texto se extrae a Markdown |
 | `.zip` | **Importación en lote** — varios artículos, ver abajo |
 
-Solo se importa el **texto**. El archivo original **no se almacena**, y las imágenes u otros binarios
-dentro de un documento no se conservan.
+Se importa el **texto**, y las **imágenes incrustadas en el documento se trasladan** como adjuntos del
+artículo (consulta [Imágenes incrustadas](#imagenes-incrustadas) más abajo). El archivo original en sí
+**no se almacena**, y los binarios que no sean imágenes no se conservan.
 
 Al importar, eliges:
 
@@ -74,3 +75,26 @@ Revísalo y luego cierra el diálogo — una importación en lote no te lleva a 
   el servidor: falla esa importación concreta de forma segura y deja todo lo demás en marcha. Un fallo
   de este tipo es permanente para ese archivo: corrige o reduce el archivo comprimido e impórtalo de
   nuevo.
+## Imágenes incrustadas
+
+Las imágenes **incrustadas dentro** de un archivo importado ahora se trasladan automáticamente, de modo
+que un runbook migrado de Word o Markdown conserva sus capturas:
+
+- Una imagen pegada en un **`.docx`**, o una imagen en base64 incrustada directamente en **Markdown**,
+  se extrae, se guarda como **adjunto** del artículo y se muestra en línea en el artículo importado —
+  igual que una imagen que pegas en el editor (consulta
+  [Artículos y redacción](/help/knowledge-base-articles-authoring)). Esto también aplica a las entradas
+  `.md` dentro de un `.zip`.
+- **Lo que no se traslada:** las imágenes **enlazadas** desde la web (`https://…`) se dejan como
+  enlaces y no se muestran (lazyit nunca descarga imágenes remotas); los **archivos** de imagen sueltos
+  junto a las notas dentro de un `.zip` se omiten; y los dibujos que no son imágenes ráster reales —
+  **SVG** o HTML — no se importan. Expórtalos a PNG primero.
+- Cada imagen pasa las **mismas comprobaciones que una subida en el editor**: se verifica su tipo real,
+  se vuelve a codificar (eliminando metadatos de cámara/ubicación) y cuenta contra el **límite de
+  almacenamiento** de adjuntos de tu instancia. Una imagen ilegible se descarta del artículo; si el
+  almacenamiento de adjuntos está **lleno**, toda la importación falla con un mensaje claro — libera
+  espacio (o pide a tu administrador que suba el límite) e importa de nuevo. Los documentos con una
+  cantidad muy grande de imágenes incrustadas conservan solo las primeras varias docenas.
+
+Las referencias que escribas tú a imágenes ya subidas en lazyit (enlaces `attachment:`) se conservan
+tal cual.

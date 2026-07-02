@@ -121,6 +121,17 @@ gh issue view <n>                            # read one
 **`dev` → `master`** is done **by the user**, manually, when they judge `dev` stable. No agent
 touches this merge.
 
+**The promotion is also the release boundary ([[0083-versioning-and-releases]]).** On a PR targeting
+`master`, `release.yml` comments a bump **suggestion** computed from the commit prefixes since the
+last tag (any `feat`/`updt`/`del` ⇒ minor; only `fix`/`chore`/`docs` ⇒ patch); the user may override
+it with a `release:major|minor|patch` label — **MAJOR is never auto-detected** (label it when the
+update needs a manual operator step, and add a `## ⚠️ Upgrade actions` section to the PR body — it is
+copied into the Release notes). On merge, the workflow creates the annotated `vX.Y.Z` tag + the
+GitHub Release with human-grouped notes. The **first** release, `v1.0.0`, is seeded **by hand**,
+SSH-signed (`git tag -s v1.0.0 -m 'lazyit v1.0.0' && git push origin v1.0.0`) — automation only
+continues an existing series, and its CI-created tags are annotated but **unsigned** (CI holds no
+signing key; the mandatory control is MFA + branch protection on the GitHub identity, per the ADR).
+
 ## Issue auto-close — read this carefully
 
 GitHub's closing keywords (`Closes #<n>`, `Fixes #<n>`) **only take effect when the reference

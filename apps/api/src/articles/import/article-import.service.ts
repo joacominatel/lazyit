@@ -189,12 +189,20 @@ export class ArticleImportService {
     if (r.includes('no text content')) {
       return 'The file has no readable text content.';
     }
+    // The attachment storage budget was hit while ingesting the import's embedded images (ADR-0082
+    // §7, issue #918). Permanent until space is freed — the whole import failed, never half-imported.
+    if (r.includes('storage is full')) {
+      return 'The import contains images but attachment storage is full. Ask your administrator to free space (or raise ATTACHMENTS_MAX_TOTAL_MB), then re-import.';
+    }
     if (r.includes('Unsupported file type')) {
       return 'That file type is not supported. Use a .md, .txt, .docx or .zip file.';
     }
     // The `.zip` bomb-guard QUOTA arm (ADR-0059 §5): too many entries or too much uncompressed text.
     // Permanent — the archive itself is over the limit, not a transient hiccup.
-    if (r.includes('import limit') && (r.includes('entries') || r.includes('uncompressed'))) {
+    if (
+      r.includes('import limit') &&
+      (r.includes('entries') || r.includes('uncompressed'))
+    ) {
       return 'The .zip archive is too large to import — it has too many files or too much uncompressed content.';
     }
     if (r.includes('not a zip file') || r.includes('read the .zip')) {

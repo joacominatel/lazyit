@@ -48,6 +48,7 @@ import {
   useCreateArticle,
   useUpdateArticle,
 } from "@/lib/api/hooks/use-article-mutations";
+import { useUploadAttachment } from "@/lib/api/hooks/use-attachments";
 import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
@@ -107,6 +108,12 @@ export function ArticleForm({ article }: { article?: Article }) {
   const [chipQuery, setChipQuery] = useState<string | undefined>(undefined);
   const wikiLinkSuggestions = useArticleSlugSuggestions(wikiLinkQuery);
   const { data: chipSuggestions } = useHandleSuggestions(chipQuery);
+
+  // KB inline-image upload (ADR-0082 §5): paste/drop/pick uploads a raster image onto THIS article
+  // and inserts an `attachment:<id>` ref. Only wired on an existing article — a brand-new draft has
+  // no id yet, so `upload` stays undefined and the editor shows a "save the draft first" hint. The
+  // hook is called unconditionally (rules of hooks) with the id when present.
+  const uploadImage = useUploadAttachment("article", article?.id ?? "");
 
   const format = useFormatter();
   const baseline = useMemo(() => toFormValues(article), [article]);
@@ -375,6 +382,12 @@ export function ArticleForm({ article }: { article?: Article }) {
                 secretChip={{
                   onQueryChange: (q) => setChipQuery(q || undefined),
                   suggestions: chipSuggestions ?? [],
+                }}
+                image={{
+                  articleId: article?.id,
+                  upload: article
+                    ? (file) => uploadImage.mutateAsync(file)
+                    : undefined,
                 }}
               />
               <FieldError errors={[fieldState.error]} />

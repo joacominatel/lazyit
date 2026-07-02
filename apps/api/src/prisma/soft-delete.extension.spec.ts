@@ -97,7 +97,7 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     });
   });
 
-  it('SOFT_DELETABLE_MODELS lists exactly the 15 mutable domain entities', () => {
+  it('SOFT_DELETABLE_MODELS lists exactly the 16 mutable domain entities', () => {
     expect(SOFT_DELETABLE_MODELS.has('User')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('Asset')).toBe(true);
     // ServiceAccount is soft-deletable (revoke = soft delete; ADR-0048).
@@ -123,7 +123,9 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     // not (no deletedAt — a closed edge sets endedAt, an ADR-0019 lifecycle marker, and cascades).
     expect(SOFT_DELETABLE_MODELS.has('InfraNode')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('InfraEdge')).toBe(false);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(15);
+    // File attachments (ADR-0082): delete = soft delete; the GC sweep adjudicates the blob later.
+    expect(SOFT_DELETABLE_MODELS.has('Attachment')).toBe(true);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(16);
   });
 
   it('auto-scopes ConsumableCategory reads to live rows (#321)', () => {

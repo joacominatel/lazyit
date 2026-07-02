@@ -52,6 +52,11 @@ import { pageSchema } from "./pagination";
  *     #852; ADR-0074 §4): the staleness sweeper flipped a reporting-agent node CONFIRMED→OFFLINE (it
  *     stopped reporting). Broadcast to the admin feed; deep-links to the topology map. ONE per outage
  *     (deduped on the node's last-report timestamp), never once-per-sweep.
+ *   - `update.available`     — the weekly update-awareness nudge (ADR-0084 §2, issue #904): the opt-in
+ *     GitHub-releases check observed a NEWER release than the running version. Broadcast to the admin
+ *     feed (the audience that can act); deep-links to Settings → Instance. De-duped per newly-observed
+ *     latest version (one email per version, never a weekly re-nag) and suppressed when current.
+ *     INV-6-safe — carries only the version strings + count, no host-identifying data.
  */
 export const NOTIFICATION_TYPES = [
   "critical_app_access",
@@ -62,6 +67,7 @@ export const NOTIFICATION_TYPES = [
   "secret.vault_setup",
   "permission_widened",
   "infra.agent_offline",
+  "update.available",
 ] as const;
 
 /** A single known notification type. The wire shape validates against this enum (→ 400 otherwise). */

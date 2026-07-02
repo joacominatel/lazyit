@@ -45,6 +45,9 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   // here like Asset. InfraEdge is DELIBERATELY EXCLUDED: it has no `deletedAt` (a closed edge sets
   // `endedAt`, an ADR-0019 lifecycle marker, not a soft delete) and cascades on node delete.
   'InfraNode',
+  // File attachments (ADR-0082): delete = soft delete (the blob stays until the GC sweep proves
+  // nothing restorable references it). The GC itself reads soft-deleted rows via includeSoftDeleted.
+  'Attachment',
 ]);
 
 // Read operations whose results must hide soft-deleted rows. `findUnique`/`findUniqueOrThrow` are

@@ -512,6 +512,15 @@ bring_up() {
     warn "Let's Encrypt: you gave an ACME email ($TLS_EMAIL). Uncomment 'email $TLS_EMAIL' (and, for a public domain, 'import hsts') in infra/caddy/Caddyfile to enable publicly-trusted certs (print-only — the script does not edit the Caddyfile)."
   fi
 
+  # Version identity (ADR-0083): bake the checkout's git tag into the api/web images. compose maps
+  # LAZYIT_VERSION/LAZYIT_GIT_SHA -> the APP_VERSION/GIT_SHA build args -> ENV -> GET /instance/version.
+  # `git describe` reads v1.4.2 on a clean tag, the honest v1.4.2-3-gabc1234 off-tag, or a bare short
+  # sha before any tag exists; a non-git dir (e.g. a tarball) falls back to dev/unknown. Read-only.
+  LAZYIT_VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
+  LAZYIT_GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+  export LAZYIT_VERSION LAZYIT_GIT_SHA
+  info "building version: $LAZYIT_VERSION ($LAZYIT_GIT_SHA)"
+
   # The canonical prod bring-up (verbatim from the runbooks / the example header).
   set -- docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_PROD" --profile prod
   [ "$ENABLE_BACKUP" -eq 1 ] && set -- "$@" --profile backup
