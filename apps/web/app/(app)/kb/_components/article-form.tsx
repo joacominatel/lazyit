@@ -301,7 +301,17 @@ export function ArticleForm({ article }: { article?: Article }) {
                 aria-invalid={fieldState.invalid || undefined}
                 autoFocus
               />
-              <FieldError errors={[fieldState.error]} />
+              {/* `title` is `min(1).max(200)`; only the empty case is common in practice (a runaway
+                  paste past 200 chars is rare and stays as the raw zod message) — swap in the
+                  localized copy for the required case rather than leak it untranslated (issue #966,
+                  same class as the `categoryId` fix below). */}
+              <FieldError
+                errors={[
+                  fieldState.error?.type === "too_small"
+                    ? { message: t("form.titleRequired") }
+                    : fieldState.error,
+                ]}
+              />
             </Field>
           )}
         />
@@ -412,7 +422,13 @@ export function ArticleForm({ article }: { article?: Article }) {
                     : undefined,
                 }}
               />
-              <FieldError errors={[fieldState.error]} />
+              {/* `content` is `min(1)` (no upper bound) — its only failure mode is empty, so swap in
+                  the localized copy unconditionally (issue #966, same class as `title` above). */}
+              <FieldError
+                errors={[
+                  fieldState.error && { message: t("form.contentRequired") },
+                ]}
+              />
             </Field>
           )}
         />

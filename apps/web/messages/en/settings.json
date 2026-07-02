@@ -762,6 +762,7 @@
         "description": "Create a category to use it right away. You can refine it later.",
         "nameLabel": "Name",
         "namePlaceholder": "e.g. Laptops",
+        "nameRequired": "Name is required",
         "created": "Category created",
         "createError": "Couldn't create the category"
       },
@@ -770,8 +771,10 @@
         "description": "Create a make/model to use it right away. You can refine it later.",
         "nameLabel": "Name",
         "namePlaceholder": "Latitude 5520",
+        "nameRequired": "Name is required",
         "manufacturerLabel": "Manufacturer",
         "manufacturerPlaceholder": "Dell",
+        "manufacturerRequired": "Manufacturer is required",
         "categoryLabel": "Category",
         "categoryPlaceholder": "Select a category",
         "searchCategory": "Search categories…",

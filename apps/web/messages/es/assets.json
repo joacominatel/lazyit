@@ -120,6 +120,7 @@
     "breadcrumbClone": "Clonar",
     "name": "Nombre",
     "namePlaceholder": "Laptop de Ada",
+    "nameRequired": "El nombre es obligatorio",
     "status": "Estado",
     "model": "Modelo",
     "modelPlaceholder": "Selecciona un modelo",
