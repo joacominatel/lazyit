@@ -100,6 +100,12 @@ model User {
   accessGrantsGranted AccessGrant[] @relation("AccessGrantGrantedBy")
   accessGrantsRevoked AccessGrant[] @relation("AccessGrantRevokedBy")
 
+  // Self-service access requests (ADR-0085): requests this user RAISED (Restrict — a person's request
+  // history is preserved; soft delete bypasses it) and requests this user DECIDED as approver (SetNull —
+  // losing the decider never blocks deleting them, the request record survives).
+  accessRequestsMade    AccessRequest[] @relation("AccessRequestRequester")
+  accessRequestsDecided AccessRequest[] @relation("AccessRequestDecidedBy")
+
   // Asset events this user caused (AssetHistory.performedById). SetNull keeps the log on deletion.
   assetHistoryActed AssetHistory[] @relation("AssetHistoryActor")
 
@@ -1134,6 +1140,9 @@ model Application {
   deletedAt   DateTime?
 
   grants       AccessGrant[]
+  // Self-service access requests raised against this application (ADR-0085). Restrict on that side
+  // (a request keeps its target); soft delete bypasses it, like grants.
+  accessRequests AccessRequest[]
   // KB links (ADR-0042): knowledge-base articles linked to this application ("the runbook for THIS app").
   articleLinks ArticleLink[]
 
@@ -1197,11 +1206,73 @@ model AccessGrant {
   // commits and NEVER rolls it back — the deliberate inverse of the Zitadel strong-coupling.
   workflowRuns WorkflowRun[]
 
+  // The self-service access request this grant was produced by, when it came from an approval
+  // (ADR-0085). Back-relation of AccessRequest.grantId (nullable, @unique → at most one). Null for a
+  // grant created directly (the ADR-0023 path, still supported).
+  accessRequest AccessRequest? @relation("AccessRequestGrant")
+
   // No deletedAt: a lifecycle join, not a soft-deletable entity (ADR-0006). No uniqueness
   // constraint — multi-grant is allowed by design (ADR-0023).
   @@index([userId])
   @@index([applicationId])
   @@map("access_grants")
+}
+
+/// The lifecycle status of an AccessRequest (ADR-0085). PENDING until an approver decides it, then
+/// APPROVED (a grant was produced) or DENIED (with a recorded reason). Adding a status later is a
+/// schema/enum migration — the closed set is deliberate (v1 has no CANCELLED/EXPIRED).
+enum AccessRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+}
+
+/// A user's self-service request to be GRANTED access to an Application, moving through an approval
+/// lifecycle (ADR-0085). Closes the deferral of ADR-0023 (grants were created directly). NOT soft-
+/// deletable: a request is a lifecycle row — it closes by DECISION, never deleted (append-only-family
+/// posture, ADR-0006: createdAt only; decidedAt stamps the one allowed transition). Approval produces
+/// an AccessGrant through the EXISTING grant write path, so provisioning + audit attribution (ADR-0054,
+/// fires AFTER the grant commits) keep working. One OPEN request per (requester, application) is enforced
+/// by a PARTIAL unique index WHERE status = 'PENDING' (raw SQL in the migration; Prisma can't express it,
+/// same pattern as AssetAssignment's active-key — ADR-0019/0041). See docs/02-domain/entities/access-request.md
+model AccessRequest {
+  id            String              @id @default(cuid())
+  // Who is asking. @db.Uuid to match User.id (uuid). Restrict: a person's request history is preserved
+  // (soft delete bypasses it). NEVER set from the body — the requester is the authenticated caller.
+  requesterId   String              @db.Uuid
+  requester     User                @relation("AccessRequestRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  // The application access is requested on. Restrict (soft delete bypasses).
+  applicationId String
+  application   Application         @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  // The access level asked for — free-form, app-defined (mirrors AccessGrant.accessLevel). null =
+  // unspecified. On approval it becomes the created grant's accessLevel verbatim.
+  accessLevel   String?
+  // Optional free-text reason the requester provided.
+  justification String?
+  status        AccessRequestStatus @default(PENDING)
+  // Who decided (approved/denied) — a HUMAN approver. @db.Uuid. SetNull: losing the decider never blocks
+  // deleting them; the request record survives. null while PENDING. No SA decider column — deciding is
+  // human-only (the controller 403s a service account).
+  decidedById   String?             @db.Uuid
+  decidedBy     User?               @relation("AccessRequestDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  // When the decision was made. null while PENDING. The "closed at" timestamp of the lifecycle row.
+  decidedAt     DateTime?
+  // Why a request was DENIED (required at deny time). null while PENDING or APPROVED.
+  deniedReason  String?
+  // The AccessGrant produced on APPROVAL (created in the SAME transaction as the status flip). Nullable,
+  // @unique → at most one request per grant (a 1:1). SetNull: grants are append-only, so this is only a
+  // safety net if a grant is ever hard-deleted.
+  grantId       String?             @unique
+  grant         AccessGrant?        @relation("AccessRequestGrant", fields: [grantId], references: [id], onDelete: SetNull)
+  createdAt     DateTime            @default(now())
+
+  // No updatedAt / deletedAt: closes by decision, never edited or deleted (ADR-0085 / ADR-0006). The
+  // one-open-per-(requester, application) uniqueness is a PARTIAL unique index (raw SQL in the migration,
+  // WHERE status = 'PENDING'); Prisma PSL can't express it, so it is not declared here.
+  @@index([applicationId])
+  @@index([requesterId])
+  @@index([status])
+  @@map("access_requests")
 }
 
 /// User-managed grouping for Consumables (Cables, Adapters, Peripherals, …). Like AssetCategory /
