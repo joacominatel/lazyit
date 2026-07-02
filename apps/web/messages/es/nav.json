@@ -17,5 +17,6 @@
   "expandApplications": "Expandir aplicaciones",
   "collapseApplications": "Contraer aplicaciones",
   "noApplications": "Sin aplicaciones",
-  "secrets": "Secretos"
+  "secrets": "Secretos",
+  "accessRequests": "Solicitudes de acceso"
 }

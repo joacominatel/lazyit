@@ -45,9 +45,13 @@ export function useAccessGrants(
  * `Page<AccessGrant>` envelope; the grant rows are lean (applicationId only), so the profile resolves
  * the application label from the applications catalog. `limit` gathers the whole history in one page.
  */
-export function useMyGrants({ limit = 200 }: { limit?: number } = {}) {
+export function useMyGrants({
+  limit = 200,
+  enabled = true,
+}: { limit?: number; enabled?: boolean } = {}) {
   return useQuery({
     queryKey: accessGrantKeys.mine(),
     queryFn: () => getMyGrants({ limit }),
+    enabled,
   });
 }

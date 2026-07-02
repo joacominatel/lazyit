@@ -4,6 +4,7 @@ import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { AccessRequestStatusBadge } from "@/app/(app)/applications/_components/access-request-status-badge";
 import { AssetStatusBadge } from "@/app/(app)/assets/_components/asset-status-badge";
 import { UserRoleBadge } from "@/app/(app)/users/_components/user-role-badge";
 import {
@@ -20,6 +21,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useMyAssets } from "@/lib/api/hooks/use-assets";
 import { useMyGrants } from "@/lib/api/hooks/use-access-grants";
+import { useMyAccessRequests } from "@/lib/api/hooks/use-access-requests";
 import { useCurrentUser } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
@@ -45,6 +47,7 @@ export function ProfileView() {
   const { data: user, isLoading, isError, error, refetch } = useCurrentUser();
   const { data: assetsPage } = useMyAssets();
   const { data: grantsPage } = useMyGrants();
+  const { data: requestsPage } = useMyAccessRequests();
   // Grant rows are lean (applicationId only); resolve the display name from the catalog. VIEWER holds
   // `application:read`, but gate the fetch on it so a caller who somehow lacks it doesn't fire a doomed
   // 403 (the grant still renders with the fallback label).
@@ -84,6 +87,7 @@ export function ProfileView() {
 
   const assets = assetsPage?.items ?? [];
   const grants = grantsPage?.items ?? [];
+  const accessRequests = requestsPage?.items ?? [];
   const activeGrants = grants.filter((g) => g.revokedAt === null);
   const grantHistory = grants.filter((g) => g.revokedAt !== null);
 
@@ -206,6 +210,50 @@ export function ProfileView() {
                 </li>
               );
             })}
+          </ul>
+        )}
+      </DetailPanel>
+
+      <DetailPanel title={t("requests.title")}>
+        {accessRequests.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("requests.empty")}</p>
+        ) : (
+          <ul className="divide-y">
+            {accessRequests.map((request) => (
+              <li
+                key={request.id}
+                className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link
+                    href={`/applications/${request.applicationId}`}
+                    className="truncate font-medium hover:underline"
+                  >
+                    {appNameById.get(request.applicationId) ??
+                      t("access.applicationFallback")}
+                  </Link>
+                  {request.accessLevel && (
+                    <Badge variant="secondary">{request.accessLevel}</Badge>
+                  )}
+                  <AccessRequestStatusBadge status={request.status} />
+                </div>
+                {request.justification && (
+                  <p className="text-sm whitespace-pre-wrap text-muted-foreground">
+                    {request.justification}
+                  </p>
+                )}
+                {request.status === "DENIED" && request.deniedReason && (
+                  <p className="text-sm text-muted-foreground">
+                    {t("requests.deniedReason", {
+                      reason: request.deniedReason,
+                    })}
+                  </p>
+                )}
+                <p className="font-mono text-xs tabular-nums text-muted-foreground">
+                  {t("requests.requestedOn", { date: date(request.createdAt) })}
+                </p>
+              </li>
+            ))}
           </ul>
         )}
       </DetailPanel>

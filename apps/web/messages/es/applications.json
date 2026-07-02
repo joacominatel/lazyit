@@ -96,7 +96,10 @@
     "historyTitle": "Historial",
     "historyRevokedByPart": " · por {name}",
     "unknownUser": "Usuario desconocido",
-    "entityLabel": "aplicación"
+    "entityLabel": "aplicación",
+    "requestAccess": "Solicitar acceso",
+    "accessRequested": "Acceso solicitado",
+    "noActiveGrantsRequest": "Todavía no hay accesos activos. ¿Necesitás acceso? Usá el botón Solicitar acceso de arriba, o contactá a tu equipo de IT."
   },
   "access": {
     "grantTitle": "Otorgar acceso",
@@ -137,5 +140,47 @@
   "avatars": {
     "deactivatedSuffix": " · desactivado",
     "deactivatedTooltip": "{count, plural, one {# concesionario desactivado} other {# concesionarios desactivados}}"
+  },
+  "request": {
+    "title": "Solicitar acceso",
+    "description": "Pedí a un administrador acceso a esta aplicación. Recibirá una notificación y podrá aprobar o rechazar tu solicitud.",
+    "accessLevelLabel": "Nivel de acceso",
+    "accessLevelDescription": "Opcional — el nivel de acceso que necesitás (cada aplicación define los suyos).",
+    "justificationLabel": "Justificación",
+    "justificationPlaceholder": "¿Por qué necesitás acceso?",
+    "justificationDescription": "Opcional — una nota breve para ayudar a quien apruebe.",
+    "submit": "Enviar solicitud",
+    "submittedToast": "Solicitud de acceso enviada.",
+    "alreadyPending": "Ya tenés una solicitud pendiente para esta aplicación.",
+    "error": "No se pudo enviar tu solicitud. Probá de nuevo."
+  },
+  "requests": {
+    "title": "Solicitudes de acceso",
+    "subtitle": "Revisá quién pide acceso — aprobá para otorgarlo, o rechazá con un motivo.",
+    "lockedTitle": "No podés revisar solicitudes de acceso",
+    "lockedDescription": "No tenés permiso para ver la cola de solicitudes de acceso. Pedíselo a un administrador si lo necesitás.",
+    "errorTitle": "No se pudieron cargar las solicitudes de acceso",
+    "emptyTitle": "No hay solicitudes pendientes",
+    "emptyDescription": "No hay nada esperando una decisión en este momento.",
+    "wantsAccessTo": "pide acceso a",
+    "requestedOn": "Solicitado {date}",
+    "unknownUser": "Usuario desconocido",
+    "unknownApplication": "Aplicación desconocida",
+    "approve": "Aprobar",
+    "deny": "Rechazar",
+    "approvedToast": "Solicitud aprobada — acceso otorgado.",
+    "deniedToast": "Solicitud rechazada.",
+    "decideError": "No se pudo completar la acción. Probá de nuevo.",
+    "denyTitle": "Rechazar solicitud de acceso",
+    "denyDescription": "Rechazar la solicitud de acceso de {name}. Verá tu motivo en su perfil.",
+    "denySubmit": "Rechazar solicitud",
+    "reasonLabel": "Motivo",
+    "reasonPlaceholder": "¿Por qué rechazás esta solicitud?",
+    "reasonRequired": "Se requiere un motivo para rechazar una solicitud.",
+    "status": {
+      "PENDING": "Pendiente",
+      "APPROVED": "Aprobada",
+      "DENIED": "Rechazada"
+    }
   }
 }
