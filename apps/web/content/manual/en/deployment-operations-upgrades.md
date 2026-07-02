@@ -31,6 +31,16 @@ The rebuild brings up the new images, and the one-shot **migrate** job re-runs a
 API starts — applying any new database migrations (a no-op if there's nothing pending). You don't run
 migrations by hand.
 
+## Support policy
+
+Only the **latest release** is supported — stay current. You do **not** have to install versions one at a
+time: jumping across several releases at once (say **1.2 → 1.9**) in a single upgrade is safe, because the
+one-shot **migrate** job applies every pending database migration **in order**. The **one exception** is a
+**major** version in the range. A major always ships with a **⚠️ Upgrade actions** section in its release
+notes describing a manual step you must perform (a new required setting, a topology change). So jump freely
+across patch and minor releases, but **stop and read the Upgrade actions for each major you cross**. The
+running version is shown on **Settings → Instance**.
+
 ## New required settings after a pull
 
 A version that adds a feature may introduce a **new required environment value**. The guided bootstrap

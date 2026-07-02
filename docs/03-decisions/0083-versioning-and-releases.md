@@ -208,3 +208,18 @@ Publishing versioned images is recorded as a deferred optimization (below), not 
 - **The consumption half — [[0084-update-awareness-and-guided-update]]** (future): latest-known-version check,
   "N versions behind" indicator, weekly digest email, and any guided updater. This ADR deliberately
   stops at version *identity*.
+
+## Amendment (2026-07-02) — support & deprecation policy
+
+Two operator-facing contracts implied by the bump policy above, stated explicitly (issues #910, #911).
+
+### Support policy — latest-only
+
+**Only the latest release is supported; operators should stay current.** There is no long-term-support
+branch and no backporting to older versions. **Version jumps are safe** — going from, say, `1.2` straight
+to `1.9` in one upgrade does **not** require installing the intermediate versions: the one-shot `migrate`
+job runs `prisma migrate deploy`, which applies **every pending migration in sequence** ([[prisma-migrations]]).
+The **one exception** is a **MAJOR** in the range — a major carries a `## ⚠️ Upgrade actions` section (above)
+whose manual step(s) must be performed. So "jump freely across PATCH/MINOR, but stop and read the notes at
+each MAJOR you cross." The guided [[0084-update-awareness-and-guided-update|updater]] (`infra/update.sh`)
+enforces exactly this: it blocks one-click across a MAJOR and surfaces the Upgrade actions verbatim.

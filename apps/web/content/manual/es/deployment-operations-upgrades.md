@@ -31,6 +31,17 @@ La reconstrucción levanta las imágenes nuevas, y el trabajo puntual de **migra
 automáticamente antes de que arranque la API — aplicando cualquier migración nueva (sin efecto si no hay
 nada pendiente). No ejecutas las migraciones a mano.
 
+## Política de soporte
+
+Solo se da soporte a la **última versión** — mantente al día. **No** hace falta instalar las versiones una
+por una: saltar de golpe varias versiones (por ejemplo **1.2 → 1.9**) en una sola actualización es seguro,
+porque el trabajo puntual de **migración** aplica **en orden** todas las migraciones pendientes. La **única
+excepción** es una versión **mayor** dentro del rango. Una versión mayor siempre incluye una sección
+**⚠️ Acciones de actualización** en sus notas de versión que describe un paso manual que debes realizar (un
+nuevo ajuste obligatorio, un cambio de topología). Así que salta con libertad entre versiones de parche y
+menores, pero **detente y lee las Acciones de actualización de cada versión mayor que cruces**. La versión
+en ejecución se muestra en **Configuración → Instancia**.
+
 ## Nuevos ajustes obligatorios tras una descarga
 
 Una versión que añade una función puede introducir un **nuevo valor de entorno obligatorio**. El arranque

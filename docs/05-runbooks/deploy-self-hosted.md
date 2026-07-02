@@ -181,6 +181,15 @@ Releases are the `vX.Y.Z` tags + GitHub Releases cut on every dev→master promo
 the Release's *⚠️ Upgrade actions* section first. Check the running version on **Settings →
 Instance** before and after.
 
+> [!note] Support is latest-only, and version jumps are safe ([[0083-versioning-and-releases]] amendment)
+> Only the newest `vX.Y.Z` is supported — stay current; there is no LTS branch or backporting. You can jump
+> across several versions at once (e.g. `1.2 → 1.9`) in **one** update: the `migrate` job runs
+> `prisma migrate deploy`, which applies every pending migration **in sequence** ([[prisma-migrations]]), so
+> you never step through intermediate versions by hand. The **only** stop is a **major** in the range — apply
+> its *⚠️ Upgrade actions* before jumping past it. The guided **`infra/update.sh`**
+> ([[0084-update-awareness-and-guided-update]]) automates the pull → verified dual backup → `verify-tag` →
+> build → migrate → health-gate sequence and blocks one-click across a major.
+
 ```sh
 git pull                                                       # or `git fetch --tags && git checkout vX.Y.Z`
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
