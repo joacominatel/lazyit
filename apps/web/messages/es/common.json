@@ -90,7 +90,9 @@
       "kind": "Tipo",
       "linkedAsset": "Activo vinculado",
       "ip": "Dirección IP",
-      "tokenPrefix": "Token"
+      "tokenPrefix": "Token",
+      "slug": "Slug",
+      "excerpt": "Extracto"
     }
   }
 }

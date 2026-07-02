@@ -115,7 +115,8 @@
     "deleteAria": "Eliminar conexión",
     "deleteTitle": "¿Eliminar la conexión?",
     "deleteDescription": "¿Eliminar la conexión «{name}»? Los flujos que la usen dejarán de aprovisionar.",
-    "deleteConfirm": "Eliminar conexión"
+    "deleteConfirm": "Eliminar conexión",
+    "deleteError": "No se pudo eliminar la conexión."
   },
   "connectionForm": {
     "newTitle": "Nueva conexión",

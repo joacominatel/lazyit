@@ -115,7 +115,8 @@
     "deleteAria": "Delete connection",
     "deleteTitle": "Delete connection?",
     "deleteDescription": "Delete the connection \"{name}\"? Workflows using it will stop provisioning.",
-    "deleteConfirm": "Delete connection"
+    "deleteConfirm": "Delete connection",
+    "deleteError": "Couldn't delete the connection."
   },
   "connectionForm": {
     "newTitle": "New connection",

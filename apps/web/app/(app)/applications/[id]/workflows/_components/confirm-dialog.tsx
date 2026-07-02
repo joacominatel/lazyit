@@ -44,6 +44,13 @@ export function ConfirmDialog({
     try {
       await onConfirm();
       onOpenChange(false);
+    } catch {
+      // Swallow: a rejected `onConfirm` must NOT propagate as an unhandled promise rejection
+      // (issue #938). The dialog intentionally stays open (mirrors DeleteConfirmDialog) so the
+      // user can retry; the failure itself is surfaced by the caller — either the underlying
+      // mutation's own `onError` (e.g. `useDeleteWorkflowConnection`) or an explicit try/catch +
+      // `notifyError` in `onConfirm` (see ReplayLatestButton, which also needs specific per-status
+      // copy and would otherwise get a second, generic toast here).
     } finally {
       setPending(false);
     }

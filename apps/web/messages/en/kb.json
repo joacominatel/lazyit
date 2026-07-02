@@ -57,6 +57,7 @@
     "categorySelect": "Select a category",
     "categoryNone": "No categories yet",
     "categoryHint": "No categories yet — use the + button to create one.",
+    "categoryRequired": "Category is required",
     "excerptLabel": "Excerpt",
     "excerptPlaceholder": "A one-line summary shown in listings (optional)",
     "contentLabel": "Content",
