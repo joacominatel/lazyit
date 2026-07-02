@@ -131,11 +131,13 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 `apps/api/src/assets/` (`AssetsModule`):
 
 - `GET /assets` — **expanded** list (`AssetWithRelations[]`, excludes soft-deleted, newest first)
-  with optional filters **`?categoryId=&locationId=&status=&company=&q=&assignedToUserId=`**: `categoryId`
-  matches the asset's **model's** category, `status` is validated against the enum (invalid → `400`),
-  `company` is an exact-match grouping filter over the free-text `company` column
-  ([[0076-asset-company-grouping-field]]; a grouping facet, not an access boundary),
-  `q` is a case-insensitive substring over `name` / `serial` / `assetTag`, and `assignedToUserId`
+  with optional filters **`?categoryId=&modelId=&locationId=&status=&company=&q=&assignedToUserId=`**:
+  `categoryId` matches the asset's **model's** category, `modelId` matches the asset's **exact**
+  model (#943 — distinct from `categoryId`; deep-linked from the asset detail page's Model link),
+  `status` is validated against the enum (invalid → `400`), `company` is an exact-match grouping
+  filter over the free-text `company` column ([[0076-asset-company-grouping-field]]; a grouping
+  facet, not an access boundary), `q` is a case-insensitive substring over `name` / `serial` /
+  `assetTag` **plus the related model's `name` / `manufacturer`** (#943), and `assignedToUserId`
   (a [[user]] `uuid`; invalid → `400`) restricts to assets with a **live** assignment
   (`releasedAt = null`) to that user — the owner filter, over the timestamped-join relation.
 - `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
