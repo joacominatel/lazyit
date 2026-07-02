@@ -1,0 +1,32 @@
+{
+  "image": {
+    "alt": "Imagen adjunta",
+    "loading": "Cargando imagen…",
+    "broken": "Imagen no disponible",
+    "unavailable": "La imagen aparece cuando se guarda el artículo"
+  },
+  "paste": {
+    "insertImage": "Insertar imagen",
+    "uploadingAlt": "subiendo {name}…",
+    "saveFirst": "Guarda primero el borrador y luego pega o suelta imágenes.",
+    "uploadError": "No se pudo subir la imagen."
+  },
+  "docs": {
+    "title": "Documentos",
+    "upload": "Subir",
+    "hint": "PDFs, imágenes y archivos de Office hasta {max} MB. Arrastra y suelta, o usa Subir.",
+    "empty": "Aún no hay documentos.",
+    "loadError": "No se pudieron cargar los documentos.",
+    "uploaded": "Se subió «{name}».",
+    "uploadError": "No se pudo subir el archivo.",
+    "downloadAria": "Descargar {name}",
+    "downloadError": "No se pudo descargar el archivo.",
+    "deleteAria": "Eliminar {name}",
+    "deleted": "Se eliminó «{name}».",
+    "deleteError": "No se pudo eliminar el documento.",
+    "deleteConfirmTitle": "¿Eliminar documento?",
+    "deleteConfirmDescription": "«{name}» se quitará de este activo. Esto no se puede deshacer desde aquí.",
+    "deleteCancel": "Cancelar",
+    "deleteConfirm": "Eliminar"
+  }
+}

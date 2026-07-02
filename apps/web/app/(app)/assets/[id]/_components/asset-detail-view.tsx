@@ -20,6 +20,7 @@ import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-pa
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { RelatedArticlesPanel } from "@/components/related-articles-panel";
+import { AssetDocumentsPanel } from "./asset-documents-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user-avatar";
@@ -393,6 +394,8 @@ export function AssetDetailView({ id }: { id: string }) {
           </ul>
         )}
       </DetailPanel>
+
+      <AssetDocumentsPanel assetId={asset.id} canWrite={canWrite} />
 
       <RelatedArticlesPanel assetId={asset.id} />
 

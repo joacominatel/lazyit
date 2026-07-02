@@ -91,6 +91,25 @@ Publica desde el propio artículo:
 Una etiqueta **Borrador** marca los artículos no publicados en su página. Editar el cuerpo nunca
 cambia el estado de publicado/borrador: publicar y despublicar son acciones explícitas aparte.
 
+## Añadir imágenes
+
+Puedes poner capturas y diagramas directamente en un artículo. La forma más rápida es **pegar**:
+copia una imagen al portapapeles y pégala en el panel de origen del editor — lazyit la sube e
+inserta una referencia de imagen en el cursor. También puedes **arrastrar y soltar** un archivo de
+imagen sobre el editor, o usar el botón **Insertar imagen** de la barra del editor para elegir una.
+
+- Los tipos admitidos son **PNG, JPEG, GIF y WebP**, hasta **10 MB** cada uno. Otros formatos —
+  incluido **SVG** — se rechazan; exporta los diagramas a PNG.
+- Las imágenes pertenecen al artículo, así que **guarda primero el borrador**. En un artículo nuevo
+  que nunca se ha guardado todavía no hay dónde adjuntar una imagen, así que al pegar verás un aviso
+  de "guarda primero el borrador".
+- Mientras la imagen se sube verás un marcador `![subiendo …]()` en el panel de origen; se
+  reemplaza por la referencia real automáticamente al terminar la subida.
+- Las imágenes se muestran en el artículo publicado y en la vista previa, y se sirven **solo** a
+  quienes ya pueden leer el artículo — una imagen nunca queda expuesta en una URL pública.
+- Solo se almacenan los archivos que pegas, sueltas o subes. Un enlace escrito a mano a una imagen de
+  la web **no** se muestra (no se cargan imágenes externas); conserva las capturas como adjuntos.
+
 ## Editar y eliminar
 
 - **Editar** abre el mismo formulario sobre el artículo existente. Guardar actualiza el cuerpo; no
