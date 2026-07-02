@@ -9,6 +9,10 @@
       "exportTitle": "Download every asset matching the current filters as a CSV",
       "error": "Couldn't export the inventory"
     },
+    "import": {
+      "button": "Import",
+      "title": "Register many assets at once from a CSV"
+    },
     "searchLabel": "Search assets",
     "searchPlaceholder": "Search name, tag, serial or model…",
     "selectAllLabel": "Select all assets on this page",
@@ -94,8 +98,9 @@
   },
   "empty": {
     "title": "Nothing tracked yet",
-    "description": "Register your first asset — laptops, monitors, phones — and it shows up here, ready to assign and follow.",
-    "action": "Register your first asset"
+    "description": "Add your first asset — laptops, monitors, phones — and it shows up here, ready to assign and follow. Got a lot? Import them from a CSV instead.",
+    "action": "Register your first asset",
+    "importLink": "Import from CSV"
   },
   "form": {
     "newTitle": "New asset",
@@ -134,10 +139,22 @@
     "notes": "Notes",
     "saveChanges": "Save changes",
     "createAsset": "Create asset",
+    "createAndAddAnother": "Create & add another",
     "savedToast": "Asset saved",
     "saveError": "Couldn't save the asset",
     "createdToast": "Asset created",
     "createError": "Couldn't create the asset",
+    "assignedToast": "Owner assigned",
+    "assignError": "Asset created, but assigning the owner failed. Assign them from the asset.",
+    "headStart": {
+      "title": "Head start",
+      "description": "Optional — set the first owner now instead of a separate step later.",
+      "assignLabel": "Assign to user",
+      "assignPlaceholder": "Unassigned",
+      "assignSearch": "Search users…",
+      "assignEmpty": "No users found",
+      "assignHelp": "Records who holds this asset from the moment it's created. Leave blank to assign later."
+    },
     "customFields": {
       "label": "Custom fields",
       "description": "Free-form attributes stored on the asset (e.g. CPU, RAM, IP address). Per-category schemas are a future improvement (ADR-0007).",
@@ -174,6 +191,9 @@
     "copySerial": "Copy serial",
     "deleteAssetLabel": "Delete asset",
     "clone": "Clone",
+    "changeStatusLabel": "Change status",
+    "statusChangedToast": "Status set to {status}",
+    "statusChangeError": "Couldn't change the status",
     "onTopology": "On topology",
     "viewInTopology": "View in topology",
     "detailsTitle": "Details",
