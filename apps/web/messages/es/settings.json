@@ -73,7 +73,12 @@
         "checksOff": "Comprobación desactivada",
         "notChecked": "No se pudo comprobar",
         "upToDate": "Actualizado",
-        "behind": "{count, plural, one {# versión por detrás} other {# versiones por detrás}}"
+        "behind": "{count, plural, one {# versión por detrás} other {# versiones por detrás}}",
+        "securityBehind": "{count, plural, one {# versión por detrás — seguridad} other {# versiones por detrás — seguridad}}"
+      },
+      "security": {
+        "title": "Actualización de seguridad disponible",
+        "description": "Una versión de este intervalo corrige problemas relacionados con la seguridad. Se recomienda actualizar cuanto antes."
       },
       "optIn": {
         "label": "Comprobar actualizaciones semanalmente",
