@@ -3,7 +3,7 @@ title: "ADR-0083: Tag-driven semver versioning & release automation"
 tags: [adr, infra, releases, versioning, ci]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-07-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -208,3 +208,35 @@ Publishing versioned images is recorded as a deferred optimization (below), not 
 - **The consumption half — [[0084-update-awareness-and-guided-update]]** (future): latest-known-version check,
   "N versions behind" indicator, weekly digest email, and any guided updater. This ADR deliberately
   stops at version *identity*.
+
+## Amendment (2026-07-02) — support & deprecation policy
+
+Two operator-facing contracts implied by the bump policy above, stated explicitly (issues #910, #911).
+
+### Support policy — latest-only
+
+**Only the latest release is supported; operators should stay current.** There is no long-term-support
+branch and no backporting to older versions. **Version jumps are safe** — going from, say, `1.2` straight
+to `1.9` in one upgrade does **not** require installing the intermediate versions: the one-shot `migrate`
+job runs `prisma migrate deploy`, which applies **every pending migration in sequence** ([[prisma-migrations]]).
+The **one exception** is a **MAJOR** in the range — a major carries a `## ⚠️ Upgrade actions` section (above)
+whose manual step(s) must be performed. So "jump freely across PATCH/MINOR, but stop and read the notes at
+each MAJOR you cross." The guided [[0084-update-awareness-and-guided-update|updater]] (`infra/update.sh`)
+enforces exactly this: it blocks one-click across a MAJOR and surfaces the Upgrade actions verbatim.
+
+### Deprecation policy — announce in a MINOR, remove in the next MAJOR
+
+Anything **user- or operator-facing** — an endpoint, a config/env var, an import/export format — follows a
+two-step retirement:
+
+1. **Deprecated in a MINOR.** The deprecation is announced in that release's changelog
+   ("New & Changed" above): *"deprecated, will be removed in X.0"*. The surface keeps working — a MINOR
+   stays one-click-safe (see "What MAJOR means" above), so nothing an operator relies on breaks yet.
+2. **Removed only in the next MAJOR.** Removal never happens in a PATCH or MINOR. Because a MAJOR already
+   means "the operator must read the `## ⚠️ Upgrade actions`" (above), the removal lands where operators are
+   already required to read the notes — the removal is listed there, so it never surprises anyone who
+   followed the version contract.
+
+This gives every retirement a predictable, pre-announced home and keeps the version number's
+"is-this-one-click-safe?" contract honest: a deprecation alone never forces a manual step, but the eventual
+removal rides the MAJOR that already carries one.
