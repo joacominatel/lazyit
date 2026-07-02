@@ -5,9 +5,9 @@
   "type": "module",
   "description": "lazyit server reporting agent — Linux inventory collector (ADR-0074, Phase 2)",
   "scripts": {
-    "compile:x64": "bun build --compile --target=bun-linux-x64 --outfile dist/lazyit-agent-x64 src/index.ts",
-    "compile:arm64": "bun build --compile --target=bun-linux-arm64 --outfile dist/lazyit-agent-arm64 src/index.ts",
-    "compile": "bun run compile:x64 && bun run compile:arm64",
+    "compile:x64": "bun build --compile --target=bun-linux-x64 --define process.env.APP_VERSION=\"\\\"${APP_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}\\\"\" --outfile dist/lazyit-agent-x64 src/index.ts",
+    "compile:arm64": "bun build --compile --target=bun-linux-arm64 --define process.env.APP_VERSION=\"\\\"${APP_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}\\\"\" --outfile dist/lazyit-agent-arm64 src/index.ts",
+    "compile": "export APP_VERSION=\"${APP_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}\"; bun run compile:x64 && bun run compile:arm64",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
