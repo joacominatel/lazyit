@@ -62,9 +62,15 @@ const processor = async (
   // inlines every embedded .docx image as one; a hand-written .md can too) into an attachment bound
   // to the article, rewriting the ref to `attachment:<id>`. Runs the untrusted image bytes through
   // the SAME sniff + re-encode + quota path an upload uses — here, in this already-sandboxed child
-  // (SEC-002). The article author (a human, resolved at enqueue) owns the minted attachments.
-  const resolveContent: ResolveImportedContent = async (articleId, content) =>
-    (await rewriteEmbeddedImages(prisma, articleId, job.data.authorId, content))
+  // (SEC-002). The article author (a human, resolved at enqueue) owns the minted attachments. The
+  // rows are minted on `tx` (the enclosing create's transaction client) so they roll back with the
+  // article — never orphaned rows/blobs against the budget if the create aborts (#918).
+  const resolveContent: ResolveImportedContent = async (
+    articleId,
+    content,
+    tx,
+  ) =>
+    (await rewriteEmbeddedImages(tx, articleId, job.data.authorId, content))
       .content;
   // Dispatch by job kind: a single file (.md/.txt/.docx) → one Article, a .zip → the bulk fan-out
   // (selective extraction, folder mirroring, slug auto-suffix, link rewire — ADR-0059 §5).
