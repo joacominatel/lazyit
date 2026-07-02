@@ -1,4 +1,5 @@
 import { parse as parseCsvSync } from 'csv-parse/sync';
+import { checkImportProvenance } from '../common/export-provenance';
 
 /**
  * Migrator INGEST parser (ADR-0069 wave 2, #629). Turns an UNTRUSTED uploaded buffer (CSV or JSON)
@@ -136,7 +137,7 @@ function parseCsv(text: string): ParseResult {
       relax_column_count: true,
       relax_quotes: true,
       trim: false,
-    }) as string[][];
+    });
   } catch (err) {
     return {
       ok: false,
@@ -328,7 +329,15 @@ export function parseImport(buffer: Buffer, format: ImportFormat): ParseResult {
   if (buffer.length === 0) {
     return { ok: false, reason: 'The uploaded file is empty.' };
   }
-  const { text, hadBom } = decodeUtf8(buffer);
+  const { text: decoded, hadBom } = decodeUtf8(buffer);
+  // Version provenance (#909, ADR-0083): a lazyit export leads with a `# lazyit vX.Y.Z — <ISO>` stamp.
+  // Strip it before parsing (so it never becomes a phantom header/data row) and refuse a file from a
+  // NEWER major than this server with a clear message — instead of failing weird deep in row
+  // validation. A MISSING stamp = legacy / hand-made / third-party file → accepted unchanged.
+  const { text, incompatibleReason } = checkImportProvenance(decoded);
+  if (incompatibleReason) {
+    return { ok: false, reason: incompatibleReason };
+  }
   const result = format === 'csv' ? parseCsv(text) : parseJson(text);
   // Stamp the real BOM detection (the CSV path can't see the original buffer).
   if (result.ok) {
