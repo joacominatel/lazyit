@@ -55,6 +55,7 @@
     "editSubmit": "Guardar cambios",
     "fields": {
       "name": "Nombre",
+      "nameRequired": "El nombre es obligatorio",
       "type": "Tipo",
       "address": "Dirección",
       "floor": "Piso",
