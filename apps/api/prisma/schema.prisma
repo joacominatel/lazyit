@@ -630,6 +630,14 @@ model UpdateSettings {
   /// re-runs the check). 0 when current / never checked. Can't be derived at read time from just
   /// current+latest — the intermediate release count must be stored.
   behindBy           Int       @default(0)
+  /// Whether the current gap (releases strictly newer than the running version, up to latest) contains
+  /// a SECURITY-marked release (issue #908) — cached like `behindBy` because it, too, is derived from the
+  /// full releases list at check time and can't be recomputed at read. false when current / never checked.
+  securityRelevant   Boolean   @default(false)
+  /// The security-relevance of the LAST emailed nudge (issue #908) — the second half of the email de-dupe.
+  /// A gap that flips to security-relevant AFTER a routine email already went out (a GHSA published on an
+  /// already-notified version) re-fires ONCE with security copy; this stops it re-nagging every week after.
+  lastEmailedSecurity Boolean  @default(false)
   /// The latest release's GitHub page URL (for the "view release" link). null until known.
   latestHtmlUrl      String?
   /// A short, redacted excerpt of the latest release notes (title / first lines). null until known.
