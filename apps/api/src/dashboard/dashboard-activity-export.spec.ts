@@ -68,8 +68,9 @@ describe('DashboardService.streamActivityCsvRows (bulk filtered export, issue #8
 
     // Exactly two reads: the full batch, then the empty one that ends the loop.
     expect(queryRaw).toHaveBeenCalledTimes(2);
-    // Header first.
-    expect(csv.startsWith(`${RECENT_ACTIVITY_CSV_HEADER}\n`)).toBe(true);
+    // Provenance stamp (#909) then the header.
+    expect(csv.startsWith('# lazyit ')).toBe(true);
+    expect(csv).toContain(`\n${RECENT_ACTIVITY_CSV_HEADER}\n`);
     // Formula-injection defused: the '=' cell is prefixed with a single quote.
     expect(csv).toContain("'=cmd|/c calc");
     // RFC-4180: comma/quote/newline cell is quote-wrapped with embedded quotes doubled.

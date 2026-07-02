@@ -110,6 +110,20 @@ export const EnqueueUpdateSchema = z.object({
 });
 export type EnqueueUpdate = z.infer<typeof EnqueueUpdateSchema>;
 
+// ── Security-release marker (issue #908) ─────────────────────────────────────
+
+/**
+ * The stable, machine-parseable marker the Release workflow writes into a Release BODY when the merged
+ * promotion PR carried the `release:security` label (ADR-0083/0084, issue #908). An HTML comment: it is
+ * invisible on the rendered GitHub Release page yet an exact, whitespace-free literal to match — far
+ * more robust than a title convention or a localized heading. The update check flags the gap as
+ * `securityRelevant` when ANY release strictly newer than the running version carries this marker.
+ *
+ * SINGLE SOURCE OF TRUTH: this literal is duplicated in `.github/workflows/release.yml` (a bash workflow
+ * cannot import the shared package). If you change it here, change it there too (grep the literal).
+ */
+export const SECURITY_RELEASE_MARKER = "<!-- lazyit:security -->";
+
 // ── Update-check settings (the opt-in toggle) ────────────────────────────────
 
 /**
@@ -143,6 +157,13 @@ export const UpdateStatusSchema = z.object({
   htmlUrl: z.string().nullable(),
   /** How many releases newer than the running version (0 when current / unknown). */
   behindBy: z.number().int().min(0),
+  /**
+   * True when ANY release in the gap (strictly newer than the running version, up to and including
+   * latest) is marked security-relevant via {@link SECURITY_RELEASE_MARKER} (issue #908). Drives the
+   * distinct security badge on the card + the flagged weekly email. false when current / unknown / no
+   * marked release in the gap.
+   */
+  securityRelevant: z.boolean(),
   /** When the last successful check ran (ISO-8601); null when never checked. */
   checkedAt: z.iso.datetime().nullable(),
   /** The current in-flight run (if any) — drives the stage labels + reconnecting state. */

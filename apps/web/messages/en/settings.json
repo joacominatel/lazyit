@@ -73,7 +73,12 @@
         "checksOff": "Update checks off",
         "notChecked": "Couldn't check",
         "upToDate": "Up to date",
-        "behind": "{count, plural, one {# version behind} other {# versions behind}}"
+        "behind": "{count, plural, one {# version behind} other {# versions behind}}",
+        "securityBehind": "{count, plural, one {# version behind — security} other {# versions behind — security}}"
+      },
+      "security": {
+        "title": "Security update available",
+        "description": "A release in this gap addresses security-relevant issues. Updating promptly is recommended."
       },
       "optIn": {
         "label": "Check for updates weekly",

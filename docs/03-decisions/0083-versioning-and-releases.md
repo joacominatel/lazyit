@@ -265,3 +265,13 @@ minimum-supported-version gate is future work).
   MAJOR is this ADR's "not one-click-safe / must read the notes" boundary, so a MAJOR gap is the only
   meaningful contract-break signal; PATCH/MINOR drift is expected and one-click-safe and is never
   nagged. Either side `dev`/unparseable ⇒ never behind (fail-soft — never nag a dev/pre-stamp build).
+
+## Amendment — security-release flag (issue #908, 2026-07-02)
+
+An OPTIONAL `release:security` label on the promotion PR is orthogonal to the semver `release:*` bump. When
+present, the release job writes a stable, machine-parseable marker into the Release notes: a `## 🔒 Security
+release` heading followed by the exact HTML comment `<!-- lazyit:security -->` (human-visible heading +
+whitespace-free parseable literal — chosen over a fragile title convention). The marker literal is mirrored
+in `packages/shared` as `SECURITY_RELEASE_MARKER` (a bash workflow cannot import the shared package — keep
+the two in sync). Absent by default: a routine promotion carries no marker. The consumption side is
+[[0084-update-awareness-and-guided-update|ADR-0084]] §amendment.

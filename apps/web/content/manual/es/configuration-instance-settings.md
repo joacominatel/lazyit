@@ -74,9 +74,16 @@ Cuando se ve por primera vez una versión más nueva, los administradores recibe
 respecto (y un correo, si SMTP está configurado — consulta la tarjeta SMTP de esta página). Se te avisa
 **una vez por cada versión nueva**, no cada semana, para que el aviso siga siendo significativo.
 
+**Las versiones de seguridad destacan.** Cuando una versión del intervalo es una corrección de seguridad,
+la insignia de estado se vuelve roja (*N versiones por detrás — seguridad*), aparece un aviso distintivo
+**Actualización de seguridad disponible** y el correo se marca como actualización de seguridad en el
+asunto — para que una corrección que conviene aplicar esta noche no se pierda entre subidas de versión
+rutinarias. Si una versión de la que ya te avisaron se publica *después* como corrección de seguridad,
+recibes un correo más para que no se te pase; tras eso deja de insistir.
+
 La tarjeta muestra tu **versión actual**, una insignia de estado (*Actualizado*, *N versiones por
-detrás*, *Comprobación desactivada* o *No se pudo comprobar*), la **última versión** con un enlace a sus
-notas, y cuándo fue la **última comprobación**.
+detrás*, *Comprobación desactivada*, *No se pudo comprobar* o la variante roja de *seguridad*), la
+**última versión** con un enlace a sus notas, y cuándo fue la **última comprobación**.
 
 ### Actualizar (guiado, no de un solo clic)
 

@@ -286,7 +286,9 @@ describe('AuditService.streamLogsCsvRows — export boundary (INV-10 + formula-i
     );
 
     expect(prisma.secretAuditLog.findMany).toHaveBeenCalledTimes(2);
-    expect(csv.startsWith(`${AUDIT_LOG_CSV_HEADER}\n`)).toBe(true);
+    // Provenance stamp (#909) then the header.
+    expect(csv.startsWith('# lazyit ')).toBe(true);
+    expect(csv).toContain(`\n${AUDIT_LOG_CSV_HEADER}\n`);
     // Formula-injection defused with a leading single quote.
     expect(csv).toContain("'=cmd|/c calc");
     // Every row of the full batch was serialized.

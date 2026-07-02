@@ -215,6 +215,108 @@ describe('UpdateService', () => {
       expect(result).toMatchObject({ latestVersion: 'v1.5.0', behindBy: 1 });
     });
 
+    it('flags the gap security-relevant and sends a flagged email when a release in the gap is marked (#908)', async () => {
+      settingsFindFirst.mockResolvedValue({
+        checkEnabled: true,
+        lastEmailedVersion: null,
+        lastEmailedSecurity: false,
+      });
+      githubOk([
+        {
+          tag_name: 'v1.6.0',
+          html_url: 'https://gh/1.6.0',
+          body: 'routine notes',
+        },
+        // A release strictly newer than the running v1.4.2, carrying the security marker.
+        { tag_name: 'v1.5.0', body: '<!-- lazyit:security -->\nfixes a hole' },
+        { tag_name: 'v1.4.2', body: 'no marker here' },
+      ]);
+      const service = await build();
+
+      const result = await service.runCheck();
+
+      expect(result).toMatchObject({ latestVersion: 'v1.6.0', behindBy: 2 });
+      expect(settingsUpdateData()).toMatchObject({ securityRelevant: true });
+      expect(emit).toHaveBeenCalledTimes(1);
+      expect(emitPayload()).toMatchObject({
+        type: 'update.available',
+        dedupeKey: 'update.available:v1.6.0:security',
+        severity: 'warning',
+      });
+      expect(String(emitPayload().title)).toContain('Security update');
+    });
+
+    it('is NOT security-relevant when no release in the gap carries the marker (#908)', async () => {
+      settingsFindFirst.mockResolvedValue({
+        checkEnabled: true,
+        lastEmailedVersion: null,
+        lastEmailedSecurity: false,
+      });
+      githubOk([
+        { tag_name: 'v1.6.0', body: 'routine' },
+        { tag_name: 'v1.5.0', body: 'routine' },
+      ]);
+      const service = await build();
+
+      await service.runCheck();
+
+      expect(settingsUpdateData()).toMatchObject({ securityRelevant: false });
+      expect(emitPayload()).toMatchObject({
+        dedupeKey: 'update.available:v1.6.0',
+        severity: 'info',
+      });
+    });
+
+    it('ignores a marker on a release that is NOT newer than the running version (#908)', async () => {
+      settingsFindFirst.mockResolvedValue({
+        checkEnabled: true,
+        lastEmailedVersion: null,
+        lastEmailedSecurity: false,
+      });
+      // The marker sits on the CURRENT version (v1.4.2) — not in the gap, so not security-relevant.
+      githubOk([
+        { tag_name: 'v1.4.2', body: '<!-- lazyit:security -->' },
+        { tag_name: 'v1.4.1', body: 'old' },
+      ]);
+      const service = await build();
+
+      const result = await service.runCheck();
+
+      expect(result.behindBy).toBe(0);
+      expect(settingsUpdateData()).toMatchObject({ securityRelevant: false });
+      expect(emit).not.toHaveBeenCalled();
+    });
+
+    it('re-fires ONCE when a version already emailed as routine later turns security-relevant (#908)', async () => {
+      settingsFindFirst.mockResolvedValue({
+        checkEnabled: true,
+        lastEmailedVersion: 'v1.6.0', // already emailed as a routine nudge
+        lastEmailedSecurity: false, // …but not yet as security
+      });
+      githubOk([{ tag_name: 'v1.6.0', body: '<!-- lazyit:security -->' }]);
+      const service = await build();
+
+      const result = await service.runCheck();
+
+      expect(result.behindBy).toBe(1);
+      expect(emit).toHaveBeenCalledTimes(1);
+      expect(emitPayload()).toMatchObject({ severity: 'warning' });
+    });
+
+    it('does not re-nag once the security nudge for a version has been emailed (#908)', async () => {
+      settingsFindFirst.mockResolvedValue({
+        checkEnabled: true,
+        lastEmailedVersion: 'v1.6.0',
+        lastEmailedSecurity: true, // security already emailed for this version
+      });
+      githubOk([{ tag_name: 'v1.6.0', body: '<!-- lazyit:security -->' }]);
+      const service = await build();
+
+      await service.runCheck();
+
+      expect(emit).not.toHaveBeenCalled();
+    });
+
     it('is fail-soft: a fetch error leaves the cache untouched and does not throw', async () => {
       settingsFindFirst.mockResolvedValue({
         checkEnabled: true,
