@@ -11,6 +11,10 @@ A note you'd leave a teammate, not a form. Fill what's useful, delete the rest.
 Branch off `dev` as <prefix>/issue-<n>-<slug>. See docs/05-runbooks/git-workflow.md.
 -->
 
+## lazyit version
+
+<!-- Optional but helpful for bugs. Read it in-app at Settings → Instance → Version & updates. -->
+
 ## Context
 
 Why does this need to happen? What's the situation today.
