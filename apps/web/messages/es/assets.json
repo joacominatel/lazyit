@@ -85,6 +85,10 @@
       "has": "Con responsables",
       "none": "Sin responsables"
     },
+    "warranty": {
+      "expiring": "Por vencer ≤ 90d",
+      "expired": "Vencida"
+    },
     "chips": {
       "search": "Búsqueda: “{query}”",
       "status": "Estado: {value}",
@@ -93,7 +97,8 @@
       "location": "Ubicación: {value}",
       "company": "Empresa: {value}",
       "owner": "Responsable: {value}",
-      "owners": "Responsables: {value}"
+      "owners": "Responsables: {value}",
+      "warranty": "Garantía: {value}"
     }
   },
   "empty": {
