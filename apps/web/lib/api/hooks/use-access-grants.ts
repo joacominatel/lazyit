@@ -19,11 +19,18 @@ export const accessGrantKeys = {
  * counts/avatars, fetched with a large `limit`). Returns the `Page<AccessGrant>`
  * envelope (`items` + `total`/`limit`/`offset`). `keepPreviousData` holds the
  * current page while a new filter/page query resolves, avoiding a skeleton flash.
+ *
+ * `enabled` lets a caller skip the fetch when it would only 403 — e.g. the Access list's grantee
+ * column for a VIEWER who lacks `accessGrant:read` (issue #935): don't fire a doomed request.
  */
-export function useAccessGrants(filters: AccessGrantFilters = {}) {
+export function useAccessGrants(
+  filters: AccessGrantFilters = {},
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: accessGrantKeys.list(filters),
     queryFn: () => getAccessGrants(filters),
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
