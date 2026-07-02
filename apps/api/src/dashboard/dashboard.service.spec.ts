@@ -115,8 +115,10 @@ describe('DashboardService', () => {
     prisma = buildPrismaMock();
     service = await buildService(prisma);
 
-    // --- Inventory ---
-    prisma.asset.count.mockResolvedValue(12);
+    // --- Inventory: asset.count is called 2x in order (total, warrantiesExpiringSoon) ---
+    prisma.asset.count
+      .mockResolvedValueOnce(12) // total
+      .mockResolvedValueOnce(5); // warrantiesExpiringSoon
     prisma.asset.groupBy.mockResolvedValue([
       { status: 'OPERATIONAL', _count: { _all: 8 } },
       { status: 'IN_MAINTENANCE', _count: { _all: 3 } },
@@ -187,6 +189,26 @@ describe('DashboardService', () => {
       UNKNOWN: 0,
     });
     expect(assets.assigned).toBe(3);
+  });
+
+  it('computes warrantiesExpiringSoon and echoes the fixed 90-day warranty window (#955)', async () => {
+    const { assets } = await service.getSummary();
+    expect(assets.warrantiesExpiringSoon).toBe(5);
+    expect(assets.warrantyExpiringWithinDays).toBe(90);
+  });
+
+  it('queries warrantiesExpiringSoon within a (now, now + 90 days] window on live assets (#955)', async () => {
+    const before = Date.now();
+    await service.getSummary();
+    const after = Date.now();
+
+    // 2nd asset.count call is warrantiesExpiringSoon (1st is the total).
+    const warrantyArgs = prisma.asset.count.mock.calls[1][0];
+    const { gt, lte } = warrantyArgs.where.warrantyEnd;
+    expect((gt as Date).getTime()).toBeGreaterThanOrEqual(before);
+    expect((gt as Date).getTime()).toBeLessThanOrEqual(after);
+    const windowMs = (lte as Date).getTime() - (gt as Date).getTime();
+    expect(windowMs).toBe(90 * 24 * 60 * 60 * 1000);
   });
 
   it('counts active assignments as distinct assets via groupBy on assetId', async () => {
