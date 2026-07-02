@@ -102,7 +102,10 @@ o un campo inesperado). Estas sugerencias son solo orientativas — siempre pod�
 ## Encontrar activos en la lista
 
 La lista de **Activos** tiene un buscador y un desplegable de **Estado** en la barra de
-herramientas, y además un botón **Filtros** que abre un panel con el resto:
+herramientas, y además un botón **Filtros** que abre un panel con el resto. El buscador coincide
+con el nombre del activo, número de serie, etiqueta de activo, y el nombre o fabricante de su
+modelo — así que buscar un modelo como "ThinkPad" o "Pro 14" encuentra todos los activos que lo
+llevan, aunque el modelo no esté en el nombre.
 
 - **Categoría** y **Ubicación** — acota a una categoría de modelo o a un lugar.
 - **Empresa** — acota a una empresa (la etiqueta de agrupación de arriba). Solo aparecen las empresas en uso.
@@ -116,6 +119,10 @@ El botón **Filtros** muestra un pequeño contador de cuántos de estos están a
 aplicas aparece también como una etiqueta que puedes quitar debajo de la barra, y los filtros viven
 en la dirección de la página, así que una vista filtrada es fácil de deshacer, compartir o guardar
 en marcadores.
+
+En la página de detalle de un activo, tanto **Modelo** como **Categoría** son enlaces que vuelven a
+esta lista: Modelo acota a ese modelo exacto, Categoría a todos los modelos de esa categoría — una
+forma rápida de ver "qué más es este modelo exacto" frente a "qué más hay en esta categoría".
 
 ### Exportar el inventario
 

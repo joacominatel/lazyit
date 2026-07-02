@@ -195,18 +195,14 @@ export function AssetDetailView({ id }: { id: string }) {
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
           <DetailField label={t("model")}>
             {asset.model ? (
-              // No server `model` filter on the asset list — deep-link the model to its category
-              // (the closest filter that exists), falling back to plain text when uncategorized.
-              asset.model.category ? (
-                <Link
-                  href={`/assets?category=${asset.model.category.id}`}
-                  className="hover:underline"
-                >
-                  {asset.model.manufacturer} {asset.model.name}
-                </Link>
-              ) : (
-                `${asset.model.manufacturer} ${asset.model.name}`
-              )
+              // Deep-link to the EXACT model (#943) — distinct from the Category link right below,
+              // which narrows to the whole category instead.
+              <Link
+                href={`/assets?model=${asset.model.id}`}
+                className="hover:underline"
+              >
+                {asset.model.manufacturer} {asset.model.name}
+              </Link>
             ) : (
               "—"
             )}

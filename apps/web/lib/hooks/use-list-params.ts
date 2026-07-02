@@ -119,6 +119,7 @@ export interface ListParams {
 export function useListParams(options: UseListParamsOptions = {}): ListParams {
   const {
     filters: filterDefaults = {},
+    filterValidators,
     defaultLimit = 50,
     defaultSort,
     defaultDir = "desc",
@@ -139,11 +140,12 @@ export function useListParams(options: UseListParamsOptions = {}): ListParams {
     () =>
       deriveListState(searchParams, {
         filters: filterDefaults,
+        filterValidators,
         defaultLimit,
         defaultSort,
         defaultDir,
       }),
-    [searchParams, filterDefaults, defaultLimit, defaultSort, defaultDir],
+    [searchParams, filterDefaults, filterValidators, defaultLimit, defaultSort, defaultDir],
   );
   const { q, sort, dir, offset, page, limit, filters, filtersActive, query } = derived;
 

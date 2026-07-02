@@ -42,6 +42,8 @@ import {
 /** Optional filters for listing assets. `categoryId` filters by the asset's model's category. */
 export interface AssetFilters {
   categoryId?: string;
+  /** Filter to assets carrying this exact AssetModel (#943) — deep-linked from the asset detail page. */
+  modelId?: string;
   locationId?: string;
   status?: AssetStatus;
   /** Exact-match grouping filter over the free-text `company` column (ADR-0076). */
@@ -166,10 +168,11 @@ export class AssetsService {
    * LEAN projection ({@link ASSET_LIST_SELECT}): no `specs` blob and trimmed joins — the full
    * relation graph stays on {@link findOne}. Runs the page `findMany(take/skip)` and the `count`
    * over the **same** `where` inside one `$transaction`, so the `total` can't drift from the page.
-   * Optional filters: category (via the model), location, status, and `q` (substring over
-   * name/serial/assetTag). The `deleted` slice (`active` default | `only`) scopes the page to live or
-   * soft-deleted assets; `only` carries the ADR-0032 `includeSoftDeleted` escape hatch so the read
-   * filter doesn't re-hide them (ADMIN-gated at the controller).
+   * Optional filters: category and model (via the model), location, status, and `q` (substring over
+   * name/serial/assetTag PLUS the related model's name/manufacturer, #943). The `deleted` slice
+   * (`active` default | `only`) scopes the page to live or soft-deleted assets; `only` carries the
+   * ADR-0032 `includeSoftDeleted` escape hatch so the read filter doesn't re-hide them (ADMIN-gated at
+   * the controller).
    */
   async findPage(filters: AssetFilters = {}, page: PageQuery) {
     const where = {
@@ -213,6 +216,7 @@ export class AssetsService {
   /** The shared `where` for the asset list — used identically by findPage and its count. */
   private buildWhere({
     categoryId,
+    modelId,
     locationId,
     status,
     company,
@@ -228,6 +232,9 @@ export class AssetsService {
       ...(company ? { company } : {}),
       // Category lives on the model, not the asset: match assets whose model is in it.
       ...(categoryId ? { model: { categoryId } } : {}),
+      // Exact model filter (#943) — deep-linked from the asset detail page's Model link, distinct
+      // from the (broader) categoryId filter next to it.
+      ...(modelId ? { modelId } : {}),
       // Owner: assets with a LIVE (releasedAt null) assignment to this user — ownership is a
       // timestamped join (asset-centric), never a column, so this filters the relation.
       ...(assignedToUserId
@@ -245,10 +252,15 @@ export class AssetsService {
             : {}),
       ...(q
         ? {
+            // #943: also match the related model's name/manufacturer (e.g. searching "Pro 14", visible
+            // only in the Model column, previously returned nothing) — an OR across the asset's own
+            // columns AND the model relation.
             OR: [
               { name: { contains: q, mode: 'insensitive' } },
               { serial: { contains: q, mode: 'insensitive' } },
               { assetTag: { contains: q, mode: 'insensitive' } },
+              { model: { name: { contains: q, mode: 'insensitive' } } },
+              { model: { manufacturer: { contains: q, mode: 'insensitive' } } },
             ],
           }
         : {}),

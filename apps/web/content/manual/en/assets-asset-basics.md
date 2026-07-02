@@ -95,7 +95,9 @@ unexpected field). These hints are advisory only — you can always save.
 ## Finding assets in the list
 
 The **Assets** list has a search box and a **Status** dropdown right in the toolbar, plus a
-**Filters** button that opens a small panel for the rest:
+**Filters** button that opens a small panel for the rest. The search box matches an asset's name,
+serial, asset tag, and its model's name or manufacturer — so searching a model like "ThinkPad" or
+"Pro 14" finds every asset carrying it, even though the model isn't in the name.
 
 - **Category** and **Location** — narrow to one model category or one place.
 - **Company** — narrow to one company (the grouping label above). Only companies in use appear.
@@ -107,6 +109,10 @@ The **Assets** list has a search box and a **Status** dropdown right in the tool
 The **Filters** button shows a small count of how many of these are active. Every filter you set
 also appears as a removable chip below the toolbar, and the filters live in the page address, so a
 filtered view is easy to undo, share or bookmark.
+
+On the asset detail page, both **Model** and **Category** are links back into this list: Model
+narrows to that exact model, Category to every model in that category — a quick way to see "what
+else is this exact model" versus "what else is in this category."
 
 ### Exporting the inventory
 

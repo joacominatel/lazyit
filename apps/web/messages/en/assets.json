@@ -10,7 +10,7 @@
       "error": "Couldn't export the inventory"
     },
     "searchLabel": "Search assets",
-    "searchPlaceholder": "Search by name, serial, tag…",
+    "searchPlaceholder": "Search name, tag, serial or model…",
     "selectAllLabel": "Select all assets on this page",
     "selectRowLabel": "Select {name}",
     "onTopology": "On topology",
@@ -85,6 +85,7 @@
       "search": "Search: “{query}”",
       "status": "Status: {value}",
       "category": "Category: {value}",
+      "model": "Model: {value}",
       "location": "Location: {value}",
       "company": "Company: {value}",
       "owner": "Owner: {value}",

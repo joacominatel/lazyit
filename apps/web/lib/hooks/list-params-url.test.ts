@@ -206,6 +206,35 @@ describe("deriveListState", () => {
     });
   });
 
+  test("filterValidators (#944): an unrecognized enum value falls back to the filter's default", () => {
+    const s = deriveListState(new URLSearchParams("status=INVENTADO"), {
+      ...ASSET_OPTIONS,
+      filterValidators: { status: ["ACTIVE", "RETIRED"] },
+    });
+    // The garbage value never reaches `filters`/`query` — a chip translating it, or the API call
+    // built from it, can't happen because it was never accepted in the first place.
+    expect(s.filters.status).toBe("ALL");
+    expect(s.filtersActive).toBe(false);
+    expect(s.query.status).toBeUndefined();
+  });
+
+  test("filterValidators (#944): an allowed enum value passes through unchanged", () => {
+    const s = deriveListState(new URLSearchParams("status=ACTIVE"), {
+      ...ASSET_OPTIONS,
+      filterValidators: { status: ["ACTIVE", "RETIRED"] },
+    });
+    expect(s.filters.status).toBe("ACTIVE");
+    expect(s.query.status).toBe("ACTIVE");
+  });
+
+  test("filterValidators (#944): a filter with no validator entry is passed through unvalidated", () => {
+    const s = deriveListState(new URLSearchParams("category=garbage-id"), {
+      ...ASSET_OPTIONS,
+      filterValidators: { status: ["ACTIVE", "RETIRED"] },
+    });
+    expect(s.filters.category).toBe("garbage-id");
+  });
+
   test("clamps a tampered ?limit over the API cap to MAX_PAGE_LIMIT (issue #508)", () => {
     const s = deriveListState(new URLSearchParams(`limit=${MAX_PAGE_LIMIT + 5000}`), {});
     expect(s.limit).toBe(MAX_PAGE_LIMIT);
