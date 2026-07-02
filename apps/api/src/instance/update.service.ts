@@ -5,6 +5,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import {
+  SECURITY_RELEASE_MARKER,
   UPDATE_RUN_ACTIVE_STATUSES,
   countVersionsBehind,
   isNewerVersion,
@@ -194,6 +195,7 @@ export class UpdateService implements OnModuleInit {
       latestVersion: settings?.latestVersion ?? null,
       htmlUrl: settings?.latestHtmlUrl ?? null,
       behindBy: settings?.behindBy ?? 0,
+      securityRelevant: settings?.securityRelevant ?? false,
       checkedAt: settings?.checkedAt?.toISOString() ?? null,
       activeRun,
       recentRuns,
@@ -298,39 +300,48 @@ export class UpdateService implements OnModuleInit {
       const latest = latestVersion
         ? releases.find((r) => r.tag_name === latestVersion)
         : undefined;
+      // Security-relevant gap (issue #908): any release strictly newer than the running version that
+      // carries the marker in its notes. Reuses the SAME releases response — no second GitHub call.
+      const securityRelevant = this.isSecurityRelevantGap(releases);
 
       await this.prisma.updateSettings.update({
         where: { id: UPDATE_SETTINGS_SINGLETON_ID },
         data: {
           latestVersion,
           behindBy,
+          securityRelevant,
           latestHtmlUrl: latest?.html_url ?? null,
           latestNotes: buildNotes(latest),
           checkedAt: new Date(),
         },
       });
 
-      // Weekly email — suppress-when-current + de-dupe-per-version (ADR-0084 §2).
+      // Weekly email — suppress-when-current + de-dupe-per-version (ADR-0084 §2). A security-relevant gap
+      // ALWAYS reaches the inbox (issue #908): it fires on a new latest version like a routine nudge, AND
+      // re-fires ONCE if a version already emailed as routine later flips to security-relevant (a GHSA
+      // published on an already-notified version) — `lastEmailedSecurity` then stops the weekly re-nag.
       let emailed = false;
-      if (
-        behindBy > 0 &&
-        latestVersion &&
-        latestVersion !== settings.lastEmailedVersion
-      ) {
+      const newVersion = latestVersion !== settings.lastEmailedVersion;
+      const newlySecurity = securityRelevant && !settings.lastEmailedSecurity;
+      if (behindBy > 0 && latestVersion && (newVersion || newlySecurity)) {
         await this.emitUpdateAvailable(
           latestVersion,
           behindBy,
           latest?.html_url ?? null,
+          securityRelevant,
         );
         await this.prisma.updateSettings.update({
           where: { id: UPDATE_SETTINGS_SINGLETON_ID },
-          data: { lastEmailedVersion: latestVersion },
+          data: {
+            lastEmailedVersion: latestVersion,
+            lastEmailedSecurity: securityRelevant,
+          },
         });
         emailed = true;
       }
 
       this.logger.log(
-        `Update check: running ${this.currentVersion}, latest ${latestVersion ?? 'unknown'}, ${behindBy} behind${emailed ? ' (emailed)' : ''}.`,
+        `Update check: running ${this.currentVersion}, latest ${latestVersion ?? 'unknown'}, ${behindBy} behind${securityRelevant ? ' (security)' : ''}${emailed ? ' (emailed)' : ''}.`,
       );
       return { checked: true, latestVersion, behindBy, emailed };
     } catch (err) {
@@ -375,29 +386,59 @@ export class UpdateService implements OnModuleInit {
   }
 
   /**
+   * True when the gap contains a SECURITY-marked release (issue #908): any non-draft, non-pre-release
+   * item strictly newer than the running version whose notes body carries {@link SECURITY_RELEASE_MARKER}.
+   * "Up to and including latest" falls out for free — `maxVersion` IS the newest such release, so any
+   * release newer than current is in [current, latest]. Pure over the already-fetched releases list.
+   */
+  private isSecurityRelevantGap(releases: GithubRelease[]): boolean {
+    return releases.some(
+      (r) =>
+        !r.draft &&
+        !r.prerelease &&
+        !!r.tag_name &&
+        isNewerVersion(r.tag_name, this.currentVersion) &&
+        (r.body ?? '').includes(SECURITY_RELEASE_MARKER),
+    );
+  }
+
+  /**
    * Emit the `update.available` notification (ADR-0084 §2). Broadcast to the ADMIN feed (recipientUserId
    * null) and — since the type is on the ADR-0079 email allowlist — ALSO emailed, best-effort. The
    * dedupeKey pins ONE row per version (a re-check of the same latest is a no-op even if the row was
    * pruned). Metadata carries only version strings + count (INV-6). Fail-soft: emit never throws.
+   *
+   * A security-relevant gap (issue #908) raises the severity to `warning` and prepends a SECURITY prefix
+   * to the subject + a lead sentence to the summary, so the email reads unmistakably as click-now — the
+   * dedupeKey gains a `:security` suffix so the security nudge is a distinct row from any prior routine one.
    */
   private async emitUpdateAvailable(
     latestVersion: string,
     behindBy: number,
     htmlUrl: string | null,
+    securityRelevant: boolean,
   ): Promise<void> {
+    const body =
+      behindBy === 1
+        ? `You are running ${this.currentVersion} — one newer release is out. Review it in Settings → Instance.`
+        : `You are running ${this.currentVersion} — ${behindBy} newer releases are out. Review them in Settings → Instance.`;
     await this.notifications.emit({
       type: 'update.available',
-      dedupeKey: `update.available:${latestVersion}`,
-      severity: 'info',
-      title: `lazyit ${latestVersion} is available`,
-      summary:
-        behindBy === 1
-          ? `You are running ${this.currentVersion} — one newer release is out. Review it in Settings → Instance.`
-          : `You are running ${this.currentVersion} — ${behindBy} newer releases are out. Review them in Settings → Instance.`,
+      dedupeKey: securityRelevant
+        ? `update.available:${latestVersion}:security`
+        : `update.available:${latestVersion}`,
+      severity: securityRelevant ? 'warning' : 'info',
+      title: securityRelevant
+        ? `Security update: lazyit ${latestVersion} is available`
+        : `lazyit ${latestVersion} is available`,
+      summary: securityRelevant
+        ? `This update addresses security-relevant issues — updating promptly is recommended. ${body}`
+        : body,
       metadata: {
         current: this.currentVersion,
         latest: latestVersion,
         behindBy,
+        securityRelevant,
         ...(htmlUrl ? { htmlUrl } : {}),
       },
     });
