@@ -236,10 +236,21 @@ export function CloneUserWizard({
     const parsed = CloneUserSchema.safeParse(buildPayload());
     if (!parsed.success) {
       // Surface field errors under their last path segment (the profile fields the operator can fix).
+      // `firstName`/`lastName` are `min(1).max(100)` with only one reachable failure mode here (the
+      // operator clears the pre-filled value) — swap in the localized copy rather than leak the raw
+      // zod message (issue #966, same class as the `title` fix in the KB article form).
       const next: Record<string, string> = {};
       for (const issue of parsed.error.issues) {
         const key = issue.path[issue.path.length - 1];
-        if (typeof key === "string" && !(key in next)) next[key] = issue.message;
+        if (typeof key === "string" && !(key in next)) {
+          if (key === "firstName" && issue.code === "too_small") {
+            next[key] = tf("firstNameRequired");
+          } else if (key === "lastName" && issue.code === "too_small") {
+            next[key] = tf("lastNameRequired");
+          } else {
+            next[key] = issue.message;
+          }
+        }
       }
       setErrors(next);
       return;
