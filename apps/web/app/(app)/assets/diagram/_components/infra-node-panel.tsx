@@ -67,7 +67,11 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { statusTone } from "@/lib/infra/canvas";
-import { AgentBadge, AgentFreshness } from "./agent-provenance";
+import {
+  AgentBadge,
+  AgentFreshness,
+  AgentOutdatedBadge,
+} from "./agent-provenance";
 import { DeleteNodeDialog } from "./delete-node-dialog";
 import { NodeEdgesManager } from "./node-edges-manager";
 
@@ -224,6 +228,9 @@ function PanelBody({
           {/* Provenance (ADR-0074 §3): mark machine-reported nodes so an operator knows the inventory
               is auto-maintained — and how fresh the last report is (muted/"stale" when OFFLINE). */}
           {node.source === "AGENT" ? <AgentBadge /> : null}
+          {node.source === "AGENT" ? (
+            <AgentOutdatedBadge agentVersion={node.agentVersion} />
+          ) : null}
         </div>
         {node.source === "AGENT" ? (
           <AgentFreshness
