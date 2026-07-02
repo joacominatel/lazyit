@@ -157,9 +157,13 @@ equivalent), each guarded by the **parent's** permission:
 - `img src` is restricted to `attachment:<id>` refs. **External `![](https://…)` image URLs are
   restricted out** (no SSRF / tracking-pixel / arbitrary-remote surface); `data:` and `javascript:`
   are rejected.
-- **KB import must round-trip images:** extract the embedded image, upload it through this subsystem,
-  rewrite the Markdown ref to `attachment:<id>`. The current importer discards images — this ADR
-  fixes that gap, not just new authoring.
+- **KB import should round-trip images:** extract the embedded image, upload it through this subsystem,
+  rewrite the Markdown ref to `attachment:<id>`. The current importer discards images.
+  **NOTE (v1, issue #917):** this is **deferred** — see [Deferred](#deferred). The UX slice ships
+  authoring (paste / drag-drop / picker) + serving; `attachment:<id>` refs already survive import
+  because `.md`/`.txt`/`.zip` bodies are stored **verbatim** (a ref is plain Markdown text), but
+  *extracting* embedded `.docx`/data-URI image bytes into attachments is a distinct backend feature
+  and did not ride the UX issue.
 
 ### 6. Soft-delete + GC contract (four pins)
 
@@ -187,8 +191,16 @@ finite," and — critically — Marta's version-restore requirement:
 
 ## Consequences
 
-- KB authors get inline images; asset records get their documents; the KB importer stops dropping
-  images. The paste-from-clipboard editor flow (below) makes it the tool Marta actually adopts.
+- KB authors get inline images and asset records get their documents. The paste-from-clipboard editor
+  flow (below) makes it the tool Marta actually adopts.
+- **UX scope split (issue #917).** The UX slice implements the two *authoring/serving* surfaces —
+  KB paste/drag-drop/picker → `attachment:<id>` refs rendered by a post-sanitize rehype image
+  renderer, and the asset documents section (upload/list/download/delete). The **import image
+  round-trip** (extract embedded `.docx`/data-URI images → upload → rewrite refs, §5) is **deferred**
+  to a follow-up: hand-authored/exported `attachment:<id>` refs already survive import unchanged
+  (bodies are stored verbatim), but the importer still does not turn *embedded* images into
+  attachments. There is no article **export** feature today, so no lazyit→lazyit blob archive exists
+  to carry; the boundary is refs-travel-as-text, blobs do not. See [Deferred](#deferred).
 - **DR gap (accepted, loud).** `pg_dump` does **not** capture a filesystem volume. Until the v1.1
   backup sidecar extension ships, a host disk loss loses **all attachments** while the DB restores
   cleanly — leaving `Attachment` rows pointing at vanished blobs (which degrade to a broken-file
@@ -256,6 +268,14 @@ finite," and — critically — Marta's version-restore requirement:
   inventory + restore order. Until then the DR-table row and warning callout (added by *this* issue)
   must state loudly that attachments are **not backed up**. This is the accepted-gap → documented-gap
   bargain; it does not stay silent.
+- **KB import image round-trip (the named follow-up to §5).** Extract images embedded in imported
+  `.docx` / data-URI Markdown, upload each through this subsystem, and rewrite the ref to
+  `attachment:<id>` — so a migrated Google-Docs/wiki runbook keeps its screenshots. The UX slice
+  (issue #917) shipped authoring + serving only; this extraction is a distinct backend feature (it
+  runs inside the sandboxed import worker, through the magic-byte sniff + re-encode + quota path) and
+  was scoped out. Until it lands, imported embedded images are not shown (they are not
+  `attachment:<id>` refs, so the render pipeline drops them, exactly as external image URLs are). A
+  hand-written/exported `attachment:<id>` ref, by contrast, survives import as plain text.
 - **Optional external-S3 driver.** A future ADR, gated behind an env var (the OIDC BYOI /
   `BACKUP_OFFSITE_CMD` pattern) for larger/multi-host deployments. Keep the storage writer behind a
   thin interface so it slots in without a data-model change; do not build the abstraction speculatively.
