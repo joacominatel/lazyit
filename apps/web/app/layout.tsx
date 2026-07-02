@@ -57,6 +57,12 @@ export default async function RootLayout({
   // (issue #498, ADR-0039). Public routes get `null` and behave exactly as before.
   const [locale, messages, session] = await Promise.all([getLocale(), getMessages(), auth()]);
 
+  // A single server-render "now", forwarded to the intl provider so next-intl's `useNow()` returns
+  // the same instant on the server and on the first client render — otherwise each pass calls its own
+  // `new Date()` and relative times ("Updated 2m ago") mismatch on hydration (#939). It ticks forward
+  // on the client from this seed via `useNow({ updateInterval })`.
+  const now = new Date();
+
   // suppressHydrationWarning: next-themes sets the theme class on <html> before
   // hydration, which would otherwise trip React's mismatch warning.
   return (
@@ -66,7 +72,7 @@ export default async function RootLayout({
       className={`${hankenGrotesk.variable} ${commitMono.variable} ${redaction.variable}`}
     >
       <body className="min-h-svh antialiased">
-        <Providers locale={locale} messages={messages} session={session}>
+        <Providers locale={locale} messages={messages} now={now} session={session}>
           {children}
         </Providers>
       </body>

@@ -60,6 +60,7 @@ export function Providers({
   children,
   locale,
   messages,
+  now,
   session,
 }: {
   children: React.ReactNode;
@@ -67,6 +68,14 @@ export function Providers({
   locale: string;
   /** The full message catalog for `locale`, forwarded to Client Components. */
   messages: AbstractIntlMessages;
+  /**
+   * The server-render "now", resolved once in the root layout. Seeding it here makes next-intl's
+   * `useNow()` return the SAME instant on the server and on the first client render, so relative
+   * times ("Updated 2m ago") are byte-identical across hydration instead of each pass computing its
+   * own `new Date()` — the classic relative-time hydration mismatch (#939). `useNow({ updateInterval })`
+   * still ticks forward from this seed on the client, so live relative times keep aging on their own.
+   */
+  now: Date;
   /**
    * Server-resolved Auth.js session (from `auth()` in the root layout). Seeding it here makes
    * `useSession()` return `authenticated` on the FIRST client render instead of starting in
@@ -92,6 +101,7 @@ export function Providers({
       messages={messages}
       formats={SHARED_FORMATS}
       timeZone={DEFAULT_TIME_ZONE}
+      now={now}
     >
       <SessionProvider session={session}>
         <QueryClientProvider client={queryClient}>

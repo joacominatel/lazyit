@@ -31,6 +31,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardSummary } from "@/lib/api/hooks/use-dashboard";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
+import { useMounted } from "@/lib/hooks/use-mounted";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { lift } from "@/lib/recipes";
 import { useFormatters } from "@/lib/hooks/use-formatters";
@@ -52,6 +53,7 @@ export function DashboardView() {
   const t = useTranslations("dashboard");
   const tc = useTranslations("common");
   const { dateTime, relative } = useFormatters();
+  const mounted = useMounted();
   const { data, isLoading, isError, error, refetch, isFetching } =
     useDashboardSummary();
   // The quick actions are cross-pillar shortcuts into create flows; each gates on its own
@@ -66,25 +68,35 @@ export function DashboardView() {
   // feed never flashes for a non-admin. v1 NOTE: this is a UI-LEVEL gate only — the underlying
   // `GET /dashboard/activity` endpoint still authorises on `dashboard:read` (visible to every
   // role), so an admin-only `logs:read` endpoint is DEBT-1, tracked with the Informes screen.
-  const canSeeActivityFeed = useCan("logs:read");
+  const rawCanSeeActivityFeed = useCan("logs:read");
+  // `mounted` gate (#931): the permission set behind `useCan` is read from the client-only
+  // `/config/my-permissions` cache — always cold on the SERVER (never prefetched) but possibly WARM on
+  // the first client render, so `canSeeActivityFeed` / `quickActions` could resolve DIFFERENTLY on each
+  // hydration pass and swap the command-surface layout (`lg:grid-cols-5` feed+rail ⇄ the full-width
+  // Pulse band) or flip the quick-actions tile between a Card and `null` — a structural mismatch.
+  // Holding them at their server-equivalent (permission-absent) value until `mounted` keeps the first
+  // client render identical to the server; the real command surface resolves on the next render.
+  const canSeeActivityFeed = mounted && rawCanSeeActivityFeed;
   const quickActions = (
-    [
-      {
-        href: "/assets/new",
-        label: t("quickActions.newAsset"),
-        show: canCreateAsset,
-      },
-      {
-        href: "/consumables/new",
-        label: t("quickActions.addStock"),
-        show: canAdjustStock,
-      },
-      {
-        href: "/applications",
-        label: t("quickActions.grantAccess"),
-        show: canGrantAccess,
-      },
-    ] as const
+    mounted
+      ? ([
+          {
+            href: "/assets/new",
+            label: t("quickActions.newAsset"),
+            show: canCreateAsset,
+          },
+          {
+            href: "/consumables/new",
+            label: t("quickActions.addStock"),
+            show: canAdjustStock,
+          },
+          {
+            href: "/applications",
+            label: t("quickActions.grantAccess"),
+            show: canGrantAccess,
+          },
+        ] as const)
+      : []
   )
     .filter((action) => action.show)
     .map(({ href, label }) => ({ href, label }));
