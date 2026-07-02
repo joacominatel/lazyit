@@ -3,6 +3,7 @@
 import {
   LockOpenIcon,
   QuestionMarkCircleIcon,
+  UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { signOut } from "next-auth/react";
@@ -110,6 +111,16 @@ export function UserMenu() {
             )}
           </div>
         </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {/* My profile (#947): the self-service view of the caller's OWN assets + application access.
+            Any authenticated user (esp. a VIEWER) reaches it here — the admin `/users/[id]` 360 view is
+            gated on `user:read`. A real link so middle/modifier-click behave; navigates in-app. */}
+        <DropdownMenuItem asChild>
+          <Link href="/profile">
+            <UserCircleIcon aria-hidden />
+            {t("chrome.myProfile")}
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* Locale switcher (ADR-0051): a Globe sub-menu with EN / ES. */}
         <LocaleSwitcher />
