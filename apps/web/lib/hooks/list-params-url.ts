@@ -32,6 +32,17 @@ export interface UseListParamsOptions {
    * Use a sentinel like `"ALL"` (or `""`) for "no filter". A filter not listed here is ignored.
    */
   filters?: Record<string, string>;
+  /**
+   * Allowed non-default values per **enum-backed** filter (#944) — e.g. a zod enum's `.options` from
+   * `@lazyit/shared`, or a small in-code literal set. A filter with a validator entry is read against
+   * it: a URL value that's neither the filter's default nor in this list is treated as absent (falls
+   * back to the default) INSTEAD of flowing through to a chip label / API call. This is the one place
+   * to guard a filter — a stale/tampered/bookmarked URL (e.g. `?status=INVENTADO` after a status was
+   * renamed) would otherwise throw a next-intl `MISSING_MESSAGE` translating the arbitrary string AND
+   * 400 the API. A filter not listed here is passed through unvalidated (e.g. a cuid reference filter,
+   * already 400-validated server-side).
+   */
+  filterValidators?: Record<string, readonly string[]>;
   /** Default page size (`limit`). Defaults to 50, matching the API list default (ADR-0030). */
   defaultLimit?: number;
   /** Default sort field (a name from the resource's server allowlist). Optional. */
@@ -109,6 +120,7 @@ export function deriveListState(
 ): DerivedListState {
   const {
     filters: filterDefaults = {},
+    filterValidators,
     defaultLimit = 50,
     defaultSort,
     defaultDir = "desc",
@@ -138,7 +150,14 @@ export function deriveListState(
   const filterNames = Object.keys(filterDefaults);
   const filters: Record<string, string> = {};
   for (const name of filterNames) {
-    filters[name] = params.get(name) ?? filterDefaults[name];
+    const raw = params.get(name) ?? filterDefaults[name];
+    // #944: an enum-backed filter with a validator entry only accepts its default or one of the
+    // allowed values — anything else (a stale/tampered/bookmarked URL) reads as if absent.
+    const allowed = filterValidators?.[name];
+    filters[name] =
+      allowed && raw !== filterDefaults[name] && !allowed.includes(raw)
+        ? filterDefaults[name]
+        : raw;
   }
 
   const filtersActive =
