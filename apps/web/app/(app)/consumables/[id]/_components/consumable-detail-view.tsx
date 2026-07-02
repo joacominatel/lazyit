@@ -8,7 +8,7 @@ import {
   ScaleIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import type { ConsumableMovementType, User } from "@lazyit/shared";
+import type { ConsumableMovementType } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -37,7 +37,7 @@ import {
   useConsumable,
   useConsumableMovements,
 } from "@/lib/api/hooks/use-consumables";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { MovementTypeBadge } from "../../_components/movement-type-badge";
 import { QuickAdjustButtons } from "../../_components/quick-adjust-buttons";
@@ -71,17 +71,22 @@ export function ConsumableDetailView({ id }: { id: string }) {
     useConsumable(id);
   const { data: movements } = useConsumableMovements(id);
   const { data: categories } = useConsumableCategories();
-  const { data: users } = useUsers();
   const deleteConsumable = useDeleteConsumable();
 
   const [movementType, setMovementType] =
     useState<ConsumableMovementType | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const userById = useMemo(
-    () => new Map<string, User>((users ?? []).map((user) => [user.id, user])),
-    [users],
+  // Resolve just the actors of this consumable's movements (#961) — a targeted id→name batch, not
+  // the whole directory.
+  const actorIds = useMemo(
+    () =>
+      (movements ?? [])
+        .map((movement) => movement.performedById)
+        .filter((mid): mid is string => mid != null),
+    [movements],
   );
+  const userById = useUserNames(actorIds);
 
   const breadcrumb = useMemo(
     () => (
