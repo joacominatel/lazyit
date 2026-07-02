@@ -57,6 +57,54 @@
     "identityProvider": {
       "zitadel": "Zitadel (incluido)",
       "generic-oidc": "OIDC genérico (usa el tuyo)"
+    },
+    "updates": {
+      "title": "Versión y actualizaciones",
+      "subtitle": "Comprueba si hay nuevas versiones de lazyit y ejecuta una actualización guiada y respaldada desde el host.",
+      "rows": {
+        "current": "Versión actual",
+        "status": "Estado",
+        "latest": "Última versión",
+        "viewRelease": "Ver notas de la versión",
+        "lastChecked": "Última comprobación",
+        "never": "Nunca"
+      },
+      "state": {
+        "checksOff": "Comprobación desactivada",
+        "notChecked": "No se pudo comprobar",
+        "upToDate": "Actualizado",
+        "behind": "{count, plural, one {# versión por detrás} other {# versiones por detrás}}"
+      },
+      "optIn": {
+        "label": "Comprobar actualizaciones semanalmente",
+        "description": "Consulta github.com de forma anónima en busca de nuevas versiones. Desactivado por defecto; nunca se envían datos de la instancia y falla en silencio si está bloqueado.",
+        "smtpHint": "Para recibir también un correo cuando te quedes atrás, configura SMTP en la tarjeta de abajo."
+      },
+      "cta": {
+        "update": "Actualizar a {version}",
+        "hint": "Esto registra la actualización y muestra el comando exacto para ejecutar en el host; nada se ejecuta automáticamente."
+      },
+      "command": {
+        "instruction": "Ejecuta esto en el host para aplicar la actualización. Respalda ambas bases de datos (verificado) antes de nada y no continúa si el respaldo falla:",
+        "reconnecting": "Actualización en curso — la app puede quedar brevemente inaccesible mientras se reinicia. Esta página se reconecta automáticamente."
+      },
+      "history": {
+        "title": "Historial de actualizaciones"
+      },
+      "runStatus": {
+        "requested": "Actualización solicitada — ejecuta el comando de abajo en el host",
+        "backing_up": "Respaldando ambas bases de datos…",
+        "migrating": "Ejecutando migraciones de base de datos…",
+        "building": "Compilando la nueva versión…",
+        "restarting": "Reiniciando el stack…",
+        "verifying": "Verificando la nueva versión…",
+        "done": "Hecho",
+        "failed": "Falló",
+        "rolled_back": "Revertido"
+      },
+      "toast": {
+        "enqueued": "Actualización en cola. Ejecuta el comando mostrado en el host para aplicarla."
+      }
     }
   },
   "assetTagScheme": {
