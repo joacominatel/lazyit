@@ -21,7 +21,6 @@ import type {
   SecretItem,
   SecretItemKind,
   ServiceAccount,
-  User,
   UserListItem,
   VaultMemberMeta,
   VaultServiceAccountMemberMeta,
@@ -60,7 +59,8 @@ import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useServiceAccounts } from "@/lib/api/hooks/use-service-accounts";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUser, useUsers } from "@/lib/api/hooks/use-users";
+import { UserCombobox } from "@/components/user-combobox";
 import {
   CLIPBOARD_CLEAR_MS,
   copyTextWithAutoClear,
@@ -2074,12 +2074,6 @@ function AddMemberDialogBody({
   const { data: myMembership } = useMyMembership(vaultId);
   const addMember = useAddMember();
 
-  // SM-WEB-02: read isError so a users load error is NOT indistinguishable from "no one to add".
-  const {
-    data: allUsers,
-    isLoading: usersLoading,
-    isError: usersLoadError,
-  } = useUsers();
   const { data: currentMembers } = useMembers(vaultId);
 
   const [targetUserId, setTargetUserId] = useState("");
@@ -2094,15 +2088,14 @@ function AddMemberDialogBody({
     error: publicKeyErrorObj,
   } = useUserPublicKey(targetUserId || undefined);
 
-  // Filter out users who are already members.
-  const memberUserIds = new Set(currentMembers?.map((m) => m.userId) ?? []);
-  const eligibleUsers: User[] =
-    allUsers?.filter((u: User) => !memberUserIds.has(u.id)) ?? [];
+  // Resolve the selected user's name for the success toast — the picker is server-searched (#937), so the
+  // chosen user may not be on the current search page; `useUser` fetches (and caches) the one row by id.
+  const { data: targetUser } = useUser(targetUserId || undefined);
 
-  // SM-WEB-02: with users loaded successfully but nobody left to add, show an explicit empty state and
-  // disable Grant — instead of a dead <select> with only the placeholder option.
-  const noEligible =
-    !usersLoading && !usersLoadError && eligibleUsers.length === 0;
+  // Hide users who already have access from the picker. The picker is server-searched (#937), so this is
+  // just an exclusion hint over each page — not a whole-directory materialization (the old 200-cap bug).
+  const memberUserIds = currentMembers?.map((m) => m.userId) ?? [];
+
   // SECW-03: a 404 on the target's public key means they never bootstrapped; any other resolved-empty key
   // is a different failure. Both block the grant, but the 404 gets a clear, actionable message.
   const targetNoKeypair =
@@ -2135,7 +2128,6 @@ function AddMemberDialogBody({
         data: { userId: targetUserId, ...wrappedDek },
       });
 
-      const targetUser = eligibleUsers.find((u: User) => u.id === targetUserId);
       const targetName = targetUser
         ? `${targetUser.firstName} ${targetUser.lastName}`
         : targetUserId;
@@ -2152,34 +2144,19 @@ function AddMemberDialogBody({
     <form onSubmit={handleGrant} className="space-y-4">
       <Field>
         <FieldLabel htmlFor="grant-user">{t("members.userLabel")}</FieldLabel>
-        {usersLoading ? (
-          <div className="h-9 animate-pulse rounded-md bg-muted" />
-        ) : usersLoadError ? (
-          // SM-WEB-02: a load error must be distinct from "no one to add".
-          <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-            {t("members.usersLoadError")}
-          </p>
-        ) : noEligible ? (
-          // SM-WEB-02: explicit empty state instead of a dead <select> with only the placeholder.
-          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-            {t("members.noEligible")}
-          </p>
-        ) : (
-          <select
-            id="grant-user"
-            value={targetUserId}
-            onChange={(e) => setTargetUserId(e.target.value)}
-            disabled={busy}
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            <option value="">{t("members.selectUser")}</option>
-            {eligibleUsers.map((u: User) => (
-              <option key={u.id} value={u.id}>
-                {u.firstName} {u.lastName} ({u.email})
-              </option>
-            ))}
-          </select>
-        )}
+        {/* Server-searched picker (#937): any of the org's users is reachable by name/email — the old
+            whole-directory <select> silently dropped everyone past the 200-user page cap. Users who
+            already have access are excluded. */}
+        <UserCombobox
+          id="grant-user"
+          value={targetUserId || undefined}
+          onValueChange={setTargetUserId}
+          disabled={busy}
+          excludeUserIds={memberUserIds}
+          placeholder={t("members.selectUser")}
+          searchPlaceholder={t("members.userSearchPlaceholder")}
+          emptyText={t("members.userEmpty")}
+        />
         {targetUserId && !publicKeyLoading && !targetPublicKeyData ? (
           <FieldDescription className="text-destructive">
             {/* SECW-03: a 404 means the target never bootstrapped — give an actionable message;
@@ -2191,40 +2168,22 @@ function AddMemberDialogBody({
         ) : null}
       </Field>
 
-      {!usersLoading && !usersLoadError && !noEligible ? (
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onClose}
-            disabled={busy}
-          >
-            {tc("cancel")}
-          </Button>
-          <Button
-            type="submit"
-            disabled={
-              busy || !targetUserId || publicKeyLoading || !targetPublicKeyData
-            }
-          >
-            {busy || publicKeyLoading ? (
-              <ArrowPathIcon className="size-4 animate-spin" />
-            ) : null}
-            {busy ? t("members.granting") : t("members.grantSubmit")}
-          </Button>
-        </DialogFooter>
-      ) : (
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onClose}
-            disabled={busy}
-          >
-            {tc("cancel")}
-          </Button>
-        </DialogFooter>
-      )}
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+          {tc("cancel")}
+        </Button>
+        <Button
+          type="submit"
+          disabled={
+            busy || !targetUserId || publicKeyLoading || !targetPublicKeyData
+          }
+        >
+          {busy || publicKeyLoading ? (
+            <ArrowPathIcon className="size-4 animate-spin" />
+          ) : null}
+          {busy ? t("members.granting") : t("members.grantSubmit")}
+        </Button>
+      </DialogFooter>
     </form>
   );
 }
