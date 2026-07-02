@@ -1,3 +1,4 @@
+import { Logger as NestLogger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -87,6 +88,13 @@ async function bootstrap() {
   }
 
   await app.listen(process.env.PORT ?? 3001);
+
+  // Self-dating boot line: log the running build's identity so any log excerpt reveals its version.
+  // Same source as GET /instance/version (ADR-0083): APP_VERSION/GIT_SHA baked at image build, with
+  // the dev/unknown fallbacks a native run gets.
+  const version = process.env.APP_VERSION || 'dev';
+  const gitSha = process.env.GIT_SHA || 'unknown';
+  new NestLogger('Bootstrap').log(`lazyit ${version} (${gitSha}) started`);
 }
 
 // Only boot when run as the entry point (e.g. `nest start`); importing this module (config specs)
