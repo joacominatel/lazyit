@@ -63,6 +63,12 @@ herramientas corporativas, ese es el dolor que viene a quitar.
 - **Gestor de Secretos** — bóvedas compartidas y cifradas de extremo a extremo para las credenciales
   que tu equipo tiene en común.
 
+## Cómo encontrar este Manual de nuevo
+
+Con la sesión iniciada no necesitas recordar esta URL: abre **Ayuda** desde el menú de usuario (arriba
+a la derecha), o el ícono **?** al pie de la barra lateral — ambos abren este Manual en una pestaña
+nueva.
+
 ## Pasos siguientes
 
 - Pon en marcha una instancia nueva: [Configuración inicial](/help/getting-started).
