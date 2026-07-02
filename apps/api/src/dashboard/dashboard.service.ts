@@ -15,6 +15,7 @@ import {
   RECENT_ACTIVITY_ACTIONS,
   RECENT_ACTIVITY_CSV_HEADER,
   recentActivityCsvRow,
+  WARRANTY_EXPIRING_WITHIN_DAYS,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import {
@@ -103,9 +104,15 @@ export class DashboardService {
     const expiryCutoff = new Date(
       now.getTime() + expiringWithinDays * MS_PER_DAY,
     );
+    // Warranty look-ahead window (#955): its own fixed horizon (WARRANTY_EXPIRING_WITHIN_DAYS),
+    // independent of the tunable access-grant window above.
+    const warrantyCutoff = new Date(
+      now.getTime() + WARRANTY_EXPIRING_WITHIN_DAYS * MS_PER_DAY,
+    );
 
     const [
       assetTotal,
+      warrantiesExpiringSoon,
       assetsByStatusGroups,
       assignedAssets,
       activeGrants,
@@ -119,6 +126,12 @@ export class DashboardService {
     ] = await Promise.all([
       // --- Inventory ---------------------------------------------------------
       this.prisma.asset.count(),
+      // Live assets whose warranty ends within the next window and hasn't lapsed (now < warrantyEnd
+      // <= now + N days) — mirrors the access-grant expiringSoon window (#955). Soft-deleted assets
+      // are auto-excluded by the ADR-0032 extension; assets with no warrantyEnd never match.
+      this.prisma.asset.count({
+        where: { warrantyEnd: { gt: now, lte: warrantyCutoff } },
+      }),
       this.prisma.asset.groupBy({ by: ['status'], _count: { _all: true } }),
       // Distinct assets holding >=1 active assignment. groupBy collapses multi-owner assets to one
       // row each, so its length is the distinct-asset count.
@@ -203,6 +216,8 @@ export class DashboardService {
         total: assetTotal,
         byStatus: byStatus,
         assigned: assignedAssets,
+        warrantiesExpiringSoon,
+        warrantyExpiringWithinDays: WARRANTY_EXPIRING_WITHIN_DAYS,
       },
       access: {
         activeGrants,
