@@ -50,14 +50,18 @@ type PrismaMock = {
     findFirst: jest.Mock;
     findMany: jest.Mock;
     update: jest.Mock;
-    aggregate: jest.Mock;
+    groupBy: jest.Mock;
   };
   asset: { findFirst: jest.Mock };
 };
 
+/** What the budget accounting sees: existing rows, live or soft-deleted-at-some-time. */
+type BudgetRow = { sha256: string; byteSize: number; deletedAt: Date | null };
+
 describe('AttachmentsService (ADR-0082)', () => {
   let root: string;
   let prisma: PrismaMock;
+  let budgetRows: BudgetRow[];
   let articles: { findOne: jest.Mock; assertAttachmentWritable: jest.Mock };
   let queue: { add: jest.Mock };
   let service: AttachmentsService;
@@ -75,6 +79,7 @@ describe('AttachmentsService (ADR-0082)', () => {
     root = await mkdtemp(join(tmpdir(), 'lazyit-attachments-'));
     process.env.ATTACHMENTS_DIR = root;
     delete process.env.ATTACHMENTS_MAX_TOTAL_MB;
+    budgetRows = [];
     prisma = {
       attachment: {
         create: jest.fn((args: { data: object }) => ({
@@ -84,7 +89,28 @@ describe('AttachmentsService (ADR-0082)', () => {
         findFirst: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn((args: { data: object }) => ({ ...args.data })),
-        aggregate: jest.fn().mockResolvedValue({ _sum: { byteSize: 0 } }),
+        // Functional fake of the budget aggregate: applies the service's OWN where clause
+        // (live OR soft-deleted after the grace cutoff) to `budgetRows` and groups distinct-by-sha
+        // — so the tests exercise the window logic, not just a canned sum.
+        groupBy: jest.fn(
+          (args: {
+            where: { OR: [{ deletedAt: null }, { deletedAt: { gt: Date } }] };
+          }) => {
+            const cutoff = args.where.OR[1].deletedAt.gt;
+            const bySha = new Map<string, number>();
+            for (const row of budgetRows) {
+              if (row.deletedAt !== null && row.deletedAt <= cutoff) continue;
+              bySha.set(
+                row.sha256,
+                Math.max(bySha.get(row.sha256) ?? 0, row.byteSize),
+              );
+            }
+            return [...bySha].map(([sha256, byteSize]) => ({
+              sha256,
+              _max: { byteSize },
+            }));
+          },
+        ),
       },
       asset: { findFirst: jest.fn().mockResolvedValue({ id: ASSET_ID }) },
     };
@@ -174,8 +200,10 @@ describe('AttachmentsService (ADR-0082)', () => {
 
     it('rejects with a clean 507 when the total budget would be exceeded (never a 500/partial write)', async () => {
       process.env.ATTACHMENTS_MAX_TOTAL_MB = '1';
-      prisma.attachment.aggregate.mockResolvedValue({
-        _sum: { byteSize: 1024 * 1024 - 5 },
+      budgetRows.push({
+        sha256: 'a'.repeat(64),
+        byteSize: 1024 * 1024 - 5,
+        deletedAt: null,
       });
       const file = await stageUpload(PDF_BYTES, 'one-more.pdf');
       await expect(
@@ -185,6 +213,50 @@ describe('AttachmentsService (ADR-0082)', () => {
       // Nothing promoted, tmp discarded — no half-written blob anywhere.
       expect(await readdir(root)).toEqual(['tmp']);
       expect(await readdir(join(root, 'tmp'))).toEqual([]);
+    });
+
+    it('counts soft-deleted-WITHIN-GRACE bytes against the budget (upload→delete→upload churn cannot stack blobs)', async () => {
+      process.env.ATTACHMENTS_MAX_TOTAL_MB = '1';
+      // Deleted a minute ago: the blob is still on disk until the daily GC + 24 h grace pass.
+      budgetRows.push({
+        sha256: 'a'.repeat(64),
+        byteSize: 1024 * 1024 - 5,
+        deletedAt: new Date(Date.now() - 60_000),
+      });
+      const file = await stageUpload(PDF_BYTES, 'again.pdf');
+      await expect(
+        service.upload('ASSET', ASSET_ID, file, HUMAN),
+      ).rejects.toMatchObject({ status: 507 });
+      expect(prisma.attachment.create).not.toHaveBeenCalled();
+    });
+
+    it('frees the budget once a soft delete ages past the GC grace (bytes reclaimed or about to be)', async () => {
+      process.env.ATTACHMENTS_MAX_TOTAL_MB = '1';
+      // Deleted 48 h ago — past the 24 h grace, the sweep has (or will have) unlinked the blob.
+      budgetRows.push({
+        sha256: 'a'.repeat(64),
+        byteSize: 1024 * 1024 - 5,
+        deletedAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
+      });
+      const file = await stageUpload(PDF_BYTES, 'fits-now.pdf');
+      await expect(
+        service.upload('ASSET', ASSET_ID, file, HUMAN),
+      ).resolves.toMatchObject({ mimeType: 'application/pdf' });
+    });
+
+    it('counts a dedup-shared blob ONCE against the budget (distinct-by-sha256)', async () => {
+      process.env.ATTACHMENTS_MAX_TOTAL_MB = '1';
+      // Two live rows sharing one 700 KB blob = 700 KB on disk, not 1.4 MB — the upload fits.
+      const shared = {
+        sha256: 'b'.repeat(64),
+        byteSize: 700 * 1024,
+        deletedAt: null,
+      };
+      budgetRows.push(shared, { ...shared });
+      const file = await stageUpload(PDF_BYTES, 'fits.pdf');
+      await expect(
+        service.upload('ASSET', ASSET_ID, file, HUMAN),
+      ).resolves.toMatchObject({ mimeType: 'application/pdf' });
     });
 
     it('dedups by content: the same bytes on two parents share ONE blob (two rows, same sha)', async () => {
@@ -286,6 +358,13 @@ describe('AttachmentsService (ADR-0082)', () => {
         where: { id: 'clatt0000000000000000000' },
         data: { deletedAt: expect.any(Date) as Date },
       });
+    });
+
+    it('rejects a service-account delete on an ASSET attachment (403 — write symmetry with upload)', async () => {
+      await expect(
+        service.remove('ASSET', ASSET_ID, 'clatt0000000000000000000', SA),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(prisma.attachment.update).not.toHaveBeenCalled();
     });
 
     it('enforces the article edit gate on delete', async () => {
