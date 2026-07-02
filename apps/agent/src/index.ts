@@ -12,8 +12,10 @@ import { AgentReportSchema, type AgentReport } from "@lazyit/shared";
 import { loadConfig } from "./config";
 import { collectHost, collectSoftware, readMachineId } from "./collect";
 
-// ponytail: keep in sync with package.json `version` (a 1-line bump); not worth a JSON-import build dep.
-const AGENT_VERSION = "0.1.0";
+// Build-time version stamp (ADR-0083 mechanism, issue #907): the compile scripts bake `APP_VERSION`
+// via `bun build --define` (git describe → env). A plain `bun run`/an unstamped compile falls back to
+// "dev", which the server treats as "don't warn" (never nag a dev build). Mirrors GET /instance/version.
+const AGENT_VERSION = process.env.APP_VERSION || "dev";
 
 const HELP = `lazyit-agent ${AGENT_VERSION} — server reporting agent (Linux)
 
