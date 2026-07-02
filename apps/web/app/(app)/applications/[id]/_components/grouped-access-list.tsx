@@ -18,7 +18,7 @@ const PAGE_SIZE = 25;
 
 export interface GroupedAccessListProps {
   activeGrants: AccessGrant[];
-  userById: Map<string, User>;
+  userById: ReadonlyMap<string, User>;
   /** Stable snapshot of "now" from the page for expiry comparisons. */
   now: number;
   applicationId: string;
