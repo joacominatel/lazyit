@@ -10,7 +10,7 @@
       "error": "No se pudo exportar el inventario"
     },
     "searchLabel": "Buscar activos",
-    "searchPlaceholder": "Buscar por nombre, número de serie, etiqueta…",
+    "searchPlaceholder": "Buscar por nombre, etiqueta, número de serie o modelo…",
     "selectAllLabel": "Seleccionar todos los activos de esta página",
     "selectRowLabel": "Seleccionar {name}",
     "onTopology": "En la topología",
@@ -85,6 +85,7 @@
       "search": "Búsqueda: “{query}”",
       "status": "Estado: {value}",
       "category": "Categoría: {value}",
+      "model": "Modelo: {value}",
       "location": "Ubicación: {value}",
       "company": "Empresa: {value}",
       "owner": "Responsable: {value}",
