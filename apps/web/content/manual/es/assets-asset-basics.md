@@ -133,6 +133,10 @@ llevan, aunque el modelo no esté en el nombre.
   persona.
 - **Responsabilidad** — filtra según si el activo tiene algún responsable actual (*Con responsables*
   / *Sin responsables*), sin importar quién.
+- **Garantía** — acota a los activos cuya **garantía está por vencer** (*Por vencer ≤ 90d*) o ya
+  **venció** (*Vencida*). Este filtro no tiene control en la barra: aparece como una etiqueta cuando
+  llegas desde la tarjeta de **garantías** en **Requiere atención** del panel (que enlaza a *Por
+  vencer ≤ 90d*), y lo quitas eliminando la etiqueta.
 
 El botón **Filtros** muestra un pequeño contador de cuántos de estos están activos. Cada filtro que
 aplicas aparece también como una etiqueta que puedes quitar debajo de la barra, y los filtros viven

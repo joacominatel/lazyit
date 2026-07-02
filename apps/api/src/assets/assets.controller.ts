@@ -30,6 +30,7 @@ import {
   AssetListPageSchema,
   AssetSchema,
   AssetStatusSchema,
+  AssetWarrantyFilterSchema,
   AssetWithRelationsSchema,
   BatchAssetStatusSchema,
   BatchIdsSchema,
@@ -37,6 +38,7 @@ import {
   CreateAssetSchema,
   UpdateAssetSchema,
   type AssetStatus,
+  type AssetWarrantyFilter,
 } from '@lazyit/shared';
 import { ASSET_SORT_ALLOWLIST } from './assets.service';
 import { AssetsService } from './assets.service';
@@ -162,6 +164,13 @@ export class AssetsController {
       'Ownership slice over LIVE assignments. HAS = assets with an active owner; NONE = unassigned. Invalid value → 400.',
   })
   @ApiQuery({
+    name: 'warranty',
+    required: false,
+    enum: [...AssetWarrantyFilterSchema.options],
+    description:
+      'Warranty-window filter (#955). expiring90d = warranty ends within the next 90 days and hasn’t lapsed (deep-linked from the dashboard tile); expired = warranty end already past. Invalid value → 400.',
+  })
+  @ApiQuery({
     name: 'deleted',
     required: false,
     enum: ['active', 'only'],
@@ -178,6 +187,7 @@ export class AssetsController {
     @Query('q') q?: string,
     @Query('assignedToUserId') assignedToUserId?: string,
     @Query('ownership') ownership?: string,
+    @Query('warranty') warranty?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -207,6 +217,7 @@ export class AssetsController {
         q,
         assignedToUserId,
         ownership,
+        warranty,
       }),
       pageQuery,
     );
@@ -228,6 +239,7 @@ export class AssetsController {
     q?: string;
     assignedToUserId?: string;
     ownership?: string;
+    warranty?: string;
   }) {
     let parsedStatus: AssetStatus | undefined;
     if (raw.status !== undefined) {
@@ -248,6 +260,16 @@ export class AssetsController {
       }
       parsedOwnership = raw.ownership;
     }
+    let parsedWarranty: AssetWarrantyFilter | undefined;
+    if (raw.warranty !== undefined) {
+      const result = AssetWarrantyFilterSchema.safeParse(raw.warranty);
+      if (!result.success) {
+        throw new BadRequestException(
+          `Invalid warranty. Expected one of: ${AssetWarrantyFilterSchema.options.join(', ')}`,
+        );
+      }
+      parsedWarranty = result.data;
+    }
     return {
       categoryId: parseCuidQuery(raw.categoryId, 'categoryId'),
       modelId: parseCuidQuery(raw.modelId, 'modelId'),
@@ -260,6 +282,7 @@ export class AssetsController {
         'assignedToUserId',
       ),
       ownership: parsedOwnership,
+      warranty: parsedWarranty,
     };
   }
 
@@ -296,6 +319,11 @@ export class AssetsController {
   @ApiQuery({ name: 'assignedToUserId', required: false })
   @ApiQuery({ name: 'ownership', required: false, enum: ['HAS', 'NONE'] })
   @ApiQuery({
+    name: 'warranty',
+    required: false,
+    enum: [...AssetWarrantyFilterSchema.options],
+  })
+  @ApiQuery({
     name: 'deleted',
     required: false,
     enum: ['active', 'only'],
@@ -314,6 +342,7 @@ export class AssetsController {
     @Query('q') q?: string,
     @Query('assignedToUserId') assignedToUserId?: string,
     @Query('ownership') ownership?: string,
+    @Query('warranty') warranty?: string,
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
   ): StreamableFile {
@@ -326,6 +355,7 @@ export class AssetsController {
       q,
       assignedToUserId,
       ownership,
+      warranty,
     });
     // Reuse parsePageQuery ONLY for its `deleted` validation (the export is unpaginated); an invalid
     // slice → 400, then gate the privileged archived slice ADMIN-only exactly like the list (ADR-0041).

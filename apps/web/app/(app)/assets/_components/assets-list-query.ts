@@ -1,4 +1,9 @@
-import { type AssetStatus, AssetStatusSchema } from "@lazyit/shared";
+import {
+  type AssetStatus,
+  AssetStatusSchema,
+  type AssetWarrantyFilter,
+  AssetWarrantyFilterSchema,
+} from "@lazyit/shared";
 import type { AssetFilters } from "@/lib/api/endpoints/assets";
 import type { DerivedListState } from "@/lib/hooks/list-params-url";
 
@@ -16,8 +21,9 @@ import type { DerivedListState } from "@/lib/hooks/list-params-url";
  * the server's `status`/`categoryId`/`modelId`/`locationId`/`company` (`model`, #943, is the EXACT
  * model deep-linked from the asset detail page's Model link — distinct from `category`, which maps to
  * the model's category); `owner` maps to `assignedToUserId` (a User uuid, "" = unset); `ownership`
- * (Has/None) maps to the server `ownership` filter (#824); `archived` ("ALL" | "only") drives the
- * ADMIN-only `deleted=only` view via the URL.
+ * (Has/None) maps to the server `ownership` filter (#824); `warranty` ("ALL" | "expiring90d" |
+ * "expired") maps to the server `warranty` filter (#955, deep-linked from the dashboard tile);
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
  */
 export const ASSET_FILTER_DEFAULTS = {
   status: "ALL",
@@ -27,6 +33,7 @@ export const ASSET_FILTER_DEFAULTS = {
   company: "ALL",
   owner: "",
   ownership: "ALL",
+  warranty: "ALL",
   archived: "ALL",
 } as const;
 
@@ -42,6 +49,7 @@ export const ASSET_LIST_OPTIONS = {
   filterValidators: {
     status: AssetStatusSchema.options,
     ownership: ["HAS", "NONE"],
+    warranty: AssetWarrantyFilterSchema.options,
     archived: ["only"],
   },
   defaultSort: "updatedAt",
@@ -71,6 +79,10 @@ export function deriveAssetFilters(
     assignedToUserId: filters.owner || undefined,
     ownership:
       filters.ownership === "ALL" ? undefined : (filters.ownership as "HAS" | "NONE"),
+    warranty:
+      filters.warranty === "ALL"
+        ? undefined
+        : (filters.warranty as AssetWarrantyFilter),
     sort,
     dir: sort ? dir : undefined,
     limit,

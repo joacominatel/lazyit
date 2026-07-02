@@ -3,6 +3,7 @@ import type {
   AssetAssignmentWithUser,
   AssetListPage,
   AssetStatus,
+  AssetWarrantyFilter,
   AssetWithRelations,
   BatchAssetStatus,
   BatchIds,
@@ -61,6 +62,8 @@ export interface AssetFilters {
   assignedToUserId?: string;
   /** Server-side ownership filter: `HAS` = has a live owner, `NONE` = unassigned (#824). */
   ownership?: "HAS" | "NONE";
+  /** Warranty-window filter (#955): `expiring90d` = ends within 90d (not lapsed); `expired` = past. */
+  warranty?: AssetWarrantyFilter;
   sort?: string;
   dir?: "asc" | "desc";
   limit?: number;
@@ -78,8 +81,8 @@ export interface AssetFilters {
 /**
  * Append the additive FILTER params (not paging/sort) shared by the list read and the CSV export —
  * `q`, `categoryId`, `modelId`, `locationId`, `status`, `company`, `assignedToUserId`, `ownership`,
- * `deleted`. The export reuses this so it serializes every filter IDENTICALLY to the list and can
- * never drift from it.
+ * `warranty`, `deleted`. The export reuses this so it serializes every filter IDENTICALLY to the
+ * list and can never drift from it.
  */
 function appendAssetFilterParams(
   params: URLSearchParams,
@@ -94,6 +97,7 @@ function appendAssetFilterParams(
   if (filters.assignedToUserId)
     params.set("assignedToUserId", filters.assignedToUserId);
   if (filters.ownership) params.set("ownership", filters.ownership);
+  if (filters.warranty) params.set("warranty", filters.warranty);
   if (filters.deleted) params.set("deleted", filters.deleted);
 }
 

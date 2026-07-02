@@ -123,6 +123,10 @@ serial, asset tag, and its model's name or manufacturer — so searching a model
   pick them; the list then shows just that person's live assignments.
 - **Ownership** — filter by whether an asset has any current owner at all (*Has owners* /
   *No owners*), regardless of who.
+- **Warranty** — narrow to assets whose **warranty is about to lapse** (*Expiring ≤ 90d*) or has
+  **already lapsed** (*Expired*). This filter has no toolbar control: it appears as a chip when you
+  arrive from the dashboard's **Needs attention** warranty tile (which links to *Expiring ≤ 90d*),
+  and you clear it by removing the chip.
 
 The **Filters** button shows a small count of how many of these are active. Every filter you set
 also appears as a removable chip below the toolbar, and the filters live in the page address, so a

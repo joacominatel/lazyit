@@ -115,8 +115,10 @@ describe('DashboardService', () => {
     prisma = buildPrismaMock();
     service = await buildService(prisma);
 
-    // --- Inventory ---
-    prisma.asset.count.mockResolvedValue(12);
+    // --- Inventory: asset.count is called 2x in order (total, warrantiesExpiringSoon) ---
+    prisma.asset.count
+      .mockResolvedValueOnce(12) // total
+      .mockResolvedValueOnce(5); // warrantiesExpiringSoon
     prisma.asset.groupBy.mockResolvedValue([
       { status: 'OPERATIONAL', _count: { _all: 8 } },
       { status: 'IN_MAINTENANCE', _count: { _all: 3 } },
@@ -189,6 +191,30 @@ describe('DashboardService', () => {
     expect(assets.assigned).toBe(3);
   });
 
+  it('computes warrantiesExpiringSoon and echoes the fixed 90-day warranty window (#955)', async () => {
+    const { assets } = await service.getSummary();
+    expect(assets.warrantiesExpiringSoon).toBe(5);
+    expect(assets.warrantyExpiringWithinDays).toBe(90);
+  });
+
+  it('queries warrantiesExpiringSoon within a (now, now + 90 days] window on live assets (#955)', async () => {
+    const before = Date.now();
+    await service.getSummary();
+    const after = Date.now();
+
+    // 2nd asset.count call is warrantiesExpiringSoon (1st is the total).
+    const warrantyArgs = (
+      prisma.asset.count.mock.calls as Array<
+        [{ where: { warrantyEnd: { gt: Date; lte: Date } } }]
+      >
+    )[1][0];
+    const { gt, lte } = warrantyArgs.where.warrantyEnd;
+    expect(gt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(gt.getTime()).toBeLessThanOrEqual(after);
+    const windowMs = lte.getTime() - gt.getTime();
+    expect(windowMs).toBe(90 * 24 * 60 * 60 * 1000);
+  });
+
   it('counts active assignments as distinct assets via groupBy on assetId', async () => {
     await service.getSummary();
     expect(prisma.assetAssignment.groupBy).toHaveBeenCalledWith({
@@ -213,19 +239,25 @@ describe('DashboardService', () => {
     const after = Date.now();
 
     // 2nd accessGrant.count call is expiringSoon.
-    const expiringArgs = prisma.accessGrant.count.mock.calls[1][0];
+    const expiringArgs = (
+      prisma.accessGrant.count.mock.calls as Array<
+        [{ where: { revokedAt: null; expiresAt: { gt: Date; lte: Date } } }]
+      >
+    )[1][0];
     expect(expiringArgs.where.revokedAt).toBeNull();
     const { gt, lte } = expiringArgs.where.expiresAt;
-    expect((gt as Date).getTime()).toBeGreaterThanOrEqual(before);
-    expect((gt as Date).getTime()).toBeLessThanOrEqual(after);
-    const windowMs = (lte as Date).getTime() - (gt as Date).getTime();
+    expect(gt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(gt.getTime()).toBeLessThanOrEqual(after);
+    const windowMs = lte.getTime() - gt.getTime();
     expect(windowMs).toBe(10 * 24 * 60 * 60 * 1000);
   });
 
   it('filters critical-app grants to active grants on isCritical applications', async () => {
     await service.getSummary();
     // 3rd accessGrant.count call is onCriticalApps.
-    expect(prisma.accessGrant.count.mock.calls[2][0]).toEqual({
+    expect(
+      (prisma.accessGrant.count.mock.calls as Array<[unknown]>)[2][0],
+    ).toEqual({
       where: { revokedAt: null, application: { is: { isCritical: true } } },
     });
   });
@@ -363,8 +395,8 @@ describe('DashboardService', () => {
     it('selects the subject columns from the view (subjectName / targetUserId / targetUserName)', async () => {
       await service.getActivity({ limit: 20, offset: 0, deleted: 'active' });
       const pageText = (
-        prisma.$queryRaw.mock.calls[0][0] as { text: string }
-      ).text;
+        prisma.$queryRaw.mock.calls as Array<[{ text: string }]>
+      )[0][0].text;
       expect(pageText).toContain('ra."subjectName"');
       expect(pageText).toContain('ra."targetUserId"');
       expect(pageText).toContain('ra."targetUserName"');
@@ -419,14 +451,18 @@ describe('DashboardService', () => {
      * structure (binds rendered as `?`), `.values` shows the bound parameters — proving the filters
      * are PARAMETERIZED, never concatenated, and that the page + count share the same WHERE.
      */
-    const pageSql = () => prisma.$queryRaw.mock.calls[0][0] as {
-      text: string;
-      values: unknown[];
-    };
-    const countSql = () => prisma.$queryRaw.mock.calls[1][0] as {
-      text: string;
-      values: unknown[];
-    };
+    const pageSql = () =>
+      (
+        prisma.$queryRaw.mock.calls as Array<
+          [{ text: string; values: unknown[] }]
+        >
+      )[0][0];
+    const countSql = () =>
+      (
+        prisma.$queryRaw.mock.calls as Array<
+          [{ text: string; values: unknown[] }]
+        >
+      )[1][0];
 
     it('emits NO WHERE clause when no filter is supplied (backward-compatible)', async () => {
       await service.getActivity({ limit: 20, offset: 0, deleted: 'active' });
@@ -585,8 +621,8 @@ describe('DashboardService', () => {
       prisma.$transaction.mockResolvedValue([[], []]);
       await service.getActivityFilterOptions();
       const actorsText = (
-        prisma.$queryRaw.mock.calls[0][0] as { text: string }
-      ).text;
+        prisma.$queryRaw.mock.calls as Array<[{ text: string }]>
+      )[0][0].text;
       // INNER JOIN (not LEFT JOIN) — a row with a null actorId has nothing to filter by, so it's out.
       expect(actorsText).toContain('JOIN "users"');
       expect(actorsText).not.toContain('LEFT JOIN');

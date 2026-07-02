@@ -7,6 +7,7 @@ import {
 import type {
   AssetInventoryCsvItem,
   AssetStatus,
+  AssetWarrantyFilter,
   BatchResult,
   CreateAsset,
   DeletedFilter,
@@ -19,6 +20,7 @@ import {
   assetInventoryCsvRow,
   offsetOf,
   pageOf,
+  WARRANTY_EXPIRING_WITHIN_DAYS,
 } from '@lazyit/shared';
 import { provenanceStampLine } from '../common/export-provenance';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
@@ -57,6 +59,12 @@ export interface AssetFilters {
    * owner; `NONE` = unassigned assets. Independent of `assignedToUserId` (which already implies HAS).
    */
   ownership?: 'HAS' | 'NONE';
+  /**
+   * Warranty-window filter (#955). `expiring90d` = warranty ends within the next
+   * WARRANTY_EXPIRING_WITHIN_DAYS days and hasn't lapsed (deep-linked from the dashboard tile);
+   * `expired` = warranty end already passed. Assets with no `warrantyEnd` match neither.
+   */
+  warranty?: AssetWarrantyFilter;
 }
 
 /**
@@ -142,6 +150,25 @@ const ASSET_LIST_SELECT = {
 type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
 }>;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The `warrantyEnd` predicate for the warranty-window list filter (#955). `expiring90d` = the same
+ * (now, now + N days] look-ahead the dashboard tile counts (warranty not yet lapsed but ending soon);
+ * `expired` = warranty end already in the past. `now` is captured at call time so the window tracks
+ * the request. Assets with a null `warrantyEnd` satisfy neither comparison, so they're excluded.
+ */
+function warrantyWhere(warranty: AssetWarrantyFilter): Prisma.AssetWhereInput {
+  const now = new Date();
+  if (warranty === 'expired') {
+    return { warrantyEnd: { lt: now } };
+  }
+  const cutoff = new Date(
+    now.getTime() + WARRANTY_EXPIRING_WITHIN_DAYS * MS_PER_DAY,
+  );
+  return { warrantyEnd: { gt: now, lte: cutoff } };
+}
 
 /**
  * The SELF-SCOPE variant of {@link ASSET_LIST_SELECT} for `GET /assets/mine` (#947 security review):
@@ -256,10 +283,15 @@ export class AssetsService {
     q,
     assignedToUserId,
     ownership,
+    warranty,
   }: AssetFilters): Prisma.AssetWhereInput {
     return {
       ...(locationId ? { locationId } : {}),
       ...(status ? { status } : {}),
+      // Warranty window (#955): `expiring90d` mirrors the dashboard tile's (now, now + N days]
+      // look-ahead (assets whose warranty hasn't lapsed but ends soon); `expired` = warranty end
+      // already past. `now` is read per-call so the window tracks the request time.
+      ...(warranty ? warrantyWhere(warranty) : {}),
       // Grouping filter (ADR-0076): exact match on the chosen company value (one of the distinct
       // values offered by listCompanies). Not a scoping boundary — just narrows the list.
       ...(company ? { company } : {}),

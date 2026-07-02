@@ -85,6 +85,10 @@
       "has": "Has owners",
       "none": "No owners"
     },
+    "warranty": {
+      "expiring": "Expiring ≤ 90d",
+      "expired": "Expired"
+    },
     "chips": {
       "search": "Search: “{query}”",
       "status": "Status: {value}",
@@ -93,7 +97,8 @@
       "location": "Location: {value}",
       "company": "Company: {value}",
       "owner": "Owner: {value}",
-      "owners": "Owners: {value}"
+      "owners": "Owners: {value}",
+      "warranty": "Warranty: {value}"
     }
   },
   "empty": {
