@@ -96,7 +96,10 @@
     "historyTitle": "History",
     "historyRevokedByPart": " · by {name}",
     "unknownUser": "Unknown user",
-    "entityLabel": "application"
+    "entityLabel": "application",
+    "requestAccess": "Request access",
+    "accessRequested": "Access requested",
+    "noActiveGrantsRequest": "No active grants yet. Need access? Use the Request access button above, or contact your IT team."
   },
   "access": {
     "grantTitle": "Grant access",
@@ -137,5 +140,47 @@
   "avatars": {
     "deactivatedSuffix": " · deactivated",
     "deactivatedTooltip": "{count, plural, one {# deactivated grantee} other {# deactivated grantees}}"
+  },
+  "request": {
+    "title": "Request access",
+    "description": "Ask an administrator for access to this application. They'll be notified and can approve or deny your request.",
+    "accessLevelLabel": "Access level",
+    "accessLevelDescription": "Optional — the level of access you need (each application defines its own).",
+    "justificationLabel": "Justification",
+    "justificationPlaceholder": "Why do you need access?",
+    "justificationDescription": "Optional — a short note to help the approver decide.",
+    "submit": "Send request",
+    "submittedToast": "Access request sent.",
+    "alreadyPending": "You already have a pending request for this application.",
+    "error": "Couldn't send your request. Please try again."
+  },
+  "requests": {
+    "title": "Access requests",
+    "subtitle": "Review who's asking for access — approve to grant it, or deny with a reason.",
+    "lockedTitle": "You can't review access requests",
+    "lockedDescription": "You don't have permission to see the access-request queue. Ask an administrator if you need it.",
+    "errorTitle": "Couldn't load access requests",
+    "emptyTitle": "No pending requests",
+    "emptyDescription": "There's nothing waiting for a decision right now.",
+    "wantsAccessTo": "wants access to",
+    "requestedOn": "Requested {date}",
+    "unknownUser": "Unknown user",
+    "unknownApplication": "Unknown application",
+    "approve": "Approve",
+    "deny": "Deny",
+    "approvedToast": "Request approved — access granted.",
+    "deniedToast": "Request denied.",
+    "decideError": "Couldn't complete that action. Please try again.",
+    "denyTitle": "Deny access request",
+    "denyDescription": "Deny {name}'s request for access. They'll see your reason on their profile.",
+    "denySubmit": "Deny request",
+    "reasonLabel": "Reason",
+    "reasonPlaceholder": "Why are you denying this request?",
+    "reasonRequired": "A reason is required to deny a request.",
+    "status": {
+      "PENDING": "Pending",
+      "APPROVED": "Approved",
+      "DENIED": "Denied"
+    }
   }
 }
