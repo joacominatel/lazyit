@@ -20,6 +20,7 @@
       "actions": "Actions"
     },
     "criticalBadge": "Critical",
+    "accessRestricted": "Restricted",
     "chips": {
       "search": "Search: “{q}”",
       "category": "Category: {name}",
