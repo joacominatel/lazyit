@@ -705,6 +705,17 @@ export function ErrorState({
         <p className="max-w-sm text-sm text-muted-foreground">
           {t("errors.forbiddenDescription")}
         </p>
+        {/* #953: deep-link the Manual's roles/permissions page instead of dead-ending on "ask an
+            administrator" — this single branch is shared by every list that forwards `error`, so it
+            fixes Secrets/Settings/Reports/Users/etc. in one change. */}
+        <Link
+          href="/help/permissions"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {t("errors.manualLink")}
+        </Link>
         <RequestIdNote requestId={requestId} />
       </div>
     );
