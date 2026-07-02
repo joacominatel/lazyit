@@ -100,6 +100,7 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 import type { EntityKey } from "@/lib/entity-key";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import { useMounted } from "@/lib/hooks/use-mounted";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
@@ -184,6 +185,12 @@ export function AssetsListView() {
   // that view ADMIN-only (it was NOT migrated to a permission), so a MEMBER with asset:delete still
   // can't list archived rows. Write/delete affordances use the fine-grained permissions.
   const { isAdmin } = usePermissions();
+  // `isAdmin` is read from the client-only `/users/me` cache — always cold on the SERVER (never
+  // prefetched here) but possibly WARM on the first client render (the top-bar UserMenu shares it),
+  // so the `isAdmin`-gated "Show archived" toggle can flip into existence on hydration and mismatch
+  // the server tree (#931). `mounted` (false on the server and the first client render) gates the
+  // toggle so both passes render the same toolbar; it reveals on the next render.
+  const mounted = useMounted();
   const canWrite = useCan("asset:write");
   const canDelete = useCan("asset:delete");
   // Which assets back a topology node — drives the small "On topology" glyph per row (issue #765).
@@ -604,7 +611,7 @@ export function AssetsListView() {
         subtitle={t("subtitle")}
         actions={
           <>
-            {isAdmin ? (
+            {mounted && isAdmin ? (
               <ArchivedToggle
                 checked={archived}
                 onCheckedChange={(on) => {
