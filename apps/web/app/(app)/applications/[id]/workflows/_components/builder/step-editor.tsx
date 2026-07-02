@@ -794,6 +794,15 @@ function SelectOptionsEditor({
   onChange: (options: string[]) => void;
 }) {
   const t = useTranslations("workflow");
+  // Stable per-row ids for `options`, generated when a row is added — used ONLY as the React list
+  // key so that reordering or removing a row doesn't make React reuse an adjacent row's identity/
+  // focus (same index-key bug as #946). `options` is a plain string[] with no id field of its own
+  // (see `ManualInputField` in `@lazyit/shared`); this local array is kept in lockstep with it by
+  // addOption/removeOption/moveOption (the only ops that change length or order — setOption
+  // patches in place).
+  const [ids, setIds] = useState<string[]>(() =>
+    options.map(() => crypto.randomUUID()),
+  );
 
   function setOption(index: number, value: string) {
     onChange(options.map((o, i) => (i === index ? value : o)));
@@ -802,10 +811,12 @@ function SelectOptionsEditor({
   function addOption() {
     if (options.length >= 50) return;
     onChange([...options, ""]);
+    setIds((prev) => [...prev, crypto.randomUUID()]);
   }
 
   function removeOption(index: number) {
     onChange(options.filter((_, i) => i !== index));
+    setIds((prev) => prev.filter((_, i) => i !== index));
   }
 
   function moveOption(index: number, delta: number) {
@@ -815,6 +826,12 @@ function SelectOptionsEditor({
     const [item] = next.splice(index, 1);
     if (item !== undefined) next.splice(target, 0, item);
     onChange(next);
+    setIds((prev) => {
+      const nextIds = [...prev];
+      const [id] = nextIds.splice(index, 1);
+      if (id !== undefined) nextIds.splice(target, 0, id);
+      return nextIds;
+    });
   }
 
   return (
@@ -829,7 +846,10 @@ function SelectOptionsEditor({
       ) : (
         <ul className="space-y-2">
           {options.map((option, index) => (
-            <li key={`option-${index}`} className="flex items-center gap-1.5">
+            <li
+              key={ids[index] ?? `option-${index}`}
+              className="flex items-center gap-1.5"
+            >
               <Input
                 value={option}
                 onChange={(e) => setOption(index, e.target.value)}
