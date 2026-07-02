@@ -162,6 +162,48 @@ When it finishes, open `http://localhost:3000/setup` to create the first admin *
 > the script's "already provisioned" short-circuit never fires against stale dev creds. To re-run
 > against an EXISTING stack instead (no wipe), use `dev:up` — it does not touch Zitadel or the `.env`.
 
+### 0e. Login branding & localization (issue #952)
+
+On the **same** provisioning run, the sidecar also brands and localizes the Zitadel **login UI** so it
+no longer reads as a stock/foreign page after the branded landing. These are **instance-default**
+settings applied via the Zitadel **Admin API** (`/admin/v1`), which the FirstInstance machine user may
+set through its `IAM_OWNER` role. Verified against the pinned **Zitadel v2.68** Admin API:
+
+- **Brand color + no watermark** — `UpdateLabelPolicy` (`PUT /admin/v1/policies/label`) sets the brand
+  **oxblood** primary (`#9e2b25`, the lazyit brand mark — the same hue the marketing landing uses; a
+  lifted `#c04a42` for the dark login theme) and `disableWatermark:true` (hides "Powered by ZITADEL").
+  `ActivateLabelPolicy` (`POST /admin/v1/policies/label/_activate`) promotes the preview to the live
+  login.
+- **Languages** — `SetRestrictions` (`PUT /admin/v1/restrictions`) allows **`en` + `es`** (Zitadel
+  ships the es translations); `SetDefaultLanguage` (`PUT /admin/v1/languages/default/en`) sets the
+  fallback. The app forwards the signed-in user's locale as the OIDC **`ui_locales`** param
+  (`apps/web/app/(auth)/login/page.tsx`), so the login renders in the same language as the app.
+
+> [!important] Best-effort, unlike the OIDC provisioning
+> Branding/localization are **cosmetic**, so — unlike the project/app/roles/SA steps — they are
+> **best-effort**: a failure logs a loud `WARN` to the sidecar log but does **not** abort the run
+> (sign-in is never blocked over a color). All calls are idempotent upserts (`PUT` + `_activate`), safe
+> to re-apply on a clean re-bootstrap. Because the idempotent short-circuit (§0b) skips the whole run
+> once the secret files exist, branding lands on the **first** (fresh) provision; to re-apply to an
+> already-provisioned instance, do a clean re-bootstrap (remove the `zitadel_secrets` volume) **or** set
+> it once by hand in the console.
+
+> [!tip] Logo upload is a one-time operator step (not automated)
+> The bootstrap sets **colors + watermark + languages** but does **not** upload a logo — that needs a
+> multipart asset upload plus the brand files baked into the sidecar image, which is more than the
+> zero-touch flow should carry. To add the wordmark: sign in to the console
+> (`https://auth.yourdomain.com/ui/console`) as the IAM admin → **Settings → Branding** (Appearance) →
+> upload the light/dark **logo** (and favicon) from `brand/` → **Apply configuration**. It survives
+> re-bootstraps unless you wipe the `zitadel_db`.
+
+> [!note] First-login order — a Zitadel limitation (not fixable via API)
+> The audit found Zitadel's first login offers **2FA setup before** the forced password change, and
+> never announces that the initial password is temporary. Zitadel's login v1 does **not** expose an API
+> to reorder those steps, so we do **not** hack around it: instead the `/login` interstitial adds a
+> localized line — *"First time signing in? Your initial password is temporary…"* — for the provisioned
+> user, and `prompt=login` on the authorize request (`apps/web/auth.ts`) stops Zitadel showing **other**
+> users' accounts in its shared picker to a brand-new employee.
+
 ---
 
 ## 1 — Prerequisites (manual path)

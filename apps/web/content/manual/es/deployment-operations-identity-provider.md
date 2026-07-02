@@ -35,6 +35,33 @@ de la app — el arranque del proveedor de identidad nunca crea un usuario de la
 > una base de datos de proveedor restaurada. Trátala como una joya de la corona y respáldala fuera del
 > servidor. Consulta [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
+## Apariencia e idioma del inicio de sesión (proveedor incluido)
+
+El arranque también **personaliza la marca y el idioma de la página de inicio de sesión** para que
+coincida con lazyit y deje de parecer una pantalla genérica de terceros. En el mismo primer arranque,
+de forma automática:
+
+- Aplica el color de acento **oxblood** de la marca y **oculta la marca de agua «Powered by ZITADEL»**.
+- Permite **inglés y español** y sigue el idioma que estás usando en la app, de modo que la página de
+  inicio de sesión aparece en ese mismo idioma.
+- Lleva a los nuevos empleados directamente al formulario de inicio de sesión en vez de a un selector de
+  cuentas compartido, para que una persona recién incorporada nunca vea las cuentas de **otras**
+  personas en un equipo compartido.
+
+Son detalles cosméticos: si alguno no puede aplicarse en el arranque, se omite con una advertencia en los
+registros y el inicio de sesión sigue funcionando.
+
+**Añade tu logo (opcional, una sola vez).** El logo es la única pieza de marca que el arranque *no* sube
+por ti. Para añadirlo, inicia sesión en la consola del proveedor en el subdominio `auth.`
+(`/ui/console`) como administrador, abre **Settings → Branding**, sube tu logo claro y oscuro (y el
+favicon) y pulsa **Apply configuration**. Se conserva entre reinicios.
+
+**Nota sobre el primer inicio de sesión.** Con el proveedor incluido, la **contraseña inicial** de una
+persona recién añadida es **temporal**: el proveedor le pide que defina la suya en el primer inicio de
+sesión, y también puede ofrecerle añadir un segundo factor. La página de inicio de sesión muestra un
+breve recordatorio de esto. El orden en que el proveedor presenta esos pasos lo fija el proveedor y no es
+algo que lazyit pueda cambiar.
+
 ## Opción 2 — usa tu propio proveedor (BYOI)
 
 Si ya tienes un proveedor de identidad compatible con OIDC — Azure AD / Entra ID, Okta, Keycloak,

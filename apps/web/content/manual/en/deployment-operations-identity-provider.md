@@ -33,6 +33,30 @@ identity-provider bootstrap never creates an application user.
 > restored provider database readable. Treat it like a crown jewel and back it up off-host. See
 > [Backups & restore](/help/deployment-operations-backups-restore).
 
+## Sign-in appearance & language (bundled provider)
+
+The bootstrap also **brands and localizes the sign-in page** so it matches lazyit and no longer looks
+like a stock, third-party screen. On the same first-boot run it automatically:
+
+- Sets the **brand oxblood** accent color and **hides the "Powered by ZITADEL" watermark**.
+- Allows both **English and Spanish** and follows the language you're using in the app, so the sign-in
+  page appears in the same language.
+- Sends new employees straight to the sign-in form instead of a shared account picker, so a brand-new
+  person never sees **other people's** accounts on a shared machine.
+
+These are cosmetic touches: if any of them can't be applied at boot they're skipped with a warning in
+the logs and sign-in still works.
+
+**Add your logo (one-time, optional).** The logo is the one branding piece the bootstrap does *not*
+upload for you. To add it, sign in to the provider's console at the `auth.` subdomain
+(`/ui/console`) as the admin, open **Settings → Branding**, upload your light and dark logo (and
+favicon), then **Apply configuration**. It persists across restarts.
+
+**First sign-in note.** With the bundled provider, a newly added person's **initial password is
+temporary** — the provider asks them to set their own on first sign-in, and may also offer to add a
+second factor. The sign-in page shows a short reminder of this. The order in which the provider presents
+those steps is fixed by the provider and isn't something lazyit can change.
+
 ## Option 2 — bring your own provider (BYOI)
 
 If you already run an OIDC-compatible identity provider — Azure AD / Entra ID, Okta, Keycloak,
