@@ -38,7 +38,9 @@
   "agent": {
     "badge": "Agent-reported",
     "reported": "reported {time}",
-    "staleReported": "reported {time} · stale"
+    "staleReported": "reported {time} · stale",
+    "outdated": "Agent outdated",
+    "outdatedTooltip": "This agent ({agentVersion}) is a major version behind your server ({serverVersion}). Update the agent binary to stay compatible."
   },
   "pending": {
     "title": "Pending review",
