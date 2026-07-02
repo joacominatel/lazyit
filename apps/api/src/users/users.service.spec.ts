@@ -1221,6 +1221,46 @@ describe('UsersService', () => {
       ]);
     });
 
+    // Issue #961 — the batch id→name resolver filter. `ids` scopes the page to exactly the requested
+    // ids via `id: { in }`, alongside the default live-user slice; unknown ids simply match nothing.
+    it('scopes to the requested ids via id: { in } (batch resolver, #961)', async () => {
+      user.findMany.mockResolvedValue([
+        { id: '11111111-1111-4111-8111-111111111111' },
+      ]);
+      user.count.mockResolvedValue(1);
+
+      const ids = [
+        '11111111-1111-4111-8111-111111111111',
+        '22222222-2222-4222-8222-222222222222',
+      ];
+      await service.findPage(
+        { ids },
+        { limit: 200, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      // Only the requested ids are queried (an unknown id in the set matches no row — silently ignored),
+      // still scoped to the live slice.
+      expect(call.where).toEqual({ id: { in: ids }, deletedAt: null });
+    });
+
+    it('omits the id filter entirely for an empty ids array', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        { ids: [] },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).toEqual({ deletedAt: null });
+    });
+
     // Issue #386 — the two derived, list-only activity counts. They must be BATCHED per page (one
     // `groupBy` each over the whole page's user ids, never N+1) and reflect only the ACTIVE lifecycle.
     describe('activity counts (#386)', () => {
