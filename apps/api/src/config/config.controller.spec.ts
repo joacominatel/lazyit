@@ -225,6 +225,14 @@ describe('POST /config/setup — rate-limit guard 429 propagation (e2e pipeline)
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    // ponytail: supertest binds `app.getHttpServer()` lazily on the first request and, once IT
+    // opened the socket, closes it again after that same request — so every subsequent `it()` in
+    // this block re-opens and re-closes the raw http.Server. Under CPU contention (parallel Jest
+    // workers) that listen/close churn on one shared server object occasionally races and a request
+    // gets "socket hang up" (reproduced locally by running 30 copies of this spec concurrently).
+    // Listening once, up front, means supertest sees an already-bound server and never touches its
+    // lifecycle again — `afterAll` still owns the real close.
+    await app.listen(0);
   });
 
   afterAll(async () => {
@@ -233,14 +241,13 @@ describe('POST /config/setup — rate-limit guard 429 propagation (e2e pipeline)
 
   it('a rotating forged X-Forwarded-For does NOT bypass the cap, then 429s — and never calls the service for the blocked attempt (SEC-010)', async () => {
     const token = csrfService.issue();
-    const server = app.getHttpServer();
     // `trust proxy` is off here (Express default), so the client-sent X-Forwarded-For is IGNORED:
     // every request resolves to the same loopback req.ip and shares ONE bucket. The attacker rotates
     // the spoofed leftmost hop on each call hoping each one mints a fresh window — it never works.
     // Pre-SEC-010 the guard keyed on the leftmost XFF token, so each distinct fake hop started a new
     // bucket and the 6th would have returned 201; this test would fail.
     for (let i = 0; i < 5; i++) {
-      const ok = await request(server)
+      const ok = await request(app.getHttpServer())
         .post('/config/setup')
         .set('X-CSRF-Token', token)
         .set('X-Forwarded-For', `1.2.3.${i}`)
@@ -251,7 +258,7 @@ describe('POST /config/setup — rate-limit guard 429 propagation (e2e pipeline)
 
     // 6th with yet another forged hop — still the same verified client → 429, not a fresh 201, and
     // the guard short-circuits before the handler (the service is not called a 6th time).
-    const blocked = await request(server)
+    const blocked = await request(app.getHttpServer())
       .post('/config/setup')
       .set('X-CSRF-Token', token)
       .set('X-Forwarded-For', '9.9.9.9')
@@ -289,9 +296,15 @@ describe('ConfigController — permission gates (e2e pipeline, ADR-0046 P5)', ()
 
   // The permissions service is stubbed — the gate, not the business logic, is under test here.
   const permissionsStub = {
-    getMatrix: jest.fn().mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
-    updateMatrix: jest.fn().mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
-    resolveFor: jest.fn().mockResolvedValue({ role: 'MEMBER', permissions: [] }),
+    getMatrix: jest
+      .fn()
+      .mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
+    updateMatrix: jest
+      .fn()
+      .mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
+    resolveFor: jest
+      .fn()
+      .mockResolvedValue({ role: 'MEMBER', permissions: [] }),
   };
 
   beforeAll(async () => {
@@ -321,6 +334,14 @@ describe('ConfigController — permission gates (e2e pipeline, ADR-0046 P5)', ()
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    // ponytail: supertest binds `app.getHttpServer()` lazily on the first request and, once IT
+    // opened the socket, closes it again after that same request — so every subsequent `it()` in
+    // this block re-opens and re-closes the raw http.Server. Under CPU contention (parallel Jest
+    // workers) that listen/close churn on one shared server object occasionally races and a request
+    // gets "socket hang up" (reproduced locally by running 30 copies of this spec concurrently).
+    // Listening once, up front, means supertest sees an already-bound server and never touches its
+    // lifecycle again — `afterAll` still owns the real close.
+    await app.listen(0);
   });
 
   afterAll(async () => {
@@ -360,7 +381,9 @@ describe('ConfigController — permission gates (e2e pipeline, ADR-0046 P5)', ()
   );
 
   it('GET /config/my-permissions: anonymous (no user) → 403', async () => {
-    const res = await request(app.getHttpServer()).get('/config/my-permissions');
+    const res = await request(app.getHttpServer()).get(
+      '/config/my-permissions',
+    );
     expect(res.status).toBe(403);
   });
 });
@@ -380,13 +403,19 @@ describe('ConfigController — service-principal blocked on permissions routes (
     resolve: (role: string) =>
       Promise.resolve(role === 'ADMIN' ? adminSet : new Set<string>()),
     hasAll: (role: string, required: string[]) =>
-      Promise.resolve(role === 'ADMIN' || required.every((p) => adminSet.has(p))),
+      Promise.resolve(
+        role === 'ADMIN' || required.every((p) => adminSet.has(p)),
+      ),
     invalidate: jest.fn(),
   };
 
   const permissionsStub = {
-    getMatrix: jest.fn().mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
-    updateMatrix: jest.fn().mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
+    getMatrix: jest
+      .fn()
+      .mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
+    updateMatrix: jest
+      .fn()
+      .mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
     resolveFor: jest.fn().mockResolvedValue({ role: 'ADMIN', permissions: [] }),
   };
 
@@ -433,6 +462,14 @@ describe('ConfigController — service-principal blocked on permissions routes (
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    // ponytail: supertest binds `app.getHttpServer()` lazily on the first request and, once IT
+    // opened the socket, closes it again after that same request — so every subsequent `it()` in
+    // this block re-opens and re-closes the raw http.Server. Under CPU contention (parallel Jest
+    // workers) that listen/close churn on one shared server object occasionally races and a request
+    // gets "socket hang up" (reproduced locally by running 30 copies of this spec concurrently).
+    // Listening once, up front, means supertest sees an already-bound server and never touches its
+    // lifecycle again — `afterAll` still owns the real close.
+    await app.listen(0);
   });
 
   afterAll(async () => {
