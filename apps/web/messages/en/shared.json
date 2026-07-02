@@ -97,6 +97,7 @@
   "chrome": {
     "skipToContent": "Skip to content",
     "openUserMenu": "Open user menu",
+    "myProfile": "My profile",
     "signOut": "Sign out",
     "openNavigationMenu": "Open navigation menu",
     "toggleTheme": "Toggle theme",
