@@ -27,9 +27,10 @@ export const SMTP_SECRET_KEY_ENV = 'SMTP_SECRET_KEY';
  * The CURATED allowlist of notification types that are ALSO emailed when outbound email is enabled
  * (ADR-0079). The clearly OPERATIONAL nudges a small team wants in their inbox PLUS the two
  * sensitive-audit alerts (`permission_widened`, `infra.agent_offline`, #852) — the CEO opted these IN on
- * 2026-06-30 (ADR-0079 fork #1). The only type still bell-only is the per-user login nudge
- * (`secret.vault_setup`), which is not inbox-worthy. No per-event rules engine: this flat allowlist + the
- * single global on/off IS the routing (one line before fifty).
+ * 2026-06-30 (ADR-0079 fork #1) — PLUS the weekly update nudge (`update.available`, ADR-0084 §2): the
+ * whole point of the weekly "N behind" reminder is that it lands in an ADMIN inbox. The only type still
+ * bell-only is the per-user login nudge (`secret.vault_setup`), which is not inbox-worthy. No per-event
+ * rules engine: this flat allowlist + the single global on/off IS the routing (one line before fifty).
  */
 export const EMAIL_NOTIFICATION_TYPES = [
   'critical_app_access',
@@ -39,6 +40,7 @@ export const EMAIL_NOTIFICATION_TYPES = [
   'workflow.run_failed',
   'permission_widened',
   'infra.agent_offline',
+  'update.available',
 ] as const satisfies readonly NotificationType[];
 
 /** O(1) membership set for the allowlist. */
