@@ -80,6 +80,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
+import { useAssetModel } from "@/lib/api/hooks/use-asset-models";
 import { useAssetCompanies, useAssets } from "@/lib/api/hooks/use-assets";
 import { useAssetsOnTopology } from "@/lib/api/hooks/use-infra-nodes";
 import { useUser } from "@/lib/api/hooks/use-users";
@@ -207,12 +208,19 @@ export function AssetsListView() {
 
   const statusFilter = filters.status as AssetStatus | "ALL";
   const categoryFilter = filters.category;
+  // The EXACT model filter (#943, deep-linked from the asset detail page's Model link) — distinct
+  // from `categoryFilter` above. No picker for it (URL-only); the chip is its sole surface + clear.
+  const modelFilter = filters.model;
   const locationFilter = filters.location;
   const companyFilter = filters.company; // "ALL" = unset; otherwise an exact company value.
   const ownerFilter = filters.owner; // "" = unset; otherwise a User uuid (server-side filter)
   const ownershipFilter = filters.ownership as OwnershipFilter;
   // Resolve the owner-filter user's name for its chip, even when not on the current search page.
   const { data: ownerUser } = useUser(ownerFilter || undefined);
+  // Resolve the model-filter's name for its chip, mirroring the owner chip above.
+  const { data: modelFilterModel } = useAssetModel(
+    modelFilter !== "ALL" ? modelFilter : undefined,
+  );
   // The archived view is ADMIN-only; a non-admin can never set it (toggle hidden) and we never send
   // the param for them, so the API stays on the active-only list.
   const archived = isAdmin && filters.archived === "only";
@@ -545,6 +553,19 @@ export function AssetsListView() {
                 categories?.find((c) => c.id === categoryFilter)?.name ?? "—",
             }),
             onClear: () => setFilter("category", FILTER_DEFAULTS.category),
+          },
+        ]
+      : []),
+    ...(modelFilter !== "ALL"
+      ? [
+          {
+            key: "model",
+            label: t("chips.model", {
+              value: modelFilterModel
+                ? `${modelFilterModel.manufacturer} ${modelFilterModel.name}`
+                : "…",
+            }),
+            onClear: () => setFilter("model", FILTER_DEFAULTS.model),
           },
         ]
       : []),
