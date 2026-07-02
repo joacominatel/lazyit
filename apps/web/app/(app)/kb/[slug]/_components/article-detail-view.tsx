@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailSkeleton } from "@/components/detail-panel";
 import { MarkdownView } from "@/components/markdown-view";
+import { ArticleAttachmentProvider } from "@/components/markdown-attachment-image-view";
 import { WikiLinkProvider } from "@/components/markdown-wiki-link-view";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -215,7 +216,9 @@ export function ArticleDetailView({ slug }: { slug: string }) {
       )}
 
       <WikiLinkProvider resolve={resolveWikiLink}>
-        <MarkdownView content={article.content} />
+        <ArticleAttachmentProvider articleId={article.id}>
+          <MarkdownView content={article.content} />
+        </ArticleAttachmentProvider>
       </WikiLinkProvider>
 
       {/* References (article↔article backlinks, ADR-0059 §4) — DISTINCT from the asset/application
