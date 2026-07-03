@@ -26,6 +26,10 @@ import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { RelatedArticlesPanel } from "@/components/related-articles-panel";
 import { AssetDocumentsPanel } from "./asset-documents-panel";
+import {
+  AgentInventoryPanel,
+  getAgentInventory,
+} from "./agent-inventory-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -177,6 +181,12 @@ export function AssetDetailView({ id }: { id: string }) {
   const active = (assignments ?? []).filter((a) => a.releasedAt === null);
   const history = (assignments ?? []).filter((a) => a.releasedAt !== null);
   const specsEntries = Object.entries(asset.specs ?? {});
+  // Agent-reported hosts (ADR-0074) carry a structured inventory blob under `specs.host` — render it
+  // readably instead of dumping raw JSON into the custom-fields grid. Non-agent assets get `null` and
+  // fall through to the existing render unchanged.
+  const agentInventory = getAgentInventory(
+    asset.specs as Record<string, unknown> | null,
+  );
 
   function handleRelease(assignmentId: string) {
     setReleasingId(assignmentId);
@@ -372,26 +382,30 @@ export function AssetDetailView({ id }: { id: string }) {
         )}
       </DetailPanel>
 
-      <DetailPanel title={t("customFieldsTitle")}>
-        {specsEntries.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {t("noCustomFields")}
-          </p>
-        ) : (
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-            {specsEntries.map(([key, value]) => (
-              <div key={key} className="space-y-1">
-                <dt className="text-xs font-medium text-muted-foreground">
-                  {formatFieldLabel(key) || key}
-                </dt>
-                <dd className="text-sm break-words">
-                  {formatSpecValue(value, { yes: tc("yes"), no: tc("no") })}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </DetailPanel>
+      {agentInventory ? (
+        <AgentInventoryPanel inventory={agentInventory} />
+      ) : (
+        <DetailPanel title={t("customFieldsTitle")}>
+          {specsEntries.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {t("noCustomFields")}
+            </p>
+          ) : (
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+              {specsEntries.map(([key, value]) => (
+                <div key={key} className="space-y-1">
+                  <dt className="text-xs font-medium text-muted-foreground">
+                    {formatFieldLabel(key) || key}
+                  </dt>
+                  <dd className="text-sm break-words">
+                    {formatSpecValue(value, { yes: tc("yes"), no: tc("no") })}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </DetailPanel>
+      )}
 
       <DetailPanel
         title={t("ownersTitle")}
