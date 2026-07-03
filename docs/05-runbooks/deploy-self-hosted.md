@@ -308,6 +308,17 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > without the *matching* key yields undecryptable connector credentials. Back it up off-host (it lives
 > in `.env.prod`; see **[[backups]]**). Do **not** generate a fresh one on a restore.
 
+> **Upgrade note — attachments storage: fix a pre-existing root-owned volume (#1019).** The api
+> image now creates `/app/attachments` owned by `node` before the runtime `USER node` switch, so
+> Docker seeds the `*_attachments_data` named volume with the right ownership on first mount. A
+> stack that booted **before** this fix has an already-created, root-owned (and empty — uploads
+> never worked) volume; Docker only applies ownership at first mount into an *empty* volume, so
+> pulling the fix alone won't repair it. Run this **once** after upgrading:
+>
+> ```sh
+> docker run --rm -v lazyit-prod_attachments_data:/v alpine chown -R 1000:1000 /v
+> ```
+
 ## 5. Backups & disaster recovery
 
 Configure backups before real use — see **[[backups]]**. The prod stack has **two** databases (the
