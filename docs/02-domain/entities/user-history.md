@@ -40,9 +40,12 @@ Indexes: `(userId, id)` (the per-user timeline) and `(createdAt)` (powers the [[
 
 ## Events (`UserHistoryEventType`)
 
-`CREATED` · `UPDATED` · `ROLE_CHANGED` (payload `{ from, to }`) · `DELETED` · `RESTORED` ·
-`PASSWORD_RESET_SENT`. The `CREATED/UPDATED/DELETED/RESTORED` set mirrors [[asset-history]]; `ROLE_CHANGED`
-and `PASSWORD_RESET_SENT` are user-specific.
+`CREATED` · `UPDATED` · `ROLE_CHANGED` (payload `{ from, to }`) · `MANAGER_CHANGED` (payload `{ from, to }`,
+[[0058-user-manager-and-clone-actions]]) · `DELETED` · `RESTORED` · `PASSWORD_RESET_SENT` ·
+`PASSWORD_RESET_BY_ADMIN`. The `CREATED/UPDATED/DELETED/RESTORED` set mirrors [[asset-history]]; the rest are
+user-specific. `PASSWORD_RESET_SENT` records an IdP reset **link** request (OIDC mode);
+`PASSWORD_RESET_BY_ADMIN` records an admin minting a **local temp-password** (`AUTH_MODE=local`,
+[[0086-local-authentication-mode]] §5).
 
 ## Emission
 
@@ -53,7 +56,10 @@ all from the [[user]] service:
   and trigger the compensating hard-delete; the `Restrict` FK would otherwise block that rollback).
 - `update` → `UPDATED` on a name/email edit (payload `{ fields }`) and/or `ROLE_CHANGED` on a role
   change (payload `{ from, to }`) — both only **after** any IdP mirror commits (a reverted update never logs).
-- `requestPasswordReset` → `PASSWORD_RESET_SENT`, **after** the IdP call succeeds (422/501/503 never logs).
+- `requestPasswordReset` → in OIDC mode, `PASSWORD_RESET_SENT` **after** the IdP call succeeds (422/501/503
+  never logs). In local mode (`AUTH_MODE=local`), `PASSWORD_RESET_BY_ADMIN` after the credential is reset —
+  the admin mints a temp-password, `sessionEpoch` is bumped (existing sessions revoked) and the temp password
+  is returned once ([[0086-local-authentication-mode]] §5).
 - `remove`/`offboard` → `DELETED`, **inside** the offboarding transaction (atomic with the soft-delete).
 - `restore` → `RESTORED`, atomic with clearing `deletedAt`; the idempotent already-live path emits nothing.
 

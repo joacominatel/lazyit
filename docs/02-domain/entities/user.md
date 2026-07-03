@@ -38,14 +38,19 @@ the reverse.
   **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit,
   `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
   each side a user-id / external-name / null — [[0058-user-manager-and-clone-actions]]) on a manager
-  change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when a reset link is
-  requested. This supersedes the fire-and-forget IdP write-back log lines for *durability*: those
+  change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when an IdP reset link is
+  requested (OIDC mode), `PASSWORD_RESET_BY_ADMIN` when an admin mints a local temp-password
+  (`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5). This supersedes the fire-and-forget IdP write-back log lines for *durability*: those
   structured logs remain, but the queryable trail now lives in the DB and surfaces in the
   [[recent-activity]] feed (`entityType = 'user'`).
-- **Identity / auth:** the local User is the source of truth for the domain. Authentication is
-  handled by an external IdP (OIDC) whose `sub` maps to `externalId`; the global guard JIT-provisions
-  a User on first login ([[0038-jit-user-provisioning]]) — we do **not** implement our own auth.
-  `AUTH_MODE=shim` keeps the `X-User-Id` header path for dev/test.
+- **Identity / auth:** the local User is the source of truth for the domain. `AUTH_MODE` is a
+  three-state, instance-immutable choice ([[0086-local-authentication-mode]]): in `oidc` mode
+  authentication is delegated to an external IdP whose `sub` maps to `externalId` and the guard
+  JIT-provisions a User on first login ([[0038-jit-user-provisioning]]); in `local` mode lazyit owns
+  the credential directly — `passwordHash` (argon2id), `passwordUpdatedAt`, `sessionEpoch` (token-version
+  revocation) and `mustChangePassword` on the User row, provisioned by `/config/setup` (first admin) and
+  admin create/reset (never JIT, no IdP). `AUTH_MODE=shim` keeps the `X-User-Id` header path for dev/test.
+  Imported / directory-only rows land `passwordHash=null` and cannot log in until an admin provisions one.
 - **Authorization (Roles & Permissions v2):** the three roles stay **fixed** —
   `enum Role { ADMIN MEMBER VIEWER }` is unchanged ([[0040-rbac-roles]]) — but what each role *grants*
   is now a configurable set of **fine-grained permissions** ([[0046-roles-permissions-v2]]). A privilege
@@ -214,19 +219,26 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > the **existing** Zitadel user (same `sub`/`externalId` — never a re-link, SEC-006) and sets the new
 > address **pre-verified**, so the change does **not** force re-verification or break login. `externalId`
 > can never be set via the API.
-> `POST /users/:id/reset-password` triggers **Zitadel's own** password-reset flow (Management API,
-> `password_reset` with `sendLink`): lazyit **never** stores/sets/sends a password ([[0016-auth-strategy-deferred]],
-> [[0037-idp-choice-zitadel-byoi]]) — **Zitadel emails the link via ZITADEL's SMTP**, which the operator
-> must have configured for delivery. It is refused for an **inactive** user (**422**) and surfaces an
+> `POST /users/:id/reset-password` in **OIDC** mode triggers **Zitadel's own** password-reset flow
+> (Management API, `password_reset` with `sendLink`): lazyit **never** stores/sets/sends a password
+> ([[0016-auth-strategy-deferred]], [[0037-idp-choice-zitadel-byoi]]) — **Zitadel emails the link via
+> ZITADEL's SMTP**. It is refused for an **inactive** user (**422**), returns **204**, and surfaces an
 > honest **501** ("managed by your identity provider") under BYOI / generic OIDC or for a user with no
-> IdP link ([[INVARIANTS]] INV-4) — never a misleading success. Both rely on the same Private-Key-JWT
-> Management auth as the create/role write-backs ([[0043-zitadel-source-of-truth]] §3).
+> IdP link ([[INVARIANTS]] INV-4) — never a misleading success. In **`AUTH_MODE=local`** mode
+> ([[0086-local-authentication-mode]] §5) the same endpoint instead mints a **one-time local temp-password**,
+> hashes it (argon2id), sets `mustChangePassword`, **bumps `sessionEpoch`** (revoking the subject's existing
+> sessions), audits `PASSWORD_RESET_BY_ADMIN` and returns **200** with `{ temporaryPassword }` (shown once —
+> no IdP, no SMTP). It is refused for an inactive user or a **directory-only** person (**422**). Directory-only
+> rows never receive a credential via any path.
 
 > [!note] Create accepts an optional temporary password ([[0064-admin-user-provisioning-credentials]], #411)
 > `POST /users` accepts an **optional** `password` on `CreateUserSchema` — a **temporary** credential for
 > admin provisioning. It is honored **only on the bundled-Zitadel management path** (`idp.supportsManagement`):
 > the new Zitadel user is created with the password set **`changeRequired:true`**, so Zitadel **forces a
 > password change at first login** — a one-time hand-off secret, never a standing admin-known credential.
+> In **`AUTH_MODE=local`** mode ([[0086-local-authentication-mode]] §5) a supplied `password` is instead
+> **hashed to `passwordHash`** (argon2id) with `mustChangePassword=true` and **no IdP call** (`externalId`
+> stays null); omitting it lands a password-less row an admin can provision later.
 > The user is created **email auto-verified** (always-on, ADR-0064 §3 — no email-verified toggle). Under
 > **BYOI / generic OIDC** a supplied `password` is rejected with **400** *before any local row is created*
 > (the operator's own IdP owns the credential; the controls are hidden in the later full-page UI). The
