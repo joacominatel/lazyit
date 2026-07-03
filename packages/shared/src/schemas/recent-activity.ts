@@ -141,8 +141,10 @@ export const RECENT_ACTIVITY_ACTIONS = [
   // PASSWORD_RESET_BY_ADMIN verb the recent_activity view emits.
   "password_reset_by_admin",
   // Self-service password lifecycle (AUTH_MODE=local, ADR-0086 §F4) — the lowercased PASSWORD_CHANGED
-  // (user changed their own password) and PASSWORD_RESET_COMPLETED (user reset it via an email token) verbs.
+  // (user changed their own password), PASSWORD_RESET_REQUESTED (a forgot-password reset link was issued,
+  // issue #1006) and PASSWORD_RESET_COMPLETED (user reset it via an email token) verbs.
   "password_changed",
+  "password_reset_requested",
   "password_reset_completed",
 ] as const;
 
