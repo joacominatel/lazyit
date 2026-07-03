@@ -171,6 +171,23 @@ jobs:
         working-directory: apps/api
         run: node -e "require('./dist/src/main.js')"
 
+      # Boot-config parametrized for AUTH_MODE=local (#929 + ADR-0086). The boot smoke above loads the
+      # module graph but never runs validateBootConfig, so it wouldn't catch a broken LOCAL boot contract.
+      # This asserts the COMPILED boot-config (dist) both ACCEPTS a valid local config and REFUSES a local
+      # config missing SESSION_SIGNING_SECRET (validateBootConfig process.exit(1)s on failure) — the local
+      # analogue of the OIDC issuer/JWKS checks. Complements boot-config.spec (TS source, under jest).
+      - name: API boot-config check (AUTH_MODE=local)
+        working-directory: apps/api
+        run: |
+          set -e
+          echo "positive: AUTH_MODE=local + a valid SESSION_SIGNING_SECRET must validate"
+          node -e "require('./dist/src/auth/boot-config').validateBootConfig({AUTH_MODE:'local',DATABASE_URL:'postgres://u:p@localhost:5432/db',SESSION_SIGNING_SECRET:'0123456789abcdef0123456789abcdef0123456789abcdef'})"
+          echo "negative: AUTH_MODE=local WITHOUT SESSION_SIGNING_SECRET must be refused"
+          if node -e "require('./dist/src/auth/boot-config').validateBootConfig({AUTH_MODE:'local',DATABASE_URL:'postgres://u:p@localhost:5432/db'})" 2>/dev/null; then
+            echo "::error::local-mode boot-config accepted a missing SESSION_SIGNING_SECRET"; exit 1
+          fi
+          echo "AUTH_MODE=local boot-config contract verified"
+
       # Verify the Help/Manual en↔es parity invariant (ADR-0062 §4 / CLAUDE.md rule #7).
       # Exits 1 when any slug exists in one locale tree but lacks a counterpart in the other.
       # No DB or generated client needed — pure filesystem check. Resolves #589.
