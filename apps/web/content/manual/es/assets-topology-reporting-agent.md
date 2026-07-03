@@ -40,10 +40,19 @@ El botón abre un asistente guiado y breve, de tres pasos:
    ```
 
    La dirección es **tu propia instancia de lazyit** — el agente solo se comunica con el servidor que
-   vos ejecutás. Ejecutalo en un servidor **Linux** **como root**. El token se muestra **una sola
-   vez**, así que copialo (o descargalo) antes de continuar. Si preferís revisar cada paso, expandí
-   **Instalar manualmente (paso a paso)** para la misma instalación hecha a mano (descargar el binario,
-   instalarlo, escribir el archivo de configuración y enviar un reporte de prueba).
+   vos ejecutás, y tiene que ser el **origen HTTPS público** (la dirección que usás en el navegador,
+   delante del proxy reverso) — **nunca** el puerto crudo del web (`:3000`), que no tiene ruta para la
+   descarga del agente y hará que la instalación falle. Ejecutalo en un servidor **Linux** **como
+   root**. El token se muestra **una sola vez**, así que copialo (o descargalo) antes de continuar. Si
+   preferís revisar cada paso, expandí **Instalar manualmente (paso a paso)** para la misma instalación
+   hecha a mano (descargar el binario, instalarlo, escribir el archivo de configuración y enviar un
+   reporte de prueba).
+
+   > **¿Despliegue en LAN (sin dominio público)?** Si tu instancia solo es alcanzable por una IP o
+   > nombre de host de LAN con un certificado autofirmado, confiá en esa autoridad certificadora en el
+   > host del agente **antes** de correr el comando de instalación, o la descarga se rechazará por no
+   > ser confiable. Consultá el runbook de despliegue LAN de tu instalación para el helper de una línea
+   > que hace esto.
 3. **Espera.** El asistente entonces espera a que el servidor reporte. Apenas el agente reporta —
    normalmente en un par de minutos — muestra un mensaje de éxito y un botón **Confirmar** en línea.
    Podés confirmar ahí mismo, o cerrar el asistente y confirmarlo más tarde desde la bandeja de
@@ -88,7 +97,9 @@ vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés do
   mapa): no se destruye nada y se puede restaurar más adelante.
 
 Una vez confirmado, un host sigue recibiendo datos frescos del agente, pero tus ediciones — su
-nombre, tipo, posición y conexiones — son tuyas y el agente nunca las sobrescribe.
+nombre, tipo, posición y conexiones — son tuyas y el agente nunca las sobrescribe. Una vez confirmado
+un host reportado, su inventario — sistema operativo, CPU, discos, interfaces de red y software
+instalado — se muestra como un panel estructurado en el activo correspondiente.
 
 ## Qué recopila el agente
 

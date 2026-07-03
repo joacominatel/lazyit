@@ -37,11 +37,18 @@ The button opens a short, guided wizard with three steps:
    curl -fsSL https://your-instance/install.sh | sudo sh -s -- --url https://your-instance --token <token>
    ```
 
-   The address is **your own lazyit instance** — the agent only ever talks to the server you run. Run
-   it on a **Linux** server **as root**. The token is shown **only once**, so copy it (or download it)
-   before continuing. If you'd rather inspect every step, expand **Install manually (step by step)**
-   for the same install done by hand (download the binary, install it, write the config file, send a
-   test report).
+   The address is **your own lazyit instance** — the agent only ever talks to the server you run, and
+   it must be the **public HTTPS origin** (the address you use in a browser, in front of the reverse
+   proxy) — **never** the raw web port (`:3000`), which has no route for the agent download and will
+   make the install fail. Run it on a **Linux** server **as root**. The token is shown **only once**,
+   so copy it (or download it) before continuing. If you'd rather inspect every step, expand **Install
+   manually (step by step)** for the same install done by hand (download the binary, install it, write
+   the config file, send a test report).
+
+   > **LAN deployment (no public domain)?** If your instance is reachable only by a LAN IP or hostname
+   > with a self-signed certificate, trust that certificate authority on the agent host **before**
+   > running the install command, or the download will be rejected as untrusted. See your deployment's
+   > LAN runbook for the one-line helper that does this.
 3. **Wait.** The wizard then waits for the server to report. As soon as the agent checks in — usually
    within a couple of minutes — it shows a success message and an inline **Confirm** button. You can
    confirm right there, or close the wizard and confirm later from the Pending review tray.
@@ -85,7 +92,9 @@ how long ago it last reported. For each one you have two choices:
   map): nothing is destroyed and it can be restored later.
 
 Once confirmed, a host keeps receiving fresh facts from the agent, but your edits — its name, kind,
-position and connections — are yours and the agent never overwrites them.
+position and connections — are yours and the agent never overwrites them. Once a reported host is
+confirmed, its inventory — operating system, CPU, disks, network interfaces and installed software —
+shows as a structured panel on the corresponding asset.
 
 ## What the agent collects
 
