@@ -61,9 +61,16 @@ export function SetupWizard() {
   const [userChoice, setUserChoice] = useState<IdpChoice | null>(null);
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
 
+  // The server-reported mode drives the wizard fork. Local mode (ADR-0086) is deploy-fixed and immutable,
+  // so it is NEVER overridden by an operator pick; the OIDC modes keep the zitadel/byoi copy toggle.
   const detectedChoice: IdpChoice =
-    status?.integrationMode === "generic-oidc" ? "byoi" : "zitadel";
-  const idpChoice: IdpChoice = userChoice ?? detectedChoice;
+    status?.integrationMode === "local"
+      ? "local"
+      : status?.integrationMode === "generic-oidc"
+        ? "byoi"
+        : "zitadel";
+  const idpChoice: IdpChoice =
+    detectedChoice === "local" ? "local" : (userChoice ?? detectedChoice);
 
   // The bundled-Zitadel path drops the no-op "Configure" step; BYOI keeps it. The step list is
   // derived from the live choice so the progress indicator and the Back/Continue jumps agree.
@@ -203,6 +210,7 @@ export function SetupWizard() {
       {step === "done" && (
         <StepDone
           email={createdEmail}
+          isLocal={idpChoice === "local"}
           onFinish={() => router.replace("/login")}
         />
       )}

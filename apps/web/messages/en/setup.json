@@ -33,6 +33,10 @@
       "title": "Bring your own OIDC",
       "description": "Point lazyit at an OIDC provider you already run (Okta, Authentik, Keycloak, Entra ID…)."
     },
+    "local": {
+      "title": "Local accounts",
+      "body": "This instance uses lazyit's built-in accounts — no external identity provider. On the next step you'll create the first administrator with a name, email and password."
+    },
     "continue": "Continue"
   },
   "configure": {
@@ -77,6 +81,7 @@
   "done": {
     "title": "You're all set",
     "bodyWithEmail": "<email></email> is now the administrator. Sign in through your identity provider to start using lazyit.",
+    "bodyWithEmailLocal": "<email></email> is now the administrator. Sign in with that email and the password you just set to start using lazyit.",
     "bodyWithoutEmail": "Your administrator account is ready. Sign in to start using lazyit.",
     "finish": "Go to sign in"
   }

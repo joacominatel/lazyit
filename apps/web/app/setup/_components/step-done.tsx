@@ -12,12 +12,17 @@ import { CardContent, CardFooter } from "@/components/ui/card";
  */
 export function StepDone({
   email,
+  isLocal,
   onFinish,
 }: {
   email: string | null;
+  /** Local mode (ADR-0086) — the admin signs in with their lazyit password, not through an IdP. */
+  isLocal: boolean;
   onFinish: () => void;
 }) {
   const t = useTranslations("setup.done");
+  // Copy differs only in HOW they sign in: an IdP redirect (OIDC) vs. the lazyit password form (local).
+  const withEmailKey = isLocal ? "bodyWithEmailLocal" : "bodyWithEmail";
   return (
     <>
       <CardContent className="space-y-4">
@@ -27,7 +32,7 @@ export function StepDone({
             <p className="text-base font-medium text-foreground">{t("title")}</p>
             <p className="text-sm text-muted-foreground">
               {email
-                ? t.rich("bodyWithEmail", {
+                ? t.rich(withEmailKey, {
                     email: () => (
                       <span className="font-medium text-foreground">
                         {email}

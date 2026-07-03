@@ -19,6 +19,8 @@ import {
 import { getConfigStatus } from "@/lib/api/endpoints/config";
 import { safeInternalPath } from "@/lib/utils/safe-redirect";
 
+import { LocalLoginForm } from "./local-login-form";
+
 /**
  * Sign-in page — redirects the user to the configured OIDC provider.
  *
@@ -57,13 +59,22 @@ const ERROR_KEY_BASE: Record<string, string> = {
   Default: "default",
 };
 
-/** Resolve whether this instance still needs first-run setup; fail safe (no link) if the API is down. */
-async function instanceIsUnconfigured(): Promise<boolean> {
+/**
+ * Read first-run status + the instance auth mode (ADR-0086 §6) in one call; fail safe (treat as
+ * configured + OIDC, the byte-identical status quo) if the API is unreachable.
+ */
+async function resolveLoginContext(): Promise<{
+  unconfigured: boolean;
+  isLocal: boolean;
+}> {
   try {
     const status = await getConfigStatus();
-    return status.isConfigured === false;
+    return {
+      unconfigured: status.isConfigured === false,
+      isLocal: status.authMode === "local",
+    };
   } catch {
-    return false;
+    return { unconfigured: false, isLocal: false };
   }
 }
 
@@ -83,14 +94,29 @@ export default async function LoginPage({
     redirect(destination);
   }
 
-  const [t, locale, unconfigured] = await Promise.all([
+  const [t, locale, { unconfigured, isLocal }] = await Promise.all([
     getTranslations("auth"),
     getLocale(),
-    instanceIsUnconfigured(),
+    resolveLoginContext(),
   ]);
   const errorKeyBase = error
     ? (ERROR_KEY_BASE[error] ?? ERROR_KEY_BASE.Default)
     : null;
+
+  // Local mode (ADR-0086 §6): a configured local instance shows the first-party username/password form
+  // instead of the SSO button. The unconfigured → /setup CTA takes precedence (there is no one to sign
+  // in yet, in either mode).
+  if (isLocal && !unconfigured) {
+    return (
+      <Card className="w-full animate-rise-in shadow-e2">
+        <CardHeader>
+          <CardTitle className="font-display">{t("login.title")}</CardTitle>
+          <CardDescription>{t("login.localSubtitle")}</CardDescription>
+        </CardHeader>
+        <LocalLoginForm destination={destination} />
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-full animate-rise-in shadow-e2">

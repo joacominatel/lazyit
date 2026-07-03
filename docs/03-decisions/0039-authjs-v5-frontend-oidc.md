@@ -13,6 +13,11 @@ deciders: [Joaquín Minatel]
 
 accepted — 2026-05-27. Implements Phase 3 of the auth plan outlined in
 [[0037-idp-choice-zitadel-byoi]] and [[0038-jit-user-provisioning]].
+**Amended by [[0086-local-authentication-mode]] (F2):** a first-party `Credentials` provider now sits
+**alongside** the single OIDC provider in `auth.ts` (invoked only when `authMode === "local"`), and the
+session cookie's `Secure` flag is keyed to the real origin scheme (`AUTH_URL`/`NEXTAUTH_URL`/`WEB_ORIGIN`)
+instead of `NODE_ENV`, so a prod-over-HTTP LAN deploy doesn't silently drop the cookie. The OIDC flow
+described below is unchanged.
 
 ## Context
 

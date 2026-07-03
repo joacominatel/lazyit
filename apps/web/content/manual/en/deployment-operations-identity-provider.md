@@ -7,9 +7,19 @@ subcategory: identity-provider
 
 # Identity provider
 
-lazyit does not store sign-in passwords itself. Sign-in is delegated to an **identity provider** that
-speaks **OIDC**. You choose between two options at deploy time, and you can switch later without code
-changes.
+lazyit supports two families of sign-in, chosen **once at deploy time** via `AUTH_MODE` and then
+**immutable** for the life of the instance:
+
+- **Local accounts** (`AUTH_MODE=local`) — lazyit owns sign-in itself (username/email + password), with
+  **no external identity provider**. This is the simplest option for a LAN or internal deployment; see
+  [Local accounts](#option-3--local-accounts-no-identity-provider) below.
+- **Single sign-on (OIDC)** — sign-in is delegated to an **identity provider** that speaks **OIDC**,
+  either the bundled one or your own (the two options below). lazyit stores no sign-in password in this
+  family.
+
+You may still switch between the bundled and your-own OIDC provider (both are OIDC), but switching
+between the **local** and **OIDC** families on a populated instance is unsupported — their credentials
+don't carry across. Decide the family up front.
 
 > For the end-user side of this choice (the first-run wizard, adding team members), see
 > [Getting started](/help/getting-started).
@@ -77,6 +87,32 @@ To switch:
 
 With your own provider, that provider owns passwords and account creation — lazyit never sets or stores
 a sign-in password. The application database is completely unaffected by the switch.
+
+## Option 3 — local accounts (no identity provider)
+
+Set `AUTH_MODE=local` and lazyit runs with **no external identity provider at all** — no Zitadel, no
+`auth.` subdomain, no OIDC issuer. lazyit stores each person's credential itself (passwords are hashed
+with **argon2id**) and issues its own signed session on login. This is the standard self-hosted pattern
+(Gitea, Portainer, Proxmox) and the least moving parts for a small internal deploy.
+
+- **First run.** The setup wizard's sign-in-choice step is skipped; you go straight to creating the
+  first administrator with a **name, email and password**. That password is stored (hashed) as the
+  admin's credential — there is no IdP to mirror it to.
+- **Sign-in page.** Instead of an SSO button, `/login` shows a **username/email + password** form.
+- **Adding people.** An administrator provisions each user with a password directly in lazyit; there is
+  no automatic provisioning on first sign-in (that is an OIDC-only behavior).
+- **The signing secret.** Local mode requires a persistent `SESSION_SIGNING_SECRET` (generated for you
+  by the guided installer). It is separate from `AUTH_SECRET`. Rotating it only forces everyone to sign
+  in again — no data loss — but keep it stable so restarts don't sign everyone out.
+- **No MFA yet.** Local mode is password-only in this version; multi-factor is available only via an
+  OIDC provider that offers it. If you need MFA today, choose an OIDC family.
+- **Lost the last admin password?** Because there is no IdP to reset it, a one-shot **recovery command**
+  (run on the host) resets a named administrator's password directly. See
+  [Troubleshooting](/help/deployment-operations-troubleshooting).
+
+> **Local mode and the Secret Manager.** The Secret Manager stays end-to-end encrypted: your login
+> password is **not** your vault passphrase. They are separate credentials by design — do not reuse one
+> as the other. See [Secret Manager](/help/secret-manager).
 
 ## Authorization stays in lazyit
 

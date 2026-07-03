@@ -46,8 +46,9 @@ it is built to remove.
   for end customers.
 - **Not a multi-tenant SaaS.** lazyit ships single-organization and self-hosted; running many
   customers from one shared instance is out of scope.
-- **Not your identity provider.** lazyit does not own login passwords. Sign-in is delegated over OIDC
-  to an identity provider — either the bundled one it ships with, or your own. See
+- **Flexible sign-in.** You choose at deploy time how people sign in: **local accounts** (lazyit owns
+  the username/email + password itself — the simplest option for a LAN) or **single sign-on** delegated
+  over OIDC to an identity provider (the bundled one, or your own). See
   [Initial setup](/help/getting-started) for the choice.
 
 ## The main areas
