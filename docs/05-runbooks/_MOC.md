@@ -3,7 +3,7 @@ title: Runbooks — MOC
 tags: [moc, runbook]
 status: draft
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-07-03
 ---
 
 # Runbooks — Map of Content
@@ -28,7 +28,9 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
   migrate + API + web + Caddy) with local HTTPS; verify it; routine ops.
 - **[[deploy-self-hosted]]** — install on a single host on a real domain: the guided `infra/start.sh`
   bootstrap ([[0047-guided-first-deploy-bootstrap]]), env/secrets, Let's Encrypt, bring-up, updates, the
-  bundled-Zitadel vs BYOI fork.
+  bundled-Zitadel vs BYOI fork. Also covers **LAN / bare-IP deploys** (§1a): `default_sni` (issue
+  #1010) makes bare-IP HTTPS work, and trusting Caddy's internal CA on each reporting-agent host via
+  `infra/trust-local-ca.sh` before running the agent installer.
 - **[[releasing]]** — cut a version: release = a `dev → master` promotion (auto-tagged by
   `release.yml`), the one-time signed `v1.0.0` seed, support/deprecation policy, and the guided
   host update. [[0083-versioning-and-releases]] · [[0084-update-awareness-and-guided-update]].

@@ -29,6 +29,10 @@ export const UserHistoryEventTypeSchema = z.enum([
   "PASSWORD_RESET_BY_ADMIN",
   // The user CHANGED their own password via self-service (AUTH_MODE=local, ADR-0086 §F4). Actor == subject.
   "PASSWORD_CHANGED",
+  // A forgot-password reset link was ISSUED for the user (a token minted + emailed, AUTH_MODE=local,
+  // ADR-0086 §F4 / issue #1006). Recorded only for a real, login-capable subject — never for an unknown
+  // identifier — so it is not an enumeration oracle (the log is admin-only). Actor == subject.
+  "PASSWORD_RESET_REQUESTED",
   // The user RESET their own password via a forgot-password email token (AUTH_MODE=local, ADR-0086 §F4).
   // Distinct from PASSWORD_RESET_BY_ADMIN (an admin acted) — here the SUBJECT reset it themselves via token.
   "PASSWORD_RESET_COMPLETED",

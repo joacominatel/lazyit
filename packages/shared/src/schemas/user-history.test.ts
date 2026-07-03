@@ -18,6 +18,8 @@ describe("UserHistoryEventTypeSchema (ADR-0058)", () => {
       "PASSWORD_RESET_BY_ADMIN",
       // ADR-0086 §F4 (F4a) — self-service change + email-token reset.
       "PASSWORD_CHANGED",
+      // ADR-0086 §F4 / issue #1006 — forgot-password issuance audit.
+      "PASSWORD_RESET_REQUESTED",
       "PASSWORD_RESET_COMPLETED",
     ]);
   });

@@ -87,6 +87,12 @@ ENV AGENT_BIN_DIR=/app/agent/bin
 COPY --from=agent-builder /app/apps/agent/dist/lazyit-agent-x64   /app/agent/bin/lazyit-agent-x64
 COPY --from=agent-builder /app/apps/agent/dist/lazyit-agent-arm64 /app/agent/bin/lazyit-agent-arm64
 
+# Create the attachments blob dir owned by the non-root runtime user (#1019). The named volume
+# (attachments_data:/app/attachments) is seeded from this path's ownership on first mount, so the
+# node process can mkdir tmp/ and write blobs (ADR-0082). Without this, Docker mounts the volume
+# root-owned and every upload 500s with EACCES.
+RUN mkdir -p /app/attachments && chown -R node:node /app/attachments
+
 USER node
 EXPOSE 3001
 

@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-30
+updated: 2026-07-03
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -91,6 +91,36 @@ Edit `infra/env/.env.prod`:
 > `POSTGRES_PASSWORD` on *first* init, so editing the env file alone does **not** change the live
 > role password. Rotate it with `ALTER USER ... PASSWORD ...` inside the `db` container, then update
 > **both** `POSTGRES_PASSWORD` and the password embedded in `DATABASE_URL`, then `up -d db api migrate`.
+
+## 1a. LAN / bare-IP deployment (no public domain)
+
+Small IT teams often reach lazyit on the LAN by a bare IP (`https://192.168.1.50`) or a plain LAN
+hostname, with no public DNS and so no Let's Encrypt. This works out of the box: Caddy's
+`default_sni` (issue #1010/#1011, `infra/caddy/Caddyfile`) presents the site certificate even when
+the client sends no SNI — which is the bare-IP case, since TLS SNI is a hostname field and neither
+browsers nor curl/OpenSSL send an IP literal as SNI (RFC 6066). A bare-IP deploy keeps Caddy's
+**internal CA** — do not set `LAZYIT_TLS_EMAIL` / uncomment Let's Encrypt against an IP, it needs a
+real hostname.
+
+1. Set `LAZYIT_SITE_ADDRESS` (and `WEB_ORIGIN`) to the LAN IP or hostname operators will actually
+   type (e.g. `192.168.1.50` or `lazyit.lan`). Leave `LAZYIT_TLS_EMAIL` unset to keep the internal CA.
+2. Bring the stack up as in **§2** below. Browsers show a self-signed-CA warning the first time —
+   click through it, or trust the CA per-machine as in the next step.
+3. **Before installing the reporting agent** ([[0074-server-reporting-agent]]) **on any LAN host**,
+   trust Caddy's internal CA on that host — otherwise the installer's `curl -f` rejects the
+   certificate as untrusted and the install fails closed (it does not silently skip verification).
+   Run the bundled helper on the agent host itself (Linux and macOS are both supported):
+
+   ```sh
+   ./infra/trust-local-ca.sh          # extracts Caddy's current root CA and trusts it (sudo)
+   ```
+
+   Re-run it after any `down -v` / volume reset — Caddy mints a new root then, and the script
+   removes the stale one first (`--untrust` reverts it). See the script's own `--help`.
+4. Run the agent install command from the **Add agent** wizard as usual, with `--url` set to the
+   **HTTPS origin from step 1** (the Caddy front, e.g. `https://192.168.1.50`) — never the raw web
+   port `:3000`, which has no `/api` routing and 302s to `/login` (issue #980; the installer now
+   hard-fails on that instead of installing the redirect page as the binary).
 
 ## 2. Bring it up
 
@@ -277,6 +307,17 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > Treat this key like `ZITADEL_MASTERKEY`: it is **unrotatable and irreplaceable** — a DB restore
 > without the *matching* key yields undecryptable connector credentials. Back it up off-host (it lives
 > in `.env.prod`; see **[[backups]]**). Do **not** generate a fresh one on a restore.
+
+> **Upgrade note — attachments storage: fix a pre-existing root-owned volume (#1019).** The api
+> image now creates `/app/attachments` owned by `node` before the runtime `USER node` switch, so
+> Docker seeds the `*_attachments_data` named volume with the right ownership on first mount. A
+> stack that booted **before** this fix has an already-created, root-owned (and empty — uploads
+> never worked) volume; Docker only applies ownership at first mount into an *empty* volume, so
+> pulling the fix alone won't repair it. Run this **once** after upgrading:
+>
+> ```sh
+> docker run --rm -v lazyit-prod_attachments_data:/v alpine chown -R 1000:1000 /v
+> ```
 
 ## 5. Backups & disaster recovery
 

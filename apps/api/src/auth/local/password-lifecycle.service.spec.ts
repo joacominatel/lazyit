@@ -240,6 +240,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       userFindFirst.mockResolvedValue(makeUser());
       const before = Date.now();
       await service.forgotPassword('alice@example.com');
+      await flush(); // token issuance is detached (fire-and-forget) — let it run before asserting
 
       expect(tokCreate).toHaveBeenCalledTimes(1);
       const data = firstArg<CreateTokenArg>(tokCreate).data;
@@ -286,7 +287,10 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.forgotPassword('alice@example.com'),
       ).resolves.toBeUndefined();
+      await flush(); // cap check now runs in the detached path
       expect(tokCreate).not.toHaveBeenCalled();
+      // Over the cap → no token minted → no issuance audit either (audit follows the create).
+      expect(historyRecord).not.toHaveBeenCalled();
     });
 
     it('when SMTP is NOT configured, still creates the token and returns uniformly (no email, no throw)', async () => {
@@ -322,6 +326,51 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       ).resolves.toBeUndefined();
       expect(userFindFirst).not.toHaveBeenCalled();
       expect(tokCreate).not.toHaveBeenCalled();
+    });
+
+    // ---- F-4 (issue #1006): issuance is audited as PASSWORD_RESET_REQUESTED --------------------------
+
+    it('F-4: audits PASSWORD_RESET_REQUESTED (actor == subject) when a token is minted for a real user', async () => {
+      userFindFirst.mockResolvedValue(makeUser());
+      await service.forgotPassword('alice@example.com');
+      await flush();
+
+      expect(tokCreate).toHaveBeenCalledTimes(1);
+      // The issuance is audited on the SUBJECT (self-service). The exact event object carries ONLY
+      // userId/eventType/actor — no token field, so no plaintext is ever recorded.
+      expect(historyRecord).toHaveBeenCalledWith(expect.anything(), {
+        userId: VALID_ID,
+        eventType: 'PASSWORD_RESET_REQUESTED',
+        actor: { userId: VALID_ID },
+      });
+    });
+
+    it('F-4: writes NO audit and mints NO token for an unknown / inactive / directory-only identifier', async () => {
+      // Unknown identifier.
+      userFindFirst.mockResolvedValueOnce(null);
+      await service.forgotPassword('ghost@example.com');
+      // Inactive.
+      userFindFirst.mockResolvedValueOnce(makeUser({ isActive: false }));
+      await service.forgotPassword('alice@example.com');
+      // Directory-only.
+      userFindFirst.mockResolvedValueOnce(makeUser({ directoryOnly: true }));
+      await service.forgotPassword('alice@example.com');
+      await flush();
+
+      expect(tokCreate).not.toHaveBeenCalled();
+      expect(historyRecord).not.toHaveBeenCalled(); // enumeration-safe: no audit for a non-eligible subject
+    });
+
+    it('F-1: resolves WITHOUT awaiting the detached issuance (fire-and-forget)', async () => {
+      userFindFirst.mockResolvedValue(makeUser());
+      await service.forgotPassword('alice@example.com');
+      // The variable-cost work is detached: it has NOT run yet when forgotPassword resolves…
+      expect(tokCreate).not.toHaveBeenCalled();
+      expect(historyRecord).not.toHaveBeenCalled();
+      // …and completes once the microtask/immediate queue is flushed.
+      await flush();
+      expect(tokCreate).toHaveBeenCalledTimes(1);
+      expect(historyRecord).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -64,11 +64,20 @@ TIMER="/etc/systemd/system/lazyit-agent.timer"
 echo "lazyit-agent install: downloading agent ($ARCH) from $URL ..."
 TMP_BIN="$(mktemp)"
 trap 'rm -f "$TMP_BIN"' EXIT
-if ! curl -fsSL -H "Authorization: Bearer $TOKEN" \
+# --max-redirs 0 makes a 3xx a hard curl failure instead of a followed redirect (issue #980): if
+# --url points at an origin with no /api routing (e.g. the raw web port :3000, no Caddy in front),
+# the unauthenticated request 302s to /login — curl must not silently download that HTML.
+if ! curl -fsSL --max-redirs 0 -H "Authorization: Bearer $TOKEN" \
   "$URL/api/agent/download?arch=$ARCH" -o "$TMP_BIN"; then
   die "download failed — check the URL, the token (needs infra:report), and that the binary is bundled in this build"
 fi
 [ -s "$TMP_BIN" ] || die "downloaded an empty file — aborting"
+
+# Belt-and-braces: require the download to actually be a Linux ELF binary (magic 7f 45 4c 46)
+# before installing + arming the timer. Catches anything that slipped through as a 200 (HTML/JSON
+# error page, a misrouted proxy response, ...) that --max-redirs above wouldn't catch.
+MAGIC="$(od -An -tx1 -N4 "$TMP_BIN" | tr -d ' \n')"
+[ "$MAGIC" = "7f454c46" ] || die "downloaded file is not a Linux executable — is --url your lazyit HTTPS origin (the Caddy front), not the raw web port :3000?"
 
 install -m 755 "$TMP_BIN" "$BIN_PATH"
 
