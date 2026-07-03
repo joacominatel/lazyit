@@ -1,0 +1,53 @@
+{
+  "notifications": {
+    "title": "Notification emails",
+    "subtitle": "Choose which notifications lazyit emails you. Your in-app bell is unaffected.",
+    "card": {
+      "title": "Email me about",
+      "description": "Turn a notification off to stop receiving it by email. You still see every notification in your in-app bell. Only notifications your instance can email are shown."
+    },
+    "toggleAria": "Email me about {type}",
+    "empty": "There are no notification emails to configure. Your instance may not have email configured yet, or none of your notifications can be emailed.",
+    "error": {
+      "title": "Couldn't load your preferences",
+      "description": "Your notification email preferences failed to load."
+    },
+    "toast": {
+      "saveError": "Couldn't save your notification preferences"
+    }
+  },
+  "types": {
+    "critical_app_access": {
+      "label": "Critical-app access",
+      "description": "A grant opened access to an application flagged as critical."
+    },
+    "admin_granted": {
+      "label": "Admin granted",
+      "description": "A grant or role change raised someone to the Administrator role."
+    },
+    "low_stock": {
+      "label": "Low stock",
+      "description": "A consumable dropped to or below its minimum stock level."
+    },
+    "workflow_manual_task": {
+      "label": "Manual task waiting",
+      "description": "A workflow run paused and is waiting for a person to act."
+    },
+    "workflow_run_failed": {
+      "label": "Workflow run failed",
+      "description": "A workflow run failed or escalated and stopped."
+    },
+    "permission_widened": {
+      "label": "Sensitive permission granted",
+      "description": "A role-permission edit gave the Member or Viewer role a high-risk capability."
+    },
+    "infra_agent_offline": {
+      "label": "Agent offline",
+      "description": "A reporting agent stopped sending reports and its node was flipped offline."
+    },
+    "update_available": {
+      "label": "Update available",
+      "description": "A newer lazyit release than the one you're running is available."
+    }
+  }
+}
