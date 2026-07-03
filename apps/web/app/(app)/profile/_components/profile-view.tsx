@@ -4,6 +4,7 @@ import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { ChangePasswordPanel } from "./change-password-panel";
 import { AccessRequestStatusBadge } from "@/app/(app)/applications/_components/access-request-status-badge";
 import { AssetStatusBadge } from "@/app/(app)/assets/_components/asset-status-badge";
 import { UserRoleBadge } from "@/app/(app)/users/_components/user-role-badge";
@@ -120,6 +121,10 @@ export function ProfileView() {
           </DetailField>
         </dl>
       </DetailPanel>
+
+      {/* Self-service password change — renders only for local-mode accounts (ADR-0086 §F4b); an
+          OIDC instance owns credentials at the IdP, so this is null and the page is unchanged. */}
+      <ChangePasswordPanel />
 
       <DetailPanel title={t("assets.title")}>
         {assets.length === 0 ? (
