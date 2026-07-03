@@ -216,68 +216,77 @@ async function refreshAccessToken(refreshToken: string): Promise<
   }
 }
 
+/**
+ * Generic OIDC provider. Auth.js runs discovery from `issuer`
+ * (`{issuer}/.well-known/openid-configuration`) — no Zitadel-specific code.
+ * BYOI: replace these three env vars to swap IdPs.
+ *
+ * When AUTH_INTERNAL_ISSUER is set, the custom fetch (above) rewrites server-side OIDC
+ * request URLs from the external issuer origin to the internal Docker origin. We rely on
+ * discovery + that rewriting fetch alone: oauth4webapi's discovery is driven by `issuer`,
+ * so wellKnown / token / userinfo overrides would be ignored and only add confusion.
+ *
+ * Only registered when `externalIssuer` (`AUTH_ISSUER`) is set (issue #1008 / ADR-0086). In
+ * `AUTH_MODE=local` that env is unset, so `issuer` would be `undefined` and Auth.js fails to
+ * initialize this provider — every Auth.js route (starting with `GET /api/auth/csrf`) then 500s
+ * with "There was a problem with the server configuration", breaking the session for local
+ * deploys entirely. Dropping the provider outright when there is no issuer leaves Credentials as
+ * the sole provider in local mode, so the handler initializes cleanly; an OIDC deploy (issuer
+ * set) is unaffected.
+ */
+const oidcProvider = {
+  id: "oidc",
+  name: "Your organization",
+  type: "oidc" as const,
+  issuer: externalIssuer,
+  clientId: process.env.AUTH_CLIENT_ID,
+  clientSecret: process.env.AUTH_CLIENT_SECRET,
+  // Request the standard identity scopes so the IdP returns the user's
+  // `name`/`email` claims — without this the provider asks for `openid` only
+  // and `session.user.name` stays empty (the topbar shows "—"). NB: the IdP
+  // (e.g. Zitadel) must also grant these scopes and emit the claims (for
+  // Zitadel: enable "User Info inside ID Token" on the app) — see ADR-0037/0039.
+  //
+  // `offline_access` asks the IdP for a `refresh_token` so the `jwt` callback can
+  // silently renew the access token before it expires (issue #658). Zitadel grants
+  // it for confidential web clients. If the IdP does NOT return a refresh_token, the
+  // refresh logic degrades gracefully to the existing #657 global-401 path — the
+  // session is never broken by a missing refresh_token.
+  // `prompt=login` forces the IdP to re-authenticate rather than reuse an existing browser
+  // session, so Zitadel skips its shared account-picker (issue #952: a brand-new employee was
+  // shown OTHER people's accounts on a machine that had prior sessions). The per-user `ui_locales`
+  // param is passed dynamically at sign-in time from the /login page (the active next-intl locale).
+  authorization: { params: { scope: "openid profile email offline_access", prompt: "login" } },
+  // Map the OIDC standard claims to the Auth.js user. Fall back to
+  // `preferred_username` / a `given_name + family_name` join when an IdP omits
+  // the composite `name` claim, so the topbar never falls back to "—".
+  profile(profile: { name?: string; given_name?: string; family_name?: string; preferred_username?: string; email?: string; sub: string }) {
+    const fullName =
+      profile.name ??
+      [profile.given_name, profile.family_name]
+        .filter(Boolean)
+        .join(" ") ??
+      profile.preferred_username ??
+      null;
+    return {
+      id: profile.sub,
+      name: fullName || profile.preferred_username || null,
+      email: profile.email ?? null,
+    };
+  },
+  ...(internalIssuer ? { [customFetch]: forwardedFetch } : {}),
+};
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  /**
-   * Generic OIDC provider. Auth.js runs discovery from `issuer`
-   * (`{issuer}/.well-known/openid-configuration`) — no Zitadel-specific code.
-   * BYOI: replace these three env vars to swap IdPs.
-   *
-   * When AUTH_INTERNAL_ISSUER is set, the custom fetch (above) rewrites server-side OIDC
-   * request URLs from the external issuer origin to the internal Docker origin. We rely on
-   * discovery + that rewriting fetch alone: oauth4webapi's discovery is driven by `issuer`,
-   * so wellKnown / token / userinfo overrides would be ignored and only add confusion.
-   */
   providers: [
-    {
-      id: "oidc",
-      name: "Your organization",
-      type: "oidc",
-      issuer: externalIssuer,
-      clientId: process.env.AUTH_CLIENT_ID,
-      clientSecret: process.env.AUTH_CLIENT_SECRET,
-      // Request the standard identity scopes so the IdP returns the user's
-      // `name`/`email` claims — without this the provider asks for `openid` only
-      // and `session.user.name` stays empty (the topbar shows "—"). NB: the IdP
-      // (e.g. Zitadel) must also grant these scopes and emit the claims (for
-      // Zitadel: enable "User Info inside ID Token" on the app) — see ADR-0037/0039.
-      //
-      // `offline_access` asks the IdP for a `refresh_token` so the `jwt` callback can
-      // silently renew the access token before it expires (issue #658). Zitadel grants
-      // it for confidential web clients. If the IdP does NOT return a refresh_token, the
-      // refresh logic degrades gracefully to the existing #657 global-401 path — the
-      // session is never broken by a missing refresh_token.
-      // `prompt=login` forces the IdP to re-authenticate rather than reuse an existing browser
-      // session, so Zitadel skips its shared account-picker (issue #952: a brand-new employee was
-      // shown OTHER people's accounts on a machine that had prior sessions). The per-user `ui_locales`
-      // param is passed dynamically at sign-in time from the /login page (the active next-intl locale).
-      authorization: { params: { scope: "openid profile email offline_access", prompt: "login" } },
-      // Map the OIDC standard claims to the Auth.js user. Fall back to
-      // `preferred_username` / a `given_name + family_name` join when an IdP omits
-      // the composite `name` claim, so the topbar never falls back to "—".
-      profile(profile) {
-        const fullName =
-          profile.name ??
-          [profile.given_name, profile.family_name]
-            .filter(Boolean)
-            .join(" ") ??
-          profile.preferred_username ??
-          null;
-        return {
-          id: profile.sub,
-          name: fullName || profile.preferred_username || null,
-          email: profile.email ?? null,
-        };
-      },
-      ...(internalIssuer ? { [customFetch]: forwardedFetch } : {}),
-    },
     /**
-     * First-party local credentials provider (ADR-0086 §6, `AUTH_MODE=local`). It lives ALONGSIDE the
-     * OIDC provider — OIDC instances never invoke it (the /login screen only calls `signIn("credentials")`
-     * when `authMode === "local"`), so the OIDC flow is byte-identical. `authorize` delegates the actual
-     * credential check to the API's `POST /auth/login` (argon2id, rate-limit, uniform 401 — the browser
-     * never sees a password hash) and returns the API-minted session token on the user; the `jwt` callback
-     * moves it onto `token.accessToken`, so the entire downstream (Bearer forwarding, the proxy gate, the
-     * global-401 handler) is unchanged.
+     * First-party local credentials provider (ADR-0086 §6, `AUTH_MODE=local`). Always registered —
+     * it lives ALONGSIDE the OIDC provider — OIDC instances never invoke it (the /login screen only
+     * calls `signIn("credentials")` when `authMode === "local"`), so the OIDC flow is byte-identical.
+     * `authorize` delegates the actual credential check to the API's `POST /auth/login` (argon2id,
+     * rate-limit, uniform 401 — the browser never sees a password hash) and returns the API-minted
+     * session token on the user; the `jwt` callback moves it onto `token.accessToken`, so the entire
+     * downstream (Bearer forwarding, the proxy gate, the global-401 handler) is unchanged.
      */
     Credentials({
       id: "credentials",
@@ -316,6 +325,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
       },
     }),
+    // Only registered when an OIDC issuer is configured — see `oidcProvider`'s doc comment
+    // (issue #1008): an unconfigured OIDC provider 500s the whole Auth.js handler in local mode.
+    ...(externalIssuer ? [oidcProvider] : []),
   ],
 
   // `Secure` keyed to the real origin scheme, not `NODE_ENV` (ADR-0086 §6) — see deriveUseSecureCookies.
