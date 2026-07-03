@@ -38,3 +38,6 @@ apps/*/coverage/
 packages/*/coverage/
 
 video/
+
+# extracted Caddy local-CA cert (infra/trust-local-ca.sh runtime artifact — never commit)
+infra/.local-ca/
