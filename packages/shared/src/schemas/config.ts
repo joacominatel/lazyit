@@ -20,9 +20,13 @@ import { EmailSchema } from "./user";
  *   - "zitadel"      — the bundled, lazyit-managed IdP; user/role write-back is possible.
  *   - "generic-oidc" — BYOI (bring your own OIDC IdP); user/role management is LOCAL-ONLY (no
  *     write-back), so the Users page surfaces the graceful-degradation banner.
+ *   - "local"        — first-party local auth (ADR-0086, `AUTH_MODE=local`): NO external IdP at all;
+ *     lazyit owns username/email + password directly. There is nothing to mirror to, so like BYOI it
+ *     has no write-back posture (the Users page manages credentials locally). Added in F1a — the
+ *     ConfigService wiring that emits it (and the UI branch) lands in a later phase.
  * Mirrors `IdentityProviderType` in the API's identity-provider factory (one definition each side).
  */
-export const IntegrationModeSchema = z.enum(["zitadel", "generic-oidc"]);
+export const IntegrationModeSchema = z.enum(["zitadel", "generic-oidc", "local"]);
 export type IntegrationMode = z.infer<typeof IntegrationModeSchema>;
 
 /**
@@ -54,6 +58,16 @@ export const ConfigStatusSchema = z.object({
    * ask for one). Derived server-side from `idp.supportsManagement`, never a stored flag.
    */
   requiresAdminPassword: z.boolean(),
+  /**
+   * The instance-wide authentication mode the UI branches on (ADR-0086) — `"oidc"` (SSO button) vs.
+   * `"local"` (username/email + password form). `shim` never reaches a browser (dev X-User-Id header
+   * only), so it is NOT part of this UI-facing union.
+   *
+   * ponytail: OPTIONAL in F1a — the shape exists now so F1c/F2 can consume it, but populating it in
+   * `ConfigService.getStatus()` and branching `/login` on it is F2 work (ADR-0086 §6). Keeping it
+   * additive-optional here avoids dragging that wiring into the foundation PR.
+   */
+  authMode: z.enum(["oidc", "local"]).optional(),
 });
 export type ConfigStatus = z.infer<typeof ConfigStatusSchema>;
 
