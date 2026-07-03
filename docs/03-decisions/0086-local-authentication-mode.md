@@ -1,7 +1,7 @@
 ---
 title: "ADR-0086: Local (first-party) authentication mode — make Zitadel/OIDC opt-in"
 tags: [adr, auth, security, deployment, data-model]
-status: proposed
+status: accepted
 created: 2026-07-03
 updated: 2026-07-03
 deciders: [Joaquín Minatel]
@@ -11,7 +11,8 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-07-03 (issue #989). Awaits CEO review of this ADR before F1 writes code.
+**accepted** — 2026-07-03 (issue #989). CEO ratified the direction and the resolved decisions; build
+proceeds in phases F1–F4.
 **Supersedes** the "no first-party auth" posture of [[0016-auth-strategy-deferred]].
 **Amends** [[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]],
 [[0039-authjs-v5-frontend-oidc]], [[0043-zitadel-source-of-truth]],
