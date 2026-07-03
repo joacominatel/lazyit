@@ -148,6 +148,9 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       "password_reset_sent",
       // ADR-0086 §5 (F1c) — local-mode admin temp-password reset.
       "password_reset_by_admin",
+      // ADR-0086 §F4 (F4a) — self-service change + email-token reset.
+      "password_changed",
+      "password_reset_completed",
     ]);
   });
 
