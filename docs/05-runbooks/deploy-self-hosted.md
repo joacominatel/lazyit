@@ -12,12 +12,15 @@ Install lazyit on a single host (one company = one instance — [[0015-deploymen
 domain with publicly-trusted HTTPS. Same compose as the [[docker-prod-like-first-boot|prod-like
 runbook]]; the differences are a real domain, real secrets, and backups.
 
-> [!info] Auth is wired (OIDC via Zitadel)
-> This build authenticates via OIDC against a bundled Zitadel IdP (ADR-0037/0038/0039). The API
-> validates OIDC tokens behind a global guard; the web app uses Auth.js. **Bootstrap Zitadel and
-> register the OIDC client before first real login** — follow [[auth-bootstrap]] (and the `OIDC_*`
-> / `AUTH_*` vars in `.env.prod`). The legacy `X-User-Id` shim is dev-only (`AUTH_MODE=shim`) and
-> must never be enabled in production.
+> [!info] Auth mode — `local` is the default; OIDC/Zitadel is opt-in (ADR-0086)
+> `AUTH_MODE` is a **three-state, explicit-required** setting: **`local`** (built-in accounts +
+> passwords, no external IdP — the default the guided bootstrap writes), **`oidc`** (a bundled
+> Zitadel IdP *or* your own BYOI IdP — ADR-0037/0038/0039), or `shim` (the dev-only `X-User-Id`
+> bypass, **never** in production). There is **no implicit default at boot**: an unset `AUTH_MODE`
+> is a hard boot failure — see the **upgrade note in §4** (existing OIDC installs must set
+> `AUTH_MODE=oidc` before upgrading). In **OIDC** mode you additionally run the bundled Zitadel
+> (the `oidc` compose profile + overlay, below) and bootstrap the OIDC client before first login
+> ([[auth-bootstrap]]); in **local** mode there is no IdP to bootstrap — you go straight to `/setup`.
 
 ## Prerequisites
 
@@ -93,7 +96,9 @@ Edit `infra/env/.env.prod`:
 
 The stack is one canonical `compose.yaml` at the repo root plus a thin prod override; the full
 containerized stack lives behind the `prod` profile ([[auth-zitadel-sot#9-compose-structure-decided|dossier §9]]).
-Run from the **repo root**:
+Run from the **repo root**. **Which command depends on `AUTH_MODE`** (ADR-0086):
+
+**Local-auth mode (`AUTH_MODE=local` — the default):** plain `--profile prod`, no Zitadel.
 
 ```sh
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
@@ -101,6 +106,24 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
   --profile prod --env-file infra/env/.env.prod ps          # all healthy; migrate exited 0
 ```
+
+**OIDC mode with the bundled Zitadel (`AUTH_MODE=oidc`):** add the **`oidc` overlay + profile** so the
+`zitadel*` services come up and the api/web wait on the `zitadel-bootstrap` sidecar. (BYOI — your own
+external IdP — stays on the plain local command above: it uses your `OIDC_*` creds and starts no
+bundled Zitadel.)
+
+```sh
+docker compose -f compose.yaml -f infra/docker-compose.prod.yaml -f infra/docker-compose.oidc.yaml \
+  --profile prod --profile oidc --env-file infra/env/.env.prod up -d --build
+```
+
+> [!note] Why the extra overlay (ADR-0086)
+> The `zitadel`, `zitadel_db`, `zitadel-secrets-init` and `zitadel-bootstrap` services carry a **bare
+> `profiles: [oidc]`**, so they only start under `--profile oidc`. `infra/docker-compose.oidc.yaml`
+> carries the api/web → `zitadel-bootstrap` `depends_on` (and the backup → `zitadel_db` gate + the
+> Caddy `auth.{domain}` site mount). Those edges **cannot** live in the base file: an active service
+> depending on a profile-excluded one makes plain `--profile prod` a parse-fatal *"invalid compose
+> project"*. The guided `infra/start.sh` picks the right invocation for you from your chosen mode.
 
 > [!note] Backward-compat — the old command is aliased
 > The previous form `docker compose -f infra/docker-compose.prod.yml up -d --build` is **superseded**.
@@ -205,6 +228,22 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
 New migrations are applied automatically by the `migrate` job on the next `up` (it runs
 `prisma migrate deploy` — never `migrate dev`/`reset` in production; [[prisma-migrations]]).
 **Back up the database before any update** ([[backups]]).
+
+> [!danger] Upgrade note — set `AUTH_MODE=oidc` BEFORE upgrading an existing OIDC install (ADR-0086)
+> This release adds a third auth mode (`local`) and makes **`AUTH_MODE` explicit-required**: an
+> **unset** `AUTH_MODE` used to imply OIDC, but it is now a **hard boot failure** (a silent "unset ⇒
+> local" flip would have taken every OIDC instance offline). Deployments created before this release
+> have **no `AUTH_MODE` line** in `.env.prod`, so add it **before** you pull-and-`up`:
+>
+> ```sh
+> grep -q '^AUTH_MODE=' infra/env/.env.prod || echo 'AUTH_MODE=oidc' >> infra/env/.env.prod
+> ```
+>
+> Then bring the stack up with the **OIDC command** (the `-f infra/docker-compose.oidc.yaml`
+> `--profile oidc` variant in §2) — the bundled `zitadel*` services now live behind the `oidc`
+> profile and will not start under a plain `--profile prod`. Your existing `ZITADEL_*` / `OIDC_*` /
+> `AUTH_*` values and `lazyit-prod_*` volumes are untouched; the deploy is otherwise byte-identical.
+> (The guided `infra/start.sh` detects the mode from your `.env.prod` and picks the command for you.)
 
 > **Upgrade note — `REDIS_URL` is required (ADR-0053).** Deployments created **before** the async-workers
 > release have a `.env.prod` that predates `REDIS_URL`. The guided `start.sh` only writes it on a
