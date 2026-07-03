@@ -15,6 +15,7 @@ import {
   IDENTITY_PROVIDER,
   type IdentityProvider,
 } from '../auth/identity/identity-provider.interface';
+import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 import { resolveIntegrationMode } from './integration-mode';
 import { SetupCsrfService } from './setup-csrf.service';
 
@@ -55,13 +56,25 @@ export class ConfigService {
     @Inject(IDENTITY_PROVIDER)
     private readonly idp: IdentityProvider,
     private readonly csrf: SetupCsrfService,
+    private readonly provisioning: LocalProvisioningService,
     @InjectPinoLogger(ConfigService.name)
     private readonly logger: PinoLogger,
   ) {}
 
-  /** The IdP posture, derived from IDENTITY_PROVIDER_TYPE (zitadel | generic-oidc). */
+  /**
+   * The IdP posture (zitadel | generic-oidc | local). `AUTH_MODE=local` yields `'local'` regardless of
+   * IDENTITY_PROVIDER_TYPE (ADR-0086 §5), matching the LocalIdentityProvider the AuthModule builds.
+   */
   integrationMode(): IntegrationMode {
-    return resolveIntegrationMode(process.env.IDENTITY_PROVIDER_TYPE);
+    return resolveIntegrationMode(
+      process.env.IDENTITY_PROVIDER_TYPE,
+      process.env.AUTH_MODE,
+    );
+  }
+
+  /** True when the instance runs first-party local auth (AUTH_MODE=local, ADR-0086). */
+  private isLocalMode(): boolean {
+    return this.idp.kind === 'local';
   }
 
   /**
@@ -85,15 +98,22 @@ export class ConfigService {
     const adminCount = await this.prisma.user.count({
       where: { role: Role.ADMIN },
     });
+    const isLocal = this.isLocalMode();
     return {
       isConfigured: adminCount > 0,
       adminCount,
       integrationMode: this.integrationMode(),
       devMode: this.devMode(),
       csrfToken: this.csrf.issue(),
-      // The wizard collects an initial password only when lazyit can SET it on the IdP (bundled Zitadel
-      // with management); BYOI / generic-OIDC own the credential themselves (issue #335).
-      requiresAdminPassword: this.idp.supportsManagement,
+      // requiresAdminPassword is DECOUPLED from supportsManagement (ADR-0086 §5): in LOCAL mode the wizard
+      // MUST collect a password (lazyit stores it as the first admin's passwordHash — otherwise the first
+      // ADMIN would be un-loggable and the instance bricks). In OIDC mode it stays exactly as before —
+      // true only for bundled Zitadel with a Management credential (issue #335), false for BYOI.
+      requiresAdminPassword: isLocal ? true : this.idp.supportsManagement,
+      // The UI-facing auth mode (ADR-0086 §6). Populated ONLY in local mode here so the OIDC
+      // /config/status response stays byte-identical to today; F2 adds the explicit 'oidc' value when it
+      // branches the /login screen. `shim` never reaches a browser, so it is not part of this union.
+      ...(isLocal ? { authMode: 'local' as const } : {}),
     };
   }
 
@@ -125,6 +145,47 @@ export class ConfigService {
       throw new ConflictException(
         'This instance is already configured (an administrator exists).',
       );
+    }
+
+    // LOCAL mode (ADR-0086 §5): lazyit OWNS the credential — there is no IdP. `/setup` is the ONLY path to
+    // the first ADMIN and it MUST set a password (else an un-loggable first admin bricks the instance). We
+    // hash it via the LocalCredentialService (through the provisioning primitive) and store it on the new
+    // ADMIN's `passwordHash` — the admin chooses their OWN real password, so mustChangePassword stays false.
+    // No IdP mirror, `externalId` stays null. We branch BEFORE the supportsManagement checks below because
+    // LocalIdentityProvider is `supportsManagement:false` (which those checks read).
+    if (this.isLocalMode()) {
+      if (!input.password) {
+        throw new BadRequestException(
+          'An initial password is required to create the first administrator in local authentication mode.',
+        );
+      }
+      const credential = await this.provisioning.credentialFields(
+        input.password,
+        { mustChangePassword: false },
+      );
+      const admin = await this.prisma.user.create({
+        data: {
+          email: input.email,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          role: Role.ADMIN,
+          ...credential,
+        },
+      });
+      // Immutability enforcement WRITE side (ADR-0086 §1): persist the mode marker at first setup so every
+      // subsequent boot refuses to start if AUTH_MODE is flipped on this now-populated instance.
+      await this.persistAuthModeMarker();
+      this.search.upsert('users', projectUser(admin));
+      this.auditSetup('setup', admin.id, admin.email, ip, {
+        mirrored: false,
+        mode: 'local',
+      });
+      return {
+        adminId: admin.id,
+        email: admin.email,
+        mirrored: false,
+        setupCompletedAt: admin.createdAt,
+      };
     }
 
     // Bundled Zitadel REQUIRES an initial password (issue #335): the freshly-created Zitadel user has
@@ -167,6 +228,8 @@ export class ConfigService {
           where: { id: admin.id },
           data: { externalId: ref.externalId },
         });
+        // Immutability enforcement WRITE side (ADR-0086 §1): persist the 'oidc' mode marker at first setup.
+        await this.persistAuthModeMarker();
         this.search.upsert('users', projectUser(linked));
         this.auditSetup('setup', admin.id, admin.email, ip, { mirrored: true });
         return {
@@ -205,6 +268,8 @@ export class ConfigService {
     // Local-only path: providers we cannot manage (BYOI / generic-OIDC). No password, no mirror — the
     // operator's own IdP owns the credential. This is the only path the ADR-0043 §6 #4 degrade-not-
     // block stance still covers (there is no mirror to fail on).
+    // Immutability enforcement WRITE side (ADR-0086 §1): persist the 'oidc' mode marker at first setup.
+    await this.persistAuthModeMarker();
     this.search.upsert('users', projectUser(admin));
     this.auditSetup('setup', admin.id, admin.email, ip, { mirrored: false });
     return {
@@ -213,6 +278,25 @@ export class ConfigService {
       mirrored: false,
       setupCompletedAt: admin.createdAt,
     };
+  }
+
+  /**
+   * Persist the immutable auth-mode marker at first successful setup (ADR-0086 §1). Upserts the single
+   * `instance_config` row (fixed id 'singleton') with the boot-validated `AUTH_MODE`. Every subsequent boot
+   * compares this against `env.AUTH_MODE` (auth/mode-marker.ts) and REFUSES to start on a mismatch — the
+   * write side of the "mode is chosen once and is immutable" enforcement. Setup is one-time (409 after the
+   * first ADMIN), so this effectively writes exactly once; the upsert is idempotent regardless.
+   *
+   * `AUTH_MODE` is guaranteed present + one of shim|local|oidc here (boot-config asserts it before the app
+   * boots). The fallback to 'oidc' is defensive dead-code for the type — it is never taken at runtime.
+   */
+  private async persistAuthModeMarker(): Promise<void> {
+    const authMode = process.env.AUTH_MODE ?? 'oidc';
+    await this.prisma.instanceConfig.upsert({
+      where: { id: 'singleton' },
+      create: { id: 'singleton', authMode },
+      update: { authMode },
+    });
   }
 
   /**
