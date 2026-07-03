@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckIcon, InboxStackIcon } from "@heroicons/react/24/outline";
-import type { AccessRequest, User } from "@lazyit/shared";
+import type { AccessRequest } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -22,7 +22,7 @@ import {
   useDenyAccessRequest,
 } from "@/lib/api/hooks/use-access-requests";
 import { useApplications } from "@/lib/api/hooks/use-applications";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { DenyRequestDialog } from "./deny-request-dialog";
@@ -89,17 +89,18 @@ function PendingQueue() {
   });
   // Requests are lean (ids only); resolve requester + application display names from the catalogs
   // (a queue reader holds `user:read` and `application:read`).
-  const { data: users } = useUsers();
   const { data: applications } = useApplications();
   const approve = useApproveAccessRequest();
   const denyMutation = useDenyAccessRequest();
 
   const [denyTarget, setDenyTarget] = useState<AccessRequest | null>(null);
 
-  const userById = useMemo(
-    () => new Map<string, User>((users ?? []).map((u) => [u.id, u])),
-    [users],
+  // Resolve just the requesters on this page (#961) — a targeted id→name batch, not the whole directory.
+  const requesterIds = useMemo(
+    () => [...new Set((page?.items ?? []).map((r) => r.requesterId))],
+    [page],
   );
+  const userById = useUserNames(requesterIds);
   const appNameById = useMemo(
     () => new Map((applications ?? []).map((a) => [a.id, a.name])),
     [applications],

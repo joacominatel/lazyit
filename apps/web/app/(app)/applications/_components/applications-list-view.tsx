@@ -42,7 +42,7 @@ import { useAccessGrants } from "@/lib/api/hooks/use-access-grants";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
 import { useApplicationList } from "@/lib/api/hooks/use-applications";
 import { useDeleteApplication } from "@/lib/api/hooks/use-application-mutations";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
@@ -111,7 +111,6 @@ export function ApplicationsListView() {
     { enabled: canSeeAccess },
   );
   const activeGrants = activeGrantsPage?.items;
-  const { data: users } = useUsers({ enabled: canSeeAccess });
   const deleteApplication = useDeleteApplication();
 
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
@@ -123,10 +122,13 @@ export function ApplicationsListView() {
       new Map((categories ?? []).map((category) => [category.id, category.name])),
     [categories],
   );
-  const userById = useMemo(
-    () => new Map<string, User>((users ?? []).map((user) => [user.id, user])),
-    [users],
+  // Resolve just the grantee users referenced by the active grants (#961) — a targeted id→name batch,
+  // not the whole directory (so avatars resolve regardless of headcount). Gated on `accessGrant:read`.
+  const granteeIds = useMemo(
+    () => [...new Set((activeGrants ?? []).map((grant) => grant.userId))],
+    [activeGrants],
   );
+  const userById = useUserNames(granteeIds, { enabled: canSeeAccess });
   // applicationId → { count of active grants, distinct grantee users }.
   const accessByApp = useMemo(() => {
     const map = new Map<string, { count: number; userIds: Set<string> }>();

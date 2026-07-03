@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import request from 'supertest';
+import { MAX_RESOLVE_USER_IDS } from '@lazyit/shared';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { PasswordResetUnsupportedError } from '../auth/identity/identity-provider.interface';
@@ -92,6 +93,87 @@ describe('UsersController :id uuid validation (SEC-004)', () => {
     );
     expect(res.status).toBe(200);
     expect(findOneSerialized).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Issue #961 — the batch id→name resolver query (`GET /users?ids=…`). The controller parses the raw
+ * `?ids=` param before the service: it splits + de-duplicates the comma-encoded ids and validates them
+ * with `ResolveUserIdsSchema` (each a UUID, count ≤ the cap), so a garbage or over-cap batch is a clean
+ * 400 that never reaches `findPage`. A valid batch is forwarded to `findPage` as the `ids` filter.
+ */
+describe('UsersController GET /users?ids= (batch resolver, #961)', () => {
+  let app: INestApplication;
+  const findPage = jest.fn();
+
+  beforeAll(async () => {
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      controllers: [UsersController],
+      providers: [
+        { provide: UsersService, useValue: { findPage } },
+        { provide: AssetAssignmentsService, useValue: { findAll: jest.fn() } },
+        { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
+        {
+          provide: ActorService,
+          useValue: {
+            resolve: jest.fn().mockReturnValue(undefined),
+            resolveActor: jest.fn().mockReturnValue({}),
+          },
+        },
+        vaultSetupNudgeProvider,
+      ],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => findPage.mockReset());
+
+  it('forwards a valid, de-duplicated id batch to findPage as the ids filter', async () => {
+    findPage.mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 });
+    const a = '11111111-1111-4111-8111-111111111111';
+    const b = '22222222-2222-4222-8222-222222222222';
+    const res = await request(app.getHttpServer()).get(
+      // `a` is repeated — the parse de-duplicates before the IN clause.
+      `/users?ids=${a},${b},${a}&limit=200`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(findPage).toHaveBeenCalledTimes(1);
+    const call = (
+      findPage.mock.calls as Array<[Record<string, unknown>]>
+    )[0][0];
+    expect(call).toEqual(expect.objectContaining({ ids: [a, b] }));
+  });
+
+  it('rejects a garbage (non-UUID) id with 400 and never reaches the service', async () => {
+    const res = await request(app.getHttpServer()).get('/users?ids=not-a-uuid');
+    expect(res.status).toBe(400);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('rejects an over-cap batch with 400 (respects MAX_RESOLVE_USER_IDS)', async () => {
+    const overCap = Array.from(
+      { length: MAX_RESOLVE_USER_IDS + 1 },
+      (_, i) => `00000000-0000-4000-8000-${i.toString(16).padStart(12, '0')}`,
+    ).join(',');
+    const res = await request(app.getHttpServer()).get(`/users?ids=${overCap}`);
+    expect(res.status).toBe(400);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('omits the ids filter when the param is absent (plain directory read)', async () => {
+    findPage.mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
+    const res = await request(app.getHttpServer()).get('/users');
+    expect(res.status).toBe(200);
+    const call = (
+      findPage.mock.calls as Array<[Record<string, unknown>]>
+    )[0][0];
+    expect(call).toEqual(expect.objectContaining({ ids: undefined }));
   });
 });
 

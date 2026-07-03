@@ -1,11 +1,7 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
-import type {
-  AssetHistory,
-  AssetHistoryEventType,
-  User,
-} from "@lazyit/shared";
+import type { AssetHistory, AssetHistoryEventType } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
@@ -13,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { UserAvatar } from "@/components/user-avatar";
 import { useAssetHistory } from "@/lib/api/hooks/use-asset-history";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
 
@@ -103,7 +99,7 @@ function asString(value: unknown): string | undefined {
 
 /**
  * The AssetHistory event log (ADR-0033) as a vertical timeline. Reads its own paginated history
- * (cursor on id) plus the users list to resolve actors and the `{userId}` payloads of
+ * (cursor on id) plus a batch id→name resolve (#961) for the actors and the `{userId}` payloads of
  * ASSIGNED/RELEASED. Self-contained — the detail page just drops it into a panel.
  */
 export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
@@ -116,16 +112,25 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
     hasNextPage,
     isFetchingNextPage,
   } = useAssetHistory(assetId);
-  const { data: users } = useUsers();
   const t = useTranslations("assets.detail.timeline");
   const tc = useTranslations("common");
   const { dateTime, relative } = useFormatters();
 
-  const userById = useMemo(
-    () => new Map<string, User>((users ?? []).map((user) => [user.id, user])),
-    [users],
-  );
   const events = useMemo(() => (data?.pages ?? []).flat(), [data]);
+  // Resolve just the actors + `{userId}` payloads referenced by this asset's history (#961) — a
+  // targeted id→name batch, not the whole directory (so actors resolve regardless of team size).
+  const actorIds = useMemo(
+    () =>
+      events.flatMap((event) => {
+        const ids: string[] = [];
+        if (event.performedById) ids.push(event.performedById);
+        const payloadUserId = asString(event.payload?.userId);
+        if (payloadUserId) ids.push(payloadUserId);
+        return ids;
+      }),
+    [events],
+  );
+  const userById = useUserNames(actorIds);
 
   function userName(id: string | undefined): string {
     if (!id) return t("someone");

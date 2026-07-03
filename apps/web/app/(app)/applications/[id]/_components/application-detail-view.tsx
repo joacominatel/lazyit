@@ -9,7 +9,7 @@ import {
   TrashIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import { type AccessGrant, isSafeApplicationUrl, type User } from "@lazyit/shared";
+import { type AccessGrant, isSafeApplicationUrl } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -33,7 +33,7 @@ import {
 import { useMyGrants } from "@/lib/api/hooks/use-access-grants";
 import { useRevokeGrant } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useMyAccessRequests } from "@/lib/api/hooks/use-access-requests";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { EditGrantDialog } from "../../_components/edit-grant-dialog";
 import { GrantAccessDialog } from "../../_components/grant-access-dialog";
@@ -94,7 +94,6 @@ export function ApplicationDetailView({ id }: { id: string }) {
   // All grants (active + revoked), each raw (userId only) — resolved to users below.
   const { data: grants } = useApplicationGrants(id, { activeOnly: false });
   const { data: categories } = useApplicationCategories();
-  const { data: users } = useUsers();
   const revokeGrant = useRevokeGrant();
   const deleteApplication = useDeleteApplication();
 
@@ -133,10 +132,12 @@ export function ApplicationDetailView({ id }: { id: string }) {
   // Snapshot "now" once (not during render) so the expiry comparison stays pure and stable.
   const [now] = useState(() => Date.now());
 
-  const userById = useMemo(
-    () => new Map<string, User>((users ?? []).map((user) => [user.id, user])),
-    [users],
+  // Resolve just this app's grantees (#961) — a targeted id→name batch, not the whole directory.
+  const granteeIds = useMemo(
+    () => [...new Set((grants ?? []).map((grant) => grant.userId))],
+    [grants],
   );
+  const userById = useUserNames(granteeIds);
 
   // Stable element for the PageHeader `breadcrumb` slot (jsx-no-jsx-as-prop). `application` is defined
   // wherever this is rendered (after the loading/error guards); the `?? ""` only covers the unused

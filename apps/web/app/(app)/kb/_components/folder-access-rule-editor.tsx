@@ -29,7 +29,7 @@ import { UserMultiSelect } from "@/components/user-multi-select";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useAssets } from "@/lib/api/hooks/use-assets";
 import { useSetFolderAccessRules } from "@/lib/api/hooks/use-folder-access-rules";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUserNames } from "@/lib/api/hooks/use-users";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
 
@@ -113,16 +113,20 @@ export function FolderAccessRuleEditor({
   const isPublic = isPublicAccessRules(rules);
 
   // Supporting data for the pickers — all loaded from existing hooks (no new endpoints).
-  const { data: users } = useUsers();
   const { data: applications } = useApplications();
   const { data: assetsPage } = useAssets({ limit: 200 });
   const assets = assetsPage?.items ?? [];
 
-  // A stable lookup map to resolve ids to display names in the rendered rule rows.
-  const userById = useMemo(
-    () => new Map((users ?? []).map((u) => [u.id, u])),
-    [users],
+  // Resolve just the users referenced by the committed `users` rules (#961) — a targeted id→name batch,
+  // not the whole directory. The picker itself is the server-searched UserMultiSelect below.
+  const referencedUserIds = useMemo(
+    () =>
+      storedRules.flatMap((r) =>
+        r.rule.kind === "users" ? r.rule.userIds : [],
+      ),
+    [storedRules],
   );
+  const userById = useUserNames(referencedUserIds);
   const appById = useMemo(
     () => new Map((applications ?? []).map((a) => [a.id, a])),
     [applications],
@@ -291,7 +295,7 @@ export function FolderAccessRuleEditor({
 
 type RuleRowProps = {
   rule: FolderAccessRule;
-  userById: Map<string, { id: string; firstName: string; lastName: string }>;
+  userById: ReadonlyMap<string, { firstName: string; lastName: string }>;
   appById: Map<string, { id: string; name: string }>;
   assetById: Map<string, { id: string; name: string }>;
   onRemove: () => void;
@@ -351,7 +355,7 @@ function RuleKindBadge({
 
 function ruleLabel(
   rule: FolderAccessRule,
-  userById: Map<string, { firstName: string; lastName: string }>,
+  userById: ReadonlyMap<string, { firstName: string; lastName: string }>,
   appById: Map<string, { name: string }>,
   assetById: Map<string, { name: string }>,
   t: ReturnType<typeof useTranslations<"kb">>,

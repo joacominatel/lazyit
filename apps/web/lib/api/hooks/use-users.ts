@@ -1,5 +1,6 @@
-import { MAX_PAGE_LIMIT, type UserListItem } from "@lazyit/shared";
+import { MAX_RESOLVE_USER_IDS, type UserListItem } from "@lazyit/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import {
   getCurrentUser,
   getUser,
@@ -9,7 +10,7 @@ import {
   getUsers,
   type UserListParams,
 } from "../endpoints/users";
-import { createQueryKeys, selectDirectoryItems } from "../query-keys";
+import { createQueryKeys } from "../query-keys";
 
 /**
  * Query-key factory for the User resource (shape from `createQueryKeys`, see
@@ -28,6 +29,11 @@ export const userKeys = {
   roleCounts: () => [...baseUserKeys.all, "role-counts"] as const,
   /** A parameterized (search/sort/paged) list page — distinct from the bare directory `lists()`. */
   list: (params: UserListParams) => [...baseUserKeys.all, "list", params] as const,
+  /**
+   * A batch id→name resolution (`GET /users?ids=…`, #961). Keyed by the SORTED, de-duplicated id set so
+   * two callers asking for the same users share one cache entry (and re-render order can't thrash it).
+   */
+  names: (ids: string[]) => [...baseUserKeys.all, "names", ids] as const,
   assignments: (id: string, activeOnly: boolean) =>
     [...baseUserKeys.detail(id), "assignments", activeOnly] as const,
   grants: (id: string, activeOnly: boolean) =>
@@ -35,24 +41,53 @@ export const userKeys = {
 };
 
 /**
- * The full user directory as a flat `User[]` — for the screens that join users client-side (asset
- * owners, access grantees, article authors, the assign/grant dialogs). The list is paginated
- * server-side (ADR-0030), so this requests the hard-max page (200) to materialize the whole
- * directory for those lookups; the dedicated **Users list page** uses {@link useUserList} for real
- * paging. Returns just `items` so the existing `User[]` consumers are unchanged — but `select` warns
- * (dev) when the directory exceeds the cap so the truncation is never silent (issue #508).
+ * Stable empty lookup returned by {@link useUserNames} when there is nothing to resolve — a module-level
+ * constant so the reference never changes (no spurious re-renders / effect churn in consumers).
  */
-export function useUsers({ enabled = true }: { enabled?: boolean } = {}) {
-  return useQuery({
-    queryKey: userKeys.lists(),
-    queryFn: ({ signal }) => getUsers({ limit: MAX_PAGE_LIMIT }, signal),
-    // Pin the element generic: with the queryFn now taking the context arg, TanStack's overload no
-    // longer back-infers the page item type into `select`, so name it to keep `data` as UserListItem[].
-    select: selectDirectoryItems<UserListItem>("users"),
-    // Skip the directory fetch when the caller lacks `user:read` (would 403 — issue #935); callers
-    // that never gate simply omit the option and keep the eager default.
-    enabled,
+const EMPTY_USER_MAP: ReadonlyMap<string, UserListItem> = new Map();
+
+/**
+ * Batch id→name resolver (issue #961) — resolves a set of user ids to their rows for READ-ONLY name
+ * lookups (history timelines, grantee chips, vault member chips, KB committed-rule names). It replaced
+ * the whole-directory `useUsers()` hook, which materialized one hard-max page (200) and silently
+ * degraded to an id fallback for any user past the cap. Backed by the list endpoint's `?ids=` filter
+ * (`GET /users?ids=a,b,c`), so it resolves ANY referenced user regardless of directory size.
+ *
+ * The ids are de-duplicated and SORTED into a stable query key (shared cache across callers asking for
+ * the same set, order-independent) and the batch is capped at `MAX_RESOLVE_USER_IDS` to match the
+ * server bound — a larger set is sliced (never hit in a 5–20-person org). Returns a `Map<id, user>`:
+ * a caller reads `.get(id)` for the name (`${firstName} ${lastName}`) or the whole row where a chip
+ * needs it (avatars, Quick View). An unresolved id (soft-deleted, or beyond the cap) is simply absent
+ * from the map, and the caller falls back to its own placeholder — exactly as before.
+ *
+ * `enabled` gates the fetch when the caller lacks `user:read` (would 403 — issue #935); the query is
+ * also inert when there are no ids to resolve.
+ */
+export function useUserNames(
+  ids: string[],
+  { enabled = true }: { enabled?: boolean } = {},
+): ReadonlyMap<string, UserListItem> {
+  // De-duplicate + sort for a stable key, and cap to the server bound so a large set can't 400.
+  const uniqueIds = useMemo(
+    () => [...new Set(ids)].sort().slice(0, MAX_RESOLVE_USER_IDS),
+    [ids],
+  );
+  const { data } = useQuery({
+    queryKey: userKeys.names(uniqueIds),
+    // Pair `ids` with `limit` = the id count so the single page returns every requested user (the ids
+    // are capped at the page ceiling, so one page always suffices).
+    queryFn: ({ signal }) =>
+      getUsers({ ids: uniqueIds, limit: uniqueIds.length }, signal),
+    select: (page) =>
+      new Map(page.items.map((u) => [u.id, u] as const)) as ReadonlyMap<
+        string,
+        UserListItem
+      >,
+    enabled: enabled && uniqueIds.length > 0,
+    // The resolved names rarely change within a session; a brief stale read is harmless.
+    staleTime: 5 * 60 * 1000,
   });
+  return data ?? EMPTY_USER_MAP;
 }
 
 /**

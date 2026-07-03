@@ -3,7 +3,7 @@
 import { ArrowUturnLeftIcon, ClockIcon } from "@heroicons/react/24/outline";
 import type { ArticleVersion } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DetailPanel } from "@/components/detail-panel";
 import { MarkdownView } from "@/components/markdown-view";
@@ -32,7 +32,7 @@ import {
   useArticleVersion,
   useArticleVersions,
 } from "@/lib/api/hooks/use-article-versions";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUserNames } from "@/lib/api/hooks/use-users";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 
@@ -68,10 +68,18 @@ export function ArticleVersionHistoryPanel({
   const { data: page, isLoading } = useArticleVersions(
     historyOpen ? articleId : undefined,
   );
-  const { data: users } = useUsers();
   const restoreVersion = useRestoreArticleVersion(articleId);
 
-  const versions: ArticleVersion[] = page?.items ?? [];
+  const versions: ArticleVersion[] = useMemo(() => page?.items ?? [], [page]);
+  // Resolve just the authors referenced by these versions (#961) — no whole-directory read.
+  const authorIds = useMemo(
+    () =>
+      versions
+        .map((v) => v.editedById)
+        .filter((id): id is string => id != null),
+    [versions],
+  );
+  const usersById = useUserNames(authorIds);
 
   function handleRestore(version: ArticleVersion) {
     restoreVersion.mutate(version.version, {
@@ -165,7 +173,7 @@ export function ArticleVersionHistoryPanel({
                   <VersionRow
                     key={v.id}
                     version={v}
-                    authorName={resolveAuthor(v.editedById, users)}
+                    authorName={resolveAuthor(v.editedById, usersById)}
                     onView={() => {
                       setSelectedVersion(v);
                     }}
@@ -188,15 +196,13 @@ export function ArticleVersionHistoryPanel({
   );
 }
 
-/** Resolve a user id to a display name from the users list. */
+/** Resolve a user id to a display name from the resolved id→user lookup (#961). */
 function resolveAuthor(
   userId: string | null,
-  users:
-    | { id: string; firstName: string; lastName: string }[]
-    | undefined,
+  usersById: ReadonlyMap<string, { firstName: string; lastName: string }>,
 ): string | undefined {
-  if (!userId || !users) return undefined;
-  const user = users.find((u) => u.id === userId);
+  if (!userId) return undefined;
+  const user = usersById.get(userId);
   return user ? `${user.firstName} ${user.lastName}` : undefined;
 }
 
@@ -280,7 +286,6 @@ function VersionDetailSheet({
 }) {
   const t = useTranslations("kb");
   const { date } = useFormatters();
-  const { data: users } = useUsers();
 
   // Fetch from the server to ensure we render the authoritative snapshot.
   const { data: fetched, isLoading } = useArticleVersion(
@@ -289,6 +294,12 @@ function VersionDetailSheet({
   );
 
   const snap = fetched ?? version;
+  // Resolve only this snapshot's author (#961).
+  const authorIds = useMemo(
+    () => (snap?.editedById ? [snap.editedById] : []),
+    [snap],
+  );
+  const usersById = useUserNames(authorIds);
 
   return (
     <Sheet open={version !== null} onOpenChange={(open) => !open && onClose()}>
@@ -304,7 +315,7 @@ function VersionDetailSheet({
           {snap && (
             <SheetDescription className="flex items-center gap-1.5">
               <span>
-                {resolveAuthor(snap.editedById, users) ??
+                {resolveAuthor(snap.editedById, usersById) ??
                   t("detail.unknownAuthor")}
               </span>
               <span aria-hidden>·</span>
