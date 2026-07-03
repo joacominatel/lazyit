@@ -6,6 +6,7 @@ import { RolesGuard } from './roles.guard';
 import { PermissionResolverService } from './permission-resolver.service';
 import { IDENTITY_PROVIDER } from './identity/identity-provider.interface';
 import { createIdentityProvider } from './identity/identity-provider.factory';
+import { LocalCredentialService } from './local/local-credential.service';
 
 /**
  * Global auth module. Registers the application-wide guards via APP_GUARD, IN ORDER:
@@ -39,6 +40,9 @@ import { createIdentityProvider } from './identity/identity-provider.factory';
     JwtAuthGuard,
     PermissionResolverService,
     RolesGuard,
+    // Local (first-party) credential + session primitives (ADR-0086 §3). Provided here (and exported) so
+    // BOTH the guard's handleLocal branch and the LocalAuthModule's LoginService inject the SAME instance.
+    LocalCredentialService,
     // Authentication first: populate request.user.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // Authorization second: enforce @RequirePermission against the now-populated request.user.
@@ -60,6 +64,7 @@ import { createIdentityProvider } from './identity/identity-provider.factory';
     RolesGuard,
     PermissionResolverService,
     IDENTITY_PROVIDER,
+    LocalCredentialService,
   ],
 })
 export class AuthModule {}

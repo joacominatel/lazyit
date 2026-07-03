@@ -7,6 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { LocalCredentialService } from './local/local-credential.service';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -137,6 +138,8 @@ describe('JwtAuthGuard', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         JwtAuthGuard,
+        // Required constructor dep of JwtAuthGuard (ADR-0086); never invoked on the shim/oidc paths.
+        LocalCredentialService,
         Reflector,
         {
           provide: PrismaService,
@@ -162,7 +165,7 @@ describe('JwtAuthGuard', () => {
       }
       return Promise.resolve(jsonResponse({}));
     });
-    global.fetch = fetchMock as unknown as typeof fetch;
+    global.fetch = fetchMock;
 
     // Reset jose mocks between tests.
     jest.clearAllMocks();
@@ -344,8 +347,8 @@ describe('JwtAuthGuard', () => {
         makeCtx({ headers: { authorization: 'Bearer valid.token.here' } }),
       );
 
-      const verifyOptions = (jose.jwtVerify as jest.Mock).mock
-        .calls[0][2] as Record<string, unknown>;
+      const [, , verifyOptions] = (jose.jwtVerify as jest.Mock).mock
+        .calls[0] as [unknown, unknown, Record<string, unknown>];
       expect(verifyOptions.algorithms).toEqual(['RS256']);
     });
 
@@ -517,11 +520,10 @@ describe('JwtAuthGuard', () => {
         makeCtx({ headers: { authorization: 'Bearer t' } }),
       );
 
-      const created = (
-        prismaUser.upsert.mock.calls[0][0] as {
-          create: { firstName: string; lastName: string };
-        }
-      ).create;
+      const [createArg] = prismaUser.upsert.mock.calls[0] as [
+        { create: { firstName: string; lastName: string } },
+      ];
+      const created = createArg.create;
       expect(created.firstName).toBe('Madonna');
       expect(created.lastName).toBe('star');
     });
@@ -544,11 +546,10 @@ describe('JwtAuthGuard', () => {
         makeCtx({ headers: { authorization: 'Bearer t' } }),
       );
 
-      const created = (
-        prismaUser.upsert.mock.calls[0][0] as {
-          create: { firstName: string; lastName: string };
-        }
-      ).create;
+      const [createArg] = prismaUser.upsert.mock.calls[0] as [
+        { create: { firstName: string; lastName: string } },
+      ];
+      const created = createArg.create;
       expect(created.firstName).toBe('ada');
       expect(created.lastName).toBe('Lovelace');
     });
