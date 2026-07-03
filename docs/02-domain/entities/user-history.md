@@ -42,10 +42,12 @@ Indexes: `(userId, id)` (the per-user timeline) and `(createdAt)` (powers the [[
 
 `CREATED` · `UPDATED` · `ROLE_CHANGED` (payload `{ from, to }`) · `MANAGER_CHANGED` (payload `{ from, to }`,
 [[0058-user-manager-and-clone-actions]]) · `DELETED` · `RESTORED` · `PASSWORD_RESET_SENT` ·
-`PASSWORD_RESET_BY_ADMIN`. The `CREATED/UPDATED/DELETED/RESTORED` set mirrors [[asset-history]]; the rest are
-user-specific. `PASSWORD_RESET_SENT` records an IdP reset **link** request (OIDC mode);
-`PASSWORD_RESET_BY_ADMIN` records an admin minting a **local temp-password** (`AUTH_MODE=local`,
-[[0086-local-authentication-mode]] §5).
+`PASSWORD_RESET_BY_ADMIN` · `PASSWORD_CHANGED` · `PASSWORD_RESET_COMPLETED`. The `CREATED/UPDATED/DELETED/RESTORED`
+set mirrors [[asset-history]]; the rest are user-specific. `PASSWORD_RESET_SENT` records an IdP reset **link**
+request (OIDC mode); `PASSWORD_RESET_BY_ADMIN` records an admin minting a **local temp-password**
+(`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5); `PASSWORD_CHANGED` and `PASSWORD_RESET_COMPLETED`
+record the **self-service** local flows (the user changed their own password, or reset it via a
+forgot-password email token — [[0086-local-authentication-mode]] §F4), actor == subject.
 
 ## Emission
 
@@ -60,6 +62,9 @@ all from the [[user]] service:
   never logs). In local mode (`AUTH_MODE=local`), `PASSWORD_RESET_BY_ADMIN` after the credential is reset —
   the admin mints a temp-password, `sessionEpoch` is bumped (existing sessions revoked) and the temp password
   is returned once ([[0086-local-authentication-mode]] §5).
+- Self-service local flows (`PasswordLifecycleService`, [[0086-local-authentication-mode]] §F4) → `PASSWORD_CHANGED`
+  on `POST /auth/change-password` and `PASSWORD_RESET_COMPLETED` on `POST /auth/reset-password` (via a
+  forgot-password email token) — each after the credential write, actor == subject, `sessionEpoch` bumped.
 - `remove`/`offboard` → `DELETED`, **inside** the offboarding transaction (atomic with the soft-delete).
 - `restore` → `RESTORED`, atomic with clearing `deletedAt`; the idempotent already-live path emits nothing.
 

@@ -40,7 +40,8 @@ the reverse.
   each side a user-id / external-name / null — [[0058-user-manager-and-clone-actions]]) on a manager
   change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when an IdP reset link is
   requested (OIDC mode), `PASSWORD_RESET_BY_ADMIN` when an admin mints a local temp-password
-  (`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5). This supersedes the fire-and-forget IdP write-back log lines for *durability*: those
+  (`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5), and — self-service in local mode ([[0086-local-authentication-mode]] §F4) — `PASSWORD_CHANGED` when the user changes their own password and
+  `PASSWORD_RESET_COMPLETED` when they reset it via a forgot-password email token. This supersedes the fire-and-forget IdP write-back log lines for *durability*: those
   structured logs remain, but the queryable trail now lives in the DB and surfaces in the
   [[recent-activity]] feed (`entityType = 'user'`).
 - **Identity / auth:** the local User is the source of truth for the domain. `AUTH_MODE` is a
@@ -51,6 +52,14 @@ the reverse.
   revocation) and `mustChangePassword` on the User row, provisioned by `/config/setup` (first admin) and
   admin create/reset (never JIT, no IdP). `AUTH_MODE=shim` keeps the `X-User-Id` header path for dev/test.
   Imported / directory-only rows land `passwordHash=null` and cannot log in until an admin provisions one.
+  **Self-service password lifecycle (local mode, [[0086-local-authentication-mode]] §F4):** `POST /auth/change-password`
+  (authenticated — verifies the current password, sets the new one, **bumps `sessionEpoch`**, clears
+  `mustChangePassword`), plus the public `POST /auth/forgot-password` (enumeration-safe; mints a single-use
+  SHA-256-hashed reset token, ≤1h TTL, in `PasswordResetToken`, and emails the link if SMTP is configured)
+  and `POST /auth/reset-password` (consumes the token, sets the new password, bumps the epoch, invalidates
+  sibling tokens). A `mustChangePassword=true` user is **walled off** from every non-exempt route with a
+  `403 { code: 'PASSWORD_CHANGE_REQUIRED' }` until they change it (exempt: change-password, `GET /users/me`,
+  public routes).
 - **Authorization (Roles & Permissions v2):** the three roles stay **fixed** —
   `enum Role { ADMIN MEMBER VIEWER }` is unchanged ([[0040-rbac-roles]]) — but what each role *grants*
   is now a configurable set of **fine-grained permissions** ([[0046-roles-permissions-v2]]). A privilege
