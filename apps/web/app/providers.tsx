@@ -14,6 +14,7 @@ import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { handleAuthExpiry } from "@/lib/api/handle-auth-expiry";
+import { handlePasswordChangeRequired } from "@/lib/api/handle-password-change-required";
 import { skip4xxRetry } from "@/lib/api/retry";
 import { DEFAULT_TIME_ZONE, SHARED_FORMATS } from "@/i18n/config";
 
@@ -26,11 +27,30 @@ function makeQueryClient() {
     // drowning in 401 toasts. Wired here once for the whole app; no per-call wiring needed.
     // NB: the deferred follow-up is the full Auth.js rotating-refresh (offline_access) that
     // keeps the token alive transparently; this lazy redirect is the agreed first step.
+    // Two global reactions, in one place: a 401 (IdP/session-token expiry, #600) signs out and
+    // redirects to /login; a 403 `{ code: PASSWORD_CHANGE_REQUIRED }` (local-mode forced-change gate,
+    // ADR-0086 §F4b) hard-navigates to the /change-password wall. Each checks its own status so the
+    // order is irrelevant and each is a no-op for the other. In OIDC mode the forced-change 403 never
+    // occurs, so that handler is inert.
     queryCache: new QueryCache({
-      onError: (error) => handleAuthExpiry(error),
+      onError: (error) => {
+        handlePasswordChangeRequired(error);
+        handleAuthExpiry(error);
+      },
     }),
     mutationCache: new MutationCache({
-      onError: (error) => handleAuthExpiry(error),
+      onError: (error, _variables, _context, mutation) => {
+        // The change-password mutation opts out (meta): its wrong-current-password 401 must surface
+        // inline on the form, not sign the user out (and it is exempt from the forced-change gate).
+        if (
+          (mutation.meta as { skipGlobalAuthHandling?: boolean } | undefined)
+            ?.skipGlobalAuthHandling
+        ) {
+          return;
+        }
+        handlePasswordChangeRequired(error);
+        handleAuthExpiry(error);
+      },
     }),
     defaultOptions: {
       queries: {

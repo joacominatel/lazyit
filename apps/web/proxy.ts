@@ -44,6 +44,11 @@ function isPublicPath(pathname: string): boolean {
     /\.(?:mp4|webm|ogg|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|mp3)$/i.test(pathname) ||
     pathname.startsWith("/api/auth") ||
     pathname === "/login" ||
+    // Local-mode self-service recovery (ADR-0086 §F4b): a locked-out user has NO session, so these
+    // public pages must stay reachable or route-protection would bounce them to /login (defeating the
+    // point). They're gated to local mode inside the pages themselves (OIDC → redirect to /login).
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
     pathname === "/setup" ||
     pathname === "/" ||
     // The reporting-agent installer (ADR-0074 §6) is a public `curl | sh` script served from

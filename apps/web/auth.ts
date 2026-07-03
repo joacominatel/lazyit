@@ -341,11 +341,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      *   token in place (and set `error` on failure). The next API call 401s and the existing
      *   global-401 handler (issue #657) signs the user out — the intended safety net.
      */
-    async jwt({ token, account, user }) {
+    async jwt({ token, account, user, trigger, session }) {
       // `user` is only present on the initial sign-in; persist identity on the token.
       if (user) {
         token.name = user.name ?? token.name;
         token.email = user.email ?? token.email;
+      }
+
+      // Client-driven session update (`useSession().update({ accessToken })`) — used by the local-mode
+      // change-password flow (ADR-0086 §F4b): the API minted a FRESH session token at the new
+      // `sessionEpoch` (the change revoked the old one), so persist it into the cookie here or a reload
+      // would re-seed the dead token. Guarded to a well-typed string; nothing else about the token
+      // changes, so the OIDC refresh cycle below is untouched.
+      if (trigger === "update") {
+        const next = (session as { accessToken?: unknown } | undefined)?.accessToken;
+        if (typeof next === "string" && next.length > 0) {
+          token.accessToken = next;
+        }
+        return token;
       }
 
       // Initial sign-in: snapshot the tokens from the provider's response.
