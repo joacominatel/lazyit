@@ -75,6 +75,32 @@ review-then-apply tool:
 Backfill is **forward-only — there is no bulk undo.** If a single tag comes out wrong, fix it by
 editing that one asset.
 
+## Printing a QR label
+
+Every asset can print a small **QR label** to stick on the physical unit. On the asset's page, use
+**Print label**. lazyit opens a clean, chrome-less sheet showing a QR code with the asset tag and name
+printed underneath, and a **Print** button that hands off to your browser's print dialog — send it to a
+label printer, or print on paper and cut it out.
+
+The QR encodes a **direct link to that asset in lazyit** (built from the address you're using right
+now), so scanning it — with the built-in scanner below, or any phone camera — opens the asset's page.
+The human-readable asset tag is always printed under the code, so a person can still read or type it if
+they can't scan.
+
+## Scanning to find an asset
+
+**Assets → Scan** opens your device camera to read an asset's QR label hands-free. Point the camera at
+the label and lazyit acts on what it reads:
+
+- a lazyit QR label → it opens that asset's page directly;
+- any other code or text → it runs an asset **search** for that value, so a plain tag sticker still
+  finds the unit.
+
+Scanning works in the browser — no app to install — on mobile Safari (iOS), Android Chrome and desktop
+Firefox. It needs **camera permission** and a **secure (HTTPS) connection**; allow the camera when your
+browser asks. If the camera isn't available or you deny access, the same screen offers a **manual
+entry** field — type an asset tag and it runs the same lookup.
+
 ## What's next
 
 - [Asset basics](/help/assets-asset-basics) — where asset tags appear on each unit.
