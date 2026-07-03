@@ -23,10 +23,14 @@
  */
 
 import NextAuth, { customFetch } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
 // Type-only import so the `next-auth/jwt` module is in the program and can be augmented
 // below (the `jwt` callback's `token` is typed by this module's `JWT` interface).
 import type {} from "next-auth/jwt";
 
+import { LoginRequestSchema, type LoginResponse } from "@lazyit/shared";
+
+import { apiFetch } from "@/lib/api/client";
 import { loadWebBootstrapOidcFile } from "@/lib/auth/bootstrap-file";
 
 // Zero-touch bootstrap (ADR-0043 Phase 3): before any AUTH_* read below, back-fill them from the
@@ -36,6 +40,15 @@ import { loadWebBootstrapOidcFile } from "@/lib/auth/bootstrap-file";
 loadWebBootstrapOidcFile();
 
 declare module "next-auth" {
+  interface User {
+    /**
+     * Set ONLY on a local (Credentials) sign-in (ADR-0086 §6): the first-party session token the API
+     * minted in `POST /auth/login`. The `authorize` callback returns it here; the `jwt` callback moves
+     * it onto `token.accessToken` (a local sign-in has no `account.access_token` to snapshot). OIDC
+     * sign-ins never set this — they carry the token via `account.access_token`.
+     */
+    accessToken?: string;
+  }
   interface Session {
     /** IdP access token, forwarded as `Authorization: Bearer` on API calls. */
     accessToken: string;
@@ -84,6 +97,31 @@ declare module "next-auth/jwt" {
  * very short-lived tokens or refresh storms appear.
  */
 const REFRESH_SKEW_SECONDS = 30;
+
+/**
+ * Whether the session cookie carries the `Secure` flag / `__Secure-` prefix (ADR-0086 §6, security).
+ *
+ * Auth.js defaults this to `NODE_ENV === "production"`. That default is WRONG for a self-hosted
+ * prod-over-HTTP LAN deploy (`AUTH_MODE=local`): the build is production, so Auth.js would emit a
+ * `Secure` cookie the browser silently drops over plain HTTP — a silent login failure with no error.
+ * We instead key it to the ACTUAL origin scheme (`AUTH_URL` → `NEXTAUTH_URL` → `WEB_ORIGIN`): `https`
+ * → Secure, `http` → not. `HttpOnly` + `SameSite=Lax` stay on always (Auth.js's own defaults for the
+ * session cookie — untouched here). For an existing HTTPS deploy `AUTH_URL` is `https://…`, so this
+ * returns `true` — byte-identical to today's `NODE_ENV=production` behavior. When no origin var is set
+ * we fall back to the stock `NODE_ENV` default so nothing changes for callers that never set one.
+ */
+function deriveUseSecureCookies(): boolean {
+  const origin =
+    process.env.AUTH_URL ?? process.env.NEXTAUTH_URL ?? process.env.WEB_ORIGIN;
+  if (origin) {
+    try {
+      return new URL(origin).protocol === "https:";
+    } catch {
+      // Malformed origin → fall through to the stock default rather than guess.
+    }
+  }
+  return process.env.NODE_ENV === "production";
+}
 
 const internalIssuer = process.env.AUTH_INTERNAL_ISSUER;
 const externalIssuer = process.env.AUTH_ISSUER;
@@ -232,7 +270,56 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       ...(internalIssuer ? { [customFetch]: forwardedFetch } : {}),
     },
+    /**
+     * First-party local credentials provider (ADR-0086 §6, `AUTH_MODE=local`). It lives ALONGSIDE the
+     * OIDC provider — OIDC instances never invoke it (the /login screen only calls `signIn("credentials")`
+     * when `authMode === "local"`), so the OIDC flow is byte-identical. `authorize` delegates the actual
+     * credential check to the API's `POST /auth/login` (argon2id, rate-limit, uniform 401 — the browser
+     * never sees a password hash) and returns the API-minted session token on the user; the `jwt` callback
+     * moves it onto `token.accessToken`, so the entire downstream (Bearer forwarding, the proxy gate, the
+     * global-401 handler) is unchanged.
+     */
+    Credentials({
+      id: "credentials",
+      name: "Local account",
+      credentials: {
+        identifier: { label: "Email or username", type: "text" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(rawCredentials) {
+        // Validate against the SHARED login contract before touching the network (never trust the form).
+        const parsed = LoginRequestSchema.safeParse(rawCredentials);
+        if (!parsed.success) return null;
+        try {
+          const result = await apiFetch<LoginResponse>("/auth/login", {
+            method: "POST",
+            body: parsed.data,
+          });
+          const name =
+            [result.user.firstName, result.user.lastName]
+              .filter(Boolean)
+              .join(" ")
+              .trim() ||
+            result.user.username ||
+            result.user.email;
+          return {
+            id: result.user.id,
+            name,
+            email: result.user.email,
+            // Carried onto the JWT in the `jwt` callback (a Credentials sign-in has no `account.access_token`).
+            accessToken: result.token,
+          };
+        } catch {
+          // Any failure (incl. the API's uniform 401) → null → Auth.js reports a generic CredentialsSignin
+          // error. No user enumeration: the backend already returns one indistinguishable 401 for every case.
+          return null;
+        }
+      },
+    }),
   ],
+
+  // `Secure` keyed to the real origin scheme, not `NODE_ENV` (ADR-0086 §6) — see deriveUseSecureCookies.
+  useSecureCookies: deriveUseSecureCookies(),
 
   session: {
     /** Stateless JWT session — no session DB required (ADR-0039). */
@@ -261,8 +348,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.email = user.email ?? token.email;
       }
 
-      // Initial sign-in: snapshot the tokens from the IdP's token response.
+      // Initial sign-in: snapshot the tokens from the provider's response.
       if (account) {
+        // Local (Credentials) sign-in (ADR-0086 §6): there is no IdP token exchange — the API already
+        // minted the session token and `authorize` returned it on `user`. There is no OIDC refresh cycle
+        // for a local session (no `expiresAt`/`refreshToken`), so the refresh block below is skipped and
+        // session lifetime is governed API-side (the `sessionEpoch` re-check + short token TTL).
+        if (account.type === "credentials") {
+          token.accessToken = user?.accessToken ?? token.accessToken;
+          token.expiresAt = undefined;
+          token.refreshToken = undefined;
+          delete token.error;
+          return token;
+        }
         token.accessToken = account.access_token ?? token.accessToken;
         // `expires_at` is seconds since epoch (oauth4webapi normalises `expires_in`).
         token.expiresAt =
