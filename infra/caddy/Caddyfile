@@ -68,16 +68,14 @@ http://:2021 {
 	respond /healthz "ok" 200
 }
 
-# --- Zitadel IdP — auth subdomain (ADR-0037) -------------------------------------
-# Zitadel runs on the internal Docker network without its own TLS (--tlsMode external; Caddy
-# terminates HTTPS here and proxies to Zitadel's internal HTTP listener).
-# Set LAZYIT_DOMAIN to your base domain (e.g. "lazyit.example.com") in .env.prod.
-# Local prod-like: set LAZYIT_DOMAIN=localhost — Caddy uses its internal CA.
-auth.{$LAZYIT_DOMAIN:localhost} {
-	import security_headers
-	import access_log
-	reverse_proxy zitadel:8080
-}
+# --- Zitadel IdP — auth subdomain (ADR-0037, gated by ADR-0086) ------------------
+# The auth.{domain} site block lives in sites/auth.caddy and is imported here ONLY when that file is
+# present in the container. infra/docker-compose.oidc.yaml mounts it (bundled Zitadel / AUTH_MODE=oidc);
+# in local-auth mode (the default) and BYOI the oidc overlay isn't loaded, sites/ is empty, this glob
+# matches nothing (NOT an error — Caddy docs), and Caddy never serves auth.{domain} nor requests an
+# unusable cert for it. `import` at top level can bring in a whole site block; it is textual + resolved
+# before parse, so sites/auth.caddy can reference the (security_headers)/(access_log) snippets above.
+import sites/*.caddy
 
 # Site address. Local prod-like: unset -> "localhost" (internal CA, served on :443 -> host :8443).
 # Real domain: set LAZYIT_SITE_ADDRESS=lazyit.example.com (publicly reachable :80/:443).
