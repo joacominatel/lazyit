@@ -150,6 +150,8 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       "password_reset_by_admin",
       // ADR-0086 §F4 (F4a) — self-service change + email-token reset.
       "password_changed",
+      // ADR-0086 §F4 / issue #1006 — forgot-password issuance audit.
+      "password_reset_requested",
       "password_reset_completed",
     ]);
   });
