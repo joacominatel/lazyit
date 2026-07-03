@@ -154,11 +154,13 @@ export class PasswordLifecycleService {
    * tell (ADR-0086 §F4 / SECURITY GAP #7). When a LIVE, active, non-directory user matches, mint a
    * single-use hashed token (SHA-256 at rest, ≤1h TTL) and, if SMTP is configured, email the reset link.
    *
-   * Enumeration/timing: the dominant cost is the constant `findFirst` lookup, run for every request
-   * regardless of a match. The extra work on a match (one indexed INSERT; the SMTP send is detached,
-   * fire-and-forget) is sub-millisecond and dwarfed by network jitter — not a practical oracle, and the
-   * per-IP rate-limit guard + the identical response body are the primary enumeration defenses. Nothing
-   * about the response (status, shape, latency class) differs between "user exists" and "does not".
+   * Enumeration/timing (F-1, issue #1006): the ONLY synchronous work is the constant `findFirst` lookup
+   * plus a cheap eligibility check — run identically whether or not an account matches. The variable-cost
+   * token issuance (GC + per-account cap + INSERT + audit + email) is DETACHED into {@link issueResetToken}
+   * (fire-and-forget, like the email already was), so it runs AFTER this method returns and never adds to
+   * response latency. Result: latency is existence-independent with NO dummy/garbage work, complementing
+   * the per-IP rate-limit guard + the identical response body. Nothing about the response (status, shape,
+   * latency class) differs between "user exists" and "does not".
    */
   async forgotPassword(identifier: string): Promise<void> {
     // In non-local mode there are no local passwords or tokens — do nothing, but return the SAME uniform
@@ -181,6 +183,25 @@ export class PasswordLifecycleService {
       return;
     }
 
+    // Detach the VARIABLE-cost issuance so the response latency equals the constant `findFirst` for BOTH a
+    // match and a miss (F-1). Fire-and-forget (like sendResetEmail): any error is logged + swallowed and
+    // never surfaces to the caller, so the uniform outcome is preserved.
+    void this.issueResetToken(user).catch((err) =>
+      this.logger.warn(
+        `password-reset issuance failed for user ${user.id}: ${errText(err)}`,
+      ),
+    );
+  }
+
+  /**
+   * Mint + dispatch a reset token for a resolved, login-capable `user` — the DETACHED tail of
+   * {@link forgotPassword} (F-1, issue #1006). Runs out-of-band so none of its variable-cost work (the GC
+   * sweep, the per-account cap check, the INSERT, the issuance audit, the SMTP send) contributes to the
+   * response latency, and it is only ever reached AFTER the eligibility check — so it never fires for a
+   * non-existent / inactive / directory-only identifier. All the original cap/GC semantics are unchanged;
+   * they simply moved here.
+   */
+  private async issueResetToken(user: User): Promise<void> {
     // Opportunistic GC: drop this user's already-used or expired tokens so the table + the per-account cap
     // stay bounded. Best-effort (a failure never blocks the flow).
     try {
@@ -213,8 +234,19 @@ export class PasswordLifecycleService {
       },
     });
 
-    // Send the email out-of-band (detached) so the response latency never depends on SMTP. Fail-soft: a
-    // missing config or a send error is logged and swallowed (the admin-reset path remains the fallback).
+    // Audit the ISSUANCE (F-4, issue #1006): a reset link was actually minted for a real, login-capable
+    // user. Written ONLY here — inside the detached path, AFTER a token is created — so it never affects
+    // response latency and NEVER fires for a non-existent / inactive / directory-only identifier (so it is
+    // not an enumeration oracle; the user_history log is admin-only, so its existence is not observable to
+    // a non-admin caller either). Self-service: actor == subject. No plaintext token is ever recorded.
+    await this.history.record(this.prisma, {
+      userId: user.id,
+      eventType: 'PASSWORD_RESET_REQUESTED',
+      actor: { userId: user.id },
+    });
+
+    // Send the email out-of-band. Fail-soft: a missing config or a send error is logged and swallowed (the
+    // admin-reset path remains the fallback).
     void this.sendResetEmail(user.email, raw).catch((err) =>
       this.logger.warn(
         `password-reset email dispatch failed for user ${user.id}: ${errText(err)}`,
