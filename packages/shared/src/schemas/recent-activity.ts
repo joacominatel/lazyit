@@ -137,6 +137,9 @@ export const RECENT_ACTIVITY_ACTIONS = [
   // Manager change (ADR-0058) — the lowercased MANAGER_CHANGED verb the recent_activity view emits.
   "manager_changed",
   "password_reset_sent",
+  // Admin minted a local temp-password (AUTH_MODE=local, ADR-0086 §5) — the lowercased
+  // PASSWORD_RESET_BY_ADMIN verb the recent_activity view emits.
+  "password_reset_by_admin",
 ] as const;
 
 /** A single known activity verb. The `action` filter validates against this enum (→ 400 otherwise). */
