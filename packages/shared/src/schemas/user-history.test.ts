@@ -14,6 +14,8 @@ describe("UserHistoryEventTypeSchema (ADR-0058)", () => {
       "DELETED",
       "RESTORED",
       "PASSWORD_RESET_SENT",
+      // ADR-0086 §5 (F1c) — local-mode admin temp-password reset.
+      "PASSWORD_RESET_BY_ADMIN",
     ]);
   });
 
