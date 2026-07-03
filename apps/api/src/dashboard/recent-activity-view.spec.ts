@@ -16,10 +16,7 @@ import { UserHistoryEventTypeSchema } from '@lazyit/shared';
  * revisions automatically, not just the current one.
  */
 
-const MIGRATIONS_DIR = path.resolve(
-  __dirname,
-  '../../prisma/migrations',
-);
+const MIGRATIONS_DIR = path.resolve(__dirname, '../../prisma/migrations');
 
 /** The SQL string that marks the start of a recent_activity view definition. */
 const VIEW_DEFINITION_MARKER = 'CREATE OR REPLACE VIEW "recent_activity"';
@@ -37,9 +34,7 @@ function resolveCanonicalViewMigration(): {
     .filter(
       (entry) =>
         !entry.startsWith('.') &&
-        fs
-          .statSync(path.join(MIGRATIONS_DIR, entry))
-          .isDirectory(),
+        fs.statSync(path.join(MIGRATIONS_DIR, entry)).isDirectory(),
     )
     .sort(); // lexicographic = chronological (YYYYMMDDHHMMSS_ prefix)
 
@@ -67,9 +62,7 @@ function resolveCanonicalViewMigration(): {
  * `{ 'ENUM_VALUE' => 'summary text' }` for every `WHEN '<VALUE>' THEN '<summary>'` pair found
  * inside the block that follows `CASE uh."eventType"::text`.
  */
-function extractUserHistorySummaryBranches(
-  sql: string,
-): Map<string, string> {
+function extractUserHistorySummaryBranches(sql: string): Map<string, string> {
   // Isolate the UserHistory CASE block: starts at `CASE uh."eventType"::text` and ends at the
   // first `END` keyword that closes it. We grab everything between them.
   const caseStart = sql.indexOf('CASE uh."eventType"::text');
@@ -127,9 +120,7 @@ describe('recent_activity view — UserHistory CASE completeness (regression gua
     }
 
     if (missingBranches.length > 0 || blankSummaries.length > 0) {
-      const lines: string[] = [
-        `Canonical view migration: ${migrationName}`,
-      ];
+      const lines: string[] = [`Canonical view migration: ${migrationName}`];
       if (missingBranches.length > 0) {
         lines.push(
           `Missing WHEN branches (add them to the view SQL): ${missingBranches.join(', ')}`,
@@ -149,10 +140,12 @@ describe('recent_activity view — UserHistory CASE completeness (regression gua
     );
   });
 
-  it('the canonical migration is the expected 20260611180848_user_manager_clone (update if view is re-issued)', () => {
+  it('the canonical migration is the expected 20260703020000_password_lifecycle (update if view is re-issued)', () => {
     // This assertion is intentionally explicit: if someone re-issues the view in a NEW migration
     // the test still passes (the guard auto-upgrades), but this test will FAIL to remind you to
     // update this name. Delete or re-pin this case when the canonical migration changes.
-    expect(migrationName).toBe('20260611180848_user_manager_clone');
+    // Re-pinned in F4a (ADR-0086 §F4): the password-lifecycle migration re-issues the view to add the
+    // PASSWORD_CHANGED + PASSWORD_RESET_COMPLETED summary branches (superseding 20260703010000_local_auth_provisioning).
+    expect(migrationName).toBe('20260703020000_password_lifecycle');
   });
 });

@@ -12,6 +12,16 @@
 	# Real domain (Let's Encrypt): set an ACME contact email. Leave commented for local.
 	# email {$LAZYIT_TLS_EMAIL}
 
+	# Serve this site's certificate to clients that send NO SNI (issue #1010). This is what makes a
+	# bare-IP deployment work (LAZYIT_SITE_ADDRESS=192.168.1.50): TLS SNI is a HOSTNAME field, so
+	# browsers AND curl/OpenSSL (RFC 6066) never send an IP literal as SNI. Without SNI, Caddy can't
+	# match the IP site block to select a cert and aborts the handshake with an internal-error alert
+	# (SSL_ERROR_INTERNAL_ERROR_ALERT / "tlsv1 alert internal error"). default_sni names the ServerName
+	# to assume when SNI is absent, so the IP cert is presented and connect-by-IP works (the common
+	# small-team case, ADR-0086). Additive + harmless for hostname/localhost deploys: those clients DO
+	# send SNI, so this is a no-op for them.
+	default_sni {$LAZYIT_SITE_ADDRESS:localhost}
+
 	# Trusted proxies (SEC-010). Caddy is the ONLY hop in front of the API, and api/web/db sit on a
 	# private Docker network. `static private_ranges` tells Caddy to trust X-Forwarded-For only from
 	# private-range peers (the Docker network) and to use the real connecting client IP otherwise —
@@ -68,16 +78,14 @@ http://:2021 {
 	respond /healthz "ok" 200
 }
 
-# --- Zitadel IdP — auth subdomain (ADR-0037) -------------------------------------
-# Zitadel runs on the internal Docker network without its own TLS (--tlsMode external; Caddy
-# terminates HTTPS here and proxies to Zitadel's internal HTTP listener).
-# Set LAZYIT_DOMAIN to your base domain (e.g. "lazyit.example.com") in .env.prod.
-# Local prod-like: set LAZYIT_DOMAIN=localhost — Caddy uses its internal CA.
-auth.{$LAZYIT_DOMAIN:localhost} {
-	import security_headers
-	import access_log
-	reverse_proxy zitadel:8080
-}
+# --- Zitadel IdP — auth subdomain (ADR-0037, gated by ADR-0086) ------------------
+# The auth.{domain} site block lives in sites/auth.caddy and is imported here ONLY when that file is
+# present in the container. infra/docker-compose.oidc.yaml mounts it (bundled Zitadel / AUTH_MODE=oidc);
+# in local-auth mode (the default) and BYOI the oidc overlay isn't loaded, sites/ is empty, this glob
+# matches nothing (NOT an error — Caddy docs), and Caddy never serves auth.{domain} nor requests an
+# unusable cert for it. `import` at top level can bring in a whole site block; it is textual + resolved
+# before parse, so sites/auth.caddy can reference the (security_headers)/(access_log) snippets above.
+import sites/*.caddy
 
 # Site address. Local prod-like: unset -> "localhost" (internal CA, served on :443 -> host :8443).
 # Real domain: set LAZYIT_SITE_ADDRESS=lazyit.example.com (publicly reachable :80/:443).

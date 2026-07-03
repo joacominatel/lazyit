@@ -11,8 +11,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiCreatedResponse,
   ApiNoContentResponse,
@@ -23,6 +25,7 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  AdminPasswordResetResultSchema,
   CloneUserResultSchema,
   CloneUserSchema,
   CreateUserSchema,
@@ -40,6 +43,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
+import { AllowPasswordChangeRequired } from '../auth/allow-password-change-required.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
 import { PasswordResetUnsupportedError } from '../auth/identity/identity-provider.interface';
@@ -61,6 +65,10 @@ class CreateUserDto extends createZodDto(CreateUserSchema) {}
 class UpdateUserDto extends createZodDto(UpdateUserSchema) {}
 class CloneUserDto extends createZodDto(CloneUserSchema) {}
 class CloneUserResultDto extends createZodDto(CloneUserResultSchema) {}
+// Local-mode (AUTH_MODE=local) admin-reset result: the one-time temp-password (ADR-0086 §5).
+class AdminPasswordResetResultDto extends createZodDto(
+  AdminPasswordResetResultSchema,
+) {}
 
 @ApiTags('users')
 @Controller('users')
@@ -250,6 +258,9 @@ export class UsersController {
   // caller (never another user), so it is a self-read, not a directory read. Gating it would break the
   // admin-UI gate for VIEWER. Only the cross-user DIRECTORY reads below carry `user:read`.
   @Get('me')
+  // Exempt from the forced-change gate (ADR-0086 §F4): a user who still owes a one-time-credential change
+  // must be able to self-read (the payload carries `mustChangePassword`) so the web can render the wall.
+  @AllowPasswordChangeRequired()
   @ApiOperation({
     summary: 'The current authenticated user (including their RBAC role)',
     description:
@@ -410,21 +421,40 @@ export class UsersController {
   @ApiOperation({
     summary: 'Trigger a password reset for a user — ADMIN only (issue #149)',
     description:
-      'Asks the identity provider to send the user a password-reset link. lazyit NEVER stores, sets ' +
-      'or sends a password (ADR-0016/0037): Zitadel emails the link via ZITADEL’s own SMTP (which the ' +
-      'operator must have configured for delivery). 422 if the user is inactive; 501 ("managed by ' +
-      'your identity provider") under BYOI / generic OIDC or for a user not linked to the IdP; 503 if ' +
-      'the Zitadel Management call fails. Returns 204 No Content on success.',
+      'OIDC mode: asks the identity provider to send the user a password-reset link. lazyit NEVER ' +
+      'stores, sets or sends a password (ADR-0016/0037): Zitadel emails the link via ZITADEL’s own ' +
+      'SMTP. Returns 204 No Content. LOCAL mode (AUTH_MODE=local, ADR-0086 §5): there is no IdP — an ' +
+      'admin reset mints a one-time temporary password, sets mustChangePassword, revokes the user’s ' +
+      'sessions and returns the temp password ONCE (200 with { temporaryPassword }). 422 if the user ' +
+      'is inactive (both modes) or is a directory-only person (local); 501 ("managed by your identity ' +
+      'provider") under BYOI / generic OIDC or for a user not linked to the IdP; 503 if the Zitadel ' +
+      'Management call fails.',
   })
   @ApiNoContentResponse({
-    description: 'Reset notification triggered (Zitadel will email the link).',
+    description:
+      'OIDC mode: reset notification triggered (Zitadel will email the link).',
+  })
+  @ApiOkResponse({
+    type: AdminPasswordResetResultDto,
+    description:
+      'Local mode: the one-time temporary password to hand off to the user (shown once).',
   })
   async resetPassword(
     @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
     @CurrentUser() actor?: User,
-  ): Promise<void> {
+  ): Promise<AdminPasswordResetResultDto | void> {
     try {
-      await this.users.requestPasswordReset(id, this.actor.resolve(actor));
+      const result = await this.users.requestPasswordReset(
+        id,
+        this.actor.resolve(actor),
+      );
+      // LOCAL mode returns the minted temp-password → 200 with a body (override the @HttpCode(204) default
+      // via the passthrough response). OIDC mode returns null → keep the byte-identical 204 No Content.
+      if (result) {
+        res.status(200);
+        return result;
+      }
     } catch (err) {
       // BYOI (or a user with no IdP link) cannot trigger a reset: surface that HONESTLY as a 501 rather
       // than a misleading 2xx (INV-4). Every other error (404/422/503) propagates unchanged.

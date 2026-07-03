@@ -55,6 +55,8 @@ export function InstanceSettingsView() {
   const identityProviderLabel: Record<IntegrationMode, string> = {
     zitadel: t("instance.identityProvider.zitadel"),
     "generic-oidc": t("instance.identityProvider.generic-oidc"),
+    // First-party local auth (ADR-0086) — no external IdP; lazyit owns the accounts directly.
+    local: t("instance.identityProvider.local"),
   };
 
   const posture: { label: string; tone: StatusTone } = data?.devMode

@@ -19,18 +19,21 @@ Get lazyit running on your machine. Verified against the repo as of 2026-05-30.
 ## Quick start — one command (recommended)
 
 The fastest path is the **`dev-setup` script** (`scripts/dev-setup.ts`, issue #483). It automates the
-whole bring-up — backing services, migrate/generate/seed, the Zitadel + OIDC bootstrap, and the
-`apps/{web,api}/.env` wiring — into one command, with two modes:
+whole bring-up — backing services, migrate/generate/seed, auth wiring, and the `apps/{web,api}/.env`
+wiring — into one command, with two modes. **Since ADR-0086 it defaults to LOCAL auth** (built-in
+accounts — no Zitadel containers, no `jq`/`curl` needed); pass **`--zitadel`** (or set
+`LAZYIT_DEV_AUTH=oidc`) to get the bundled dev Zitadel + OIDC path instead.
 
 ```bash
 bun install                  # 1. install all workspace dependencies
-cp .env.example .env         # 2. root env only: POSTGRES_*, MEILI_MASTER_KEY, ZITADEL_* (dev IdP)
+cp .env.example .env         # 2. root env only: POSTGRES_*, MEILI_MASTER_KEY, ZITADEL_* (dev IdP, oidc only)
 
-# 3a. FIRST TIME (or a clean slate) — wipes dev volumes, rebuilds, bootstraps Zitadel, wires env:
+# 3a. FIRST TIME (or a clean slate) — wipes dev volumes, rebuilds, wires env (LOCAL auth default):
 bun run dev:fresh            # destructive: prompts for a typed "yes" (use --yes to skip in CI)
+bun run dev:fresh -- --zitadel   # …same, but bring up the bundled dev Zitadel + OIDC (ADR-0086)
 
 # 3b. EVERY DAY AFTER — services up + a fresh Prisma client, then start the apps:
-bun run dev:up              # assumes dev:fresh ran before (Zitadel already bootstrapped)
+bun run dev:up              # assumes dev:fresh ran before (add --zitadel if you chose the OIDC path)
 ```
 
 Both modes end by running `bun run dev` (web → :3000, api → :3001). Pass `--no-start` to do all the
@@ -38,7 +41,11 @@ prep but stop before starting the apps (useful in CI/tests):
 `bun scripts/dev-setup.ts --fresh --yes --no-start`.
 
 > [!info] What `dev:fresh` does (and what it touches)
-> It mirrors the prod zero-touch bootstrap for dev — **idempotent and fail-loud**. In order:
+> **Local default (ADR-0086):** it wipes the dev volumes, brings up **only** db/meilisearch/valkey
+> (`docker compose up -d` — no Zitadel), migrate/generate/seed, then wires `apps/api/.env`
+> (`AUTH_MODE=local` + a dev `SESSION_SIGNING_SECRET`, OIDC vars off) and `apps/web/.env`
+> (`AUTH_MODE=local`). No `jq`/`curl` needed — only `docker`. The steps below are the **`--zitadel`**
+> path (the bundled dev Zitadel + OIDC), which mirrors the prod zero-touch bootstrap. In order:
 > 1. **removes the dev Docker volumes** (`lazyit_{db_data,zitadel_db_data,zitadel_secrets,meili_data,valkey_data}`) — this is the destructive step it asks you to confirm;
 > 2. `docker compose up -d` — the `compose.override.yaml` `zitadel-secrets-init-dev` chmods the
 >    secrets volume so Zitadel no longer crash-loops on a fresh volume (#477);

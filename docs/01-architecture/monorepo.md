@@ -18,10 +18,11 @@ lazyit/
 ├── packages/
 │   └── shared/      # @lazyit/shared — types & zod schemas shared front↔back
 ├── docs/            # this vault
-├── compose.yaml             # dev backing services (Postgres, Meilisearch, Zitadel)
+├── compose.yaml             # dev backing services (Postgres, Meilisearch, Valkey; Zitadel behind --profile oidc)
 ├── compose.override.yaml    # dev-only overrides (loopback port bindings), auto-loaded
 ├── infra/
-│   └── docker-compose.prod.yaml  # the `prod` profile (Caddy, full containerized stack)
+│   ├── docker-compose.prod.yaml  # the `prod` profile (Caddy, full containerized stack)
+│   └── docker-compose.oidc.yaml  # the `oidc` overlay (bundled Zitadel; ADR-0086) — opt-in
 ├── .env.example
 ├── turbo.json
 └── package.json     # workspace root: workspaces = ["apps/*", "packages/*"]

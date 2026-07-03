@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
+import { LocalAuthModule } from './auth/local/local-auth.module';
 import { UsersModule } from './users/users.module';
 import { LocationsModule } from './locations/locations.module';
 import { AssetCategoriesModule } from './asset-categories/asset-categories.module';
@@ -51,6 +52,9 @@ import { buildLoggerParams } from './logging/logging.config';
     // Global auth guard (ADR-0038): JwtAuthGuard runs on every request.
     // AUTH_MODE=shim → reads X-User-Id; default → validates OIDC Bearer JWT + JIT provisions User.
     AuthModule,
+    // Local (first-party) auth — @Public() POST /auth/login for AUTH_MODE=local (ADR-0086 §3). The
+    // credential/session primitives + the guard's handleLocal branch live in AuthModule; this hosts login.
+    LocalAuthModule,
     // Global cross-cutting providers (ActorService — resolves actor id from User entity, ADR-0038).
     CommonModule,
     // Async workers foundation (ADR-0053): the shared BullMQ connection to Valkey (REDIS_URL).

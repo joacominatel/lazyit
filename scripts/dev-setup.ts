@@ -8,7 +8,8 @@
  * perms — also fixed at the compose level in `compose.override.yaml`).
  *
  *   bun scripts/dev-setup.ts --up      (default) bring services up + fresh Prisma client + start apps
- *   bun scripts/dev-setup.ts --fresh   wipe dev state, rebuild from zero, bootstrap Zitadel + wire env
+ *   bun scripts/dev-setup.ts --fresh   wipe dev state, rebuild from zero, wire env (LOCAL auth default)
+ *   bun scripts/dev-setup.ts --fresh --zitadel   same, but bring up the bundled dev Zitadel + OIDC (ADR-0086)
  *
  * Flags:
  *   --fresh      destructive full rebuild (requires a typed "yes" unless --yes is passed)
@@ -27,6 +28,7 @@
  */
 
 import { $ } from "bun";
+import { randomBytes } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp, mkdir, rm, chmod, readFile } from "node:fs/promises";
@@ -92,6 +94,8 @@ interface Options {
   mode: "fresh" | "up";
   yes: boolean;
   noStart: boolean;
+  /** true => bring up the bundled dev Zitadel + OIDC wiring (ADR-0086 opt-in); false => local auth. */
+  zitadel: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
@@ -99,6 +103,9 @@ function parseArgs(argv: string[]): Options {
   let up = false;
   let yes = false;
   let noStart = false;
+  // Local-auth is the DEFAULT (ADR-0086). Opt into the bundled dev Zitadel with --zitadel or
+  // LAZYIT_DEV_AUTH=oidc (the env var lets CI/tooling flip it without editing the command).
+  let zitadel = process.env.LAZYIT_DEV_AUTH === "oidc";
 
   for (const arg of argv) {
     switch (arg) {
@@ -115,18 +122,21 @@ function parseArgs(argv: string[]): Options {
       case "--no-start":
         noStart = true;
         break;
+      case "--zitadel":
+        zitadel = true;
+        break;
       case "--help":
       case "-h":
         printUsage();
         process.exit(0);
       default:
-        fail(`unknown flag: ${arg} (use --fresh | --up | --yes | --no-start | --help)`);
+        fail(`unknown flag: ${arg} (use --fresh | --up | --yes | --no-start | --zitadel | --help)`);
     }
   }
 
   if (fresh && up) fail("--fresh and --up are mutually exclusive");
   // --up is the default when neither is given.
-  return { mode: fresh ? "fresh" : "up", yes, noStart };
+  return { mode: fresh ? "fresh" : "up", yes, noStart, zitadel };
 }
 
 function printUsage(): void {
@@ -134,13 +144,16 @@ function printUsage(): void {
     [
       "lazyit dev bootstrap (issue #483)",
       "",
-      "  bun scripts/dev-setup.ts [--up | --fresh] [--yes] [--no-start]",
+      "  bun scripts/dev-setup.ts [--up | --fresh] [--yes] [--no-start] [--zitadel]",
       "",
       "  --up        (default) bring services up + refresh the Prisma client, then start the apps.",
-      "              Assumes --fresh ran before (Zitadel already bootstrapped). Does NOT touch .env.",
+      "              Assumes --fresh ran before. Does NOT touch .env.",
       "  --fresh     wipe dev state and rebuild from zero: remove dev volumes, bring services up,",
-      "              migrate+generate+seed, bootstrap Zitadel, wire apps/{web,api}/.env, then start.",
+      "              migrate+generate+seed, wire apps/{web,api}/.env, then start.",
       "              DESTRUCTIVE — requires a typed 'yes' unless --yes is passed.",
+      "  --zitadel   opt into the bundled dev Zitadel + OIDC (ADR-0086). Default is LOCAL auth:",
+      "              no Zitadel containers, no jq/curl needed — the API signs its own sessions.",
+      "              (Equivalent env: LAZYIT_DEV_AUTH=oidc.)",
       "  --yes, -y   skip the --fresh confirmation prompt (CI / unattended).",
       "  --no-start  do all prep but do NOT run `bun run dev` at the end (CI/tests).",
     ].join("\n"),
@@ -170,11 +183,25 @@ async function assertHostTools(tools: string[]): Promise<void> {
 // Docker helpers.
 // ---------------------------------------------------------------------------
 
-/** Bring up the unprofiled backing services (auto-merges compose.override.yaml). */
-async function composeUp(): Promise<void> {
-  log("bringing up backing services: docker compose up -d");
-  // cwd = repo root so compose.yaml + compose.override.yaml are auto-discovered.
-  await $`docker compose up -d`.cwd(REPO_ROOT);
+/**
+ * Bring up the dev backing services (auto-merges compose.override.yaml).
+ *
+ * Local-auth default (ADR-0086): only the unprofiled backing — db, meilisearch, valkey. The bundled
+ * Zitadel stack is profiles:[oidc], so plain `docker compose up -d` leaves it down.
+ *
+ * `withZitadel` (--zitadel / LAZYIT_DEV_AUTH=oidc): add `--profile oidc` and bring up `zitadel` BY
+ * NAME so Compose pulls only its deps (zitadel_db + the dev zitadel-secrets-init-dev) — NOT the prod
+ * `zitadel-bootstrap` sidecar, which dev provisions with the host script (bootstrapZitadel) instead.
+ */
+async function composeUp(withZitadel: boolean): Promise<void> {
+  if (withZitadel) {
+    log("bringing up backing services + dev Zitadel: docker compose --profile oidc up -d db meilisearch valkey zitadel");
+    await $`docker compose --profile oidc up -d db meilisearch valkey zitadel`.cwd(REPO_ROOT);
+  } else {
+    log("bringing up backing services (local auth — no Zitadel): docker compose up -d");
+    // cwd = repo root so compose.yaml + compose.override.yaml are auto-discovered.
+    await $`docker compose up -d`.cwd(REPO_ROOT);
+  }
 }
 
 /**
@@ -444,6 +471,45 @@ async function wireApiEnv(oidc: OidcClient): Promise<void> {
   log(`wired apps/api/.env (AUTH_MODE off, OIDC_ISSUER, OIDC_JWKS_URI, ZITADEL_MGMT_PROJECT_ID, ZITADEL_MGMT_SA_KEY_PATH).`);
 }
 
+/**
+ * Read an existing SESSION_SIGNING_SECRET from env text, reusing it when it is already a valid
+ * (>= 32-char, non-placeholder) secret so repeated --fresh runs don't needlessly log everyone out;
+ * otherwise mint a fresh 64-hex-char one (node:crypto — no openssl host-tool needed in local mode).
+ */
+function resolveDevSessionSecret(apiEnvText: string): string {
+  const m = apiEnvText.match(/^\s*SESSION_SIGNING_SECRET\s*=\s*(.+)$/m);
+  const existing = m?.[1]?.trim();
+  if (existing && existing.length >= 32 && !/CHANGE_ME/i.test(existing)) return existing;
+  return randomBytes(32).toString("hex"); // 64 hex chars — satisfies the >= 32 boot assertion (ADR-0086 §4)
+}
+
+/**
+ * Wire the env files for LOCAL auth (ADR-0086 — the default): AUTH_MODE=local + a dev
+ * SESSION_SIGNING_SECRET on the API (which signs its own sessions), and AUTH_MODE=local on the web
+ * (so the login surface renders the built-in Credentials flow, not OIDC). No Zitadel, no OIDC creds.
+ */
+async function wireLocalEnv(): Promise<void> {
+  // apps/api/.env — AUTH_MODE=local + a valid SESSION_SIGNING_SECRET; comment out the OIDC vars (unused
+  // in local mode) so a stale dev Zitadel URL can't confuse anyone reading the file.
+  const apiEnvPath = join(REPO_ROOT, "apps", "api", ".env");
+  const apiExample = join(REPO_ROOT, "apps", "api", ".env.example");
+  let apiText = await readOrSeedEnv(apiEnvPath, apiExample);
+  apiText = setEnvKey(apiText, "AUTH_MODE", "local");
+  apiText = setEnvKey(apiText, "SESSION_SIGNING_SECRET", resolveDevSessionSecret(apiText));
+  apiText = commentOutEnvKey(apiText, "OIDC_ISSUER");
+  apiText = commentOutEnvKey(apiText, "OIDC_JWKS_URI");
+  await Bun.write(apiEnvPath, apiText);
+  log(`wired apps/api/.env (AUTH_MODE=local, SESSION_SIGNING_SECRET set, OIDC vars off).`);
+
+  // apps/web/.env — AUTH_MODE=local so the web renders the local login surface (Credentials provider).
+  const webEnvPath = join(REPO_ROOT, "apps", "web", ".env");
+  const webExample = join(REPO_ROOT, "apps", "web", ".env.example");
+  let webText = await readOrSeedEnv(webEnvPath, webExample);
+  webText = setEnvKey(webText, "AUTH_MODE", "local");
+  await Bun.write(webEnvPath, webText);
+  log(`wired apps/web/.env (AUTH_MODE=local).`);
+}
+
 // ---------------------------------------------------------------------------
 // Confirmation prompt for --fresh (destructive).
 // ---------------------------------------------------------------------------
@@ -479,9 +545,13 @@ async function startApps(): Promise<void> {
   await $`bun run dev`.cwd(REPO_ROOT);
 }
 
-function printNextSteps(): void {
+function printNextSteps(zitadel: boolean): void {
   console.log("");
-  log("Zitadel is bootstrapped and the env files are wired. Next steps:");
+  if (zitadel) {
+    log("Zitadel is bootstrapped and the env files are wired. Next steps:");
+  } else {
+    log("Local auth is wired (AUTH_MODE=local — no Zitadel). Next steps:");
+  }
   log(`  1. open ${WEB_ORIGIN}/setup  — create the first admin ONCE`);
   log(`  2. then ${WEB_ORIGIN}/login`);
   console.log("");
@@ -492,35 +562,40 @@ function printNextSteps(): void {
 // ---------------------------------------------------------------------------
 
 async function runFresh(opts: Options): Promise<void> {
-  log("MODE: --fresh (wipe dev state, rebuild from zero, bootstrap Zitadel, wire env)");
+  const auth = opts.zitadel ? "bootstrap Zitadel" : "wire local auth";
+  log(`MODE: --fresh (wipe dev state, rebuild from zero, ${auth}, wire env)`);
 
-  // The reused bootstrap script needs these host tools (fail-loud if missing).
-  await assertHostTools(["docker", "jq", "openssl", "curl"]);
+  // Host tools: the reused Zitadel bootstrap script needs jq/openssl/curl; local mode needs only docker
+  // (a real DX win — ADR-0086). We generate the dev SESSION_SIGNING_SECRET with node:crypto, not openssl.
+  await assertHostTools(opts.zitadel ? ["docker", "jq", "openssl", "curl"] : ["docker"]);
 
   if (!opts.yes) await confirmFresh();
 
   // 1. Remove dev volumes.
   await wipeDevVolumes();
 
-  // 2. Bring up backing services (compose.override.yaml chmods the secrets volume before Zitadel).
-  await composeUp();
+  // 2. Bring up backing services (+ dev Zitadel when --zitadel; compose.override chmods the secrets vol).
+  await composeUp(opts.zitadel);
 
-  // 3. Wait for db healthy AND Zitadel /debug/healthz 200.
+  // 3. Wait for db healthy (+ Zitadel /debug/healthz 200 only when the dev Zitadel is up).
   await waitForDbHealthy();
-  await waitForZitadelHealthy();
+  if (opts.zitadel) await waitForZitadelHealthy();
 
   // 4. Prisma: migrate deploy + generate (explicit — #480) + seed.
   await prismaFresh();
 
-  // 5. Bootstrap Zitadel (reuse the prod script) → returns the OIDC client config.
-  const oidc = await bootstrapZitadel();
+  // 5. Wire auth. Zitadel: bootstrap (reuse the prod script) → OIDC client config → wire web+api env.
+  //    Local: AUTH_MODE=local + a dev SESSION_SIGNING_SECRET on the api, AUTH_MODE=local on the web.
+  if (opts.zitadel) {
+    const oidc = await bootstrapZitadel();
+    await wireWebEnv(oidc);
+    await wireApiEnv(oidc);
+  } else {
+    await wireLocalEnv();
+  }
 
-  // 6 (stash) + 7 + 8. Wire the env files idempotently. (stash happens inside bootstrapZitadel.)
-  await wireWebEnv(oidc);
-  await wireApiEnv(oidc);
-
-  // 9. Print next steps, then start (unless --no-start).
-  printNextSteps();
+  // 6. Print next steps, then start (unless --no-start).
+  printNextSteps(opts.zitadel);
   if (opts.noStart) {
     log("--no-start: prep complete, NOT starting the apps. Run `bun run dev` when ready.");
     return;
@@ -532,9 +607,9 @@ async function runUp(opts: Options): Promise<void> {
   log("MODE: --up (bring services up + refresh the Prisma client, then start). Assumes --fresh ran before.");
   await assertHostTools(["docker"]);
 
-  await composeUp();
+  await composeUp(opts.zitadel);
   await waitForDbHealthy();
-  await waitForZitadelHealthy();
+  if (opts.zitadel) await waitForZitadelHealthy();
   await prismaGenerateOnly();
 
   if (opts.noStart) {

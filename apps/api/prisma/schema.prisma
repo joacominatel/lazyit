@@ -73,6 +73,24 @@ model User {
   // and any person sub-field with no native home). Same posture as Asset.specs (ADR-0007): jsonb,
   // optional, only populated on directory rows. NOT validated per-field in this MVP.
   directoryAttrs Json?
+
+  // Local (first-party) auth credentials — ADR-0086, AUTH_MODE=local. ALL nullable/defaulted (additive,
+  // no backfill): OIDC-linked users and directoryOnly rows never carry one. The SCHEMA only STORES these;
+  // hashing/verify/login live in the LocalCredentialService (F1b) — F1a lands the columns the later phases
+  // build on. `passwordHash` is argon2id, PHC-encoded with a per-hash salt (params pinned in @lazyit/shared);
+  // a null/empty hash FAILS CLOSED at login (never verifies against any password). `passwordUpdatedAt`
+  // timestamps the last credential set (admin reset / self-change). `sessionEpoch` is the token-version for
+  // revocation: logout / password-change / deactivate / offboard BUMP it and the guard's handleLocal rejects
+  // any token minted at a lower epoch (ADR-0086 §3) — a stateless-JWT revocation without a session table.
+  passwordHash      String?
+  passwordUpdatedAt DateTime?
+  sessionEpoch      Int       @default(0)
+  // One-time-credential flag (ADR-0086 §5, F1c). Set true when an admin PROVISIONS or RESETS a local
+  // credential (create with a temp password / admin reset) so the user is a temp secret holder, not the
+  // owner of their final password. F1c only STORES it; ENFORCEMENT (forcing the change at next login) is
+  // deferred to F4. Never set by the first-admin `/setup` (that admin chooses their own real password).
+  mustChangePassword Boolean  @default(false)
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
@@ -116,6 +134,11 @@ model User {
   // User lifecycle events this user CAUSED (UserHistory.performedById — the actor side). SetNull keeps
   // the append-only row when the actor is deleted, mirroring assetHistoryActed.
   userHistoryActed UserHistory[] @relation("UserHistoryActor")
+
+  // Outstanding local-mode password-reset tokens for this user (ADR-0086 §F4). Cascade: the (rare) hard
+  // delete of a user drops their tokens; a soft-delete (deletedAt) leaves them but the reset flow re-loads
+  // the user on the LIVE-filtered client, so a soft-deleted user can never complete a reset regardless.
+  passwordResetTokens PasswordResetToken[] @relation("PasswordResetTokens")
 
   // Consumable stock movements this user performed (ConsumableMovement.performedById). SetNull.
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
@@ -568,6 +591,30 @@ model AssetTagScheme {
   @@map("asset_tag_scheme")
 }
 
+/// Instance-wide singleton config — the persisted AUTH_MODE marker (ADR-0086 §1). The auth mode is chosen
+/// ONCE at first deploy and is immutable; this row makes that enforceable rather than documentation-only.
+/// It is written ONCE at the first successful `/setup` (F1c) and READ at every boot: if `env.AUTH_MODE` ≠
+/// this stored `authMode`, the API REFUSES to start (fail-loud), because switching modes on a populated
+/// instance half-migrates and bricks (oidc users have `externalId`/no password; local users the reverse).
+/// A MISSING row = fresh install / not yet set up → boot accepts `env.AUTH_MODE`. F1a only READS it
+/// defensively (the write is F1c). Follows the AssetTagScheme single-row pattern (ADR-0063 §1).
+model InstanceConfig {
+  /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it), so the table
+  /// can hold AT MOST one row and a second insert is structurally impossible. Not a generated id: there is
+  /// exactly one config row for the whole instance, so its id is a known constant (AssetTagScheme precedent).
+  id        String   @id @default("singleton")
+  /// The persisted auth-mode marker — one of shim|local|oidc. A plain String (not a DB enum): the source of
+  /// truth for the value set is the zod enum in @lazyit/shared / boot-config; this is a defensive boot marker,
+  /// not a domain enum, so a String keeps migrations trivial and avoids a second enum definition to drift.
+  authMode  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // No deletedAt: mutable instance config, never soft-deleted (ADR-0006 / AssetTagScheme precedent). Keep
+  // OUT of SOFT_DELETABLE_MODELS so reads are not auto-scoped to `deletedAt: null` (the column doesn't exist).
+  @@map("instance_config")
+}
+
 /// Instance SMTP settings — the singleton config store for OUTBOUND EMAIL (issue #615, ADR-0079).
 /// Same singleton pattern as AssetTagScheme (ADR-0063): ONE admin-only row (`settings:manage`), a
 /// migration CHECK pins the id. Unlocks an email CHANNEL behind the notification bell (ADR-0056); a
@@ -834,7 +881,8 @@ model UserHistory {
 /// provisioning, UPDATED on a name/email edit, ROLE_CHANGED on an RBAC role change (payload { from,
 /// to }), MANAGER_CHANGED on a manager change (payload { from, to } — each side a user-id, an
 /// external-name string, or null; ADR-0058), DELETED on offboard (soft delete), RESTORED on
-/// re-onboard, PASSWORD_RESET_SENT when an IdP reset link is requested. Mirrors AssetHistoryEventType's
+/// re-onboard, PASSWORD_RESET_SENT when an IdP reset link is requested (OIDC mode), PASSWORD_RESET_BY_ADMIN
+/// when an admin mints a local temp-password (AUTH_MODE=local, ADR-0086 §5). Mirrors AssetHistoryEventType's
 /// CREATED/UPDATED/DELETED/RESTORED set.
 enum UserHistoryEventType {
   CREATED
@@ -844,6 +892,40 @@ enum UserHistoryEventType {
   DELETED
   RESTORED
   PASSWORD_RESET_SENT
+  PASSWORD_RESET_BY_ADMIN
+  PASSWORD_CHANGED
+  PASSWORD_RESET_COMPLETED
+}
+
+/// A single-use, short-TTL local-mode password-reset token (ADR-0086 §F4 / SECURITY GAP #7). Created by
+/// `POST /auth/forgot-password`; consumed by `POST /auth/reset-password`. The raw token (a CSPRNG value
+/// emailed to the user) is NEVER stored — only `tokenHash = SHA-256(raw)` (hash-at-rest, the
+/// service-account-token mold, ADR-0080). Lookup is by the hash; a hit is validated as not-expired +
+/// not-used, then marked `usedAt` (single-use) and the user's siblings are invalidated. Append-ish: only
+/// `usedAt` is ever mutated (consume/invalidate); no soft-delete (rows are GC-pruned opportunistically).
+model PasswordResetToken {
+  // cuid: an internal store row, never exposed in a URL/API (the RAW token — not this id — is what the
+  // user presents). ADR-0005 (cuid for most domain entities).
+  id        String    @id @default(cuid())
+  // SHA-256(raw) as lowercase hex — @unique so a hash collision/replay can't create duplicates and the
+  // reset lookup is a single indexed point-read. The raw token is never persisted.
+  tokenHash String    @unique
+  // The subject whose password this token resets. @db.Uuid to match User.id; Cascade on the (rare) hard
+  // delete. The reset flow still re-loads the user live-filtered, so a soft-deleted user can't reset.
+  userId    String    @db.Uuid
+  user      User      @relation("PasswordResetTokens", fields: [userId], references: [id], onDelete: Cascade)
+  // Absolute expiry (≤1h from creation, ADR-0086 §F4). A token past this is invalid (generic error).
+  expiresAt DateTime
+  // Single-use marker: set once when the token is consumed OR invalidated as a sibling. A non-null value
+  // means the token can never authenticate a reset again.
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  // tokenHash is already indexed by @unique (the reset point-read). A userId index powers the
+  // sibling-invalidation + per-user prune; an expiresAt index powers the opportunistic GC sweep.
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 /// User-managed grouping for knowledge-base Articles, EVOLVED into a hierarchical Folder (ADR-0059

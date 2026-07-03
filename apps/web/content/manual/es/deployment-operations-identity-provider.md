@@ -7,9 +7,20 @@ subcategory: identity-provider
 
 # Proveedor de identidad
 
-lazyit no almacena por sí mismo las contraseñas de inicio de sesión. El inicio de sesión se delega en un
-**proveedor de identidad** que habla **OIDC**. Eliges entre dos opciones al desplegar, y puedes cambiar
-después sin tocar el código.
+lazyit admite dos familias de inicio de sesión, elegidas **una sola vez al desplegar** mediante
+`AUTH_MODE` y luego **inmutables** durante toda la vida de la instancia:
+
+- **Cuentas locales** (`AUTH_MODE=local`) — lazyit es dueño del inicio de sesión (nombre de
+  usuario/correo + contraseña), **sin proveedor de identidad externo**. Es la opción más simple para un
+  despliegue en LAN o interno; consulta [Cuentas locales](#opción-3--cuentas-locales-sin-proveedor-de-identidad)
+  más abajo.
+- **Inicio de sesión único (OIDC)** — el inicio de sesión se delega en un **proveedor de identidad** que
+  habla **OIDC**, ya sea el incluido o el tuyo (las dos opciones de abajo). En esta familia lazyit no
+  almacena ninguna contraseña de inicio de sesión.
+
+Aún puedes cambiar entre el proveedor OIDC incluido y el tuyo (ambos son OIDC), pero cambiar entre la
+familia **local** y la **OIDC** en una instancia con usuarios no está soportado — sus credenciales no se
+trasladan. Decide la familia desde el principio.
 
 > Para la parte del usuario final de esta decisión (el asistente del primer arranque, añadir miembros al
 > equipo), consulta [Primeros pasos](/help/getting-started).
@@ -83,6 +94,37 @@ Para cambiar:
 Con tu propio proveedor, ese proveedor es el dueño de las contraseñas y de la creación de cuentas —
 lazyit nunca define ni almacena una contraseña de inicio de sesión. La base de datos de la aplicación no
 se ve afectada en absoluto por el cambio.
+
+## Opción 3 — cuentas locales (sin proveedor de identidad)
+
+Define `AUTH_MODE=local` y lazyit funciona **sin ningún proveedor de identidad externo** — sin Zitadel,
+sin subdominio `auth.`, sin issuer OIDC. lazyit guarda la credencial de cada persona él mismo (las
+contraseñas se cifran con **argon2id**) y emite su propia sesión firmada al iniciar sesión. Es el patrón
+estándar del autoalojamiento (Gitea, Portainer, Proxmox) y el de menos piezas móviles para un despliegue
+interno pequeño.
+
+- **Primer arranque.** El paso de elección de inicio de sesión del asistente se omite; vas directo a
+  crear el primer administrador con **nombre, correo y contraseña**. Esa contraseña se guarda (cifrada)
+  como la credencial del administrador — no hay IdP al que reflejarla.
+- **Página de inicio de sesión.** En lugar de un botón de SSO, `/login` muestra un formulario de
+  **nombre de usuario/correo + contraseña**.
+- **Dar de alta personas.** Un administrador aprovisiona a cada usuario con una contraseña directamente
+  en lazyit; no hay aprovisionamiento automático en el primer inicio de sesión (eso es un comportamiento
+  exclusivo de OIDC).
+- **El secreto de firma.** El modo local requiere un `SESSION_SIGNING_SECRET` persistente (que el
+  instalador guiado genera por ti). Es distinto de `AUTH_SECRET`. Rotarlo solo obliga a todos a iniciar
+  sesión de nuevo — sin pérdida de datos — pero mantenlo estable para que los reinicios no cierren la
+  sesión de todos.
+- **Sin MFA todavía.** El modo local es solo contraseña en esta versión; el multifactor está disponible
+  únicamente con un proveedor OIDC que lo ofrezca. Si necesitas MFA hoy, elige una familia OIDC.
+- **¿Perdiste la contraseña del último administrador?** Como no hay un IdP que la restablezca, un
+  **comando de recuperación** de un solo uso (ejecutado en el host) restablece la contraseña de un
+  administrador con nombre directamente. Consulta
+  [Solución de problemas](/help/deployment-operations-troubleshooting).
+
+> **El modo local y el Gestor de Secretos.** El Gestor de Secretos sigue cifrado de extremo a extremo: tu
+> contraseña de inicio de sesión **no** es la frase de acceso de tu bóveda. Son credenciales separadas por
+> diseño — no reutilices una como la otra. Consulta [Gestor de Secretos](/help/secret-manager).
 
 ## La autorización permanece en lazyit
 

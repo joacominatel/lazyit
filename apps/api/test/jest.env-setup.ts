@@ -18,3 +18,10 @@ if (!process.env.WORKFLOW_SECRET_KEY) {
 if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = 'test';
 }
+// Local-mode session signing key (ADR-0086 §4). The LocalCredentialService mint/verify path asserts a
+// >=32-char SESSION_SIGNING_SECRET; provide a deterministic throwaway so the auth suite can sign/verify.
+// Only set when unset, so a CI/dev value is never clobbered. Never a real credential.
+if (!process.env.SESSION_SIGNING_SECRET) {
+  process.env.SESSION_SIGNING_SECRET =
+    'test-session-signing-secret-0123456789abcdef';
+}

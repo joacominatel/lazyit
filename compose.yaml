@@ -1,19 +1,30 @@
 # lazyit — canonical Compose definition (ALL services). See ADR-0025/0026/0028/0037 and
 # docs/05-runbooks/. Layout decided in docs/01-architecture/auth-zitadel-sot.md §9.
 #
-# This single file is the source of truth for every service. Profiles split the two audiences:
-#   - UNPROFILED backing services (db, meilisearch, zitadel, zitadel_db) come up by default and
-#     back native `bun run dev` (api/web run on the host). `compose.override.yaml` (auto-loaded)
-#     tunes THEM for dev: loopback-only ports, no TLS, no resource ceilings.
+# This single file is the source of truth for every service. Profiles split the audiences:
+#   - UNPROFILED backing services (db, meilisearch, valkey) come up by default and back native
+#     `bun run dev` (api/web run on the host). `compose.override.yaml` (auto-loaded) tunes THEM
+#     for dev: loopback-only ports, no TLS, no resource ceilings.
 #   - profiles: [prod] services (api, web, migrate, caddy, backup) only come up under --profile prod,
-#     i.e. the full containerized stack. Room is reserved for a future `zitadel-bootstrap` sidecar.
+#     i.e. the full containerized stack.
+#   - profiles: [oidc] services (zitadel, zitadel_db, zitadel-secrets-init, zitadel-bootstrap) are the
+#     bundled Zitadel IdP — OPT-IN since ADR-0086 made `AUTH_MODE=local` the default. They come up ONLY
+#     under --profile oidc, alongside the `infra/docker-compose.oidc.yaml` overlay that re-adds the
+#     api/web → zitadel-bootstrap `depends_on` (kept out of the base so `--profile prod` in local mode
+#     PARSES — an active service can't depend_on a profile-excluded one). A BARE `[oidc]` profile (not
+#     `[prod, oidc]`): profiles are OR-ed, so `[prod, oidc]` would start under plain `--profile prod`.
 #
 # DEV (from the repo ROOT) — backing services only, loopback ports, apps run via `bun run dev`:
-#   docker compose up -d            # auto-merges compose.override.yaml
+#   docker compose up -d            # auto-merges compose.override.yaml (local-auth default; no Zitadel)
+#   docker compose --profile oidc up -d   # + the bundled dev Zitadel (AUTH_MODE=oidc dev path)
 #
 # PROD (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod`:
+#   # local-auth mode (AUTH_MODE=local — the default):
 #   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
 #     --profile prod --env-file infra/env/.env.prod up -d --build
+#   # OIDC mode (AUTH_MODE=oidc — bundled Zitadel or BYOI): add the oidc overlay + profile:
+#   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml -f infra/docker-compose.oidc.yaml \
+#     --profile prod --profile oidc --env-file infra/env/.env.prod up -d --build
 #
 # --env-file is required in prod: the `environment:` blocks use ${VAR} interpolation resolved by
 # Compose at parse time (from shell or --env-file), NOT from the service's env_file directive.
@@ -145,10 +156,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      # Gate the api on the bootstrap COMPLETING successfully — so OIDC_CLIENT_* / sa-key.json exist
-      # before the api validates its OIDC config at boot (ADR-0043 §4c/§4d).
-      zitadel-bootstrap:
-        condition: service_completed_successfully
+      # NOTE (ADR-0086): the api → zitadel-bootstrap gate lives in infra/docker-compose.oidc.yaml, NOT
+      # here. zitadel-bootstrap is profiles:[oidc]; keeping this edge in the base made `--profile prod`
+      # in local mode a parse-fatal "invalid compose project" (an active api depending on a
+      # profile-excluded service). The oidc overlay re-adds it only when OIDC is selected.
       # BullMQ broker must be accepting connections before the worker/queue wire up (ADR-0053).
       valkey:
         condition: service_healthy
@@ -199,12 +210,9 @@ services:
       AUTH_INTERNAL_ISSUER: ${AUTH_INTERNAL_ISSUER:-}
       # Where the web reads the sidecar's OIDC client file. Defaults to the mounted path.
       OIDC_CLIENT_FILE: ${OIDC_CLIENT_FILE:-/zitadel-secrets/oidc-client.json}
-    depends_on:
-      # Wait for the zero-touch bootstrap to finish so the OIDC client (id/secret) exists before the
-      # web server boots Auth.js (ADR-0043 §4c/§4d). The web reads AUTH_CLIENT_* from .env.prod when
-      # set; otherwise from oidc-client.json on the shared (read-only) volume the sidecar writes.
-      zitadel-bootstrap:
-        condition: service_completed_successfully
+    # NOTE (ADR-0086): the web → zitadel-bootstrap gate lives in infra/docker-compose.oidc.yaml (OIDC
+    # mode only), NOT here — same parse-fatal reason as the api above. In local mode the web has no
+    # bootstrap dependency (Auth.js Credentials provider, no OIDC client to wait for).
     networks: [internal]
 
   # --- Zitadel's own PostgreSQL — separate from the app DB (ADR-0037) -----
@@ -212,8 +220,10 @@ services:
   # independent backups and a clean BYOI removal path (remove zitadel + zitadel_db,
   # change OIDC_ISSUER — no impact on the app DB).
   # Never published to the host — internal network only (ADR-0028).
-  # UNPROFILED: comes up on plain `docker compose up` (Zitadel is part of the dev backing stack).
+  # profiles: [oidc] (ADR-0086): only comes up when the bundled Zitadel IdP is opted in (--profile oidc,
+  # AUTH_MODE=oidc). In local-auth mode (the default) it stays down — nothing to back up, nothing to run.
   zitadel_db:
+    profiles: [oidc]
     # postgres:16-alpine — pinned by digest. NOTE: this is Postgres 16 (PGDATA layout differs
     # from the app's PG18 db). Re-pin on a deliberate bump; see docs/05-runbooks/backups.md.
     image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
@@ -251,7 +261,7 @@ services:
   # per-file mode still governs read access (the sidecar writes 0644 outputs; 0600 stays on the
   # machine key). restart:"no" → runs once. NO other dependency — it only prepares the volume.
   zitadel-secrets-init:
-    profiles: [prod]
+    profiles: [oidc]
     # alpine:3.21 — pinned by digest (matches infra/docker/zitadel-bootstrap.Dockerfile).
     image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
     user: "0:0"
@@ -270,9 +280,11 @@ services:
   # http:// URLs the browser blocks via CSP — see ADR-0037 and Zitadel TLS modes docs.
   # First start runs `start-from-init`: initialises the DB schema + creates the admin user.
   # See docs/05-runbooks/auth-bootstrap.md for the full bootstrap procedure.
-  # UNPROFILED: comes up on plain `docker compose up`. compose.override.yaml flips it to the dev
-  # form (loopback :8080, --tlsMode disabled, EXTERNALSECURE=false — no Caddy in front).
+  # profiles: [oidc] (ADR-0086): opt-in with the bundled IdP (--profile oidc). compose.override.yaml
+  # flips it to the dev form (loopback :8080, --tlsMode disabled, EXTERNALSECURE=false — no Caddy in
+  # front) and re-declares the [oidc] profile so `docker compose --profile oidc up` runs it in dev.
   zitadel:
+    profiles: [oidc]
     # ghcr.io/zitadel/zitadel:v2.68.0 — pinned by digest. Always back up zitadel_db AND keep the
     # matching ZITADEL_MASTERKEY before a deliberate bump (see docs/05-runbooks/backups.md).
     image: ghcr.io/zitadel/zitadel:v2.68.0@sha256:9e0e672e4467fd5b1ad07acf206d61e096886e44ca1347c2deef8b65f8ace2b5
@@ -311,9 +323,9 @@ services:
       zitadel_db:
         condition: service_healthy
       # NOTE: the gate on zitadel-secrets-init lives in infra/docker-compose.prod.yaml, NOT here.
-      # `zitadel` is UNPROFILED (it backs dev too), but zitadel-secrets-init is profiles:[prod]; an
-      # unprofiled service may not depend_on a profiled one (the dev merge would be "invalid compose
-      # project: depends on undefined service"). The prod overlay adds the edge only in the prod merge.
+      # Both are profiles:[oidc], but the dev merge (compose.override.yaml) needs its own unprofiled-in-dev
+      # twin edge (zitadel-secrets-init-dev), so the base keeps only the zitadel_db gate; the prod overlay
+      # adds the prod secrets-init edge in the prod merge.
     # No container healthcheck on purpose: the zitadel image is shell-less/distroless — no /bin/sh
     # and no curl — so a CMD-SHELL `curl ... /debug/healthz` check can NEVER run and would leave the
     # container permanently (unhealthy) even though Zitadel boots fine and serves on :8080. Readiness
@@ -340,7 +352,7 @@ services:
   #   restart:"no"  → a misconfig stays VISIBLE (the run fails loudly; api/web won't start on failure).
   #   idempotent    → `down && up` is safe; if the secret files already exist it short-circuits.
   zitadel-bootstrap:
-    profiles: [prod]
+    profiles: [oidc]
     build:
       context: .
       dockerfile: infra/docker/zitadel-bootstrap.Dockerfile
@@ -466,13 +478,15 @@ services:
       start_period: 10s
     networks: [internal]
 
-  # --- Backup sidecar (OPT-IN) — cron + pg_dump for BOTH databases (prod) ----------
+  # --- Backup sidecar (OPT-IN) — cron + pg_dump, mode-aware (prod) ----------
   # In the `prod` AND a `backup` profile, so it only runs when BOTH are requested alongside the
   # prod stack:
   #   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
   #     --profile prod --profile backup --env-file infra/env/.env.prod up -d backup
-  # Dumps the app DB and the Zitadel DB on a schedule to the host-mounted ./backups dir, prunes
-  # dumps older than the retention window, and (optional, OFF by default) runs an offsite hook.
+  # Dumps the app DB on a schedule to the host-mounted ./backups dir, prunes dumps older than the
+  # retention window, and (optional, OFF by default) runs an offsite hook. In OIDC mode (AUTH_MODE=oidc)
+  # it ALSO dumps the Zitadel DB; in local-auth mode (ADR-0086) there is no zitadel_db, so the cron skips
+  # that dump — otherwise every nightly run would report FAILED (zitadel_db unreachable).
   # Respects "no mandatory cloud" — local-disk only unless you wire BACKUP_OFFSITE_CMD.
   # Full DR procedure (what/order/restore): docs/05-runbooks/backups.md.
   backup:
@@ -492,7 +506,10 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
       # App DB connection (reuses the shared POSTGRES_* + the `db` service name).
       PGHOST: db
-      # Zitadel DB connection (the `zitadel_db` service uses its own credentials).
+      # Auth mode (ADR-0086) — the cron dumps the Zitadel DB ONLY when this is `oidc`. Defaults to `oidc`
+      # so an env without it (a pre-ADR-0086 OIDC deploy) keeps dumping both DBs, byte-identical to before.
+      AUTH_MODE: ${AUTH_MODE:-oidc}
+      # Zitadel DB connection (the `zitadel_db` service uses its own credentials). Used only in OIDC mode.
       ZITADEL_DB_HOST: zitadel_db
       ZITADEL_DB_USER: ${ZITADEL_DB_USER:-zitadel}
       ZITADEL_DB_PASSWORD: ${ZITADEL_DB_PASSWORD}
@@ -513,8 +530,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      zitadel_db:
-        condition: service_healthy
+      # NOTE (ADR-0086): the backup → zitadel_db gate lives in infra/docker-compose.oidc.yaml (OIDC mode
+      # only). zitadel_db is profiles:[oidc]; keeping this edge here made `--profile prod --profile backup`
+      # in local mode parse-fatal (an active backup depending on a profile-excluded zitadel_db). The cron
+      # below already skips the Zitadel dump when AUTH_MODE≠oidc, so there is nothing to gate on in local.
     # Generate a crontab, then run cron in the foreground. Every shell `$` is written as `$$` so
     # Compose's parse-time ${...} interpolation leaves them intact for the container shell at
     # RUNTIME. PGPASSWORD/POSTGRES_* come from env_file; ZITADEL_* are passed explicitly above —
@@ -579,8 +598,14 @@ services:
 
         # App DB — POSTGRES_USER/PASSWORD/DB come from the shared .env.prod (env_file).
         dump_db "app" "/backups/app-$${TS}.dump" "$$POSTGRES_PASSWORD" "$$PGHOST" "$$POSTGRES_USER" "$$POSTGRES_DB"
-        # Zitadel DB — its own credentials.
-        dump_db "zitadel" "/backups/zitadel-$${TS}.dump" "$$ZITADEL_DB_PASSWORD" "$$ZITADEL_DB_HOST" "$$ZITADEL_DB_USER" "$$ZITADEL_DB_NAME"
+        # Zitadel DB — its own credentials. OIDC mode ONLY: in local-auth mode (AUTH_MODE≠oidc) there is
+        # no zitadel_db service, so dumping it would fail every run (ADR-0086). Default oidc => a pre-ADR
+        # OIDC deploy (AUTH_MODE unset) still dumps it, unchanged.
+        if [ "$${AUTH_MODE:-oidc}" = "oidc" ]; then
+          dump_db "zitadel" "/backups/zitadel-$${TS}.dump" "$$ZITADEL_DB_PASSWORD" "$$ZITADEL_DB_HOST" "$$ZITADEL_DB_USER" "$$ZITADEL_DB_NAME"
+        else
+          echo "[lazyit-backup] AUTH_MODE=$${AUTH_MODE:-oidc} (local-auth): skipping the Zitadel DB dump — no zitadel_db in this mode"
+        fi
 
         # Retention sweep — delete dumps older than BACKUP_RETENTION_DAYS. Only ever matches *.dump
         # (verified, promoted) files; *.partial temp files are never left behind on the happy path
@@ -592,6 +617,8 @@ services:
         # loud + non-zero (the local dumps are safe, but the offsite copy didn't happen).
         if [ -n "$${BACKUP_OFFSITE_CMD:-}" ]; then
           for f in "/backups/app-$${TS}.dump" "/backups/zitadel-$${TS}.dump"; do
+            # The Zitadel dump is absent in local-auth mode (skipped above) — don't offsite a missing file.
+            [ -f "$$f" ] || continue
             sh -c "$$BACKUP_OFFSITE_CMD \"\$$1\"" _ "$$f" \
               || fail "offsite hook failed for $$f (local dump is intact; offsite copy did NOT happen)"
           done
@@ -632,7 +659,8 @@ volumes:
   # the FirstInstance machine key here; the zitadel-bootstrap sidecar reads it and writes back
   # oidc-client.json + sa-key.json for api/web. Persisted (a named volume) so creds survive `down`;
   # pair `down -v` with removing it for a clean re-bootstrap. Declared here (not only in the prod
-  # override) because the unprofiled `zitadel` service mounts it for the key export.
+  # override) because the profiles:[oidc] `zitadel` service mounts it for the key export, and the
+  # dev override's zitadel-secrets-init-dev also references it.
   zitadel_secrets:
 
 networks:

@@ -27,7 +27,7 @@ con una view"). See [[0044-recent-activity-view]] and [[0050-user-history-and-ac
 | [[asset-assignment]] | open / close | `asset` | `assigned` (`assignedAt`) · `released` (`releasedAt`) |
 | [[access-grant]] | open / close | `application` | `granted` (`grantedAt`) · `revoked` (`revokedAt`) |
 | [[consumable-movement]] | each movement | `consumable` | `stock_in` / `stock_out` / `stock_adjustment` |
-| [[user-history]] (DEBT-2, #185 / ADR-0058) | the event row | `user` | the lowercased `eventType`: `created` · `updated` · `role_changed` · `manager_changed` · `deleted` · `restored` · `password_reset_sent` |
+| [[user-history]] (DEBT-2, #185 / ADR-0058 / ADR-0086) | the event row | `user` | the lowercased `eventType`: `created` · `updated` · `role_changed` · `manager_changed` · `deleted` · `restored` · `password_reset_sent` · `password_reset_by_admin` (local-mode admin reset) · `password_changed` · `password_reset_completed` (local-mode self-service, ADR-0086 §F4) |
 
 The full closed verb set is the single source of truth for the `action` filter's allowlist
 (`RECENT_ACTIVITY_ACTIONS` in `@lazyit/shared`). An unknown verb on the filter is a 400, never a

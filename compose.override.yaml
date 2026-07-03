@@ -2,10 +2,16 @@
 # auth-zitadel-sot.md §9 and docs/04-development/setup.md.
 #
 # Plain `docker compose up` (from the repo ROOT) auto-loads compose.yaml + THIS file and brings up
-# ONLY the unprofiled backing services — db, meilisearch, valkey, zitadel, zitadel_db — for native
-# `bun run dev` (api/web run on the host at :3000/:3001, NOT in containers). The prod-only services
-# (api, web, migrate, caddy, backup) carry `profiles: [prod]` in compose.yaml, so they stay down
-# here. This file is COMMITTED and never gitignored — it is the canonical dev experience.
+# ONLY the unprofiled backing services — db, meilisearch, valkey — for native `bun run dev` (api/web
+# run on the host at :3000/:3001, NOT in containers). The prod-only services (api, web, migrate, caddy,
+# backup) carry `profiles: [prod]` in compose.yaml, so they stay down here. This file is COMMITTED and
+# never gitignored — it is the canonical dev experience.
+#
+# Local-auth default (ADR-0086): the bundled Zitadel dev stack (zitadel, zitadel_db, and this file's
+# zitadel-secrets-init-dev) is now profiles:[oidc], so plain `docker compose up` no longer starts it —
+# `bun run dev:up` runs against the local-auth API by default (a real DX win: two fewer containers, no
+# health poll, no jq/curl). Opt back into the dev Zitadel with `bun run dev:up --zitadel`
+# (scripts/dev-setup.ts adds `--profile oidc` and brings up zitadel by name — NOT the prod sidecar).
 #
 # What it tunes vs. the canonical compose.yaml (which carries the prod hardening):
 #   - publishes each backing service on 127.0.0.1 (loopback only, never the LAN — SEC-005/ADR-0028)
@@ -49,6 +55,8 @@ services:
     cpus: 0
 
   zitadel_db:
+    # profiles:[oidc] (ADR-0086) — mirrors the base; dev Zitadel is opt-in (`--profile oidc`).
+    profiles: [oidc]
     restart: "no"
     mem_limit: 0
     cpus: 0
@@ -67,6 +75,9 @@ services:
   # `profiles: [prod]` (an empty list can't subtract). A distinct, unprofiled name sidesteps the merge
   # entirely and stays active in the plain `docker compose up` dev run.
   zitadel-secrets-init-dev:
+    # profiles:[oidc] (ADR-0086) — only needed when the dev Zitadel is opted in. dev-setup brings up
+    # zitadel BY NAME under `--profile oidc`, which pulls this init as zitadel's dependency.
+    profiles: [oidc]
     # alpine:3.21 — pinned by digest (matches the prod zitadel-secrets-init in compose.yaml).
     image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
     user: "0:0"
@@ -77,6 +88,9 @@ services:
     networks: [internal]
 
   zitadel:
+    # profiles:[oidc] (ADR-0086) — mirrors the base so plain `docker compose up` skips the dev IdP;
+    # `docker compose --profile oidc up -d zitadel` (what dev-setup --zitadel runs) brings it up.
+    profiles: [oidc]
     # Dev: no HTTPS — Zitadel serves plain HTTP on loopback :8080; Caddy only exists in prod.
     command: start-from-init --masterkey "${ZITADEL_MASTERKEY}" --tlsMode disabled
     restart: unless-stopped

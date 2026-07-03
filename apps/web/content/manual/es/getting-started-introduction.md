@@ -47,9 +47,10 @@ herramientas corporativas, ese es el dolor que viene a quitar.
   de servicio pública para clientes finales.
 - **No es un SaaS multiinquilino.** lazyit se entrega para una sola organización y autoalojado; servir
   a muchos clientes desde una misma instancia compartida queda fuera de alcance.
-- **No es tu proveedor de identidad.** lazyit no es dueño de las contraseñas de inicio de sesión. El
-  inicio de sesión se delega por OIDC a un proveedor de identidad — el integrado que trae, o el tuyo.
-  Consulta [Configuración inicial](/help/getting-started) para la elección.
+- **Inicio de sesión flexible.** Eliges al desplegar cómo inician sesión las personas: **cuentas
+  locales** (lazyit es dueño del nombre de usuario/correo + contraseña — la opción más simple para una
+  LAN) o **inicio de sesión único** delegado por OIDC a un proveedor de identidad (el integrado, o el
+  tuyo). Consulta [Configuración inicial](/help/getting-started) para la elección.
 
 ## Las áreas principales
 

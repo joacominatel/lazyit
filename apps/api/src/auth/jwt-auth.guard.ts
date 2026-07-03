@@ -25,6 +25,7 @@ import {
   verifySecret,
 } from '../service-accounts/service-account-token';
 import { resolveServiceAccountPermissions } from '../service-accounts/service-account-permissions';
+import { LocalCredentialService } from './local/local-credential.service';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -78,6 +79,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly prisma: PrismaService,
     private readonly reflector: Reflector,
+    private readonly localCredentials: LocalCredentialService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -108,10 +110,23 @@ export class JwtAuthGuard implements CanActivate {
       return this.handleServiceAccount(request, bearer);
     }
 
-    const result =
-      process.env.AUTH_MODE === 'shim'
-        ? await this.handleShim(request)
-        : await this.handleOidc(request);
+    // Dispatch by mode (ADR-0086 §3): the `shim ? … : oidc` ternary became a switch when `local` was
+    // added. Order is unchanged — SA-token branch already ran first above; `default` is `oidc` (the only
+    // remaining valid value, since boot-config rejects anything but shim|local|oidc). A local (HS256)
+    // token therefore reaches handleOidc in oidc mode and is rejected (RS256 pin), and an OIDC (RS256)
+    // token reaches handleLocal in local mode and is rejected (HS256 pin) — cross-mode rejection.
+    let result: boolean;
+    switch (process.env.AUTH_MODE) {
+      case 'shim':
+        result = await this.handleShim(request);
+        break;
+      case 'local':
+        result = await this.handleLocal(request);
+        break;
+      default:
+        result = await this.handleOidc(request);
+        break;
+    }
 
     // Unify the human principal (ADR-0048): every existing path still sets request.user; mirror it onto
     // request.principal so the authorization guard + ActorService can read either kind uniformly. An
@@ -244,6 +259,66 @@ export class JwtAuthGuard implements CanActivate {
     // (its whole posture is "missing/invalid actor → anonymous"), so a deactivated user must not keep
     // an authenticated context either.
     request.user = user && user.isActive ? user : undefined;
+    return true;
+  }
+
+  // ---------- local mode (ADR-0086) -----------------------------------------
+
+  /**
+   * Authenticate a HUMAN from a first-party local session token (ADR-0086 §3). DB-FIRST (INV-1), mirroring
+   * handleOidc but with a stateless-JWT revocation via `sessionEpoch`:
+   *   1. Require a Bearer token; verify it with the LocalCredentialService — HS256 PINNED (rejects
+   *      `alg:none` / an RS256-forged token) + `exp` enforced. A bad/expired token → generic 401.
+   *   2. Re-load the User by `sub` on the LIVE-filtered client EVERY request (a soft-deleted row is
+   *      invisible here → 401), so offboarding/deletion takes effect immediately.
+   *   3. Reject (401) when: the token's `epoch` ≠ the row's `sessionEpoch` (REVOCATION — logout /
+   *      password-change / deactivate bump the epoch, killing all prior tokens), the account is inactive,
+   *      or it is `directoryOnly` (a login-incapable directory person must never authenticate).
+   *
+   * A local token is only accepted in local mode; in oidc mode it falls to handleOidc and is rejected
+   * (cross-mode rejection, asserted in tests). Sets request.user; the principal mirror happens in canActivate.
+   */
+  private async handleLocal(
+    request: Request & { user?: User },
+  ): Promise<boolean> {
+    const bearer = this.extractBearer(request);
+    if (!bearer) {
+      throw new UnauthorizedException('Missing Bearer token');
+    }
+
+    let claims: { sub: string; epoch: number };
+    try {
+      claims = await this.localCredentials.verifySession(bearer);
+    } catch {
+      throw new UnauthorizedException('Invalid or expired session token');
+    }
+
+    // A token we minted always carries a uuid sub; guard against a malformed sub reaching the uuid column
+    // (a would-be 500) — treat as invalid. Defense-in-depth: forging a sub requires the signing secret.
+    if (!UUID_REGEX.test(claims.sub)) {
+      throw new UnauthorizedException('Invalid session token');
+    }
+
+    // LIVE-filtered read: the soft-delete extension hides deleted rows, so an offboarded user 401s here.
+    const user = await this.prisma.user.findFirst({
+      where: { id: claims.sub },
+    });
+    if (!user) {
+      throw new UnauthorizedException('Account not found');
+    }
+    // Revocation: any epoch bump (logout / password change / deactivate / offboard) invalidates old tokens.
+    if (user.sessionEpoch !== claims.epoch) {
+      throw new UnauthorizedException('Session has been revoked');
+    }
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account disabled');
+    }
+    // A directory-only person has no login capability by construction — never authenticate one.
+    if (user.directoryOnly) {
+      throw new UnauthorizedException('Account cannot log in');
+    }
+
+    request.user = user;
     return true;
   }
 

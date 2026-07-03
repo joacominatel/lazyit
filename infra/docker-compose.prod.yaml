@@ -9,11 +9,15 @@
 #     env_file — db/zitadel_db/zitadel/meilisearch (api/web/migrate/caddy/backup already declare it
 #     in compose.yaml). Compose still needs --env-file for the ${VAR} interpolation in
 #     `environment:` blocks (resolved at PARSE time, not from env_file). See the header of compose.yaml;
-#   - a reserved `zitadel_secrets` volume mounted read-only into api/web — the home of the future
-#     zitadel-bootstrap sidecar's oidc-client.json (dossier §4c / §9c; the sidecar itself is the NEXT
-#     PR). Reserving it now keeps this override stable when the sidecar lands;
 #   - it leaves the `internal` network (defined in compose.yaml) as the ONLY network — no host-published
 #     ports except Caddy's, which compose.yaml already scopes.
+#
+# NOTE (ADR-0086): the api/web `zitadel_secrets:/zitadel-secrets:ro` mounts and the backup→zitadel_db
+# edge MOVED to infra/docker-compose.oidc.yaml (loaded only in OIDC mode). They are meaningless in
+# local-auth mode (no Zitadel), and the profile flip needs the api/web→zitadel-bootstrap edge out of
+# any always-loaded file to keep `--profile prod` (local) parseable. This override stays mode-agnostic:
+# it applies to BOTH local and OIDC prod deploys (env-file paths, the zitadel-secrets-init gate that
+# only matters when zitadel is active).
 #
 # Deploy (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod`:
 #   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
@@ -60,22 +64,3 @@ services:
 
   meilisearch:
     env_file: [infra/env/.env.prod]
-
-  # api/web read the OIDC/AUTH client secrets the zitadel-bootstrap sidecar writes to the shared
-  # zitadel_secrets volume (dossier §4c): the api reads sa-key.json (ZITADEL_MGMT_SA_KEY_PATH) +
-  # oidc-client.json; the web reads the same OIDC client values. Mounted READ-ONLY here (the sidecar
-  # is the only writer). The api's depends_on (in compose.yaml) gates it on the sidecar completing.
-  api:
-    volumes:
-      - zitadel_secrets:/zitadel-secrets:ro
-  web:
-    volumes:
-      - zitadel_secrets:/zitadel-secrets:ro
-
-volumes:
-  # The zitadel-bootstrap sidecar's exported OIDC client creds + runtime SA key (dossier §9c/§9e).
-  # NOW declared in the canonical compose.yaml too (the unprofiled `zitadel` service mounts it for the
-  # FirstInstance machine-key export); re-listed here is a harmless no-op under the compose merge.
-  # Persisted (named volume) so creds survive `down`; pair `down -v` with removing it for a clean
-  # re-bootstrap (dossier §4e).
-  zitadel_secrets:

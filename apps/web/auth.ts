@@ -23,10 +23,14 @@
  */
 
 import NextAuth, { customFetch } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
 // Type-only import so the `next-auth/jwt` module is in the program and can be augmented
 // below (the `jwt` callback's `token` is typed by this module's `JWT` interface).
 import type {} from "next-auth/jwt";
 
+import { LoginRequestSchema, type LoginResponse } from "@lazyit/shared";
+
+import { apiFetch } from "@/lib/api/client";
 import { loadWebBootstrapOidcFile } from "@/lib/auth/bootstrap-file";
 
 // Zero-touch bootstrap (ADR-0043 Phase 3): before any AUTH_* read below, back-fill them from the
@@ -36,6 +40,15 @@ import { loadWebBootstrapOidcFile } from "@/lib/auth/bootstrap-file";
 loadWebBootstrapOidcFile();
 
 declare module "next-auth" {
+  interface User {
+    /**
+     * Set ONLY on a local (Credentials) sign-in (ADR-0086 §6): the first-party session token the API
+     * minted in `POST /auth/login`. The `authorize` callback returns it here; the `jwt` callback moves
+     * it onto `token.accessToken` (a local sign-in has no `account.access_token` to snapshot). OIDC
+     * sign-ins never set this — they carry the token via `account.access_token`.
+     */
+    accessToken?: string;
+  }
   interface Session {
     /** IdP access token, forwarded as `Authorization: Bearer` on API calls. */
     accessToken: string;
@@ -84,6 +97,31 @@ declare module "next-auth/jwt" {
  * very short-lived tokens or refresh storms appear.
  */
 const REFRESH_SKEW_SECONDS = 30;
+
+/**
+ * Whether the session cookie carries the `Secure` flag / `__Secure-` prefix (ADR-0086 §6, security).
+ *
+ * Auth.js defaults this to `NODE_ENV === "production"`. That default is WRONG for a self-hosted
+ * prod-over-HTTP LAN deploy (`AUTH_MODE=local`): the build is production, so Auth.js would emit a
+ * `Secure` cookie the browser silently drops over plain HTTP — a silent login failure with no error.
+ * We instead key it to the ACTUAL origin scheme (`AUTH_URL` → `NEXTAUTH_URL` → `WEB_ORIGIN`): `https`
+ * → Secure, `http` → not. `HttpOnly` + `SameSite=Lax` stay on always (Auth.js's own defaults for the
+ * session cookie — untouched here). For an existing HTTPS deploy `AUTH_URL` is `https://…`, so this
+ * returns `true` — byte-identical to today's `NODE_ENV=production` behavior. When no origin var is set
+ * we fall back to the stock `NODE_ENV` default so nothing changes for callers that never set one.
+ */
+function deriveUseSecureCookies(): boolean {
+  const origin =
+    process.env.AUTH_URL ?? process.env.NEXTAUTH_URL ?? process.env.WEB_ORIGIN;
+  if (origin) {
+    try {
+      return new URL(origin).protocol === "https:";
+    } catch {
+      // Malformed origin → fall through to the stock default rather than guess.
+    }
+  }
+  return process.env.NODE_ENV === "production";
+}
 
 const internalIssuer = process.env.AUTH_INTERNAL_ISSUER;
 const externalIssuer = process.env.AUTH_ISSUER;
@@ -178,61 +216,122 @@ async function refreshAccessToken(refreshToken: string): Promise<
   }
 }
 
+/**
+ * Generic OIDC provider. Auth.js runs discovery from `issuer`
+ * (`{issuer}/.well-known/openid-configuration`) — no Zitadel-specific code.
+ * BYOI: replace these three env vars to swap IdPs.
+ *
+ * When AUTH_INTERNAL_ISSUER is set, the custom fetch (above) rewrites server-side OIDC
+ * request URLs from the external issuer origin to the internal Docker origin. We rely on
+ * discovery + that rewriting fetch alone: oauth4webapi's discovery is driven by `issuer`,
+ * so wellKnown / token / userinfo overrides would be ignored and only add confusion.
+ *
+ * Only registered when `externalIssuer` (`AUTH_ISSUER`) is set (issue #1008 / ADR-0086). In
+ * `AUTH_MODE=local` that env is unset, so `issuer` would be `undefined` and Auth.js fails to
+ * initialize this provider — every Auth.js route (starting with `GET /api/auth/csrf`) then 500s
+ * with "There was a problem with the server configuration", breaking the session for local
+ * deploys entirely. Dropping the provider outright when there is no issuer leaves Credentials as
+ * the sole provider in local mode, so the handler initializes cleanly; an OIDC deploy (issuer
+ * set) is unaffected.
+ */
+const oidcProvider = {
+  id: "oidc",
+  name: "Your organization",
+  type: "oidc" as const,
+  issuer: externalIssuer,
+  clientId: process.env.AUTH_CLIENT_ID,
+  clientSecret: process.env.AUTH_CLIENT_SECRET,
+  // Request the standard identity scopes so the IdP returns the user's
+  // `name`/`email` claims — without this the provider asks for `openid` only
+  // and `session.user.name` stays empty (the topbar shows "—"). NB: the IdP
+  // (e.g. Zitadel) must also grant these scopes and emit the claims (for
+  // Zitadel: enable "User Info inside ID Token" on the app) — see ADR-0037/0039.
+  //
+  // `offline_access` asks the IdP for a `refresh_token` so the `jwt` callback can
+  // silently renew the access token before it expires (issue #658). Zitadel grants
+  // it for confidential web clients. If the IdP does NOT return a refresh_token, the
+  // refresh logic degrades gracefully to the existing #657 global-401 path — the
+  // session is never broken by a missing refresh_token.
+  // `prompt=login` forces the IdP to re-authenticate rather than reuse an existing browser
+  // session, so Zitadel skips its shared account-picker (issue #952: a brand-new employee was
+  // shown OTHER people's accounts on a machine that had prior sessions). The per-user `ui_locales`
+  // param is passed dynamically at sign-in time from the /login page (the active next-intl locale).
+  authorization: { params: { scope: "openid profile email offline_access", prompt: "login" } },
+  // Map the OIDC standard claims to the Auth.js user. Fall back to
+  // `preferred_username` / a `given_name + family_name` join when an IdP omits
+  // the composite `name` claim, so the topbar never falls back to "—".
+  profile(profile: { name?: string; given_name?: string; family_name?: string; preferred_username?: string; email?: string; sub: string }) {
+    const fullName =
+      profile.name ??
+      [profile.given_name, profile.family_name]
+        .filter(Boolean)
+        .join(" ") ??
+      profile.preferred_username ??
+      null;
+    return {
+      id: profile.sub,
+      name: fullName || profile.preferred_username || null,
+      email: profile.email ?? null,
+    };
+  },
+  ...(internalIssuer ? { [customFetch]: forwardedFetch } : {}),
+};
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  /**
-   * Generic OIDC provider. Auth.js runs discovery from `issuer`
-   * (`{issuer}/.well-known/openid-configuration`) — no Zitadel-specific code.
-   * BYOI: replace these three env vars to swap IdPs.
-   *
-   * When AUTH_INTERNAL_ISSUER is set, the custom fetch (above) rewrites server-side OIDC
-   * request URLs from the external issuer origin to the internal Docker origin. We rely on
-   * discovery + that rewriting fetch alone: oauth4webapi's discovery is driven by `issuer`,
-   * so wellKnown / token / userinfo overrides would be ignored and only add confusion.
-   */
   providers: [
-    {
-      id: "oidc",
-      name: "Your organization",
-      type: "oidc",
-      issuer: externalIssuer,
-      clientId: process.env.AUTH_CLIENT_ID,
-      clientSecret: process.env.AUTH_CLIENT_SECRET,
-      // Request the standard identity scopes so the IdP returns the user's
-      // `name`/`email` claims — without this the provider asks for `openid` only
-      // and `session.user.name` stays empty (the topbar shows "—"). NB: the IdP
-      // (e.g. Zitadel) must also grant these scopes and emit the claims (for
-      // Zitadel: enable "User Info inside ID Token" on the app) — see ADR-0037/0039.
-      //
-      // `offline_access` asks the IdP for a `refresh_token` so the `jwt` callback can
-      // silently renew the access token before it expires (issue #658). Zitadel grants
-      // it for confidential web clients. If the IdP does NOT return a refresh_token, the
-      // refresh logic degrades gracefully to the existing #657 global-401 path — the
-      // session is never broken by a missing refresh_token.
-      // `prompt=login` forces the IdP to re-authenticate rather than reuse an existing browser
-      // session, so Zitadel skips its shared account-picker (issue #952: a brand-new employee was
-      // shown OTHER people's accounts on a machine that had prior sessions). The per-user `ui_locales`
-      // param is passed dynamically at sign-in time from the /login page (the active next-intl locale).
-      authorization: { params: { scope: "openid profile email offline_access", prompt: "login" } },
-      // Map the OIDC standard claims to the Auth.js user. Fall back to
-      // `preferred_username` / a `given_name + family_name` join when an IdP omits
-      // the composite `name` claim, so the topbar never falls back to "—".
-      profile(profile) {
-        const fullName =
-          profile.name ??
-          [profile.given_name, profile.family_name]
-            .filter(Boolean)
-            .join(" ") ??
-          profile.preferred_username ??
-          null;
-        return {
-          id: profile.sub,
-          name: fullName || profile.preferred_username || null,
-          email: profile.email ?? null,
-        };
+    /**
+     * First-party local credentials provider (ADR-0086 §6, `AUTH_MODE=local`). Always registered —
+     * it lives ALONGSIDE the OIDC provider — OIDC instances never invoke it (the /login screen only
+     * calls `signIn("credentials")` when `authMode === "local"`), so the OIDC flow is byte-identical.
+     * `authorize` delegates the actual credential check to the API's `POST /auth/login` (argon2id,
+     * rate-limit, uniform 401 — the browser never sees a password hash) and returns the API-minted
+     * session token on the user; the `jwt` callback moves it onto `token.accessToken`, so the entire
+     * downstream (Bearer forwarding, the proxy gate, the global-401 handler) is unchanged.
+     */
+    Credentials({
+      id: "credentials",
+      name: "Local account",
+      credentials: {
+        identifier: { label: "Email or username", type: "text" },
+        password: { label: "Password", type: "password" },
       },
-      ...(internalIssuer ? { [customFetch]: forwardedFetch } : {}),
-    },
+      async authorize(rawCredentials) {
+        // Validate against the SHARED login contract before touching the network (never trust the form).
+        const parsed = LoginRequestSchema.safeParse(rawCredentials);
+        if (!parsed.success) return null;
+        try {
+          const result = await apiFetch<LoginResponse>("/auth/login", {
+            method: "POST",
+            body: parsed.data,
+          });
+          const name =
+            [result.user.firstName, result.user.lastName]
+              .filter(Boolean)
+              .join(" ")
+              .trim() ||
+            result.user.username ||
+            result.user.email;
+          return {
+            id: result.user.id,
+            name,
+            email: result.user.email,
+            // Carried onto the JWT in the `jwt` callback (a Credentials sign-in has no `account.access_token`).
+            accessToken: result.token,
+          };
+        } catch {
+          // Any failure (incl. the API's uniform 401) → null → Auth.js reports a generic CredentialsSignin
+          // error. No user enumeration: the backend already returns one indistinguishable 401 for every case.
+          return null;
+        }
+      },
+    }),
+    // Only registered when an OIDC issuer is configured — see `oidcProvider`'s doc comment
+    // (issue #1008): an unconfigured OIDC provider 500s the whole Auth.js handler in local mode.
+    ...(externalIssuer ? [oidcProvider] : []),
   ],
+
+  // `Secure` keyed to the real origin scheme, not `NODE_ENV` (ADR-0086 §6) — see deriveUseSecureCookies.
+  useSecureCookies: deriveUseSecureCookies(),
 
   session: {
     /** Stateless JWT session — no session DB required (ADR-0039). */
@@ -254,15 +353,39 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      *   token in place (and set `error` on failure). The next API call 401s and the existing
      *   global-401 handler (issue #657) signs the user out — the intended safety net.
      */
-    async jwt({ token, account, user }) {
+    async jwt({ token, account, user, trigger, session }) {
       // `user` is only present on the initial sign-in; persist identity on the token.
       if (user) {
         token.name = user.name ?? token.name;
         token.email = user.email ?? token.email;
       }
 
-      // Initial sign-in: snapshot the tokens from the IdP's token response.
+      // Client-driven session update (`useSession().update({ accessToken })`) — used by the local-mode
+      // change-password flow (ADR-0086 §F4b): the API minted a FRESH session token at the new
+      // `sessionEpoch` (the change revoked the old one), so persist it into the cookie here or a reload
+      // would re-seed the dead token. Guarded to a well-typed string; nothing else about the token
+      // changes, so the OIDC refresh cycle below is untouched.
+      if (trigger === "update") {
+        const next = (session as { accessToken?: unknown } | undefined)?.accessToken;
+        if (typeof next === "string" && next.length > 0) {
+          token.accessToken = next;
+        }
+        return token;
+      }
+
+      // Initial sign-in: snapshot the tokens from the provider's response.
       if (account) {
+        // Local (Credentials) sign-in (ADR-0086 §6): there is no IdP token exchange — the API already
+        // minted the session token and `authorize` returned it on `user`. There is no OIDC refresh cycle
+        // for a local session (no `expiresAt`/`refreshToken`), so the refresh block below is skipped and
+        // session lifetime is governed API-side (the `sessionEpoch` re-check + short token TTL).
+        if (account.type === "credentials") {
+          token.accessToken = user?.accessToken ?? token.accessToken;
+          token.expiresAt = undefined;
+          token.refreshToken = undefined;
+          delete token.error;
+          return token;
+        }
         token.accessToken = account.access_token ?? token.accessToken;
         // `expires_at` is seconds since epoch (oauth4webapi normalises `expires_in`).
         token.expiresAt =
