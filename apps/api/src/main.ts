@@ -7,8 +7,10 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { validateBootConfig } from './auth/boot-config';
 import { loadBootstrapOidcFile } from './auth/bootstrap-file';
+import { decideModeMarker } from './auth/mode-marker';
 import { addStandardErrorResponses } from './common/openapi-errors';
 import { parseTrustProxy } from './common/trust-proxy';
+import { PrismaService } from './prisma/prisma.service';
 
 async function bootstrap() {
   // Zero-touch bootstrap (ADR-0043 Phase 3): back-fill OIDC_* / ZITADEL_MGMT_PROJECT_ID from the
@@ -30,6 +32,24 @@ async function bootstrap() {
   app.useLogger(app.get(Logger));
   // Ensure PrismaService.onModuleDestroy runs on SIGTERM/SIGINT (graceful $disconnect).
   app.enableShutdownHooks();
+
+  // Persisted auth-mode marker (ADR-0086 §1): the auth mode is immutable, so refuse to boot when the
+  // operator has flipped AUTH_MODE on a populated instance (oidc↔local half-migrates and bricks). Needs
+  // the DB, so it runs here (after create — Prisma exists) but BEFORE listen — a mismatch never serves.
+  // A missing marker row (fresh install / not yet through /setup) accepts env.AUTH_MODE. F1a only READS
+  // it (the write is F1c), so until then the marker is always absent and this check always passes.
+  const marker = await app
+    .get(PrismaService)
+    .instanceConfig.findUnique({ where: { id: 'singleton' } });
+  const modeDecision = decideModeMarker(
+    marker?.authMode,
+    process.env.AUTH_MODE,
+  );
+  if (!modeDecision.ok) {
+    new NestLogger('Bootstrap').error(`CRITICAL: ${modeDecision.message}`);
+    await app.close();
+    process.exit(1);
+  }
 
   // Trust proxy (SEC-010): when the API sits behind the Caddy reverse proxy, `req.ip` must be the
   // VERIFIED client — not the client-controllable leftmost X-Forwarded-For token. Express only

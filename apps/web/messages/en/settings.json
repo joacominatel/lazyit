@@ -56,7 +56,8 @@
     },
     "identityProvider": {
       "zitadel": "Zitadel (bundled)",
-      "generic-oidc": "Generic OIDC (bring your own)"
+      "generic-oidc": "Generic OIDC (bring your own)",
+      "local": "Local accounts"
     },
     "updates": {
       "title": "Version & updates",

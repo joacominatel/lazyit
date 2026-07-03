@@ -56,7 +56,8 @@
     },
     "identityProvider": {
       "zitadel": "Zitadel (incluido)",
-      "generic-oidc": "OIDC genérico (usa el tuyo)"
+      "generic-oidc": "OIDC genérico (usa el tuyo)",
+      "local": "Cuentas locales"
     },
     "updates": {
       "title": "Versión y actualizaciones",

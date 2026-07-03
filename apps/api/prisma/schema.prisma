@@ -73,6 +73,19 @@ model User {
   // and any person sub-field with no native home). Same posture as Asset.specs (ADR-0007): jsonb,
   // optional, only populated on directory rows. NOT validated per-field in this MVP.
   directoryAttrs Json?
+
+  // Local (first-party) auth credentials — ADR-0086, AUTH_MODE=local. ALL nullable/defaulted (additive,
+  // no backfill): OIDC-linked users and directoryOnly rows never carry one. The SCHEMA only STORES these;
+  // hashing/verify/login live in the LocalCredentialService (F1b) — F1a lands the columns the later phases
+  // build on. `passwordHash` is argon2id, PHC-encoded with a per-hash salt (params pinned in @lazyit/shared);
+  // a null/empty hash FAILS CLOSED at login (never verifies against any password). `passwordUpdatedAt`
+  // timestamps the last credential set (admin reset / self-change). `sessionEpoch` is the token-version for
+  // revocation: logout / password-change / deactivate / offboard BUMP it and the guard's handleLocal rejects
+  // any token minted at a lower epoch (ADR-0086 §3) — a stateless-JWT revocation without a session table.
+  passwordHash      String?
+  passwordUpdatedAt DateTime?
+  sessionEpoch      Int       @default(0)
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
@@ -566,6 +579,30 @@ model AssetTagScheme {
   // No deletedAt: mutable instance config, never soft-deleted (ADR-0006 / ADR-0063 §1). Keep OUT of
   // SOFT_DELETABLE_MODELS so reads are not auto-scoped to `deletedAt: null` (the column doesn't exist).
   @@map("asset_tag_scheme")
+}
+
+/// Instance-wide singleton config — the persisted AUTH_MODE marker (ADR-0086 §1). The auth mode is chosen
+/// ONCE at first deploy and is immutable; this row makes that enforceable rather than documentation-only.
+/// It is written ONCE at the first successful `/setup` (F1c) and READ at every boot: if `env.AUTH_MODE` ≠
+/// this stored `authMode`, the API REFUSES to start (fail-loud), because switching modes on a populated
+/// instance half-migrates and bricks (oidc users have `externalId`/no password; local users the reverse).
+/// A MISSING row = fresh install / not yet set up → boot accepts `env.AUTH_MODE`. F1a only READS it
+/// defensively (the write is F1c). Follows the AssetTagScheme single-row pattern (ADR-0063 §1).
+model InstanceConfig {
+  /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it), so the table
+  /// can hold AT MOST one row and a second insert is structurally impossible. Not a generated id: there is
+  /// exactly one config row for the whole instance, so its id is a known constant (AssetTagScheme precedent).
+  id        String   @id @default("singleton")
+  /// The persisted auth-mode marker — one of shim|local|oidc. A plain String (not a DB enum): the source of
+  /// truth for the value set is the zod enum in @lazyit/shared / boot-config; this is a defensive boot marker,
+  /// not a domain enum, so a String keeps migrations trivial and avoids a second enum definition to drift.
+  authMode  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // No deletedAt: mutable instance config, never soft-deleted (ADR-0006 / AssetTagScheme precedent). Keep
+  // OUT of SOFT_DELETABLE_MODELS so reads are not auto-scoped to `deletedAt: null` (the column doesn't exist).
+  @@map("instance_config")
 }
 
 /// Instance SMTP settings — the singleton config store for OUTBOUND EMAIL (issue #615, ADR-0079).
