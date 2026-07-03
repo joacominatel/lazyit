@@ -16,10 +16,7 @@ import { UserHistoryEventTypeSchema } from '@lazyit/shared';
  * revisions automatically, not just the current one.
  */
 
-const MIGRATIONS_DIR = path.resolve(
-  __dirname,
-  '../../prisma/migrations',
-);
+const MIGRATIONS_DIR = path.resolve(__dirname, '../../prisma/migrations');
 
 /** The SQL string that marks the start of a recent_activity view definition. */
 const VIEW_DEFINITION_MARKER = 'CREATE OR REPLACE VIEW "recent_activity"';
@@ -37,9 +34,7 @@ function resolveCanonicalViewMigration(): {
     .filter(
       (entry) =>
         !entry.startsWith('.') &&
-        fs
-          .statSync(path.join(MIGRATIONS_DIR, entry))
-          .isDirectory(),
+        fs.statSync(path.join(MIGRATIONS_DIR, entry)).isDirectory(),
     )
     .sort(); // lexicographic = chronological (YYYYMMDDHHMMSS_ prefix)
 
@@ -67,9 +62,7 @@ function resolveCanonicalViewMigration(): {
  * `{ 'ENUM_VALUE' => 'summary text' }` for every `WHEN '<VALUE>' THEN '<summary>'` pair found
  * inside the block that follows `CASE uh."eventType"::text`.
  */
-function extractUserHistorySummaryBranches(
-  sql: string,
-): Map<string, string> {
+function extractUserHistorySummaryBranches(sql: string): Map<string, string> {
   // Isolate the UserHistory CASE block: starts at `CASE uh."eventType"::text` and ends at the
   // first `END` keyword that closes it. We grab everything between them.
   const caseStart = sql.indexOf('CASE uh."eventType"::text');
@@ -127,9 +120,7 @@ describe('recent_activity view — UserHistory CASE completeness (regression gua
     }
 
     if (missingBranches.length > 0 || blankSummaries.length > 0) {
-      const lines: string[] = [
-        `Canonical view migration: ${migrationName}`,
-      ];
+      const lines: string[] = [`Canonical view migration: ${migrationName}`];
       if (missingBranches.length > 0) {
         lines.push(
           `Missing WHEN branches (add them to the view SQL): ${missingBranches.join(', ')}`,
