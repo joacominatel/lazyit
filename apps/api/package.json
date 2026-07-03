@@ -18,6 +18,7 @@
     "lint:fix": "eslint . --fix",
     "reindex:all": "bun scripts/reindex-all.ts",
     "set-role": "bun scripts/set-role.ts",
+    "reset-admin-password": "bun scripts/reset-admin-password.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
