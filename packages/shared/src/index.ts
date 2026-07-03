@@ -8,6 +8,8 @@
 export * from "./clone/clone-defaults";
 export * from "./clone/clone-user-payload";
 export * from "./constants/app";
+// Local (first-party) auth — argon2id params, password cap, session-token TTL/alg (ADR-0086, F1b).
+export * from "./constants/local-auth";
 export * from "./schemas/access-grant";
 export * from "./schemas/access-grant-list";
 export * from "./schemas/access-request";
@@ -37,6 +39,8 @@ export * from "./schemas/asset-tag-backfill";
 export * from "./schemas/asset-tag-scheme";
 export * from "./schemas/attachment";
 export * from "./schemas/audit-log-query";
+// Local-mode login request/response wire shapes (ADR-0086 §3, F1b).
+export * from "./schemas/auth-login";
 export * from "./schemas/application-list";
 export * from "./schemas/batch";
 export * from "./schemas/config";
