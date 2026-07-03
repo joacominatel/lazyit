@@ -25,13 +25,17 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { DEFAULT_ROLE_PERMISSIONS } from '@lazyit/shared';
 import { PrismaClient, Role } from '../generated/prisma/client';
 import { seedCategoriesOnce } from '../src/prisma/seed-categories';
+import { LocalCredentialService } from '../src/auth/local/local-credential.service';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error('DATABASE_URL is not set');
 }
 
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString }),
+});
+const credentials = new LocalCredentialService();
 
 // The seeded administrator — DEV CONVENIENCE ONLY, OPT-IN (#333). Seeded ONLY when SEED_ADMIN_EMAIL
 // is explicitly set; there is NO default. In a prod / zero-touch deploy SEED_ADMIN_EMAIL is UNSET, so
@@ -42,6 +46,24 @@ const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) })
 // because the operator's IdP email never matches the seed's `admin@lazyit.local`. For local dev with
 // the X-User-Id shim, set SEED_ADMIN_EMAIL=admin@lazyit.local in apps/api/.env. Bun auto-loads .env.
 const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL?.trim() || undefined;
+
+// SEED_ADMIN_PASSWORD — local-auth (ADR-0086) dev/test convenience, OPT-IN and gated to
+// NON-production ONLY (#333 lesson: a passworded default is a footgun the moment it reaches a real
+// deploy). Paired with SEED_ADMIN_EMAIL — there is no seeded admin to attach a password to
+// otherwise. Lets an AUTH_MODE=local dev/test setup log in without a manual `reset-admin-password`
+// CLI run. In production the var is IGNORED — with a loud warning — no matter what an operator sets
+// it to; the only ways to get a first local-auth admin password in production are the /setup wizard
+// or the `reset-admin-password` recovery CLI (ADR-0086 §5).
+const rawSeedAdminPassword = process.env.SEED_ADMIN_PASSWORD;
+if (rawSeedAdminPassword && process.env.NODE_ENV === 'production') {
+  console.warn(
+    'SEED_ADMIN_PASSWORD is set but NODE_ENV=production — IGNORING it. Seeding a password in production is never allowed (#333); use the reset-admin-password CLI or the /setup wizard instead.',
+  );
+}
+const SEED_ADMIN_PASSWORD =
+  rawSeedAdminPassword && process.env.NODE_ENV !== 'production'
+    ? rawSeedAdminPassword
+    : undefined;
 
 // Initial asset categories. Users can add / edit / soft-delete categories afterwards; none of
 // these is special. Icons (heroicon names) are left unset for the frontend to assign.
@@ -106,6 +128,16 @@ async function main() {
   // creates the row only when no LIVE admin with that email exists.
   if (SEED_ADMIN_EMAIL) {
     const adminEmail = SEED_ADMIN_EMAIL.toLowerCase();
+    // Local-auth password (dev/test only, see SEED_ADMIN_PASSWORD above) — hashed with the exact
+    // argon2id params the app targets (LocalCredentialService), so it verifies exactly like any
+    // app-set hash. Undefined (and therefore omitted from `data`) whenever the var is unset or the
+    // process is production.
+    const passwordFields = SEED_ADMIN_PASSWORD
+      ? {
+          passwordHash: await credentials.hash(SEED_ADMIN_PASSWORD),
+          passwordUpdatedAt: new Date(),
+        }
+      : undefined;
     const existingAdmin = await prisma.user.findFirst({
       where: { email: adminEmail, deletedAt: null },
       select: { id: true },
@@ -113,7 +145,7 @@ async function main() {
     if (existingAdmin) {
       await prisma.user.update({
         where: { id: existingAdmin.id },
-        data: { role: Role.ADMIN },
+        data: { role: Role.ADMIN, ...passwordFields },
       });
     } else {
       await prisma.user.create({
@@ -122,10 +154,17 @@ async function main() {
           firstName: 'Admin',
           lastName: 'User',
           role: Role.ADMIN,
+          ...passwordFields,
         },
       });
     }
-    console.log(`Seeded ADMIN user ${adminEmail} (SEED_ADMIN_EMAIL set).`);
+    console.log(
+      `Seeded ADMIN user ${adminEmail} (SEED_ADMIN_EMAIL set)${
+        passwordFields
+          ? ' with a local-auth password (SEED_ADMIN_PASSWORD, dev-only).'
+          : '.'
+      }`,
+    );
   } else {
     console.log(
       'No SEED_ADMIN_EMAIL set — skipping admin seed; the /setup wizard or first OIDC login owns the first ADMIN (ADR-0043).',
