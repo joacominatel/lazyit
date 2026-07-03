@@ -43,6 +43,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
+import { AllowPasswordChangeRequired } from '../auth/allow-password-change-required.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
 import { PasswordResetUnsupportedError } from '../auth/identity/identity-provider.interface';
@@ -257,6 +258,9 @@ export class UsersController {
   // caller (never another user), so it is a self-read, not a directory read. Gating it would break the
   // admin-UI gate for VIEWER. Only the cross-user DIRECTORY reads below carry `user:read`.
   @Get('me')
+  // Exempt from the forced-change gate (ADR-0086 §F4): a user who still owes a one-time-credential change
+  // must be able to self-read (the payload carries `mustChangePassword`) so the web can render the wall.
+  @AllowPasswordChangeRequired()
   @ApiOperation({
     summary: 'The current authenticated user (including their RBAC role)',
     description:

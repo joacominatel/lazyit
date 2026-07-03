@@ -117,3 +117,44 @@ export function renderNotificationEmail(input: {
 
   return { subject, text, html };
 }
+
+/**
+ * Render the local-mode password-reset email (ADR-0086 §F4). A single branded message carrying the
+ * one-time reset link — same look as {@link renderNotificationEmail}, no templating framework. The link
+ * embeds the RAW token (which the server stored only as a SHA-256); it expires within the hour and is
+ * single-use. `resetUrl` is built by the caller from WEB_ORIGIN; it is HTML-escaped defensively even
+ * though it is server-built.
+ */
+export function renderPasswordResetEmail(input: {
+  resetUrl: string;
+  brandName: string;
+  ttlMinutes: number;
+}): RenderedEmail {
+  const { resetUrl, brandName, ttlMinutes } = input;
+  const subject = `Reset your ${brandName} password`;
+  const text = [
+    `A password reset was requested for your ${brandName} account.`,
+    '',
+    `Reset your password: ${resetUrl}`,
+    '',
+    `This link expires in ${ttlMinutes} minutes and can be used once. If you did not request this, you can safely ignore this email — your password will not change.`,
+    '',
+    `— ${brandName}`,
+  ].join('\n');
+
+  const safeUrl = escapeHtml(resetUrl);
+  const html = `<!doctype html><html><body style="margin:0;background:#f5f4f2;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1c1917">
+  <div style="max-width:560px;margin:0 auto;padding:32px 24px">
+    <div style="background:#ffffff;border:1px solid #e7e5e4;border-radius:8px;padding:28px">
+      <div style="font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#7b2d26;margin-bottom:12px">${escapeHtml(brandName)}</div>
+      <h1 style="margin:0;font-size:19px;line-height:1.35;font-weight:600">Reset your password</h1>
+      <p style="margin:12px 0 0;font-size:15px;line-height:1.5;color:#44403c">A password reset was requested for your ${escapeHtml(brandName)} account. Click below to choose a new password.</p>
+      <p style="margin:24px 0 0"><a href="${safeUrl}" style="display:inline-block;background:#7b2d26;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-size:14px">Reset password</a></p>
+      <p style="margin:20px 0 0;font-size:13px;line-height:1.5;color:#78716c">This link expires in ${ttlMinutes} minutes and can be used once. If you did not request this, you can safely ignore this email — your password will not change.</p>
+    </div>
+    <p style="margin:20px 4px 0;font-size:12px;color:#a8a29e">Sent by your ${escapeHtml(brandName)} instance.</p>
+  </div>
+</body></html>`;
+
+  return { subject, text, html };
+}

@@ -27,6 +27,11 @@ export const UserHistoryEventTypeSchema = z.enum([
   // An admin minted a local temp-password (AUTH_MODE=local, ADR-0086 §5). Distinct from
   // PASSWORD_RESET_SENT (which means an IdP reset LINK was requested in OIDC mode).
   "PASSWORD_RESET_BY_ADMIN",
+  // The user CHANGED their own password via self-service (AUTH_MODE=local, ADR-0086 §F4). Actor == subject.
+  "PASSWORD_CHANGED",
+  // The user RESET their own password via a forgot-password email token (AUTH_MODE=local, ADR-0086 §F4).
+  // Distinct from PASSWORD_RESET_BY_ADMIN (an admin acted) — here the SUBJECT reset it themselves via token.
+  "PASSWORD_RESET_COMPLETED",
 ]);
 
 /** Contextual data attached to an event (e.g. `{ from, to }` on ROLE_CHANGED). Unvalidated jsonb. */

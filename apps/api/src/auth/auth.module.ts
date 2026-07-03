@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { PinoLogger } from 'nestjs-pino';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
+import { MustChangePasswordGuard } from './must-change-password.guard';
 import { PermissionResolverService } from './permission-resolver.service';
 import { IDENTITY_PROVIDER } from './identity/identity-provider.interface';
 import { createIdentityProvider } from './identity/identity-provider.factory';
@@ -11,12 +12,16 @@ import { LocalProvisioningService } from './local/local-provisioning.service';
 
 /**
  * Global auth module. Registers the application-wide guards via APP_GUARD, IN ORDER:
- *   1. JwtAuthGuard — authentication (ADR-0038): sets request.user (OIDC JWT or X-User-Id shim).
- *   2. RolesGuard   — authorization (ADR-0040 → ADR-0046 P4): enforces @RequirePermission
+ *   1. JwtAuthGuard           — authentication (ADR-0038): sets request.user (OIDC JWT / local session /
+ *      X-User-Id shim).
+ *   2. MustChangePasswordGuard — forced password change (ADR-0086 §F4): in local mode, walls off a
+ *      mustChangePassword=true human from every non-exempt route (403 PASSWORD_CHANGE_REQUIRED) BEFORE
+ *      authorization. A no-op outside local mode / for non-flagged users / public + exempt routes.
+ *   3. RolesGuard             — authorization (ADR-0040 → ADR-0046 P4): enforces @RequirePermission
  *      AFTER request.user is populated.
  *
- * NestJS runs multiple APP_GUARD providers in registration order, so RolesGuard MUST be listed after
- * JwtAuthGuard or it would read an empty request.user. PrismaService is available globally
+ * NestJS runs multiple APP_GUARD providers in registration order, so MustChangePasswordGuard and RolesGuard
+ * MUST be listed after JwtAuthGuard or they would read an empty request.user. PrismaService is available globally
  * (PrismaModule is @Global), so JwtAuthGuard and the {@link PermissionResolverService} can inject it
  * without importing PrismaModule here.
  *
@@ -41,6 +46,9 @@ import { LocalProvisioningService } from './local/local-provisioning.service';
     JwtAuthGuard,
     PermissionResolverService,
     RolesGuard,
+    // Forced-change gate (ADR-0086 §F4): blocks a mustChangePassword=true human from every non-exempt
+    // route (local mode only). Provided so it can be an APP_GUARD; see the ordered registration below.
+    MustChangePasswordGuard,
     // Local (first-party) credential + session primitives (ADR-0086 §3). Provided here (and exported) so
     // BOTH the guard's handleLocal branch and the LocalAuthModule's LoginService inject the SAME instance.
     LocalCredentialService,
@@ -50,7 +58,11 @@ import { LocalProvisioningService } from './local/local-provisioning.service';
     LocalProvisioningService,
     // Authentication first: populate request.user.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
-    // Authorization second: enforce @RequirePermission against the now-populated request.user.
+    // Forced password change (ADR-0086 §F4) second: a local user who still owes a one-time-credential
+    // change is walled off from every non-exempt route (403 PASSWORD_CHANGE_REQUIRED) BEFORE any
+    // authorization runs. Reads request.user set above; a no-op outside local mode / for non-flagged users.
+    { provide: APP_GUARD, useClass: MustChangePasswordGuard },
+    // Authorization third: enforce @RequirePermission against the now-populated request.user.
     { provide: APP_GUARD, useClass: RolesGuard },
     // IdP write-back provider (ADR-0043), selected by IDENTITY_PROVIDER_TYPE. The request-scoped
     // PinoLogger is injected and threaded into the Zitadel management client so its failure WARN

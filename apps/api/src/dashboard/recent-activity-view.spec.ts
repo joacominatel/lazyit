@@ -140,12 +140,12 @@ describe('recent_activity view — UserHistory CASE completeness (regression gua
     );
   });
 
-  it('the canonical migration is the expected 20260703010000_local_auth_provisioning (update if view is re-issued)', () => {
+  it('the canonical migration is the expected 20260703020000_password_lifecycle (update if view is re-issued)', () => {
     // This assertion is intentionally explicit: if someone re-issues the view in a NEW migration
     // the test still passes (the guard auto-upgrades), but this test will FAIL to remind you to
     // update this name. Delete or re-pin this case when the canonical migration changes.
-    // Re-pinned in F1c (ADR-0086 §5): the local-auth-provisioning migration re-issues the view to add
-    // the PASSWORD_RESET_BY_ADMIN summary branch (superseding 20260611180848_user_manager_clone).
-    expect(migrationName).toBe('20260703010000_local_auth_provisioning');
+    // Re-pinned in F4a (ADR-0086 §F4): the password-lifecycle migration re-issues the view to add the
+    // PASSWORD_CHANGED + PASSWORD_RESET_COMPLETED summary branches (superseding 20260703010000_local_auth_provisioning).
+    expect(migrationName).toBe('20260703020000_password_lifecycle');
   });
 });

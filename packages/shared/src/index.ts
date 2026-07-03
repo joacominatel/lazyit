@@ -41,6 +41,8 @@ export * from "./schemas/attachment";
 export * from "./schemas/audit-log-query";
 // Local-mode login request/response wire shapes (ADR-0086 §3, F1b).
 export * from "./schemas/auth-login";
+// Local-mode password-lifecycle wire shapes (ADR-0086 §F4, F4a): change / forgot / reset.
+export * from "./schemas/auth-password";
 export * from "./schemas/application-list";
 export * from "./schemas/batch";
 export * from "./schemas/config";

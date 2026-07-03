@@ -135,6 +135,11 @@ model User {
   // the append-only row when the actor is deleted, mirroring assetHistoryActed.
   userHistoryActed UserHistory[] @relation("UserHistoryActor")
 
+  // Outstanding local-mode password-reset tokens for this user (ADR-0086 §F4). Cascade: the (rare) hard
+  // delete of a user drops their tokens; a soft-delete (deletedAt) leaves them but the reset flow re-loads
+  // the user on the LIVE-filtered client, so a soft-deleted user can never complete a reset regardless.
+  passwordResetTokens PasswordResetToken[] @relation("PasswordResetTokens")
+
   // Consumable stock movements this user performed (ConsumableMovement.performedById). SetNull.
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
 
@@ -888,6 +893,39 @@ enum UserHistoryEventType {
   RESTORED
   PASSWORD_RESET_SENT
   PASSWORD_RESET_BY_ADMIN
+  PASSWORD_CHANGED
+  PASSWORD_RESET_COMPLETED
+}
+
+/// A single-use, short-TTL local-mode password-reset token (ADR-0086 §F4 / SECURITY GAP #7). Created by
+/// `POST /auth/forgot-password`; consumed by `POST /auth/reset-password`. The raw token (a CSPRNG value
+/// emailed to the user) is NEVER stored — only `tokenHash = SHA-256(raw)` (hash-at-rest, the
+/// service-account-token mold, ADR-0080). Lookup is by the hash; a hit is validated as not-expired +
+/// not-used, then marked `usedAt` (single-use) and the user's siblings are invalidated. Append-ish: only
+/// `usedAt` is ever mutated (consume/invalidate); no soft-delete (rows are GC-pruned opportunistically).
+model PasswordResetToken {
+  // cuid: an internal store row, never exposed in a URL/API (the RAW token — not this id — is what the
+  // user presents). ADR-0005 (cuid for most domain entities).
+  id        String    @id @default(cuid())
+  // SHA-256(raw) as lowercase hex — @unique so a hash collision/replay can't create duplicates and the
+  // reset lookup is a single indexed point-read. The raw token is never persisted.
+  tokenHash String    @unique
+  // The subject whose password this token resets. @db.Uuid to match User.id; Cascade on the (rare) hard
+  // delete. The reset flow still re-loads the user live-filtered, so a soft-deleted user can't reset.
+  userId    String    @db.Uuid
+  user      User      @relation("PasswordResetTokens", fields: [userId], references: [id], onDelete: Cascade)
+  // Absolute expiry (≤1h from creation, ADR-0086 §F4). A token past this is invalid (generic error).
+  expiresAt DateTime
+  // Single-use marker: set once when the token is consumed OR invalidated as a sibling. A non-null value
+  // means the token can never authenticate a reset again.
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  // tokenHash is already indexed by @unique (the reset point-read). A userId index powers the
+  // sibling-invalidation + per-user prune; an expiresAt index powers the opportunistic GC sweep.
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 /// User-managed grouping for knowledge-base Articles, EVOLVED into a hierarchical Folder (ADR-0059
