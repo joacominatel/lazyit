@@ -14,6 +14,7 @@ jest.mock('../../generated/prisma/client', () => ({
 }));
 
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { LocalCredentialService } from './local/local-credential.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { mintToken } from '../service-accounts/service-account-token';
 import type { Principal } from './principal';
@@ -69,6 +70,8 @@ describe('JwtAuthGuard — service-account branch (ADR-0048)', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         JwtAuthGuard,
+        // Required constructor dep of JwtAuthGuard (ADR-0086); never invoked on the SA-token path.
+        LocalCredentialService,
         Reflector,
         {
           provide: PrismaService,
