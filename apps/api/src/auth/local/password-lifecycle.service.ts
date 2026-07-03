@@ -99,25 +99,43 @@ export class PasswordLifecycleService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const newHash = await this.credentials.hash(newPassword);
-    // Set the credential AND bump sessionEpoch atomically — the epoch bump revokes every existing session
-    // (the guard's handleLocal rejects any token minted at a lower epoch), so a compromised session is
-    // killed the moment the real owner changes their password (ADR-0086 §3 revocation).
-    const updated = await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordHash: newHash,
-        passwordUpdatedAt: new Date(),
-        mustChangePassword: false,
-        sessionEpoch: { increment: 1 },
-      },
-    });
+    // Reject a no-op rotation: the new password must actually DIFFER from the current one. Otherwise a
+    // mustChangePassword user could submit their admin-set temp password as both `current` and `new`,
+    // clearing the forced-change flag WITHOUT ever rotating the credential — defeating forced rotation.
+    if (newPassword === currentPassword) {
+      throw new BadRequestException(
+        'New password must differ from the current password.',
+      );
+    }
 
-    // Append-only audit (self-action: actor == subject). No plaintext is ever recorded.
-    await this.history.record(this.prisma, {
-      userId: user.id,
-      eventType: 'PASSWORD_CHANGED',
-      actor: { userId: user.id },
+    const newHash = await this.credentials.hash(newPassword);
+    // Set the credential, bump sessionEpoch, and kill any outstanding reset tokens — ALL atomically. The
+    // epoch bump revokes every existing session (the guard's handleLocal rejects any token minted at a
+    // lower epoch), so a compromised session dies the moment the real owner changes their password
+    // (ADR-0086 §3 revocation); the token sweep does the same for any live emailed reset link (symmetry
+    // with resetPassword, which invalidates siblings), so a change also closes that vector.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash: newHash,
+          passwordUpdatedAt: new Date(),
+          mustChangePassword: false,
+          sessionEpoch: { increment: 1 },
+        },
+      });
+      // Any outstanding (unused) reset token is now stale — a self-service change supersedes it. Delete
+      // rather than mark used: these rows are already GC-pruned, and a hard delete leaves nothing to leak.
+      await tx.passwordResetToken.deleteMany({
+        where: { userId: user.id, usedAt: null },
+      });
+      // Append-only audit (self-action: actor == subject). No plaintext is ever recorded.
+      await this.history.record(tx, {
+        userId: user.id,
+        eventType: 'PASSWORD_CHANGED',
+        actor: { userId: user.id },
+      });
+      return row;
     });
 
     // Mint a fresh token at the NEW epoch so the caller stays authenticated (their prior token just died).
