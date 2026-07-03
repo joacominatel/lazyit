@@ -42,12 +42,15 @@ Indexes: `(userId, id)` (the per-user timeline) and `(createdAt)` (powers the [[
 
 `CREATED` · `UPDATED` · `ROLE_CHANGED` (payload `{ from, to }`) · `MANAGER_CHANGED` (payload `{ from, to }`,
 [[0058-user-manager-and-clone-actions]]) · `DELETED` · `RESTORED` · `PASSWORD_RESET_SENT` ·
-`PASSWORD_RESET_BY_ADMIN` · `PASSWORD_CHANGED` · `PASSWORD_RESET_COMPLETED`. The `CREATED/UPDATED/DELETED/RESTORED`
-set mirrors [[asset-history]]; the rest are user-specific. `PASSWORD_RESET_SENT` records an IdP reset **link**
-request (OIDC mode); `PASSWORD_RESET_BY_ADMIN` records an admin minting a **local temp-password**
-(`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5); `PASSWORD_CHANGED` and `PASSWORD_RESET_COMPLETED`
-record the **self-service** local flows (the user changed their own password, or reset it via a
-forgot-password email token — [[0086-local-authentication-mode]] §F4), actor == subject.
+`PASSWORD_RESET_BY_ADMIN` · `PASSWORD_CHANGED` · `PASSWORD_RESET_REQUESTED` · `PASSWORD_RESET_COMPLETED`. The
+`CREATED/UPDATED/DELETED/RESTORED` set mirrors [[asset-history]]; the rest are user-specific. `PASSWORD_RESET_SENT`
+records an IdP reset **link** request (OIDC mode); `PASSWORD_RESET_BY_ADMIN` records an admin minting a **local
+temp-password** (`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5); `PASSWORD_CHANGED`,
+`PASSWORD_RESET_REQUESTED` and `PASSWORD_RESET_COMPLETED` record the **self-service** local flows (the user changed
+their own password, a forgot-password reset link was **issued** for them, or they reset it via that email token —
+[[0086-local-authentication-mode]] §F4), actor == subject. `PASSWORD_RESET_REQUESTED` is written **only** for a
+real, login-capable subject (never for an unknown identifier), so it is not an enumeration oracle — the log is
+admin-only (issue #1006).
 
 ## Emission
 
@@ -65,6 +68,10 @@ all from the [[user]] service:
 - Self-service local flows (`PasswordLifecycleService`, [[0086-local-authentication-mode]] §F4) → `PASSWORD_CHANGED`
   on `POST /auth/change-password` and `PASSWORD_RESET_COMPLETED` on `POST /auth/reset-password` (via a
   forgot-password email token) — each after the credential write, actor == subject, `sessionEpoch` bumped.
+  `POST /auth/forgot-password` → `PASSWORD_RESET_REQUESTED` when (and only when) a reset link is actually **minted**
+  for a real, login-capable subject. The audit is written in the **detached** issuance path (fire-and-forget), so
+  it never affects the response latency and never fires for an unknown/inactive/directory-only identifier — keeping
+  the flow enumeration- and timing-uniform (issue #1006), actor == subject.
 - `remove`/`offboard` → `DELETED`, **inside** the offboarding transaction (atomic with the soft-delete).
 - `restore` → `RESTORED`, atomic with clearing `deletedAt`; the idempotent already-live path emits nothing.
 
