@@ -43,3 +43,18 @@ export const LoginResponseSchema = z.object({
   user: LoginUserSchema,
 });
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
+
+/**
+ * `POST /users/:id/reset-password` result IN LOCAL MODE (AUTH_MODE=local, ADR-0086 §5). An admin reset
+ * mints a one-time temporary password locally (there is no IdP to email a link, and no instance SMTP
+ * yet), sets `mustChangePassword`, bumps the subject's `sessionEpoch` (killing their existing sessions)
+ * and audits `PASSWORD_RESET_BY_ADMIN`. The plaintext is returned to the admin to hand off ONCE — it is
+ * never stored in plaintext or shown again. In OIDC mode the endpoint keeps its 204 No Content shape
+ * (Zitadel emails the link), so this body is local-mode only.
+ */
+export const AdminPasswordResetResultSchema = z.object({
+  temporaryPassword: z.string().min(1),
+});
+export type AdminPasswordResetResult = z.infer<
+  typeof AdminPasswordResetResultSchema
+>;
