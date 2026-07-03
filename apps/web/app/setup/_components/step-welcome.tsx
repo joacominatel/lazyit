@@ -1,4 +1,9 @@
-import { CheckCircleIcon, ServerStackIcon, KeyIcon } from "@heroicons/react/24/outline";
+import {
+  CheckCircleIcon,
+  ServerStackIcon,
+  KeyIcon,
+  LockClosedIcon,
+} from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardFooter } from "@/components/ui/card";
@@ -28,6 +33,30 @@ export function StepWelcome({
   onNext: () => void;
 }) {
   const t = useTranslations("setup.welcome");
+
+  // Local mode (ADR-0086): the auth mode is fixed at deploy time and immutable — there is no IdP to
+  // pick. Skip the radiogroup entirely and just explain the mode before creating the first admin.
+  if (choice === "local") {
+    return (
+      <>
+        <CardContent className="space-y-4">
+          <div className="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+            <LockClosedIcon className="size-6 shrink-0 text-primary" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-foreground">
+                {t("local.title")}
+              </p>
+              <p className="text-xs text-muted-foreground">{t("local.body")}</p>
+            </div>
+          </div>
+        </CardContent>
+        <CardFooter className="justify-end">
+          <Button onClick={onNext}>{t("continue")}</Button>
+        </CardFooter>
+      </>
+    );
+  }
+
   const options: Option[] = [
     {
       value: "zitadel",
