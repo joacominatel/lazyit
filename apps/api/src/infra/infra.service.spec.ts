@@ -382,6 +382,53 @@ describe('InfraService', () => {
         accepted: true,
       });
     });
+
+    it('RACE: a concurrent same-host report (create → P2002) falls back to the update path, never a 409 (#1012)', async () => {
+      // TOCTOU: our findFirst missed (the row didn't exist yet), then a concurrent report from the SAME
+      // host inserted it → our create hits the partial-unique dedup index and throws P2002. The loser
+      // must re-resolve the now-existing row and take the curation-preserving update path (idempotent
+      // ack), NOT surface the 409.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(null) // the initial reconcile miss (row not yet inserted)
+        .mockResolvedValueOnce({ id: 'node-raced' }); // the post-P2002 re-resolve (the winner's row)
+      prisma.infraNode.create.mockRejectedValueOnce(new KnownError('P2002'));
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-raced',
+        state: 'PENDING',
+      });
+
+      const ack = await service.ingestReport(FULL_REPORT);
+
+      // It fell back to the SAME facts-only update (no state/label/curation touched — see the KNOWN test).
+      const updateArg = firstArg<{
+        where: { id: string };
+        data: Record<string, unknown>;
+      }>(prisma.infraNode.update);
+      expect(updateArg.where).toEqual({ id: 'node-raced' });
+      expect(updateArg.data.status).toBe('ONLINE');
+      expect(updateArg.data).not.toHaveProperty('state');
+      expect(updateArg.data).not.toHaveProperty('label');
+
+      // Idempotent success — the loser acks instead of throwing.
+      expect(ack).toEqual({
+        nodeId: 'node-raced',
+        state: 'PENDING',
+        accepted: true,
+      });
+    });
+
+    it('RACE: a P2002 whose row cannot be re-resolved rethrows the original error (no invented loop)', async () => {
+      // Defensive: if the racing row is unresolvable (e.g. soft-deleted in the same instant), the fix
+      // deliberately rethrows rather than looping — surfacing the real error over inventing recovery.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(null) // initial miss
+        .mockResolvedValueOnce(null); // re-resolve also misses
+      const raced = new KnownError('P2002');
+      prisma.infraNode.create.mockRejectedValueOnce(raced);
+
+      await expect(service.ingestReport(FULL_REPORT)).rejects.toBe(raced);
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
   });
 
   // ── Reporting-agent confirmation (ADR-0074 §3) — the human review-tray gate ──
