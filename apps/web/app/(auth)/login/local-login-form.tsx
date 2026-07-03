@@ -3,6 +3,7 @@
 import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { signIn } from "next-auth/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -105,6 +106,16 @@ export function LocalLoginForm({ destination }: { destination: string }) {
             />
           </Field>
         </FieldGroup>
+
+        {/* Self-service recovery (ADR-0086 §F4b) — local mode only; this form only mounts in local mode. */}
+        <div className="text-right">
+          <Link
+            href="/forgot-password"
+            className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            {t("login.forgotPassword")}
+          </Link>
+        </div>
       </CardContent>
       <CardFooter>
         <Button type="submit" className="w-full" disabled={pending}>
