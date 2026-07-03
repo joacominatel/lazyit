@@ -79,6 +79,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
   let tokCreate: jest.Mock;
   let tokFindFirst: jest.Mock;
   let txTokUpdateMany: jest.Mock;
+  let txTokDeleteMany: jest.Mock;
   let txUserUpdate: jest.Mock;
   let historyRecord: jest.Mock;
   let resolveConfig: jest.Mock;
@@ -104,7 +105,11 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
     tokCreate = jest.fn().mockResolvedValue({});
     tokFindFirst = jest.fn();
     txTokUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
-    txUserUpdate = jest.fn().mockResolvedValue({});
+    txTokDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    // tx.user.update returns the fresh row (changePassword mints a token off the new epoch).
+    txUserUpdate = jest
+      .fn()
+      .mockResolvedValue({ id: VALID_ID, sessionEpoch: 1 });
     historyRecord = jest.fn().mockResolvedValue({});
     resolveConfig = jest.fn().mockResolvedValue(null); // SMTP off by default
 
@@ -118,7 +123,10 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       },
       $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
         cb({
-          passwordResetToken: { updateMany: txTokUpdateMany },
+          passwordResetToken: {
+            updateMany: txTokUpdateMany,
+            deleteMany: txTokDeleteMany,
+          },
           user: { update: txUserUpdate },
         }),
       ),
@@ -145,9 +153,9 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         'NewPass1!',
       );
 
-      // The stored write: a NEW hash, epoch increment, flag cleared, timestamp set.
-      expect(userUpdate).toHaveBeenCalledTimes(1);
-      const data = firstArg<UpdateArg>(userUpdate).data;
+      // The stored write (inside the tx): a NEW hash, epoch increment, flag cleared, timestamp set.
+      expect(txUserUpdate).toHaveBeenCalledTimes(1);
+      const data = firstArg<UpdateArg>(txUserUpdate).data;
       expect(data.sessionEpoch).toEqual({ increment: 1 });
       expect(data.mustChangePassword).toBe(false);
       expect(typeof data.passwordHash).toBe('string');
@@ -158,8 +166,13 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         credentials.verify(data.passwordHash, 'NewPass1!'),
       ).resolves.toMatchObject({ valid: true });
 
-      // Audited append-only as a self-action.
-      expect(historyRecord).toHaveBeenCalledWith(prisma, {
+      // F-3: outstanding (unused) reset tokens are swept in the SAME tx so a live emailed link is dead.
+      expect(txTokDeleteMany).toHaveBeenCalledWith({
+        where: { userId: VALID_ID, usedAt: null },
+      });
+
+      // Audited append-only as a self-action, on the tx client (atomic with the write).
+      expect(historyRecord).toHaveBeenCalledWith(expect.anything(), {
         userId: VALID_ID,
         eventType: 'PASSWORD_CHANGED',
         actor: { userId: VALID_ID },
@@ -178,7 +191,19 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.changePassword(user as never, 'wrong-pw', 'NewPass1!'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(userUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(historyRecord).not.toHaveBeenCalled();
+    });
+
+    it('F-2: rejects a new password identical to the current one (defeats forced-rotation bypass)', async () => {
+      const hash = await credentials.hash('Samepass1!');
+      const user = makeUser({ passwordHash: hash, mustChangePassword: true });
+      // Current verifies, but new === current → 400, and NOTHING is written (flag stays set).
+      await expect(
+        service.changePassword(user as never, 'Samepass1!', 'Samepass1!'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.$transaction as jest.Mock).not.toHaveBeenCalled();
+      expect(txUserUpdate).not.toHaveBeenCalled();
       expect(historyRecord).not.toHaveBeenCalled();
     });
 
@@ -187,7 +212,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.changePassword(user as never, 'anything', 'NewPass1!'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(userUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdate).not.toHaveBeenCalled();
     });
 
     it('refuses a directory-only person', async () => {
@@ -204,7 +229,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.changePassword(user as never, 'old-pw', 'NewPass1!'),
       ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(userUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdate).not.toHaveBeenCalled();
     });
   });
 
