@@ -7,6 +7,7 @@ import { PermissionResolverService } from './permission-resolver.service';
 import { IDENTITY_PROVIDER } from './identity/identity-provider.interface';
 import { createIdentityProvider } from './identity/identity-provider.factory';
 import { LocalCredentialService } from './local/local-credential.service';
+import { LocalProvisioningService } from './local/local-provisioning.service';
 
 /**
  * Global auth module. Registers the application-wide guards via APP_GUARD, IN ORDER:
@@ -43,6 +44,10 @@ import { LocalCredentialService } from './local/local-credential.service';
     // Local (first-party) credential + session primitives (ADR-0086 §3). Provided here (and exported) so
     // BOTH the guard's handleLocal branch and the LocalAuthModule's LoginService inject the SAME instance.
     LocalCredentialService,
+    // Local provisioning primitive (ADR-0086 §5, F1c): set-password / temp-password, reused by
+    // ConfigService.setup + UsersService.create/requestPasswordReset in their local branches. Global so
+    // both feature modules inject it without importing the local module.
+    LocalProvisioningService,
     // Authentication first: populate request.user.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // Authorization second: enforce @RequirePermission against the now-populated request.user.
@@ -54,8 +59,14 @@ import { LocalCredentialService } from './local/local-credential.service';
     // startup singleton: it resolves the per-request child logger from AsyncLocalStorage at LOG time.
     {
       provide: IDENTITY_PROVIDER,
+      // AUTH_MODE=local selects the pure-no-op LocalIdentityProvider regardless of IDENTITY_PROVIDER_TYPE
+      // (ADR-0086 §5) — there is no external IdP to mirror to in local mode.
       useFactory: (logger: PinoLogger) =>
-        createIdentityProvider(process.env.IDENTITY_PROVIDER_TYPE, logger),
+        createIdentityProvider(
+          process.env.IDENTITY_PROVIDER_TYPE,
+          logger,
+          process.env.AUTH_MODE,
+        ),
       inject: [PinoLogger],
     },
   ],
@@ -65,6 +76,7 @@ import { LocalCredentialService } from './local/local-credential.service';
     PermissionResolverService,
     IDENTITY_PROVIDER,
     LocalCredentialService,
+    LocalProvisioningService,
   ],
 })
 export class AuthModule {}
