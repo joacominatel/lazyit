@@ -85,6 +85,11 @@ model User {
   passwordHash      String?
   passwordUpdatedAt DateTime?
   sessionEpoch      Int       @default(0)
+  // One-time-credential flag (ADR-0086 §5, F1c). Set true when an admin PROVISIONS or RESETS a local
+  // credential (create with a temp password / admin reset) so the user is a temp secret holder, not the
+  // owner of their final password. F1c only STORES it; ENFORCEMENT (forcing the change at next login) is
+  // deferred to F4. Never set by the first-admin `/setup` (that admin chooses their own real password).
+  mustChangePassword Boolean  @default(false)
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -871,7 +876,8 @@ model UserHistory {
 /// provisioning, UPDATED on a name/email edit, ROLE_CHANGED on an RBAC role change (payload { from,
 /// to }), MANAGER_CHANGED on a manager change (payload { from, to } — each side a user-id, an
 /// external-name string, or null; ADR-0058), DELETED on offboard (soft delete), RESTORED on
-/// re-onboard, PASSWORD_RESET_SENT when an IdP reset link is requested. Mirrors AssetHistoryEventType's
+/// re-onboard, PASSWORD_RESET_SENT when an IdP reset link is requested (OIDC mode), PASSWORD_RESET_BY_ADMIN
+/// when an admin mints a local temp-password (AUTH_MODE=local, ADR-0086 §5). Mirrors AssetHistoryEventType's
 /// CREATED/UPDATED/DELETED/RESTORED set.
 enum UserHistoryEventType {
   CREATED
@@ -881,6 +887,7 @@ enum UserHistoryEventType {
   DELETED
   RESTORED
   PASSWORD_RESET_SENT
+  PASSWORD_RESET_BY_ADMIN
 }
 
 /// User-managed grouping for knowledge-base Articles, EVOLVED into a hierarchical Folder (ADR-0059
