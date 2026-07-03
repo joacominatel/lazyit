@@ -149,10 +149,12 @@ describe('recent_activity view — UserHistory CASE completeness (regression gua
     );
   });
 
-  it('the canonical migration is the expected 20260611180848_user_manager_clone (update if view is re-issued)', () => {
+  it('the canonical migration is the expected 20260703010000_local_auth_provisioning (update if view is re-issued)', () => {
     // This assertion is intentionally explicit: if someone re-issues the view in a NEW migration
     // the test still passes (the guard auto-upgrades), but this test will FAIL to remind you to
     // update this name. Delete or re-pin this case when the canonical migration changes.
-    expect(migrationName).toBe('20260611180848_user_manager_clone');
+    // Re-pinned in F1c (ADR-0086 §5): the local-auth-provisioning migration re-issues the view to add
+    // the PASSWORD_RESET_BY_ADMIN summary branch (superseding 20260611180848_user_manager_clone).
+    expect(migrationName).toBe('20260703010000_local_auth_provisioning');
   });
 });
