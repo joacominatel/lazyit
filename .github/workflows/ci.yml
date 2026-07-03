@@ -178,6 +178,14 @@ jobs:
         working-directory: apps/web
         run: bun run check:manual-parity
 
+      # Message-catalog en↔es key parity (#965): a key present in one locale's namespace
+      # JSON but missing in the other silently falls back to `en` (or ships ES-only copy).
+      # No DB or generated client needed — pure filesystem check, same shape as the Manual
+      # parity check above.
+      - name: Message catalog en↔es parity check
+        working-directory: apps/web
+        run: bun run check:message-parity
+
   # The three images are built in PARALLEL (one matrix job per image, each on its own runner)
   # instead of sequentially in one job — docker wall-clock drops from the SUM of the three builds
   # to the MAX. This job is NOT gated on `verify` (no `needs:`): the image build and the quality

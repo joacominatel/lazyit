@@ -762,6 +762,7 @@
         "description": "Crea una categoría para usarla de inmediato. Puedes refinarla más tarde.",
         "nameLabel": "Nombre",
         "namePlaceholder": "p. ej. Portátiles",
+        "nameRequired": "El nombre es obligatorio",
         "created": "Categoría creada",
         "createError": "No se pudo crear la categoría"
       },
@@ -770,8 +771,10 @@
         "description": "Crea una marca/modelo para usarla de inmediato. Puedes refinarla más tarde.",
         "nameLabel": "Nombre",
         "namePlaceholder": "Latitude 5520",
+        "nameRequired": "El nombre es obligatorio",
         "manufacturerLabel": "Fabricante",
         "manufacturerPlaceholder": "Dell",
+        "manufacturerRequired": "El fabricante es obligatorio",
         "categoryLabel": "Categoría",
         "categoryPlaceholder": "Elige una categoría",
         "searchCategory": "Buscar categorías…",

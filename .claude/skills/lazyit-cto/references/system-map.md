@@ -129,6 +129,13 @@ Module registration order is load-bearing in two places: `LoggerModule.forRoot(.
 
 - `import/` module: guided bulk **Asset** import (JSON+CSV), sandboxed parse, dry-run → persisted plan → replay-at-commit (`import:run`). Entities `ImportSession`/`ImportRun`/`ImportRow`. Web: `app/(app)/imports/`.
 
+### Access requests + self-service (ADR-0085, v1.1.0 — 2026-07-02)
+
+- **`access-requests/` module (backend only so far)**: `AccessRequest` entity (request→approve/deny→grant; one PENDING per requester+application via a partial unique index). Endpoints: `POST /access-requests` (`accessRequest:create`, all roles, human-only), `GET /access-requests` (`accessRequest:read`, ADMIN+MEMBER), `GET /access-requests/mine` (self-scope), `POST /:id/approve|deny` (`accessGrant:grant`). Approve rides the real grant path (`AccessGrantsService.createWithinApproval`, one tx, race-guarded `updateMany WHERE status='PENDING'`). **Frontend part 2 PENDING** — contract in PR #977's body.
+- **Self-scope carve-outs (#947, "My profile")**: `GET /assets/mine` (caller-narrowed `assetMineListSelect` — no co-assignee PII, security-gated) + `GET /access-grants/mine`; unannotated human-only routes (SA fail-closed by the guard). Web: read-only `/profile` + user-menu entry.
+- **Permission catalog grew**: `accessRequest:create`/`accessRequest:read` + a `SELF_SERVICE_CAPABILITIES` seed tier; existing installs pick them up via the idempotent seed on deploy.
+- **v1.1.0 released 2026-07-02** (promotion PR #978) — first automatic ADR-0083 release (bump-suggestion comment → merge → signed tag + GitHub Release). Also shipped: the 2026-07-02 UX-audit bug wave (central no-4xx-retry policy + 403-aware `ErrorState`, permission gating, server-searched user pickers, hydration fixes incl. a seeded `NextIntlClientProvider now`, `?model=`/`?warranty=` asset filters + model/vendor in `q`, asset-intake accelerators, Help link in the app shell, Zitadel login branding via bootstrap + `prompt=login`, a CI AppModule boot smoke, the warranty Needs-attention tile).
+
 ### Cross-cutting UX & platform additions
 
 - **i18n (ADR-0051)** — next-intl 4.x cookie-mode, en (default/fallback) + es, `NEXT_LOCALE` cookie, no URL prefix. Every user-facing string + the Manual ship en+es.

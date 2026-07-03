@@ -4,11 +4,12 @@ import {
   ArrowTopRightOnSquareIcon,
   Cog6ToothIcon,
   DocumentDuplicateIcon,
+  HandRaisedIcon,
   PencilSquareIcon,
   TrashIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import { type AccessGrant, isSafeApplicationUrl, type User } from "@lazyit/shared";
+import { type AccessGrant, isSafeApplicationUrl } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -20,6 +21,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { RelatedArticlesPanel } from "@/components/related-articles-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { ErrorState } from "@/components/resource-table";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
@@ -28,11 +30,14 @@ import {
   useApplication,
   useApplicationGrants,
 } from "@/lib/api/hooks/use-applications";
+import { useMyGrants } from "@/lib/api/hooks/use-access-grants";
 import { useRevokeGrant } from "@/lib/api/hooks/use-access-grant-mutations";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useMyAccessRequests } from "@/lib/api/hooks/use-access-requests";
+import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { EditGrantDialog } from "../../_components/edit-grant-dialog";
 import { GrantAccessDialog } from "../../_components/grant-access-dialog";
+import { RequestAccessDialog } from "../../_components/request-access-dialog";
 import { RevokeGrantDialog } from "../../_components/revoke-grant-dialog";
 import { GroupedAccessList } from "./grouped-access-list";
 
@@ -47,6 +52,7 @@ function toHref(url: string): string {
  *  transitions mirror the original setState calls exactly (no new mutual-exclusivity). */
 type DialogState = {
   grantOpen: boolean;
+  requestOpen: boolean;
   deleteOpen: boolean;
   revoking: AccessGrant | null;
   editing: AccessGrant | null;
@@ -54,6 +60,7 @@ type DialogState = {
 
 type DialogAction =
   | { type: "setGrantOpen"; open: boolean }
+  | { type: "setRequestOpen"; open: boolean }
   | { type: "setDeleteOpen"; open: boolean }
   | { type: "setRevoking"; grant: AccessGrant | null }
   | { type: "setEditing"; grant: AccessGrant | null };
@@ -62,6 +69,8 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
   switch (action.type) {
     case "setGrantOpen":
       return { ...state, grantOpen: action.open };
+    case "setRequestOpen":
+      return { ...state, requestOpen: action.open };
     case "setDeleteOpen":
       return { ...state, deleteOpen: action.open };
     case "setRevoking":
@@ -85,24 +94,50 @@ export function ApplicationDetailView({ id }: { id: string }) {
   // All grants (active + revoked), each raw (userId only) — resolved to users below.
   const { data: grants } = useApplicationGrants(id, { activeOnly: false });
   const { data: categories } = useApplicationCategories();
-  const { data: users } = useUsers();
   const revokeGrant = useRevokeGrant();
   const deleteApplication = useDeleteApplication();
 
+  // Self-service "Request access" affordance (ADR-0085) — shown to callers who can't grant directly.
+  // Both reads are self-scope (any human), so a VIEWER can tell whether they already hold a grant or
+  // have a pending request for this app; skip them for a grantor, who uses "Grant access" instead.
+  const showRequestAffordance = !canGrant;
+  const { data: myGrantsPage } = useMyGrants({ enabled: showRequestAffordance });
+  const { data: myRequestsPage } = useMyAccessRequests({
+    enabled: showRequestAffordance,
+  });
+  const hasOwnActiveGrant = useMemo(
+    () =>
+      (myGrantsPage?.items ?? []).some(
+        (grant) => grant.applicationId === id && grant.revokedAt === null,
+      ),
+    [myGrantsPage, id],
+  );
+  const hasPendingRequest = useMemo(
+    () =>
+      (myRequestsPage?.items ?? []).some(
+        (request) =>
+          request.applicationId === id && request.status === "PENDING",
+      ),
+    [myRequestsPage, id],
+  );
+
   const [dialog, dispatchDialog] = useReducer(dialogReducer, {
     grantOpen: false,
+    requestOpen: false,
     deleteOpen: false,
     revoking: null,
     editing: null,
   });
-  const { grantOpen, deleteOpen, revoking, editing } = dialog;
+  const { grantOpen, requestOpen, deleteOpen, revoking, editing } = dialog;
   // Snapshot "now" once (not during render) so the expiry comparison stays pure and stable.
   const [now] = useState(() => Date.now());
 
-  const userById = useMemo(
-    () => new Map<string, User>((users ?? []).map((user) => [user.id, user])),
-    [users],
+  // Resolve just this app's grantees (#961) — a targeted id→name batch, not the whole directory.
+  const granteeIds = useMemo(
+    () => [...new Set((grants ?? []).map((grant) => grant.userId))],
+    [grants],
   );
+  const userById = useUserNames(granteeIds);
 
   // Stable element for the PageHeader `breadcrumb` slot (jsx-no-jsx-as-prop). `application` is defined
   // wherever this is rendered (after the loading/error guards); the `?? ""` only covers the unused
@@ -275,7 +310,22 @@ export function ApplicationDetailView({ id }: { id: string }) {
               <UserPlusIcon />
               {t("detail.grantAccess")}
             </Button>
-          ) : undefined
+          ) : hasOwnActiveGrant ? undefined : hasPendingRequest ? (
+            <StatusBadge tone="warning">
+              {t("detail.accessRequested")}
+            </StatusBadge>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                dispatchDialog({ type: "setRequestOpen", open: true })
+              }
+            >
+              <HandRaisedIcon />
+              {t("detail.requestAccess")}
+            </Button>
+          )
         }
       >
         <GroupedAccessList
@@ -333,6 +383,11 @@ export function ApplicationDetailView({ id }: { id: string }) {
       <GrantAccessDialog
         open={grantOpen}
         onOpenChange={(open) => dispatchDialog({ type: "setGrantOpen", open })}
+        applicationId={application.id}
+      />
+      <RequestAccessDialog
+        open={requestOpen}
+        onOpenChange={(open) => dispatchDialog({ type: "setRequestOpen", open })}
         applicationId={application.id}
       />
       <EditGrantDialog

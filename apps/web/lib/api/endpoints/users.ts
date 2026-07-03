@@ -52,6 +52,13 @@ export interface UserListParams {
    * the role-membership browser (server-side search/sort/paging) — no separate per-role view.
    */
   role?: Role;
+  /**
+   * Batch id→name resolver filter (#961). Scope the list to exactly these user ids (`id IN (…)`) — the
+   * read-only name-resolution path behind {@link useUserNames}, which replaced the truncated
+   * whole-directory read. Sent comma-encoded (`?ids=a,b,c`); de-duplicated + capped
+   * (`MAX_RESOLVE_USER_IDS`) and each validated as a UUID server-side. Pair with `limit` ≥ the id count.
+   */
+  ids?: string[];
 }
 
 /**
@@ -80,6 +87,8 @@ export function getUsers(
   if (params.directoryOnly !== undefined)
     qs.set("directoryOnly", String(params.directoryOnly));
   if (params.role) qs.set("role", params.role);
+  // Batch id→name resolver (#961): comma-encoded ids so a whole set rides one param.
+  if (params.ids && params.ids.length > 0) qs.set("ids", params.ids.join(","));
   const search = qs.toString();
   return apiFetch<UserListPage>(search ? `${BASE}?${search}` : BASE, {
     signal,

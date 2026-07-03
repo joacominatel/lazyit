@@ -27,13 +27,14 @@ interface DirectoryPage<T> {
 }
 
 /**
- * `select` for the "whole-directory" lookup hooks (`useUsers`, `useAssetModels`) that fetch a single
- * `MAX_PAGE_LIMIT` page and expose just `items` to client-side joiners (pickers, owner/grantee
- * lookups). Returning `page.items` keeps those consumers' `data` shape exactly `T[]`, but a single
- * page silently DROPS rows past the cap — so when `items.length < total` we emit a dev `console.warn`
- * naming the resource and the totals, making the cap loud instead of silent (issue #508). The
- * dedicated searchable, server-paged list hook (`useUserList` / `useAssetModelList`) is the answer
- * for directories that can legitimately exceed the cap.
+ * `select` for the "whole-directory" lookup hook (`useAssetModels`) that fetches a single
+ * `MAX_PAGE_LIMIT` page and exposes just `items` to client-side joiners (pickers, model lookups).
+ * Returning `page.items` keeps those consumers' `data` shape exactly `T[]`, but a single page silently
+ * DROPS rows past the cap — so when `items.length < total` we emit a dev `console.warn` naming the
+ * resource and the totals, making the cap loud instead of silent (issue #508). The dedicated
+ * searchable, server-paged list hook (`useAssetModelList`) is the answer for directories that can
+ * legitimately exceed the cap. (The users directory dropped this pattern in #961 for the batch
+ * {@link useUserNames} id→name resolver — see `lib/api/hooks/use-users.ts`.)
  */
 export function selectDirectoryItems<T>(resource: string) {
   return (page: DirectoryPage<T>): T[] => {

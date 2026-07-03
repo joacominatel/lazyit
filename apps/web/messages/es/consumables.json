@@ -54,6 +54,7 @@
     "breadcrumbClone": "Clonar",
     "nameLabel": "Nombre",
     "namePlaceholder": "Adaptador USB-C a HDMI",
+    "nameRequired": "El nombre es obligatorio",
     "skuLabel": "SKU",
     "skuPlaceholder": "ADP-USBC-HDMI",
     "categoryLabel": "Categoría",

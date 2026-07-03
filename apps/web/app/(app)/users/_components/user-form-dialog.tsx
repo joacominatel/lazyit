@@ -225,7 +225,16 @@ export function UserFormDialog({
                     aria-invalid={fieldState.invalid || undefined}
                     autoFocus
                   />
-                  <FieldError errors={[fieldState.error]} />
+                  {/* `firstName` is `min(1).max(100)`; only the empty case is common — swap in the
+                      localized copy for the required case rather than leak the raw zod message
+                      (issue #966, same class as the KB article `title` fix). */}
+                  <FieldError
+                    errors={[
+                      fieldState.error?.type === "too_small"
+                        ? { message: t("firstNameRequired") }
+                        : fieldState.error,
+                    ]}
+                  />
                 </Field>
               )}
             />
@@ -243,7 +252,14 @@ export function UserFormDialog({
                     placeholder="Lovelace"
                     aria-invalid={fieldState.invalid || undefined}
                   />
-                  <FieldError errors={[fieldState.error]} />
+                  {/* `lastName` is `min(1).max(100)` — same pattern as `firstName` above (issue #966). */}
+                  <FieldError
+                    errors={[
+                      fieldState.error?.type === "too_small"
+                        ? { message: t("lastNameRequired") }
+                        : fieldState.error,
+                    ]}
+                  />
                 </Field>
               )}
             />

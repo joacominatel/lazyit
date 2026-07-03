@@ -17,5 +17,6 @@
   "expandApplications": "Expand applications",
   "collapseApplications": "Collapse applications",
   "noApplications": "No applications",
-  "secrets": "Secrets"
+  "secrets": "Secrets",
+  "accessRequests": "Access requests"
 }

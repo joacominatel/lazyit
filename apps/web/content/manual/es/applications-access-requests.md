@@ -7,37 +7,54 @@ subcategory: access-requests
 
 # Solicitudes de acceso
 
-> **Próximamente, aún no disponible.** Hoy el acceso lo **otorga directamente** un administrador —
-> no hay una cola de solicitud y aprobación. Esta página describe lo que está planificado para que
-> sepas cómo está pensado que crezca el modelo.
+Una **solicitud de acceso** permite que una persona pida acceso a una aplicación en lugar de esperar a
+que un administrador se lo otorgue directamente. La solicitud pasa por un flujo de aprobación breve:
+**solicitada → aprobada o rechazada**. Al aprobarse produce un [acceso](/help/applications-access-grants)
+común y corriente —el mismo registro que se crea cuando un administrador otorga acceso a mano—, así que
+no cambia nada en cómo se lleva el registro del acceso.
 
-## Cómo funciona el acceso hoy
+Cualquiera puede solicitar acceso, incluidos los usuarios de solo lectura. Decidir sobre una solicitud
+es una capacidad de administrador (las mismas personas que pueden otorgar acceso).
 
-Por ahora el flujo es simple y deliberado: un administrador decide que alguien debe tener acceso a
-una aplicación y crea la concesión por esa persona. No hay estado pendiente, ni paso de aprobador,
-ni espera — ver [Concesiones de acceso](/help/applications-access-grants). Si tu proceso necesita
-una aprobación, llévala por tu canal habitual (un mensaje de chat, un ticket en otra herramienta)
-y registra el resultado otorgando acceso, usando las **notas** de la concesión para dejar
-constancia del motivo.
+## Cómo solicitar acceso
 
-## Qué será una solicitud de acceso
+1. Abrí la aplicación desde **Aplicaciones** y entrá a su página de detalle.
+2. En el panel **Acceso activo**, hacé clic en **Solicitar acceso**. (Si ya tenés acceso, o ya tenés
+   una solicitud esperando una decisión, el botón se reemplaza por un estado breve.)
+3. Opcionalmente agregá:
+   - un **nivel de acceso** —el tipo de acceso que necesitás, si la aplicación los distingue—; y
+   - una **justificación** —una nota breve para que quien apruebe entienda por qué lo necesitás—.
+4. Hacé clic en **Enviar solicitud**. Se notifica a los administradores y tu solicitud aparece en la
+   cola de revisión.
 
-Una **solicitud de acceso** es una adición planificada: en lugar de crear el acceso directamente,
-una persona (o alguien en su nombre) **solicita** acceso a una aplicación, y la solicitud avanza
-por un flujo de aprobación — solicitada, luego aprobada o rechazada. **Al aprobarse, produce una
-concesión de acceso** igual a las que creas hoy.
+Solo podés tener **una solicitud pendiente por aplicación** a la vez. Si ya tenés una, lazyit te lo
+avisa en lugar de crear una duplicada.
 
-Está diseñada para integrarse **sin cambiar lo que ya existe**. Las concesiones siguen siendo el
-registro de solo adición de quién tiene acceso; las solicitudes simplemente pasan a ser una de las
-formas en que nace una concesión. Otorgar directamente seguirá disponible.
+## Qué pasa después
 
-## Por qué está diferido
+- Los administradores ven tu solicitud en **Acceso → Solicitudes de acceso** y reciben una notificación
+  en la campana.
+- Quien aprueba la **aprueba** —lo que crea tu acceso de inmediato— o la **rechaza** con un motivo.
+- La aprobación y el rechazo son definitivos para esa solicitud. Si una solicitud fue rechazada y
+  todavía necesitás acceso, podés crear una nueva.
 
-lazyit lanza la gestión de acceso sin un flujo de aprobación a propósito, para mantener la primera
-versión enfocada y predecible. Las reglas de aprobador — quién da el visto bueno, y si eso se ata
-a la aplicación, a un equipo o a un rol — son una decisión de diseño que conviene tomar cuando se
-construya el flujo, no adivinarla de antemano.
+## Revisar solicitudes (administradores)
 
-> Cuando lleguen las solicitudes de acceso, esta página se reemplazará por cómo usarlas. Hasta
-> entonces, trata las concesiones directas (con buenas notas) como la forma admitida de dar y
-> registrar acceso.
+Abrí **Acceso → Solicitudes de acceso** para ver todo lo que espera una decisión. Cada fila muestra
+quién pide, qué aplicación, el nivel solicitado, la justificación (si hay) y cuándo se creó.
+
+- **Aprobar** otorga el acceso en el acto —sin formulario adicional—. El nuevo acceso se comporta
+  exactamente como uno creado a mano (ejecuta cualquier flujo de acceso y queda registrado en el
+  historial de acceso de la aplicación).
+- **Rechazar** pide un **motivo**, que es obligatorio. El motivo se muestra a quien solicitó, para que
+  sepa por qué.
+
+Revisar la cola requiere el permiso de lectura de solicitudes de acceso; aprobar o rechazar requiere el
+mismo permiso que otorgar acceso. Ver [Roles y permisos](/help/permissions).
+
+## Seguir tus solicitudes
+
+Abrí tu **Perfil** para ver **Mis solicitudes de acceso** —cada solicitud que creaste y su estado
+actual (**Pendiente**, **Aprobada** o **Rechazada**)—. Una solicitud rechazada muestra el motivo que
+dio quien aprobó. Este es el lugar para verificar el resultado; lazyit no te envía una notificación
+aparte cuando se toma una decisión.

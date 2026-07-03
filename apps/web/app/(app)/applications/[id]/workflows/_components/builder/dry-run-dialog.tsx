@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowPathIcon, BeakerIcon } from "@heroicons/react/24/outline";
-import type { User, WorkflowStep, WorkflowTriggerV1 } from "@lazyit/shared";
+import type { WorkflowStep, WorkflowTriggerV1 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,7 @@ import type {
   WorkflowDryRunInput,
 } from "@/lib/api/endpoints/workflow-runs";
 import { useApplicationGrants } from "@/lib/api/hooks/use-applications";
-import { useUsers } from "@/lib/api/hooks/use-users";
+import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useDryRunWorkflow } from "@/lib/api/hooks/use-workflow-runs";
 import { notifyError } from "@/lib/api/notify-error";
 import { DryRunTimeline } from "./dry-run-timeline";
@@ -62,15 +62,16 @@ export function DryRunDialog({
   const { data: grants } = useApplicationGrants(applicationId, {
     activeOnly: true,
   });
-  const { data: users } = useUsers();
   const dryRun = useDryRunWorkflow();
 
-  const userById = useMemo(
-    () => new Map<string, User>((users ?? []).map((u) => [u.id, u])),
-    [users],
+  const activeGrants = useMemo(() => grants ?? [], [grants]);
+  // Resolve just the grantees of these active grants (#961) for the sample-grant labels — a targeted
+  // id→name batch, not the whole directory.
+  const granteeIds = useMemo(
+    () => [...new Set(activeGrants.map((g) => g.userId))],
+    [activeGrants],
   );
-
-  const activeGrants = grants ?? [];
+  const userById = useUserNames(granteeIds);
 
   const [grantId, setGrantId] = useState<string>("");
   const [simulateEnabled, setSimulateEnabled] = useState(false);

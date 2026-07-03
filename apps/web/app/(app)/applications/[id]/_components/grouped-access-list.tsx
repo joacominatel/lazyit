@@ -18,7 +18,7 @@ const PAGE_SIZE = 25;
 
 export interface GroupedAccessListProps {
   activeGrants: AccessGrant[];
-  userById: Map<string, User>;
+  userById: ReadonlyMap<string, User>;
   /** Stable snapshot of "now" from the page for expiry comparisons. */
   now: number;
   applicationId: string;
@@ -99,7 +99,9 @@ export function GroupedAccessList({
         <p className="text-sm text-muted-foreground">
           {search.trim()
             ? t("detail.accessSearchEmpty")
-            : t("detail.noActiveGrants")}
+            : canGrant
+              ? t("detail.noActiveGrants")
+              : t("detail.noActiveGrantsRequest")}
         </p>
       ) : (
         <ul className="divide-y">

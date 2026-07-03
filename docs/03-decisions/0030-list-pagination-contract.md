@@ -188,6 +188,12 @@ users, locations, kb). This supersedes the "Frontend pagination UI" bullet above
   contract by requesting the hard-max page (200) and `select`-ing `items`; new **`useUserList` /
   `useLocationList` / `useApplicationList`** hooks return the envelope for the list pages.
   Consumables only powers its own list, so `useConsumables` returns the envelope directly.
+  > **Amendment (#961).** The `useUsers` whole-directory hook was **removed**: its remaining
+  > read-only id→name consumers (history timelines, grantee chips, vault member chips, KB
+  > committed-rule names) now use a **batch resolver** — `useUserNames(ids)` over a new
+  > `GET /users?ids=a,b,c` filter (bounded by `MAX_RESOLVE_USER_IDS` = the page cap) — so names
+  > resolve past the 200-row window the truncated directory silently dropped. The interactive user
+  > pickers were already server-searched (#937). `useAssetModels` still uses the flat-directory pattern.
 - **Server sort is wired to the UI.** Sortable column headers (`SortableHeader` →
   `toggleSort(field)`) only expose the per-resource allowlist (§1); the order is recomputed by the
   API over the **full** result set, not the page. Non-allowlisted columns (model/owners/category,
@@ -269,7 +275,8 @@ the controller via `assertCanListDeleted` (§7).
 
 **Web (no breaking change to the flat consumers).** The bare directory hook `useAssetModels` keeps its
 `AssetModel[]` contract by requesting the hard-max page (200) and `select`-ing `items` (the pattern
-`useUsers`/`useLocations` use) — so the Settings → Taxonomies table is unchanged. A new
+`useLocations` uses; `useUsers` was retired in #961 for the batch id→name resolver) — so the
+Settings → Taxonomies table is unchanged. A new
 **`useAssetModelList({ q })`** hook returns the envelope for the searchable picker.
 
 **The reusable searchable Combobox.** A single controlled picker — `components/combobox.tsx` (Popover +

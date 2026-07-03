@@ -26,6 +26,8 @@ import {
   CloneUserResultSchema,
   CloneUserSchema,
   CreateUserSchema,
+  MAX_RESOLVE_USER_IDS,
+  ResolveUserIdsSchema,
   RoleCountsSchema,
   RoleSchema,
   UpdateUserSchema,
@@ -135,6 +137,13 @@ export class UsersController {
     description:
       'RBAC role filter (issue #693). Scope the list to one role (ADMIN | MEMBER | VIEWER). Unknown value → 400. Absent = all roles (default). Backs the Settings → Roles "View N members" deep-link.',
   })
+  @ApiQuery({
+    name: 'ids',
+    required: false,
+    description:
+      'Batch id→name resolver (issue #961). Comma-separated user UUIDs to scope the list to (`id IN (…)`) — the read-only name-resolution path. De-duplicated, each must be a UUID (garbage → 400) and capped at ' +
+      `${MAX_RESOLVE_USER_IDS} (over-cap → 400). Pair with limit ≥ the id count so one page returns all; unknown ids are ignored (match nothing).`,
+  })
   @ApiOkResponse({ type: UserListPageDto })
   findAll(
     @Query('q') q?: string,
@@ -146,6 +155,7 @@ export class UsersController {
     @Query('deleted') deleted?: string,
     @Query('directoryOnly') directoryOnly?: string,
     @Query('role') role?: string,
+    @Query('ids') ids?: string | string[],
     @CurrentUser() user?: User,
   ) {
     const pageQuery = parsePageQuery({
@@ -168,8 +178,16 @@ export class UsersController {
     // ZodValidationPipe only validates @Body, so a raw @Query is otherwise unchecked → 400 on a bad value).
     const roleFilter =
       role !== undefined ? this.parseRoleQuery(role) : undefined;
+    // ids is optional (issue #961): absent → no filter; present → split, de-duplicated and validated
+    // (each a UUID, count ≤ cap) against ResolveUserIdsSchema, so a garbage/over-cap batch is a clean 400.
+    const idsFilter = ids !== undefined ? this.parseIdsQuery(ids) : undefined;
     return this.users.findPage(
-      { q, directoryOnly: directoryOnlyFilter, role: roleFilter },
+      {
+        q,
+        directoryOnly: directoryOnlyFilter,
+        role: roleFilter,
+        ids: idsFilter,
+      },
       pageQuery,
     );
   }
@@ -180,6 +198,30 @@ export class UsersController {
     if (!result.success) {
       throw new BadRequestException(
         `Invalid role filter: must be one of ${RoleSchema.options.join(', ')}`,
+      );
+    }
+    return result.data;
+  }
+
+  /**
+   * Parse the raw `?ids=` query (issue #961) into the bounded id set the batch resolver filters on. The
+   * value is comma-encoded (`?ids=a,b,c`), or a repeated param (`?ids=a&ids=b`, which Nest/Express hand
+   * us as a `string[]`) — both are accepted, mirroring `parseCuidArrayQuery`. Split on `,`, trim, drop
+   * empties, de-duplicate (an IN clause is set semantics), then validate the array with the shared
+   * `ResolveUserIdsSchema` — every element must be a UUID and the count ≤ the cap, so a garbage id or an
+   * over-cap batch is a clean 400 (the global ZodValidationPipe only validates @Body, so a raw @Query is
+   * otherwise unchecked → a Postgres cast-error 500; SEC-004).
+   */
+  private parseIdsQuery(raw: string | string[]): string[] {
+    const elements = (Array.isArray(raw) ? raw : [raw])
+      .flatMap((part) => part.split(','))
+      .map((part) => part.trim())
+      .filter((part) => part !== '');
+    const ids = [...new Set(elements)];
+    const result = ResolveUserIdsSchema.safeParse(ids);
+    if (!result.success) {
+      throw new BadRequestException(
+        `Invalid ids: expected up to ${MAX_RESOLVE_USER_IDS} comma-separated user UUIDs`,
       );
     }
     return result.data;

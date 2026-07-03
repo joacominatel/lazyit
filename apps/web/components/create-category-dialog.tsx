@@ -121,7 +121,16 @@ export function CreateCategoryDialog({
                   aria-invalid={fieldState.invalid || undefined}
                   autoFocus
                 />
-                <FieldError errors={[fieldState.error]} />
+                {/* `name` is `min(1).max(100)`; only the empty case is common — swap in the
+                    localized copy for the required case rather than leak the raw zod message
+                    (issue #966, same class as the KB article `title` fix). */}
+                <FieldError
+                  errors={[
+                    fieldState.error?.type === "too_small"
+                      ? { message: t("nameRequired") }
+                      : fieldState.error,
+                  ]}
+                />
               </Field>
             )}
           />

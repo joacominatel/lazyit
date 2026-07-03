@@ -99,6 +99,15 @@ export interface UserFilters {
    * absent/undefined → all roles (default; no filter). Validated by `RoleSchema` at the controller.
    */
   role?: Role;
+  /**
+   * Batch id→name resolver filter (issue #961). When set, scope the list to exactly these user ids
+   * (`id IN (…)`) — the read-only name-resolution path that replaced the truncated whole-directory
+   * `useUsers()` hook (history timelines, grantee chips, vault member chips, KB committed-rule names).
+   * De-duplicated + capped (`ResolveUserIdsSchema`, ≤ MAX_RESOLVE_USER_IDS) and each element validated
+   * as a UUID at the controller, so the IN clause is always bounded and well-formed. An unknown id
+   * simply matches no row (silently ignored, never a 400). absent/undefined → no filter (default).
+   */
+  ids?: string[];
 }
 
 /**
@@ -260,6 +269,7 @@ export class UsersService {
     q,
     directoryOnly,
     role,
+    ids,
   }: UserFilters): Prisma.UserWhereInput {
     return {
       ...(q
@@ -275,6 +285,9 @@ export class UsersService {
       ...(directoryOnly !== undefined ? { directoryOnly } : {}),
       // role filter (issue #693): absent → no filter; backs the Roles "View N members" deep-link.
       ...(role ? { role } : {}),
+      // ids filter (issue #961): the batch id→name resolver — scope to exactly these ids. Absent or
+      // empty → no filter. Unknown ids simply match nothing (the IN clause ignores them silently).
+      ...(ids && ids.length > 0 ? { id: { in: ids } } : {}),
     };
   }
 
