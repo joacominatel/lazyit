@@ -12,6 +12,16 @@
 	# Real domain (Let's Encrypt): set an ACME contact email. Leave commented for local.
 	# email {$LAZYIT_TLS_EMAIL}
 
+	# Serve this site's certificate to clients that send NO SNI (issue #1010). This is what makes a
+	# bare-IP deployment work (LAZYIT_SITE_ADDRESS=192.168.1.50): TLS SNI is a HOSTNAME field, so
+	# browsers AND curl/OpenSSL (RFC 6066) never send an IP literal as SNI. Without SNI, Caddy can't
+	# match the IP site block to select a cert and aborts the handshake with an internal-error alert
+	# (SSL_ERROR_INTERNAL_ERROR_ALERT / "tlsv1 alert internal error"). default_sni names the ServerName
+	# to assume when SNI is absent, so the IP cert is presented and connect-by-IP works (the common
+	# small-team case, ADR-0086). Additive + harmless for hostname/localhost deploys: those clients DO
+	# send SNI, so this is a no-op for them.
+	default_sni {$LAZYIT_SITE_ADDRESS:localhost}
+
 	# Trusted proxies (SEC-010). Caddy is the ONLY hop in front of the API, and api/web/db sit on a
 	# private Docker network. `static private_ranges` tells Caddy to trust X-Forwarded-For only from
 	# private-range peers (the Docker network) and to use the real connecting client IP otherwise —
