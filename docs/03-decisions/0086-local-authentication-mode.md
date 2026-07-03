@@ -260,7 +260,15 @@ security-critical code; the SA-token scheme is the trusted precedent to model on
   `/login` and `/setup` branches, Manual (en + es).
 - **F3 — infra:** the `oidc` overlay + `--profile oidc`, `start.sh` three-way (AUTH_MODE explicit), the
   local-default `dev-setup`, the mode-gated Caddy block, the mode-aware backup, the runbook + upgrade note.
-- **F4 — password lifecycle:** self-service change + forgot/reset-token, SMTP-gated email reset.
+- **F4 — password lifecycle:** self-service change + forgot/reset-token, SMTP-gated email reset. Shipped
+  in two parts — **F4a (backend, #1003):** `POST /auth/{change,forgot,reset}-password`, the same-password
+  rejection, the reset-token sweep-on-change, and the `MustChangePasswordGuard` (`403
+  { code: 'PASSWORD_CHANGE_REQUIRED' }` on non-exempt routes; exempt: change-password, `GET /users/me`,
+  public). **F4b (frontend, #1004):** the profile change-password panel, the blocking `/change-password`
+  forced-change wall (interception wired into the TanStack query/mutation `onError` seam alongside the
+  global-401 handler — a hard navigation the user cannot click past), the public `/forgot-password` +
+  `/reset-password` pages linked from local `/login`, and Manual (en + es). All local-mode-gated; the
+  OIDC path is byte-identical (the guard never fires in OIDC, so the web interception is inert).
 - **Follow-up (separate ADR/issue):** plain-HTTP-on-LAN — a deployment-TLS axis distinct from `AUTH_MODE`.
 
 ## Non-goals
