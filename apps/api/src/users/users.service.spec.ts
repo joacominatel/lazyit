@@ -21,6 +21,7 @@ import {
   PasswordResetUnsupportedError,
 } from '../auth/identity/identity-provider.interface';
 import type { IdentityProvider } from '../auth/identity/identity-provider.interface';
+import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -85,6 +86,12 @@ describe('UsersService', () => {
   let tx: TxMock;
   let assignments: { releaseAllForUser: jest.Mock };
   let idp: IdpMock;
+  // ADR-0086 §5 (F1c): the local provisioning primitive. Mocked so the local-mode create/reset tests
+  // assert hash-store/temp-password behaviour without running argon2.
+  let provisioning: {
+    credentialFields: jest.Mock;
+    generateTempPassword: jest.Mock;
+  };
   // DEBT-2 (issue #185): the append-only UserHistory emitter. Mocked so each write-path assertion can
   // check WHICH event was recorded (and with which payload/actor) without a DB.
   let history: { record: jest.Mock; list: jest.Mock };
@@ -205,6 +212,16 @@ describe('UsersService', () => {
       updateUser: jest.fn().mockResolvedValue(undefined),
       requestPasswordReset: jest.fn().mockResolvedValue(undefined),
     };
+    // Local provisioning primitive (ADR-0086 §5). Defaults return a deterministic hash fragment + temp
+    // password so the local-mode tests can assert the stored fields without argon2.
+    provisioning = {
+      credentialFields: jest.fn().mockResolvedValue({
+        passwordHash: '$argon2id$hash',
+        passwordUpdatedAt: new Date('2026-07-03T00:00:00.000Z'),
+        mustChangePassword: true,
+      }),
+      generateTempPassword: jest.fn().mockReturnValue('Temp-Pass-9xZ!'),
+    };
     // A no-op PinoLogger stand-in (the service uses it for structured write-back audit lines).
     const logger = {
       info: jest.fn(),
@@ -244,6 +261,7 @@ describe('UsersService', () => {
         { provide: WorkflowTriggerService, useValue: workflowTrigger },
         { provide: AccessGrantsService, useValue: accessGrants },
         { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
+        { provide: LocalProvisioningService, useValue: provisioning },
         { provide: getLoggerToken(UsersService.name), useValue: logger },
       ],
     }).compile();
@@ -542,6 +560,82 @@ describe('UsersService', () => {
       expect(user.update).not.toHaveBeenCalled();
       expect(search.upsert).not.toHaveBeenCalled();
       expect(history.record).not.toHaveBeenCalled();
+    });
+  });
+
+  // ADR-0086 §5 (F1c) — local-mode create. A supplied password is HASHED to passwordHash (no IdP, no
+  // 400); a no-password create lands password-less (imported / provision-later); directoryOnly unaffected.
+  describe('local-mode create (ADR-0086 §5)', () => {
+    beforeEach(() => {
+      idp.kind = 'local';
+      idp.supportsManagement = false;
+    });
+
+    it('hashes a supplied password onto passwordHash (mustChangePassword=true), no IdP call, no 400', async () => {
+      const dto = {
+        email: 'l@b.com',
+        firstName: 'Lo',
+        lastName: 'Cal',
+        password: 'Str0ng!Pass',
+      };
+      user.create.mockResolvedValue({
+        id: 'uuid-l',
+        email: dto.email,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        role: 'VIEWER',
+        externalId: null,
+        deletedAt: null,
+      });
+
+      await service.create(dto);
+
+      // The password is hashed via the provisioning primitive as an admin-provisioned temp credential.
+      expect(provisioning.credentialFields).toHaveBeenCalledWith(
+        'Str0ng!Pass',
+        {
+          mustChangePassword: true,
+        },
+      );
+      // The row is created WITH the credential fields and NO password plaintext / NO externalId.
+      const createArg = (
+        user.create.mock.calls as Array<[{ data: Record<string, unknown> }]>
+      )[0][0];
+      expect(createArg.data).toMatchObject({
+        email: 'l@b.com',
+        role: 'VIEWER',
+        passwordHash: '$argon2id$hash',
+        mustChangePassword: true,
+      });
+      expect(createArg.data).not.toHaveProperty('password');
+      // No IdP mirror at all in local mode.
+      expect(idp.createUser).not.toHaveBeenCalled();
+      expect(user.update).not.toHaveBeenCalled();
+      // The CREATED history row is still appended.
+      expect(history.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ userId: 'uuid-l', eventType: 'CREATED' }),
+      );
+    });
+
+    it('a no-password local create lands password-less (imported / provision-later): no hashing, no credential fields', async () => {
+      const dto = { email: 'imp@b.com', firstName: 'Im', lastName: 'Port' };
+      user.create.mockResolvedValue({
+        id: 'uuid-imp',
+        ...dto,
+        role: 'VIEWER',
+        externalId: null,
+        deletedAt: null,
+      });
+
+      await service.create(dto);
+
+      expect(provisioning.credentialFields).not.toHaveBeenCalled();
+      const createArg = (
+        user.create.mock.calls as Array<[{ data: Record<string, unknown> }]>
+      )[0][0];
+      expect(createArg.data).not.toHaveProperty('passwordHash');
+      expect(idp.createUser).not.toHaveBeenCalled();
     });
   });
 
@@ -2079,6 +2173,76 @@ describe('UsersService', () => {
       await expect(
         service.requestPasswordReset('user-1', 'actor-1'),
       ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    });
+
+    // ADR-0086 §5 (F1c): local mode mints a temp-password directly — no IdP, no 501.
+    describe('local mode', () => {
+      beforeEach(() => {
+        idp.kind = 'local';
+        idp.supportsManagement = false;
+      });
+
+      it('mints + hashes a temp-password, bumps sessionEpoch, audits PASSWORD_RESET_BY_ADMIN, returns the temp password (no IdP call, no 501)', async () => {
+        // A local user with NO externalId + NO passwordHash (imported / never provisioned) — the admin
+        // reset provisions/resets them. In OIDC mode this would 501; local mints a credential instead.
+        user.findFirst.mockResolvedValue(
+          linkedActiveUser({ externalId: null, passwordHash: null }),
+        );
+        user.update.mockResolvedValue(linkedActiveUser());
+
+        const result = await service.requestPasswordReset('user-1', 'actor-1');
+
+        // The temp-password is generated + hashed via the provisioning primitive (forced-change credential).
+        expect(provisioning.generateTempPassword).toHaveBeenCalledTimes(1);
+        expect(provisioning.credentialFields).toHaveBeenCalledWith(
+          'Temp-Pass-9xZ!',
+          { mustChangePassword: true },
+        );
+        // The row is updated with the hashed fields AND a sessionEpoch increment (revoke existing sessions).
+        expect(user.update).toHaveBeenCalledWith({
+          where: { id: 'user-1' },
+          data: {
+            passwordHash: '$argon2id$hash',
+            passwordUpdatedAt: new Date('2026-07-03T00:00:00.000Z'),
+            mustChangePassword: true,
+            sessionEpoch: { increment: 1 },
+          },
+        });
+        // The plaintext is returned to the admin ONCE.
+        expect(result).toEqual({ temporaryPassword: 'Temp-Pass-9xZ!' });
+        // NO IdP call in local mode.
+        expect(idp.requestPasswordReset).not.toHaveBeenCalled();
+        // Append-only audit: PASSWORD_RESET_BY_ADMIN, actor + subject.
+        expect(history.record).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            userId: 'user-1',
+            eventType: 'PASSWORD_RESET_BY_ADMIN',
+            actor: { userId: 'actor-1' },
+          }),
+        );
+      });
+
+      it('422s a directory-only person (never gets a login credential) and never writes', async () => {
+        user.findFirst.mockResolvedValue(
+          linkedActiveUser({ externalId: null, directoryOnly: true }),
+        );
+        await expect(
+          service.requestPasswordReset('user-1', 'actor-1'),
+        ).rejects.toBeInstanceOf(UnprocessableEntityException);
+        expect(user.update).not.toHaveBeenCalled();
+        expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+      });
+
+      it('still 422s an inactive user before minting anything', async () => {
+        user.findFirst.mockResolvedValue(
+          linkedActiveUser({ isActive: false, externalId: null }),
+        );
+        await expect(
+          service.requestPasswordReset('user-1', 'actor-1'),
+        ).rejects.toBeInstanceOf(UnprocessableEntityException);
+        expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+      });
     });
   });
 

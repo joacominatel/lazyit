@@ -10,14 +10,22 @@ import type { IntegrationMode } from '@lazyit/shared';
 const DEFAULT_INTEGRATION_MODE: IntegrationMode = 'zitadel';
 
 /**
- * Resolve the wizard's `integrationMode` from the `IDENTITY_PROVIDER_TYPE` env var (ADR-0043 §5a).
+ * Resolve the wizard's `integrationMode` from `AUTH_MODE` + `IDENTITY_PROVIDER_TYPE` (ADR-0043 §5a /
+ * ADR-0086 §5).
  *
- * Mirrors the {@link createIdentityProvider} factory's parsing (trim + lowercase, default = zitadel)
- * so the value `GET /config/status` reports always matches the IdP the AuthModule actually built — an
- * unrecognized/unset value falls back to the same Zitadel default. Kept pure (takes the raw value) so
- * it is unit-testable without DI and reused by the ConfigService.
+ * `AUTH_MODE=local` takes precedence and yields `'local'` regardless of IDENTITY_PROVIDER_TYPE — local
+ * mode has no external IdP (it mirrors the {@link createIdentityProvider} factory, which builds the
+ * LocalIdentityProvider in that case). Otherwise this mirrors the factory's IDENTITY_PROVIDER_TYPE parse
+ * (trim + lowercase, default = zitadel) so the value `GET /config/status` reports always matches the IdP
+ * the AuthModule actually built. Kept pure (takes the raw values) so it is unit-testable without DI.
  */
-export function resolveIntegrationMode(rawType?: string): IntegrationMode {
+export function resolveIntegrationMode(
+  rawType?: string,
+  authMode?: string,
+): IntegrationMode {
+  if (authMode?.trim().toLowerCase() === 'local') {
+    return 'local';
+  }
   const type = rawType?.trim().toLowerCase();
   if (type === 'generic-oidc') {
     return 'generic-oidc';

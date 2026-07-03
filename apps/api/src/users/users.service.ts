@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type {
+  AdminPasswordResetResult,
   CloneUser,
   CloneUserResult,
   CreateUser,
@@ -37,6 +38,7 @@ import {
   PasswordResetUnsupportedError,
   type IdentityProvider,
 } from '../auth/identity/identity-provider.interface';
+import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 
 /**
  * The reserved, non-routable email DOMAIN the bulk import synthesizes for a directory person identified
@@ -170,9 +172,18 @@ export class UsersService {
     // (BYOI) no-ops every management call. Authorization stays DB-first regardless (decision #1).
     @Inject(IDENTITY_PROVIDER)
     private readonly idp: IdentityProvider,
+    // Local (first-party) provisioning primitive (ADR-0086 §5). Used only in the `kind==='local'`
+    // branches of create() + requestPasswordReset() to hash/store passwords and mint temp-passwords —
+    // no IdP mirror. Global (AuthModule), so no module import is needed here.
+    private readonly provisioning: LocalProvisioningService,
     @InjectPinoLogger(UsersService.name)
     private readonly logger: PinoLogger,
   ) {}
+
+  /** True when the instance runs first-party local auth (AUTH_MODE=local, ADR-0086 §5). */
+  private isLocalMode(): boolean {
+    return this.idp.kind === 'local';
+  }
 
   /**
    * A single page of users (default `createdAt desc`). Server-side `q` search (over
@@ -583,6 +594,32 @@ export class UsersService {
       );
       this.search.upsert('users', projectUser(directoryUser));
       return this.serializeUser(directoryUser);
+    }
+    // LOCAL mode (ADR-0086 §5): lazyit OWNS the credential — there is no IdP to mirror to. This branches
+    // BEFORE the BYOI 400 below because LocalIdentityProvider is `supportsManagement:false` (so a supplied
+    // password would otherwise be wrongly rejected as "BYOI"). When a password is supplied it is an
+    // admin-provisioned TEMP credential (ADR-0064 semantics), so we hash it to `passwordHash` and set
+    // `mustChangePassword` (stored now; enforcement is F4). Without a password the row lands password-less
+    // (imported / provision-later): it cannot log in until an admin sets one. No IdP call; externalId null.
+    if (this.isLocalMode()) {
+      const localData = data.password
+        ? {
+            ...createData,
+            ...(await this.provisioning.credentialFields(data.password, {
+              mustChangePassword: true,
+            })),
+          }
+        : createData;
+      const localUser = await this.prisma.user.create({ data: localData });
+      await this.recordHistory(
+        this.prisma,
+        localUser.id,
+        'CREATED',
+        actorId,
+        opts?.createdPayload,
+      );
+      this.search.upsert('users', projectUser(localUser));
+      return this.serializeUser(localUser);
     }
     // Temporary-password provisioning (ADR-0064, issue #411) is a MANAGEMENT-path carve-out: lazyit only
     // ever sets a credential on the bundled Zitadel it owns. Under BYOI (`!supportsManagement`) the
@@ -1044,8 +1081,17 @@ export class UsersService {
    * Audited via a structured log line AND, since DEBT-2 (issue #185), an append-only UserHistory row
    * (PASSWORD_RESET_SENT) emitted only after the IdP call SUCCEEDS — so a 422/501/503 never logs a
    * reset that did not go out.
+   *
+   * LOCAL mode (ADR-0086 §5) diverges: there is no IdP to email a link. Instead an admin reset mints a
+   * one-time temp-password LOCALLY, hashes it to `passwordHash`, sets `mustChangePassword`, BUMPS the
+   * subject's `sessionEpoch` (killing their existing sessions), and audits `PASSWORD_RESET_BY_ADMIN`. The
+   * plaintext is RETURNED to the admin (shown once) — the only path that does so, and the reason the
+   * return type is `AdminPasswordResetResult | null` (OIDC returns null; the controller keeps its 204).
    */
-  async requestPasswordReset(id: string, actorId?: string): Promise<void> {
+  async requestPasswordReset(
+    id: string,
+    actorId?: string,
+  ): Promise<AdminPasswordResetResult | null> {
     const user = await this.findOne(id); // 404 if missing or already soft-deleted
 
     if (!user.isActive) {
@@ -1053,6 +1099,39 @@ export class UsersService {
         'Cannot reset the password of an inactive user. Reactivate the account first.',
       );
     }
+
+    // LOCAL mode: mint a temp-password directly (no IdP). Reject a directory-only person (no login by
+    // construction — INV: a directoryOnly row never gets a credential via any path, ADR-0086 §5 / #989).
+    if (this.isLocalMode()) {
+      if (user.directoryOnly) {
+        throw new UnprocessableEntityException(
+          'This is a directory-only person with no login, so a password cannot be set.',
+        );
+      }
+      const temporaryPassword = this.provisioning.generateTempPassword();
+      const credential = await this.provisioning.credentialFields(
+        temporaryPassword,
+        { mustChangePassword: true },
+      );
+      // Set the credential AND bump sessionEpoch atomically: the epoch bump revokes every existing session
+      // the subject holds (the guard's handleLocal rejects any token minted at a lower epoch), so an admin
+      // reset immediately invalidates a possibly-compromised session (ADR-0086 §3 revocation).
+      await this.prisma.user.update({
+        where: { id },
+        data: { ...credential, sessionEpoch: { increment: 1 } },
+      });
+      this.auditWriteBack('resetPasswordByAdmin', actorId, id, { local: true });
+      // Append-only audit (ADR-0086 §5 / decision G): PASSWORD_RESET_BY_ADMIN, actor + subject. No
+      // plaintext is ever recorded (the payload carries nothing sensitive).
+      await this.recordHistory(
+        this.prisma,
+        id,
+        'PASSWORD_RESET_BY_ADMIN',
+        actorId,
+      );
+      return { temporaryPassword };
+    }
+
     if (!user.externalId) {
       // No IdP identity to reset — honest 501 (same shape BYOI returns), never a misleading 2xx.
       throw new PasswordResetUnsupportedError(
@@ -1067,6 +1146,7 @@ export class UsersService {
     // Append the PASSWORD_RESET_SENT history row (DEBT-2, issue #185) AFTER the IdP call succeeded —
     // a failed/unsupported reset above already threw, so this only ever records a reset that went out.
     await this.recordHistory(this.prisma, id, 'PASSWORD_RESET_SENT', actorId);
+    return null;
   }
 
   /**

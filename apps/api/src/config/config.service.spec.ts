@@ -11,6 +11,7 @@ import { SearchService } from '../search/search.service';
 import { SetupCsrfService } from './setup-csrf.service';
 import { IDENTITY_PROVIDER } from '../auth/identity/identity-provider.interface';
 import type { IdentityProvider } from '../auth/identity/identity-provider.interface';
+import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). ConfigService uses
 // Role as a VALUE (Role.ADMIN), so the mock must expose the enum.
@@ -77,6 +78,11 @@ const SETUP_INPUT = {
 describe('ConfigService', () => {
   let service: ConfigService;
   let user: PrismaUserMock;
+  let instanceConfig: { upsert: jest.Mock };
+  let provisioning: {
+    credentialFields: jest.Mock;
+    generateTempPassword: jest.Mock;
+  };
   let search: SearchMock;
   let idp: IdpMock;
   let logger: LoggerMock;
@@ -92,8 +98,19 @@ describe('ConfigService', () => {
       update: jest.fn(),
       delete: jest.fn().mockResolvedValue(makeAdminRow()),
     };
-    const prisma = { user };
+    // instance_config marker (ADR-0086 §1): setup upserts the auth-mode marker on success.
+    instanceConfig = { upsert: jest.fn().mockResolvedValue(undefined) };
+    const prisma = { user, instanceConfig };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
+    // Local provisioning primitive (ADR-0086 §5): hashes the local admin's password on setup.
+    provisioning = {
+      credentialFields: jest.fn().mockResolvedValue({
+        passwordHash: '$argon2id$hash',
+        passwordUpdatedAt: new Date('2026-07-03T00:00:00.000Z'),
+        mustChangePassword: false,
+      }),
+      generateTempPassword: jest.fn().mockReturnValue('Temp-Pass-9xZ!'),
+    };
     idp = {
       kind: 'zitadel',
       supportsManagement: true,
@@ -117,6 +134,7 @@ describe('ConfigService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: SearchService, useValue: search },
         { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
+        { provide: LocalProvisioningService, useValue: provisioning },
         { provide: getLoggerToken(ConfigService.name), useValue: logger },
       ],
     })
@@ -174,6 +192,83 @@ describe('ConfigService', () => {
 
       process.env.NODE_ENV = 'development';
       expect((await service.getStatus()).devMode).toBe(true);
+    });
+  });
+
+  // ---------- AUTH_MODE=local (ADR-0086 §5, F1c) ----------------------------
+
+  describe('local mode', () => {
+    // Put the service into local posture: the AuthModule builds the LocalIdentityProvider
+    // (kind='local', supportsManagement=false) and AUTH_MODE=local drives integrationMode + the marker.
+    beforeEach(() => {
+      idp.kind = 'local';
+      idp.supportsManagement = false;
+      process.env.AUTH_MODE = 'local';
+    });
+
+    it('getStatus DECOUPLES requiresAdminPassword from supportsManagement — true in local mode, with authMode=local', async () => {
+      user.count.mockResolvedValue(0);
+      const status = await service.getStatus();
+      // supportsManagement is false (no IdP) yet the wizard STILL must collect a password (else the first
+      // ADMIN is un-loggable and the instance bricks — ADR-0086 §5).
+      expect(status.requiresAdminPassword).toBe(true);
+      expect(status.authMode).toBe('local');
+      expect(status.integrationMode).toBe('local');
+    });
+
+    it('setup REQUIRES a password in local mode and hashes it onto the first ADMIN (no IdP call)', async () => {
+      user.count.mockResolvedValue(0);
+      const localAdmin = makeAdminRow({ id: 'local-admin-1' });
+      user.create.mockResolvedValue(localAdmin);
+
+      const outcome = await service.setup(SETUP_INPUT, '203.0.113.7');
+
+      // The password was hashed via the provisioning primitive (owner sets their own → no forced change).
+      expect(provisioning.credentialFields).toHaveBeenCalledWith('Abcdef1!', {
+        mustChangePassword: false,
+      });
+      // The ADMIN is created WITH the hashed credential fields (the provisioning mock returns a fixed
+      // hash + date) and NO externalId — no IdP mirror at all.
+      expect(user.create).toHaveBeenCalledWith({
+        data: {
+          email: 'admin@example.com',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          role: 'ADMIN',
+          passwordHash: '$argon2id$hash',
+          passwordUpdatedAt: new Date('2026-07-03T00:00:00.000Z'),
+          mustChangePassword: false,
+        },
+      });
+      expect(idp.createUser).not.toHaveBeenCalled();
+      expect(user.update).not.toHaveBeenCalled();
+      expect(outcome.mirrored).toBe(false);
+      expect(outcome.adminId).toBe('local-admin-1');
+    });
+
+    it('setup 400s in local mode when no password is given, before any row is created', async () => {
+      user.count.mockResolvedValue(0);
+      const noPassword = {
+        email: SETUP_INPUT.email,
+        firstName: SETUP_INPUT.firstName,
+        lastName: SETUP_INPUT.lastName,
+      };
+      await expect(
+        service.setup(noPassword, '203.0.113.7'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(user.create).not.toHaveBeenCalled();
+      expect(provisioning.credentialFields).not.toHaveBeenCalled();
+    });
+
+    it('setup PERSISTS the local mode marker (instance_config) on success — immutability write side (§1)', async () => {
+      user.count.mockResolvedValue(0);
+      user.create.mockResolvedValue(makeAdminRow());
+      await service.setup(SETUP_INPUT, '203.0.113.7');
+      expect(instanceConfig.upsert).toHaveBeenCalledWith({
+        where: { id: 'singleton' },
+        create: { id: 'singleton', authMode: 'local' },
+        update: { authMode: 'local' },
+      });
     });
   });
 
@@ -248,10 +343,28 @@ describe('ConfigService', () => {
       );
     });
 
+    it('PERSISTS the oidc mode marker on a successful mirrored setup — immutability write side (§1)', async () => {
+      process.env.AUTH_MODE = 'oidc';
+      user.count.mockResolvedValue(0);
+      user.update.mockResolvedValue(
+        makeAdminRow({ externalId: 'zitadel-user-99' }),
+      );
+      await service.setup(SETUP_INPUT, '203.0.113.7');
+      expect(instanceConfig.upsert).toHaveBeenCalledWith({
+        where: { id: 'singleton' },
+        create: { id: 'singleton', authMode: 'oidc' },
+        update: { authMode: 'oidc' },
+      });
+    });
+
     it('400s when management is supported but no password is given (before creating any row) — issue #335', async () => {
       user.count.mockResolvedValue(0);
       idp.supportsManagement = true;
-      const { password: _password, ...noPassword } = SETUP_INPUT;
+      const noPassword = {
+        email: SETUP_INPUT.email,
+        firstName: SETUP_INPUT.firstName,
+        lastName: SETUP_INPUT.lastName,
+      };
 
       await expect(
         service.setup(noPassword, '203.0.113.7'),
@@ -285,7 +398,11 @@ describe('ConfigService', () => {
       user.count.mockResolvedValue(0);
       idp.supportsManagement = false;
       // BYOI sends no password — the operator's own IdP owns the credential.
-      const { password: _password, ...noPassword } = SETUP_INPUT;
+      const noPassword = {
+        email: SETUP_INPUT.email,
+        firstName: SETUP_INPUT.firstName,
+        lastName: SETUP_INPUT.lastName,
+      };
 
       const outcome = await service.setup(noPassword, '203.0.113.7');
 

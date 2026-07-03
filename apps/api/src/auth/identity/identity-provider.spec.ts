@@ -41,6 +41,7 @@ jest.mock('../../../generated/prisma/client', () => ({
 
 import { createIdentityProvider } from './identity-provider.factory';
 import { GenericOidcIdentityProvider } from './generic-oidc.identity-provider';
+import { LocalIdentityProvider } from './local.identity-provider';
 import { ZitadelIdentityProvider } from './zitadel.identity-provider';
 import { PasswordResetUnsupportedError } from './identity-provider.interface';
 
@@ -84,6 +85,67 @@ describe('createIdentityProvider (ADR-0043 factory)', () => {
     expect(provider).toBeInstanceOf(ZitadelIdentityProvider);
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  // ADR-0086 §5 (F1c): AUTH_MODE=local selects the no-op LocalIdentityProvider, IGNORING the IdP type.
+  it('returns the LocalIdentityProvider when AUTH_MODE=local, regardless of IDENTITY_PROVIDER_TYPE', () => {
+    for (const rawType of [undefined, 'zitadel', 'generic-oidc', 'okta']) {
+      const provider = createIdentityProvider(rawType, null, 'local');
+      expect(provider).toBeInstanceOf(LocalIdentityProvider);
+      expect(provider.kind).toBe('local');
+      expect(provider.supportsManagement).toBe(false);
+    }
+    // Case/space-insensitive on AUTH_MODE.
+    expect(createIdentityProvider('zitadel', null, '  LOCAL ')).toBeInstanceOf(
+      LocalIdentityProvider,
+    );
+  });
+
+  it('keeps the IdP-type parse when AUTH_MODE is not local', () => {
+    expect(createIdentityProvider('generic-oidc', null, 'oidc')).toBeInstanceOf(
+      GenericOidcIdentityProvider,
+    );
+    expect(createIdentityProvider('zitadel', null, 'shim')).toBeInstanceOf(
+      ZitadelIdentityProvider,
+    );
+  });
+});
+
+describe('LocalIdentityProvider (AUTH_MODE=local — ADR-0086 §5, pure no-op)', () => {
+  let provider: LocalIdentityProvider;
+
+  beforeEach(() => {
+    provider = new LocalIdentityProvider();
+  });
+
+  it('advertises kind=local and no management (nothing to mirror to)', () => {
+    expect(provider.kind).toBe('local');
+    expect(provider.supportsManagement).toBe(false);
+  });
+
+  it('no-ops every mirror method (createUser returns an empty ref)', async () => {
+    await expect(
+      provider.createUser({
+        email: 'a@b.com',
+        firstName: 'A',
+        lastName: 'B',
+        role: 'VIEWER',
+      }),
+    ).resolves.toEqual({ externalId: '' });
+    await expect(provider.deactivateUser('ext-1')).resolves.toBeUndefined();
+    await expect(provider.grantRole('ext-1', 'ADMIN')).resolves.toBeUndefined();
+    await expect(
+      provider.revokeRole('ext-1', 'ADMIN'),
+    ).resolves.toBeUndefined();
+    await expect(
+      provider.updateUser('ext-1', { firstName: 'New' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects requestPasswordReset (local reset is handled directly, never via the IdP seam)', async () => {
+    await expect(provider.requestPasswordReset('ext-1')).rejects.toBeInstanceOf(
+      PasswordResetUnsupportedError,
+    );
   });
 });
 
@@ -161,9 +223,9 @@ describe('GenericOidcIdentityProvider (BYOI — ADR-0043 #5)', () => {
 
     // Unlike the mirror writes, a reset is a user-visible ACTION: a silent no-op would falsely imply a
     // reset was sent. BYOI must reject so the controller can surface an honest 501 (INV-4).
-    await expect(
-      provider.requestPasswordReset('ext-1'),
-    ).rejects.toBeInstanceOf(PasswordResetUnsupportedError);
+    await expect(provider.requestPasswordReset('ext-1')).rejects.toBeInstanceOf(
+      PasswordResetUnsupportedError,
+    );
 
     warnSpy.mockRestore();
   });
@@ -227,9 +289,9 @@ describe('ZitadelIdentityProvider (write-back — ADR-0043 Phase 2)', () => {
     await expect(
       provider.updateUser('ext-1', { email: 'new@b.com' }),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
-    await expect(
-      provider.requestPasswordReset('ext-1'),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(provider.requestPasswordReset('ext-1')).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
 
     // The absent credential is reported via a structured WARN, never blocking boot/login.
     expect(warnSpy).toHaveBeenCalledWith(

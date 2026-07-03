@@ -344,6 +344,15 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
     expect(requestPasswordReset).toHaveBeenCalledWith(VALID_ID, 'actor-1');
   });
 
+  it('returns 200 with the temp password when the service mints one (local mode — ADR-0086 §5)', async () => {
+    requestPasswordReset.mockResolvedValue({ temporaryPassword: 'Temp-9xZ!' });
+    const res = await request(app.getHttpServer()).post(
+      `/users/${VALID_ID}/reset-password`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ temporaryPassword: 'Temp-9xZ!' });
+  });
+
   it('maps PasswordResetUnsupportedError (BYOI / no IdP link) to 501, not a 2xx', async () => {
     requestPasswordReset.mockRejectedValue(new PasswordResetUnsupportedError());
     const res = await request(app.getHttpServer()).post(

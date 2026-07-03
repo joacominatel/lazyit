@@ -24,6 +24,9 @@ export const UserHistoryEventTypeSchema = z.enum([
   "DELETED",
   "RESTORED",
   "PASSWORD_RESET_SENT",
+  // An admin minted a local temp-password (AUTH_MODE=local, ADR-0086 §5). Distinct from
+  // PASSWORD_RESET_SENT (which means an IdP reset LINK was requested in OIDC mode).
+  "PASSWORD_RESET_BY_ADMIN",
 ]);
 
 /** Contextual data attached to an event (e.g. `{ from, to }` on ROLE_CHANGED). Unvalidated jsonb. */

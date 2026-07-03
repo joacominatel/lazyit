@@ -146,6 +146,8 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       "role_changed",
       "manager_changed",
       "password_reset_sent",
+      // ADR-0086 §5 (F1c) — local-mode admin temp-password reset.
+      "password_reset_by_admin",
     ]);
   });
 
