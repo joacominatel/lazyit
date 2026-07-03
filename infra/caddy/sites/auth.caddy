@@ -1,0 +1,17 @@
+# lazyit — Zitadel IdP site block (ADR-0037, ADR-0086). See infra/caddy/Caddyfile.
+#
+# This file is imported by the main Caddyfile via `import sites/*.caddy`, but it is only PRESENT in
+# the Caddy container when the bundled Zitadel IdP is opted in: infra/docker-compose.oidc.yaml mounts
+# it at /etc/caddy/sites/auth.caddy. In local-auth mode (AUTH_MODE=local, the default) and in BYOI the
+# oidc overlay is not loaded, so this file is absent, the glob matches nothing, and Caddy neither
+# serves auth.{domain} nor requests an (unusable) certificate for it. It reuses the (security_headers)
+# and (access_log) snippets defined in the main Caddyfile (import is textual, resolved before parse).
+#
+# Zitadel runs on the internal Docker network without its own TLS (--tlsMode external; Caddy terminates
+# HTTPS here and proxies to Zitadel's internal HTTP listener). Set LAZYIT_DOMAIN to your base domain
+# (e.g. "lazyit.example.com") in .env.prod; local prod-like uses "localhost" (Caddy's internal CA).
+auth.{$LAZYIT_DOMAIN:localhost} {
+	import security_headers
+	import access_log
+	reverse_proxy zitadel:8080
+}

@@ -741,6 +741,16 @@ canonical Compose v2 layout.
 > `zitadel_secrets` volume read-write, and `api`/`web` gate on it via
 > `service_completed_successfully`. The deferred sub-questions (§9e) are settled below.
 
+> [!note] Amended by ADR-0086 (local auth) — Zitadel is now opt-in
+> §9 below describes the original layout where `zitadel`/`zitadel_db` are **unprofiled** dev-backing
+> services. Since **ADR-0086** (local auth is the default, OIDC/Zitadel is opt-in) the four Zitadel
+> services (`zitadel`, `zitadel_db`, `zitadel-secrets-init`, `zitadel-bootstrap`) carry a **bare
+> `profiles: [oidc]`**, so a plain `docker compose up` (dev) and a plain `--profile prod` (local-auth
+> prod) start **no** Zitadel. A new **`infra/docker-compose.oidc.yaml`** overlay carries the api/web →
+> `zitadel-bootstrap` `depends_on` (kept out of the base so `--profile prod` parses in local mode);
+> OIDC mode adds `--profile oidc -f infra/docker-compose.oidc.yaml`. Read §9 as the OIDC-mode topology;
+> the profile/overlay split is the ADR-0086 delta. See [[deploy-self-hosted]] §2 and [[backups]].
+
 ### 9a. Target layout
 
 - A single canonical **`compose.yaml` at the repo root** declaring **all** services (db, migrate, api,

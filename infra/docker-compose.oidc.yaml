@@ -1,0 +1,58 @@
+# lazyit — OIDC overlay (ADR-0086). Merged ON TOP of compose.yaml + infra/docker-compose.prod.yaml
+# ONLY when the bundled/BYOI Zitadel IdP is selected (AUTH_MODE=oidc). It carries the api/web/backup
+# → Zitadel dependency edges (and the api/web read-only mount of the shared secrets volume) that MUST
+# NOT live in any always-loaded file: the zitadel* services are profiles:[oidc], and an ACTIVE prod
+# service (api/web/backup) that depends_on a profile-EXCLUDED service makes plain
+# `docker compose --profile prod up` (local-auth mode) a parse-fatal "invalid compose project".
+# Keeping the edges here means the base + prod override parse in local mode and gain the Zitadel
+# wiring only under OIDC. See ADR-0086 §"Infra consequences" and docs/05-runbooks/deploy-self-hosted.md.
+#
+# OIDC deploy (from the repo ROOT), after `cp infra/env/.env.prod.example infra/env/.env.prod` with
+# AUTH_MODE=oidc:
+#   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml -f infra/docker-compose.oidc.yaml \
+#     --profile prod --profile oidc --env-file infra/env/.env.prod up -d --build
+#
+# Do NOT set `name:` here. This file is merged LAST; the prod override's `name: lazyit-prod` must win so
+# existing prod volumes/networks (lazyit-prod_*) are reused, never orphaned.
+
+services:
+  # api gates on the zero-touch bootstrap COMPLETING so OIDC_CLIENT_* / sa-key.json exist before it
+  # validates its OIDC config at boot (ADR-0043 §4c/§4d). It reads them from the shared secrets volume,
+  # mounted READ-ONLY (the sidecar is the only writer). Merges with the base api depends_on (db/migrate/
+  # valkey) and volumes (attachments_data) — so OIDC mode reconstructs the exact pre-ADR-0086 api spec.
+  api:
+    depends_on:
+      zitadel-bootstrap:
+        condition: service_completed_successfully
+    volumes:
+      - zitadel_secrets:/zitadel-secrets:ro
+
+  # web waits for the same bootstrap so the OIDC client (id/secret) exists before Auth.js boots, and
+  # reads the client file (oidc-client.json) from the same read-only volume.
+  web:
+    depends_on:
+      zitadel-bootstrap:
+        condition: service_completed_successfully
+    volumes:
+      - zitadel_secrets:/zitadel-secrets:ro
+
+  # The backup sidecar dumps the Zitadel DB in OIDC mode (its cron is mode-aware) — gate it on
+  # zitadel_db being healthy so the first scheduled dump can't race the DB coming up. In local-auth
+  # mode this edge is absent (this overlay isn't loaded) and the cron skips the Zitadel dump entirely.
+  backup:
+    depends_on:
+      zitadel_db:
+        condition: service_healthy
+
+  # Caddy: mount the Zitadel IdP site block (ADR-0086). The main Caddyfile does `import sites/*.caddy`,
+  # which matches nothing in local-auth mode (this overlay unloaded → sites/ empty → no auth.{domain}
+  # site, no wasted ACME). Mounting it here serves auth.{domain} only when the bundled Zitadel runs.
+  caddy:
+    volumes:
+      - ./infra/caddy/sites/auth.caddy:/etc/caddy/sites/auth.caddy:ro
+
+volumes:
+  # The zitadel-bootstrap sidecar's exported OIDC client creds + runtime SA key (ADR-0043 §9c/§9e).
+  # Also declared in compose.yaml (the zitadel service mounts it for the FirstInstance machine-key
+  # export); re-listed here is a harmless no-op under the merge, and keeps this overlay self-contained.
+  zitadel_secrets:

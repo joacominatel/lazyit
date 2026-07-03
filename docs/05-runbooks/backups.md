@@ -24,9 +24,9 @@ right order. lazyit holds sensitive inventory/access data on a single host
 
 | # | Item | Where | Back up? | How to recover if lost |
 | - | --- | --- | --- | --- |
-| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `ZITADEL_MASTERKEY` and `WORKFLOW_SECRET_KEY` (the two unrotatable DR linchpins), `AUTH_SECRET`, OIDC secrets. |
-| 2 | **App database** | `db` (Postgres 18, `db_data` volume) | **YES — `pg_dump`** | Restore from dump. |
-| 3 | **Zitadel database** | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`** | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. |
+| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
+| 2 | **App database** | `db` (Postgres 18, `db_data` volume) | **YES — `pg_dump`** | Restore from dump. In **local-auth mode** this also carries the user **password hashes** (argon2id `passwordHash`) — no separate auth store to back up. |
+| 3 | **Zitadel database** (OIDC mode only) | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`**, when `AUTH_MODE=oidc` | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. **Absent in local-auth mode** — there is no `zitadel_db`, and the backup sidecar's cron skips this dump (ADR-0086). |
 | 4 | Meilisearch index | `meili_data` volume | No (rebuildable) | Re-run `reindex:all` — it rebuilds the index from the DBs ([[0035-search-architecture]]). |
 | 5 | Caddy TLS state | `caddy_data` / `caddy_config` volumes | No (re-issuable) | Caddy re-obtains certs from Let's Encrypt (or re-mints its internal CA) automatically. |
 | 6 | **Secret Manager vault values** | App database (rows in `secret_vaults` / `secret_items` / `vault_memberships` / `user_keypairs`) | Covered by item #2 (**no extra backup needed**) | Zero-knowledge: a DB restore brings back ciphertext + wrapped DEKs. Values are readable only by a surviving member's vault passphrase or off-host recovery key — the server cannot re-enter them, unlike `WORKFLOW_SECRET_KEY`. See below. |
@@ -66,10 +66,22 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > `BACKUP_RETENTION_DAYS` / `BACKUP_OFFSITE_CMD` knobs — ADR-0082 "Deferred"). Until that ships,
 > treat attachments as expendable or run the manual `tar` in row #7 alongside your dumps.
 
-> [!info] Automation: the opt-in backup sidecar (see below)
-> Items #2 and #3 can be automated by the `backup` profile service in the canonical `compose.yaml`
-> (cron + `pg_dump` for both DBs to a host-mounted `./backups`, with retention). Item #1 is **your
-> responsibility** — `.env.prod` must be copied off-host manually and access-controlled.
+> [!info] `SESSION_SIGNING_SECRET` (local-auth mode) is rotatable and LOW-DR — not a linchpin (ADR-0086)
+> In **local-auth mode** (`AUTH_MODE=local`) the API signs its first-party session tokens (HMAC) with
+> `SESSION_SIGNING_SECRET`. It is **required at boot** (≥32 chars, fail-loud like `WORKFLOW_SECRET_KEY`)
+> but it is **NOT a DR linchpin**: it encrypts/authenticates nothing at rest. Losing or rotating it only
+> **invalidates live sessions** — every user simply logs in again with their existing password (the
+> `passwordHash` lives in the app DB, item #2). So it is *not* the `ZITADEL_MASTERKEY`/`WORKFLOW_SECRET_KEY`
+> severity class — a restored app DB is fully usable with a **fresh** signing secret. Keep it in `.env.prod`
+> (item #1) for zero-touch restores, but its loss costs one re-login, not any data. Unused in OIDC mode.
+
+> [!info] Automation: the opt-in backup sidecar (see below) — mode-aware (ADR-0086)
+> Items #2 (and #3 **in OIDC mode**) can be automated by the `backup` profile service in the canonical
+> `compose.yaml` (cron + `pg_dump` to a host-mounted `./backups`, with retention). The cron is
+> **mode-aware**: it dumps the Zitadel DB only when `AUTH_MODE=oidc`; in **local-auth mode** it dumps the
+> app DB alone (which carries the password hashes) and skips the absent `zitadel_db` — otherwise every
+> nightly run would report FAILED. Item #1 is **your responsibility** — `.env.prod` must be copied
+> off-host manually and access-controlled.
 
 > [!warning] The Secret Manager BREAKS the "restore DB + matching env key ⇒ everything readable" model
 > Everything above assumes the recovery rule "**a DB dump + the matching `.env.prod` key makes the data
