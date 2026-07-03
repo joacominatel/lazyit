@@ -163,6 +163,11 @@ export class InfraService {
    *     human's curation (`state`, `label`, `x`/`y`, asset link, …): the agent owns inventory FACTS,
    *     the human owns curation. A confirmed node keeps receiving fresh facts without losing its edits.
    *
+   * RACE-SAFE (#1012): the findFirst→create is a TOCTOU against the partial-unique dedup index, so two
+   * concurrent reports from the SAME host (the install's report racing the systemd timer's first fire,
+   * or a re-install) could both miss + both CREATE. The loser now catches the P2002 and falls back to
+   * the SAME curation-preserving update — a repeat/concurrent report is IDEMPOTENT (ack), never a 409.
+   *
    * Returns a minimal ack `{ nodeId, state, accepted: true }`. The post-write search sync reuses the
    * existing fire-and-forget helper.
    *
@@ -196,38 +201,83 @@ export class InfraService {
     if (existing) {
       // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
       // human's and is deliberately left untouched.
-      const updated = await this.prisma.infraNode.update({
-        where: { id: existing.id },
-        data: {
-          specs,
-          status: 'ONLINE',
-          lastReportedAt: now,
-          agentVersion: report.agentVersion,
-        },
-        select: { id: true, state: true },
-      });
-      void this.syncNodeToSearch(updated.id);
-      return { nodeId: updated.id, state: updated.state, accepted: true };
+      return this.refreshKnownNode(
+        existing.id,
+        specs,
+        now,
+        report.agentVersion,
+      );
     }
 
     // New host: a PENDING proposal in the review tray. No backing Asset until a human confirms (§3).
-    const created = await this.prisma.infraNode.create({
-      data: {
-        kind: 'PHYSICAL_HOST',
-        label: report.host.hostname,
-        status: 'ONLINE',
-        source: 'AGENT',
-        state: 'PENDING',
-        reportingSource: report.reportingSource,
-        externalId: report.externalId,
-        lastReportedAt: now,
-        agentVersion: report.agentVersion,
-        specs,
-      },
+    try {
+      const created = await this.prisma.infraNode.create({
+        data: {
+          kind: 'PHYSICAL_HOST',
+          label: report.host.hostname,
+          status: 'ONLINE',
+          source: 'AGENT',
+          state: 'PENDING',
+          reportingSource: report.reportingSource,
+          externalId: report.externalId,
+          lastReportedAt: now,
+          agentVersion: report.agentVersion,
+          specs,
+        },
+        select: { id: true, state: true },
+      });
+      void this.syncNodeToSearch(created.id);
+      return { nodeId: created.id, state: created.state, accepted: true };
+    } catch (err) {
+      // Race: a concurrent report from the SAME host (the install's report racing the freshly-armed
+      // systemd timer's first fire, or a re-install) inserted the dedup row between our findFirst and
+      // this create → the partial-unique `infra_nodes_reporting_source_external_id_key` throws P2002.
+      // The row now DEFINITIVELY exists, so re-resolve it and take the curation-preserving update path
+      // — a repeat report from one host is IDEMPOTENT (200/ack), never a 409 (#1012).
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        const raced = await this.prisma.infraNode.findFirst({
+          where: {
+            reportingSource: report.reportingSource,
+            externalId: report.externalId,
+          },
+          select: { id: true },
+        });
+        // No loop: after P2002 the row exists. If it somehow doesn't (e.g. it was soft-deleted in the
+        // same instant so findFirst can't see it), rethrow the original error rather than inventing one.
+        if (raced) {
+          return this.refreshKnownNode(
+            raced.id,
+            specs,
+            now,
+            report.agentVersion,
+          );
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * The curation-preserving "known host" update, shared by the normal KNOWN-key branch and the
+   * P2002 race fallback in `ingestReport`. Refreshes inventory FACTS + liveness ONLY — it NEVER
+   * writes `state`/`label`/`x`/`y`/`assetId`/`source`, so a human's curation survives every check-in.
+   */
+  private async refreshKnownNode(
+    id: string,
+    specs: Prisma.InputJsonValue,
+    now: Date,
+    agentVersion: string,
+  ): Promise<AgentReportAck> {
+    const updated = await this.prisma.infraNode.update({
+      where: { id },
+      data: { specs, status: 'ONLINE', lastReportedAt: now, agentVersion },
       select: { id: true, state: true },
     });
-    void this.syncNodeToSearch(created.id);
-    return { nodeId: created.id, state: created.state, accepted: true };
+    void this.syncNodeToSearch(updated.id);
+    return { nodeId: updated.id, state: updated.state, accepted: true };
   }
 
   /**
