@@ -140,6 +140,10 @@ export const RECENT_ACTIVITY_ACTIONS = [
   // Admin minted a local temp-password (AUTH_MODE=local, ADR-0086 §5) — the lowercased
   // PASSWORD_RESET_BY_ADMIN verb the recent_activity view emits.
   "password_reset_by_admin",
+  // Self-service password lifecycle (AUTH_MODE=local, ADR-0086 §F4) — the lowercased PASSWORD_CHANGED
+  // (user changed their own password) and PASSWORD_RESET_COMPLETED (user reset it via an email token) verbs.
+  "password_changed",
+  "password_reset_completed",
 ] as const;
 
 /** A single known activity verb. The `action` filter validates against this enum (→ 400 otherwise). */
