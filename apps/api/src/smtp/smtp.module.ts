@@ -6,10 +6,13 @@ import { SmtpService } from './smtp.service';
 import { EmailDispatchService } from './email-dispatch.service';
 import { EmailWorker } from './email.worker';
 import { NotificationEmailRelay } from './notification-email.relay';
+import { NotificationPreferencesController } from './notification-preferences.controller';
+import { NotificationPreferencesService } from './notification-preferences.service';
 
 /**
  * SmtpModule — instance SMTP settings + the outbound-email channel (issue #615, ADR-0079). Hosts the
- * `/config/smtp` surface (`GET`/`PUT`/`POST test`), the BullMQ email queue + its in-process worker
+ * `/config/smtp` surface (`GET`/`PUT`/`POST test`), the self-service `/account/notification-preferences`
+ * surface (per-user, per-type EMAIL opt-out — issue #879), the BullMQ email queue + its in-process worker
  * (ADR-0053), and EXPORTS {@link NotificationEmailRelay} so `NotificationsModule` can enqueue an email
  * for an emailable notification behind `NotificationsService.emit()` (one seam, no scattered sends).
  *
@@ -19,12 +22,13 @@ import { NotificationEmailRelay } from './notification-email.relay';
  */
 @Module({
   imports: [BullModule.registerQueue({ name: EMAIL_QUEUE })],
-  controllers: [SmtpController],
+  controllers: [SmtpController, NotificationPreferencesController],
   providers: [
     SmtpService,
     EmailDispatchService,
     EmailWorker,
     NotificationEmailRelay,
+    NotificationPreferencesService,
   ],
   exports: [NotificationEmailRelay, SmtpService],
 })
