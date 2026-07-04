@@ -19,14 +19,23 @@ employee". Answers half of the core audit question "what do we have and **where 
 ## Relationships
 
 - **holds** N [[asset]]s.
+- **nests** under an optional parent Location and **holds** N child Locations — a self-referential
+  hierarchy (adjacency list via `parentId`). See _Hierarchy_ below.
 
 ## Business rules
 
 - Atomic entity — no dependencies; implemented first alongside [[user]].
-- Flat (non-hierarchical). May become hierarchical later (site → room → rack); start flat
-  unless needed.
+- **Hierarchical (#845):** a location may hang off a parent (`parentId`), forming a **free tree**
+  — site → room → rack is the intended convention but is **not** enforced (a `RACK` may sit under
+  any node, or be a root). `parentId = null` is a root. The **one** structural rule is **no
+  cycles**: a location can be neither its own parent nor moved under one of its own descendants —
+  enforced in `LocationsService` (the DB can't express it), rejected `400`. A missing or
+  soft-deleted `parentId` is likewise rejected `400`. On a (hypothetical) hard delete of a parent
+  the FK is `onDelete: SetNull`, so children become roots — mirrors `Asset.locationId`; normal
+  deletes are soft.
 - Every location is **classified** by a required `type` — hardcoded enum for now, with
   user-managed custom types deferred (see the Known-debt note below and [[0017-location-type-enum]]).
+  The same `type` enum doubles as the hierarchy node **kind** (no separate kind field).
 
 ## Conventions
 
@@ -49,6 +58,7 @@ for both api and web ([[shared-package]], [[0013-zod-validation-pipe]]).
 | `address` | `string?` | optional. |
 | `floor` | `string?` | optional. **String, not number** — floors are labels like "PB", "Subsuelo 1", "Mezzanine". |
 | `notes` | `string?` | optional free text. |
+| `parentId` | `cuid?` | Self-referential parent (adjacency list, #845). `null` = root. Indexed; FK `onDelete: SetNull`. Cycle-free enforced in the service. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
@@ -63,11 +73,25 @@ for both api and web ([[shared-package]], [[0013-zod-validation-pipe]]).
 > deliberately — recorded in [[0017-location-type-enum]]. Until then, adding a type is an enum
 > value + a migration, not a runtime action.
 
+## Hierarchy read/write shapes (#845)
+
+- **List** (`GET /locations`) items are plain `LocationSchema` rows — now carrying `parentId`
+  (nullable). No ancestry is resolved per row (avoids an N+1 walk on the page).
+- **Detail** (`GET /locations/:id`) returns `LocationDetailSchema` = the full location **plus** a
+  resolved `path` — an ordered breadcrumb **root→self inclusive**, each hop `{ id, name, type }`
+  (the last element is the location itself). The web breadcrumb renders `path` directly. A
+  soft-deleted ancestor ends the walk (the location is treated as a root from that break).
+- **Create / update** accept an optional `parentId` (nullable). `null`/omitted = root; a
+  cycle-forming or missing/soft-deleted parent → `400`.
+- Ancestry is a **bounded parent-walk** (cap 32 levels, cycle-free by construction; the cap only
+  guards against corrupt data and is logged if hit).
+
 ## Endpoints
 
-`apps/api/src/locations/` (`LocationsModule`): `GET /locations` (excludes soft-deleted),
-`GET /locations/:id`, `POST /locations`, `PATCH /locations/:id`, `DELETE /locations/:id`
-(soft delete), `POST /locations/:id/restore` (ADMIN-only — clears `deletedAt`,
+`apps/api/src/locations/` (`LocationsModule`): `GET /locations` (excludes soft-deleted, returns
+`parentId`), `GET /locations/:id` (returns the entity **+ ancestry `path`**), `POST /locations`,
+`PATCH /locations/:id` (both accept optional `parentId`), `DELETE /locations/:id` (soft delete),
+`POST /locations/:id/restore` (ADMIN-only — clears `deletedAt`,
 [[0041-soft-delete-reuse-and-restore]]). Bodies validated against the shared schemas and documented
 via Swagger ([[0018-api-documentation-swagger]]).
 

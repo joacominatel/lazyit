@@ -19,6 +19,7 @@ import {
 import { createZodDto } from 'nestjs-zod';
 import {
   CreateLocationSchema,
+  LocationDetailSchema,
   LocationListPageSchema,
   LocationSchema,
   LocationTypeSchema,
@@ -34,6 +35,7 @@ import type { User } from '../../generated/prisma/client';
 
 // DTOs from the shared zod schemas (validation + TS type + OpenAPI). See ADR-0018.
 class LocationDto extends createZodDto(LocationSchema) {}
+class LocationDetailDto extends createZodDto(LocationDetailSchema) {}
 class LocationListPageDto extends createZodDto(LocationListPageSchema) {}
 class CreateLocationDto extends createZodDto(CreateLocationSchema) {}
 class UpdateLocationDto extends createZodDto(UpdateLocationSchema) {}
@@ -138,10 +140,13 @@ export class LocationsController {
 
   @Get(':id')
   @RequirePermission('location:read')
-  @ApiOperation({ summary: 'Get a location by id' })
-  @ApiOkResponse({ type: LocationDto })
+  @ApiOperation({
+    summary:
+      'Get a location by id, with its ancestry `path` (root→self inclusive) for the breadcrumb (#845)',
+  })
+  @ApiOkResponse({ type: LocationDetailDto })
   findOne(@Param('id') id: string) {
-    return this.locations.findOne(id);
+    return this.locations.findOneWithAncestors(id);
   }
 
   @Post()

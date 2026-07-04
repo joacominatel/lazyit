@@ -17,6 +17,7 @@ Open **Locations** and create a new one. A location has:
 
 - **Name** — required.
 - **Type** — required; every location is classified (see below).
+- **Parent location** — optional; nests this location under another (see [Nesting locations](#nesting-locations)).
 - **Description**, **Address**, **Floor** and **Notes** — all optional free text.
 
 Floor is a **label, not a number** — values like "Ground", "Basement 1" or "Mezzanine" are fine.
@@ -32,8 +33,20 @@ Each location is classified by a type, chosen from a fixed set:
 - **Storage**
 - **Other**
 
-Locations are **flat** — there is no site → room → rack nesting. For a small team a flat list is
-usually enough; if you need hierarchy, model it in the name (for example `HQ — Rack A3`).
+## Nesting locations
+
+Locations can be **nested** to mirror how your estate is really laid out — a **datacenter** contains
+**racks**, a **site** contains **rooms**, and so on. Set a location's **Parent location** to hang it
+under another; leave it as **top-level** for a standalone site. A location with no parent is a root.
+
+On a location's page, a **breadcrumb** shows its full ancestry (for example `Datacenter → Rack A3`),
+and each ancestor links to its own page. On an asset, the location field shows the **full path**, not
+just the leaf, so you can see at a glance that a server lives in `HQ → DC1 → Rack A3`.
+
+You can re-parent a location at any time by editing it and changing its parent, or promote it back to
+top-level by choosing **None (top-level)**. A location **cannot** be nested under itself or under one
+of its own descendants (that would create a loop) — lazyit rejects such a move and explains why on the
+form. Nesting is optional: a flat list still works if you don't need the structure.
 
 ## Assigning a location to an asset
 
