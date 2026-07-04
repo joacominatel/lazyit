@@ -9,6 +9,7 @@ import {
   renderNotificationEmail,
 } from './email.mailer';
 import type { NotificationEmailJob } from './email.constants';
+import type { NotificationType } from '@lazyit/shared';
 
 /** The roles email recipient-resolution considers (the full RBAC set — ADR-0046). */
 const CANDIDATE_ROLES = [
@@ -47,7 +48,10 @@ export class EmailDispatchService {
       return;
     }
 
-    const emails = await this.resolveRecipientEmails(job.recipientUserId);
+    const emails = await this.resolveRecipientEmails(
+      job.recipientUserId,
+      job.type,
+    );
     if (emails.length === 0) {
       this.logger.debug(
         `email skip (no recipients) type=${job.type} recipient=${job.recipientUserId ?? 'broadcast'}`,
@@ -83,18 +87,26 @@ export class EmailDispatchService {
    * live user's email. BROADCAST (null) → the emails of every live, active, non-directory user whose role
    * holds `notification:read` (mirrors the bell's broadcast audience). Blank emails are dropped.
    *
-   * ponytail: broadcast audience is resolved per-ROLE via the permission resolver (there is no per-user
-   * permission override system, and — separately — no per-user email opt-out in v1; see ADR-0079 forks).
-   * Ceiling: add a `User.emailOptOut`-style filter here if/when per-user opt-out lands.
+   * PER-USER EMAIL OPT-OUT (issue #879): a user who has listed `type` in their
+   * `notificationEmailOptOutTypes` is EXCLUDED from this type's email audience — both a TARGETED nudge to
+   * that one user (→ no email) and a BROADCAST (→ that user is dropped from the group). Email-channel only:
+   * the in-app bell audience is untouched (that resolution lives elsewhere). Fail-soft is preserved by the
+   * worker's outer catch — this method only reads a column and does an array membership check.
+   *
+   * ponytail: the broadcast audience is resolved per-ROLE via the permission resolver (there is no per-user
+   * permission override system); the opt-out is a flat per-user `String[]` filtered in-memory here.
    */
   private async resolveRecipientEmails(
     recipientUserId: string | null,
+    type: NotificationType,
   ): Promise<string[]> {
     if (recipientUserId) {
       const user = await this.prisma.user.findFirst({
         where: { id: recipientUserId, isActive: true, deletedAt: null },
-        select: { email: true },
+        select: { email: true, notificationEmailOptOutTypes: true },
       });
+      // Opted OUT of this type by email → no email to this one user (the bell still fired).
+      if (user?.notificationEmailOptOutTypes?.includes(type)) return [];
       const email = user?.email?.trim();
       return email ? [email] : [];
     }
@@ -115,10 +127,12 @@ export class EmailDispatchService {
         deletedAt: null,
         directoryOnly: false,
       },
-      select: { email: true },
+      select: { email: true, notificationEmailOptOutTypes: true },
     });
     const seen = new Set<string>();
     for (const u of users) {
+      // Drop any user who opted OUT of this type by email (issue #879).
+      if (u.notificationEmailOptOutTypes.includes(type)) continue;
       const email = u.email?.trim();
       if (email) seen.add(email);
     }

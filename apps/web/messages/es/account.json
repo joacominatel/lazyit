@@ -1,0 +1,53 @@
+{
+  "notifications": {
+    "title": "Correos de notificación",
+    "subtitle": "Elige de qué notificaciones lazyit te envía correo. Tu campana en la app no se ve afectada.",
+    "card": {
+      "title": "Envíame correo sobre",
+      "description": "Desactiva una notificación para dejar de recibirla por correo. Seguirás viendo todas las notificaciones en tu campana dentro de la app. Solo se muestran las notificaciones que tu instancia puede enviar por correo."
+    },
+    "toggleAria": "Envíame correo sobre {type}",
+    "empty": "No hay correos de notificación para configurar. Puede que tu instancia aún no tenga el correo configurado, o que ninguna de tus notificaciones se pueda enviar por correo.",
+    "error": {
+      "title": "No se pudieron cargar tus preferencias",
+      "description": "No se pudieron cargar tus preferencias de correo de notificación."
+    },
+    "toast": {
+      "saveError": "No se pudieron guardar tus preferencias de notificación"
+    }
+  },
+  "types": {
+    "critical_app_access": {
+      "label": "Acceso a aplicación crítica",
+      "description": "Una concesión abrió el acceso a una aplicación marcada como crítica."
+    },
+    "admin_granted": {
+      "label": "Administrador otorgado",
+      "description": "Una concesión o cambio de rol elevó a alguien al rol de Administrador."
+    },
+    "low_stock": {
+      "label": "Stock bajo",
+      "description": "Un consumible bajó a su nivel mínimo de stock o por debajo."
+    },
+    "workflow_manual_task": {
+      "label": "Tarea manual pendiente",
+      "description": "Una ejecución de flujo se pausó y espera que una persona actúe."
+    },
+    "workflow_run_failed": {
+      "label": "Ejecución de flujo fallida",
+      "description": "Una ejecución de flujo falló o escaló y se detuvo."
+    },
+    "permission_widened": {
+      "label": "Permiso sensible otorgado",
+      "description": "Una edición de permisos de rol dio al rol Miembro o Visor una capacidad de alto riesgo."
+    },
+    "infra_agent_offline": {
+      "label": "Agente desconectado",
+      "description": "Un agente de reportes dejó de enviar reportes y su nodo se marcó como desconectado."
+    },
+    "update_available": {
+      "label": "Actualización disponible",
+      "description": "Hay una versión de lazyit más reciente que la que estás ejecutando."
+    }
+  }
+}

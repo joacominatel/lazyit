@@ -91,6 +91,17 @@ model User {
   // deferred to F4. Never set by the first-admin `/setup` (that admin chooses their own real password).
   mustChangePassword Boolean  @default(false)
 
+  // Per-user, per-type EMAIL opt-out (issue #879). The list of `NotificationType` values this user has
+  // opted OUT of receiving by EMAIL — the in-app bell is UNAFFECTED (this is an email-channel filter only).
+  // OPT-OUT semantics / default-ON: an empty array (the default) means the user receives every emailable
+  // type; a type present here drops this user from that type's email audience (both the targeted and the
+  // broadcast path — see EmailDispatchService.resolveRecipientEmails). Only EMAILABLE types are meaningful
+  // (the self-service endpoint rejects non-emailable entries); the filter membership-checks against
+  // `job.type` so a stale/non-emailable value stored here is simply inert. ponytail: a String[] is enough
+  // for the email-only v1 (one channel, one flat list); a future multi-channel matrix migrates to a table
+  // then (YAGNI — not built now). No DB enum — mirrors the catalog-as-code String NotificationType.
+  notificationEmailOptOutTypes String[] @default([])
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?

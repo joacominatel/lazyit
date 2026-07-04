@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BellAlertIcon,
   LockOpenIcon,
   QuestionMarkCircleIcon,
   UserCircleIcon,
@@ -119,6 +120,14 @@ export function UserMenu() {
           <Link href="/profile">
             <UserCircleIcon aria-hidden />
             {t("chrome.myProfile")}
+          </Link>
+        </DropdownMenuItem>
+        {/* Notification email preferences (#879): the self-service per-type EMAIL opt-out. Any
+            authenticated user reaches it here — self-scope, no permission gate. */}
+        <DropdownMenuItem asChild>
+          <Link href="/account/notifications">
+            <BellAlertIcon aria-hidden />
+            {t("chrome.notificationPreferences")}
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

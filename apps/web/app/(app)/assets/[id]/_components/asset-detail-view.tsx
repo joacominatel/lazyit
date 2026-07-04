@@ -5,6 +5,7 @@ import {
   ChevronDownIcon,
   DocumentDuplicateIcon,
   PencilSquareIcon,
+  PrinterIcon,
   ShareIcon,
   TrashIcon,
   UserPlusIcon,
@@ -238,9 +239,16 @@ export function AssetDetailView({ id }: { id: string }) {
           </span>
         }
         actions={
-          canWrite || canDelete || topologyNodeId ? (
-            <>
-              {topologyNodeId ? (
+          <>
+            {/* Print a QR label (the QR over the asset tag) — a read-only affordance, so it's shown to
+                everyone. Opens the chrome-less print route in a new tab so the detail page stays. */}
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/assets/${asset.id}/label`} target="_blank">
+                <PrinterIcon />
+                {t("printLabel")}
+              </Link>
+            </Button>
+            {topologyNodeId ? (
                 <Button variant="outline" size="sm" asChild>
                   <Link
                     href={`/assets/diagram?node=${topologyNodeId}&focus=1`}
@@ -276,8 +284,7 @@ export function AssetDetailView({ id }: { id: string }) {
                   <TrashIcon />
                 </Button>
               ) : null}
-            </>
-          ) : undefined
+          </>
         }
       />
 

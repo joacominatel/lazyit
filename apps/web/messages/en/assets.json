@@ -3,6 +3,7 @@
     "title": "Assets",
     "subtitle": "Everything your team tracks and owns.",
     "newAsset": "New asset",
+    "scan": "Scan",
     "export": {
       "button": "Export (filtered)",
       "exporting": "Exporting…",
@@ -202,6 +203,7 @@
     "statusChangeError": "Couldn't change the status",
     "onTopology": "On topology",
     "viewInTopology": "View in topology",
+    "printLabel": "Print label",
     "detailsTitle": "Details",
     "model": "Model",
     "category": "Category",
@@ -303,6 +305,25 @@
     "assign": "Assign",
     "assignedToast": "User assigned",
     "assignError": "Couldn't assign the user"
+  },
+  "label": {
+    "documentTitle": "Asset label — {tag}",
+    "print": "Print",
+    "loading": "Preparing label…",
+    "notFound": "This asset could not be found.",
+    "caption": "Scan to open in lazyit"
+  },
+  "scan": {
+    "title": "Scan asset QR",
+    "subtitle": "Point your camera at an asset's QR label to open it.",
+    "starting": "Starting camera…",
+    "permissionHint": "Allow camera access when prompted. Scanning needs a secure (HTTPS) connection.",
+    "unsupported": "Camera scanning isn't supported on this device or browser. Enter an asset tag instead.",
+    "error": "Couldn't start the camera. Check that you granted permission and are on HTTPS, or enter an asset tag below.",
+    "manualLabel": "Asset tag",
+    "manualPlaceholder": "e.g. LZ-0001",
+    "manualSubmit": "Look up",
+    "back": "Back to assets"
   },
   "status": {
     "OPERATIONAL": "Operational",

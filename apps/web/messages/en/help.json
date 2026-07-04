@@ -100,6 +100,7 @@
     },
     "notifications-activity": {
       "notification-bell": "Notification bell",
+      "email-preferences": "Notification emails",
       "activity-reports": "Activity & reports",
       "global-search": "Global search",
       "quick-view": "Quick view"

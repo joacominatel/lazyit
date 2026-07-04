@@ -3,6 +3,7 @@
     "title": "Activos",
     "subtitle": "Todo lo que tu equipo rastrea y posee.",
     "newAsset": "Nuevo activo",
+    "scan": "Escanear",
     "export": {
       "button": "Exportar (filtrado)",
       "exporting": "Exportando…",
@@ -202,6 +203,7 @@
     "statusChangeError": "No se pudo cambiar el estado",
     "onTopology": "En la topología",
     "viewInTopology": "Ver en la topología",
+    "printLabel": "Imprimir etiqueta",
     "detailsTitle": "Detalles",
     "model": "Modelo",
     "category": "Categoría",
@@ -303,6 +305,25 @@
     "assign": "Asignar",
     "assignedToast": "Usuario asignado",
     "assignError": "No se pudo asignar al usuario"
+  },
+  "label": {
+    "documentTitle": "Etiqueta de activo — {tag}",
+    "print": "Imprimir",
+    "loading": "Preparando la etiqueta…",
+    "notFound": "No se encontró este activo.",
+    "caption": "Escanea para abrir en lazyit"
+  },
+  "scan": {
+    "title": "Escanear QR de activo",
+    "subtitle": "Apunta la cámara a la etiqueta QR de un activo para abrirlo.",
+    "starting": "Iniciando la cámara…",
+    "permissionHint": "Permite el acceso a la cámara cuando se solicite. El escaneo requiere una conexión segura (HTTPS).",
+    "unsupported": "El escaneo con cámara no es compatible con este dispositivo o navegador. Ingresa una etiqueta de activo.",
+    "error": "No se pudo iniciar la cámara. Verifica que otorgaste permiso y que usas HTTPS, o ingresa una etiqueta de activo abajo.",
+    "manualLabel": "Etiqueta de activo",
+    "manualPlaceholder": "p. ej. LZ-0001",
+    "manualSubmit": "Buscar",
+    "back": "Volver a activos"
   },
   "status": {
     "OPERATIONAL": "Operativo",

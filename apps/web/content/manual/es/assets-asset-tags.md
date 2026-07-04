@@ -82,6 +82,33 @@ del esquema. Esto abre una herramienta de revisar y aplicar:
 El reetiquetado masivo es **solo hacia adelante — no hay deshacer masivo.** Si una etiqueta sale mal,
 corrígela editando ese único activo.
 
+## Imprimir una etiqueta QR
+
+Cada activo puede imprimir una pequeña **etiqueta QR** para pegar en la unidad física. En la página del
+activo, usa **Imprimir etiqueta**. lazyit abre una hoja limpia y sin distracciones que muestra un código
+QR con la etiqueta de activo y el nombre impresos debajo, y un botón **Imprimir** que abre el diálogo de
+impresión de tu navegador — envíala a una impresora de etiquetas, o imprímela en papel y recórtala.
+
+El QR codifica un **enlace directo a ese activo en lazyit** (construido a partir de la dirección que
+estás usando en este momento), así que escanearlo — con el escáner integrado que se describe abajo, o
+con la cámara de cualquier teléfono — abre la página del activo. La etiqueta de activo legible siempre se
+imprime debajo del código, para que una persona aún pueda leerla o escribirla si no puede escanear.
+
+## Escanear para encontrar un activo
+
+**Activos → Escanear** abre la cámara del dispositivo para leer la etiqueta QR de un activo sin usar las
+manos. Apunta la cámara a la etiqueta y lazyit actúa según lo que lee:
+
+- una etiqueta QR de lazyit → abre directamente la página de ese activo;
+- cualquier otro código o texto → ejecuta una **búsqueda** de activos con ese valor, para que una
+  etiqueta de texto simple también encuentre la unidad.
+
+El escaneo funciona en el navegador — sin instalar ninguna app — en Safari móvil (iOS), Android Chrome y
+Firefox de escritorio. Requiere **permiso de cámara** y una **conexión segura (HTTPS)**; permite la
+cámara cuando el navegador lo solicite. Si la cámara no está disponible o deniegas el acceso, la misma
+pantalla ofrece un campo de **entrada manual** — escribe una etiqueta de activo y ejecuta la misma
+búsqueda.
+
 ## Qué sigue
 
 - [Conceptos de activos](/help/assets-asset-basics) — dónde aparecen las etiquetas de activo en cada
