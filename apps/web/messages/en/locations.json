@@ -57,11 +57,14 @@
       "name": "Name",
       "nameRequired": "Name is required",
       "type": "Type",
+      "parent": "Parent location",
       "address": "Address",
       "floor": "Floor",
       "description": "Description",
       "notes": "Notes"
     },
+    "parentNone": "None (top-level)",
+    "parentHint": "Nest this location inside another — for example a rack within a datacenter. Leave as top-level for a standalone site.",
     "placeholders": {
       "name": "HQ — 3rd floor",
       "type": "Select a type",
