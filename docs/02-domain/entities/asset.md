@@ -118,6 +118,9 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + autocomplete over already-used values (`GET /assets/companies`); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |
 | `warrantyEnd` | `datetime?` | optional; ISO-8601 string over the wire. |
+| `purchaseCost` | `int?` | optional acquisition cost in **integer minor units** (e.g. cents) of the instance's single currency (#954) — no Prisma `Decimal`, no currency modeling (YAGNI; the UI formats the number). `null` = unknown. Non-negative, bounded to `int4`. |
+| `usefulLifeMonths` | `int?` | optional straight-line depreciation period in months (#954). `null` (or `<= 0`) = don't depreciate (book value = cost). |
+| `salvageValue` | `int?` | optional residual value at end of life, minor units (#954). `null` = 0. |
 | `modelId` | `cuid?` | optional FK → [[asset-model]], `onDelete: SetNull`. |
 | `locationId` | `cuid?` | optional FK → [[location]], `onDelete: SetNull`. |
 | `createdAt` | `datetime` | `@default(now())`. |
@@ -125,6 +128,22 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `deletedAt` | `datetime?` | soft delete. |
 
 `AssetStatus` values: `OPERATIONAL`, `IN_MAINTENANCE`, `IN_STORAGE`, `RETIRED`, `LOST`, `UNKNOWN`.
+
+### Depreciation — `currentBookValue` (#954)
+
+The detail read (`GET /assets/:id`, `AssetWithRelations`) carries a **computed** `currentBookValue`
+(`int | null`, minor units) — it is **never stored**. It is derived per-request from `purchaseCost`,
+`usefulLifeMonths`, `salvageValue` and `purchaseDate` by the pure shared util
+`computeAssetBookValue` in `@lazyit/shared` (with a `bun test`). The rule is **straight-line only**
+(no MACRS / declining-balance / tax modeling, no multi-currency — deliberately minimal):
+
+- `purchaseCost == null` → `null` (unknown).
+- no `usefulLifeMonths` (or `<= 0`) or no `purchaseDate` → `purchaseCost` (can't depreciate).
+- otherwise the value falls linearly from `purchaseCost` at `purchaseDate` down to `salvageValue`
+  (`?? 0`) after `usefulLifeMonths` whole months, then stays flat — clamped to `[salvage, cost]`.
+
+The lean **list** projection omits `currentBookValue` (detail-only, mirroring the #845 pattern); the
+three stored fields are echoed on create/update.
 
 ## Endpoints
 
