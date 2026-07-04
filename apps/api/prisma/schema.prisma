@@ -532,6 +532,13 @@ model Asset {
   company      String?
   purchaseDate DateTime?
   warrantyEnd  DateTime?
+  // Purchase cost + straight-line depreciation (#954). Money is stored as INTEGER minor units (e.g.
+  // cents) of the instance's single currency — NOT a Prisma Decimal, no currency modeling (YAGNI):
+  // the UI just formats the number. `currentBookValue` is COMPUTED (never stored) on the detail read
+  // via `computeAssetBookValue` in @lazyit/shared. Straight-line only (no MACRS/declining-balance).
+  purchaseCost     Int? // minor units (cents); null = unknown
+  usefulLifeMonths Int? // straight-line depreciation period; null = don't depreciate (book value = cost)
+  salvageValue     Int? // minor units; residual value at end of life; null = 0
   // FKs are SetNull: deleting a Model/Location detaches assets, never deletes them.
   modelId      String?
   model        AssetModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
