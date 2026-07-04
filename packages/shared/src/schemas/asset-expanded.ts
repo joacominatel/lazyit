@@ -38,6 +38,11 @@ export const AssetWithRelationsSchema = AssetSchema.extend({
   model: AssetModelWithCategorySchema.nullable(),
   location: LocationSchema.nullable(),
   activeAssignments: z.array(AssetAssignmentWithUserSchema),
+  // Straight-line book value (#954), COMPUTED per-request by `computeAssetBookValue` (never stored):
+  // `null` when `purchaseCost` is unknown, else the depreciated value in minor units. Detail-only —
+  // the lean list omits it (mirrors #845's heavier fields on detail). Optional so it never forces a
+  // ripple on non-detail construction sites.
+  currentBookValue: z.number().int().nullable().optional(),
 });
 
 export type AssetModelWithCategory = z.infer<

@@ -18,6 +18,7 @@ import {
   applyAssetModelSpecsDefaults,
   ASSET_INVENTORY_CSV_HEADER,
   assetInventoryCsvRow,
+  computeAssetBookValue,
   offsetOf,
   pageOf,
   WARRANTY_EXPIRING_WITHIN_DAYS,
@@ -812,10 +813,28 @@ export class AssetsService {
     }
   }
 
-  /** Rename the Prisma `assignments` relation (filtered to active) to the response's `activeAssignments`. */
+  /**
+   * Rename the Prisma `assignments` relation (filtered to active) to the response's
+   * `activeAssignments`, and attach the COMPUTED straight-line `currentBookValue` (#954): the
+   * depreciated value in minor units as-of now, or `null` when `purchaseCost` is unknown. Detail-only
+   * (the lean list omits it) — derived from the stored `purchaseCost` / `usefulLifeMonths` /
+   * `salvageValue` / `purchaseDate` via the shared pure util, never persisted.
+   */
   private toExpanded(asset: AssetWithIncludes) {
     const { assignments, ...rest } = asset;
-    return { ...rest, activeAssignments: assignments };
+    return {
+      ...rest,
+      activeAssignments: assignments,
+      currentBookValue: computeAssetBookValue(
+        {
+          purchaseCost: rest.purchaseCost,
+          usefulLifeMonths: rest.usefulLifeMonths,
+          salvageValue: rest.salvageValue,
+          purchaseDate: rest.purchaseDate,
+        },
+        new Date(),
+      ),
+    };
   }
 
   /** Same `assignments` -> `activeAssignments` rename for the lean LIST row (AssetListItem). */
