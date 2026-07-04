@@ -179,3 +179,38 @@ export const MarkReadResultSchema = z.object({
   unread: z.number().int().min(0),
 });
 export type MarkReadResult = z.infer<typeof MarkReadResultSchema>;
+
+/**
+ * Per-user, per-type EMAIL notification preferences (issue #879). A user can opt OUT of receiving
+ * specific notification types BY EMAIL — the in-app bell is UNAFFECTED (this is an email-channel filter
+ * only). OPT-OUT semantics / default-ON: an empty opt-out list means "email me every emailable type".
+ *
+ * `GET /account/notification-preferences` returns this shape:
+ *   - `emailableTypes` — the full server-curated catalog of types that CAN be emailed, so the UI can
+ *     render one toggle per emailable type without hardcoding the allowlist (the server is the source of
+ *     truth for which types are emailable — the allowlist lives api-side).
+ *   - `optedOutTypes`  — the subset this user has currently opted OUT of. A stored value that is no longer
+ *     emailable is inert on the send path; the read echoes exactly what is stored.
+ * Both arrays contain only known `NotificationType` literals (unknown → 400 via the enum).
+ */
+export const NotificationEmailPreferencesSchema = z.object({
+  emailableTypes: z.array(NotificationTypeSchema),
+  optedOutTypes: z.array(NotificationTypeSchema),
+});
+export type NotificationEmailPreferences = z.infer<
+  typeof NotificationEmailPreferencesSchema
+>;
+
+/**
+ * `PUT /account/notification-preferences` body (issue #879): the user's DESIRED email opt-out set — the
+ * full replacement list (idempotent PUT, not a delta). Each entry must be a known `NotificationType`
+ * (unknown literal → 400 here); the API additionally rejects any entry that is not EMAILABLE → 400 (the
+ * emailable allowlist lives api-side, so that narrower check cannot be expressed in this shared schema).
+ * The API de-duplicates before storing. Keys off the JWT user — the body never carries a user id.
+ */
+export const UpdateNotificationEmailPreferencesSchema = z.object({
+  optedOutTypes: z.array(NotificationTypeSchema),
+});
+export type UpdateNotificationEmailPreferences = z.infer<
+  typeof UpdateNotificationEmailPreferencesSchema
+>;

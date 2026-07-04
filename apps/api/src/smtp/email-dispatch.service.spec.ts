@@ -136,8 +136,8 @@ describe('EmailDispatchService.dispatch', () => {
   it('BROADCAST: emails notification:read roles via bcc (addresses not cross-disclosed)', async () => {
     const { service, sendMail } = setup({
       userFindMany: [
-        { email: 'admin1@example.com' },
-        { email: 'admin2@example.com' },
+        { email: 'admin1@example.com', notificationEmailOptOutTypes: [] },
+        { email: 'admin2@example.com', notificationEmailOptOutTypes: [] },
       ],
     });
     await service.dispatch(baseJob);
@@ -150,7 +150,10 @@ describe('EmailDispatchService.dispatch', () => {
 
   it('TARGETED: emails the single user with `to` (no bcc)', async () => {
     const { service, sendMail } = setup({
-      userFindFirst: { email: 'grantee@example.com' },
+      userFindFirst: {
+        email: 'grantee@example.com',
+        notificationEmailOptOutTypes: [],
+      },
     });
     await service.dispatch({ ...baseJob, recipientUserId: 'u-123' });
     const msg = mailArg(sendMail);
@@ -162,5 +165,50 @@ describe('EmailDispatchService.dispatch', () => {
     const { service, sendMail } = setup({ userFindMany: [] });
     await service.dispatch(baseJob);
     expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  // Per-user, per-type EMAIL opt-out (issue #879): a user who listed job.type in their
+  // notificationEmailOptOutTypes is dropped from the email audience — both paths.
+  it('BROADCAST: drops a user who opted OUT of this type, keeps one who did not', async () => {
+    const { service, sendMail } = setup({
+      userFindMany: [
+        { email: 'in@example.com', notificationEmailOptOutTypes: [] },
+        {
+          email: 'out@example.com',
+          notificationEmailOptOutTypes: ['low_stock'], // opted out of baseJob.type
+        },
+        {
+          email: 'other@example.com',
+          notificationEmailOptOutTypes: ['admin_granted'], // opted out of a DIFFERENT type
+        },
+      ],
+    });
+    await service.dispatch(baseJob); // type = 'low_stock'
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    const msg = mailArg(sendMail);
+    expect(msg.bcc).toEqual(['in@example.com', 'other@example.com']);
+  });
+
+  it('TARGETED: a user who opted OUT of this type gets NO email', async () => {
+    const { service, sendMail } = setup({
+      userFindFirst: {
+        email: 'grantee@example.com',
+        notificationEmailOptOutTypes: ['low_stock'],
+      },
+    });
+    await service.dispatch({ ...baseJob, recipientUserId: 'u-123' }); // type = 'low_stock'
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it('TARGETED: a user opted out of a DIFFERENT type still receives this one', async () => {
+    const { service, sendMail } = setup({
+      userFindFirst: {
+        email: 'grantee@example.com',
+        notificationEmailOptOutTypes: ['admin_granted'],
+      },
+    });
+    await service.dispatch({ ...baseJob, recipientUserId: 'u-123' }); // type = 'low_stock'
+    const msg = mailArg(sendMail);
+    expect(msg.to).toBe('grantee@example.com');
   });
 });
