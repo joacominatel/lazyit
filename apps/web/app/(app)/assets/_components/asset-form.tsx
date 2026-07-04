@@ -57,6 +57,7 @@ import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { majorToMinor, minorToMajor } from "@/lib/utils/money";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { useAssetStatusLabel } from "./asset-status-badge";
 import {
@@ -215,6 +216,28 @@ export function AssetForm({
   // head start. The custom-field rows already live outside RHF here, so this follows the house pattern.
   const [assignToUserId, setAssignToUserId] = useState("");
 
+  // Purchase cost + depreciation (#954) live OUTSIDE react-hook-form. They're edited in MAJOR units
+  // (with decimals), but the schema validates them as integer MINOR units and a `strictObject` would
+  // reject a half-typed "10." — so we hold the raw text here and convert to minor units once, on
+  // submit (same pattern as `assignToUserId` and the specs rows above). Seed from the edited asset,
+  // or the clone source's stored cost. Displayed value = the stored minor amount shown as major.
+  const moneySource = asset ?? cloneSource;
+  const [purchaseCost, setPurchaseCost] = useState(() =>
+    moneySource?.purchaseCost != null
+      ? String(minorToMajor(moneySource.purchaseCost))
+      : "",
+  );
+  const [usefulLifeMonths, setUsefulLifeMonths] = useState(() =>
+    moneySource?.usefulLifeMonths != null
+      ? String(moneySource.usefulLifeMonths)
+      : "",
+  );
+  const [salvageValue, setSalvageValue] = useState(() =>
+    moneySource?.salvageValue != null
+      ? String(minorToMajor(moneySource.salvageValue))
+      : "",
+  );
+
   // Asset-tag scheme hint (ADR-0063, #363): on CREATE, when the org enabled an auto-tag scheme, hint the
   // next auto-generated tag as the `assetTag` placeholder so the operator knows leaving it blank
   // auto-assigns. The field stays optional and an explicit value still wins (the scheme only fills the
@@ -332,6 +355,14 @@ export function AssetForm({
       // send `{}` to actually clear them (an omitted key is a no-op in a PATCH).
       if (isEdit && specs === undefined && hadSpecs) specs = {};
 
+      // Convert the major-unit text to integer minor units (null when blank → omit on create /
+      // clear on patch). Non-negative is enforced by `min="0"` on the inputs + the server.
+      const months = usefulLifeMonths.trim();
+      const usefulLifeMonthsValue =
+        months === "" || !Number.isFinite(Number(months))
+          ? null
+          : Math.trunc(Number(months));
+
       const payload = {
         name: values.name,
         status: values.status,
@@ -343,6 +374,9 @@ export function AssetForm({
         purchaseDate: values.purchaseDate,
         warrantyEnd: values.warrantyEnd,
         notes: values.notes,
+        purchaseCost: majorToMinor(purchaseCost),
+        usefulLifeMonths: usefulLifeMonthsValue,
+        salvageValue: majorToMinor(salvageValue),
         specs,
       };
 
@@ -718,6 +752,64 @@ export function AssetForm({
           </Callout>
         ) : null}
       </FieldGroup>
+
+      {/* ── Purchase & depreciation (#954): optional cost fields. Money is entered in major units and
+          stored in minor units (cents); useful life drives a straight-line current book value shown on
+          the detail page. All optional — leave blank for gear whose cost you don't track. ────────── */}
+      <FieldSeparator />
+      <FieldSet>
+        <FieldLegend>{t("purchaseGroup.title")}</FieldLegend>
+        <FieldDescription>{t("purchaseGroup.description")}</FieldDescription>
+        <FieldGroup>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field>
+              <FieldLabel htmlFor="purchaseCost">{t("purchaseCost")}</FieldLabel>
+              <Input
+                id="purchaseCost"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={purchaseCost}
+                onChange={(event) => setPurchaseCost(event.target.value)}
+                placeholder={t("purchaseCostPlaceholder")}
+              />
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="usefulLifeMonths">
+                {t("usefulLifeMonths")}
+              </FieldLabel>
+              <Input
+                id="usefulLifeMonths"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                value={usefulLifeMonths}
+                onChange={(event) => setUsefulLifeMonths(event.target.value)}
+                placeholder={t("usefulLifeMonthsPlaceholder")}
+              />
+              <FieldDescription>{t("usefulLifeMonthsHelp")}</FieldDescription>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="salvageValue">{t("salvageValue")}</FieldLabel>
+              <Input
+                id="salvageValue"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={salvageValue}
+                onChange={(event) => setSalvageValue(event.target.value)}
+                placeholder={t("salvageValuePlaceholder")}
+              />
+              <FieldDescription>{t("salvageValueHelp")}</FieldDescription>
+            </Field>
+          </div>
+        </FieldGroup>
+      </FieldSet>
 
       {/* ── Head start (CREATE only): optionally assign the first owner in the same step (issue #951).
           Ownership stays a separate AssetAssignment write (asset-centric — never a column), so this

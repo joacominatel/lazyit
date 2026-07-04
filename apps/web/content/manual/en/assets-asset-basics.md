@@ -25,6 +25,7 @@ Open **Assets** and choose **New asset**. The form captures:
 - **Serial** and **Asset tag** — both optional (see *Serial and asset tag* below).
 - **Company** — optional grouping label (see *Company* below).
 - **Purchase date** and **Warranty end** — optional dates.
+- **Purchase & depreciation** — optional cost fields (see *Cost & depreciation* below).
 - **Notes** and **Custom fields** — optional free-form detail.
 
 Under **Head start** you can optionally **assign the first owner** right away: pick a user and, when
@@ -94,6 +95,25 @@ exists simply because at least one asset uses it.
 
 On the asset detail page the company is shown when set, and links to the list filtered by that
 company. You can filter and add a **Company** column to the list (see below).
+
+## Cost & depreciation
+
+Under **Purchase & depreciation** you can optionally record what an asset cost and how long it's
+expected to serve. All three fields are optional — leave them blank for gear whose value you don't
+track.
+
+- **Purchase cost** — what you paid for the unit.
+- **Useful life** — how long you expect to use it, **in months** (for example `36` for three years).
+- **Salvage value** — its estimated worth at the end of that life. Defaults to **0** if left blank.
+
+When a purchase cost is set, the asset's detail page shows a **Book value** — the asset's worth
+**today** under **straight-line depreciation**: the value falls in equal steps from the purchase cost
+down to the salvage value across the useful life, then holds at the salvage value. If you set a cost
+but no useful life, the book value simply stays at the purchase cost (there's nothing to depreciate
+over). Assets with no purchase cost show no book value at all.
+
+Amounts are plain numbers — lazyit is single-organization and doesn't attach a currency, so enter and
+read them in whatever currency your team uses.
 
 ## Custom fields
 
