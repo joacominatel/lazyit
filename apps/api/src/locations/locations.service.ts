@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   CreateLocation,
+  LocationBreadcrumb,
   LocationType,
   PageQuery,
   UpdateLocation,
@@ -32,8 +38,17 @@ export const LOCATION_SORT_ALLOWLIST = {
   updatedAt: 'updatedAt',
 } as const;
 
+/**
+ * Defensive cap on how deep the hierarchy walk (cycle check / ancestry resolution) will recurse. Real
+ * location trees are shallow (site → room → rack); this only guards against a walk that never
+ * terminates (which the cycle rule makes impossible, so hitting it signals a bug or corrupt data).
+ */
+const MAX_HIERARCHY_DEPTH = 32;
+
 @Injectable()
 export class LocationsService {
+  private readonly logger = new Logger(LocationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly search: SearchService,
@@ -108,7 +123,23 @@ export class LocationsService {
     return location;
   }
 
+  /**
+   * A single location plus its resolved ancestry `path` (ordered root→self inclusive) for the detail
+   * breadcrumb (#845). 404s like {@link findOne}; the path is a bounded parent-walk (cycle-free by
+   * construction, so it always terminates well under the cap).
+   */
+  async findOneWithAncestors(id: string) {
+    const location = await this.findOne(id);
+    const path = await this.resolveAncestryPath(location);
+    return { ...location, path };
+  }
+
   async create(data: CreateLocation) {
+    // Reject a bad parent BEFORE inserting (missing/soft-deleted → 400). No cycle is possible on
+    // create — the new id doesn't exist yet, so it can't appear in the parent's ancestor chain.
+    if (data.parentId != null) {
+      await this.assertParentAssignable(data.parentId);
+    }
     const location = await this.prisma.location.create({ data });
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('locations', projectLocation(location));
@@ -117,6 +148,11 @@ export class LocationsService {
 
   async update(id: string, data: UpdateLocation) {
     await this.findOne(id); // 404 if missing or already soft-deleted
+    // Re-parenting: reject a cycle (self or a descendant) and a missing/soft-deleted parent (400).
+    // `parentId: null` (promote to root) is always allowed; an absent key leaves the parent untouched.
+    if (data.parentId != null) {
+      await this.assertParentAssignable(data.parentId, id);
+    }
     const location = await this.prisma.location.update({ where: { id }, data });
     this.search.upsert('locations', projectLocation(location));
     return location;
@@ -159,5 +195,93 @@ export class LocationsService {
     // Re-index the restored location (ADR-0035).
     this.search.upsert('locations', projectLocation(restored));
     return restored;
+  }
+
+  // --- hierarchy (#845) ----------------------------------------------------
+
+  /**
+   * Validate a proposed `parentId` for a location. Rejects (400) when the parent doesn't exist or is
+   * soft-deleted, and — the one hard structural rule — when assigning it would create a CYCLE:
+   * `selfId` being its own parent, or a descendant of `selfId`. Detects the cycle by walking UP from
+   * the proposed parent following `parentId`; if `selfId` shows up anywhere in that chain, the parent
+   * is (transitively) below `selfId`, so the link would close a loop. `selfId` is omitted on create
+   * (the row doesn't exist yet, so no cycle is possible — only the existence check runs).
+   */
+  private async assertParentAssignable(
+    parentId: string,
+    selfId?: string,
+  ): Promise<void> {
+    if (selfId && parentId === selfId) {
+      throw new BadRequestException('A location cannot be its own parent.');
+    }
+    let cursor: string | null = parentId;
+    for (let depth = 0; cursor; depth++) {
+      if (depth >= MAX_HIERARCHY_DEPTH) {
+        // Unreachable while the tree stays acyclic — a safety net against corrupt data / a bug.
+        this.logger.error(
+          `Location hierarchy walk exceeded ${MAX_HIERARCHY_DEPTH} levels from parent ${parentId} (self ${selfId ?? 'n/a'}) — aborting to avoid a runaway loop.`,
+        );
+        throw new BadRequestException(
+          'Location hierarchy is too deep to validate.',
+        );
+      }
+      // Live rows only: a soft-deleted parent is not a valid parent.
+      const node: { id: string; parentId: string | null } | null =
+        await this.prisma.location.findFirst({
+          where: { id: cursor },
+          select: { id: true, parentId: true },
+        });
+      if (!node) {
+        // The first miss is the proposed parent itself (bad input); a later miss is a broken chain.
+        throw new BadRequestException(
+          cursor === parentId
+            ? `Parent location ${parentId} not found.`
+            : `Broken parent chain at ${cursor}.`,
+        );
+      }
+      if (node.id === selfId) {
+        throw new BadRequestException(
+          'A location cannot be moved under one of its own descendants.',
+        );
+      }
+      cursor = node.parentId;
+    }
+  }
+
+  /**
+   * Resolve a location's ancestry into a breadcrumb ordered root→self INCLUSIVE. Bounded parent-walk
+   * (cycle-free by construction). A soft-deleted ancestor (whose `parentId` was SET NULL on hard
+   * delete, or is simply archived) ends the walk — the location is treated as a root from that break.
+   */
+  private async resolveAncestryPath(location: {
+    id: string;
+    name: string;
+    type: LocationType;
+    parentId: string | null;
+  }): Promise<LocationBreadcrumb[]> {
+    const chain: LocationBreadcrumb[] = [
+      { id: location.id, name: location.name, type: location.type },
+    ];
+    let cursor = location.parentId;
+    for (let depth = 0; cursor && depth < MAX_HIERARCHY_DEPTH; depth++) {
+      const node: {
+        id: string;
+        name: string;
+        type: LocationType;
+        parentId: string | null;
+      } | null = await this.prisma.location.findFirst({
+        where: { id: cursor },
+        select: { id: true, name: true, type: true, parentId: true },
+      });
+      if (!node) break; // soft-deleted / missing ancestor — stop here.
+      chain.push({ id: node.id, name: node.name, type: node.type });
+      cursor = node.parentId;
+    }
+    if (cursor) {
+      this.logger.error(
+        `Location ancestry walk for ${location.id} hit the ${MAX_HIERARCHY_DEPTH}-level cap — the tree may be corrupt (a cycle should be impossible).`,
+      );
+    }
+    return chain.reverse();
   }
 }
