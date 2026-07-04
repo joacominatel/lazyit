@@ -415,8 +415,10 @@ enum ServiceAccountAuditAction {
 }
 
 /// Where an asset physically lives — office, datacenter, rack, warehouse or
-/// "remote / with employee". Flat (non-hierarchical) for now.
-/// See docs/02-domain/entities/location.md
+/// "remote / with employee". Hierarchical via a self-referential `parentId`
+/// adjacency list (a FREE tree — no enforced site>room>rack ordering; the only
+/// structural rule, enforced in the service, is NO CYCLES). The existing `type`
+/// enum doubles as the node "kind". See docs/02-domain/entities/location.md (#845).
 model Location {
   id          String       @id @default(cuid())
   name        String
@@ -426,12 +428,19 @@ model Location {
   // String, not number: floors are labels like "PB", "Subsuelo 1", "Mezzanine".
   floor       String?
   notes       String?
+  // Self-referential hierarchy (adjacency list). NULL = root. onDelete: SetNull mirrors
+  // Asset.locationId — a hard-removed parent orphans its children to roots (normal deletes are
+  // soft anyway). Cycle prevention lives in LocationsService (the DB can't express it). (#845)
+  parentId    String?
+  parent      Location?    @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Location[]   @relation("LocationHierarchy")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   deletedAt   DateTime?
 
   assets Asset[]
 
+  @@index([parentId])
   @@map("locations")
 }
 

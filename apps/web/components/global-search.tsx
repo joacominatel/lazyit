@@ -341,6 +341,7 @@ export function GlobalSearch() {
                         floor: hit.floor,
                         description: null,
                         notes: null,
+                        parentId: null,
                         createdAt: "",
                         updatedAt: "",
                         deletedAt: null,
