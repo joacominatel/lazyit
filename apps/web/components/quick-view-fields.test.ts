@@ -422,6 +422,7 @@ describe("selectFields — location", () => {
       address: "1 Main St",
       floor: "PB",
       notes: null,
+      parentId: null,
       createdAt: NOW,
       updatedAt: NOW,
       deletedAt: null,
