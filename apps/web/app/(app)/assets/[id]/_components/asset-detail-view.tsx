@@ -27,6 +27,7 @@ import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { RelatedArticlesPanel } from "@/components/related-articles-panel";
 import { AssetDocumentsPanel } from "./asset-documents-panel";
+import { AssetLocationPath } from "./asset-location-path";
 import {
   AgentInventoryPanel,
   getAgentInventory,
@@ -320,12 +321,10 @@ export function AssetDetailView({ id }: { id: string }) {
           </DetailField>
           <DetailField label={t("location")}>
             {asset.location ? (
-              <Link
-                href={`/locations/${asset.location.id}`}
-                className="hover:underline"
-              >
-                {asset.location.name}
-              </Link>
+              <AssetLocationPath
+                id={asset.location.id}
+                name={asset.location.name}
+              />
             ) : (
               "—"
             )}
