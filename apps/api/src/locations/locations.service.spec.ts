@@ -328,4 +328,113 @@ describe('LocationsService', () => {
       NotFoundException,
     );
   });
+
+  // --- hierarchy / cycle prevention (#845) ---------------------------------
+
+  // Drive findFirst off an in-memory tree so both findOne (existence) and the parent-walk resolve
+  // against the same rows; unknown ids (or soft-deleted rows omitted from the map) return null.
+  type Node = {
+    id: string;
+    name?: string;
+    type?: string;
+    parentId: string | null;
+  };
+  const seedTree = (nodes: Node[]) => {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    location.findFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve(byId.get(where.id) ?? null),
+    );
+  };
+
+  it('create sets a valid parent and rejects a missing/soft-deleted parent (400)', async () => {
+    seedTree([{ id: 'root', parentId: null }]);
+    location.create.mockResolvedValue({ id: 'child', parentId: 'root' });
+
+    await expect(
+      service.create({ name: 'Rack 1', type: 'RACK', parentId: 'root' }),
+    ).resolves.toEqual({ id: 'child', parentId: 'root' });
+    expect(location.create).toHaveBeenCalledWith({
+      data: { name: 'Rack 1', type: 'RACK', parentId: 'root' },
+    });
+
+    // A parentId with no live row (never existed, or soft-deleted → filtered out) is rejected.
+    location.create.mockClear();
+    await expect(
+      service.create({ name: 'Rack 2', type: 'RACK', parentId: 'ghost' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(location.create).not.toHaveBeenCalled();
+  });
+
+  it('update rejects a location as its own parent (400)', async () => {
+    seedTree([{ id: 'A', parentId: null }]);
+
+    await expect(service.update('A', { parentId: 'A' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(location.update).not.toHaveBeenCalled();
+  });
+
+  it('update rejects re-parenting under a descendant — cycle (400)', async () => {
+    // A → B → C. Moving A under C would close a loop (C is a descendant of A).
+    seedTree([
+      { id: 'A', parentId: null },
+      { id: 'B', parentId: 'A' },
+      { id: 'C', parentId: 'B' },
+    ]);
+
+    await expect(service.update('A', { parentId: 'C' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(location.update).not.toHaveBeenCalled();
+  });
+
+  it('update accepts a valid (non-cyclic) parent', async () => {
+    seedTree([
+      { id: 'root', parentId: null },
+      { id: 'child', parentId: null },
+    ]);
+    location.update.mockResolvedValue({ id: 'child', parentId: 'root' });
+
+    await service.update('child', { parentId: 'root' });
+
+    expect(location.update).toHaveBeenCalledWith({
+      where: { id: 'child' },
+      data: { parentId: 'root' },
+    });
+  });
+
+  it('update rejects a missing/soft-deleted parent (400)', async () => {
+    seedTree([{ id: 'child', parentId: null }]);
+
+    await expect(
+      service.update('child', { parentId: 'ghost' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(location.update).not.toHaveBeenCalled();
+  });
+
+  it('findOneWithAncestors resolves the path ordered root→self inclusive', async () => {
+    seedTree([
+      { id: 'site', name: 'HQ', type: 'OFFICE', parentId: null },
+      { id: 'room', name: 'Server Room', type: 'DATACENTER', parentId: 'site' },
+      { id: 'rack', name: 'Rack 1', type: 'RACK', parentId: 'room' },
+    ]);
+
+    const detail = await service.findOneWithAncestors('rack');
+
+    expect(detail.id).toBe('rack');
+    expect(detail.path).toEqual([
+      { id: 'site', name: 'HQ', type: 'OFFICE' },
+      { id: 'room', name: 'Server Room', type: 'DATACENTER' },
+      { id: 'rack', name: 'Rack 1', type: 'RACK' },
+    ]);
+  });
+
+  it('findOneWithAncestors returns a single-element path for a root location', async () => {
+    seedTree([{ id: 'site', name: 'HQ', type: 'OFFICE', parentId: null }]);
+
+    const detail = await service.findOneWithAncestors('site');
+
+    expect(detail.path).toEqual([{ id: 'site', name: 'HQ', type: 'OFFICE' }]);
+  });
 });
