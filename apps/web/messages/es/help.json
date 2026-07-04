@@ -100,6 +100,7 @@
     },
     "notifications-activity": {
       "notification-bell": "Campana de notificaciones",
+      "email-preferences": "Correos de notificación",
       "activity-reports": "Actividad e informes",
       "global-search": "Búsqueda global",
       "quick-view": "Vista rápida"

@@ -3,6 +3,7 @@
 //
 // Section agents edit the per-area JSON files (e.g. `assets.json`) — NEVER this
 // barrel. Adding a brand-new namespace is the only reason to touch this file.
+import account from "./account.json";
 import applications from "./applications.json";
 import assets from "./assets.json";
 import attachments from "./attachments.json";
@@ -30,6 +31,7 @@ import workflow from "./workflow.json";
 
 const messages = {
   common,
+  account,
   nav,
   marketing,
   shared,
