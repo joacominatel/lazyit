@@ -1,7 +1,7 @@
 "use client";
 
 import { PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
-import { MAX_PAGE_LIMIT } from "@lazyit/shared";
+import { type LocationDetail, MAX_PAGE_LIMIT } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -85,17 +85,25 @@ export function LocationDetailView({ id }: { id: string }) {
     [t],
   );
 
-  const breadcrumb = useMemo(
-    () => (
+  // The detail endpoint returns `path` (root→self INCLUSIVE, #845), so the breadcrumb is the full
+  // ancestry: each ancestor links to its own detail, the last hop (self) is plain text. Falls back to
+  // just the location's name while the record (or a legacy response without `path`) loads.
+  const path = (location as LocationDetail | undefined)?.path;
+  const breadcrumb = useMemo(() => {
+    const trail =
+      path && path.length > 0
+        ? path.map((hop, index) =>
+            index === path.length - 1
+              ? { label: hop.name }
+              : { label: hop.name, href: `/locations/${hop.id}` },
+          )
+        : [{ label: location?.name ?? "" }];
+    return (
       <Breadcrumb
-        items={[
-          { label: t("detail.breadcrumb"), href: "/locations" },
-          { label: location?.name ?? "" },
-        ]}
+        items={[{ label: t("detail.breadcrumb"), href: "/locations" }, ...trail]}
       />
-    ),
-    [t, location?.name],
-  );
+    );
+  }, [t, location?.name, path]);
 
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
