@@ -7,6 +7,7 @@ import {
   ArrowUturnLeftIcon,
   FunnelIcon,
   PlusIcon,
+  QrCodeIcon,
   ServerStackIcon,
   ShareIcon,
   TrashIcon,
@@ -677,6 +678,14 @@ export function AssetsListView() {
                 }}
               />
             ) : null}
+            {/* Camera QR lookup (#875) — scan an asset's label to jump to it. A read-only affordance,
+                so it's shown to everyone. */}
+            <Button variant="outline" asChild title={t("scan")}>
+              <Link href="/assets/scan">
+                <QrCodeIcon />
+                {t("scan")}
+              </Link>
+            </Button>
             {/* Export the CURRENT filtered slice as a CSV (#872). Disabled while streaming or when
                 there's nothing to export; available to any reader (the export reuses asset:read). */}
             <Button
