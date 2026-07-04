@@ -630,6 +630,31 @@ describe('AssetsService', () => {
     );
   });
 
+  it('findOne attaches currentBookValue = null when purchaseCost is unknown (#954)', async () => {
+    // The default rawRow carries no purchaseCost → unknown → null (asserted deterministically).
+    asset.findFirst.mockResolvedValue(rawRow());
+
+    const result = await service.findOne('a1');
+
+    expect(result.currentBookValue).toBeNull();
+  });
+
+  it('findOne echoes cost as currentBookValue when there is nothing to depreciate (#954)', async () => {
+    // purchaseCost set but no usefulLifeMonths → current value = cost (independent of "now").
+    asset.findFirst.mockResolvedValue(
+      rawRow({
+        purchaseCost: 100_000,
+        usefulLifeMonths: null,
+        salvageValue: null,
+        purchaseDate: null,
+      }),
+    );
+
+    const result = await service.findOne('a1');
+
+    expect(result.currentBookValue).toBe(100_000);
+  });
+
   // --- findPage (paginated, lean) -----------------------------------------
   it('findPage uses the LEAN select (no specs; trimmed joins), newest first, with take/skip', async () => {
     asset.findMany.mockResolvedValue([]);
