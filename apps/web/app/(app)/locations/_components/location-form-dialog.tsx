@@ -9,7 +9,7 @@ import {
   LocationTypeSchema,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -36,19 +36,28 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ApiError } from "@/lib/api/client";
 import {
   useCreateLocation,
   useUpdateLocation,
 } from "@/lib/api/hooks/use-location-mutations";
+import { useLocations } from "@/lib/api/hooks/use-locations";
 import { notifyError } from "@/lib/api/notify-error";
 import { useLocationTypeLabel } from "./location-type-badge";
 
 const FORM_ID = "location-form";
 
 /**
+ * Radix `Select` can't use `""`/`null` as an item value, so a sentinel stands in for "no parent"
+ * (root). It maps to `parentId: null` on submit — the API reads `null` as "promote to root" (#845).
+ */
+const ROOT_VALUE = "__root__";
+
+/**
  * Maps a Location (or nothing, for create) to form values. Optional DB fields
  * are `null`; the form works in `undefined` (an empty optional) so the strict
  * `CreateLocationSchema` accepts an untouched field instead of an empty string.
+ * `parentId` (`null` = a root location) is part of the shared schema (#845).
  */
 function toFormValues(location?: Location): CreateLocation {
   return {
@@ -58,6 +67,7 @@ function toFormValues(location?: Location): CreateLocation {
     address: location?.address ?? undefined,
     floor: location?.floor ?? undefined,
     notes: location?.notes ?? undefined,
+    parentId: location?.parentId ?? null,
   };
 }
 
@@ -89,6 +99,18 @@ export function LocationFormDialog({
   const updateLocation = useUpdateLocation();
   const isPending = createLocation.isPending || updateLocation.isPending;
 
+  // Parent options: the whole (active) location directory, minus invalid choices. The server is the
+  // source of truth (it 400s a cycle), so we only trim the cheap cases client-side (#845): a location
+  // can't be its own parent, nor sit under its own direct children. Deeper cycles fall to the 400.
+  const { data: allLocations } = useLocations();
+  const parentOptions = useMemo(() => {
+    const rows = allLocations ?? [];
+    if (!location) return rows;
+    return rows.filter(
+      (row) => row.id !== location.id && row.parentId !== location.id,
+    );
+  }, [allLocations, location]);
+
   const form = useForm<CreateLocation>({
     resolver: zodResolver(CreateLocationSchema),
     defaultValues: toFormValues(location),
@@ -100,7 +122,18 @@ export function LocationFormDialog({
     if (open) form.reset(toFormValues(location));
   }, [open, location, form]);
 
+  // A parent that's a cycle (self/descendant) or missing/soft-deleted comes back as a 400 (#845).
+  // Surface it inline on the parent field rather than as a bare toast; anything else keeps the toast.
+  function handleWriteError(error: unknown, fallback: string) {
+    if (error instanceof ApiError && error.status === 400) {
+      form.setError("parentId", { type: "server", message: error.message });
+      return;
+    }
+    notifyError(error, fallback);
+  }
+
   const onSubmit = form.handleSubmit((values) => {
+    // `parentId` is part of the payload (#845); `null` promotes to a root.
     if (location) {
       updateLocation.mutate(
         { id: location.id, data: values },
@@ -109,8 +142,7 @@ export function LocationFormDialog({
             toast.success(t("form.toast.updated"));
             onOpenChange(false);
           },
-          onError: (error) =>
-            notifyError(error, t("form.toast.updateError")),
+          onError: (error) => handleWriteError(error, t("form.toast.updateError")),
         },
       );
     } else {
@@ -120,8 +152,7 @@ export function LocationFormDialog({
           toast.success(t("form.toast.created"));
           onOpenChange(false);
         },
-        onError: (error) =>
-          notifyError(error, t("form.toast.createError")),
+        onError: (error) => handleWriteError(error, t("form.toast.createError")),
       });
     }
   });
@@ -204,6 +235,51 @@ export function LocationFormDialog({
                     </SelectContent>
                   </Select>
                   <FieldError errors={[fieldState.error]} />
+                </Field>
+              )}
+            />
+
+            <Controller
+              control={form.control}
+              name="parentId"
+              render={({ field, fieldState }) => (
+                <Field data-invalid={fieldState.invalid || undefined}>
+                  <FieldLabel htmlFor="parentId">
+                    {t("form.fields.parent")}
+                  </FieldLabel>
+                  <Select
+                    value={field.value ?? ROOT_VALUE}
+                    onValueChange={(value) => {
+                      field.onChange(value === ROOT_VALUE ? null : value);
+                      // Clear a stale server 400 once the user picks a different parent.
+                      if (fieldState.error) form.clearErrors("parentId");
+                    }}
+                  >
+                    <SelectTrigger
+                      id="parentId"
+                      className="w-full"
+                      aria-invalid={fieldState.invalid || undefined}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ROOT_VALUE}>
+                        {t("form.parentNone")}
+                      </SelectItem>
+                      {parentOptions.map((parent) => (
+                        <SelectItem key={parent.id} value={parent.id}>
+                          {parent.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {fieldState.error ? (
+                    <FieldError errors={[fieldState.error]} />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {t("form.parentHint")}
+                    </p>
+                  )}
                 </Field>
               )}
             />
