@@ -157,4 +157,22 @@ describe('validateBootConfig (fail-loud boot config)', () => {
     ).toThrow(ExitCalled);
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
+
+  it('accepts LAN host-agnostic mode (AUTH_TRUST_HOST=true, no WEB_ORIGIN, AUTH_MODE=local)', () => {
+    expect(() =>
+      validateBootConfig({ ...LOCAL_OK, AUTH_TRUST_HOST: 'true' }),
+    ).not.toThrow();
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('EXITS when AUTH_TRUST_HOST=true with a non-local AUTH_MODE (names AUTH_TRUST_HOST)', () => {
+    expect(() =>
+      validateBootConfig({ ...OIDC_OK, AUTH_TRUST_HOST: 'true' }),
+    ).toThrow(ExitCalled);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const logged = errorSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join('\n');
+    expect(logged).toContain('AUTH_TRUST_HOST');
+  });
 });
