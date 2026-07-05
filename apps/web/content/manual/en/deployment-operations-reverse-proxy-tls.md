@@ -34,6 +34,11 @@ Caddy provisions certificates with **zero configuration**, in one of two modes:
   (no warning) and renew automatically. This requires your domain to resolve to the host and ports
   **80 and 443** to be reachable.
 
+There is also a **no-TLS option** for a trusted LAN: the bootstrap's **LAN mode** serves plain **HTTP**
+on any IP or hostname, with no certificate to provision or trust. Sessions are then unencrypted, so use
+it only on a local network you control — see
+[Network & TLS modes](/help/deployment-operations-self-hosting).
+
 ## Going live on a real domain
 
 For a public, trusted-HTTPS deployment, set these in `infra/env/.env.prod`:
