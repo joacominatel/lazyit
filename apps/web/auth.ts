@@ -111,6 +111,10 @@ const REFRESH_SKEW_SECONDS = 30;
  * we fall back to the stock `NODE_ENV` default so nothing changes for callers that never set one.
  */
 function deriveUseSecureCookies(): boolean {
+  // LAN mode (`AUTH_TRUST_HOST=true`, issue #1035): host-agnostic plain-HTTP on a trusted LAN, with
+  // NO origin var set. The request is `http` at any Host, so the session cookie MUST be non-Secure —
+  // a `Secure` cookie is silently dropped by the browser over http and login fails with no error.
+  if (process.env.AUTH_TRUST_HOST === "true") return false;
   const origin =
     process.env.AUTH_URL ?? process.env.NEXTAUTH_URL ?? process.env.WEB_ORIGIN;
   if (origin) {
@@ -329,6 +333,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // (issue #1008): an unconfigured OIDC provider 500s the whole Auth.js handler in local mode.
     ...(externalIssuer ? [oidcProvider] : []),
   ],
+
+  // LAN mode (`AUTH_TRUST_HOST=true`, issue #1035): derive the callback URL + cookie host from the
+  // incoming request `Host` instead of a fixed `AUTH_URL`/`WEB_ORIGIN`, so one image serves any
+  // IP/hostname/localhost over plain HTTP. Trusting the `Host` header is safe ONLY because Caddy is
+  // the single ingress that sets it — the app container must never be exposed directly (see the LAN
+  // deploy ADR / ADR-0086 follow-up). Non-LAN modes leave `trustHost` unset (Auth.js's default),
+  // so behavior is byte-identical to today.
+  ...(process.env.AUTH_TRUST_HOST === "true" ? { trustHost: true } : {}),
 
   // `Secure` keyed to the real origin scheme, not `NODE_ENV` (ADR-0086 §6) — see deriveUseSecureCookies.
   useSecureCookies: deriveUseSecureCookies(),
