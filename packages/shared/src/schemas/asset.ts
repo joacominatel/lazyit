@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalText, requireAtLeastOneKey } from "./primitives";
+import { int4, optionalText, requireAtLeastOneKey } from "./primitives";
 
 /**
  * Asset — the first-class citizen: a single tracked thing, a concrete instance of an AssetModel
@@ -59,6 +59,15 @@ export const AssetSchema = z.object({
   company: z.string().nullable(),
   purchaseDate: z.iso.datetime().nullable(),
   warrantyEnd: z.iso.datetime().nullable(),
+  // Purchase cost + straight-line depreciation (#954). Money in INTEGER minor units (cents) of the
+  // instance's single currency — bounded to int4 like every other Int column. `.nullish()` (not
+  // required-nullable) on purpose: an optional key means existing web object-construction sites
+  // (Quick View mappers, fixtures) that build an Asset without these keys keep type-checking. The
+  // COMPUTED `currentBookValue` lives on the detail read (AssetWithRelationsSchema), not here — it is
+  // derived per-request via `computeAssetBookValue`, never a persisted column.
+  purchaseCost: int4({ min: 0 }).nullish(),
+  usefulLifeMonths: int4({ min: 0 }).nullish(),
+  salvageValue: int4({ min: 0 }).nullish(),
   modelId: z.cuid().nullable(),
   locationId: z.cuid().nullable(),
   createdAt: z.iso.datetime(),
@@ -81,6 +90,10 @@ export const CreateAssetSchema = z.strictObject({
   company: optionalText(200),
   purchaseDate: z.iso.datetime().optional(),
   warrantyEnd: z.iso.datetime().optional(),
+  // Purchase cost + straight-line depreciation (#954) — optional non-negative int4 minor units.
+  purchaseCost: int4({ min: 0 }).nullish(),
+  usefulLifeMonths: int4({ min: 0 }).nullish(),
+  salvageValue: int4({ min: 0 }).nullish(),
   modelId: z.cuid().optional(),
   locationId: z.cuid().optional(),
 });
@@ -99,6 +112,11 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
       company: z.string().trim().min(1).max(200),
       purchaseDate: z.iso.datetime(),
       warrantyEnd: z.iso.datetime(),
+      // Purchase cost + straight-line depreciation (#954). `.nullable()` (inside `.partial()`) so a
+      // PATCH can CLEAR a value back to unknown (`{ purchaseCost: null }`) as well as set it.
+      purchaseCost: int4({ min: 0 }).nullable(),
+      usefulLifeMonths: int4({ min: 0 }).nullable(),
+      salvageValue: int4({ min: 0 }).nullable(),
       modelId: z.cuid(),
       locationId: z.cuid(),
     })

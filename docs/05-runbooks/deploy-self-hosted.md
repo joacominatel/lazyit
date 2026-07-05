@@ -41,7 +41,8 @@ runbook]]; the differences are a real domain, real secrets, and backups.
 > up — then prints the URL and points you at `https://<your-domain>/setup`.
 >
 > ```sh
-> ./infra/start.sh            # interactive; choose 'real' deployment mode and answer ~6 questions
+> ./infra/start.sh            # interactive; pick a network mode (lan | local | real) + answer ~6 questions
+> ./infra/start.sh --reconfigure  # existing install: re-render .env.prod for a new host/port/mode, keep secrets
 > ./infra/start.sh --dry-run  # preview: run all checks + prompts, write nothing, run no docker
 > ```
 >
@@ -94,8 +95,42 @@ Edit `infra/env/.env.prod`:
 
 ## 1a. LAN / bare-IP deployment (no public domain)
 
-Small IT teams often reach lazyit on the LAN by a bare IP (`https://192.168.1.50`) or a plain LAN
-hostname, with no public DNS and so no Let's Encrypt. This works out of the box: Caddy's
+Small IT teams often reach lazyit on the LAN by IP or a plain hostname, with no public DNS. There are
+**two** ways to do this — pick one at install (Q1 of `infra/start.sh`, [[0087-plain-http-lan-deployment-axis]]):
+
+### Option A — `lan` mode: plain HTTP, host-agnostic (recommended for a trusted LAN)
+
+Choose **`lan`** at Q1. The script sets a **port-only** `LAZYIT_SITE_ADDRESS=:80`, so Caddy serves plain
+HTTP for **any** Host on the published port (`LAZYIT_HTTP_PORT`, default 8080) — no TLS, no cert, no
+browser warning. It sets `AUTH_TRUST_HOST=true` and leaves `WEB_ORIGIN` **unset**, so the app derives its
+origin from whatever host/IP the browser used. **If the LAN IP changes (DHCP), the URL just follows — no
+reconfigure needed.** Reach it at `http://<this-host>:8080`.
+
+- **`lan` requires `AUTH_MODE=local`** (built-in accounts) — OIDC/Zitadel bakes a fixed `externalDomain`
+  and can't be host-agnostic. The script forces this.
+- **Security:** the login session travels **unencrypted** over the LAN. Use `lan` **only** on a network
+  you trust; never expose it to the public internet. The **secret vault stays end-to-end encrypted**
+  regardless (its passphrase never reaches the server — INV-10), so a sniffed session grants no vault
+  access. For anything less than a physically-trusted LAN, use Option B (HTTPS) or a real domain.
+- The reporting agent installs against the **plain-HTTP** origin (`--url http://<this-host>:8080`); no CA
+  trust step is needed (there is no TLS).
+
+To change the port or switch modes later (or after an IP change on a **hostname**-pinned deploy), re-run:
+
+```sh
+./infra/start.sh --reconfigure   # re-render .env.prod for a new host/port/mode, preserving ALL secrets
+```
+
+`--reconfigure` re-asks the network mode / host / ports, keeps every secret (`WORKFLOW_SECRET_KEY`,
+`SESSION_SIGNING_SECRET`, `AUTH_SECRET`, DB creds — never regenerated) and the auth mode + Postgres
+topology, touches **no** volumes, and brings the stack back up. It is supported for **local-auth installs
+only** (an OIDC deploy's IdP `externalDomain` is baked at first boot and can't be re-homed by re-rendering
+env — edit `.env.prod` by hand and re-provision Zitadel instead).
+
+### Option B — HTTPS on a bare IP (internal CA)
+
+Prefer encrypted sessions on the LAN? Choose **`local`**/**`real`** and set `LAZYIT_SITE_ADDRESS` to the
+bare IP or LAN hostname. This works out of the box: Caddy's
 `default_sni` (issue #1010/#1011, `infra/caddy/Caddyfile`) presents the site certificate even when
 the client sends no SNI — which is the bare-IP case, since TLS SNI is a hostname field and neither
 browsers nor curl/OpenSSL send an IP literal as SNI (RFC 6066). A bare-IP deploy keeps Caddy's

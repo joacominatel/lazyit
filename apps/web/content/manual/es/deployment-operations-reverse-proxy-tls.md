@@ -35,6 +35,11 @@ Caddy aprovisiona certificados con **cero configuración**, en uno de dos modos:
   confianza pública (sin aviso) y se renuevan automáticamente. Requiere que tu dominio resuelva al
   servidor y que los puertos **80 y 443** sean accesibles.
 
+También existe una **opción sin TLS** para una LAN de confianza: el **modo LAN** del arranque sirve
+**HTTP** plano en cualquier IP o nombre de host, sin certificado que aprovisionar ni en el que confiar.
+Entonces las sesiones no van cifradas, así que úsalo solo en una red local que controles — consulta
+[Modos de red y TLS](/help/deployment-operations-self-hosting).
+
 ## Salir en vivo con un dominio real
 
 Para un despliegue público con HTTPS de confianza, define esto en `infra/env/.env.prod`:

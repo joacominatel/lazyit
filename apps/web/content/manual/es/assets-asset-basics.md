@@ -27,6 +27,7 @@ Abre **Activos** y elige **Nuevo activo**. El formulario captura:
 - **Serie** y **Etiqueta de activo** — ambas opcionales (ver *Serie y etiqueta de activo* abajo).
 - **Empresa** — etiqueta de agrupación opcional (ver *Empresa* abajo).
 - **Fecha de compra** y **Fin de garantía** — fechas opcionales.
+- **Compra y amortización** — campos de costo opcionales (ver *Costo y amortización* abajo).
 - **Notas** y **Campos personalizados** — detalle libre opcional.
 
 En **Ventaja inicial** puedes, de forma opcional, **asignar al primer responsable** de una vez: elige
@@ -100,6 +101,26 @@ que administrar: una empresa existe simplemente porque al menos un activo la usa
 
 En la página de detalle del activo la empresa se muestra cuando está fijada, y enlaza a la lista
 filtrada por esa empresa. Puedes filtrar y agregar una columna **Empresa** a la lista (más abajo).
+
+## Costo y amortización
+
+En **Compra y amortización** puedes, de forma opcional, registrar cuánto costó un activo y cuánto se
+espera que dure. Los tres campos son opcionales — déjalos en blanco para el equipo cuyo valor no
+lleves.
+
+- **Costo de compra** — lo que pagaste por la unidad.
+- **Vida útil** — cuánto esperas usarla, **en meses** (por ejemplo `36` para tres años).
+- **Valor residual** — su valor estimado al final de esa vida útil. Por defecto **0** si se deja en
+  blanco.
+
+Cuando hay un costo de compra, la página de detalle del activo muestra un **Valor contable** — lo que
+vale el activo **hoy** con **amortización lineal**: el valor baja en pasos iguales desde el costo de
+compra hasta el valor residual a lo largo de la vida útil, y luego se mantiene en el valor residual.
+Si defines un costo pero no una vida útil, el valor contable simplemente se queda en el costo de
+compra (no hay nada que amortizar). Los activos sin costo de compra no muestran ningún valor contable.
+
+Los importes son números simples — lazyit es de una sola organización y no asocia una moneda, así que
+introdúcelos y léelos en la moneda que use tu equipo.
 
 ## Campos personalizados
 

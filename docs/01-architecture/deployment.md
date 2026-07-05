@@ -49,10 +49,17 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   stage, and serves the right one over the token-gated `GET /api/agent/download`; the public
   `install.sh` (web `/public`) installs it as a systemd timer. Same-origin, version-locked,
   air-gapped-safe — no GitHub Release. → [[0074-server-reporting-agent]] §6.
-- **Reverse proxy / TLS:** **Caddy** with automatic HTTPS — internal CA for local prod-like,
-  Let's Encrypt for a real domain. **Same-origin routing**: the browser calls `/api/*` and Caddy
-  forwards it to the API, so the web image is domain-portable (`NEXT_PUBLIC_API_URL=/api`, baked at
-  build). Details: [[0026-reverse-proxy-tls]].
+- **Reverse proxy / TLS:** **Caddy**, with a **network/TLS mode chosen at install** (three, orthogonal
+  to `AUTH_MODE` — [[0087-plain-http-lan-deployment-axis]]):
+  - **`lan`** — `LAZYIT_SITE_ADDRESS=:80` (port-only) → Caddy serves **plain HTTP for any Host**, no TLS,
+    no cert, no redirect (host-agnostic: survives a DHCP IP change). `AUTH_TRUST_HOST=true`, `WEB_ORIGIN`
+    unset. **Requires `AUTH_MODE=local`.** Trusted-LAN only — the session is unencrypted in transit.
+  - **`local`** — `localhost` + Caddy **internal-CA HTTPS** on high ports (browser warns until trusted).
+  - **`real`** — a public FQDN + **Let's Encrypt** (or internal CA).
+  **Same-origin routing** in every mode: the browser calls `/api/*` and Caddy forwards it to the API, so
+  the web image is domain-portable (`NEXT_PUBLIC_API_URL=/api`, baked at build). The single
+  `{$LAZYIT_SITE_ADDRESS}` site block already covers all three (a port-only value disables auto-TLS —
+  verified with `caddy validate`); no per-mode Caddy block. Details: [[0026-reverse-proxy-tls]].
 - **Migrations in prod:** the `migrate` job runs `prisma migrate deploy` (never `migrate dev`/
   `reset`) then the idempotent seed, before the API starts. → [[prisma-migrations]].
 - **Async substrate (Valkey):** a **Valkey** container (`valkey:8-alpine`, the Redis-compatible BSD
@@ -89,8 +96,13 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
 | Level | What runs | Runbook |
 | --- | --- | --- |
 | **Dev** | root `compose.yaml` + auto-loaded `compose.override.yaml` (backing services) + `bun run dev` | [[setup]] |
+| **LAN (host-agnostic HTTP)** | `compose.yaml` + `infra/docker-compose.prod.yaml` + `--profile prod`, `LAZYIT_SITE_ADDRESS=:80` plain HTTP any-host on the published port, `AUTH_MODE=local` | [[deploy-self-hosted]] |
 | **Local prod-like** | `compose.yaml` + `infra/docker-compose.prod.yaml` + `--profile prod`, local HTTPS, high ports 8080/8443 | [[docker-prod-like-first-boot]] |
 | **Self-hosted real** | same compose, real domain + Let's Encrypt, real secrets, backups | [[deploy-self-hosted]] |
+
+The network/TLS mode (`lan`/`local`/`real`) is chosen at install; changing it later (or after a DHCP IP
+change) is the supported `./infra/start.sh --reconfigure` path — it re-renders `infra/env/.env.prod`
+preserving every secret, without touching volumes (local-auth installs only). → [[0087-plain-http-lan-deployment-axis]].
 
 ## First deploy — the guided bootstrap (`infra/start.sh`)
 

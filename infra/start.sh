@@ -31,9 +31,20 @@
 #
 # Usage:
 #   ./infra/start.sh                 # interactive guided bootstrap (recommended)
+#   ./infra/start.sh --reconfigure   # re-run the host/ports/mode questions on an EXISTING install
+#                                    #   and re-render .env.prod, PRESERVING every secret. The
+#                                    #   supported "my LAN IP changed / switch network mode" path.
 #   ./infra/start.sh --yes           # non-interactive localhost defaults (smoke test)
 #   ./infra/start.sh --dry-run       # do everything EXCEPT write the file and run docker
 #   ./infra/start.sh --help
+#
+# NETWORK / TLS MODE (chosen at Q1, ADR-0087). Three modes, orthogonal to AUTH_MODE:
+#   lan   — plain HTTP, HOST-AGNOSTIC (LAZYIT_SITE_ADDRESS=:80 → Caddy serves any Host on the
+#           published port, no TLS). Survives a DHCP IP change. REQUIRES AUTH_MODE=local (a
+#           trusted-LAN downgrade: the session travels unencrypted — the secret vault stays E2E
+#           encrypted regardless). The easy pick for a small team on a LAN.
+#   local — localhost + Caddy internal-CA HTTPS on the high ports (unchanged prod-like default).
+#   real  — public FQDN + optional Let's Encrypt (unchanged).
 #
 # Docs: docs/05-runbooks/docker-prod-like-first-boot.md · docs/05-runbooks/deploy-self-hosted.md
 #       ADR-0047 (this script) · ADR-0028 (secrets) · ADR-0025 (containerization) · ADR-0043 (Zitadel).
@@ -42,7 +53,10 @@ set -eu
 
 # ---------- constants --------------------------------------------------------
 ENV_EXAMPLE="infra/env/.env.prod.example"
-ENV_FILE="infra/env/.env.prod"
+# ENV_FILE is overridable via LAZYIT_ENV_FILE for the leave-behind test
+# (infra/test/reconfigure-preserves-secrets.sh) so it can point at a scratch file and never touch
+# a real deploy's .env.prod. Defaults to the canonical path for every real invocation.
+ENV_FILE="${LAZYIT_ENV_FILE:-infra/env/.env.prod}"
 COMPOSE_BASE="compose.yaml"
 COMPOSE_PROD="infra/docker-compose.prod.yaml"
 COMPOSE_OIDC="infra/docker-compose.oidc.yaml"   # OIDC overlay (bundled Zitadel); ADR-0086
@@ -66,12 +80,16 @@ zitadel_console_login() {
 # ---------- flags ------------------------------------------------------------
 ASSUME_YES=0
 DRY_RUN=0
+RECONFIGURE=0                     # --reconfigure: re-render an EXISTING .env.prod, preserving secrets
 
 # ---------- defaults the questions fill in (localhost prod-like smoke test) ---
-DEPLOY_MODE="local"               # local | real
+DEPLOY_MODE="local"               # lan | local | real  (network/TLS axis, ADR-0087)
 DOMAIN="localhost"                # FQDN or localhost
-SITE_ADDRESS="localhost"          # Caddy site address (LAZYIT_SITE_ADDRESS)
-WEB_ORIGIN_VAL="https://localhost:8443"
+SITE_ADDRESS="localhost"          # Caddy site address (LAZYIT_SITE_ADDRESS); ":80" in lan mode (any-host HTTP)
+WEB_ORIGIN_VAL="https://localhost:8443"  # UNSET (empty) in lan mode — the app derives origin from the request Host
+WEB_ORIGIN_DISPLAY="https://localhost:8443"  # human-facing URL for the banner (lan has no fixed origin)
+# AUTH_TRUST_HOST (ADR-0087): render_env_file emits it =true in lan mode (keyed off DEPLOY_MODE), unset
+# otherwise. It is the contract that makes the api reflect the request Origin + the web trust the Host.
 AUTH_SUBDOMAIN="auth.localhost"   # ZITADEL_EXTERNALDOMAIN
 ISSUER_URL="https://auth.localhost:8443"
 ZITADEL_ADMIN_USERNAME="admin"
@@ -112,7 +130,7 @@ usage() {
 lazyit — start.sh · guided first-deploy bootstrap
 
 USAGE
-  ./infra/start.sh [--yes] [--dry-run] [--help]
+  ./infra/start.sh [--reconfigure] [--yes] [--dry-run] [--help]
 
 WHAT IT DOES
   Detects your environment, asks ~6 questions, generates infra/env/.env.prod with real
@@ -121,17 +139,27 @@ WHAT IT DOES
   if an install already exists it skips generation and just brings the stack up.
 
 OPTIONS
+  --reconfigure                  Re-run the network-mode / host / ports questions on an EXISTING
+                                 install and re-render infra/env/.env.prod, PRESERVING every secret
+                                 already in the file (ZITADEL_MASTERKEY, WORKFLOW/SESSION/AUTH
+                                 secrets, DB creds — read back, never regenerated) and touching NO
+                                 volumes. Use it when your LAN IP changed (DHCP) or to switch
+                                 network mode (e.g. localhost-HTTPS -> host-agnostic LAN HTTP).
+                                 AUTH_MODE stays immutable (local<->oidc is refused, per ADR-0086).
   --yes, -y, --non-interactive   Accept localhost defaults for every question (smoke test).
   --dry-run                      Run all checks + prompts and PRINT what would happen, but
                                  do NOT write infra/env/.env.prod and do NOT run docker.
   --help, -h                     Show this help and exit.
 
 THE ~6 QUESTIONS (interactive mode only)
-  1. Deployment mode      — local prod-like (default) vs a real public domain.
-  2. Public domain (FQDN) — default localhost (-> auth.localhost; hosts-file note printed).
-  3. TLS                  — Caddy internal CA (local) vs Let's Encrypt (real domain -> ACME email).
-  4. Host ports for Caddy — default 8080/8443 (80/443 offered for a real domain).
-  5. Authentication       — local built-in accounts (DEFAULT) vs bundled Zitadel OIDC vs BYOI (ADR-0086).
+  1. Network / TLS mode   — 'lan' plain-HTTP host-agnostic (trusted LAN), 'local' localhost
+                            internal-CA HTTPS, or 'real' public FQDN + TLS (ADR-0087). lan implies
+                            AUTH_MODE=local and prints an unencrypted-session warning.
+  2. Public domain (FQDN) — real mode only (-> auth.{domain}; hosts-file note printed).
+  3. TLS                  — real mode: Caddy internal CA vs Let's Encrypt (-> ACME email).
+  4. Host ports for Caddy — lan/local default 8080; real offers 80/443.
+  5. Authentication       — local/real: built-in accounts (DEFAULT) vs bundled Zitadel OIDC vs
+                            BYOI (ADR-0086). lan forces built-in accounts.
   6. Postgres             — bundled internal db (default) vs external (prints the manual step).
      (+ a yes/no: enable the opt-in backup sidecar now.)
 
@@ -289,6 +317,9 @@ port_in_use() {
 # check_free_port "<name>" "<port>" -> echoes a free port (prompts for an alternate if busy).
 check_free_port() {
   _name=$1; _port=$2
+  # Test mode (LAZYIT_SKIP_DOCKER) never binds a host port, so skip the availability probe entirely
+  # (keeps the offline leave-behind test deterministic regardless of what's listening on the box).
+  if [ "${LAZYIT_SKIP_DOCKER:-0}" = 1 ]; then printf '%s' "$_port"; return 0; fi
   if port_in_use "$_port"; then
     warn "host port ${_port} (Caddy ${_name}) appears to be IN USE."
     if [ "$ASSUME_YES" -eq 1 ]; then
@@ -372,15 +403,23 @@ generate_secrets() {
 }
 
 # =============================================================================
-# render_env_file — read the example, rewrite ONLY owned keys, validate, chmod 600, atomic mv.
+# render_env_file [template] — read the template, rewrite ONLY owned keys, validate, chmod 600, atomic mv.
 # =============================================================================
 # Reading line-by-line preserves every comment + ordering and avoids `sed` on base64 secrets
 # (which contain / + =). Values are written with printf (no shell interpolation of the value).
+# The template defaults to the committed example (fresh install). For --reconfigure it is the EXISTING
+# .env.prod, so any operator customisation to NON-owned keys (backup cron, import size, …) is preserved
+# — only the owned network/secret keys are rewritten (secrets from the globals hydrated by load_existing_env).
 render_env_file() {
-  step "Rendering $ENV_FILE"
+  _template="${1:-$ENV_EXAMPLE}"
+  step "Rendering $ENV_FILE (template: $_template)"
 
   _tmp="${ENV_FILE}.tmp.$$"
   trap 'rm -f "$_tmp" 2>/dev/null || true' EXIT INT TERM
+
+  # Track whether the template carried an AUTH_TRUST_HOST line; if not (a file predating ADR-0087) and we
+  # need it active (lan mode), append it after the loop so lan reconfigure of an OLD file still works.
+  _saw_auth_trust=0
 
   # Create the temp file with mode 600 FROM CREATION — BEFORE a single secret is written.
   # A plain `: >"$_tmp"` honours the shell umask (022 -> 644), leaving the full secret set
@@ -400,7 +439,19 @@ render_env_file() {
     case "$line" in
       POSTGRES_PASSWORD=*)      printf 'POSTGRES_PASSWORD=%s\n'      "$POSTGRES_PASSWORD"   >>"$_tmp" ;;
       DATABASE_URL=*)           printf 'DATABASE_URL=%s\n'           "$DATABASE_URL_VAL"    >>"$_tmp" ;;
-      WEB_ORIGIN=*)             printf 'WEB_ORIGIN=%s\n'             "$WEB_ORIGIN_VAL"      >>"$_tmp" ;;
+      # WEB_ORIGIN (ADR-0087). lan mode: UNSET (commented) — WEB_ORIGIN unset + AUTH_TRUST_HOST=true is
+      #     the contract that tells the api to reflect the request Origin (CORS) and the web to derive
+      #     its origin from the Host, so a DHCP IP change needs no re-pin. local/real: the pinned origin.
+      "# WEB_ORIGIN="*|WEB_ORIGIN=*)
+        if [ "$DEPLOY_MODE" = "lan" ]; then printf '# WEB_ORIGIN=  # unset in lan mode (origin derived from the request Host; see AUTH_TRUST_HOST)\n' >>"$_tmp"
+        else printf 'WEB_ORIGIN=%s\n' "$WEB_ORIGIN_VAL" >>"$_tmp"; fi ;;
+      # AUTH_TRUST_HOST (ADR-0087). lan mode: "true" — api CORS reflects the request Origin and the web
+      #     sets NextAuth trustHost (WEB_ORIGIN is unset). local/real: UNSET (the pinned WEB_ORIGIN is the
+      #     single allowed origin). Only ever safe because api/web sit BEHIND Caddy (never exposed direct).
+      "# AUTH_TRUST_HOST="*|AUTH_TRUST_HOST=*)
+        _saw_auth_trust=1
+        if [ "$DEPLOY_MODE" = "lan" ]; then printf 'AUTH_TRUST_HOST=true\n' >>"$_tmp"
+        else printf '# AUTH_TRUST_HOST=  # unset (set to true only in lan mode — origin comes from the Host)\n' >>"$_tmp"; fi ;;
       LAZYIT_SITE_ADDRESS=*)    printf 'LAZYIT_SITE_ADDRESS=%s\n'    "$SITE_ADDRESS"        >>"$_tmp" ;;
       LAZYIT_HTTP_PORT=*)       printf 'LAZYIT_HTTP_PORT=%s\n'       "$HTTP_PORT"           >>"$_tmp" ;;
       LAZYIT_HTTPS_PORT=*)      printf 'LAZYIT_HTTPS_PORT=%s\n'      "$HTTPS_PORT"          >>"$_tmp" ;;
@@ -450,7 +501,14 @@ render_env_file() {
       WORKFLOW_SECRET_KEY=*)    printf 'WORKFLOW_SECRET_KEY=%s\n'    "$WORKFLOW_SECRET_KEY" >>"$_tmp" ;;
       *) printf '%s\n' "$line" >>"$_tmp" ;;
     esac
-  done <"$ENV_EXAMPLE"
+  done <"$_template"
+
+  # Reconfigure of a file predating ADR-0087 (no AUTH_TRUST_HOST line) into lan mode: the loop couldn't
+  # toggle a line that wasn't there, so append it now (lan needs it active). The example ships the line,
+  # so a fresh render always takes the loop branch and never reaches here.
+  if [ "$DEPLOY_MODE" = "lan" ] && [ "$_saw_auth_trust" -eq 0 ]; then
+    printf 'AUTH_TRUST_HOST=true\n' >>"$_tmp"
+  fi
 
   # BYOI: append explicit OIDC/AUTH client overrides (explicit env always wins over the file).
   if [ "$IDP_MODE" = "byoi" ]; then
@@ -498,6 +556,22 @@ render_env_file() {
       die "render check failed ($IDP_MODE): SESSION_SIGNING_SECRET is active — it is only used in local mode and must be unset here."
     fi
   fi
+  # Network/TLS mode contract (ADR-0087). lan: LAZYIT_SITE_ADDRESS is PORT-ONLY (:80 → any-host HTTP),
+  # AUTH_TRUST_HOST=true is active, WEB_ORIGIN is NOT active, and AUTH_MODE must be local (Zitadel bakes
+  # a fixed externalDomain → cannot be host-agnostic). local/real: WEB_ORIGIN active, AUTH_TRUST_HOST unset.
+  _sa=$(grep -E '^LAZYIT_SITE_ADDRESS=' "$_tmp" | head -n1 | cut -d= -f2-)
+  if [ "$DEPLOY_MODE" = "lan" ]; then
+    case "$_sa" in
+      :[0-9]*) : ;;   # port-only site address (":80", ":8080", …) → host-agnostic plain HTTP, no TLS
+      *) die "render check failed (lan): LAZYIT_SITE_ADDRESS='$_sa' is not a port-only ':<port>' value — lan mode needs a port-only Caddy site address for host-agnostic HTTP." ;;
+    esac
+    [ "$_am" = "local" ] || die "render check failed (lan): AUTH_MODE is '$_am', but lan mode REQUIRES local auth (Zitadel/OIDC bakes a fixed externalDomain and cannot be host-agnostic)."
+    grep -qE '^AUTH_TRUST_HOST=true$' "$_tmp" || die "render check failed (lan): AUTH_TRUST_HOST must be an active 'true' line (the api/web derive the origin from the request Host)."
+    if grep -qE '^WEB_ORIGIN=' "$_tmp"; then die "render check failed (lan): WEB_ORIGIN is active — it must be UNSET in lan mode (the origin is derived from the Host)."; fi
+  else
+    if grep -qE '^AUTH_TRUST_HOST=' "$_tmp"; then die "render check failed ($DEPLOY_MODE): AUTH_TRUST_HOST is active — it must be UNSET outside lan mode (WEB_ORIGIN is the single allowed origin)."; fi
+    grep -qE '^WEB_ORIGIN=' "$_tmp" || die "render check failed ($DEPLOY_MODE): WEB_ORIGIN must be an active line (the pinned public origin)."
+  fi
   _hp=$(grep -E '^LAZYIT_HTTP_PORT='  "$_tmp" | head -n1 | cut -d= -f2-)
   _sp=$(grep -E '^LAZYIT_HTTPS_PORT=' "$_tmp" | head -n1 | cut -d= -f2-)
   case "$_hp" in ''|*[!0-9]*) die "render check failed: LAZYIT_HTTP_PORT is not numeric ('$_hp')." ;; esac
@@ -517,7 +591,7 @@ render_env_file() {
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "DRY RUN: NOT writing $ENV_FILE and NOT running docker."
     info "Rendered file would carry these non-secret keys (secrets are masked):"
-    grep -E '^(AUTH_MODE|WEB_ORIGIN|LAZYIT_SITE_ADDRESS|LAZYIT_DOMAIN|LAZYIT_HTTP_PORT|LAZYIT_HTTPS_PORT|ZITADEL_EXTERNALDOMAIN|OIDC_ISSUER|AUTH_ISSUER)=' "$_tmp" \
+    grep -E '^(AUTH_MODE|AUTH_TRUST_HOST|WEB_ORIGIN|LAZYIT_SITE_ADDRESS|LAZYIT_DOMAIN|LAZYIT_HTTP_PORT|LAZYIT_HTTPS_PORT|ZITADEL_EXTERNALDOMAIN|OIDC_ISSUER|AUTH_ISSUER)=' "$_tmp" \
       | sed 's/^/    /' >&2 || true
     rm -f "$_tmp" 2>/dev/null || true
     trap - EXIT INT TERM
@@ -536,6 +610,58 @@ render_env_file() {
   else
     warn "$ENV_FILE written but permissions are '$_perm' (expected 600). Run: chmod 600 $ENV_FILE"
   fi
+}
+
+# =============================================================================
+# _read_env KEY — echo the value of an ACTIVE (uncommented) KEY= line in $ENV_FILE (empty if absent).
+# Same read pattern the idempotency probe already uses; kept as a helper for load_existing_env.
+# =============================================================================
+_read_env() {
+  grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2- || true
+}
+
+# =============================================================================
+# load_existing_env — for --reconfigure. Read the CURRENT .env.prod and hydrate the secret + topology
+# globals so render_env_file re-emits them UNCHANGED. Secrets are NEVER regenerated. Only AUTH_MODE=local
+# installs are reconfigurable (OIDC/Zitadel bakes a fixed externalDomain/issuer at first boot and cannot
+# be re-homed safely — ADR-0086/0087). See docs/05-runbooks/deploy-self-hosted.md.
+# =============================================================================
+load_existing_env() {
+  step "Reading existing secrets from $ENV_FILE (reconfigure — secrets are PRESERVED, never regenerated)"
+
+  AUTH_MODE_VAL=$(_read_env AUTH_MODE)
+  case "$AUTH_MODE_VAL" in
+    local) : ;;
+    oidc)  die "this install uses OIDC auth (AUTH_MODE=oidc). --reconfigure is supported only for local-auth installs: an OIDC deploy bakes a fixed IdP externalDomain/issuer at first boot and cannot be re-homed by re-rendering env (ADR-0086/0087). To change host/ports, edit $ENV_FILE by hand and follow docs/05-runbooks/deploy-self-hosted.md." ;;
+    *)     die "cannot read a valid AUTH_MODE from $ENV_FILE (got '${AUTH_MODE_VAL:-<unset>}'). Refusing to reconfigure a file I don't understand — restore it from your off-host backup first." ;;
+  esac
+  IDP_MODE="local"
+
+  # Secrets — hydrate globals VERBATIM from the file; render_env_file writes exactly these back.
+  POSTGRES_PASSWORD=$(_read_env POSTGRES_PASSWORD)
+  DATABASE_URL_VAL=$(_read_env DATABASE_URL)
+  MEILI_MASTER_KEY=$(_read_env MEILI_MASTER_KEY)
+  AUTH_SECRET=$(_read_env AUTH_SECRET)
+  WORKFLOW_SECRET_KEY=$(_read_env WORKFLOW_SECRET_KEY)
+  SESSION_SIGNING_SECRET=$(_read_env SESSION_SIGNING_SECRET)
+
+  # Postgres topology from the DATABASE_URL host (internal `@db:5432` vs an external/managed URL).
+  case "$DATABASE_URL_VAL" in
+    *@db:5432/*) PG_MODE="internal" ;;
+    *)           PG_MODE="external"; EXTERNAL_DATABASE_URL="$DATABASE_URL_VAL" ;;
+  esac
+
+  # Fail loud if a DR-critical secret is missing rather than silently blank it on re-render.
+  [ -n "$WORKFLOW_SECRET_KEY" ]    || die "WORKFLOW_SECRET_KEY missing from $ENV_FILE — refusing to reconfigure (unrotatable DR linchpin; restore the file from backup first)."
+  [ -n "$AUTH_SECRET" ]            || die "AUTH_SECRET missing from $ENV_FILE — refusing to reconfigure."
+  [ -n "$SESSION_SIGNING_SECRET" ] || die "SESSION_SIGNING_SECRET missing from $ENV_FILE — AUTH_MODE=local needs it; refusing to reconfigure."
+  [ -n "$MEILI_MASTER_KEY" ]       || die "MEILI_MASTER_KEY missing from $ENV_FILE — refusing to reconfigure."
+  if [ "$PG_MODE" = "internal" ]; then
+    [ -n "$POSTGRES_PASSWORD" ]    || die "POSTGRES_PASSWORD missing from $ENV_FILE — refusing to reconfigure."
+  fi
+
+  ok "preserved secrets loaded (WORKFLOW_SECRET_KEY, AUTH_SECRET, SESSION_SIGNING_SECRET, MEILI_MASTER_KEY, DB creds) — none regenerated"
+  info "existing topology: AUTH_MODE=local, Postgres=${PG_MODE}"
 }
 
 # =============================================================================
@@ -584,6 +710,10 @@ bring_up() {
   info "running: $*"
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "DRY RUN: not executing the docker command above."
+  elif [ "${LAZYIT_SKIP_BRINGUP:-0}" = 1 ]; then
+    # Test-only seam (infra/test/reconfigure-preserves-secrets.sh): render + write, but do NOT invoke
+    # docker. NEVER set it in a real deploy.
+    warn "LAZYIT_SKIP_BRINGUP=1 — env rendered/written but NOT bringing docker up (test mode)."
   else
     "$@" || die "docker compose up failed. Inspect with the same 'docker compose ... logs' invocation (swap 'up -d --build' for 'logs')."
     if [ "$IDP_MODE" = "bundled" ]; then
@@ -604,13 +734,28 @@ print_post_up_guidance() {
   lazyit is bootstrapping. A few things to know:
 ============================================================================
 
-  Public URL:        $WEB_ORIGIN_VAL
+  Public URL:        $WEB_ORIGIN_DISPLAY
 
   NEXT STEP — create the first ADMIN in the in-app wizard:
-      open  $WEB_ORIGIN_VAL/setup
+      open  $WEB_ORIGIN_DISPLAY/setup
   (The first sign-in routes you to /setup; it creates the first ADMIN. This
    script does NOT create any user — that is the wizard's job.)
 EOF
+
+  if [ "$DEPLOY_MODE" = "lan" ]; then
+    cat >&2 <<EOF
+
+  LAN (host-agnostic HTTP) notes:
+   - Plain HTTP on a trusted LAN — the login session is NOT encrypted in transit. Use only on a
+     network you trust; never expose this deploy to the public internet. (The secret vault stays
+     end-to-end encrypted regardless.)
+   - Caddy answers for ANY host on port ${HTTP_PORT}: reach it at http://<this-host>:${HTTP_PORT}
+     using this machine's LAN IP or hostname. If the IP changes (DHCP), the URL just follows —
+     no reconfigure needed. To change the port or switch mode later:
+         ./infra/start.sh --reconfigure
+   - Auth: local built-in accounts (AUTH_MODE=local) — sign in at http://<this-host>:${HTTP_PORT}/login after /setup.
+EOF
+  fi
 
   if [ "$DEPLOY_MODE" = "local" ]; then
     cat >&2 <<EOF
@@ -693,14 +838,40 @@ EOF
 ask_questions() {
   step "A few questions (press Enter to accept the [default])"
 
-  # --- Q1. deployment mode ---
-  _mode=$(ask "1) Deployment mode — 'local' prod-like on this machine, or 'real' public domain?" "local")
+  # --- Q1. network / TLS mode (ADR-0087): lan | local | real ---
+  # lan  = plain-HTTP host-agnostic on a trusted LAN (Caddy serves any Host, no TLS); implies local auth.
+  # local = localhost + Caddy internal-CA HTTPS on high ports (unchanged prod-like default).
+  # real  = public FQDN + optional Let's Encrypt (unchanged).
+  # Interactive default is lan (the easy pick for a small team — CEO), but it is always an EXPLICIT
+  # choice with the unencrypted-session warning shown. --yes keeps the historical localhost smoke test.
+  if [ "$ASSUME_YES" -eq 1 ]; then _q1_default="local"; else _q1_default="lan"; fi
+  _mode=$(ask "1) Network mode — 'lan' plain-HTTP host-agnostic (trusted LAN), 'local' localhost HTTPS, or 'real' public FQDN?" "$_q1_default")
   case "$_mode" in
-    real|REAL|r|R) DEPLOY_MODE="real" ;;
-    *)             DEPLOY_MODE="local" ;;
+    lan|LAN|Lan)           DEPLOY_MODE="lan" ;;
+    real|REAL|r|R)         DEPLOY_MODE="real" ;;
+    local|LOCAL|Local|l|L) DEPLOY_MODE="local" ;;
+    *) warn "unrecognized choice '$_mode' — defaulting to $_q1_default."; DEPLOY_MODE="$_q1_default" ;;
   esac
 
-  if [ "$DEPLOY_MODE" = "local" ]; then
+  if [ "$DEPLOY_MODE" = "lan" ]; then
+    # Host-agnostic plain HTTP on a trusted LAN. Caddy listens on container :80 for ANY Host (a port-only
+    # site address disables auto-TLS — verified with `caddy validate`); the operator's chosen HTTP host
+    # port publishes it via the EXISTING compose ${LAZYIT_HTTP_PORT}:80 mapping (ponytail: no mode-specific
+    # compose port block). WEB_ORIGIN stays unset + AUTH_TRUST_HOST=true, so a DHCP IP change needs no
+    # re-pin. lan REQUIRES local auth (Zitadel bakes a fixed externalDomain — see ADR-0086/0087).
+    DOMAIN="localhost"
+    SITE_ADDRESS=":80"
+    AUTH_SUBDOMAIN="auth.localhost"
+    IDP_MODE="local"; AUTH_MODE_VAL="local"
+    HTTP_PORT=$(ask_text "2) HTTP host port for lazyit (plain HTTP, reachable at http://<this-host>:<port>)" "8080" \
+      valid_port "a port number 1-65535")
+    # ponytail: HTTPS is unused in lan mode, but the compose ${LAZYIT_HTTPS_PORT}:443 mapping still
+    # publishes it (compose port lists can't be conditionally dropped). 8443 is bound-but-idle; the
+    # check_free_port below keeps a busy 8443 from failing the bring-up.
+    HTTPS_PORT="8443"
+    warn "LAN mode: the login session travels UNENCRYPTED over your network — use ONLY on a trusted LAN, never over the public internet. The secret vault stays end-to-end encrypted regardless (ADR-0087)."
+    info "lan mode: AUTH_MODE=local (built-in accounts). Caddy answers for ANY host on the published HTTP port — survives a DHCP IP change. Reconfigure later with: ./infra/start.sh --reconfigure"
+  elif [ "$DEPLOY_MODE" = "local" ]; then
     # Local prod-like: everything pinned to localhost on high ports.
     DOMAIN="localhost"
     SITE_ADDRESS="localhost"
@@ -739,9 +910,16 @@ ask_questions() {
   HTTPS_PORT=$(check_free_port "HTTPS" "$HTTPS_PORT")
 
   # Derive the browser-facing origins from the final host + https port.
-  if [ "$DEPLOY_MODE" = "local" ]; then
+  if [ "$DEPLOY_MODE" = "lan" ]; then
+    # Host-agnostic: no fixed origin. The app derives it from the request Host (AUTH_TRUST_HOST=true,
+    # emitted by render_env_file for lan mode).
+    WEB_ORIGIN_VAL=""
+    ISSUER_URL=""                        # no OIDC in lan mode
+    WEB_ORIGIN_DISPLAY="http://<this-host>:${HTTP_PORT}"   # for the post-up banner only
+  elif [ "$DEPLOY_MODE" = "local" ]; then
     WEB_ORIGIN_VAL="https://localhost:${HTTPS_PORT}"
     ISSUER_URL="https://${AUTH_SUBDOMAIN}:${HTTPS_PORT}"
+    WEB_ORIGIN_DISPLAY="$WEB_ORIGIN_VAL"
   else
     if [ "$HTTPS_PORT" = "443" ]; then
       WEB_ORIGIN_VAL="https://${DOMAIN}"
@@ -750,38 +928,50 @@ ask_questions() {
       WEB_ORIGIN_VAL="https://${DOMAIN}:${HTTPS_PORT}"
       ISSUER_URL="https://${AUTH_SUBDOMAIN}:${HTTPS_PORT}"
     fi
+    WEB_ORIGIN_DISPLAY="$WEB_ORIGIN_VAL"
   fi
 
   # --- Q5. Authentication mode (ADR-0086) — local (default) | bundled Zitadel | BYOI ---
-  # local is the DEFAULT: lazyit manages accounts + passwords itself; the bundled Zitadel IdP and BYOI
-  # are the opt-ins (AUTH_MODE=oidc). The mode is chosen ONCE and cannot be changed on a populated DB.
-  _auth=$(ask "5) Authentication — 'local' built-in accounts (default), 'bundled' Zitadel OIDC, or 'byoi' your own IdP?" "local")
-  case "$_auth" in
-    bundled|BUNDLED|Bundled)  IDP_MODE="bundled" ;;
-    byoi|BYOI|Byoi)           IDP_MODE="byoi" ;;
-    local|LOCAL|Local)        IDP_MODE="local" ;;
-    *) warn "unrecognized choice '$_auth' — defaulting to local."; IDP_MODE="local" ;;
-  esac
-
-  if [ "$IDP_MODE" = "byoi" ]; then
-    info "BYOI: enter your existing IdP's OIDC details (the bundled Zitadel services will NOT be started)."
-    BYOI_ISSUER=$(ask_text "   OIDC_ISSUER (your IdP issuer URL)" "$ISSUER_URL" \
-      valid_issuer_url "an https:// issuer URL (e.g. https://login.example.com)")
-    # Client id/secret: opaque tokens — only the newline/control-char gate applies (no charset rule).
-    BYOI_CLIENT_ID=$(ask_text "   OIDC_CLIENT_ID" "" "" "")
-    BYOI_CLIENT_SECRET=$(ask_text "   OIDC_CLIENT_SECRET" "" "" "")
-    ISSUER_URL="$BYOI_ISSUER"
-  elif [ "$IDP_MODE" = "local" ]; then
-    info "local mode: lazyit stores accounts + password hashes itself — no Zitadel, no external IdP. You create the first admin at /setup."
+  # SKIPPED in lan mode (forced local, set above) and under --reconfigure (auth mode is immutable per
+  # ADR-0086 — preserved from the existing .env.prod). Otherwise: local is the DEFAULT (lazyit manages
+  # accounts + passwords); bundled Zitadel and BYOI are the opt-ins (AUTH_MODE=oidc). Chosen ONCE.
+  if [ "$DEPLOY_MODE" = "lan" ]; then
+    info "lan mode: authentication is built-in accounts (AUTH_MODE=local) — no external IdP possible with host-agnostic HTTP."
+  elif [ "$RECONFIGURE" -eq 1 ]; then
+    info "reconfigure: keeping the existing AUTH_MODE=${AUTH_MODE_VAL} (immutable — ADR-0086)."
   else
-    info "bundled Zitadel: the zitadel-bootstrap sidecar wires OIDC automatically (no console clicking)."
+    _auth=$(ask "5) Authentication — 'local' built-in accounts (default), 'bundled' Zitadel OIDC, or 'byoi' your own IdP?" "local")
+    case "$_auth" in
+      bundled|BUNDLED|Bundled)  IDP_MODE="bundled" ;;
+      byoi|BYOI|Byoi)           IDP_MODE="byoi" ;;
+      local|LOCAL|Local)        IDP_MODE="local" ;;
+      *) warn "unrecognized choice '$_auth' — defaulting to local."; IDP_MODE="local" ;;
+    esac
+
+    if [ "$IDP_MODE" = "byoi" ]; then
+      info "BYOI: enter your existing IdP's OIDC details (the bundled Zitadel services will NOT be started)."
+      BYOI_ISSUER=$(ask_text "   OIDC_ISSUER (your IdP issuer URL)" "$ISSUER_URL" \
+        valid_issuer_url "an https:// issuer URL (e.g. https://login.example.com)")
+      # Client id/secret: opaque tokens — only the newline/control-char gate applies (no charset rule).
+      BYOI_CLIENT_ID=$(ask_text "   OIDC_CLIENT_ID" "" "" "")
+      BYOI_CLIENT_SECRET=$(ask_text "   OIDC_CLIENT_SECRET" "" "" "")
+      ISSUER_URL="$BYOI_ISSUER"
+    elif [ "$IDP_MODE" = "local" ]; then
+      info "local mode: lazyit stores accounts + password hashes itself — no Zitadel, no external IdP. You create the first admin at /setup."
+    else
+      info "bundled Zitadel: the zitadel-bootstrap sidecar wires OIDC automatically (no console clicking)."
+    fi
+
+    # Derive AUTH_MODE for the env file (ADR-0086): local -> "local"; bundled/byoi -> "oidc".
+    if [ "$IDP_MODE" = "local" ]; then AUTH_MODE_VAL="local"; else AUTH_MODE_VAL="oidc"; fi
   fi
 
-  # Derive AUTH_MODE for the env file (ADR-0086): local -> "local"; bundled/byoi -> "oidc".
-  if [ "$IDP_MODE" = "local" ]; then AUTH_MODE_VAL="local"; else AUTH_MODE_VAL="oidc"; fi
-
   # --- Q6. Postgres — bundled internal vs external ---
-  if ask_yn "6) Use the bundled internal Postgres (recommended)? (n = external/managed Postgres)" "y"; then
+  # SKIPPED under --reconfigure: PG_MODE + DATABASE_URL are preserved from the existing file (switching
+  # the database out is a data operation, not a reconfigure).
+  if [ "$RECONFIGURE" -eq 1 ]; then
+    info "reconfigure: keeping the existing Postgres topology (${PG_MODE})."
+  elif ask_yn "6) Use the bundled internal Postgres (recommended)? (n = external/managed Postgres)" "y"; then
     PG_MODE="internal"
   else
     PG_MODE="external"
@@ -805,6 +995,7 @@ main() {
     case "$arg" in
       -y|--yes|--non-interactive) ASSUME_YES=1 ;;
       --dry-run)                  DRY_RUN=1 ;;
+      --reconfigure)              RECONFIGURE=1 ;;
       -h|--help)                  usage; exit 0 ;;
       *) usage; die "unknown option: $arg" ;;
     esac
@@ -832,21 +1023,28 @@ EOF
   # ---------- 1. DETECT prerequisites ----------
   step "Checking prerequisites"
 
-  command -v docker >/dev/null 2>&1 \
-    || die "docker not found. Install Docker Engine + Compose v2: https://docs.docker.com/engine/install/"
-  if ! docker info >/dev/null 2>&1; then
-    die "the Docker daemon is not reachable. Start it (e.g. 'sudo systemctl start docker') and ensure your user can talk to it (the 'docker' group), then re-run."
-  fi
-  ok "docker present and the daemon is reachable"
+  # LAZYIT_SKIP_DOCKER=1 bypasses the docker/openssl tool checks AND the volume probe below. Test-only
+  # seam for the offline leave-behind check (infra/test/reconfigure-preserves-secrets.sh), which drives
+  # --reconfigure --dry-run without a Docker daemon. NEVER set it in a real deploy.
+  if [ "${LAZYIT_SKIP_DOCKER:-0}" != 1 ]; then
+    command -v docker >/dev/null 2>&1 \
+      || die "docker not found. Install Docker Engine + Compose v2: https://docs.docker.com/engine/install/"
+    if ! docker info >/dev/null 2>&1; then
+      die "the Docker daemon is not reachable. Start it (e.g. 'sudo systemctl start docker') and ensure your user can talk to it (the 'docker' group), then re-run."
+    fi
+    ok "docker present and the daemon is reachable"
 
-  if ! docker compose version >/dev/null 2>&1; then
-    die "Docker Compose v2 not found. This needs the 'docker compose' plugin (not legacy 'docker-compose'). See https://docs.docker.com/compose/install/"
-  fi
-  ok "docker compose v2 present"
+    if ! docker compose version >/dev/null 2>&1; then
+      die "Docker Compose v2 not found. This needs the 'docker compose' plugin (not legacy 'docker-compose'). See https://docs.docker.com/compose/install/"
+    fi
+    ok "docker compose v2 present"
 
-  command -v openssl >/dev/null 2>&1 \
-    || die "openssl not found — it generates the random secrets. Install it (e.g. 'apt-get install openssl') and re-run."
-  ok "openssl present"
+    command -v openssl >/dev/null 2>&1 \
+      || die "openssl not found — it generates the random secrets. Install it (e.g. 'apt-get install openssl') and re-run."
+    ok "openssl present"
+  else
+    warn "LAZYIT_SKIP_DOCKER=1 — skipping docker/openssl checks (test mode)."
+  fi
 
   # Resource floor — WARN only (never block a deploy on a small box).
   RAM_MB=""
@@ -870,6 +1068,21 @@ EOF
     fi
   fi
 
+  # ---------- 1b. RECONFIGURE (supported "my IP changed / switch network mode" path) ----------
+  # Re-run the network-mode / host / ports questions on an EXISTING install and re-render .env.prod,
+  # PRESERVING every secret (read back, never regenerated) and touching NO volumes. Only local-auth
+  # installs are reconfigurable (OIDC bakes a fixed externalDomain — load_existing_env refuses). ADR-0087.
+  if [ "$RECONFIGURE" -eq 1 ]; then
+    step "Reconfigure requested"
+    [ -f "$ENV_FILE" ] || die "nothing to reconfigure: $ENV_FILE does not exist. Run ./infra/start.sh (no flag) for a first install."
+    load_existing_env          # hydrates the secret + topology globals from the existing file; refuses OIDC
+    ask_questions              # re-asks network mode / host / ports (auth + Postgres are preserved)
+    render_env_file "$ENV_FILE"  # template = the EXISTING file → preserve non-owned keys; secrets from globals
+    bring_up                   # no volume touch; just recreates api/web/caddy with the new env
+    print_post_up_guidance
+    exit 0
+  fi
+
   # ---------- 2. EXISTING-INSTALL PROBE (the idempotency guard) ----------
   # An install exists if EITHER the rendered env file exists OR any prod volume is present.
   step "Checking for an existing install"
@@ -880,7 +1093,10 @@ EOF
     _existing=1
     _reason="$ENV_FILE already exists"
   fi
-  _vols=$(docker volume ls -q 2>/dev/null | grep "^${PROD_PROJECT}_" || true)
+  # LAZYIT_SKIP_DOCKER (test mode) has no real docker to probe — treat volumes as absent.
+  if [ "${LAZYIT_SKIP_DOCKER:-0}" = 1 ]; then _vols=""; else
+    _vols=$(docker volume ls -q 2>/dev/null | grep "^${PROD_PROJECT}_" || true)
+  fi
   if [ -n "$_vols" ]; then
     _existing=1
     if [ -n "$_reason" ]; then
@@ -915,6 +1131,18 @@ EOF
     # guidance banner; read back the browser origin so the CTA is accurate.
     _wo=$(grep -E '^WEB_ORIGIN=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)
     [ -n "$_wo" ] && WEB_ORIGIN_VAL="$_wo"
+    WEB_ORIGIN_DISPLAY="$WEB_ORIGIN_VAL"
+    # lan mode has NO WEB_ORIGIN (host-agnostic) — detect it from the port-only site address so the
+    # banner shows a usable http://<this-host>:<port> instead of a stale/empty URL (ADR-0087).
+    _sa=$(grep -E '^LAZYIT_SITE_ADDRESS=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)
+    case "$_sa" in
+      :[0-9]*)
+        DEPLOY_MODE="lan"
+        _hp=$(grep -E '^LAZYIT_HTTP_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)
+        HTTP_PORT="${_hp:-8080}"
+        WEB_ORIGIN_DISPLAY="http://<this-host>:${HTTP_PORT}"
+        ;;
+    esac
     ZITADEL_ADMIN_PASSWORD=""   # never re-surface an existing admin password
     bring_up
     print_post_up_guidance

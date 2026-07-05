@@ -15,7 +15,7 @@ import {
   type AssetStatus,
   AssetStatusSchema,
 } from "@lazyit/shared";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -51,6 +51,7 @@ import { useDeleteAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutati
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { formatFieldLabel, formatSpecValue } from "@/lib/utils/format";
+import { formatMoney } from "@/lib/utils/money";
 import { AssetHistoryTimeline } from "../../_components/asset-history-timeline";
 import {
   AssetStatusBadge,
@@ -126,6 +127,7 @@ function AssetStatusMenu({
 export function AssetDetailView({ id }: { id: string }) {
   const router = useRouter();
   const t = useTranslations("assets.detail");
+  const locale = useLocale();
   const { date } = useFormatters();
   const tList = useTranslations("assets.list");
   const tc = useTranslations("common");
@@ -377,6 +379,24 @@ export function AssetDetailView({ id }: { id: string }) {
           <DetailField label={t("warrantyEnd")} mono>
             {asset.warrantyEnd ? date(asset.warrantyEnd) : "—"}
           </DetailField>
+          <DetailField label={t("purchaseCost")} mono>
+            {asset.purchaseCost != null
+              ? formatMoney(asset.purchaseCost, locale)
+              : "—"}
+          </DetailField>
+          {/* Current book value (#954): straight-line depreciation as of today, computed by the API.
+              `null` exactly when there's no purchase cost — hide the row rather than show a 0. The
+              label carries the "as of today" caveat as a native tooltip. */}
+          {asset.currentBookValue != null ? (
+            <DetailField
+              label={
+                <span title={t("bookValueHint")}>{t("bookValue")}</span>
+              }
+              mono
+            >
+              {formatMoney(asset.currentBookValue, locale)}
+            </DetailField>
+          ) : null}
         </dl>
         {asset.notes && (
           <div className="mt-4 space-y-1">

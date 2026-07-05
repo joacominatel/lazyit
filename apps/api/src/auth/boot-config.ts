@@ -19,7 +19,11 @@ import { z } from 'zod';
  *  - AUTH_MODE=local REQUIRES SESSION_SIGNING_SECRET (present + ≥32 chars) — a misconfigured local deploy
  *    must fail at BOOT, not on the first login (mirrors the WORKFLOW_SECRET_KEY length assertion).
  *  - WEB_ORIGIN, when set, must be a valid URL (it feeds CORS with credentials:true, where the
- *    origin can never be "*").
+ *    origin can never be "*"). It is OPTIONAL: LAN host-agnostic mode (AUTH_TRUST_HOST=true) leaves it
+ *    unset and reflects the request Origin instead (issue #1035).
+ *  - AUTH_TRUST_HOST=true (LAN host-agnostic mode, issue #1035) REQUIRES AUTH_MODE=local: OIDC bakes
+ *    its external domain into issuer/redirect config and cannot be reached at an arbitrary Host, so
+ *    trust-host + oidc is a misconfiguration and fails at boot.
  *
  * The persisted mode-marker check (ADR-0086 §1 — refuse to boot when env.AUTH_MODE disagrees with the
  * stored marker) is NOT here: it needs the DB, so it runs after NestFactory.create (see auth/mode-marker.ts
@@ -35,6 +39,9 @@ export const BootConfigSchema = z
     AUTH_MODE: z.enum(['shim', 'local', 'oidc']).optional(),
     DATABASE_URL: z.string().min(1, 'is required'),
     WEB_ORIGIN: z.url(urlMessage).optional(),
+    // LAN host-agnostic deploy switch (issue #1035): ONLY the literal 'true' enables it — kept a raw
+    // string (not coerced/enum'd) so 'false' and any other value read as off, exactly like unset.
+    AUTH_TRUST_HOST: z.string().optional(),
     OIDC_ISSUER: z.url(urlMessage).optional(),
     OIDC_JWKS_URI: z.url(urlMessage).optional(),
     OIDC_CLIENT_ID: z.string().optional(),
@@ -78,6 +85,14 @@ export const BootConfigSchema = z
   .refine((c) => c.AUTH_MODE !== 'oidc' || !!c.OIDC_JWKS_URI, {
     message: 'is required in OIDC mode (AUTH_MODE=oidc)',
     path: ['OIDC_JWKS_URI'],
+  })
+  // LAN host-agnostic mode (AUTH_TRUST_HOST=true) requires local auth: OIDC (and the retired shim's
+  // prod-forbid aside) bakes a fixed external domain, so serving at an arbitrary Host is a
+  // misconfiguration — fail at boot, not on the first cross-host login (issue #1035).
+  .refine((c) => c.AUTH_TRUST_HOST !== 'true' || c.AUTH_MODE === 'local', {
+    message:
+      'AUTH_TRUST_HOST=true (LAN host-agnostic mode) requires AUTH_MODE=local — OIDC bakes its external domain and cannot be reached at an arbitrary Host',
+    path: ['AUTH_TRUST_HOST'],
   });
 
 export type BootConfig = z.infer<typeof BootConfigSchema>;

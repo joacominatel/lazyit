@@ -102,25 +102,33 @@ const REFRESH_SKEW_SECONDS = 30;
  * Whether the session cookie carries the `Secure` flag / `__Secure-` prefix (ADR-0086 §6, security).
  *
  * Auth.js defaults this to `NODE_ENV === "production"`. That default is WRONG for a self-hosted
- * prod-over-HTTP LAN deploy (`AUTH_MODE=local`): the build is production, so Auth.js would emit a
- * `Secure` cookie the browser silently drops over plain HTTP — a silent login failure with no error.
- * We instead key it to the ACTUAL origin scheme (`AUTH_URL` → `NEXTAUTH_URL` → `WEB_ORIGIN`): `https`
- * → Secure, `http` → not. `HttpOnly` + `SameSite=Lax` stay on always (Auth.js's own defaults for the
- * session cookie — untouched here). For an existing HTTPS deploy `AUTH_URL` is `https://…`, so this
- * returns `true` — byte-identical to today's `NODE_ENV=production` behavior. When no origin var is set
- * we fall back to the stock `NODE_ENV` default so nothing changes for callers that never set one.
+ * prod-over-HTTP deploy (local/LAN): the build is production, so Auth.js would emit a `Secure` cookie
+ * the browser silently drops over plain HTTP — a silent login failure with no error. We instead key it
+ * to the ACTUAL origin scheme (`AUTH_URL` → `NEXTAUTH_URL` → `WEB_ORIGIN`): `https` → Secure, `http` →
+ * not. `HttpOnly` + `SameSite=Lax` stay on always (Auth.js's own defaults for the session cookie —
+ * untouched here). For an existing HTTPS deploy `AUTH_URL` is `https://…`, so this returns `true` —
+ * byte-identical to today. When NO origin is pinned the deploy is host-agnostic plain-HTTP LAN mode
+ * (#1035 / ADR-0087) reached over http, so the tail returns `false` (never Secure) rather than the
+ * stock `NODE_ENV` default, which would wrongly emit a Secure cookie a browser drops over http.
  */
 function deriveUseSecureCookies(): boolean {
+  // `||` (not `??`): compose pins `AUTH_URL: ${WEB_ORIGIN:-}`, so in host-agnostic LAN mode the var is
+  // present but EMPTY (`""`). `??` would treat that empty string as "set" and stop; `||` falls through
+  // to the next candidate, and to the no-origin tail when none is pinned.
   const origin =
-    process.env.AUTH_URL ?? process.env.NEXTAUTH_URL ?? process.env.WEB_ORIGIN;
+    process.env.AUTH_URL || process.env.NEXTAUTH_URL || process.env.WEB_ORIGIN;
   if (origin) {
     try {
       return new URL(origin).protocol === "https:";
     } catch {
-      // Malformed origin → fall through to the stock default rather than guess.
+      // Malformed origin → fall through to the no-origin tail rather than guess.
     }
   }
-  return process.env.NODE_ENV === "production";
+  // No pinned origin ⇒ host-agnostic plain-HTTP LAN mode (ADR-0087), reached over http on any Host
+  // behind Caddy on :80 ⇒ NEVER Secure (a Secure cookie is silently dropped over http → silent login
+  // failure). Every non-LAN container path pins an origin (local/real/oidc all set WEB_ORIGIN), so
+  // this tail only fires for LAN. Keying it to the ACTUAL origin scheme keeps https origins Secure.
+  return false;
 }
 
 const internalIssuer = process.env.AUTH_INTERNAL_ISSUER;
@@ -329,6 +337,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // (issue #1008): an unconfigured OIDC provider 500s the whole Auth.js handler in local mode.
     ...(externalIssuer ? [oidcProvider] : []),
   ],
+
+  // Host-agnostic LAN mode (#1035): with `AUTH_URL` unset, Auth.js falls back to trusting the request
+  // `Host` — but it only does so when `trustHost` is TRUE. The `AUTH_TRUST_HOST=true` env alone does NOT
+  // enable it in this custom-config setup (Auth.js throws `UntrustedHost` on the internal
+  // /api/auth/session call otherwise), so we must set it explicitly here. Gated on the env so dev/local/
+  // real (where `AUTH_URL` is pinned) are byte-identical. Safe only because Caddy is the single ingress
+  // that sets `Host`; never expose the web container directly.
+  ...(process.env.AUTH_TRUST_HOST === "true" ? { trustHost: true } : {}),
 
   // `Secure` keyed to the real origin scheme, not `NODE_ENV` (ADR-0086 §6) — see deriveUseSecureCookies.
   useSecureCookies: deriveUseSecureCookies(),

@@ -270,6 +270,8 @@ security-critical code; the SA-token scheme is the trusted precedent to model on
   `/reset-password` pages linked from local `/login`, and Manual (en + es). All local-mode-gated; the
   OIDC path is byte-identical (the guard never fires in OIDC, so the web interception is inert).
 - **Follow-up (separate ADR/issue):** plain-HTTP-on-LAN — a deployment-TLS axis distinct from `AUTH_MODE`.
+  **Done (#1035):** [[0087-plain-http-lan-deployment-axis]] — a host-agnostic `lan` mode + `start.sh
+  --reconfigure`.
 
 ## Non-goals
 
@@ -278,4 +280,5 @@ security-critical code; the SA-token scheme is the trusted precedent to model on
 - **Plain-HTTP-on-LAN** — a third, orthogonal deployment axis (not implied by `AUTH_MODE=local`, which
   keeps the internal-CA TLS default). It is a real security-posture decision (credentials in cleartext on
   the LAN) and gets its own ADR; local mode + that follow-up together deliver the "just works on a LAN"
-  experience.
+  experience. **Now decided in [[0087-plain-http-lan-deployment-axis]]** (#1035): a `lan` network mode
+  (host-agnostic HTTP, requires `AUTH_MODE=local`) + `start.sh --reconfigure`.

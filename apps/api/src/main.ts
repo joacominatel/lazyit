@@ -9,6 +9,7 @@ import { validateBootConfig } from './auth/boot-config';
 import { loadBootstrapOidcFile } from './auth/bootstrap-file';
 import { decideModeMarker } from './auth/mode-marker';
 import { addStandardErrorResponses } from './common/openapi-errors';
+import { resolveCorsOrigin } from './common/cors-origin';
 import { parseTrustProxy } from './common/trust-proxy';
 import { PrismaService } from './prisma/prisma.service';
 
@@ -62,14 +63,19 @@ async function bootstrap() {
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
   app.set('trust proxy', trustProxy);
 
-  // CORS for the web app. Origin is read from WEB_ORIGIN (default: the Next.js dev server)
+  // CORS for the web app. Origin is normally the fixed WEB_ORIGIN (default: the Next.js dev server)
   // so it is never hardcoded. credentials:true is set ahead of cookie/session auth (deferred,
-  // ADR-0016); with credentials the origin must be explicit, never "*". allowedHeaders is left
-  // unset so cors reflects the requested headers (covers Content-Type, Authorization, …).
-  // exposedHeaders surfaces X-Request-Id (ADR-0031) to the browser so the client can quote it in
-  // error UX — cross-origin responses hide non-safelisted headers from JS unless exposed.
+  // ADR-0016); with credentials the origin must be explicit, never "*". In LAN host-agnostic mode
+  // (AUTH_TRUST_HOST=true, issue #1035) WEB_ORIGIN is unset and the app is reachable at any Host, so
+  // resolveCorsOrigin returns `true` — cors then reflects the request's own Origin (credential-safe,
+  // unlike "*"). The browser mostly calls the API same-origin through Caddy (ADR-0026), so this
+  // reflect-origin is a correctness/robustness guard scoped to the trusted LAN — not an open CORS
+  // policy for the internet. allowedHeaders is left unset so cors reflects the requested headers
+  // (covers Content-Type, Authorization, …). exposedHeaders surfaces X-Request-Id (ADR-0031) to the
+  // browser so the client can quote it in error UX — cross-origin responses hide non-safelisted
+  // headers from JS unless exposed.
   app.enableCors({
-    origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
+    origin: resolveCorsOrigin(process.env),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     exposedHeaders: ['X-Request-Id'],
     credentials: true,

@@ -15,6 +15,28 @@ Lee primero [Introducción](/help/getting-started-introduction).
 > una página pública, sin inicio de sesión. Es distinto de la Base de Conocimiento: el Manual
 > documenta *lazyit en sí*, la Base de Conocimiento documenta *tu parque*.
 
+## De cero a /setup
+
+¿Todavía no tienes lazyit corriendo? En un host Linux con Docker, dos comandos te dejan una instancia
+en marcha:
+
+```sh
+git clone https://github.com/joacominatel/lazyit && cd lazyit
+./infra/start.sh
+```
+
+`start.sh` es un script guiado e idempotente: detecta Docker, puertos libres y los recursos del host,
+hace unas seis preguntas que no puede completar de forma segura por su cuenta (dominio, TLS, proveedor
+de identidad, etc.), genera `infra/env/.env.prod` con secretos aleatorios reales, levanta el stack
+completo con Docker Compose y muestra tu URL. Es seguro volver a ejecutarlo — es no destructivo y
+nunca sobrescribe secretos existentes.
+
+Cuando termina, abre **`https://tu-host/setup`** — el resto de esta página recorre ese asistente.
+
+Para configuraciones avanzadas (usar tu propio proveedor de identidad, un Postgres externo, TLS en un
+dominio real), consulta [Autoalojamiento](/help/deployment-operations-self-hosting). Para actualizar
+una instancia existente más adelante, ejecuta `./infra/update.sh`.
+
 ## Antes de empezar
 
 Cómo inician sesión las personas se elige **una sola vez, al desplegar**, y queda fijo durante toda la

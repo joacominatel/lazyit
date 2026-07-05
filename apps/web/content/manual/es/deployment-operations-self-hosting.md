@@ -96,6 +96,39 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod 
   --env-file infra/env/.env.prod run --rm migrate bun run reindex:all
 ```
 
+## Modos de red y TLS
+
+El arranque guiado pregunta cómo se accede a la instancia y elige por ti la postura de TLS
+correspondiente. Hay tres modos — es un eje distinto de los niveles de despliegue de más abajo (dónde
+la ejecutas):
+
+| Modo | Cómo se accede | TLS |
+| --- | --- | --- |
+| **LAN** | cualquier IP o nombre de host en una red local de confianza, sobre **HTTP** plano | ninguno — agnóstico al host |
+| **Local** | solo `localhost`, sobre HTTPS en puertos altos (8080/8443) | autoridad de certificación interna de Caddy |
+| **Real** | un dominio público, sobre HTTPS en los puertos 80/443 | Let's Encrypt (de confianza pública) |
+
+El **modo LAN** es la vía más rápida para poner a un equipo pequeño en lazyit sin DNS ni certificados: la
+misma imagen responde en `http://<cualquier-ip>/`, `http://<nombre-de-host>/` y `http://localhost/`, de
+modo que la instancia **no queda fijada a una sola dirección**. La contrapartida es honesta: **las
+sesiones en LAN viajan sin cifrar**, así que usa este modo solo en una red local de confianza que
+controles. Sea cual sea el modo, la **bóveda de secretos permanece cifrada de extremo a extremo**: su
+contenido se cifra en el navegador y el servidor nunca lo ve en claro, ni siquiera sobre HTTP plano
+(consulta [Gestor de secretos](/help/secret-manager)).
+
+## Cambiar tu host, puertos o modo
+
+¿Moviste la instancia a una IP o nombre de host nuevos, cambiaste un puerto o quieres cambiar de modo
+(por ejemplo, LAN → un dominio real)? Vuelve a ejecutar el arranque con `--reconfigure`:
+
+```sh
+./infra/start.sh --reconfigure
+```
+
+Vuelve a preguntar el host, los puertos y las opciones de red/TLS y reescribe el archivo de entorno en
+consecuencia. **Conserva tus secretos existentes y nunca toca tus datos**: solo cambian los ajustes de
+accesibilidad. Levanta de nuevo la pila y la instancia responderá en su nueva dirección.
+
 ## Niveles de despliegue
 
 | Nivel | Qué se ejecuta | Para qué |

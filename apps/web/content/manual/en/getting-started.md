@@ -15,6 +15,27 @@ in, creating the first administrator, and adding your team. New to lazyit? Read
 > login-free page. It is separate from the Knowledge Base: the Manual documents *lazyit itself*, the
 > Knowledge Base documents *your estate*.
 
+## From zero to /setup
+
+Don't have lazyit running yet? On a Linux host with Docker, two commands get you a running instance:
+
+```sh
+git clone https://github.com/joacominatel/lazyit && cd lazyit
+./infra/start.sh
+```
+
+`start.sh` is a guided, idempotent script: it detects Docker, free ports and host resources, asks
+around six questions it can't safely default (domain, TLS, identity provider, and so on), generates
+`infra/env/.env.prod` with real random secrets, brings the stack up with Docker Compose, and prints
+your URL. It is safe to re-run — it is non-destructive and never overwrites existing secrets.
+
+When it finishes, open **`https://<your-host>/setup`** — the rest of this page walks through that
+wizard.
+
+For advanced setups (bring-your-own identity provider, an external Postgres, TLS on a real domain),
+see [Self-hosting](/help/deployment-operations-self-hosting). To upgrade an existing instance later,
+run `./infra/update.sh`.
+
 ## Before you start
 
 How people sign in is chosen **once, at deploy time**, and is fixed for the life of the instance. There
