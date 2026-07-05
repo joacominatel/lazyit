@@ -338,10 +338,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     ...(externalIssuer ? [oidcProvider] : []),
   ],
 
+  // Host-agnostic LAN mode (#1035): with `AUTH_URL` unset, Auth.js falls back to trusting the request
+  // `Host` — but it only does so when `trustHost` is TRUE. The `AUTH_TRUST_HOST=true` env alone does NOT
+  // enable it in this custom-config setup (Auth.js throws `UntrustedHost` on the internal
+  // /api/auth/session call otherwise), so we must set it explicitly here. Gated on the env so dev/local/
+  // real (where `AUTH_URL` is pinned) are byte-identical. Safe only because Caddy is the single ingress
+  // that sets `Host`; never expose the web container directly.
+  ...(process.env.AUTH_TRUST_HOST === "true" ? { trustHost: true } : {}),
+
   // `Secure` keyed to the real origin scheme, not `NODE_ENV` (ADR-0086 §6) — see deriveUseSecureCookies.
-  // NB: host-agnostic LAN mode (#1035) relies on the pre-existing `AUTH_TRUST_HOST=true` env (set on the
-  // web container in every mode), so Auth.js already derives the callback URL + cookie host from the
-  // request `Host` — no config here. Safe only because Caddy is the single ingress that sets `Host`.
   useSecureCookies: deriveUseSecureCookies(),
 
   session: {
