@@ -87,8 +87,14 @@ http://:2021 {
 # before parse, so sites/auth.caddy can reference the (security_headers)/(access_log) snippets above.
 import sites/*.caddy
 
-# Site address. Local prod-like: unset -> "localhost" (internal CA, served on :443 -> host :8443).
-# Real domain: set LAZYIT_SITE_ADDRESS=lazyit.example.com (publicly reachable :80/:443).
+# Site address — one block, three shapes driven by LAZYIT_SITE_ADDRESS (ADR-0026, ADR-0087):
+#   - unset / "localhost"          -> internal-CA HTTPS on :443 (host :8443).            [local]
+#   - "lazyit.example.com" (FQDN)  -> publicly reachable :80/:443 (Let's Encrypt).       [real]
+#   - ":80" (PORT-ONLY)            -> plain HTTP for ANY Host on that port, NO TLS, no    [lan]
+#                                     cert, no http->https redirect. This is what makes a
+#                                     host-agnostic LAN deploy work (survives a DHCP IP change).
+# The @api/handle routing below is scheme-agnostic, and default_sni/trusted_proxies are no-ops
+# without TLS — so this single block serves all three unchanged (verified with `caddy validate`).
 {$LAZYIT_SITE_ADDRESS:localhost} {
 	encode zstd gzip
 

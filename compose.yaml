@@ -196,7 +196,10 @@ services:
       # Canonical public origin. Pins the OIDC redirect_uri to the external URL
       # (https://host/api/auth/callback/oidc); without it Auth.js infers the container's own
       # 0.0.0.0:3000 and the redirect_uri won't match what's registered in the IdP.
-      AUTH_URL: ${WEB_ORIGIN}
+      # ${WEB_ORIGIN:-} (not ${WEB_ORIGIN}) so host-agnostic LAN mode (WEB_ORIGIN unset, ADR-0087) does
+      # not trip a compose "variable is not set" warning. Empty AUTH_URL → Auth.js derives the base URL
+      # from the request Host (AUTH_TRUST_HOST=true). local/real still pin the explicit origin.
+      AUTH_URL: ${WEB_ORIGIN:-}
       # Internal API base for server-side fetches (proxy.ts first-run gate + SSR API calls).
       # NEXT_PUBLIC_API_URL is baked as the relative `/api` for browser calls (domain-portable,
       # ADR-0026), but relative URLs throw in Node's undici fetch — the server needs an absolute
