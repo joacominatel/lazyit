@@ -91,6 +91,37 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod 
   --env-file infra/env/.env.prod run --rm migrate bun run reindex:all
 ```
 
+## Network & TLS modes
+
+The guided bootstrap asks how people reach the instance, and picks the matching TLS posture for you.
+There are three modes — this is a separate axis from the deployment levels below (where you run it):
+
+| Mode | How it's reached | TLS |
+| --- | --- | --- |
+| **LAN** | any IP or hostname on a trusted local network, over plain **HTTP** | none — host-agnostic |
+| **Local** | `localhost` only, over HTTPS on high ports (8080/8443) | Caddy's internal certificate authority |
+| **Real** | a public domain, over HTTPS on ports 80/443 | Let's Encrypt (publicly trusted) |
+
+**LAN mode** is the quickest way to get a small team onto lazyit without DNS or certificates: the same
+image answers on `http://<any-ip>/`, `http://<hostname>/` and `http://localhost/`, so the instance is
+**not pinned to one address**. The trade-off is honest — **LAN sessions travel unencrypted**, so use
+this mode only on a trusted local network you control. Regardless of mode, the **secret vault stays
+end-to-end encrypted**: vault contents are encrypted in the browser and the server never sees them in
+the clear, even over plain HTTP (see [Secret Manager](/help/secret-manager)).
+
+## Changing your host, ports, or mode
+
+Moved the instance to a new IP or hostname, changed a port, or want to switch modes (say, LAN → a real
+domain)? Re-run the bootstrap with `--reconfigure`:
+
+```sh
+./infra/start.sh --reconfigure
+```
+
+It re-asks the host, ports and network/TLS questions and rewrites the environment file accordingly. It
+**preserves your existing secrets and never touches your data** — only the reachability settings change.
+Bring the stack back up and the instance answers at its new address.
+
 ## Deployment levels
 
 | Level | What runs | Use it for |
