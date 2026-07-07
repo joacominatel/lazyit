@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { coerceRow } from "./coerce-row";
 import { assetImportDescriptor } from "./descriptor";
 import { ImportMappingSchema, type ImportMapping } from "./mapping";
+import { CreateAssetSchema } from "../asset";
 
 /**
  * coercion-under-mapping (ADR-0069 §3/§4/§5, #631): the bridge from a raw source row + a confirmed
@@ -362,5 +363,67 @@ describe("coerceRow — directory person → person bucket (ADR-0069 REDESIGN §
     expect(person).toEqual({ email: "z@x.com" });
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(Object.getPrototypeOf(person)).toBeNull();
+  });
+});
+
+describe("coerceRow — #1051 notes + money/depreciation fields", () => {
+  test("notes flows through the text branch (trimmed, empty omitted)", () => {
+    const m = mapping({
+      columns: [
+        { field: "name", column: "N" },
+        { field: "notes", column: "Note" },
+      ],
+    });
+    expect(coerceRow({ N: "PC", Note: "  spare unit " }, m, desc).payload).toEqual({
+      name: "PC",
+      notes: "spare unit",
+    });
+    expect("notes" in coerceRow({ N: "PC", Note: "" }, m, desc).payload).toBe(false);
+  });
+
+  test("money fields land as integer cents, months stays a plain integer", () => {
+    const m = mapping({
+      columns: [
+        { field: "name", column: "N" },
+        { field: "purchaseCost", column: "Cost" },
+        { field: "salvageValue", column: "Salvage" },
+        { field: "usefulLifeMonths", column: "Life" },
+      ],
+    });
+    const { payload } = coerceRow(
+      { N: "Laptop", Cost: "$1,234.56", Salvage: "1.000,00", Life: "36" },
+      m,
+      desc,
+    );
+    expect(payload).toEqual({
+      name: "Laptop",
+      purchaseCost: 123456,
+      salvageValue: 100000,
+      usefulLifeMonths: 36,
+    });
+    // the coerced payload is accepted by the UNCHANGED create schema (the preview cannot lie).
+    expect(CreateAssetSchema.safeParse({ ...payload, status: "OPERATIONAL" }).success).toBe(true);
+  });
+
+  test("an unparseable money cell is kept raw so the schema raises the field error", () => {
+    const m = mapping({
+      columns: [
+        { field: "name", column: "N" },
+        { field: "purchaseCost", column: "C" },
+      ],
+    });
+    const { payload } = coerceRow({ N: "X", C: "free" }, m, desc);
+    expect(payload.purchaseCost).toBe("free");
+    expect(CreateAssetSchema.safeParse({ ...payload, status: "OPERATIONAL" }).success).toBe(false);
+  });
+
+  test("an empty money cell is omitted (absent, not 0)", () => {
+    const m = mapping({
+      columns: [
+        { field: "name", column: "N" },
+        { field: "purchaseCost", column: "C" },
+      ],
+    });
+    expect("purchaseCost" in coerceRow({ N: "X", C: "" }, m, desc).payload).toBe(false);
   });
 });
