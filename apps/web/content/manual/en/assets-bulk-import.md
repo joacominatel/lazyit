@@ -70,7 +70,8 @@ For each column, open it and pick one target from the dropdown:
 
 - **A lazyit field**, grouped by entity:
   - **Asset** — **Name** (*required*), **Status** (*required*), **Serial number**, **Asset tag**,
-    **Company**, **Purchase date**, **Warranty end**, **Model** and **Location**.
+    **Company**, **Notes**, **Purchase date**, **Warranty end**, **Purchase cost**, **Useful life
+    (months)**, **Salvage value**, **Model** and **Location**.
   - **Model** — **Manufacturer** and **Category** for the asset models the import creates (see
     *Model brand and category* below).
   - **Person** — the person the asset is **assigned to**: **Name**, **Email**, **Employee no.**,
@@ -98,6 +99,14 @@ A few fields behave specially:
 - **Model** and **Location** are **references**, matched to existing records by name (see *Conflicts*).
 - **Company** is an optional grouping label, set as-is from your file (a *Company* / *Empresa* column
   is recognized automatically). It groups and filters assets — it is not an access control.
+- **Notes** is optional free text, mapped as-is (a *Notes* / *Notas* / *Observaciones* column is
+  recognized automatically).
+- **Purchase cost** and **Salvage value** are money, entered in your file in **whole currency**
+  (dollars, pesos…), not cents — the importer converts to the stored minor units for you. It reads the
+  common formats: a currency symbol, thousands separators and either decimal style — `1,234.56`,
+  `1.234,56` and `$1,000.00` all work. Blank cells stay unset (not zero); a value it can't read as a
+  number is flagged in the preview, never guessed.
+- **Useful life (months)** is the straight-line depreciation period as a whole number of months.
 
 The importer **pre-fills a best guess** for each column, but it never decides for you — you confirm
 every column, and nothing is dropped silently. The guess understands more than exact English

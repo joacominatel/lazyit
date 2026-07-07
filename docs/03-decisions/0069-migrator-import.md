@@ -344,6 +344,17 @@ written to `Asset.specs` (jsonb). The mapping step exposes them as a separate `c
 - **Omit-empty:** a custom field with no value in a row produces no key in `specs`. An empty `specs`
   object is never written (`{}` is treated as absent).
 - **Native date fields promoted:** `purchaseDate` and `warrantyEnd` are added to `assetImportDescriptor.mappableFields` so the operator can map them to `Asset` native fields (not custom keys).
+- **Native cost / notes fields promoted (#1051):** `notes` (free text — text branch, no coercion) and
+  the depreciation trio `purchaseCost` / `usefulLifeMonths` / `salvageValue` are added to
+  `mappableFields`. `coerceRow` gains a numeric branch: `MONEY_FIELDS` (`purchaseCost`, `salvageValue`)
+  run through `coerceMoneyMinorUnits` — a locale-tolerant parser (currency symbols, US `1,234.56` and
+  LATAM `1.234,56` grouping/decimal, accounting parens `(500)` → -500) that returns **integer minor
+  units** (major-unit CSV × 100, rounded to cents, matching the `Int` cents columns from #954);
+  `usefulLifeMonths` (an `INTEGER_FIELD`) runs through `coerceInteger` (same parser, major units, no
+  ×100). Absent cells are omitted (never 0); an unparseable cell keeps its raw string so
+  `CreateAssetSchema.safeParse` raises the field error (parity with the date branch). Heuristic ceiling:
+  the decimal separator is the last `.`/`,` with 1–2 trailing digits, so a lone 3-digit group (`1.234`)
+  reads as thousands — fine for ≤2-decimal money.
 - **Ceiling:** per-category specs validation (ADR-0007 follow-up) remains deferred. Custom key = free-text string; no type hints in this MVP.
 
 ### A.2 Model, Manufacturer, and Category (lifting §12 "applications / AccessGrant")
