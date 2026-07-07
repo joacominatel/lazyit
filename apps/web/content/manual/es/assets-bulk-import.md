@@ -92,7 +92,10 @@ Algunos campos se comportan de forma especial:
 - **Nombre** y **Estado** son **obligatorios**: debes mapear una columna a cada uno antes de continuar.
 - Los valores de **Estado** se concilian **dentro de la tarjeta de esa columna** — cada valor de
   estado distinto de tu archivo se asocia a un estado de lazyit (por ejemplo `active → OPERATIONAL`,
-  `retired → RETIRED`). Los sinónimos comunes se completan por ti; cambia cualquiera.
+  `retired → RETIRED`). Los sinónimos comunes se completan por ti —incluidas las etiquetas de estado
+  de Snipe-IT como `Deployed`, `Ready to Deploy`, `Archived`, `Broken` y etiquetas personalizadas
+  como `Nueva (deployed)` (se lee la palabra meta entre paréntesis)—; cambia cualquiera. Lo que siga
+  sin reconocerse se marca en la vista previa, nunca se descarta en silencio.
 - **Número de serie** es opcional pero **importante**: es la única clave natural del activo. Si lo
   mapeas, una nueva subida no creará duplicados de esas filas. Sin él, una nueva subida **no se
   de-duplica**.
@@ -167,6 +170,9 @@ persona.
 La simulación valida, normaliza y resuelve **todas** las filas — **sin escribir nada**. Obtienes:
 
 - Un recuento de filas **válidas** e **inválidas**.
+- Un resumen **«Por qué se excluyeron filas»** que agrupa las filas inválidas por el campo que falló
+  (por ejemplo *«12 filas — campo status»* con el valor problemático), para que no puedas confirmar
+  sin notar que se descartó toda una clase de filas.
 - Resultados por fila, con el error de validación exacto de cada fila inválida (para que corrijas el
   archivo).
 - **Colisiones de etiqueta de activo** — cualquier etiqueta de tu archivo que ya pertenezca a un

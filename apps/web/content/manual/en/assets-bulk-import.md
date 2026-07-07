@@ -87,7 +87,10 @@ A few fields behave specially:
 - **Name** and **Status** are **required**: you must map a column to each before you can continue.
 - **Status** values are reconciled **inside that column's card** — each distinct status value in your
   file maps to a lazyit status (for example `active → OPERATIONAL`, `retired → RETIRED`). Common
-  synonyms are filled in for you; change any of them.
+  synonyms are filled in for you — including Snipe-IT status labels such as `Deployed`, `Ready to
+  Deploy`, `Archived`, `Broken` and custom labels like `Nueva (deployed)` (read from the meta word in
+  parentheses) — change any of them. Anything still unrecognized is flagged in the preview, never
+  silently dropped.
 - **Serial number** is optional but **important**: it is the asset's only natural key. Map it and a
   re-upload won't create duplicates for those rows. Without it, a re-upload is **not de-duplicated**.
 - **Asset tag** — a tag from your file is used as-is; a blank one is auto-assigned later if your
@@ -154,6 +157,9 @@ The asset always imports either way; only the **assignment** depends on identify
 The dry run validates, coerces and resolves **every** row — **writing nothing**. You get:
 
 - A count of **valid** and **invalid** rows.
+- A **“Why rows were excluded”** summary that groups the invalid rows by the field that failed (for
+  example *“12 rows — field status”* with the offending value), so you can't confirm the commit
+  without noticing that a whole class of rows was dropped.
 - Per-row outcomes, with the exact validation error for each invalid row (so you can fix the file).
 - **Asset-tag collisions** — any tag in your file that already belongs to a live asset is flagged
   here, never silently dropped.
