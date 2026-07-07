@@ -10,8 +10,10 @@
  * The lazy correct fix (CEO decision: "lazy 401-redirect first") is a single global
  * reaction: on a 401 from `apiFetch`, sign the dead session out and redirect to /login.
  * This is wired once into the TanStack QueryCache/MutationCache `onError` in providers.tsx
- * so no per-call wiring is needed. `signOut({ callbackUrl })` is Auth.js's canonical
- * client-side sign-out (the same call the UserMenu uses) — it clears the cookie and navigates.
+ * so no per-call wiring is needed. `signOut({ redirect: false })` clears the cookie without
+ * following Auth.js's server-resolved absolute URL (the same call the UserMenu uses); we then
+ * navigate client-side to the RELATIVE /login so the destination stays on the current host
+ * (host-agnostic LAN mode would otherwise resolve to `http://0.0.0.0:3000` — issue #1052).
  *
  * Idempotency / loop-guard: `signOut` triggers a full-page navigation to /login, but many
  * in-flight queries can 401 at once and the login page itself is public. We therefore
@@ -44,8 +46,13 @@ export function handleAuthExpiry(error: unknown): boolean {
   if (signingOut || onAuthRoute()) return true;
 
   signingOut = true;
-  // callbackUrl mirrors the UserMenu sign-out; Auth.js validates it against the app origin.
-  void signOut({ callbackUrl: "/login" });
+  // #1052: sign out WITHOUT a server-resolved absolute redirect, then navigate client-side to a
+  // RELATIVE path (mirrors the UserMenu sign-out). In host-agnostic LAN mode (AUTH_URL unset) a
+  // `callbackUrl` redirect resolves against the Next standalone bind host and lands on
+  // `http://0.0.0.0:3000/login`; a relative navigation stays on the current host in every mode.
+  void signOut({ redirect: false }).then(() => {
+    window.location.assign("/login");
+  });
   return true;
 }
 

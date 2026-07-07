@@ -67,14 +67,20 @@ export function UserMenu() {
     .map((word) => word[0].toUpperCase())
     .join("");
 
-  function handleSignOut() {
+  async function handleSignOut() {
     // #512: clear the in-memory secret session BEFORE signing out. `signOut` triggers a full-page
     // navigation that unmounts the provider (which also drops the key + DEKs), but locking explicitly
     // makes key-clearing intention-revealing and navigation-independent — so a future soft client-side
     // sign-out, or a `signOut` that errors before navigating, can never leave the unlocked private key
     // and cached DEKs resident in memory (notably on shared workstations). Safe to call when locked.
     lock();
-    signOut({ callbackUrl: "/login" });
+    // #1052: sign out WITHOUT letting Auth.js follow the server-resolved absolute URL, then navigate
+    // client-side to a RELATIVE path (mirrors the local login's `router.push`). In host-agnostic LAN
+    // mode (AUTH_URL unset) the server origin is the Next standalone bind host `0.0.0.0`, so a
+    // `callbackUrl` redirect lands on `http://0.0.0.0:3000/login`. A relative navigation stays on the
+    // current LAN host and remains correct with a pinned origin and behind Caddy/TLS.
+    await signOut({ redirect: false });
+    window.location.assign("/login");
   }
 
   return (

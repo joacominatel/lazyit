@@ -8,17 +8,20 @@ import { afterEach, beforeEach, expect, mock, test } from "bun:test";
  * synthetic `ApiError(401)` and assert the contract that matters: it fires Auth.js's `signOut`
  * exactly once, ignores non-401 errors, and never fires while on an auth route (the loop-guard).
  *
- * `signOut` is mocked so nothing actually navigates; `window.location` is stubbed so the
- * auth-route guard has a pathname to read under bun's happy-dom-less runtime.
+ * `signOut` is mocked so nothing actually navigates; `window.location` is stubbed (with a spy on
+ * `assign`) so the auth-route guard has a pathname to read and the post-sign-out relative redirect
+ * (issue #1052) is observable under bun's happy-dom-less runtime.
  */
 
 const signOut = mock(() => Promise.resolve(undefined));
 mock.module("next-auth/react", () => ({ signOut }));
 
-// `handleAuthExpiry` reads window.location.pathname; provide a writable stub.
+const assign = mock(() => undefined);
+
+// `handleAuthExpiry` reads window.location.pathname and calls window.location.assign; stub both.
 function setPathname(pathname: string): void {
   // @ts-expect-error — minimal window stub for the guard under test.
-  globalThis.window = { location: { pathname } };
+  globalThis.window = { location: { pathname, assign } };
 }
 
 import { ApiError } from "./client";
@@ -29,6 +32,7 @@ import {
 
 beforeEach(() => {
   signOut.mockClear();
+  assign.mockClear();
   __resetAuthExpiryLatch();
   setPathname("/dashboard");
 });
@@ -48,10 +52,14 @@ test("ignores non-401 ApiErrors", () => {
   expect(signOut).not.toHaveBeenCalled();
 });
 
-test("a 401 signs out exactly once and redirects to /login", () => {
+test("a 401 signs out exactly once and redirects to a relative /login (issue #1052)", async () => {
   expect(handleAuthExpiry(new ApiError(401, "unauthorized"))).toBe(true);
   expect(signOut).toHaveBeenCalledTimes(1);
-  expect(signOut).toHaveBeenCalledWith({ callbackUrl: "/login" });
+  // `redirect: false` keeps Auth.js from following the server-resolved absolute URL...
+  expect(signOut).toHaveBeenCalledWith({ redirect: false });
+  // ...and once the cookie is cleared we navigate client-side to the RELATIVE /login.
+  await Promise.resolve();
+  expect(assign).toHaveBeenCalledWith("/login");
 });
 
 test("concurrent 401s only trigger one sign-out (latch)", () => {
