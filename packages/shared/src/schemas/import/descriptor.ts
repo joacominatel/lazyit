@@ -99,6 +99,19 @@ export const assetImportDescriptor: ImportDescriptor<CreateAsset> = {
         lost: "LOST",
         stolen: "LOST",
         missing: "LOST",
+        // Snipe-IT status-label vocabulary (#1049). A Snipe-IT export ships each org's custom label,
+        // often as `"<Label> (<statusMeta>)"` (e.g. "Nueva (deployed)"). `coerceEnum` retries against
+        // the parenthetical meta token, so mapping the four meta words below (deployed/deployable →
+        // in use, pending/broken → being worked on, archived → retired) covers those custom labels.
+        deployed: "OPERATIONAL",
+        deployable: "OPERATIONAL",
+        "ready to deploy": "IN_STORAGE",
+        nueva: "OPERATIONAL",
+        nuevo: "OPERATIONAL",
+        archived: "RETIRED",
+        broken: "IN_MAINTENANCE",
+        pending: "IN_MAINTENANCE",
+        pendiente: "IN_MAINTENANCE",
       },
     },
   },
