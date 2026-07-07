@@ -77,8 +77,13 @@ export function coerceDate(value: string | null | undefined): string | undefined
 /**
  * Coerce a source string to a canonical enum member using a case-insensitive **synonym map** layered
  * over the enum's own members (e.g. `{ active: "OPERATIONAL", retired: "RETIRED" }`). Resolution order:
- * exact member (case-insensitive) → synonym (case-insensitive) → `undefined` (caller surfaces the
- * mismatch). `members` is the closed enum; `synonyms` keys are matched lowercased.
+ * exact member (case-insensitive) → synonym (case-insensitive) → **parenthetical fallback** → `undefined`
+ * (caller surfaces the mismatch). `members` is the closed enum; `synonyms` keys are matched lowercased.
+ *
+ * Parenthetical fallback (#1049): Snipe-IT exports a status as `"<Custom Label> (<statusMeta>)"` — e.g.
+ * `"Nueva (deployed)"`. When the whole string matches nothing, we retry the token inside the LAST
+ * parentheses (`deployed`) against the same member/synonym table. This lets a synonym for the meta word
+ * cover every org's arbitrary label, instead of enumerating each custom label verbatim.
  */
 export function coerceEnum(
   value: string | null | undefined,
@@ -87,10 +92,15 @@ export function coerceEnum(
 ): string | undefined {
   const present = coerceAbsent(value);
   if (present === undefined) return undefined;
-  const lower = present.toLowerCase();
-  const exact = members.find((m) => m.toLowerCase() === lower);
-  if (exact !== undefined) return exact;
   const lowerSynonyms: Record<string, string> = {};
   for (const [k, v] of Object.entries(synonyms)) lowerSynonyms[k.toLowerCase()] = v;
-  return lowerSynonyms[lower];
+  const resolve = (token: string): string | undefined => {
+    const lower = token.trim().toLowerCase();
+    const exact = members.find((m) => m.toLowerCase() === lower);
+    return exact ?? lowerSynonyms[lower];
+  };
+  const direct = resolve(present);
+  if (direct !== undefined) return direct;
+  const paren = present.match(/\(([^)]*)\)\s*$/);
+  return paren ? resolve(paren[1]) : undefined;
 }

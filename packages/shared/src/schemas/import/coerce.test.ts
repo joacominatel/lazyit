@@ -94,6 +94,22 @@ describe("coerceEnum (member + synonym map, case-insensitive)", () => {
   test("unknown value → undefined (caller surfaces the mismatch)", () => {
     expect(coerceEnum("banana", members, synonyms)).toBeUndefined();
   });
+
+  // #1049 — Snipe-IT status labels must not drop the row.
+  test("Snipe-IT meta labels map to the right member", () => {
+    expect(coerceEnum("Deployed", members, synonyms)).toBe("OPERATIONAL");
+    expect(coerceEnum("Ready to Deploy", members, synonyms)).toBe("IN_STORAGE");
+    expect(coerceEnum("Archived", members, synonyms)).toBe("RETIRED");
+    expect(coerceEnum("Broken", members, synonyms)).toBe("IN_MAINTENANCE");
+    expect(coerceEnum("Pending", members, synonyms)).toBe("IN_MAINTENANCE");
+  });
+  test('custom "<Label> (<meta>)" export resolves via the parenthetical meta', () => {
+    expect(coerceEnum("Nueva (deployed)", members, synonyms)).toBe("OPERATIONAL");
+    expect(coerceEnum("Retirada (archived)", members, synonyms)).toBe("RETIRED");
+  });
+  test("a bare custom label with no synonym still misses (surfaced, not silently mapped)", () => {
+    expect(coerceEnum("Nueva (frobnicated)", members, synonyms)).toBeUndefined();
+  });
 });
 
 describe("assetImportDescriptor (compiles against the real CreateAssetSchema)", () => {
