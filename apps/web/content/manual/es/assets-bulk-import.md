@@ -161,6 +161,9 @@ Mapea cualquier campo de **Persona** y la importación, para cada fila, buscará
   **Crear cuenta OIDC** para aprovisionarla en el proveedor de identidad de inmediato, en vez de esperar
   a un inicio de sesión. El proveedor de identidad exige un correo real, así que el botón está
   **deshabilitado hasta que la persona tenga uno** — edita la persona y agrega un correo real primero.
+  Esto solo está disponible con el **proveedor de identidad integrado**; en modo de autenticación local
+  o con tu propio proveedor OIDC lazyit no puede crear la cuenta, y las personas importadas inician
+  sesión a través de tu proveedor de identidad.
 
 El activo siempre se importa de cualquier modo; solo la **asignación** depende de identificar a la
 persona.

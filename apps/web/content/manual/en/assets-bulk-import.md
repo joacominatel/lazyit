@@ -148,7 +148,9 @@ asset to them** — the assignment is recorded the same way it would be in the a
 - **You can create their account now.** An administrator can open the person's page and choose **Create
   OIDC account** to provision them in the identity provider immediately, instead of waiting for a login.
   The identity provider requires a real email, so the button is **disabled until the person has one** —
-  edit the person and add a real email first.
+  edit the person and add a real email first. This is only available with the **bundled identity
+  provider**; in local authentication mode or with your own OIDC provider lazyit can't create the
+  account, and imported people sign in through your identity provider instead.
 
 The asset always imports either way; only the **assignment** depends on identifying the person.
 
