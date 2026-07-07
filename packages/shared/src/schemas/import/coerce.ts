@@ -45,6 +45,79 @@ export function coerceNumber(value: string | null | undefined): number | undefin
   return Number(present);
 }
 
+/**
+ * Parse a possibly locale-formatted numeric string to a JS number in MAJOR units, or `NaN` when it
+ * isn't numeric. Handles currency symbols/spaces (stripped), US (`1,234.56`) and LATAM (`1.234,56`)
+ * grouping+decimal, and accounting parentheses (`(500)` → -500). Takes an already-present (trimmed,
+ * non-absent) string — the public coercers gate on `coerceAbsent` first.
+ *
+ * ponytail: the decimal separator is the LAST `.`/`,` followed by exactly 1-2 digits at end of string;
+ * every other `.`/`,` is a thousands separator that gets stripped. Ceiling: a lone 3-digit group like
+ * `1.234` reads as thousands (1234), never as a genuine 3-decimal value; a 3+ decimal fraction
+ * (`1.2345`) loses the separator and reads as an integer. Fine for money (≤2 decimals) — the common
+ * Snipe-IT / spreadsheet case. Upgrade path: take an explicit locale/decimal hint from the mapping.
+ */
+function parseLocaleNumber(present: string): number {
+  let sign = 1;
+  let s = present.trim();
+  // Accounting parentheses wrap a negative: (500) → -500.
+  const paren = /^\((.*)\)$/.exec(s);
+  if (paren) {
+    sign = -1;
+    s = paren[1].trim();
+  }
+  // A leading sign sitting outside the digits (before symbol-strip): -$5 / +5.
+  if (s.startsWith("-")) {
+    sign = -sign;
+    s = s.slice(1).trim();
+  } else if (s.startsWith("+")) {
+    s = s.slice(1).trim();
+  }
+  // Strip everything that isn't a digit or a separator (currency symbols, spaces, letters).
+  s = s.replace(/[^\d.,]/g, "");
+  if (s === "") return Number.NaN;
+  // Decimal separator = the last `.`/`,` with exactly 1-2 trailing digits at end of string.
+  const dec = /[.,](\d{1,2})$/.exec(s);
+  let intPart: string;
+  let fracPart: string;
+  if (dec) {
+    intPart = s.slice(0, s.length - dec[0].length).replace(/[.,]/g, "");
+    fracPart = dec[1];
+  } else {
+    intPart = s.replace(/[.,]/g, "");
+    fracPart = "";
+  }
+  if (intPart === "" && fracPart === "") return Number.NaN;
+  const num = Number(`${intPart || "0"}.${fracPart || "0"}`);
+  return Number.isNaN(num) ? Number.NaN : sign * num;
+}
+
+/**
+ * Coerce a source money string (major units — dollars/pesos) to INTEGER MINOR UNITS (cents), or
+ * `undefined` when absent. Rounds to the nearest cent. Returns `NaN` for a present-but-unparseable
+ * value so the caller surfaces a field-level error (mirrors `coerceNumber`). Negatives (incl. the
+ * accounting-parentheses form) are returned as-is — the `int4({ min: 0 })` money schema then rejects
+ * them with a field error rather than this layer silently dropping the value.
+ */
+export function coerceMoneyMinorUnits(value: string | null | undefined): number | undefined {
+  const present = coerceAbsent(value);
+  if (present === undefined) return undefined;
+  const major = parseLocaleNumber(present);
+  if (Number.isNaN(major)) return Number.NaN;
+  return Math.round(major * 100);
+}
+
+/**
+ * Coerce a source string to an integer (e.g. depreciation months), or `undefined` when absent.
+ * Locale-tolerant like `coerceMoneyMinorUnits` but keeps MAJOR units. A non-integer input (`12.5`) is
+ * returned as the parsed number so the `int4` schema raises the field error; unparseable → `NaN`.
+ */
+export function coerceInteger(value: string | null | undefined): number | undefined {
+  const present = coerceAbsent(value);
+  if (present === undefined) return undefined;
+  return parseLocaleNumber(present);
+}
+
 const TRUE_TOKENS: ReadonlySet<string> = new Set(["true", "yes", "y", "1", "t", "on"]);
 const FALSE_TOKENS: ReadonlySet<string> = new Set(["false", "no", "n", "0", "f", "off"]);
 
