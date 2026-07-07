@@ -1252,10 +1252,47 @@ describe('UsersService', () => {
         user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
       )[0][0];
       expect(call.where).toEqual({
-        OR: [
-          { firstName: { contains: 'bob', mode: 'insensitive' } },
-          { lastName: { contains: 'bob', mode: 'insensitive' } },
-          { email: { contains: 'bob', mode: 'insensitive' } },
+        AND: [
+          {
+            OR: [
+              { firstName: { contains: 'bob', mode: 'insensitive' } },
+              { lastName: { contains: 'bob', mode: 'insensitive' } },
+              { email: { contains: 'bob', mode: 'insensitive' } },
+            ],
+          },
+        ],
+        deletedAt: null,
+      });
+    });
+
+    it('requires every token of a multi-word q to match some field (issue #1053)', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        { q: 'Nahuel Genari' },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+      )[0][0];
+      expect(call.where).toEqual({
+        AND: [
+          {
+            OR: [
+              { firstName: { contains: 'Nahuel', mode: 'insensitive' } },
+              { lastName: { contains: 'Nahuel', mode: 'insensitive' } },
+              { email: { contains: 'Nahuel', mode: 'insensitive' } },
+            ],
+          },
+          {
+            OR: [
+              { firstName: { contains: 'Genari', mode: 'insensitive' } },
+              { lastName: { contains: 'Genari', mode: 'insensitive' } },
+              { email: { contains: 'Genari', mode: 'insensitive' } },
+            ],
+          },
         ],
         deletedAt: null,
       });
