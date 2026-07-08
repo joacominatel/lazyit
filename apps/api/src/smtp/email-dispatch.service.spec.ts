@@ -39,12 +39,15 @@ describe('email allowlist (curated)', () => {
     expect(isEmailableNotificationType('infra.agent_offline')).toBe(true);
     // The weekly update nudge (ADR-0084 §2) — emailed (the whole point is an admin inbox):
     expect(isEmailableNotificationType('update.available')).toBe(true);
+    // The targeted requester decision nudge (#1071) — emailed (opt-out-able):
+    expect(isEmailableNotificationType('access_request.decided')).toBe(true);
     // Still bell-only — the per-user login nudge is not inbox-worthy:
     expect(isEmailableNotificationType('secret.vault_setup')).toBe(false);
   });
-  it('the allowlist is the eight emailed types', () => {
+  it('the allowlist is the nine emailed types', () => {
     expect([...EMAIL_NOTIFICATION_TYPES].sort()).toEqual(
       [
+        'access_request.decided',
         'admin_granted',
         'critical_app_access',
         'infra.agent_offline',
