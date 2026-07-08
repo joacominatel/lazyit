@@ -22,8 +22,9 @@ acotado:
   que falló, un otorgamiento de permiso sensible, un agente sin conexión) solo son visibles para quienes
   tengan el permiso de notificaciones en su rol. Por defecto, eso es **solo administradores**.
 - **Notificaciones dirigidas** — una notificación dirigida a una persona concreta aparece en **su
-  propia** campana, aunque no sea administrador ni tenga el permiso de notificaciones. Hoy la única
-  notificación dirigida es el **aviso para configurar el almacén** (más abajo).
+  propia** campana, aunque no sea administrador ni tenga el permiso de notificaciones. Incluyen el
+  **aviso para configurar el almacén** y la **decisión de una solicitud de acceso**, que le avisa a quien
+  solicitó si su solicitud fue aprobada o rechazada (más abajo).
 
 Así, una persona que no es administrador y no tiene nada dirigido a ella simplemente ve una campana
 limpia y sin indicador; un administrador ve el feed de difusión más lo que esté dirigido a él.
@@ -43,6 +44,7 @@ una manguera:
 | **Permiso sensible otorgado** | Una edición de permisos le dio al rol Miembro o Espectador una capacidad de alto riesgo — ajustes de la instancia, gestión de usuarios, control de accesos, o cualquier permiso de eliminación. Enlaza al editor de permisos por rol. |
 | **Agente sin conexión** | Un agente de reportes dejó de enviar informes y su nodo pasó a estar sin conexión. Una notificación por caída — no una por cada chequeo. Enlaza al mapa de topología. |
 | **Configurar almacén** | (Dirigida, una sola vez) A quien puede leer secretos pero nunca configuró una contraseña de almacén se le avisa al iniciar sesión para que configure una. |
+| **Solicitud de acceso resuelta** | (Dirigida) Tu propia solicitud de acceso fue aprobada o rechazada. Aparece en tu campana —y en tu correo, salvo que lo desactives— para que no tengas que revisar tu lista de solicitudes. Enlaza a la aplicación. |
 
 Las notificaciones se emiten **después** de que la acción que las origina se completa, y son **de mejor
 esfuerzo**: una notificación que no se logra enviar nunca bloquea ni deshace el cambio subyacente. Los

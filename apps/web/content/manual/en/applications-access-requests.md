@@ -34,6 +34,9 @@ tells you so instead of creating a duplicate.
 - Administrators see your request in **Access → Access requests** and get a notification in the bell.
 - An approver either **approves** it — which creates your access grant immediately — or **denies** it
   with a reason.
+- When a decision is made you get a **notification** in your own bell — and an email, unless you have
+  turned that type off in [email preferences](/help/notifications-activity-email-preferences) — telling
+  you whether it was approved or denied (a denial includes the reason).
 - Approval and denial are final for that request. If a request was denied and you still need access,
   you can raise a new one.
 
@@ -54,5 +57,5 @@ permission as granting access. See [Roles & permissions](/help/permissions).
 
 Open your **Profile** to see **My access requests** — every request you've raised and its current
 status (**Pending**, **Approved** or **Denied**). A denied request shows the reason the approver gave.
-This is the place to check the outcome; lazyit doesn't send you a separate notification when a decision
-is made.
+lazyit also notifies you the moment a decision is made — in your bell, and by email unless you opt out —
+so this list is the full history, not the only way to learn the outcome.
