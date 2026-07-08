@@ -12,7 +12,7 @@
  * API dry-run/commit — the preview cannot lie (ADR-0069 §3). Unit-tested with `bun test`.
  */
 
-import { coerceAbsent, coerceDate, coerceEnum } from "./coerce";
+import { coerceAbsent, coerceDate, coerceEnum, coerceInteger, coerceMoneyMinorUnits } from "./coerce";
 import type { ImportDescriptor } from "./descriptor";
 import type { ImportMapping } from "./mapping";
 
@@ -65,6 +65,16 @@ const PROTO_POLLUTION_KEYS: ReadonlySet<string> = new Set(["__proto__", "constru
 
 /** Which create-schema fields are ISO-date fields (re-emitted via `coerceDate`). Phase 1: Asset. */
 const DATE_FIELDS: ReadonlySet<string> = new Set(["purchaseDate", "warrantyEnd"]);
+
+/**
+ * Money fields stored as INTEGER MINOR UNITS (cents) — the CSV carries major units, so
+ * `coerceMoneyMinorUnits` normalizes the locale format and ×100s it (#1051; schema.prisma
+ * purchaseCost/salvageValue).
+ */
+const MONEY_FIELDS: ReadonlySet<string> = new Set(["purchaseCost", "salvageValue"]);
+
+/** Plain-integer numeric fields (major units, no ×100) — e.g. depreciation months (#1051). */
+const INTEGER_FIELDS: ReadonlySet<string> = new Set(["usefulLifeMonths"]);
 
 /**
  * Resolve the source value for a mapped field: a pinned `constant` wins over the `column`'s cell; an
@@ -154,6 +164,16 @@ export function coerceRow(
       // An unparseable date → keep the raw value so `CreateAssetSchema.safeParse` raises the field
       // error (rather than silently dropping it, which would look like an absent optional).
       payload[field] = iso ?? present;
+      continue;
+    }
+
+    if (MONEY_FIELDS.has(field) || INTEGER_FIELDS.has(field)) {
+      const src = sourceValue(raw, col);
+      const num = MONEY_FIELDS.has(field) ? coerceMoneyMinorUnits(src) : coerceInteger(src);
+      if (num === undefined) continue; // absent → let the schema's requiredness decide.
+      // Unparseable → keep the raw string so `CreateAssetSchema.safeParse` raises the field error
+      // (parity with the date branch), rather than dropping it like an absent optional.
+      payload[field] = Number.isNaN(num) ? coerceAbsent(src) : num;
       continue;
     }
 

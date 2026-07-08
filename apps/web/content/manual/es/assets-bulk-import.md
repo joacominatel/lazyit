@@ -73,7 +73,8 @@ Para cada columna, ábrela y elige un destino en el desplegable:
 
 - **Un campo de lazyit**, agrupado por entidad:
   - **Activo** — **Nombre** (*obligatorio*), **Estado** (*obligatorio*), **Número de serie**,
-    **Etiqueta de activo**, **Empresa**, **Fecha de compra**, **Fin de garantía**, **Modelo** y **Ubicación**.
+    **Etiqueta de activo**, **Empresa**, **Notas**, **Fecha de compra**, **Fin de garantía**, **Costo
+    de compra**, **Vida útil (meses)**, **Valor residual**, **Modelo** y **Ubicación**.
   - **Modelo** — **Fabricante** y **Categoría** para los modelos de activo que cree la importación
     (consulta *Marca y categoría del modelo* más abajo).
   - **Persona** — la persona a la que está **asignado** el activo: **Nombre**, **Correo**, **Legajo**,
@@ -105,6 +106,14 @@ Algunos campos se comportan de forma especial:
   (consulta *Conflictos*).
 - **Empresa** es una etiqueta de agrupación opcional, tomada tal cual de tu archivo (una columna
   *Empresa* / *Company* se reconoce automáticamente). Agrupa y filtra activos — no es un control de acceso.
+- **Notas** es texto libre opcional, tomado tal cual (una columna *Notas* / *Notes* / *Observaciones*
+  se reconoce automáticamente).
+- **Costo de compra** y **Valor residual** son montos, cargados en tu archivo en **moneda entera**
+  (dólares, pesos…), no en centavos — la importación los convierte a las unidades menores almacenadas.
+  Lee los formatos habituales: símbolo de moneda, separadores de miles y cualquiera de los dos estilos
+  decimales — `1,234.56`, `1.234,56` y `$1,000.00` funcionan. Las celdas en blanco quedan sin valor
+  (no en cero); un valor que no puede leer como número se marca en la previsualización, nunca se adivina.
+- **Vida útil (meses)** es el período de depreciación lineal, como número entero de meses.
 
 El importador **pre-rellena una mejor suposición** para cada columna, pero nunca decide por ti —
 confirmas cada columna, y nada se descarta en silencio. La suposición entiende más que los encabezados

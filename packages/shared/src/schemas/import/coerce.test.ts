@@ -4,6 +4,8 @@ import {
   coerceBoolean,
   coerceDate,
   coerceEnum,
+  coerceInteger,
+  coerceMoneyMinorUnits,
   coerceNumber,
   normalizeMatchKey,
 } from "./coerce";
@@ -44,6 +46,61 @@ describe("coerceNumber", () => {
   test("present-but-unparseable → NaN (so the caller can surface an error)", () => {
     expect(Number.isNaN(coerceNumber("12abc") as number)).toBe(true);
     expect(Number.isNaN(coerceNumber("1,000") as number)).toBe(true);
+  });
+});
+
+describe("coerceMoneyMinorUnits (#1051 — major units → integer cents, locale-tolerant)", () => {
+  test("absent → undefined (not 0)", () => {
+    expect(coerceMoneyMinorUnits("")).toBeUndefined();
+    expect(coerceMoneyMinorUnits(null)).toBeUndefined();
+    expect(coerceMoneyMinorUnits("n/a")).toBeUndefined();
+  });
+  test("plain decimal → ×100 rounded to cents", () => {
+    expect(coerceMoneyMinorUnits("0.00")).toBe(0);
+    expect(coerceMoneyMinorUnits("1234.56")).toBe(123456);
+    expect(coerceMoneyMinorUnits("10")).toBe(1000);
+    expect(coerceMoneyMinorUnits("12.5")).toBe(1250);
+    expect(coerceMoneyMinorUnits("0.1")).toBe(10);
+  });
+  test("currency symbol + US thousands separator", () => {
+    expect(coerceMoneyMinorUnits("$1,000.00")).toBe(100000);
+    expect(coerceMoneyMinorUnits("$1,234.56")).toBe(123456);
+    expect(coerceMoneyMinorUnits("USD 2 500.75")).toBe(250075);
+  });
+  test("LATAM format (dot thousands, comma decimal)", () => {
+    expect(coerceMoneyMinorUnits("1.234,56")).toBe(123456);
+    expect(coerceMoneyMinorUnits("1.000,00")).toBe(100000);
+    expect(coerceMoneyMinorUnits("$ 2.500,75")).toBe(250075);
+  });
+  test("a lone thousands-grouped value with no decimal (US or LATAM) → whole units", () => {
+    expect(coerceMoneyMinorUnits("1,234")).toBe(123400);
+    expect(coerceMoneyMinorUnits("1.234")).toBe(123400);
+  });
+  test("negatives: leading sign and accounting parentheses both negate", () => {
+    expect(coerceMoneyMinorUnits("-500")).toBe(-50000);
+    expect(coerceMoneyMinorUnits("(500)")).toBe(-50000);
+    expect(coerceMoneyMinorUnits("($1,000.00)")).toBe(-100000);
+  });
+  test("present-but-unparseable → NaN (caller surfaces a field error)", () => {
+    expect(Number.isNaN(coerceMoneyMinorUnits("abc") as number)).toBe(true);
+    expect(Number.isNaN(coerceMoneyMinorUnits("$$$") as number)).toBe(true);
+  });
+});
+
+describe("coerceInteger (#1051 — depreciation months, no ×100)", () => {
+  test("absent → undefined", () => {
+    expect(coerceInteger("")).toBeUndefined();
+  });
+  test("plain and grouped integers stay in major units", () => {
+    expect(coerceInteger("36")).toBe(36);
+    expect(coerceInteger("1,200")).toBe(1200);
+    expect(coerceInteger("1.200")).toBe(1200);
+  });
+  test("a fractional input is returned as-is so the int4 schema rejects it", () => {
+    expect(coerceInteger("12.5")).toBe(12.5);
+  });
+  test("unparseable → NaN", () => {
+    expect(Number.isNaN(coerceInteger("many") as number)).toBe(true);
   });
 });
 
