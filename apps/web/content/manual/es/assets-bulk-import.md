@@ -88,6 +88,12 @@ Para cada columna, ábrela y elige un destino en el desplegable:
   defecto**, así que una exportación ancha con decenas de columnas sin uso no es un muro de trabajo;
   solo tocas las que importan.
 
+¿Cambiaste de idea sobre una columna ignorada? Abre su tarjeta y hacé clic en **Usar el nombre de la
+columna como campo personalizado** — se convierte en un campo personalizado con el nombre de la
+columna, sin escribir nada (el nombre queda editable después). Si varias columnas valen la pena, el
+aviso arriba de la lista ofrece **Usar nombres de columna en todas las ignoradas** para convertir de
+una vez todas las columnas que sigan ignoradas.
+
 Algunos campos se comportan de forma especial:
 
 - **Nombre** y **Estado** son **obligatorios**: debes mapear una columna a cada uno antes de continuar.
