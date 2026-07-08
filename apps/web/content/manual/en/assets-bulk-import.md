@@ -83,6 +83,11 @@ For each column, open it and pick one target from the dropdown:
 - **Ignore** — drop the column. **Empty and irrelevant columns default to Ignore**, so a wide export
   with dozens of unused columns isn't a wall of work; you only touch the ones that matter.
 
+Changed your mind about an ignored column? Open its card and click **Use column name as custom
+field** — it becomes a custom field named after the column itself, no typing needed (the name stays
+editable afterward). If several columns are worth keeping, the banner above the column list offers
+**Use column names for all ignored** to convert every still-ignored column in one click.
+
 A few fields behave specially:
 
 - **Name** and **Status** are **required**: you must map a column to each before you can continue.

@@ -41,6 +41,13 @@ import {
 import type { ImportDryRunReport } from "@lazyit/shared";
 import { FixedValueField } from "../fixed-value-field";
 import { useImportError } from "../use-import-error";
+import {
+  applyCustomShortcutToIgnored,
+  type ColumnChoice,
+  CUSTOM,
+  customChoiceFromHeader,
+  IGNORE,
+} from "./mapping-shortcuts";
 
 /**
  * Step 3 — Mapping (ADR-0069 REDESIGN §6.2). COLUMN-CENTRIC + assisted: one card per CSV column, not
@@ -57,10 +64,6 @@ import { useImportError } from "../use-import-error";
  * step. `onMapped`/`onBack` and the `setMapping → dryRun` flow are unchanged.
  */
 
-/** Target token: where a column's value goes. `__ignore__` drops it, `__custom__` → specs, else `entity:field`. */
-const IGNORE = "__ignore__";
-const CUSTOM = "__custom__";
-
 /** Build the `entity:field` token used as a column's Select value (e.g. `asset:name`, `model:category`). */
 function token(entity: string, field: string): string {
   return `${entity}:${field}`;
@@ -73,9 +76,6 @@ const FK_FIELDS = new Set(Object.keys(assetImportDescriptor.references));
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
-
-/** Per-column state: the chosen target token + (for `__custom__`) the operator-named specs key. */
-type ColumnChoice = { target: string; customName: string };
 
 /** Model-config cluster: the brand/category constant fallbacks plus the category picker's mode
  *  (pick-existing vs free constant) and picked id. Grouped into one reducer to stay under the
@@ -203,6 +203,14 @@ export function MappingStep({
 
   function setChoice(header: string, patch: Partial<ColumnChoice>) {
     setChoices((prev) => ({ ...prev, [header]: { ...prev[header], ...patch } }));
+  }
+
+  // #1050: one-click shortcut — turn an ignored column into a custom field named after its own
+  // header, no typing required. `applyCustomShortcutToIgnored` only touches columns still `IGNORE`d,
+  // so it never clobbers a choice the operator already made.
+  const ignoredCount = headers.filter((h) => choices[h]?.target === IGNORE).length;
+  function useIgnoredHeadersAsCustom() {
+    setChoices((prev) => applyCustomShortcutToIgnored(headers, prev));
   }
 
   // The header (if any) the operator mapped to `status` — its value-map lives inside that column's card.
@@ -471,6 +479,19 @@ export function MappingStep({
         {t("mapping.piiNote")}
       </p>
 
+      {/* #1050: bulk shortcut — convert every still-ignored column to a custom field named after
+          its header in one click. Only shown while there's something to convert. */}
+      {ignoredCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-2">
+          <p className="text-xs text-muted-foreground">
+            {t("mapping.ignoredCount", { count: ignoredCount })}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={useIgnoredHeadersAsCustom}>
+            {t("mapping.useAllIgnoredShortcut")}
+          </Button>
+        </div>
+      )}
+
       {/* One card per column */}
       <ul className="space-y-2">
         {headers.map((header) => {
@@ -592,6 +613,19 @@ export function MappingStep({
                         <SelectItem value={CUSTOM}>{t("mapping.targetCustom")}</SelectItem>
                       </SelectContent>
                     </Select>
+                    {/* #1050: one-click "use as custom field" — skips typing the name, seeds it
+                        from the column's own header (still editable below once applied). */}
+                    {isIgnored && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-fit"
+                        onClick={() => setChoice(header, customChoiceFromHeader(header))}
+                      >
+                        {t("mapping.useAsCustomShortcut")}
+                      </Button>
+                    )}
                   </div>
 
                   {/* Custom field key */}
