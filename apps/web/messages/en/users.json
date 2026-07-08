@@ -103,6 +103,7 @@
       "title": "Directory person",
       "description": "This person was added by the bulk import and has no login yet. Create their account in the identity provider so they can sign in.",
       "needsEmail": "This person needs a real email before they can get an account. Edit the person and add one first.",
+      "unsupported": "Creating accounts is only available with the bundled identity provider. In local or bring-your-own-OIDC mode, imported people sign in through your identity provider instead.",
       "success": "{name} now has an OIDC account.",
       "error": "Couldn't create the account. Try again."
     }

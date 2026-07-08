@@ -107,7 +107,10 @@ iniciar sesión.
 - **Crea su cuenta ahora.** En la página de una persona de directorio, **Crear cuenta OIDC** la
   aprovisiona en el proveedor de identidad de inmediato. El proveedor exige un correo real, así que el
   botón está deshabilitado hasta que la persona tenga uno — edita la persona y agrega un correo real
-  primero. Esto es solo para administradores (Gestionar usuarios).
+  primero. Esto es solo para administradores (Gestionar usuarios). Esta acción solo está disponible
+  cuando lazyit usa el **proveedor de identidad integrado**. En modo de autenticación local o cuando
+  usas tu propio proveedor OIDC, lazyit no puede crear cuentas por ti, así que la opción se reemplaza por
+  una breve nota — las personas importadas inician sesión a través de tu proveedor de identidad.
 
 ## Restaurar un usuario
 

@@ -70,7 +70,8 @@ For each column, open it and pick one target from the dropdown:
 
 - **A lazyit field**, grouped by entity:
   - **Asset** — **Name** (*required*), **Status** (*required*), **Serial number**, **Asset tag**,
-    **Company**, **Purchase date**, **Warranty end**, **Model** and **Location**.
+    **Company**, **Notes**, **Purchase date**, **Warranty end**, **Purchase cost**, **Useful life
+    (months)**, **Salvage value**, **Model** and **Location**.
   - **Model** — **Manufacturer** and **Category** for the asset models the import creates (see
     *Model brand and category* below).
   - **Person** — the person the asset is **assigned to**: **Name**, **Email**, **Employee no.**,
@@ -82,12 +83,20 @@ For each column, open it and pick one target from the dropdown:
 - **Ignore** — drop the column. **Empty and irrelevant columns default to Ignore**, so a wide export
   with dozens of unused columns isn't a wall of work; you only touch the ones that matter.
 
+Changed your mind about an ignored column? Open its card and click **Use column name as custom
+field** — it becomes a custom field named after the column itself, no typing needed (the name stays
+editable afterward). If several columns are worth keeping, the banner above the column list offers
+**Use column names for all ignored** to convert every still-ignored column in one click.
+
 A few fields behave specially:
 
 - **Name** and **Status** are **required**: you must map a column to each before you can continue.
 - **Status** values are reconciled **inside that column's card** — each distinct status value in your
   file maps to a lazyit status (for example `active → OPERATIONAL`, `retired → RETIRED`). Common
-  synonyms are filled in for you; change any of them.
+  synonyms are filled in for you — including Snipe-IT status labels such as `Deployed`, `Ready to
+  Deploy`, `Archived`, `Broken` and custom labels like `Nueva (deployed)` (read from the meta word in
+  parentheses) — change any of them. Anything still unrecognized is flagged in the preview, never
+  silently dropped.
 - **Serial number** is optional but **important**: it is the asset's only natural key. Map it and a
   re-upload won't create duplicates for those rows. Without it, a re-upload is **not de-duplicated**.
 - **Asset tag** — a tag from your file is used as-is; a blank one is auto-assigned later if your
@@ -95,6 +104,14 @@ A few fields behave specially:
 - **Model** and **Location** are **references**, matched to existing records by name (see *Conflicts*).
 - **Company** is an optional grouping label, set as-is from your file (a *Company* / *Empresa* column
   is recognized automatically). It groups and filters assets — it is not an access control.
+- **Notes** is optional free text, mapped as-is (a *Notes* / *Notas* / *Observaciones* column is
+  recognized automatically).
+- **Purchase cost** and **Salvage value** are money, entered in your file in **whole currency**
+  (dollars, pesos…), not cents — the importer converts to the stored minor units for you. It reads the
+  common formats: a currency symbol, thousands separators and either decimal style — `1,234.56`,
+  `1.234,56` and `$1,000.00` all work. Blank cells stay unset (not zero); a value it can't read as a
+  number is flagged in the preview, never guessed.
+- **Useful life (months)** is the straight-line depreciation period as a whole number of months.
 
 The importer **pre-fills a best guess** for each column, but it never decides for you — you confirm
 every column, and nothing is dropped silently. The guess understands more than exact English
@@ -145,7 +162,9 @@ asset to them** — the assignment is recorded the same way it would be in the a
 - **You can create their account now.** An administrator can open the person's page and choose **Create
   OIDC account** to provision them in the identity provider immediately, instead of waiting for a login.
   The identity provider requires a real email, so the button is **disabled until the person has one** —
-  edit the person and add a real email first.
+  edit the person and add a real email first. This is only available with the **bundled identity
+  provider**; in local authentication mode or with your own OIDC provider lazyit can't create the
+  account, and imported people sign in through your identity provider instead.
 
 The asset always imports either way; only the **assignment** depends on identifying the person.
 
@@ -154,6 +173,9 @@ The asset always imports either way; only the **assignment** depends on identify
 The dry run validates, coerces and resolves **every** row — **writing nothing**. You get:
 
 - A count of **valid** and **invalid** rows.
+- A **“Why rows were excluded”** summary that groups the invalid rows by the field that failed (for
+  example *“12 rows — field status”* with the offending value), so you can't confirm the commit
+  without noticing that a whole class of rows was dropped.
 - Per-row outcomes, with the exact validation error for each invalid row (so you can fix the file).
 - **Asset-tag collisions** — any tag in your file that already belongs to a live asset is flagged
   here, never silently dropped.

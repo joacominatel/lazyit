@@ -71,10 +71,18 @@ export const assetImportDescriptor: ImportDescriptor<CreateAsset> = {
     { field: "status", i18nKey: "import.asset.field.status", required: true },
     // Optional grouping value (ADR-0076, #857) — plain text, flows through coerceRow's text branch.
     { field: "company", i18nKey: "import.asset.field.company", required: false },
+    // Free-text note (#1051) — plain text, flows through coerceRow's text branch (no coercion).
+    { field: "notes", i18nKey: "import.asset.field.notes", required: false },
     { field: "modelId", i18nKey: "import.asset.field.model", required: false },
     { field: "locationId", i18nKey: "import.asset.field.location", required: false },
     { field: "purchaseDate", i18nKey: "import.asset.field.purchaseDate", required: false },
     { field: "warrantyEnd", i18nKey: "import.asset.field.warrantyEnd", required: false },
+    // Purchase cost + straight-line depreciation (#954, #1051). purchaseCost/salvageValue are stored in
+    // minor units (cents) — coerceRow's money branch ×100s the CSV's major-unit value; usefulLifeMonths
+    // is a plain integer (months). See coerce-row.ts MONEY_FIELDS / INTEGER_FIELDS.
+    { field: "purchaseCost", i18nKey: "import.asset.field.purchaseCost", required: false },
+    { field: "usefulLifeMonths", i18nKey: "import.asset.field.usefulLifeMonths", required: false },
+    { field: "salvageValue", i18nKey: "import.asset.field.salvageValue", required: false },
   ],
   naturalKey: "serial",
   references: {
@@ -99,6 +107,19 @@ export const assetImportDescriptor: ImportDescriptor<CreateAsset> = {
         lost: "LOST",
         stolen: "LOST",
         missing: "LOST",
+        // Snipe-IT status-label vocabulary (#1049). A Snipe-IT export ships each org's custom label,
+        // often as `"<Label> (<statusMeta>)"` (e.g. "Nueva (deployed)"). `coerceEnum` retries against
+        // the parenthetical meta token, so mapping the four meta words below (deployed/deployable →
+        // in use, pending/broken → being worked on, archived → retired) covers those custom labels.
+        deployed: "OPERATIONAL",
+        deployable: "OPERATIONAL",
+        "ready to deploy": "IN_STORAGE",
+        nueva: "OPERATIONAL",
+        nuevo: "OPERATIONAL",
+        archived: "RETIRED",
+        broken: "IN_MAINTENANCE",
+        pending: "IN_MAINTENANCE",
+        pendiente: "IN_MAINTENANCE",
       },
     },
   },
@@ -175,6 +196,16 @@ export const HEADER_ALIASES: Record<string, readonly string[]> = {
     "Warranty Expiration",
     "Warranty Expiry",
   ],
+  "asset:notes": ["Notas", "Notes", "Note", "Nota", "Observaciones"],
+  "asset:purchaseCost": ["Costo", "Costo de compra", "Purchase Cost", "Cost", "Price", "Precio"],
+  "asset:usefulLifeMonths": [
+    "Vida útil (meses)",
+    "Useful Life (months)",
+    "Depreciation",
+    "Depreciación",
+    "EOL Rate",
+  ],
+  "asset:salvageValue": ["Valor residual", "Salvage Value", "Residual Value", "Valor de rescate"],
   // Model (brand/category → resolved through the created AssetModel)
   "model:manufacturer": ["Fabricante", "Manufacturer", "Marca"],
   "model:category": ["Categoría", "Category"],

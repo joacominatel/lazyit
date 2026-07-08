@@ -27,6 +27,7 @@ import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
+import { multiTokenWhere } from '../common/multi-token-where';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import type { ActorAttribution } from '../common/actor.service';
@@ -283,15 +284,9 @@ export class UsersService {
     ids,
   }: UserFilters): Prisma.UserWhereInput {
     return {
-      ...(q
-        ? {
-            OR: [
-              { firstName: { contains: q, mode: 'insensitive' } },
-              { lastName: { contains: q, mode: 'insensitive' } },
-              { email: { contains: q, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
+      // Token-wise match (issue #1053): each whitespace-separated token of `q` must appear in
+      // firstName, lastName OR email — so "Nahuel Genari" matches firstName+lastName across columns.
+      ...multiTokenWhere(q, ['firstName', 'lastName', 'email']),
       // directoryOnly filter (ADR-0069 REDESIGN §0 #2): absent → no filter (show all).
       ...(directoryOnly !== undefined ? { directoryOnly } : {}),
       // role filter (issue #693): absent → no filter; backs the Roles "View N members" deep-link.

@@ -73,7 +73,8 @@ Para cada columna, ábrela y elige un destino en el desplegable:
 
 - **Un campo de lazyit**, agrupado por entidad:
   - **Activo** — **Nombre** (*obligatorio*), **Estado** (*obligatorio*), **Número de serie**,
-    **Etiqueta de activo**, **Empresa**, **Fecha de compra**, **Fin de garantía**, **Modelo** y **Ubicación**.
+    **Etiqueta de activo**, **Empresa**, **Notas**, **Fecha de compra**, **Fin de garantía**, **Costo
+    de compra**, **Vida útil (meses)**, **Valor residual**, **Modelo** y **Ubicación**.
   - **Modelo** — **Fabricante** y **Categoría** para los modelos de activo que cree la importación
     (consulta *Marca y categoría del modelo* más abajo).
   - **Persona** — la persona a la que está **asignado** el activo: **Nombre**, **Correo**, **Legajo**,
@@ -87,12 +88,21 @@ Para cada columna, ábrela y elige un destino en el desplegable:
   defecto**, así que una exportación ancha con decenas de columnas sin uso no es un muro de trabajo;
   solo tocas las que importan.
 
+¿Cambiaste de idea sobre una columna ignorada? Abre su tarjeta y hacé clic en **Usar el nombre de la
+columna como campo personalizado** — se convierte en un campo personalizado con el nombre de la
+columna, sin escribir nada (el nombre queda editable después). Si varias columnas valen la pena, el
+aviso arriba de la lista ofrece **Usar nombres de columna en todas las ignoradas** para convertir de
+una vez todas las columnas que sigan ignoradas.
+
 Algunos campos se comportan de forma especial:
 
 - **Nombre** y **Estado** son **obligatorios**: debes mapear una columna a cada uno antes de continuar.
 - Los valores de **Estado** se concilian **dentro de la tarjeta de esa columna** — cada valor de
   estado distinto de tu archivo se asocia a un estado de lazyit (por ejemplo `active → OPERATIONAL`,
-  `retired → RETIRED`). Los sinónimos comunes se completan por ti; cambia cualquiera.
+  `retired → RETIRED`). Los sinónimos comunes se completan por ti —incluidas las etiquetas de estado
+  de Snipe-IT como `Deployed`, `Ready to Deploy`, `Archived`, `Broken` y etiquetas personalizadas
+  como `Nueva (deployed)` (se lee la palabra meta entre paréntesis)—; cambia cualquiera. Lo que siga
+  sin reconocerse se marca en la vista previa, nunca se descarta en silencio.
 - **Número de serie** es opcional pero **importante**: es la única clave natural del activo. Si lo
   mapeas, una nueva subida no creará duplicados de esas filas. Sin él, una nueva subida **no se
   de-duplica**.
@@ -102,6 +112,14 @@ Algunos campos se comportan de forma especial:
   (consulta *Conflictos*).
 - **Empresa** es una etiqueta de agrupación opcional, tomada tal cual de tu archivo (una columna
   *Empresa* / *Company* se reconoce automáticamente). Agrupa y filtra activos — no es un control de acceso.
+- **Notas** es texto libre opcional, tomado tal cual (una columna *Notas* / *Notes* / *Observaciones*
+  se reconoce automáticamente).
+- **Costo de compra** y **Valor residual** son montos, cargados en tu archivo en **moneda entera**
+  (dólares, pesos…), no en centavos — la importación los convierte a las unidades menores almacenadas.
+  Lee los formatos habituales: símbolo de moneda, separadores de miles y cualquiera de los dos estilos
+  decimales — `1,234.56`, `1.234,56` y `$1,000.00` funcionan. Las celdas en blanco quedan sin valor
+  (no en cero); un valor que no puede leer como número se marca en la previsualización, nunca se adivina.
+- **Vida útil (meses)** es el período de depreciación lineal, como número entero de meses.
 
 El importador **pre-rellena una mejor suposición** para cada columna, pero nunca decide por ti —
 confirmas cada columna, y nada se descarta en silencio. La suposición entiende más que los encabezados
@@ -158,6 +176,9 @@ Mapea cualquier campo de **Persona** y la importación, para cada fila, buscará
   **Crear cuenta OIDC** para aprovisionarla en el proveedor de identidad de inmediato, en vez de esperar
   a un inicio de sesión. El proveedor de identidad exige un correo real, así que el botón está
   **deshabilitado hasta que la persona tenga uno** — edita la persona y agrega un correo real primero.
+  Esto solo está disponible con el **proveedor de identidad integrado**; en modo de autenticación local
+  o con tu propio proveedor OIDC lazyit no puede crear la cuenta, y las personas importadas inician
+  sesión a través de tu proveedor de identidad.
 
 El activo siempre se importa de cualquier modo; solo la **asignación** depende de identificar a la
 persona.
@@ -167,6 +188,9 @@ persona.
 La simulación valida, normaliza y resuelve **todas** las filas — **sin escribir nada**. Obtienes:
 
 - Un recuento de filas **válidas** e **inválidas**.
+- Un resumen **«Por qué se excluyeron filas»** que agrupa las filas inválidas por el campo que falló
+  (por ejemplo *«12 filas — campo status»* con el valor problemático), para que no puedas confirmar
+  sin notar que se descartó toda una clase de filas.
 - Resultados por fila, con el error de validación exacto de cada fila inválida (para que corrijas el
   archivo).
 - **Colisiones de etiqueta de activo** — cualquier etiqueta de tu archivo que ya pertenezca a un

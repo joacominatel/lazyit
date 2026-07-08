@@ -33,6 +33,29 @@ describe("ConfigStatusSchema", () => {
     expect(parsed.requiresAdminPassword).toBe(true);
   });
 
+  test("carries the optional canProvisionAccounts capability (issue #1048)", () => {
+    const base = {
+      isConfigured: true,
+      adminCount: 1,
+      integrationMode: "local" as const,
+      devMode: false,
+      csrfToken: "abc.def",
+      requiresAdminPassword: true,
+    };
+    // Present + typed as a boolean.
+    expect(
+      ConfigStatusSchema.parse({ ...base, canProvisionAccounts: false })
+        .canProvisionAccounts,
+    ).toBe(false);
+    // Optional — an older web build that never sends it still parses.
+    expect(ConfigStatusSchema.parse(base).canProvisionAccounts).toBeUndefined();
+    // A non-boolean is rejected.
+    expect(
+      ConfigStatusSchema.safeParse({ ...base, canProvisionAccounts: "yes" })
+        .success,
+    ).toBe(false);
+  });
+
   test("rejects a negative adminCount and a missing csrfToken", () => {
     expect(
       ConfigStatusSchema.safeParse({
