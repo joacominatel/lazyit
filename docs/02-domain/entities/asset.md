@@ -161,7 +161,9 @@ three stored fields are echoed on create/update.
   (`releasedAt = null`) to that user — the owner filter, over the timestamped-join relation — and
   `warranty` (#955; invalid → `400`) filters on `warrantyEnd`: `expiring90d` = `now < warrantyEnd <=
   now + 90d` (the not-yet-lapsed window the dashboard "Needs attention" warranty tile deep-links to),
-  `expired` = `warrantyEnd < now`. Assets with no `warrantyEnd` match neither.
+  `expired` = `warrantyEnd < now`. Assets with no `warrantyEnd` match neither. The same 90-day window
+  also drives a proactive **`warranty_expiring`** notification (bell + email, admin broadcast) — a daily
+  look-ahead sweeper emits one heads-up per asset when its warranty enters the window (#1070).
 - `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
   `asset:read`) — powers the form autocomplete datalist and the list filter ([[0076-asset-company-grouping-field]]).
 - `GET /assets/:id` — one **expanded** asset (`404` if missing/soft-deleted).
