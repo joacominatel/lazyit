@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { NotificationsRetentionSweeper } from './notifications-retention.sweeper';
+import { ExpiryNotificationsSweeper } from './expiry-notifications.sweeper';
 import { VaultSetupNudgeService } from './vault-setup-nudge.service';
 import { SmtpModule } from '../smtp/smtp.module';
 
@@ -31,6 +32,9 @@ import { SmtpModule } from '../smtp/smtp.module';
   providers: [
     NotificationsService,
     NotificationsRetentionSweeper,
+    // Daily look-ahead that emits proactive `warranty_expiring` / `access_grant_expiring` nudges before
+    // those lifecycle events fire silently (issue #1070). Deduped via the emit path's dedupeKey UNIQUE.
+    ExpiryNotificationsSweeper,
     VaultSetupNudgeService,
   ],
   exports: [NotificationsService, VaultSetupNudgeService],

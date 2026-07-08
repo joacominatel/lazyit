@@ -47,8 +47,9 @@ Como la lista es a medida, dos personas pueden ver interruptores distintos — e
 
 Los tipos disponibles reflejan los disparadores de la campana — una concesión a una aplicación crítica,
 una elevación a administrador, stock bajo, un flujo que necesita a una persona o que falló, una concesión
-de permiso sensible, un agente de reportes desconectado, una nueva versión de lazyit o la decisión sobre
-una de tus propias solicitudes de acceso. Cada interruptor lleva una descripción de una línea para que
+de permiso sensible, un agente de reportes desconectado, una nueva versión de lazyit, la decisión sobre
+una de tus propias solicitudes de acceso, o un aviso anticipado de que una garantía de activo o una
+concesión de acceso está por vencer. Cada interruptor lleva una descripción de una línea para que
 sepas exactamente qué silenciarás al desactivarlo. Para la
 lista completa de disparadores, consulta la
 [campana de notificaciones](/help/notifications-activity-notification-bell).

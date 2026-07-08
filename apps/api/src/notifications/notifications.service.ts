@@ -333,9 +333,13 @@ export class NotificationsService {
     switch (type) {
       case 'workflow.run_failed':
         return 'critical';
+      // low_stock + the proactive expiry nudges (#1070) share the "look at this before the deadline"
+      // should-act-soon weight — a warning, not a normal info nudge.
       case 'critical_app_access':
       case 'admin_granted':
       case 'low_stock':
+      case 'warranty_expiring':
+      case 'access_grant_expiring':
         return 'warning';
       case 'workflow.manual_task':
       case 'secret.vault_setup':

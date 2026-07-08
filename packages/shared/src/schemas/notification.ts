@@ -68,6 +68,20 @@ import { pageSchema } from "./pagination";
  *     emailed (opt-out-able) — closing the ADR-0085 deferral where the requester had to poll their own
  *     request list for the outcome. De-duped per request (`access_request.decided:<requestId>`; a request
  *     decides exactly once). Metadata is REDACTED (app name/ids + the decision + any accessLevel only).
+ *   - `warranty_expiring` — a PROACTIVE lifecycle nudge (issue #1070): an asset's `warrantyEnd` fell
+ *     inside the look-ahead window (`WARRANTY_EXPIRING_WITHIN_DAYS`) and has not yet lapsed. Broadcast to
+ *     the admin feed (the audience that renews/replaces hardware) and emailed (opt-out-able); deep-links
+ *     to the asset. De-duped ONE per asset per warranty date (`warranty_expiring:<assetId>:<YYYY-MM-DD>`):
+ *     the daily look-ahead sweeper emits once when the window is first crossed, never once-per-day, and a
+ *     renewed warranty (new date) is a distinct row. Metadata is REDACTED (asset name/tag + date only).
+ *   - `access_grant_expiring` — a PROACTIVE lifecycle nudge (issue #1070): an active AccessGrant's
+ *     `expiresAt` fell inside the look-ahead window and the grant will soon AUTO-REVOKE (ADR-0023). Before
+ *     this, an expiring grant vanished silently — a small team lost a contractor/temp's access with no
+ *     heads-up. Broadcast to the admin feed (the audience that holds `accessGrant:grant` and can RE-GRANT
+ *     to prevent the loss; `targetUserId` = the grantee for the "about whom" click-through) and emailed
+ *     (opt-out-able); deep-links to the application. De-duped ONE per grant per expiry date
+ *     (`access_grant_expiring:<grantId>:<YYYY-MM-DD>`); an extended expiry (new date) is a distinct row.
+ *     Metadata is REDACTED (grantee + app name/ids + date only).
  */
 export const NOTIFICATION_TYPES = [
   "critical_app_access",
@@ -81,6 +95,8 @@ export const NOTIFICATION_TYPES = [
   "update.available",
   "access_request.created",
   "access_request.decided",
+  "warranty_expiring",
+  "access_grant_expiring",
 ] as const;
 
 /** A single known notification type. The wire shape validates against this enum (→ 400 otherwise). */
@@ -103,13 +119,15 @@ export type NotificationSeverity = z.infer<typeof NotificationSeveritySchema>;
  * The deep-link target pillar a notification points at — what the bell row click-through navigates to.
  * Mirrors the `recent_activity` entity-type instinct but is its OWN closed set (notifications are a
  * distinct store): a grant/admin-grant points at the user/application, low stock at the consumable, a
- * workflow nudge at the run (the manual-task inbox / run timeline). `null` entityType ⇒ no click-through.
+ * workflow nudge at the run (the manual-task inbox / run timeline), an expiring warranty at the asset
+ * (issue #1070). `null` entityType ⇒ no click-through.
  */
 export const NOTIFICATION_ENTITY_TYPES = [
   "application",
   "user",
   "consumable",
   "workflowRun",
+  "asset",
 ] as const;
 export const NotificationEntityTypeSchema = z.enum(NOTIFICATION_ENTITY_TYPES);
 export type NotificationEntityType = z.infer<

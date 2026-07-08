@@ -41,12 +41,16 @@ describe('email allowlist (curated)', () => {
     expect(isEmailableNotificationType('update.available')).toBe(true);
     // The targeted requester decision nudge (#1071) — emailed (opt-out-able):
     expect(isEmailableNotificationType('access_request.decided')).toBe(true);
+    // The proactive expiry nudges (#1070) — emailed (act before the deadline, opt-out-able):
+    expect(isEmailableNotificationType('warranty_expiring')).toBe(true);
+    expect(isEmailableNotificationType('access_grant_expiring')).toBe(true);
     // Still bell-only — the per-user login nudge is not inbox-worthy:
     expect(isEmailableNotificationType('secret.vault_setup')).toBe(false);
   });
-  it('the allowlist is the nine emailed types', () => {
+  it('the allowlist is the eleven emailed types', () => {
     expect([...EMAIL_NOTIFICATION_TYPES].sort()).toEqual(
       [
+        'access_grant_expiring',
         'access_request.decided',
         'admin_granted',
         'critical_app_access',
@@ -54,6 +58,7 @@ describe('email allowlist (curated)', () => {
         'low_stock',
         'permission_widened',
         'update.available',
+        'warranty_expiring',
         'workflow.manual_task',
         'workflow.run_failed',
       ].sort(),
