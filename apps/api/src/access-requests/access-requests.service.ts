@@ -185,7 +185,10 @@ export class AccessRequestsService {
 
     // The grant is created and the request flipped to APPROVED atomically; return the updated request
     // (now carrying grantId + decision fields).
-    return this.findOne(id);
+    const updated = await this.findOne(id);
+    // AFTER commit, best-effort: nudge the requester that their request was decided (issue #1071).
+    await this.emitDecidedNotification(updated);
+    return updated;
   }
 
   /**
@@ -211,7 +214,10 @@ export class AccessRequestsService {
         `AccessRequest ${id} has already been decided`,
       );
     }
-    return this.findOne(id);
+    const updated = await this.findOne(id);
+    // AFTER commit, best-effort: nudge the requester that their request was decided (issue #1071).
+    await this.emitDecidedNotification(updated);
+    return updated;
   }
 
   // --- internals -----------------------------------------------------------
@@ -329,6 +335,65 @@ export class AccessRequestsService {
       });
     } catch {
       // Best-effort: a failed nudge never affects the already-committed request.
+    }
+  }
+
+  /**
+   * Best-effort POST-COMMIT bell + email nudge to the REQUESTER that their request was decided (issue
+   * #1071) — a TARGETED notification (`recipientUserId = the requester`) so it lands in that user's OWN
+   * bell even when they hold no `notification:read`, closing the ADR-0085 deferral (the requester no
+   * longer has to poll their own list for the outcome). De-duped per request (a request decides exactly
+   * once). Every failure is swallowed (a nudge never affects the committed decision). INV-6-safe: metadata
+   * carries app name/ids + the decision + any accessLevel only; the free-text denial reason rides the
+   * human `summary` (the requester is entitled to it), never metadata.
+   */
+  private async emitDecidedNotification(request: {
+    id: string;
+    requesterId: string;
+    applicationId: string;
+    accessLevel: string | null;
+    status: string;
+    deniedReason: string | null;
+  }): Promise<void> {
+    try {
+      const application = await this.prisma.application.findUnique({
+        where: { id: request.applicationId },
+        select: { name: true },
+      });
+      if (!application) {
+        return; // app vanished post-commit — nothing meaningful to nudge about.
+      }
+      const approved = request.status === 'APPROVED';
+
+      await this.notifications.emit({
+        type: 'access_request.decided',
+        dedupeKey: `access_request.decided:${request.id}`,
+        severity: approved ? 'info' : 'warning',
+        recipientUserId: request.requesterId,
+        title: approved
+          ? `Your access to ${application.name} was approved`
+          : `Your access request for ${application.name} was denied`,
+        summary: approved
+          ? request.accessLevel
+            ? `Granted level: ${request.accessLevel}.`
+            : 'Access granted.'
+          : request.deniedReason
+            ? `Reason: ${request.deniedReason}`
+            : 'Your request was denied.',
+        entityType: 'application',
+        entityId: request.applicationId,
+        targetUserId: request.requesterId,
+        metadata: {
+          applicationName: application.name,
+          accessRequestId: request.id,
+          decision: approved ? 'APPROVED' : 'DENIED',
+          ...(request.accessLevel !== null
+            ? { accessLevel: request.accessLevel }
+            : {}),
+        },
+      });
+    } catch {
+      // Best-effort: a failed nudge never affects the already-committed decision.
     }
   }
 }
