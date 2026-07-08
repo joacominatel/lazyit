@@ -35,6 +35,9 @@ avisa en lugar de crear una duplicada.
 - Los administradores ven tu solicitud en **Acceso → Solicitudes de acceso** y reciben una notificación
   en la campana.
 - Quien aprueba la **aprueba** —lo que crea tu acceso de inmediato— o la **rechaza** con un motivo.
+- Cuando se toma una decisión recibís una **notificación** en tu propia campana —y un correo, salvo que
+  hayas desactivado ese tipo en las [preferencias de correo](/help/notifications-activity-email-preferences)—
+  que te dice si fue aprobada o rechazada (un rechazo incluye el motivo).
 - La aprobación y el rechazo son definitivos para esa solicitud. Si una solicitud fue rechazada y
   todavía necesitás acceso, podés crear una nueva.
 
@@ -56,5 +59,6 @@ mismo permiso que otorgar acceso. Ver [Roles y permisos](/help/permissions).
 
 Abrí tu **Perfil** para ver **Mis solicitudes de acceso** —cada solicitud que creaste y su estado
 actual (**Pendiente**, **Aprobada** o **Rechazada**)—. Una solicitud rechazada muestra el motivo que
-dio quien aprobó. Este es el lugar para verificar el resultado; lazyit no te envía una notificación
-aparte cuando se toma una decisión.
+dio quien aprobó. lazyit además te avisa en cuanto se toma una decisión —en tu campana y por correo,
+salvo que lo desactives—, así que esta lista es el historial completo, no la única forma de enterarte
+del resultado.

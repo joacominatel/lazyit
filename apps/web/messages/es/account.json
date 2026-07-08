@@ -48,6 +48,10 @@
     "update_available": {
       "label": "Actualización disponible",
       "description": "Hay una versión de lazyit más reciente que la que estás ejecutando."
+    },
+    "access_request_decided": {
+      "label": "Solicitud de acceso resuelta",
+      "description": "Una de tus solicitudes de acceso fue aprobada o denegada."
     }
   }
 }

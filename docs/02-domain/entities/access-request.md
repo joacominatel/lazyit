@@ -46,8 +46,12 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
   requests needs `accessRequest:read` (ADMIN+MEMBER), but a requester always sees their **own** via
   `GET /access-requests/mine`. → [[0046-roles-permissions-v2]].
 - **Notified on create:** a broadcast `access_request.created` bell nudge to the admins who can decide
-  ([[0056-in-app-notification-bell]]). Decision notifications are deferred (the bell is ADMIN-only) — the
-  requester tracks the outcome in their own request list.
+  ([[0056-in-app-notification-bell]]).
+- **Notified on decision (#1071):** a TARGETED `access_request.decided` bell + email nudge to the
+  **requester** on approve/deny (`recipientUserId = requesterId`), so it lands in their OWN bell even
+  without `notification:read` — closing the earlier deferral where the requester had to poll their own
+  request list. Best-effort post-commit, de-duped per request; the denial reason rides the human summary,
+  metadata stays REDACTED (app name/ids + decision + accessLevel). Email is opt-out-able (issue #879).
 
 > [!note] Relationship to tickets — question closed (CEO 2026-06-16)
 > lazyit will NOT have a ticketing pillar (see [[vision]] non-goals). AccessRequest is a distinct entity in

@@ -71,7 +71,15 @@ type AccessRequestMock = {
 type WriteCall = [
   { where?: Record<string, unknown>; data: Record<string, unknown> },
 ];
-type EmitCall = [{ type: string; dedupeKey: string }];
+type EmitCall = [
+  {
+    type: string;
+    dedupeKey: string;
+    recipientUserId?: string | null;
+    severity?: string;
+    summary?: string | null;
+  },
+];
 type GrantCall = [Record<string, unknown>];
 type FindManyCall = [{ where: unknown }];
 
@@ -274,6 +282,87 @@ describe('AccessRequestsService', () => {
       });
     });
 
+    it('emits a targeted access_request.decided nudge to the requester on approval', async () => {
+      accessRequest.findUnique
+        .mockResolvedValueOnce({
+          id: REQ_ID,
+          requesterId: REQUESTER,
+          applicationId: APP_ID,
+          accessLevel: 'admin',
+          status: 'PENDING',
+        }) // findPending
+        .mockResolvedValueOnce({
+          id: REQ_ID,
+          requesterId: REQUESTER,
+          applicationId: APP_ID,
+          accessLevel: 'admin',
+          status: 'APPROVED',
+          deniedReason: null,
+          grantId: 'grant_new',
+          decidedById: DECIDER,
+        }); // findOne after
+      application.findUnique.mockResolvedValue({ name: 'Jira' });
+      grants.createWithinApproval.mockImplementation(
+        async (
+          _data: unknown,
+          _principal: unknown,
+          extra: (tx: unknown, g: { id: string }) => Promise<void>,
+        ) => {
+          accessRequest.updateMany.mockResolvedValue({ count: 1 });
+          await extra({ accessRequest }, { id: 'grant_new' });
+          return { id: 'grant_new' };
+        },
+      );
+
+      await service.approve(REQ_ID, HUMAN_PRINCIPAL);
+
+      // Exactly one nudge — the targeted decision, addressed to the requester (not over-emitted).
+      expect(notifications.emit).toHaveBeenCalledTimes(1);
+      const emitArg = (notifications.emit.mock.calls as EmitCall[])[0][0];
+      expect(emitArg.type).toBe('access_request.decided');
+      expect(emitArg.dedupeKey).toBe(`access_request.decided:${REQ_ID}`);
+      expect(emitArg.recipientUserId).toBe(REQUESTER);
+      expect(emitArg.severity).toBe('info');
+    });
+
+    it('does not let a failed decision nudge break the committed approval', async () => {
+      accessRequest.findUnique
+        .mockResolvedValueOnce({
+          id: REQ_ID,
+          requesterId: REQUESTER,
+          applicationId: APP_ID,
+          accessLevel: null,
+          status: 'PENDING',
+        })
+        .mockResolvedValueOnce({
+          id: REQ_ID,
+          requesterId: REQUESTER,
+          applicationId: APP_ID,
+          accessLevel: null,
+          status: 'APPROVED',
+          deniedReason: null,
+          grantId: 'grant_new',
+          decidedById: DECIDER,
+        });
+      application.findUnique.mockResolvedValue({ name: 'Jira' });
+      grants.createWithinApproval.mockImplementation(
+        async (
+          _data: unknown,
+          _principal: unknown,
+          extra: (tx: unknown, g: { id: string }) => Promise<void>,
+        ) => {
+          accessRequest.updateMany.mockResolvedValue({ count: 1 });
+          await extra({ accessRequest }, { id: 'grant_new' });
+          return { id: 'grant_new' };
+        },
+      );
+      notifications.emit.mockRejectedValue(new Error('bell down'));
+
+      await expect(
+        service.approve(REQ_ID, HUMAN_PRINCIPAL),
+      ).resolves.toMatchObject({ status: 'APPROVED' });
+    });
+
     it('409s when the request is already decided', async () => {
       accessRequest.findUnique.mockResolvedValue({
         id: REQ_ID,
@@ -284,6 +373,8 @@ describe('AccessRequestsService', () => {
         service.approve(REQ_ID, HUMAN_PRINCIPAL),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(grants.createWithinApproval).not.toHaveBeenCalled();
+      // A request already decided never emits a decision nudge.
+      expect(notifications.emit).not.toHaveBeenCalled();
     });
 
     it('404s when the request does not exist', async () => {
@@ -354,6 +445,34 @@ describe('AccessRequestsService', () => {
       expect(result).toMatchObject({ status: 'DENIED' });
     });
 
+    it('emits a targeted access_request.decided nudge to the requester on denial', async () => {
+      accessRequest.findUnique
+        .mockResolvedValueOnce({ id: REQ_ID, status: 'PENDING' }) // findPending
+        .mockResolvedValueOnce({
+          id: REQ_ID,
+          requesterId: REQUESTER,
+          applicationId: APP_ID,
+          accessLevel: null,
+          status: 'DENIED',
+          deniedReason: 'Not needed',
+          decidedById: DECIDER,
+        }); // findOne after
+      application.findUnique.mockResolvedValue({ name: 'Jira' });
+      accessRequest.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.deny(REQ_ID, { reason: 'Not needed' }, HUMAN_PRINCIPAL);
+
+      // Exactly one nudge — the targeted decision, addressed to the requester (not over-emitted).
+      expect(notifications.emit).toHaveBeenCalledTimes(1);
+      const emitArg = (notifications.emit.mock.calls as EmitCall[])[0][0];
+      expect(emitArg.type).toBe('access_request.decided');
+      expect(emitArg.dedupeKey).toBe(`access_request.decided:${REQ_ID}`);
+      expect(emitArg.recipientUserId).toBe(REQUESTER);
+      expect(emitArg.severity).toBe('warning');
+      // The requester is entitled to the denial reason — it rides the human summary.
+      expect(emitArg.summary).toContain('Not needed');
+    });
+
     it('409s when the request is already decided', async () => {
       accessRequest.findUnique.mockResolvedValue({
         id: REQ_ID,
@@ -364,6 +483,8 @@ describe('AccessRequestsService', () => {
         service.deny(REQ_ID, { reason: 'x' }, HUMAN_PRINCIPAL),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(accessRequest.updateMany).not.toHaveBeenCalled();
+      // A request already decided never emits a decision nudge.
+      expect(notifications.emit).not.toHaveBeenCalled();
     });
 
     it('403s a service-account principal (deciding is human-only)', async () => {

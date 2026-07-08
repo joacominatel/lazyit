@@ -48,6 +48,10 @@
     "update_available": {
       "label": "Update available",
       "description": "A newer lazyit release than the one you're running is available."
+    },
+    "access_request_decided": {
+      "label": "Access request decided",
+      "description": "One of your access requests was approved or denied."
     }
   }
 }

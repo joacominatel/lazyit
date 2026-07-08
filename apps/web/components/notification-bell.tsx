@@ -121,6 +121,13 @@ const TYPE_META: Record<
     tone: "bg-pillar-access/10 text-pillar-access",
     href: (n) => (n.entityId ? `/applications/${n.entityId}` : "/applications"),
   },
+  // A requester's own access request was decided (approved/denied) — a TARGETED nudge to them (#1071).
+  // Deep-links to the target application; the outcome detail lives in their profile request list.
+  "access_request.decided": {
+    icon: KeyIcon,
+    tone: "bg-pillar-access/10 text-pillar-access",
+    href: (n) => (n.entityId ? `/applications/${n.entityId}` : "/applications"),
+  },
 };
 
 /** Fallback meta for an unknown future type (defensive — the closed enum should make this unreachable). */

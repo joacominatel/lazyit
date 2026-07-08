@@ -61,8 +61,13 @@ import { pageSchema } from "./pagination";
  *     user asked to be granted access to an application. Broadcast to the admin feed (the audience that
  *     holds `accessGrant:grant` and can approve/deny); deep-links to the application. De-duped per
  *     request (`access_request.created:<requestId>`). Metadata is REDACTED (requester + app names/ids
- *     only). Decision notifications are NOT emitted in v1 — the requester tracks the outcome in their
- *     own request list (the bell is ADMIN-broadcast; a targeted per-user decision nudge is a follow-up).
+ *     only).
+ *   - `access_request.decided` — a TARGETED decision nudge to the REQUESTER (issue #1071): their
+ *     self-service access request was APPROVED or DENIED. Delivered targeted (`recipientUserId = the
+ *     requester`) so it lands in that user's OWN bell even when they hold no `notification:read`, and
+ *     emailed (opt-out-able) — closing the ADR-0085 deferral where the requester had to poll their own
+ *     request list for the outcome. De-duped per request (`access_request.decided:<requestId>`; a request
+ *     decides exactly once). Metadata is REDACTED (app name/ids + the decision + any accessLevel only).
  */
 export const NOTIFICATION_TYPES = [
   "critical_app_access",
@@ -75,6 +80,7 @@ export const NOTIFICATION_TYPES = [
   "infra.agent_offline",
   "update.available",
   "access_request.created",
+  "access_request.decided",
 ] as const;
 
 /** A single known notification type. The wire shape validates against this enum (→ 400 otherwise). */

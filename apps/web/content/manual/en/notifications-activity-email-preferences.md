@@ -43,9 +43,9 @@ Because the list is tailored, two people may see different toggles — that is e
 ## What each type means
 
 The available types mirror the bell's triggers — a critical-app grant, an admin elevation, low stock, a
-workflow that needs a person or has failed, a sensitive permission grant, an offline reporting agent, or
-a new lazyit release. Each toggle carries a one-line description so you know exactly what turning it off
-will silence. For the full trigger list, see the
+workflow that needs a person or has failed, a sensitive permission grant, an offline reporting agent, a
+new lazyit release, or the decision on one of your own access requests. Each toggle carries a one-line
+description so you know exactly what turning it off will silence. For the full trigger list, see the
 [notification bell](/help/notifications-activity-notification-bell).
 
 ## Good to know
