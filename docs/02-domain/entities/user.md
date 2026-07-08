@@ -166,7 +166,12 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 >   The person inherits their existing `role` (VIEWER) and all prior assignments.
 > - **Manual (ADMIN):** `POST /users/:id/provision-account` takes a real email (required), writes
 >   to Zitadel first, then sets `externalId` + `directoryOnly = false`. The endpoint rejects
->   `@directory.local` placeholder emails.
+>   `@directory.local` placeholder emails. It **only works on the bundled-Zitadel management path**
+>   (`idp.supportsManagement`): in `AUTH_MODE=local` and BYOI / generic-OIDC there is no write-back, so
+>   it **400s** ("only available with the bundled identity provider"). `GET /config/status` exposes this
+>   as **`canProvisionAccounts`** so the web **hides the "Create OIDC account" action** entirely in those
+>   modes instead of offering a request that always fails (#1048). *(Local-mode onboarding of directory
+>   persons is a separate `needs-decision` — not built here.)*
 >
 > **Visibility:** directory persons appear in `GET /users` mixed with accounts, tagged `directoryOnly: true`.
 > The web shows a "Directorio" badge. `GET /users?directoryOnly=true` lists only directory persons.

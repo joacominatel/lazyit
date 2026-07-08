@@ -110,6 +110,10 @@ export class ConfigService {
       // ADMIN would be un-loggable and the instance bricks). In OIDC mode it stays exactly as before —
       // true only for bundled Zitadel with a Management credential (issue #335), false for BYOI.
       requiresAdminPassword: isLocal ? true : this.idp.supportsManagement,
+      // Whether the manual "Create OIDC account" promotion (ADR-0069) can actually succeed — true ONLY
+      // for the bundled Zitadel. In LOCAL / BYOI there is no management write-back, so the Users page
+      // reads this to hide the impossible action instead of offering a request that always 400s (#1048).
+      canProvisionAccounts: this.idp.supportsManagement,
       // The UI-facing auth mode (ADR-0086 §6). Populated ONLY in local mode here so the OIDC
       // /config/status response stays byte-identical to today; F2 adds the explicit 'oidc' value when it
       // branches the /login screen. `shim` never reaches a browser, so it is not part of this union.

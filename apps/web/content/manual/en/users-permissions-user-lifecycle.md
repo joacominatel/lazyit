@@ -100,6 +100,10 @@ record before that owner can sign in.
 - **Create their account now.** On a directory person's page, **Create OIDC account** provisions them in
   the identity provider immediately. The provider requires a real email, so the button is disabled until
   the person has one — edit the person and add a real email first. This is admin-only (Manage users).
+  This action is only available when lazyit runs the **bundled identity provider**. In local
+  authentication mode or when you bring your own OIDC provider, lazyit cannot create accounts for you, so
+  the option is replaced with a short note — imported people sign in through your identity provider
+  instead.
 
 ## Restore a user
 

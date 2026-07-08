@@ -168,6 +168,16 @@ describe('ConfigService', () => {
       expect((await service.getStatus()).requiresAdminPassword).toBe(false);
     });
 
+    it('canProvisionAccounts mirrors idp.supportsManagement (issue #1048)', async () => {
+      // Bundled Zitadel manages users → the "Create OIDC account" promotion can succeed.
+      idp.supportsManagement = true;
+      expect((await service.getStatus()).canProvisionAccounts).toBe(true);
+
+      // LOCAL / BYOI → no management write-back, so provisioning is impossible and the UI hides it.
+      idp.supportsManagement = false;
+      expect((await service.getStatus()).canProvisionAccounts).toBe(false);
+    });
+
     it('reports configured once an ADMIN exists', async () => {
       user.count.mockResolvedValue(2);
       const status = await service.getStatus();

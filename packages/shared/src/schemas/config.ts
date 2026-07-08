@@ -59,6 +59,15 @@ export const ConfigStatusSchema = z.object({
    */
   requiresAdminPassword: z.boolean(),
   /**
+   * Whether the active IdP can PROVISION accounts for directory persons — i.e. the manual "Create OIDC
+   * account" promotion (ADR-0069) can actually succeed. Derived server-side from `idp.supportsManagement`:
+   * true ONLY for the bundled Zitadel; false for `AUTH_MODE=local` (ADR-0086) and BYOI / generic-OIDC,
+   * which have no management write-back. The Users page reads this to hide the impossible "Create OIDC
+   * account" action instead of offering a request that always 400s (issue #1048). Optional/additive so an
+   * older web build ignores it; the backend always populates it.
+   */
+  canProvisionAccounts: z.boolean().optional(),
+  /**
    * The instance-wide authentication mode the UI branches on (ADR-0086) — `"oidc"` (SSO button) vs.
    * `"local"` (username/email + password form). `shim` never reaches a browser (dev X-User-Id header
    * only), so it is NOT part of this UI-facing union.
