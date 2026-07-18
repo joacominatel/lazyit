@@ -110,6 +110,11 @@
       },
       "toast": {
         "enqueued": "Actualización en cola. Ejecuta el comando mostrado en el host para aplicarla."
+      },
+      "cancel": {
+        "button": "Cancelar esta actualización",
+        "hint": "¿Aún no ejecutaste el comando? Cancélala para descartar esta solicitud y volver a comprobar actualizaciones más tarde.",
+        "toast": "Actualización cancelada. Puedes volver a comprobar actualizaciones cuando quieras."
       }
     }
   },
