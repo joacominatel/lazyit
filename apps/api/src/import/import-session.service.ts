@@ -51,6 +51,12 @@ export interface DetectedShape {
    * only). Optional because sessions parsed before this field landed have no `samples` key.
    */
   samples?: Record<string, string[]>;
+  /**
+   * How many data rows had an unexpected cell count vs. the header width (#1062) — a non-blocking
+   * signal that a delimiter/quoting shift may have misaligned some rows' fields. Optional because
+   * sessions parsed before this field landed have no `raggedRowCount` key.
+   */
+  raggedRowCount?: number;
 }
 
 /** A session read with its rows + an at-a-glance summary (owner-scoped). */
