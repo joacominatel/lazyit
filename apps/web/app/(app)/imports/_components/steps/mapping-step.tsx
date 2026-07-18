@@ -77,21 +77,23 @@ function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-/** Model-config cluster: the brand/category constant fallbacks plus the category picker's mode
- *  (pick-existing vs free constant) and picked id. Grouped into one reducer to stay under the
- *  prefer-useReducer budget — `choices` and `statusMap` remain their own (independent) state. */
+/** Model-config cluster: the brand/category/sku constant fallbacks (sku #1064) plus the category
+ *  picker's mode (pick-existing vs free constant) and picked id. Grouped into one reducer to stay
+ *  under the prefer-useReducer budget — `choices` and `statusMap` remain their own (independent) state. */
 type ModelConfigState = {
   manufacturerConst: string;
   categoryConst: string;
   categoryPickMode: boolean;
   categoryPickId: string;
+  skuConst: string;
 };
 
 type ModelConfigAction =
   | { type: "setManufacturerConst"; value: string }
   | { type: "setCategoryConst"; value: string }
   | { type: "setCategoryPickMode"; mode: boolean }
-  | { type: "pickCategory"; id: string; name: string };
+  | { type: "pickCategory"; id: string; name: string }
+  | { type: "setSkuConst"; value: string };
 
 function modelConfigReducer(
   state: ModelConfigState,
@@ -108,6 +110,8 @@ function modelConfigReducer(
       // The picker is controlled by id, but we persist the category's NATURAL KEY (name) — both move
       // together, exactly as the original setCategoryPickId + setCategoryConst pair did.
       return { ...state, categoryPickId: action.id, categoryConst: action.name };
+    case "setSkuConst":
+      return { ...state, skuConst: action.value };
   }
 }
 
@@ -243,7 +247,7 @@ export function MappingStep({
     return out;
   }, [distinctStatusValues, statusMap]);
 
-  // --- model brand/category constant fallbacks ("all models are brand X / category Y") ---
+  // --- model brand/category/sku constant fallbacks ("all models are brand X / category Y / sku Z") ---
   // Only relevant once a model is in play (a column maps to it, or these constants pin it). Grouped with
   // the category picker (mode + picked id) into one reducer — see `modelConfigReducer`.
   const [modelConfig, dispatchModelConfig] = useReducer(modelConfigReducer, {
@@ -251,13 +255,20 @@ export function MappingStep({
     categoryConst: "",
     categoryPickMode: true,
     categoryPickId: "",
+    skuConst: "",
   });
-  const { manufacturerConst, categoryConst, categoryPickMode, categoryPickId } =
-    modelConfig;
+  const {
+    manufacturerConst,
+    categoryConst,
+    categoryPickMode,
+    categoryPickId,
+    skuConst,
+  } = modelConfig;
   const modelManufacturerHeader = headers.find(
     (h) => choices[h]?.target === token("model", "manufacturer"),
   );
   const modelCategoryHeader = headers.find((h) => choices[h]?.target === token("model", "category"));
+  const modelSkuHeader = headers.find((h) => choices[h]?.target === token("model", "sku"));
 
   // Category fixed-value picker (#640): default = pick an EXISTING AssetCategory so a typo can't create a
   // ghost category. The picker is controlled by id, but what we persist is the category's NATURAL KEY (its
@@ -401,6 +412,9 @@ export function MappingStep({
     else if (manufacturerConst.trim()) mc.manufacturerConst = manufacturerConst.trim();
     if (modelCategoryHeader) mc.categoryColumn = modelCategoryHeader;
     else if (categoryConst.trim()) mc.categoryConst = categoryConst.trim();
+    // sku / model-number (#1064) — same column-wins-over-constant precedence as brand/category.
+    if (modelSkuHeader) mc.skuColumn = modelSkuHeader;
+    else if (skuConst.trim()) mc.skuConst = skuConst.trim();
     const modelConfig = Object.keys(mc).length > 0 ? mc : undefined;
 
     // Only send `person` when the operator actually started one — an empty sub-payload would tell the
@@ -446,6 +460,16 @@ export function MappingStep({
         </p>
       ) : undefined,
     [t, modelCategoryHeader],
+  );
+
+  const skuFromColumn = useMemo(
+    () =>
+      modelSkuHeader ? (
+        <p className="text-xs text-muted-foreground">
+          {t("mapping.modelConfig.fromColumn", { column: modelSkuHeader })}
+        </p>
+      ) : undefined,
+    [t, modelSkuHeader],
   );
 
   const categoryPicker = useMemo(
@@ -722,13 +746,13 @@ export function MappingStep({
         })}
       </ul>
 
-      {/* Model brand + category — constant fallback when no column drives them */}
+      {/* Model brand + category + sku — constant fallback when no column drives them (sku #1064) */}
       <div className="space-y-3 rounded-lg border bg-card p-4">
         <div className="space-y-0.5">
           <h3 className="text-sm font-medium">{t("mapping.modelConfig.title")}</h3>
           <p className="text-xs text-muted-foreground">{t("mapping.modelConfig.description")}</p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           {/* Manufacturer is a plain string on AssetModel (no Manufacturer entity) → constant only. */}
           <FixedValueField
             id="model-manufacturer-const"
@@ -759,6 +783,18 @@ export function MappingStep({
             disabled={Boolean(modelCategoryHeader)}
             picker={categoryPicker}
             fromColumn={categoryFromColumn}
+          />
+          {/* sku / model-number (#1064) — plain string on AssetModel, no entity → constant only. */}
+          <FixedValueField
+            id="model-sku-const"
+            label={t("mapping.modelConfig.skuLabel")}
+            value={modelSkuHeader ? "" : skuConst}
+            constantPlaceholder={t("mapping.modelConfig.skuPlaceholder")}
+            mode={false}
+            onModeChange={() => {}}
+            onConstantChange={(value) => dispatchModelConfig({ type: "setSkuConst", value })}
+            disabled={Boolean(modelSkuHeader)}
+            fromColumn={skuFromColumn}
           />
         </div>
       </div>

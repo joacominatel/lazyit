@@ -1,12 +1,13 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access,
-   @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call,
-   @typescript-eslint/require-await, @typescript-eslint/no-unused-vars,
-   @typescript-eslint/only-throw-error, no-unsafe-optional-chaining --
- * Pre-existing test-double debt: this spec hand-rolls untyped `any` Prisma/service doubles (fake
- * `create`/`findFirst`/etc, intentionally-unused mock-signature params, scripted throw-whatever-was-
- * configured failures) across 2000+ lines, so the whole-file lint-on-changed-files gate surfaces
- * hundreds of type-aware findings on intentional test doubles. Scoped to this spec file only —
- * production code is never touched by this. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call,
+   @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return,
+   @typescript-eslint/no-unused-vars, @typescript-eslint/only-throw-error,
+   @typescript-eslint/require-await, no-unsafe-optional-chaining --
+   this spec builds hand-rolled `any`-typed fake Prisma/service doubles (see `makeAssets`,
+   `makeRefService`, `makeService`, etc.) and scripted `_args`/`_principal`/`_opts` stand-ins
+   that mirror real service signatures without using them; both patterns are pre-existing
+   and repo-wide across import-commit test doubles, not specific to this change. A few
+   `as any` casts on `Map#get(...)?.field` reads are kept (not auto-fix-stripped) because
+   removing them turns `(x?.y).z` into a real `no-unsafe-optional-chaining` risk. */
 import {
   ConflictException,
   ForbiddenException,
@@ -1378,6 +1379,54 @@ describe('ImportCommitService.commit', () => {
     expect(models.create.mock.calls[0][0]).toEqual({
       name: 'Mystery',
       manufacturer: 'Unknown',
+    });
+  });
+
+  it('createReference creates a Model with the sku from modelConfig.skuColumn [#1064]', async () => {
+    const state = sessionWithMapping(
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: {
+            Name: 'A',
+            Status: 'active',
+            Model: 'Latitude 5520',
+            'Model No.': 'P108F',
+          },
+        },
+      ],
+      plan({
+        conflicts: [
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'Latitude 5520',
+            outcome: 'create',
+            targetId: null,
+          },
+        ],
+      }),
+      mapping({
+        columns: [
+          { field: 'name', column: 'Name' },
+          { field: 'status', column: 'Status' },
+        ],
+        references: [{ field: 'modelId', column: 'Model' }],
+        modelConfig: { skuColumn: 'Model No.' },
+      }),
+    );
+    const { service, models } = makeService(state);
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(result.committed).toBe(1);
+    expect(models.create).toHaveBeenCalledTimes(1);
+    expect(models.create.mock.calls[0][0]).toEqual({
+      name: 'Latitude 5520',
+      manufacturer: 'Unknown',
+      sku: 'P108F',
     });
   });
 

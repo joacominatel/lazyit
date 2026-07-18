@@ -82,10 +82,13 @@ export const PersonSubMappingSchema = z.object({
 });
 
 /**
- * Model config (ADR-0069 REDESIGN §5.1): brand (manufacturer) + category for newly-created
- * `AssetModel`s. Bound at the MAPPING level (session/column), NOT per `ConflictResolution` — read by
- * the commit's `createReference`. Each is either a column (per-row value) or a pinned constant; all
- * optional (a Model can be created with the `'Unknown'` manufacturer fallback when nothing is set).
+ * Model config (ADR-0069 REDESIGN §5.1): brand (manufacturer) + category, plus an optional sku /
+ * model-number (#1064), for newly-created `AssetModel`s. Bound at the MAPPING level (session/column),
+ * NOT per `ConflictResolution` — read by the commit's `createReference`. Each is either a column
+ * (per-row value) or a pinned constant; all optional (a Model can be created with the `'Unknown'`
+ * manufacturer fallback and no sku when nothing is set) — sku strengthens the descriptor's
+ * `matchBy:['sku','name']` dedup for future imports/edits, but stays optional so it never blocks a
+ * create.
  */
 export const ModelConfigSchema = z
   .object({
@@ -97,6 +100,10 @@ export const ModelConfigSchema = z
     categoryColumn: z.string().optional(),
     /** A fixed category name applied to every created model (overrides the column). */
     categoryConst: z.string().trim().min(1).optional(),
+    /** Column whose cell is the sku / model-number of the created model (#1064). */
+    skuColumn: z.string().nullish(),
+    /** A fixed sku applied to every created model (overrides the column, #1064). */
+    skuConst: z.string().trim().min(1).nullish(),
   })
   .optional();
 

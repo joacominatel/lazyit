@@ -3,7 +3,7 @@ title: "ADR-0069: Migrator — guided bulk import (phase 1: Asset slice, JSON + 
 tags: [adr, migrator, import, asset, backend, frontend, shared, settings]
 status: accepted
 created: 2026-06-17
-updated: 2026-06-23
+updated: 2026-07-18
 deciders: [Joaquín Minatel]
 ---
 
@@ -366,6 +366,14 @@ Category is found-or-created by normalized name (idempotent `findFirst` — same
 Model, closes the cross-run window). `'Unknown'` remains the last-resort fallback manufacturer when no
 column or constant is configured. Ghost (soft-deleted) categories are invisible to the find-first and
 produce a new live row (same accepted trade-off as for Location/Model).
+
+**Sku / model-number carried through (#1064):** `modelConfig` also takes an optional `skuColumn` /
+`skuConst` (const wins, trimmed, same precedence as manufacturer/category), passed into
+`CreateAssetModelSchema.parse` as `sku` when present. Unlike manufacturer there is no fallback — an
+absent sku is simply omitted, never `''`. This strengthens the reference resolver's
+`matchBy: ['sku', 'name']` for `AssetModel` (§ the descriptor, `descriptor.ts`): a Snipe-IT-style export
+mapping "Model No." to sku now dedupes/matches by that natural key on later imports/edits, not just by
+name.
 
 ### A.3 Directory persons + AssetAssignment (lifting §12 "asset ownership/assignment")
 
