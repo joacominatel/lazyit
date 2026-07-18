@@ -858,9 +858,15 @@ describe('InfraService', () => {
 
       const detail = await service.getNodeDetail('host-1');
 
-      // Queried the inverse active RUNS_ON (targetId = me, endedAt null).
+      // Queried the inverse active RUNS_ON (targetId = me, endedAt null) AND excluded soft-deleted
+      // sources (#1067): InfraEdge is not soft-deletable, so the query must guard `source.deletedAt`.
       expect(prisma.infraEdge.findMany).toHaveBeenCalledWith({
-        where: { targetId: 'host-1', kind: 'RUNS_ON', endedAt: null },
+        where: {
+          targetId: 'host-1',
+          kind: 'RUNS_ON',
+          endedAt: null,
+          source: { deletedAt: null },
+        },
         select: {
           source: {
             select: { id: true, label: true, kind: true, status: true },
@@ -874,6 +880,26 @@ describe('InfraService', () => {
       expect(detail.owners).toEqual([]);
       expect(detail.articleLinks).toEqual([]);
       expect(assignments.findAll).not.toHaveBeenCalled();
+    });
+
+    it('excludes soft-deleted child nodes reached via a still-active RUNS_ON edge (#1067)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'host-1',
+        label: 'host',
+        assetId: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.getNodeDetail('host-1');
+
+      // The children query must carry the nested soft-delete guard so a soft-deleted child whose edge
+      // is still active never surfaces (a node's edges are not closed when the node is soft-deleted).
+      const where = (
+        prisma.infraEdge.findMany.mock.calls as Array<
+          [{ where: { source?: { deletedAt?: unknown } } }]
+        >
+      )[0][0].where;
+      expect(where.source).toEqual({ deletedAt: null });
     });
   });
 
