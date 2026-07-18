@@ -75,7 +75,40 @@ export class ApplicationsService {
       }),
       this.prisma.application.count({ where, ...escapeHatch }),
     ]);
-    return pageOf(items, total, page);
+    // Derived license seats (#949): ONE distinct query for the whole page, folded in memory — no
+    // per-row fan-out (N+1). Absent app → 0 seats used.
+    const seatsUsed = await this.seatsUsedByApplication(
+      items.map((application) => application.id),
+    );
+    const withSeats = items.map((application) => ({
+      ...application,
+      seatsUsed: seatsUsed.get(application.id) ?? 0,
+    }));
+    return pageOf(withSeats, total, page);
+  }
+
+  /**
+   * `seatsUsed` per application (#949, ADR-0088): the DISTINCT count of users holding an ACTIVE
+   * (`revokedAt: null`) grant on each app. Grants are deliberately multi-grant — a user may hold
+   * several active grants on one app at different accessLevels (ADR-0023) — so a raw grant count
+   * over-reports the license; DISTINCT user is the correct seat math. ONE query for the whole set
+   * (distinct `(applicationId, userId)` pairs over the `access_grants(applicationId)` index), folded in
+   * memory — never a per-row query. Apps with no active grant are simply absent from the map (→ 0).
+   */
+  private async seatsUsedByApplication(
+    ids: string[],
+  ): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const pairs = await this.prisma.accessGrant.findMany({
+      where: { revokedAt: null, applicationId: { in: ids } },
+      select: { applicationId: true, userId: true },
+      distinct: ['applicationId', 'userId'],
+    });
+    const counts = new Map<string, number>();
+    for (const { applicationId } of pairs) {
+      counts.set(applicationId, (counts.get(applicationId) ?? 0) + 1);
+    }
+    return counts;
   }
 
   /** The shared `where` for the application list — used identically by findPage and its count. */
@@ -92,7 +125,10 @@ export class ApplicationsService {
       : {};
   }
 
-  /** A single non-deleted application by id; throws 404 if missing or deleted. */
+  /**
+   * A single non-deleted application by id; throws 404 if missing or deleted. Carries the derived
+   * `seatsUsed` (#949) so the detail read renders "used / purchased" without a second round-trip.
+   */
   async findOne(id: string) {
     const application = await this.prisma.application.findFirst({
       where: { id },
@@ -100,7 +136,8 @@ export class ApplicationsService {
     if (!application) {
       throw new NotFoundException(`Application ${id} not found`);
     }
-    return application;
+    const seatsUsed = await this.seatsUsedByApplication([application.id]);
+    return { ...application, seatsUsed: seatsUsed.get(application.id) ?? 0 };
   }
 
   async create(data: CreateApplication) {
