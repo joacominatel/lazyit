@@ -1,5 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  type OnModuleInit,
+} from '@nestjs/common';
 import type { CreateWorkflowSecret } from '@lazyit/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -207,7 +212,9 @@ export class SecretService implements OnModuleInit {
 
   /**
    * Rotate a live secret's value in place: re-encrypt under the current key (fresh IV) and overwrite
-   * the envelope. Only rotates a non-deleted secret. Returns the REDACTED descriptor.
+   * the envelope. Only rotates a non-deleted secret. Returns the REDACTED descriptor. Throws a
+   * {@link NotFoundException} — distinguishable from a DB/crypto failure — when the id has no live row
+   * (#1069: the caller must NOT collapse every failure mode into 404).
    */
   async rotate(id: string, value: string): Promise<WorkflowSecretDescriptor> {
     const envelope = this.encrypt(value);
@@ -221,7 +228,9 @@ export class SecretService implements OnModuleInit {
       },
     });
     if (result.count === 0) {
-      throw new Error(`Workflow secret ${id} not found (or already deleted).`);
+      throw new NotFoundException(
+        `Workflow secret ${id} not found (or already deleted).`,
+      );
     }
     const row = await this.prisma.workflowSecret.findFirstOrThrow({
       where: { id },
@@ -229,14 +238,20 @@ export class SecretService implements OnModuleInit {
     return toDescriptor(row);
   }
 
-  /** Soft-delete (revoke) a secret. A revoked secret can no longer be revealed for authentication. */
+  /**
+   * Soft-delete (revoke) a secret. A revoked secret can no longer be revealed for authentication.
+   * Throws a {@link NotFoundException} (not a bare `Error`) when the id has no live row, so callers
+   * can tell "not found" apart from a DB failure (#1069).
+   */
   async softDelete(id: string): Promise<void> {
     const result = await this.prisma.workflowSecret.updateMany({
       where: { id, deletedAt: null },
       data: { deletedAt: new Date() },
     });
     if (result.count === 0) {
-      throw new Error(`Workflow secret ${id} not found (or already deleted).`);
+      throw new NotFoundException(
+        `Workflow secret ${id} not found (or already deleted).`,
+      );
     }
   }
 
