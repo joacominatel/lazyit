@@ -3,7 +3,7 @@ title: "ADR-0080: Programmatic secret retrieval via a service account (headless,
 tags: [adr, secrets, security, crypto, service-accounts, automation]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-07-18
 deciders: [Joaquín Minatel]
 ---
 
@@ -225,6 +225,40 @@ CHECK on `SecretAuditLog`. A `--create-only` migration (no reset). New catalog v
   bake `lazyit-fetch-{x64,arm64}` into the API image build stage and stream it from a `secret:fetch`-gated
   route (no anonymous binary surface, version-locked to the running server). #887 added only the `compile`
   scripts + corrected the Manual; the serve endpoint is deferred to this follow-up.
+
+## Amendment — revoke/restore is a reversible token suspension, not a vault-access removal (issue #1066, 2026-07-18)
+
+**Decision (CEO): accepted, no code change.** `ServiceAccountsService.revoke`/`.restore` (ADR-0048 §4)
+stamp/clear only `ServiceAccount.deletedAt` — the token stops/resumes authenticating, but the SA's
+`ServiceAccountVaultMembership` rows (its wrapped-DEK material, §2 above) and its `ServiceAccountKeypair`
+are **left untouched**. A restored SA resumes **every vault it could read before revoke**, with no
+re-grant step. This is a deliberate design, not an oversight, and it is asymmetric with **human**
+offboarding (`UsersService.deactivate`, issue #869, SOC2 control): a departing human's `VaultMembership`
+rows are **hard-dropped** in the same transaction as their deactivation, so restoring a human later
+requires being **re-granted** vault access from scratch.
+
+**Why the asymmetry is intentional.** SA revoke/restore is framed (ADR-0048 §4, "Revoke (delete)") as a
+**suspend/resume** of one continuous credential — "restore it later" is meant to bring back the exact same
+automation identity with the exact same grants, the same way flipping the `isActive` toggle does (just
+audited and stronger). A human's offboarding, by contrast, is an identity leaving and (maybe) rejoining —
+#869 treats "restored" as "onboarded again," so vault access is re-established deliberately, per vault, not
+silently resumed. Conflating the two would either make **human** restore too permissive (silently
+resuming vault reads for someone who left) or make **SA** revoke too disruptive (an accidental toggle
+during, say, a scheduled maintenance window would force re-granting every vault the automation needs,
+defeating "revoke" as a quick kill-switch with an undo).
+
+**How to actually remove an SA's vault key material.** Revoking the SA principal is **not** the control
+for that. Use the **per-vault** revoke instead — `SecretManagerService.revokeServiceAccountMembership`
+(reachable from the vault Members card, `vaults.controller.ts`), the same hard-drop-the-
+`ServiceAccountVaultMembership`-row operation described in §2 above (Manual: [[secret-vault]] members).
+This is finer-grained than principal revoke by design: it lets an operator pull one vault's key material
+(e.g. on suspicion that specific credential leaked) without suspending the SA's ability to authenticate
+elsewhere, and it is the correct SOC2-equivalent control to reach for when the intent is genuinely "this
+machine should no longer be able to decrypt this vault" rather than "pause this automation."
+
+No code changes ship with this amendment — `apps/web` gets one caution line on the SA revoke
+confirmation dialog (mirrors the Manual note below) so an operator revoking a principal is not misled
+into thinking it also pulls vault access.
 
 ---
 
