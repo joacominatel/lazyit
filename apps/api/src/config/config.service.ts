@@ -114,6 +114,12 @@ export class ConfigService {
       // for the bundled Zitadel. In LOCAL / BYOI there is no management write-back, so the Users page
       // reads this to hide the impossible action instead of offering a request that always 400s (#1048).
       canProvisionAccounts: this.idp.supportsManagement,
+      // Whether an ADMIN can locally ONBOARD a directory person — mint a one-time temp password so an
+      // imported, login-less person can sign in (ADR-0086 §5, issue #1072). True ONLY in local mode
+      // (lazyit owns the credential); the Users page reads it to offer the temp-password action in place
+      // of the impossible "Create OIDC account" one. Spread only when local so the OIDC status is
+      // byte-identical to before (matching the authMode pattern below).
+      ...(isLocal ? { canProvisionLocalAccounts: true } : {}),
       // The UI-facing auth mode (ADR-0086 §6). Populated ONLY in local mode here so the OIDC
       // /config/status response stays byte-identical to today; F2 adds the explicit 'oidc' value when it
       // branches the /login screen. `shim` never reaches a browser, so it is not part of this union.
