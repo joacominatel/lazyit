@@ -1879,9 +1879,28 @@ describe('ArticlesService', () => {
         >
       )[0][0].where;
       // A non-author sees PUBLISHED sources plus their OWN drafts — not the target author's drafts.
+      // The source is also guarded by `deletedAt: null` (#1067) so a soft-deleted source never leaks.
       expect(where.source).toEqual({
         OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: OTHER }],
+        deletedAt: null,
       });
+    });
+
+    it('excludes a soft-deleted PUBLISHED source from the backlinks (#1067)', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+      });
+      await service.backlinks('a', AUTHOR_USER as never);
+      // ArticleWikiLink is not soft-deletable, so the read must carry the source `deletedAt: null` guard
+      // itself — otherwise a soft-deleted PUBLISHED source surfaces as a live backlink.
+      const where = (
+        articleWikiLink.findMany.mock.calls as Array<
+          [{ where: { source: { deletedAt?: unknown } } }]
+        >
+      )[0][0].where;
+      expect(where.source.deletedAt).toBeNull();
     });
 
     it('404s when the TARGET itself is a draft the caller cannot read (no leak of its backlinks)', async () => {
