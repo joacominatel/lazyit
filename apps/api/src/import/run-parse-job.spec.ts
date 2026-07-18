@@ -74,8 +74,24 @@ describe('runParseJob', () => {
       'name',
       'serial',
     ]);
+    // Clean file — no ragged rows (#1062).
+    expect((last.detected as { raggedRowCount: number }).raggedRowCount).toBe(
+      0,
+    );
     // Idempotency: clears any prior rows before inserting.
     expect(fake.deleteManyCalls).toBe(1);
+  });
+
+  it('threads raggedRowCount from the parser into the detected shape (#1062)', async () => {
+    const fake = makeFakePrisma();
+    await runParseJob(
+      job(b64('a,b,c\n1,2,3\n1,2\n1,2,3,4\n'), 'csv'),
+      fake.prisma,
+    );
+    const last = fake.sessionUpdates[fake.sessionUpdates.length - 1].data;
+    expect((last.detected as { raggedRowCount: number }).raggedRowCount).toBe(
+      2,
+    );
   });
 
   it('parses a JSON array', async () => {
