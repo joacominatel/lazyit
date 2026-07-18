@@ -31,6 +31,14 @@ export const UPDATE_RUN_HISTORY_LIMIT = 10;
 /** Redacted release-notes excerpt cap — we cache a short teaser, never a whole changelog body. */
 const NOTES_MAX_CHARS = 500;
 
+/**
+ * The distinct `error` reason stamped on a run cancelled by an operator (issue #1065). A cancelled run
+ * renders as the existing terminal `failed` in the history list (no enum migration, ADR-0084 §4) — this
+ * message is the audit trail that says the run was deliberately dropped, not that the update broke.
+ */
+export const UPDATE_CANCELLED_REASON =
+  'Cancelled by the operator before the host update ran.';
+
 /** The GitHub Releases API request timeout — fail-soft, never hang a sweep on a slow network. */
 const GITHUB_FETCH_TIMEOUT_MS = 10_000;
 
@@ -254,6 +262,61 @@ export class UpdateService implements OnModuleInit {
       `Update enqueued: ${this.currentVersion} → ${toVersion} (run #${created.id}). Operator must run: ./infra/update.sh ${toVersion}`,
     );
     return this.toRunWire(created);
+  }
+
+  // ── cancel (the ADMIN escape hatch for a stuck `requested` run) ─────────────
+
+  /**
+   * Cancel a still-pending guided update (issue #1065). A run stuck in `requested` — the operator
+   * enqueued it but never ran `./infra/update.sh` — is a permanent brick: the {@link enqueue}
+   * single-flight guard counts `requested` as active and refuses every future update, while boot
+   * reconciliation deliberately skips `requested` (it is a pending intent, not an interrupted run).
+   * This is the ONLY escape hatch: transition the current `requested` run to the existing terminal
+   * `failed` (ADR-0084 §4) with a distinct {@link UPDATE_CANCELLED_REASON}, so a fresh enqueue succeeds.
+   *
+   * GUARD: ONLY a `requested` run is cancellable. A genuinely in-flight run (`backing_up`…`verifying`)
+   * is the host script actually working — cancelling mid-apply would desync the DB/backup state, so we
+   * reject with a 4xx. The flip is a CAS `updateMany` scoped to `status = 'requested'`: if the host
+   * picked the run up between our read and our write (advancing it past `requested`), the update matches
+   * zero rows and we reject — a concurrent advance always wins, never gets clobbered.
+   */
+  async cancel(): Promise<UpdateRunWire> {
+    const run = await this.prisma.updateRun.findFirst({
+      where: {
+        status: { in: UPDATE_RUN_ACTIVE_STATUSES as unknown as string[] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!run) {
+      throw new BadRequestException('There is no pending update to cancel.');
+    }
+    if (run.status !== 'requested') {
+      throw new BadRequestException(
+        `The update to ${run.toVersion} is already ${run.status} — a running update can't be cancelled. Let it finish, or reconcile it after it settles.`,
+      );
+    }
+
+    const finishedAt = new Date();
+    const { count } = await this.prisma.updateRun.updateMany({
+      where: { id: run.id, status: 'requested' },
+      data: { status: 'failed', finishedAt, error: UPDATE_CANCELLED_REASON },
+    });
+    if (count === 0) {
+      // The host script advanced the row out of `requested` between our read and write — it won the race.
+      throw new BadRequestException(
+        'The update just started running on the host and can no longer be cancelled.',
+      );
+    }
+
+    this.logger.log(
+      `Update run #${run.id} (${run.fromVersion} → ${run.toVersion}) cancelled by operator.`,
+    );
+    return this.toRunWire({
+      ...run,
+      status: 'failed',
+      finishedAt,
+      error: UPDATE_CANCELLED_REASON,
+    });
   }
 
   // ── the periodic check (called by the sweeper) ─────────────────────────────
