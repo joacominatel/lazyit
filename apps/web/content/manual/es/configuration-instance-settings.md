@@ -115,6 +115,16 @@ Mientras una actualización se ejecuta, la tarjeta muestra la etapa real (respal
 compilando, reiniciando, verificando) — no una barra de progreso falsa — y se reconecta con discreción
 cuando la app vuelve.
 
+### Cancelar una actualización solicitada
+
+Si pulsaste **Actualizar** pero aún no ejecutaste el comando en el host, la tarjeta muestra un botón
+**Cancelar esta actualización** junto al comando. Cancelar descarta la solicitud pendiente para que la
+tarjeta vuelva a su estado normal de "comprobar actualizaciones" y puedas iniciar una nueva más tarde.
+Solo puedes cancelar mientras sigue *solicitada* — una vez que el script del host ya empezó (respaldando
+en adelante), el botón desaparece y esa actualización debe terminar o reconciliarse, porque
+interrumpirla a mitad podría dejar las bases de datos y los respaldos desincronizados. La solicitud
+cancelada se conserva en el historial de actualizaciones como registro.
+
 ### Si una actualización falla — el punto de restauración
 
 El respaldo previo a la actualización es un **punto de restauración**, no un deshacer mágico. Si la
