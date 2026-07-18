@@ -104,13 +104,19 @@ iniciar sesión.
   cuando el correo verificado coincide — momento en el que la insignia desaparece y pasan a ser una
   cuenta normal. Una persona de directorio importada **sin un correo real nunca se vincula
   automáticamente**.
-- **Crea su cuenta ahora.** En la página de una persona de directorio, **Crear cuenta OIDC** la
-  aprovisiona en el proveedor de identidad de inmediato. El proveedor exige un correo real, así que el
-  botón está deshabilitado hasta que la persona tenga uno — edita la persona y agrega un correo real
-  primero. Esto es solo para administradores (Gestionar usuarios). Esta acción solo está disponible
-  cuando lazyit usa el **proveedor de identidad integrado**. En modo de autenticación local o cuando
-  usas tu propio proveedor OIDC, lazyit no puede crear cuentas por ti, así que la opción se reemplaza por
-  una breve nota — las personas importadas inician sesión a través de tu proveedor de identidad.
+- **Dale una cuenta ahora.** En la página de una persona de directorio hay una acción, solo para
+  administradores (Gestionar usuarios), para darla de alta; lo que hace depende de cómo tu instancia
+  autentica a las personas:
+  - **Proveedor de identidad integrado** — **Crear cuenta OIDC** la aprovisiona en el proveedor de
+    identidad de inmediato. El proveedor exige un correo real, así que el botón está deshabilitado hasta
+    que la persona tenga uno — edita la persona y agrega un correo real primero.
+  - **Modo de autenticación local** — **Dar de alta con una contraseña temporal** crea su acceso aquí
+    mismo y muestra una **contraseña temporal de un solo uso** para entregar. La contraseña se muestra
+    **una sola vez** (cópiala en ese momento), la persona **debe cambiarla en el primer inicio de sesión**,
+    y dar de alta **conserva su rol actual** — nunca otorga acceso adicional. No hace falta correo.
+  - **Tu propio proveedor OIDC (BYOI)** — lazyit no puede crear cuentas por ti, así que la opción se
+    reemplaza por una breve nota; las personas importadas inician sesión a través de tu proveedor de
+    identidad.
 
 ## Restaurar un usuario
 
