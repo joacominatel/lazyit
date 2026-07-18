@@ -25,7 +25,7 @@ reconocerla y encontrarla:
   sin esquema como `vpn.corp.local`. Por seguridad solo se aceptan hosts sin esquema y enlaces
   `http(s)`; otros esquemas se rechazan.
 - **Crítica** — una marca para destinos especialmente sensibles (ver
-  [Criticidad y alertas](/help/applications-access-criticality-alerts)).
+  [Criticidad y alertas](/help/applications-criticality-alerts)).
 - **Descripción** y **Notas** — texto libre para dar contexto.
 - **Licencia y asientos** — datos de licenciamiento opcionales (asientos comprados, costo por
   asiento, fecha de renovación). Ver [Licencia y asientos](#licencia-y-asientos) más abajo.

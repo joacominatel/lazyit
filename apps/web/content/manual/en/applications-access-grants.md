@@ -27,7 +27,7 @@ Open an application and, under **Active access**, choose **Grant access**. You p
 Granting (and revoking) access is an administrator-only action by default.
 
 > Today access is **granted directly** — there is no approval queue. A formal request-and-approve
-> workflow is planned; see [Access requests](/help/applications-access-access-requests).
+> workflow is planned; see [Access requests](/help/applications-access-requests).
 
 ## One person, several grants
 

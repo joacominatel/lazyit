@@ -22,7 +22,7 @@ required — everything else is optional and there to help your team recognize a
 - **URL** — where the system lives. This can be a normal `https://…` address or a scheme-less
   internal host such as `vpn.corp.local`. For safety, only scheme-less hosts and `http(s)` links
   are accepted; other schemes are rejected.
-- **Critical** — a flag for especially sensitive targets (see [Criticality & alerts](/help/applications-access-criticality-alerts)).
+- **Critical** — a flag for especially sensitive targets (see [Criticality & alerts](/help/applications-criticality-alerts)).
 - **Description** and **Notes** — free text for context.
 - **License & seats** — optional licensing details (seats purchased, cost per seat, renewal date). See
   [License & seats](#license--seats) below.

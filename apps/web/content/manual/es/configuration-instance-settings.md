@@ -24,7 +24,7 @@ La página de inicio de Configuración es una cuadrícula de tarjetas, cada una 
   Configuración y no en la navegación principal; la tarjeta enlaza a la página completa de Ubicaciones.
 - **Roles** — consulta quién tiene cada rol en el equipo. Es una vista de solo lectura; el rol de una
   persona se cambia desde la sección Usuarios, y lo que cada rol puede hacer se ajusta en
-  [Permisos](/help/users-permissions-permissions).
+  [Permisos](/help/permissions).
 - **Cuentas de servicio** — crea y gestiona credenciales de API no humanas para CI, scripts e
   integraciones, acotadas por permiso y revocables.
 - **Integraciones y flujos** — la bandeja de tareas manuales entre aplicaciones para los flujos de

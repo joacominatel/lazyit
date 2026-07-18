@@ -23,7 +23,7 @@ The Settings home is a grid of cards, each opening a focused sub-area:
   navigation; the card links out to the full Locations page.
 - **Roles** — see who holds which role across the team. This is a read-only overview; you change a
   person's role from the Users section, and you tune what each role may do under
-  [Permissions](/help/users-permissions-permissions).
+  [Permissions](/help/permissions).
 - **Service accounts** — create and manage non-human API credentials for CI, scripts and
   integrations, scoped by permission and revocable.
 - **Integrations & workflows** — the cross-application manual-task inbox for provisioning workflows.
