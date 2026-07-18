@@ -194,17 +194,22 @@ export class WorkflowRunOrchestrator {
    * undid — resolve it by re-granting, not retrying (the caller rejects non-`FAILED` runs with a 409).
    *
    * The walk runs OFF the request via a delayed-0 retry job (the decoupled posture, §1); the worker's
-   * {@link retryStep} re-enters at this exact step+attempt. A broker-down enqueue leaves the run `RUNNING`
-   * for the RUNNING-staleness reconciler to finalize (the operator simply retries again once Valkey is
-   * back) — never a synchronous external call on the request thread.
+   * {@link retryStep} re-enters at this exact step+attempt. ENQUEUE-THEN-CLEAR (#1068): the `FAILED`→
+   * `RUNNING` CAS PRESERVES the run's `error` (the failed-step marker), and only a CONFIRMED enqueue
+   * clears it. A broker-down enqueue (false) ROLLS the run back to `FAILED` with its marker intact and
+   * returns `{ retried: false }` (→ 409, retry once Valkey is back) — so the run is never stranded
+   * `RUNNING` with `error=null`, where the RUNNING-staleness reconciler would finalize it as a step-less
+   * `engine-restart` and a later retry would become unresolvable. Never a synchronous external call on
+   * the request thread.
    *
    * OPTION 2 (ADR-0057) — an OPTIONAL `overrides` map (field name → template-or-literal) patches the
    * FAILED step's data mapping for the NEXT attempt ONLY. It is stored TRANSIENTLY in {@link
    * pendingOverrides} (in memory, never Valkey/Postgres/logs) and consumed by the next walk's render of
    * that step; only the field NAMES are ever recorded (INV-6). A no-override retry is unchanged.
    *
-   * @returns `{ retried: true, resumeStepKey, attempt }` on a successful CAS, or `{ retried: false }`
-   *   when the run was not `FAILED` at claim time (the caller maps that to a 409 conflict).
+   * @returns `{ retried: true, resumeStepKey, attempt }` on a successful CAS + CONFIRMED enqueue, or
+   *   `{ retried: false }` when the run was not `FAILED` at claim time OR the enqueue failed (broker down,
+   *   the run rolled back to `FAILED`) — the caller maps either to a 409 conflict.
    */
   async retryRun(
     runId: string,
@@ -232,10 +237,13 @@ export class WorkflowRunOrchestrator {
     const nextAttempt = await this.nextAttemptFor(runId, failedStepKey);
 
     // Guarded CAS: ONLY a run still FAILED flips to RUNNING. A lost race (already RUNNING / re-retried /
-    // swept) yields count 0 — the caller surfaces a clean conflict and we enqueue nothing.
+    // swept) yields count 0 — the caller surfaces a clean conflict and we enqueue nothing. The redacted
+    // `error` (the failed-step marker) is DELIBERATELY PRESERVED across the flip — NOT cleared here (#1068):
+    // ENQUEUE-THEN-CLEAR. If the enqueue then fails we roll the run back to FAILED with its marker intact,
+    // so a later retry stays resolvable. Only a CONFIRMED enqueue clears it (below).
     const claimed = await this.prisma.workflowRun.updateMany({
       where: { id: runId, status: 'FAILED' },
-      data: { status: 'RUNNING', finishedAt: null, error: Prisma.DbNull },
+      data: { status: 'RUNNING', finishedAt: null },
     });
     if (claimed.count === 0) {
       return { retried: false };
@@ -250,9 +258,36 @@ export class WorkflowRunOrchestrator {
       });
     }
 
-    // Advance OFF the request via a delayed-0 retry job (decoupled, §1). A broker-down enqueue is
-    // swallowed by enqueueRetry; the run is RUNNING and the RUNNING-staleness reconciler finalizes it.
-    await this.trigger.enqueueRetry(runId, failedStepKey, nextAttempt, 0);
+    // Advance OFF the request via a delayed-0 retry job (decoupled, §1). ENQUEUE-THEN-CLEAR (#1068): a
+    // broker-down enqueue returns false — the job never scheduled, so ROLL BACK to FAILED (restoring
+    // finishedAt; the `error`/failed-step marker was never cleared) and drop the just-stashed override,
+    // then surface a clean conflict. Without this, the run would sit RUNNING with error=null; the
+    // RUNNING-staleness reconciler would finalize it as a step-less `engine-restart`, and a later retry
+    // would hit `resolveFailedStepKey === null` → RetryNotResolvableError (the step was lost).
+    const scheduled = await this.trigger.enqueueRetry(
+      runId,
+      failedStepKey,
+      nextAttempt,
+      0,
+    );
+    if (!scheduled) {
+      // Guarded on RUNNING so a raced finalize (worker/sweeper) is never undone — only OUR own claim rolls
+      // back. A lost roll-back race (count 0) simply leaves the run as that concurrent write left it.
+      await this.prisma.workflowRun.updateMany({
+        where: { id: runId, status: 'RUNNING' },
+        data: { status: 'FAILED', finishedAt: run.finishedAt },
+      });
+      this.pendingOverrides.delete(runId);
+      return { retried: false };
+    }
+
+    // The enqueue is CONFIRMED: the run is durably RUNNING with a scheduled retry, so clear the stale
+    // failure summary (the run is no longer failed). Guarded on RUNNING so a concurrent finalize's fresh
+    // `error` (e.g. the delayed-0 worker already re-failed the run) is never clobbered.
+    await this.prisma.workflowRun.updateMany({
+      where: { id: runId, status: 'RUNNING' },
+      data: { error: Prisma.DbNull },
+    });
     return {
       retried: true,
       resumeStepKey: failedStepKey,
