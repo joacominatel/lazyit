@@ -66,6 +66,7 @@
       "salvageValue": "Valor residual",
       "manufacturer": "Fabricante",
       "category": "Categoría",
+      "sku": "SKU / número de modelo",
       "email": "Correo",
       "legajo": "Legajo",
       "username": "Usuario",
@@ -107,8 +108,8 @@
       "helper": "Elige un valor existente para vincular cada fila a él, o cambia a constante para escribir uno nuevo."
     },
     "modelConfig": {
-      "title": "Marca y categoría del modelo",
-      "description": "Mapea una columna a Fabricante o Categoría arriba para definirlos por fila, o fija un valor aquí para aplicarlo a todos los modelos que cree la importación.",
+      "title": "Marca, categoría y SKU del modelo",
+      "description": "Mapea una columna a Fabricante, Categoría o SKU arriba para definirlos por fila, o fija un valor aquí para aplicarlo a todos los modelos que cree la importación.",
       "manufacturerLabel": "Fabricante para todos los modelos",
       "manufacturerPlaceholder": "p. ej. Apple",
       "categoryLabel": "Categoría para todos los modelos",
@@ -116,6 +117,8 @@
       "categoryPickPlaceholder": "Elegir una categoría…",
       "categoryPickSearch": "Buscar categorías…",
       "categoryPickEmpty": "No se encontraron categorías.",
+      "skuLabel": "SKU para todos los modelos",
+      "skuPlaceholder": "p. ej. P108F",
       "fromColumn": "Se toma de la columna «{column}»."
     },
     "missingRequired": "Mapea una columna a: {fields}.",
