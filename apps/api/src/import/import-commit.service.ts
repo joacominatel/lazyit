@@ -75,19 +75,23 @@ const IMPORT_LOCATION_DEFAULT_TYPE = 'OTHER' as const;
 const IMPORT_MODEL_DEFAULT_MANUFACTURER = 'Unknown';
 
 /**
- * The brand + category resolved for ONE created `AssetModel` (ADR-0069 REDESIGN §4.4). Both are
- * optional: an absent `manufacturer` falls back to {@link IMPORT_MODEL_DEFAULT_MANUFACTURER}; an absent
- * `categoryName` means the created model gets no category link. Built per-row from `mapping.modelConfig`
- * (a pinned constant or the row's column cell), then carried into `createReference` — but a Model is
- * created AT MOST ONCE per natural-key value (memoized), so the FIRST row that triggers the create wins.
+ * The brand + category + sku resolved for ONE created `AssetModel` (ADR-0069 REDESIGN §4.4; sku #1064).
+ * All optional: an absent `manufacturer` falls back to {@link IMPORT_MODEL_DEFAULT_MANUFACTURER}; an
+ * absent `categoryName` means the created model gets no category link; an absent `sku` means the model
+ * carries none (weakens the descriptor's `matchBy:['sku','name']` dedup for later imports, but never
+ * blocks a create). Built per-row from `mapping.modelConfig` (a pinned constant or the row's column
+ * cell), then carried into `createReference` — but a Model is created AT MOST ONCE per natural-key value
+ * (memoized), so the FIRST row that triggers the create wins.
  *
- * ponytail: two flat fields, not a generic multi-level sub-descriptor. Ceiling: the brand/category of a
- * created model come from whichever row first mints it (deterministic at the value granularity since the
- * value IS the model name). Upgrade path: a richer per-reference field bag in the resolution plan.
+ * ponytail: three flat fields, not a generic multi-level sub-descriptor. Ceiling: the brand/category/sku
+ * of a created model come from whichever row first mints it (deterministic at the value granularity
+ * since the value IS the model name). Upgrade path: a richer per-reference field bag in the resolution
+ * plan.
  */
 interface ModelCreateConfig {
   manufacturer?: string;
   categoryName?: string;
+  sku?: string;
 }
 
 /**
@@ -101,17 +105,21 @@ type DirectoryPersonResolution =
   | { kind: 'ambiguous' };
 
 /**
- * Resolve the brand/category for a created model from the mapping's `modelConfig` + this row's cells
- * (ADR-0069 REDESIGN §4.4 / §5.1). A pinned `*Const` wins over the `*Column` cell; an empty/absent value
- * yields no entry. Trimmed; empty strings dropped so a blank cell never becomes a `''` manufacturer.
+ * Resolve the brand/category/sku for a created model from the mapping's `modelConfig` + this row's cells
+ * (ADR-0069 REDESIGN §4.4 / §5.1; sku #1064). A pinned `*Const` wins over the `*Column` cell; an
+ * empty/absent value yields no entry. Trimmed; empty strings dropped so a blank cell never becomes a
+ * `''` manufacturer/sku.
  */
 function modelCreateConfigFor(
   modelConfig: ModelConfig,
   raw: Record<string, string>,
 ): ModelCreateConfig {
   if (!modelConfig) return {};
-  const pick = (constVal?: string, column?: string): string | undefined => {
-    const value = constVal ?? (column !== undefined ? raw[column] : undefined);
+  const pick = (
+    constVal?: string | null,
+    column?: string | null,
+  ): string | undefined => {
+    const value = constVal ?? (column ? raw[column] : undefined);
     const trimmed = value?.trim();
     return trimmed ? trimmed : undefined;
   };
@@ -121,6 +129,7 @@ function modelCreateConfigFor(
       modelConfig.manufacturerColumn,
     ),
     categoryName: pick(modelConfig.categoryConst, modelConfig.categoryColumn),
+    sku: pick(modelConfig.skuConst, modelConfig.skuColumn),
   };
 }
 
@@ -818,7 +827,9 @@ export class ImportCommitService {
         // distinct id the precedence is moot, but the ordering is the contract a multi-key single-user row
         // resolves by. Existing behavior: link to it.
         const matched =
-          matches.find((m) => data.email !== undefined && m.email === data.email) ??
+          matches.find(
+            (m) => data.email !== undefined && m.email === data.email,
+          ) ??
           matches.find(
             (m) => data.legajo !== undefined && m.legajo === data.legajo,
           ) ??
@@ -1038,9 +1049,10 @@ export class ImportCommitService {
    * the ACROSS-run window.
    *
    * Required fields the value can't supply get an audit-honest phase-1 default the operator can edit
-   * later — never a silent drop. An `AssetModel` create now reads its REAL manufacturer + category from
-   * the row's `modelCreateConfig` (ADR-0069 REDESIGN §4.4): manufacturer falls back to `'Unknown'` only
-   * as a last resort; a category NAME is resolved to a `categoryId` via the SAME idempotent find-first
+   * later — never a silent drop. An `AssetModel` create now reads its REAL manufacturer + category (+
+   * optional sku, #1064) from the row's `modelCreateConfig` (ADR-0069 REDESIGN §4.4): manufacturer falls
+   * back to `'Unknown'` only as a last resort; sku is omitted entirely when unset (never `''`); a
+   * category NAME is resolved to a `categoryId` via the SAME idempotent find-first
    * pattern (find-or-create `AssetCategory` by name) so a concurrent/retried run reuses it instead of
    * minting a duplicate.
    *
@@ -1087,6 +1099,9 @@ export class ImportCommitService {
           manufacturer:
             modelCreateConfig.manufacturer ?? IMPORT_MODEL_DEFAULT_MANUFACTURER,
           ...(categoryId !== undefined ? { categoryId } : {}),
+          ...(modelCreateConfig.sku !== undefined
+            ? { sku: modelCreateConfig.sku }
+            : {}),
         }),
       );
       return m.id;
