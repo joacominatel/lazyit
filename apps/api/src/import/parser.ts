@@ -34,7 +34,8 @@ export interface ParseSuccess {
   ok: true;
   headers: string[];
   dialect: ParseDialect;
-  /** Always `'utf-8'` in phase 1 (the only encoding we accept; see {@link decodeUtf8}). */
+  /** Always `'utf-8'`: the in-memory text is always valid UTF-16 JS strings by this point — a
+   *  non-UTF-8 source buffer was transcoded from `windows-1252`, not rejected (see {@link decodeUtf8}). */
   encoding: 'utf-8';
   rowCount: number;
   rows: RawRow[];
@@ -70,11 +71,15 @@ export function maxImportRows(): number {
 }
 
 /**
- * Decode an uploaded buffer as UTF-8 and strip a leading BOM. We deliberately accept ONLY UTF-8
- * (ADR-0069 §12 — `.xlsx` and exotic encodings are rejected with an "export to CSV UTF-8" message);
- * a UTF-16/Latin-1 file decodes to mojibake here, which the JSON/CSV structure check below then
- * rejects as malformed rather than silently importing garbage. Returns the text + whether a BOM was
- * present.
+ * Decode an uploaded buffer to text and strip a leading BOM. Tries a STRICT UTF-8 decode first
+ * (`TextDecoder(..., { fatal: true })` throws on any invalid byte sequence, unlike
+ * `Buffer#toString('utf-8')` which silently substitutes U+FFFD) — genuine UTF-8, including plain
+ * ASCII, passes through unchanged. A file that fails strict UTF-8 is transcoded from
+ * `windows-1252` (a WHATWG-builtin `TextDecoder` label, zero deps): the overwhelmingly common
+ * real-world case is Excel's "Save as CSV" default or a Snipe-IT export re-saved on Windows
+ * (#1059) — without this, CP-1252/Latin-1 accents (`José`, `Dirección`) decoded to mojibake
+ * (`JosÃ©`) that stayed structurally valid and passed row validation silently. Returns the text +
+ * whether a BOM was present.
  */
 function decodeUtf8(buffer: Buffer): { text: string; hadBom: boolean } {
   // A UTF-8 BOM is the bytes EF BB BF. `csv-parse` strips it with `bom:true`, but JSON.parse chokes
@@ -84,7 +89,16 @@ function decodeUtf8(buffer: Buffer): { text: string; hadBom: boolean } {
     buffer[0] === 0xef &&
     buffer[1] === 0xbb &&
     buffer[2] === 0xbf;
-  const text = buffer.toString('utf-8');
+  let text: string;
+  try {
+    // `ignoreBOM: true` keeps the BOM char in the decoded output (TextDecoder strips it by default,
+    // unlike `Buffer#toString`) so the single hadBom-based slice below is the only place it's removed.
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+      buffer,
+    );
+  } catch {
+    text = new TextDecoder('windows-1252').decode(buffer);
+  }
   return { text: hadBom ? text.slice(1) : text, hadBom };
 }
 
