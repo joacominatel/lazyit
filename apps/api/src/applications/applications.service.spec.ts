@@ -22,6 +22,8 @@ type ApplicationMock = {
   count: jest.Mock;
 };
 
+type AccessGrantMock = { findMany: jest.Mock };
+
 type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
 type DataCall = [{ data: Record<string, unknown> }];
@@ -33,6 +35,7 @@ type FindManyCall = [
 describe('ApplicationsService', () => {
   let service: ApplicationsService;
   let application: ApplicationMock;
+  let accessGrant: AccessGrantMock;
   let search: SearchMock;
 
   beforeEach(async () => {
@@ -43,11 +46,15 @@ describe('ApplicationsService', () => {
       update: jest.fn(),
       count: jest.fn(),
     };
+    // Derived seatsUsed (#949) reads distinct active-grant (applicationId, userId) pairs. Default to an
+    // empty set so the existing findOne/findPage cases just see 0 seats used.
+    accessGrant = { findMany: jest.fn().mockResolvedValue([]) };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
     // findPage runs [findMany, count] inside $transaction(array) — resolve each promise in the array.
     const prisma = {
       application,
+      accessGrant,
       $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
 
@@ -75,8 +82,9 @@ describe('ApplicationsService', () => {
     expect(calls[0][0].orderBy).toEqual({ name: 'asc' });
     // The default `active` slice scopes the list to live rows (ADR-0041).
     expect(calls[0][0].where).toEqual({ deletedAt: null });
+    // Each row carries the derived seatsUsed (#949) — 0 with no active grants.
     expect(page).toEqual({
-      items: [{ id: 'app1' }],
+      items: [{ id: 'app1', seatsUsed: 0 }],
       total: 1,
       limit: 50,
       offset: 0,
@@ -142,7 +150,7 @@ describe('ApplicationsService', () => {
       (calls[0][0] as unknown as { includeSoftDeleted?: boolean })
         .includeSoftDeleted,
     ).toBe(true);
-    expect(page.items).toEqual([{ id: 'gone' }]);
+    expect(page.items).toEqual([{ id: 'gone', seatsUsed: 0 }]);
   });
 
   it('creates an application (no metadata key when omitted)', async () => {
@@ -180,11 +188,14 @@ describe('ApplicationsService', () => {
     expect(calls[0][0].data.metadata).toEqual({ ssoProvider: 'okta' });
   });
 
-  it('returns an application by id when it exists', async () => {
+  it('returns an application by id when it exists (with derived seatsUsed)', async () => {
     const found = { id: 'app1', name: 'Jira', deletedAt: null };
     application.findFirst.mockResolvedValue(found);
 
-    await expect(service.findOne('app1')).resolves.toEqual(found);
+    await expect(service.findOne('app1')).resolves.toEqual({
+      ...found,
+      seatsUsed: 0,
+    });
     expect(application.findFirst).toHaveBeenCalledWith({
       where: { id: 'app1' },
     });
@@ -196,6 +207,69 @@ describe('ApplicationsService', () => {
     await expect(service.findOne('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  // --- derived seatsUsed (#949, ADR-0088) ----------------------------------
+  it('findOne seatsUsed is the DISTINCT active-grant user count (two active grants for one user = 1; revoked excluded)', async () => {
+    application.findFirst.mockResolvedValue({ id: 'app1', deletedAt: null });
+    // The DB `distinct: ['applicationId','userId']` collapses a user's two active grants to one pair,
+    // so the query returns a single (app1, u1) row — exactly what the license math should count as 1.
+    accessGrant.findMany.mockResolvedValue([
+      { applicationId: 'app1', userId: 'u1' },
+    ]);
+
+    const result = await service.findOne('app1');
+
+    expect(result.seatsUsed).toBe(1);
+    // Revoked grants are excluded (revokedAt: null) and the multi-grant over-count is removed at the DB
+    // via distinct — both encoded in this single query shape.
+    expect(accessGrant.findMany).toHaveBeenCalledTimes(1);
+    expect(accessGrant.findMany).toHaveBeenCalledWith({
+      where: { revokedAt: null, applicationId: { in: ['app1'] } },
+      select: { applicationId: true, userId: true },
+      distinct: ['applicationId', 'userId'],
+    });
+  });
+
+  it('findPage folds distinct-user seat counts per app in ONE query (no per-row N+1)', async () => {
+    application.findMany.mockResolvedValue([{ id: 'app1' }, { id: 'app2' }]);
+    application.count.mockResolvedValue(2);
+    // app1: two distinct users (u1, u2) → 2 seats; app2: one user (u1) → 1 seat.
+    accessGrant.findMany.mockResolvedValue([
+      { applicationId: 'app1', userId: 'u1' },
+      { applicationId: 'app1', userId: 'u2' },
+      { applicationId: 'app2', userId: 'u1' },
+    ]);
+
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    expect(page.items).toEqual([
+      { id: 'app1', seatsUsed: 2 },
+      { id: 'app2', seatsUsed: 1 },
+    ]);
+    // A SINGLE grant query for the whole page (both ids in one `in` filter) — no per-row fan-out.
+    expect(accessGrant.findMany).toHaveBeenCalledTimes(1);
+    expect(accessGrant.findMany).toHaveBeenCalledWith({
+      where: { revokedAt: null, applicationId: { in: ['app1', 'app2'] } },
+      select: { applicationId: true, userId: true },
+      distinct: ['applicationId', 'userId'],
+    });
+  });
+
+  it('findPage skips the seat query entirely for an empty page', async () => {
+    application.findMany.mockResolvedValue([]);
+    application.count.mockResolvedValue(0);
+
+    const page = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    expect(page.items).toEqual([]);
+    expect(accessGrant.findMany).not.toHaveBeenCalled();
   });
 
   it('applies a partial update after confirming the application exists', async () => {
