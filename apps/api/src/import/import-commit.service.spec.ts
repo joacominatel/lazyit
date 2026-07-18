@@ -96,9 +96,7 @@ interface PrismaState {
    * the ghost) to prove no resurrection. Returned rows may carry `email`/`legajo`/`username` for the
    * precedence assertion (the single-match path).
    */
-  directoryDedup?: (
-    or: any[],
-  ) =>
+  directoryDedup?: (or: any[]) =>
     | {
         id: string;
         email?: string;
@@ -1290,6 +1288,54 @@ describe('ImportCommitService.commit', () => {
     });
   });
 
+  it('createReference creates a Model with the sku from modelConfig.skuColumn [#1064]', async () => {
+    const state = sessionWithMapping(
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: {
+            Name: 'A',
+            Status: 'active',
+            Model: 'Latitude 5520',
+            'Model No.': 'P108F',
+          },
+        },
+      ],
+      plan({
+        conflicts: [
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'Latitude 5520',
+            outcome: 'create',
+            targetId: null,
+          },
+        ],
+      }),
+      mapping({
+        columns: [
+          { field: 'name', column: 'Name' },
+          { field: 'status', column: 'Status' },
+        ],
+        references: [{ field: 'modelId', column: 'Model' }],
+        modelConfig: { skuColumn: 'Model No.' },
+      }),
+    );
+    const { service, models } = makeService(state);
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(result.committed).toBe(1);
+    expect(models.create).toHaveBeenCalledTimes(1);
+    expect(models.create.mock.calls[0][0]).toEqual({
+      name: 'Latitude 5520',
+      manufacturer: 'Unknown',
+      sku: 'P108F',
+    });
+  });
+
   it('AssetCategory find-or-create is idempotent: two models, same category name → ONE category [§4.4]', async () => {
     const state = sessionWithMapping(
       [
@@ -1600,7 +1646,10 @@ describe('ImportCommitService.commit', () => {
       const row = prisma._rowStatuses.get(1);
       expect(row?.status).toBe('COMMITTED');
       expect(row?.error).toEqual(
-        expect.objectContaining({ reason: 'ambiguous-identity', warning: true }),
+        expect.objectContaining({
+          reason: 'ambiguous-identity',
+          warning: true,
+        }),
       );
     });
 
@@ -1740,7 +1789,8 @@ describe('ImportCommitService.commit', () => {
         plan({ conflicts: [] }),
       );
       state.session!.mapping = noNamePersonMapping;
-      const { service, assets, users, assignments, prisma } = makeService(state);
+      const { service, assets, users, assignments, prisma } =
+        makeService(state);
 
       const result = await service.commit('sess-1', OWNER);
 
