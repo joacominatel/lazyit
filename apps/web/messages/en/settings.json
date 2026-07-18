@@ -110,6 +110,11 @@
       },
       "toast": {
         "enqueued": "Update queued. Run the shown command on the host to apply it."
+      },
+      "cancel": {
+        "button": "Cancel this update",
+        "hint": "Haven't run the command yet? Cancel to clear this request and check for updates again later.",
+        "toast": "Update cancelled. You can check for updates again anytime."
       }
     }
   },
