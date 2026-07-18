@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalText, requireAtLeastOneKey } from "./primitives";
+import { int4, optionalText, requireAtLeastOneKey } from "./primitives";
 
 /**
  * Application — something a User can be granted access to: a SaaS product (Jira, GitHub, AWS), an
@@ -66,6 +66,19 @@ export const ApplicationSchema = z.object({
   isCritical: z.boolean(),
   metadata: ApplicationMetadataSchema.nullable(),
   notes: z.string().nullable(),
+  // License / seat tracking (#949). Money in INTEGER minor units (cents) of the org's single currency,
+  // bounded to int4 like every other Int column — mirrors Asset.purchaseCost (#954). All optional/null =
+  // "untracked": `seatsPurchased` null = unlimited/not tracked, `costPerSeat` null = unknown, `renewalDate`
+  // null = no known renewal. `.nullish()` (not required-nullable) so existing web object-construction
+  // sites (Quick View mappers, fixtures) that build an Application without these keys keep type-checking.
+  seatsPurchased: int4({ min: 0 }).nullish(),
+  costPerSeat: int4({ min: 0 }).nullish(),
+  renewalDate: z.iso.datetime().nullish(),
+  // DERIVED, never stored: distinct count of users holding an ACTIVE grant (revokedAt: null) on this app
+  // — the correct license "seats used" (grants are multi-grant, so a raw count over-reports). Computed
+  // per-request by ApplicationsService; read-only — create/update REJECT it (strictObject). `.nullish()`
+  // so non-detail construction sites (list joins, fixtures) that omit it stay green.
+  seatsUsed: int4({ min: 0 }).nullish(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -81,6 +94,11 @@ export const CreateApplicationSchema = z.strictObject({
   isCritical: z.boolean().default(false),
   metadata: ApplicationMetadataSchema.optional(),
   notes: optionalText(2000),
+  // License / seat tracking (#949) — all optional. Money is INTEGER minor units (mirrors #954). A
+  // strictObject rejects the derived `seatsUsed`, so it can never be written from a create body.
+  seatsPurchased: int4({ min: 0 }).nullish(),
+  costPerSeat: int4({ min: 0 }).nullish(),
+  renewalDate: z.iso.datetime().nullish(),
 });
 
 /** Partial update; any subset of the editable fields (an empty body is rejected). */
@@ -95,6 +113,12 @@ export const UpdateApplicationSchema = requireAtLeastOneKey(
       isCritical: z.boolean(),
       metadata: ApplicationMetadataSchema,
       notes: z.string().trim().min(1).max(2000),
+      // License / seat tracking (#949). `.nullable()` (inside `.partial()`) so a PATCH can CLEAR a value
+      // back to "untracked" (`{ seatsPurchased: null }`) as well as set it. Derived `seatsUsed` is absent
+      // here → a strictObject rejects it (read-only).
+      seatsPurchased: int4({ min: 0 }).nullable(),
+      costPerSeat: int4({ min: 0 }).nullable(),
+      renewalDate: z.iso.datetime().nullable(),
     })
     .partial(),
 );
