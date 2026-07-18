@@ -346,16 +346,18 @@ export class ImportDryRunService {
   }
 
   /**
-   * Location: by normalized name — EXACT after trim (ADR-0069 §5: per-key normalization is trim-only,
-   * NOT case-folded, mirroring how the name is actually stored + uniquely indexed). Probes WITH
-   * soft-deleted so a ghost location surfaces as a `restore` candidate.
+   * Location: by normalized name — case-folded (#1063), mirroring `resolveModel`'s soft name match so
+   * the preview agrees with the commit engine's find-or-create probe (`ImportCommitService.
+   * createReference`) and `'Piso 3'`/`'piso 3'` resolve to the SAME row instead of minting a duplicate.
+   * Probes WITH soft-deleted so a ghost location surfaces as a `restore` candidate.
    */
   private async resolveLocation(
     normalizedValue: string,
   ): Promise<ResolveResult> {
     const rows = await this.prisma.location.findMany({
-      where: { name: normalizedValue },
+      where: { name: { equals: normalizedValue, mode: 'insensitive' } },
       select: { id: true, name: true, deletedAt: true },
+      orderBy: { createdAt: 'asc' },
       ...({ includeSoftDeleted: true } as object),
     });
     const candidates: ConflictCandidate[] = rows.map((r) => ({
