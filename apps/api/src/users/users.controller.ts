@@ -563,4 +563,33 @@ export class UsersController {
     // Pass the actor so the service attributes the audited UPDATED history row + the IdP write-back line.
     return this.users.provisionAccount(id, this.actor.resolve(actor));
   }
+
+  // The LOCAL-mode counterpart to provision-account (ADR-0086 §5 amendment, issue #1072): onboard a
+  // directory person by minting a ONE-TIME temporary password so an imported, login-less person can sign
+  // in. Distinct route (not a mode-branch on provision-account) because the response shape differs — this
+  // returns the temp password once, not the promoted User. ADMIN-only (same `user:manage` gate).
+  @Post(':id/provision-local-account')
+  @RequirePermission('user:manage')
+  @ApiOperation({
+    summary:
+      'Onboard a directory person with a one-time temporary password — ADMIN only, LOCAL mode (ADR-0086)',
+    description:
+      'AUTH_MODE=local only: mints a one-time temporary password for a directory-only person (created by ' +
+      'the bulk import, no login), hashes it, sets mustChangePassword, flips directoryOnly to false so the ' +
+      'account can sign in, and returns the temp password ONCE (shown once, never stored in plaintext). ' +
+      'The existing role is kept (no privilege widening). 400 outside local mode (use provision-account ' +
+      'for the bundled Zitadel) or when the target is not a directory person; 404 if missing.',
+  })
+  @ApiCreatedResponse({
+    type: AdminPasswordResetResultDto,
+    description:
+      'The one-time temporary password to hand off to the person (shown once).',
+  })
+  provisionLocalAccount(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor?: User,
+  ): Promise<AdminPasswordResetResultDto> {
+    // Pass the actor so the service attributes the audited UPDATED history row.
+    return this.users.provisionLocalAccount(id, this.actor.resolve(actor));
+  }
 }
