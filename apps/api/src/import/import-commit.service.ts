@@ -1057,8 +1057,9 @@ export class ImportCommitService {
   ): Promise<string> {
     if (entity === 'Location') {
       const found = await this.prisma.location.findFirst({
-        where: { name: normalizedValue },
+        where: { name: { equals: normalizedValue, mode: 'insensitive' } },
         select: { id: true },
+        orderBy: { createdAt: 'asc' },
       });
       if (found) return found.id;
       const l = await this.locations.create({
@@ -1069,8 +1070,9 @@ export class ImportCommitService {
     }
     if (entity === 'AssetModel') {
       const found = await this.prisma.assetModel.findFirst({
-        where: { name: normalizedValue },
+        where: { name: { equals: normalizedValue, mode: 'insensitive' } },
         select: { id: true },
+        orderBy: { createdAt: 'asc' },
       });
       if (found) return found.id;
       // Resolve the category NAME → id first (find-or-create). CreateAssetModelSchema takes
@@ -1107,8 +1109,9 @@ export class ImportCommitService {
   private async findOrCreateCategory(name: string): Promise<string> {
     const trimmed = name.trim();
     const found = await this.prisma.assetCategory.findFirst({
-      where: { name: trimmed },
+      where: { name: { equals: trimmed, mode: 'insensitive' } },
       select: { id: true },
+      orderBy: { createdAt: 'asc' },
     });
     if (found) return found.id;
     // Same strict schema as the HTTP path so an import-created category honors `name` `.max(100)` (a
