@@ -120,7 +120,9 @@ domain)? Re-run the bootstrap with `--reconfigure`:
 
 It re-asks the host, ports and network/TLS questions and rewrites the environment file accordingly. It
 **preserves your existing secrets and never touches your data** — only the reachability settings change.
-Bring the stack back up and the instance answers at its new address.
+Bring the stack back up and the instance answers at its new address. Existing browser sessions from
+before the reconfigure are now stale — they self-heal to `/login` on their next request, so anyone
+signed in just needs to sign in again.
 
 ## Deployment levels
 

@@ -47,22 +47,22 @@ export class WorkflowSecretsService {
     return descriptor;
   }
 
-  /** Rotate a live secret's value in place (re-encrypt). Returns the redacted descriptor. */
-  async rotate(id: string, value: string): Promise<WorkflowSecretDescriptor> {
-    try {
-      return await this.secrets.rotate(id, value);
-    } catch {
-      throw new NotFoundException(`WorkflowSecret ${id} not found`);
-    }
+  /**
+   * Rotate a live secret's value in place (re-encrypt). Returns the redacted descriptor. Delegates
+   * straight to {@link SecretService.rotate} — it already throws a {@link NotFoundException} for a
+   * missing id, so a real DB/crypto failure propagates as its own error instead of being collapsed
+   * into a 404 (#1069).
+   */
+  rotate(id: string, value: string): Promise<WorkflowSecretDescriptor> {
+    return this.secrets.rotate(id, value);
   }
 
-  /** Soft-delete (revoke) a secret. A revoked secret can no longer authenticate a connector. */
-  async softDelete(id: string): Promise<void> {
-    try {
-      await this.secrets.softDelete(id);
-    } catch {
-      throw new NotFoundException(`WorkflowSecret ${id} not found`);
-    }
+  /**
+   * Soft-delete (revoke) a secret. A revoked secret can no longer authenticate a connector. Delegates
+   * straight to {@link SecretService.softDelete} for the same reason as {@link rotate} (#1069).
+   */
+  softDelete(id: string): Promise<void> {
+    return this.secrets.softDelete(id);
   }
 
   /** A page of REDACTED descriptors (never ciphertext), optionally scoped to an application. */

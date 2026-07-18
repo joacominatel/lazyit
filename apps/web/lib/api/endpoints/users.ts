@@ -1,5 +1,6 @@
 import type {
   AccessGrant,
+  AdminPasswordResetResult,
   AssetAssignment,
   CloneUser,
   CloneUserResult,
@@ -191,6 +192,23 @@ export function restoreUser(id: string): Promise<User> {
  */
 export function provisionUserAccount(id: string): Promise<User> {
   return apiFetch<User>(`${BASE}/${id}/provision-account`, { method: "POST" });
+}
+
+/**
+ * Onboard a directory person in LOCAL auth mode (`POST /users/:id/provision-local-account`, `user:manage`
+ * — ADR-0086 §5 / issue #1072). The local-mode counterpart to {@link provisionUserAccount}: for an
+ * imported, login-less directory person it mints a ONE-TIME temporary password, flips them into a login
+ * account (keeping their role), and resolves to the temp password — shown ONCE, never refetchable. Only
+ * meaningful when `canProvisionLocalAccounts` is set on `GET /config/status` (local mode); the backend
+ * 400s outside local mode or for a non-directory target, surfaced as an {@link ApiError} on `.status`.
+ */
+export function provisionLocalUserAccount(
+  id: string,
+): Promise<AdminPasswordResetResult> {
+  return apiFetch<AdminPasswordResetResult>(
+    `${BASE}/${id}/provision-local-account`,
+    { method: "POST" },
+  );
 }
 
 /**

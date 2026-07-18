@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import {
   AssetSchema,
   AssetStatusSchema,
@@ -132,6 +132,9 @@ export function MappingStep({
   const dryRun = useRunImportDryRun();
 
   const headers = session.headers;
+  // #1062: ragged-width rows (a shifted delimiter/unescaped quote) are silently padded/truncated by
+  // the parser — surface the count as a non-blocking warning so an operator can check the raw file.
+  const raggedRowCount = session.detected?.raggedRowCount ?? 0;
 
   // i18n leaf-label for a field (the catalog carries a shared key like "import.asset.field.name";
   // we render the last segment under our own `mapping.field.*` namespace).
@@ -502,6 +505,17 @@ export function MappingStep({
       >
         {t("mapping.piiNote")}
       </p>
+
+      {/* #1062: non-blocking — a ragged row never blocks Continue, it's a "check your file" nudge. */}
+      {raggedRowCount > 0 && (
+        <div
+          className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground"
+          role="note"
+        >
+          <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+          <p>{t("mapping.raggedRowsWarning", { count: raggedRowCount })}</p>
+        </div>
+      )}
 
       {/* #1050: bulk shortcut — convert every still-ignored column to a custom field named after
           its header in one click. Only shown while there's something to convert. */}

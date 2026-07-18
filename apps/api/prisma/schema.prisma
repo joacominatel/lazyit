@@ -1245,6 +1245,15 @@ model Application {
   // Asset.specs / Article.metadata. See ADR-0007 and ADR-0023.
   metadata    Json?
   notes       String?
+  // License / seat tracking (#949, ADR-0088). All nullable = "untracked". `seatsPurchased` = the number
+  // of paid seats (null = unlimited / not tracked). `costPerSeat` = the price PER SEAT in INTEGER minor
+  // units (cents) of the org's single currency — mirrors Asset.purchaseCost (#954): no float drift.
+  // `renewalDate` = when the license/subscription next renews (informational for now; proactive renewal
+  // reminders are a follow-up, #1070). `seatsUsed` is DERIVED (distinct active-grant users) and NEVER
+  // stored — computed per-request in ApplicationsService.
+  seatsPurchased Int?
+  costPerSeat    Int?
+  renewalDate    DateTime?
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
   deletedAt   DateTime?
@@ -2450,6 +2459,13 @@ enum InfraNodeSource {
   AGENT
 }
 
+/// Who owns a node's `ipAddress` (ADR-0074 §3 fact-promotion, issue #1081). AGENT (default) = a
+/// discovered live fact each report overwrites; MANUAL = a human-typed value the agent never clobbers.
+enum InfraNodeIpSource {
+  AGENT
+  MANUAL
+}
+
 /// Lifecycle (ADR-0070 §4): PENDING = in the v2 review tray, CONFIRMED = on the live map.
 enum InfraNodeState {
   CONFIRMED
@@ -2482,8 +2498,11 @@ model InfraNode {
   asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
   // Access surface (NOT a network model — ADR-0070 scope cuts).
-  ipAddress String? // primary IP, label-only (no validation/IPAM)
-  shortcuts Json? // [{ label, url }] — SSH/web UI/console links (validated by zod in @lazyit/shared)
+  ipAddress       String? // primary IP, label-only (no validation/IPAM)
+  // Who owns `ipAddress` (ADR-0074 §3, #1081): AGENT (default) = a discovered fact reports overwrite;
+  // MANUAL = a human edit the agent never clobbers. Stamped MANUAL server-side on a human IP edit.
+  ipAddressSource InfraNodeIpSource @default(AGENT)
+  shortcuts       Json? // [{ label, url }] — SSH/web UI/console links (validated by zod in @lazyit/shared)
   specs     Json? // loose per-kind attrs (ADR-0007 posture)
 
   // Canvas layout (free-move). v1: one board, x/y on the node. Multi-board => join later.

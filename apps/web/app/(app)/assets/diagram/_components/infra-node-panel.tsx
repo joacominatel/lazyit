@@ -68,6 +68,10 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { statusTone } from "@/lib/infra/canvas";
 import {
+  AgentInventoryPanel,
+  getAgentInventory,
+} from "../../[id]/_components/agent-inventory-panel";
+import {
   AgentBadge,
   AgentFreshness,
   AgentOutdatedBadge,
@@ -324,6 +328,13 @@ function PanelBody({
           </Section>
         ) : null}
 
+        {/* Reported facts (issue #1081) — the agent's host inventory (cpu/ram/os/disks/serial +
+            software), read-only. Only for AGENT nodes; reuses the Assets detail projection so there's
+            one renderer for agent inventory across the app. */}
+        {node.source === "AGENT" ? (
+          <ReportedFactsSection specs={node.specs} />
+        ) : null}
+
         <Separator />
 
         <OwnersSection owners={node.owners} />
@@ -544,6 +555,11 @@ function DetailsSection({ node }: { node: InfraNodeDetail }) {
  * Inline IP field (issue #764): plain text until edited, commits on blur/Enter, cancels on Esc.
  * An empty value clears the IP (`ipAddress: null`, which the shared schema allows). Mirrors the
  * rename pattern — minimal, non-animated, one patch per save.
+ *
+ * Manual override (issue #1081): saving an IP here marks the node's `ipAddressSource=MANUAL` so the
+ * next agent report never clobbers the human value. That stamp is derived SERVER-SIDE from the
+ * presence of `ipAddress` in the patch (never a client-settable field), so this component only sends
+ * `{ ipAddress }` — no extra payload — and the provenance marker stays trustworthy.
  */
 function InlineIpField({
   nodeId,
@@ -1141,6 +1157,28 @@ function ChildrenSection({ nodes }: { nodes: InfraNodeChild[] }) {
           ))}
         </ul>
       )}
+    </Section>
+  );
+}
+
+/**
+ * Reported facts (issue #1081) — the agent's host inventory carried in `node.specs`, rendered
+ * read-only. Reuses the Assets detail projection ({@link getAgentInventory} + {@link AgentInventoryPanel})
+ * so there is ONE renderer for agent inventory across the app (no duplicated cpu/ram/os/disks/serial
+ * layout). Renders nothing when the specs don't parse as agent inventory (a manual/graph-only node
+ * that happens to be flagged AGENT but has no host block).
+ */
+function ReportedFactsSection({
+  specs,
+}: {
+  specs: Record<string, unknown> | null;
+}) {
+  const t = useTranslations("infra");
+  const inventory = getAgentInventory(specs);
+  if (!inventory) return null;
+  return (
+    <Section title={t("panel.reportedFactsTitle")}>
+      <AgentInventoryPanel inventory={inventory} />
     </Section>
   );
 }

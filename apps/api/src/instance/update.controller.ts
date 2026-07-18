@@ -21,7 +21,7 @@ class UpdateRunDto extends createZodDto(UpdateRunSchema) {}
 
 /**
  * UpdateController — update awareness & the ENQUEUE-ONLY guided update (ADR-0084, issue #904). Extends
- * the ADR-0083 `/instance` identity surface with the consumption half. Four routes:
+ * the ADR-0083 `/instance` identity surface with the consumption half. Five routes:
  *   - GET  /instance/update-status    — the whole "Version & updates" card (current, latest, N behind,
  *                                        last checked, active run + history). ADMIN read (settings:read).
  *   - GET  /instance/update-settings  — the opt-in toggle's current value.
@@ -29,6 +29,9 @@ class UpdateRunDto extends createZodDto(UpdateRunSchema) {}
  *   - POST /instance/update           — ENQUEUE a guided update (settings:manage, HUMAN-ONLY). Inserts
  *                                       an UpdateRun and returns it; the UI then shows the operator the
  *                                       exact `./infra/update.sh vX.Y.Z` command. EXECUTES NOTHING.
+ *   - POST /instance/update/cancel    — CANCEL a stuck `requested` run (settings:manage, HUMAN-ONLY),
+ *                                       issue #1065. Moves it to terminal `failed` so a fresh update can
+ *                                       be enqueued; a genuinely in-flight run is rejected. EXECUTES NOTHING.
  *
  * RED LINE: this controller never runs an update — no docker, no shell, no host reach. The POST only
  * records intent (a Postgres row); the host script is the only thing that mutates the host, run by a
@@ -82,5 +85,17 @@ export class UpdateController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.updates.enqueue(dto, principal);
+  }
+
+  @UseGuards(HumanOnlyGuard)
+  @RequirePermission('settings:manage')
+  @Post('update/cancel')
+  @ApiOperation({
+    summary:
+      'Cancel a still-pending guided update (issue #1065). Only a `requested` run — enqueued but never run on the host — can be cancelled; it moves to the terminal `failed` state so a fresh update can be enqueued (a stuck `requested` run otherwise blocks every future update). A genuinely in-flight run (backing_up…verifying) is rejected with a 4xx.',
+  })
+  @ApiOkResponse({ type: UpdateRunDto })
+  cancel() {
+    return this.updates.cancel();
   }
 }

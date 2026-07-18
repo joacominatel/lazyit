@@ -5,6 +5,7 @@ import {
   ArrowTopRightOnSquareIcon,
   ArrowUpCircleIcon,
   ShieldExclamationIcon,
+  XCircleIcon,
 } from "@heroicons/react/24/outline";
 import type { UpdateRun, UpdateRunStatus } from "@lazyit/shared";
 import { isActiveUpdateRun } from "@lazyit/shared";
@@ -25,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { notifyError } from "@/lib/api/notify-error";
 import {
+  useCancelUpdate,
   useEnqueueUpdate,
   useUpdateSettings,
   useUpdateStatus,
@@ -72,6 +74,7 @@ export function UpdatePanel() {
   const smtp = useSmtpSettings();
   const toggle = useUpdateUpdateSettings();
   const enqueue = useEnqueueUpdate();
+  const cancel = useCancelUpdate();
 
   const data = status.data;
   const checkEnabled = settings.data?.checkEnabled ?? false;
@@ -103,6 +106,13 @@ export function UpdatePanel() {
         onError: (err) => notifyError(err, t("cta.hint")),
       },
     );
+  }
+
+  function onCancel() {
+    cancel.mutate(undefined, {
+      onSuccess: () => toast.success(t("cancel.toast")),
+      onError: (err) => notifyError(err, t("cancel.button")),
+    });
   }
 
   // The headline status badge.
@@ -228,13 +238,27 @@ export function UpdatePanel() {
                   </p>
                 </div>
                 {activeRun.status === "requested" ? (
-                  <div className="space-y-1.5">
+                  <div className="space-y-2.5">
                     <p className="text-xs text-muted-foreground">
                       {t("command.instruction")}
                     </p>
                     <code className="block rounded bg-muted px-2 py-1.5 font-mono text-xs">
                       {command}
                     </code>
+                    <div className="space-y-1.5 border-t border-primary/20 pt-2.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={onCancel}
+                        disabled={cancel.isPending}
+                      >
+                        <XCircleIcon />
+                        {t("cancel.button")}
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        {t("cancel.hint")}
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">

@@ -24,7 +24,7 @@ La página de inicio de Configuración es una cuadrícula de tarjetas, cada una 
   Configuración y no en la navegación principal; la tarjeta enlaza a la página completa de Ubicaciones.
 - **Roles** — consulta quién tiene cada rol en el equipo. Es una vista de solo lectura; el rol de una
   persona se cambia desde la sección Usuarios, y lo que cada rol puede hacer se ajusta en
-  [Permisos](/help/users-permissions-permissions).
+  [Permisos](/help/permissions).
 - **Cuentas de servicio** — crea y gestiona credenciales de API no humanas para CI, scripts e
   integraciones, acotadas por permiso y revocables.
 - **Integraciones y flujos** — la bandeja de tareas manuales entre aplicaciones para los flujos de
@@ -114,6 +114,16 @@ Ejecuta ese comando en el servidor (por SSH). El script es cuidadoso y no destru
 Mientras una actualización se ejecuta, la tarjeta muestra la etapa real (respaldando, migrando,
 compilando, reiniciando, verificando) — no una barra de progreso falsa — y se reconecta con discreción
 cuando la app vuelve.
+
+### Cancelar una actualización solicitada
+
+Si pulsaste **Actualizar** pero aún no ejecutaste el comando en el host, la tarjeta muestra un botón
+**Cancelar esta actualización** junto al comando. Cancelar descarta la solicitud pendiente para que la
+tarjeta vuelva a su estado normal de "comprobar actualizaciones" y puedas iniciar una nueva más tarde.
+Solo puedes cancelar mientras sigue *solicitada* — una vez que el script del host ya empezó (respaldando
+en adelante), el botón desaparece y esa actualización debe terminar o reconciliarse, porque
+interrumpirla a mitad podría dejar las bases de datos y los respaldos desincronizados. La solicitud
+cancelada se conserva en el historial de actualizaciones como registro.
 
 ### Si una actualización falla — el punto de restauración
 

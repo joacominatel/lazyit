@@ -101,11 +101,24 @@
     "provision": {
       "action": "Create OIDC account",
       "title": "Directory person",
-      "description": "This person was added by the bulk import and has no login yet. Create their account in the identity provider so they can sign in.",
+      "description": "This person was added by the bulk import and has no login yet. Give them an account so they can sign in.",
       "needsEmail": "This person needs a real email before they can get an account. Edit the person and add one first.",
-      "unsupported": "Creating accounts is only available with the bundled identity provider. In local or bring-your-own-OIDC mode, imported people sign in through your identity provider instead.",
+      "unsupported": "Creating accounts is only available with the bundled identity provider. When you bring your own OIDC provider, imported people sign in through your identity provider instead.",
       "success": "{name} now has an OIDC account.",
       "error": "Couldn't create the account. Try again."
+    },
+    "provisionLocal": {
+      "action": "Onboard with a temporary password",
+      "success": "{name} can now sign in. Give them the temporary password below.",
+      "error": "Couldn't onboard this person. Try again.",
+      "reveal": {
+        "message": "Give this one-time password to <b>{name}</b>. They must change it the first time they sign in, and it keeps their current role — onboarding never grants extra access.",
+        "warning": "This password is shown only once. Copy it now — you won't be able to see it again.",
+        "copyAria": "Copy the temporary password",
+        "copyUnavailable": "Couldn't copy automatically. Select the password and copy it by hand.",
+        "acknowledge": "I've copied the temporary password and handed it to the person.",
+        "done": "Done"
+      }
     }
   },
   "empty": {

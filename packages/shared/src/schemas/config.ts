@@ -68,6 +68,17 @@ export const ConfigStatusSchema = z.object({
    */
   canProvisionAccounts: z.boolean().optional(),
   /**
+   * Whether the active mode supports ADMIN-initiated LOCAL onboarding of a directory person — minting a
+   * one-time temporary password so an imported, login-less person can sign in (ADR-0086 §5, issue #1072).
+   * Derived server-side from `AUTH_MODE=local`: true ONLY in local mode (there is no IdP to mirror to, so
+   * lazyit sets the credential directly); undefined/false for bundled Zitadel + BYOI, which either
+   * provision an IdP account ({@link canProvisionAccounts}) or manage credentials in a foreign IdP. The
+   * Users page reads this to offer the "Onboard with a temporary password" action in place of the
+   * impossible "Create OIDC account" one. Optional/additive so an older web build ignores it; the backend
+   * populates it only in local mode (the OIDC status stays byte-identical).
+   */
+  canProvisionLocalAccounts: z.boolean().optional(),
+  /**
    * The instance-wide authentication mode the UI branches on (ADR-0086) — `"oidc"` (SSO button) vs.
    * `"local"` (username/email + password form). `shim` never reaches a browser (dev X-User-Id header
    * only), so it is NOT part of this UI-facing union.

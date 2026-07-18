@@ -811,6 +811,107 @@ describe('UsersService', () => {
     });
   });
 
+  // ADR-0086 §5 amendment (issue #1072): the LOCAL-mode onboarding of a directory person — mint a
+  // one-time temp password so an imported, login-less person can sign in. No self-service, no role
+  // widening, temp password shown once. The OIDC counterpart is provisionAccount (above).
+  describe('provisionLocalAccount (local onboarding, ADR-0086 §5 / issue #1072)', () => {
+    const DIRECTORY = {
+      id: 'uuid-onb',
+      email: 'imported@corp.com',
+      firstName: 'Im',
+      lastName: 'Ported',
+      role: 'VIEWER',
+      isActive: true,
+      externalId: null,
+      passwordHash: null,
+      directoryOnly: true,
+      deletedAt: null,
+    };
+
+    beforeEach(() => {
+      idp.kind = 'local';
+      idp.supportsManagement = false;
+    });
+
+    it('mints + hashes a temp password, flips directoryOnly=false, keeps the role, audits UPDATED, returns the temp password once', async () => {
+      user.findFirst.mockResolvedValue(DIRECTORY);
+      user.update.mockResolvedValue({
+        ...DIRECTORY,
+        directoryOnly: false,
+        passwordHash: '$argon2id$hash',
+        mustChangePassword: true,
+      });
+
+      const result = await service.provisionLocalAccount('uuid-onb', 'admin-1');
+
+      // The temp password is generated + hashed via the provisioning primitive (forced-change credential).
+      expect(provisioning.generateTempPassword).toHaveBeenCalledTimes(1);
+      expect(provisioning.credentialFields).toHaveBeenCalledWith(
+        'Temp-Pass-9xZ!',
+        { mustChangePassword: true },
+      );
+      // The row is updated WITH the credential fields AND directoryOnly=false — and NOTHING else. No role
+      // (no privilege widening) and no sessionEpoch bump (a directory person holds no session to revoke).
+      expect(user.update).toHaveBeenCalledWith({
+        where: { id: 'uuid-onb' },
+        data: {
+          passwordHash: '$argon2id$hash',
+          passwordUpdatedAt: new Date('2026-07-03T00:00:00.000Z'),
+          mustChangePassword: true,
+          directoryOnly: false,
+        },
+      });
+      const updateArg = (
+        user.update.mock.calls as Array<[{ data: Record<string, unknown> }]>
+      )[0][0];
+      expect(updateArg.data).not.toHaveProperty('role');
+      expect(updateArg.data).not.toHaveProperty('sessionEpoch');
+      // The transition is audited (UPDATED, no new enum) in the SAME tx, with the onboarding action payload.
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'uuid-onb',
+        eventType: 'UPDATED',
+        payload: { action: 'provisionLocalAccount', directoryOnly: false },
+        actor: { userId: 'admin-1' },
+      });
+      // The plaintext is returned to the admin ONCE (AdminPasswordResetResult shape).
+      expect(result).toEqual({ temporaryPassword: 'Temp-Pass-9xZ!' });
+    });
+
+    it('400 when the target is NOT a directory person (already a real account) — mints nothing', async () => {
+      user.findFirst.mockResolvedValue({ ...DIRECTORY, directoryOnly: false });
+
+      await expect(
+        service.provisionLocalAccount('uuid-onb', 'admin-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+      expect(user.update).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('400 in OIDC mode — no credential is ever minted (invariant not bypassed)', async () => {
+      idp.kind = 'zitadel';
+      idp.supportsManagement = true;
+      user.findFirst.mockResolvedValue(DIRECTORY);
+
+      await expect(
+        service.provisionLocalAccount('uuid-onb', 'admin-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+      expect(user.update).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('404 when the person is missing or soft-deleted (findOne filters) — mints nothing', async () => {
+      user.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.provisionLocalAccount('missing', 'admin-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+      expect(user.update).not.toHaveBeenCalled();
+    });
+  });
+
   // SEC-006: externalId is no longer a client-settable create field (it is server-owned, ADR-0016).
   // The schema-level guard is covered by packages/shared user.test.ts; the service just forwards the
   // (already-validated) payload to Prisma, asserted by the case above.

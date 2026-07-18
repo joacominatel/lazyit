@@ -36,7 +36,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { TableCell } from "@/components/ui/table";
-import { useInfraNodes } from "@/lib/api/hooks/use-infra-nodes";
+import { INFRA_LIVE_POLL_MS, useInfraNodes } from "@/lib/api/hooks/use-infra-nodes";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { statusTone } from "@/lib/infra/canvas";
@@ -122,11 +122,15 @@ export function ServersTableView() {
     isError,
     error,
     refetch,
-  } = useInfraNodes({
-    kind: kindFilter === "ALL" ? undefined : kindFilter,
-    status: statusFilter === "ALL" ? undefined : statusFilter,
-    state: stateFilter === "ALL" ? undefined : stateFilter,
-  });
+  } = useInfraNodes(
+    {
+      kind: kindFilter === "ALL" ? undefined : kindFilter,
+      status: statusFilter === "ALL" ? undefined : statusFilter,
+      state: stateFilter === "ALL" ? undefined : stateFilter,
+    },
+    // Poll so live nodes show fresh lastReportedAt/status/IP without a manual reload (#1081).
+    { refetchInterval: INFRA_LIVE_POLL_MS },
+  );
 
   // Client-side text search over label + IP + linked asset name + each owner's name/email (#750).
   // The list is unpaged (see the file header), so we filter the loaded array in memory.

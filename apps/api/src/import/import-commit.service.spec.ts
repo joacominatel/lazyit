@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call,
    @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return,
-   @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unused-vars,
-   @typescript-eslint/only-throw-error, @typescript-eslint/require-await --
+   @typescript-eslint/no-unused-vars, @typescript-eslint/only-throw-error,
+   @typescript-eslint/require-await, no-unsafe-optional-chaining --
    this spec builds hand-rolled `any`-typed fake Prisma/service doubles (see `makeAssets`,
    `makeRefService`, `makeService`, etc.) and scripted `_args`/`_principal`/`_opts` stand-ins
    that mirror real service signatures without using them; both patterns are pre-existing
@@ -260,6 +260,34 @@ function makeRefService(prefix: string) {
       ...data,
     })),
     restore: jest.fn(async (id: string) => ({ id, deletedAt: null })),
+  };
+}
+
+/**
+ * A stateful, case-insensitive `findFirst({ where: { name } })` double (#1063) — mirrors the real
+ * `mode:'insensitive'` Postgres probe against an in-memory list a paired `create` override appends
+ * to, so a spec can prove `'Piso 3'` and `'piso 3'` resolve to the SAME row instead of a duplicate.
+ * Falls back to exact-string matching if a caller ever passes a plain string (pre-fix shape) — so a
+ * regression back to the old case-sensitive probe makes the "resolves to ONE row" assertion fail.
+ */
+function makeInsensitiveProbe() {
+  const rows: { id: string; name: string }[] = [];
+  return {
+    rows,
+    findFirst: (args: {
+      where: { name: string | { equals: string; mode?: string } };
+    }) => {
+      const clause = args.where.name;
+      const wanted = typeof clause === 'string' ? clause : clause.equals;
+      const insensitive =
+        typeof clause !== 'string' && clause.mode === 'insensitive';
+      const hit = rows.find((r) =>
+        insensitive
+          ? r.name.toLowerCase() === wanted.toLowerCase()
+          : r.name === wanted,
+      );
+      return Promise.resolve(hit ? { id: hit.id } : null);
+    },
   };
 }
 
@@ -645,7 +673,7 @@ describe('ImportCommitService.commit', () => {
     expect(prisma._rowStatuses.get(2)?.status).toBe('FAILED');
     expect(prisma._rowStatuses.get(3)?.status).toBe('COMMITTED'); // batch continued past the failure
     // PII-free reason — a code, never the colliding value.
-    expect((prisma._rowStatuses.get(2)?.error as any).reason).toBe(
+    expect((prisma._rowStatuses.get(2)?.error).reason).toBe(
       'unique-taken-since-preview',
     );
   });
@@ -672,7 +700,7 @@ describe('ImportCommitService.commit', () => {
     const result = await service.commit('sess-1', OWNER);
 
     expect(result.failed).toBe(1);
-    expect((prisma._rowStatuses.get(1)?.error as any).reason).toBe(
+    expect((prisma._rowStatuses.get(1)?.error).reason).toBe(
       'reference-missing-since-preview',
     );
   });
@@ -730,9 +758,7 @@ describe('ImportCommitService.commit', () => {
     expect(result.failed).toBe(1);
     expect(result.committed).toBe(1);
     expect(prisma._rowStatuses.get(1)?.status).toBe('FAILED');
-    expect((prisma._rowStatuses.get(1)?.error as any).reason).toBe(
-      'validation',
-    );
+    expect((prisma._rowStatuses.get(1)?.error).reason).toBe('validation');
     // create() was reached ONLY for the valid row — the doomed row never entered the tag allocator.
     expect(assets.create).toHaveBeenCalledTimes(1);
     expect(assets._calls[0].data.name).toBe('B');
@@ -1177,6 +1203,64 @@ describe('ImportCommitService.commit', () => {
     expect(assets._calls[0].data.locationId).toBe('clocexistinghq0000000001');
   });
 
+  it('createReference is case-insensitive: "Piso 3" and "piso 3" resolve to ONE Location, not two (#1063)', async () => {
+    const state = sessionWith(
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Location: 'Piso 3' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active', Location: 'piso 3' },
+        },
+      ],
+      plan({
+        // The dry-run plan can legitimately carry BOTH casings as separate `create` conflicts (each
+        // distinct normalized value is resolved independently) — the commit engine's find-first is
+        // what must collapse them into one live row.
+        conflicts: [
+          {
+            entity: 'Location',
+            field: 'locationId',
+            normalizedValue: 'Piso 3',
+            outcome: 'create',
+            targetId: null,
+          },
+          {
+            entity: 'Location',
+            field: 'locationId',
+            normalizedValue: 'piso 3',
+            outcome: 'create',
+            targetId: null,
+          },
+        ],
+      }),
+    );
+    const prisma = makePrisma(state);
+    const probe = makeInsensitiveProbe();
+    prisma.location.findFirst =
+      probe.findFirst as unknown as typeof prisma.location.findFirst;
+    const locations = makeRefService('location');
+    locations.create = jest.fn((data: { name: string }) => {
+      const row = { id: 'clocpiso3created0000001', name: data.name };
+      probe.rows.push(row);
+      return Promise.resolve(row);
+    }) as never;
+    const { service, assets } = makeService(state, { prisma, locations });
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(result.committed).toBe(2);
+    expect(locations.create).toHaveBeenCalledTimes(1); // ONE Location, despite two casings
+    expect(assets._calls[0].data.locationId).toBe('clocpiso3created0000001');
+    expect(assets._calls[1].data.locationId).toBe('clocpiso3created0000001');
+  });
+
   // ===== Etapa 1: real Model manufacturer + category, find-or-create category, specs ===========
 
   /** A mapping that maps name/status, model as an FK ref, plus a modelConfig (manufacturer+category). */
@@ -1465,6 +1549,133 @@ describe('ImportCommitService.commit', () => {
     expect(categories.create).not.toHaveBeenCalled(); // reused the live one
     expect(models.create.mock.calls[0][0].categoryId).toBe(
       'ccategoryexistingsrv00001',
+    );
+  });
+
+  it('createReference is case-insensitive: "ThinkPad" and "thinkpad" resolve to ONE AssetModel (#1063)', async () => {
+    const state = sessionWith(
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: { Name: 'A', Status: 'active', Model: 'ThinkPad' },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: { Name: 'B', Status: 'active', Model: 'thinkpad' },
+        },
+      ],
+      plan({
+        conflicts: [
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'ThinkPad',
+            outcome: 'create',
+            targetId: null,
+          },
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'thinkpad',
+            outcome: 'create',
+            targetId: null,
+          },
+        ],
+      }),
+    );
+    const prisma = makePrisma(state);
+    const probe = makeInsensitiveProbe();
+    prisma.assetModel.findFirst =
+      probe.findFirst as unknown as typeof prisma.assetModel.findFirst;
+    const models = makeRefService('model');
+    models.create = jest.fn((data: { name: string }) => {
+      const row = { id: 'cmodelthinkpad0000000001', name: data.name };
+      probe.rows.push(row);
+      return Promise.resolve(row);
+    }) as never;
+    const { service, assets } = makeService(state, { prisma, models });
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(result.committed).toBe(2);
+    expect(models.create).toHaveBeenCalledTimes(1); // ONE AssetModel, despite two casings
+    expect(assets._calls[0].data.modelId).toBe('cmodelthinkpad0000000001');
+    expect(assets._calls[1].data.modelId).toBe('cmodelthinkpad0000000001');
+  });
+
+  it('findOrCreateCategory is case-insensitive: "Laptop" and "laptop" resolve to ONE AssetCategory (#1063)', async () => {
+    const state = sessionWithMapping(
+      [
+        {
+          id: 1,
+          rowIndex: 0,
+          status: 'VALID',
+          raw: {
+            Name: 'A',
+            Status: 'active',
+            Model: 'Model One',
+            Manufacturer: 'Dell',
+            Category: 'Laptop',
+          },
+        },
+        {
+          id: 2,
+          rowIndex: 1,
+          status: 'VALID',
+          raw: {
+            Name: 'B',
+            Status: 'active',
+            Model: 'Model Two',
+            Manufacturer: 'HP',
+            Category: 'laptop',
+          },
+        },
+      ],
+      plan({
+        conflicts: [
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'Model One',
+            outcome: 'create',
+            targetId: null,
+          },
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'Model Two',
+            outcome: 'create',
+            targetId: null,
+          },
+        ],
+      }),
+      MODEL_CONFIG_MAPPING,
+    );
+    const prisma = makePrisma(state);
+    const probe = makeInsensitiveProbe();
+    prisma.assetCategory.findFirst =
+      probe.findFirst as unknown as typeof prisma.assetCategory.findFirst;
+    const categories = makeCategories();
+    categories.create = jest.fn((data: { name: string }) => {
+      const row = { id: 'ccategorylaptop0000000001', name: data.name };
+      probe.rows.push(row);
+      return Promise.resolve(row);
+    }) as never;
+    const { service, models } = makeService(state, { prisma, categories });
+
+    const result = await service.commit('sess-1', OWNER);
+
+    expect(result.committed).toBe(2);
+    expect(categories.create).toHaveBeenCalledTimes(1); // ONE category, despite two casings
+    expect(models.create.mock.calls[0][0].categoryId).toBe(
+      'ccategorylaptop0000000001',
+    );
+    expect(models.create.mock.calls[1][0].categoryId).toBe(
+      'ccategorylaptop0000000001',
     );
   });
 

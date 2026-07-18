@@ -6,6 +6,7 @@ import {
 import type { EnqueueUpdate, UpdateSettings } from "@lazyit/shared";
 import { isActiveUpdateRun, type UpdateRunStatus } from "@lazyit/shared";
 import {
+  cancelUpdate,
   enqueueUpdate,
   getInstanceVersion,
   getUpdateSettings,
@@ -95,6 +96,23 @@ export function useEnqueueUpdate() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: EnqueueUpdate) => enqueueUpdate(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: instanceKeys.updateStatus(),
+      });
+    },
+  });
+}
+
+/**
+ * Cancel a stuck `requested` update (`POST /instance/update/cancel`, issue #1065). On success the status
+ * card refetches: the cancelled run drops out of `activeRun` (now terminal), so the card returns to the
+ * normal "check for updates" / "N behind" state and a fresh update can be enqueued.
+ */
+export function useCancelUpdate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => cancelUpdate(),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: instanceKeys.updateStatus(),

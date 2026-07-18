@@ -51,6 +51,12 @@ export interface DetectedShape {
    * only). Optional because sessions parsed before this field landed have no `samples` key.
    */
   samples?: Record<string, string[]>;
+  /**
+   * How many data rows had an unexpected cell count vs. the header width (#1062) — a non-blocking
+   * signal that a delimiter/quoting shift may have misaligned some rows' fields. Optional because
+   * sessions parsed before this field landed have no `raggedRowCount` key.
+   */
+  raggedRowCount?: number;
 }
 
 /** A session read with its rows + an at-a-glance summary (owner-scoped). */
@@ -171,7 +177,8 @@ export class ImportSessionService {
       entity: session.entity.toLowerCase() as ImportEntity,
       status: session.status,
       detected,
-      error: (session.error as { phase: string; message: string } | null) ?? null,
+      error:
+        (session.error as { phase: string; message: string } | null) ?? null,
       rowCount: session.rows.length,
       headers: detected?.headers ?? [],
       // Surface the per-column samples from the detected blob (ADR-0069 REDESIGN §4.2); default to {}
@@ -213,7 +220,7 @@ export class ImportSessionService {
     }
     await this.prisma.importSession.updateMany({
       where: { id: sessionId, ownerId },
-      data: { mapping: mapping as object, status: 'MAPPED' },
+      data: { mapping, status: 'MAPPED' },
     });
   }
 }

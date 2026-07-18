@@ -10,6 +10,11 @@
  *
  * This module is framework-pure (no Prisma import) so it can be unit-tested in isolation. The
  * Prisma client extension that calls {@link withSoftDeleteFilter} is wired in `prisma.service.ts`.
+ *
+ * SCOPE (#1067): this filter only rewrites the TOP-LEVEL `where` of a read. A soft-deletable model
+ * reached through a nested `select`/`include` (a to-one relation projection) is NOT auto-scoped — the
+ * extension never sees those args. Such reads must carry an explicit `<relation>: { deletedAt: null }`
+ * filter in the parent `where` themselves (e.g. loadServiceAccountMembers, infra children, KB backlinks).
  */
 
 // Mutable domain entities that carry a `deletedAt` column (ADR-0006). Append-only tables and

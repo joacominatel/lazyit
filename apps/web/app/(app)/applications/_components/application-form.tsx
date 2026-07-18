@@ -10,6 +10,7 @@ import {
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { CreatableField } from "@/components/creatable-field";
@@ -22,6 +23,9 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  FieldLegend,
+  FieldSeparator,
+  FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -39,11 +43,22 @@ import {
   useUpdateApplication,
 } from "@/lib/api/hooks/use-application-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { majorToMinor, minorToMajor } from "@/lib/utils/money";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
 const FORM_ID = "application-form";
 /** Radix Select forbids an empty-string item value; use a sentinel for "no category". */
 const NONE = "__none__";
+
+/** ISO datetime → "YYYY-MM-DD" for a date input (empty when absent). */
+function isoToDateInput(iso?: string | null): string {
+  return iso ? iso.slice(0, 10) : "";
+}
+
+/** "YYYY-MM-DD" from a date input → ISO datetime; `null` when empty so a PATCH can CLEAR it. */
+function dateInputToIso(value: string): string | null {
+  return value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null;
+}
 
 type ApplicationFormValues = {
   name: string;
@@ -131,7 +146,35 @@ export function ApplicationForm({
     defaultValues: toFormValues(application, cloneSource),
   });
 
+  // License / seat tracking (#949) lives OUTSIDE react-hook-form — same rationale as the asset money
+  // fields (#954): they're edited in MAJOR units / raw text, but the schema validates minor-unit ints,
+  // and a `strictObject` resolver would reject a half-typed "12.". Seed from the edited application, or
+  // (on a clone) the source's plan config. `renewalDate` is a specific subscription date, so it seeds
+  // only on edit — a clone starts with a blank renewal, mirroring how asset clones drop dates.
+  const licenseSource = application ?? cloneSource;
+  const [seatsPurchased, setSeatsPurchased] = useState(() =>
+    licenseSource?.seatsPurchased != null
+      ? String(licenseSource.seatsPurchased)
+      : "",
+  );
+  const [costPerSeat, setCostPerSeat] = useState(() =>
+    licenseSource?.costPerSeat != null
+      ? String(minorToMajor(licenseSource.costPerSeat))
+      : "",
+  );
+  const [renewalDate, setRenewalDate] = useState(() =>
+    isoToDateInput(application?.renewalDate),
+  );
+
   const onSubmit = form.handleSubmit((values) => {
+    // License fields → wire shape. Blank = null (create: "untracked"; PATCH: clear it). Seats is a
+    // plain non-negative int; costPerSeat is major-unit text coerced to minor units (never re-coerced
+    // server-side); renewalDate is an ISO datetime (or null). The server re-validates non-negative.
+    const seats = seatsPurchased.trim();
+    const seatsPurchasedValue =
+      seats === "" || !Number.isFinite(Number(seats))
+        ? null
+        : Math.trunc(Number(seats));
     const payload = {
       name: values.name,
       description: values.description,
@@ -140,6 +183,9 @@ export function ApplicationForm({
       categoryId: values.categoryId,
       isCritical: values.isCritical,
       notes: values.notes,
+      seatsPurchased: seatsPurchasedValue,
+      costPerSeat: majorToMinor(costPerSeat),
+      renewalDate: dateInputToIso(renewalDate),
     };
 
     if (application) {
@@ -362,6 +408,68 @@ export function ApplicationForm({
           )}
         />
       </FieldGroup>
+
+      {/* ── License & seats (#949): optional per-application license tracking. Seats purchased + cost
+          per seat (entered in major units, stored in minor units like asset cost) + a renewal date.
+          "Seats used" is derived on the detail page from distinct active grants — never entered here.
+          All optional: leave blank for apps whose licensing you don't track. ────────────────────── */}
+      <FieldSeparator />
+      <FieldSet>
+        <FieldLegend>{t("form.licenseTitle")}</FieldLegend>
+        <FieldDescription>{t("form.licenseDescription")}</FieldDescription>
+        <FieldGroup>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field>
+              <FieldLabel htmlFor="seatsPurchased">
+                {t("form.seatsPurchasedLabel")}
+              </FieldLabel>
+              <Input
+                id="seatsPurchased"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                value={seatsPurchased}
+                onChange={(event) => setSeatsPurchased(event.target.value)}
+                placeholder={t("form.seatsPurchasedPlaceholder")}
+              />
+              <FieldDescription>
+                {t("form.seatsPurchasedHelp")}
+              </FieldDescription>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="costPerSeat">
+                {t("form.costPerSeatLabel")}
+              </FieldLabel>
+              <Input
+                id="costPerSeat"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={costPerSeat}
+                onChange={(event) => setCostPerSeat(event.target.value)}
+                placeholder={t("form.costPerSeatPlaceholder")}
+              />
+              <FieldDescription>{t("form.costPerSeatHelp")}</FieldDescription>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="renewalDate">
+                {t("form.renewalDateLabel")}
+              </FieldLabel>
+              <Input
+                id="renewalDate"
+                type="date"
+                value={renewalDate}
+                onChange={(event) => setRenewalDate(event.target.value)}
+              />
+              <FieldDescription>{t("form.renewalDateHelp")}</FieldDescription>
+            </Field>
+          </div>
+        </FieldGroup>
+      </FieldSet>
 
       <div className="flex justify-end gap-2">
         <Button

@@ -279,9 +279,24 @@ class FakePrisma {
   };
 
   readonly serviceAccountVaultMembership = {
-    findMany: ({ where }: { where: { vaultId: string }; orderBy?: unknown }) =>
+    findMany: ({
+      where,
+    }: {
+      where: { vaultId: string; serviceAccount?: { deletedAt?: Date | null } };
+      orderBy?: unknown;
+    }) =>
       this.saMemberships
-        .filter((m) => m.vaultId === where.vaultId)
+        .filter((m) => {
+          if (m.vaultId !== where.vaultId) return false;
+          // Honor the nested to-one relation filter (#1067): a revoked SA's membership is excluded.
+          if (where.serviceAccount?.deletedAt === null) {
+            const sa = this.serviceAccounts.find(
+              (s) => s.id === m.serviceAccountId,
+            );
+            if (!sa || sa.deletedAt !== null) return false;
+          }
+          return true;
+        })
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
         .map((m) => {
           const sa = this.serviceAccounts.find(
@@ -646,6 +661,27 @@ describe('SecretManagerService — SA programmatic retrieval (ADR-0080)', () => 
       expect(
         await svc.listServiceAccountMembers(human('alice'), vaultId),
       ).toEqual([]);
+    });
+
+    it('excludes a REVOKED (soft-deleted) SA whose membership row survives (#1067)', async () => {
+      const { svc, db } = build();
+      const { vaultId, saId } = seed(db, { humanMemberId: 'alice' });
+      await svc.grantServiceAccountMembership(human('alice'), vaultId, {
+        serviceAccountId: saId,
+        ...WRAP,
+      });
+      // Revoke the SA = soft delete. The membership row is NOT dropped (only a keypair rotation does that),
+      // so without the nested `serviceAccount: { deletedAt: null }` guard it would resurface as a live member.
+      Object.assign(db.serviceAccounts.find((s) => s.id === saId)!, {
+        deletedAt: new Date(),
+      });
+      expect(db.saMemberships).toHaveLength(1); // the crypto row still exists
+
+      const members = await svc.listServiceAccountMembers(
+        human('alice'),
+        vaultId,
+      );
+      expect(members).toEqual([]);
     });
 
     it('403s a human who is neither ADMIN nor a live member', async () => {

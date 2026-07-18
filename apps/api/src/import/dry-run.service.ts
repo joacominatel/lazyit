@@ -99,8 +99,10 @@ export class ImportDryRunService {
     // 1. Coerce + validate every row; collect the distinct reference values to resolve.
     const rowResults: RowResult[] = [];
     // perRow: the coerced FK references, kept to compute the per-conflict blast radius.
-    const perRowRefs: { rowIndex: number; references: Record<string, string> }[] =
-      [];
+    const perRowRefs: {
+      rowIndex: number;
+      references: Record<string, string>;
+    }[] = [];
     const tagDecisions: AssetTagDecision[] = [];
 
     // distinct (entity, field, normalizedValue) → set of affected row indexes.
@@ -122,11 +124,18 @@ export class ImportDryRunService {
         rowResults.push({
           rowIndex,
           status: 'invalid',
-          errors: [{ field: null, message: 'This row could not be processed.' }],
+          errors: [
+            { field: null, message: 'This row could not be processed.' },
+          ],
           entityId: null,
         });
         // Still emit a tag decision so the per-row arrays stay index-aligned with rowResults.
-        tagDecisions.push({ rowIndex, mode: 'none', tag: null, collision: false });
+        tagDecisions.push({
+          rowIndex,
+          mode: 'none',
+          tag: null,
+          collision: false,
+        });
         continue;
       }
       const { payload, references, enumMisses } = coerced;
@@ -151,11 +160,16 @@ export class ImportDryRunService {
       // with an identity key (email/legajo/username) but no `name` passed preview, then FAILED every
       // row at commit and orphaned the asset. Surface those issues HERE so the operator fixes them first.
       if (coerced.person !== undefined) {
-        const personParsed = CreateDirectoryPersonSchema.safeParse(coerced.person);
+        const personParsed = CreateDirectoryPersonSchema.safeParse(
+          coerced.person,
+        );
         if (!personParsed.success) {
           for (const issue of personParsed.error.issues) {
             errors.push({
-              field: issue.path.length > 0 ? `person.${String(issue.path[0])}` : "person",
+              field:
+                issue.path.length > 0
+                  ? `person.${String(issue.path[0])}`
+                  : 'person',
               message: issue.message,
             });
           }
@@ -187,9 +201,9 @@ export class ImportDryRunService {
             field,
             normalizedValue,
           });
-          (conflictRows.get(key) ?? conflictRows.set(key, new Set()).get(key)!).add(
-            rowIndex,
-          );
+          (
+            conflictRows.get(key) ?? conflictRows.set(key, new Set()).get(key)!
+          ).add(rowIndex);
         }
       }
 
@@ -267,7 +281,7 @@ export class ImportDryRunService {
   ): Promise<void> {
     const updated = await this.prisma.importSession.updateMany({
       where: { id: sessionId, ownerId },
-      data: { resolutionPlan: plan as object, status: 'DRY_RUN' },
+      data: { resolutionPlan: plan, status: 'DRY_RUN' },
     });
     if (updated.count === 0) {
       throw new NotFoundException(`Import session ${sessionId} not found`);
@@ -346,16 +360,18 @@ export class ImportDryRunService {
   }
 
   /**
-   * Location: by normalized name — EXACT after trim (ADR-0069 §5: per-key normalization is trim-only,
-   * NOT case-folded, mirroring how the name is actually stored + uniquely indexed). Probes WITH
-   * soft-deleted so a ghost location surfaces as a `restore` candidate.
+   * Location: by normalized name — case-folded (#1063), mirroring `resolveModel`'s soft name match so
+   * the preview agrees with the commit engine's find-or-create probe (`ImportCommitService.
+   * createReference`) and `'Piso 3'`/`'piso 3'` resolve to the SAME row instead of minting a duplicate.
+   * Probes WITH soft-deleted so a ghost location surfaces as a `restore` candidate.
    */
   private async resolveLocation(
     normalizedValue: string,
   ): Promise<ResolveResult> {
     const rows = await this.prisma.location.findMany({
-      where: { name: normalizedValue },
+      where: { name: { equals: normalizedValue, mode: 'insensitive' } },
       select: { id: true, name: true, deletedAt: true },
+      orderBy: { createdAt: 'asc' },
       ...({ includeSoftDeleted: true } as object),
     });
     const candidates: ConflictCandidate[] = rows.map((r) => ({
@@ -387,7 +403,8 @@ export class ImportDryRunService {
     suggested: ConflictOutcome;
     ambiguous: boolean;
   } {
-    if (candidates.length === 0) return { suggested: 'create', ambiguous: false };
+    if (candidates.length === 0)
+      return { suggested: 'create', ambiguous: false };
     if (candidates.length > 1) {
       // Ambiguous — suggest the safest non-destructive default (match a live one if all are live,
       // else restore), but flag it so the UI forces an explicit choice.
@@ -433,6 +450,7 @@ export class ImportDryRunService {
    */
   private async finalizeTags(
     decisions: AssetTagDecision[],
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- documented above: pre-existing ponytail placeholder, unused now.
     _perRowRefs: { rowIndex: number; references: Record<string, string> }[],
   ): Promise<AssetTagDecision[]> {
     const explicitTags = decisions

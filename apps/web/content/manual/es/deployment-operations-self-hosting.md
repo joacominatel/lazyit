@@ -127,7 +127,9 @@ contenido se cifra en el navegador y el servidor nunca lo ve en claro, ni siquie
 
 Vuelve a preguntar el host, los puertos y las opciones de red/TLS y reescribe el archivo de entorno en
 consecuencia. **Conserva tus secretos existentes y nunca toca tus datos**: solo cambian los ajustes de
-accesibilidad. Levanta de nuevo la pila y la instancia responderá en su nueva dirección.
+accesibilidad. Levanta de nuevo la pila y la instancia responderá en su nueva dirección. Las sesiones del
+navegador previas a la reconfiguración quedan obsoletas: se autorreparan hacia `/login` en su siguiente
+solicitud, así que quien tenga sesión iniciada solo debe volver a iniciarla.
 
 ## Niveles de despliegue
 

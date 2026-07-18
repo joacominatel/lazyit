@@ -742,6 +742,14 @@ print_post_up_guidance() {
    script does NOT create any user — that is the wizard's job.)
 EOF
 
+  if [ "$RECONFIGURE" -eq 1 ]; then
+    cat >&2 <<EOF
+
+  Existing browser sessions from before this reconfigure are now stale — they will
+  401 and self-heal to /login on their next request. No action needed; just sign in again.
+EOF
+  fi
+
   if [ "$DEPLOY_MODE" = "lan" ]; then
     cat >&2 <<EOF
 

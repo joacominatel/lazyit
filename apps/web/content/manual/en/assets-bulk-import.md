@@ -66,6 +66,14 @@ you're looking at before you decide where it goes.
 > file, so they can include employee data such as names and emails. Nothing is written anywhere until
 > the final commit; the values are only shown to you, the operator running the import.
 
+If any row in your file had a different number of columns than the header — most often an unescaped
+delimiter inside a text cell (for example a `;` inside a *Notes* value in a `;`-delimited file) — this
+screen shows a warning naming how many rows were affected. It's **informational, not blocking**: the
+importer still tolerates the mismatch (short rows get blank cells, extra cells are dropped), but a
+shifted delimiter can silently push a later value — like the serial number — into the wrong field. If
+you see this warning, check the flagged rows in your source file for stray delimiters or unbalanced
+quotes before continuing.
+
 For each column, open it and pick one target from the dropdown:
 
 - **A lazyit field**, grouped by entity:

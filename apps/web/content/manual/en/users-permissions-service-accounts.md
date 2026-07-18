@@ -63,6 +63,12 @@ before wiring it into a system.
 - **Audit** — every create, rotate, permission change, revoke and restore is recorded, and any action
   a service account performs is attributed to that account in the activity history, never to a person.
 
+> **Revoking suspends the token — it does not remove vault access.** Revoke only stops the token from
+> authenticating; any Secret Manager vault the account was granted stays granted, so **restoring** it
+> later resumes every one of those vaults with no re-grant needed. If a service account should lose the
+> ability to read a specific vault, revoke it from **that vault's Members** list instead — see
+> [Vaults & members](/help/secret-manager-vaults-members).
+
 ## System-managed accounts
 
 Some accounts are created and owned by lazyit itself — for example the account the Applications Workflow

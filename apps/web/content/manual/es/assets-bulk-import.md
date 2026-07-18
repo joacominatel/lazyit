@@ -69,6 +69,15 @@ archivo, para que sepas siempre qué estás viendo antes de decidir a dónde va.
 > ningún sitio hasta la confirmación final; los valores solo se te muestran a ti, el operador que
 > ejecuta la importación.
 
+Si alguna fila de tu archivo tuvo una cantidad de columnas distinta a la del encabezado — lo más común
+es un delimitador sin escapar dentro de una celda de texto (por ejemplo un `;` dentro de un valor de
+*Notas* en un archivo delimitado por `;`) — esta pantalla muestra una advertencia con cuántas filas se
+vieron afectadas. Es **informativa, no bloqueante**: el importador igual tolera el desajuste (las filas
+cortas reciben celdas vacías, las celdas de más se descartan), pero un delimitador corrido puede empujar
+en silencio un valor posterior — como el número de serie — al campo equivocado. Si ves esta advertencia,
+revisá las filas señaladas en tu archivo de origen en busca de delimitadores sueltos o comillas
+desbalanceadas antes de continuar.
+
 Para cada columna, ábrela y elige un destino en el desplegable:
 
 - **Un campo de lazyit**, agrupado por entidad:

@@ -213,6 +213,7 @@
     "statusUpdatedToast": "Estado actualizado.",
     "statusError": "No se pudo actualizar el estado.",
     "detailsTitle": "Detalles",
+    "reportedFactsTitle": "Datos reportados",
     "labelLabel": "Nombre",
     "labelEditHint": "Hacé clic en el título para renombrar",
     "labelEmpty": "El nombre es obligatorio.",
