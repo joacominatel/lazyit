@@ -818,7 +818,9 @@ export class ImportCommitService {
         // distinct id the precedence is moot, but the ordering is the contract a multi-key single-user row
         // resolves by. Existing behavior: link to it.
         const matched =
-          matches.find((m) => data.email !== undefined && m.email === data.email) ??
+          matches.find(
+            (m) => data.email !== undefined && m.email === data.email,
+          ) ??
           matches.find(
             (m) => data.legajo !== undefined && m.legajo === data.legajo,
           ) ??
