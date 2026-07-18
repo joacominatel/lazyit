@@ -8,6 +8,7 @@ import {
   createUser,
   deleteUser,
   offboardUser,
+  provisionLocalUserAccount,
   provisionUserAccount,
   resetUserPassword,
   restoreUser,
@@ -155,6 +156,24 @@ export function useProvisionUserAccount() {
   return useMutation({
     mutationFn: (id: string) => provisionUserAccount(id),
     onSuccess: (_user, id) => {
+      queryClient.invalidateQueries({ queryKey: userKeys.all });
+      queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
+    },
+  });
+}
+
+/**
+ * Onboard a directory person in LOCAL auth mode (`POST /users/:id/provision-local-account`, `user:manage`
+ * — ADR-0086 §5 / issue #1072). Mints a one-time temporary password and flips the person into a login
+ * account (keeping their role), resolving to the temp password shown ONCE by the calling component. On
+ * success the person stops being directory-only, so this invalidates the users list AND the user's detail
+ * so both reflect the onboarding. The temp password rides only the mutation result — never the cache.
+ */
+export function useProvisionLocalUserAccount() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => provisionLocalUserAccount(id),
+    onSuccess: (_result, id) => {
       queryClient.invalidateQueries({ queryKey: userKeys.all });
       queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
     },
