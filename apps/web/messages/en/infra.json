@@ -213,6 +213,7 @@
     "statusUpdatedToast": "Status updated.",
     "statusError": "Couldn't update the status.",
     "detailsTitle": "Details",
+    "reportedFactsTitle": "Reported facts",
     "labelLabel": "Name",
     "labelEditHint": "Click the title to rename",
     "labelEmpty": "A name is required.",

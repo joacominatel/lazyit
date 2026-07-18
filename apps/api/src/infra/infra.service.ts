@@ -7,8 +7,11 @@ import {
 } from '@nestjs/common';
 import {
   isPlausibleEdge,
+  primaryIpv4,
+  sanitizeSerial,
   type AgentReport,
   type AgentReportAck,
+  type AgentReportHost,
   type AttachInfraSecret,
   type ConfirmInfraNode,
   type CreateInfraEdge,
@@ -182,34 +185,45 @@ export class InfraService {
     // keys, plus the report timestamp for provenance. Stored verbatim — validated already by
     // `AgentReportSchema` at the controller. `software` is omitted when the agent couldn't list it.
     // `agentVersion` is NOT duplicated here (#907): it now lives in its own queryable column below.
-    const specs: Prisma.InputJsonValue = {
+    // Held as a plain object (not just `Prisma.InputJsonValue`) so the linked-Asset specs sync can
+    // spread its keys (#1081).
+    const blob: AgentReportSpecsBlob = {
       host: report.host,
       ...(report.software !== undefined ? { software: report.software } : {}),
       reportedAt: report.reportedAt,
     };
+    const specs = blob as Prisma.InputJsonValue;
     const now = new Date();
+    // The primary IPv4 promoted to the node's `ipAddress` (#1081) — a display fact, undefined on a
+    // partial/unprivileged report (then we never fabricate or clear an IP).
+    const primaryIp = primaryIpv4(report.host);
 
     // Reconcile by the dedup key over non-deleted nodes (the soft-delete extension scopes findFirst).
+    // `assetId`/`ipAddressSource` are selected so the KNOWN-key refresh can sync the linked Asset's
+    // specs and honour a human's MANUAL IP (#1081).
     const existing = await this.prisma.infraNode.findFirst({
       where: {
         reportingSource: report.reportingSource,
         externalId: report.externalId,
       },
-      select: { id: true },
+      select: { id: true, assetId: true, ipAddressSource: true },
     });
 
     if (existing) {
       // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
       // human's and is deliberately left untouched.
       return this.refreshKnownNode(
-        existing.id,
-        specs,
+        existing,
+        blob,
         now,
         report.agentVersion,
+        primaryIp,
       );
     }
 
     // New host: a PENDING proposal in the review tray. No backing Asset until a human confirms (§3).
+    // Its `ipAddress` is seeded from the report (source=AGENT) so the topology card shows the IP with
+    // zero hand-entry — an IP is a display fact; setting it pre-confirm does NOT bypass the human gate.
     try {
       const created = await this.prisma.infraNode.create({
         data: {
@@ -222,6 +236,9 @@ export class InfraService {
           externalId: report.externalId,
           lastReportedAt: now,
           agentVersion: report.agentVersion,
+          ...(primaryIp !== undefined
+            ? { ipAddress: primaryIp, ipAddressSource: 'AGENT' as const }
+            : {}),
           specs,
         },
         select: { id: true, state: true },
@@ -243,16 +260,17 @@ export class InfraService {
             reportingSource: report.reportingSource,
             externalId: report.externalId,
           },
-          select: { id: true },
+          select: { id: true, assetId: true, ipAddressSource: true },
         });
         // No loop: after P2002 the row exists. If it somehow doesn't (e.g. it was soft-deleted in the
         // same instant so findFirst can't see it), rethrow the original error rather than inventing one.
         if (raced) {
           return this.refreshKnownNode(
-            raced.id,
-            specs,
+            raced,
+            blob,
             now,
             report.agentVersion,
+            primaryIp,
           );
         }
       }
@@ -264,20 +282,75 @@ export class InfraService {
    * The curation-preserving "known host" update, shared by the normal KNOWN-key branch and the
    * P2002 race fallback in `ingestReport`. Refreshes inventory FACTS + liveness ONLY — it NEVER
    * writes `state`/`label`/`x`/`y`/`assetId`/`source`, so a human's curation survives every check-in.
+   *
+   * Fact promotion (#1081): the node's `ipAddress` is OVERWRITTEN with the report's primary IPv4 on
+   * every check-in (a live fact) UNLESS a human curated it (`ipAddressSource === 'MANUAL'`), in which
+   * case the human value is never clobbered; a report with no IPv4 leaves the existing value intact
+   * (never nulled). When the node is asset-backed, the linked Asset's `specs` snapshot is refreshed
+   * too, so the Asset inventory panel stays fresh — its human-owned columns (serial/name/model) are
+   * left untouched.
    */
   private async refreshKnownNode(
-    id: string,
-    specs: Prisma.InputJsonValue,
+    node: { id: string; assetId: string | null; ipAddressSource: string },
+    blob: AgentReportSpecsBlob,
     now: Date,
     agentVersion: string,
+    primaryIp: string | undefined,
   ): Promise<AgentReportAck> {
+    const data: Prisma.InfraNodeUpdateInput = {
+      specs: blob,
+      status: 'ONLINE',
+      lastReportedAt: now,
+      agentVersion,
+    };
+    // Overwrite the IP with the live fact — but only when the agent owns it (never a MANUAL edit) and
+    // the report actually carries one (never clear a good IP on a partial report). CEO policy #1081.
+    if (node.ipAddressSource !== 'MANUAL' && primaryIp !== undefined) {
+      data.ipAddress = primaryIp;
+    }
     const updated = await this.prisma.infraNode.update({
-      where: { id },
-      data: { specs, status: 'ONLINE', lastReportedAt: now, agentVersion },
+      where: { id: node.id },
+      data,
       select: { id: true, state: true },
     });
+    // Keep the linked Asset's specs snapshot fresh on every report (agent-owned facts only).
+    if (node.assetId) {
+      await this.syncAssetSpecs(node.assetId, blob);
+    }
     void this.syncNodeToSearch(updated.id);
     return { nodeId: updated.id, state: updated.state, accepted: true };
+  }
+
+  /**
+   * Refresh a linked Asset's `specs` inventory snapshot from a fresh report (#1081) — the host facts
+   * blob (`host`/`software`/`reportedAt`), so the Asset inventory panel mirrors the node on every
+   * check-in. Merges over the existing specs: the three agent-owned keys are replaced wholesale (a
+   * report that dropped `software` drops it here too), while every human-added key (custom fields, the
+   * `_infraAutoCreated` marker, a serial fallback) is preserved. Writes `specs` DIRECTLY (not via
+   * AssetsService.update) on purpose: this is an agent fact refresh, so it must NOT emit a
+   * SPECS_CHANGED history event on every report (that would flood the asset's audit trail) and must
+   * NEVER touch the Asset's human-owned serial/name/modelId. A soft-deleted asset is skipped — the
+   * soft-delete extension scopes `findFirst`, so a detached/archived asset simply resolves to null.
+   */
+  private async syncAssetSpecs(
+    assetId: string,
+    blob: AgentReportSpecsBlob,
+  ): Promise<void> {
+    const asset = await this.prisma.asset.findFirst({
+      where: { id: assetId },
+      select: { specs: true },
+    });
+    if (!asset) return; // soft-deleted / detached — nothing to refresh.
+    const existing = (asset.specs ?? {}) as Record<string, unknown>;
+    const merged: Record<string, unknown> = { ...existing };
+    delete merged.host;
+    delete merged.software;
+    delete merged.reportedAt;
+    Object.assign(merged, blob);
+    await this.prisma.asset.update({
+      where: { id: assetId },
+      data: { specs: merged as Prisma.InputJsonValue },
+    });
   }
 
   /**
@@ -311,14 +384,37 @@ export class InfraService {
     let assetId = node.assetId ?? undefined;
     if (trackAsAsset && !node.assetId) {
       const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
-      const created = await this.assets.create(
-        {
-          name: label,
-          status: 'UNKNOWN',
-          specs: { ...hostSpecs, [INFRA_AUTO_ASSET_MARKER]: true },
-        },
-        principal,
-      );
+      // Promote the discovered hardware serial to the canonical `Asset.serial` (#1081) — only a
+      // sanitized real serial (dmidecode junk placeholders dropped). The raw value always survives in
+      // `specs.host.hardware.serial`, so on a unique-serial collision we retry WITHOUT the serial
+      // rather than fail the confirm. `modelId` is deliberately left null (no AssetModel auto-create).
+      const host = (hostSpecs.host ?? {}) as AgentReportHost;
+      const serial = sanitizeSerial(host);
+      const assetSpecs = { ...hostSpecs, [INFRA_AUTO_ASSET_MARKER]: true };
+      let created: { id: string };
+      try {
+        created = await this.assets.create(
+          {
+            name: label,
+            status: 'UNKNOWN',
+            ...(serial !== undefined ? { serial } : {}),
+            specs: assetSpecs,
+          },
+          principal,
+        );
+      } catch (err) {
+        // A discovered serial that collides with an existing LIVE asset's serial (P2002 on
+        // `assets_serial_active_key`) must NOT fail the confirm — retry without it (the serial stays
+        // in specs). Any other error propagates unchanged.
+        if (serial !== undefined && isSerialUniqueCollision(err)) {
+          created = await this.assets.create(
+            { name: label, status: 'UNKNOWN', specs: assetSpecs },
+            principal,
+          );
+        } else {
+          throw err;
+        }
+      }
       assetId = created.id;
     }
 
@@ -590,6 +686,12 @@ export class InfraService {
       where: { id },
       data: {
         ...rest,
+        // A human edit to the IP marks it MANUAL (#1081) so the next agent report never clobbers the
+        // curated value — derived server-side (never client-settable) so `source` stays a trusted
+        // provenance marker. Clearing the IP is a human choice too, so it also stamps MANUAL.
+        ...(data.ipAddress !== undefined
+          ? { ipAddressSource: 'MANUAL' as const }
+          : {}),
         ...(specs !== undefined
           ? {
               specs:
@@ -908,6 +1010,35 @@ export class InfraService {
  * 5–20-person estate — ponytail: a generous constant, not a tunable knob nobody will turn.
  */
 const IMPACT_MAX_DEPTH = 64;
+
+/**
+ * Is this error a unique-serial collision on `Asset.serial` (#1081)? A P2002 whose target names the
+ * `assets_serial_active_key` partial-unique — i.e. a discovered serial already belongs to another live
+ * asset. `confirmNode` uses it to fall back to leaving the serial in specs instead of failing the
+ * confirm. Anything else is not a serial collision.
+ */
+function isSerialUniqueCollision(err: unknown): boolean {
+  if (
+    !(err instanceof Prisma.PrismaClientKnownRequestError) ||
+    err.code !== 'P2002'
+  ) {
+    return false;
+  }
+  const target = err.meta?.target;
+  const name = Array.isArray(target) ? target.join(',') : String(target);
+  return name.toLowerCase().includes('serial');
+}
+
+/**
+ * The inventory `specs` blob an agent report lands (#1081): host facts + optional software list + the
+ * report timestamp. A concrete type (not just `Prisma.InputJsonValue`) so the linked-Asset specs sync
+ * can spread its keys and the node/asset snapshots stay identical.
+ */
+type AgentReportSpecsBlob = {
+  host: AgentReportHost;
+  software?: AgentReport['software'];
+  reportedAt: string;
+};
 
 /** The lean owner-user shape AssetAssignmentsService inlines when `includeUser: true`. */
 interface AssignmentUser {

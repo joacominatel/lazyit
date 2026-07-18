@@ -2459,6 +2459,13 @@ enum InfraNodeSource {
   AGENT
 }
 
+/// Who owns a node's `ipAddress` (ADR-0074 §3 fact-promotion, issue #1081). AGENT (default) = a
+/// discovered live fact each report overwrites; MANUAL = a human-typed value the agent never clobbers.
+enum InfraNodeIpSource {
+  AGENT
+  MANUAL
+}
+
 /// Lifecycle (ADR-0070 §4): PENDING = in the v2 review tray, CONFIRMED = on the live map.
 enum InfraNodeState {
   CONFIRMED
@@ -2491,8 +2498,11 @@ model InfraNode {
   asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
   // Access surface (NOT a network model — ADR-0070 scope cuts).
-  ipAddress String? // primary IP, label-only (no validation/IPAM)
-  shortcuts Json? // [{ label, url }] — SSH/web UI/console links (validated by zod in @lazyit/shared)
+  ipAddress       String? // primary IP, label-only (no validation/IPAM)
+  // Who owns `ipAddress` (ADR-0074 §3, #1081): AGENT (default) = a discovered fact reports overwrite;
+  // MANUAL = a human edit the agent never clobbers. Stamped MANUAL server-side on a human IP edit.
+  ipAddressSource InfraNodeIpSource @default(AGENT)
+  shortcuts       Json? // [{ label, url }] — SSH/web UI/console links (validated by zod in @lazyit/shared)
   specs     Json? // loose per-kind attrs (ADR-0007 posture)
 
   // Canvas layout (free-move). v1: one board, x/y on the node. Multi-board => join later.
