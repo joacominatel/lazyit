@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { CreateApplicationSchema, isSafeApplicationUrl } from "./application";
+import {
+  ApplicationSchema,
+  CreateApplicationSchema,
+  isSafeApplicationUrl,
+  UpdateApplicationSchema,
+} from "./application";
 
 // SEC-008 — Application.url must not accept an executable scheme (javascript:/data:/…) that would
 // become a stored XSS sink when rendered as a link href, while still allowing scheme-less internal
@@ -55,5 +60,99 @@ describe("CreateApplicationSchema.url scheme guard (SEC-008)", () => {
         url: "https://jira.corp",
       }).success,
     ).toBe(true);
+  });
+});
+
+// License / seat tracking (#949). The read fields must be `.nullish()` so web object-construction
+// sites (Quick View mappers, fixtures, list joins) that omit them keep type-checking, and `seatsUsed`
+// is a DERIVED read-only value that create/update must reject (strictObject).
+describe("Application seat/license tracking (#949)", () => {
+  const baseRead = {
+    id: "cjld2cjxh0000qzrmn831i7rn",
+    name: "Jira",
+    description: null,
+    url: null,
+    vendor: null,
+    categoryId: null,
+    isCritical: false,
+    metadata: null,
+    notes: null,
+    createdAt: "2026-07-18T00:00:00.000Z",
+    updatedAt: "2026-07-18T00:00:00.000Z",
+    deletedAt: null,
+  };
+
+  test("ApplicationSchema: the seat fields are OPTIONAL (omitting all keeps parsing green)", () => {
+    expect(ApplicationSchema.safeParse(baseRead).success).toBe(true);
+  });
+
+  test("ApplicationSchema: the seat fields accept null (untracked)", () => {
+    expect(
+      ApplicationSchema.safeParse({
+        ...baseRead,
+        seatsPurchased: null,
+        costPerSeat: null,
+        renewalDate: null,
+        seatsUsed: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("ApplicationSchema: accepts populated seat fields (minor-unit cost, ISO renewal)", () => {
+    const parsed = ApplicationSchema.safeParse({
+      ...baseRead,
+      seatsPurchased: 50,
+      costPerSeat: 1299, // $12.99 in minor units
+      renewalDate: "2027-01-01T00:00:00.000Z",
+      seatsUsed: 12,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("CreateApplicationSchema: accepts the writable seat fields", () => {
+    expect(
+      CreateApplicationSchema.safeParse({
+        name: "GitHub",
+        seatsPurchased: 25,
+        costPerSeat: 2100,
+        renewalDate: "2027-03-15T00:00:00.000Z",
+      }).success,
+    ).toBe(true);
+  });
+
+  test("CreateApplicationSchema: REJECTS the derived seatsUsed (read-only)", () => {
+    expect(
+      CreateApplicationSchema.safeParse({
+        name: "GitHub",
+        seatsUsed: 5,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("CreateApplicationSchema: rejects a negative cost / seat count", () => {
+    expect(
+      CreateApplicationSchema.safeParse({ name: "X", seatsPurchased: -1 })
+        .success,
+    ).toBe(false);
+    expect(
+      CreateApplicationSchema.safeParse({ name: "X", costPerSeat: -100 })
+        .success,
+    ).toBe(false);
+  });
+
+  test("UpdateApplicationSchema: allows clearing the seat fields to null", () => {
+    expect(
+      UpdateApplicationSchema.safeParse({
+        seatsPurchased: null,
+        costPerSeat: null,
+        renewalDate: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("UpdateApplicationSchema: REJECTS the derived seatsUsed (read-only)", () => {
+    expect(UpdateApplicationSchema.safeParse({ seatsUsed: 5 }).success).toBe(
+      false,
+    );
   });
 });

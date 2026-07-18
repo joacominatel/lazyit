@@ -27,6 +27,8 @@ reconocerla y encontrarla:
 - **Crítica** — una marca para destinos especialmente sensibles (ver
   [Criticidad y alertas](/help/applications-access-criticality-alerts)).
 - **Descripción** y **Notas** — texto libre para dar contexto.
+- **Licencia y asientos** — datos de licenciamiento opcionales (asientos comprados, costo por
+  asiento, fecha de renovación). Ver [Licencia y asientos](#licencia-y-asientos) más abajo.
 
 ## Agregar y editar aplicaciones
 
@@ -56,7 +58,34 @@ y quedan sin categoría. No se pierde nada.
 El listado de Acceso permite buscar por **nombre o proveedor**, y filtrar por **categoría** y por
 **criticidad** (solo críticas / no críticas / cualquiera). Cada fila muestra además el número de
 **acceso activo** — cuántas personas tienen actualmente una concesión vigente sobre esa
-aplicación — para que veas de un vistazo qué sistemas están en uso.
+aplicación — y, cuando registras el licenciamiento, una celda de **Licencia** (usados / comprados,
+con una advertencia de sobreasignación y la próxima fecha de renovación), para que veas de un
+vistazo qué sistemas están en uso.
+
+## Licencia y asientos
+
+lazyit puede registrar el licenciamiento detrás de una aplicación, para que veas de un vistazo
+cuánto de lo que pagas está realmente en uso. En el formulario de la aplicación, completa
+cualquiera de estos:
+
+- **Asientos comprados** — cuántos asientos pagos incluye la licencia. Déjalo en blanco para no
+  fijar un límite.
+- **Costo por asiento** — el precio de un solo asiento, por período de facturación. Ingrésalo en
+  unidades normales (p. ej. `12.99`); lazyit guarda el importe con precisión.
+- **Fecha de renovación** — cuándo se renueva la licencia por próxima vez.
+
+Los **asientos en uso** se calculan solos: es la cantidad de *personas distintas* que tienen
+acceso activo a la aplicación en este momento. Como una misma persona puede tener más de una
+concesión sobre la misma app, lazyit cuenta *personas*, no concesiones — así el número refleja el
+consumo real de la licencia.
+
+El listado de Acceso y los **Detalles** de cada aplicación muestran **usados / comprados**. Cuando
+más personas tienen acceso que los asientos comprados, lazyit marca la aplicación como
+**sobreasignada** — un aviso para comprar más asientos o revocar accesos que ya no hacen falta. La
+advertencia es informativa: lazyit nunca bloquea una concesión por la cantidad de asientos.
+
+Todos los campos de licencia son opcionales — déjalos en blanco para aplicaciones que no licencias
+por asiento.
 
 ## Eliminar una aplicación
 

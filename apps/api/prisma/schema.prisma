@@ -1245,6 +1245,15 @@ model Application {
   // Asset.specs / Article.metadata. See ADR-0007 and ADR-0023.
   metadata    Json?
   notes       String?
+  // License / seat tracking (#949, ADR-0088). All nullable = "untracked". `seatsPurchased` = the number
+  // of paid seats (null = unlimited / not tracked). `costPerSeat` = the price PER SEAT in INTEGER minor
+  // units (cents) of the org's single currency — mirrors Asset.purchaseCost (#954): no float drift.
+  // `renewalDate` = when the license/subscription next renews (informational for now; proactive renewal
+  // reminders are a follow-up, #1070). `seatsUsed` is DERIVED (distinct active-grant users) and NEVER
+  // stored — computed per-request in ApplicationsService.
+  seatsPurchased Int?
+  costPerSeat    Int?
+  renewalDate    DateTime?
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
   deletedAt   DateTime?
