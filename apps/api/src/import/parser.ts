@@ -83,23 +83,26 @@ export function maxImportRows(): number {
  */
 function decodeUtf8(buffer: Buffer): { text: string; hadBom: boolean } {
   // A UTF-8 BOM is the bytes EF BB BF. `csv-parse` strips it with `bom:true`, but JSON.parse chokes
-  // on it, so we strip it once here for both paths and report it as detected metadata.
+  // on it, so we strip it once here for both paths and report it as detected metadata. Strip it from
+  // the RAW BYTES *before* either decode: if we left the BOM in and the strict UTF-8 decode threw
+  // (an invalid byte anywhere in the file), the windows-1252 fallback would decode EF BB BF as the
+  // three chars 'ï»¿' — and a one-char slice would leave '»¿' silently prepended to the first cell
+  // (the exact mojibake #1059 kills). Removing the bytes up front makes the fallback path BOM-clean.
   const hadBom =
     buffer.length >= 3 &&
     buffer[0] === 0xef &&
     buffer[1] === 0xbb &&
     buffer[2] === 0xbf;
+  const body = hadBom ? buffer.subarray(3) : buffer;
   let text: string;
   try {
-    // `ignoreBOM: true` keeps the BOM char in the decoded output (TextDecoder strips it by default,
-    // unlike `Buffer#toString`) so the single hadBom-based slice below is the only place it's removed.
-    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
-      buffer,
-    );
+    // Strict UTF-8: throws on any invalid byte sequence (unlike `Buffer#toString`, which substitutes
+    // U+FFFD) so a non-UTF-8 file falls through to the windows-1252 transcode below.
+    text = new TextDecoder('utf-8', { fatal: true }).decode(body);
   } catch {
-    text = new TextDecoder('windows-1252').decode(buffer);
+    text = new TextDecoder('windows-1252').decode(body);
   }
-  return { text: hadBom ? text.slice(1) : text, hadBom };
+  return { text, hadBom };
 }
 
 /**
