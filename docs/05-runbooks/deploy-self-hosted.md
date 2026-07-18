@@ -125,7 +125,9 @@ To change the port or switch modes later (or after an IP change on a **hostname*
 `SESSION_SIGNING_SECRET`, `AUTH_SECRET`, DB creds — never regenerated) and the auth mode + Postgres
 topology, touches **no** volumes, and brings the stack back up. It is supported for **local-auth installs
 only** (an OIDC deploy's IdP `externalDomain` is baked at first boot and can't be re-homed by re-rendering
-env — edit `.env.prod` by hand and re-provision Zitadel instead).
+env — edit `.env.prod` by hand and re-provision Zitadel instead). Existing browser sessions from before
+the reconfigure go stale and self-heal to `/login` on their next request — the script's post-up guidance
+notes this; no other action needed.
 
 ### Option B — HTTPS on a bare IP (internal CA)
 
