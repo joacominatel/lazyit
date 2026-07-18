@@ -163,6 +163,28 @@ describe('parseImport — CSV', () => {
       address: 'Dirección 5',
     });
   });
+
+  // #1059 regression: a UTF-8 BOM in FRONT of a body that also has one invalid UTF-8 byte. The strict
+  // decode throws for the WHOLE buffer, so the windows-1252 fallback runs — and if the BOM bytes are
+  // still present it decodes EF BB BF to 'ï»¿', then a one-char slice leaves '»¿' welded to the first
+  // header/cell (the exact silent mojibake #1059 kills). Stripping the BOM from the RAW BYTES before
+  // either decode must yield clean 'café' with hadBom still reported. Header + data row so the decoded
+  // strings are readable back (a header-only file would fail before exposing the header value).
+  it('strips the BOM before decode so a BOM + invalid-byte file transcodes cleanly (no »¿ prefix)', () => {
+    const withBomAndBadByte = Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]), // UTF-8 BOM
+      Buffer.from('city\n', 'utf-8'), // header row
+      Buffer.from([0x63, 0x61, 0x66, 0xe9]), // 'caf' + E9 ('é' in CP-1252) — invalid standalone UTF-8
+      Buffer.from('\n', 'utf-8'),
+    ]);
+    const result = parseImport(withBomAndBadByte, 'csv');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // NOT '»¿city' — the BOM never leaked into the fallback-decoded first cell.
+    expect(result.headers).toEqual(['city']);
+    expect(result.rows[0]).toEqual({ city: 'café' });
+    expect(result.dialect.hadBom).toBe(true);
+  });
 });
 
 describe('parseImport — JSON', () => {
