@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/require-await, @typescript-eslint/unbound-method -- test-double harness leans on loosely-typed jest.fn() mocks and scripted async stubs; intentional for this spec file only. */
 jest.mock('../../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
@@ -496,7 +497,7 @@ describe('WorkflowRunOrchestrator — the DAG walk (ADR-0054 §8)', () => {
 
     // The bell nudge fired, but its summary is a GENERIC pointer — never the rendered prompt/PII.
     expect(notifications.emit).toHaveBeenCalledTimes(1);
-    const payload = (notifications.emit as jest.Mock).mock.calls[0][0] as {
+    const payload = notifications.emit.mock.calls[0][0] as {
       summary: string;
       title: string;
     };
@@ -838,13 +839,13 @@ describe('WorkflowRunOrchestrator.retryRun — manual FAILED-run retry (issue #3
 
     // s2 (the retried step) only ever saw its PINNED mapping (`email`) — never an injected override field.
     const s2Calls = rest.execute.mock.calls.filter(
-      (c) =>
-        (c[0] as { step: { key: string } }).step.key === 's2',
+      (c) => (c[0] as { step: { key: string } }).step.key === 's2',
     );
     expect(s2Calls.length).toBeGreaterThanOrEqual(2); // attempt 1 (fail) + the automatic retry
     for (const call of s2Calls) {
-      const seen = (call[0] as { step: { dataMapping?: Record<string, string> } })
-        .step.dataMapping;
+      const seen = (
+        call[0] as { step: { dataMapping?: Record<string, string> } }
+      ).step.dataMapping;
       expect(Object.keys(seen ?? {})).toEqual(['email']);
     }
   });
