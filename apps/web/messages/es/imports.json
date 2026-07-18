@@ -50,6 +50,7 @@
     "title": "Mapea tus columnas",
     "description": "Cada tarjeta de abajo es una columna de tu archivo, con valores de ejemplo. Para cada columna, elige el campo de lazyit que completa, crea un campo personalizado guardado en los detalles del activo, o ignórala. Necesitas una columna mapeada a Nombre y otra a Estado.",
     "piiNote": "Estas tarjetas muestran valores reales de tu archivo, incluidos datos de empleados (nombres, correos). No se guarda nada hasta que confirmes.",
+    "raggedRowsWarning": "{count, plural, one {# fila tuvo una cantidad de columnas inesperada} other {# filas tuvieron una cantidad de columnas inesperada}} — revisá el delimitador o las comillas de tu archivo, por si algún campo se corrió.",
     "field": {
       "name": "Nombre",
       "serial": "Número de serie",
