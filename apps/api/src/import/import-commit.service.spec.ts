@@ -1,3 +1,13 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call,
+   @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return,
+   @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unused-vars,
+   @typescript-eslint/only-throw-error, @typescript-eslint/require-await --
+   this spec builds hand-rolled `any`-typed fake Prisma/service doubles (see `makeAssets`,
+   `makeRefService`, `makeService`, etc.) and scripted `_args`/`_principal`/`_opts` stand-ins
+   that mirror real service signatures without using them; both patterns are pre-existing
+   and repo-wide across import-commit test doubles, not specific to this change. A few
+   `as any` casts on `Map#get(...)?.field` reads are kept (not auto-fix-stripped) because
+   removing them turns `(x?.y).z` into a real `no-unsafe-optional-chaining` risk. */
 import {
   ConflictException,
   ForbiddenException,
@@ -353,15 +363,15 @@ function makeService(state: PrismaState, doubles?: any) {
   };
   const service = new ImportCommitService(
     queue as any,
-    prisma as any,
-    assets as any,
-    models as any,
-    categories as any,
-    locations as any,
-    users as any,
-    assignments as any,
-    search as any,
-    permissions as any,
+    prisma,
+    assets,
+    models,
+    categories,
+    locations,
+    users,
+    assignments,
+    search,
+    permissions,
   );
   return {
     service,
@@ -1528,7 +1538,7 @@ describe('ImportCommitService.commit', () => {
       expect(result.failed).toBe(0);
       // The person is created via UsersService with skipIdpWriteBack + import provenance + directoryOnly.
       expect(users.create).toHaveBeenCalledTimes(1);
-      const { data, opts } = users._calls[0] as any;
+      const { data, opts } = users._calls[0];
       expect(opts.skipIdpWriteBack).toBe(true);
       expect(opts.createdPayload).toEqual({
         source: 'import',
@@ -1567,7 +1577,7 @@ describe('ImportCommitService.commit', () => {
 
       await service.commit('sess-1', OWNER);
 
-      const { data } = users._calls[0] as any;
+      const { data } = users._calls[0];
       expect(data.firstName).toBe('Madonna');
       expect(data.lastName).toBe('Madonna'); // fallback keeps lastName .min(1) satisfied
     });
@@ -1932,8 +1942,8 @@ describe('ImportCommitService.commit', () => {
 
       await service.commit('sess-1', OWNER);
 
-      const callA = (users._calls[0] as any).data;
-      const callB = (users._calls[1] as any).data;
+      const callA = users._calls[0].data;
+      const callB = users._calls[1].data;
       expect(callA.manager).toEqual({ managerId: 'mgr-grace' });
       expect(callB.manager).toEqual({ managerName: 'Nobody Here' });
     });
