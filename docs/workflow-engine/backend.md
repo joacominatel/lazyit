@@ -288,7 +288,13 @@ Two layers, kept distinct:
   attempt for that step (max + 1), flips `FAILED`→`RUNNING` under a **guarded compare-and-set** (only a
   still-`FAILED` run proceeds — a double-retry / a retry racing the sweeper is idempotent), and
   re-enqueues a delayed-0 `run-retry` job (reusing the colon-free `workflowJobId`) so the walk re-enters
-  at the failed step OFF the request thread. Because the walk resumes at that step (not the entry node),
+  at the failed step OFF the request thread. **Enqueue-then-clear (#1068):** the CAS **preserves** the
+  run's redacted `error` (the failed-step marker); only a **confirmed** enqueue clears it. A broker-down
+  enqueue (`enqueueRetry` → `false`) **rolls the run back to `FAILED`** with the marker intact and returns
+  `retried:false` (→ 409, "retry once Valkey is back") — so the run is never stranded `RUNNING` with
+  `error=null`, which the RUNNING-staleness reconciler would otherwise finalize as a step-less
+  `engine-restart`, making a later retry unresolvable (`resolveFailedStepKey === null` → 422). Because the
+  walk resumes at that step (not the entry node),
   already-`SUCCEEDED` steps are never re-executed — a non-idempotent create cannot double-provision.
   **Policy: only `FAILED` is retryable** — a `COMPENSATED` run already rolled its external effects back,
   so re-driving it would re-provision what compensation just undid; the endpoint rejects non-`FAILED`
