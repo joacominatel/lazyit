@@ -50,6 +50,7 @@
     "title": "Map your columns",
     "description": "Each card below is a column from your file, with example values. For every column, pick the lazyit field it fills, create a custom field saved to the asset's details, or ignore it. You need a column mapped to Name and one to Status.",
     "piiNote": "These cards show real values from your file, including any employee data (names, emails). Nothing is saved until you commit.",
+    "raggedRowsWarning": "{count, plural, one {# row had an unexpected number of columns} other {# rows had an unexpected number of columns}} — check the delimiter or quoting in your file, in case some fields shifted.",
     "field": {
       "name": "Name",
       "serial": "Serial number",

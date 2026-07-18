@@ -66,18 +66,41 @@ describe('parseImport — CSV', () => {
     expect(result.dialect.hadBom).toBe(true);
   });
 
-  it('tolerates a ragged short row (pads missing cells to "")', () => {
+  it('tolerates a ragged short row (pads missing cells to "") and counts it as ragged (#1062)', () => {
     const result = parseImport(buf('a,b,c\n1,2\n'), 'csv');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.rows[0]).toEqual({ a: '1', b: '2', c: '' });
+    expect(result.raggedRowCount).toBe(1);
   });
 
-  it('tolerates a ragged long row (drops extra cells)', () => {
+  it('tolerates a ragged long row (drops extra cells) and counts it as ragged (#1062)', () => {
     const result = parseImport(buf('a,b\n1,2,3,4\n'), 'csv');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.rows[0]).toEqual({ a: '1', b: '2' });
+    expect(result.raggedRowCount).toBe(1);
+  });
+
+  it('reports raggedRowCount === 0 for a clean, uniform-width file (#1062)', () => {
+    const result = parseImport(
+      buf('name,serial\nLaptop,ABC123\nMonitor,DEF456\n'),
+      'csv',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.raggedRowCount).toBe(0);
+  });
+
+  it('counts only the ragged rows, not the clean ones, in a mixed file (#1062)', () => {
+    const result = parseImport(
+      buf('a,b,c\n1,2,3\n1,2\n1,2,3\n1,2,3,4\n'),
+      'csv',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rowCount).toBe(4);
+    expect(result.raggedRowCount).toBe(2);
   });
 
   it('fails gracefully on an empty file', () => {
@@ -201,6 +224,8 @@ describe('parseImport — JSON', () => {
     // Sparse record: the missing key is backfilled to ''.
     expect(result.rows[1]).toEqual({ name: 'Monitor', serial: '' });
     expect(result.dialect.delimiter).toBeNull();
+    // JSON is key-based, not positional — raggedRowCount is always 0 (#1062).
+    expect(result.raggedRowCount).toBe(0);
   });
 
   it('parses a { data: [...] } envelope', () => {

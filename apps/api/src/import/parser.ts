@@ -39,6 +39,14 @@ export interface ParseSuccess {
   encoding: 'utf-8';
   rowCount: number;
   rows: RawRow[];
+  /**
+   * How many data rows had a different cell count than the header width (#1062). A shifted delimiter
+   * (e.g. an unescaped `;` inside a `notes` cell in a `;`-delimited file) silently shoves every
+   * following cell one column over — `relax_column_count` keeps parsing (pads/drops, see `parseCsv`)
+   * instead of throwing, so this count is the only surface that a row's fields may be misaligned.
+   * Always `0` for JSON (key-based, not positional — there is no "column count" to shift).
+   */
+  raggedRowCount: number;
 }
 
 /** A graceful, recorded parse failure — NEVER a thrown crash out of the worker. */
@@ -134,8 +142,8 @@ function sniffDelimiter(text: string): string {
  * Parse a CSV string into raw rows keyed by header. Uses `csv-parse` (RFC-4180: quoting, embedded
  * newlines, escaped quotes) in ARRAY mode — NOT `columns:true` — so we own header extraction and can
  * report ragged rows precisely. `relax_*` options keep a slightly-irregular real-world export from
- * throwing; raggedness is RECORDED, not fatal: short rows pad to absent (`''`), extra cells are
- * dropped.
+ * throwing; raggedness is RECORDED via `raggedRowCount` (#1062), not fatal: short rows pad to absent
+ * (`''`), extra cells are dropped.
  */
 function parseCsv(text: string): ParseResult {
   const delimiter = sniffDelimiter(text);
@@ -192,8 +200,10 @@ function parseCsv(text: string): ParseResult {
   });
 
   const rows: RawRow[] = [];
+  let raggedRowCount = 0;
   for (let i = 1; i < records.length; i++) {
     const cells = records[i];
+    if (cells.length !== headers.length) raggedRowCount++;
     const row: RawRow = {};
     for (let c = 0; c < headers.length; c++) {
       // Short rows → absent cells become '' (coercion treats '' as absent in wave 3). Extra cells
@@ -211,6 +221,7 @@ function parseCsv(text: string): ParseResult {
     encoding: 'utf-8',
     rowCount: rows.length,
     rows,
+    raggedRowCount,
   };
 }
 
@@ -318,6 +329,8 @@ function parseJson(text: string): ParseResult {
     encoding: 'utf-8',
     rowCount: rows.length,
     rows,
+    // JSON is key-based, not positional — there is no "column count" for a delimiter to shift.
+    raggedRowCount: 0,
   };
 }
 
