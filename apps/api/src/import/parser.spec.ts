@@ -133,6 +133,36 @@ describe('parseImport — CSV', () => {
       'Dir (4)': '4',
     });
   });
+
+  // #1059: a CP-1252/Latin-1 CSV (Excel "Save as CSV" default, or a Snipe-IT export re-saved on
+  // Windows) must decode its accents correctly instead of importing silent mojibake (JosÃ©).
+  it('transcodes a CP-1252 CSV (accented cells) instead of importing mojibake', () => {
+    const cp1252 = Buffer.from(
+      'name,address\nJos\xe9 Garc\xeda,Direcci\xf3n 5\n',
+      'latin1', // Node's 'latin1' encoder maps 1 char = 1 byte, matching CP-1252 in this ASCII+accents range.
+    );
+    const result = parseImport(cp1252, 'csv');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rows[0]).toEqual({
+      name: 'José García',
+      address: 'Dirección 5',
+    });
+    expect(result.encoding).toBe('utf-8');
+  });
+
+  it('leaves genuine UTF-8 accented cells unchanged (no false transcode)', () => {
+    const result = parseImport(
+      buf('name,address\nJosé García,Dirección 5\n'),
+      'csv',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rows[0]).toEqual({
+      name: 'José García',
+      address: 'Dirección 5',
+    });
+  });
 });
 
 describe('parseImport — JSON', () => {
