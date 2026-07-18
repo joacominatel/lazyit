@@ -78,7 +78,7 @@ interface PrismaMock {
     updateMany: Mock;
   };
   infraNodeSecretRef: { findMany: Mock; upsert: Mock; deleteMany: Mock };
-  asset: { findFirst: Mock };
+  asset: { findFirst: Mock; update: Mock };
   $transaction: Mock;
   $queryRaw: Mock;
 }
@@ -124,7 +124,7 @@ describe('InfraService', () => {
         upsert: jest.fn().mockResolvedValue(undefined),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
-      asset: { findFirst: jest.fn() },
+      asset: { findFirst: jest.fn(), update: jest.fn() },
       $transaction: jest.fn(
         (cb: (tx: { infraEdge: typeof txEdge }) => unknown) =>
           cb({ infraEdge: txEdge }),
@@ -429,6 +429,154 @@ describe('InfraService', () => {
       await expect(service.ingestReport(FULL_REPORT)).rejects.toBe(raced);
       expect(prisma.infraNode.update).not.toHaveBeenCalled();
     });
+
+    // ── IP fact-promotion (#1081) ─────────────────────────────────────────────
+
+    /** A report whose host advertises NICs, so a primary IPv4 can be promoted. */
+    const REPORT_WITH_NICS = AgentReportSchema.parse({
+      agentVersion: '1.0.0',
+      reportingSource: 'agent:nic',
+      externalId: 'machine-nic',
+      reportedAt: '2026-06-27T12:00:00.000Z',
+      host: {
+        hostname: 'web-01',
+        nics: [
+          { name: 'lo', ipv4: ['127.0.0.1'] },
+          { name: 'eth0', ipv4: ['10.0.0.12', '10.0.0.13'] },
+        ],
+      },
+    });
+
+    it('CREATE (unknown key) seeds ipAddress from the report (source=AGENT)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-1',
+        state: 'PENDING',
+      });
+
+      await service.ingestReport(REPORT_WITH_NICS);
+
+      const createArg = firstArg<{
+        data: { ipAddress?: string; ipAddressSource?: string };
+      }>(prisma.infraNode.create);
+      // The first non-loopback NIC's first IPv4 becomes the node's IP, marked agent-owned.
+      expect(createArg.data.ipAddress).toBe('10.0.0.12');
+      expect(createArg.data.ipAddressSource).toBe('AGENT');
+    });
+
+    it('a repeat report OVERWRITES ipAddress when the node is AGENT-owned', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(REPORT_WITH_NICS);
+
+      const updateArg = firstArg<{ data: { ipAddress?: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(updateArg.data.ipAddress).toBe('10.0.0.12');
+    });
+
+    it('a repeat report NEVER clobbers a human-curated (MANUAL) ipAddress', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+        ipAddressSource: 'MANUAL',
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(REPORT_WITH_NICS);
+
+      const updateArg = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.update,
+      );
+      // Facts + liveness still refresh, but the human's IP is left untouched.
+      expect(updateArg.data.status).toBe('ONLINE');
+      expect(updateArg.data).not.toHaveProperty('ipAddress');
+    });
+
+    it('a report with no IPv4 leaves an existing AGENT ipAddress intact (never nulls it)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'PENDING',
+      });
+
+      // FULL_REPORT carries no nics → primaryIpv4 is undefined → no ipAddress write.
+      await service.ingestReport(FULL_REPORT);
+
+      const updateArg = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.update,
+      );
+      expect(updateArg.data).not.toHaveProperty('ipAddress');
+    });
+
+    it('a repeat report on an ASSET-BACKED node refreshes the linked Asset.specs (host facts only)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-1',
+        ipAddressSource: 'AGENT',
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+      // The asset already holds a human custom field + the auto-created marker + a STALE host.
+      prisma.asset.findFirst.mockResolvedValue({
+        specs: {
+          _infraAutoCreated: true,
+          rack: 'A3',
+          host: { hostname: 'OLD' },
+          reportedAt: '2020-01-01T00:00:00.000Z',
+        },
+      });
+
+      await service.ingestReport(FULL_REPORT);
+
+      const updateArg = firstArg<{
+        where: { id: string };
+        data: { specs: Record<string, unknown> };
+      }>(prisma.asset.update);
+      expect(updateArg.where).toEqual({ id: 'asset-1' });
+      // Agent-owned keys refreshed to the new report…
+      expect((updateArg.data.specs.host as { hostname: string }).hostname).toBe(
+        'web-01',
+      );
+      expect(updateArg.data.specs.reportedAt).toBe('2026-06-27T12:00:00.000Z');
+      // …human-added keys + the provenance marker preserved.
+      expect(updateArg.data.specs.rack).toBe('A3');
+      expect(updateArg.data.specs._infraAutoCreated).toBe(true);
+    });
+
+    it('a soft-deleted linked Asset is skipped on the specs refresh (no asset.update)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-gone',
+        ipAddressSource: 'AGENT',
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+      prisma.asset.findFirst.mockResolvedValue(null); // the soft-delete extension scopes findFirst
+
+      await service.ingestReport(FULL_REPORT);
+
+      expect(prisma.asset.update).not.toHaveBeenCalled();
+    });
   });
 
   // ── Reporting-agent confirmation (ADR-0074 §3) — the human review-tray gate ──
@@ -531,6 +679,106 @@ describe('InfraService', () => {
       expect(arg.data.state).toBe('CONFIRMED');
       // No asset minted → no assetId written.
       expect(arg.data).not.toHaveProperty('assetId');
+    });
+
+    it('promotes a sanitized hardware serial to the minted Asset.serial, modelId left null (#1081)', async () => {
+      const PENDING = {
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {
+          host: { hostname: 'web-01', hardware: { serial: '  SN-REAL-123  ' } },
+        },
+      };
+      mockDetailReadAfterConfirm(PENDING);
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      const createArg = firstArg<{ serial?: string; modelId?: string }>(
+        assets.create,
+      );
+      expect(createArg.serial).toBe('SN-REAL-123'); // trimmed + promoted
+      expect(createArg).not.toHaveProperty('modelId'); // no AssetModel auto-create
+    });
+
+    it('drops a junk serial (dmidecode placeholder) — Asset.serial stays null, raw value kept in specs', async () => {
+      const PENDING = {
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {
+          host: {
+            hostname: 'web-01',
+            hardware: { serial: 'To be filled by O.E.M.' },
+          },
+        },
+      };
+      mockDetailReadAfterConfirm(PENDING);
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      const createArg = firstArg<{
+        serial?: string;
+        specs: { host: { hardware: { serial: string } } };
+      }>(assets.create);
+      // No canonical serial promoted…
+      expect(createArg).not.toHaveProperty('serial');
+      // …but the raw dmidecode value still survives in the specs blob.
+      expect(createArg.specs.host.hardware.serial).toBe(
+        'To be filled by O.E.M.',
+      );
+    });
+
+    it('a serial-unique collision (P2002) retries WITHOUT the serial rather than failing the confirm', async () => {
+      const PENDING = {
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {
+          host: { hostname: 'web-01', hardware: { serial: 'DUP-SERIAL' } },
+        },
+      };
+      mockDetailReadAfterConfirm(PENDING);
+      // First mint (with serial) collides on assets_serial_active_key; the retry (no serial) succeeds.
+      assets.create
+        .mockRejectedValueOnce(
+          new KnownError('P2002', { target: 'assets_serial_active_key' }),
+        )
+        .mockResolvedValueOnce({ id: 'asset-new' });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(assets.create).toHaveBeenCalledTimes(2);
+      const firstCall = (assets.create.mock.calls as unknown[][])[0][0] as {
+        serial?: string;
+      };
+      const retryCall = (assets.create.mock.calls as unknown[][])[1][0] as {
+        serial?: string;
+      };
+      expect(firstCall.serial).toBe('DUP-SERIAL'); // attempted with the serial
+      expect(retryCall).not.toHaveProperty('serial'); // retried without it
+      // The confirm still flips the node to CONFIRMED (never a 409).
+      const arg = firstArg<{ data: { state: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.state).toBe('CONFIRMED');
     });
 
     it('is an idempotent no-op on an already-CONFIRMED node (no Asset minted, no re-flip write)', async () => {
