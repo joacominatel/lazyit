@@ -75,8 +75,8 @@ Para cada columna, ábrela y elige un destino en el desplegable:
   - **Activo** — **Nombre** (*obligatorio*), **Estado** (*obligatorio*), **Número de serie**,
     **Etiqueta de activo**, **Empresa**, **Notas**, **Fecha de compra**, **Fin de garantía**, **Costo
     de compra**, **Vida útil (meses)**, **Valor residual**, **Modelo** y **Ubicación**.
-  - **Modelo** — **Fabricante** y **Categoría** para los modelos de activo que cree la importación
-    (consulta *Marca y categoría del modelo* más abajo).
+  - **Modelo** — **Fabricante**, **Categoría** y **SKU / número de modelo** para los modelos de activo
+    que cree la importación (consulta *Marca, categoría y SKU del modelo* más abajo).
   - **Persona** — la persona a la que está **asignado** el activo: **Nombre**, **Correo**, **Legajo**,
     **Usuario**, **Cargo**, **Departamento** y **Supervisor** (consulta *Asignar activos a personas*
     más abajo).
@@ -108,8 +108,8 @@ Algunos campos se comportan de forma especial:
   de-duplica**.
 - **Etiqueta de activo** — una etiqueta de tu archivo se usa tal cual; una en blanco se asigna
   automáticamente más tarde si tu instancia tiene un esquema de etiquetas activado.
-- **Modelo** y **Ubicación** son **referencias**, asociadas a registros existentes por nombre
-  (consulta *Conflictos*).
+- **Modelo** y **Ubicación** son **referencias**, asociadas a registros existentes por nombre — un
+  **Modelo** con SKU se asocia primero por SKU y luego por nombre (consulta *Conflictos*).
 - **Empresa** es una etiqueta de agrupación opcional, tomada tal cual de tu archivo (una columna
   *Empresa* / *Company* se reconoce automáticamente). Agrupa y filtra activos — no es un control de acceso.
 - **Notas** es texto libre opcional, tomado tal cual (una columna *Notas* / *Notes* / *Observaciones*
@@ -127,28 +127,33 @@ exactos en inglés: también reconoce **nombres en español y estilo Snipe-IT** 
 *Número de serie*, *Asignado a*, *Modelo*), así que una exportación típica llega casi toda
 pre-mapeada. Aun así confirmas cada columna — la auto-detección solo propone el destino.
 
-### Marca y categoría del modelo
+### Marca, categoría y SKU del modelo
 
 **Un modelo se crea a partir de su nombre.** Para que la importación cree modelos, mapea una columna a
-**Modelo** (dentro del grupo *Activo*). Mapear solo **Fabricante** o **Categoría** *no* crea un modelo
-— esos dos solo **enriquecen** un modelo que ya proviene de una columna **Modelo** mapeada. La
-categoría se vincula **a través del modelo**, no directamente al activo.
+**Modelo** (dentro del grupo *Activo*). Mapear solo **Fabricante**, **Categoría** o **SKU / número de
+modelo** *no* crea un modelo — esos tres solo **enriquecen** un modelo que ya proviene de una columna
+**Modelo** mapeada. La categoría se vincula **a través del modelo**, no directamente al activo.
 
-Cuando la importación crea un **Modelo** nuevo, necesita un **fabricante** y una **categoría**. Puedes
-definirlos de dos maneras:
+Cuando la importación crea un **Modelo** nuevo, puede tomar un **fabricante**, una **categoría** y un
+**SKU / número de modelo** (por ejemplo, la columna "Model No." de Snipe-IT: `Latitude 5520` como
+Modelo, `P108F` como su SKU). Fabricante y categoría tienen un valor por defecto de fase 1 (ver abajo);
+el SKU es opcional y queda vacío si no lo mapeas ni lo fijas. Puedes definir cada uno de dos maneras:
 
-- **Por fila** — mapea una columna a **Fabricante** o **Categoría** en el desplegable, y cada modelo
-  toma su valor de esa fila.
-- **Para todos los modelos** — si tu archivo no tiene esa columna (o todos tus activos son de la misma
-  marca), fija un único **Fabricante** y/o **Categoría** en el recuadro *Marca y categoría del modelo*;
-  se aplica a todos los modelos que cree la importación. Una columna mapeada siempre gana sobre un
-  valor fijado.
+- **Por fila** — mapea una columna a **Fabricante**, **Categoría** o **SKU / número de modelo** en el
+  desplegable, y cada modelo toma su valor de esa fila.
+- **Para todos los modelos** — si tu archivo no tiene esa columna (o todos tus activos comparten marca,
+  categoría o SKU), fija un único **Fabricante**, **Categoría** y/o **SKU** en el recuadro *Marca,
+  categoría y SKU del modelo*; se aplica a todos los modelos que cree la importación. Una columna
+  mapeada siempre gana sobre un valor fijado.
   - Para **Categoría**, el recuadro viene en modo **Existente**: elige una categoría que ya exista para
     que todos los modelos se vinculen a ella — sin errores de tipeo ni categorías nuevas por accidente.
     Cambia el interruptor a **Constante** para escribir un valor libre (igual se busca-o-crea por nombre
     al importar).
-  - El **Fabricante** es texto libre (no hay una lista de fabricantes para elegir), así que siempre es
+  - El **Fabricante** y el **SKU** son texto libre (no hay una lista para elegir), así que siempre son
     una constante.
+- **Mapear una columna de SKU refuerza el emparejamiento.** Un modelo con SKU se empareja primero por
+  SKU en futuras importaciones y ediciones — es la clave natural más confiable del modelo, por delante
+  de su nombre.
 
 ### Asignar activos a personas
 
