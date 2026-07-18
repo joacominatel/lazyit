@@ -39,6 +39,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ApiError } from "@/lib/api/client";
+import { errorStateKind } from "@/lib/api/error-state-kind";
 import type { EntityKey } from "@/lib/entity-key";
 
 /** A column definition for {@link ResourceTable} — header + loading skeleton. */
@@ -667,12 +668,18 @@ export function EmptyState({
 /**
  * Full-bleed error state shown in place of the table.
  *
- * 403-aware (issue #935): a 403 (and 401) is a PERMISSION decision, not an outage — retrying it can
- * never succeed. When the failed query's `error` is a 401/403 `ApiError` we render the calm
- * "restricted" presentation (a lock, a plain-language line, no Retry) instead of the generic
- * "the API may be down… Retry" surface, so a forbidden read stops masquerading as a flaky one. Any
- * other failure (5xx / network / unknown) keeps the retryable presentation. This single change
- * covers every list that already forwards `error` — Users, the infra map, Assets, Applications, etc.
+ * 403-aware (issue #935): a 403 is a PERMISSION decision, not an outage — retrying it can never
+ * succeed. When the failed query's `error` is a 403 `ApiError` we render the calm "restricted"
+ * presentation (a lock, a plain-language line, no Retry) instead of the generic "the API may be
+ * down… Retry" surface, so a forbidden read stops masquerading as a flaky one. Any other failure
+ * (5xx / network / unknown) keeps the retryable presentation. This single change covers every
+ * list that already forwards `error` — Users, the infra map, Assets, Applications, etc.
+ *
+ * A 401 is deliberately NOT the same branch (issue #1045): it means the session itself expired,
+ * and the global `handleAuthExpiry` reaction (providers.tsx) is already signing the user out and
+ * redirecting to /login in the same tick. Painting the "you don't have access" panel for that
+ * split second is misleading, so a 401 renders nothing here and lets the redirect win in
+ * silence — see `errorStateKind`.
  */
 export function ErrorState({
   title,
@@ -687,11 +694,15 @@ export function ErrorState({
   error?: unknown;
 }) {
   const t = useTranslations("shared");
-  const status = error instanceof ApiError ? error.status : undefined;
-  const forbidden = status === 401 || status === 403;
+  const kind = errorStateKind(error);
   const requestId = error instanceof ApiError ? error.requestId : undefined;
 
-  if (forbidden) {
+  if (kind === "auth") {
+    // The 401 → signOut + redirect race (#1045): render nothing while it resolves.
+    return null;
+  }
+
+  if (kind === "forbidden") {
     return (
       <div
         className="animate-rise-in flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
