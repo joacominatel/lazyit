@@ -66,6 +66,7 @@
       "salvageValue": "Salvage value",
       "manufacturer": "Manufacturer",
       "category": "Category",
+      "sku": "SKU / model number",
       "email": "Email",
       "legajo": "Employee no.",
       "username": "Username",
@@ -107,8 +108,8 @@
       "helper": "Pick an existing value to link every row to it, or switch to a constant to type a new one."
     },
     "modelConfig": {
-      "title": "Model brand and category",
-      "description": "Map a column to Manufacturer or Category above to set them per row, or pin a value here to apply it to every model the import creates.",
+      "title": "Model brand, category and SKU",
+      "description": "Map a column to Manufacturer, Category or SKU above to set them per row, or pin a value here to apply it to every model the import creates.",
       "manufacturerLabel": "Manufacturer for all models",
       "manufacturerPlaceholder": "e.g. Apple",
       "categoryLabel": "Category for all models",
@@ -116,6 +117,8 @@
       "categoryPickPlaceholder": "Pick a category…",
       "categoryPickSearch": "Search categories…",
       "categoryPickEmpty": "No categories found.",
+      "skuLabel": "SKU for all models",
+      "skuPlaceholder": "e.g. P108F",
       "fromColumn": "Taken from the column “{column}”."
     },
     "missingRequired": "Map a column to: {fields}.",
