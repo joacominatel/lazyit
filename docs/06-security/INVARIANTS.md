@@ -523,9 +523,15 @@ rotation; the API imports no crypto capable of exploiting it.
 **Rule.** A row with `directoryOnly = true` (a **directory person** created by the bulk import,
 [[0069-migrator-import]] §A.3):
 
-1. **Never authenticates.** It has `externalId = null` (never set by the import) and a `role` that
-   is forced VIEWER. The JIT guard (`jwt-auth.guard.ts`) can promote it to a full account on a verified
-   email match — but only then does it become a normal `User`; until promotion it has no login.
+1. **Never authenticates until an explicit promotion.** It has `externalId = null` (never set by the
+   import) and a `role` that is forced VIEWER; until it is promoted it has no login. Three promotion
+   paths exist, each keeping the existing (VIEWER) role: (a) the JIT guard (`jwt-auth.guard.ts`) on a
+   verified email match (OIDC); (b) `POST /users/:id/provision-account` (ADMIN, bundled Zitadel) which
+   sets `externalId`; and (c) — **local mode only**, issue #1072 — `POST /users/:id/provision-local-account`
+   (ADMIN) which sets a `passwordHash` (one-time temp password, `mustChangePassword=true`). All three flip
+   `directoryOnly = false`, at which point it is a normal `User`. This is the only amendment to "never
+   receives a credential": it is admin-action-gated, never self-service, and never widens the role
+   ([[0086-local-authentication-mode]] §5 amendment).
 2. **Never holds an administrative role.** `CreateDirectoryPersonSchema` (strict, in `@lazyit/shared`)
    rejects any `role` field. The import path forces VIEWER unconditionally; the regular `PATCH /users`
    path can change the role, but only AFTER the person is promoted (`directoryOnly = false`) — a
