@@ -11,6 +11,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  INFRA_LIVE_POLL_MS,
   useDeleteInfraNode,
   useInfraNodes,
 } from "@/lib/api/hooks/use-infra-nodes";
@@ -39,7 +40,11 @@ export function PendingReviewTray() {
   const t = useTranslations("infra.pending");
   const tInfra = useTranslations("infra");
   const canManage = useCan("infra:manage");
-  const { data, isLoading } = useInfraNodes({ state: "PENDING" });
+  // Poll so a freshly-discovered host appears in the tray without a manual reload (#1081).
+  const { data, isLoading } = useInfraNodes(
+    { state: "PENDING" },
+    { refetchInterval: INFRA_LIVE_POLL_MS },
+  );
   const deleteNode = useDeleteInfraNode();
 
   const [confirmTarget, setConfirmTarget] = useState<InfraNodeListItem | null>(
