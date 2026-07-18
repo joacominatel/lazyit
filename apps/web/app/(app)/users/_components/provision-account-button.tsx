@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { useProvisionUserAccount } from "@/lib/api/hooks/use-user-mutations";
 import { classifyProvisionError } from "./provision-account-error";
+import { ProvisionLocalAccountButton } from "./provision-local-account-button";
 
 /**
  * The manual "Create OIDC account" promotion (ADR-0069 REDESIGN §0 #3) — the explicit counterpart to the
@@ -17,10 +18,13 @@ import { classifyProvisionError } from "./provision-account-error";
  * directory person; the caller already gates on `user:manage` (the same coarse capability behind every
  * other admin user action), so this component doesn't re-check the permission.
  *
- * Provisioning only works when the active IdP MANAGES users (bundled Zitadel). In `AUTH_MODE=local` and
- * BYOI / generic-OIDC there is no write-back, so the promotion ALWAYS 400s — offering it there is a lie
- * (issue #1048). We read `canProvisionAccounts` from `GET /config/status` and, when it is explicitly
- * false, render a short "not available in this mode" note instead of an impossible button.
+ * Provisioning only works when the active IdP MANAGES users (bundled Zitadel). We read the mode from
+ * `GET /config/status` and branch (issue #1048 / #1072):
+ *   - `canProvisionLocalAccounts` (AUTH_MODE=local) → the {@link ProvisionLocalAccountButton} onboarding
+ *     flow, which mints a one-time temporary password (there is no IdP to create an account in);
+ *   - `canProvisionAccounts` (bundled Zitadel) → the OIDC "Create account" promotion below;
+ *   - neither (BYOI / generic-OIDC) → a short "not available in this mode" note, since the operator's own
+ *     IdP owns onboarding and offering an action that always 400s is a lie.
  *
  * When provisioning IS available (Zitadel requires a real email):
  *   - When the person has no real email — missing, or the synthesized `…@directory.local` placeholder the
@@ -45,6 +49,13 @@ export function ProvisionAccountButton({ user }: { user: User }) {
   // The inline 400 message (server says this person can't be promoted as-is — the real cause, #1048).
   const [inlineError, setInlineError] = useState<string | null>(null);
 
+  // LOCAL mode (#1072): there is no IdP to create an account in — onboard the person with a one-time temp
+  // password instead. This wins over the OIDC branch below because in local mode `canProvisionAccounts`
+  // is false; branching here keeps the OIDC path untouched.
+  if (configStatus.data?.canProvisionLocalAccounts === true) {
+    return <ProvisionLocalAccountButton user={user} />;
+  }
+
   // Whether the active IdP can provision accounts at all (bundled Zitadel only, #1048). Only hide the
   // action when the server EXPLICITLY says it can't — while the status is still loading we optimistically
   // show the button (a Zitadel instance never flashes the note; a LOCAL one settles into it a beat later).
@@ -54,7 +65,8 @@ export function ProvisionAccountButton({ user }: { user: User }) {
   const lacksRealEmail =
     !user.email || user.email.endsWith(DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN);
 
-  // The IdP can't provision accounts (LOCAL / BYOI) — don't offer an action that always fails; explain why.
+  // The IdP can't provision accounts (BYOI / generic-OIDC) — don't offer an action that always fails;
+  // explain why. (Local mode returned above with the temp-password onboarding flow.)
   if (!canProvision) {
     return (
       <p className="max-w-prose text-xs text-muted-foreground" role="note">

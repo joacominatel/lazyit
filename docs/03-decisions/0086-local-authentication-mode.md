@@ -186,6 +186,23 @@ exist. Two existing guards actively break local mode and are fixed:
   `directoryOnly` users stay login-incapable by construction. (Correction of record: the bulk importer has
   only ever created `directoryOnly` VIEWER rows; "real user import" was deferred in
   [[0069-migrator-import]] §12.)
+- **Amendment (issue #1072) — admin-initiated LOCAL onboarding of a directory person.** The prior invariant
+  ("a `directoryOnly` row never receives a credential via any path") was **absolute** and, after a mass
+  import in local mode, left every imported person permanently stranded: login rejects `directoryOnly`,
+  `requestPasswordReset` 422s a directory person, and `provisionAccount` hard-gates on
+  `supportsManagement=false`. The invariant is **narrowed, not dropped**: a `directoryOnly` row may receive a
+  credential **only** through a new explicit, admin-action-gated `UsersService.provisionLocalAccount`
+  (`POST /users/:id/provision-local-account`, `user:manage`), which mints a one-time temp password with the
+  **same** primitives as the admin reset (`generateTempPassword` + `credentialFields({mustChangePassword:true})`),
+  flips `directoryOnly=false`, appends an audited `UPDATED` history row, and returns the plaintext **once**.
+  Security reasoning that keeps this safe: (1) **no self-service** — only an ADMIN (never the subject, never
+  the login path) can trigger it; (2) **no role widening** — the import forced VIEWER and onboarding passes
+  the existing role through untouched (the method never reads a role from any payload); (3) **shown once** —
+  the temp password is never stored in plaintext or refetchable, and `mustChangePassword` forces a change at
+  first sign-in (narrowing the hand-off window, exactly like the admin reset); (4) **local-mode only** — the
+  method 400s in OIDC/BYOI (where `provisionAccount` / the foreign IdP own onboarding), so the invariant is
+  unchanged there. INV-10 is untouched: onboarding grants **zero** additional Secret-Manager crypto access
+  (the vault passphrase is a separate credential, §7).
 - **Escape hatch:** a one-shot **recovery CLI** (`bun` script) resets a named admin's `passwordHash`
   directly against the DB — the only recovery when the last admin forgets their password and no SMTP
   exists ([[0079-instance-smtp-outbound-email]] pending).
