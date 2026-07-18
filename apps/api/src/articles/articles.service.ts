@@ -797,9 +797,16 @@ export class ArticlesService {
     // surface its slug/title. ADMIN ('ALL') gets no folder pin.
     const visible = await this.folderAccess.visibleFolderIds(principal, cache);
     const folderClause = this.folderWhere(visible);
-    const sourceWhere: Prisma.ArticleWhereInput = folderClause
-      ? { AND: [this.visibilityWhere(cu), folderClause] }
-      : this.visibilityWhere(cu);
+    // `deletedAt: null` on the source is required: ArticleWikiLink is not soft-deletable, so the
+    // soft-delete extension never scopes this read, and it cannot inject a guard into the nested to-one
+    // `source` projection either — without it a soft-deleted PUBLISHED source would surface as a live
+    // backlink (#1067). The visibility gate only filters by status.
+    const sourceWhere: Prisma.ArticleWhereInput = {
+      ...(folderClause
+        ? { AND: [this.visibilityWhere(cu), folderClause] }
+        : this.visibilityWhere(cu)),
+      deletedAt: null,
+    };
     const edges = await this.prisma.articleWikiLink.findMany({
       where: {
         resolvedTargetId: id,

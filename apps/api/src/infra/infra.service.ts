@@ -423,8 +423,17 @@ export class InfraService {
     const node = await this.getNode(id);
 
     // Children: nodes pointing AT this node with an ACTIVE RUNS_ON (inverse — "what runs on me").
+    // `source: { deletedAt: null }` is required: InfraEdge is not soft-deletable (it closes via
+    // `endedAt`, so the soft-delete extension never touches it), and a node's edges are NOT closed when
+    // the node is soft-deleted — so a deleted child would resurface through its still-active edge. The
+    // extension only scopes the top-level model, never a nested to-one `source` projection (#1067).
     const childEdges = await this.prisma.infraEdge.findMany({
-      where: { targetId: id, kind: 'RUNS_ON', endedAt: null },
+      where: {
+        targetId: id,
+        kind: 'RUNS_ON',
+        endedAt: null,
+        source: { deletedAt: null },
+      },
       select: {
         source: { select: { id: true, label: true, kind: true, status: true } },
       },

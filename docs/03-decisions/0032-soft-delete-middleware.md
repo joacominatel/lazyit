@@ -72,9 +72,11 @@ it" as the intended fix.
   column must be added to `SOFT_DELETABLE_MODELS`**, or its reads won't be filtered.
 - **`findUnique` bypasses the filter** (caveat above) — a deliberate, documented limitation.
 - **Nested relation reads are not filtered:** query extensions only intercept top-level operations,
-  so a soft-deletable relation loaded via `include`/`select` is not auto-scoped. No service relied on
-  nested `deletedAt` filtering today, so nothing regressed; revisit if an `include` must hide
-  soft-deleted relations.
+  so a soft-deletable relation loaded via `include`/`select` is not auto-scoped. A read that projects
+  a soft-deletable to-one relation must add an explicit `<relation>: { deletedAt: null }` to the parent
+  `where` itself. #1067 found three such leaks (a revoked service-account surfacing as a live vault
+  member, a soft-deleted infra child node reached via a still-active `RUNS_ON` edge, and a soft-deleted
+  PUBLISHED article surfacing as a live KB backlink) and point-fixed each with that relation filter.
 
 ## Related
 
