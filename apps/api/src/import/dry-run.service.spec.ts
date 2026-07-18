@@ -32,7 +32,7 @@ function mapping(input: unknown): ImportMapping {
  */
 function makePrisma(opts: {
   assetModel?: any[];
-  location?: any[];
+  location?: { id: string; name: string; deletedAt: Date | null }[];
   assetByTag?: any[];
   schemeEnabled?: boolean;
   session?: any;
@@ -61,9 +61,24 @@ function makePrisma(opts: {
       update: failOnWrite,
     },
     location: {
-      findMany: async () => {
+      // Real (case-insensitive-aware) filtering by `where.name` — not a canned return — so a spec can
+      // prove the query shape itself (mode:'insensitive') rather than just the post-query classification
+      // (#1063: 'Piso 3' in the fixture must be found by a 'piso 3' probe).
+      findMany: (args: {
+        where: { name: string | { equals: string; mode?: string } };
+      }) => {
         (prisma as any)._calls.location += 1;
-        return opts.location ?? [];
+        const clause = args.where.name;
+        const wanted = typeof clause === 'string' ? clause : clause.equals;
+        const insensitive =
+          typeof clause !== 'string' && clause.mode === 'insensitive';
+        return Promise.resolve(
+          (opts.location ?? []).filter((r) =>
+            insensitive
+              ? r.name.toLowerCase() === wanted.toLowerCase()
+              : r.name === wanted,
+          ),
+        );
       },
       create: failOnWrite,
       update: failOnWrite,
@@ -290,7 +305,7 @@ describe('ImportDryRunService.analyze — reference resolution (deduped, no auto
     expect(c.suggested).toBe('match');
   });
 
-  it('location resolves by exact (trim-only) name', async () => {
+  it('location resolves by trimmed name', async () => {
     prisma = makePrisma({ location: [{ id: 'loc1', name: 'HQ', deletedAt: null }] });
     const service = new ImportDryRunService(prisma);
     const m = mapping({
@@ -301,6 +316,28 @@ describe('ImportDryRunService.analyze — reference resolution (deduped, no auto
     expect(report.conflicts[0].entity).toBe('Location');
     expect(report.conflicts[0].normalizedValue).toBe('HQ'); // trimmed
     expect(report.conflicts[0].suggested).toBe('match');
+  });
+
+  it('location resolves case-insensitively — "piso 3" matches a live "Piso 3" (#1063)', async () => {
+    prisma = makePrisma({
+      location: [{ id: 'loc1', name: 'Piso 3', deletedAt: null }],
+    });
+    const service = new ImportDryRunService(prisma);
+    const m = mapping({
+      columns: [
+        { field: 'name', column: 'N' },
+        { field: 'status', constant: 'active' },
+      ],
+      references: [{ field: 'locationId', column: 'Loc' }],
+    });
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { N: 'PC', Loc: 'piso 3' } }],
+      m,
+    );
+    expect(report.conflicts[0].entity).toBe('Location');
+    expect(report.conflicts[0].candidates).toHaveLength(1);
+    expect(report.conflicts[0].candidates[0].id).toBe('loc1');
+    expect(report.conflicts[0].suggested).toBe('match'); // NOT create — same casing-drift row, no duplicate
   });
 });
 
