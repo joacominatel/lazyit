@@ -104,11 +104,12 @@ coercion runs in the web preview and the API commit** so the preview cannot lie.
 A first-class, **value-deduplicated, dependency-ordered** subsystem (category → model → asset), resolving
 each distinct natural-key value **once** (cached, like the KB folder resolver), with an `includeSoftDeleted`
 probe. Per-entity natural keys + **per-key normalization** (mirror the schemas: **trim-only**, no
-internal-whitespace collapse): **category / location by normalized name**; **AssetModel by `sku`** (exact,
-case-sensitive) else a *soft* case-folded `(manufacturer, name)` match offered as **candidates**. Because
-`AssetModel.name` and person names are **not unique**, resolution **never auto-picks** on ambiguity — it
-surfaces candidates. (Asset ownership/assignment is **not** a `CreateAssetSchema` field and is **out of
-phase 1**.)
+internal-whitespace collapse): **category / location by normalized name, case-folded** (#1063 — a Snipe-IT
+export's casing drift, e.g. `'Piso 3'` vs `'piso 3'`, resolves to the SAME row instead of a duplicate);
+**AssetModel by `sku`** (exact, case-sensitive) else a *soft* case-folded `(manufacturer, name)` match
+offered as **candidates**. Because `AssetModel.name` and person names are **not unique**, resolution
+**never auto-picks** on ambiguity — it surfaces candidates. (Asset ownership/assignment is **not** a
+`CreateAssetSchema` field and is **out of phase 1**.)
 
 ### 6. Conflict model — four outcomes, persisted
 
