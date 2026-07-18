@@ -427,7 +427,7 @@
       "revoke": "Revoke",
       "openActions": "Open actions"
     },
-    "revokeExplanation": "Its token stops authenticating immediately. You can restore it from the “Show revoked” view (rotate to mint a fresh token).",
+    "revokeExplanation": "Its token stops authenticating immediately. You can restore it from the “Show revoked” view (rotate to mint a fresh token). Revoking suspends the token but does not remove vault access — use the vault's Members list to revoke per vault and remove key material.",
     "toast": {
       "restored": "Service account restored",
       "restoreError": "Couldn't restore service account",
