@@ -209,6 +209,22 @@ export class DirectoryReconcileService {
         counts,
         error: null,
       };
+    } catch (err) {
+      // Anything the inner LDAP try/catch didn't already handle — a bind-password decrypt failure after a
+      // DIRECTORY_SECRET_KEY rotation / keyVersion mismatch, a transient DB error in config resolution or the
+      // upsert loop — must still honor the "always HTTP 200, inspect `ok`" contract the controller + web
+      // client rely on. Scrub (name only, never the DN/filter/password), record the failed run, return ok:false.
+      const error = scrubLdapError(err);
+      const finishedAt = new Date();
+      await this.config.recordRun('error', counts, finishedAt).catch(() => undefined);
+      this.logger.warn(`Directory sync failed: ${error}`);
+      return {
+        ok: false,
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        counts,
+        error,
+      };
     } finally {
       this.running = false;
     }
@@ -229,6 +245,12 @@ export class DirectoryReconcileService {
     actor: ActorAttribution,
     counts: DirectorySyncCounts,
   ): Promise<void> {
+    // Carry forward the create-time `emailConflict` merge HINT: it's set once in createNew and never
+    // re-derived (refreshMatched never re-evaluates email — email is a hint, never an auto-merge key).
+    // Without this it'd be wiped ~1 sweep after creation, which also spawns a phantom UPDATED + history row.
+    if (priorEmailConflict(person.directoryAttrs)) {
+      directoryAttrs.emailConflict = true;
+    }
     const changedFields: string[] = [];
     const data: Prisma.UserUpdateInput = {
       directoryAttrs: directoryAttrs as Prisma.InputJsonValue,
@@ -407,6 +429,14 @@ function buildDirectoryAttrs(
   }
   attrs.lastSeenAt = lastSeenAt;
   return attrs;
+}
+
+/** True when a person's stored directoryAttrs already carries the create-time `emailConflict` merge hint. */
+function priorEmailConflict(attrs: Prisma.JsonValue | null): boolean {
+  if (attrs === null || typeof attrs !== 'object' || Array.isArray(attrs)) {
+    return false;
+  }
+  return (attrs as Record<string, unknown>).emailConflict === true;
 }
 
 /** The lastSeenAt heartbeat (ms) stored in a person's directoryAttrs, or null when absent/unparseable. */
