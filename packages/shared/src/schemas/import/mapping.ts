@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AssetSchema, CreateAssetSchema } from "../asset";
+import { DATE_FORMATS } from "./coerce";
 import { IMPORT_UI_TARGETS } from "./descriptor";
 
 /**
@@ -81,6 +82,21 @@ export const PersonSubMappingSchema = z.object({
   fields: z.array(ColumnFieldMappingSchema).default([]),
 });
 
+/** The concrete per-column date format the operator confirmed in the map step (#1060). */
+export const DateFormatSchema = z.enum(DATE_FORMATS);
+
+/**
+ * A target-date-field → chosen format binding (#1060) — e.g. `{ field: "purchaseDate", format: "dmy" }`.
+ * The wire always carries a CONCRETE format: the mapping UI's "Auto" is resolved to `iso`/`dmy`/`mdy` via
+ * `detectDateFormat` BEFORE submit, so the SAME stored format is read identically by the dry-run preview
+ * and the chunked commit (the preview cannot lie; the commit never re-derives a heuristic over a partial
+ * column). `field` is one of `coerce-row.DATE_FIELDS` (`purchaseDate` / `warrantyEnd`).
+ */
+export const DateFieldMappingSchema = z.object({
+  field: z.string().min(1),
+  format: DateFormatSchema,
+});
+
 /**
  * Model config (ADR-0069 REDESIGN §5.1): brand (manufacturer) + category for newly-created
  * `AssetModel`s. Bound at the MAPPING level (session/column), NOT per `ConflictResolution` — read by
@@ -151,6 +167,7 @@ export const ImportMappingSchema = z
     enums: z.array(EnumFieldMappingSchema).default([]),
     references: z.array(FkFieldMappingSchema).default([]),
     custom: z.array(CustomFieldMappingSchema).default([]), // → Asset.specs
+    dates: z.array(DateFieldMappingSchema).default([]), // → per-column date format (#1060)
     person: PersonSubMappingSchema.optional(), // → directory person sub-payload (ADR-0069 REDESIGN §5.1)
     modelConfig: ModelConfigSchema, // → created AssetModel brand + category
   })
@@ -258,6 +275,8 @@ export type EnumValueMapping = z.infer<typeof EnumValueMappingSchema>;
 export type EnumFieldMapping = z.infer<typeof EnumFieldMappingSchema>;
 export type FkFieldMapping = z.infer<typeof FkFieldMappingSchema>;
 export type CustomFieldMapping = z.infer<typeof CustomFieldMappingSchema>;
+// `DateFormat` (the "iso"/"dmy"/"mdy" union) is exported from ./coerce — the barrel re-exports it once.
+export type DateFieldMapping = z.infer<typeof DateFieldMappingSchema>;
 export type PersonSubMapping = z.infer<typeof PersonSubMappingSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
 export type ImportMapping = z.infer<typeof ImportMappingSchema>;
