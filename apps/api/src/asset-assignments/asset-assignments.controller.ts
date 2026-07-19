@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiConflictResponse,
@@ -20,6 +21,7 @@ import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import {
+  AcknowledgeAssignmentDto,
   AssetAssignmentDto,
   CreateAssetAssignmentDto,
   ReleaseAssetAssignmentDto,
@@ -27,6 +29,7 @@ import {
 } from './asset-assignment.dto';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
+import { ServicePrincipalForbiddenGuard } from '../auth/service-principal-forbidden.guard';
 import type { Principal } from '../auth/principal';
 
 @ApiTags('asset-assignments')
@@ -109,5 +112,29 @@ export class AssetAssignmentsController {
     @Body() dto: UpdateAssetAssignmentNotesDto,
   ) {
     return this.assignments.updateNotes(id, dto);
+  }
+
+  // Check-out acknowledgement (ADR-0089 Part B, #1029). SELF-SERVICE: NO @RequirePermission — the
+  // authorization is "it's your OWN active assignment" (open-by-default for humans, INV-8), enforced by
+  // the service's self-scoped conditional write. Human-only, so ServicePrincipalForbiddenGuard 403s a
+  // service account (an asset is checked out to a person, not a bot). The acting user comes from the
+  // authenticated principal, never the body.
+  @Post(':id/acknowledge')
+  @UseGuards(ServicePrincipalForbiddenGuard)
+  @ApiOperation({
+    summary:
+      'Acknowledge receipt of an asset checked out to you (self-service; your OWN active assignment; human-only). 409 if already acknowledged / released / not yours.',
+  })
+  @ApiOkResponse({ type: AssetAssignmentDto })
+  @ApiConflictResponse({
+    description:
+      'The assignment is already acknowledged, already released, or not the caller’s own',
+  })
+  acknowledge(
+    @Param('id') id: string,
+    @Body() dto: AcknowledgeAssignmentDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.assignments.acknowledge(id, dto, principal);
   }
 }
