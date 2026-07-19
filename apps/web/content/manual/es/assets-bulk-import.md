@@ -120,6 +120,15 @@ Algunos campos se comportan de forma especial:
   decimales — `1,234.56`, `1.234,56` y `$1,000.00` funcionan. Las celdas en blanco quedan sin valor
   (no en cero); un valor que no puede leer como número se marca en la previsualización, nunca se adivina.
 - **Vida útil (meses)** es el período de depreciación lineal, como número entero de meses.
+- **Fecha de compra** y **Fin de garantía** son fechas, y cada columna de fecha lleva su propio selector
+  de **formato de fecha** en su tarjeta — **Automático**, **DMY** (día / mes / año), **MDY** (mes / día /
+  año) o **ISO** (`AAAA-MM-DD`). Importa porque `03/04/2024` es el 3 de abril en algunos países y el 4 de
+  marzo en otros. **Automático** lee la columna y decide: si algún primer número es mayor que 12 solo
+  puede ser un día, así que la columna se lee día primero (DMY); una columna `AAAA-MM-DD` pura se lee
+  como ISO; una columna ambigua por lo demás recae en **DMY** (el caso común de las migraciones). La
+  tarjeta muestra el formato detectado y una vista previa en vivo de cómo se interpreta el primer valor,
+  para que puedas cambiarlo antes de continuar. Un valor que no coincide con el formato elegido se marca
+  en la vista previa — nunca se desplaza al día equivocado.
 
 El importador **pre-rellena una mejor suposición** para cada columna, pero nunca decide por ti —
 confirmas cada columna, y nada se descarta en silencio. La suposición entiende más que los encabezados
@@ -193,6 +202,10 @@ La simulación valida, normaliza y resuelve **todas** las filas — **sin escrib
   sin notar que se descartó toda una clase de filas.
 - Resultados por fila, con el error de validación exacto de cada fila inválida (para que corrijas el
   archivo).
+- **Activos que ya existen** — cuando el **número de serie** de una fila coincide con un activo que ya
+  está en lazyit, la vista previa la marca como una **actualización**: ese activo se sobrescribe con los
+  valores del archivo en vez de crearse de nuevo (consulta *Reimportar actualiza los activos existentes*
+  más abajo). El recuento te dice de antemano cuántos activos vigentes cambiaría una confirmación.
 - **Colisiones de etiqueta de activo** — cualquier etiqueta de tu archivo que ya pertenezca a un
   activo vigente se marca aquí, nunca se descarta en silencio.
 
@@ -230,13 +243,31 @@ Cuando el plan está listo, la importación se ejecuta en segundo plano. Es **po
 
 El informe de resultados muestra cuántas filas se **crearon**, **fallaron** y se **omitieron**, además
 del id de la **ejecución de importación** para tu auditoría. Si algunas filas fallaron, corrígelas en
-tu archivo y ejecuta el importador de nuevo — las filas ya importadas se omiten en una nueva ejecución
-(cuando hay un número de serie mapeado).
+tu archivo y ejecuta el importador de nuevo (consulta *Reimportar actualiza los activos existentes* más
+abajo).
+
+### Reimportar actualiza los activos existentes
+
+Volver a ejecutar una importación es **idempotente cuando hay un número de serie mapeado**: una fila
+cuyo serie coincide con un activo que ya está en lazyit **actualiza ese activo en su lugar** en vez de
+crear un duplicado. Los campos mapeados se sobrescriben con los valores del archivo, y el cambio queda
+registrado en el **historial** del activo como un evento *Actualizado* marcado como reimportación. El
+recuento *«Algunos activos ya existen»* de la vista previa te dice cuántas filas actualizarán activos
+vigentes **antes** de confirmar, así que nunca es una sorpresa.
+
+> **Precaución — esto cambia datos vigentes.** Una actualización **sobrescribe** los valores actuales del
+> activo coincidente con los de tu archivo: un valor distinto reemplaza al vigente (una celda en blanco
+> deja el campo intacto en vez de borrarlo). Revisa el recuento de actualizaciones de la vista previa y
+> mantén tu archivo como la fuente autoritativa antes de confirmar. Las filas cuyo serie no coincide con
+> nada se crean igualmente; las filas **sin** serie mapeado nunca se de-duplican, así que una nueva
+> ejecución sin columna de serie crea duplicados.
 
 ## Bueno saberlo
 
-- **Es aditivo y auditado.** El importador solo crea y vincula; nunca elimina ni sobrescribe tus
-  activos existentes. Cada activo creado recibe una entrada de historial atribuida a ti.
+- **Es auditado, e idempotente por número de serie.** El importador crea y vincula registros nuevos y,
+  cuando el serie de una fila coincide con un activo existente, **actualiza ese activo en su lugar**
+  (nunca elimina). Cada activo creado o actualizado recibe una entrada de historial atribuida a ti —
+  consulta *Reimportar actualiza los activos existentes* más arriba.
 - **Las sesiones expiran.** Una sesión de importación en curso se conserva 24 horas y luego se
   descarta. El registro de auditoría de una importación *completada* es permanente.
 - **Los permisos siguen aplicándose al confirmar.** Más allá de `import:run`, crear un modelo o una
