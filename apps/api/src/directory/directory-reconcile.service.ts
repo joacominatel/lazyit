@@ -216,7 +216,9 @@ export class DirectoryReconcileService {
       // client rely on. Scrub (name only, never the DN/filter/password), record the failed run, return ok:false.
       const error = scrubLdapError(err);
       const finishedAt = new Date();
-      await this.config.recordRun('error', counts, finishedAt).catch(() => undefined);
+      await this.config
+        .recordRun('error', counts, finishedAt)
+        .catch(() => undefined);
       this.logger.warn(`Directory sync failed: ${error}`);
       return {
         ok: false,
