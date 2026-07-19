@@ -1,3 +1,4 @@
+/* eslint-disable no-unsafe-optional-chaining, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unused-vars, @typescript-eslint/only-throw-error, @typescript-eslint/require-await -- Scoped to this spec (the CI "lint changed files" gate lints the whole changed file): the hand-rolled Prisma/service doubles are intentionally `any`-typed and use underscore-ignored params, tripping the type-aware no-unsafe, unused-vars and require-await family across the pre-existing fixtures. Established repo pattern for a debt-laden test double; never applied to production files. */
 import {
   ConflictException,
   ForbiddenException,
@@ -96,9 +97,7 @@ interface PrismaState {
    * the ghost) to prove no resurrection. Returned rows may carry `email`/`legajo`/`username` for the
    * precedence assertion (the single-match path).
    */
-  directoryDedup?: (
-    or: any[],
-  ) =>
+  directoryDedup?: (or: any[]) =>
     | {
         id: string;
         email?: string;
@@ -114,6 +113,12 @@ interface PrismaState {
     | null;
   /** Live non-directory Users the supervisor→managerId match scans (REDESIGN §3.6). */
   liveManagers?: { id: string; firstName: string; lastName: string }[];
+  /**
+   * The #1061 serial dedup probe (`asset.findFirst({ where: { serial } })`): given the row's serial, return
+   * the matched LIVE asset `{ id }` (→ UPDATE path) or null (→ create). Default absent = always-miss
+   * (create). A ghost-only serial returns null (the live-filtered read never sees the ghost).
+   */
+  serialMatch?: (serial: string) => { id: string } | null;
 }
 
 /** A Prisma double recording every write so the spec can assert the contract. */
@@ -190,6 +195,9 @@ function makePrisma(state: PrismaState) {
     },
     asset: {
       findMany: async () => assets,
+      // #1061 serial dedup probe (LIVE-only, default soft-delete filter): default no match → create path.
+      findFirst: async (args: any) =>
+        state.serialMatch?.(args?.where?.serial) ?? null,
     },
     // The resume-detect probe: matches a CREATED import event by (sessionId, rowIndex) (fix 2).
     assetHistory: {
@@ -227,12 +235,17 @@ function makePrisma(state: PrismaState) {
   };
 }
 
-/** A fake AssetsService recording every create() call + its provenance, with scripted failures. */
+/**
+ * A fake AssetsService recording every create()/update() call + its provenance, with scripted failures.
+ * `update()` (the #1061 re-import path) records `{ id, data, options }` on `_updateCalls`.
+ */
 function makeAssets(opts?: { failOn?: (data: any) => unknown }) {
   const calls: { data: any; options: any }[] = [];
+  const updateCalls: { id: string; data: any; options: any }[] = [];
   let idSeq = 0;
   return {
     _calls: calls,
+    _updateCalls: updateCalls,
     create: jest.fn(async (data: any, _principal: any, options: any) => {
       calls.push({ data, options });
       const fail = opts?.failOn?.(data);
@@ -240,6 +253,12 @@ function makeAssets(opts?: { failOn?: (data: any) => unknown }) {
       const asset = { id: `asset-${idSeq++}`, ...data };
       return asset;
     }),
+    update: jest.fn(
+      async (id: string, data: any, _principal: any, options: any) => {
+        updateCalls.push({ id, data, options });
+        return { id, ...data };
+      },
+    ),
   };
 }
 
@@ -355,15 +374,15 @@ function makeService(state: PrismaState, doubles?: any) {
   };
   const service = new ImportCommitService(
     queue as any,
-    prisma as any,
-    assets as any,
-    models as any,
-    categories as any,
-    locations as any,
-    users as any,
-    assignments as any,
-    search as any,
-    permissions as any,
+    prisma,
+    assets,
+    models,
+    categories,
+    locations,
+    users,
+    assignments,
+    search,
+    permissions,
   );
   return {
     service,
@@ -391,6 +410,17 @@ const ASSET_MAPPING = mapping({
     { field: 'modelId', column: 'Model' },
     { field: 'locationId', column: 'Location' },
   ],
+});
+
+/** name/status/serial by column — exercises the #1061 serial dedup → UPDATE path. */
+const SERIAL_MAPPING = mapping({
+  columns: [
+    { field: 'name', column: 'Name' },
+    { field: 'status', column: 'Status' },
+    { field: 'serial', column: 'Serial' },
+  ],
+  enums: [],
+  references: [],
 });
 
 function sessionWith(
@@ -637,7 +667,7 @@ describe('ImportCommitService.commit', () => {
     expect(prisma._rowStatuses.get(2)?.status).toBe('FAILED');
     expect(prisma._rowStatuses.get(3)?.status).toBe('COMMITTED'); // batch continued past the failure
     // PII-free reason — a code, never the colliding value.
-    expect((prisma._rowStatuses.get(2)?.error as any).reason).toBe(
+    expect((prisma._rowStatuses.get(2)?.error).reason).toBe(
       'unique-taken-since-preview',
     );
   });
@@ -664,7 +694,7 @@ describe('ImportCommitService.commit', () => {
     const result = await service.commit('sess-1', OWNER);
 
     expect(result.failed).toBe(1);
-    expect((prisma._rowStatuses.get(1)?.error as any).reason).toBe(
+    expect((prisma._rowStatuses.get(1)?.error).reason).toBe(
       'reference-missing-since-preview',
     );
   });
@@ -722,9 +752,7 @@ describe('ImportCommitService.commit', () => {
     expect(result.failed).toBe(1);
     expect(result.committed).toBe(1);
     expect(prisma._rowStatuses.get(1)?.status).toBe('FAILED');
-    expect((prisma._rowStatuses.get(1)?.error as any).reason).toBe(
-      'validation',
-    );
+    expect((prisma._rowStatuses.get(1)?.error).reason).toBe('validation');
     // create() was reached ONLY for the valid row — the doomed row never entered the tag allocator.
     expect(assets.create).toHaveBeenCalledTimes(1);
     expect(assets._calls[0].data.name).toBe('B');
@@ -1482,7 +1510,7 @@ describe('ImportCommitService.commit', () => {
       expect(result.failed).toBe(0);
       // The person is created via UsersService with skipIdpWriteBack + import provenance + directoryOnly.
       expect(users.create).toHaveBeenCalledTimes(1);
-      const { data, opts } = users._calls[0] as any;
+      const { data, opts } = users._calls[0];
       expect(opts.skipIdpWriteBack).toBe(true);
       expect(opts.createdPayload).toEqual({
         source: 'import',
@@ -1521,7 +1549,7 @@ describe('ImportCommitService.commit', () => {
 
       await service.commit('sess-1', OWNER);
 
-      const { data } = users._calls[0] as any;
+      const { data } = users._calls[0];
       expect(data.firstName).toBe('Madonna');
       expect(data.lastName).toBe('Madonna'); // fallback keeps lastName .min(1) satisfied
     });
@@ -1600,7 +1628,10 @@ describe('ImportCommitService.commit', () => {
       const row = prisma._rowStatuses.get(1);
       expect(row?.status).toBe('COMMITTED');
       expect(row?.error).toEqual(
-        expect.objectContaining({ reason: 'ambiguous-identity', warning: true }),
+        expect.objectContaining({
+          reason: 'ambiguous-identity',
+          warning: true,
+        }),
       );
     });
 
@@ -1740,7 +1771,8 @@ describe('ImportCommitService.commit', () => {
         plan({ conflicts: [] }),
       );
       state.session!.mapping = noNamePersonMapping;
-      const { service, assets, users, assignments, prisma } = makeService(state);
+      const { service, assets, users, assignments, prisma } =
+        makeService(state);
 
       const result = await service.commit('sess-1', OWNER);
 
@@ -1882,10 +1914,170 @@ describe('ImportCommitService.commit', () => {
 
       await service.commit('sess-1', OWNER);
 
-      const callA = (users._calls[0] as any).data;
-      const callB = (users._calls[1] as any).data;
+      const callA = users._calls[0].data;
+      const callB = users._calls[1].data;
       expect(callA.manager).toEqual({ managerId: 'mgr-grace' });
       expect(callB.manager).toEqual({ managerName: 'Nobody Here' });
+    });
+  });
+
+  // ===== #1061: serial dedup → UPDATE the matched live asset (no duplicate) =====================
+  describe('serial dedup → UPDATE the matched live asset (#1061)', () => {
+    function sessionWithSerial(
+      rows: FixtureRow[],
+      resolutionPlan: ImportResolutionPlan,
+    ): PrismaState {
+      const state = sessionWith(rows, resolutionPlan);
+      state.session!.mapping = SERIAL_MAPPING;
+      return state;
+    }
+
+    it('a row whose serial matches a LIVE asset UPDATES it (not create), with import provenance + suppressSearch', async () => {
+      const state = sessionWithSerial(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'Laptop A', Status: 'active', Serial: 'SN-1' },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      state.serialMatch = (serial) =>
+        serial === 'SN-1' ? { id: 'existing-asset-1' } : null;
+      const { service, assets, prisma } = makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.committed).toBe(1);
+      expect(result.failed).toBe(0);
+      // The matched asset is UPDATED (through AssetsService.update), never re-created.
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(assets.update).toHaveBeenCalledTimes(1);
+      const [id, data, , options] = assets.update.mock.calls[0] as any[];
+      expect(id).toBe('existing-asset-1');
+      expect(data).toMatchObject({
+        name: 'Laptop A',
+        status: 'OPERATIONAL',
+        serial: 'SN-1',
+      });
+      expect(options).toEqual({
+        updatedPayload: { source: 'import', sessionId: 'sess-1', rowIndex: 0 },
+        suppressSearch: true,
+      });
+      expect(prisma._rowStatuses.get(1)?.status).toBe('COMMITTED');
+    });
+
+    it('re-import is idempotent: a matched serial creates NO duplicate asset (update, not create)', async () => {
+      const state = sessionWithSerial(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'A', Status: 'active', Serial: 'SN-DUP' },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      state.serialMatch = () => ({ id: 'live-dup' });
+      const { service, assets } = makeService(state);
+
+      await service.commit('sess-1', OWNER);
+
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(assets.update).toHaveBeenCalledTimes(1);
+      expect((assets.update.mock.calls[0] as any[])[0]).toBe('live-dup');
+    });
+
+    it('P2002 race on serial: create() throws P2002 (assets_serial_active_key) → falls back to UPDATE, row COMMITTED', async () => {
+      const state = sessionWithSerial(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'A', Status: 'active', Serial: 'SN-RACE' },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      // The pre-create probe misses (serial free at preview); a concurrent writer took it before create()
+      // landed → P2002 on the serial index → the fallback re-probes and finds the raced live asset.
+      let probes = 0;
+      state.serialMatch = () => (probes++ === 0 ? null : { id: 'raced-asset' });
+      const p2002 = new Prisma.PrismaClientKnownRequestError('dupe', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: 'assets_serial_active_key' },
+      });
+      const assets = makeAssets({ failOn: () => p2002 });
+      const { service, prisma } = makeService(state, { assets });
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.committed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(assets.create).toHaveBeenCalledTimes(1); // attempted
+      expect(assets.update).toHaveBeenCalledTimes(1); // then routed to the update path
+      expect((assets.update.mock.calls[0] as any[])[0]).toBe('raced-asset');
+      expect(prisma._rowStatuses.get(1)?.status).toBe('COMMITTED');
+    });
+
+    it('a P2002 on a DIFFERENT target (assetTag) stays a FAILED row — never routed to update', async () => {
+      const state = sessionWithSerial(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'A', Status: 'active', Serial: 'SN-2' },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      state.serialMatch = () => null; // no live serial match → create path
+      const p2002tag = new Prisma.PrismaClientKnownRequestError('dupe', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: 'assets_assetTag_active_key' },
+      });
+      const assets = makeAssets({ failOn: () => p2002tag });
+      const { service, prisma } = makeService(state, { assets });
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.failed).toBe(1);
+      expect(assets.update).not.toHaveBeenCalled();
+      expect(prisma._rowStatuses.get(1)?.status).toBe('FAILED');
+      expect((prisma._rowStatuses.get(1)?.error).reason).toBe(
+        'unique-taken-since-preview',
+      );
+    });
+
+    it('a row with NO serial creates on every run (no natural key to dedup on)', async () => {
+      // ASSET_MAPPING has no serial column → the serial probe is never consulted, so a stray serialMatch
+      // must not divert the create path.
+      const state = sessionWith(
+        [
+          {
+            id: 1,
+            rowIndex: 0,
+            status: 'VALID',
+            raw: { Name: 'A', Status: 'active' },
+          },
+        ],
+        plan({ conflicts: [] }),
+      );
+      state.serialMatch = () => ({ id: 'should-not-be-used' });
+      const { service, assets } = makeService(state);
+
+      const result = await service.commit('sess-1', OWNER);
+
+      expect(result.committed).toBe(1);
+      expect(assets.create).toHaveBeenCalledTimes(1);
+      expect(assets.update).not.toHaveBeenCalled();
     });
   });
 
