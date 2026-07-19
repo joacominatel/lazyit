@@ -51,6 +51,8 @@ export * from "./schemas/consumable";
 export * from "./schemas/consumable-category";
 export * from "./schemas/consumable-list";
 export * from "./schemas/consumable-movement";
+// On-prem AD/LDAP directory-source config + sync-result wire shapes (issue #839, ADR-0091).
+export * from "./schemas/directory-connection";
 export * from "./schemas/dashboard";
 export * from "./schemas/folder";
 export * from "./schemas/import";
