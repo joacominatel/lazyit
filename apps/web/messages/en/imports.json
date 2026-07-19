@@ -100,6 +100,17 @@
     "statusInColumnNote": "Map each status value in this column to a lazyit status. Common synonyms are filled in for you.",
     "statusNoValues": "No status values were found in the sampled rows.",
     "statusUnmapped": "— leave as-is —",
+    "dateFormat": {
+      "label": "Date format",
+      "auto": "Auto-detect",
+      "dmy": "DMY — day / month / year",
+      "mdy": "MDY — month / day / year",
+      "iso": "ISO — YYYY-MM-DD",
+      "note": "lazyit reads every date in this column with this format. A wrong format means those rows are skipped.",
+      "detected": "Auto-detected: {format}",
+      "preview": "Example: {value} → {result}",
+      "previewFail": "won't parse (row skipped)"
+    },
     "fixedValue": {
       "modeExisting": "Existing",
       "modeConstant": "Constant",
@@ -144,6 +155,8 @@
     "showAllRows": "Show all {count} rows",
     "collapseRows": "Show fewer",
     "allInvalid": "No rows are valid. Go back and review the mapping or the file.",
+    "updateExistingTitle": "Some assets already exist",
+    "updateExistingDescription": "{count, plural, one {# row matches an existing asset by serial number and will UPDATE it in place} other {# rows match existing assets by serial number and will UPDATE them in place}} — their current values are overwritten with your file's, and the change is recorded in each asset's history.",
     "tagCollisionTitle": "Asset-tag collisions",
     "tagCollisionDescription": "{count, plural, one {# row carries an asset tag that already exists on a live asset} other {# rows carry an asset tag that already exists on a live asset}}. Resolve the duplicate tag in your file before committing those rows.",
     "tagCollisionRow": "Row {index}: tag {tag}",
