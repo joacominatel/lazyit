@@ -91,6 +91,7 @@ function makeService(opts: {
   serviceAccountId?: string | null;
   emailTaken?: boolean;
   disabled?: boolean;
+  resolveThrows?: boolean;
   attributeMap?: Record<string, string>;
 }) {
   const attributeMap = opts.attributeMap ?? {
@@ -117,11 +118,14 @@ function makeService(opts: {
   } as unknown as PrismaService;
 
   const recordRun = jest.fn().mockResolvedValue(undefined);
-  const config = {
-    resolveConfig: jest.fn().mockResolvedValue(
-      opts.disabled
-        ? null
-        : {
+  const resolveConfig = opts.resolveThrows
+    ? jest
+        .fn()
+        .mockRejectedValue(new Error('bind password decrypt failed: s3cr3t'))
+    : jest.fn().mockResolvedValue(
+        opts.disabled
+          ? null
+          : {
             host: 'dc',
             port: 636,
             transport: 'ldaps',
@@ -132,7 +136,9 @@ function makeService(opts: {
             searchFilter: '(objectClass=user)',
             attributeNames: Object.values(attributeMap),
           },
-    ),
+      );
+  const config = {
+    resolveConfig,
     getAttributeMap: jest.fn().mockResolvedValue(attributeMap),
     getOffboardGraceDays: jest.fn().mockResolvedValue(opts.graceDays ?? 7),
     getServiceAccountId: jest
@@ -384,6 +390,56 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     expect(usersCreate).not.toHaveBeenCalled();
     expect(result.counts.created).toBe(0);
     expect(result.counts.skipped).toBe(1);
+  });
+
+  it('config-resolution throw (key rotation / decrypt fail) → ok:false + recorded error, never a raw throw or leak', async () => {
+    const { service, recordRun } = makeService({
+      localPeople: [],
+      entries: [],
+      resolveThrows: true,
+    });
+    const result = await service.reconcile();
+    // The "always HTTP 200, inspect ok" contract holds even when config resolution throws.
+    expect(result.ok).toBe(false);
+    expect(result.error).not.toContain('s3cr3t'); // scrubbed: name only, never the secret
+    expect(recordRun).toHaveBeenCalledWith(
+      'error',
+      expect.anything(),
+      expect.any(Date),
+    );
+  });
+
+  it('MATCHED conflicted person → carries emailConflict forward (no phantom update/history row)', async () => {
+    const { service, userUpdate, txUserUpdate, historyRecord } = makeService({
+      localPeople: [
+        {
+          id: 'u1',
+          directorySourceId: 'G1',
+          isActive: true,
+          directoryOffboardedAt: null,
+          firstName: 'Dup',
+          lastName: 'Mail',
+          directoryAttrs: {
+            mail: 'taken@corp.com',
+            emailConflict: true,
+            lastSeenAt: '2020-01-01T00:00:00.000Z',
+          },
+        },
+      ],
+      entries: [
+        makeEntry('G1', { givenName: 'Dup', sn: 'Mail', mail: 'taken@corp.com' }),
+      ],
+    });
+    const result = await service.reconcile();
+    // Nothing meaningful changed → silent heartbeat only, no phantom UPDATED count or history row.
+    expect(result.counts.updated).toBe(0);
+    expect(result.counts.skipped).toBe(1);
+    expect(txUserUpdate).not.toHaveBeenCalled();
+    expect(historyRecord).not.toHaveBeenCalled();
+    // …and the flag survives the refresh instead of being wiped.
+    const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
+    const attrs = data.directoryAttrs as Record<string, unknown>;
+    expect(attrs.emailConflict).toBe(true);
   });
 
   it('disabled/unconfigured → no-op result, no LDAP bind', async () => {
