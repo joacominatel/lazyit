@@ -152,9 +152,10 @@ export const DEFAULT_DATE_FORMAT: DateFormat = "dmy";
  * {@link detectDateFormat}) and stored on the mapping, so the dry-run and the chunked commit read the SAME
  * stored format identically (the preview cannot lie; the commit never re-derives over a partial column).
  *
- *   - `iso` — accept only ISO-shaped input (a bare date `2024-01-02` or a full instant); re-emit via the
- *     Date constructor + `toISOString()` (`z.iso.datetime()` rejects the bare form). A slash value never
- *     matches → `undefined`. This preserves today's bare-ISO behavior for any mapping without a date entry.
+ *   - `iso` — accept an ISO-shaped value (a bare date `2024-01-02`, or a date-prefixed instant); take the
+ *     leading calendar date and re-emit UTC midnight via {@link utcDateOnly} — dropping any time component
+ *     so a server time zone never drifts the stored day, and REJECTING an impossible date (`2024-02-30`)
+ *     instead of rolling it over. A slash value never matches → `undefined`.
  *   - `dmy` / `mdy` — strict `D/M/Y` / `M/D/Y` slash form (4-digit year, date-only). Build via `Date.UTC`
  *     and VALIDATE the components round-trip so an impossible date (`31/02`, month `13`) is REJECTED
  *     (`undefined`) rather than silently rolled over by the Date constructor.
@@ -170,9 +171,11 @@ export function coerceDate(
   const present = coerceAbsent(value);
   if (present === undefined) return undefined;
   if (format === "iso") {
-    if (!/^\d{4}-\d{2}-\d{2}/.test(present)) return undefined;
-    const date = new Date(present);
-    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+    // Date-only: take the leading calendar date (Y-M-D) and drop any time component, so a server time
+    // zone never drifts the stored day. A slash value never matches → undefined.
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(present);
+    if (!iso) return undefined;
+    return utcDateOnly(Number(iso[1]), Number(iso[2]), Number(iso[3]));
   }
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(present);
   if (!m) return undefined;
@@ -181,9 +184,20 @@ export function coerceDate(
   const year = Number(m[3]);
   const day = format === "dmy" ? first : second;
   const month = format === "dmy" ? second : first;
+  return utcDateOnly(year, month, day);
+}
+
+/**
+ * Build UTC-midnight ISO for a calendar date, REJECTING an impossible one: `Date.UTC(2024, 1, 31)` rolls
+ * over to Mar 2, so the round-trip equality fails → `undefined`. Shared by every {@link coerceDate} format
+ * so a bad date is never silently shifted, on any server time zone. (Hoisted — used above.)
+ */
+function utcDateOnly(
+  year: number,
+  month: number,
+  day: number,
+): string | undefined {
   const utc = new Date(Date.UTC(year, month - 1, day));
-  // Round-trip validation: `Date.UTC(2024, 1, 31)` rolls to Mar 2, so an impossible date fails this
-  // equality and returns undefined (never a silently-shifted value).
   if (
     utc.getUTCFullYear() !== year ||
     utc.getUTCMonth() !== month - 1 ||
