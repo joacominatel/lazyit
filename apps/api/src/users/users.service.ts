@@ -548,6 +548,14 @@ export class UsersService {
       // payload (role-escalation closed) — CreateDirectoryPersonSchema doesn't even carry `role`.
       skipIdpWriteBack?: boolean;
       directoryAttrs?: Prisma.InputJsonValue;
+      // ADR-0091 (#839): AD/LDAP directory-source provenance stamped on the NEW directory person. Only the
+      // read-only directory reconcile (a trusted server caller) passes these; the public Users controller
+      // never does. `directorySource` discriminates the origin ("ad"); `directorySourceId` is the AD
+      // objectGUID canonical string — the immutable natural key the reconcile upserts on (NEVER externalId,
+      // INV-2). Both are additive to the existing skipIdpWriteBack branch and change none of its invariants
+      // (role stays VIEWER, externalId stays null, no login).
+      directorySource?: string;
+      directorySourceId?: string;
     },
   ): Promise<SerializedUser> {
     // RBAC default (ADR-0040, flipped to VIEWER by ADR-0043): an omitted role lands the least-
@@ -575,6 +583,12 @@ export class UsersService {
         data: {
           ...createData,
           directoryOnly: true,
+          ...(opts.directorySource !== undefined
+            ? { directorySource: opts.directorySource }
+            : {}),
+          ...(opts.directorySourceId !== undefined
+            ? { directorySourceId: opts.directorySourceId }
+            : {}),
           ...(opts.directoryAttrs !== undefined
             ? { directoryAttrs: opts.directoryAttrs }
             : {}),
