@@ -16,6 +16,7 @@ import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { useInstanceVersion } from "@/lib/api/hooks/use-instance-version";
 import { AdminGate } from "../../_components/admin-gate";
 import { AssetTagSchemeEditor } from "./asset-tag-scheme-editor";
+import { DirectorySettingsEditor } from "./directory-settings-editor";
 import { SmtpSettingsEditor } from "./smtp-settings-editor";
 import { UpdatePanel } from "./update-panel";
 
@@ -162,7 +163,10 @@ export function InstanceSettingsView() {
             <AssetTagSchemeEditor />
           </div>
 
-          <SmtpSettingsEditor />
+          <div className="space-y-6">
+            <SmtpSettingsEditor />
+            <DirectorySettingsEditor />
+          </div>
         </div>
       </div>
     </AdminGate>
