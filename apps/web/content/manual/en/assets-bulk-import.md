@@ -121,6 +121,14 @@ A few fields behave specially:
   `1.234,56` and `$1,000.00` all work. Blank cells stay unset (not zero); a value it can't read as a
   number is flagged in the preview, never guessed.
 - **Useful life (months)** is the straight-line depreciation period as a whole number of months.
+- **Purchase date** and **Warranty end** are dates, and each date column carries its own **date-format**
+  picker in its card — **Auto**, **DMY** (day / month / year), **MDY** (month / day / year) or **ISO**
+  (`YYYY-MM-DD`). This matters because `03/04/2024` is 3 April in some countries and March 4th in
+  others. **Auto** reads the column and decides: if any first number is greater than 12 it can only be a
+  day, so the column is read day-first (DMY); a pure `YYYY-MM-DD` column is read as ISO; an otherwise
+  ambiguous column falls back to **DMY** (the migration-common case). The card shows the detected format
+  and a live preview of how the first value parses, so you can override it before continuing. A value
+  that doesn't match the chosen format is flagged in the preview — never shifted to the wrong day.
 
 The importer **pre-fills a best guess** for each column, but it never decides for you — you confirm
 every column, and nothing is dropped silently. The guess understands more than exact English
@@ -192,6 +200,10 @@ The dry run validates, coerces and resolves **every** row — **writing nothing*
   example *“12 rows — field status”* with the offending value), so you can't confirm the commit
   without noticing that a whole class of rows was dropped.
 - Per-row outcomes, with the exact validation error for each invalid row (so you can fix the file).
+- **Assets that already exist** — when a row's **serial number** matches an asset already in lazyit, the
+  preview flags it as an **update**: that asset is overwritten with the file's values rather than created
+  anew (see *Re-importing updates existing assets* below). The count tells you up front how many live
+  assets a commit would change.
 - **Asset-tag collisions** — any tag in your file that already belongs to a live asset is flagged
   here, never silently dropped.
 
@@ -226,12 +238,28 @@ follows a **keep-partial** rule:
 
 The result report shows how many rows were **created**, **failed** and **skipped**, plus the
 **import run** id for your audit trail. If some rows failed, fix them in your file and run the
-importer again — already-imported rows are skipped on a re-run (when a serial number is mapped).
+importer again (see *Re-importing updates existing assets* below).
+
+### Re-importing updates existing assets
+
+Re-running an import is **idempotent when a serial number is mapped**: a row whose serial matches an
+asset already in lazyit **updates that asset in place** instead of creating a duplicate. The mapped
+fields are overwritten with the file's values, and the change is recorded in the asset's **history** as
+an *Updated* event marked as a re-import. The preview's *“Some assets already exist”* count tells you
+how many rows will update live assets **before** you commit, so it's never a surprise.
+
+> **Caution — this changes live data.** An update **overwrites** the matched asset's current values with
+> what's in your file: a different value replaces the live one (a blank cell leaves the field untouched
+> rather than erasing it). Review the preview's update count and keep your file authoritative before you
+> commit. Rows whose serial matches nothing are still created fresh; rows with **no** serial mapped are
+> never de-duplicated, so a re-run without a serial column creates duplicates.
 
 ## Good to know
 
-- **It's additive and audited.** The importer only creates and links; it never deletes or overwrites
-  your existing assets. Every created asset gets a history entry attributed to you.
+- **It's audited, and idempotent by serial.** The importer creates and links new records and, when a
+  row's serial matches an existing asset, **updates that asset in place** (it never deletes). Every
+  created or updated asset gets a history entry attributed to you — see *Re-importing updates existing
+  assets* above.
 - **Sessions expire.** An in-progress import session is kept for 24 hours and then discarded. The
   audit ledger of a *completed* import is permanent.
 - **Permissions still apply at commit.** Beyond `import:run`, creating a new model or location during

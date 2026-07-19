@@ -87,11 +87,38 @@ and merges → the user promotes `dev` to `master`.** The step-by-step with real
   documentation** (e.g. Context7 or the web) — don't rely on memory. Versions here are recent
   (Next 16, Nest 11, Prisma 7, Tailwind 4) and APIs move.
 
+## 7. Upgrade-safe over production data
+
+lazyit is **live in production** on real self-hosted instances (operators, including the CEO, run
+it for their own teams). Every change must apply cleanly when an existing operator **updates their
+version** — the release path is `dev`→`master`→tag→the operator pulls the new images and
+`prisma migrate deploy` runs the migrations against their **populated** database ([[0084-update-awareness-and-guided-update]]).
+A change that only works on a fresh, seeded install is a regression for every current user.
+
+Before writing code — and again before merging — clear the **upgrade-path** dimension:
+
+- **Migrations are additive + nullable/defaulted.** No destructive drop, no `NOT NULL` without a
+  default, no rename that strands data. If existing rows genuinely need fixing, **ship the backfill**
+  (a data step in the migration, a self-heal path, or a one-time reconcile job) — never assume rows
+  are absent.
+- **New validation/logic stays read-tolerant of legacy values.** Enforce only on **write**; keep the
+  **read** schema tolerant so old data still loads (don't 400/crash on it). Prefer a **self-heal**
+  path that corrects the data on the next natural write. *Example (#847 IPAM):* the InfraNode read
+  schema stayed `z.string().nullable()` (legacy invalid IPs still read), validation is write-only,
+  and agent-sourced nodes self-heal their IP on the next report.
+- **New enum values / notification types / config degrade gracefully** on an already-updated app;
+  old rows get sensible NULL defaults.
+- **Document the upgrade behavior** in the PR body (and the public Manual when user-facing): what
+  happens to existing data on update, and whether a re-poll or backfill is involved.
+
+This sits alongside correctness and security as a mandatory review dimension — a green diff that
+breaks or silently ignores existing production data is **not** done.
+
 ## Definition of done
 
 A change is done when: code is in place, **tests** exist per [[0012-testing-strategy]] (unit
 always; core/complex logic thoroughly), `docs/` is updated and consistent, **the public Manual
-is updated for any user-facing change** ([[manual-authoring]]), and commits are file-scoped with
-a correct prefix.
+is updated for any user-facing change** ([[manual-authoring]]), **the upgrade path over existing
+production data is safe and verified** (§7), and commits are file-scoped with a correct prefix.
 
 Related: [[git-workflow]] · [[workflows]] · [[code-conventions]] · [[0012-testing-strategy]] · [[shared-package]]

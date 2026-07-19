@@ -142,7 +142,9 @@ one place:
 > top) is editable in place — no separate page. Click the **title** to rename the node; change its
 > **kind** or **IP address** right there; and the **status** and **shortcuts** are editable too
 > (see below). Edits save as you go and the node's card on the canvas updates immediately. Read-only
-> viewers see the same facts as plain text, with no edit controls.
+> viewers see the same facts as plain text, with no edit controls. The **IP address** is checked
+> when you save it: it must be a valid IPv4 or IPv6 address, and an invalid entry is rejected with a
+> clear message rather than saved.
 
 - **Owner(s)** — who is responsible, pulled from the linked asset's assignments. An owner who has
   left the company but was never released is still shown, marked as such.
@@ -158,7 +160,10 @@ one place:
 - **Shortcuts** — quick links (SSH, web UI, console) that open in a new tab. With the manage
   permission you edit them inline: each shortcut is a label + URL pair you can change, add or remove,
   then **Save** the list (lazyit checks each URL is valid before saving).
-- **IP address** and **added-on** date.
+- **IP address** and **added-on** date. If another node on the map already carries the *exact same*
+  IP, the panel shows a **non-blocking duplicate-IP warning** listing the other node(s) — a heads-up,
+  not a block: the address is still saved (lazyit enforces no uniqueness on IPs), and each listed
+  node is a click away so you can jump over and reconcile.
 - **Children** — the nodes hosted on this one (its active *runs on* relationships).
 - **Connections** — this node's active relationships (closable) and its closed history (a *runs on*
   migration shows here), plus the **Add connection** action.

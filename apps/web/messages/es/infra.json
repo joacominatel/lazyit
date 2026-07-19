@@ -221,6 +221,7 @@
     "ipEditLabel": "Dirección IP",
     "ipPlaceholder": "ej. 10.0.0.12",
     "ipClear": "Borrar",
+    "ipConflictWarning": "{count, plural, one {Esta IP también la usa # nodo más} other {Esta IP también la usan # nodos más}}",
     "editSave": "Guardar",
     "editCancel": "Cancelar",
     "editedToast": "Nodo actualizado.",

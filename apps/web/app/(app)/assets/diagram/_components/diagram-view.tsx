@@ -144,6 +144,7 @@ export function DiagramView() {
           <InfraNodePanel
             nodeId={selectedId}
             onClose={() => selectNode(null)}
+            onSelectNode={selectNode}
             impactOn={impactOn}
             onToggleImpact={() => setImpactOn((on) => !on)}
             impact={impactOn ? impact : undefined}

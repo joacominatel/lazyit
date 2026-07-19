@@ -38,6 +38,9 @@ function makePrisma(opts: {
   assetModel?: any[];
   location?: { id: string; name: string; deletedAt: Date | null }[];
   assetByTag?: any[];
+  // #1061: rows the LIVE serial probe returns (default filter is deletedAt:null, so a ghost-only serial
+  // returns [] here — the mock mirrors the live-filtered read).
+  assetBySerial?: any[];
   schemeEnabled?: boolean;
   session?: any;
   writes?: { count: number };
@@ -88,7 +91,12 @@ function makePrisma(opts: {
       update: failOnWrite,
     },
     asset: {
-      findMany: async () => opts.assetByTag ?? [],
+      // Two read callers in finalizeTags: the explicit-tag probe (`where.assetTag`) and the #1061 serial
+      // probe (`where.serial`). Branch on the where so each returns its own fixture.
+      findMany: async (args: any) =>
+        args?.where?.serial
+          ? (opts.assetBySerial ?? [])
+          : (opts.assetByTag ?? []),
       create: failOnWrite,
       update: failOnWrite,
     },
@@ -479,6 +487,87 @@ describe('ImportDryRunService.analyze — asset-tag classification', () => {
       tagless,
     );
     expect(report.tags[0].mode).toBe('auto-mint');
+  });
+});
+
+describe('ImportDryRunService.analyze — serial dedup → use-existing (#1061)', () => {
+  const withSerial = mapping({
+    columns: [
+      { field: 'name', column: 'Name' },
+      { field: 'status', constant: 'active' },
+      { field: 'serial', column: 'Serial' },
+    ],
+  });
+
+  it('a row whose serial matches a LIVE asset becomes use-existing (no collision)', async () => {
+    prisma = makePrisma({ assetBySerial: [{ serial: 'SN-1' }] });
+    const service = new ImportDryRunService(prisma);
+    const report = await service.analyze(
+      [
+        { rowIndex: 0, raw: { Name: 'A', Serial: 'SN-1' } }, // matches a live asset → use-existing
+        { rowIndex: 1, raw: { Name: 'B', Serial: 'SN-NEW' } }, // no live match → stays none
+      ],
+      withSerial,
+    );
+    expect(report.tags[0]).toMatchObject({
+      rowIndex: 0,
+      mode: 'use-existing',
+      collision: false,
+    });
+    expect(report.tags[1].mode).toBe('none');
+  });
+
+  it('a serial that matches only a GHOST (soft-deleted) is NOT use-existing — LIVE-only', async () => {
+    // The default soft-delete filter means the live probe returns [] for a ghost-only serial → the row is
+    // created fresh, never matched (the partial-unique index frees the ghost's serial).
+    prisma = makePrisma({ assetBySerial: [] });
+    const service = new ImportDryRunService(prisma);
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { Name: 'A', Serial: 'SN-GHOST' } }],
+      withSerial,
+    );
+    expect(report.tags[0].mode).not.toBe('use-existing');
+  });
+
+  it('use-existing WINS over an explicit-tag collision (the commit updates, never inserts a tag)', async () => {
+    const withSerialAndTag = mapping({
+      columns: [
+        { field: 'name', column: 'Name' },
+        { field: 'status', constant: 'active' },
+        { field: 'serial', column: 'Serial' },
+        { field: 'assetTag', column: 'Tag' },
+      ],
+    });
+    prisma = makePrisma({
+      assetBySerial: [{ serial: 'SN-1' }],
+      assetByTag: [{ assetTag: 'IT-1' }],
+    });
+    const service = new ImportDryRunService(prisma);
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { Name: 'A', Serial: 'SN-1', Tag: 'IT-1' } }],
+      withSerialAndTag,
+    );
+    // Even though the explicit tag collides with a live asset, serial-match precedence wins → no collision.
+    expect(report.tags[0]).toMatchObject({
+      mode: 'use-existing',
+      collision: false,
+    });
+  });
+
+  it('a row with NO serial is never use-existing', async () => {
+    const noSerial = mapping({
+      columns: [
+        { field: 'name', column: 'Name' },
+        { field: 'status', constant: 'active' },
+      ],
+    });
+    prisma = makePrisma({ assetBySerial: [{ serial: 'whatever' }] });
+    const service = new ImportDryRunService(prisma);
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { Name: 'A' } }],
+      noSerial,
+    );
+    expect(report.tags[0].mode).not.toBe('use-existing');
   });
 });
 

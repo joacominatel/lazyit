@@ -4,6 +4,7 @@ import {
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
   InfraShortcutSchema,
+  IpAddressSchema,
   isPlausibleEdge,
   primaryIpv4,
   sanitizeSerial,
@@ -52,6 +53,43 @@ describe("CreateInfraNodeSchema", () => {
       shortcuts: [{ label: "ssh", url: "://nope" }],
     });
     expect(r.success).toBe(false);
+  });
+
+  test("a malformed ipAddress fails the node create (ADR-0090, #847)", () => {
+    expect(
+      CreateInfraNodeSchema.safeParse({ kind: "VM", label: "pve1", ipAddress: "10.0.0.256" })
+        .success,
+    ).toBe(false);
+    expect(
+      CreateInfraNodeSchema.safeParse({ kind: "VM", label: "pve1", ipAddress: "myserver" }).success,
+    ).toBe(false);
+  });
+
+  test("a valid ipAddress passes and is trimmed", () => {
+    const r = CreateInfraNodeSchema.safeParse({
+      kind: "VM",
+      label: "pve1",
+      ipAddress: "  10.0.0.5  ",
+    });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.ipAddress).toBe("10.0.0.5");
+  });
+});
+
+// ── IP address value-object (ADR-0090, issue #847) ──────────────────────────────────────────────────
+
+describe("IpAddressSchema", () => {
+  test("accepts IPv4 and IPv6 (trimmed)", () => {
+    expect(IpAddressSchema.parse("192.168.1.5")).toBe("192.168.1.5");
+    expect(IpAddressSchema.parse("  10.0.0.5  ")).toBe("10.0.0.5"); // trim-normalized
+    expect(IpAddressSchema.parse("::1")).toBe("::1");
+    expect(IpAddressSchema.parse("2001:db8::1")).toBe("2001:db8::1");
+  });
+
+  test("rejects malformed addresses", () => {
+    for (const bad of ["10.0.0.256", "10.0..5", "myserver", "", "999.1.1.1", "2001:zz::1"]) {
+      expect(IpAddressSchema.safeParse(bad).success).toBe(false);
+    }
   });
 });
 
@@ -139,6 +177,14 @@ describe("primaryIpv4", () => {
     expect(primaryIpv4(host([{ name: "eth0" }]))).toBeUndefined();
     expect(primaryIpv4(host(undefined))).toBeUndefined();
     expect(primaryIpv4({ hostname: "h" } as AgentReportHost)).toBeUndefined();
+  });
+
+  test("drops a malformed NIC value (validate-or-drop — ADR-0090, #847)", () => {
+    // A garbage primary NIC value never promotes to the node's ipAddress — dropped, never a 400 on
+    // the report; a well-formed value still promotes untouched.
+    expect(primaryIpv4(host([{ name: "eth0", ipv4: ["10.0.0.256"] }]))).toBeUndefined();
+    expect(primaryIpv4(host([{ name: "eth0", ipv4: ["not-an-ip"] }]))).toBeUndefined();
+    expect(primaryIpv4(host([{ name: "eth0", ipv4: ["10.0.0.42"] }]))).toBe("10.0.0.42");
   });
 });
 

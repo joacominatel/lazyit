@@ -52,13 +52,17 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   `externalId`, `lastReportedAt` sit nullable/defaulted; the installable reporting agent that fills
   them is a future major (extends [[0048-service-accounts]] auth). No agent code ships in v1; the
   composite partial-unique `(reportingSource, externalId)` index is a forward-only add deferred with it.
-- **Access surface, not a network model** (scope cut). `ipAddress` is a label-only string (no
-  validation/IPAM); the reporting agent promotes the report's primary IPv4 into it and refreshes it
-  each check-in unless `ipAddressSource` is `MANUAL` (a human edit — the agent never clobbers it;
-  stamped `MANUAL` server-side when an IP rides an update, so it stays a trusted marker). ADR-0074 §3
-  / #1081. `shortcuts` is `[{ label, url }]` (URLs validated by zod), `specs` is a loose jsonb of
-  per-kind attrs ([[0007-flexible-asset-specs-jsonb]] posture; per-kind schema validation deferred —
-  the shared `TODO(specs)` debt).
+- **Access surface, not a network model** (scope cut). `ipAddress` is **format-validated** as an IPv4
+  or IPv6 value on write (shared `IpAddressSchema`, native zod — [[0090-ipam-validated-ip]] / #847): a
+  human edit that is malformed is a clean `400`, and the agent DROPS a garbage NIC value rather than
+  `400`-ing the whole report (never IPAM — no registry/subnet/allocation/`@unique`). The reporting agent
+  promotes the report's primary IPv4 into it and refreshes it each check-in unless `ipAddressSource` is
+  `MANUAL` (a human edit — the agent never clobbers it; stamped `MANUAL` server-side when an IP rides an
+  update, so it stays a trusted marker). ADR-0074 §3 / #1081. The drill-in read also carries a
+  **display-only `ipConflict`** — a **soft, non-blocking** signal listing other LIVE nodes with the same
+  IP (a badge; never a constraint — [[0090-ipam-validated-ip]]). `shortcuts` is `[{ label, url }]` (URLs
+  validated by zod), `specs` is a loose jsonb of per-kind attrs ([[0007-flexible-asset-specs-jsonb]]
+  posture; per-kind schema validation deferred — the shared `TODO(specs)` debt).
 - **Secret linkage is a soft handle-ref ([[0073-infra-node-secret-linkage]], #801).** A node can
   attach secret HANDLE references (`InfraNodeSecretRef`: `handle` + `vaultId`, **no FK** to the
   `SecretItem` — mirrors KB chips + `SecretAuditLog`). Resolved at read to live secret METADATA only
@@ -88,7 +92,7 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `label` | `string` | required; the canvas display name (always wins for display). |
 | `status` | `InfraNodeStatus` | `@default(UNKNOWN)`. |
 | `assetId` | `cuid?` | nullable FK → [[asset]], `onDelete: SetNull`. Default-on link; null = graph-only. |
-| `ipAddress` | `string?` | primary IP, label-only (no validation/IPAM). Agent-promoted from the report's primary IPv4 (ADR-0074 §3 / #1081). |
+| `ipAddress` | `string?` | primary IP, **format-validated** (IPv4/IPv6) on write — no IPAM/registry/`@unique` ([[0090-ipam-validated-ip]] / #847). Agent-promoted from the report's primary IPv4, validate-or-drop (ADR-0074 §3 / #1081). |
 | `ipAddressSource` | `InfraNodeIpSource` | `@default(AGENT)`; who owns `ipAddress` — `AGENT` (each report overwrites) vs `MANUAL` (a human edit the agent never clobbers, stamped server-side on an IP edit). #1081. |
 | `shortcuts` | `jsonb?` | `[{ label, url }]` SSH/web-UI/console links (max 20; URLs zod-validated). |
 | `specs` | `jsonb?` | loose per-kind attributes (ADR-0007 posture; per-kind validation deferred). |
@@ -120,7 +124,8 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   asset-backed payoff — `assetName`, active `owners`, published `articleLinks`, `secretRefs`
   (HANDLES only, never values — INV-10, [[0061-secret-manager-zero-knowledge]]; resolved from the
   node's secret links, dangling refs dropped — [[0073-infra-node-secret-linkage]], #801),
-  `shortcuts`, IP, and `children` (active inverse RUNS_ON).
+  `shortcuts`, IP, `children` (active inverse RUNS_ON), and `ipConflict` (a display-only soft signal:
+  other LIVE nodes with the same `ipAddress` — [[0090-ipam-validated-ip]], #847).
 - `POST /infra/nodes/:id/secrets` / `DELETE /infra/nodes/:id/secrets` — attach / detach a secret
   HANDLE reference (`{ handle, vaultId }` in the body; never a value). Attach needs `infra:manage` +
   `secret:read` **and** live vault membership (human-only); detach needs only `infra:manage`. Both
