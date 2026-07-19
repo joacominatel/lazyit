@@ -501,6 +501,60 @@ The check is a single-major compatibility gate, not a version-negotiation framew
 differences never block. The same `provenanceStampLine()` helper stamps the asset (#872), audit-log
 (#871) and dashboard-activity (#840) CSV exports; only the asset CSV has a round-trip importer here.
 
+## Amendment — explicit per-column date formats + serial re-import mutates live assets (2026-07-18, #1060 / #1061)
+
+> Extends §3 (coercion), §7 (asset-tag decisions) and **rewrites §9's "re-upload is NOT deduped" rule**.
+
+### #1060 — explicit per-column date format (no more heuristic guessing)
+
+`coerceDate` no longer feeds the raw cell to `new Date(...)` and hopes: a LATAM `13/07/2024` was parsed
+as an invalid/US date and the row failed. It now takes an **explicit `DateFormat`** (`iso` | `dmy` | `mdy`,
+`@lazyit/shared` `coerce.ts`) and parses **strictly** per format — `dmy`/`mdy` match a 4-digit-year slash
+form and **validate the component round-trip** (so `31/02/2024` and month `13` are rejected, never silently
+rolled over), `iso` accepts only ISO-shaped input. The chosen format is **persisted on the mapping** as
+`ImportMapping.dates: { field, format }[]` (defaults to `[]` → every date field reads as `iso`, today's
+bare-ISO behaviour, so all existing persisted mappings parse unchanged). "Auto" is a **UI-only**
+pre-selection resolved to a concrete format on the frontend (`detectDateFormat`, the CEO heuristic:
+first-part >12 ⇒ dmy, else second-part >12 ⇒ mdy, else pure-ISO ⇒ iso, else the named default) **before**
+submit — the wire always carries a concrete `iso`/`dmy`/`mdy`. This keeps the **"preview cannot lie"**
+invariant: the dry-run and the chunked commit read the SAME stored format identically, and the commit never
+re-derives a heuristic over a partial column. Mixed formats within one column, 2-digit years and datetime
+suffixes stay out of scope (strict-per-format; flagged `ponytail:` in `coerceDate`).
+
+### #1061 — re-importing a mapped serial UPDATES the matched live asset
+
+§9 previously said re-upload is "NOT deduped unless serialNumber is mapped" — but a mapped serial merely
+**warned**, then a second import **duplicated** every asset. Now, when `serial` is mapped:
+
+- **Dry-run** (`dry-run.service.ts` `finalizeTags`) runs ONE batched **LIVE** probe of every valid row's
+  serial (`asset.findMany({ where: { serial: { in } } })`, default soft-delete filter). A row whose serial
+  already exists on a live asset becomes the existing wire mode **`use-existing`** (no shared-schema change —
+  it was already in `AssetTagDecisionSchema`; the engine just emits it now). `use-existing` **wins** over
+  explicit/auto-mint/none and is never a collision (we update the matched asset, we don't insert a tag). The
+  web derives the "N rows already exist → will be updated" count from `report.tags`.
+- **Commit** (`import-commit.service.ts` `commitRow`) probes `asset.findFirst({ where: { serial } })`
+  (LIVE-only) after coerce + FK resolution; on a hit it routes to **`AssetsService.update(existingId, …,
+  { updatedPayload:{ source:'import', sessionId, rowIndex }, suppressSearch:true })`** (the mapped
+  `CreateAsset` fields are a valid partial `UpdateAsset`; absent optionals were stripped so a missing
+  assetTag/date never clobbers the stored value), then still opens the person assignment idempotently. A
+  **P2002 race** on `assets_serial_active_key` (the serial was free at preview but taken before `create()`
+  landed) re-finds the live asset and routes to the SAME update path; a P2002 on `assetTag` (or anything
+  else) stays a per-row FAILED as before.
+- **LIVE-only, always:** a soft-deleted (ghost) serial must **not** match — the partial-unique index frees a
+  ghost's serial, so a new live asset is created (never `includeSoftDeleted`, mirroring the explicit-tag and
+  directory-person dedup probes).
+- **No natural key ⇒ still creates every run:** a row with no mapped serial has nothing to dedup on and is
+  created on each import (documented `ponytail:` ceiling on the create branch — the CEO-accepted limitation).
+
+**Audit marker.** `AssetHistoryEventType` gains an additive **`UPDATED`** value (Postgres `ALTER TYPE … ADD
+VALUE`, safe on PG18; mirrors `UserHistoryEventType.UPDATED`). `AssetsService.update` now takes a
+create-parity options bag: `updatedPayload` stamps the import provenance onto every per-dimension change
+event **and**, because a no-field-delta re-import emits zero change events, writes exactly one `UPDATED`
+marker ("updated via re-import") so a re-import always leaves an audit row; `suppressSearch` skips the
+per-row Meili upsert (the bulk commit reconciles once). Existing `update()` callers (the PATCH controller)
+pass no options → behaviour unchanged. This is the recommended path over the provenance-only fallback
+(which would leave a no-delta re-import with no `AssetHistory` row).
+
 **Related:** [[0069-migrator-import.REDESIGN]] · [[0038-jit-user-provisioning]] · [[user]] ·
 [[INVARIANTS]] · [[SEC-072]] · [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] ·
 [[0083-versioning-and-releases]]
