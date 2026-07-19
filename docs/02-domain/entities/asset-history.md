@@ -39,7 +39,8 @@ the "what changed, when, by whom?" trail that auditing requires ([[problem-space
 
 `CREATED` · `STATUS_CHANGED` · `ASSIGNED` · `RELEASED` · `LOCATION_CHANGED` · `MODEL_CHANGED` ·
 `SPECS_CHANGED` · `DELETED` · `RESTORED` (emitted by `POST /assets/:id/restore`, the counterpart of
-`DELETED` — [[0041-soft-delete-reuse-and-restore]]).
+`DELETED` — [[0041-soft-delete-reuse-and-restore]]) · `ACKNOWLEDGED` (emitted by
+`POST /asset-assignments/:id/acknowledge` when the assignee confirms receipt — ADR-0089 Part B, #1029).
 
 ## Emission
 
@@ -47,7 +48,8 @@ the "what changed, when, by whom?" trail that auditing requires ([[problem-space
 
 - [[asset]] service — `CREATED` (create); per-field `STATUS_CHANGED` / `LOCATION_CHANGED` /
   `MODEL_CHANGED` / `SPECS_CHANGED` (update diff, one event per changed field); `DELETED` (soft delete).
-- [[asset-assignment]] service — `ASSIGNED` (open) and `RELEASED` (release).
+- [[asset-assignment]] service — `ASSIGNED` (open), `RELEASED` (release) and `ACKNOWLEDGED`
+  (self-service acknowledgement of receipt; payload `{ userId }` = the acknowledging owner — #1029).
 
 ## Endpoint
 

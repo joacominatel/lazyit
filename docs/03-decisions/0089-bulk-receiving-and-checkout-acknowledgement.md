@@ -1,7 +1,7 @@
 ---
 title: "ADR-0089: Bulk receiving + check-out acknowledgement"
 tags: [adr, assets, receiving, asset-assignment, notifications, data-model]
-status: proposed
+status: accepted
 created: 2026-07-18
 updated: 2026-07-18
 deciders: [Joaquín Minatel]
@@ -11,7 +11,10 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-07-18 (issue #1029). Two related receiving/hand-off ergonomics the migration
+**accepted** — 2026-07-18 (issue #1029). Both parts greenlit and **built 2026-07-18** (backend: shared
+contracts + api + the additive migration; the "Receive stock" UI, the "Acknowledge receipt" action and
+the Manual pages ship in the frontend lane per CLAUDE.md #3/#7). Two related receiving/hand-off
+ergonomics the migration
 persona ranked as the top inventory gap: **(A)** minting N assets from one [[asset-model]] in a single
 action ("we just received 20 identical ThinkPads"), and **(B)** recording that the person a device was
 **checked out to** actually **acknowledged** they hold it. This ADR is **design-only** — it writes no
