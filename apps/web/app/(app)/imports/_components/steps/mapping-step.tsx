@@ -4,12 +4,18 @@ import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import {
   AssetSchema,
   AssetStatusSchema,
+  DATE_FIELDS,
+  DEFAULT_DATE_FORMAT,
   HEADER_ALIASES,
   IMPORT_UI_TARGETS,
   assetImportDescriptor,
   coerceAbsent,
+  coerceDate,
+  detectDateFormat,
   type ColumnFieldMapping,
   type CustomFieldMapping,
+  type DateFieldMapping,
+  type DateFormat,
   type EnumValueMapping,
   type FkFieldMapping,
   type ImportMapping,
@@ -205,6 +211,10 @@ export function MappingStep({
     setChoices((prev) => ({ ...prev, [header]: { ...prev[header], ...patch } }));
   }
 
+  // #1060: the per-column date format the operator picked. "auto" (default, unset) resolves to
+  // `detectDateFormat` at build time; an explicit choice overrides it. Keyed by header.
+  const [dateFormats, setDateFormats] = useState<Record<string, "auto" | DateFormat>>({});
+
   // #1050: one-click shortcut — turn an ignored column into a custom field named after its own
   // header, no typing required. `applyCustomShortcutToIgnored` only touches columns still `IGNORE`d,
   // so it never clobbers a choice the operator already made.
@@ -229,6 +239,23 @@ export function MappingStep({
     }
     return [...seen];
   }, [statusHeader, session.rows]);
+
+  // #1060: auto-detected format per column mapped to a date field (purchaseDate / warrantyEnd). Runs the
+  // shared heuristic over every sampled value (coerceAbsent-filtered, exactly like the backend reads them)
+  // to feed the "Auto-detected: X" hint and resolve the "Auto" picker choice at submit.
+  const detectedDateFormat = useMemo<Record<string, DateFormat>>(() => {
+    const out: Record<string, DateFormat> = {};
+    for (const h of headers) {
+      if (!DATE_FIELDS.has(choices[h]?.target.split(":")[1] ?? "")) continue;
+      const values: string[] = [];
+      for (const row of session.rows) {
+        const v = coerceAbsent(row.raw[h]);
+        if (v !== undefined) values.push(v);
+      }
+      out[h] = detectDateFormat(values);
+    }
+    return out;
+  }, [headers, choices, session.rows]);
 
   const [statusMap, setStatusMap] = useState<Record<string, string>>({});
   const resolvedStatusMap = useMemo(() => {
@@ -352,6 +379,7 @@ export function MappingStep({
     const references: FkFieldMapping[] = [];
     const custom: CustomFieldMapping[] = [];
     const personFields: ColumnFieldMapping[] = [];
+    const dates: DateFieldMapping[] = [];
 
     for (const h of headers) {
       const choice = choices[h];
@@ -377,6 +405,15 @@ export function MappingStep({
         references.push({ field, column: h, constant: null });
       } else {
         columns.push({ field, column: h, constant: null });
+        // #1060: a date column carries its chosen parse format. "auto" resolves to the detected format
+        // (never "auto" on the wire), so the dry-run and commit read every value under one explicit format.
+        if (DATE_FIELDS.has(field)) {
+          const chosen = dateFormats[h] ?? "auto";
+          dates.push({
+            field,
+            format: chosen === "auto" ? (detectedDateFormat[h] ?? DEFAULT_DATE_FORMAT) : chosen,
+          });
+        }
       }
     }
 
@@ -403,12 +440,6 @@ export function MappingStep({
     // Only send `person` when the operator actually started one — an empty sub-payload would tell the
     // backend nothing and the schema keeps it optional.
     const person = personFields.length > 0 ? { fields: personFields } : undefined;
-
-    // #1060: per-column date format. Placeholder empty array — with no `dates` entry every date column
-    // defaults to "iso" (today's bare-ISO behavior). TODO(frontend agent): render the Auto/DMY/MDY/ISO
-    // picker per date-target column (keyed off shared `DATE_FIELDS`), resolve "Auto" via `detectDateFormat`
-    // over that column's `session.rows` values, and push `{ field, format }` entries here.
-    const dates: { field: string; format: "iso" | "dmy" | "mdy" }[] = [];
 
     return { columns, references, enums, custom, dates, person, modelConfig };
   }
@@ -507,6 +538,15 @@ export function MappingStep({
           const isCustom = choice.target === CUSTOM;
           const isIgnored = choice.target === IGNORE;
           const isStatus = choice.target === token("asset", "status");
+          // #1060: a date target (purchaseDate / warrantyEnd) gets an in-card format picker + preview.
+          const isDateField = DATE_FIELDS.has(choice.target.split(":")[1] ?? "");
+          const dateChoice = dateFormats[header] ?? "auto";
+          const resolvedDateFormat =
+            dateChoice === "auto" ? (detectedDateFormat[header] ?? DEFAULT_DATE_FORMAT) : dateChoice;
+          const datePreview =
+            isDateField && firstSample !== undefined
+              ? coerceDate(firstSample, resolvedDateFormat)
+              : undefined;
           const selectId = `map-${header}`;
 
           const badge = isIgnored
@@ -654,6 +694,53 @@ export function MappingStep({
                     <p className="text-xs text-destructive" role="alert">
                       {columnError[header]}
                     </p>
+                  )}
+
+                  {/* #1060: per-column date format. A date is parsed strictly under ONE format — a
+                      wrong guess drops the value silently — so the operator confirms it here. "Auto"
+                      reflects the detected format; the preview shows how the first sample parses. */}
+                  {isDateField && (
+                    <div className="space-y-2 rounded-lg border bg-card p-3">
+                      <div className="grid gap-1.5 sm:max-w-md">
+                        <Label htmlFor={`${selectId}-date`}>{t("mapping.dateFormat.label")}</Label>
+                        <Select
+                          value={dateChoice}
+                          onValueChange={(value) =>
+                            setDateFormats((prev) => ({
+                              ...prev,
+                              [header]: value as "auto" | DateFormat,
+                            }))
+                          }
+                        >
+                          <SelectTrigger id={`${selectId}-date`} className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">{t("mapping.dateFormat.auto")}</SelectItem>
+                            <SelectItem value="dmy">{t("mapping.dateFormat.dmy")}</SelectItem>
+                            <SelectItem value="mdy">{t("mapping.dateFormat.mdy")}</SelectItem>
+                            <SelectItem value="iso">{t("mapping.dateFormat.iso")}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          {dateChoice === "auto"
+                            ? t("mapping.dateFormat.detected", {
+                                format: resolvedDateFormat.toUpperCase(),
+                              })
+                            : t("mapping.dateFormat.note")}
+                        </p>
+                      </div>
+                      {firstSample !== undefined && (
+                        <p className="text-xs text-muted-foreground">
+                          {t("mapping.dateFormat.preview", {
+                            value: firstSample,
+                            result: datePreview
+                              ? datePreview.slice(0, 10)
+                              : t("mapping.dateFormat.previewFail"),
+                          })}
+                        </p>
+                      )}
+                    </div>
                   )}
 
                   {/* Status value → enum map (lives inside the status column's card) */}
