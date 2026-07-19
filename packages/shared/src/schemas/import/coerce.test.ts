@@ -125,11 +125,22 @@ describe("coerceDate (explicit per-column format, #1060)", () => {
     expect(coerceDate(null, "mdy")).toBeUndefined();
   });
 
-  test("iso: bare date → full ISO instant (z.iso.datetime would reject the bare form)", () => {
+  test("iso: bare date → UTC-midnight instant (z.iso.datetime would reject the bare form)", () => {
     expect(coerceDate("2024-01-02", "iso")).toBe("2024-01-02T00:00:00.000Z");
   });
-  test("iso: a full instant round-trips", () => {
-    expect(coerceDate("2024-01-02T03:04:05.000Z", "iso")).toBe("2024-01-02T03:04:05.000Z");
+  test("iso: a date-prefixed instant keeps the calendar day as UTC midnight (date-only field)", () => {
+    // Time component dropped — these are date-only fields, and dropping it keeps the stored day
+    // stable regardless of the value's (or the server's) time zone.
+    expect(coerceDate("2024-01-02T03:04:05.000Z", "iso")).toBe("2024-01-02T00:00:00.000Z");
+  });
+  test("iso: an offset-less datetime never drifts the day across a non-UTC server TZ (#1060)", () => {
+    // `new Date("2024-01-02T23:30:00")` would parse as LOCAL and toISOString() could roll to Jan 3 on
+    // a local-TZ container. Date-only extraction pins it to Jan 2 UTC everywhere.
+    expect(coerceDate("2024-01-02T23:30:00", "iso")).toBe("2024-01-02T00:00:00.000Z");
+  });
+  test("iso: an impossible date is REJECTED, not rolled over (#1060)", () => {
+    expect(coerceDate("2024-02-30", "iso")).toBeUndefined(); // would roll to Mar 1 via new Date()
+    expect(coerceDate("2024-13-01", "iso")).toBeUndefined(); // month 13
   });
   test("iso: a slash value NEVER matches the iso branch → undefined (row error)", () => {
     expect(coerceDate("13/07/2024", "iso")).toBeUndefined();
