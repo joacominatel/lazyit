@@ -111,9 +111,12 @@ model User {
   reports User[] @relation("UserManager")
 
   // Asset ownership over time (three roles: owner, who-assigned, who-released). See AssetAssignment.
-  assignments         AssetAssignment[] @relation("AssignmentOwner")
-  assignmentsMade     AssetAssignment[] @relation("AssignmentAssignedBy")
-  assignmentsReleased AssetAssignment[] @relation("AssignmentReleasedBy")
+  assignments             AssetAssignment[] @relation("AssignmentOwner")
+  assignmentsMade         AssetAssignment[] @relation("AssignmentAssignedBy")
+  assignmentsReleased     AssetAssignment[] @relation("AssignmentReleasedBy")
+  // Check-out acknowledgements this user recorded (ADR-0089 Part B, #1029) — the inverse of
+  // AssetAssignment.acknowledgedBy. Self-scoped: the acknowledger is always the assignment's owner.
+  assignmentsAcknowledged AssetAssignment[] @relation("AssignmentAcknowledgedBy")
 
   // Knowledge Base authorship: articles this user authored, and articles they last edited.
   articlesAuthored Article[] @relation("ArticleAuthor")
@@ -804,6 +807,15 @@ model AssetAssignment {
   assignedBy     User?           @relation("AssignmentAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
   releasedById   String?         @db.Uuid
   releasedBy     User?           @relation("AssignmentReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+  // Check-out acknowledgement (ADR-0089 Part B, #1029): additive lifecycle metadata on this ALREADY-mutable
+  // join (NOT an append-only violation — the immutable trail is the ACKNOWLEDGED AssetHistory event). Set
+  // ONCE, self-service, by the assignment's OWN owner: `acknowledgedById` always equals `userId` (enforced
+  // by the self-scoped conditional write). SetNull mirrors assignedById/releasedById — losing the actor
+  // never blocks their deletion and the row survives. `acknowledgeNote` is an optional free-text note.
+  acknowledgedAt   DateTime?
+  acknowledgedById String?         @db.Uuid
+  acknowledgedBy   User?           @relation("AssignmentAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  acknowledgeNote  String?
   // Service-account actors (ADR-0048): set instead of the User actor when a SERVICE ACCOUNT assigned /
   // released. A DB CHECK enforces at-most-one of (assignedById, assignedBySaId) and likewise for
   // released. Plain String (cuid → text). SetNull.
@@ -866,6 +878,9 @@ enum AssetHistoryEventType {
   SPECS_CHANGED
   DELETED
   RESTORED
+  // Check-out acknowledgement — the assignee confirmed they hold the asset (ADR-0089 Part B, #1029).
+  // Emitted by POST /asset-assignments/:id/acknowledge, payload { userId } (the acknowledging owner).
+  ACKNOWLEDGED
 }
 
 /// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's
