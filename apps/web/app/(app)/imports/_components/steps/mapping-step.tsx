@@ -404,7 +404,13 @@ export function MappingStep({
     // backend nothing and the schema keeps it optional.
     const person = personFields.length > 0 ? { fields: personFields } : undefined;
 
-    return { columns, references, enums, custom, person, modelConfig };
+    // #1060: per-column date format. Placeholder empty array — with no `dates` entry every date column
+    // defaults to "iso" (today's bare-ISO behavior). TODO(frontend agent): render the Auto/DMY/MDY/ISO
+    // picker per date-target column (keyed off shared `DATE_FIELDS`), resolve "Auto" via `detectDateFormat`
+    // over that column's `session.rows` values, and push `{ field, format }` entries here.
+    const dates: { field: string; format: "iso" | "dmy" | "mdy" }[] = [];
+
+    return { columns, references, enums, custom, dates, person, modelConfig };
   }
 
   function handleSubmit() {
