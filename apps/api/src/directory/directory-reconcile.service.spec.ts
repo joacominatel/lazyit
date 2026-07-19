@@ -126,16 +126,16 @@ function makeService(opts: {
         opts.disabled
           ? null
           : {
-            host: 'dc',
-            port: 636,
-            transport: 'ldaps',
-            rejectUnauthorized: true,
-            baseDN: 'DC=corp,DC=com',
-            bindDN: 'CN=svc,DC=corp,DC=com',
-            bindPassword: 'secret',
-            searchFilter: '(objectClass=user)',
-            attributeNames: Object.values(attributeMap),
-          },
+              host: 'dc',
+              port: 636,
+              transport: 'ldaps',
+              rejectUnauthorized: true,
+              baseDN: 'DC=corp,DC=com',
+              bindDN: 'CN=svc,DC=corp,DC=com',
+              bindPassword: 'secret',
+              searchFilter: '(objectClass=user)',
+              attributeNames: Object.values(attributeMap),
+            },
       );
   const config = {
     resolveConfig,
@@ -427,7 +427,11 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
         },
       ],
       entries: [
-        makeEntry('G1', { givenName: 'Dup', sn: 'Mail', mail: 'taken@corp.com' }),
+        makeEntry('G1', {
+          givenName: 'Dup',
+          sn: 'Mail',
+          mail: 'taken@corp.com',
+        }),
       ],
     });
     const result = await service.reconcile();
