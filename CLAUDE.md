@@ -37,6 +37,14 @@ Default operating procedure for **every** change. Full version:
    `docs/04-development/manual-authoring.md`. The Manual documents *lazyit itself* for operators;
    a user-facing change isn't done until its Manual page is. This is distinct from #5 (the dev
    `docs/` vault) — update **both** when a change is both core and user-facing.
+8. **Upgrade-safe over production data.** lazyit runs on live self-hosted instances; every change
+   must apply cleanly when an existing operator **updates their version**
+   (`dev`→`master`→tag→`prisma migrate deploy`), not only on a fresh install. Migrations
+   **additive + nullable/defaulted** (no destructive drop, no `NOT NULL` without a default; ship a
+   backfill when one is genuinely needed). New validation/logic stays **read-tolerant** of legacy
+   data and **enforces only on write**, preferring a **self-heal** path. **Document the upgrade
+   behavior** in the PR (and the Manual when user-facing). **Verify it before merging** — it's a
+   review dimension alongside correctness and security. → `docs/04-development/claude-workflow.md`.
 
 ## Git workflow (READ FIRST)
 
