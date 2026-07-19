@@ -38,6 +38,10 @@ describe("Notification type catalog (catalog-as-code)", () => {
     expect(NOTIFICATION_TYPES).toContain("infra.agent_offline");
   });
 
+  test("the targeted check-out acknowledgement nudge type is present (ADR-0089 Part B, #1029)", () => {
+    expect(NOTIFICATION_TYPES).toContain("asset_assignment.acknowledged");
+  });
+
   test("rejects an unknown type literal", () => {
     expect(NotificationTypeSchema.safeParse("nope").success).toBe(false);
     expect(NotificationTypeSchema.safeParse("workflow.unknown").success).toBe(
