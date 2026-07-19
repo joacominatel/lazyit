@@ -4,6 +4,7 @@ import {
   ArrowUpCircleIcon,
   BellIcon,
   BoltIcon,
+  CheckBadgeIcon,
   CubeIcon,
   ExclamationTriangleIcon,
   KeyIcon,
@@ -141,6 +142,14 @@ const TYPE_META: Record<
     icon: KeyIcon,
     tone: "bg-pillar-access/10 text-pillar-access",
     href: (n) => (n.entityId ? `/applications/${n.entityId}` : "/applications"),
+  },
+  // An assignee confirmed receipt of an asset checked out to them (ADR-0089 Part B, #1029) — a TARGETED
+  // accountability nudge to the ASSIGNER. Inventory-toned; deep-links to the asset (entityId = assetId)
+  // so the assigner can see the acknowledged owner on the asset's detail page.
+  "asset_assignment.acknowledged": {
+    icon: CheckBadgeIcon,
+    tone: "bg-pillar-inventory/10 text-pillar-inventory",
+    href: (n) => (n.entityId ? `/assets/${n.entityId}` : "/assets"),
   },
 };
 
