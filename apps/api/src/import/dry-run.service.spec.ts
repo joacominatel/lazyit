@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await -- Scoped to this spec (the CI "lint changed files" gate lints the whole changed file): the hand-rolled read-only Prisma double is intentionally `any`-typed, tripping the type-aware no-unsafe and require-await family across the pre-existing fixtures. Established repo pattern for a debt-laden test double; never applied to production files. */
 import { NotFoundException } from '@nestjs/common';
 import { ImportMappingSchema, type ImportMapping } from '@lazyit/shared';
 import { ImportDryRunService } from './dry-run.service';
@@ -34,6 +35,9 @@ function makePrisma(opts: {
   assetModel?: any[];
   location?: any[];
   assetByTag?: any[];
+  // #1061: rows the LIVE serial probe returns (default filter is deletedAt:null, so a ghost-only serial
+  // returns [] here — the mock mirrors the live-filtered read).
+  assetBySerial?: any[];
   schemeEnabled?: boolean;
   session?: any;
   writes?: { count: number };
@@ -54,7 +58,7 @@ function makePrisma(opts: {
     },
     assetModel: {
       findMany: async function (this: any) {
-        (prisma as any)._calls.assetModel += 1;
+        prisma._calls.assetModel += 1;
         return opts.assetModel ?? [];
       },
       create: failOnWrite,
@@ -62,14 +66,19 @@ function makePrisma(opts: {
     },
     location: {
       findMany: async () => {
-        (prisma as any)._calls.location += 1;
+        prisma._calls.location += 1;
         return opts.location ?? [];
       },
       create: failOnWrite,
       update: failOnWrite,
     },
     asset: {
-      findMany: async () => opts.assetByTag ?? [],
+      // Two read callers in finalizeTags: the explicit-tag probe (`where.assetTag`) and the #1061 serial
+      // probe (`where.serial`). Branch on the where so each returns its own fixture.
+      findMany: async (args: any) =>
+        args?.where?.serial
+          ? (opts.assetBySerial ?? [])
+          : (opts.assetByTag ?? []),
       create: failOnWrite,
       update: failOnWrite,
     },
@@ -78,7 +87,9 @@ function makePrisma(opts: {
       update: failOnWrite,
       updateMany: failOnWrite,
     },
-  } as unknown as PrismaService & { _calls: { assetModel: number; location: number } };
+  } as unknown as PrismaService & {
+    _calls: { assetModel: number; location: number };
+  };
 }
 
 let prisma: any;
@@ -101,13 +112,22 @@ describe('ImportDryRunService.analyze — coercion + validation', () => {
       ],
       m,
     );
-    expect(report.result.counts).toMatchObject({ total: 3, valid: 1, invalid: 2 });
-    expect(report.result.rows[0]).toMatchObject({ rowIndex: 0, status: 'valid' });
+    expect(report.result.counts).toMatchObject({
+      total: 3,
+      valid: 1,
+      invalid: 2,
+    });
+    expect(report.result.rows[0]).toMatchObject({
+      rowIndex: 0,
+      status: 'valid',
+    });
     expect(report.result.rows[1].status).toBe('invalid');
     expect(report.result.rows[1].errors[0].field).toBe('name');
     expect(report.result.rows[2].status).toBe('invalid');
     // the enum miss is surfaced as a field-level error (not silently defaulted)
-    expect(report.result.rows[2].errors.some((e) => e.field === 'status')).toBe(true);
+    expect(report.result.rows[2].errors.some((e) => e.field === 'status')).toBe(
+      true,
+    );
   });
 
   it('a row whose coercion THROWS is recorded invalid — it never 500s the whole preview', async () => {
@@ -171,8 +191,16 @@ describe('ImportDryRunService.analyze — coercion + validation', () => {
   it('maps status synonyms via the descriptor value-map', async () => {
     prisma = makePrisma({});
     const service = new ImportDryRunService(prisma);
-    const m = mapping({ columns: [{ field: 'name', column: 'N' }, { field: 'status', column: 'S' }] });
-    const report = await service.analyze([{ rowIndex: 0, raw: { N: 'X', S: 'Retired' } }], m);
+    const m = mapping({
+      columns: [
+        { field: 'name', column: 'N' },
+        { field: 'status', column: 'S' },
+      ],
+    });
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { N: 'X', S: 'Retired' } }],
+      m,
+    );
     expect(report.result.rows[0].status).toBe('valid');
   });
 });
@@ -189,7 +217,14 @@ describe('ImportDryRunService.analyze — reference resolution (deduped, no auto
   it('resolves a distinct value ONCE across many rows (value-deduped, cached)', async () => {
     prisma = makePrisma({
       assetModel: [
-        { id: 'm1', name: 'Latitude 5520', manufacturer: 'Dell', sku: null, deletedAt: null, category: { name: 'Laptops' } },
+        {
+          id: 'm1',
+          name: 'Latitude 5520',
+          manufacturer: 'Dell',
+          sku: null,
+          deletedAt: null,
+          category: { name: 'Laptops' },
+        },
       ],
     });
     const service = new ImportDryRunService(prisma);
@@ -212,8 +247,22 @@ describe('ImportDryRunService.analyze — reference resolution (deduped, no auto
   it('NEVER auto-picks on an ambiguous (N-candidate) model name match', async () => {
     prisma = makePrisma({
       assetModel: [
-        { id: 'm1', name: 'XPS', manufacturer: 'Dell', sku: null, deletedAt: null, category: null },
-        { id: 'm2', name: 'XPS', manufacturer: 'Dell', sku: null, deletedAt: null, category: null },
+        {
+          id: 'm1',
+          name: 'XPS',
+          manufacturer: 'Dell',
+          sku: null,
+          deletedAt: null,
+          category: null,
+        },
+        {
+          id: 'm2',
+          name: 'XPS',
+          manufacturer: 'Dell',
+          sku: null,
+          deletedAt: null,
+          category: null,
+        },
       ],
     });
     const service = new ImportDryRunService(prisma);
@@ -229,8 +278,22 @@ describe('ImportDryRunService.analyze — reference resolution (deduped, no auto
   it('a sku-exact hit is preferred over the soft name match', async () => {
     prisma = makePrisma({
       assetModel: [
-        { id: 'm1', name: 'OtherName', manufacturer: 'Dell', sku: 'SKU-1', deletedAt: null, category: null },
-        { id: 'm2', name: 'SKU-1', manufacturer: 'HP', sku: null, deletedAt: null, category: null }, // matched the name only
+        {
+          id: 'm1',
+          name: 'OtherName',
+          manufacturer: 'Dell',
+          sku: 'SKU-1',
+          deletedAt: null,
+          category: null,
+        },
+        {
+          id: 'm2',
+          name: 'SKU-1',
+          manufacturer: 'HP',
+          sku: null,
+          deletedAt: null,
+          category: null,
+        }, // matched the name only
       ],
     });
     const service = new ImportDryRunService(prisma);
@@ -247,7 +310,14 @@ describe('ImportDryRunService.analyze — reference resolution (deduped, no auto
   it('a soft-deleted-only match surfaces as a RESTORE candidate (includeSoftDeleted)', async () => {
     prisma = makePrisma({
       assetModel: [
-        { id: 'm-ghost', name: 'Ghosted', manufacturer: 'Dell', sku: null, deletedAt: new Date(), category: null },
+        {
+          id: 'm-ghost',
+          name: 'Ghosted',
+          manufacturer: 'Dell',
+          sku: null,
+          deletedAt: new Date(),
+          category: null,
+        },
       ],
     });
     const service = new ImportDryRunService(prisma);
@@ -275,8 +345,22 @@ describe('ImportDryRunService.analyze — reference resolution (deduped, no auto
   it('a live match shadows a same-named ghost (preferLive)', async () => {
     prisma = makePrisma({
       assetModel: [
-        { id: 'live', name: 'Dup', manufacturer: 'Dell', sku: null, deletedAt: null, category: null },
-        { id: 'ghost', name: 'Dup', manufacturer: 'Dell', sku: null, deletedAt: new Date(), category: null },
+        {
+          id: 'live',
+          name: 'Dup',
+          manufacturer: 'Dell',
+          sku: null,
+          deletedAt: null,
+          category: null,
+        },
+        {
+          id: 'ghost',
+          name: 'Dup',
+          manufacturer: 'Dell',
+          sku: null,
+          deletedAt: new Date(),
+          category: null,
+        },
       ],
     });
     const service = new ImportDryRunService(prisma);
@@ -291,13 +375,21 @@ describe('ImportDryRunService.analyze — reference resolution (deduped, no auto
   });
 
   it('location resolves by exact (trim-only) name', async () => {
-    prisma = makePrisma({ location: [{ id: 'loc1', name: 'HQ', deletedAt: null }] });
+    prisma = makePrisma({
+      location: [{ id: 'loc1', name: 'HQ', deletedAt: null }],
+    });
     const service = new ImportDryRunService(prisma);
     const m = mapping({
-      columns: [{ field: 'name', column: 'N' }, { field: 'status', constant: 'active' }],
+      columns: [
+        { field: 'name', column: 'N' },
+        { field: 'status', constant: 'active' },
+      ],
       references: [{ field: 'locationId', column: 'Loc' }],
     });
-    const report = await service.analyze([{ rowIndex: 0, raw: { N: 'PC', Loc: ' HQ ' } }], m);
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { N: 'PC', Loc: ' HQ ' } }],
+      m,
+    );
     expect(report.conflicts[0].entity).toBe('Location');
     expect(report.conflicts[0].normalizedValue).toBe('HQ'); // trimmed
     expect(report.conflicts[0].suggested).toBe('match');
@@ -323,14 +415,25 @@ describe('ImportDryRunService.analyze — asset-tag classification', () => {
       ],
       m,
     );
-    expect(report.tags[0]).toMatchObject({ mode: 'explicit', tag: 'IT-0001', collision: true });
-    expect(report.tags[1]).toMatchObject({ mode: 'explicit', tag: 'IT-9999', collision: false });
+    expect(report.tags[0]).toMatchObject({
+      mode: 'explicit',
+      tag: 'IT-0001',
+      collision: true,
+    });
+    expect(report.tags[1]).toMatchObject({
+      mode: 'explicit',
+      tag: 'IT-9999',
+      collision: false,
+    });
   });
 
   it('a tagless row is auto-mint when the scheme is enabled, else none', async () => {
     const noScheme = makePrisma({ schemeEnabled: false });
     const tagless = mapping({
-      columns: [{ field: 'name', column: 'Name' }, { field: 'status', constant: 'active' }],
+      columns: [
+        { field: 'name', column: 'Name' },
+        { field: 'status', constant: 'active' },
+      ],
     });
     let report = await new ImportDryRunService(noScheme).analyze(
       [{ rowIndex: 0, raw: { Name: 'A' } }],
@@ -347,11 +450,101 @@ describe('ImportDryRunService.analyze — asset-tag classification', () => {
   });
 });
 
+describe('ImportDryRunService.analyze — serial dedup → use-existing (#1061)', () => {
+  const withSerial = mapping({
+    columns: [
+      { field: 'name', column: 'Name' },
+      { field: 'status', constant: 'active' },
+      { field: 'serial', column: 'Serial' },
+    ],
+  });
+
+  it('a row whose serial matches a LIVE asset becomes use-existing (no collision)', async () => {
+    prisma = makePrisma({ assetBySerial: [{ serial: 'SN-1' }] });
+    const service = new ImportDryRunService(prisma);
+    const report = await service.analyze(
+      [
+        { rowIndex: 0, raw: { Name: 'A', Serial: 'SN-1' } }, // matches a live asset → use-existing
+        { rowIndex: 1, raw: { Name: 'B', Serial: 'SN-NEW' } }, // no live match → stays none
+      ],
+      withSerial,
+    );
+    expect(report.tags[0]).toMatchObject({
+      rowIndex: 0,
+      mode: 'use-existing',
+      collision: false,
+    });
+    expect(report.tags[1].mode).toBe('none');
+  });
+
+  it('a serial that matches only a GHOST (soft-deleted) is NOT use-existing — LIVE-only', async () => {
+    // The default soft-delete filter means the live probe returns [] for a ghost-only serial → the row is
+    // created fresh, never matched (the partial-unique index frees the ghost's serial).
+    prisma = makePrisma({ assetBySerial: [] });
+    const service = new ImportDryRunService(prisma);
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { Name: 'A', Serial: 'SN-GHOST' } }],
+      withSerial,
+    );
+    expect(report.tags[0].mode).not.toBe('use-existing');
+  });
+
+  it('use-existing WINS over an explicit-tag collision (the commit updates, never inserts a tag)', async () => {
+    const withSerialAndTag = mapping({
+      columns: [
+        { field: 'name', column: 'Name' },
+        { field: 'status', constant: 'active' },
+        { field: 'serial', column: 'Serial' },
+        { field: 'assetTag', column: 'Tag' },
+      ],
+    });
+    prisma = makePrisma({
+      assetBySerial: [{ serial: 'SN-1' }],
+      assetByTag: [{ assetTag: 'IT-1' }],
+    });
+    const service = new ImportDryRunService(prisma);
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { Name: 'A', Serial: 'SN-1', Tag: 'IT-1' } }],
+      withSerialAndTag,
+    );
+    // Even though the explicit tag collides with a live asset, serial-match precedence wins → no collision.
+    expect(report.tags[0]).toMatchObject({
+      mode: 'use-existing',
+      collision: false,
+    });
+  });
+
+  it('a row with NO serial is never use-existing', async () => {
+    const noSerial = mapping({
+      columns: [
+        { field: 'name', column: 'Name' },
+        { field: 'status', constant: 'active' },
+      ],
+    });
+    prisma = makePrisma({ assetBySerial: [{ serial: 'whatever' }] });
+    const service = new ImportDryRunService(prisma);
+    const report = await service.analyze(
+      [{ rowIndex: 0, raw: { Name: 'A' } }],
+      noSerial,
+    );
+    expect(report.tags[0].mode).not.toBe('use-existing');
+  });
+});
+
 describe('ImportDryRunService — dry-run writes NOTHING + plumbing', () => {
   it('runs the full pipeline without a single domain write', async () => {
     const writes = { count: 0 };
     prisma = makePrisma({
-      assetModel: [{ id: 'm1', name: 'M', manufacturer: 'Dell', sku: null, deletedAt: null, category: { name: 'C' } }],
+      assetModel: [
+        {
+          id: 'm1',
+          name: 'M',
+          manufacturer: 'Dell',
+          sku: null,
+          deletedAt: null,
+          category: { name: 'C' },
+        },
+      ],
       location: [{ id: 'l1', name: 'HQ', deletedAt: null }],
       assetByTag: [{ assetTag: 'T1' }],
       schemeEnabled: true,
@@ -378,19 +571,32 @@ describe('ImportDryRunService — dry-run writes NOTHING + plumbing', () => {
   it('dryRun reads the session owner-scoped and 404s for an unknown/foreign session', async () => {
     prisma = makePrisma({ session: null });
     const service = new ImportDryRunService(prisma);
-    await expect(service.dryRun('sess_x', OWNER)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.dryRun('sess_x', OWNER)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('dryRun 404s a session with no confirmed mapping', async () => {
     prisma = makePrisma({ session: { id: 's', mapping: null, rows: [] } });
     const service = new ImportDryRunService(prisma);
-    await expect(service.dryRun('s', OWNER)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.dryRun('s', OWNER)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('dryRun runs analyze over the session rows under the persisted mapping', async () => {
-    const m = mapping({ columns: [{ field: 'name', column: 'Name' }, { field: 'status', constant: 'active' }] });
+    const m = mapping({
+      columns: [
+        { field: 'name', column: 'Name' },
+        { field: 'status', constant: 'active' },
+      ],
+    });
     prisma = makePrisma({
-      session: { id: 's', mapping: m, rows: [{ rowIndex: 0, raw: { Name: 'PC' } }] },
+      session: {
+        id: 's',
+        mapping: m,
+        rows: [{ rowIndex: 0, raw: { Name: 'PC' } }],
+      },
     });
     const report = await new ImportDryRunService(prisma).dryRun('s', OWNER);
     expect(report.result.counts.total).toBe(1);
