@@ -110,7 +110,10 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
 | `directoryOnly` | `boolean` | `@default(false)`. `true` = a **directory person** created by the bulk import ([[0069-migrator-import]] §A.3): no login, no Zitadel mirror, role forced VIEWER, `externalId` stays `null`. Flips to `false` on first OIDC login (JIT promotion, [[0038-jit-user-provisioning]] amendment) or via `POST /users/:id/provision-account` (ADMIN manual promotion). See **Directory mode** note below. |
-| `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. |
+| `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. The AD/LDAP reconcile ([[0091-on-prem-ad-ldap-directory-source]]) also stashes `mail`/`username` **hints**, the entry's `memberOf` group DNs **inert** (#846), and a `lastSeenAt` heartbeat here. |
+| `directorySource` | `string?` | AD/LDAP directory-source discriminator ([[0091-on-prem-ad-ldap-directory-source]]): `"ad"` for a person reconciled from an on-prem AD/LDAP directory; `null` for a login user or an import-sourced directory person. Mirrors infra `reportingSource` (a string, not a bool) so a second source can coexist additively. |
+| `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
+| `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Cleared if the person reappears in a later sync ([[0091-on-prem-ad-ldap-directory-source]]). |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
 > The read `UserSchema` resolves the manager FK to a **redaction-safe descriptor** —
@@ -182,6 +185,16 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 >
 > **Visibility:** directory persons appear in `GET /users` mixed with accounts, tagged `directoryOnly: true`.
 > The web shows a "Directorio" badge. `GET /users?directoryOnly=true` lists only directory persons.
+>
+> **AD/LDAP as a directory SOURCE** ([[0091-on-prem-ad-ldap-directory-source]], #839): besides the bulk
+> import, `directoryOnly` persons can be **reconciled read-only** from an on-prem AD/LDAP directory. A
+> singleton `DirectoryConnection` (Settings → Instance → Directory, `settings:manage`, off by default) binds
+> read-only, subtree-searches, and **upserts** persons keyed on `directorySourceId` (AD `objectGUID`) — via
+> a `setInterval` sweeper and an ADMIN `POST /directory/sync` ("Sync now"). NEW → the PENDING tray (a
+> `directoryOnly` VIEWER); MATCHED → refresh mapped profile fields + `directoryAttrs` (a fixed allowlist);
+> DISAPPEARED past a grace threshold → soft offboard. **Hard invariants:** the sync never changes `role`,
+> never sets `passwordHash`/`externalId`, never flips `directoryOnly`→false, never grants a login, never
+> hard-deletes. `provisionAccount`/`provisionLocalAccount` stay the ONLY login-granting paths.
 
 ## Endpoints
 

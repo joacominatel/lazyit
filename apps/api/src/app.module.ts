@@ -37,6 +37,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { SmtpModule } from './smtp/smtp.module';
 import { SecretManagerModule } from './secret-manager/secret-manager.module';
 import { InfraModule } from './infra/infra.module';
+import { DirectoryModule } from './directory/directory.module';
 import { AgentDistModule } from './agent-dist/agent-dist.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { SearchModule } from './search/search.module';
@@ -121,6 +122,9 @@ import { buildLoggerParams } from './logging/logging.config';
     // The infra topology graph (ADR-0070) — the generic visual CMDB of the server estate. Nodes +
     // typed timestamped edges; asset-backed by default (reuses Assets/AssetAssignments/Articles).
     InfraModule,
+    // On-prem AD/LDAP directory source (ADR-0091, #839): a READ-ONLY LDAP directory that upserts
+    // login-less `directoryOnly` VIEWER persons keyed on AD objectGUID. No write-back, no new AUTH_MODE.
+    DirectoryModule,
     // Agent distribution (ADR-0074 §6, #831): token-gated GET /agent/download streaming the baked
     // reporting-agent binary. Separate from InfraModule by design — distribution is its own concern.
     AgentDistModule,
