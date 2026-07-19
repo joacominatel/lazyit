@@ -135,6 +135,8 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       "specs_changed",
       "deleted",
       "restored",
+      // Check-out acknowledgement (ADR-0089 Part B, #1029) — the lowercased ACKNOWLEDGED verb.
+      "acknowledged",
       "granted",
       "revoked",
       "stock_in",
