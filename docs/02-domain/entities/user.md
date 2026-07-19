@@ -164,14 +164,21 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > - **Auto (JIT):** when the person logs in via OIDC with the same verified email, the standard JIT
 >   claim path (`jwt-auth.guard.ts`) binds `externalId = sub` and sets `directoryOnly = false`.
 >   The person inherits their existing `role` (VIEWER) and all prior assignments.
-> - **Manual (ADMIN):** `POST /users/:id/provision-account` takes a real email (required), writes
+> - **Manual (ADMIN, OIDC):** `POST /users/:id/provision-account` takes a real email (required), writes
 >   to Zitadel first, then sets `externalId` + `directoryOnly = false`. The endpoint rejects
 >   `@directory.local` placeholder emails. It **only works on the bundled-Zitadel management path**
 >   (`idp.supportsManagement`): in `AUTH_MODE=local` and BYOI / generic-OIDC there is no write-back, so
 >   it **400s** ("only available with the bundled identity provider"). `GET /config/status` exposes this
 >   as **`canProvisionAccounts`** so the web **hides the "Create OIDC account" action** entirely in those
->   modes instead of offering a request that always fails (#1048). *(Local-mode onboarding of directory
->   persons is a separate `needs-decision` — not built here.)*
+>   modes instead of offering a request that always fails (#1048).
+> - **Manual (ADMIN, local):** `POST /users/:id/provision-local-account` (issue #1072, [[0086-local-authentication-mode]]
+>   §5 amendment) onboards a directory person in `AUTH_MODE=local`: it mints a one-time temp password with the
+>   admin-reset primitives (`generateTempPassword` + `credentialFields({mustChangePassword:true})`), flips
+>   `directoryOnly = false`, appends an `UPDATED` history row, and returns the plaintext **once**
+>   (`AdminPasswordResetResult`). The existing `role` is kept (**no widening**), it's ADMIN-action-gated (no
+>   self-service), and it **400s outside local mode**. `GET /config/status` exposes **`canProvisionLocalAccounts`**
+>   (true only in local mode) so the web offers the "Onboard with a temporary password" action there instead of
+>   the impossible OIDC one. This is the one path that amends INV-DIR's "never receives a credential".
 >
 > **Visibility:** directory persons appear in `GET /users` mixed with accounts, tagged `directoryOnly: true`.
 > The web shows a "Directorio" badge. `GET /users?directoryOnly=true` lists only directory persons.

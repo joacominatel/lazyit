@@ -66,18 +66,41 @@ describe('parseImport — CSV', () => {
     expect(result.dialect.hadBom).toBe(true);
   });
 
-  it('tolerates a ragged short row (pads missing cells to "")', () => {
+  it('tolerates a ragged short row (pads missing cells to "") and counts it as ragged (#1062)', () => {
     const result = parseImport(buf('a,b,c\n1,2\n'), 'csv');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.rows[0]).toEqual({ a: '1', b: '2', c: '' });
+    expect(result.raggedRowCount).toBe(1);
   });
 
-  it('tolerates a ragged long row (drops extra cells)', () => {
+  it('tolerates a ragged long row (drops extra cells) and counts it as ragged (#1062)', () => {
     const result = parseImport(buf('a,b\n1,2,3,4\n'), 'csv');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.rows[0]).toEqual({ a: '1', b: '2' });
+    expect(result.raggedRowCount).toBe(1);
+  });
+
+  it('reports raggedRowCount === 0 for a clean, uniform-width file (#1062)', () => {
+    const result = parseImport(
+      buf('name,serial\nLaptop,ABC123\nMonitor,DEF456\n'),
+      'csv',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.raggedRowCount).toBe(0);
+  });
+
+  it('counts only the ragged rows, not the clean ones, in a mixed file (#1062)', () => {
+    const result = parseImport(
+      buf('a,b,c\n1,2,3\n1,2\n1,2,3\n1,2,3,4\n'),
+      'csv',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rowCount).toBe(4);
+    expect(result.raggedRowCount).toBe(2);
   });
 
   it('fails gracefully on an empty file', () => {
@@ -133,6 +156,58 @@ describe('parseImport — CSV', () => {
       'Dir (4)': '4',
     });
   });
+
+  // #1059: a CP-1252/Latin-1 CSV (Excel "Save as CSV" default, or a Snipe-IT export re-saved on
+  // Windows) must decode its accents correctly instead of importing silent mojibake (JosÃ©).
+  it('transcodes a CP-1252 CSV (accented cells) instead of importing mojibake', () => {
+    const cp1252 = Buffer.from(
+      'name,address\nJos\xe9 Garc\xeda,Direcci\xf3n 5\n',
+      'latin1', // Node's 'latin1' encoder maps 1 char = 1 byte, matching CP-1252 in this ASCII+accents range.
+    );
+    const result = parseImport(cp1252, 'csv');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rows[0]).toEqual({
+      name: 'José García',
+      address: 'Dirección 5',
+    });
+    expect(result.encoding).toBe('utf-8');
+  });
+
+  it('leaves genuine UTF-8 accented cells unchanged (no false transcode)', () => {
+    const result = parseImport(
+      buf('name,address\nJosé García,Dirección 5\n'),
+      'csv',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rows[0]).toEqual({
+      name: 'José García',
+      address: 'Dirección 5',
+    });
+  });
+
+  // #1059 regression: a UTF-8 BOM in FRONT of a body that also has one invalid UTF-8 byte. The strict
+  // decode throws for the WHOLE buffer, so the windows-1252 fallback runs — and if the BOM bytes are
+  // still present it decodes EF BB BF to 'ï»¿', then a one-char slice leaves '»¿' welded to the first
+  // header/cell (the exact silent mojibake #1059 kills). Stripping the BOM from the RAW BYTES before
+  // either decode must yield clean 'café' with hadBom still reported. Header + data row so the decoded
+  // strings are readable back (a header-only file would fail before exposing the header value).
+  it('strips the BOM before decode so a BOM + invalid-byte file transcodes cleanly (no »¿ prefix)', () => {
+    const withBomAndBadByte = Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]), // UTF-8 BOM
+      Buffer.from('city\n', 'utf-8'), // header row
+      Buffer.from([0x63, 0x61, 0x66, 0xe9]), // 'caf' + E9 ('é' in CP-1252) — invalid standalone UTF-8
+      Buffer.from('\n', 'utf-8'),
+    ]);
+    const result = parseImport(withBomAndBadByte, 'csv');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // NOT '»¿city' — the BOM never leaked into the fallback-decoded first cell.
+    expect(result.headers).toEqual(['city']);
+    expect(result.rows[0]).toEqual({ city: 'café' });
+    expect(result.dialect.hadBom).toBe(true);
+  });
 });
 
 describe('parseImport — JSON', () => {
@@ -149,6 +224,8 @@ describe('parseImport — JSON', () => {
     // Sparse record: the missing key is backfilled to ''.
     expect(result.rows[1]).toEqual({ name: 'Monitor', serial: '' });
     expect(result.dialect.delimiter).toBeNull();
+    // JSON is key-based, not positional — raggedRowCount is always 0 (#1062).
+    expect(result.raggedRowCount).toBe(0);
   });
 
   it('parses a { data: [...] } envelope', () => {

@@ -101,11 +101,24 @@
     "provision": {
       "action": "Crear cuenta OIDC",
       "title": "Persona de directorio",
-      "description": "Esta persona la agregó la importación masiva y todavía no tiene acceso. Crea su cuenta en el proveedor de identidad para que pueda iniciar sesión.",
+      "description": "Esta persona la agregó la importación masiva y todavía no tiene acceso. Dale una cuenta para que pueda iniciar sesión.",
       "needsEmail": "Esta persona necesita un correo real antes de poder tener una cuenta. Edita la persona y agrégalo primero.",
-      "unsupported": "Crear cuentas solo está disponible con el proveedor de identidad integrado. En modo local o con tu propio OIDC, las personas importadas inician sesión a través de tu proveedor de identidad.",
+      "unsupported": "Crear cuentas solo está disponible con el proveedor de identidad integrado. Cuando usas tu propio proveedor OIDC, las personas importadas inician sesión a través de tu proveedor de identidad.",
       "success": "{name} ya tiene una cuenta OIDC.",
       "error": "No se pudo crear la cuenta. Inténtalo de nuevo."
+    },
+    "provisionLocal": {
+      "action": "Dar de alta con una contraseña temporal",
+      "success": "{name} ya puede iniciar sesión. Entrégale la contraseña temporal de abajo.",
+      "error": "No se pudo dar de alta a esta persona. Inténtalo de nuevo.",
+      "reveal": {
+        "message": "Entrega esta contraseña de un solo uso a <b>{name}</b>. Deberá cambiarla la primera vez que inicie sesión, y conserva su rol actual — dar de alta nunca otorga acceso adicional.",
+        "warning": "Esta contraseña se muestra una sola vez. Cópiala ahora — no podrás volver a verla.",
+        "copyAria": "Copiar la contraseña temporal",
+        "copyUnavailable": "No se pudo copiar automáticamente. Selecciona la contraseña y cópiala a mano.",
+        "acknowledge": "Copié la contraseña temporal y se la entregué a la persona.",
+        "done": "Listo"
+      }
     }
   },
   "empty": {

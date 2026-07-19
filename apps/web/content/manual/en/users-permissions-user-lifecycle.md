@@ -97,13 +97,17 @@ record before that owner can sign in.
 - **They link to a real account on first sign-in** through your identity provider, when the verified
   email matches — at which point the badge disappears and they become a normal account. A directory
   person imported **without a real email never links automatically**.
-- **Create their account now.** On a directory person's page, **Create OIDC account** provisions them in
-  the identity provider immediately. The provider requires a real email, so the button is disabled until
-  the person has one — edit the person and add a real email first. This is admin-only (Manage users).
-  This action is only available when lazyit runs the **bundled identity provider**. In local
-  authentication mode or when you bring your own OIDC provider, lazyit cannot create accounts for you, so
-  the option is replaced with a short note — imported people sign in through your identity provider
-  instead.
+- **Give them an account now.** On a directory person's page there is an admin-only (Manage users) action
+  to onboard them, and what it does depends on how your instance signs people in:
+  - **Bundled identity provider** — **Create OIDC account** provisions them in the identity provider
+    immediately. The provider requires a real email, so the button is disabled until the person has one —
+    edit the person and add a real email first.
+  - **Local authentication mode** — **Onboard with a temporary password** creates their login right here
+    and shows a **one-time temporary password** to hand off. The password is shown **only once** (copy it
+    then), the person **must change it at first sign-in**, and onboarding **keeps their existing role** —
+    it never grants extra access. No email is required.
+  - **Your own OIDC provider (BYOI)** — lazyit cannot create accounts for you, so the option is replaced
+    with a short note; imported people sign in through your identity provider instead.
 
 ## Restore a user
 

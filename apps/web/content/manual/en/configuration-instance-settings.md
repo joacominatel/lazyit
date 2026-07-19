@@ -23,7 +23,7 @@ The Settings home is a grid of cards, each opening a focused sub-area:
   navigation; the card links out to the full Locations page.
 - **Roles** — see who holds which role across the team. This is a read-only overview; you change a
   person's role from the Users section, and you tune what each role may do under
-  [Permissions](/help/users-permissions-permissions).
+  [Permissions](/help/permissions).
 - **Service accounts** — create and manage non-human API credentials for CI, scripts and
   integrations, scoped by permission and revocable.
 - **Integrations & workflows** — the cross-application manual-task inbox for provisioning workflows.
@@ -105,6 +105,15 @@ Run that command on the server (over SSH). The script is careful and non-destruc
 
 While an update is running, the card shows the real stage (backing up, migrating, building, restarting,
 verifying) — not a fake progress bar — and quietly reconnects when the app comes back.
+
+### Cancelling a requested update
+
+If you pressed **Update** but haven't run the command on the host yet, the card shows a **Cancel this
+update** button next to the command. Cancelling clears the pending request so the card returns to its
+normal "check for updates" state and you can start a fresh update later. You can only cancel while it is
+still just *requested* — once the host script has actually started (backing up and beyond), the button
+is gone and that update must finish or be reconciled, because interrupting it mid-run could leave the
+databases and backups out of step. The cancelled request is kept in the update history for the record.
 
 ### If an update fails — the restore point
 

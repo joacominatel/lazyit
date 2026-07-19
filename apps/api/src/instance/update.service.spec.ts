@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { UpdateService } from './update.service';
+import { UpdateService, UPDATE_CANCELLED_REASON } from './update.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { Principal } from '../auth/principal';
@@ -30,6 +30,7 @@ describe('UpdateService', () => {
   const runFindMany = jest.fn();
   const runCreate = jest.fn();
   const runUpdate = jest.fn();
+  const runUpdateMany = jest.fn();
   const emit = jest.fn();
   const fetchMock = jest.fn();
 
@@ -52,6 +53,7 @@ describe('UpdateService', () => {
               findMany: runFindMany,
               create: runCreate,
               update: runUpdate,
+              updateMany: runUpdateMany,
             },
           },
         },
@@ -70,6 +72,7 @@ describe('UpdateService', () => {
       runFindMany,
       runCreate,
       runUpdate,
+      runUpdateMany,
       emit,
       fetchMock,
     ]) {
@@ -418,6 +421,119 @@ describe('UpdateService', () => {
         status: 'requested',
         toVersion: 'v1.5.0',
       });
+    });
+  });
+
+  describe('cancel', () => {
+    const admin: Principal = {
+      kind: 'human',
+      user: { id: USER_ID, role: 'ADMIN' } as never,
+    };
+
+    /** A full `requested` UpdateRun row (the shape findFirst returns with no `select`). */
+    const requestedRow = (
+      overrides: Partial<Record<string, unknown>> = {},
+    ) => ({
+      id: 9,
+      requestedByUserId: USER_ID,
+      fromVersion: 'v1.4.2',
+      toVersion: 'v1.5.0',
+      status: 'requested',
+      startedAt: null,
+      finishedAt: null,
+      logTail: null,
+      error: null,
+      createdAt: new Date('2026-07-01T00:00:00Z'),
+      updatedAt: new Date('2026-07-01T00:00:00Z'),
+      ...overrides,
+    });
+
+    it('cancels a stale `requested` run (terminal `failed` + distinct reason) so a fresh enqueue succeeds', async () => {
+      const service = await build();
+
+      // 1) The stuck run is found; the CAS flip matches it.
+      runFindFirst.mockResolvedValueOnce(requestedRow());
+      runUpdateMany.mockResolvedValue({ count: 1 });
+
+      const cancelled = await service.cancel();
+
+      expect(cancelled).toMatchObject({
+        id: 9,
+        status: 'failed',
+        error: UPDATE_CANCELLED_REASON,
+      });
+      expect(cancelled.finishedAt).not.toBeNull();
+
+      // CAS scoped to status='requested' so a concurrent host advance can't be clobbered.
+      const casArg = (runUpdateMany.mock.calls[0] as unknown[])[0] as {
+        where: { id: number; status: string };
+        data: { status: string };
+      };
+      expect(casArg.where).toMatchObject({ id: 9, status: 'requested' });
+      expect(casArg.data.status).toBe('failed');
+
+      // 2) The single-flight guard now sees no active run — a fresh enqueue goes through.
+      runFindFirst.mockResolvedValueOnce(null);
+      runCreate.mockResolvedValue({
+        id: 10,
+        requestedByUserId: USER_ID,
+        fromVersion: 'v1.4.2',
+        toVersion: 'v1.6.0',
+        status: 'requested',
+        startedAt: null,
+        finishedAt: null,
+        logTail: null,
+        error: null,
+        createdAt: new Date('2026-07-02T00:00:00Z'),
+        updatedAt: new Date('2026-07-02T00:00:00Z'),
+      });
+
+      const next = await service.enqueue({ toVersion: 'v1.6.0' }, admin);
+      expect(next).toMatchObject({ status: 'requested', toVersion: 'v1.6.0' });
+    });
+
+    it('rejects cancelling a genuinely in-flight run (backing_up) — it must not be interrupted mid-apply', async () => {
+      runFindFirst.mockResolvedValue(requestedRow({ status: 'backing_up' }));
+      const service = await build();
+
+      await expect(service.cancel()).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(runUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects when there is no pending update to cancel', async () => {
+      runFindFirst.mockResolvedValue(null);
+      const service = await build();
+
+      await expect(service.cancel()).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(runUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the run advanced out of `requested` mid-cancel (CAS matched 0 rows)', async () => {
+      runFindFirst.mockResolvedValue(requestedRow());
+      runUpdateMany.mockResolvedValue({ count: 0 });
+      const service = await build();
+
+      await expect(service.cancel()).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('a genuinely in-flight run still blocks a new enqueue (single-flight unchanged)', async () => {
+      runFindFirst.mockResolvedValue({
+        id: 5,
+        toVersion: 'v1.5.0',
+        status: 'backing_up',
+      });
+      const service = await build();
+
+      await expect(
+        service.enqueue({ toVersion: 'v1.6.0' }, admin),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(runCreate).not.toHaveBeenCalled();
     });
   });
 

@@ -3,7 +3,7 @@ title: "ADR-0069: Migrator — guided bulk import (phase 1: Asset slice, JSON + 
 tags: [adr, migrator, import, asset, backend, frontend, shared, settings]
 status: accepted
 created: 2026-06-17
-updated: 2026-06-23
+updated: 2026-07-18
 deciders: [Joaquín Minatel]
 ---
 
@@ -104,11 +104,12 @@ coercion runs in the web preview and the API commit** so the preview cannot lie.
 A first-class, **value-deduplicated, dependency-ordered** subsystem (category → model → asset), resolving
 each distinct natural-key value **once** (cached, like the KB folder resolver), with an `includeSoftDeleted`
 probe. Per-entity natural keys + **per-key normalization** (mirror the schemas: **trim-only**, no
-internal-whitespace collapse): **category / location by normalized name**; **AssetModel by `sku`** (exact,
-case-sensitive) else a *soft* case-folded `(manufacturer, name)` match offered as **candidates**. Because
-`AssetModel.name` and person names are **not unique**, resolution **never auto-picks** on ambiguity — it
-surfaces candidates. (Asset ownership/assignment is **not** a `CreateAssetSchema` field and is **out of
-phase 1**.)
+internal-whitespace collapse): **category / location by normalized name, case-folded** (#1063 — a Snipe-IT
+export's casing drift, e.g. `'Piso 3'` vs `'piso 3'`, resolves to the SAME row instead of a duplicate);
+**AssetModel by `sku`** (exact, case-sensitive) else a *soft* case-folded `(manufacturer, name)` match
+offered as **candidates**. Because `AssetModel.name` and person names are **not unique**, resolution
+**never auto-picks** on ambiguity — it surfaces candidates. (Asset ownership/assignment is **not** a
+`CreateAssetSchema` field and is **out of phase 1**.)
 
 ### 6. Conflict model — four outcomes, persisted
 
@@ -365,6 +366,14 @@ Category is found-or-created by normalized name (idempotent `findFirst` — same
 Model, closes the cross-run window). `'Unknown'` remains the last-resort fallback manufacturer when no
 column or constant is configured. Ghost (soft-deleted) categories are invisible to the find-first and
 produce a new live row (same accepted trade-off as for Location/Model).
+
+**Sku / model-number carried through (#1064):** `modelConfig` also takes an optional `skuColumn` /
+`skuConst` (const wins, trimmed, same precedence as manufacturer/category), passed into
+`CreateAssetModelSchema.parse` as `sku` when present. Unlike manufacturer there is no fallback — an
+absent sku is simply omitted, never `''`. This strengthens the reference resolver's
+`matchBy: ['sku', 'name']` for `AssetModel` (§ the descriptor, `descriptor.ts`): a Snipe-IT-style export
+mapping "Model No." to sku now dedupes/matches by that natural key on later imports/edits, not just by
+name.
 
 ### A.3 Directory persons + AssetAssignment (lifting §12 "asset ownership/assignment")
 

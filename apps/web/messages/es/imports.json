@@ -50,6 +50,7 @@
     "title": "Mapea tus columnas",
     "description": "Cada tarjeta de abajo es una columna de tu archivo, con valores de ejemplo. Para cada columna, elige el campo de lazyit que completa, crea un campo personalizado guardado en los detalles del activo, o ignórala. Necesitas una columna mapeada a Nombre y otra a Estado.",
     "piiNote": "Estas tarjetas muestran valores reales de tu archivo, incluidos datos de empleados (nombres, correos). No se guarda nada hasta que confirmes.",
+    "raggedRowsWarning": "{count, plural, one {# fila tuvo una cantidad de columnas inesperada} other {# filas tuvieron una cantidad de columnas inesperada}} — revisá el delimitador o las comillas de tu archivo, por si algún campo se corrió.",
     "field": {
       "name": "Nombre",
       "serial": "Número de serie",
@@ -66,6 +67,7 @@
       "salvageValue": "Valor residual",
       "manufacturer": "Fabricante",
       "category": "Categoría",
+      "sku": "SKU / número de modelo",
       "email": "Correo",
       "legajo": "Legajo",
       "username": "Usuario",
@@ -118,8 +120,8 @@
       "helper": "Elige un valor existente para vincular cada fila a él, o cambia a constante para escribir uno nuevo."
     },
     "modelConfig": {
-      "title": "Marca y categoría del modelo",
-      "description": "Mapea una columna a Fabricante o Categoría arriba para definirlos por fila, o fija un valor aquí para aplicarlo a todos los modelos que cree la importación.",
+      "title": "Marca, categoría y SKU del modelo",
+      "description": "Mapea una columna a Fabricante, Categoría o SKU arriba para definirlos por fila, o fija un valor aquí para aplicarlo a todos los modelos que cree la importación.",
       "manufacturerLabel": "Fabricante para todos los modelos",
       "manufacturerPlaceholder": "p. ej. Apple",
       "categoryLabel": "Categoría para todos los modelos",
@@ -127,6 +129,8 @@
       "categoryPickPlaceholder": "Elegir una categoría…",
       "categoryPickSearch": "Buscar categorías…",
       "categoryPickEmpty": "No se encontraron categorías.",
+      "skuLabel": "SKU para todos los modelos",
+      "skuPlaceholder": "p. ej. P108F",
       "fromColumn": "Se toma de la columna «{column}»."
     },
     "missingRequired": "Mapea una columna a: {fields}.",

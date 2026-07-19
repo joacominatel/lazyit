@@ -157,6 +157,9 @@ export async function runParseJob(
         // Per-column example values for the assisted mapping UI — same owner-scope + GC as the rows,
         // never logged (ADR-0069 REDESIGN §4.2).
         samples: collectSamples(result.headers, result.rows),
+        // Ragged-width row count (#1062): a non-blocking signal for the map step that a delimiter/quoting
+        // shift may have misaligned some rows' fields (0 for JSON, and for a clean CSV).
+        raggedRowCount: result.raggedRowCount,
       },
     },
   });

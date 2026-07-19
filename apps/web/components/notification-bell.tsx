@@ -121,6 +121,27 @@ const TYPE_META: Record<
     tone: "bg-pillar-access/10 text-pillar-access",
     href: (n) => (n.entityId ? `/applications/${n.entityId}` : "/applications"),
   },
+  // A requester's own access request was decided (approved/denied) — a TARGETED nudge to them (#1071).
+  // Deep-links to the target application; the outcome detail lives in their profile request list.
+  "access_request.decided": {
+    icon: KeyIcon,
+    tone: "bg-pillar-access/10 text-pillar-access",
+    href: (n) => (n.entityId ? `/applications/${n.entityId}` : "/applications"),
+  },
+  // A proactive expiry heads-up (#1070). An asset's warranty is about to lapse — admin-broadcast,
+  // inventory-toned, deep-links to the asset so an operator can renew/replace before the deadline.
+  warranty_expiring: {
+    icon: ExclamationTriangleIcon,
+    tone: "bg-pillar-inventory/10 text-pillar-inventory",
+    href: (n) => (n.entityId ? `/assets/${n.entityId}` : "/assets"),
+  },
+  // A proactive expiry heads-up (#1070). An active grant is about to auto-revoke — admin-broadcast,
+  // access-toned, deep-links to the target application so an admin can re-grant before access is lost.
+  access_grant_expiring: {
+    icon: KeyIcon,
+    tone: "bg-pillar-access/10 text-pillar-access",
+    href: (n) => (n.entityId ? `/applications/${n.entityId}` : "/applications"),
+  },
 };
 
 /** Fallback meta for an unknown future type (defensive — the closed enum should make this unreachable). */

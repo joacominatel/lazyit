@@ -36,6 +36,15 @@ export const InfraNodeStatusSchema = z.enum(["ONLINE", "OFFLINE", "UNKNOWN"]);
 /** Provenance (ADR-0070 §4): hand-entered vs auto-discovered by the v2 reporting agent. */
 export const InfraNodeSourceSchema = z.enum(["MANUAL", "AGENT"]);
 
+/**
+ * Who owns the node's `ipAddress` (ADR-0074 §3 fact-promotion, issue #1081). `AGENT` (the default)
+ * means the value is a discovered live fact — each report OVERWRITES it. `MANUAL` means a human typed
+ * it in the panel, so the agent must NEVER clobber it. The default is AGENT because the only writer
+ * that needs the distinction is the report path; a manually-created node never receives reports, so
+ * its default AGENT is harmless, and the human IP-edit path stamps MANUAL server-side.
+ */
+export const InfraNodeIpSourceSchema = z.enum(["AGENT", "MANUAL"]);
+
 /** Lifecycle (ADR-0070 §4): PENDING = in the v2 review tray, CONFIRMED = on the live map. */
 export const InfraNodeStateSchema = z.enum(["CONFIRMED", "PENDING"]);
 
@@ -71,6 +80,23 @@ export const InfraShortcutsSchema = z.array(InfraShortcutSchema).max(INFRA_SHORT
  */
 const InfraSpecsSchema = z.record(z.string(), z.unknown());
 
+// ── IP address value-object (ADR-0090, issue #847) ────────────────────────────────────────────────
+
+/**
+ * A single IPv4 OR IPv6 address, trimmed then FORMAT-validated (ADR-0090, issue #847). The shared
+ * value-object BOTH write paths reuse — the manual node edit (a clean 400 on garbage, via the DTO) and
+ * the agent-promotion path (validate-or-drop in {@link primaryIpv4}, never a 400 on a whole report).
+ * Native zod-v4 validators (`z.ipv4()`/`z.ipv6()`) — NO new dependency (they back `z.string().ip()`'s
+ * successor). Normalization is TRIM-ONLY: zod validates the address but does not canonicalize IPv6
+ * (`2001:db8::1` and its expanded form stay distinct strings) — good enough for a display fact plus a
+ * best-effort soft conflict hint, and it never rewrites what the operator typed. `InfraNodeSchema`
+ * keeps the looser `z.string().nullable()` on the READ side (tolerance for legacy label-only rows).
+ */
+export const IpAddressSchema = z
+  .string()
+  .trim()
+  .pipe(z.union([z.ipv4(), z.ipv6()]));
+
 // ── InfraNode wire shape + DTOs (ADR-0070 §1) ─────────────────────────────────────────────────────
 
 /** The full persisted InfraNode (API representation of the `infra_nodes` row). */
@@ -82,6 +108,9 @@ export const InfraNodeSchema = z.object({
   // Asset linkage — default-on; SetNull detaches (never deletes) the node when the asset is removed.
   assetId: z.cuid().nullable(),
   ipAddress: z.string().nullable(), // primary IP, label-only (no validation/IPAM — ADR-0070 scope cut)
+  // Who owns `ipAddress` (issue #1081): AGENT = a discovered live fact reports overwrite; MANUAL = a
+  // human-typed value the agent never clobbers. `.nullish()` so an older API/read never breaks web.
+  ipAddressSource: InfraNodeIpSourceSchema.nullish(),
   shortcuts: InfraShortcutsSchema.nullable(),
   specs: InfraSpecsSchema.nullable(),
   x: z.number().nullable(), // canvas position (free-move board)
@@ -113,7 +142,8 @@ export const CreateInfraNodeSchema = z.strictObject({
   label: z.string().trim().min(1).max(200),
   status: InfraNodeStatusSchema.optional(),
   assetId: z.cuid().optional(),
-  ipAddress: z.string().trim().min(1).max(255).optional(),
+  // Format-validated (ADR-0090, #847): a malformed IP is a clean 400 here, never a persisted label.
+  ipAddress: IpAddressSchema.optional(),
   shortcuts: InfraShortcutsSchema.optional(),
   specs: InfraSpecsSchema.optional(),
   x: z.number().optional(),
@@ -128,7 +158,8 @@ export const UpdateInfraNodeSchema = requireAtLeastOneKey(
       label: z.string().trim().min(1).max(200),
       status: InfraNodeStatusSchema,
       assetId: z.cuid().nullable(), // null detaches the asset link
-      ipAddress: z.string().trim().min(1).max(255).nullable(),
+      // Format-validated (ADR-0090, #847); `null` clears the IP (stamped MANUAL server-side).
+      ipAddress: IpAddressSchema.nullable(),
       shortcuts: InfraShortcutsSchema.nullable(),
       specs: InfraSpecsSchema.nullable(),
       x: z.number(),
@@ -233,6 +264,14 @@ export const InfraNodeDetailSchema = InfraNodeSchema.extend({
   secretRefs: z.array(InfraSecretRefSchema),
   /** Nodes hosted on this one via an ACTIVE inverse RUNS_ON edge. */
   children: z.array(InfraNodeChildSchema),
+  /**
+   * SOFT duplicate-IP signal (ADR-0090, #847): other LIVE nodes carrying this node's exact `ipAddress`
+   * (lean `{ id, label, kind, status }` peers, self excluded). Display-only — a badge on the drill-in;
+   * it NEVER blocks a create/update and there is NO DB uniqueness. `[]` when the node has no IP or no
+   * peer shares it. `.nullish()` for read tolerance: an older API omits it → web treats it as "no
+   * conflict". Exact-string match, so the same IPv6 typed in two forms won't pair (accepted best-effort).
+   */
+  ipConflict: z.array(InfraNodeChildSchema).nullish(),
 });
 
 /**
@@ -349,6 +388,75 @@ export const AgentReportSchema = z.strictObject({
 });
 export type AgentReport = z.infer<typeof AgentReportSchema>;
 
+/** The `host` block of a report — the subset the fact-promotion mappers below read (issue #1081). */
+export type AgentReportHost = AgentReport["host"];
+
+// ── Fact-promotion mappers (ADR-0074 §3, issue #1081) — pure, framework-agnostic ──────────────────
+//
+// Promote a raw report's host facts into canonical fields: the primary IPv4 → the node's `ipAddress`
+// (a display fact), and the hardware serial → the confirmed Asset's `serial`. Kept here beside
+// `AgentReportSchema` so api (the writer) and any future consumer share one definition. Pure — no
+// framework, no I/O — and unit-tested in `infra.test.ts`.
+
+/** A NIC's first non-empty IPv4 (trimmed), or undefined when it advertises none. */
+function firstNicIpv4(nic: NonNullable<AgentReportHost["nics"]>[number]): string | undefined {
+  return nic.ipv4?.map((ip) => ip.trim()).find((ip) => ip.length > 0);
+}
+
+/**
+ * The host's primary IPv4 (issue #1081): the first IPv4 of the first non-loopback NIC (name !== `lo`)
+ * that advertises one; failing that, the first IPv4 found on ANY NIC (loopback included); `undefined`
+ * when the report carries no IPv4 at all (an unprivileged/partial report — never fabricate one). This
+ * is what a discovered node shows as its `ipAddress`, and what each report refreshes it to.
+ *
+ * Validate-or-drop (ADR-0090, #847): the chosen value is returned ONLY if it passes
+ * {@link IpAddressSchema}, else `undefined`. A malformed NIC value can NEVER promote to the node's
+ * `ipAddress` — per ADR-0074 §3 a bad fact is silently DROPPED, never a 400 on the whole report.
+ */
+export function primaryIpv4(host: AgentReportHost): string | undefined {
+  const nics = host.nics ?? [];
+  // The first IPv4 of the first non-loopback NIC that advertises one …
+  const candidate =
+    nics.filter((n) => n.name !== "lo").map(firstNicIpv4).find(Boolean) ??
+    // … else the first IPv4 on ANY NIC (loopback included — reached only when no non-lo NIC had one).
+    nics.map(firstNicIpv4).find(Boolean);
+  // Format-validate the winner; garbage is dropped (returns the trimmed value on success).
+  const parsed = IpAddressSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * dmidecode serial placeholders that mean "no real serial" — OEMs ship these literal strings on
+ * boards nobody flashed. Lower-cased for a case-insensitive match. `"0"` is also caught by the
+ * all-same-char guard below, but listed for clarity.
+ */
+const SERIAL_JUNK_PLACEHOLDERS = new Set([
+  "to be filled by o.e.m.",
+  "system product name",
+  "default string",
+  "none",
+  "not specified",
+  "o.e.m.",
+  "not applicable",
+  "0",
+]);
+
+/**
+ * The host's hardware serial, sanitized (issue #1081): trimmed, with the well-known dmidecode junk
+ * placeholders rejected (case-insensitive) and any all-same-character string (e.g. `000000`, `......`)
+ * dropped. Returns `undefined` for an empty/absent/junk serial so the caller leaves the Asset serial
+ * null (the raw value still survives verbatim in `specs.host.hardware.serial`). Never promote junk to
+ * the unique canonical `Asset.serial`.
+ */
+export function sanitizeSerial(host: AgentReportHost): string | undefined {
+  const raw = host.hardware?.serial?.trim();
+  if (!raw) return undefined;
+  if (SERIAL_JUNK_PLACEHOLDERS.has(raw.toLowerCase())) return undefined;
+  // A single character repeated (length ≥ 1) is a placeholder, not a real serial.
+  if (/^(.)\1*$/.test(raw)) return undefined;
+  return raw;
+}
+
 /**
  * The minimal ack the report endpoint returns (ADR-0074 §3). Fire-and-forget by design: it confirms
  * the node id, its lifecycle `state` (PENDING for a freshly-discovered host, CONFIRMED once a human
@@ -450,8 +558,10 @@ export const InfraImpactResponseSchema = z.object({
 
 // ── Inferred types ────────────────────────────────────────────────────────────────────────────────
 
+export type IpAddress = z.infer<typeof IpAddressSchema>;
 export type InfraNodeStatus = z.infer<typeof InfraNodeStatusSchema>;
 export type InfraNodeSource = z.infer<typeof InfraNodeSourceSchema>;
+export type InfraNodeIpSource = z.infer<typeof InfraNodeIpSourceSchema>;
 export type InfraNodeState = z.infer<typeof InfraNodeStateSchema>;
 export type InfraShortcut = z.infer<typeof InfraShortcutSchema>;
 export type InfraNode = z.infer<typeof InfraNodeSchema>;

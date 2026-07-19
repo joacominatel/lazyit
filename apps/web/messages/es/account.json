@@ -48,6 +48,18 @@
     "update_available": {
       "label": "Actualización disponible",
       "description": "Hay una versión de lazyit más reciente que la que estás ejecutando."
+    },
+    "access_request_decided": {
+      "label": "Solicitud de acceso resuelta",
+      "description": "Una de tus solicitudes de acceso fue aprobada o denegada."
+    },
+    "warranty_expiring": {
+      "label": "Garantía por vencer",
+      "description": "La garantía de un activo se acerca a su fecha de vencimiento."
+    },
+    "access_grant_expiring": {
+      "label": "Acceso por vencer",
+      "description": "Una concesión de acceso está por vencer y será revocada automáticamente."
     }
   }
 }

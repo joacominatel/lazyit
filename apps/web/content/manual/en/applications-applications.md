@@ -22,8 +22,10 @@ required — everything else is optional and there to help your team recognize a
 - **URL** — where the system lives. This can be a normal `https://…` address or a scheme-less
   internal host such as `vpn.corp.local`. For safety, only scheme-less hosts and `http(s)` links
   are accepted; other schemes are rejected.
-- **Critical** — a flag for especially sensitive targets (see [Criticality & alerts](/help/applications-access-criticality-alerts)).
+- **Critical** — a flag for especially sensitive targets (see [Criticality & alerts](/help/applications-criticality-alerts)).
 - **Description** and **Notes** — free text for context.
+- **License & seats** — optional licensing details (seats purchased, cost per seat, renewal date). See
+  [License & seats](#license--seats) below.
 
 ## Adding and editing applications
 
@@ -51,8 +53,30 @@ them uncategorized. Nothing is lost.
 
 The Access list supports searching by **name or vendor**, and filtering by **category** and by
 **criticality** (critical only / non-critical / any). Each row also shows the count of **active
-access** — how many people currently hold a live grant on that application — so you can see at a
-glance which systems are in active use.
+access** — how many people currently hold a live grant on that application — and, when you track
+licensing, a **License** cell (used / purchased, with an over-allocation warning and the next
+renewal date), so you can see at a glance which systems are in active use.
+
+## License & seats
+
+lazyit can track the licensing behind an application, so you can see at a glance how much of what
+you pay for is actually in use. On the application form, fill in any of:
+
+- **Seats purchased** — how many paid seats the license includes. Leave it blank to not track a limit.
+- **Cost per seat** — the price of a single seat, per billing period. Enter it in normal units
+  (e.g. `12.99`); lazyit stores the amount precisely.
+- **Renewal date** — when the license next renews.
+
+**Seats in use** is worked out for you: it's the number of *distinct people* who currently hold
+active access to the application. Because one person can hold more than one grant on the same app,
+lazyit counts *people*, not grants — so the number reflects real license consumption.
+
+The Access list and each application's **Details** show **used / purchased**. When more people hold
+access than there are purchased seats, lazyit flags the application as **over-allocated** — a nudge
+to buy more seats or revoke access no longer needed. The warning is advisory: lazyit never blocks a
+grant on seat count.
+
+All license fields are optional — leave them blank for applications you don't license by seat.
 
 ## Deleting an application
 

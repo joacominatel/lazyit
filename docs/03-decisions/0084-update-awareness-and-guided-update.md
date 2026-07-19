@@ -133,7 +133,16 @@ thing: insert an append-only **`UpdateRun`** row and return. The UI then shows t
   being replaced, and the UI just polls the same origin.
 - **Boot-time reconciliation:** a freshly-booted API that finds a dangling non-terminal row compares
   its own `APP_VERSION` to the row's `toVersion` — equal ⇒ stamp `done`, unchanged ⇒ stamp `failed`.
-  No permanent "updating…" ghost.
+  No permanent "updating…" ghost. Reconciliation deliberately **skips `requested`** (a pending intent
+  the operator hasn't run, not an interrupted run).
+- **Operator cancel of a stuck `requested` run** (issue #1065): because `requested` counts as active in
+  the single-flight guard yet is never auto-reconciled, an enqueued-but-never-run request would block
+  every future update forever. `POST /instance/update/cancel` (ADMIN + human-only) is the escape hatch —
+  a CAS `updateMany` scoped to `status = 'requested'` transitions the run to the existing terminal
+  `failed` (distinct `error` reason, no enum migration), so a fresh enqueue succeeds. **Only `requested`
+  is cancellable**; a genuinely in-flight run (`backing_up`…`verifying`) is rejected — cancelling
+  mid-apply could desync the DB/backup state, and the CAS guarantees a concurrent host pick-up wins the
+  race rather than being clobbered.
 - **`UpdateRun` IS the audit record** — who requested, from→to, when, outcome. It is deliberately
   **NOT** added to the [[0081-audit-log-read-surface]]: that surface reads three *security* logs; an
   update is an operational event. Its history renders as a simple list on Settings → Instance.

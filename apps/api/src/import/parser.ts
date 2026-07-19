@@ -34,10 +34,19 @@ export interface ParseSuccess {
   ok: true;
   headers: string[];
   dialect: ParseDialect;
-  /** Always `'utf-8'` in phase 1 (the only encoding we accept; see {@link decodeUtf8}). */
+  /** Always `'utf-8'`: the in-memory text is always valid UTF-16 JS strings by this point — a
+   *  non-UTF-8 source buffer was transcoded from `windows-1252`, not rejected (see {@link decodeUtf8}). */
   encoding: 'utf-8';
   rowCount: number;
   rows: RawRow[];
+  /**
+   * How many data rows had a different cell count than the header width (#1062). A shifted delimiter
+   * (e.g. an unescaped `;` inside a `notes` cell in a `;`-delimited file) silently shoves every
+   * following cell one column over — `relax_column_count` keeps parsing (pads/drops, see `parseCsv`)
+   * instead of throwing, so this count is the only surface that a row's fields may be misaligned.
+   * Always `0` for JSON (key-based, not positional — there is no "column count" to shift).
+   */
+  raggedRowCount: number;
 }
 
 /** A graceful, recorded parse failure — NEVER a thrown crash out of the worker. */
@@ -70,22 +79,38 @@ export function maxImportRows(): number {
 }
 
 /**
- * Decode an uploaded buffer as UTF-8 and strip a leading BOM. We deliberately accept ONLY UTF-8
- * (ADR-0069 §12 — `.xlsx` and exotic encodings are rejected with an "export to CSV UTF-8" message);
- * a UTF-16/Latin-1 file decodes to mojibake here, which the JSON/CSV structure check below then
- * rejects as malformed rather than silently importing garbage. Returns the text + whether a BOM was
- * present.
+ * Decode an uploaded buffer to text and strip a leading BOM. Tries a STRICT UTF-8 decode first
+ * (`TextDecoder(..., { fatal: true })` throws on any invalid byte sequence, unlike
+ * `Buffer#toString('utf-8')` which silently substitutes U+FFFD) — genuine UTF-8, including plain
+ * ASCII, passes through unchanged. A file that fails strict UTF-8 is transcoded from
+ * `windows-1252` (a WHATWG-builtin `TextDecoder` label, zero deps): the overwhelmingly common
+ * real-world case is Excel's "Save as CSV" default or a Snipe-IT export re-saved on Windows
+ * (#1059) — without this, CP-1252/Latin-1 accents (`José`, `Dirección`) decoded to mojibake
+ * (`JosÃ©`) that stayed structurally valid and passed row validation silently. Returns the text +
+ * whether a BOM was present.
  */
 function decodeUtf8(buffer: Buffer): { text: string; hadBom: boolean } {
   // A UTF-8 BOM is the bytes EF BB BF. `csv-parse` strips it with `bom:true`, but JSON.parse chokes
-  // on it, so we strip it once here for both paths and report it as detected metadata.
+  // on it, so we strip it once here for both paths and report it as detected metadata. Strip it from
+  // the RAW BYTES *before* either decode: if we left the BOM in and the strict UTF-8 decode threw
+  // (an invalid byte anywhere in the file), the windows-1252 fallback would decode EF BB BF as the
+  // three chars 'ï»¿' — and a one-char slice would leave '»¿' silently prepended to the first cell
+  // (the exact mojibake #1059 kills). Removing the bytes up front makes the fallback path BOM-clean.
   const hadBom =
     buffer.length >= 3 &&
     buffer[0] === 0xef &&
     buffer[1] === 0xbb &&
     buffer[2] === 0xbf;
-  const text = buffer.toString('utf-8');
-  return { text: hadBom ? text.slice(1) : text, hadBom };
+  const body = hadBom ? buffer.subarray(3) : buffer;
+  let text: string;
+  try {
+    // Strict UTF-8: throws on any invalid byte sequence (unlike `Buffer#toString`, which substitutes
+    // U+FFFD) so a non-UTF-8 file falls through to the windows-1252 transcode below.
+    text = new TextDecoder('utf-8', { fatal: true }).decode(body);
+  } catch {
+    text = new TextDecoder('windows-1252').decode(body);
+  }
+  return { text, hadBom };
 }
 
 /**
@@ -117,8 +142,8 @@ function sniffDelimiter(text: string): string {
  * Parse a CSV string into raw rows keyed by header. Uses `csv-parse` (RFC-4180: quoting, embedded
  * newlines, escaped quotes) in ARRAY mode — NOT `columns:true` — so we own header extraction and can
  * report ragged rows precisely. `relax_*` options keep a slightly-irregular real-world export from
- * throwing; raggedness is RECORDED, not fatal: short rows pad to absent (`''`), extra cells are
- * dropped.
+ * throwing; raggedness is RECORDED via `raggedRowCount` (#1062), not fatal: short rows pad to absent
+ * (`''`), extra cells are dropped.
  */
 function parseCsv(text: string): ParseResult {
   const delimiter = sniffDelimiter(text);
@@ -175,8 +200,10 @@ function parseCsv(text: string): ParseResult {
   });
 
   const rows: RawRow[] = [];
+  let raggedRowCount = 0;
   for (let i = 1; i < records.length; i++) {
     const cells = records[i];
+    if (cells.length !== headers.length) raggedRowCount++;
     const row: RawRow = {};
     for (let c = 0; c < headers.length; c++) {
       // Short rows → absent cells become '' (coercion treats '' as absent in wave 3). Extra cells
@@ -194,6 +221,7 @@ function parseCsv(text: string): ParseResult {
     encoding: 'utf-8',
     rowCount: rows.length,
     rows,
+    raggedRowCount,
   };
 }
 
@@ -301,6 +329,8 @@ function parseJson(text: string): ParseResult {
     encoding: 'utf-8',
     rowCount: rows.length,
     rows,
+    // JSON is key-based, not positional — there is no "column count" for a delimiter to shift.
+    raggedRowCount: 0,
   };
 }
 

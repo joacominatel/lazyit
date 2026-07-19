@@ -114,6 +114,34 @@ never a 400.
 - **Confirmation (the tray):** confirming a PENDING node sets `state=CONFIRMED` and — per the
   existing topology "track as asset" path — may create the backing `Asset` (specs carried over), so
   the auto-discovered host becomes a first-class, owned, assignable Asset only on human approval.
+
+**Amendment (2026-07-18, #1081) — fact promotion (IP → node, serial → Asset, specs sync).** The report
+path stops leaving every fact buried in `specs` and promotes the useful ones to canonical fields, while
+keeping the human gate intact:
+
+- **Primary IPv4 → `InfraNode.ipAddress`.** The pure `primaryIpv4(host)` mapper in `@lazyit/shared`
+  (first IPv4 of the first non-`lo` NIC; else the first IPv4 anywhere; `undefined` on a partial report)
+  seeds `ipAddress` on the CREATE branch (source-stamped `AGENT`) so a discovered PENDING node shows its
+  IP on the map with zero hand-entry — an IP is a *display fact*, so setting it pre-confirm does **not**
+  bypass the confirm gate. On every subsequent report the IP is **overwritten** with the live value
+  (never nulled when a report lacks NICs).
+- **`ipAddressSource` (new `InfraNodeIpSource { AGENT, MANUAL }`, default `AGENT`).** The "always
+  overwrite the IP with the live fact **unless a human edited it**" policy. A human IP edit through the
+  node panel stamps `MANUAL` **server-side** (derived from `ipAddress` being present in the PATCH — never
+  a client-settable field, so the provenance marker stays trustworthy); a `MANUAL` node's IP is never
+  clobbered by a report thereafter.
+- **Hardware serial → `Asset.serial` at confirm.** The pure `sanitizeSerial(host)` mapper (trims, drops
+  the well-known dmidecode junk placeholders — `To be filled by O.E.M.`, `Default string`, all-same-char,
+  … — case-insensitive) promotes a real discovered serial to the minted Asset's canonical `serial`. A
+  unique-serial collision (`assets_serial_active_key`) **retries without the serial** rather than failing
+  the confirm (the raw value still lives in `specs.host.hardware.serial`). `modelId` stays **null** — no
+  `AssetModel` auto-create (a human product call).
+- **Linked-Asset `specs` sync on every report.** When a confirmed node is asset-backed, each report also
+  refreshes the linked Asset's `specs` inventory snapshot (host facts blob), so the Asset inventory panel
+  stays fresh. Written **directly** (not via `AssetsService.update`) so it emits **no** `SPECS_CHANGED`
+  history event per report (no audit-trail flooding) and **never** touches the Asset's human-owned
+  `serial`/`name`/`modelId`; a soft-deleted asset is skipped. The three agent-owned keys
+  (`host`/`software`/`reportedAt`) are replaced; every human-added specs key is preserved.
 - **Async:** heavy work (software-list diffing, search re-index) goes through a BullMQ queue on the
   same Valkey substrate ([[0053-async-workers-bullmq-valkey]]), copying the `import-commit` worker
   pattern. The endpoint returns fast (accepted), the work drains in the background.

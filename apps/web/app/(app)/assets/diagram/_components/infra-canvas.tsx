@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
+  INFRA_LIVE_POLL_MS,
   useInfraEdges,
   useInfraNodes,
   useUpdateInfraNodePosition,
@@ -111,7 +112,11 @@ export function InfraCanvas({
   onApiReady?: (api: InfraCanvasApi) => void;
 }) {
   const t = useTranslations("infra");
-  const { data: rawNodes, isLoading, isError, error, refetch } = useInfraNodes();
+  // Poll so live nodes show fresh status/lastReportedAt/IP on the map without a manual reload (#1081).
+  const { data: rawNodes, isLoading, isError, error, refetch } = useInfraNodes(
+    {},
+    { refetchInterval: INFRA_LIVE_POLL_MS },
+  );
   const nodeIds = useMemo(() => (rawNodes ?? []).map((n) => n.id), [rawNodes]);
   const {
     edges: rawEdges,

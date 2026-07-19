@@ -62,3 +62,14 @@ export function enqueueUpdate(body: EnqueueUpdate): Promise<UpdateRun> {
     body,
   });
 }
+
+/**
+ * CANCEL a stuck `requested` update (`POST /instance/update/cancel`, `settings:manage`, human-only,
+ * issue #1065). Moves a run the operator enqueued but never ran on the host to the terminal `failed`
+ * state so a fresh update can be enqueued. The API rejects this for a genuinely in-flight run.
+ */
+export function cancelUpdate(): Promise<UpdateRun> {
+  return apiFetch<UpdateRun>(`${BASE}/update/cancel`, {
+    method: "POST",
+  });
+}

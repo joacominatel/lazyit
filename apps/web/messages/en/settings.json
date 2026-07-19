@@ -110,6 +110,11 @@
       },
       "toast": {
         "enqueued": "Update queued. Run the shown command on the host to apply it."
+      },
+      "cancel": {
+        "button": "Cancel this update",
+        "hint": "Haven't run the command yet? Cancel to clear this request and check for updates again later.",
+        "toast": "Update cancelled. You can check for updates again anytime."
       }
     }
   },
@@ -427,7 +432,7 @@
       "revoke": "Revoke",
       "openActions": "Open actions"
     },
-    "revokeExplanation": "Its token stops authenticating immediately. You can restore it from the “Show revoked” view (rotate to mint a fresh token).",
+    "revokeExplanation": "Its token stops authenticating immediately. You can restore it from the “Show revoked” view (rotate to mint a fresh token). Revoking suspends the token but does not remove vault access — use the vault's Members list to revoke per vault and remove key material.",
     "toast": {
       "restored": "Service account restored",
       "restoreError": "Couldn't restore service account",

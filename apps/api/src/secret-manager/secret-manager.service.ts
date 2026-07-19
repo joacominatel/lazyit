@@ -1320,16 +1320,20 @@ export class SecretManagerService {
   }
 
   /**
-   * Load a vault's SERVICE-ACCOUNT members as display metadata (ADR-0080). Only LIVE memberships exist here
-   * — a revoked (soft-deleted) SA has its wrapped-DEK row hard-dropped — so no soft-delete filter is needed.
-   * `isActive` is surfaced so the UI can flag a member whose token is currently disabled (a paused SA is
-   * still a crypto member, but its token will not authenticate). Never a wrapped DEK or the token (INV-10).
+   * Load a vault's SERVICE-ACCOUNT members as display metadata (ADR-0080). A keypair rotation hard-drops the
+   * SA's memberships, but a plain REVOKE only stamps `serviceAccount.deletedAt` and leaves the membership row
+   * (ServiceAccountVaultMembership has no `deletedAt`), so we must exclude soft-deleted SAs explicitly here:
+   * the soft-delete extension only scopes the TOP-LEVEL model (ServiceAccountVaultMembership), never a nested
+   * to-one `serviceAccount` projection (#1067). Without `serviceAccount: { deletedAt: null }` a revoked SA
+   * would resurface as a live member. `isActive` is surfaced so the UI can flag a member whose token is
+   * currently disabled (a paused SA is still a crypto member, but its token will not authenticate). Never a
+   * wrapped DEK or the token (INV-10).
    */
   private async loadServiceAccountMembers(
     vaultId: string,
   ): Promise<VaultServiceAccountMemberMeta[]> {
     const rows = await this.prisma.serviceAccountVaultMembership.findMany({
-      where: { vaultId },
+      where: { vaultId, serviceAccount: { deletedAt: null } },
       select: {
         serviceAccountId: true,
         createdAt: true,

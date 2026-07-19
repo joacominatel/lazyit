@@ -110,6 +110,11 @@
       },
       "toast": {
         "enqueued": "Actualización en cola. Ejecuta el comando mostrado en el host para aplicarla."
+      },
+      "cancel": {
+        "button": "Cancelar esta actualización",
+        "hint": "¿Aún no ejecutaste el comando? Cancélala para descartar esta solicitud y volver a comprobar actualizaciones más tarde.",
+        "toast": "Actualización cancelada. Puedes volver a comprobar actualizaciones cuando quieras."
       }
     }
   },
@@ -427,7 +432,7 @@
       "revoke": "Revocar",
       "openActions": "Abrir acciones"
     },
-    "revokeExplanation": "Su token deja de autenticar de inmediato. Puedes restaurarla desde la vista «Mostrar revocadas» (rota para generar un token nuevo).",
+    "revokeExplanation": "Su token deja de autenticar de inmediato. Puedes restaurarla desde la vista «Mostrar revocadas» (rota para generar un token nuevo). Revocar suspende el token pero no elimina el acceso a las bóvedas — usa la lista de Miembros de la bóveda para revocar por bóveda y eliminar el material de clave.",
     "toast": {
       "restored": "Cuenta de servicio restaurada",
       "restoreError": "No se pudo restaurar la cuenta de servicio",

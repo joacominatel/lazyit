@@ -86,15 +86,23 @@ how long ago it last reported. For each one you have two choices:
 - **Confirm** — adds the host to your live topology. A short dialog lets you rename it and change its
   kind first, and offers a **Track as an inventory asset** toggle (**on** by default): left on,
   lazyit also creates a tracked **asset** carrying the reported host facts, so the server can have an
-  owner, knowledge-base links and secret references like any other asset. Turn it off to keep the
-  node graph-only.
+  owner, knowledge-base links and secret references like any other asset. If the host reported a real
+  hardware **serial number**, it becomes that asset's serial automatically (a placeholder like
+  *"To be filled by O.E.M."*, or a serial already used by another asset, is skipped). Turn the toggle
+  off to keep the node graph-only.
 - **Discard** — removes the proposal. This is a soft delete (the same as removing any node from the
   map): nothing is destroyed and it can be restored later.
 
+A discovered host also **fills in its own IP address** the moment it reports — you don't have to type
+it. On every later report the IP is refreshed to the current value, **unless you've edited it by hand**
+on the node — a manual IP is treated as yours and the agent never overwrites it.
+
 Once confirmed, a host keeps receiving fresh facts from the agent, but your edits — its name, kind,
-position and connections — are yours and the agent never overwrites them. Once a reported host is
-confirmed, its inventory — operating system, CPU, disks, network interfaces and installed software —
-shows as a structured panel on the corresponding asset.
+position, IP and connections — are yours and the agent never overwrites them. The reported inventory —
+operating system, CPU, memory, disks, network interfaces, serial and installed software — shows as a
+read-only **Reported facts** panel right on the node (open a node on the diagram or Servers list), and
+the same facts appear on the corresponding asset. Both stay fresh: each new report updates them
+without touching anything you own (the asset's name, serial and model are never changed by a report).
 
 ## What the agent collects
 

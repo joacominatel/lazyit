@@ -107,7 +107,7 @@ describe("NotificationSchema (one bell row)", () => {
       NotificationSchema.safeParse({ ...base, severity: "fatal" }).success,
     ).toBe(false);
     expect(
-      NotificationSchema.safeParse({ ...base, entityType: "asset" }).success,
+      NotificationSchema.safeParse({ ...base, entityType: "nope" }).success,
     ).toBe(false);
   });
 

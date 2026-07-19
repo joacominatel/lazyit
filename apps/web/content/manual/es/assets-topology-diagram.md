@@ -155,7 +155,9 @@ estático. Reúne, en un solo lugar:
 > nodo; cambiá su **tipo** o su **dirección IP** directamente; y el **estado** y los **accesos
 > directos** también son editables (ver abajo). Los cambios se guardan a medida que los hacés y la
 > tarjeta del nodo en el lienzo se actualiza al instante. Quien solo puede ver lo encuentra como
-> texto plano, sin controles de edición.
+> texto plano, sin controles de edición. La **dirección IP** se valida al guardarla: debe ser una
+> dirección IPv4 o IPv6 válida, y una entrada inválida se rechaza con un mensaje claro en lugar de
+> guardarse.
 
 - **Responsable(s)** — quién es responsable, tomado de las asignaciones del activo vinculado. Un
   responsable que dejó la empresa pero cuya asignación nunca se liberó sigue mostrándose, marcado
@@ -175,7 +177,10 @@ estático. Reúne, en un solo lugar:
   nueva. Con el permiso de gestión los editás ahí mismo: cada acceso directo es un par etiqueta + URL
   que podés cambiar, agregar o quitar, y luego **Guardás** la lista (lazyit verifica que cada URL sea
   válida antes de guardar).
-- **Dirección IP** y fecha de **agregado**.
+- **Dirección IP** y fecha de **agregado**. Si otro nodo del mapa ya tiene la *misma* IP exacta, el
+  panel muestra un **aviso de IP duplicada no bloqueante** que lista el/los otro(s) nodo(s) — es un
+  aviso, no un bloqueo: la dirección se guarda igual (lazyit no impone unicidad en las IP), y cada
+  nodo listado está a un clic para que puedas saltar a él y resolverlo.
 - **Hijos** — los nodos alojados en este (sus relaciones *corre sobre* activas).
 - **Conexiones** — las relaciones activas de este nodo (que se pueden cerrar) y su historial cerrado
   (una migración de *corre sobre* aparece aquí), además de la acción **Agregar conexión**.

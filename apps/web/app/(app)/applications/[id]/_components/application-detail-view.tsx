@@ -4,13 +4,14 @@ import {
   ArrowTopRightOnSquareIcon,
   Cog6ToothIcon,
   DocumentDuplicateIcon,
+  ExclamationTriangleIcon,
   HandRaisedIcon,
   PencilSquareIcon,
   TrashIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
 import { type AccessGrant, isSafeApplicationUrl } from "@lazyit/shared";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useState } from "react";
@@ -35,6 +36,7 @@ import { useRevokeGrant } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useMyAccessRequests } from "@/lib/api/hooks/use-access-requests";
 import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import { formatMoney } from "@/lib/utils/money";
 import { EditGrantDialog } from "../../_components/edit-grant-dialog";
 import { GrantAccessDialog } from "../../_components/grant-access-dialog";
 import { RequestAccessDialog } from "../../_components/request-access-dialog";
@@ -82,6 +84,7 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
 
 export function ApplicationDetailView({ id }: { id: string }) {
   const t = useTranslations("applications");
+  const locale = useLocale();
   const { date } = useFormatters();
   const router = useRouter();
   const canWrite = useCan("application:write");
@@ -180,6 +183,20 @@ export function ApplicationDetailView({ id }: { id: string }) {
   const categoryName = application.categoryId
     ? categories?.find((category) => category.id === application.categoryId)?.name
     : undefined;
+
+  // License / seat tracking (#949). `seatsUsed` is the API-derived distinct active-grant user count.
+  // The over-allocation warning is purely client-derived: more distinct users hold access than there
+  // are purchased seats. Only meaningful when seats are actually tracked (`seatsPurchased != null`).
+  const seatsUsed = application.seatsUsed ?? 0;
+  const isOverAllocated =
+    application.seatsPurchased != null && seatsUsed > application.seatsPurchased;
+  const overBy = isOverAllocated
+    ? seatsUsed - (application.seatsPurchased as number)
+    : 0;
+  const hasLicenseInfo =
+    application.seatsPurchased != null ||
+    application.costPerSeat != null ||
+    application.renewalDate != null;
 
   function userName(userId: string): string {
     const user = userById.get(userId);
@@ -297,6 +314,45 @@ export function ApplicationDetailView({ id }: { id: string }) {
           </div>
         )}
       </DetailPanel>
+
+      {hasLicenseInfo && (
+        <DetailPanel title={t("detail.licenseTitle")}>
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+            <DetailField label={t("detail.seatsLabel")}>
+              {application.seatsPurchased != null ? (
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  <span className="font-mono tabular-nums">
+                    {seatsUsed} / {application.seatsPurchased}
+                  </span>
+                  {isOverAllocated ? (
+                    <StatusBadge tone="warning">
+                      <ExclamationTriangleIcon
+                        className="size-3.5"
+                        aria-hidden
+                      />
+                      {t("detail.overAllocated", { over: overBy })}
+                    </StatusBadge>
+                  ) : null}
+                </span>
+              ) : (
+                <span className="font-mono tabular-nums text-muted-foreground">
+                  {t("detail.seatsUsedUntracked", { used: seatsUsed })}
+                </span>
+              )}
+            </DetailField>
+            {application.costPerSeat != null ? (
+              <DetailField label={t("detail.costPerSeatLabel")} mono>
+                {formatMoney(application.costPerSeat, locale)}
+              </DetailField>
+            ) : null}
+            {application.renewalDate ? (
+              <DetailField label={t("detail.renewalDateLabel")} mono>
+                {date(application.renewalDate)}
+              </DetailField>
+            ) : null}
+          </dl>
+        </DetailPanel>
+      )}
 
       <DetailPanel
         title={t("detail.activeAccessTitle")}

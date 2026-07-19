@@ -66,14 +66,22 @@ you're looking at before you decide where it goes.
 > file, so they can include employee data such as names and emails. Nothing is written anywhere until
 > the final commit; the values are only shown to you, the operator running the import.
 
+If any row in your file had a different number of columns than the header — most often an unescaped
+delimiter inside a text cell (for example a `;` inside a *Notes* value in a `;`-delimited file) — this
+screen shows a warning naming how many rows were affected. It's **informational, not blocking**: the
+importer still tolerates the mismatch (short rows get blank cells, extra cells are dropped), but a
+shifted delimiter can silently push a later value — like the serial number — into the wrong field. If
+you see this warning, check the flagged rows in your source file for stray delimiters or unbalanced
+quotes before continuing.
+
 For each column, open it and pick one target from the dropdown:
 
 - **A lazyit field**, grouped by entity:
   - **Asset** — **Name** (*required*), **Status** (*required*), **Serial number**, **Asset tag**,
     **Company**, **Notes**, **Purchase date**, **Warranty end**, **Purchase cost**, **Useful life
     (months)**, **Salvage value**, **Model** and **Location**.
-  - **Model** — **Manufacturer** and **Category** for the asset models the import creates (see
-    *Model brand and category* below).
+  - **Model** — **Manufacturer**, **Category** and **SKU / model number** for the asset models the
+    import creates (see *Model brand, category and SKU* below).
   - **Person** — the person the asset is **assigned to**: **Name**, **Email**, **Employee no.**,
     **Username**, **Job title**, **Department** and **Supervisor** (see *Assign assets to people*
     below).
@@ -101,7 +109,8 @@ A few fields behave specially:
   re-upload won't create duplicates for those rows. Without it, a re-upload is **not de-duplicated**.
 - **Asset tag** — a tag from your file is used as-is; a blank one is auto-assigned later if your
   instance has an asset-tag scheme enabled.
-- **Model** and **Location** are **references**, matched to existing records by name (see *Conflicts*).
+- **Model** and **Location** are **references**, matched to existing records by name — a **Model** with
+  a SKU is matched by SKU first, then name (see *Conflicts*).
 - **Company** is an optional grouping label, set as-is from your file (a *Company* / *Empresa* column
   is recognized automatically). It groups and filters assets — it is not an access control.
 - **Notes** is optional free text, mapped as-is (a *Notes* / *Notas* / *Observaciones* column is
@@ -127,25 +136,31 @@ headers: it recognises **Spanish and Snipe-IT-style names** too (for example *No
 serie*, *Asignado a*, *Modelo*), so a typical export lands mostly pre-mapped. You still confirm each
 column — the auto-detection only proposes the target.
 
-### Model brand and category
+### Model brand, category and SKU
 
 **A model is created from its name.** To have the import create models, map a column to **Model**
-(under the *Asset* group). Mapping only **Manufacturer** or **Category** does *not* create a model —
-those two only **enrich** a model that already comes from a mapped **Model** column. The category is
-attached **through the model**, not directly to the asset.
+(under the *Asset* group). Mapping only **Manufacturer**, **Category** or **SKU / model number** does
+*not* create a model — those three only **enrich** a model that already comes from a mapped **Model**
+column. The category is attached **through the model**, not directly to the asset.
 
-When the import creates a new **Model**, it needs a **manufacturer** and a **category**. You can set
-these two ways:
+When the import creates a new **Model**, it can take a **manufacturer**, a **category** and a **SKU /
+model number** (for example Snipe-IT's "Model No." column — `Latitude 5520` as the Model, `P108F` as
+its SKU). Manufacturer and category get a phase-1 fallback (see below); SKU is optional and left blank
+if you don't map or pin it. You can set each of the three two ways:
 
-- **Per row** — map a column to **Manufacturer** or **Category** in the dropdown, and each model takes
-  its value from that row.
-- **For every model** — if your file has no such column (or all your assets are the same brand), pin a
-  single **Manufacturer** and/or **Category** in the *Model brand and category* box; it applies to
-  every model the import creates. A mapped column always wins over a pinned value.
+- **Per row** — map a column to **Manufacturer**, **Category** or **SKU / model number** in the
+  dropdown, and each model takes its value from that row.
+- **For every model** — if your file has no such column (or all your assets share the same brand,
+  category or SKU), pin a single **Manufacturer**, **Category** and/or **SKU** in the *Model brand,
+  category and SKU* box; it applies to every model the import creates. A mapped column always wins over
+  a pinned value.
   - For **Category**, the box defaults to **Existing**: pick a category that already exists so every
     model links to it — no typo, no accidental new category. Flip the toggle to **Constant** to type a
     free value instead (it's still found-or-created by name on import).
-  - **Manufacturer** is free text (there's no manufacturer list to pick from), so it's always a constant.
+  - **Manufacturer** and **SKU** are free text (there's no list to pick from), so they're always a
+    constant.
+- **Mapping a SKU column strengthens matching.** A SKU-carrying model is matched by SKU first on future
+  imports and edits — it's the model's most reliable natural key, ahead of its name.
 
 ### Assign assets to people
 

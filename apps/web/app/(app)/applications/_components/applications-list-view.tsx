@@ -1,11 +1,12 @@
 "use client";
 
 import {
+  ExclamationTriangleIcon,
   KeyIcon,
   LockClosedIcon,
   PlusIcon,
 } from "@heroicons/react/24/outline";
-import { MAX_PAGE_LIMIT, type User } from "@lazyit/shared";
+import { type Application, MAX_PAGE_LIMIT, type User } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -29,6 +30,7 @@ import {
 import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import {
   Select,
   SelectContent,
@@ -204,6 +206,11 @@ export function ApplicationsListView() {
         skeleton: <Skeleton className="size-6 rounded-full" />,
       },
       {
+        key: "license",
+        header: t("list.columns.license"),
+        skeleton: <Skeleton className="h-4 w-16" />,
+      },
+      {
         key: "updated",
         header: (
           <SortableHeader
@@ -243,6 +250,45 @@ export function ApplicationsListView() {
       ? [...access.userIds].filter((id) => !userById.has(id)).length
       : 0;
     return { count: access?.count ?? 0, granteeUsers, deactivatedGrantees };
+  }
+
+  /** License seats + renewal for one row (#949): used/purchased with an over-allocation warning
+   *  (distinct active-grant users exceed purchased seats), and the next renewal date. A muted
+   *  em-dash when the app tracks neither. `seatsUsed` is server-derived (correct distinct-user math). */
+  function licenseCell(application: Application) {
+    const purchased = application.seatsPurchased;
+    const used = application.seatsUsed ?? 0;
+    const renewal = application.renewalDate;
+    if (purchased == null && !renewal) {
+      return <span className="text-sm text-muted-foreground">—</span>;
+    }
+    const over = purchased != null && used > purchased;
+    return (
+      <div className="flex flex-col items-start gap-1">
+        {purchased != null ? (
+          over ? (
+            <StatusBadge tone="warning">
+              <ExclamationTriangleIcon aria-hidden />
+              <span className="font-mono tabular-nums">
+                {used} / {purchased}
+              </span>
+              <span className="sr-only">
+                {t("list.overAllocatedTitle", { over: used - purchased })}
+              </span>
+            </StatusBadge>
+          ) : (
+            <span className="font-mono text-sm tabular-nums">
+              {used} / {purchased}
+            </span>
+          )
+        ) : null}
+        {renewal ? (
+          <span className="text-xs text-muted-foreground">
+            {t("list.renewsOn", { date: date(renewal) })}
+          </span>
+        ) : null}
+      </div>
+    );
   }
 
   /** Shown in the access column when the caller can't read grants/users (issue #935). */
@@ -418,6 +464,9 @@ export function ApplicationsListView() {
                           </span>
                         )}
                       </ResourceCardMeta>
+                      <ResourceCardMeta label={t("list.columns.license")}>
+                        {licenseCell(application)}
+                      </ResourceCardMeta>
                       <ResourceCardMeta label={t("list.columns.updated")}>
                         <span className="font-mono tabular-nums">
                           {date(application.updatedAt)}
@@ -507,6 +556,7 @@ export function ApplicationsListView() {
                       </div>
                     )}
                   </TableCell>
+                  <TableCell>{licenseCell(application)}</TableCell>
                   <TableCell className="font-mono text-muted-foreground tabular-nums">
                     {date(application.updatedAt)}
                   </TableCell>
