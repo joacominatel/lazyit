@@ -60,6 +60,10 @@
     "access_grant_expiring": {
       "label": "Access expiring",
       "description": "An access grant is about to expire and be auto-revoked."
+    },
+    "asset_assignment_acknowledged": {
+      "label": "Receipt acknowledged",
+      "description": "Someone confirmed receipt of an asset you assigned to them."
     }
   }
 }
