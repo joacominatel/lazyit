@@ -32,9 +32,13 @@ export const SMTP_SECRET_KEY_ENV = 'SMTP_SECRET_KEY';
  * requester decision nudge (`access_request.decided`, #1071): a requester wants the approve/deny outcome
  * in their inbox, not only in the app — PLUS the two PROACTIVE expiry nudges (`warranty_expiring`,
  * `access_grant_expiring`, #1070): an expiring warranty / an about-to-auto-revoke grant is precisely the
- * kind of "act before the deadline" heads-up a small team wants in their inbox. The only type still
- * bell-only is the per-user login nudge (`secret.vault_setup`), which is not inbox-worthy. No per-event
- * rules engine: this flat allowlist + the single global on/off IS the routing (one line before fifty).
+ * kind of "act before the deadline" heads-up a small team wants in their inbox — PLUS the targeted
+ * check-out acknowledgement nudge (`asset_assignment.acknowledged`, ADR-0089 Part B / #1029): the
+ * operator who assigned a device wants the "they confirmed receipt" signal in their inbox, not only in
+ * the app. Two types stay bell-only (not inbox-worthy): the per-user vault-setup nudge
+ * (`secret.vault_setup`) and the new-access-request alert (`access_request.created`). No per-event
+ * rules engine: this flat allowlist + the single global on/off IS the
+ * routing (one line before fifty).
  */
 export const EMAIL_NOTIFICATION_TYPES = [
   'critical_app_access',
@@ -48,6 +52,7 @@ export const EMAIL_NOTIFICATION_TYPES = [
   'access_request.decided',
   'warranty_expiring',
   'access_grant_expiring',
+  'asset_assignment.acknowledged',
 ] as const satisfies readonly NotificationType[];
 
 /** O(1) membership set for the allowlist. */

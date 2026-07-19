@@ -23,6 +23,9 @@ export const AssetHistoryEventTypeSchema = z.enum([
   "SPECS_CHANGED",
   "DELETED",
   "RESTORED",
+  // Check-out acknowledgement — the assignee confirmed they hold the asset (ADR-0089 Part B, #1029).
+  // Emitted by POST /asset-assignments/:id/acknowledge; payload { userId } = the acknowledging owner.
+  "ACKNOWLEDGED",
 ]);
 
 /** Contextual data attached to an event (e.g. `{ from, to }`, `{ userId }`). Unvalidated jsonb. */

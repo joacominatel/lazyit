@@ -24,6 +24,9 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
 - **optionally references** a [[user]] as `assignedBy` and/or `releasedBy` — audit of who acted
   (`onDelete: SetNull`; `null` when the system acted or it's unknown). Recorded from the
   `X-User-Id` shim, not the body — see the callout below.
+- **optionally references** a [[user]] as `acknowledgedBy` (`onDelete: SetNull`) — who confirmed
+  receipt (ADR-0089 Part B, #1029). By the self-scoped write it always equals `userId` (the owner
+  acknowledges their OWN assignment). See "Check-out acknowledgement" below.
 
 ## Business rules
 
@@ -45,9 +48,19 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
   decommissioned asset or a departed user. Mirrors the same guard on [[access-grant]]
   (`assertUsable`); the soft-delete read filter ([[0032-soft-delete-middleware]]) makes the lookup
   return null for deleted rows, so the check is a single `findFirst`.
-- **Immutable identity:** `assetId`, `userId` and `assignedAt` are set once and never change. Only
-  `notes` and `releasedAt` are mutable. Reassigning a single owner = release that assignment +
-  create a new one.
+- **Immutable identity:** `assetId`, `userId` and `assignedAt` are set once and never change. The
+  mutable lifecycle metadata is `notes`, `releasedAt`, and the acknowledgement fields below.
+  Reassigning a single owner = release that assignment + create a new one.
+- **Check-out acknowledgement (ADR-0089 Part B, #1029):** additive lifecycle metadata —
+  `acknowledgedAt DateTime?`, `acknowledgedById String? @db.Uuid` (FK [[user]], `onDelete: SetNull`),
+  `acknowledgeNote String?` — recording that the person a device was checked out to **confirmed they
+  hold it**. This is **not** an append-only violation: `AssetAssignment` is already a mutable
+  lifecycle join (like `releasedAt`), and the immutable trail is the `ACKNOWLEDGED` [[asset-history]]
+  event. **Self-service, set-once, race-safe:** the transition scopes to the caller's OWN active
+  assignment (`where: { id, userId: caller, releasedAt: null, acknowledgedAt: null }`) — a
+  double-click / concurrent call flips the row at most once (mirrors `release()`'s conditional write),
+  and already-acknowledged / released / not-yours all return `409`. On success a **targeted**
+  notification (`asset_assignment.acknowledged`) nudges the human who assigned the device.
 - **Referential integrity ([[0019-asset-assignment-integrity]]):** the required FKs are
   `onDelete: Restrict` — an [[asset]] or [[user]] with assignment rows **cannot be hard-deleted**.
 
@@ -120,11 +133,19 @@ Indexes: `@@index([assetId])`, `@@index([userId])`, plus the partial unique inde
 - `PATCH /asset-assignments/:id/release` — body `{ notes? }`; optional `X-User-Id` header →
   `releasedById` (a bad/dead actor → `400`); sets `releasedAt = now()`. Already released → `409`.
 - `PATCH /asset-assignments/:id/notes` — body `{ notes }` (`null` clears). The only free edit.
+- `POST /asset-assignments/:id/acknowledge` — **self-service** acknowledgement of receipt (ADR-0089
+  Part B, #1029); body `{ note? }`. Any authenticated **human**; **no permission** — the authorization
+  is "it's your OWN active assignment" (the `/access-requests/mine` self-scope carve-out), and a
+  service account is `403`'d (`ServicePrincipalForbiddenGuard`). Already acknowledged / released /
+  not-yours → `409`. Sets `acknowledgedAt = now()`, `acknowledgedById = caller`, optional
+  `acknowledgeNote`; records an `ACKNOWLEDGED` [[asset-history]] event and, post-commit, a targeted
+  `asset_assignment.acknowledged` nudge to the assigner.
 - **No `DELETE`** — by design (append-only).
 
 > [!note] Emits [[asset-history]] events
-> Opening an assignment records an `ASSIGNED` event and releasing one records `RELEASED` (with the
-> `X-User-Id` actor), transactionally with the change ([[0033-asset-history-event-model]]).
+> Opening an assignment records an `ASSIGNED` event, releasing one records `RELEASED`, and
+> acknowledging receipt records `ACKNOWLEDGED` (payload `{ userId }` = the acknowledging owner) — each
+> transactionally with the change, with the actor from the principal ([[0033-asset-history-event-model]]).
 
 Plus the natural sub-resource endpoints on the related entities:
 
@@ -137,5 +158,6 @@ All documented via Swagger ([[0018-api-documentation-swagger]]).
 Related: [[asset]] · [[user]] · [[service-account]] · [[asset-history]] · [[asset-centric]] ·
 [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0019-asset-assignment-integrity]] · [[0024-asset-assignment-actor-shim]] ·
+[[0089-bulk-receiving-and-checkout-acknowledgement]] ·
 [[0022-draft-visibility-auth-shim]] · [[0033-asset-history-event-model]] · [[0048-service-accounts]] ·
 [[INVARIANTS]] · [[prisma-migrations]]

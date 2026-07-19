@@ -2,12 +2,14 @@ import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { AssetAssignmentsService } from './asset-assignments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -55,17 +57,20 @@ const SA_PRINCIPAL = {
 describe('AssetAssignmentsService', () => {
   let service: AssetAssignmentsService;
   let assetAssignment: PrismaModelMock;
-  let asset: { findFirst: jest.Mock };
-  let user: { findFirst: jest.Mock };
+  // `findUnique` on asset/user is added for the acknowledge() post-commit emitter (it reads the asset
+  // name/tag + the assignee name to build the redacted nudge).
+  let asset: { findFirst: jest.Mock; findUnique: jest.Mock };
+  let user: { findFirst: jest.Mock; findUnique: jest.Mock };
   let tx: TxAssignmentMock;
   let prisma: {
     assetAssignment: PrismaModelMock;
-    asset: { findFirst: jest.Mock };
-    user: { findFirst: jest.Mock };
+    asset: { findFirst: jest.Mock; findUnique: jest.Mock };
+    user: { findFirst: jest.Mock; findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
   let actor: ActorService;
   let history: { record: jest.Mock; list: jest.Mock };
+  let notifications: { emit: jest.Mock };
 
   beforeEach(async () => {
     assetAssignment = {
@@ -77,9 +82,20 @@ describe('AssetAssignmentsService', () => {
     };
     // create() now asserts the asset and user are live (non-soft-deleted) rows before opening the
     // transaction (mirrors AccessGrantsService). Default both to "found" so the existing create
-    // tests still reach the create path; the guard tests override to null.
-    asset = { findFirst: jest.fn().mockResolvedValue({ id: 'a1' }) };
-    user = { findFirst: jest.fn().mockResolvedValue({ id: 'u1' }) };
+    // tests still reach the create path; the guard tests override to null. `findUnique` defaults feed the
+    // acknowledge() emitter (asset name/tag + assignee name).
+    asset = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'a1' }),
+      findUnique: jest
+        .fn()
+        .mockResolvedValue({ name: 'ThinkPad', assetTag: 'LZ-1' }),
+    };
+    user = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'u1' }),
+      findUnique: jest
+        .fn()
+        .mockResolvedValue({ firstName: 'Ada', lastName: 'Byron' }),
+    };
     tx = {
       create: jest.fn(),
       update: jest.fn(),
@@ -99,6 +115,8 @@ describe('AssetAssignmentsService', () => {
     // the real instance is used — it produces the genuine ActorAttribution from the principal we pass.
     actor = new ActorService();
     history = { record: jest.fn(), list: jest.fn() };
+    // NotificationsService.emit is best-effort and swallows internally; the mock records the calls.
+    notifications = { emit: jest.fn().mockResolvedValue(null) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -106,6 +124,7 @@ describe('AssetAssignmentsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ActorService, useValue: actor },
         { provide: AssetHistoryService, useValue: history },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 
@@ -429,9 +448,9 @@ describe('AssetAssignmentsService', () => {
     // a concurrent release already flipped the row, so the conditional write matches nothing
     tx.updateMany.mockResolvedValue({ count: 0 });
 
-    await expect(service.release('as1', {}, HUMAN_PRINCIPAL)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      service.release('as1', {}, HUMAN_PRINCIPAL),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(tx.updateMany).toHaveBeenCalledTimes(1);
     // the loser records NOTHING - the append-only history stays single-RELEASED
     expect(history.record).not.toHaveBeenCalled();
@@ -456,9 +475,9 @@ describe('AssetAssignmentsService', () => {
     });
 
     const winner = await service.release('as1', {}, HUMAN_PRINCIPAL);
-    await expect(service.release('as1', {}, SA_PRINCIPAL)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      service.release('as1', {}, SA_PRINCIPAL),
+    ).rejects.toBeInstanceOf(ConflictException);
 
     // exactly one transition → exactly one append-only RELEASED event, never two
     expect(history.record).toHaveBeenCalledTimes(1);
@@ -472,6 +491,146 @@ describe('AssetAssignmentsService', () => {
       },
     );
     expect(winner).toEqual({ id: 'as1' });
+  });
+
+  // --- acknowledge (ADR-0089 Part B, #1029) -------------------------------
+  // The caller (HUMAN_PRINCIPAL → ACTOR_ID) is the ASSIGNEE; a DIFFERENT user assigned the device.
+  const ASSIGNER_ID = '22222222-2222-2222-2222-222222222222';
+  type AckUpdateManyCall = [
+    { where: Record<string, unknown>; data: AssignmentData },
+  ];
+
+  describe('acknowledge', () => {
+    it('flips the row once (self-scoped set-once), records ONE ACKNOWLEDGED event, and nudges the assigner', async () => {
+      assetAssignment.findUnique.mockResolvedValue({
+        id: 'as1',
+        assetId: 'a1',
+        userId: ACTOR_ID, // the caller owns this assignment
+        assignedById: ASSIGNER_ID,
+        releasedAt: null,
+        acknowledgedAt: null,
+      });
+
+      await service.acknowledge('as1', { note: 'got it' }, HUMAN_PRINCIPAL);
+
+      // set-once + self-scope conditional write (never the unguarded update)
+      expect(tx.update).not.toHaveBeenCalled();
+      expect(tx.updateMany).toHaveBeenCalledTimes(1);
+      const calls = tx.updateMany.mock.calls as AckUpdateManyCall[];
+      expect(calls[0][0].where).toEqual({
+        id: 'as1',
+        userId: ACTOR_ID,
+        releasedAt: null,
+        acknowledgedAt: null,
+      });
+      expect(calls[0][0].data.acknowledgedAt).toBeInstanceOf(Date);
+      expect(calls[0][0].data.acknowledgedById).toBe(ACTOR_ID);
+      expect(calls[0][0].data.acknowledgeNote).toBe('got it');
+
+      // exactly one append-only ACKNOWLEDGED event, attributed to + about the acknowledging owner
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(
+        { assetAssignment: tx },
+        {
+          assetId: 'a1',
+          eventType: 'ACKNOWLEDGED',
+          payload: { userId: ACTOR_ID },
+          actor: { userId: ACTOR_ID },
+        },
+      );
+
+      // one targeted nudge to the ASSIGNER (recipient), about the assignee (target)
+      expect(notifications.emit).toHaveBeenCalledTimes(1);
+      const emitCalls = notifications.emit.mock.calls as Array<
+        [Record<string, unknown>]
+      >;
+      const emit = emitCalls[0][0];
+      expect(emit.type).toBe('asset_assignment.acknowledged');
+      expect(emit.recipientUserId).toBe(ASSIGNER_ID);
+      expect(emit.targetUserId).toBe(ACTOR_ID);
+      expect(emit.entityType).toBe('asset');
+      expect(emit.entityId).toBe('a1');
+      expect(emit.dedupeKey).toBe('asset_assignment.acknowledged:as1');
+    });
+
+    it('409s and writes NO history / NO nudge when the conditional write matches nothing (already-acked / released / not the caller’s)', async () => {
+      assetAssignment.findUnique.mockResolvedValue({
+        id: 'as1',
+        assetId: 'a1',
+        userId: ACTOR_ID,
+        assignedById: ASSIGNER_ID,
+        releasedAt: null,
+        acknowledgedAt: null, // pre-check passes; the row is flipped/foreign by the time we write
+      });
+      tx.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.acknowledge('as1', {}, HUMAN_PRINCIPAL),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.updateMany).toHaveBeenCalledTimes(1);
+      expect(history.record).not.toHaveBeenCalled();
+      expect(tx.findUnique).not.toHaveBeenCalled();
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('double acknowledge → the second call 409s (set-once)', async () => {
+      assetAssignment.findUnique.mockResolvedValue({
+        id: 'as1',
+        assetId: 'a1',
+        userId: ACTOR_ID,
+        assignedById: ASSIGNER_ID,
+        releasedAt: null,
+        acknowledgedAt: null,
+      });
+      // first write flips the row (count 1); the second matches nothing (count 0) — the set-once backstop
+      let acked = false;
+      tx.updateMany.mockImplementation(() => {
+        if (acked) return Promise.resolve({ count: 0 });
+        acked = true;
+        return Promise.resolve({ count: 1 });
+      });
+
+      await service.acknowledge('as1', {}, HUMAN_PRINCIPAL);
+      await expect(
+        service.acknowledge('as1', {}, HUMAN_PRINCIPAL),
+      ).rejects.toBeInstanceOf(ConflictException);
+      // exactly one append-only ACKNOWLEDGED event across both calls
+      expect(history.record).toHaveBeenCalledTimes(1);
+    });
+
+    it('acknowledges but SKIPS the nudge when there is no human assigner (assignedById null)', async () => {
+      assetAssignment.findUnique.mockResolvedValue({
+        id: 'as1',
+        assetId: 'a1',
+        userId: ACTOR_ID,
+        assignedById: null, // system / import / service-account assigner — no bell to nudge
+        releasedAt: null,
+        acknowledgedAt: null,
+      });
+
+      await service.acknowledge('as1', {}, HUMAN_PRINCIPAL);
+
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('404s a missing assignment (before any write)', async () => {
+      assetAssignment.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.acknowledge('missing', {}, HUMAN_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('403s a service-account (non-human) caller before touching the assignment', async () => {
+      await expect(
+        service.acknowledge('as1', {}, SA_PRINCIPAL),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(assetAssignment.findUnique).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
   });
 
   // --- updateNotes --------------------------------------------------------

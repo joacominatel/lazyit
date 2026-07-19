@@ -82,6 +82,14 @@ import { pageSchema } from "./pagination";
  *     (opt-out-able); deep-links to the application. De-duped ONE per grant per expiry date
  *     (`access_grant_expiring:<grantId>:<YYYY-MM-DD>`); an extended expiry (new date) is a distinct row.
  *     Metadata is REDACTED (grantee + app name/ids + date only).
+ *   - `asset_assignment.acknowledged` — a TARGETED accountability nudge to the ASSIGNER (ADR-0089 Part B,
+ *     issue #1029): the person an asset was checked out to CONFIRMED they hold it (self-service
+ *     acknowledgement). Delivered targeted (`recipientUserId` = the assigner / `assignedById`) so it lands
+ *     in that operator's OWN bell even when they hold no `notification:read`, and emailed (opt-out-able).
+ *     `targetUserId` = the assignee it is ABOUT (a secondary click-through). Only emitted when the assigner
+ *     is a known human (a null / service-account assigner has no bell). De-duped per assignment
+ *     (`asset_assignment.acknowledged:<assignmentId>`; an assignment acknowledges exactly once). Deep-links
+ *     to the asset (`entityType: 'asset'`). Metadata is REDACTED (asset name/tag + assignee name/ids only).
  */
 export const NOTIFICATION_TYPES = [
   "critical_app_access",
@@ -97,6 +105,7 @@ export const NOTIFICATION_TYPES = [
   "access_request.decided",
   "warranty_expiring",
   "access_grant_expiring",
+  "asset_assignment.acknowledged",
 ] as const;
 
 /** A single known notification type. The wire shape validates against this enum (→ 400 otherwise). */

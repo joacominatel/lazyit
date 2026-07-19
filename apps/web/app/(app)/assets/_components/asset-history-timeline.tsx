@@ -24,6 +24,7 @@ const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
   LOCATION_CHANGED: "locationChanged",
   MODEL_CHANGED: "modelChanged",
   SPECS_CHANGED: "specsChanged",
+  ACKNOWLEDGED: "acknowledged",
   DELETED: "deleted",
   RESTORED: "restored",
 };
@@ -57,6 +58,9 @@ const EVENT_BADGE: Record<AssetHistoryEventType, EventBadgeSpec> = {
   LOCATION_CHANGED: { kind: "categorical", dot: "bg-chart-2" },
   MODEL_CHANGED: { kind: "categorical", dot: "bg-chart-3" },
   SPECS_CHANGED: { kind: "categorical", dot: "bg-muted-foreground" },
+  // Receipt acknowledgement (ADR-0089 Part B, #1029) — not a state change, so a neutral pill with the
+  // inventory-family chart-4 dot rather than a solid status tone.
+  ACKNOWLEDGED: { kind: "categorical", dot: "bg-chart-4" },
 };
 
 /** The rail tick colour (ADR-0077): a semantic event lights its tick with its status tone;
@@ -165,6 +169,8 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
         return t("details.modelChanged");
       case "SPECS_CHANGED":
         return t("details.specsChanged");
+      case "ACKNOWLEDGED":
+        return t("details.acknowledged");
       case "DELETED":
         return t("details.deleted");
       case "RESTORED":

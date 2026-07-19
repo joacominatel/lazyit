@@ -44,15 +44,20 @@ describe('email allowlist (curated)', () => {
     // The proactive expiry nudges (#1070) — emailed (act before the deadline, opt-out-able):
     expect(isEmailableNotificationType('warranty_expiring')).toBe(true);
     expect(isEmailableNotificationType('access_grant_expiring')).toBe(true);
+    // The targeted check-out acknowledgement nudge (ADR-0089 Part B, #1029) — emailed (opt-out-able):
+    expect(isEmailableNotificationType('asset_assignment.acknowledged')).toBe(
+      true,
+    );
     // Still bell-only — the per-user login nudge is not inbox-worthy:
     expect(isEmailableNotificationType('secret.vault_setup')).toBe(false);
   });
-  it('the allowlist is the eleven emailed types', () => {
+  it('the allowlist is the twelve emailed types', () => {
     expect([...EMAIL_NOTIFICATION_TYPES].sort()).toEqual(
       [
         'access_grant_expiring',
         'access_request.decided',
         'admin_granted',
+        'asset_assignment.acknowledged',
         'critical_app_access',
         'infra.agent_offline',
         'low_stock',

@@ -12,6 +12,7 @@ import type {
   CreateAsset,
   DeletedFilter,
   PageQuery,
+  ReceiveAssets,
   UpdateAsset,
 } from '@lazyit/shared';
 import {
@@ -573,6 +574,81 @@ export class AssetsService {
       'Could not allocate a unique asset tag — the configured scheme keeps colliding with existing tags; retry or adjust the scheme.',
       { cause: lastError instanceof Error ? lastError : undefined },
     );
+  }
+
+  /**
+   * Bulk receive: mint `quantity` assets from ONE AssetModel in a single action (ADR-0089 Part A, #1029)
+   * — "we just received 20 identical ThinkPads".
+   *
+   * The asset-tag counter constraint (ADR-0063) FORCES the shape: this LOOPS the existing single-asset
+   * {@link create}, so each unit is its OWN transaction with its OWN INDEPENDENT tag-counter commit —
+   * exactly as the import commit does per row. It must NEVER wrap the N inserts in one `$transaction`:
+   * the counter increments in its own commit OUTSIDE the create tx, so a rolled-back insert would
+   * un-consume the number and the retry would re-render the same colliding tag forever. Consequence,
+   * accepted: PARTIAL SUCCESS is the correct outcome — a unit that fails (e.g. a duplicate serial → a
+   * P2002 the create path re-throws) is captured in `failed[{ index, error }]` while its siblings land,
+   * and the consumed tag numbers advance past the gaps. Reusing {@link create} verbatim (no
+   * `suppressSearch`) gives every minted unit the full write path: model spec-defaults, the CREATED
+   * history event with actor attribution, the search upsert, and the #954 money pass-through
+   * (`purchaseCost` is already minor units — NEVER re-coerced here).
+   *
+   * The controller returns this envelope with HTTP 201 (NestJS `@Post` default), including an all-failed
+   * batch (`created: []`) — `failed` is the honest partial signal (mirrors the import row-level FAILED).
+   */
+  async receiveBatch(data: ReceiveAssets, principal?: Principal) {
+    // ONE upfront model lookup: a single friendly 400 instead of N identical per-unit failures, and the
+    // model name feeds each unit's default `name`. Mirrors create()'s model lookup (no deletedAt filter).
+    const model = await this.prisma.assetModel.findFirst({
+      where: { id: data.modelId },
+      select: { name: true },
+    });
+    if (!model) {
+      throw new BadRequestException(`AssetModel ${data.modelId} not found`);
+    }
+
+    // create() returns a raw Prisma Asset row (Date fields). Let `created` INFER that type — do NOT type
+    // it as the shared `Asset[]` (ISO strings) nor annotate this method's return as ReceiveAssetsResult,
+    // or tsc flags Date-vs-string. Date→ISO happens at the Express JSON boundary (no ZodSerializer), the
+    // same reason single-create returns the raw row typed as AssetDto and serializes correctly.
+    const created: Awaited<ReturnType<AssetsService['create']>>[] = [];
+    const failed: { index: number; error: string }[] = [];
+
+    for (let i = 0; i < data.quantity; i++) {
+      // Derive the per-unit payload from the shared batch fields + a friendly 1-based default name (a
+      // label, NOT the asset tag — the tag still comes from the scheme via create()→allocateTag) +
+      // serials[i] when present. Only present fields are spread so absent optionals stay absent; the
+      // already-minor-units purchaseCost is forwarded untouched (#954).
+      const unit: CreateAsset = {
+        name: `${model.name} #${i + 1}`,
+        status: data.status,
+        modelId: data.modelId,
+        ...(data.locationId !== undefined
+          ? { locationId: data.locationId }
+          : {}),
+        ...(data.company !== undefined ? { company: data.company } : {}),
+        ...(data.purchaseDate !== undefined
+          ? { purchaseDate: data.purchaseDate }
+          : {}),
+        ...(data.purchaseCost != null
+          ? { purchaseCost: data.purchaseCost }
+          : {}),
+        ...(data.notes !== undefined ? { notes: data.notes } : {}),
+        ...(data.serials?.[i] ? { serial: data.serials[i] } : {}),
+      };
+      try {
+        // Each unit = its own tx + its own independent counter commit + its own CREATED history + search
+        // upsert. A per-unit failure NEVER aborts the batch (partial success by design); the consumed tag
+        // number has already advanced past this gap.
+        created.push(await this.create(unit, principal));
+      } catch (err) {
+        failed.push({
+          index: i,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return { created, failed };
   }
 
   /**

@@ -41,7 +41,9 @@ the "what changed, when, by whom?" trail that auditing requires ([[problem-space
 `SPECS_CHANGED` · `DELETED` · `RESTORED` (emitted by `POST /assets/:id/restore`, the counterpart of
 `DELETED` — [[0041-soft-delete-reuse-and-restore]]) · `UPDATED` (the "updated via re-import" marker —
 a bulk import that matches a live asset by serial UPDATEs it, and when no tracked dimension changed this
-marker is written so the re-import still leaves one audit row; [[0069-migrator-import]] #1061).
+marker is written so the re-import still leaves one audit row; [[0069-migrator-import]] #1061) ·
+`ACKNOWLEDGED` (emitted by `POST /asset-assignments/:id/acknowledge` when the assignee confirms receipt —
+ADR-0089 Part B, #1029).
 
 ## Emission
 
@@ -51,7 +53,8 @@ marker is written so the re-import still leaves one audit row; [[0069-migrator-i
   `MODEL_CHANGED` / `SPECS_CHANGED` (update diff, one event per changed field); `DELETED` (soft delete);
   `UPDATED` (re-import marker only — written by the migrator's serial-match update path when no per-field
   change event fired, so a no-delta re-import still audits; [[0069-migrator-import]] #1061).
-- [[asset-assignment]] service — `ASSIGNED` (open) and `RELEASED` (release).
+- [[asset-assignment]] service — `ASSIGNED` (open), `RELEASED` (release) and `ACKNOWLEDGED`
+  (self-service acknowledgement of receipt; payload `{ userId }` = the acknowledging owner — #1029).
 
 ## Endpoint
 

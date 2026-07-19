@@ -177,6 +177,17 @@ three stored fields are echoed on create/update.
   `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). Each write
   takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
   (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
+- `POST /assets/batch/receive` — **bulk receive** (ADR-0089 Part A, #1029): mint `quantity` assets from
+  one [[asset-model]] in a single action (`asset:write` — ADMIN or MEMBER; creating assets is that verb,
+  no new permission). Body `{ modelId, quantity (1..200), status, locationId?, company?, purchaseDate?,
+  purchaseCost?, notes?, serials? }` (`serials` must be empty **or** exactly `quantity` long → else
+  `400`). It **loops the single-asset create** — each unit is its own transaction with its own
+  **independent asset-tag-counter commit** ([[0063-configurable-asset-tag-scheme]]), so **partial
+  success is the correct outcome**: the response is `{ created: Asset[], failed: { index, error }[] }`
+  (`201` even when some units fail — `failed[]` is the honest partial signal, mirroring the [[import]]
+  row-level FAILED reporting). Each minted unit gets the full create path (model spec-defaults, the
+  `CREATED` [[asset-history]] event, search upsert, #954 money pass-through) and a default
+  `name` of `"<ModelName> #<seq>"`.
 - `POST /assets/:id/restore` — **ADMIN-only** ([[0040-rbac-roles]]). Clears `deletedAt` and emits a
   `RESTORED` [[asset-history]] event transactionally; returns the expanded asset. Idempotent on a live
   asset; can `409` if a live asset took the freed serial/assetTag meanwhile
@@ -193,4 +204,5 @@ three stored fields are echoed on create/update.
 
 Related: [[asset-model]] · [[location]] · [[asset-category]] · [[asset-assignment]] ·
 [[asset-history]] · [[asset-centric]] · [[0007-flexible-asset-specs-jsonb]] ·
-[[0018-api-documentation-swagger]] · [[0033-asset-history-event-model]]
+[[0018-api-documentation-swagger]] · [[0033-asset-history-event-model]] ·
+[[0063-configurable-asset-tag-scheme]] · [[0089-bulk-receiving-and-checkout-acknowledgement]]
