@@ -1,10 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
 import type {
+  AcknowledgeAssignment,
   CreateAssetAssignment,
   ReleaseAssetAssignment,
   UpdateAssetAssignmentNotes,
 } from "@lazyit/shared";
 import {
+  acknowledgeAssetAssignment,
   createAssetAssignment,
   releaseAssetAssignment,
   updateAssetAssignmentNotes,
@@ -50,6 +52,21 @@ export function useUpdateAssignmentNotes() {
       id: string;
       data: UpdateAssetAssignmentNotes;
     }) => updateAssetAssignmentNotes(id, data),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Acknowledge receipt of the caller's OWN active assignment (ADR-0089 Part B, #1029). Self-service and
+ * set-once; a 409 (already acknowledged / released / not yours) is surfaced by the caller. Invalidates
+ * the shared asset cache so the owners panel repaints its acknowledged state and the asset's activity
+ * log picks up the ACKNOWLEDGED event.
+ */
+export function useAcknowledgeAssignment() {
+  const invalidate = useInvalidateAssets();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data?: AcknowledgeAssignment }) =>
+      acknowledgeAssetAssignment(id, data),
     onSuccess: invalidate,
   });
 }
