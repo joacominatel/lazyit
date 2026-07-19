@@ -16,12 +16,15 @@ import { cn } from "@/lib/utils";
 /** Maps each event type to its label key under `assets.detail.timeline.events`. */
 const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
   CREATED: "created",
+  // UPDATED — the "updated via re-import" marker (#1061). Mechanical wiring of the new shared enum member.
+  UPDATED: "updated",
   STATUS_CHANGED: "statusChanged",
   ASSIGNED: "assigned",
   RELEASED: "released",
   LOCATION_CHANGED: "locationChanged",
   MODEL_CHANGED: "modelChanged",
   SPECS_CHANGED: "specsChanged",
+  ACKNOWLEDGED: "acknowledged",
   DELETED: "deleted",
   RESTORED: "restored",
 };
@@ -47,12 +50,17 @@ const EVENT_BADGE: Record<AssetHistoryEventType, EventBadgeSpec> = {
   RESTORED: { kind: "status", tone: "success" },
   RELEASED: { kind: "status", tone: "warning" },
   STATUS_CHANGED: { kind: "status", tone: "info" },
+  // UPDATED (#1061): a whole-asset re-import touch — informational, same tone as STATUS_CHANGED.
+  UPDATED: { kind: "status", tone: "info" },
   DELETED: { kind: "status", tone: "danger" },
   // Categorical — neutral pill + a chart-hue dot (label stays on --foreground).
   ASSIGNED: { kind: "categorical", dot: "bg-chart-1" },
   LOCATION_CHANGED: { kind: "categorical", dot: "bg-chart-2" },
   MODEL_CHANGED: { kind: "categorical", dot: "bg-chart-3" },
   SPECS_CHANGED: { kind: "categorical", dot: "bg-muted-foreground" },
+  // Receipt acknowledgement (ADR-0089 Part B, #1029) — not a state change, so a neutral pill with the
+  // inventory-family chart-4 dot rather than a solid status tone.
+  ACKNOWLEDGED: { kind: "categorical", dot: "bg-chart-4" },
 };
 
 /** The rail tick colour (ADR-0077): a semantic event lights its tick with its status tone;
@@ -153,12 +161,16 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
         return t("releasedFrom", { name: userName(asString(payload.userId)) });
       case "CREATED":
         return t("details.created");
+      case "UPDATED":
+        return t("details.updated");
       case "LOCATION_CHANGED":
         return t("details.locationChanged");
       case "MODEL_CHANGED":
         return t("details.modelChanged");
       case "SPECS_CHANGED":
         return t("details.specsChanged");
+      case "ACKNOWLEDGED":
+        return t("details.acknowledged");
       case "DELETED":
         return t("details.deleted");
       case "RESTORED":

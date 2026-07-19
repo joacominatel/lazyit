@@ -69,14 +69,23 @@ archivo, para que sepas siempre qué estás viendo antes de decidir a dónde va.
 > ningún sitio hasta la confirmación final; los valores solo se te muestran a ti, el operador que
 > ejecuta la importación.
 
+Si alguna fila de tu archivo tuvo una cantidad de columnas distinta a la del encabezado — lo más común
+es un delimitador sin escapar dentro de una celda de texto (por ejemplo un `;` dentro de un valor de
+*Notas* en un archivo delimitado por `;`) — esta pantalla muestra una advertencia con cuántas filas se
+vieron afectadas. Es **informativa, no bloqueante**: el importador igual tolera el desajuste (las filas
+cortas reciben celdas vacías, las celdas de más se descartan), pero un delimitador corrido puede empujar
+en silencio un valor posterior — como el número de serie — al campo equivocado. Si ves esta advertencia,
+revisá las filas señaladas en tu archivo de origen en busca de delimitadores sueltos o comillas
+desbalanceadas antes de continuar.
+
 Para cada columna, ábrela y elige un destino en el desplegable:
 
 - **Un campo de lazyit**, agrupado por entidad:
   - **Activo** — **Nombre** (*obligatorio*), **Estado** (*obligatorio*), **Número de serie**,
     **Etiqueta de activo**, **Empresa**, **Notas**, **Fecha de compra**, **Fin de garantía**, **Costo
     de compra**, **Vida útil (meses)**, **Valor residual**, **Modelo** y **Ubicación**.
-  - **Modelo** — **Fabricante** y **Categoría** para los modelos de activo que cree la importación
-    (consulta *Marca y categoría del modelo* más abajo).
+  - **Modelo** — **Fabricante**, **Categoría** y **SKU / número de modelo** para los modelos de activo
+    que cree la importación (consulta *Marca, categoría y SKU del modelo* más abajo).
   - **Persona** — la persona a la que está **asignado** el activo: **Nombre**, **Correo**, **Legajo**,
     **Usuario**, **Cargo**, **Departamento** y **Supervisor** (consulta *Asignar activos a personas*
     más abajo).
@@ -108,8 +117,8 @@ Algunos campos se comportan de forma especial:
   de-duplica**.
 - **Etiqueta de activo** — una etiqueta de tu archivo se usa tal cual; una en blanco se asigna
   automáticamente más tarde si tu instancia tiene un esquema de etiquetas activado.
-- **Modelo** y **Ubicación** son **referencias**, asociadas a registros existentes por nombre
-  (consulta *Conflictos*).
+- **Modelo** y **Ubicación** son **referencias**, asociadas a registros existentes por nombre — un
+  **Modelo** con SKU se asocia primero por SKU y luego por nombre (consulta *Conflictos*).
 - **Empresa** es una etiqueta de agrupación opcional, tomada tal cual de tu archivo (una columna
   *Empresa* / *Company* se reconoce automáticamente). Agrupa y filtra activos — no es un control de acceso.
 - **Notas** es texto libre opcional, tomado tal cual (una columna *Notas* / *Notes* / *Observaciones*
@@ -120,6 +129,15 @@ Algunos campos se comportan de forma especial:
   decimales — `1,234.56`, `1.234,56` y `$1,000.00` funcionan. Las celdas en blanco quedan sin valor
   (no en cero); un valor que no puede leer como número se marca en la previsualización, nunca se adivina.
 - **Vida útil (meses)** es el período de depreciación lineal, como número entero de meses.
+- **Fecha de compra** y **Fin de garantía** son fechas, y cada columna de fecha lleva su propio selector
+  de **formato de fecha** en su tarjeta — **Automático**, **DMY** (día / mes / año), **MDY** (mes / día /
+  año) o **ISO** (`AAAA-MM-DD`). Importa porque `03/04/2024` es el 3 de abril en algunos países y el 4 de
+  marzo en otros. **Automático** lee la columna y decide: si algún primer número es mayor que 12 solo
+  puede ser un día, así que la columna se lee día primero (DMY); una columna `AAAA-MM-DD` pura se lee
+  como ISO; una columna ambigua por lo demás recae en **DMY** (el caso común de las migraciones). La
+  tarjeta muestra el formato detectado y una vista previa en vivo de cómo se interpreta el primer valor,
+  para que puedas cambiarlo antes de continuar. Un valor que no coincide con el formato elegido se marca
+  en la vista previa — nunca se desplaza al día equivocado.
 
 El importador **pre-rellena una mejor suposición** para cada columna, pero nunca decide por ti —
 confirmas cada columna, y nada se descarta en silencio. La suposición entiende más que los encabezados
@@ -127,28 +145,33 @@ exactos en inglés: también reconoce **nombres en español y estilo Snipe-IT** 
 *Número de serie*, *Asignado a*, *Modelo*), así que una exportación típica llega casi toda
 pre-mapeada. Aun así confirmas cada columna — la auto-detección solo propone el destino.
 
-### Marca y categoría del modelo
+### Marca, categoría y SKU del modelo
 
 **Un modelo se crea a partir de su nombre.** Para que la importación cree modelos, mapea una columna a
-**Modelo** (dentro del grupo *Activo*). Mapear solo **Fabricante** o **Categoría** *no* crea un modelo
-— esos dos solo **enriquecen** un modelo que ya proviene de una columna **Modelo** mapeada. La
-categoría se vincula **a través del modelo**, no directamente al activo.
+**Modelo** (dentro del grupo *Activo*). Mapear solo **Fabricante**, **Categoría** o **SKU / número de
+modelo** *no* crea un modelo — esos tres solo **enriquecen** un modelo que ya proviene de una columna
+**Modelo** mapeada. La categoría se vincula **a través del modelo**, no directamente al activo.
 
-Cuando la importación crea un **Modelo** nuevo, necesita un **fabricante** y una **categoría**. Puedes
-definirlos de dos maneras:
+Cuando la importación crea un **Modelo** nuevo, puede tomar un **fabricante**, una **categoría** y un
+**SKU / número de modelo** (por ejemplo, la columna "Model No." de Snipe-IT: `Latitude 5520` como
+Modelo, `P108F` como su SKU). Fabricante y categoría tienen un valor por defecto de fase 1 (ver abajo);
+el SKU es opcional y queda vacío si no lo mapeas ni lo fijas. Puedes definir cada uno de dos maneras:
 
-- **Por fila** — mapea una columna a **Fabricante** o **Categoría** en el desplegable, y cada modelo
-  toma su valor de esa fila.
-- **Para todos los modelos** — si tu archivo no tiene esa columna (o todos tus activos son de la misma
-  marca), fija un único **Fabricante** y/o **Categoría** en el recuadro *Marca y categoría del modelo*;
-  se aplica a todos los modelos que cree la importación. Una columna mapeada siempre gana sobre un
-  valor fijado.
+- **Por fila** — mapea una columna a **Fabricante**, **Categoría** o **SKU / número de modelo** en el
+  desplegable, y cada modelo toma su valor de esa fila.
+- **Para todos los modelos** — si tu archivo no tiene esa columna (o todos tus activos comparten marca,
+  categoría o SKU), fija un único **Fabricante**, **Categoría** y/o **SKU** en el recuadro *Marca,
+  categoría y SKU del modelo*; se aplica a todos los modelos que cree la importación. Una columna
+  mapeada siempre gana sobre un valor fijado.
   - Para **Categoría**, el recuadro viene en modo **Existente**: elige una categoría que ya exista para
     que todos los modelos se vinculen a ella — sin errores de tipeo ni categorías nuevas por accidente.
     Cambia el interruptor a **Constante** para escribir un valor libre (igual se busca-o-crea por nombre
     al importar).
-  - El **Fabricante** es texto libre (no hay una lista de fabricantes para elegir), así que siempre es
+  - El **Fabricante** y el **SKU** son texto libre (no hay una lista para elegir), así que siempre son
     una constante.
+- **Mapear una columna de SKU refuerza el emparejamiento.** Un modelo con SKU se empareja primero por
+  SKU en futuras importaciones y ediciones — es la clave natural más confiable del modelo, por delante
+  de su nombre.
 
 ### Asignar activos a personas
 
@@ -193,6 +216,10 @@ La simulación valida, normaliza y resuelve **todas** las filas — **sin escrib
   sin notar que se descartó toda una clase de filas.
 - Resultados por fila, con el error de validación exacto de cada fila inválida (para que corrijas el
   archivo).
+- **Activos que ya existen** — cuando el **número de serie** de una fila coincide con un activo que ya
+  está en lazyit, la vista previa la marca como una **actualización**: ese activo se sobrescribe con los
+  valores del archivo en vez de crearse de nuevo (consulta *Reimportar actualiza los activos existentes*
+  más abajo). El recuento te dice de antemano cuántos activos vigentes cambiaría una confirmación.
 - **Colisiones de etiqueta de activo** — cualquier etiqueta de tu archivo que ya pertenezca a un
   activo vigente se marca aquí, nunca se descarta en silencio.
 
@@ -230,13 +257,31 @@ Cuando el plan está listo, la importación se ejecuta en segundo plano. Es **po
 
 El informe de resultados muestra cuántas filas se **crearon**, **fallaron** y se **omitieron**, además
 del id de la **ejecución de importación** para tu auditoría. Si algunas filas fallaron, corrígelas en
-tu archivo y ejecuta el importador de nuevo — las filas ya importadas se omiten en una nueva ejecución
-(cuando hay un número de serie mapeado).
+tu archivo y ejecuta el importador de nuevo (consulta *Reimportar actualiza los activos existentes* más
+abajo).
+
+### Reimportar actualiza los activos existentes
+
+Volver a ejecutar una importación es **idempotente cuando hay un número de serie mapeado**: una fila
+cuyo serie coincide con un activo que ya está en lazyit **actualiza ese activo en su lugar** en vez de
+crear un duplicado. Los campos mapeados se sobrescriben con los valores del archivo, y el cambio queda
+registrado en el **historial** del activo como un evento *Actualizado* marcado como reimportación. El
+recuento *«Algunos activos ya existen»* de la vista previa te dice cuántas filas actualizarán activos
+vigentes **antes** de confirmar, así que nunca es una sorpresa.
+
+> **Precaución — esto cambia datos vigentes.** Una actualización **sobrescribe** los valores actuales del
+> activo coincidente con los de tu archivo: un valor distinto reemplaza al vigente (una celda en blanco
+> deja el campo intacto en vez de borrarlo). Revisa el recuento de actualizaciones de la vista previa y
+> mantén tu archivo como la fuente autoritativa antes de confirmar. Las filas cuyo serie no coincide con
+> nada se crean igualmente; las filas **sin** serie mapeado nunca se de-duplican, así que una nueva
+> ejecución sin columna de serie crea duplicados.
 
 ## Bueno saberlo
 
-- **Es aditivo y auditado.** El importador solo crea y vincula; nunca elimina ni sobrescribe tus
-  activos existentes. Cada activo creado recibe una entrada de historial atribuida a ti.
+- **Es auditado, e idempotente por número de serie.** El importador crea y vincula registros nuevos y,
+  cuando el serie de una fila coincide con un activo existente, **actualiza ese activo en su lugar**
+  (nunca elimina). Cada activo creado o actualizado recibe una entrada de historial atribuida a ti —
+  consulta *Reimportar actualiza los activos existentes* más arriba.
 - **Las sesiones expiran.** Una sesión de importación en curso se conserva 24 horas y luego se
   descarta. El registro de auditoría de una importación *completada* es permanente.
 - **Los permisos siguen aplicándose al confirmar.** Más allá de `import:run`, crear un modelo o una

@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import {
+  AcknowledgeAssignmentSchema,
   AssetAssignmentSchema,
   CreateAssetAssignmentSchema,
   ReleaseAssetAssignmentSchema,
@@ -19,4 +20,9 @@ export class ReleaseAssetAssignmentDto extends createZodDto(
 ) {}
 export class UpdateAssetAssignmentNotesDto extends createZodDto(
   UpdateAssetAssignmentNotesSchema,
+) {}
+// Check-out acknowledgement payload (ADR-0089 Part B, #1029) — an optional `note`; the acting user
+// comes from the authenticated principal, never the body.
+export class AcknowledgeAssignmentDto extends createZodDto(
+  AcknowledgeAssignmentSchema,
 ) {}

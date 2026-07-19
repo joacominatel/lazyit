@@ -12,6 +12,7 @@ import type {
   CreateAsset,
   DeletedFilter,
   PageQuery,
+  ReceiveAssets,
   UpdateAsset,
 } from '@lazyit/shared';
 import {
@@ -41,6 +42,29 @@ import {
   AssetTagSchemeService,
   isUniqueTagCollision,
 } from '../asset-tag-scheme/asset-tag-scheme.service';
+
+/**
+ * Merge migrator re-import provenance into a change-event payload (#1061). Both are plain jsonb objects;
+ * the provenance keys (`source`/`sessionId`/`rowIndex`) are added alongside the event's own `{ from, to }`
+ * (a `SPECS_CHANGED` event carries no payload, so it becomes the provenance alone). Non-object payloads
+ * (never produced today) are treated as empty so this can't throw on a hostile value.
+ */
+function mergeProvenance(
+  payload: Prisma.InputJsonValue | undefined,
+  provenance: Prisma.InputJsonValue,
+): Prisma.InputJsonValue {
+  const base =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as object)
+      : {};
+  const extra =
+    typeof provenance === 'object' &&
+    provenance !== null &&
+    !Array.isArray(provenance)
+      ? (provenance as object)
+      : {};
+  return { ...base, ...extra };
+}
 
 /** Optional filters for listing assets. `categoryId` filters by the asset's model's category. */
 export interface AssetFilters {
@@ -553,10 +577,100 @@ export class AssetsService {
   }
 
   /**
+   * Bulk receive: mint `quantity` assets from ONE AssetModel in a single action (ADR-0089 Part A, #1029)
+   * — "we just received 20 identical ThinkPads".
+   *
+   * The asset-tag counter constraint (ADR-0063) FORCES the shape: this LOOPS the existing single-asset
+   * {@link create}, so each unit is its OWN transaction with its OWN INDEPENDENT tag-counter commit —
+   * exactly as the import commit does per row. It must NEVER wrap the N inserts in one `$transaction`:
+   * the counter increments in its own commit OUTSIDE the create tx, so a rolled-back insert would
+   * un-consume the number and the retry would re-render the same colliding tag forever. Consequence,
+   * accepted: PARTIAL SUCCESS is the correct outcome — a unit that fails (e.g. a duplicate serial → a
+   * P2002 the create path re-throws) is captured in `failed[{ index, error }]` while its siblings land,
+   * and the consumed tag numbers advance past the gaps. Reusing {@link create} verbatim (no
+   * `suppressSearch`) gives every minted unit the full write path: model spec-defaults, the CREATED
+   * history event with actor attribution, the search upsert, and the #954 money pass-through
+   * (`purchaseCost` is already minor units — NEVER re-coerced here).
+   *
+   * The controller returns this envelope with HTTP 201 (NestJS `@Post` default), including an all-failed
+   * batch (`created: []`) — `failed` is the honest partial signal (mirrors the import row-level FAILED).
+   */
+  async receiveBatch(data: ReceiveAssets, principal?: Principal) {
+    // ONE upfront model lookup: a single friendly 400 instead of N identical per-unit failures, and the
+    // model name feeds each unit's default `name`. Mirrors create()'s model lookup (no deletedAt filter).
+    const model = await this.prisma.assetModel.findFirst({
+      where: { id: data.modelId },
+      select: { name: true },
+    });
+    if (!model) {
+      throw new BadRequestException(`AssetModel ${data.modelId} not found`);
+    }
+
+    // create() returns a raw Prisma Asset row (Date fields). Let `created` INFER that type — do NOT type
+    // it as the shared `Asset[]` (ISO strings) nor annotate this method's return as ReceiveAssetsResult,
+    // or tsc flags Date-vs-string. Date→ISO happens at the Express JSON boundary (no ZodSerializer), the
+    // same reason single-create returns the raw row typed as AssetDto and serializes correctly.
+    const created: Awaited<ReturnType<AssetsService['create']>>[] = [];
+    const failed: { index: number; error: string }[] = [];
+
+    for (let i = 0; i < data.quantity; i++) {
+      // Derive the per-unit payload from the shared batch fields + a friendly 1-based default name (a
+      // label, NOT the asset tag — the tag still comes from the scheme via create()→allocateTag) +
+      // serials[i] when present. Only present fields are spread so absent optionals stay absent; the
+      // already-minor-units purchaseCost is forwarded untouched (#954).
+      const unit: CreateAsset = {
+        name: `${model.name} #${i + 1}`,
+        status: data.status,
+        modelId: data.modelId,
+        ...(data.locationId !== undefined
+          ? { locationId: data.locationId }
+          : {}),
+        ...(data.company !== undefined ? { company: data.company } : {}),
+        ...(data.purchaseDate !== undefined
+          ? { purchaseDate: data.purchaseDate }
+          : {}),
+        ...(data.purchaseCost != null
+          ? { purchaseCost: data.purchaseCost }
+          : {}),
+        ...(data.notes !== undefined ? { notes: data.notes } : {}),
+        ...(data.serials?.[i] ? { serial: data.serials[i] } : {}),
+      };
+      try {
+        // Each unit = its own tx + its own independent counter commit + its own CREATED history + search
+        // upsert. A per-unit failure NEVER aborts the batch (partial success by design); the consumed tag
+        // number has already advanced past this gap.
+        created.push(await this.create(unit, principal));
+      } catch (err) {
+        failed.push({
+          index: i,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return { created, failed };
+  }
+
+  /**
    * Partial update. Emits a discrete history event per changed dimension (status / location / model
    * / specs), transactionally with the update (ADR-0033). 404 if missing or already soft-deleted.
+   *
+   * `options` mirrors {@link create}'s bag for the migrator re-import path (#1061): `updatedPayload` stamps
+   * `{ source:'import', sessionId, rowIndex }` onto every emitted change event AND — because a re-import
+   * that changes no tracked dimension produces zero change events — guarantees exactly ONE `UPDATED` marker
+   * so "updated via re-import" is always in the AssetHistory timeline. `suppressSearch` skips the per-row
+   * Meili upsert (the bulk commit runs ONE reconcile afterwards). Existing callers pass no options →
+   * behaviour is byte-for-byte unchanged.
    */
-  async update(id: string, data: UpdateAsset, principal?: Principal) {
+  async update(
+    id: string,
+    data: UpdateAsset,
+    principal?: Principal,
+    options?: {
+      updatedPayload?: Prisma.InputJsonValue;
+      suppressSearch?: boolean;
+    },
+  ) {
     const actor = this.actor.resolveActor(principal);
     const before = await this.prisma.asset.findFirst({
       where: { id },
@@ -582,13 +696,34 @@ export class AssetsService {
             : {}),
         },
       });
-      for (const event of this.changeEvents(before, row, actor)) {
+      const events = this.changeEvents(before, row, actor);
+      // Re-import provenance (#1061): stamp it onto every per-dimension change event, and when NONE fired
+      // (a no-field-delta re-import) write exactly one UPDATED marker carrying the provenance — so the
+      // re-import always leaves an audit trail. Gated on `updatedPayload`, so normal PATCHes are unchanged.
+      if (options?.updatedPayload !== undefined) {
+        const provenance = options.updatedPayload;
+        for (const ev of events) {
+          ev.payload = mergeProvenance(ev.payload, provenance);
+        }
+        if (events.length === 0) {
+          events.push({
+            assetId: row.id,
+            eventType: 'UPDATED',
+            payload: provenance,
+            actor,
+          });
+        }
+      }
+      for (const event of events) {
         await this.history.record(tx, event);
       }
       return row;
     });
-    // Fire-and-forget search sync after the commit (ADR-0035): re-index the updated row.
-    this.search.upsert('assets', projectAsset(updated));
+    // Fire-and-forget search sync after the commit (ADR-0035): re-index the updated row. Suppressed during
+    // the bulk migrator commit (#1061), which runs ONE reconcile after the batch instead.
+    if (!options?.suppressSearch) {
+      this.search.upsert('assets', projectAsset(updated));
+    }
     return updated;
   }
 

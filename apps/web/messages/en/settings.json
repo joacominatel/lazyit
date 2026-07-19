@@ -110,6 +110,11 @@
       },
       "toast": {
         "enqueued": "Update queued. Run the shown command on the host to apply it."
+      },
+      "cancel": {
+        "button": "Cancel this update",
+        "hint": "Haven't run the command yet? Cancel to clear this request and check for updates again later.",
+        "toast": "Update cancelled. You can check for updates again anytime."
       }
     }
   },
@@ -265,6 +270,114 @@
     "toast": {
       "saved": "SMTP settings saved.",
       "saveError": "Could not save the SMTP settings."
+    }
+  },
+  "directory": {
+    "title": "AD / LDAP directory sync",
+    "subtitle": "Read-only import of people from your on-prem Active Directory / LDAP. lazyit creates login-less directory persons — it never writes back to your directory and never logs anyone in.",
+    "loadError": "Could not load the directory settings.",
+    "loadErrorHint": "Check your connection and try again.",
+    "retry": "Retry",
+    "save": "Save settings",
+    "disabledHint": "Scheduled sync is off. Turn it on to import people on a schedule — you can still run Sync now below to test the connection.",
+    "fields": {
+      "enabled": {
+        "label": "Enable scheduled sync",
+        "description": "When on, lazyit periodically binds to your directory and imports people. When off, only a manual Sync now runs."
+      },
+      "host": {
+        "label": "Directory host",
+        "placeholder": "dc01.corp.example.com"
+      },
+      "port": {
+        "label": "Port",
+        "placeholder": "636"
+      },
+      "transport": {
+        "label": "Transport security",
+        "options": {
+          "ldaps": "LDAPS — implicit TLS (port 636)",
+          "starttls": "StartTLS — upgrade over LDAP (port 389)",
+          "plaintext": "Plaintext — no encryption (port 389)"
+        },
+        "hint": {
+          "ldaps": "Encrypted from the first byte. The recommended default.",
+          "starttls": "Connects in plaintext, then upgrades to TLS.",
+          "plaintext": "Unencrypted — the bind password travels in the clear. Only for a trusted internal segment."
+        }
+      },
+      "rejectUnauthorized": {
+        "label": "Verify TLS certificate",
+        "description": "Reject a directory whose TLS certificate can't be verified. Turn off only to allow a self-signed certificate on a trusted internal server.",
+        "plaintextHint": "Not applicable to a plaintext connection (there is no TLS to verify)."
+      },
+      "baseDN": {
+        "label": "Search base (base DN)",
+        "placeholder": "OU=People,DC=corp,DC=example,DC=com",
+        "description": "The subtree lazyit searches for people."
+      },
+      "bindDN": {
+        "label": "Bind DN",
+        "placeholder": "CN=svc-lazyit,OU=Service,DC=corp,DC=example,DC=com",
+        "description": "The read-only service account lazyit binds as. This identifies the credential; it is not itself the secret."
+      },
+      "bindPassword": {
+        "label": "Bind password",
+        "placeholderSet": "Configured — leave blank to keep",
+        "placeholderUnset": "Bind password",
+        "hintSet": "A bind password is stored. Leave blank to keep it, or type a new one to replace it."
+      },
+      "searchFilter": {
+        "label": "Search filter",
+        "placeholder": "(&(objectClass=user)(objectCategory=person))",
+        "description": "The LDAP filter selecting which entries to import. Run verbatim — there is no per-user substitution."
+      },
+      "offboardGraceDays": {
+        "label": "Offboard grace (days)",
+        "description": "How many days a person may be missing from the directory before lazyit deactivates them. 0 = deactivate on the first sync that no longer finds them."
+      },
+      "attributeMap": {
+        "label": "Attribute mapping",
+        "description": "Which directory attribute fills each lazyit field. Leave a field blank to skip it.",
+        "keys": {
+          "firstName": "First name ←",
+          "lastName": "Last name ←",
+          "email": "Email ←",
+          "username": "Username ←"
+        }
+      }
+    },
+    "sync": {
+      "heading": "Sync now",
+      "description": "Runs the same read-only import the schedule runs, using the saved settings — so save your changes first. This also confirms the bind works.",
+      "button": "Sync now",
+      "success": "Directory sync completed.",
+      "counts": "Created {created}, updated {updated}, offboarded {offboarded}, skipped {skipped}.",
+      "failure": "The directory sync failed.",
+      "error": "Could not run the directory sync.",
+      "lastRun": "Last run:",
+      "status": {
+        "ok": "OK",
+        "error": "Error",
+        "never": "Never run"
+      },
+      "countLabels": {
+        "created": "Created",
+        "updated": "Updated",
+        "offboarded": "Offboarded",
+        "skipped": "Skipped"
+      }
+    },
+    "tray": {
+      "title": "Directory people to review",
+      "description": "People imported from your directory. Each is a login-less person you can open, provision a login for, or offboard from the Users section.",
+      "offboarded": "Inactive",
+      "discovered": "Added {when}",
+      "viewAll": "View all in Users"
+    },
+    "toast": {
+      "saved": "Directory settings saved.",
+      "saveError": "Could not save the directory settings."
     }
   },
   "roles": {
@@ -427,7 +540,7 @@
       "revoke": "Revoke",
       "openActions": "Open actions"
     },
-    "revokeExplanation": "Its token stops authenticating immediately. You can restore it from the “Show revoked” view (rotate to mint a fresh token).",
+    "revokeExplanation": "Its token stops authenticating immediately. You can restore it from the “Show revoked” view (rotate to mint a fresh token). Revoking suspends the token but does not remove vault access — use the vault's Members list to revoke per vault and remove key material.",
     "toast": {
       "restored": "Service account restored",
       "restoreError": "Couldn't restore service account",

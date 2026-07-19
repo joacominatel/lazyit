@@ -106,7 +106,7 @@ export type RecentActivityPage = z.infer<typeof RecentActivityPageSchema>;
  * the `action` filter's allowlist (an unknown verb is a 400, never a silent no-match). Derived 1:1
  * from the view (`docs/02-domain/entities/recent-activity.md`):
  *   - AssetHistory (lowercased `AssetHistoryEventType`): created · status_changed · assigned ·
- *     released · location_changed · model_changed · specs_changed · deleted · restored
+ *     released · location_changed · model_changed · specs_changed · deleted · restored · acknowledged
  *   - AssetAssignment branch: assigned · released (already covered above)
  *   - AccessGrant: granted · revoked
  *   - ConsumableMovement: stock_in · stock_out · stock_adjustment
@@ -126,6 +126,10 @@ export const RECENT_ACTIVITY_ACTIONS = [
   "specs_changed",
   "deleted",
   "restored",
+  // Check-out acknowledgement (ADR-0089 Part B, #1029) — the lowercased ACKNOWLEDGED AssetHistory event
+  // the recent_activity view surfaces once acknowledgement rows exist. Keeps the distinct-actions query
+  // (GET /dashboard/activity/filters) validating against this closed allowlist.
+  "acknowledged",
   "granted",
   "revoked",
   "stock_in",

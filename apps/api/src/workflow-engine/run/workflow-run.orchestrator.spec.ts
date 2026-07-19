@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/require-await, @typescript-eslint/unbound-method -- test-double harness leans on loosely-typed jest.fn() mocks and scripted async stubs; intentional for this spec file only. */
 jest.mock('../../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
@@ -49,6 +50,9 @@ function harness(
     // The redacted failure summary on the run (set by finalizeFailed) — the manual retry (#308) resumes
     // from `error.stepKey`. Tests preset it to drive the resume cursor.
     runError: null as Record<string, unknown> | null,
+    // The run's finishedAt — stamped on a terminal finalize, cleared to null on a FAILED→RUNNING claim,
+    // and RESTORED on an enqueue-then-clear rollback (#1068). Preset in tests that exercise the rollback.
+    runFinishedAt: null as Date | null,
     stepRuns: [] as Array<Record<string, unknown>>,
     runUpdates: [] as Array<Record<string, unknown>>,
     manualTasks: [] as Array<Record<string, unknown>>,
@@ -62,13 +66,21 @@ function harness(
           data,
         }: {
           where: { status: string };
-          data: { status: string; error?: unknown };
+          // The enqueue-then-clear retry (#1068) issues a status-less updateMany (just `error`) to clear
+          // the summary AFTER a confirmed enqueue, so `status`/`finishedAt` are optional here.
+          data: { status?: string; error?: unknown; finishedAt?: Date | null };
         }) => {
           if (where.status === state.runStatus) {
-            state.runStatus = data.status;
-            // A successful CAS that clears the failure summary (the manual retry, #308) drops runError.
+            if (typeof data.status === 'string') {
+              state.runStatus = data.status;
+            }
+            // A CAS/clear that carries the `error` key drops the failure summary (the confirmed-enqueue
+            // retry, #308/#1068); the rollback path omits `error`, so the marker is PRESERVED there.
             if ('error' in data) {
               state.runError = null;
+            }
+            if ('finishedAt' in data) {
+              state.runFinishedAt = data.finishedAt ?? null;
             }
             return { count: 1 };
           }
@@ -80,6 +92,7 @@ function harness(
         status: state.runStatus,
         trigger: 'ACCESS_GRANTED',
         error: state.runError,
+        finishedAt: state.runFinishedAt,
         workflowVersion: { steps },
       })),
       // Used by emitManualTaskNotification (post-commit bell nudge) to resolve the app name.
@@ -484,7 +497,7 @@ describe('WorkflowRunOrchestrator — the DAG walk (ADR-0054 §8)', () => {
 
     // The bell nudge fired, but its summary is a GENERIC pointer — never the rendered prompt/PII.
     expect(notifications.emit).toHaveBeenCalledTimes(1);
-    const payload = (notifications.emit as jest.Mock).mock.calls[0][0] as {
+    const payload = notifications.emit.mock.calls[0][0] as {
       summary: string;
       title: string;
     };
@@ -624,6 +637,45 @@ describe('WorkflowRunOrchestrator.retryRun — manual FAILED-run retry (issue #3
     expect(state.runError).toBeNull();
     // The retry is re-enqueued at the FAILED step with delay 0 (off-request, decoupled posture).
     expect(trigger.enqueueRetry).toHaveBeenCalledWith('run1', 's2', 1, 0);
+  });
+
+  it('#1068 enqueue-then-clear: a broker-down enqueue ROLLS BACK to FAILED with the failed step intact and returns retried:false', async () => {
+    const { orchestrator, state, trigger } = harness(TWO_STEP, {
+      REST: scripted('REST', [ok()]),
+    });
+    state.runStatus = 'FAILED';
+    state.runFinishedAt = new Date('2026-01-02T03:04:05.000Z');
+    const failure = { stepKey: 's2', errorClass: 'step-failed' };
+    state.runError = { ...failure };
+    // Valkey is unreachable: enqueueRetry swallows the broker error and reports it could not schedule.
+    trigger.enqueueRetry.mockResolvedValue(false);
+
+    const result = await orchestrator.retryRun('run1');
+
+    // The operator gets a clean "couldn't retry" (→ 409), NOT a false success.
+    expect(result).toEqual({ retried: false });
+    // The run is rolled back to FAILED with its finishedAt restored — never stranded RUNNING/error=null.
+    expect(state.runStatus).toBe('FAILED');
+    expect(state.runFinishedAt).toEqual(new Date('2026-01-02T03:04:05.000Z'));
+    // The failed-step marker is PRESERVED, so the run stays resolvable for a later retry (the whole bug).
+    expect(state.runError).toEqual(failure);
+    expect(
+      resolveFailedStepKey(
+        state.runError,
+        TWO_STEP.map((s) => s as unknown as WorkflowStep),
+      ),
+    ).toBe('s2');
+
+    // And once Valkey is back, a fresh retry succeeds off the preserved marker — recovery is intact.
+    trigger.enqueueRetry.mockResolvedValue(true);
+    const retryAgain = await orchestrator.retryRun('run1');
+    expect(retryAgain).toEqual({
+      retried: true,
+      resumeStepKey: 's2',
+      attempt: 1,
+    });
+    expect(state.runStatus).toBe('RUNNING');
+    expect(state.runError).toBeNull();
   });
 
   it('resume-from-failed-step: a SUCCEEDED non-idempotent step is NOT re-executed (no double-provision)', async () => {
@@ -787,13 +839,13 @@ describe('WorkflowRunOrchestrator.retryRun — manual FAILED-run retry (issue #3
 
     // s2 (the retried step) only ever saw its PINNED mapping (`email`) — never an injected override field.
     const s2Calls = rest.execute.mock.calls.filter(
-      (c) =>
-        (c[0] as { step: { key: string } }).step.key === 's2',
+      (c) => (c[0] as { step: { key: string } }).step.key === 's2',
     );
     expect(s2Calls.length).toBeGreaterThanOrEqual(2); // attempt 1 (fail) + the automatic retry
     for (const call of s2Calls) {
-      const seen = (call[0] as { step: { dataMapping?: Record<string, string> } })
-        .step.dataMapping;
+      const seen = (
+        call[0] as { step: { dataMapping?: Record<string, string> } }
+      ).step.dataMapping;
       expect(Object.keys(seen ?? {})).toEqual(['email']);
     }
   });

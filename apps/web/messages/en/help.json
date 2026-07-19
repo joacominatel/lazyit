@@ -110,6 +110,7 @@
       "taxonomies": "Taxonomies",
       "asset-tag-scheme": "Asset tag scheme",
       "smtp-email": "Email & SMTP",
+      "directory-sync": "AD / LDAP directory sync",
       "time-zone-formats": "Time zone & formats",
       "search-index": "Search index"
     },

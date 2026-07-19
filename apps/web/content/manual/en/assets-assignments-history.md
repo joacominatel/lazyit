@@ -40,6 +40,27 @@ the new one.
 > An owner who has left the company still appears as an active owner until you explicitly release the
 > assignment — lazyit never silently drops ownership records.
 
+## Acknowledging receipt
+
+Assigning an asset records **who is accountable** for it — but it doesn't prove the person actually
+received it. **Acknowledge receipt** closes that gap: the owner themselves confirms they took
+possession.
+
+- **Self-service.** Only the owner can acknowledge **their own** active assignment. Open the asset,
+  find yourself under **Owners**, and choose **Acknowledge receipt**. You can add an optional note (for
+  example "received in good condition"). No one can acknowledge on someone else's behalf.
+- **A confirmed date.** Once acknowledged, the owner's line shows **Acknowledged &lt;date&gt;** and the
+  event is written to the asset's activity log. Until then it reads **Awaiting acknowledgement**, so an
+  operator can see at a glance which handovers are still unconfirmed.
+- **The assigner is notified.** When you acknowledge, whoever assigned the asset to you gets a
+  notification (in their bell, and by email unless they've opted out) — a quiet, automatic
+  confirmation that the handover is complete.
+- **Set once.** Acknowledgement is a one-way confirmation: it can't be undone or repeated, and an
+  assignment that has already been acknowledged or released can't be acknowledged again.
+
+This is optional — an assignment is valid whether or not it's ever acknowledged — but for asset
+handovers where accountability matters, it gives you a clean record that the person confirmed receipt.
+
 ## Quick actions from the assets list
 
 You don't have to open an asset to manage its owner. Each row on the **Assets** list carries one
@@ -67,6 +88,7 @@ Recorded events include:
 - **Location** and **Model** changes.
 - **Specs** changes — edits to custom fields.
 - **Assigned** and **Released** — ownership changes, naming the owner involved.
+- **Acknowledged** — an owner confirmed receipt of the asset checked out to them.
 
 Each entry records **what changed, when, and by whom** (or "System" when lazyit acted on its own).
 Together with soft delete everywhere, this gives you the audit trail of an asset's whole life without

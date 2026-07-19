@@ -15,19 +15,19 @@ Definitions are intentionally short — each links to the page where the topic i
 The opt-in, per-application set of steps lazyit can run **on your behalf** when access is granted or
 revoked — for example, opening a ticket in another system or calling an external API. An application
 with no automation behaves normally: granting access simply records an [access
-grant](/help/applications-access-access-grants). See [Access automation](/help/access-automation-concepts).
+grant](/help/applications-access-grants). See [Access automation](/help/access-automation-concepts).
 
 ## Access grant
 
 The record that a **user has access to an application**, with the date it was granted and (when it
 ends) the date it was revoked. Grants are kept over time rather than overwritten, so you always have
 an answer to "who can access what — and who could, last month?". See [Access
-grants](/help/applications-access-access-grants).
+grants](/help/applications-access-grants).
 
 ## Access request
 
 A pending, approval-gated ask for access to an application. A request becomes an **access grant**
-once it is approved. See [Access requests](/help/applications-access-access-requests).
+once it is approved. See [Access requests](/help/applications-access-requests).
 
 ## Activity
 
@@ -125,7 +125,7 @@ sign-in password. See [Passwords & recovery keys](/help/secret-manager-passwords
 A single capability written as `area:action` — for example `asset:write` (create or edit assets) or
 `consumable:read` (view consumables). A role holds a set of permissions; lazyit checks them whenever
 you act. The full list of permissions is fixed and ships with the product. See
-[Permissions](/help/users-permissions-permissions).
+[Permissions](/help/permissions).
 
 ## Recovery key
 

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/require-await -- the fake structural Prisma below implements
+   an async interface (ParsePrismaClient) with synchronous bodies; no real await is needed. */
 import { runParseJob, type ParsePrismaClient } from './run-parse-job';
 import type { ParseJobData } from './import-job.types';
 
@@ -21,7 +23,7 @@ function makeFakePrisma() {
   const prisma: ParsePrismaClient = {
     importSession: {
       update: async (args) => {
-        sessionUpdates.push(args as SessionUpdate);
+        sessionUpdates.push(args);
         return undefined;
       },
     },
@@ -37,7 +39,14 @@ function makeFakePrisma() {
     },
   };
 
-  return { prisma, sessionUpdates, insertedRows, get deleteManyCalls() { return deleteManyCalls; } };
+  return {
+    prisma,
+    sessionUpdates,
+    insertedRows,
+    get deleteManyCalls() {
+      return deleteManyCalls;
+    },
+  };
 }
 
 const job = (
@@ -74,8 +83,24 @@ describe('runParseJob', () => {
       'name',
       'serial',
     ]);
+    // Clean file — no ragged rows (#1062).
+    expect((last.detected as { raggedRowCount: number }).raggedRowCount).toBe(
+      0,
+    );
     // Idempotency: clears any prior rows before inserting.
     expect(fake.deleteManyCalls).toBe(1);
+  });
+
+  it('threads raggedRowCount from the parser into the detected shape (#1062)', async () => {
+    const fake = makeFakePrisma();
+    await runParseJob(
+      job(b64('a,b,c\n1,2,3\n1,2\n1,2,3,4\n'), 'csv'),
+      fake.prisma,
+    );
+    const last = fake.sessionUpdates[fake.sessionUpdates.length - 1].data;
+    expect((last.detected as { raggedRowCount: number }).raggedRowCount).toBe(
+      2,
+    );
   });
 
   it('parses a JSON array', async () => {
@@ -92,14 +117,12 @@ describe('runParseJob', () => {
     const fake = makeFakePrisma();
     // colA has 5 distinct values (capped at 4) + a repeat + a blank; colB has a blank + repeats.
     await runParseJob(
-      job(
-        b64('colA,colB\na1,b1\na2,b1\na3,\na4,b2\na5,b1\na1, \n'),
-        'csv',
-      ),
+      job(b64('colA,colB\na1,b1\na2,b1\na3,\na4,b2\na5,b1\na1, \n'), 'csv'),
       fake.prisma,
     );
     const last = fake.sessionUpdates[fake.sessionUpdates.length - 1].data;
-    const samples = (last.detected as { samples: Record<string, string[]> }).samples;
+    const samples = (last.detected as { samples: Record<string, string[]> })
+      .samples;
     // colA: first 4 DISTINCT non-empty values, in first-seen order (a5 + the a1 repeat are dropped).
     expect(samples.colA).toEqual(['a1', 'a2', 'a3', 'a4']);
     // colB: blank + whitespace cells are skipped (coerceAbsent); only distinct non-empty values kept.

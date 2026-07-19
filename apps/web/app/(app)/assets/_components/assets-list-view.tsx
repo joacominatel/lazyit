@@ -115,6 +115,7 @@ import {
 } from "./assets-list-query";
 import { downloadAssetsExport } from "./assets-csv";
 import { AssetRowActions } from "./asset-row-actions";
+import { ReceiveStockButton } from "./receive-stock-dialog";
 import {
   AssetStatusBadge,
   useAssetStatusLabel,
@@ -707,6 +708,9 @@ export function AssetsListView() {
                 </Link>
               </Button>
             ) : null}
+            {/* Bulk receiving (ADR-0089 Part A, #1029): mint many identical assets from one model in a
+                single action. Gated on asset:write like the New-asset button; opens its own dialog. */}
+            {canWrite ? <ReceiveStockButton /> : null}
             {canWrite ? (
               <Button asChild>
                 <Link href="/assets/new">

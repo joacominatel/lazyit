@@ -229,8 +229,12 @@ describe('AssetsService', () => {
   let tx: TxAssetMock;
   let txAssetModel: TxAssetModelMock;
   let txClient: TxClientMock;
+  // The NON-tx model lookup receiveBatch does once upfront (the batch name default). Distinct from the
+  // per-create tx-client model lookup (txAssetModel) that resolves spec-defaults inside each create tx.
+  let prismaAssetModel: { findFirst: jest.Mock };
   let prisma: {
     asset: PrismaAssetMock;
+    assetModel: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
   let actor: ActorService;
@@ -252,8 +256,11 @@ describe('AssetsService', () => {
     txClient = { asset: tx } as TxClientMock;
     // keep existing transaction assertions focused on the asset delegate
     Object.defineProperty(txClient, 'assetModel', { value: txAssetModel });
+    // receiveBatch does ONE non-tx model lookup upfront (for the "<ModelName> #<seq>" default name).
+    prismaAssetModel = { findFirst: jest.fn() };
     prisma = {
       asset,
+      assetModel: prismaAssetModel,
       // create/update/remove pass a CALLBACK (interactive tx); findPage passes an ARRAY of two
       // promises (findMany + count). Support both forms.
       $transaction: jest.fn(
@@ -563,6 +570,113 @@ describe('AssetsService', () => {
     expect(tx.create).toHaveBeenCalledTimes(
       AssetTagSchemeService.MAX_ALLOCATION_ATTEMPTS,
     );
+  });
+
+  // --- receiveBatch (bulk receiving, ADR-0089 Part A, #1029) ---------------
+  describe('receiveBatch', () => {
+    it('mints N units named "<ModelName> #<seq>" — one independent create tx per unit, failed[] empty', async () => {
+      prismaAssetModel.findFirst.mockResolvedValue({ name: 'ThinkPad X1' });
+      // model spec-defaults lookup inside each create() tx (no defaults here).
+      txAssetModel.findFirst.mockResolvedValue({ specs: null });
+      let seq = 0;
+      tx.create.mockImplementation(({ data }: { data: AssetData }) =>
+        Promise.resolve({ id: `a${++seq}`, ...data }),
+      );
+
+      const result = await service.receiveBatch(
+        { modelId: 'm1', quantity: 3, status: 'IN_STORAGE' },
+        HUMAN_PRINCIPAL,
+      );
+
+      // one upfront non-tx model lookup for the name default (not N).
+      expect(prismaAssetModel.findFirst).toHaveBeenCalledTimes(1);
+      expect(prismaAssetModel.findFirst).toHaveBeenCalledWith({
+        where: { id: 'm1' },
+        select: { name: true },
+      });
+      // ONE create transaction per unit — each its own independent tag-counter commit (ADR-0063), never
+      // one wrapping $transaction across the batch.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+      expect(result.failed).toEqual([]);
+      expect(result.created).toHaveLength(3);
+      const calls = tx.create.mock.calls as CreateCall[];
+      expect(calls[0][0].data.name).toBe('ThinkPad X1 #1');
+      expect(calls[1][0].data.name).toBe('ThinkPad X1 #2');
+      expect(calls[2][0].data.name).toBe('ThinkPad X1 #3');
+      // the model + status flow onto every unit.
+      expect(calls[0][0].data.modelId).toBe('m1');
+      expect(calls[0][0].data.status).toBe('IN_STORAGE');
+    });
+
+    it('400s once (before any write) when the model is missing — not N identical failures', async () => {
+      prismaAssetModel.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.receiveBatch(
+          { modelId: 'gone', quantity: 5, status: 'OPERATIONAL' },
+          HUMAN_PRINCIPAL,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      // no unit was attempted — the single upfront 400 short-circuits the loop.
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.create).not.toHaveBeenCalled();
+    });
+
+    it('applies serials[i] per unit and forwards purchaseCost verbatim (minor units, #954)', async () => {
+      prismaAssetModel.findFirst.mockResolvedValue({ name: 'Dock' });
+      txAssetModel.findFirst.mockResolvedValue({ specs: null });
+      tx.create.mockImplementation(({ data }: { data: AssetData }) =>
+        Promise.resolve({ id: 'x', ...data }),
+      );
+
+      await service.receiveBatch(
+        {
+          modelId: 'm1',
+          quantity: 2,
+          status: 'OPERATIONAL',
+          serials: ['SN-A', 'SN-B'],
+          purchaseCost: 4500,
+          locationId: 'l1',
+        },
+        HUMAN_PRINCIPAL,
+      );
+
+      const calls = tx.create.mock.calls as CreateCall[];
+      expect(calls[0][0].data.serial).toBe('SN-A');
+      expect(calls[1][0].data.serial).toBe('SN-B');
+      // purchaseCost is passed straight through — no re-coercion in the service.
+      expect(calls[0][0].data.purchaseCost).toBe(4500);
+      expect(calls[0][0].data.locationId).toBe('l1');
+    });
+
+    it('PARTIAL SUCCESS: one failing unit lands in failed[{index}] while its siblings are created (counter advanced)', async () => {
+      prismaAssetModel.findFirst.mockResolvedValue({ name: 'ThinkPad X1' });
+      txAssetModel.findFirst.mockResolvedValue({ specs: null });
+      // The 2nd unit (index 1) collides on the serial unique index → a P2002 the create path re-throws
+      // (allocateTag is OFF, so no retry): it is captured, the other two land, the tag counter advanced.
+      let call = 0;
+      tx.create.mockImplementation(({ data }: { data: AssetData }) => {
+        call++;
+        if (call === 2) {
+          return Promise.reject(
+            new FakePrismaKnownError('P2002', { target: SERIAL_INDEX }),
+          );
+        }
+        return Promise.resolve({ id: `a${call}`, ...data });
+      });
+
+      const result = await service.receiveBatch(
+        { modelId: 'm1', quantity: 3, status: 'OPERATIONAL' },
+        HUMAN_PRINCIPAL,
+      );
+
+      // three independent create attempts ran — the failing unit NEVER aborted the batch.
+      expect(tx.create).toHaveBeenCalledTimes(3);
+      expect(result.created).toHaveLength(2);
+      expect(result.failed).toHaveLength(1);
+      expect(result.failed[0].index).toBe(1);
+      expect(typeof result.failed[0].error).toBe('string');
+    });
   });
 
   // --- findOne (expanded) -------------------------------------------------
@@ -1527,6 +1641,68 @@ describe('AssetsService', () => {
 
     expect(tx.update).toHaveBeenCalledTimes(1);
     expect(history.record).not.toHaveBeenCalled();
+  });
+
+  // --- update: re-import provenance + UPDATED marker (#1061) ---------------
+  it('stamps import provenance onto each change event when updatedPayload is set', async () => {
+    asset.findFirst.mockResolvedValue(beforeRow({ status: 'OPERATIONAL' }));
+    tx.update.mockResolvedValue(beforeRow({ status: 'RETIRED' }));
+
+    await service.update('a1', { status: 'RETIRED' }, undefined, {
+      updatedPayload: { source: 'import', sessionId: 's1', rowIndex: 4 },
+    });
+
+    // The STATUS_CHANGED event carries its own { from, to } PLUS the stamped import provenance.
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      {
+        assetId: 'a1',
+        eventType: 'STATUS_CHANGED',
+        payload: {
+          from: 'OPERATIONAL',
+          to: 'RETIRED',
+          source: 'import',
+          sessionId: 's1',
+          rowIndex: 4,
+        },
+        actor: {},
+      },
+    );
+  });
+
+  it('writes exactly one UPDATED marker when a re-import changes no tracked dimension', async () => {
+    // notes is not a tracked dimension → zero change events → the marker guarantees one audit row so
+    // "updated via re-import" always lands (#1061).
+    asset.findFirst.mockResolvedValue(beforeRow());
+    tx.update.mockResolvedValue(beforeRow({ notes: 'touch' }));
+
+    await service.update('a1', { notes: 'touch' }, undefined, {
+      updatedPayload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+    });
+
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      {
+        assetId: 'a1',
+        eventType: 'UPDATED',
+        payload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+        actor: {},
+      },
+    );
+  });
+
+  it('suppressSearch skips the per-row search upsert (the bulk import reconciles once)', async () => {
+    asset.findFirst.mockResolvedValue(beforeRow());
+    tx.update.mockResolvedValue(beforeRow({ status: 'RETIRED' }));
+
+    await service.update('a1', { status: 'RETIRED' }, undefined, {
+      updatedPayload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+      suppressSearch: true,
+    });
+
+    expect(search.upsert).not.toHaveBeenCalled();
   });
 
   it('treats an unchanged status (same value sent) as no STATUS_CHANGED event', async () => {

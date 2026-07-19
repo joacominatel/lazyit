@@ -27,7 +27,7 @@ Abre una aplicación y, bajo **Acceso activo**, elige **Otorgar acceso**. Eliges
 Otorgar (y revocar) acceso es una acción solo de administrador de forma predeterminada.
 
 > Hoy el acceso se **otorga directamente** — no hay cola de aprobación. Está planificado un flujo
-> formal de solicitud y aprobación; ver [Solicitudes de acceso](/help/applications-access-access-requests).
+> formal de solicitud y aprobación; ver [Solicitudes de acceso](/help/applications-access-requests).
 
 ## Una persona, varias concesiones
 

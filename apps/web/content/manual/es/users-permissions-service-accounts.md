@@ -71,6 +71,12 @@ como esperas antes de cablearlo en un sistema.
   registrado, y cualquier acción que realice una cuenta de servicio se atribuye a esa cuenta en el
   historial de actividad, nunca a una persona.
 
+> **Revocar suspende el token — no elimina el acceso a las bóvedas.** Revocar solo detiene la
+> autenticación del token; cualquier bóveda del Gestor de Secretos que la cuenta tuviera concedida sigue
+> concedida, así que **restaurarla** más tarde reanuda todas esas bóvedas sin necesidad de volver a
+> otorgarlas. Si una cuenta de servicio debe perder la capacidad de leer una bóveda en particular,
+> revócala desde la lista de **Miembros** de esa bóveda — consulta [Bóvedas y miembros](/help/secret-manager-vaults-members).
+
 ## Cuentas gestionadas por el sistema
 
 Algunas cuentas las crea y posee lazyit en sí — por ejemplo la cuenta con la que el Motor de Flujos de

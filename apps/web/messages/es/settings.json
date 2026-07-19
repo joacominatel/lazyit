@@ -110,6 +110,11 @@
       },
       "toast": {
         "enqueued": "Actualización en cola. Ejecuta el comando mostrado en el host para aplicarla."
+      },
+      "cancel": {
+        "button": "Cancelar esta actualización",
+        "hint": "¿Aún no ejecutaste el comando? Cancélala para descartar esta solicitud y volver a comprobar actualizaciones más tarde.",
+        "toast": "Actualización cancelada. Puedes volver a comprobar actualizaciones cuando quieras."
       }
     }
   },
@@ -265,6 +270,114 @@
     "toast": {
       "saved": "Configuración de SMTP guardada.",
       "saveError": "No se pudo guardar la configuración de SMTP."
+    }
+  },
+  "directory": {
+    "title": "Sincronización de directorio AD / LDAP",
+    "subtitle": "Importación de solo lectura de personas desde tu Active Directory / LDAP local. lazyit crea personas de directorio sin acceso — nunca escribe en tu directorio ni permite iniciar sesión a nadie.",
+    "loadError": "No se pudo cargar la configuración del directorio.",
+    "loadErrorHint": "Revisa tu conexión e inténtalo de nuevo.",
+    "retry": "Reintentar",
+    "save": "Guardar configuración",
+    "disabledHint": "La sincronización programada está desactivada. Actívala para importar personas de forma periódica — igualmente puedes usar Sincronizar ahora para probar la conexión.",
+    "fields": {
+      "enabled": {
+        "label": "Activar sincronización programada",
+        "description": "Cuando está activa, lazyit se conecta periódicamente a tu directorio e importa personas. Cuando está desactivada, solo se ejecuta Sincronizar ahora manualmente."
+      },
+      "host": {
+        "label": "Host del directorio",
+        "placeholder": "dc01.corp.example.com"
+      },
+      "port": {
+        "label": "Puerto",
+        "placeholder": "636"
+      },
+      "transport": {
+        "label": "Seguridad del transporte",
+        "options": {
+          "ldaps": "LDAPS — TLS implícito (puerto 636)",
+          "starttls": "StartTLS — actualización sobre LDAP (puerto 389)",
+          "plaintext": "Texto plano — sin cifrado (puerto 389)"
+        },
+        "hint": {
+          "ldaps": "Cifrado desde el primer byte. La opción recomendada.",
+          "starttls": "Conecta en texto plano y luego actualiza a TLS.",
+          "plaintext": "Sin cifrar — la contraseña de conexión viaja en claro. Solo para un segmento interno de confianza."
+        }
+      },
+      "rejectUnauthorized": {
+        "label": "Verificar certificado TLS",
+        "description": "Rechaza un directorio cuyo certificado TLS no se pueda verificar. Desactívalo solo para permitir un certificado autofirmado en un servidor interno de confianza.",
+        "plaintextHint": "No aplica a una conexión en texto plano (no hay TLS que verificar)."
+      },
+      "baseDN": {
+        "label": "Base de búsqueda (base DN)",
+        "placeholder": "OU=People,DC=corp,DC=example,DC=com",
+        "description": "El subárbol donde lazyit busca personas."
+      },
+      "bindDN": {
+        "label": "DN de conexión (bind DN)",
+        "placeholder": "CN=svc-lazyit,OU=Service,DC=corp,DC=example,DC=com",
+        "description": "La cuenta de servicio de solo lectura con la que lazyit se conecta. Identifica la credencial; no es en sí el secreto."
+      },
+      "bindPassword": {
+        "label": "Contraseña de conexión",
+        "placeholderSet": "Configurada — deja en blanco para conservarla",
+        "placeholderUnset": "Contraseña de conexión",
+        "hintSet": "Hay una contraseña de conexión guardada. Déjala en blanco para conservarla, o escribe una nueva para reemplazarla."
+      },
+      "searchFilter": {
+        "label": "Filtro de búsqueda",
+        "placeholder": "(&(objectClass=user)(objectCategory=person))",
+        "description": "El filtro LDAP que selecciona qué entradas importar. Se ejecuta literalmente — no hay sustitución por usuario."
+      },
+      "offboardGraceDays": {
+        "label": "Margen de baja (días)",
+        "description": "Cuántos días puede faltar una persona en el directorio antes de que lazyit la desactive. 0 = desactivar en la primera sincronización que ya no la encuentre."
+      },
+      "attributeMap": {
+        "label": "Mapeo de atributos",
+        "description": "Qué atributo del directorio rellena cada campo de lazyit. Deja un campo en blanco para omitirlo.",
+        "keys": {
+          "firstName": "Nombre ←",
+          "lastName": "Apellido ←",
+          "email": "Correo ←",
+          "username": "Usuario ←"
+        }
+      }
+    },
+    "sync": {
+      "heading": "Sincronizar ahora",
+      "description": "Ejecuta la misma importación de solo lectura que la sincronización programada, usando la configuración guardada — guarda tus cambios primero. Esto también confirma que la conexión funciona.",
+      "button": "Sincronizar ahora",
+      "success": "Sincronización del directorio completada.",
+      "counts": "Creadas {created}, actualizadas {updated}, dadas de baja {offboarded}, omitidas {skipped}.",
+      "failure": "La sincronización del directorio falló.",
+      "error": "No se pudo ejecutar la sincronización del directorio.",
+      "lastRun": "Última ejecución:",
+      "status": {
+        "ok": "OK",
+        "error": "Error",
+        "never": "Sin ejecutar"
+      },
+      "countLabels": {
+        "created": "Creadas",
+        "updated": "Actualizadas",
+        "offboarded": "Dadas de baja",
+        "skipped": "Omitidas"
+      }
+    },
+    "tray": {
+      "title": "Personas del directorio para revisar",
+      "description": "Personas importadas desde tu directorio. Cada una es una persona sin acceso que puedes abrir, aprovisionar con un inicio de sesión o dar de baja desde la sección Usuarios.",
+      "offboarded": "Inactiva",
+      "discovered": "Añadida {when}",
+      "viewAll": "Ver todas en Usuarios"
+    },
+    "toast": {
+      "saved": "Configuración del directorio guardada.",
+      "saveError": "No se pudo guardar la configuración del directorio."
     }
   },
   "roles": {
@@ -427,7 +540,7 @@
       "revoke": "Revocar",
       "openActions": "Abrir acciones"
     },
-    "revokeExplanation": "Su token deja de autenticar de inmediato. Puedes restaurarla desde la vista «Mostrar revocadas» (rota para generar un token nuevo).",
+    "revokeExplanation": "Su token deja de autenticar de inmediato. Puedes restaurarla desde la vista «Mostrar revocadas» (rota para generar un token nuevo). Revocar suspende el token pero no elimina el acceso a las bóvedas — usa la lista de Miembros de la bóveda para revocar por bóveda y eliminar el material de clave.",
     "toast": {
       "restored": "Cuenta de servicio restaurada",
       "restoreError": "No se pudo restaurar la cuenta de servicio",

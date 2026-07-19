@@ -71,8 +71,28 @@ model User {
   directoryOnly  Boolean   @default(false)
   // Free-form directory attributes for a directory-only person (cargo/jobTitle, departamento, teléfono,
   // and any person sub-field with no native home). Same posture as Asset.specs (ADR-0007): jsonb,
-  // optional, only populated on directory rows. NOT validated per-field in this MVP.
+  // optional, only populated on directory rows. NOT validated per-field in this MVP. AD sync also stashes
+  // the entry's `memberOf` group DNs here INERT (store-now-act-later, #846) — never acted on as subjects.
   directoryAttrs Json?
+
+  // On-prem AD/LDAP directory-source provenance (ADR-0091, issue #839). All nullable/defaulted (additive,
+  // no backfill): only AD-reconciled persons carry them; every existing row (login users, import-sourced
+  // directory persons) reads null and is untouched.
+  //   - `directorySource`   discriminates WHERE a directory person came from ("ad" for the LDAP reconcile;
+  //     null for an import-sourced or login user). A string (not a bool) mirrors infra `reportingSource`,
+  //     so a future second source coexists additively.
+  //   - `directorySourceId` is the AD `objectGUID` formatted as a canonical GUID string — the IMMUTABLE
+  //     natural key the reconcile upserts on. NEVER `externalId` (that is the OIDC-sub / account-linking
+  //     key, INV-2 — overloading it would collide). UNIQUE among LIVE rows via a PARTIAL unique index
+  //     `WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL` (raw SQL in the migration — Prisma
+  //     can't express partial uniques), following the email/legajo/username precedent (ADR-0041). No
+  //     `@unique` (that would emit a FULL unique index and collide across soft-deleted rows).
+  //   - `directoryOffboardedAt` timestamps a SOFT offboard: a person that DISAPPEARED from AD past the
+  //     grace threshold is flagged (isActive=false + this stamp), NEVER hard-deleted (ADR-0006). Cleared
+  //     if the person reappears in a later sync.
+  directorySource      String?
+  directorySourceId    String?
+  directoryOffboardedAt DateTime?
 
   // Local (first-party) auth credentials — ADR-0086, AUTH_MODE=local. ALL nullable/defaulted (additive,
   // no backfill): OIDC-linked users and directoryOnly rows never carry one. The SCHEMA only STORES these;
@@ -111,9 +131,12 @@ model User {
   reports User[] @relation("UserManager")
 
   // Asset ownership over time (three roles: owner, who-assigned, who-released). See AssetAssignment.
-  assignments         AssetAssignment[] @relation("AssignmentOwner")
-  assignmentsMade     AssetAssignment[] @relation("AssignmentAssignedBy")
-  assignmentsReleased AssetAssignment[] @relation("AssignmentReleasedBy")
+  assignments             AssetAssignment[] @relation("AssignmentOwner")
+  assignmentsMade         AssetAssignment[] @relation("AssignmentAssignedBy")
+  assignmentsReleased     AssetAssignment[] @relation("AssignmentReleasedBy")
+  // Check-out acknowledgements this user recorded (ADR-0089 Part B, #1029) — the inverse of
+  // AssetAssignment.acknowledgedBy. Self-scoped: the acknowledger is always the assignment's owner.
+  assignmentsAcknowledged AssetAssignment[] @relation("AssignmentAcknowledgedBy")
 
   // Knowledge Base authorship: articles this user authored, and articles they last edited.
   articlesAuthored Article[] @relation("ArticleAuthor")
@@ -355,6 +378,13 @@ model ServiceAccount {
   // DEK row is meaningless without its service account (a — never-issued — hard delete drops them).
   keypair          ServiceAccountKeypair?
   vaultMemberships ServiceAccountVaultMembership[]
+
+  // On-prem AD/LDAP directory sync (ADR-0091, issue #839). The OPTIONAL attribution SA the singleton
+  // DirectoryConnection points at, so every UserHistory row the read-only reconcile writes is attributed
+  // to a dedicated directory service account (ADR-0048) rather than a fabricated human. SetNull: hard-
+  // deleting the SA never blocks it and simply reverts the config to a system actor (soft delete, the
+  // norm, keeps the reference). A directory connection is config, not an audit row, so no at-most-one CHECK.
+  directoryConnections DirectoryConnection[] @relation("DirectorySyncSaActor")
 
   @@index([isActive])
   @@map("service_accounts")
@@ -734,6 +764,68 @@ model UpdateSettings {
   @@map("update_settings")
 }
 
+/// On-prem AD/LDAP directory-source connection — the singleton config store for the READ-ONLY directory
+/// sync (ADR-0091, issue #839). Same singleton pattern as SmtpSettings/UpdateSettings (ADR-0063/0079):
+/// ONE admin-only row (`settings:manage`), a migration CHECK pins the id, off by default, never soft-
+/// deleted. lazyit binds read-only, subtree-searches, and UPSERTS login-less `directoryOnly` VIEWER
+/// persons keyed on `User.directorySourceId` (AD objectGUID). NON-GOALS (never): write-back to AD, a new
+/// AUTH_MODE, LDAP-bind login, or group-as-subject (memberOf is stored INERT, #846).
+///
+/// The read-only BIND PASSWORD is a SERVER-MANAGED machine credential (the server MUST decrypt it to bind
+/// — the explicit inverse of the zero-knowledge Secret Manager, INV-10). It is encrypted at rest as an
+/// AES-256-GCM envelope (the same {ciphertext,iv,authTag,keyVersion} shape as SmtpSettings, under its OWN
+/// key axis `DIRECTORY_SECRET_KEY` — "one key per subsystem", ADR-0054/0079). The envelope columns are
+/// NEVER returned on the wire (write-only; the read shape exposes only `bindPasswordSet`).
+model DirectoryConnection {
+  /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it).
+  id                 String   @id @default("singleton")
+  /// Master switch. false (default) = the sweeper never runs and "Sync now" refuses.
+  enabled            Boolean  @default(false)
+  /// LDAP/AD host. null until configured.
+  host               String?
+  /// LDAP/AD port (1–65535). null until configured.
+  port               Int?
+  /// Transport-security mode: "ldaps" | "starttls" | "plaintext" (validated by the shared enum). Default
+  /// LDAPS (secure). "plaintext" is a loud opt-in — the api refuses to send the bind password over it.
+  transport          String   @default("ldaps")
+  /// TLS cert verification. true (default, secure) rejects an unverifiable cert; false allows a
+  /// self-signed cert on an internal server (opt-in insecurity). Inert under "plaintext".
+  rejectUnauthorized Boolean  @default(true)
+  /// The subtree search base DN (e.g. OU=People,DC=corp,DC=example,DC=com). null until configured.
+  baseDN             String?
+  /// The read-only service bind DN (identifies the credential; NOT a secret). null until configured.
+  bindDN             String?
+  /// The RFC 4515 population filter run VERBATIM over the subtree (static; no per-user interpolation, so
+  /// no LDAP-injection surface). null until configured.
+  searchFilter       String?
+  /// AD-attribute → profile/directoryAttrs key map (jsonb, Asset.specs posture — not per-field validated).
+  attributeMap       Json?
+  /// How many days a person may be MISSING from AD before it is soft-offboarded (grace threshold). 7 default.
+  offboardGraceDays  Int      @default(7)
+  /// Encrypted bind-password envelope (AES-256-GCM under DIRECTORY_SECRET_KEY). All four are null when no
+  /// password is stored. WRITE-ONLY: never returned on the wire (the read shape exposes only bindPasswordSet).
+  bindPasswordCiphertext String?
+  bindPasswordIv         String?
+  bindPasswordAuthTag    String?
+  bindPasswordKeyVersion Int?
+  /// Optional ServiceAccount (ADR-0048) the reconcile's UserHistory rows are attributed to. SetNull:
+  /// hard-deleting the SA reverts to a system actor. null = system actor.
+  serviceAccountId   String?
+  serviceAccount     ServiceAccount? @relation("DirectorySyncSaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  /// Cached result of the last run (mirrors UpdateSettings caching) so the UI reads this, not a live sync.
+  lastSyncAt         DateTime?
+  /// "ok" | "error" | "never" — the last run's outcome. null until the first run.
+  lastSyncStatus     String?
+  /// The last run's redacted counts {created,updated,offboarded,skipped} (jsonb). null until the first run.
+  lastSyncCounts     Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // No deletedAt: mutable instance config, never soft-deleted (same posture as SmtpSettings).
+  @@index([serviceAccountId])
+  @@map("directory_connection")
+}
+
 /// UpdateRun — one guided update, the API↔host contract (ADR-0084 §4, issue #904). An APPEND-ONLY
 /// ledger row (autoincrement id, never deleted) whose `status` transitions during execution — the
 /// same shape as WorkflowRun (identity immutable; status + timestamps move). The in-app ADMIN action
@@ -804,6 +896,15 @@ model AssetAssignment {
   assignedBy     User?           @relation("AssignmentAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
   releasedById   String?         @db.Uuid
   releasedBy     User?           @relation("AssignmentReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+  // Check-out acknowledgement (ADR-0089 Part B, #1029): additive lifecycle metadata on this ALREADY-mutable
+  // join (NOT an append-only violation — the immutable trail is the ACKNOWLEDGED AssetHistory event). Set
+  // ONCE, self-service, by the assignment's OWN owner: `acknowledgedById` always equals `userId` (enforced
+  // by the self-scoped conditional write). SetNull mirrors assignedById/releasedById — losing the actor
+  // never blocks their deletion and the row survives. `acknowledgeNote` is an optional free-text note.
+  acknowledgedAt   DateTime?
+  acknowledgedById String?         @db.Uuid
+  acknowledgedBy   User?           @relation("AssignmentAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  acknowledgeNote  String?
   // Service-account actors (ADR-0048): set instead of the User actor when a SERVICE ACCOUNT assigned /
   // released. A DB CHECK enforces at-most-one of (assignedById, assignedBySaId) and likewise for
   // released. Plain String (cuid → text). SetNull.
@@ -855,7 +956,11 @@ model AssetHistory {
 }
 
 /// The discrete asset events recorded in AssetHistory (ADR-0033). RESTORED is emitted by the asset
-/// restore endpoint (POST /assets/:id/restore — ADR-0041), the counterpart of DELETED.
+/// restore endpoint (POST /assets/:id/restore — ADR-0041), the counterpart of DELETED. UPDATED is the
+/// whole-asset "updated via re-import" marker (#1061): a re-import that matches a live asset by serial
+/// UPDATEs it, and when no tracked dimension changed this marker is written so the re-import still leaves
+/// exactly one audit row. Mirrors UserHistoryEventType.UPDATED. Appended at the tail (ALTER TYPE ADD VALUE
+/// appends), so the DB enum order matches this declaration.
 enum AssetHistoryEventType {
   CREATED
   STATUS_CHANGED
@@ -866,6 +971,10 @@ enum AssetHistoryEventType {
   SPECS_CHANGED
   DELETED
   RESTORED
+  UPDATED
+  // Check-out acknowledgement — the assignee confirmed they hold the asset (ADR-0089 Part B, #1029).
+  // Emitted by POST /asset-assignments/:id/acknowledge, payload { userId } (the acknowledging owner).
+  ACKNOWLEDGED
 }
 
 /// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's
@@ -1245,6 +1354,15 @@ model Application {
   // Asset.specs / Article.metadata. See ADR-0007 and ADR-0023.
   metadata    Json?
   notes       String?
+  // License / seat tracking (#949, ADR-0088). All nullable = "untracked". `seatsPurchased` = the number
+  // of paid seats (null = unlimited / not tracked). `costPerSeat` = the price PER SEAT in INTEGER minor
+  // units (cents) of the org's single currency — mirrors Asset.purchaseCost (#954): no float drift.
+  // `renewalDate` = when the license/subscription next renews (informational for now; proactive renewal
+  // reminders are a follow-up, #1070). `seatsUsed` is DERIVED (distinct active-grant users) and NEVER
+  // stored — computed per-request in ApplicationsService.
+  seatsPurchased Int?
+  costPerSeat    Int?
+  renewalDate    DateTime?
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
   deletedAt   DateTime?
@@ -2450,6 +2568,13 @@ enum InfraNodeSource {
   AGENT
 }
 
+/// Who owns a node's `ipAddress` (ADR-0074 §3 fact-promotion, issue #1081). AGENT (default) = a
+/// discovered live fact each report overwrites; MANUAL = a human-typed value the agent never clobbers.
+enum InfraNodeIpSource {
+  AGENT
+  MANUAL
+}
+
 /// Lifecycle (ADR-0070 §4): PENDING = in the v2 review tray, CONFIRMED = on the live map.
 enum InfraNodeState {
   CONFIRMED
@@ -2482,8 +2607,11 @@ model InfraNode {
   asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
   // Access surface (NOT a network model — ADR-0070 scope cuts).
-  ipAddress String? // primary IP, label-only (no validation/IPAM)
-  shortcuts Json? // [{ label, url }] — SSH/web UI/console links (validated by zod in @lazyit/shared)
+  ipAddress       String? // primary IP, label-only (no validation/IPAM)
+  // Who owns `ipAddress` (ADR-0074 §3, #1081): AGENT (default) = a discovered fact reports overwrite;
+  // MANUAL = a human edit the agent never clobbers. Stamped MANUAL server-side on a human IP edit.
+  ipAddressSource InfraNodeIpSource @default(AGENT)
+  shortcuts       Json? // [{ label, url }] — SSH/web UI/console links (validated by zod in @lazyit/shared)
   specs     Json? // loose per-kind attrs (ADR-0007 posture)
 
   // Canvas layout (free-move). v1: one board, x/y on the node. Multi-board => join later.

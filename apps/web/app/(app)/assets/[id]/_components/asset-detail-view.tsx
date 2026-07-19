@@ -2,7 +2,9 @@
 
 import {
   ArrowPathIcon,
+  CheckBadgeIcon,
   ChevronDownIcon,
+  ClockIcon,
   DocumentDuplicateIcon,
   PencilSquareIcon,
   PrinterIcon,
@@ -46,6 +48,7 @@ import { ErrorState } from "@/components/resource-table";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useAsset, useAssetAssignments } from "@/lib/api/hooks/use-assets";
+import { useCurrentUser } from "@/lib/api/hooks/use-users";
 import { useAssetInfraNodeId } from "@/lib/api/hooks/use-infra-nodes";
 import { useDeleteAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useReleaseAssignment } from "@/lib/api/hooks/use-asset-assignment-mutations";
@@ -58,6 +61,7 @@ import {
   useAssetStatusLabel,
 } from "../../_components/asset-status-badge";
 import { AssignUserDialog } from "../../_components/assign-user-dialog";
+import { AcknowledgeAssignmentDialog } from "../../_components/acknowledge-assignment-dialog";
 
 function ownerName(assignment: AssetAssignmentWithUser): string {
   return `${assignment.user.firstName} ${assignment.user.lastName}`;
@@ -142,6 +146,10 @@ export function AssetDetailView({ id }: { id: string }) {
   const { data: asset, isLoading, isError, error, refetch } = useAsset(id);
   // All assignments (active + released), each with its user, for owners + history.
   const { data: assignments } = useAssetAssignments(id, false);
+  // The caller — to offer the self-service "Acknowledge receipt" action on their OWN active assignment
+  // (ADR-0089 Part B). A read every authenticated human can make; drives only which button renders (the
+  // API self-scopes the acknowledge regardless).
+  const { data: me } = useCurrentUser();
 
   const breadcrumb = useMemo(
     () => (
@@ -160,6 +168,8 @@ export function AssetDetailView({ id }: { id: string }) {
   const [assignOpen, setAssignOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [releasingId, setReleasingId] = useState<string | null>(null);
+  // The active assignment id whose "Acknowledge receipt" dialog is open (null = closed).
+  const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -456,10 +466,15 @@ export function AssetDetailView({ id }: { id: string }) {
           <ul className="divide-y">
             {active.map((assignment) => {
               const gone = assignment.user.deletedAt != null;
+              // The acknowledge affordance is offered only to the OWN owner of a not-yet-acknowledged,
+              // still-live assignment (ADR-0089 Part B) — the API self-scopes it regardless.
+              const isMine = me?.id === assignment.userId;
+              const canAcknowledge =
+                isMine && !assignment.acknowledgedAt && !gone;
               return (
                 <li
                   key={assignment.id}
-                  className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                  className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <UserAvatar
@@ -489,21 +504,52 @@ export function AssetDetailView({ id }: { id: string }) {
                               date: date(assignment.assignedAt),
                             })}
                       </p>
+                      {/* Acknowledgement state (ADR-0089 Part B): the confirmed-receipt date, else an
+                          "awaiting" indicator for the operator. The status hue rides the icon only —
+                          the caption text stays on --muted-foreground so it holds AA (ADR-0049). */}
+                      {assignment.acknowledgedAt ? (
+                        <span className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <CheckBadgeIcon
+                            className="size-3.5 text-success"
+                            aria-hidden
+                          />
+                          {t("acknowledgedOn", {
+                            date: date(assignment.acknowledgedAt),
+                          })}
+                        </span>
+                      ) : (
+                        <span className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <ClockIcon className="size-3.5" aria-hidden />
+                          {t("awaitingAcknowledgement")}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  {canWrite && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRelease(assignment.id)}
-                      disabled={release.isPending}
-                    >
-                      {releasingId === assignment.id && (
-                        <ArrowPathIcon className="animate-spin" />
-                      )}
-                      {t("release")}
-                    </Button>
-                  )}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {canAcknowledge && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setAcknowledgingId(assignment.id)}
+                      >
+                        <CheckBadgeIcon />
+                        {t("acknowledgeReceipt")}
+                      </Button>
+                    )}
+                    {canWrite && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRelease(assignment.id)}
+                        disabled={release.isPending}
+                      >
+                        {releasingId === assignment.id && (
+                          <ArrowPathIcon className="animate-spin" />
+                        )}
+                        {t("release")}
+                      </Button>
+                    )}
+                  </div>
                 </li>
               );
             })}
@@ -563,6 +609,15 @@ export function AssetDetailView({ id }: { id: string }) {
         assetId={asset.id}
         excludeUserIds={active.map((a) => a.userId)}
       />
+      {acknowledgingId ? (
+        <AcknowledgeAssignmentDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setAcknowledgingId(null);
+          }}
+          assignmentId={acknowledgingId}
+        />
+      ) : null}
       <DeleteConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}

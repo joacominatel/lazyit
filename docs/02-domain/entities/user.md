@@ -110,7 +110,10 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
 | `directoryOnly` | `boolean` | `@default(false)`. `true` = a **directory person** created by the bulk import ([[0069-migrator-import]] §A.3): no login, no Zitadel mirror, role forced VIEWER, `externalId` stays `null`. Flips to `false` on first OIDC login (JIT promotion, [[0038-jit-user-provisioning]] amendment) or via `POST /users/:id/provision-account` (ADMIN manual promotion). See **Directory mode** note below. |
-| `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. |
+| `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. The AD/LDAP reconcile ([[0091-on-prem-ad-ldap-directory-source]]) also stashes `mail`/`username` **hints**, the entry's `memberOf` group DNs **inert** (#846), and a `lastSeenAt` heartbeat here. |
+| `directorySource` | `string?` | AD/LDAP directory-source discriminator ([[0091-on-prem-ad-ldap-directory-source]]): `"ad"` for a person reconciled from an on-prem AD/LDAP directory; `null` for a login user or an import-sourced directory person. Mirrors infra `reportingSource` (a string, not a bool) so a second source can coexist additively. |
+| `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
+| `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Cleared if the person reappears in a later sync ([[0091-on-prem-ad-ldap-directory-source]]). |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
 > The read `UserSchema` resolves the manager FK to a **redaction-safe descriptor** —
@@ -164,17 +167,34 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > - **Auto (JIT):** when the person logs in via OIDC with the same verified email, the standard JIT
 >   claim path (`jwt-auth.guard.ts`) binds `externalId = sub` and sets `directoryOnly = false`.
 >   The person inherits their existing `role` (VIEWER) and all prior assignments.
-> - **Manual (ADMIN):** `POST /users/:id/provision-account` takes a real email (required), writes
+> - **Manual (ADMIN, OIDC):** `POST /users/:id/provision-account` takes a real email (required), writes
 >   to Zitadel first, then sets `externalId` + `directoryOnly = false`. The endpoint rejects
 >   `@directory.local` placeholder emails. It **only works on the bundled-Zitadel management path**
 >   (`idp.supportsManagement`): in `AUTH_MODE=local` and BYOI / generic-OIDC there is no write-back, so
 >   it **400s** ("only available with the bundled identity provider"). `GET /config/status` exposes this
 >   as **`canProvisionAccounts`** so the web **hides the "Create OIDC account" action** entirely in those
->   modes instead of offering a request that always fails (#1048). *(Local-mode onboarding of directory
->   persons is a separate `needs-decision` — not built here.)*
+>   modes instead of offering a request that always fails (#1048).
+> - **Manual (ADMIN, local):** `POST /users/:id/provision-local-account` (issue #1072, [[0086-local-authentication-mode]]
+>   §5 amendment) onboards a directory person in `AUTH_MODE=local`: it mints a one-time temp password with the
+>   admin-reset primitives (`generateTempPassword` + `credentialFields({mustChangePassword:true})`), flips
+>   `directoryOnly = false`, appends an `UPDATED` history row, and returns the plaintext **once**
+>   (`AdminPasswordResetResult`). The existing `role` is kept (**no widening**), it's ADMIN-action-gated (no
+>   self-service), and it **400s outside local mode**. `GET /config/status` exposes **`canProvisionLocalAccounts`**
+>   (true only in local mode) so the web offers the "Onboard with a temporary password" action there instead of
+>   the impossible OIDC one. This is the one path that amends INV-DIR's "never receives a credential".
 >
 > **Visibility:** directory persons appear in `GET /users` mixed with accounts, tagged `directoryOnly: true`.
 > The web shows a "Directorio" badge. `GET /users?directoryOnly=true` lists only directory persons.
+>
+> **AD/LDAP as a directory SOURCE** ([[0091-on-prem-ad-ldap-directory-source]], #839): besides the bulk
+> import, `directoryOnly` persons can be **reconciled read-only** from an on-prem AD/LDAP directory. A
+> singleton `DirectoryConnection` (Settings → Instance → Directory, `settings:manage`, off by default) binds
+> read-only, subtree-searches, and **upserts** persons keyed on `directorySourceId` (AD `objectGUID`) — via
+> a `setInterval` sweeper and an ADMIN `POST /directory/sync` ("Sync now"). NEW → the PENDING tray (a
+> `directoryOnly` VIEWER); MATCHED → refresh mapped profile fields + `directoryAttrs` (a fixed allowlist);
+> DISAPPEARED past a grace threshold → soft offboard. **Hard invariants:** the sync never changes `role`,
+> never sets `passwordHash`/`externalId`, never flips `directoryOnly`→false, never grants a login, never
+> hard-deletes. `provisionAccount`/`provisionLocalAccount` stay the ONLY login-granting paths.
 
 ## Endpoints
 

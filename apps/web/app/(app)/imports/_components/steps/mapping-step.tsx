@@ -1,15 +1,21 @@
 "use client";
 
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import {
   AssetSchema,
   AssetStatusSchema,
+  DATE_FIELDS,
+  DEFAULT_DATE_FORMAT,
   HEADER_ALIASES,
   IMPORT_UI_TARGETS,
   assetImportDescriptor,
   coerceAbsent,
+  coerceDate,
+  detectDateFormat,
   type ColumnFieldMapping,
   type CustomFieldMapping,
+  type DateFieldMapping,
+  type DateFormat,
   type EnumValueMapping,
   type FkFieldMapping,
   type ImportMapping,
@@ -77,21 +83,23 @@ function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-/** Model-config cluster: the brand/category constant fallbacks plus the category picker's mode
- *  (pick-existing vs free constant) and picked id. Grouped into one reducer to stay under the
- *  prefer-useReducer budget — `choices` and `statusMap` remain their own (independent) state. */
+/** Model-config cluster: the brand/category/sku constant fallbacks (sku #1064) plus the category
+ *  picker's mode (pick-existing vs free constant) and picked id. Grouped into one reducer to stay
+ *  under the prefer-useReducer budget — `choices` and `statusMap` remain their own (independent) state. */
 type ModelConfigState = {
   manufacturerConst: string;
   categoryConst: string;
   categoryPickMode: boolean;
   categoryPickId: string;
+  skuConst: string;
 };
 
 type ModelConfigAction =
   | { type: "setManufacturerConst"; value: string }
   | { type: "setCategoryConst"; value: string }
   | { type: "setCategoryPickMode"; mode: boolean }
-  | { type: "pickCategory"; id: string; name: string };
+  | { type: "pickCategory"; id: string; name: string }
+  | { type: "setSkuConst"; value: string };
 
 function modelConfigReducer(
   state: ModelConfigState,
@@ -108,6 +116,8 @@ function modelConfigReducer(
       // The picker is controlled by id, but we persist the category's NATURAL KEY (name) — both move
       // together, exactly as the original setCategoryPickId + setCategoryConst pair did.
       return { ...state, categoryPickId: action.id, categoryConst: action.name };
+    case "setSkuConst":
+      return { ...state, skuConst: action.value };
   }
 }
 
@@ -128,6 +138,9 @@ export function MappingStep({
   const dryRun = useRunImportDryRun();
 
   const headers = session.headers;
+  // #1062: ragged-width rows (a shifted delimiter/unescaped quote) are silently padded/truncated by
+  // the parser — surface the count as a non-blocking warning so an operator can check the raw file.
+  const raggedRowCount = session.detected?.raggedRowCount ?? 0;
 
   // i18n leaf-label for a field (the catalog carries a shared key like "import.asset.field.name";
   // we render the last segment under our own `mapping.field.*` namespace).
@@ -205,6 +218,10 @@ export function MappingStep({
     setChoices((prev) => ({ ...prev, [header]: { ...prev[header], ...patch } }));
   }
 
+  // #1060: the per-column date format the operator picked. "auto" (default, unset) resolves to
+  // `detectDateFormat` at build time; an explicit choice overrides it. Keyed by header.
+  const [dateFormats, setDateFormats] = useState<Record<string, "auto" | DateFormat>>({});
+
   // #1050: one-click shortcut — turn an ignored column into a custom field named after its own
   // header, no typing required. `applyCustomShortcutToIgnored` only touches columns still `IGNORE`d,
   // so it never clobbers a choice the operator already made.
@@ -230,6 +247,23 @@ export function MappingStep({
     return [...seen];
   }, [statusHeader, session.rows]);
 
+  // #1060: auto-detected format per column mapped to a date field (purchaseDate / warrantyEnd). Runs the
+  // shared heuristic over every sampled value (coerceAbsent-filtered, exactly like the backend reads them)
+  // to feed the "Auto-detected: X" hint and resolve the "Auto" picker choice at submit.
+  const detectedDateFormat = useMemo<Record<string, DateFormat>>(() => {
+    const out: Record<string, DateFormat> = {};
+    for (const h of headers) {
+      if (!DATE_FIELDS.has(choices[h]?.target.split(":")[1] ?? "")) continue;
+      const values: string[] = [];
+      for (const row of session.rows) {
+        const v = coerceAbsent(row.raw[h]);
+        if (v !== undefined) values.push(v);
+      }
+      out[h] = detectDateFormat(values);
+    }
+    return out;
+  }, [headers, choices, session.rows]);
+
   const [statusMap, setStatusMap] = useState<Record<string, string>>({});
   const resolvedStatusMap = useMemo(() => {
     const synonyms = assetImportDescriptor.enumValueMaps.status?.synonyms ?? {};
@@ -240,7 +274,7 @@ export function MappingStep({
     return out;
   }, [distinctStatusValues, statusMap]);
 
-  // --- model brand/category constant fallbacks ("all models are brand X / category Y") ---
+  // --- model brand/category/sku constant fallbacks ("all models are brand X / category Y / sku Z") ---
   // Only relevant once a model is in play (a column maps to it, or these constants pin it). Grouped with
   // the category picker (mode + picked id) into one reducer — see `modelConfigReducer`.
   const [modelConfig, dispatchModelConfig] = useReducer(modelConfigReducer, {
@@ -248,13 +282,20 @@ export function MappingStep({
     categoryConst: "",
     categoryPickMode: true,
     categoryPickId: "",
+    skuConst: "",
   });
-  const { manufacturerConst, categoryConst, categoryPickMode, categoryPickId } =
-    modelConfig;
+  const {
+    manufacturerConst,
+    categoryConst,
+    categoryPickMode,
+    categoryPickId,
+    skuConst,
+  } = modelConfig;
   const modelManufacturerHeader = headers.find(
     (h) => choices[h]?.target === token("model", "manufacturer"),
   );
   const modelCategoryHeader = headers.find((h) => choices[h]?.target === token("model", "category"));
+  const modelSkuHeader = headers.find((h) => choices[h]?.target === token("model", "sku"));
 
   // Category fixed-value picker (#640): default = pick an EXISTING AssetCategory so a typo can't create a
   // ghost category. The picker is controlled by id, but what we persist is the category's NATURAL KEY (its
@@ -352,6 +393,7 @@ export function MappingStep({
     const references: FkFieldMapping[] = [];
     const custom: CustomFieldMapping[] = [];
     const personFields: ColumnFieldMapping[] = [];
+    const dates: DateFieldMapping[] = [];
 
     for (const h of headers) {
       const choice = choices[h];
@@ -377,6 +419,15 @@ export function MappingStep({
         references.push({ field, column: h, constant: null });
       } else {
         columns.push({ field, column: h, constant: null });
+        // #1060: a date column carries its chosen parse format. "auto" resolves to the detected format
+        // (never "auto" on the wire), so the dry-run and commit read every value under one explicit format.
+        if (DATE_FIELDS.has(field)) {
+          const chosen = dateFormats[h] ?? "auto";
+          dates.push({
+            field,
+            format: chosen === "auto" ? (detectedDateFormat[h] ?? DEFAULT_DATE_FORMAT) : chosen,
+          });
+        }
       }
     }
 
@@ -398,13 +449,16 @@ export function MappingStep({
     else if (manufacturerConst.trim()) mc.manufacturerConst = manufacturerConst.trim();
     if (modelCategoryHeader) mc.categoryColumn = modelCategoryHeader;
     else if (categoryConst.trim()) mc.categoryConst = categoryConst.trim();
+    // sku / model-number (#1064) — same column-wins-over-constant precedence as brand/category.
+    if (modelSkuHeader) mc.skuColumn = modelSkuHeader;
+    else if (skuConst.trim()) mc.skuConst = skuConst.trim();
     const modelConfig = Object.keys(mc).length > 0 ? mc : undefined;
 
     // Only send `person` when the operator actually started one — an empty sub-payload would tell the
     // backend nothing and the schema keeps it optional.
     const person = personFields.length > 0 ? { fields: personFields } : undefined;
 
-    return { columns, references, enums, custom, person, modelConfig };
+    return { columns, references, enums, custom, dates, person, modelConfig };
   }
 
   function handleSubmit() {
@@ -445,6 +499,16 @@ export function MappingStep({
     [t, modelCategoryHeader],
   );
 
+  const skuFromColumn = useMemo(
+    () =>
+      modelSkuHeader ? (
+        <p className="text-xs text-muted-foreground">
+          {t("mapping.modelConfig.fromColumn", { column: modelSkuHeader })}
+        </p>
+      ) : undefined,
+    [t, modelSkuHeader],
+  );
+
   const categoryPicker = useMemo(
     () => (
       <CategoryCombobox
@@ -479,6 +543,17 @@ export function MappingStep({
         {t("mapping.piiNote")}
       </p>
 
+      {/* #1062: non-blocking — a ragged row never blocks Continue, it's a "check your file" nudge. */}
+      {raggedRowCount > 0 && (
+        <div
+          className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground"
+          role="note"
+        >
+          <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+          <p>{t("mapping.raggedRowsWarning", { count: raggedRowCount })}</p>
+        </div>
+      )}
+
       {/* #1050: bulk shortcut — convert every still-ignored column to a custom field named after
           its header in one click. Only shown while there's something to convert. */}
       {ignoredCount > 0 && (
@@ -501,6 +576,15 @@ export function MappingStep({
           const isCustom = choice.target === CUSTOM;
           const isIgnored = choice.target === IGNORE;
           const isStatus = choice.target === token("asset", "status");
+          // #1060: a date target (purchaseDate / warrantyEnd) gets an in-card format picker + preview.
+          const isDateField = DATE_FIELDS.has(choice.target.split(":")[1] ?? "");
+          const dateChoice = dateFormats[header] ?? "auto";
+          const resolvedDateFormat =
+            dateChoice === "auto" ? (detectedDateFormat[header] ?? DEFAULT_DATE_FORMAT) : dateChoice;
+          const datePreview =
+            isDateField && firstSample !== undefined
+              ? coerceDate(firstSample, resolvedDateFormat)
+              : undefined;
           const selectId = `map-${header}`;
 
           const badge = isIgnored
@@ -650,6 +734,53 @@ export function MappingStep({
                     </p>
                   )}
 
+                  {/* #1060: per-column date format. A date is parsed strictly under ONE format — a
+                      wrong guess drops the value silently — so the operator confirms it here. "Auto"
+                      reflects the detected format; the preview shows how the first sample parses. */}
+                  {isDateField && (
+                    <div className="space-y-2 rounded-lg border bg-card p-3">
+                      <div className="grid gap-1.5 sm:max-w-md">
+                        <Label htmlFor={`${selectId}-date`}>{t("mapping.dateFormat.label")}</Label>
+                        <Select
+                          value={dateChoice}
+                          onValueChange={(value) =>
+                            setDateFormats((prev) => ({
+                              ...prev,
+                              [header]: value as "auto" | DateFormat,
+                            }))
+                          }
+                        >
+                          <SelectTrigger id={`${selectId}-date`} className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">{t("mapping.dateFormat.auto")}</SelectItem>
+                            <SelectItem value="dmy">{t("mapping.dateFormat.dmy")}</SelectItem>
+                            <SelectItem value="mdy">{t("mapping.dateFormat.mdy")}</SelectItem>
+                            <SelectItem value="iso">{t("mapping.dateFormat.iso")}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          {dateChoice === "auto"
+                            ? t("mapping.dateFormat.detected", {
+                                format: resolvedDateFormat.toUpperCase(),
+                              })
+                            : t("mapping.dateFormat.note")}
+                        </p>
+                      </div>
+                      {firstSample !== undefined && (
+                        <p className="text-xs text-muted-foreground">
+                          {t("mapping.dateFormat.preview", {
+                            value: firstSample,
+                            result: datePreview
+                              ? datePreview.slice(0, 10)
+                              : t("mapping.dateFormat.previewFail"),
+                          })}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {/* Status value → enum map (lives inside the status column's card) */}
                   {isStatus && (
                     <div className="space-y-2 rounded-lg border bg-card p-3">
@@ -708,13 +839,13 @@ export function MappingStep({
         })}
       </ul>
 
-      {/* Model brand + category — constant fallback when no column drives them */}
+      {/* Model brand + category + sku — constant fallback when no column drives them (sku #1064) */}
       <div className="space-y-3 rounded-lg border bg-card p-4">
         <div className="space-y-0.5">
           <h3 className="text-sm font-medium">{t("mapping.modelConfig.title")}</h3>
           <p className="text-xs text-muted-foreground">{t("mapping.modelConfig.description")}</p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           {/* Manufacturer is a plain string on AssetModel (no Manufacturer entity) → constant only. */}
           <FixedValueField
             id="model-manufacturer-const"
@@ -745,6 +876,18 @@ export function MappingStep({
             disabled={Boolean(modelCategoryHeader)}
             picker={categoryPicker}
             fromColumn={categoryFromColumn}
+          />
+          {/* sku / model-number (#1064) — plain string on AssetModel, no entity → constant only. */}
+          <FixedValueField
+            id="model-sku-const"
+            label={t("mapping.modelConfig.skuLabel")}
+            value={modelSkuHeader ? "" : skuConst}
+            constantPlaceholder={t("mapping.modelConfig.skuPlaceholder")}
+            mode={false}
+            onModeChange={() => {}}
+            onConstantChange={(value) => dispatchModelConfig({ type: "setSkuConst", value })}
+            disabled={Boolean(modelSkuHeader)}
+            fromColumn={skuFromColumn}
           />
         </div>
       </div>

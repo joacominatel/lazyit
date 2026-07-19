@@ -1,4 +1,5 @@
 import type {
+  AcknowledgeAssignment,
   AssetAssignment,
   CreateAssetAssignment,
   ReleaseAssetAssignment,
@@ -39,6 +40,22 @@ export function updateAssetAssignmentNotes(
 ): Promise<AssetAssignment> {
   return apiFetch<AssetAssignment>(`${BASE}/${id}/notes`, {
     method: "PATCH",
+    body: data,
+  });
+}
+
+/**
+ * Acknowledge receipt of an asset checked out to you (ADR-0089 Part B, #1029). SELF-SERVICE — the API
+ * scopes the transition to the caller's OWN active assignment (the actor comes from the principal,
+ * never the body). Set-once: acknowledging an already-acknowledged / released / not-your assignment
+ * returns 409. Only an optional `note` is carried.
+ */
+export function acknowledgeAssetAssignment(
+  id: string,
+  data: AcknowledgeAssignment = {},
+): Promise<AssetAssignment> {
+  return apiFetch<AssetAssignment>(`${BASE}/${id}/acknowledge`, {
+    method: "POST",
     body: data,
   });
 }

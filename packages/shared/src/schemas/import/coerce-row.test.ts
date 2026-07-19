@@ -107,16 +107,46 @@ describe("coerceRow — FK references", () => {
   });
 });
 
-describe("coerceRow — dates", () => {
-  test("a bare date is re-emitted as an ISO instant", () => {
+describe("coerceRow — dates (#1060 per-column format)", () => {
+  test("no `dates` entry → default 'iso': a bare date is re-emitted as an ISO instant", () => {
     const m = mapping({ columns: [{ field: "name", column: "N" }, { field: "purchaseDate", column: "D" }] });
     const { payload } = coerceRow({ N: "PC", D: "2024-01-02" }, m, desc);
     expect(payload.name).toBe("PC");
-    expect(payload.purchaseDate).toBe(new Date("2024-01-02").toISOString());
+    expect(payload.purchaseDate).toBe("2024-01-02T00:00:00.000Z");
   });
 
-  test("an unparseable date keeps the raw value so the schema raises the field error", () => {
-    const m = mapping({ columns: [{ field: "purchaseDate", column: "D" }] });
+  test("a 'dmy' dates entry parses the LATAM day-first value that used to be blocked (#1060)", () => {
+    const m = mapping({
+      columns: [{ field: "purchaseDate", column: "D" }],
+      dates: [{ field: "purchaseDate", format: "dmy" }],
+    });
+    expect(coerceRow({ D: "13/07/2024" }, m, desc).payload.purchaseDate).toBe("2024-07-13T00:00:00.000Z");
+  });
+
+  test("per-field formats are independent (purchaseDate dmy, warrantyEnd mdy)", () => {
+    const m = mapping({
+      columns: [
+        { field: "purchaseDate", column: "P" },
+        { field: "warrantyEnd", column: "W" },
+      ],
+      dates: [
+        { field: "purchaseDate", format: "dmy" },
+        { field: "warrantyEnd", format: "mdy" },
+      ],
+    });
+    const { payload } = coerceRow({ P: "03/04/2024", W: "03/04/2024" }, m, desc);
+    expect(payload.purchaseDate).toBe("2024-04-03T00:00:00.000Z"); // dmy → 3 Apr
+    expect(payload.warrantyEnd).toBe("2024-03-04T00:00:00.000Z"); // mdy → 4 Mar
+  });
+
+  test("an unparseable-under-format value keeps the raw string so the schema raises the field error", () => {
+    const m = mapping({
+      columns: [{ field: "purchaseDate", column: "D" }],
+      dates: [{ field: "purchaseDate", format: "dmy" }],
+    });
+    // 31 Feb is impossible under dmy → coerceDate returns undefined → the raw value is kept (row error).
+    expect(coerceRow({ D: "31/02/2024" }, m, desc).payload.purchaseDate).toBe("31/02/2024");
+    // an ISO value under a dmy column also won't match → kept raw.
     expect(coerceRow({ D: "not-a-date" }, m, desc).payload.purchaseDate).toBe("not-a-date");
   });
 });

@@ -36,6 +36,8 @@ import {
   BatchIdsSchema,
   BatchResultSchema,
   CreateAssetSchema,
+  ReceiveAssetsResultSchema,
+  ReceiveAssetsSchema,
   UpdateAssetSchema,
   type AssetStatus,
   type AssetWarrantyFilter,
@@ -77,6 +79,9 @@ class ArticleListPageDto extends createZodDto(ArticleListPageSchema) {}
 class BatchIdsDto extends createZodDto(BatchIdsSchema) {}
 class BatchAssetStatusDto extends createZodDto(BatchAssetStatusSchema) {}
 class BatchResultDto extends createZodDto(BatchResultSchema) {}
+// Bulk receiving (ADR-0089 Part A, #1029): the request payload + the partial-success result envelope.
+class ReceiveAssetsDto extends createZodDto(ReceiveAssetsSchema) {}
+class ReceiveAssetsResultDto extends createZodDto(ReceiveAssetsResultSchema) {}
 
 @ApiTags('assets')
 @Controller('assets')
@@ -625,6 +630,25 @@ export class AssetsController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.assets.batchSetStatus(dto.ids, dto.status, principal);
+  }
+
+  // Bulk receive (ADR-0089 Part A, #1029) — a STATIC `batch/*` route so it never collides with the
+  // `:id` routes below. UNLIKE the ADMIN-only delete/restore/status cluster above, this is
+  // `asset:write` (creating assets IS that verb — ADMIN or MEMBER, no new permission). It LOOPS the
+  // single-asset create (each unit its own tx + independent tag-counter commit, ADR-0063), so partial
+  // success is expected — `failed[]` reports the per-index failures. 201 when ≥1 (or 0) created.
+  @Post('batch/receive')
+  @RequirePermission('asset:write')
+  @ApiOperation({
+    summary:
+      'Bulk receive: mint N assets from one model in a single action; returns { created, failed[] } (partial success by design) (ADMIN or MEMBER)',
+  })
+  @ApiCreatedResponse({ type: ReceiveAssetsResultDto })
+  receiveBatch(
+    @Body() dto: ReceiveAssetsDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.assets.receiveBatch(dto, principal);
   }
 
   @Patch(':id')

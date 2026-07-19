@@ -6,6 +6,7 @@ import {
   BookOpenIcon,
   CheckIcon,
   CubeIcon,
+  ExclamationTriangleIcon,
   KeyIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -68,6 +69,10 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { statusTone } from "@/lib/infra/canvas";
 import {
+  AgentInventoryPanel,
+  getAgentInventory,
+} from "../../[id]/_components/agent-inventory-panel";
+import {
   AgentBadge,
   AgentFreshness,
   AgentOutdatedBadge,
@@ -91,6 +96,7 @@ const KIND_OPTIONS = InfraNodeKindSchema.options;
 export function InfraNodePanel({
   nodeId,
   onClose,
+  onSelectNode,
   impactOn,
   onToggleImpact,
   impact,
@@ -100,6 +106,8 @@ export function InfraNodePanel({
   nodeId: string | null;
   /** Called to clear the selection (Sheet dismissed). */
   onClose: () => void;
+  /** Re-select another node in place (used by the duplicate-IP peers to jump across — #847). */
+  onSelectNode: (nodeId: string) => void;
   /** Whether blast-radius mode is on for this node (ADR-0070 §7, issue #755). */
   impactOn: boolean;
   /** Toggle blast-radius mode for the selected node. */
@@ -157,6 +165,7 @@ export function InfraNodePanel({
             node={node}
             canManage={canManage}
             onClose={onClose}
+            onSelectNode={onSelectNode}
             impactOn={impactOn}
             onToggleImpact={onToggleImpact}
             impact={impact}
@@ -173,6 +182,7 @@ function PanelBody({
   node,
   canManage,
   onClose,
+  onSelectNode,
   impactOn,
   onToggleImpact,
   impact,
@@ -181,6 +191,7 @@ function PanelBody({
   node: InfraNodeDetail;
   canManage: boolean;
   onClose: () => void;
+  onSelectNode: (nodeId: string) => void;
   impactOn: boolean;
   onToggleImpact: () => void;
   impact: InfraImpactResponse | undefined;
@@ -293,6 +304,16 @@ function PanelBody({
           </dl>
         )}
 
+        {/* Soft duplicate-IP warning (ADR-0090, #847) — a NON-BLOCKING heads-up when other live nodes
+            carry this node's exact IP. Display-only: the IP is still valid + saved (no DB uniqueness);
+            this just names the peers so an operator can reconcile. Shown to every reader (a fact). */}
+        {(node.ipConflict?.length ?? 0) > 0 ? (
+          <IpConflictNotice
+            peers={node.ipConflict ?? []}
+            onSelectNode={onSelectNode}
+          />
+        ) : null}
+
         {/* Impact / blast radius (ADR-0070 §7, issue #755) — the query that justifies a graph. The
             toggle drives the canvas highlight (state lives in diagram-view); this surfaces the count
             + list. Shown to every reader (the API gates on infra:read). */}
@@ -322,6 +343,13 @@ function PanelBody({
               {t("panel.statusDescription")}
             </p>
           </Section>
+        ) : null}
+
+        {/* Reported facts (issue #1081) — the agent's host inventory (cpu/ram/os/disks/serial +
+            software), read-only. Only for AGENT nodes; reuses the Assets detail projection so there's
+            one renderer for agent inventory across the app. */}
+        {node.source === "AGENT" ? (
+          <ReportedFactsSection specs={node.specs} />
         ) : null}
 
         <Separator />
@@ -544,6 +572,11 @@ function DetailsSection({ node }: { node: InfraNodeDetail }) {
  * Inline IP field (issue #764): plain text until edited, commits on blur/Enter, cancels on Esc.
  * An empty value clears the IP (`ipAddress: null`, which the shared schema allows). Mirrors the
  * rename pattern — minimal, non-animated, one patch per save.
+ *
+ * Manual override (issue #1081): saving an IP here marks the node's `ipAddressSource=MANUAL` so the
+ * next agent report never clobbers the human value. That stamp is derived SERVER-SIDE from the
+ * presence of `ipAddress` in the patch (never a client-settable field), so this component only sends
+ * `{ ipAddress }` — no extra payload — and the provenance marker stays trustworthy.
  */
 function InlineIpField({
   nodeId,
@@ -597,6 +630,60 @@ function InlineIpField({
           }
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * Non-blocking duplicate-IP notice (ADR-0090, issue #847). Renders only when the backend's `ipConflict`
+ * read field reports other LIVE nodes carrying this node's exact `ipAddress`. A soft signal, never a
+ * block — the IP is a valid, saved value (there is no DB uniqueness) — so it wears the `warning` tone
+ * (not `destructive`) and reuses the panel's own list idiom: each peer is a button that re-selects that
+ * node in place (`onSelectNode`) so an operator can jump over and reconcile, with kind + status in a
+ * tooltip. Parent gates on the count, so `peers` here is always non-empty.
+ */
+function IpConflictNotice({
+  peers,
+  onSelectNode,
+}: {
+  peers: InfraNodeChild[];
+  onSelectNode: (nodeId: string) => void;
+}) {
+  const t = useTranslations("infra");
+  return (
+    <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+      <div className="flex items-start gap-2 text-sm font-medium text-warning-text">
+        <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <span>{t("panel.ipConflictWarning", { count: peers.length })}</span>
+      </div>
+      <ul className="space-y-1.5 text-sm">
+        {peers.map((peer) => (
+          <li key={peer.id}>
+            <button
+              type="button"
+              onClick={() => onSelectNode(peer.id)}
+              className="flex w-full items-center gap-2 rounded-sm text-left transition-colors duration-150 ease-[var(--ease-out-quad)] hover:text-foreground/80 motion-reduce:transition-none"
+              title={`${t(`kind.${peer.kind}`)} · ${t(`status.${peer.status}`)}`}
+            >
+              <CubeIcon
+                className="size-4 shrink-0 text-muted-foreground"
+                aria-hidden
+              />
+              <span className="truncate font-medium">{peer.label}</span>
+              <span className="text-xs text-muted-foreground">
+                {t(`kind.${peer.kind}`)}
+              </span>
+              <StatusBadge
+                tone={statusTone(peer.status)}
+                dot
+                className="ml-auto"
+              >
+                {t(`status.${peer.status}`)}
+              </StatusBadge>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -1141,6 +1228,28 @@ function ChildrenSection({ nodes }: { nodes: InfraNodeChild[] }) {
           ))}
         </ul>
       )}
+    </Section>
+  );
+}
+
+/**
+ * Reported facts (issue #1081) — the agent's host inventory carried in `node.specs`, rendered
+ * read-only. Reuses the Assets detail projection ({@link getAgentInventory} + {@link AgentInventoryPanel})
+ * so there is ONE renderer for agent inventory across the app (no duplicated cpu/ram/os/disks/serial
+ * layout). Renders nothing when the specs don't parse as agent inventory (a manual/graph-only node
+ * that happens to be flagged AGENT but has no host block).
+ */
+function ReportedFactsSection({
+  specs,
+}: {
+  specs: Record<string, unknown> | null;
+}) {
+  const t = useTranslations("infra");
+  const inventory = getAgentInventory(specs);
+  if (!inventory) return null;
+  return (
+    <Section title={t("panel.reportedFactsTitle")}>
+      <AgentInventoryPanel inventory={inventory} />
     </Section>
   );
 }

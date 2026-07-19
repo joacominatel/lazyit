@@ -92,14 +92,24 @@ vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés do
   cambiar su tipo antes, y ofrece un interruptor **Registrar como activo de inventario** (**activado**
   por defecto): si lo dejás activado, lazyit también crea un **activo** registrado con los datos
   reportados del host, así el servidor puede tener responsable, artículos de la base de conocimiento y
-  referencias a secretos como cualquier otro activo. Desactivalo para dejar el nodo solo en el grafo.
+  referencias a secretos como cualquier otro activo. Si el host reportó un **número de serie** de
+  hardware real, ese pasa a ser el serie del activo automáticamente (un texto de relleno como
+  *"To be filled by O.E.M."*, o un serie que ya usa otro activo, se descarta). Desactivá el
+  interruptor para dejar el nodo solo en el grafo.
 - **Descartar** — elimina la propuesta. Es un borrado lógico (igual que quitar cualquier nodo del
   mapa): no se destruye nada y se puede restaurar más adelante.
 
+Un host descubierto también **completa su propia dirección IP** apenas reporta: no hace falta que la
+escribas. En cada reporte posterior la IP se actualiza al valor actual, **salvo que la hayas editado a
+mano** en el nodo: una IP manual se considera tuya y el agente nunca la sobrescribe.
+
 Una vez confirmado, un host sigue recibiendo datos frescos del agente, pero tus ediciones — su
-nombre, tipo, posición y conexiones — son tuyas y el agente nunca las sobrescribe. Una vez confirmado
-un host reportado, su inventario — sistema operativo, CPU, discos, interfaces de red y software
-instalado — se muestra como un panel estructurado en el activo correspondiente.
+nombre, tipo, posición, IP y conexiones — son tuyas y el agente nunca las sobrescribe. El inventario
+reportado — sistema operativo, CPU, memoria, discos, interfaces de red, número de serie y software
+instalado — se muestra como un panel de solo lectura **Datos reportados** en el propio nodo (abrí un
+nodo en el diagrama o en la lista de Servidores), y los mismos datos aparecen en el activo
+correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin tocar nada que sea tuyo
+(el nombre, el número de serie y el modelo del activo nunca cambian por un reporte).
 
 ## Qué recopila el agente
 

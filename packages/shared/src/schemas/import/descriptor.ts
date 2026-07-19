@@ -141,9 +141,9 @@ export const IMPORT_DESCRIPTORS: Record<ImportEntity, ImportDescriptor<unknown>>
  * UI target catalog for the assisted (column-centric) mapping step (ADR-0069 REDESIGN §5.5). The
  * operator maps each CSV column to one of these targets (or to a custom specs field, or ignores it).
  * The `asset` group IS the typed descriptor's `mappableFields` — so it cannot drift from the create
- * schema. `model` exposes the brand + category for newly-created `AssetModel`s (NOT `CreateAsset` keys —
- * resolved through the model at commit, see `ModelConfigSchema`), which is exactly why they live here as
- * plain UI targets and NOT in `assetImportDescriptor.mappableFields` (that would break the
+ * schema. `model` exposes the brand + category + sku (#1064) for newly-created `AssetModel`s (NOT
+ * `CreateAsset` keys — resolved through the model at commit, see `ModelConfigSchema`), which is exactly
+ * why they live here as plain UI targets and NOT in `assetImportDescriptor.mappableFields` (that would break the
  * `MappableField<keyof TCreate>` schema↔descriptor invariant). The `person` group (Etapa 2) is the
  * directory-person sub-fields the operator maps for the asset's "assigned to" — also plain UI targets, NOT
  * `CreateAsset` keys: the commit routes them into a directory `User` (`CreateDirectoryPersonSchema`), where
@@ -155,6 +155,8 @@ export const IMPORT_UI_TARGETS = {
   model: [
     { field: "manufacturer", i18nKey: "import.model.field.manufacturer" },
     { field: "category", i18nKey: "import.model.field.category" },
+    // sku / model-number (#1064) — strengthens the descriptor's `matchBy:['sku','name']` model dedup.
+    { field: "sku", i18nKey: "import.model.field.sku" },
   ],
   person: [
     { field: "name", i18nKey: "import.person.field.name" },
@@ -206,9 +208,10 @@ export const HEADER_ALIASES: Record<string, readonly string[]> = {
     "EOL Rate",
   ],
   "asset:salvageValue": ["Valor residual", "Salvage Value", "Residual Value", "Valor de rescate"],
-  // Model (brand/category → resolved through the created AssetModel)
+  // Model (brand/category/sku → resolved through the created AssetModel)
   "model:manufacturer": ["Fabricante", "Manufacturer", "Marca"],
   "model:category": ["Categoría", "Category"],
+  "model:sku": ["Model No.", "Model Number", "Número de modelo"],
   // Directory person (the asset's "assigned to")
   "person:name": ["Asignado a", "Assigned To", "Asignado"],
   "person:email": ["Email", "Correo", "Correo electrónico", "E-mail"],

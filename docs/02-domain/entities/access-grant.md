@@ -38,11 +38,13 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
   partial unique index — access has no such rule ([[0023-access-management-design]]).
 - **`accessLevel` is free-form**, app-defined (`admin`, `developer`, `viewer`, …). lazyit stores it
   verbatim and never interprets it; each [[application]] owns its vocabulary.
-- **`expiresAt` is informative only** — no scheduler auto-revokes at expiry. An expired-but-not-
-  revoked grant is still *active*; the list endpoints can **hide** it with `includeExpired=false`,
-  but nothing in the database changes ([[0023-access-management-design]]). On **create**, when both
-  are supplied, `expiresAt` must be **on or after** `grantedAt` (a grant can't expire before it
-  starts) — a `@lazyit/shared` cross-field refine returns `400` otherwise (round-2 correctness).
+- **`expiresAt` drives auto-revoke** — a periodic sweeper (`AccessGrantExpirySweeper`) revokes a grant
+  once it passes `expiresAt`, through the normal `revoke()` path so the deprovision workflow + system
+  attribution fire ([[0023-access-management-design]] amended). A proactive **`access_grant_expiring`**
+  notification (bell + email, admin broadcast) warns ~14 days before, so the team can re-grant before a
+  contractor/temp silently loses access (#1070). On **create**, when both are supplied, `expiresAt` must
+  be **on or after** `grantedAt` (a grant can't expire before it starts) — a `@lazyit/shared` cross-field
+  refine returns `400` otherwise (round-2 correctness).
 - **Immutable identity:** `userId`, `applicationId` and `grantedAt` are set once. Only `notes`,
   `revokedAt` and `expiresAt` are mutable.
 - **Create-time integrity:** `userId` and `applicationId` must reference **live** (non-soft-deleted)
@@ -142,8 +144,8 @@ Plus the natural sub-resource endpoints on the related entities:
 
 ## Not yet implemented (deferred)
 
-- **Auto-revoke on `expiresAt`** via a scheduler/worker; a soft-delete-time guard on apps/users with
-  active grants; **retrofitting [[asset-assignment]]** to the same `X-User-Id` actor pattern.
+- A soft-delete-time guard on apps/users with active grants; **retrofitting [[asset-assignment]]** to the
+  same `X-User-Id` actor pattern. (Auto-revoke on `expiresAt` is now implemented — see `expiresAt` above.)
 
 Related: [[user]] · [[application]] · [[application-category]] · [[access-request]] ·
 [[asset-assignment]] · [[service-account]] · [[shared-package]] · [[0023-access-management-design]] ·

@@ -48,6 +48,22 @@
     "update_available": {
       "label": "Update available",
       "description": "A newer lazyit release than the one you're running is available."
+    },
+    "access_request_decided": {
+      "label": "Access request decided",
+      "description": "One of your access requests was approved or denied."
+    },
+    "warranty_expiring": {
+      "label": "Warranty expiring",
+      "description": "An asset's warranty is approaching its end date."
+    },
+    "access_grant_expiring": {
+      "label": "Access expiring",
+      "description": "An access grant is about to expire and be auto-revoked."
+    },
+    "asset_assignment_acknowledged": {
+      "label": "Receipt acknowledged",
+      "description": "Someone confirmed receipt of an asset you assigned to them."
     }
   }
 }

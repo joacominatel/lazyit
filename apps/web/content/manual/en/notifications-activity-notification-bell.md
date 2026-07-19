@@ -17,11 +17,12 @@ The bell shows for **every signed-in person**, but what each person sees is scop
 
 - **Broadcast notifications** — the estate-wide operational nudges (a critical-app grant, an admin
   elevation, low stock, a workflow that needs a human or failed, a sensitive permission grant, an
-  offline agent) are visible only to people whose role holds the **notification** permission. By
-  default that is **administrators only**.
+  offline agent, an expiring asset warranty or access grant) are visible only to people whose role
+  holds the **notification** permission. By default that is **administrators only**.
 - **Targeted notifications** — a notification addressed to one specific person lands in **their own**
-  bell, even if they are not an administrator and hold no notification permission. Today the only
-  targeted notification is the **vault-setup nudge** (see below).
+  bell, even if they are not an administrator and hold no notification permission. These include the
+  **vault-setup nudge** and the **access-request decision** that tells a requester their request was
+  approved or denied (see below).
 
 So a non-administrator with nothing addressed to them simply sees a clean bell with no badge; an
 administrator sees the broadcast feed plus anything targeted to them.
@@ -40,6 +41,10 @@ The set of triggers is fixed and deliberately small — the bell is a curated nu
 | **Sensitive permission granted** | A role-permission edit gave the Member or Viewer role a high-risk capability — instance settings, user management, access-grant control, or any delete permission. Links to the role-permission editor. |
 | **Agent offline** | A reporting agent stopped sending reports and its node was flipped offline. One notification per outage — not once per check. Links to the topology map. |
 | **Vault setup** | (Targeted, one-time) A person who can read secrets but has never set a vault passphrase is nudged at sign-in to set one up. |
+| **Access request decided** | (Targeted) Your own access request was approved or denied. Lands in your bell — and inbox, unless you opt out — so you don't have to poll your request list. Links to the application. |
+| **Warranty expiring** | An asset's warranty is within its look-ahead window (the last 90 days before it ends) and has not yet lapsed. One heads-up per asset, so you can renew or replace before the deadline instead of finding out after. Links to the asset. |
+| **Access expiring** | An active access grant is within two weeks of its expiry date and will be auto-revoked when it passes. One heads-up per grant so you can re-grant before a contractor or temp silently loses access. Links to the application. |
+| **Receipt acknowledged** | (Targeted) Someone confirmed receipt of an asset you assigned to them. Lands in your bell — and inbox, unless you opt out — so you know the handover is complete without asking. Links to the asset. |
 
 Notifications are emitted **after** the originating action completes and are **best-effort**: a
 notification that fails to send never blocks or undoes the underlying change. Repeated triggers for

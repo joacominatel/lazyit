@@ -37,7 +37,7 @@ Consulta [Asignaciones e historial](/help/assets-assignments-history).
 El conjunto opcional de pasos, configurado por aplicación, que lazyit puede ejecutar **en tu nombre**
 cuando se concede o se revoca un acceso — por ejemplo, abrir un ticket en otro sistema o llamar a una
 API externa. Una aplicación sin automatización funciona con normalidad: conceder acceso simplemente
-registra una [concesión de acceso](/help/applications-access-access-grants). Consulta
+registra una [concesión de acceso](/help/applications-access-grants). Consulta
 [Automatización de accesos](/help/access-automation-concepts).
 
 ## Bóveda
@@ -65,7 +65,7 @@ Consulta [Contraseñas y claves de recuperación](/help/secret-manager-passwords
 El registro de que un **usuario tiene acceso a una aplicación**, con la fecha en que se concedió y
 (cuando termina) la fecha en que se revocó. Las concesiones se conservan en el tiempo en vez de
 sobrescribirse, así que siempre tienes una respuesta a "quién puede acceder a qué — y quién podía el
-mes pasado". Consulta [Concesiones de acceso](/help/applications-access-access-grants).
+mes pasado". Consulta [Concesiones de acceso](/help/applications-access-grants).
 
 ## Consumible
 
@@ -155,7 +155,7 @@ espera. Consulta [Campana de notificaciones](/help/notifications-activity-notifi
 Una sola capacidad escrita como `área:acción` — por ejemplo, `asset:write` (crear o editar activos) o
 `consumable:read` (ver consumibles). Un rol tiene un conjunto de permisos; lazyit los comprueba cada
 vez que actúas. La lista completa de permisos es fija y se publica con el producto. Consulta
-[Permisos](/help/users-permissions-permissions).
+[Permisos](/help/permissions).
 
 ## Rol
 
@@ -167,7 +167,7 @@ el conjunto de permisos detrás de Miembro y Lector. Consulta [Roles](/help/user
 
 Una petición pendiente, sujeta a aprobación, para acceder a una aplicación. Una solicitud se convierte
 en una **concesión de acceso** una vez aprobada. Consulta [Solicitudes de
-acceso](/help/applications-access-access-requests).
+acceso](/help/applications-access-requests).
 
 ## Tarea manual
 

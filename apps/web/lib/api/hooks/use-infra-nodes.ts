@@ -46,6 +46,14 @@ import {
  * prefix-matches all `["infra", …]` keys — so a create/edit/delete/edge write refreshes the canvas
  * node list, the open panel's detail, and its edge lists in one call (TanStack Query v5 prefix match).
  */
+/**
+ * Modest background poll (issue #1081) for the live node surfaces — the pending tray, the Servers
+ * table and the topology canvas — so a discovered host's `lastReportedAt`/status/IP refresh without a
+ * manual reload. 40s is far coarser than the agent report cadence (a liveness bit, not a metric) and
+ * separate from the wizard's transient 5s onboarding poll, which passes its own interval.
+ */
+export const INFRA_LIVE_POLL_MS = 40_000;
+
 export const infraKeys = {
   all: ["infra"] as const,
   nodes: (filters: InfraNodeFilters) =>

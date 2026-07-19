@@ -35,6 +35,12 @@ export const ImportDetectedShapeSchema = z.object({
    * they live in the same owner-scoped `ImportSession.detected` and never enter logs or the run ledger.
    */
   samples: z.record(z.string(), z.array(z.string())).default({}),
+  /**
+   * How many data rows had an unexpected cell count vs. the header width (#1062) — a non-blocking
+   * signal for the map step that a delimiter/quoting shift may have misaligned some rows' fields.
+   * `.nullish()`: existing sessions parsed before this field landed have no `raggedRowCount` key.
+   */
+  raggedRowCount: z.number().int().nonnegative().nullish(),
 });
 export type ImportDetectedShape = z.infer<typeof ImportDetectedShapeSchema>;
 

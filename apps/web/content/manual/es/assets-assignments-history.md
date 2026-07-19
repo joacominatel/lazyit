@@ -42,6 +42,27 @@ y **asigna** al nuevo.
 > Un responsable que dejó la empresa sigue figurando como responsable activo hasta que liberes
 > explícitamente la asignación — lazyit nunca descarta registros de pertenencia en silencio.
 
+## Confirmar la recepción
+
+Asignar un activo registra **quién es responsable** de él, pero no prueba que la persona realmente lo
+recibió. **Confirmar recepción** cierra esa brecha: el propio responsable confirma que tomó posesión.
+
+- **Autoservicio.** Solo el responsable puede confirmar **su propia** asignación activa. Abre el
+  activo, ubícate en **Responsables** y elige **Confirmar recepción**. Puedes agregar una nota opcional
+  (por ejemplo "recibido en buen estado"). Nadie puede confirmar en nombre de otra persona.
+- **Una fecha confirmada.** Una vez confirmada, la línea del responsable muestra **Confirmado
+  &lt;fecha&gt;** y el evento se escribe en el registro de actividad del activo. Hasta entonces dice
+  **Pendiente de confirmación**, para que un operador vea de un vistazo qué entregas siguen sin
+  confirmar.
+- **Se notifica a quien asignó.** Cuando confirmas, quien te asignó el activo recibe una notificación
+  (en su campana y por correo, salvo que lo haya desactivado) — una confirmación silenciosa y
+  automática de que la entrega se completó.
+- **Se hace una sola vez.** La confirmación es unidireccional: no se puede deshacer ni repetir, y una
+  asignación ya confirmada o liberada no se puede volver a confirmar.
+
+Es opcional — una asignación es válida se confirme o no — pero en entregas de activos donde importa la
+responsabilidad, te da un registro claro de que la persona confirmó la recepción.
+
 ## Acciones rápidas desde la lista de activos
 
 No hace falta abrir un activo para gestionar su responsable. Cada fila de la lista de **Activos** trae
@@ -70,6 +91,7 @@ Los eventos registrados incluyen:
 - Cambios de **Ubicación** y **Modelo**.
 - Cambios de **Specs** — ediciones de los campos personalizados.
 - **Asignado** y **Liberado** — cambios de pertenencia, nombrando al responsable involucrado.
+- **Confirmado** — un responsable confirmó la recepción del activo entregado a él.
 
 Cada entrada registra **qué cambió, cuándo y quién lo hizo** (o "Sistema" cuando lazyit actuó por su
 cuenta). Junto con el borrado lógico en todo el sistema, esto te da el rastro de auditoría de toda la

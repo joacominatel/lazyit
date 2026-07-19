@@ -3,7 +3,7 @@ title: Application
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-07-18
 ---
 
 # Application
@@ -32,6 +32,13 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
   and `http(s)` are accepted, so the value can't become a link-href XSS sink (SEC-008).
 - **`isCritical`** (default `false`) flags an application whose access is especially sensitive
   (production infra, finance). Informational for now; the UI can highlight it.
+- **License / seat tracking** ([[0088-application-license-seat-tracking]], #949) — all optional / `null`
+  = "untracked". `seatsPurchased` = paid seats; `costPerSeat` = price per seat in **integer minor units**
+  (cents), mirroring `Asset.purchaseCost` (#954); `renewalDate` = when the license next renews. **`seatsUsed`
+  is DERIVED, never stored:** `COUNT(DISTINCT userId)` over active ([[access-grant]]s with `revokedAt IS
+  NULL`) — DISTINCT user because grants are multi-grant (a raw count over-reports the license). The web
+  flags **over-allocation** (`seatsUsed > seatsPurchased`) as an advisory warning; lazyit never blocks a
+  grant on seat count.
 - **Category is optional and `SetNull`** — an application with no category is valid, and deleting a
   category never deletes its applications.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
@@ -76,6 +83,10 @@ Prisma model `Application` → table `applications`. Validation schemas (`Applic
 | `isCritical` | `boolean` | `@default(false)`. |
 | `metadata` | `jsonb?` | free-form extras; any JSON object for now (see debt note). |
 | `notes` | `string?` | optional free text. |
+| `seatsPurchased` | `int?` | license seats paid for; `null` = untracked/unlimited (#949, [[0088-application-license-seat-tracking]]). |
+| `costPerSeat` | `int?` | price **per seat** in integer **minor units** (cents); reuses the #954 money convention. |
+| `renewalDate` | `datetime?` | when the license next renews (informational; the proactive nudge #1070 is a follow-up). |
+| `seatsUsed` | `int` (derived) | **not a column** — `COUNT(DISTINCT userId)` over active grants, computed per-request; read-only (create/update reject it). |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete. |
@@ -106,4 +117,5 @@ Indexes: `@@index([categoryId])`.
 Related: [[application-category]] · [[access-grant]] · [[access-request]] · [[user]] ·
 [[shared-package]] · [[0023-access-management-design]] · [[0016-auth-strategy-deferred]] ·
 [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] ·
-[[0018-api-documentation-swagger]]
+[[0018-api-documentation-swagger]] · [[0088-application-license-seat-tracking]] ·
+[[0036-int4-bounded-integers]]

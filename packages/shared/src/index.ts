@@ -34,6 +34,7 @@ export * from "./schemas/asset-history";
 export * from "./schemas/asset-list";
 export * from "./schemas/asset-model";
 export * from "./schemas/asset-model-list";
+export * from "./schemas/asset-receive";
 export * from "./schemas/asset-specs-dictionary";
 export * from "./schemas/asset-tag-backfill";
 export * from "./schemas/asset-tag-scheme";
@@ -50,6 +51,8 @@ export * from "./schemas/consumable";
 export * from "./schemas/consumable-category";
 export * from "./schemas/consumable-list";
 export * from "./schemas/consumable-movement";
+// On-prem AD/LDAP directory-source config + sync-result wire shapes (issue #839, ADR-0091).
+export * from "./schemas/directory-connection";
 export * from "./schemas/dashboard";
 export * from "./schemas/folder";
 export * from "./schemas/import";

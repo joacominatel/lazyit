@@ -548,6 +548,14 @@ export class UsersService {
       // payload (role-escalation closed) — CreateDirectoryPersonSchema doesn't even carry `role`.
       skipIdpWriteBack?: boolean;
       directoryAttrs?: Prisma.InputJsonValue;
+      // ADR-0091 (#839): AD/LDAP directory-source provenance stamped on the NEW directory person. Only the
+      // read-only directory reconcile (a trusted server caller) passes these; the public Users controller
+      // never does. `directorySource` discriminates the origin ("ad"); `directorySourceId` is the AD
+      // objectGUID canonical string — the immutable natural key the reconcile upserts on (NEVER externalId,
+      // INV-2). Both are additive to the existing skipIdpWriteBack branch and change none of its invariants
+      // (role stays VIEWER, externalId stays null, no login).
+      directorySource?: string;
+      directorySourceId?: string;
     },
   ): Promise<SerializedUser> {
     // RBAC default (ADR-0040, flipped to VIEWER by ADR-0043): an omitted role lands the least-
@@ -575,6 +583,12 @@ export class UsersService {
         data: {
           ...createData,
           directoryOnly: true,
+          ...(opts.directorySource !== undefined
+            ? { directorySource: opts.directorySource }
+            : {}),
+          ...(opts.directorySourceId !== undefined
+            ? { directorySourceId: opts.directorySourceId }
+            : {}),
           ...(opts.directoryAttrs !== undefined
             ? { directoryAttrs: opts.directoryAttrs }
             : {}),
@@ -795,6 +809,75 @@ export class UsersService {
     });
     this.search.upsert('users', projectUser(linked));
     return this.serializeUser(linked);
+  }
+
+  /**
+   * ONBOARD a directory-only person in LOCAL auth mode (AUTH_MODE=local, ADR-0086 §5 amendment, issue
+   * #1072) — the local-mode counterpart to {@link provisionAccount}. After a Snipe-IT / LAN mass import
+   * every person lands `directoryOnly=true`, password-less, and in local mode ALL three self-service
+   * onboarding paths are closed by construction (login rejects directoryOnly; requestPasswordReset 422s a
+   * directory person; provisionAccount hard-gates on `supportsManagement=false`). So an admin explicitly
+   * mints a ONE-TIME temporary password here, using the EXACT primitives the local admin-reset uses:
+   * `generateTempPassword()` + `credentialFields({ mustChangePassword: true })` (ADR-0064 semantics).
+   *
+   * In ONE transaction we set the credential AND flip `directoryOnly=false` (the row becomes a login
+   * account — login now accepts it), then append the audited history row. The temp password is RETURNED
+   * ONCE (never persisted in plaintext, never shown again — same `AdminPasswordResetResult` shape the
+   * admin-reset returns). SECURITY: no self-service (admin-action-gated), no role widening (the import
+   * forced VIEWER and onboarding keeps the existing role — never trusts a payload, carries none), and
+   * `mustChangePassword` narrows the hand-off window (forced change at first login).
+   *
+   * Guards: 404 if missing/soft-deleted (findOne); 400 in OIDC/BYOI (no local credential to mint — use
+   * {@link provisionAccount} there); 400 if the target is NOT a directory person (a real account already
+   * owns/manages a credential — use requestPasswordReset instead). No `sessionEpoch` bump: a directory
+   * person holds no session to revoke (unlike the admin-reset, which kills a live user's sessions).
+   */
+  async provisionLocalAccount(
+    id: string,
+    actorId?: string,
+  ): Promise<AdminPasswordResetResult> {
+    const target = await this.findOne(id); // 404 if missing or soft-deleted
+    // Local mode ONLY: there is no IdP here, so lazyit owns the credential. In OIDC/BYOI there is no local
+    // credential to mint — provisionAccount (bundled Zitadel) / the foreign IdP owns onboarding instead.
+    if (!this.isLocalMode()) {
+      throw new BadRequestException(
+        'Local onboarding is only available in local authentication mode.',
+      );
+    }
+    // Only a directory-only person is onboarded here. A real account already has (or manages) a
+    // credential — reset it with requestPasswordReset instead of minting a second one.
+    if (!target.directoryOnly) {
+      throw new BadRequestException(
+        'This user already has an account; only a directory person can be onboarded.',
+      );
+    }
+
+    // Mint the SAME one-time temp credential the local admin-reset uses (ADR-0064): a strong random
+    // password hashed to `passwordHash` with `mustChangePassword=true` (forced change at first login).
+    const temporaryPassword = this.provisioning.generateTempPassword();
+    const credential = await this.provisioning.credentialFields(
+      temporaryPassword,
+      { mustChangePassword: true },
+    );
+    // ONE tx: set the credential AND flip directoryOnly=false (the row transitions to a login account),
+    // then append the audited history row atomically. The role is passed through UNCHANGED — onboarding
+    // never widens privilege (the import forced VIEWER; we never touch `role` here). Reuse UPDATED (no
+    // new enum/migration) with an action payload so the audit trail names the transition unambiguously.
+    const onboarded = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id },
+        data: { ...credential, directoryOnly: false },
+      });
+      await this.recordHistory(tx, id, 'UPDATED', actorId, {
+        action: 'provisionLocalAccount',
+        directoryOnly: false,
+      });
+      return updated;
+    });
+    this.auditWriteBack('provisionLocalAccount', actorId, id, { local: true });
+    this.search.upsert('users', projectUser(onboarded));
+    // The plaintext is returned to the admin to hand off ONCE — never stored in plaintext or shown again.
+    return { temporaryPassword };
   }
 
   /**
