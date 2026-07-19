@@ -11,6 +11,10 @@ import { int4 } from "./primitives";
 /** The discrete asset events recorded in AssetHistory. */
 export const AssetHistoryEventTypeSchema = z.enum([
   "CREATED",
+  // UPDATED — a whole-asset update with no per-dimension delta to record; today it is the "updated via
+  // re-import" marker the migrator stamps so a no-field-change re-import still lands one audit row (#1061).
+  // Mirrors UserHistoryEventType.UPDATED.
+  "UPDATED",
   "STATUS_CHANGED",
   "ASSIGNED",
   "RELEASED",

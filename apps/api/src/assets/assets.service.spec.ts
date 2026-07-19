@@ -1529,6 +1529,68 @@ describe('AssetsService', () => {
     expect(history.record).not.toHaveBeenCalled();
   });
 
+  // --- update: re-import provenance + UPDATED marker (#1061) ---------------
+  it('stamps import provenance onto each change event when updatedPayload is set', async () => {
+    asset.findFirst.mockResolvedValue(beforeRow({ status: 'OPERATIONAL' }));
+    tx.update.mockResolvedValue(beforeRow({ status: 'RETIRED' }));
+
+    await service.update('a1', { status: 'RETIRED' }, undefined, {
+      updatedPayload: { source: 'import', sessionId: 's1', rowIndex: 4 },
+    });
+
+    // The STATUS_CHANGED event carries its own { from, to } PLUS the stamped import provenance.
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      {
+        assetId: 'a1',
+        eventType: 'STATUS_CHANGED',
+        payload: {
+          from: 'OPERATIONAL',
+          to: 'RETIRED',
+          source: 'import',
+          sessionId: 's1',
+          rowIndex: 4,
+        },
+        actor: {},
+      },
+    );
+  });
+
+  it('writes exactly one UPDATED marker when a re-import changes no tracked dimension', async () => {
+    // notes is not a tracked dimension → zero change events → the marker guarantees one audit row so
+    // "updated via re-import" always lands (#1061).
+    asset.findFirst.mockResolvedValue(beforeRow());
+    tx.update.mockResolvedValue(beforeRow({ notes: 'touch' }));
+
+    await service.update('a1', { notes: 'touch' }, undefined, {
+      updatedPayload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+    });
+
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      {
+        assetId: 'a1',
+        eventType: 'UPDATED',
+        payload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+        actor: {},
+      },
+    );
+  });
+
+  it('suppressSearch skips the per-row search upsert (the bulk import reconciles once)', async () => {
+    asset.findFirst.mockResolvedValue(beforeRow());
+    tx.update.mockResolvedValue(beforeRow({ status: 'RETIRED' }));
+
+    await service.update('a1', { status: 'RETIRED' }, undefined, {
+      updatedPayload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+      suppressSearch: true,
+    });
+
+    expect(search.upsert).not.toHaveBeenCalled();
+  });
+
   it('treats an unchanged status (same value sent) as no STATUS_CHANGED event', async () => {
     asset.findFirst.mockResolvedValue(beforeRow({ status: 'OPERATIONAL' }));
     tx.update.mockResolvedValue(beforeRow({ status: 'OPERATIONAL' }));

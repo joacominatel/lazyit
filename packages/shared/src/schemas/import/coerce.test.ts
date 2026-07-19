@@ -7,6 +7,7 @@ import {
   coerceInteger,
   coerceMoneyMinorUnits,
   coerceNumber,
+  detectDateFormat,
   normalizeMatchKey,
 } from "./coerce";
 import { AssetStatusSchema } from "../asset";
@@ -117,18 +118,77 @@ describe("coerceBoolean", () => {
   });
 });
 
-describe("coerceDate (re-emit via toISOString)", () => {
-  test("absent → undefined", () => {
-    expect(coerceDate("")).toBeUndefined();
+describe("coerceDate (explicit per-column format, #1060)", () => {
+  test("absent → undefined (any format)", () => {
+    expect(coerceDate("", "iso")).toBeUndefined();
+    expect(coerceDate("n/a", "dmy")).toBeUndefined();
+    expect(coerceDate(null, "mdy")).toBeUndefined();
   });
-  test("bare date → full ISO instant (z.iso.datetime would reject the bare form)", () => {
-    expect(coerceDate("2024-01-02")).toBe("2024-01-02T00:00:00.000Z");
+
+  test("iso: bare date → UTC-midnight instant (z.iso.datetime would reject the bare form)", () => {
+    expect(coerceDate("2024-01-02", "iso")).toBe("2024-01-02T00:00:00.000Z");
   });
-  test("an ISO instant round-trips", () => {
-    expect(coerceDate("2024-01-02T03:04:05.000Z")).toBe("2024-01-02T03:04:05.000Z");
+  test("iso: a date-prefixed instant keeps the calendar day as UTC midnight (date-only field)", () => {
+    // Time component dropped — these are date-only fields, and dropping it keeps the stored day
+    // stable regardless of the value's (or the server's) time zone.
+    expect(coerceDate("2024-01-02T03:04:05.000Z", "iso")).toBe("2024-01-02T00:00:00.000Z");
   });
-  test("unparseable → undefined", () => {
-    expect(coerceDate("not-a-date")).toBeUndefined();
+  test("iso: an offset-less datetime never drifts the day across a non-UTC server TZ (#1060)", () => {
+    // `new Date("2024-01-02T23:30:00")` would parse as LOCAL and toISOString() could roll to Jan 3 on
+    // a local-TZ container. Date-only extraction pins it to Jan 2 UTC everywhere.
+    expect(coerceDate("2024-01-02T23:30:00", "iso")).toBe("2024-01-02T00:00:00.000Z");
+  });
+  test("iso: an impossible date is REJECTED, not rolled over (#1060)", () => {
+    expect(coerceDate("2024-02-30", "iso")).toBeUndefined(); // would roll to Mar 1 via new Date()
+    expect(coerceDate("2024-13-01", "iso")).toBeUndefined(); // month 13
+  });
+  test("iso: a slash value NEVER matches the iso branch → undefined (row error)", () => {
+    expect(coerceDate("13/07/2024", "iso")).toBeUndefined();
+    expect(coerceDate("03/04/2024", "iso")).toBeUndefined();
+  });
+
+  test("dmy: LATAM day-first parses to the correct date (#1060 headline)", () => {
+    expect(coerceDate("13/07/2024", "dmy")).toBe("2024-07-13T00:00:00.000Z");
+  });
+  test("the disambiguation pair 03/04/2024 parses per the chosen format", () => {
+    // dmy → 3 April; mdy → 4 March — the SAME string, two formats, two dates (parse explicitly, no guess).
+    expect(coerceDate("03/04/2024", "dmy")).toBe("2024-04-03T00:00:00.000Z");
+    expect(coerceDate("03/04/2024", "mdy")).toBe("2024-03-04T00:00:00.000Z");
+  });
+  test("mdy: month-first parses to the correct date", () => {
+    expect(coerceDate("07/13/2024", "mdy")).toBe("2024-07-13T00:00:00.000Z");
+    expect(coerceDate("12/31/2024", "mdy")).toBe("2024-12-31T00:00:00.000Z");
+  });
+
+  test("an impossible slash date is REJECTED (round-trip validation, never silently rolled over)", () => {
+    expect(coerceDate("31/02/2024", "dmy")).toBeUndefined(); // 31 Feb
+    expect(coerceDate("13/13/2024", "dmy")).toBeUndefined(); // month 13
+    expect(coerceDate("02/31/2024", "mdy")).toBeUndefined(); // Feb 31 (mdy)
+  });
+  test("a non-date / wrong-shape value → undefined (any format)", () => {
+    expect(coerceDate("not-a-date", "iso")).toBeUndefined();
+    expect(coerceDate("13/07/24", "dmy")).toBeUndefined(); // 2-digit year not accepted
+    expect(coerceDate("2024-07-13", "dmy")).toBeUndefined(); // ISO value under a slash format
+  });
+});
+
+describe("detectDateFormat (CEO heuristic, #1060)", () => {
+  test("any first-part >12 ⇒ dmy (first part can only be a day) — wins over a later mdy signal", () => {
+    expect(detectDateFormat(["13/07/2024", "03/04/2024"])).toBe("dmy");
+    expect(detectDateFormat(["03/25/2024", "13/07/2024"])).toBe("dmy"); // first>12 wins globally
+  });
+  test("else any second-part >12 ⇒ mdy (safe unambiguous extension)", () => {
+    expect(detectDateFormat(["03/25/2024"])).toBe("mdy");
+  });
+  test("all parts ≤12 ⇒ the named DEFAULT (ambiguous, operator override is the safety)", () => {
+    expect(detectDateFormat(["03/04/2024"])).toBe("dmy"); // DEFAULT_DATE_FORMAT
+    expect(detectDateFormat([])).toBe("dmy");
+  });
+  test("pure ISO column, no slash dates ⇒ iso", () => {
+    expect(detectDateFormat(["2024-01-02", "2024-12-31"])).toBe("iso");
+  });
+  test("absent/null-token cells are ignored", () => {
+    expect(detectDateFormat(["", "n/a", "13/07/2024"])).toBe("dmy");
   });
 });
 

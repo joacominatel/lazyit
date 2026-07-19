@@ -855,7 +855,11 @@ model AssetHistory {
 }
 
 /// The discrete asset events recorded in AssetHistory (ADR-0033). RESTORED is emitted by the asset
-/// restore endpoint (POST /assets/:id/restore — ADR-0041), the counterpart of DELETED.
+/// restore endpoint (POST /assets/:id/restore — ADR-0041), the counterpart of DELETED. UPDATED is the
+/// whole-asset "updated via re-import" marker (#1061): a re-import that matches a live asset by serial
+/// UPDATEs it, and when no tracked dimension changed this marker is written so the re-import still leaves
+/// exactly one audit row. Mirrors UserHistoryEventType.UPDATED. Appended at the tail (ALTER TYPE ADD VALUE
+/// appends), so the DB enum order matches this declaration.
 enum AssetHistoryEventType {
   CREATED
   STATUS_CHANGED
@@ -866,6 +870,7 @@ enum AssetHistoryEventType {
   SPECS_CHANGED
   DELETED
   RESTORED
+  UPDATED
 }
 
 /// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's

@@ -102,6 +102,17 @@
     "statusInColumnNote": "Asocia cada valor de estado de esta columna a un estado de lazyit. Los sinónimos comunes se completan por ti.",
     "statusNoValues": "No se encontraron valores de estado en las filas de muestra.",
     "statusUnmapped": "— dejar tal cual —",
+    "dateFormat": {
+      "label": "Formato de fecha",
+      "auto": "Detección automática",
+      "dmy": "DMY — día / mes / año",
+      "mdy": "MDY — mes / día / año",
+      "iso": "ISO — AAAA-MM-DD",
+      "note": "lazyit lee cada fecha de esta columna con este formato. Un formato incorrecto hace que esas filas se omitan.",
+      "detected": "Detectado automáticamente: {format}",
+      "preview": "Ejemplo: {value} → {result}",
+      "previewFail": "no se puede interpretar (fila omitida)"
+    },
     "fixedValue": {
       "modeExisting": "Existente",
       "modeConstant": "Constante",
@@ -148,6 +159,8 @@
     "showAllRows": "Mostrar las {count} filas",
     "collapseRows": "Mostrar menos",
     "allInvalid": "Ninguna fila es válida. Vuelve y revisa el mapeo o el archivo.",
+    "updateExistingTitle": "Algunos activos ya existen",
+    "updateExistingDescription": "{count, plural, one {# fila coincide con un activo existente por número de serie y lo ACTUALIZARÁ en su lugar} other {# filas coinciden con activos existentes por número de serie y los ACTUALIZARÁN en su lugar}} — sus valores actuales se sobrescriben con los de tu archivo, y el cambio queda registrado en el historial de cada activo.",
     "tagCollisionTitle": "Colisiones de etiqueta de activo",
     "tagCollisionDescription": "{count, plural, one {# fila lleva una etiqueta de activo que ya existe en un activo vigente} other {# filas llevan una etiqueta de activo que ya existe en un activo vigente}}. Resuelve la etiqueta duplicada en tu archivo antes de confirmar esas filas.",
     "tagCollisionRow": "Fila {index}: etiqueta {tag}",

@@ -42,6 +42,29 @@ import {
   isUniqueTagCollision,
 } from '../asset-tag-scheme/asset-tag-scheme.service';
 
+/**
+ * Merge migrator re-import provenance into a change-event payload (#1061). Both are plain jsonb objects;
+ * the provenance keys (`source`/`sessionId`/`rowIndex`) are added alongside the event's own `{ from, to }`
+ * (a `SPECS_CHANGED` event carries no payload, so it becomes the provenance alone). Non-object payloads
+ * (never produced today) are treated as empty so this can't throw on a hostile value.
+ */
+function mergeProvenance(
+  payload: Prisma.InputJsonValue | undefined,
+  provenance: Prisma.InputJsonValue,
+): Prisma.InputJsonValue {
+  const base =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as object)
+      : {};
+  const extra =
+    typeof provenance === 'object' &&
+    provenance !== null &&
+    !Array.isArray(provenance)
+      ? (provenance as object)
+      : {};
+  return { ...base, ...extra };
+}
+
 /** Optional filters for listing assets. `categoryId` filters by the asset's model's category. */
 export interface AssetFilters {
   categoryId?: string;
@@ -555,8 +578,23 @@ export class AssetsService {
   /**
    * Partial update. Emits a discrete history event per changed dimension (status / location / model
    * / specs), transactionally with the update (ADR-0033). 404 if missing or already soft-deleted.
+   *
+   * `options` mirrors {@link create}'s bag for the migrator re-import path (#1061): `updatedPayload` stamps
+   * `{ source:'import', sessionId, rowIndex }` onto every emitted change event AND — because a re-import
+   * that changes no tracked dimension produces zero change events — guarantees exactly ONE `UPDATED` marker
+   * so "updated via re-import" is always in the AssetHistory timeline. `suppressSearch` skips the per-row
+   * Meili upsert (the bulk commit runs ONE reconcile afterwards). Existing callers pass no options →
+   * behaviour is byte-for-byte unchanged.
    */
-  async update(id: string, data: UpdateAsset, principal?: Principal) {
+  async update(
+    id: string,
+    data: UpdateAsset,
+    principal?: Principal,
+    options?: {
+      updatedPayload?: Prisma.InputJsonValue;
+      suppressSearch?: boolean;
+    },
+  ) {
     const actor = this.actor.resolveActor(principal);
     const before = await this.prisma.asset.findFirst({
       where: { id },
@@ -582,13 +620,34 @@ export class AssetsService {
             : {}),
         },
       });
-      for (const event of this.changeEvents(before, row, actor)) {
+      const events = this.changeEvents(before, row, actor);
+      // Re-import provenance (#1061): stamp it onto every per-dimension change event, and when NONE fired
+      // (a no-field-delta re-import) write exactly one UPDATED marker carrying the provenance — so the
+      // re-import always leaves an audit trail. Gated on `updatedPayload`, so normal PATCHes are unchanged.
+      if (options?.updatedPayload !== undefined) {
+        const provenance = options.updatedPayload;
+        for (const ev of events) {
+          ev.payload = mergeProvenance(ev.payload, provenance);
+        }
+        if (events.length === 0) {
+          events.push({
+            assetId: row.id,
+            eventType: 'UPDATED',
+            payload: provenance,
+            actor,
+          });
+        }
+      }
+      for (const event of events) {
         await this.history.record(tx, event);
       }
       return row;
     });
-    // Fire-and-forget search sync after the commit (ADR-0035): re-index the updated row.
-    this.search.upsert('assets', projectAsset(updated));
+    // Fire-and-forget search sync after the commit (ADR-0035): re-index the updated row. Suppressed during
+    // the bulk migrator commit (#1061), which runs ONE reconcile after the batch instead.
+    if (!options?.suppressSearch) {
+      this.search.upsert('assets', projectAsset(updated));
+    }
     return updated;
   }
 

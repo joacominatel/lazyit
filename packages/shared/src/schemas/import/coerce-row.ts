@@ -12,7 +12,7 @@
  * API dry-run/commit — the preview cannot lie (ADR-0069 §3). Unit-tested with `bun test`.
  */
 
-import { coerceAbsent, coerceDate, coerceEnum, coerceInteger, coerceMoneyMinorUnits } from "./coerce";
+import { coerceAbsent, coerceDate, coerceEnum, coerceInteger, coerceMoneyMinorUnits, type DateFormat } from "./coerce";
 import type { ImportDescriptor } from "./descriptor";
 import type { ImportMapping } from "./mapping";
 
@@ -63,8 +63,11 @@ const PERSON_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["email", "legajo", 
  */
 const PROTO_POLLUTION_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
 
-/** Which create-schema fields are ISO-date fields (re-emitted via `coerceDate`). Phase 1: Asset. */
-const DATE_FIELDS: ReadonlySet<string> = new Set(["purchaseDate", "warrantyEnd"]);
+/**
+ * Which create-schema fields are ISO-date fields (re-emitted via `coerceDate`). Phase 1: Asset. EXPORTED
+ * (#1060) so the frontend knows which mapping targets need a per-column date-format picker.
+ */
+export const DATE_FIELDS: ReadonlySet<string> = new Set(["purchaseDate", "warrantyEnd"]);
 
 /**
  * Money fields stored as INTEGER MINOR UNITS (cents) — the CSV carries major units, so
@@ -104,6 +107,16 @@ function valueMapFor(
   const out: Record<string, string> = {};
   for (const { from, to } of entry.values) out[from] = to;
   return out;
+}
+
+/**
+ * The operator-chosen date format for a target date field (mirrors {@link valueMapFor}) — read from
+ * `mapping.dates` (#1060). Absent → `undefined`, and the caller defaults to `"iso"` so any mapping without
+ * a `dates` entry keeps today's bare-ISO behavior. The wire always carries a CONCRETE format (the "Auto"
+ * pre-selection is resolved on the frontend before submit), so the dry-run and commit read it identically.
+ */
+function dateFormatFor(mapping: ImportMapping, field: string): DateFormat | undefined {
+  return mapping.dates?.find((d) => d.field === field)?.format;
 }
 
 /**
@@ -160,7 +173,9 @@ export function coerceRow(
     if (DATE_FIELDS.has(field)) {
       const present = coerceAbsent(sourceValue(raw, col));
       if (present === undefined) continue;
-      const iso = coerceDate(present);
+      // Parse strictly under the operator-chosen per-column format (#1060); default "iso" preserves
+      // today's bare-ISO behavior for any mapping without a `dates` entry.
+      const iso = coerceDate(present, dateFormatFor(mapping, field) ?? "iso");
       // An unparseable date → keep the raw value so `CreateAssetSchema.safeParse` raises the field
       // error (rather than silently dropping it, which would look like an absent optional).
       payload[field] = iso ?? present;
