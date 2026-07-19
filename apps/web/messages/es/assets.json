@@ -282,6 +282,7 @@
       "statusChange": "{from} → {to}",
       "events": {
         "created": "Creado",
+        "updated": "Actualizado",
         "statusChanged": "Estado",
         "assigned": "Asignado",
         "released": "Liberado",
@@ -293,6 +294,7 @@
       },
       "details": {
         "created": "Activo creado",
+        "updated": "Actualizado por reimportación",
         "locationChanged": "Ubicación actualizada",
         "modelChanged": "Modelo actualizado",
         "specsChanged": "Especificaciones actualizadas",

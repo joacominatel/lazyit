@@ -282,6 +282,7 @@
       "statusChange": "{from} → {to}",
       "events": {
         "created": "Created",
+        "updated": "Updated",
         "statusChanged": "Status",
         "assigned": "Assigned",
         "released": "Released",
@@ -293,6 +294,7 @@
       },
       "details": {
         "created": "Asset created",
+        "updated": "Updated via re-import",
         "locationChanged": "Location updated",
         "modelChanged": "Model updated",
         "specsChanged": "Specs updated",
