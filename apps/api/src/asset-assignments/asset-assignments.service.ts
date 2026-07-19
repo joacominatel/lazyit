@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type {
+  AcknowledgeAssignment,
   CreateAssetAssignment,
   ReleaseAssetAssignment,
   UpdateAssetAssignmentNotes,
@@ -12,8 +14,9 @@ import type {
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
-import type { Principal } from '../auth/principal';
+import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /** Filters for listing assignments. `activeOnly` defaults to true (set at the controller). */
 export interface FindAssignmentsFilters {
@@ -36,6 +39,9 @@ export class AssetAssignmentsService {
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
     private readonly history: AssetHistoryService,
+    // Post-commit targeted nudge to the assigner on acknowledgement (ADR-0089 Part B, #1029). Best-effort:
+    // NotificationsService.emit never throws to us, so a nudge failure can't roll back the acknowledgement.
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Assignments, newest first; filter by asset/user and (by default) active only. */
@@ -153,7 +159,9 @@ export class AssetAssignmentsService {
       if (count === 0) {
         // lost the race - a concurrent release committed first; same 409 as the pre-check, and we
         // bail before recording history (the throw rolls the tx back), so no duplicate RELEASED row
-        throw new ConflictException(`AssetAssignment ${id} is already released`);
+        throw new ConflictException(
+          `AssetAssignment ${id} is already released`,
+        );
       }
       await this.history.record(tx, {
         assetId: assignment.assetId,
@@ -166,6 +174,62 @@ export class AssetAssignmentsService {
       // updateMany returns only a count; re-read the row for the response (identity is immutable)
       return tx.assetAssignment.findUnique({ where: { id } });
     });
+  }
+
+  /**
+   * Acknowledge receipt of an asset checked out to you (ADR-0089 Part B, #1029). SELF-SERVICE and scoped
+   * to the caller's OWN active assignment — no coarse permission; the authorization IS "it's your own
+   * active assignment" (the /access-requests/mine self-scope carve-out, ADR-0085). Human-only (the
+   * controller's ServicePrincipalForbiddenGuard 403s a service account; {@link requireHumanCaller} is the
+   * defence-in-depth backstop).
+   *
+   * Set-once + race-safe, exactly like {@link release}: the conditional
+   * `updateMany({ where: { id, userId: caller, releasedAt: null, acknowledgedAt: null } })` flips the row
+   * at most once, so a double-click / concurrent call acknowledges once and records exactly one
+   * ACKNOWLEDGED history event. `count === 0` is the SINGLE 409 covering already-acknowledged / released /
+   * not-the-caller's (an assignment that isn't the caller's simply matches nothing). On success the
+   * ACKNOWLEDGED event is recorded in the SAME transaction; then, best-effort AFTER commit, a targeted
+   * nudge tells the human who assigned the device.
+   */
+  async acknowledge(
+    id: string,
+    data: AcknowledgeAssignment,
+    principal?: Principal,
+  ) {
+    const caller = this.requireHumanCaller(principal);
+    // Friendly pre-check: a clean 404 for a missing id, and it captures the assigner (the nudge
+    // recipient) + assetId + userId for the post-commit emit.
+    const assignment = await this.findOne(id);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.assetAssignment.updateMany({
+        // atomic set-once + self-scope: ONLY the caller's own still-active, not-yet-acknowledged row flips.
+        where: { id, userId: caller, releasedAt: null, acknowledgedAt: null },
+        data: {
+          acknowledgedAt: new Date(),
+          acknowledgedById: caller,
+          ...(data.note !== undefined ? { acknowledgeNote: data.note } : {}),
+        },
+      });
+      if (count === 0) {
+        // already acknowledged / released / not the caller's assignment — one 409, nothing written (the
+        // throw rolls the tx back before any history row is recorded).
+        throw new ConflictException(
+          `AssetAssignment ${id} cannot be acknowledged (already acknowledged, released, or not yours)`,
+        );
+      }
+      await this.history.record(tx, {
+        assetId: assignment.assetId,
+        eventType: 'ACKNOWLEDGED',
+        // The acknowledging owner (caller === the assignee by the self-scope) — mirrors ASSIGNED/RELEASED.
+        payload: { userId: caller },
+        actor: { userId: caller },
+      });
+      // updateMany returns only a count; re-read the row for the response (identity is immutable).
+      return tx.assetAssignment.findUnique({ where: { id } });
+    });
+    // AFTER commit, best-effort: nudge the human who assigned the device that it was acknowledged.
+    await this.emitAcknowledgedNotification(assignment);
+    return updated;
   }
 
   /**
@@ -227,6 +291,85 @@ export class AssetAssignmentsService {
   }
 
   // --- internals -----------------------------------------------------------
+
+  /**
+   * Resolve the caller to the HUMAN assignee's `User.id`. Acknowledgement is human-only and self-scoped
+   * (the controller's ServicePrincipalForbiddenGuard already 403s a service account); this is
+   * defence-in-depth — a missing/non-human principal is a 403, never a null actor.
+   */
+  private requireHumanCaller(principal?: Principal): string {
+    if (!isHumanPrincipal(principal)) {
+      throw new ForbiddenException(
+        'An authenticated human user is required to acknowledge an assignment.',
+      );
+    }
+    return principal.user.id;
+  }
+
+  /**
+   * Best-effort POST-COMMIT bell + email nudge to the ASSIGNER that the assignee acknowledged receipt
+   * (ADR-0089 Part B, #1029) — a TARGETED notification (`recipientUserId = assignedById`) so it lands in
+   * that operator's OWN bell even when they hold no `notification:read`. Only a HUMAN assigner has a bell:
+   * a null assigner (system/import) or a service-account assigner (`assignedBySaId` set → `assignedById`
+   * null by the at-most-one CHECK) has no recipient, so we return early. Every failure is swallowed (a
+   * nudge never affects the committed acknowledgement). INV-6-safe: metadata carries the asset name/tag +
+   * the assignee name/ids only — no bodies/secrets.
+   */
+  private async emitAcknowledgedNotification(assignment: {
+    id: string;
+    assetId: string;
+    userId: string;
+    assignedById: string | null;
+  }): Promise<void> {
+    try {
+      if (assignment.assignedById === null) {
+        return; // no human assigner to nudge (null / service-account assigner).
+      }
+      const [asset, assignee] = await Promise.all([
+        this.prisma.asset.findUnique({
+          where: { id: assignment.assetId },
+          select: { name: true, assetTag: true },
+        }),
+        this.prisma.user.findUnique({
+          where: { id: assignment.userId },
+          select: { firstName: true, lastName: true },
+        }),
+      ]);
+      if (!asset) {
+        return; // asset vanished post-commit — nothing meaningful to nudge about.
+      }
+      const assetLabel = asset.assetTag
+        ? `${asset.name} (${asset.assetTag})`
+        : asset.name;
+      const assigneeName =
+        assignee && (assignee.firstName || assignee.lastName)
+          ? `${assignee.firstName} ${assignee.lastName}`.trim()
+          : 'The assignee';
+
+      await this.notifications.emit({
+        type: 'asset_assignment.acknowledged',
+        dedupeKey: `asset_assignment.acknowledged:${assignment.id}`,
+        severity: 'info',
+        // TARGETED to the assigner: it lands in THEIR bell (even without notification:read).
+        recipientUserId: assignment.assignedById,
+        title: `${assigneeName} acknowledged ${assetLabel}`,
+        summary: `${assigneeName} confirmed they received ${assetLabel}.`,
+        entityType: 'asset',
+        entityId: assignment.assetId,
+        // Who it is ABOUT (the assignee) — a secondary click-through to that person.
+        targetUserId: assignment.userId,
+        metadata: {
+          assetName: asset.name,
+          ...(asset.assetTag !== null ? { assetTag: asset.assetTag } : {}),
+          assignmentId: assignment.id,
+          assigneeId: assignment.userId,
+          assigneeName,
+        },
+      });
+    } catch {
+      // Best-effort: a failed nudge never affects the already-committed acknowledgement.
+    }
+  }
 
   /**
    * 400 if assetId doesn't reference a live (non-soft-deleted) asset. The soft-delete read filter
