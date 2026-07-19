@@ -60,6 +60,10 @@
     "access_grant_expiring": {
       "label": "Acceso por vencer",
       "description": "Una concesión de acceso está por vencer y será revocada automáticamente."
+    },
+    "asset_assignment_acknowledged": {
+      "label": "Recepción confirmada",
+      "description": "Alguien confirmó la recepción de un activo que le asignaste."
     }
   }
 }
