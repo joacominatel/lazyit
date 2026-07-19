@@ -32,6 +32,14 @@ export const AssetAssignmentSchema = z.object({
   assignedById: z.uuid().nullable(),
   releasedById: z.uuid().nullable(),
   notes: z.string().nullable(),
+  // Check-out acknowledgement (ADR-0089 Part B, #1029): additive lifecycle metadata, set once by the
+  // OWN owner (`acknowledgedById` always equals `userId`). `.nullish()` (not `.nullable()`) per the
+  // shared-package new-read-field rule — these keys were ADDED to an existing schema, so web object
+  // sites that build an AssetAssignment without them (fixtures, mappers) keep type-checking. null =
+  // not yet acknowledged. `acknowledgeNote` is an optional free-text note captured at acknowledgement.
+  acknowledgedAt: z.iso.datetime().nullish(),
+  acknowledgedById: z.uuid().nullish(),
+  acknowledgeNote: z.string().nullish(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -66,9 +74,22 @@ export const UpdateAssetAssignmentNotesSchema = z.strictObject({
   notes: z.string().trim().min(1).max(2000).nullable(),
 });
 
+/**
+ * Payload to acknowledge receipt of an asset checked out to you
+ * (`POST /asset-assignments/:id/acknowledge`, ADR-0089 Part B, #1029). SELF-SERVICE — the API scopes
+ * the transition to the caller's OWN active assignment; the acting user is NEVER in the body (it comes
+ * from the authenticated principal, like `releasedById`). Only an optional `note` (the wire field maps
+ * to the `acknowledgeNote` column). A set-once transition: acknowledging an already-acknowledged /
+ * released / not-your assignment is a 409.
+ */
+export const AcknowledgeAssignmentSchema = z.strictObject({
+  note: optionalText(2000),
+});
+
 export type AssetAssignment = z.infer<typeof AssetAssignmentSchema>;
 export type CreateAssetAssignment = z.infer<typeof CreateAssetAssignmentSchema>;
 export type ReleaseAssetAssignment = z.infer<typeof ReleaseAssetAssignmentSchema>;
 export type UpdateAssetAssignmentNotes = z.infer<
   typeof UpdateAssetAssignmentNotesSchema
 >;
+export type AcknowledgeAssignment = z.infer<typeof AcknowledgeAssignmentSchema>;
