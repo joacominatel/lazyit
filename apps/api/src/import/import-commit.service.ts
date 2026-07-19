@@ -19,6 +19,7 @@ import {
   IMPORT_DESCRIPTORS,
   normalizeMatchKey,
   type ConflictResolution,
+  type CreateAsset,
   type CreateDirectoryPerson,
   type ImportMapping,
   type ModelConfig,
@@ -143,6 +144,19 @@ const SPECS_RESERVED_KEYS: ReadonlySet<string> = new Set([
   'constructor',
   'prototype',
 ]);
+
+/**
+ * The live partial-unique index on `Asset.serial` — the discriminator that tells a serial-collision `P2002`
+ * (a re-import row racing another writer for the same serial → route to the UPDATE path, #1061) apart from
+ * an `assetTag` collision (which must stay a FAILED row). Prisma's `meta.target` is a string on Postgres,
+ * but a driver can surface an array, so accept both.
+ */
+const SERIAL_ACTIVE_KEY = 'assets_serial_active_key';
+function isSerialActiveKeyTarget(target: unknown): boolean {
+  return Array.isArray(target)
+    ? target.includes(SERIAL_ACTIVE_KEY)
+    : target === SERIAL_ACTIVE_KEY;
+}
 
 /**
  * Re-build a specs object with a NULL prototype and the reserved prototype-pollution keys skipped
@@ -609,34 +623,17 @@ export class ImportCommitService {
         // is NOT a shared transaction with the asset create — a crash strictly between the two probes
         // re-narrows the window but doesn't fully close it. Ceiling: full-row atomicity. Upgrade path:
         // a shared tx (refactor of assets.create) if the CEO won't tolerate the residual window.
-        if (person !== undefined) {
-          const actorId =
-            principal?.kind === 'human' ? principal.user.id : undefined;
-          const resolved = await this.resolveOrCreateDirectoryPerson(
-            person,
-            actorId,
-            sessionId,
-            row.rowIndex,
-          );
-          // AMBIGUOUS identity (E2-INTEG-02): the row's identity keys point at TWO different live users
-          // — linking either would be wrong. The asset already exists (resume), so we leave it UNASSIGNED
-          // and COMMIT the row with a PII-free warning, never FAILED (REDESIGN §0 #1: the asset imports).
-          if (resolved.kind === 'ambiguous') {
-            await this.markRow(row.id, 'COMMITTED', {
-              phase: 'commit',
-              reason: 'ambiguous-identity',
-              warning: true,
-            });
-            return { kind: 'committed' };
-          }
-          await this.openAssignmentIdempotent(
-            resumedAssetId,
-            resolved.personId,
-            principal,
-          );
-        }
-        await this.markRow(row.id, 'COMMITTED', null);
-        return { kind: 'committed' };
+        // NOTE: the resume probe only matches a CREATED provenance event — an UPDATE-path row (#1061)
+        // stamps no CREATED event, so a crashed update re-runs its UPDATE (idempotent data, a second
+        // audit marker). ponytail ceiling; an UPDATED-provenance resume probe isn't worth it at
+        // concurrency-1.
+        return this.linkPersonAndCommit(
+          resumedAssetId,
+          person,
+          row,
+          sessionId,
+          principal,
+        );
       }
 
       // The brand/category for a Model this row may create (ADR-0069 REDESIGN §4.4) — resolved from the
@@ -692,58 +689,87 @@ export class ImportCommitService {
         return { kind: 'failed' };
       }
 
-      const asset = await this.assets.create(parsed.data, principal, {
-        // Stamp the STABLE sessionId (known upfront) + rowIndex — not the autoincrement ImportRun id,
-        // which doesn't exist until after the loop (ADR-0069 §8/§9). This is the provenance the resume
-        // probe matches on, and the asset→import correlation key (via ImportRun.sessionId).
-        createdPayload: {
-          source: 'import',
-          sessionId,
-          rowIndex: row.rowIndex,
-        },
-        // Per-row search upsert is suppressed (ADR-0069 §10) — one reconcile runs after the bulk. This
-        // is SCOPED to the import's own asset writes, not a process-wide mute.
-        suppressSearch: true,
-      });
+      // SERIAL DEDUP (#1061): a re-import must UPDATE the live asset that already holds this serial rather
+      // than minting a duplicate. The probe is LIVE-only (default soft-delete filter — a soft-deleted
+      // ghost's serial is free to re-use, so it must NOT match; a fresh live asset is created), mirroring
+      // finalizeTags' explicit-tag probe and resolveOrCreateDirectoryPerson's live-only dedup.
+      if (parsed.data.serial !== undefined) {
+        const existing = await this.prisma.asset.findFirst({
+          where: { serial: parsed.data.serial },
+          select: { id: true },
+        });
+        if (existing) {
+          return this.updateExistingAsset(
+            existing.id,
+            parsed.data,
+            row,
+            sessionId,
+            person,
+            principal,
+          );
+        }
+      }
+
+      // CREATE path. ponytail: a row with NO serial has no natural key, so it is created on EVERY run
+      // (un-dedupable) — the ceiling the CEO explicitly accepted. Upgrade path: an operator-chosen
+      // surrogate natural key in the mapping.
+      let asset: { id: string };
+      try {
+        asset = await this.assets.create(parsed.data, principal, {
+          // Stamp the STABLE sessionId (known upfront) + rowIndex — not the autoincrement ImportRun id,
+          // which doesn't exist until after the loop (ADR-0069 §8/§9). This is the provenance the resume
+          // probe matches on, and the asset→import correlation key (via ImportRun.sessionId).
+          createdPayload: {
+            source: 'import',
+            sessionId,
+            rowIndex: row.rowIndex,
+          },
+          // Per-row search upsert is suppressed (ADR-0069 §10) — one reconcile runs after the bulk. This
+          // is SCOPED to the import's own asset writes, not a process-wide mute.
+          suppressSearch: true,
+        });
+      } catch (err) {
+        // P2002 RACE (#1061): the serial was free at the probe above but a concurrent writer (or a
+        // preview→commit gap) took it before create() landed. Re-find the LIVE asset by serial and route
+        // to the SAME update path so the row converges to an update, never a duplicate. ONLY a serial-index
+        // collision is re-routed — a P2002 on `assets_assetTag_active_key` (or anything else) stays a
+        // per-row FAILED, exactly as today.
+        if (
+          parsed.data.serial !== undefined &&
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002' &&
+          isSerialActiveKeyTarget(err.meta?.target)
+        ) {
+          const existing = await this.prisma.asset.findFirst({
+            where: { serial: parsed.data.serial },
+            select: { id: true },
+          });
+          if (existing) {
+            return this.updateExistingAsset(
+              existing.id,
+              parsed.data,
+              row,
+              sessionId,
+              person,
+              principal,
+            );
+          }
+        }
+        throw err;
+      }
 
       // COMMIT ORDER asset → person → assignment (ADR-0069 REDESIGN §4.5): asset-first so an invalid
       // asset aborts the row cheaply ABOVE (no orphan person). Only now, with a durable asset, do we
-      // resolve/create the directory person and open its assignment. `person` is built by coerceRow ONLY
-      // when an identity key (email ∨ legajo ∨ username) is present — a row with none imports the asset
-      // UNASSIGNED (REDESIGN §0 #1). A throw here is caught by commitRow's catch → the row is FAILED.
-      if (person !== undefined) {
-        // The actor attributed to a freshly-created person's CREATED UserHistory (import is human-only,
-        // ADR-0069 §11; `principal` is the loaded ADMIN). undefined → a system/unknown actor.
-        const actorId =
-          principal?.kind === 'human' ? principal.user.id : undefined;
-        const resolved = await this.resolveOrCreateDirectoryPerson(
-          person,
-          actorId,
-          sessionId,
-          row.rowIndex,
-        );
-        // AMBIGUOUS identity (E2-INTEG-02): the row's identity keys resolve to TWO different live users
-        // (e.g. its email matches user A, its legajo matches user B) — linking either is a wrong link that
-        // would leak inventory to the wrong employee. The asset is already durable (asset-first order), so
-        // we import it UNASSIGNED and COMMIT the row with a PII-free `ambiguous-identity` warning, NEVER
-        // marking it FAILED (REDESIGN §0 #1: the asset must import). A human resolves the link later.
-        if (resolved.kind === 'ambiguous') {
-          await this.markRow(row.id, 'COMMITTED', {
-            phase: 'commit',
-            reason: 'ambiguous-identity',
-            warning: true,
-          });
-          return { kind: 'committed' };
-        }
-        await this.openAssignmentIdempotent(
-          asset.id,
-          resolved.personId,
-          principal,
-        );
-      }
-
-      await this.markRow(row.id, 'COMMITTED', null);
-      return { kind: 'committed' };
+      // resolve/create the directory person and open its assignment (the shared tail). `person` is built
+      // by coerceRow ONLY when an identity key is present — a row with none imports the asset UNASSIGNED
+      // (REDESIGN §0 #1). A throw in the tail is caught by commitRow's catch → the row is FAILED.
+      return this.linkPersonAndCommit(
+        asset.id,
+        person,
+        row,
+        sessionId,
+        principal,
+      );
     } catch (err) {
       // Per-row isolation (ADR-0069 §8): a unique/FK collision since preview, or any create-path error,
       // is recorded as a FAILED row — the batch is NEVER aborted. PII-free reason (a code, not data).
@@ -753,6 +779,74 @@ export class ImportCommitService {
       });
       return { kind: 'failed' };
     }
+  }
+
+  /**
+   * The re-import UPDATE path (#1061): a row whose serial matched a LIVE asset UPDATES that asset through
+   * the real `AssetsService.update` (so its change-event history + audit fire, and one search reconcile
+   * covers it) instead of creating a duplicate, then links the person + marks the row COMMITTED via the
+   * shared tail. The coerced + FK-resolved `CreateAsset` fields ARE a valid `UpdateAsset` (every key is
+   * editable, `requireAtLeastOneKey` is satisfied by the always-present name/status). Because
+   * `CreateAssetSchema` strips absent optionals, a missing `assetTag`/date is simply not a key here and so
+   * never clobbers the matched asset's stored value (UpdateAsset is partial). Import provenance is stamped
+   * so a no-field-delta re-import still writes exactly one "updated via re-import" AssetHistory row.
+   */
+  private async updateExistingAsset(
+    assetId: string,
+    data: CreateAsset,
+    row: { id: number; rowIndex: number },
+    sessionId: string,
+    person: Record<string, unknown> | undefined,
+    principal: Principal | undefined,
+  ): Promise<{ kind: 'committed' | 'failed' }> {
+    await this.assets.update(assetId, data, principal, {
+      updatedPayload: { source: 'import', sessionId, rowIndex: row.rowIndex },
+      suppressSearch: true,
+    });
+    return this.linkPersonAndCommit(assetId, person, row, sessionId, principal);
+  }
+
+  /**
+   * The shared COMMIT TAIL of the create / update / resume paths: link the row's directory person (when
+   * one was built — coerceRow's identity gate) to `assetId` and mark the row COMMITTED. Resolves/creates
+   * the person, opens the assignment idempotently, and on an AMBIGUOUS identity imports the asset UNASSIGNED
+   * with a PII-free `ambiguous-identity` warning — COMMITTED, never FAILED (REDESIGN §0 #1: the asset must
+   * import; a human resolves the link later). A throw here propagates to `commitRow`'s catch (FAILED row).
+   */
+  private async linkPersonAndCommit(
+    assetId: string,
+    person: Record<string, unknown> | undefined,
+    row: { id: number; rowIndex: number },
+    sessionId: string,
+    principal: Principal | undefined,
+  ): Promise<{ kind: 'committed' | 'failed' }> {
+    if (person !== undefined) {
+      // The actor attributed to a freshly-created person's CREATED UserHistory (import is human-only,
+      // ADR-0069 §11; `principal` is the loaded ADMIN). undefined → a system/unknown actor.
+      const actorId =
+        principal?.kind === 'human' ? principal.user.id : undefined;
+      const resolved = await this.resolveOrCreateDirectoryPerson(
+        person,
+        actorId,
+        sessionId,
+        row.rowIndex,
+      );
+      if (resolved.kind === 'ambiguous') {
+        await this.markRow(row.id, 'COMMITTED', {
+          phase: 'commit',
+          reason: 'ambiguous-identity',
+          warning: true,
+        });
+        return { kind: 'committed' };
+      }
+      await this.openAssignmentIdempotent(
+        assetId,
+        resolved.personId,
+        principal,
+      );
+    }
+    await this.markRow(row.id, 'COMMITTED', null);
+    return { kind: 'committed' };
   }
 
   /**
@@ -818,7 +912,9 @@ export class ImportCommitService {
         // distinct id the precedence is moot, but the ordering is the contract a multi-key single-user row
         // resolves by. Existing behavior: link to it.
         const matched =
-          matches.find((m) => data.email !== undefined && m.email === data.email) ??
+          matches.find(
+            (m) => data.email !== undefined && m.email === data.email,
+          ) ??
           matches.find(
             (m) => data.legajo !== undefined && m.legajo === data.legajo,
           ) ??
