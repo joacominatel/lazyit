@@ -1149,6 +1149,59 @@ describe('InfraService', () => {
       )[0][0].where;
       expect(where.source).toEqual({ deletedAt: null });
     });
+
+    it('surfaces a SOFT duplicate-IP conflict — other LIVE nodes with the same ipAddress, self excluded (ADR-0090, #847)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        assetId: null,
+        ipAddress: '10.0.0.5',
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      // Two OTHER live nodes share the exact IP (the soft-delete extension scopes this findMany).
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-2', label: 'api-02', kind: 'VM', status: 'ONLINE' },
+        {
+          id: 'node-3',
+          label: 'db-03',
+          kind: 'PHYSICAL_HOST',
+          status: 'UNKNOWN',
+        },
+      ]);
+
+      const detail = await service.getNodeDetail('node-1');
+
+      // Exact-IP match, self excluded — a lean display signal, no DB uniqueness involved.
+      expect(prisma.infraNode.findMany).toHaveBeenCalledWith({
+        where: { ipAddress: '10.0.0.5', id: { not: 'node-1' } },
+        orderBy: { label: 'asc' },
+        select: { id: true, label: true, kind: true, status: true },
+      });
+      expect(detail.ipConflict).toEqual([
+        { id: 'node-2', label: 'api-02', kind: 'VM', status: 'ONLINE' },
+        {
+          id: 'node-3',
+          label: 'db-03',
+          kind: 'PHYSICAL_HOST',
+          status: 'UNKNOWN',
+        },
+      ]);
+    });
+
+    it('never queries for a conflict when the node has no IP (empty signal, ADR-0090)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        assetId: null,
+        ipAddress: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      const detail = await service.getNodeDetail('node-1');
+
+      expect(detail.ipConflict).toEqual([]);
+      expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+    });
   });
 
   // ── Node → secret linkage (ADR-0073, #801) ──────────────────────────────────

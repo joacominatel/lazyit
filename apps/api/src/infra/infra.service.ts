@@ -19,6 +19,7 @@ import {
   type InfraEdgeKind,
   type InfraImpactNode,
   type InfraImpactResponse,
+  type InfraNodeChild,
   type InfraNodeKind,
   type InfraNodeState,
   type InfraNodeStatus,
@@ -555,6 +556,11 @@ export class InfraService {
     // soft-deleted or its editable handle renamed away) are dropped during resolution.
     const secretRefs = await this.resolveNodeSecretRefs(id);
 
+    // Soft duplicate-IP conflict signal (ADR-0090, #847): other LIVE nodes carrying the SAME
+    // ipAddress. DISPLAY-ONLY — it drives a badge on the drill-in and NEVER blocks a create/update
+    // (no DB uniqueness). Empty when the node has no IP or no peer shares it.
+    const ipConflict = await this.resolveIpConflict(node.id, node.ipAddress);
+
     return {
       ...node,
       assetName,
@@ -562,7 +568,29 @@ export class InfraService {
       articleLinks,
       secretRefs,
       children,
+      ipConflict,
     };
+  }
+
+  /**
+   * The SOFT duplicate-IP conflict signal for the drill-in (ADR-0090, #847): other LIVE nodes sharing
+   * this node's exact `ipAddress`, as lean `{ id, label, kind, status }` peers. Display-only — the
+   * caller surfaces it as a badge; it NEVER gates a mutation and there is NO DB uniqueness constraint.
+   * Empty for a node with no IP; self is excluded, and archived nodes are excluded by the soft-delete
+   * extension (this is a top-level `findMany`, which the extension scopes). Exact-string match on
+   * purpose (ponytail): two nodes with the same IPv6 typed in different forms won't pair — an accepted
+   * best-effort limit for a display hint, not a network-truth engine.
+   */
+  private async resolveIpConflict(
+    id: string,
+    ipAddress: string | null,
+  ): Promise<InfraNodeChild[]> {
+    if (!ipAddress) return [];
+    return this.prisma.infraNode.findMany({
+      where: { ipAddress, id: { not: id } },
+      orderBy: { label: 'asc' },
+      select: { id: true, label: true, kind: true, status: true },
+    });
   }
 
   /**
