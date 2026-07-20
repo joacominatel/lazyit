@@ -179,6 +179,7 @@ export function SubFolderRow({
   name,
   href,
   childCount,
+  articleCount,
   restriction,
   ancestorName,
 }: {
@@ -186,10 +187,18 @@ export function SubFolderRow({
   href: string;
   /** Direct sub-folder count, shown only when > 0 (real folder data — never a faked article count). */
   childCount: number;
+  /**
+   * Live-article count for the folder (#1106 Phase 4). A COMPUTED read from the API — `null` for a
+   * folder the viewer can't read, and absent (undefined) from a legacy server. Rendered only when it
+   * is a number, so the row self-heals to no count in both cases.
+   */
+  articleCount?: number | null;
   restriction: FolderRestriction;
   ancestorName?: string;
 }) {
   const t = useTranslations("kb");
+  // Any right-aligned meta (article count and/or sub-folder count)? The FIRST one gets `ml-auto`.
+  const hasMeta = articleCount != null || childCount > 0;
   return (
     <Link
       href={href}
@@ -198,15 +207,22 @@ export function SubFolderRow({
       <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       <span className="truncate font-medium">{name}</span>
       <RestrictionLock restriction={restriction} ancestorName={ancestorName} />
-      {childCount > 0 ? (
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-          {t("folders.childFolderCount", { count: childCount })}
+      {hasMeta ? (
+        <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground tabular-nums">
+          {articleCount != null ? (
+            <span title={t("folders.articleCount", { count: articleCount })}>
+              {t("folders.articleCount", { count: articleCount })}
+            </span>
+          ) : null}
+          {childCount > 0 ? (
+            <span>{t("folders.childFolderCount", { count: childCount })}</span>
+          ) : null}
         </span>
       ) : null}
       <ChevronRightIcon
         className={cn(
           "size-4 shrink-0 text-muted-foreground/60",
-          childCount > 0 ? "ml-1.5" : "ml-auto",
+          hasMeta ? "ml-1.5" : "ml-auto",
         )}
         aria-hidden
       />
