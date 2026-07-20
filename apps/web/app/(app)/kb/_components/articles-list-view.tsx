@@ -182,7 +182,14 @@ export function ArticlesListView() {
   } = useArticles({
     q: fallbackActive ? q || undefined : undefined,
     status: statusValues.length > 0 ? statusValues : undefined,
-    categoryId: categoryValues.length > 0 ? categoryValues : undefined,
+    // In the degraded fallback the search must be GLOBAL — matching the strong Meili search (which is
+    // never folder-scoped) — so the same query returns the same scope regardless of engine health. Only
+    // in plain browse does the selected folder scope the list.
+    categoryId: fallbackActive
+      ? undefined
+      : categoryValues.length > 0
+        ? categoryValues
+        : undefined,
     linked: linkedOnly ? "only" : undefined,
     linkedTo:
       linkedOnly && linkedToValues.length > 0 ? linkedToValues : undefined,
