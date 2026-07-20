@@ -1,5 +1,6 @@
 "use client";
 
+import { PlusIcon } from "@heroicons/react/16/solid";
 import Link from "next/link";
 import { createContext, type ReactNode, useContext } from "react";
 import { useTranslations } from "next-intl";
@@ -71,6 +72,38 @@ export function WikiLinkPreviewProvider({
 }
 
 /**
+ * OPTIONAL create-on-click decorator for UNRESOLVED wiki-links (#1106 Phase 4). Builds the href a
+ * red `[[slug]]` navigates to so the reader can author the missing note (`/kb/new` prefilled with the
+ * slug + a title from the label). A render-prop for the same reason as the preview: this module stays
+ * free of the KB route/permission wiring. The KB reading page supplies the builder ONLY for a caller
+ * who holds `article:write`; when it is `null` (a reader, the editor preview, the Manual, any non-KB
+ * caller) the unresolved link stays the calm inert "not created yet" tooltip.
+ */
+export type WikiLinkCreateHrefBuilder = (slug: string, label: string) => string;
+
+const WikiLinkCreateContext = createContext<WikiLinkCreateHrefBuilder | null>(
+  null,
+);
+
+/**
+ * Provide (or withhold) the unresolved-link create affordance. Pass `build` to turn every unresolved
+ * `[[slug]]` into a "create this note" link; pass `null` to keep the inert tooltip (readers, previews).
+ */
+export function WikiLinkCreateProvider({
+  build,
+  children,
+}: {
+  build: WikiLinkCreateHrefBuilder | null;
+  children: ReactNode;
+}) {
+  return (
+    <WikiLinkCreateContext.Provider value={build}>
+      {children}
+    </WikiLinkCreateContext.Provider>
+  );
+}
+
+/**
  * Render one `[[slug]]` token. `slug` is the resolution key; `label` is the display text (the
  * `|display` alias or the verbatim target). Consults the context resolver: a hit is a clickable KB
  * link, a miss (or no resolver) is a non-clickable tooltip — the ADR-0059 §3 "document not created
@@ -86,6 +119,7 @@ export function WikiLink({
   const t = useTranslations("kb");
   const resolve = useContext(WikiLinkContext);
   const renderPreview = useContext(WikiLinkPreviewContext);
+  const buildCreateHref = useContext(WikiLinkCreateContext);
   const text = label ?? slug ?? "";
 
   // No slug (shouldn't happen — the transform always sets one) → render the raw text.
@@ -106,6 +140,27 @@ export function WikiLink({
     // KB-only hover preview (#1106 Phase 2): decorate the resolved link when a preview provider is
     // present; otherwise render it plain (editor preview / Manual / any non-KB caller).
     return renderPreview ? <>{renderPreview(slug, link)}</> : link;
+  }
+
+  // Unresolved WITH a create builder (#1106 Phase 4): a caller who may author (`article:write`) turns
+  // the forward reference into a "create this note" link → /kb/new prefilled with the slug + a title
+  // from the label. Keeps the calm dotted underline (still "not created"), adds a small plus so it
+  // reads as an invitation to author, never an error. KB-only: the builder is supplied only there.
+  if (buildCreateHref) {
+    return (
+      <Link
+        href={buildCreateHref(slug, text)}
+        className="font-medium text-muted-foreground underline decoration-dotted decoration-muted-foreground/60 underline-offset-2 hover:text-foreground hover:decoration-foreground/60"
+        title={t("wikiLinks.createTooltip")}
+        data-wikilink="create"
+      >
+        {text}
+        <PlusIcon
+          className="ml-0.5 inline size-3 align-[-0.1em] text-muted-foreground"
+          aria-hidden
+        />
+      </Link>
+    );
   }
 
   // Unresolved (or no resolver yet): a non-clickable forward reference with a calm dotted underline
