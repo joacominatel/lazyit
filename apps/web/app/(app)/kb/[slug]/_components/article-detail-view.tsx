@@ -1,76 +1,74 @@
 "use client";
 
-import {
-  ArrowPathIcon,
-  ArrowUpCircleIcon,
-  ArrowDownCircleIcon,
-  PencilSquareIcon,
-  TrashIcon,
-} from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { toast } from "sonner";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { useMemo, useRef } from "react";
 import { DetailSkeleton } from "@/components/detail-panel";
 import { MarkdownView } from "@/components/markdown-view";
 import { ArticleAttachmentProvider } from "@/components/markdown-attachment-image-view";
 import { WikiLinkProvider } from "@/components/markdown-wiki-link-view";
-import { PageHeader } from "@/components/page-header";
-import { Breadcrumb } from "@/components/breadcrumb";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Breadcrumb, type BreadcrumbItem } from "@/components/breadcrumb";
 import { ErrorState } from "@/components/resource-table";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticleBySlug } from "@/lib/api/hooks/use-articles";
-import {
-  useDeleteArticle,
-  usePublishArticle,
-  useUnpublishArticle,
-} from "@/lib/api/hooks/use-article-mutations";
 import { useWikiLinkResolver } from "@/lib/api/hooks/use-wiki-link-resolver";
-import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { notifyError } from "@/lib/api/notify-error";
-import { ArticleAliasesPanel } from "../../_components/article-aliases-panel";
-import { ArticleLinksPanel } from "../../_components/article-links-panel";
-import { ArticleReferencesPanel } from "../../_components/article-references-panel";
-import { ArticleStatusBadge } from "../../_components/article-status-badge";
-import { ArticleVersionHistoryPanel } from "../../_components/article-version-history-panel";
+import { articleFolderTrail } from "@/lib/utils/kb-reading";
+import { ArticleConnectionsRail } from "./article-connections-rail";
+import { ArticleCoversRow } from "./article-covers-row";
+import { ArticleLedgerHeader } from "./article-ledger-header";
+import { ArticleSiblingFooter } from "./article-sibling-footer";
+import { ArticleToc, ArticleTocDetails, useTocHeadings } from "./article-toc";
+import { ArticleWikiLinkPreviewProvider } from "./article-wiki-link-preview";
 
+/**
+ * The calm KB reading view (#1106 Phase 2). A comfortable single reading column with a right rail on
+ * `xl+` — no left folder tree yet (that's Phase 3). Won as much by DELETION as addition: the old
+ * metadata-dense PageHeader, the four always-on stacked panels and the excerpt blockquote are gone.
+ *
+ * What renders:
+ *  - a FULL folder-path breadcrumb (Knowledge Base › … › home folder › title);
+ *  - a slim LEDGER RECORD HEADER (title + one Commit-Mono record line; edit/⋯ cluster);
+ *  - a "Covers" chip row (only when the article links assets/apps);
+ *  - the excerpt as a quiet muted lede (no blockquote);
+ *  - the Phase-1 markdown, with a hover Quick View on resolved `[[wiki-links]]`;
+ *  - a prev/next sibling footer;
+ *  - a sticky "On this page" TOC + a "Connections" rail (xl rail; TOC collapses to a `<details>` and
+ *    Connections stacks below the prose under xl). Each rail section shows only when it has content.
+ */
 export function ArticleDetailView({ slug }: { slug: string }) {
   const t = useTranslations("kb");
-  const { date } = useFormatters();
-  const router = useRouter();
 
-  const { data: article, isLoading, isError, error, refetch } =
-    useArticleBySlug(slug);
+  const {
+    data: article,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useArticleBySlug(slug);
   const { data: categories } = useArticleCategories();
-  // Edit / Publish / Unpublish / link are article:write; deletion is article:delete. The API
-  // additionally enforces authorship (only the author may mutate), so a holder who isn't the author
-  // still gets a 403 — the permission is the coarse gate, authorship the finer server-side one.
+  // Edit / Publish / Unpublish / link are article:write; deletion is article:delete. The API also
+  // enforces authorship — the permission is the coarse gate, authorship the finer server-side one.
   const canWrite = useCan("article:write");
   const canDelete = useCan("article:delete");
-
-  const publishArticle = usePublishArticle();
-  const unpublishArticle = useUnpublishArticle();
-  const deleteArticle = useDeleteArticle();
   // Render-time `[[slug]]` resolver (ADR-0059 §3): resolved → KB link, unresolved → tooltip.
   const resolveWikiLink = useWikiLinkResolver();
-  const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const breadcrumb = useMemo(
-    () => (
-      <Breadcrumb
-        items={[
-          { label: t("breadcrumb"), href: "/kb" },
-          { label: article?.title ?? "" },
-        ]}
-      />
-    ),
-    [t, article?.title],
-  );
+  // "On this page" TOC + scroll-spy, read from the rendered prose DOM (Phase-1 heading ids).
+  const proseRef = useRef<HTMLDivElement>(null);
+  const { headings, activeId } = useTocHeadings(proseRef, article?.content ?? "");
+
+  // Full folder-path breadcrumb: Knowledge Base › ‹root…home folders› › article title.
+  const breadcrumbItems = useMemo<BreadcrumbItem[]>(() => {
+    const items: BreadcrumbItem[] = [{ label: t("breadcrumb"), href: "/kb" }];
+    for (const folder of articleFolderTrail(article?.categoryId, categories ?? [])) {
+      items.push({
+        label: folder.name,
+        href: `/kb?categoryId=${encodeURIComponent(folder.id)}`,
+      });
+    }
+    items.push({ label: article?.title ?? "" });
+    return items;
+  }, [t, article?.categoryId, article?.title, categories]);
 
   if (isLoading) {
     return (
@@ -93,162 +91,67 @@ export function ArticleDetailView({ slug }: { slug: string }) {
     );
   }
 
-  const category = categories?.find((item) => item.id === article.categoryId);
-  // #900: the author name is EMBEDDED on the detail read (`article.author`) so it renders even for an
-  // OFFBOARDED (soft-deleted) author — where the old `authorId`→active-directory join showed "Unknown
-  // author". `author.deletedAt != null` marks a former member; we still show their real name.
-  const author = article.author;
-  const authorName = author
-    ? `${author.firstName} ${author.lastName}`.trim()
-    : null;
-  const isFormerMember = author?.deletedAt != null;
-  const isDraft = article.status === "DRAFT";
-
-  function handlePublish() {
-    if (!article) return;
-    publishArticle.mutate(article.id, {
-      onSuccess: () => toast.success(t("detail.toast.published")),
-      onError: (error) =>
-        notifyError(error, t("detail.toast.publishError")),
-    });
-  }
-
-  function handleUnpublish() {
-    if (!article) return;
-    unpublishArticle.mutate(article.id, {
-      onSuccess: () => toast.success(t("detail.toast.movedToDraft")),
-      onError: (error) =>
-        notifyError(error, t("detail.toast.unpublishError")),
-    });
-  }
-
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader
-        breadcrumb={breadcrumb}
-        title={article.title}
-        badge={isDraft ? <ArticleStatusBadge status="DRAFT" /> : undefined}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {category && <Badge variant="outline">{category.name}</Badge>}
-            <span>{authorName ?? t("detail.unknownAuthor")}</span>
-            {isFormerMember ? (
-              <span className="text-muted-foreground/70 italic">
-                {t("detail.formerMember")}
-              </span>
-            ) : null}
-            <span aria-hidden>·</span>
-            <span className="tabular-nums">
-              {t("detail.updated", { date: date(article.updatedAt) })}
-            </span>
-            {article.publishedAt && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="tabular-nums">
-                  {t("detail.published", {
-                    date: date(article.publishedAt),
-                  })}
-                </span>
-              </>
-            )}
-          </span>
-        }
-        actions={
-          canWrite || canDelete ? (
-            <>
-              {canWrite ? (
-                <>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href={`/kb/${article.slug}/edit`}>
-                      <PencilSquareIcon />
-                      {t("detail.edit")}
-                    </Link>
-                  </Button>
-                  {isDraft ? (
-                    <Button
-                      size="sm"
-                      onClick={handlePublish}
-                      disabled={publishArticle.isPending}
-                    >
-                      {publishArticle.isPending ? (
-                        <ArrowPathIcon className="animate-spin" />
-                      ) : (
-                        <ArrowUpCircleIcon />
-                      )}
-                      {t("detail.publish")}
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleUnpublish}
-                      disabled={unpublishArticle.isPending}
-                    >
-                      {unpublishArticle.isPending ? (
-                        <ArrowPathIcon className="animate-spin" />
-                      ) : (
-                        <ArrowDownCircleIcon />
-                      )}
-                      {t("detail.unpublish")}
-                    </Button>
-                  )}
-                </>
-              ) : null}
-              {canDelete ? (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("detail.deleteAriaLabel")}
-                  onClick={() => setDeleteOpen(true)}
-                >
-                  <TrashIcon />
-                </Button>
-              ) : null}
-            </>
-          ) : undefined
-        }
-      />
+    <div className="mx-auto w-full max-w-6xl">
+      <Breadcrumb items={breadcrumbItems} />
 
-      {article.excerpt && (
-        <p className="border-l-2 border-border pl-4 text-base leading-relaxed text-pretty text-muted-foreground">
-          {article.excerpt}
-        </p>
-      )}
+      <div className="mt-4 flex flex-col gap-x-10 gap-y-8 xl:flex-row xl:items-start">
+        {/* Reading column — a comfortable measure. */}
+        <div className="min-w-0 flex-1 space-y-6 xl:max-w-3xl">
+          <ArticleLedgerHeader
+            article={article}
+            canWrite={canWrite}
+            canDelete={canDelete}
+          />
 
-      <WikiLinkProvider resolve={resolveWikiLink}>
-        <ArticleAttachmentProvider articleId={article.id}>
-          <MarkdownView content={article.content} />
-        </ArticleAttachmentProvider>
-      </WikiLinkProvider>
+          <ArticleCoversRow articleId={article.id} />
 
-      {/* References (article↔article backlinks, ADR-0059 §4) — DISTINCT from the asset/application
-          "Linked to" panel below (article↔asset/application, ADR-0042). */}
-      <ArticleReferencesPanel articleId={article.id} />
+          {/* Below xl: the TOC collapses to a disclosure above the prose. */}
+          <ArticleTocDetails
+            headings={headings}
+            activeId={activeId}
+            className="xl:hidden"
+          />
 
-      {/* Nav-only folder aliases (ADR-0059 §2) — where this article ALSO surfaces, beyond its home. */}
-      <ArticleAliasesPanel
-        articleId={article.id}
-        homeFolderId={article.categoryId}
-        canWrite={canWrite}
-      />
+          {article.excerpt ? (
+            <p className="text-base leading-relaxed text-pretty text-muted-foreground">
+              {article.excerpt}
+            </p>
+          ) : null}
 
-      <ArticleLinksPanel articleId={article.id} canWrite={canWrite} />
+          <WikiLinkProvider resolve={resolveWikiLink}>
+            <ArticleWikiLinkPreviewProvider>
+              <ArticleAttachmentProvider articleId={article.id}>
+                <div ref={proseRef}>
+                  <MarkdownView content={article.content} />
+                </div>
+              </ArticleAttachmentProvider>
+            </ArticleWikiLinkPreviewProvider>
+          </WikiLinkProvider>
 
-      <ArticleVersionHistoryPanel
-        articleId={article.id}
-        canWrite={canWrite}
-      />
+          <ArticleSiblingFooter
+            articleId={article.id}
+            homeFolderId={article.categoryId}
+          />
+        </div>
 
-      <DeleteConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        entityKey="article"
-        name={article.title}
-        onConfirm={() => deleteArticle.mutateAsync(article.id)}
-        onDeleted={() => router.push("/kb")}
-      >
-        {t("detail.deleteExtra")}
-      </DeleteConfirmDialog>
+        {/* Right rail — sticky TOC + Connections on xl; below xl it stacks under the prose (the xl-only
+            TOC is hidden there, so only Connections shows, and it lands below the article). */}
+        <aside className="xl:w-72 xl:shrink-0">
+          <div className="space-y-6 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:pb-4">
+            <ArticleToc
+              headings={headings}
+              activeId={activeId}
+              className="hidden xl:block"
+            />
+            <ArticleConnectionsRail
+              articleId={article.id}
+              homeFolderId={article.categoryId}
+              canWrite={canWrite}
+            />
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }

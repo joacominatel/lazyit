@@ -4,6 +4,7 @@ import {
   ArrowTopRightOnSquareIcon,
   DocumentTextIcon,
 } from "@heroicons/react/24/outline";
+import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { DetailPanel } from "@/components/detail-panel";
@@ -20,14 +21,22 @@ import { useArticleBacklinks } from "@/lib/api/hooks/use-article-wiki-links";
  * (a document, not a cube/grid), the heading and the empty copy all keep them apart. Read-only: the
  * edge is materialized from `[[slug]]`s in other articles' bodies, never hand-managed here.
  */
-export function ArticleReferencesPanel({ articleId }: { articleId: string }) {
+export function ArticleReferencesPanel({
+  articleId,
+  title,
+}: {
+  articleId: string;
+  /** Optional heading override — the Connections rail passes "Referenced by (N)" (#1106 Phase 2);
+   *  omitted, it keeps the standalone "References" title. */
+  title?: ReactNode;
+}) {
   const t = useTranslations("kb");
   const { data: backlinks, isLoading } = useArticleBacklinks(articleId);
 
   const rows = backlinks ?? [];
 
   return (
-    <DetailPanel title={t("references.panelTitle")}>
+    <DetailPanel title={title ?? t("references.panelTitle")}>
       {isLoading ? (
         <p className="text-sm text-muted-foreground">{t("references.loading")}</p>
       ) : rows.length === 0 ? (
