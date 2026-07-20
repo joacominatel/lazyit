@@ -40,6 +40,37 @@ export function WikiLinkProvider({
 }
 
 /**
+ * OPTIONAL hover-preview decorator for RESOLVED wiki-links (#1106 Phase 2). A render-prop so this
+ * markdown-view module stays free of any Quick View / data-hook import: the KB reading page supplies a
+ * function that wraps a resolved link in its hover popover ({@link QuickViewPopover}, entity `article`)
+ * for the `slug`. When no provider is present (the editor preview, the Manual, any non-KB caller) a
+ * resolved link renders plain — the preview is purely additive and degrades to nothing.
+ */
+export type WikiLinkPreviewRenderer = (
+  slug: string,
+  link: ReactNode,
+) => ReactNode;
+
+const WikiLinkPreviewContext = createContext<WikiLinkPreviewRenderer | null>(
+  null,
+);
+
+/** Provide the resolved-link hover-preview decorator to every `[[slug]]` rendered inside `children`. */
+export function WikiLinkPreviewProvider({
+  render,
+  children,
+}: {
+  render: WikiLinkPreviewRenderer;
+  children: ReactNode;
+}) {
+  return (
+    <WikiLinkPreviewContext.Provider value={render}>
+      {children}
+    </WikiLinkPreviewContext.Provider>
+  );
+}
+
+/**
  * Render one `[[slug]]` token. `slug` is the resolution key; `label` is the display text (the
  * `|display` alias or the verbatim target). Consults the context resolver: a hit is a clickable KB
  * link, a miss (or no resolver) is a non-clickable tooltip — the ADR-0059 §3 "document not created
@@ -54,6 +85,7 @@ export function WikiLink({
 }) {
   const t = useTranslations("kb");
   const resolve = useContext(WikiLinkContext);
+  const renderPreview = useContext(WikiLinkPreviewContext);
   const text = label ?? slug ?? "";
 
   // No slug (shouldn't happen — the transform always sets one) → render the raw text.
@@ -62,7 +94,7 @@ export function WikiLink({
   const target = resolve?.(slug) ?? null;
 
   if (target) {
-    return (
+    const link = (
       <Link
         href={`/kb/${encodeURIComponent(target.slug)}`}
         className="font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
@@ -71,6 +103,9 @@ export function WikiLink({
         {text}
       </Link>
     );
+    // KB-only hover preview (#1106 Phase 2): decorate the resolved link when a preview provider is
+    // present; otherwise render it plain (editor preview / Manual / any non-KB caller).
+    return renderPreview ? <>{renderPreview(slug, link)}</> : link;
   }
 
   // Unresolved (or no resolver yet): a non-clickable forward reference with a calm dotted underline
