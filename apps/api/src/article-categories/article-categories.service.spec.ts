@@ -1,3 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+// jest's asymmetric matchers (`expect.arrayContaining/objectContaining/any`) and `mock.calls[i][j]`
+// are typed `any` by @types/jest, so the recommendedTypeChecked ruleset flags every use as "unsafe"
+// in this (and every) spec. The assertions are structurally checked at RUNTIME; casting each site
+// would only add noise. Scoped to these two rules so a genuine type error elsewhere still surfaces.
 import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -8,6 +13,7 @@ import { ArticleCategoriesService } from './article-categories.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { SearchService } from '../search/search.service';
+import { FolderAccessService } from './folder-access.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). `Prisma.DbNull` is
 // the sentinel `setAccessRules(null)` writes to clear the jsonb column, so the mock must expose it.
@@ -57,6 +63,10 @@ describe('ArticleCategoriesService', () => {
   // SearchService (#595) — mocked. removeCascade fires search.remove('articles', id) per soft-deleted
   // article so a cascade leaves no ghost docs in the Meili index.
   let search: { remove: jest.Mock; upsert: jest.Mock };
+  // FolderAccessService (ADR-0060 §4) — mocked. Drives the #1106 Phase-4 per-folder `articleCount`
+  // authz null-out. Defaults to 'ALL' (ADMIN-equivalent, every count shown); the folder-hidden test
+  // overrides visibleFolderIds with an explicit Set.
+  let folderAccess: { visibleFolderIds: jest.Mock };
 
   beforeEach(async () => {
     articleCategory = {
@@ -86,13 +96,15 @@ describe('ArticleCategoriesService', () => {
       articleCategory,
       article,
       articleAlias,
-      $transaction: jest.fn((callback: (tx: typeof txProxy) => Promise<unknown>) =>
-        callback(txProxy),
+      $transaction: jest.fn(
+        (callback: (tx: typeof txProxy) => Promise<unknown>) =>
+          callback(txProxy),
       ),
     };
 
     permissions = { hasAll: jest.fn().mockResolvedValue(false) };
     search = { remove: jest.fn(), upsert: jest.fn() };
+    folderAccess = { visibleFolderIds: jest.fn().mockResolvedValue('ALL') };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -100,6 +112,7 @@ describe('ArticleCategoriesService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: PermissionResolverService, useValue: permissions },
         { provide: SearchService, useValue: search },
+        { provide: FolderAccessService, useValue: folderAccess },
       ],
     }).compile();
 
@@ -169,18 +182,57 @@ describe('ArticleCategoriesService', () => {
 
     await service.findAll(ADMIN_PRINCIPAL);
 
-    expect(permissions.hasAll).toHaveBeenCalledWith('ADMIN', ['settings:manage']);
+    expect(permissions.hasAll).toHaveBeenCalledWith('ADMIN', [
+      'settings:manage',
+    ]);
     const call = (
-      articleCategory.findMany.mock.calls as Array<[{ select: Record<string, unknown> }]>
+      articleCategory.findMany.mock.calls as Array<
+        [{ select: Record<string, unknown> }]
+      >
     )[0][0];
     expect(call.select).toHaveProperty('accessRules', true);
+  });
+
+  it('findAll computes a per-folder live articleCount (published + own drafts) and NULLS it for a folder the caller cannot read (#1106 §4)', async () => {
+    // A non-admin who may read c1 but NOT c2 (a restricted folder whose rule they fail).
+    const MEMBER_PRINCIPAL = {
+      kind: 'human',
+      user: { id: 'u1', role: 'MEMBER' },
+    } as never;
+    folderAccess.visibleFolderIds.mockResolvedValue(new Set(['c1']));
+    articleCategory.findMany.mockResolvedValue([
+      { id: 'c1', name: 'Public', _count: { articles: 3 } },
+      { id: 'c2', name: 'Restricted', _count: { articles: 5 } },
+    ]);
+
+    const result = await service.findAll(MEMBER_PRINCIPAL);
+
+    // Prisma's nested `_count.articles` is flattened to `articleCount`; the hidden folder's count is
+    // dropped to null so it never reveals how many articles sit in a folder the list itself hides.
+    expect(result).toEqual([
+      { id: 'c1', name: 'Public', articleCount: 3 },
+      { id: 'c2', name: 'Restricted', articleCount: null },
+    ]);
+    // The nested count is filtered to LIVE (deletedAt: null) + PUBLISHED-or-own-DRAFT — exactly the
+    // article list's visibility, so the number equals the rows the caller would find via the list.
+    const call = (
+      articleCategory.findMany.mock.calls as Array<
+        [{ select: { _count: { select: { articles: { where: unknown } } } } }]
+      >
+    )[0][0];
+    expect(call.select._count.select.articles.where).toEqual({
+      deletedAt: null,
+      OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: 'u1' }],
+    });
   });
 
   it('returns a category by id when it exists; OMITS accessRules for a non-admin (#554)', async () => {
     const found = { id: 'c1', name: 'Networking', deletedAt: null };
     articleCategory.findFirst.mockResolvedValue(found);
 
-    await expect(service.findOne('c1', VIEWER_PRINCIPAL)).resolves.toEqual(found);
+    await expect(service.findOne('c1', VIEWER_PRINCIPAL)).resolves.toEqual(
+      found,
+    );
     const call = (
       articleCategory.findFirst.mock.calls as Array<
         [{ where: unknown; select: Record<string, unknown> }]
@@ -200,9 +252,13 @@ describe('ArticleCategoriesService', () => {
 
     await service.findOne('c1', ADMIN_PRINCIPAL);
 
-    expect(permissions.hasAll).toHaveBeenCalledWith('ADMIN', ['settings:manage']);
+    expect(permissions.hasAll).toHaveBeenCalledWith('ADMIN', [
+      'settings:manage',
+    ]);
     const call = (
-      articleCategory.findFirst.mock.calls as Array<[{ select: Record<string, unknown> }]>
+      articleCategory.findFirst.mock.calls as Array<
+        [{ select: Record<string, unknown> }]
+      >
     )[0][0];
     expect(call.select).toHaveProperty('accessRules', true);
   });
@@ -361,9 +417,15 @@ describe('ArticleCategoriesService', () => {
 
   describe('setAccessRules (ADR-0060 §3)', () => {
     it('stores a non-null rule list (restricts the folder)', async () => {
-      articleCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
+      articleCategory.findFirst.mockResolvedValue({
+        id: 'c1',
+        deletedAt: null,
+      });
       const rules = [{ kind: 'role' as const, role: 'MEMBER' as const }];
-      articleCategory.update.mockResolvedValue({ id: 'c1', accessRules: rules });
+      articleCategory.update.mockResolvedValue({
+        id: 'c1',
+        accessRules: rules,
+      });
 
       await service.setAccessRules('c1', rules);
 
@@ -374,7 +436,10 @@ describe('ArticleCategoriesService', () => {
     });
 
     it('clears the restriction (null → Prisma.DbNull, makes the folder PUBLIC again)', async () => {
-      articleCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
+      articleCategory.findFirst.mockResolvedValue({
+        id: 'c1',
+        deletedAt: null,
+      });
       articleCategory.update.mockResolvedValue({ id: 'c1', accessRules: null });
 
       await service.setAccessRules('c1', null);
@@ -388,9 +453,9 @@ describe('ArticleCategoriesService', () => {
 
     it('404s when the folder is missing or soft-deleted', async () => {
       articleCategory.findFirst.mockResolvedValue(null);
-      await expect(service.setAccessRules('missing', null)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        service.setAccessRules('missing', null),
+      ).rejects.toBeInstanceOf(NotFoundException);
       expect(articleCategory.update).not.toHaveBeenCalled();
     });
   });
@@ -422,7 +487,7 @@ describe('ArticleCategoriesService', () => {
       articleCategory.findMany.mockImplementation(
         (args: { where?: { parentId?: string } }) => {
           const pid = args?.where?.parentId;
-          const ids = (pid && childrenMap[pid]) ? childrenMap[pid] : [];
+          const ids = pid && childrenMap[pid] ? childrenMap[pid] : [];
           return Promise.resolve(ids.map((id) => ({ id })));
         },
       );
@@ -443,7 +508,9 @@ describe('ArticleCategoriesService', () => {
 
       // The folder-side alias deletion must cover all 3 subtree ids.
       expect(articleAlias.deleteMany).toHaveBeenNthCalledWith(1, {
-        where: { folderId: { in: expect.arrayContaining(['root', 'child', 'gc']) } },
+        where: {
+          folderId: { in: expect.arrayContaining(['root', 'child', 'gc']) },
+        },
       });
 
       // Articles in the subtree are soft-deleted (deletedAt: null guard in updateMany).
@@ -480,19 +547,29 @@ describe('ArticleCategoriesService', () => {
     });
 
     it('non-cascade (remove) still 409s when the folder has live children', async () => {
-      articleCategory.findFirst.mockResolvedValue({ id: 'f1', deletedAt: null });
+      articleCategory.findFirst.mockResolvedValue({
+        id: 'f1',
+        deletedAt: null,
+      });
       article.count.mockResolvedValue(0);
       articleCategory.count.mockResolvedValue(2); // has 2 children
 
-      await expect(service.remove('f1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.remove('f1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
       expect(articleCategory.update).not.toHaveBeenCalled();
     });
 
     it('non-cascade still 409s when the folder has live articles', async () => {
-      articleCategory.findFirst.mockResolvedValue({ id: 'f1', deletedAt: null });
+      articleCategory.findFirst.mockResolvedValue({
+        id: 'f1',
+        deletedAt: null,
+      });
       article.count.mockResolvedValue(1);
 
-      await expect(service.remove('f1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.remove('f1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
       expect(articleCategory.update).not.toHaveBeenCalled();
     });
 
