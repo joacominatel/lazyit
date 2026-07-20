@@ -98,13 +98,32 @@
     "publish": "Publicar",
     "unpublish": "Despublicar",
     "deleteAriaLabel": "Eliminar artículo",
+    "delete": "Eliminar",
+    "moreActions": "Más acciones",
     "deleteExtra": "Los artículos publicados son visibles para todo el equipo hasta entonces.",
+    "versionShort": "v{n}",
+    "updatedRelative": "Actualizado {rel}",
     "toast": {
       "published": "Artículo publicado",
       "publishError": "No se pudo publicar el artículo",
       "movedToDraft": "Devuelto a borrador",
       "unpublishError": "No se pudo despublicar el artículo"
     }
+  },
+  "covers": {
+    "label": "Incluye"
+  },
+  "connections": {
+    "railLabel": "Conexiones",
+    "referencedBy": "Referenciado por ({count})"
+  },
+  "toc": {
+    "label": "En esta página"
+  },
+  "siblings": {
+    "label": "Navegación de artículos",
+    "previous": "Anterior",
+    "next": "Siguiente"
   },
   "links": {
     "panelTitle": "Vinculado a",

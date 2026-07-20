@@ -98,13 +98,32 @@
     "publish": "Publish",
     "unpublish": "Unpublish",
     "deleteAriaLabel": "Delete article",
+    "delete": "Delete",
+    "moreActions": "More actions",
     "deleteExtra": "Published articles are visible to the whole team until then.",
+    "versionShort": "v{n}",
+    "updatedRelative": "Updated {rel}",
     "toast": {
       "published": "Article published",
       "publishError": "Couldn't publish the article",
       "movedToDraft": "Moved back to draft",
       "unpublishError": "Couldn't unpublish the article"
     }
+  },
+  "covers": {
+    "label": "Covers"
+  },
+  "connections": {
+    "railLabel": "Connections",
+    "referencedBy": "Referenced by ({count})"
+  },
+  "toc": {
+    "label": "On this page"
+  },
+  "siblings": {
+    "label": "Article navigation",
+    "previous": "Previous",
+    "next": "Next"
   },
   "links": {
     "panelTitle": "Linked to",
