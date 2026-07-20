@@ -11,6 +11,7 @@ import {
 } from "react";
 import { fetchAttachmentBlob } from "@/lib/api/endpoints/attachments";
 import { useAttachments } from "@/lib/api/hooks/use-attachments";
+import { ImageZoom } from "@/components/markdown-lightbox";
 import { cn } from "@/lib/utils";
 
 /**
@@ -135,15 +136,7 @@ export function AttachmentImage({ attachment }: { attachment?: string }) {
     );
   }
 
-  return (
-    // next/image can't load a runtime authenticated blob: object URL, so a plain img is correct here.
-    /* eslint-disable-next-line @next/next/no-img-element */
-    <img
-      src={url}
-      alt={alt}
-      loading="lazy"
-      decoding="async"
-      className="my-2 h-auto max-w-full rounded-md border border-border"
-    />
-  );
+  // #1106: click-to-enlarge in the native-`<dialog>` lightbox. `ImageZoom` renders the same blob
+  // object URL for the thumbnail and the enlarged copy (no second fetch) and preserves the alt text.
+  return <ImageZoom src={url} alt={alt} />;
 }
