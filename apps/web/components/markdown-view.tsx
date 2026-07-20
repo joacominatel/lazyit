@@ -1,10 +1,19 @@
 "use client";
 
-import type { ComponentProps, ComponentPropsWithoutRef } from "react";
+import type {
+  ComponentProps,
+  ComponentPropsWithoutRef,
+  ReactNode,
+} from "react";
 import Markdown, { type Components } from "react-markdown";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "@/components/markdown-code-block";
+import { CALLOUT_TAG, rehypeCallouts } from "@/components/markdown-callout";
+import { Callout } from "@/components/markdown-callout-view";
+import { HeadingAnchor } from "@/components/markdown-heading-anchor";
+import { ImageZoom } from "@/components/markdown-lightbox";
 import { MermaidDiagram } from "@/components/markdown-mermaid";
 import {
   rehypeWikiLinks,
@@ -90,6 +99,63 @@ const MARKDOWN_COMPONENTS: Components = {
     const safeRel = target === "_blank" ? "noopener noreferrer" : rel;
     return <a target={target} rel={safeRel} {...rest} />;
   },
+  // #1106: headings carry a stable `id` from `rehype-slug` (post-sanitize); render a hover-revealed
+  // "#" deep-link anchor. h1 is left as the article's own title styling; only in-body h2/h3 anchor.
+  h2: ({ id, children }) => (
+    <HeadingAnchor level={2} id={id}>
+      {children}
+    </HeadingAnchor>
+  ),
+  h3: ({ id, children }) => (
+    <HeadingAnchor level={3} id={id}>
+      {children}
+    </HeadingAnchor>
+  ),
+  // #1106: keep a wide GFM table on its own horizontal-scroll rail so the page body never scrolls
+  // sideways (the wrapper is its own element, per the measure constraint).
+  table: ({ node, ...props }) => {
+    void node;
+    return (
+      <div className="my-4 max-w-full overflow-x-auto">
+        <table {...props} />
+      </div>
+    );
+  },
+  // #1106: the Manual's static `![](/manual/…)` images (KB images are stripped pre-sanitize and
+  // re-minted as `attachmentimg`, so this only ever fires on the Manual) become click-to-enlarge via
+  // the native-`<dialog>` lightbox, keeping their alt text.
+  img: ({ node, src, alt }) => {
+    void node;
+    return typeof src === "string" && src ? (
+      <ImageZoom src={src} alt={alt ?? ""} />
+    ) : null;
+  },
+};
+
+/**
+ * The `callout` element minted by `rehypeCallouts` AFTER sanitize (#1106 Phase 1) — same post-sanitize
+ * slot as the other custom renderers, and CONTENT-AGNOSTIC, so it is part of the shared base used by
+ * BOTH the KB and the Manual (callouts are not a KB-only extension). `variant` carries the admonition
+ * type; the `Callout` component renders the tinted panel. Cast because react-markdown's `Components`
+ * type only knows HTML tags.
+ */
+const CALLOUT_COMPONENTS = {
+  [CALLOUT_TAG]: ({
+    variant,
+    children,
+  }: {
+    variant?: string;
+    children?: ReactNode;
+  }) => <Callout variant={variant}>{children}</Callout>,
+} as Components;
+
+/**
+ * The base component set shared by BOTH surfaces: the HTML renderers above plus the content-agnostic
+ * Phase-1 `callout` renderer. The KB adds its extension renderers on top (see `ALL_COMPONENTS`).
+ */
+const BASE_COMPONENTS: Components = {
+  ...MARKDOWN_COMPONENTS,
+  ...CALLOUT_COMPONENTS,
 };
 
 /**
@@ -129,7 +195,7 @@ const ATTACHMENT_IMG_COMPONENTS = {
 } as Components;
 
 const ALL_COMPONENTS: Components = {
-  ...MARKDOWN_COMPONENTS,
+  ...BASE_COMPONENTS,
   ...WIKI_LINK_COMPONENTS,
   ...SECRET_CHIP_COMPONENTS,
   ...ATTACHMENT_IMG_COMPONENTS,
@@ -176,30 +242,44 @@ export function MarkdownView({
   // `rehypeAttachmentImages` runs AFTER, minting the trusted `attachmentimg` element the sanitizer
   // never has to allow. Both are KB-only: the Manual (`disableKbExtensions`) keeps the plain
   // sanitize-only pipeline, so its `![](/manual/…)` static images render as before.
+  //
+  // Phase-1 passes (#1106) — `rehypeSlug` (stable, deduped heading ids) and `rehypeCallouts`
+  // (`[!TYPE]` blockquote → tinted admonition) — are CONTENT-AGNOSTIC and safe for both surfaces, so
+  // they sit in the post-sanitize slot of BOTH branches (they only reshape already-sanitized,
+  // trusted structure; `rehype-slug` merely adds `id` attributes to headings the schema already
+  // allowed). They are NOT gated behind `disableKbExtensions`.
   const rehypePlugins: ComponentProps<typeof Markdown>["rehypePlugins"] =
     disableKbExtensions
-      ? [[rehypeSanitize, SANITIZE_SCHEMA]]
+      ? [[rehypeSanitize, SANITIZE_SCHEMA], rehypeSlug, rehypeCallouts]
       : [
           rehypeAttachmentRefsPre,
           [rehypeSanitize, SANITIZE_SCHEMA],
+          rehypeSlug,
+          rehypeCallouts,
           rehypeWikiLinks,
           rehypeSecretChips,
           rehypeAttachmentImages,
         ];
 
-  // With the KB passes off, the wiki-link / secret-chip elements can never be minted, so the
-  // components map is the plain HTML-only set — keeping the rendered tree free of any KB element.
-  const components = disableKbExtensions ? MARKDOWN_COMPONENTS : ALL_COMPONENTS;
+  // With the KB passes off, the wiki-link / secret-chip / attachment elements can never be minted, so
+  // the Manual gets the shared base set (HTML renderers + the content-agnostic `callout`); the KB
+  // adds its extension renderers on top.
+  const components = disableKbExtensions ? BASE_COMPONENTS : ALL_COMPONENTS;
 
   return (
     <div
       className={cn(
-        // ADR-0049: crisp reads — balanced headings, calm links, no garish pre default (CodeBlock
-        // owns its own surface), and `text-pretty` to avoid orphans in body copy.
-        "prose prose-sm max-w-none text-pretty dark:prose-invert",
+        // ADR-0049 / #1106: crisp long-form reads — base `prose` size (bumped from `prose-sm` for
+        // legibility on articles/Manual), balanced headings, calm links, no garish pre default
+        // (CodeBlock owns its own surface), and `text-pretty` to avoid orphans in body copy.
+        "prose max-w-none text-pretty dark:prose-invert",
         "prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-pretty",
         "prose-a:font-medium prose-a:text-primary prose-a:underline-offset-2",
         "prose-pre:bg-muted prose-pre:text-foreground",
+        // #1106: give inline `code` a subtle mono chip — a muted fill + hairline border, distinct
+        // from bare text — and drop Typography's default backtick pseudo-quotes. Fenced blocks are
+        // untouched (they render inside `CodeBlock`'s own `not-prose` surface).
+        "prose-code:rounded prose-code:border prose-code:border-border/60 prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:text-[0.85em] prose-code:font-normal prose-code:before:content-none prose-code:after:content-none",
         // GFM task list (issue #945): Typography's default `<li>` marker still applies to a
         // checkbox item, so "- [ ] Todo" rendered a bullet AND the checkbox ("• ☐"). The checkbox
         // itself is the marker — drop the disc on any `<li>` that has one.

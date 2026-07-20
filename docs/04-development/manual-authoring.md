@@ -3,7 +3,7 @@ title: Authoring the Help / Manual
 tags: [development, web, frontend, docs, help, i18n]
 status: active
 created: 2026-06-16
-updated: 2026-06-16
+updated: 2026-07-20
 ---
 
 # Authoring the Help / Manual
@@ -165,6 +165,46 @@ Run it before pushing Manual changes. It is wired as the `check:manual-parity` p
 (`apps/web/scripts/check-manual-parity.ts`) and runs as a **blocking CI step** in the `verify`
 job (`.github/workflows/ci.yml`) — a PR with locale drift will fail CI.
 
+## Rich markdown — callouts & heading anchors (#1106)
+
+The shared renderer (`MarkdownView`) supports two authoring niceties that are **content-agnostic and
+safe**, so they run on the **Manual too** (not gated behind `disableKbExtensions`, unlike wiki-links and
+secret chips). Both lift the KB and the Manual at once.
+
+- **Callouts / admonitions.** Open a blockquote with a `[!TYPE]` marker on its first line and it renders as
+  a tinted panel (icon + title), styled with the Ledger status hues (tinted surface, never garish text):
+
+  ```md
+  > [!NOTE]
+  > Neutral, good-to-know context.
+
+  > [!TIP]
+  > A helpful shortcut.
+
+  > [!IMPORTANT]
+  > Something the reader must not miss.
+
+  > [!WARNING]
+  > A risky action — proceed carefully.
+
+  > [!CAUTION]
+  > A destructive or irreversible step.
+  ```
+
+  The five types are `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, `CAUTION` (case-insensitive). **Read-tolerant:** a
+  blockquote **without** a marker renders as an ordinary quote exactly as before — nothing to migrate.
+
+- **Heading anchors.** Every `##`/`###` heading automatically gets a **stable, deduped `id`** and a
+  hover-revealed `#` link. Clicking it jumps to the section **and** copies a shareable deep link to the
+  clipboard — so a reader can link straight to a subsection. Nothing to author: write normal headings; clear,
+  distinctive heading text just makes for cleaner anchors (and better sidebar search).
+
+Other renderer niceties that "just work" in Manual markdown: fenced code blocks now cover the full IT language
+set (yaml, json, ini/toml, nginx, dockerfile, python, go, sql, bash, ts/js, powershell, diff — an unknown
+language degrades to a plain block), wide GFM tables scroll horizontally instead of breaking the page, inline
+`` `code` `` renders as a subtle mono chip, and images / mermaid diagrams open in a click-to-enlarge lightbox
+(Esc or backdrop closes; motion respects `prefers-reduced-motion`).
+
 ## How to add a Help page
 
 1. Pick a kebab-case **slug** (e.g. `permissions`).
@@ -175,10 +215,11 @@ job (`.github/workflows/ci.yml`) — a PR with locale drift will fail CI.
    - `apps/web/content/manual/en/permissions.md`
    - `apps/web/content/manual/es/permissions.md`
 4. Write plain product markdown. The Manual renders through the same `MarkdownView` the KB uses (GFM, code
-   blocks, mermaid) **with `disableKbExtensions`** — so KB-only tokens (`[[slug]]` wiki-links and
-   `{{ lazyit_secret.* }}` chips) render as **literal text**, never live elements. Link between Manual pages with
-   ordinary relative links (`/help/<slug>`). **Never** reference a secret or a vault — the Manual is secret-free
-   by construction ([[0062-in-app-help-manual-surface]] §3 / INV-10).
+   blocks, mermaid, **callouts and heading anchors** — see "Rich markdown" above) **with
+   `disableKbExtensions`** — so KB-only tokens (`[[slug]]` wiki-links and `{{ lazyit_secret.* }}` chips) render
+   as **literal text**, never live elements. Link between Manual pages with ordinary relative links
+   (`/help/<slug>`). **Never** reference a secret or a vault — the Manual is secret-free by construction
+   ([[0062-in-app-help-manual-surface]] §3 / INV-10).
 5. Run `bun run check:manual-parity` and confirm it passes.
 6. The page appears automatically on `/help`, slotted under its `category` → `subcategory` (manifest order) and
    sorted by `order` — both on the index and in the **sidebar** — and becomes searchable in the sidebar search.

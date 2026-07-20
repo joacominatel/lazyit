@@ -146,6 +146,20 @@
     "renderError": "Couldn't render this diagram — check the syntax.",
     "ariaLabel": "Diagram"
   },
+  "callout": {
+    "note": "Note",
+    "tip": "Tip",
+    "important": "Important",
+    "warning": "Warning",
+    "caution": "Caution"
+  },
+  "anchor": {
+    "copyLink": "Copy link to section",
+    "copied": "Link copied"
+  },
+  "lightbox": {
+    "zoom": "Enlarge"
+  },
   "filters": {
     "activeFilters": "Active filters",
     "clearFilter": "Clear filter",
