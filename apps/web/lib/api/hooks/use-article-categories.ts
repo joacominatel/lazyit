@@ -22,7 +22,9 @@ export const articleCategoryKeys = {
 export function useArticleCategories() {
   return useQuery({
     queryKey: articleCategoryKeys.lists(),
-    queryFn: getArticleCategories,
+    // Wrapped (not bare `getArticleCategories`) so TanStack's QueryFunctionContext is never passed as
+    // the endpoint's `token` arg — the client resolves the Bearer from the session-token store instead.
+    queryFn: () => getArticleCategories(),
   });
 }
 

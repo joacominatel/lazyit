@@ -61,9 +61,27 @@ gestionar sus vínculos. **Vinculado a** (artículo ↔ activo/aplicación) y **
 ↔ artículo) son dos cosas distintas y viven en dos secciones separadas del panel Conexiones — un
 artículo puede tener ambas: los activos que documenta *y* los runbooks que lo referencian.
 
+## Navegación
+
+La base de conocimiento se abre en una lista densa de una línea por artículo — título, su ruta de
+carpeta, un breve extracto, cuándo se actualizó por última vez y un candado cuando su carpeta está
+restringida — para que puedas revisar mucho más de un vistazo que con una cuadrícula de tarjetas. El
+**árbol de carpetas** permanece fijo a la izquierda mientras navegas *y* mientras abres un artículo,
+así nunca pierdes tu lugar; la carpeta del artículo que estás leyendo aparece resaltada. En pantallas
+estrechas el árbol se colapsa tras un botón **Carpetas**. Las subcarpetas de la carpeta en la que
+estás aparecen como filas discretas al principio de la lista, para que puedas profundizar como en un
+explorador de archivos.
+
 ## Búsqueda
 
-Los artículos publicados se pueden buscar por texto completo, incluido su **cuerpo** — no solo
-títulos y extractos. Los borradores nunca se indexan, así que un borrador privado nunca puede aparecer
-en la búsqueda. Las carpetas restringidas se respetan: la búsqueda nunca revela un artículo que no
-tienes permiso para leer.
+El cuadro de búsqueda busca en el **cuerpo** completo de los artículos publicados — no solo en sus
+títulos y extractos — y resalta las palabras que escribiste en cada resultado. Pulsa **/** en
+cualquier parte de la base de conocimiento para saltar al cuadro, o **⌘K** (**Ctrl+K**) para abrir el
+mismo selector rápido de artículos desde cualquier lugar. Los borradores nunca se indexan, así que un
+borrador privado nunca puede aparecer en la búsqueda, y se respetan las carpetas restringidas: la
+búsqueda nunca revela un artículo que no tienes permiso para leer.
+
+La búsqueda de texto completo depende de que el motor de búsqueda esté indexado. Justo después de una
+actualización — antes de que se ejecute la reindexación única — o durante una breve interrupción del
+motor, la búsqueda **recurre** a coincidir títulos y extractos y te lo indica, para que siga
+funcionando en lugar de parecer que está rota.
