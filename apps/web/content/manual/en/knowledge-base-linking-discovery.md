@@ -58,8 +58,24 @@ article's links. **Linked to** (article ↔ asset/application) and **Referenced 
 are two distinct things and live in two separate sections of the Connections rail — an article can
 have both: the assets it documents *and* the runbooks that reference it.
 
+## Browsing
+
+The Knowledge Base opens on a dense, one-line-per-article list — title, its folder path, a short
+excerpt, when it was last updated and a lock when its folder is restricted — so you can scan far more
+at a glance than a grid of cards. The **folder tree** stays pinned on the left as you browse *and* as
+you open an article, so you never lose your place; the folder of the article you are reading is
+highlighted. On narrow screens the tree collapses behind a **Folders** toggle. Sub-folders of the
+folder you are in appear as quiet rows at the top of the list, so you can drill down like a file
+explorer.
+
 ## Search
 
-Published articles are full-text searchable, including their **body** — not just titles and
-excerpts. Drafts are never indexed, so a private draft can never surface in search. Restricted
-folders are respected: search never reveals an article you are not allowed to read.
+The search box searches the full **body** of published articles — not just their titles and excerpts
+— and highlights the words you typed in each result. Press **/** anywhere in the Knowledge Base to
+jump to the box, or **⌘K** (**Ctrl+K**) to open the same article quick-switcher from anywhere. Drafts
+are never indexed, so a private draft can never surface in search, and restricted folders are
+respected: search never reveals an article you are not allowed to read.
+
+Full-text search relies on the search engine being indexed. Right after an upgrade — before the
+one-time re-index runs — or during a brief engine outage, search **falls back** to matching titles
+and excerpts and tells you so, so it keeps working instead of looking broken.
