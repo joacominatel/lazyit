@@ -23,10 +23,14 @@ pick one.
 - A `[[slug]]` whose target **exists** renders as a clickable link on the published page. Hover a
   working link to preview the target article — its title, status, folder and excerpt — without
   leaving the page.
-- A `[[slug]]` whose target does **not exist yet** renders as a plain, non-clickable mention with a
-  tooltip ("not created yet"). This is a **forward reference**: you can link a runbook you intend to
-  write next. When you later create that article, the link starts working on its own — you do not
-  re-edit the first article.
+- A `[[slug]]` whose target does **not exist yet** renders as a plain mention with a tooltip
+  ("not created yet"). This is a **forward reference**: you can link a runbook you intend to write
+  next. When you later create that article, the link starts working on its own — you do not re-edit
+  the first article.
+  - If you can **edit articles**, an unresolved link becomes a **"Create this note"** affordance (a
+    small `+`): click it to open the new-article form with the link's **slug and a title already
+    filled in**, so the note you create takes exactly that slug and the original link resolves the
+    moment you save it. Readers without edit rights simply see the calm "not created yet" mention.
 
 Saving an article never fails because of an unresolved `[[link]]`.
 

@@ -17,6 +17,11 @@ redactarlo. Las carpetas pueden anidarse, así que puedes construir un árbol co
 `Servidores / Linux / Aprovisionamiento`. Explora el árbol desde la barra lateral de carpetas en la
 Base de conocimiento.
 
+- **Cada carpeta muestra cuántos artículos contiene** — un pequeño número en la fila de la carpeta.
+  Cuenta solo los artículos que **realmente puedes ver** (los publicados, más tus propios borradores),
+  así que nunca revela más de lo que mostraría la lista de la carpeta. Una **carpeta restringida que
+  no puedes leer no muestra número**, y las carpetas en un servidor más antiguo simplemente no
+  muestran ninguno hasta que se actualice.
 - **Crea una carpeta** desde el botón **+** del formulario de artículo (o desde donde se gestionan las
   carpetas): dale un nombre y, opcionalmente, una carpeta padre.
 - **Los nombres son únicos dentro de su carpeta padre.** Pueden coexistir `Servidores / Linux` y
