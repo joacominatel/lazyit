@@ -11,8 +11,16 @@ import { apiFetch } from "../client";
  * in the UI; the API gates writes and returns 409 on a delete that still has live articles). Routes
  * mirror apps/api/src/article-categories.
  */
-export function getArticleCategories(): Promise<ArticleCategory[]> {
-  return apiFetch<ArticleCategory[]>("/article-categories");
+/**
+ * List article categories (folders). `token` is the optional SSR Bearer override (ADR-0067): a Server
+ * Component prefetch (the `/kb` layout seeds the folder tree so a cold deep-link doesn't flash an empty
+ * rail) passes `session.accessToken` from `await auth()`; client callers omit it and `apiFetch` falls
+ * back to the browser-only session-token store.
+ */
+export function getArticleCategories(
+  token?: string,
+): Promise<ArticleCategory[]> {
+  return apiFetch<ArticleCategory[]>("/article-categories", { token });
 }
 
 export function createArticleCategory(
