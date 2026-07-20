@@ -52,6 +52,7 @@ import { useUploadAttachment } from "@/lib/api/hooks/use-attachments";
 import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { useCan } from "@/lib/hooks/use-permissions";
+import type { KbNewPrefill } from "@/lib/utils/kb-wiki-link-prefill";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { useArticleDraft } from "../_lib/use-article-draft";
 
@@ -85,8 +86,19 @@ function toFormValues(article?: Article): ArticleFormValues {
  * action (ADR-0021). `slug` is auto-derived from the title by the API.
  *
  * Authorship is enforced server-side via the OIDC Bearer token (ADR-0038/0039).
+ *
+ * `prefill` (#1106 Phase 4) seeds a CREATE form from a create-on-click on an unresolved `[[slug]]`:
+ * the sanitized `title` seeds the title field and the sanitized `slug` is sent on create so the new
+ * note takes exactly the wiki-link's target slug (resolving the original red link). Both are already
+ * validated by `parseKbNewPrefill` at the page edge; ignored entirely on edit.
  */
-export function ArticleForm({ article }: { article?: Article }) {
+export function ArticleForm({
+  article,
+  prefill,
+}: {
+  article?: Article;
+  prefill?: KbNewPrefill;
+}) {
   const t = useTranslations("kb");
   const tc = useTranslations("common");
   const isEdit = article != null;
@@ -124,7 +136,12 @@ export function ArticleForm({ article }: { article?: Article }) {
   const uploadImage = useUploadAttachment("article", article?.id ?? "");
 
   const format = useFormatter();
-  const baseline = useMemo(() => toFormValues(article), [article]);
+  const baseline = useMemo(() => {
+    const values = toFormValues(article);
+    // #1106 Phase 4: seed a CREATE form's title from the sanitized wiki-link prefill (never on edit).
+    if (!article && prefill?.title) values.title = prefill.title;
+    return values;
+  }, [article, prefill]);
 
   const form = useForm<ArticleFormValues>({
     resolver: zodResolver(
@@ -228,6 +245,9 @@ export function ArticleForm({ article }: { article?: Article }) {
           content: values.content,
           status: "DRAFT",
           ...(values.excerpt ? { excerpt: values.excerpt } : {}),
+          // #1106 Phase 4: when created from a wiki-link, take the link's exact (validated) target
+          // slug so the note resolves the original `[[slug]]`. The API auto-suffixes on collision.
+          ...(prefill?.slug ? { slug: prefill.slug } : {}),
         },
         {
           onSuccess: (created) => {
