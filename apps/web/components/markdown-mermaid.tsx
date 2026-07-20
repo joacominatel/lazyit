@@ -13,6 +13,7 @@ import { useTheme } from "next-themes";
 import { useTranslations } from "next-intl";
 import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { CopyButton } from "@/components/copy-button";
+import { Lightbox } from "@/components/markdown-lightbox";
 
 /**
  * MermaidDiagram — the block-level renderer for a ` ```mermaid ` fenced block in `MarkdownView`
@@ -205,13 +206,31 @@ function MermaidRenderer({ value }: { value: string }) {
     <DiagramSurface>
       {/* The SVG is mermaid's own strict-sanitised output (securityLevel: 'strict'); it never
           passes through rehype-sanitize because this component runs after it, mirroring CodeBlock.
-          [&_svg]:max-w-full keeps a wide diagram inside the paper surface. */}
-      <div
-        role="img"
-        aria-label={t("mermaid.ariaLabel")}
-        className="flex justify-center overflow-x-auto p-4 [&_svg]:h-auto [&_svg]:max-w-full"
-        dangerouslySetInnerHTML={{ __html: state.svg }}
-      />
+          [&_svg]:max-w-full keeps a wide diagram inside the paper surface.
+          #1106: click to enlarge in the native-`<dialog>` lightbox (no dep). */}
+      {/* ponytail: the thumbnail and the enlarged copy share the same SVG markup, so their internal
+          element ids are duplicated in the DOM. This is benign — `url(#id)` marker/def references
+          resolve to the first (identical) occurrence, so both copies render correctly; a
+          full-fidelity zoom would re-render the diagram under a fresh id namespace. */}
+      <Lightbox
+        label={t("lightbox.zoom")}
+        className="w-full"
+        zoomed={
+          <div
+            role="img"
+            aria-label={t("mermaid.ariaLabel")}
+            className="flex justify-center p-2 [&_svg]:h-auto [&_svg]:max-h-[86vh] [&_svg]:w-auto [&_svg]:max-w-full"
+            dangerouslySetInnerHTML={{ __html: state.svg }}
+          />
+        }
+      >
+        <div
+          role="img"
+          aria-label={t("mermaid.ariaLabel")}
+          className="flex justify-center overflow-x-auto p-4 [&_svg]:h-auto [&_svg]:max-w-full"
+          dangerouslySetInnerHTML={{ __html: state.svg }}
+        />
+      </Lightbox>
     </DiagramSurface>
   );
 }
