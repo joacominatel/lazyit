@@ -292,7 +292,8 @@
     "restoreError": "Couldn't restore the version"
   },
   "wikiLinks": {
-    "unresolvedTooltip": "Document not created yet"
+    "unresolvedTooltip": "Document not created yet",
+    "createTooltip": "Create this note"
   },
   "access": {
     "statePublic": "Public",

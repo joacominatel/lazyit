@@ -292,7 +292,8 @@
     "restoreError": "No se pudo restaurar la versión"
   },
   "wikiLinks": {
-    "unresolvedTooltip": "Documento aún no creado"
+    "unresolvedTooltip": "Documento aún no creado",
+    "createTooltip": "Crear esta nota"
   },
   "access": {
     "statePublic": "Público",
