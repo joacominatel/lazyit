@@ -146,6 +146,21 @@
     "renderError": "No se pudo renderizar este diagrama — revisa la sintaxis.",
     "ariaLabel": "Diagrama"
   },
+  "callout": {
+    "note": "Nota",
+    "tip": "Consejo",
+    "important": "Importante",
+    "warning": "Advertencia",
+    "caution": "Precaución"
+  },
+  "anchor": {
+    "copyLink": "Copiar enlace a la sección",
+    "copied": "Enlace copiado"
+  },
+  "lightbox": {
+    "zoom": "Ampliar",
+    "close": "Cerrar"
+  },
   "filters": {
     "activeFilters": "Filtros activos",
     "clearFilter": "Quitar filtro",
