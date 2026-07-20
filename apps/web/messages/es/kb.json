@@ -5,7 +5,7 @@
     "subtitle": "Documentación interna para el equipo.",
     "newArticle": "Nuevo artículo",
     "searchLabel": "Buscar artículos",
-    "searchPlaceholder": "Buscar por título…",
+    "searchPlaceholder": "Buscar artículos…",
     "errorTitle": "No se pudieron cargar los artículos",
     "noMatchFilters": "Ningún artículo coincide con tus filtros.",
     "noArticlesInFolder": "Aún no hay artículos en esta carpeta — abre una subcarpeta de arriba para seguir explorando.",
@@ -19,6 +19,21 @@
     "linkedCount": "{count} vinculados",
     "linkedTooltip": "{count, plural, one {Vinculado a # elemento} other {Vinculado a # elementos}}"
   },
+  "search": {
+    "degradedNote": "La búsqueda de texto completo no está disponible ahora mismo — se muestran coincidencias por título y resumen.",
+    "resultCount": "{count, plural, one {# resultado} other {# resultados}}",
+    "topResults": "{shown} de {total} resultados principales"
+  },
+  "quickSwitcher": {
+    "title": "Buscar artículos",
+    "description": "Salta a un artículo por título o contenido.",
+    "placeholder": "Buscar artículos…",
+    "heading": "Artículos",
+    "startTyping": "Escribe para buscar artículos por título o contenido…",
+    "searching": "Buscando…",
+    "unavailable": "La búsqueda no está disponible ahora mismo. Inténtalo de nuevo en un momento.",
+    "noResults": "Ningún artículo coincide con “{query}”."
+  },
   "filters": {
     "statusLabelName": "Estado",
     "linkedToLabelName": "Destino",
@@ -29,6 +44,7 @@
     "noAssets": "No se encontraron activos.",
     "noApplications": "No se encontraron aplicaciones.",
     "linkedOnly": "Solo vinculados",
+    "filtersButton": "Filtros",
     "chipSearch": "Búsqueda: “{query}”",
     "chipStatus": "Estado: {value}",
     "chipCategory": "Categoría: {value}",
@@ -205,6 +221,7 @@
   },
   "folders": {
     "treeLabel": "Explorar carpetas",
+    "mobileToggle": "Carpetas",
     "allArticles": "Todos los artículos",
     "empty": "Aún no hay carpetas",
     "expand": "Expandir {name}",
