@@ -43,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ApiError } from "@/lib/api/client";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import {
   useCreateArticle,
@@ -277,7 +278,8 @@ export function ArticleForm({
           status: "DRAFT",
           ...(values.excerpt ? { excerpt: values.excerpt } : {}),
           // #1106 Phase 4: when created from a wiki-link, take the link's exact (validated) target
-          // slug so the note resolves the original `[[slug]]`. The API auto-suffixes on collision.
+          // slug so the note resolves the original `[[slug]]`. Used as-is (no auto-suffix) — a slug
+          // already taken by a live row surfaces as a 409, mapped to a specific message in onError.
           ...(prefill?.slug ? { slug: prefill.slug } : {}),
         },
         {
@@ -289,8 +291,17 @@ export function ArticleForm({
             toast.success(t("form.toast.draftCreated"));
             router.push(`/kb/${created.slug}`);
           },
-          onError: (error) =>
-            notifyError(error, t("form.toast.createError")),
+          onError: (error) => {
+            // A create 409 means the slug is already taken by a live article (the only unique
+            // constraint at create) — including a wiki-link target the author couldn't see (a
+            // >200-item KB, another author's draft, a folder-hidden row). The link can't be resolved
+            // by creating a new note under a taken slug, so say so specifically (#1106).
+            if (error instanceof ApiError && error.status === 409) {
+              toast.error(t("form.toast.slugTaken"));
+              return;
+            }
+            notifyError(error, t("form.toast.createError"));
+          },
         },
       );
     }
