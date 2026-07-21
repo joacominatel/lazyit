@@ -73,6 +73,8 @@
     "categoryLabel": "Category",
     "categorySelect": "Select a category",
     "categoryNone": "No categories yet",
+    "categorySearchPlaceholder": "Search categories by path…",
+    "categoryEmpty": "No matching categories",
     "categoryHint": "No categories yet — use the + button to create one.",
     "categoryRequired": "Category is required",
     "excerptLabel": "Excerpt",
