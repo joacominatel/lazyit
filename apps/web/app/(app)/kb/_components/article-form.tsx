@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { Combobox } from "@/components/combobox";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { MarkdownEditor } from "@/components/markdown-editor";
@@ -36,13 +37,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ApiError } from "@/lib/api/client";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import {
@@ -53,6 +47,7 @@ import { useUploadAttachment } from "@/lib/api/hooks/use-attachments";
 import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { folderPathLabel } from "@/lib/utils/folder-tree";
 import type { MarkdownImport } from "@/lib/utils/kb-markdown-import";
 import type { KbNewPrefill } from "@/lib/utils/kb-wiki-link-prefill";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
@@ -309,6 +304,30 @@ export function ArticleForm({
 
   const hasCategories = (categories?.length ?? 0) > 0;
 
+  // Searchable folder-path category picker: a KB category IS a Folder (self-ref `parentId`), so each
+  // option is labeled by its FULL PATH ("Servers / Linux / Provisioning") — the leaf name alone is
+  // ambiguous when it repeats across the tree. `folderById` walks the chain via `folderPathLabel`; the
+  // bare name rides along as a keyword so typing either the leaf or an ancestor filters. Sorted by the
+  // path so children group under their parent. The combobox resolves the trigger label from this list,
+  // so the selected folder's path shows without a separate lookup.
+  const folderById = useMemo(
+    () => new Map((categories ?? []).map((category) => [category.id, category])),
+    [categories],
+  );
+  const categoryItems = useMemo(
+    () =>
+      (categories ?? [])
+        .map((category) => ({
+          value: category.id,
+          label: folderPathLabel(category, folderById),
+          keywords: [category.name],
+        }))
+        .sort((a, b) =>
+          a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
+        ),
+    [categories, folderById],
+  );
+
   const formBody = (
     <>
       {draft.restorable && (
@@ -353,7 +372,10 @@ export function ArticleForm({
           control={form.control}
           name="title"
           render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid || undefined}>
+            <Field
+              className="max-w-3xl"
+              data-invalid={fieldState.invalid || undefined}
+            >
               <FieldLabel htmlFor="title">{t("form.titleLabel")}</FieldLabel>
               <Input
                 {...field}
@@ -382,7 +404,10 @@ export function ArticleForm({
           control={form.control}
           name="categoryId"
           render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid || undefined}>
+            <Field
+              className="max-w-3xl"
+              data-invalid={fieldState.invalid || undefined}
+            >
               <FieldLabel htmlFor="categoryId" required>
                 {t("form.categoryLabel")}
               </FieldLabel>
@@ -397,28 +422,23 @@ export function ArticleForm({
                   />
                 )}
               >
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger
-                    id="categoryId"
-                    className="w-full sm:w-72"
-                    aria-invalid={fieldState.invalid || undefined}
-                  >
-                    <SelectValue
-                      placeholder={
-                        hasCategories
-                          ? t("form.categorySelect")
-                          : t("form.categoryNone")
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(categories ?? []).map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Folder-path combobox (replaces the flat Select): type-to-filter over the full
+                    path, single-select bound to categoryId, keyboard/a11y per the shared pattern. The
+                    inline "＋ create category" affordance is the CreatableField wrapper's button. */}
+                <Combobox
+                  id="categoryId"
+                  value={field.value}
+                  onValueChange={field.onChange}
+                  items={categoryItems}
+                  aria-invalid={fieldState.invalid || undefined}
+                  placeholder={
+                    hasCategories
+                      ? t("form.categorySelect")
+                      : t("form.categoryNone")
+                  }
+                  searchPlaceholder={t("form.categorySearchPlaceholder")}
+                  emptyText={t("form.categoryEmpty")}
+                />
               </CreatableField>
               {!hasCategories && (
                 <FieldDescription>{t("form.categoryHint")}</FieldDescription>
@@ -439,7 +459,10 @@ export function ArticleForm({
           control={form.control}
           name="excerpt"
           render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid || undefined}>
+            <Field
+              className="max-w-3xl"
+              data-invalid={fieldState.invalid || undefined}
+            >
               <FieldLabel htmlFor="excerpt">{t("form.excerptLabel")}</FieldLabel>
               <Input
                 id="excerpt"
@@ -510,7 +533,12 @@ export function ArticleForm({
         </MarkdownImportDropzone>
       )}
 
-      <div className="flex justify-end gap-2">
+      {/* Sticky action bar: on a long article the Save/Cancel actions used to sit at the very bottom,
+          out of reach while editing. Pinned near the viewport bottom, they stay reachable at any scroll
+          position. It's in normal tab order (last children of the form), the pending/disabled + dirty
+          leave-confirm logic is unchanged, and there's no animation — nothing for reduced-motion to
+          disable. `backdrop-blur` keeps content legible where the bar overlaps it. */}
+      <div className="sticky bottom-4 z-20 flex items-center justify-end gap-2 rounded-lg border bg-background/95 px-4 py-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <Button
           type="button"
           variant="outline"

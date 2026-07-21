@@ -139,7 +139,8 @@
   "code": {
     "copyCode": "Copy code",
     "copied": "Code copied",
-    "plainText": "text"
+    "plainText": "text",
+    "auto": "auto"
   },
   "mermaid": {
     "rendering": "Rendering diagram…",

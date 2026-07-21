@@ -20,16 +20,24 @@ Open the Knowledge Base and choose **New article**. The form is short:
 
 - **Title** — the article's name. The URL **slug** is derived from the title automatically (a short
   `lowercase-with-hyphens` form); you do not type it.
-- **Category** — the article's home folder. Every article lives in **exactly one** folder. If you
-  have not created any folders yet, use the **+** button to make one without leaving the form. See
+- **Category** — the article's home folder. Every article lives in **exactly one** folder. Pick it
+  from the **searchable folder list** — type to filter by the folder's full path (e.g.
+  *Servers / Linux*), so the right one is easy to find even in a deep tree. If you have not created
+  any folders yet, use the **+** button to make one without leaving the form. See
   [Folders and access](/help/knowledge-base-folders-access).
 - **Excerpt** *(optional)* — a one-line summary shown in listings.
 - **Content** — the body, in Markdown.
 
 The editor is a plain Markdown editor with a live preview — there is no rich-text/WYSIWYG mode by
-design. Fenced code blocks are syntax-highlighted on the published page, each with a copy button,
-and a ` ```mermaid ` block renders as a diagram. You write raw Markdown; the formatting appears when
-the article is viewed.
+design. The form gives the editor a **wide, comfortable width**, and the **Save / Create draft**
+actions ride in a bar that **stays in reach** as you scroll a long article. Fenced code blocks are
+syntax-highlighted on the published page, each with a copy button, and a ` ```mermaid ` block renders
+as a diagram. You write raw Markdown; the formatting appears when the article is viewed.
+
+If a code block's fence has **no language** marker, lazyit makes a best-effort guess at display time
+and labels it **auto** (for example, ` ```def sum(a, b): return a + b``` ` is highlighted as Python).
+An explicit language on the fence always wins, and an ambiguous block is left as plain text rather
+than mislabelled — so adding a language to the fence is still the reliable way to be sure.
 
 While typing, two helpers offer autocomplete:
 

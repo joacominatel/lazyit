@@ -32,7 +32,7 @@ export function ArticleEditView({ slug }: { slug: string }) {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-6xl">
         <DetailSkeleton panels={1} />
       </div>
     );
@@ -40,7 +40,7 @@ export function ArticleEditView({ slug }: { slug: string }) {
 
   if (isError || !article) {
     return (
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-6xl">
         <ErrorState
           title={t("detail.notFoundTitle")}
           description={t("detail.notFoundDescription")}
@@ -53,7 +53,7 @@ export function ArticleEditView({ slug }: { slug: string }) {
 
   if (!session) {
     return (
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-6xl">
         <EmptyState
           icon={LockClosedIcon}
           title={t("form.notSignedInTitle")}
@@ -64,7 +64,7 @@ export function ArticleEditView({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         breadcrumb={breadcrumb}
         title={t("form.editTitle")}

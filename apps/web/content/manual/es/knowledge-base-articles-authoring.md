@@ -21,15 +21,25 @@ Abre la Base de conocimiento y elige **Nuevo artículo**. El formulario es breve
 - **Título** — el nombre del artículo. El **slug** de la URL se deriva del título automáticamente
   (una forma corta en `minúsculas-con-guiones`); no lo escribes tú.
 - **Categoría** — la carpeta principal del artículo. Cada artículo vive en **exactamente una**
-  carpeta. Si aún no creaste ninguna carpeta, usa el botón **+** para crear una sin salir del
-  formulario. Consulta [Carpetas y acceso](/help/knowledge-base-folders-access).
+  carpeta. Elígela desde la **lista de carpetas con búsqueda**: escribe para filtrar por la ruta
+  completa de la carpeta (por ejemplo, *Servidores / Linux*), así es fácil encontrar la correcta
+  incluso en un árbol profundo. Si aún no creaste ninguna carpeta, usa el botón **+** para crear una
+  sin salir del formulario. Consulta [Carpetas y acceso](/help/knowledge-base-folders-access).
 - **Extracto** *(opcional)* — un resumen de una línea que se muestra en los listados.
 - **Contenido** — el cuerpo, en Markdown.
 
 El editor es un editor de Markdown plano con vista previa en vivo: por diseño no hay un modo de texto
-enriquecido/WYSIWYG. Los bloques de código se resaltan con sintaxis en la página publicada, cada uno
+enriquecido/WYSIWYG. El formulario le da al editor un **ancho amplio y cómodo**, y las acciones
+**Guardar / Crear borrador** van en una barra que **queda siempre al alcance** mientras te desplazas
+por un artículo largo. Los bloques de código se resaltan con sintaxis en la página publicada, cada uno
 con un botón de copia, y un bloque ` ```mermaid ` se renderiza como un diagrama. Tú escribes Markdown
 en bruto; el formato aparece cuando se ve el artículo.
+
+Si el cerco de un bloque de código **no tiene** marcador de lenguaje, lazyit hace una mejor conjetura
+al momento de mostrarlo y lo etiqueta como **auto** (por ejemplo, ` ```def sum(a, b): return a + b``` `
+se resalta como Python). Un lenguaje explícito en el cerco siempre tiene prioridad, y un bloque ambiguo
+se deja como texto plano en lugar de etiquetarse mal, así que agregar el lenguaje al cerco sigue siendo
+la forma confiable de asegurarte.
 
 Mientras escribes, dos ayudas ofrecen autocompletado:
 
