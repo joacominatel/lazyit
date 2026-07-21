@@ -903,6 +903,15 @@
       "emptyTitle": "No {label} entries yet",
       "emptyDescription": "Add your first one to start classifying records — it becomes pickable wherever this kind is referenced.",
       "emptyAction": "Create the first one",
+      "selectAll": "Select all {label} entries",
+      "selectRow": "Select {name}",
+      "bulkDelete": {
+        "confirmTitle": "Delete {count, plural, one {# category} other {# categories}}?",
+        "confirmDescription": "This soft-deletes the selected categories. Any that are still in use — they have articles or sub-folders — are kept and skipped.",
+        "resultAllDeleted": "Deleted {deleted, plural, one {# category} other {# categories}}.",
+        "resultPartial": "Deleted {deleted}, {skipped} skipped (still in use).",
+        "resultAllSkipped": "{skipped, plural, one {# category} other {# categories}} skipped (still in use)."
+      },
       "columns": {
         "name": "Name",
         "description": "Description",
