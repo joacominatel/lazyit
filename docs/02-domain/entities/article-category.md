@@ -102,6 +102,11 @@ cascade returning `{ deletedFolders, deletedArticles }` — `category:delete` AD
 body `{ accessRules: <list> | null }`, [[0060-kb-folder-access-control]]). Bodies validated against
 the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
 
+The list read shape carries a **computed `articleCount`** (`.nullish()`, ADR-0092 #1106) — a filtered
+Prisma `_count` of that folder's **live** articles scoped to the caller's visibility (folder-access
+rules + own drafts), so it never reveals a count a viewer couldn't reach; it is **not a stored column**
+(no migration) and the UI **hides the number when absent** (older API / a folder the caller can't read).
+
 Related: [[article]] · [[folder]] · [[asset-category]] · [[shared-package]] ·
 [[0021-knowledge-base-design]] · [[0059-kb-folders-links-and-import]] ·
 [[0060-kb-folder-access-control]] · [[0019-asset-assignment-integrity]] ·
