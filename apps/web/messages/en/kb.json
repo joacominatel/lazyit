@@ -88,7 +88,8 @@
       "saved": "Article saved",
       "saveError": "Couldn't save the article",
       "draftCreated": "Draft created",
-      "createError": "Couldn't create the article"
+      "createError": "Couldn't create the article",
+      "slugTaken": "A note with that name already exists — try a different title."
     },
     "draft": {
       "restoreTitle": "Unsaved draft recovered",

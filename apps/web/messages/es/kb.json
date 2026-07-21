@@ -88,7 +88,8 @@
       "saved": "Artículo guardado",
       "saveError": "No se pudo guardar el artículo",
       "draftCreated": "Borrador creado",
-      "createError": "No se pudo crear el artículo"
+      "createError": "No se pudo crear el artículo",
+      "slugTaken": "Ya existe una nota con ese nombre — probá con otro título."
     },
     "draft": {
       "restoreTitle": "Borrador sin guardar recuperado",
