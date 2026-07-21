@@ -52,9 +52,11 @@ import { useUploadAttachment } from "@/lib/api/hooks/use-attachments";
 import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { useCan } from "@/lib/hooks/use-permissions";
+import type { MarkdownImport } from "@/lib/utils/kb-markdown-import";
 import type { KbNewPrefill } from "@/lib/utils/kb-wiki-link-prefill";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { useArticleDraft } from "../_lib/use-article-draft";
+import { MarkdownImportDropzone } from "./markdown-import-dropzone";
 
 const FORM_ID = "article-form";
 
@@ -207,6 +209,35 @@ export function ArticleForm({
     router.push(cancelHref);
   };
 
+  // ── Drag-and-drop markdown import (#1106, CREATE only) ───────────────────────────────────────
+  // A dropped/picked .md fills the editor client-side (never uploaded). Its content lands in the
+  // `content` field; the derived title fills `title` ONLY when the user hasn't typed one. If the
+  // editor already has content we confirm before replacing it rather than silently clobbering.
+  const [pendingImport, setPendingImport] = useState<MarkdownImport | null>(null);
+
+  const applyImport = (result: MarkdownImport) => {
+    form.setValue("content", result.content, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    if (result.title && !form.getValues("title")?.trim()) {
+      form.setValue("title", result.title, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
+    toast.success(t("mdImport.toast.imported"));
+  };
+
+  const handleImport = (result: MarkdownImport) => {
+    // Non-empty typed content → confirm before replacing; empty → fill straight away.
+    if (form.getValues("content")?.trim()) {
+      setPendingImport(result);
+      return;
+    }
+    applyImport(result);
+  };
+
   const onSubmit = form.handleSubmit((values) => {
     if (!isAuthenticated) {
       toast.error(t("form.toast.signInRequired"));
@@ -267,8 +298,8 @@ export function ArticleForm({
 
   const hasCategories = (categories?.length ?? 0) > 0;
 
-  return (
-    <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
+  const formBody = (
+    <>
       {draft.restorable && (
         <div
           role="status"
@@ -453,6 +484,20 @@ export function ArticleForm({
           )}
         />
       </FieldGroup>
+    </>
+  );
+
+  return (
+    <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
+      {/* #1106: drag-and-drop markdown import is a CREATE-only affordance. On edit the editor owns
+          image drag/drop, so the body renders plain. */}
+      {isEdit ? (
+        formBody
+      ) : (
+        <MarkdownImportDropzone onImport={handleImport}>
+          <div className="space-y-6">{formBody}</div>
+        </MarkdownImportDropzone>
+      )}
 
       <div className="flex justify-end gap-2">
         <Button
@@ -487,6 +532,41 @@ export function ArticleForm({
                 clearly-styled discard rather than the default confirm. */}
             <Button variant="destructive" onClick={confirmLeave}>
               {t("form.leaveConfirm.leave")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* #1106: importing a .md over already-typed content asks first (never a silent clobber). */}
+      <AlertDialog
+        open={pendingImport !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingImport(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("mdImport.replaceConfirm.title")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("mdImport.replaceConfirm.description")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t("mdImport.replaceConfirm.cancel")}
+            </AlertDialogCancel>
+            {/* Plain destructive button (not AlertDialogAction) so replacing typed content is an
+                explicit, clearly-styled discard — mirrors the leave-confirm above. */}
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (pendingImport) applyImport(pendingImport);
+                setPendingImport(null);
+              }}
+            >
+              {t("mdImport.replaceConfirm.confirm")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
