@@ -27,6 +27,14 @@ La pantalla de Taxonomías es una sola página con una barra de pestañas. Cada 
 Cada pestaña es su propia lista de crear / editar. Añade una entrada nueva, renómbrala o elimina la que
 ya no necesites.
 
+**Eliminar varias a la vez.** Marca las casillas de las filas que quieras quitar y usa **Eliminar** en
+la barra de selección. lazyit las elimina una por una e informa el resultado: como una categoría que
+**aún está en uso** (tiene artículos o subcarpetas) está protegida y no se puede quitar, un lote puede
+terminar como un **éxito parcial**: las libres se eliminan y las que están en uso se **conservan y se
+omiten**, con un resumen como *"Se eliminaron 3, 2 omitidas (aún en uso)"*. Las filas omitidas quedan
+seleccionadas para que primero reasignes sus registros y vuelvas a intentarlo. (El borrado masivo
+requiere el permiso de eliminación de categorías; las casillas solo aparecen si lo tienes.)
+
 ## Cómo se relacionan las taxonomías con los registros
 
 Una categoría o un modelo es una **referencia** a la que apuntan los registros — no es el registro en

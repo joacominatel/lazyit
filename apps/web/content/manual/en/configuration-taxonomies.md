@@ -25,6 +25,14 @@ The Taxonomies screen is a single page with a tab bar. Each tab manages one kind
 
 Each tab is its own create / edit list. Add a new entry, rename one, or remove one you no longer need.
 
+**Removing several at once.** Tick the checkboxes on the rows you want to remove and use **Delete** in
+the selection bar. lazyit deletes them one by one and reports the result — because a category that is
+**still in use** (it has articles or sub-folders) is protected and cannot be removed, a batch can end
+as a **partial success**: the free ones are deleted and the in-use ones are **kept and skipped**, with
+a summary such as *"Deleted 3, 2 skipped (still in use)"*. The skipped rows stay selected so you can
+reassign their records first and try again. (Bulk delete requires the category-delete permission; the
+checkboxes only appear when you hold it.)
+
 ## How taxonomies relate to records
 
 A category or model is a **reference** that records point at — it is not the record itself. An asset
