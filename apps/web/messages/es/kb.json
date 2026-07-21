@@ -103,6 +103,22 @@
       "leave": "Descartar cambios"
     }
   },
+  "mdImport": {
+    "hint": "Arrastra aquí un archivo .md para rellenar el contenido",
+    "choose": "Elegir un archivo .md",
+    "overlay": "Suelta para importar su contenido",
+    "toast": {
+      "imported": "Markdown importado en el editor",
+      "wrongType": "Solo archivos .md, .markdown o .txt",
+      "tooLarge": "Ese archivo es demasiado grande: el límite es 1 MB"
+    },
+    "replaceConfirm": {
+      "title": "¿Reemplazar el contenido actual?",
+      "description": "El editor ya tiene contenido. Importar este archivo lo reemplaza por completo — esto no se puede deshacer.",
+      "cancel": "Conservar mi contenido",
+      "confirm": "Reemplazarlo"
+    }
+  },
   "detail": {
     "notFoundTitle": "Artículo no encontrado",
     "notFoundDescription": "Puede ser un borrador que no puedes ver, fue eliminado o la API no está disponible.",
