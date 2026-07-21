@@ -23,7 +23,11 @@ fast link resolution. Introduced in [[0059-kb-folders-links-and-import]]. Distin
 - **to** a target identified by **`targetSlug`** (the raw `[[slug]]`), with a nullable
   **`resolvedTargetId`** → [[article]] (filled when the slug currently resolves to a live article).
 - An **unresolved** `[[slug]]` (no live target) is **render-time state** — a non-clickable token with
-  a tooltip — **not** a hard FK; the edge row still exists with `resolvedTargetId` null.
+  a tooltip — **not** a hard FK; the edge row still exists with `resolvedTargetId` null. For a viewer
+  with `article:write` the token becomes a **"＋ Create this note"** link → `/kb/new` prefilled with the
+  (sanitized) slug + title, so the new note claims that slug and resolves the link; readers keep the
+  inert tooltip (ADR-0092 #1106). A slug already taken by a live-but-unseen row surfaces a specific
+  "name already exists" message on create, never a generic error.
 
 ## Business rules
 
