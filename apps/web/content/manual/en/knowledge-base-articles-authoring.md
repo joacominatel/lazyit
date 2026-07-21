@@ -38,6 +38,28 @@ While typing, two helpers offer autocomplete:
 - Secret references to the Secret Manager are also supported inline; you only ever see and pick a
   handle, never a secret value.
 
+### Start from a Markdown file
+
+On the **New article** screen you can seed the editor from a file you already have: **drag a
+Markdown file onto the form** and its text drops straight into **Content**. A calm "Drop a `.md`
+file to import its content" overlay appears while you drag. Prefer not to drag? Use the **Choose a
+`.md` file** button on the same bar to pick one — the keyboard-friendly path does exactly the same
+thing.
+
+- Accepted files are **`.md`, `.markdown` and `.txt`**, up to **1 MB**. Anything else is declined
+  with a short notice — this only imports text, so images and other file types are not accepted here
+  (for pictures, see [Adding images](#adding-images) below).
+- The file is read **in your browser only** — nothing is uploaded. It simply fills the editor, and
+  the article is created when you press **Create draft**, exactly as if you had typed it.
+- If the **Title** is still empty, it's filled from the file's first `# Heading` (a leading
+  `---` YAML frontmatter block is skipped first), or from the file name. A title you've already
+  typed is never overwritten.
+- If the editor **already has content**, importing asks you to **confirm before replacing it**, so a
+  stray drop never wipes work in progress.
+
+This is a quick way to start a draft from notes — for bringing in Word documents or a whole folder
+of Markdown at once, use **Import** instead (see [Importing articles](/help/knowledge-base-import)).
+
 ### Formatting help (the `?` button)
 
 A **`?` button** in the editor's toolbar opens a short **formatting cheat sheet** so you never write

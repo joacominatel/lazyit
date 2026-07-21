@@ -38,6 +38,29 @@ Mientras escribes, dos ayudas ofrecen autocompletado:
 - También se admiten referencias a secretos del Gestor de secretos de forma inline; solo ves y eliges
   un identificador (handle), nunca un valor secreto.
 
+### Empezar desde un archivo Markdown
+
+En la pantalla **Nuevo artículo** puedes partir de un archivo que ya tengas: **arrastra un archivo
+Markdown sobre el formulario** y su texto se vuelca directamente en **Contenido**. Mientras arrastras
+aparece una capa serena con "Suelta un archivo `.md` para importar su contenido". ¿Prefieres no
+arrastrar? Usa el botón **Elegir un archivo `.md`** de la misma barra para elegirlo — el camino
+accesible por teclado hace exactamente lo mismo.
+
+- Los archivos admitidos son **`.md`, `.markdown` y `.txt`**, hasta **1 MB**. Cualquier otro se
+  rechaza con un aviso breve — esto solo importa texto, así que las imágenes y otros tipos de archivo
+  no se admiten aquí (para imágenes, consulta [Añadir imágenes](#añadir-imágenes) más abajo).
+- El archivo se lee **solo en tu navegador** — no se sube nada. Simplemente rellena el editor, y el
+  artículo se crea cuando pulsas **Crear borrador**, igual que si lo hubieras escrito.
+- Si el **Título** sigue vacío, se rellena a partir del primer `# Encabezado` del archivo (antes se
+  omite un bloque de frontmatter YAML `---` inicial), o a partir del nombre del archivo. Un título que
+  ya hayas escrito nunca se sobrescribe.
+- Si el editor **ya tiene contenido**, la importación te pide **confirmar antes de reemplazarlo**,
+  para que un arrastre accidental nunca borre el trabajo en curso.
+
+Es una forma rápida de empezar un borrador a partir de notas — para traer documentos de Word o una
+carpeta entera de Markdown de una vez, usa **Importar** (consulta
+[Importar artículos](/help/knowledge-base-import)).
+
 ### Ayuda de formato (el botón `?`)
 
 Un **botón `?`** en la barra de herramientas del editor abre una breve **chuleta de formato** para

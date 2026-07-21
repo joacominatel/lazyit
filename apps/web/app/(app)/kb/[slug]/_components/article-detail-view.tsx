@@ -5,7 +5,10 @@ import { useMemo, useRef } from "react";
 import { DetailSkeleton } from "@/components/detail-panel";
 import { MarkdownView } from "@/components/markdown-view";
 import { ArticleAttachmentProvider } from "@/components/markdown-attachment-image-view";
-import { WikiLinkProvider } from "@/components/markdown-wiki-link-view";
+import {
+  WikiLinkCreateProvider,
+  WikiLinkProvider,
+} from "@/components/markdown-wiki-link-view";
 import { Breadcrumb, type BreadcrumbItem } from "@/components/breadcrumb";
 import { ErrorState } from "@/components/resource-table";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
@@ -13,6 +16,7 @@ import { useArticleBySlug } from "@/lib/api/hooks/use-articles";
 import { useWikiLinkResolver } from "@/lib/api/hooks/use-wiki-link-resolver";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { articleFolderTrail } from "@/lib/utils/kb-reading";
+import { buildKbCreateHref } from "@/lib/utils/kb-wiki-link-prefill";
 import { ArticleConnectionsRail } from "./article-connections-rail";
 import { ArticleCoversRow } from "./article-covers-row";
 import { ArticleLedgerHeader } from "./article-ledger-header";
@@ -119,14 +123,18 @@ export function ArticleDetailView({ slug }: { slug: string }) {
             </p>
           ) : null}
 
+          {/* #1106 Phase 4: a writer (`article:write`) turns unresolved `[[slug]]`s into "create this
+              note" links (→ /kb/new prefilled); a reader gets `null` → the calm inert tooltip stays. */}
           <WikiLinkProvider resolve={resolveWikiLink}>
-            <ArticleWikiLinkPreviewProvider>
-              <ArticleAttachmentProvider articleId={article.id}>
-                <div ref={proseRef}>
-                  <MarkdownView content={article.content} />
-                </div>
-              </ArticleAttachmentProvider>
-            </ArticleWikiLinkPreviewProvider>
+            <WikiLinkCreateProvider build={canWrite ? buildKbCreateHref : null}>
+              <ArticleWikiLinkPreviewProvider>
+                <ArticleAttachmentProvider articleId={article.id}>
+                  <div ref={proseRef}>
+                    <MarkdownView content={article.content} />
+                  </div>
+                </ArticleAttachmentProvider>
+              </ArticleWikiLinkPreviewProvider>
+            </WikiLinkCreateProvider>
           </WikiLinkProvider>
 
           <ArticleSiblingFooter

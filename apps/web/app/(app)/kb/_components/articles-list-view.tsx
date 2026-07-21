@@ -579,6 +579,7 @@ export function ArticlesListView() {
                       name={folder.name}
                       href={kbFolderHref(currentSearch, folder.id)}
                       childCount={childCountById.get(folder.id) ?? 0}
+                      articleCount={folder.articleCount}
                       restriction={restriction}
                       ancestorName={ancestorName}
                     />

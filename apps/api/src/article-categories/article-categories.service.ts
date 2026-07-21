@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { isServicePrincipal, type Principal } from '../auth/principal';
 import { SearchService } from '../search/search.service';
+import { FolderAccessService, folderVisible } from './folder-access.service';
 
 /** Shape returned by a successful cascade delete. */
 export interface CascadeDeleteResult {
@@ -61,6 +62,10 @@ export class ArticleCategoriesService {
     // cascade never leaves ghost docs in the search index. ArticleCategoriesService is not a dependency
     // of SearchService, so there is no provider cycle despite SearchModule importing this module.
     private readonly search: SearchService,
+    // Folder-access evaluator (ADR-0060 §4). The list endpoint uses it so the per-folder `articleCount`
+    // (#1106 Phase 4) is null for a folder the caller cannot read — the count must never reveal more
+    // than the article list would show that viewer. Provided by this same module (no new dependency).
+    private readonly folderAccess: FolderAccessService,
   ) {}
 
   /**
@@ -68,13 +73,65 @@ export class ArticleCategoriesService {
    * permission boundary — ADR-0060 §3) is INCLUDED only for a caller holding `settings:manage` (the
    * web rule-editor); for an ordinary `category:read` caller it is omitted entirely (INV-9 / #554). The
    * internal mutation callers pass no principal → they receive the public shape (and discard it).
+   *
+   * Each row also carries a COMPUTED `articleCount` (#1106 Phase 4) — a Prisma `_count` over the
+   * articles relation, NOT a stored column (no migration). The count is scoped to exactly what the
+   * article LIST would show this caller: LIVE (`deletedAt: null`) articles that are PUBLISHED, plus the
+   * caller's OWN DRAFTs (the article list's `visibilityWhere`) — so it never leaks the existence of
+   * other authors' drafts. AUTHZ (ADR-0060 §4): the count is set to `null` for any folder the caller
+   * cannot READ, so it never reveals a count of articles inside a folder the list itself hides from
+   * them. The nested relation count is filtered explicitly (`deletedAt: null`) because the soft-delete
+   * read extension only scopes TOP-LEVEL queries, not nested `_count` relation filters.
    */
   async findAll(principal?: Principal) {
     const withRules = await this.canSeeAccessRules(principal);
-    return this.prisma.articleCategory.findMany({
+    // Which folders may this caller read (ADR-0060 §4)? ADMIN → 'ALL' (every count shown); a non-admin
+    // gets the explicit visible set; a no-principal internal caller fails closed to public folders.
+    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const rows = await this.prisma.articleCategory.findMany({
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
-      select: { ...CATEGORY_PUBLIC_SELECT, ...(withRules ? { accessRules: true } : {}) },
+      select: {
+        ...CATEGORY_PUBLIC_SELECT,
+        ...(withRules ? { accessRules: true } : {}),
+        _count: {
+          select: {
+            articles: { where: this.articleCountWhere(principal) },
+          },
+        },
+      },
     });
+    // Flatten Prisma's nested `_count.articles` into the flat `articleCount` the DTO exposes, and null
+    // it out for a folder the caller can't read (don't leak a hidden folder's article count — §4).
+    return rows.map(({ _count, ...row }) => ({
+      ...row,
+      articleCount: folderVisible(visible, row.id) ? _count.articles : null,
+    }));
+  }
+
+  /**
+   * The nested-relation `_count` filter for a folder's `articleCount` (#1106 Phase 4). Mirrors the
+   * article list's own visibility (ArticlesService `visibilityWhere`): LIVE + PUBLISHED for everyone,
+   * plus the caller's OWN DRAFTs — so a folder's number equals the count of rows the caller would find
+   * in that folder via the list, never more. `deletedAt: null` is explicit here (the soft-delete
+   * extension does not reach nested relation filters). A service account / anonymous caller (no human
+   * id) sees PUBLISHED-only, matching the list.
+   */
+  private articleCountWhere(principal?: Principal): Prisma.ArticleWhereInput {
+    const currentUserId =
+      principal !== undefined && !isServicePrincipal(principal)
+        ? principal.user.id
+        : undefined;
+    return {
+      deletedAt: null,
+      ...(currentUserId
+        ? {
+            OR: [
+              { status: 'PUBLISHED' },
+              { status: 'DRAFT', authorId: currentUserId },
+            ],
+          }
+        : { status: 'PUBLISHED' }),
+    };
   }
 
   /**
@@ -87,7 +144,10 @@ export class ArticleCategoriesService {
     const withRules = await this.canSeeAccessRules(principal);
     const category = await this.prisma.articleCategory.findFirst({
       where: { id },
-      select: { ...CATEGORY_PUBLIC_SELECT, ...(withRules ? { accessRules: true } : {}) },
+      select: {
+        ...CATEGORY_PUBLIC_SELECT,
+        ...(withRules ? { accessRules: true } : {}),
+      },
     });
     if (!category) {
       throw new NotFoundException(`ArticleCategory ${id} not found`);

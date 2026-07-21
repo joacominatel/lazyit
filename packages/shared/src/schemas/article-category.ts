@@ -26,6 +26,14 @@ export const ArticleCategorySchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
+  // Live-article count for this folder (#1106 Phase 4). A COMPUTED read aggregate (Prisma `_count`
+  // over the articles relation), NOT a stored column — no migration, no data touch. Counts only the
+  // articles the CALLER could actually browse in the list (ADR-0060 §4 folder access + the article
+  // list's PUBLISHED-or-own-DRAFT visibility), so it never reveals more than the list would show. The
+  // api sends `null` for a folder the caller cannot read (its count would leak hidden articles) and a
+  // legacy/older server omits the field entirely — `.nullish()` accepts both, and the UI hides the
+  // number when it is null/absent (self-heals on any operator upgrade without a client change).
+  articleCount: int4({ min: 0, example: 0 }).nullish(),
 });
 
 /**

@@ -43,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ApiError } from "@/lib/api/client";
 import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import {
   useCreateArticle,
@@ -52,8 +53,11 @@ import { useUploadAttachment } from "@/lib/api/hooks/use-attachments";
 import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { useCan } from "@/lib/hooks/use-permissions";
+import type { MarkdownImport } from "@/lib/utils/kb-markdown-import";
+import type { KbNewPrefill } from "@/lib/utils/kb-wiki-link-prefill";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { useArticleDraft } from "../_lib/use-article-draft";
+import { MarkdownImportDropzone } from "./markdown-import-dropzone";
 
 const FORM_ID = "article-form";
 
@@ -85,8 +89,19 @@ function toFormValues(article?: Article): ArticleFormValues {
  * action (ADR-0021). `slug` is auto-derived from the title by the API.
  *
  * Authorship is enforced server-side via the OIDC Bearer token (ADR-0038/0039).
+ *
+ * `prefill` (#1106 Phase 4) seeds a CREATE form from a create-on-click on an unresolved `[[slug]]`:
+ * the sanitized `title` seeds the title field and the sanitized `slug` is sent on create so the new
+ * note takes exactly the wiki-link's target slug (resolving the original red link). Both are already
+ * validated by `parseKbNewPrefill` at the page edge; ignored entirely on edit.
  */
-export function ArticleForm({ article }: { article?: Article }) {
+export function ArticleForm({
+  article,
+  prefill,
+}: {
+  article?: Article;
+  prefill?: KbNewPrefill;
+}) {
   const t = useTranslations("kb");
   const tc = useTranslations("common");
   const isEdit = article != null;
@@ -124,7 +139,12 @@ export function ArticleForm({ article }: { article?: Article }) {
   const uploadImage = useUploadAttachment("article", article?.id ?? "");
 
   const format = useFormatter();
-  const baseline = useMemo(() => toFormValues(article), [article]);
+  const baseline = useMemo(() => {
+    const values = toFormValues(article);
+    // #1106 Phase 4: seed a CREATE form's title from the sanitized wiki-link prefill (never on edit).
+    if (!article && prefill?.title) values.title = prefill.title;
+    return values;
+  }, [article, prefill]);
 
   const form = useForm<ArticleFormValues>({
     resolver: zodResolver(
@@ -190,6 +210,35 @@ export function ArticleForm({ article }: { article?: Article }) {
     router.push(cancelHref);
   };
 
+  // ── Drag-and-drop markdown import (#1106, CREATE only) ───────────────────────────────────────
+  // A dropped/picked .md fills the editor client-side (never uploaded). Its content lands in the
+  // `content` field; the derived title fills `title` ONLY when the user hasn't typed one. If the
+  // editor already has content we confirm before replacing it rather than silently clobbering.
+  const [pendingImport, setPendingImport] = useState<MarkdownImport | null>(null);
+
+  const applyImport = (result: MarkdownImport) => {
+    form.setValue("content", result.content, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    if (result.title && !form.getValues("title")?.trim()) {
+      form.setValue("title", result.title, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
+    toast.success(t("mdImport.toast.imported"));
+  };
+
+  const handleImport = (result: MarkdownImport) => {
+    // Non-empty typed content → confirm before replacing; empty → fill straight away.
+    if (form.getValues("content")?.trim()) {
+      setPendingImport(result);
+      return;
+    }
+    applyImport(result);
+  };
+
   const onSubmit = form.handleSubmit((values) => {
     if (!isAuthenticated) {
       toast.error(t("form.toast.signInRequired"));
@@ -228,6 +277,10 @@ export function ArticleForm({ article }: { article?: Article }) {
           content: values.content,
           status: "DRAFT",
           ...(values.excerpt ? { excerpt: values.excerpt } : {}),
+          // #1106 Phase 4: when created from a wiki-link, take the link's exact (validated) target
+          // slug so the note resolves the original `[[slug]]`. Used as-is (no auto-suffix) — a slug
+          // already taken by a live row surfaces as a 409, mapped to a specific message in onError.
+          ...(prefill?.slug ? { slug: prefill.slug } : {}),
         },
         {
           onSuccess: (created) => {
@@ -238,8 +291,17 @@ export function ArticleForm({ article }: { article?: Article }) {
             toast.success(t("form.toast.draftCreated"));
             router.push(`/kb/${created.slug}`);
           },
-          onError: (error) =>
-            notifyError(error, t("form.toast.createError")),
+          onError: (error) => {
+            // A create 409 means the slug is already taken by a live article (the only unique
+            // constraint at create) — including a wiki-link target the author couldn't see (a
+            // >200-item KB, another author's draft, a folder-hidden row). The link can't be resolved
+            // by creating a new note under a taken slug, so say so specifically (#1106).
+            if (error instanceof ApiError && error.status === 409) {
+              toast.error(t("form.toast.slugTaken"));
+              return;
+            }
+            notifyError(error, t("form.toast.createError"));
+          },
         },
       );
     }
@@ -247,8 +309,8 @@ export function ArticleForm({ article }: { article?: Article }) {
 
   const hasCategories = (categories?.length ?? 0) > 0;
 
-  return (
-    <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
+  const formBody = (
+    <>
       {draft.restorable && (
         <div
           role="status"
@@ -433,6 +495,20 @@ export function ArticleForm({ article }: { article?: Article }) {
           )}
         />
       </FieldGroup>
+    </>
+  );
+
+  return (
+    <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
+      {/* #1106: drag-and-drop markdown import is a CREATE-only affordance. On edit the editor owns
+          image drag/drop, so the body renders plain. */}
+      {isEdit ? (
+        formBody
+      ) : (
+        <MarkdownImportDropzone onImport={handleImport}>
+          <div className="space-y-6">{formBody}</div>
+        </MarkdownImportDropzone>
+      )}
 
       <div className="flex justify-end gap-2">
         <Button
@@ -467,6 +543,41 @@ export function ArticleForm({ article }: { article?: Article }) {
                 clearly-styled discard rather than the default confirm. */}
             <Button variant="destructive" onClick={confirmLeave}>
               {t("form.leaveConfirm.leave")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* #1106: importing a .md over already-typed content asks first (never a silent clobber). */}
+      <AlertDialog
+        open={pendingImport !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingImport(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("mdImport.replaceConfirm.title")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("mdImport.replaceConfirm.description")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t("mdImport.replaceConfirm.cancel")}
+            </AlertDialogCancel>
+            {/* Plain destructive button (not AlertDialogAction) so replacing typed content is an
+                explicit, clearly-styled discard — mirrors the leave-confirm above. */}
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (pendingImport) applyImport(pendingImport);
+                setPendingImport(null);
+              }}
+            >
+              {t("mdImport.replaceConfirm.confirm")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

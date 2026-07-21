@@ -23,10 +23,15 @@ editor sugiere los artículos coincidentes para que elijas uno.
 - Un `[[slug]]` cuyo destino **existe** se renderiza como un enlace en el que se puede hacer clic en
   la página publicada. Pasa el cursor sobre un enlace que funciona para previsualizar el artículo de
   destino — su título, estado, carpeta y extracto — sin salir de la página.
-- Un `[[slug]]` cuyo destino **aún no existe** se renderiza como una mención simple, sin clic, con una
-  indicación emergente ("aún no creado"). Esto es una **referencia hacia adelante**: puedes enlazar un
-  runbook que piensas escribir a continuación. Cuando crees más tarde ese artículo, el enlace empieza
-  a funcionar por sí solo — no tienes que volver a editar el primer artículo.
+- Un `[[slug]]` cuyo destino **aún no existe** se renderiza como una mención con una indicación
+  emergente ("aún no creado"). Esto es una **referencia hacia adelante**: puedes enlazar un runbook
+  que piensas escribir a continuación. Cuando crees más tarde ese artículo, el enlace empieza a
+  funcionar por sí solo — no tienes que volver a editar el primer artículo.
+  - Si puedes **editar artículos**, un enlace sin resolver se convierte en una acción **"Crear esta
+    nota"** (un pequeño `+`): al hacer clic se abre el formulario de nuevo artículo con el **slug y un
+    título ya rellenados** a partir del enlace, de modo que la nota que crees toma exactamente ese
+    slug y el enlace original se resuelve en cuanto la guardas. Los lectores sin permiso de edición
+    solo ven la mención tranquila de "aún no creado".
 
 Guardar un artículo nunca falla por un `[[enlace]]` sin resolver.
 
