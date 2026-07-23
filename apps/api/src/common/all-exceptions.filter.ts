@@ -53,6 +53,7 @@ export class AllExceptionsFilter extends BaseExceptionFilter {
         case 'P2002':
           return 409;
         case 'P2003':
+        case 'P2020':
         case 'P2023':
           return 400;
         case 'P2025':
