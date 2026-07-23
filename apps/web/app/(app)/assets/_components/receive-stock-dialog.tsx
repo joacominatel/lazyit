@@ -60,7 +60,7 @@ function parseSerials(raw: string): string[] {
 }
 
 type FieldErrors = Partial<
-  Record<"modelId" | "quantity" | "serials", string>
+  Record<"form" | "modelId" | "quantity" | "serials", string>
 >;
 
 /**
@@ -150,9 +150,9 @@ export function ReceiveStockButton() {
         else if (key === "serials")
           next.serials = t("serialsCountMismatch", { quantity: quantity || "0" });
       }
-      // Fallback: a validation failure with no field we render inline → surface the model requirement,
-      // the only always-required field the user might have missed.
-      if (Object.keys(next).length === 0) next.modelId = t("modelRequired");
+      // Fallback: a validation failure on a field we don't render inline (company/notes/cost/…) →
+      // surface a form-level notice rather than mis-blaming the model field.
+      if (Object.keys(next).length === 0) next.form = t("validationError");
       setErrors(next);
       return;
     }
@@ -201,6 +201,11 @@ export function ReceiveStockButton() {
                 className="max-h-[60vh] overflow-y-auto pr-1"
               >
                 <FieldGroup>
+                  {errors.form ? (
+                    <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
+                      <p className="text-sm">{errors.form}</p>
+                    </Callout>
+                  ) : null}
                   <Field data-invalid={errors.modelId ? true : undefined}>
                     <FieldLabel htmlFor="receive-model" required>
                       {t("model")}
