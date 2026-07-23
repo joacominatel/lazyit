@@ -107,13 +107,24 @@ describe("splitNewVsExisting (skip-existing collision policy, #613)", () => {
     expect(skipped).toEqual([]);
   });
 
-  it("is case-sensitive (distinct keys are not collapsed)", () => {
+  it("normalizes case (handles are lowercased, so `FOO` collides with the `foo` handle)", () => {
     const { toCreate, skipped } = splitNewVsExisting(
-      [{ key: "foo", value: "1" }],
-      ["FOO"],
+      [{ key: "FOO", value: "1" }],
+      ["foo"],
     );
-    expect(toCreate).toEqual([{ key: "foo", value: "1" }]);
-    expect(skipped).toEqual([]);
+    expect(toCreate).toEqual([]);
+    expect(skipped).toEqual([{ key: "FOO", value: "1" }]);
+  });
+
+  it("normalizes disallowed handle chars the same way the create-path does", () => {
+    // `MY-KEY` and `my.key` both normalize to a handle within `[a-z0-9_.-]`, but a key with a
+    // stripped char (e.g. `MY$KEY` → `mykey`) skips an existing `mykey` handle.
+    const { toCreate, skipped } = splitNewVsExisting(
+      [{ key: "MY$KEY", value: "1" }],
+      ["mykey"],
+    );
+    expect(toCreate).toEqual([]);
+    expect(skipped).toEqual([{ key: "MY$KEY", value: "1" }]);
   });
 });
 
