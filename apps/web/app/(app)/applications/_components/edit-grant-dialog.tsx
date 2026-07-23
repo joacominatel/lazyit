@@ -75,6 +75,11 @@ export function EditGrantDialog({
     setExpiresAt(isoToDateInput(grant.expiresAt));
     setNotes(grant.notes ?? "");
   }
+  // On close (grant becomes null), clear the seed so reopening the SAME grant reseeds fresh from
+  // props — otherwise a cancelled edit lingers in the persistently-mounted dialog.
+  if (!grant && seededId !== null) {
+    setSeededId(null);
+  }
 
   const isPending = updateExpiry.isPending || updateNotes.isPending;
 
