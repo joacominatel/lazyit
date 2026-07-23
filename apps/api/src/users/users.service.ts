@@ -1467,7 +1467,9 @@ export class UsersService {
    *    not-found id, or a not-owned-by-source id is SKIPPED and reported. ASSIGNED asset-history is
    *    emitted per row.
    *  - Selected grants → NEW AccessGrant rows (grantedAt=now, actor=admin), accessLevel + expiresAt
-   *    copied verbatim. The ENGINE TOGGLE (`fireWorkflowsOnClonedGrants`, default false): when TRUE each
+   *    copied verbatim. A not-active / not-found / not-owned-by-source grant id, or one whose Application
+   *    is soft-deleted ("application_deleted"), is SKIPPED and reported. The ENGINE TOGGLE
+   *    (`fireWorkflowsOnClonedGrants`, default false): when TRUE each
    *    grant writes a PENDING workflow run (ACCESS_GRANTED) atomically and is enqueued AFTER commit
    *    (the normal grant path fires); when FALSE the grant is bookkeeping-only (the trigger is
    *    SUPPRESSED). Either way the grant row is identical and auditable.
@@ -1668,7 +1670,9 @@ export class UsersService {
   /**
    * Resolve the selected source grant ids into per-grant clone plans (ADR-0058 §4). Keeps only ids that
    * are the SOURCE's currently-ACTIVE grants (revokedAt null); a not-found / not-source / already-revoked
-   * id is skipped ("not_found") and reported. `accessLevel` + `expiresAt` are carried verbatim. When the
+   * id is skipped ("not_found"), and a grant whose Application is soft-deleted is skipped
+   * ("application_deleted") — both reported (mirrors the "asset_deleted" guard in
+   * {@link planClonedAssignments}). `accessLevel` + `expiresAt` are carried verbatim. When the
    * engine toggle is ON, each plan also pre-resolves its ACCESS_GRANTED workflow `TriggerPlan` (a READ
    * before the tx, swallowed on failure — `trigger` stays null if no workflow / lookup fails); when OFF,
    * `trigger` is always null (the workflow is SUPPRESSED).
@@ -1701,6 +1705,13 @@ export class UsersService {
       },
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
+    // Which of the selected grants reference a LIVE application (the read filter hides soft-deleted ones)
+    // — the same live-state guard planClonedAssignments applies to assets.
+    const liveApps = await this.prisma.application.findMany({
+      where: { id: { in: [...new Set(rows.map((r) => r.applicationId))] } },
+      select: { id: true },
+    });
+    const liveAppIds = new Set(liveApps.map((a) => a.id));
 
     // When the toggle is on, pre-plan ACCESS_GRANTED once per distinct application (best-effort, before
     // the tx). A null plan = no enabled workflow with a version → bookkeeping-only even when ON.
@@ -1730,6 +1741,16 @@ export class UsersService {
       const row = byId.get(id);
       if (!row) {
         skipped.push({ id, reason: 'not_found' });
+        continue;
+      }
+      if (!liveAppIds.has(row.applicationId)) {
+        // entityId = the underlying application id so the web resolves a friendly label (the requested id
+        // is the GRANT id, which the web's asset/app catalogs can't name). Mirrors asset_deleted. #361.
+        skipped.push({
+          id,
+          entityId: row.applicationId,
+          reason: 'application_deleted',
+        });
         continue;
       }
       plans.push({
