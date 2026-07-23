@@ -348,6 +348,7 @@
     "searchModel": "Buscar modelos…",
     "noModels": "Sin modelos",
     "modelRequired": "Elige un modelo para recibir.",
+    "validationError": "Algunos campos no son válidos. Revisa los valores e inténtalo de nuevo.",
     "quantity": "Cantidad",
     "quantityHelp": "Cuántas unidades crear (1–{max}).",
     "quantityInvalid": "Ingresa una cantidad entre 1 y {max}.",

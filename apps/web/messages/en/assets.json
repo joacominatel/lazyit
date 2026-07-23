@@ -348,6 +348,7 @@
     "searchModel": "Search models…",
     "noModels": "No models",
     "modelRequired": "Choose a model to receive.",
+    "validationError": "Some fields are invalid. Check the values and try again.",
     "quantity": "Quantity",
     "quantityHelp": "How many units to create (1–{max}).",
     "quantityInvalid": "Enter a quantity between 1 and {max}.",
