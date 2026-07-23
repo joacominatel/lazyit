@@ -7,11 +7,19 @@ import {
   updateConsumable,
 } from "../endpoints/consumables";
 import { consumableKeys } from "./use-consumables";
+import { invalidateDashboard } from "./use-dashboard";
 
-/** Consumable writes — each invalidates `consumableKeys.all` so the list and detail refetch. */
+/**
+ * Consumable writes — each invalidates `consumableKeys.all` so the list and detail refetch, plus the
+ * dashboard (low-stock tiles/counts depend on consumables, so a create/update/delete must refresh
+ * them too — the #499 invalidate-the-dashboard-on-related-writes pattern).
+ */
 function useInvalidateConsumables() {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: consumableKeys.all });
+  return () => {
+    queryClient.invalidateQueries({ queryKey: consumableKeys.all });
+    invalidateDashboard(queryClient);
+  };
 }
 
 export function useCreateConsumable() {
