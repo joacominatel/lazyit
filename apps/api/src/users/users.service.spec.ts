@@ -112,6 +112,7 @@ describe('UsersService', () => {
     assetAssignment: { findMany: jest.Mock; groupBy: jest.Mock };
     accessGrant: { findMany: jest.Mock; groupBy: jest.Mock };
     asset: { findMany: jest.Mock };
+    application: { findMany: jest.Mock };
   };
   /** Accessor for the lifted prisma mock — keeps the clone tests readable. */
   const prismaRef = () => prismaMock;
@@ -183,6 +184,17 @@ describe('UsersService', () => {
         groupBy: jest.fn().mockResolvedValue([]),
       },
       asset: { findMany: jest.fn().mockResolvedValue([]) },
+      // ADR-0058 clone: planClonedGrants reads which selected grants reference a LIVE application (the
+      // soft-delete extension auto-scopes to live rows). Default ECHOES the requested ids back as live —
+      // so nothing is treated as soft-deleted unless a test overrides it (mirrors planClonedAssignments'
+      // asset.findMany, but defaulting to "all live" since most grant tests don't exercise a deleted app).
+      application: {
+        findMany: jest.fn((args: { where?: { id?: { in?: string[] } } }) =>
+          Promise.resolve(
+            (args?.where?.id?.in ?? []).map((id: string) => ({ id })),
+          ),
+        ),
+      },
       // Handles BOTH forms: callback (offboard / linked-create / update / restore / clone) with the tx
       // client, and array (findPage's [findMany, count]) which resolves each promise in the array.
       $transaction: jest.fn(
@@ -2710,6 +2722,51 @@ describe('UsersService', () => {
         applicationId: 'app-1',
         accessLevel: 'developer',
       });
+    });
+
+    it('opens NEW grant rows for the new user, skipping a SOFT-DELETED application (reported)', async () => {
+      primeCreate();
+      // Two selected source grants: G1 → a LIVE app, G2 → a soft-deleted app (absent from the live-app
+      // findMany, so it is skipped + reported), mirroring the asset_deleted guard.
+      const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
+      const G2 = 'clxgrant2bbbbbbbbbbbbbbbb';
+      prismaRef().accessGrant.findMany.mockResolvedValue([
+        { id: G1, applicationId: 'app-live', accessLevel: 'developer', expiresAt: null },
+        { id: G2, applicationId: 'app-gone', accessLevel: null, expiresAt: null },
+      ]);
+      // Only app-live survives the soft-delete-scoped read.
+      prismaRef().application.findMany.mockResolvedValue([{ id: 'app-live' }]);
+
+      const result = await service.clone(
+        SOURCE,
+        {
+          profile: profile(),
+          cloneAssetAssignments: [],
+          cloneAccessGrants: [G1, G2],
+          fireWorkflowsOnClonedGrants: false,
+        },
+        ADMIN,
+      );
+
+      // Exactly ONE new grant row was written (for the live app), attributed to the cloning admin.
+      expect(tx.accessGrant.create).toHaveBeenCalledTimes(1);
+      expect(tx.accessGrant.create).toHaveBeenCalledWith({
+        data: {
+          userId: NEW_ID,
+          applicationId: 'app-live',
+          accessLevel: 'developer',
+          grantedById: ADMIN,
+        },
+      });
+      // The soft-deleted app's grant is reported as skipped, never silently dropped — carrying the
+      // underlying application id so the web can resolve a friendly label (mirrors asset_deleted, #361).
+      expect(result.skipped).toContainEqual({
+        id: G2,
+        entityId: 'app-gone',
+        reason: 'application_deleted',
+      });
+      // The skipped grant fired no bell (only the live grant did).
+      expect(accessGrants.emitGrantNotifications).toHaveBeenCalledTimes(1);
     });
 
     it('engine toggle ON: fires ACCESS_GRANTED — PENDING run written in-tx, enqueued after commit', async () => {
