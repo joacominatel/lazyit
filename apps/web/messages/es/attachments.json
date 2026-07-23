@@ -19,6 +19,8 @@
     "loadError": "No se pudieron cargar los documentos.",
     "uploaded": "Se subió «{name}».",
     "uploadError": "No se pudo subir el archivo.",
+    "tooLarge": "«{name}» es demasiado grande (máx. {max} MB).",
+    "invalidType": "«{name}» no es un tipo de archivo permitido.",
     "downloadAria": "Descargar {name}",
     "downloadError": "No se pudo descargar el archivo.",
     "deleteAria": "Eliminar {name}",

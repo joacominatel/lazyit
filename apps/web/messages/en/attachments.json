@@ -19,6 +19,8 @@
     "loadError": "Could not load documents.",
     "uploaded": "Uploaded \"{name}\".",
     "uploadError": "Could not upload the file.",
+    "tooLarge": "\"{name}\" is too large (max {max} MB).",
+    "invalidType": "\"{name}\" is not an allowed file type.",
     "downloadAria": "Download {name}",
     "downloadError": "Could not download the file.",
     "deleteAria": "Delete {name}",
