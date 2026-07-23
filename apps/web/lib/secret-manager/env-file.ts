@@ -111,18 +111,20 @@ export function parseEnv(text: string): ParsedEnv {
 
 /**
  * Split parsed entries into those whose key is NEW to the vault and those that already exist
- * (skip-existing collision policy, #613). `existingKeys` is compared case-SENSITIVELY against the
- * entry key — handles are lowercased elsewhere, so the caller passes the existing handles as-is.
+ * (skip-existing collision policy, #613). Both sides are normalized with the SAME transform the
+ * create-path applies to derive a handle (lowercase + strip anything outside `[a-z0-9_.-]`), so a
+ * re-import of a normal `.env` skips its already-imported keys instead of duplicating them.
  */
 export function splitNewVsExisting(
   entries: EnvEntry[],
   existingKeys: Iterable<string>,
 ): { toCreate: EnvEntry[]; skipped: EnvEntry[] } {
-  const existing = new Set(existingKeys);
+  const norm = (k: string) => k.toLowerCase().replace(/[^a-z0-9_.-]/g, "");
+  const existing = new Set([...existingKeys].map(norm));
   const toCreate: EnvEntry[] = [];
   const skipped: EnvEntry[] = [];
   for (const entry of entries) {
-    if (existing.has(entry.key)) skipped.push(entry);
+    if (existing.has(norm(entry.key))) skipped.push(entry);
     else toCreate.push(entry);
   }
   return { toCreate, skipped };
