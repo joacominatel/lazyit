@@ -2731,8 +2731,18 @@ describe('UsersService', () => {
       const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
       const G2 = 'clxgrant2bbbbbbbbbbbbbbbb';
       prismaRef().accessGrant.findMany.mockResolvedValue([
-        { id: G1, applicationId: 'app-live', accessLevel: 'developer', expiresAt: null },
-        { id: G2, applicationId: 'app-gone', accessLevel: null, expiresAt: null },
+        {
+          id: G1,
+          applicationId: 'app-live',
+          accessLevel: 'developer',
+          expiresAt: null,
+        },
+        {
+          id: G2,
+          applicationId: 'app-gone',
+          accessLevel: null,
+          expiresAt: null,
+        },
       ]);
       // Only app-live survives the soft-delete-scoped read.
       prismaRef().application.findMany.mockResolvedValue([{ id: 'app-live' }]);
