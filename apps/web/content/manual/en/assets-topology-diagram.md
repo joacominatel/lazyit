@@ -149,9 +149,11 @@ one place:
 - **Owner(s)** — who is responsible, pulled from the linked asset's assignments. An owner who has
   left the company but was never released is still shown, marked as such.
 - **Knowledge-base articles** — published articles linked to the node's asset, each a click away.
-- **Secret references** — *handles only, never the secret values themselves.* A reference shows the
-  `{{ lazyit_secret.… }}` handle and a label so you know which credential goes with this machine;
-  there is no reveal here and lazyit never exposes the value on this surface. With the manage
+- **Secret references** — *the panel stores handles only, never the secret values themselves.* A
+  reference shows a label and a **reveal (eye)** control. If you're a member of the secret's vault you
+  can reveal the value right here — the same as a KB secret chip: click the eye, unlock if prompted,
+  and the value is decrypted **in your browser** (lazyit's servers never see it) and auto-hides after
+  a few seconds. If you're **not** a member you see a locked chip and nothing is exposed. With the manage
   permission you attach a reference from the **Attach a secret** picker — it lists only the secrets
   **you can access** (the vaults you're a member of) and you choose one by its handle; the **×** next
   to a reference detaches it. References are stored by handle and resolved live, so the label always

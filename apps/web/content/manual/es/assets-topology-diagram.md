@@ -164,10 +164,12 @@ estático. Reúne, en un solo lugar:
   como tal.
 - **Artículos de la base de conocimiento** — artículos publicados vinculados al activo del nodo,
   cada uno a un clic.
-- **Referencias de secretos** — *solo identificadores, nunca los valores de los secretos.* Una
-  referencia muestra el identificador `{{ lazyit_secret.… }}` y una etiqueta para que sepas qué
-  credencial corresponde a esta máquina; aquí no hay forma de revelarlo y lazyit nunca expone el
-  valor en esta superficie. Con el permiso de gestión vinculás una referencia desde el selector
+- **Referencias de secretos** — *el panel guarda solo identificadores, nunca los valores de los
+  secretos.* Una referencia muestra una etiqueta y un control de **revelar (el ojito)**. Si sos miembro
+  de la bóveda del secreto podés revelar el valor acá mismo —igual que un chip de secreto de la KB—:
+  hacés clic en el ojito, desbloqueás si te lo pide, y el valor se descifra **en tu navegador** (los
+  servidores de lazyit nunca lo ven) y se vuelve a ocultar solo a los pocos segundos. Si **no** sos
+  miembro ves un chip bloqueado y no se expone nada. Con el permiso de gestión vinculás una referencia desde el selector
   **Vincular un secreto** — lista solo los secretos **a los que tenés acceso** (las bóvedas de las
   que sos miembro) y elegís uno por su identificador; la **×** junto a una referencia la quita. Las
   referencias se guardan por identificador y se resuelven en vivo, así que la etiqueta siempre refleja

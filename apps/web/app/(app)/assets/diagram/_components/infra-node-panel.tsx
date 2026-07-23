@@ -34,6 +34,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { UserAvatar } from "@/components/user-avatar";
+import { SecretChip } from "@/components/markdown-secret-chip-view";
 import { Combobox, type ComboboxItem } from "@/components/combobox";
 import { ErrorState } from "@/components/resource-table";
 import { Badge } from "@/components/ui/badge";
@@ -1007,8 +1008,9 @@ function ArticlesSection({
 
 /**
  * Secret references — HANDLES ONLY, never values (INV-10, ADR-0061). We render each `handle` as a
- * masked mono chip with a label; there is NO reveal/fetch affordance — the array is empty in v1
- * (no asset→secret linkage exists yet) but the shape is honoured so a future linkage just populates it.
+ * label + a {@link SecretChip}: the same by-handle reveal used by KB prose, so a vault member can
+ * unlock the value in place (client-side decrypt) while non-members see a locked chip. The server
+ * never sees plaintext; the panel only ever holds the handle + label metadata.
  */
 function SecretsSection({ secretRefs }: { secretRefs: InfraSecretRef[] }) {
   const t = useTranslations("infra");
@@ -1027,10 +1029,9 @@ function SecretsSection({ secretRefs }: { secretRefs: InfraSecretRef[] }) {
                 />
                 <span className="truncate text-sm font-medium">{ref.label}</span>
               </div>
-              {/* The handle is a reference token, never the secret material — render it verbatim. */}
-              <code className="block truncate rounded-md bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                {`{{ lazyit_secret.${ref.handle} }}`}
-              </code>
+              {/* Reveal is client-side only (INV-10): SecretChip resolves the handle by-handle and
+                  decrypts in the browser for vault members; non-members see a locked chip. */}
+              <SecretChip handle={ref.handle} />
             </li>
           ))}
           <li className="text-xs text-muted-foreground">
@@ -1046,7 +1047,7 @@ function SecretsSection({ secretRefs }: { secretRefs: InfraSecretRef[] }) {
  * Editable secret references (ADR-0073, issue #801, manager-only). The manager variant of
  * {@link SecretsSection}: the same handle chips PLUS a remove (×) per ref and an "Attach secret"
  * picker. INV-10 holds throughout — this surface only ever touches HANDLES + labels (metadata), never
- * a value; there is no reveal here (revealing is the KB chip's job).
+ * a value; the per-ref {@link SecretChip} does any reveal client-side, exactly as in the read-only variant.
  *
  * The picker is the shared {@link Combobox} in server-search mode, fed by {@link useHandleSuggestions}
  * — the same member-scoped, value-free handle source the KB editor uses (only the caller's vaults).
@@ -1139,10 +1140,9 @@ function SecretsEditor({
                   <XMarkIcon />
                 </Button>
               </div>
-              {/* The handle is a reference token, never the secret material — render it verbatim. */}
-              <code className="block truncate rounded-md bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                {`{{ lazyit_secret.${ref.handle} }}`}
-              </code>
+              {/* Reveal is client-side only (INV-10): SecretChip resolves the handle by-handle and
+                  decrypts in the browser for vault members; non-members see a locked chip. */}
+              <SecretChip handle={ref.handle} />
             </li>
           ))}
         </ul>
