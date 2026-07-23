@@ -43,7 +43,9 @@ Para incorporar a alguien que replica a un colega ("el mismo acceso que Ana"), a
 Por defecto, el acceso clonado **solo se registra** — es contabilidad, sin efecto externo. Hay un
 interruptor opcional para **aprovisionar al nuevo usuario en estas aplicaciones**, que ejecuta los
 flujos de aprovisionamiento de las apps seleccionadas. Tras clonar, lazyit te indica qué se trasladó y
-enumera lo que se omitió (y por qué).
+enumera lo que se omitió (y por qué). Un activo o una aplicación seleccionados que se hayan **eliminado**
+desde entonces se omiten en lugar de copiarse, para que la clonación nunca reviva un activo retirado ni
+una aplicación dada de baja.
 
 ## Enviar un restablecimiento de contraseña
 
