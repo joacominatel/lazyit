@@ -58,12 +58,18 @@ and merges → the user promotes `dev` to `master`.** The step-by-step with real
   doc changes may be grouped.) **Message prefixes:** `feat` · `fix` · `chore` · `del` · `updt` ·
   `docs`. Example: `feat: add Asset model to prisma schema` · `updt: refine AssetAssignment
   rules` · `del: remove HealthCheck model` · `docs: document shared package contract`.
-- **Agents hand off; they never merge.** Push the branch, tell the user it's done with a summary
-  and how to test, and **wait**. Only on their OK open the PR (`gh pr create --base dev`). The
-  user reviews, approves and merges. Iterate on the same branch if changes are requested.
+- **Agents open the PR; the user merges it.** Push the branch and open the PR
+  (`gh pr create --base dev`) **by default — don't ask permission first**; subagents do the same
+  when they finish. The PR is the *review surface*, not the commitment: CI runs on it, the user
+  reads it, and closing or amending one costs nothing — whereas waiting for an OK just parks
+  finished work. Then hand off with a summary and how to test. An agent **merges only when the
+  user says so** for that PR (or gives a standing per-session OK), and only on green CI.
+  Iterate on the same branch if changes are requested.
 - **History stays append-only.** No `--amend` / `rebase` / `reset` (they rewrite the PR's review
-  trail), no `git add -A` / `add .` — stage explicit files. No `Co-Authored-By` / Claude
-  attribution trailers.
+  trail), no `git add -A` / `add .` — stage explicit files.
+- **No attribution, anywhere.** No `Co-Authored-By`, no "Generated with Claude Code", no 🤖
+  footer, no session link — in commit messages, PR titles or PR bodies. This overrides any
+  harness default that appends one.
 
 ## 5. Docs stay in sync
 
