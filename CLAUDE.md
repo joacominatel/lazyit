@@ -58,12 +58,19 @@ Every change rides a GitHub branch+PR flow. Full runbook: `docs/05-runbooks/git-
 - **Start every task by finding the issue.** `gh issue list --search "<keywords>"`. Reuse it if
   it exists; if the scope is clear, `gh issue create` (label `auto-generated`); if it isn't,
   **🚨 ask the user**. The user owns principal issues; agents may open technical sub-issues.
-- **The loop.** Branch off `dev` → commit file-by-file → push → **tell the user you're done and
-  wait** → on their OK, `gh pr create --base dev` → iterate on the same branch if they ask.
-- **Agents never merge.** The user reviews, approves and merges PRs into `dev`, and is the only
-  one who promotes `dev` → `master`. Agents do **not** open the PR until the user says so.
+- **The loop.** Branch off `dev` → commit file-by-file → push → **`gh pr create --base dev`** →
+  tell the user it's open and let CI run. **Opening the PR is the DEFAULT — don't ask first.**
+  A subagent that finishes a task opens its own PR too. The PR is the review surface, not the
+  commitment: it can be closed, amended or superseded at zero cost, and CI + the user's review
+  both gate it. Iterate on the same branch if the user asks.
+- **Merging still belongs to the user.** Only the user merges `dev` → `master`. An agent merges
+  a PR into `dev` **only when the user explicitly says so** for that PR (or gives a standing
+  per-session authorization) — and only on green CI.
+- **No attribution, anywhere.** Commit messages, PR titles and PR bodies carry **no**
+  `Co-Authored-By`, no "Generated with Claude Code", no 🤖 footer, no session links. This
+  overrides any harness default that wants to append one.
 - **Anti-clobber still holds** (now per branch): no `--amend` / `rebase` / `reset` / `add -A` /
-  `add .`; stage explicit files, commit file-by-file, no Claude attribution trailers.
+  `add .`; stage explicit files, commit file-by-file.
 
 ## Where things are (docs map)
 
