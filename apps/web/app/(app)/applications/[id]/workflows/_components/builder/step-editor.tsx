@@ -52,6 +52,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { nextListKey } from "@/lib/list-key";
 import {
   applyFailureChoice,
   applySuccessChoice,
@@ -202,7 +203,7 @@ function StepForm({
   // lockstep with `values.inputFields` by `addField`/`removeField` (the only ops that change length
   // or order — `editField` patches in place).
   const [fieldIds, setFieldIds] = useState<string[]>(() =>
-    values.inputFields.map(() => crypto.randomUUID()),
+    values.inputFields.map(() => nextListKey()),
   );
 
   function set<K extends keyof EditorState>(key: K, value: EditorState[K]) {
@@ -296,7 +297,7 @@ function StepForm({
       ...values.inputFields,
       { name: "", label: "", type: "text", required: false },
     ]);
-    setFieldIds((prev) => [...prev, crypto.randomUUID()]);
+    setFieldIds((prev) => [...prev, nextListKey()]);
   }
 
   function editField(index: number, patch: Partial<ManualInputField>) {
@@ -801,7 +802,7 @@ function SelectOptionsEditor({
   // addOption/removeOption/moveOption (the only ops that change length or order — setOption
   // patches in place).
   const [ids, setIds] = useState<string[]>(() =>
-    options.map(() => crypto.randomUUID()),
+    options.map(() => nextListKey()),
   );
 
   function setOption(index: number, value: string) {
@@ -811,7 +812,7 @@ function SelectOptionsEditor({
   function addOption() {
     if (options.length >= 50) return;
     onChange([...options, ""]);
-    setIds((prev) => [...prev, crypto.randomUUID()]);
+    setIds((prev) => [...prev, nextListKey()]);
   }
 
   function removeOption(index: number) {
