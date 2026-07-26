@@ -132,6 +132,29 @@ render+validate pipeline; only the host/port/mode answers change.
   directly. Do **not** expose the app containers to the host/LAN with this on — Caddy is the only hop.
   (Caddy's `trusted_proxies static private_ranges` already ensures a forged `X-Forwarded-For` is dropped.)
 
+### Browser APIs: `lan` mode is an INSECURE CONTEXT (added 2026-07-26, #1125)
+
+The consequence that bit us twice in production before it was written down: a page served over plain
+HTTP on an IP is **not a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts)**,
+so a whole family of browser APIs is simply `undefined` there. `localhost` **is** a secure context, so
+**development never reproduces this** — the failure only appears on a real `lan` install.
+
+**Banned in `apps/web` feature code** (enforced by the `lazyit/no-secure-context-only-crypto` block in
+`apps/web/eslint.config.mjs`, `error` severity):
+
+| API | Use instead |
+| --- | --- |
+| `crypto.randomUUID()` | `nextListKey()` from `@/lib/list-key` for React list keys — keys need sibling-uniqueness, not entropy. For a real domain id, let the API mint it (`cuid()`). |
+| `crypto.subtle.*` | The already-installed pure-JS `@noble/hashes` / `@noble/ciphers` primitives. |
+| `navigator.clipboard.writeText()` | `copyText()` from `@/lib/secret-manager/clipboard` — it returns a boolean so the UI can offer a manual-copy fallback instead of a silent no-op (#813). |
+
+`crypto.getRandomValues()` is **fine** — it is available in insecure contexts, which is why the
+zero-knowledge vault (`@noble/*` + `getRandomValues`) keeps working in `lan` mode as claimed above.
+
+Known history of this class: #813 (clipboard silently no-ops — a Copy that looked like it saved the
+recovery key but didn't), #1125 (`crypto.randomUUID` crashed the workflow step editor on mount, making
+the builder unusable), #1126 (`crypto.subtle` — TOTP secret items still dead in `lan` mode, open).
+
 ### Infra
 
 - **Caddyfile: no functional change.** A port-only `LAZYIT_SITE_ADDRESS` (`:80`) already yields
