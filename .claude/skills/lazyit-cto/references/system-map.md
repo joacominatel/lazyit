@@ -17,7 +17,7 @@ This file is structured for **scanning, not reading end-to-end**. The CTO opens 
 ## High-level shape
 
 > **Monorepo**: Bun `1.3.14` workspaces + Turborepo `^2.9`
-> **Apps**: `apps/api` (NestJS `11.0.1`), `apps/web` (Next.js `16.2.9` + React `19.2.4`), **`apps/agent`** (the self-installing Linux reporting agent — ADR-0074)
+> **Apps**: `apps/api` (NestJS `11.0.1`), `apps/web` (Next.js `16.2.12` + React `19.2.8`), **`apps/agent`** (the self-installing Linux reporting agent — ADR-0074)
 > **Shared**: `packages/shared` (zod schemas, types, utilities) + **`packages/fetch-cli`** (headless SA secret-retrieval CLI + client-side decrypt — ADR-0080)
 > **Infra**: consolidated root `compose.yaml` (canonical, all services) + committed `compose.override.yaml` (dev tuning) + a `prod` profile + a thin `infra/docker-compose.prod.yaml` overlay; Caddy, env templates, Dockerfiles, bootstrap scripts. **Now also `valkey`** (Redis-compatible; backs BullMQ — ADR-0053).
 > **Docs**: `docs/` (Obsidian vault — **81 ADRs (0001–0081) as of 2026-07-01**; ADR-0055 & ADR-0079 are *proposed*, 0013/0065/0071 *superseded*) + `docs/06-security/INVARIANTS.md` (the 7 auth non-negotiables + INV-8 [ADMIN immutable/full] + INV-SA-1..4 Service-Account guardrails + **INV-9** [KB folder ACL, ADR-0060] + **INV-10** [Secret Manager: server never decrypts, ADR-0061])
@@ -213,7 +213,7 @@ Zitadel). The seven non-negotiables are codified in `docs/06-security/INVARIANTS
 
 ### Framework and conventions
 
-- Next.js `16.2.9` (App Router) + React `19.2.4`
+- Next.js `16.2.12` (App Router) + React `19.2.8`
 - Tailwind v4 + shadcn/ui (preset `radix-nova`, base `neutral`)
 - **Palette (Round 1 #65 + Round 3 #81 + UX cycle #102)**: softened neutral — warm bone (light) + dark warm gray (dark), keeping the indigo brand accent. UX cycle (#102, ADR-0011 amendment 3) **activated + tuned** the `--success/--warning/--info` (+fg) tokens for AA contrast on the bone canvas (solid pills, light + dark) and repurposed `--chart-1..5` as the **categorical / avatar palette** (`lib/avatar-color.ts` → `avatarColorFor`). KB markdown rendered via `rehype-sanitize` (closes SEC-003 render-time XSS). Mobile nav added.
 - TanStack Query for data layer (ADR-0020); `keepPreviousData` on paginated lists
