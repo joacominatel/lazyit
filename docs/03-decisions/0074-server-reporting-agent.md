@@ -209,6 +209,23 @@ today; this adds a build stage, not a publish job.)
 - **Config:** `/etc/lazyit-agent/config` (instance URL + SA token, `chmod 600`). The install script
   writes it; the binary reads it.
 
+**Amendment (2026-07-31, #1133) — every wait is bounded.** The original collector awaited Bun Shell,
+which exposes no timeout, so a command blocked on a degraded NFS mount (`lsblk`) or a wedged BMC
+(`dmidecode`) hung the run indefinitely. That is worse than a missing fact: the unit stays in
+`activating`, and since `OnUnitActiveSec` only re-arms once a unit goes **inactive**, the timer never
+fires again — the host then reads as OFFLINE on the map when in truth only the agent was stuck, so the
+liveness bit of §4 reports a **false outage**. Now bounded in three layers:
+
+- **Per command:** `run()` uses `Bun.spawn` (not `$`, which has no timeout) with a 10 s budget and
+  `killSignal: SIGKILL`; a timeout degrades to `null`, i.e. an omitted fact — the §2 partial-report
+  contract, unchanged. A guaranteed-return race covers the case the kill cannot land, because a
+  process in uninterruptible I/O ignores even SIGKILL until the I/O completes.
+- **Per report:** the POST carries `AbortSignal.timeout(30 s)`, so a black-holed connection fails
+  loudly and retries next tick instead of hanging.
+- **Per run:** the systemd unit sets `RuntimeMaxSec=120`, reaping the whole cgroup if a child
+  outlives the agent. The per-command budget is deliberately far below it, so a degraded host still
+  assembles and sends a **partial** report — reporting less beats reporting nothing.
+
 ### §8 — Security model
 
 - **Single-permission blast radius.** The agent SA holds only `infra:report` (§5).

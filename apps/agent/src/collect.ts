@@ -4,20 +4,66 @@
  * The only hard requirements are `hostname` (always available) and `/etc/machine-id` (the dedup key,
  * handled by the caller). Linux-only by design; the wire contract stays OS-neutral for future targets.
  */
-import { $ } from "bun";
 import { hostname as osHostname } from "node:os";
 import type { AgentReport } from "@lazyit/shared";
 
 type Host = AgentReport["host"];
 type Software = NonNullable<AgentReport["software"]>;
 
-/** Run a command, returning stdout on success or null on ANY failure (missing binary, non-zero, …). */
-async function run(...args: string[]): Promise<string | null> {
+/**
+ * Per-command budget (#1133). Every collector is a local read that finishes in milliseconds on a
+ * healthy host, so ten seconds is pure headroom — it exists to bound the PATHOLOGICAL host, not the
+ * normal one. Kept well under install.sh's `RuntimeMaxSec=120` so a degraded host still assembles
+ * and sends a PARTIAL report before systemd kills the unit; reporting less beats reporting nothing.
+ */
+export const COLLECT_TIMEOUT_MS = 10_000;
+
+/**
+ * Run a command, returning stdout on success or null on ANY failure (missing binary, non-zero
+ * exit, timeout, …) — the best-effort contract the whole collector is built on.
+ *
+ * Uses `Bun.spawn` rather than Bun Shell (`$`) for ONE reason: `$` exposes no timeout, and an
+ * unbounded collector is how a wedged `lsblk` on a degraded NFS mount (or `dmidecode` on a bad BMC)
+ * hung the agent forever — leaving the systemd unit in `activating`, which never re-arms the timer,
+ * which makes the host look OFFLINE when only the agent was stuck.
+ *
+ * Two layers, deliberately: `Bun.spawn`'s own timeout KILLS the child, and the race guarantees this
+ * function RETURNS even in the case the kill cannot land — a process blocked in uninterruptible I/O
+ * ignores SIGKILL until the I/O completes, which is precisely the NFS scenario. Layer three is
+ * systemd's RuntimeMaxSec, which reaps the whole cgroup if a child outlives us.
+ */
+export async function run(
+  args: string[],
+  timeoutMs = COLLECT_TIMEOUT_MS,
+): Promise<string | null> {
+  const collect = async (): Promise<string | null> => {
+    try {
+      const proc = Bun.spawn(args, {
+        stdout: "pipe",
+        stderr: "ignore",
+        stdin: "ignore",
+        timeout: timeoutMs,
+        killSignal: "SIGKILL",
+      });
+      const stdout = await new Response(proc.stdout).text();
+      await proc.exited;
+      return proc.exitCode === 0 ? stdout : null;
+    } catch {
+      return null; // missing binary (ENOENT), permission denied, …
+    }
+  };
+
+  // The grace margin lets the kill land and `exited` settle normally in the common case, so this
+  // fallback only wins when the child is genuinely unreapable.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const abandon = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs + 500);
+  });
+
   try {
-    const res = await $`${args}`.quiet().nothrow();
-    return res.exitCode === 0 ? res.stdout.toString() : null;
-  } catch {
-    return null;
+    return await Promise.race([collect(), abandon]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -89,7 +135,7 @@ interface LsblkDevice {
 }
 
 async function collectDisks(): Promise<Host["disks"]> {
-  const out = await run("lsblk", "-bJ", "-o", "NAME,SIZE,TYPE,MOUNTPOINT");
+  const out = await run(["lsblk", "-bJ", "-o", "NAME,SIZE,TYPE,MOUNTPOINT"]);
   if (!out) return undefined;
   let parsed: { blockdevices?: LsblkDevice[] };
   try {
@@ -119,7 +165,7 @@ interface IpAddr {
 }
 
 async function collectNics(): Promise<Host["nics"]> {
-  const out = await run("ip", "-j", "addr");
+  const out = await run(["ip", "-j", "addr"]);
   if (!out) return undefined;
   let parsed: IpAddr[];
   try {
@@ -146,9 +192,9 @@ async function collectNics(): Promise<Host["nics"]> {
 async function collectHardware(): Promise<Host["hardware"]> {
   if (process.getuid?.() !== 0) return undefined;
   const [manufacturer, model, serial] = await Promise.all([
-    run("dmidecode", "-s", "system-manufacturer"),
-    run("dmidecode", "-s", "system-product-name"),
-    run("dmidecode", "-s", "system-serial-number"),
+    run(["dmidecode", "-s", "system-manufacturer"]),
+    run(["dmidecode", "-s", "system-product-name"]),
+    run(["dmidecode", "-s", "system-serial-number"]),
   ]);
   return clean({
     manufacturer: manufacturer?.trim(),
@@ -193,11 +239,15 @@ function parseApk(out: string | null): Software {
 export async function collectSoftware(): Promise<Software | undefined> {
   let pkgs: Software = [];
   if (Bun.which("dpkg-query")) {
-    pkgs = parseTabbed(await run("dpkg-query", "-W", "-f=${Package}\\t${Version}\\n"));
+    pkgs = parseTabbed(
+      await run(["dpkg-query", "-W", "-f=${Package}\\t${Version}\\n"]),
+    );
   } else if (Bun.which("rpm")) {
-    pkgs = parseTabbed(await run("rpm", "-qa", "--qf", "%{NAME}\\t%{VERSION}-%{RELEASE}\\n"));
+    pkgs = parseTabbed(
+      await run(["rpm", "-qa", "--qf", "%{NAME}\\t%{VERSION}-%{RELEASE}\\n"]),
+    );
   } else if (Bun.which("apk")) {
-    pkgs = parseApk(await run("apk", "info", "-v"));
+    pkgs = parseApk(await run(["apk", "info", "-v"]));
   }
   return pkgs.length ? pkgs.slice(0, SOFTWARE_CAP) : undefined;
 }

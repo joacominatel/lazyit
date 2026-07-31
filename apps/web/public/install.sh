@@ -102,6 +102,12 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=$BIN_PATH report --once
+# Hard ceiling on a single run (#1133). The agent bounds each collector itself, but a child stuck
+# in uninterruptible I/O (a degraded NFS mount, a wedged BMC) can outlive a SIGKILL. Without this,
+# the unit sits in 'activating' forever — and OnUnitActiveSec only re-arms once a unit goes
+# INACTIVE, so the timer would never fire again and the host would look OFFLINE when only the
+# agent was stuck. systemd reaps the whole cgroup; the next tick starts clean.
+RuntimeMaxSec=120
 EOF
 
 cat > "$TIMER" <<EOF

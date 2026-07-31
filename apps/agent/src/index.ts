@@ -70,6 +70,14 @@ function gib(bytes: number | undefined): string {
   return bytes ? `${(bytes / 1024 ** 3).toFixed(1)} GiB` : "?";
 }
 
+/**
+ * Budget for the whole POST (#1133). A black-holed TCP connection — a firewall that DROPs instead
+ * of REJECTing is the everyday cause — otherwise hangs until systemd's default TimeoutStartSec
+ * kills the unit, which is both slow and opaque. Bounding it here turns that into a clean, logged
+ * "could not reach" the operator can act on, and the timer simply retries next tick.
+ */
+const REPORT_TIMEOUT_MS = 30_000;
+
 async function report(url: string, token: string): Promise<void> {
   const payload = await buildReport();
   const base = url.replace(/\/+$/, "");
@@ -83,6 +91,7 @@ async function report(url: string, token: string): Promise<void> {
         authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(REPORT_TIMEOUT_MS),
     });
   } catch (err) {
     throw new Error(`could not reach ${base}/api/infra/report — ${(err as Error).message}`);
