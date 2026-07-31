@@ -134,6 +134,14 @@ y no envía métricas.
 - **Autoalojado y compatible con redes aisladas.** El comando de instalación apunta a *tu* instancia,
   el agente solo se comunica con esa instancia y funciona totalmente sin conexión. Los tokens se pueden
   revocar en cualquier momento desde [Cuentas de servicio](/help/users-permissions-service-accounts).
+- **Límites de reporte.** Los reportes están limitados por token, y un token puede tener como máximo
+  **50** hosts esperando en la bandeja de Pendientes a la vez. Esto protege tu base de datos de un
+  agente descontrolado o robado — un token no puede llenarla de propuestas. Un agente normal nunca se
+  acerca a ninguno de los dos límites: un servidor que ya confirmaste sigue reportando por más llena
+  que esté la bandeja, y confirmar o descartar una propuesta libera un lugar al instante. Si vas a
+  desplegar más de 50 servidores de una vez, confirmá la bandeja a medida que se llena, o subí
+  `INFRA_REPORT_PENDING_CAP` (y `INFRA_REPORT_MAX_PER_WINDOW`, los reportes permitidos por minuto) en
+  el entorno de tu instancia.
 
 ## Mantener el agente al día
 

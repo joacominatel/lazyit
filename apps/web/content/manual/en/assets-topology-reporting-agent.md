@@ -126,6 +126,13 @@ metrics.
 - **Self-hosted and air-gapped-safe.** The install command points at *your* instance, the agent talks
   only to that instance, and it works fully offline. Tokens are revocable any time from
   [Service accounts](/help/users-permissions-service-accounts).
+- **Report limits.** Reporting is rate-limited per token, and one token can hold at most **50** hosts
+  waiting in the Pending tray at a time. This protects your database from a runaway or stolen agent —
+  a token cannot fill it with proposals. A normal agent never comes near either limit: a server you've
+  already confirmed keeps reporting no matter how full the tray is, and confirming or discarding a
+  proposal frees a slot immediately. If you're rolling out more than 50 servers in one go, confirm the
+  tray as it fills, or raise `INFRA_REPORT_PENDING_CAP` (and `INFRA_REPORT_MAX_PER_WINDOW`, the reports
+  allowed per minute) in your instance's environment.
 
 ## Keeping the agent current
 
