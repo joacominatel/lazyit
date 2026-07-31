@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { AgentReportSchema } from '@lazyit/shared';
+import { AgentReportSchema, InfraNodeListItemSchema } from '@lazyit/shared';
 import { InfraService } from './infra.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
@@ -1340,10 +1340,10 @@ describe('InfraService', () => {
       // The enrichment came from ONE query — a relation include, NOT a per-row detail fetch.
       expect(assignments.findAll).not.toHaveBeenCalled();
       expect(prisma.infraNode.findMany).toHaveBeenCalledTimes(1);
-      const arg = firstArg<{ include?: { asset?: { select?: unknown } } }>(
+      const arg = firstArg<{ select?: { asset?: { select?: unknown } } }>(
         prisma.infraNode.findMany,
       );
-      expect(arg.include?.asset?.select).toBeDefined();
+      expect(arg.select?.asset?.select).toBeDefined();
 
       expect(rows).toHaveLength(1);
       expect(rows[0].assetName).toBe('srv-prod-01');
@@ -1392,6 +1392,46 @@ describe('InfraService', () => {
 
       expect(rows[0].assetName).toBeNull();
       expect(rows[0].owners).toEqual([]);
+    });
+
+    // ── The lean list projection (#1135) ────────────────────────────────────
+    // `specs` is an agent's whole host inventory (the full installed-software list, ~1500 entries on
+    // a real Linux box). The PENDING tray polls this list every 40s and the create-agent wizard every
+    // 5s, so shipping the blob per row turns a liveness poll into megabytes. The projection is the
+    // fix: `select` the scalars the list actually renders, never `specs` — the drill-in
+    // (`getNodeDetail`) keeps the full blob, which is where the inventory panel reads it.
+    it('SELECTS an explicit column list that excludes `specs` (never the full inventory blob)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodes();
+
+      const arg = firstArg<{
+        select?: Record<string, unknown>;
+        include?: unknown;
+      }>(prisma.infraNode.findMany);
+      expect(arg.select).toBeDefined();
+      expect(arg.select).not.toHaveProperty('specs');
+      // A bare `include` would re-open the hole: Prisma returns EVERY scalar alongside the relation.
+      expect(arg.include).toBeUndefined();
+      // The asset enrichment must survive the switch to `select` (same one-query join, no N+1).
+      expect(arg.select?.asset).toBeDefined();
+    });
+
+    it('still selects every OTHER wire field, so the projection cannot silently starve the list', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodes();
+
+      const arg = firstArg<{ select: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      );
+      // The shared schema is the contract; `assetName`/`owners` are flattened from the asset relation
+      // rather than selected as columns, so they are the only legitimate absences.
+      const missing = Object.keys(InfraNodeListItemSchema.shape).filter(
+        (field) =>
+          field !== 'assetName' && field !== 'owners' && !arg.select[field],
+      );
+      expect(missing).toEqual([]);
     });
   });
 

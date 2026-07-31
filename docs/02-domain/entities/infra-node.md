@@ -95,7 +95,7 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `ipAddress` | `string?` | primary IP, **format-validated** (IPv4/IPv6) on write — no IPAM/registry/`@unique` ([[0090-ipam-validated-ip]] / #847). Agent-promoted from the report's primary IPv4, validate-or-drop (ADR-0074 §3 / #1081). |
 | `ipAddressSource` | `InfraNodeIpSource` | `@default(AGENT)`; who owns `ipAddress` — `AGENT` (each report overwrites) vs `MANUAL` (a human edit the agent never clobbers, stamped server-side on an IP edit). #1081. |
 | `shortcuts` | `jsonb?` | `[{ label, url }]` SSH/web-UI/console links (max 20; URLs zod-validated). |
-| `specs` | `jsonb?` | loose per-kind attributes (ADR-0007 posture; per-kind validation deferred). |
+| `specs` | `jsonb?` | loose per-kind attributes (ADR-0007 posture; per-kind validation deferred). On an agent-reported host this is the full inventory blob — **detail-only**, never on the list row (#1135). |
 | `x` / `y` | `float?` | canvas position (free-move board; persisted on drag-stop). |
 | `source` | `InfraNodeSource` | `@default(MANUAL)`; AGENT in v2. |
 | `state` | `InfraNodeState` | `@default(CONFIRMED)`; PENDING = the v2 review tray. |
@@ -116,10 +116,14 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
 
 `apps/api/src/infra/` (`InfraModule`), all gated server-side (`infra:read` / `infra:manage`):
 
-- `GET /infra/nodes?kind=&status=&state=` — list (plain `InfraNode[]`, **no page envelope** — the
-  estate is small by design; excludes soft-deleted, newest first). Carries `assetId` (the linkage),
-  not the asset name/owners (those are detail-only). Enriching the list row with the asset name +
-  owner is a tracked follow-up (#750).
+- `GET /infra/nodes?kind=&status=&state=` — list (plain `InfraNodeListItem[]`, **no page envelope** —
+  the estate is small by design; excludes soft-deleted, newest first). Each row is the node PLUS the
+  linked Asset's inventory `assetName` and its active `owners`, joined in ONE query and flattened
+  (#750) — a soft-deleted asset never leaks its name. **Minus `specs`** (#1135): a lean `select`
+  projection omits the blob, because on an agent-reported host it is the whole inventory
+  (installed-software list included) and this endpoint is polled — every 40s by the PENDING review
+  tray, every 5s by the create-agent wizard. Nothing renders `specs` from a list row; read it from
+  the drill-in below. A `take`/pagination pass is still a tracked follow-up.
 - `GET /infra/nodes/:id` — the enriched **drill-in** (`InfraNodeDetail`): the node plus its
   asset-backed payoff — `assetName`, active `owners`, published `articleLinks`, `secretRefs`
   (HANDLES only, never values — INV-10, [[0061-secret-manager-zero-knowledge]]; resolved from the

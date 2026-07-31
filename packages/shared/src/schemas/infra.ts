@@ -282,8 +282,17 @@ export const InfraNodeDetailSchema = InfraNodeSchema.extend({
  * Owners reuse the same lean `InfraNodeOwnerSchema` as the drill-in, so the "departed owner"
  * (deletedAt set) affordance renders identically. `assetName` is null when the node is graph-only
  * or its linked asset is soft-deleted (the API never leaks a detached/archived asset's name).
+ *
+ * MINUS `specs` (issue #1135). On an agent-reported host the blob is the WHOLE inventory — the full
+ * installed-software list, ~1500 entries — and this list is polled by the PENDING tray every 40s and
+ * by the create-agent wizard every 5s, so carrying it per row makes a liveness poll cost megabytes.
+ * Nothing renders `specs` from a list row: the reported-facts section reads it off the drill-in
+ * (`InfraNodeDetailSchema`, `GET /infra/nodes/:id`), which deliberately keeps the full blob. The
+ * `omit` is what stops the contract from lying — the API's projection no longer selects the column.
  */
-export const InfraNodeListItemSchema = InfraNodeSchema.extend({
+export const InfraNodeListItemSchema = InfraNodeSchema.omit({
+  specs: true,
+}).extend({
   /** The linked Asset's `name` (inventory name); null when graph-only or the asset is soft-deleted. */
   assetName: z.string().nullable(),
   /** Active owners via the linked Asset's `AssetAssignment`s; `[]` when graph-only or unowned. */
