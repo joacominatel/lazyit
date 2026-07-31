@@ -21,15 +21,25 @@ Abre la Base de conocimiento y elige **Nuevo artículo**. El formulario es breve
 - **Título** — el nombre del artículo. El **slug** de la URL se deriva del título automáticamente
   (una forma corta en `minúsculas-con-guiones`); no lo escribes tú.
 - **Categoría** — la carpeta principal del artículo. Cada artículo vive en **exactamente una**
-  carpeta. Si aún no creaste ninguna carpeta, usa el botón **+** para crear una sin salir del
-  formulario. Consulta [Carpetas y acceso](/help/knowledge-base-folders-access).
+  carpeta. Elígela desde la **lista de carpetas con búsqueda**: escribe para filtrar por la ruta
+  completa de la carpeta (por ejemplo, *Servidores / Linux*), así es fácil encontrar la correcta
+  incluso en un árbol profundo. Si aún no creaste ninguna carpeta, usa el botón **+** para crear una
+  sin salir del formulario. Consulta [Carpetas y acceso](/help/knowledge-base-folders-access).
 - **Extracto** *(opcional)* — un resumen de una línea que se muestra en los listados.
 - **Contenido** — el cuerpo, en Markdown.
 
 El editor es un editor de Markdown plano con vista previa en vivo: por diseño no hay un modo de texto
-enriquecido/WYSIWYG. Los bloques de código se resaltan con sintaxis en la página publicada, cada uno
+enriquecido/WYSIWYG. El formulario le da al editor un **ancho amplio y cómodo**, y las acciones
+**Guardar / Crear borrador** van en una barra que **queda siempre al alcance** mientras te desplazas
+por un artículo largo. Los bloques de código se resaltan con sintaxis en la página publicada, cada uno
 con un botón de copia, y un bloque ` ```mermaid ` se renderiza como un diagrama. Tú escribes Markdown
 en bruto; el formato aparece cuando se ve el artículo.
+
+Si el cerco de un bloque de código **no tiene** marcador de lenguaje, lazyit hace una mejor conjetura
+al momento de mostrarlo y lo etiqueta como **auto** (por ejemplo, ` ```def sum(a, b): return a + b``` `
+se resalta como Python). Un lenguaje explícito en el cerco siempre tiene prioridad, y un bloque ambiguo
+se deja como texto plano en lugar de etiquetarse mal, así que agregar el lenguaje al cerco sigue siendo
+la forma confiable de asegurarte.
 
 Mientras escribes, dos ayudas ofrecen autocompletado:
 
@@ -37,6 +47,29 @@ Mientras escribes, dos ayudas ofrecen autocompletado:
   [Enlaces y descubrimiento](/help/knowledge-base-linking-discovery).
 - También se admiten referencias a secretos del Gestor de secretos de forma inline; solo ves y eliges
   un identificador (handle), nunca un valor secreto.
+
+### Empezar desde un archivo Markdown
+
+En la pantalla **Nuevo artículo** puedes partir de un archivo que ya tengas: **arrastra un archivo
+Markdown sobre el formulario** y su texto se vuelca directamente en **Contenido**. Mientras arrastras
+aparece una capa serena con "Suelta un archivo `.md` para importar su contenido". ¿Prefieres no
+arrastrar? Usa el botón **Elegir un archivo `.md`** de la misma barra para elegirlo — el camino
+accesible por teclado hace exactamente lo mismo.
+
+- Los archivos admitidos son **`.md`, `.markdown` y `.txt`**, hasta **1 MB**. Cualquier otro se
+  rechaza con un aviso breve — esto solo importa texto, así que las imágenes y otros tipos de archivo
+  no se admiten aquí (para imágenes, consulta [Añadir imágenes](#añadir-imágenes) más abajo).
+- El archivo se lee **solo en tu navegador** — no se sube nada. Simplemente rellena el editor, y el
+  artículo se crea cuando pulsas **Crear borrador**, igual que si lo hubieras escrito.
+- Si el **Título** sigue vacío, se rellena a partir del primer `# Encabezado` del archivo (antes se
+  omite un bloque de frontmatter YAML `---` inicial), o a partir del nombre del archivo. Un título que
+  ya hayas escrito nunca se sobrescribe.
+- Si el editor **ya tiene contenido**, la importación te pide **confirmar antes de reemplazarlo**,
+  para que un arrastre accidental nunca borre el trabajo en curso.
+
+Es una forma rápida de empezar un borrador a partir de notas — para traer documentos de Word o una
+carpeta entera de Markdown de una vez, usa **Importar** (consulta
+[Importar artículos](/help/knowledge-base-import)).
 
 ### Ayuda de formato (el botón `?`)
 

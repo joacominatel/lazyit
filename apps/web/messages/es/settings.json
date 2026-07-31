@@ -903,6 +903,15 @@
       "emptyTitle": "Aún no hay entradas de {label}",
       "emptyDescription": "Agrega la primera para empezar a clasificar registros — quedará disponible para elegir donde sea que se referencie este tipo.",
       "emptyAction": "Crear la primera",
+      "selectAll": "Seleccionar todas las entradas de {label}",
+      "selectRow": "Seleccionar {name}",
+      "bulkDelete": {
+        "confirmTitle": "¿Eliminar {count, plural, one {# categoría} other {# categorías}}?",
+        "confirmDescription": "Esto elimina (borrado lógico) las categorías seleccionadas. Las que aún estén en uso — tienen artículos o subcarpetas — se conservan y se omiten.",
+        "resultAllDeleted": "Se eliminaron {deleted, plural, one {# categoría} other {# categorías}}.",
+        "resultPartial": "Se eliminaron {deleted}, {skipped} omitidas (aún en uso).",
+        "resultAllSkipped": "{skipped, plural, one {# categoría omitida} other {# categorías omitidas}} (aún en uso)."
+      },
       "columns": {
         "name": "Nombre",
         "description": "Descripción",

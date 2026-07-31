@@ -139,12 +139,27 @@
   "code": {
     "copyCode": "Copy code",
     "copied": "Code copied",
-    "plainText": "text"
+    "plainText": "text",
+    "auto": "auto"
   },
   "mermaid": {
     "rendering": "Rendering diagram…",
     "renderError": "Couldn't render this diagram — check the syntax.",
     "ariaLabel": "Diagram"
+  },
+  "callout": {
+    "note": "Note",
+    "tip": "Tip",
+    "important": "Important",
+    "warning": "Warning",
+    "caution": "Caution"
+  },
+  "anchor": {
+    "copyLink": "Copy link to section",
+    "copied": "Link copied"
+  },
+  "lightbox": {
+    "zoom": "Enlarge"
   },
   "filters": {
     "activeFilters": "Active filters",

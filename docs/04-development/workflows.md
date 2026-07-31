@@ -60,8 +60,9 @@ Full step-by-step with commands: [[git-workflow]]. The short version:
 - **Branches:** `master` = production (protected, user-only merges from `dev`), `dev` =
   integration, work on `<prefix>/issue-<n>-<slug>` branches **cut from `dev`**.
 - **The loop:** find/open the issue (`gh issue list --search …`) → branch off `dev` → commit
-  file-by-file → push → **hand off to the user and wait** → on their OK, `gh pr create --base
-  dev`. **Agents never merge**; the user merges to `dev` and promotes `dev` → `master`.
+  file-by-file → push → **`gh pr create --base dev` (the default — don't ask first)** → hand off
+  with a summary while CI runs. **The user merges**; an agent merges into `dev` only when told
+  to, on green CI, and `dev` → `master` is the user's alone. PRs carry **no attribution footer**.
 - **Commits are file-scoped and minimal** (docs may be grouped), prefixed `feat` · `fix` ·
   `chore` · `del` · `updt` · `docs`. No `--amend`/`rebase`/`reset`, no `add -A`/`add .`.
 - Before committing, **review `docs/` for sync** — no references to removed files or stale

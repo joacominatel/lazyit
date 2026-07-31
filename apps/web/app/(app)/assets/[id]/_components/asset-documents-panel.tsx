@@ -76,6 +76,21 @@ export function AssetDocumentsPanel({
 
   function uploadFiles(files: File[]) {
     for (const file of files) {
+      // Client-side guard (the server sniffs + enforces too, ADR-0082 §3) — skip an oversized or
+      // wrong-type file with a clear toast instead of firing a doomed request.
+      if (file.size > ASSET_ATTACHMENT_MAX_MB * 1024 * 1024) {
+        toast.error(
+          t("docs.tooLarge", { name: file.name, max: ASSET_ATTACHMENT_MAX_MB }),
+        );
+        continue;
+      }
+      if (
+        file.type &&
+        !(ASSET_ATTACHMENT_MIME_TYPES as readonly string[]).includes(file.type)
+      ) {
+        toast.error(t("docs.invalidType", { name: file.name }));
+        continue;
+      }
       upload.mutate(file, {
         onSuccess: () => toast.success(t("docs.uploaded", { name: file.name })),
         onError: (error) => notifyError(error, t("docs.uploadError")),

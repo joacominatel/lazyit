@@ -23,6 +23,20 @@ const RAW_PALETTE_MESSAGE =
   "tokens (--success/--warning/--info/--destructive), the pillar utilities " +
   "(bg-pillar-*/text-pillar-*), or the chart tokens (bg-chart-*) instead.";
 
+// #1125 anti-rot guard: WebCrypto APIs that are **secure-context-only** (HTTPS or `localhost`).
+// A self-hosted lazyit reached over plain HTTP on a LAN IP is a first-class deployment shape
+// (ADR-0087) — there `window.crypto` exists but `randomUUID` and `subtle` are `undefined`, so a
+// bare call throws at runtime. Development never reproduces it (`localhost` IS a secure context),
+// which is how #946/#970 shipped a crash that made the workflow builder unusable in production.
+//
+// `crypto.getRandomValues` is deliberately NOT banned — it is available in insecure contexts.
+// For React list keys use `@/lib/list-key`; for hashing/HMAC use the already-installed `@noble/*`
+// pure-JS primitives; for clipboard writes use `@/lib/secret-manager/clipboard`.
+const SECURE_CONTEXT_ONLY_MESSAGE =
+  "This WebCrypto API is secure-context-only (HTTPS/localhost) and is `undefined` on plain-HTTP " +
+  "LAN installs (ADR-0087, #1125). Use `nextListKey()` from @/lib/list-key for React list keys, " +
+  "or the pure-JS @noble/* primitives for hashing/HMAC.";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -49,6 +63,31 @@ const eslintConfig = defineConfig([
         {
           selector: `TemplateElement[value.raw=/${RAW_PALETTE_RE.source}/]`,
           message: RAW_PALETTE_MESSAGE,
+        },
+      ],
+    },
+  },
+  {
+    name: "lazyit/no-secure-context-only-crypto",
+    files: ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.ts"],
+    // `totp.ts` is the one KNOWN remaining offender (TOTP codes are dead on plain HTTP) — tracked
+    // as #1126, which swaps `crypto.subtle` for @noble/hashes. Drop this ignore when it lands.
+    ignores: ["components/ui/**", "lib/secret-manager/totp.ts"],
+    rules: {
+      // `no-restricted-properties`, NOT `no-restricted-syntax`: flat config REPLACES a rule's
+      // options per matching file, so a second `no-restricted-syntax` block would silently
+      // disable the raw-palette guard above on every file both blocks match.
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "crypto",
+          property: "randomUUID",
+          message: SECURE_CONTEXT_ONLY_MESSAGE,
+        },
+        {
+          object: "crypto",
+          property: "subtle",
+          message: SECURE_CONTEXT_ONLY_MESSAGE,
         },
       ],
     },

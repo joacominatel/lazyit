@@ -37,8 +37,8 @@ This is **auditability by default**. Because the prior body is always preserved:
 
 ## Viewing version history
 
-Open any article and scroll to the **Version History** panel at the bottom of the page. Click
-**History** to open a side panel listing every saved snapshot, newest first. Each row shows:
+Open any article, choose the **⋯** (more actions) menu at the top-right of the page, and pick
+**Version history** to open a side panel listing every saved snapshot, newest first. Each row shows:
 
 - The version number (1, 2, 3 …)
 - The draft or published status at that moment
@@ -48,7 +48,7 @@ Click **View** on any row to open a read-only view of that snapshot's full title
 
 ## Restoring a previous version
 
-If an edit went wrong, you can **restore** an earlier snapshot. Open the **History** panel and click
+If an edit went wrong, you can **restore** an earlier snapshot. Open **⋯ → Version history** and click
 **Restore** on any past version (the latest version is the live content, so it has nothing to
 restore). Confirm, and lazyit re-applies that version's **title, body and excerpt** to the live
 article.

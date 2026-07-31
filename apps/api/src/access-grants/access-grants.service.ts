@@ -456,7 +456,9 @@ export class AccessGrantsService {
               ...(actor.serviceAccountId != null
                 ? { revokedBySaId: actor.serviceAccountId }
                 : {}),
-              ...(notes !== undefined && notes !== null ? { notes } : {}),
+              // `null` clears the note, omitted (`undefined`) preserves it — matching the single-item
+              // revoke() and updateNotes().
+              ...(notes !== undefined ? { notes } : {}),
             },
           });
           const runId = await this.recordRevokeRun(

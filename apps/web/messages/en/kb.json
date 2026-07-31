@@ -5,7 +5,7 @@
     "subtitle": "Internal documentation for the team.",
     "newArticle": "New article",
     "searchLabel": "Search articles",
-    "searchPlaceholder": "Search by title…",
+    "searchPlaceholder": "Search articles…",
     "errorTitle": "Could not load articles",
     "noMatchFilters": "No articles match your filters.",
     "noArticlesInFolder": "No articles in this folder yet — open a sub-folder above to keep browsing.",
@@ -19,6 +19,21 @@
     "linkedCount": "{count} linked",
     "linkedTooltip": "{count, plural, one {Linked to # item} other {Linked to # items}}"
   },
+  "search": {
+    "degradedNote": "Full-text search is unavailable right now — showing title and excerpt matches instead.",
+    "resultCount": "{count, plural, one {# result} other {# results}}",
+    "topResults": "Top {shown} of {total} results"
+  },
+  "quickSwitcher": {
+    "title": "Search articles",
+    "description": "Jump to an article by title or content.",
+    "placeholder": "Search articles…",
+    "heading": "Articles",
+    "startTyping": "Type to search articles by title or content…",
+    "searching": "Searching…",
+    "unavailable": "Search is unavailable right now. Try again in a moment.",
+    "noResults": "No articles match “{query}”."
+  },
   "filters": {
     "statusLabelName": "Status",
     "linkedToLabelName": "Target",
@@ -29,6 +44,7 @@
     "noAssets": "No assets found.",
     "noApplications": "No applications found.",
     "linkedOnly": "Linked only",
+    "filtersButton": "Filters",
     "chipSearch": "Search: “{query}”",
     "chipStatus": "Status: {value}",
     "chipCategory": "Category: {value}",
@@ -57,6 +73,8 @@
     "categoryLabel": "Category",
     "categorySelect": "Select a category",
     "categoryNone": "No categories yet",
+    "categorySearchPlaceholder": "Search categories by path…",
+    "categoryEmpty": "No matching categories",
     "categoryHint": "No categories yet — use the + button to create one.",
     "categoryRequired": "Category is required",
     "excerptLabel": "Excerpt",
@@ -72,7 +90,8 @@
       "saved": "Article saved",
       "saveError": "Couldn't save the article",
       "draftCreated": "Draft created",
-      "createError": "Couldn't create the article"
+      "createError": "Couldn't create the article",
+      "slugTaken": "A note with that name already exists — try a different title."
     },
     "draft": {
       "restoreTitle": "Unsaved draft recovered",
@@ -87,6 +106,22 @@
       "leave": "Discard changes"
     }
   },
+  "mdImport": {
+    "hint": "Drag a .md file here to fill the content",
+    "choose": "Choose a .md file",
+    "overlay": "Drop to import its content",
+    "toast": {
+      "imported": "Markdown imported into the editor",
+      "wrongType": "Only .md, .markdown or .txt files",
+      "tooLarge": "That file is too large — the limit is 1 MB"
+    },
+    "replaceConfirm": {
+      "title": "Replace the current content?",
+      "description": "The editor already has content. Importing this file replaces all of it — this can't be undone.",
+      "cancel": "Keep my content",
+      "confirm": "Replace it"
+    }
+  },
   "detail": {
     "notFoundTitle": "Article not found",
     "notFoundDescription": "It may be a draft you can't see, it was deleted, or the API is unreachable.",
@@ -98,13 +133,32 @@
     "publish": "Publish",
     "unpublish": "Unpublish",
     "deleteAriaLabel": "Delete article",
+    "delete": "Delete",
+    "moreActions": "More actions",
     "deleteExtra": "Published articles are visible to the whole team until then.",
+    "versionShort": "v{n}",
+    "updatedRelative": "Updated {rel}",
     "toast": {
       "published": "Article published",
       "publishError": "Couldn't publish the article",
       "movedToDraft": "Moved back to draft",
       "unpublishError": "Couldn't unpublish the article"
     }
+  },
+  "covers": {
+    "label": "Covers"
+  },
+  "connections": {
+    "railLabel": "Connections",
+    "referencedBy": "Referenced by ({count})"
+  },
+  "toc": {
+    "label": "On this page"
+  },
+  "siblings": {
+    "label": "Article navigation",
+    "previous": "Previous",
+    "next": "Next"
   },
   "links": {
     "panelTitle": "Linked to",
@@ -186,6 +240,7 @@
   },
   "folders": {
     "treeLabel": "Browse folders",
+    "mobileToggle": "Folders",
     "allArticles": "All articles",
     "empty": "No folders yet",
     "expand": "Expand {name}",
@@ -256,7 +311,8 @@
     "restoreError": "Couldn't restore the version"
   },
   "wikiLinks": {
-    "unresolvedTooltip": "Document not created yet"
+    "unresolvedTooltip": "Document not created yet",
+    "createTooltip": "Create this note"
   },
   "access": {
     "statePublic": "Public",

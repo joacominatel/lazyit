@@ -309,12 +309,29 @@ function FolderTreeNode({
           <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="truncate">{folder.name}</span>
 
+          {/* #1106 Phase 4: live-article count (ADR-0077 tabular-nums). Shown only when the API sent a
+              number — it is null for a folder the viewer can't read and absent from a legacy server, so
+              the row self-heals to no count. `ml-auto` right-aligns it; the padlock follows without its
+              own `ml-auto` when a count is present. */}
+          {folder.articleCount != null ? (
+            <span
+              className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums"
+              aria-label={t("folders.articleCount", { count: folder.articleCount })}
+              title={t("folders.articleCount", { count: folder.articleCount })}
+            >
+              {folder.articleCount}
+            </span>
+          ) : null}
+
           {/* ADR-0060: padlock affordance — restricted own rule */}
           {isRestricted ? (
             <span
               title={t("access.restrictedTooltip")}
               aria-label={t("access.restrictedAriaLabel")}
-              className="ml-auto shrink-0"
+              className={cn(
+                "shrink-0",
+                folder.articleCount != null ? "ml-1.5" : "ml-auto",
+              )}
             >
               <LockClosedIcon
                 className="size-3.5 text-warning"
@@ -335,7 +352,10 @@ function FolderTreeNode({
               aria-label={t("access.inheritedRestrictedAriaLabel", {
                 name: ancestorName ?? "",
               })}
-              className="ml-auto shrink-0"
+              className={cn(
+                "shrink-0",
+                folder.articleCount != null ? "ml-1.5" : "ml-auto",
+              )}
             >
               <LockClosedIcon className="size-3.5 text-warning/70" aria-hidden />
             </span>

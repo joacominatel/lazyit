@@ -41,7 +41,8 @@ You pick a fresh, unique email and a role, then choose which of the source's **a
 By default, cloned access is **recorded only** — bookkeeping, no external effect. There is an opt-in
 switch to **provision the new user in these applications**, which runs the provisioning workflows for
 the selected apps. After cloning, lazyit tells you what carried over and lists anything that was
-skipped (and why).
+skipped (and why). A selected asset or application that has since been **deleted** is skipped rather
+than copied, so the clone never revives a retired asset or a decommissioned application.
 
 ## Send a password reset
 

@@ -63,6 +63,8 @@ export const CloneUserSchema = z.strictObject({
  *      • `not_found`        — the id wasn't an ACTIVE row of the source (not found / not the source's /
  *                             already released or revoked).
  *      • `asset_deleted`    — the assignment's asset is soft-deleted (the live-row guard equivalent).
+ *      • `application_deleted` — the grant's Application is soft-deleted (the asset_deleted equivalent
+ *                             for grants).
  *      • `already_in_state` — two selected assignments resolved to the SAME asset; the duplicate is a
  *                             no-op (the one-active-per-(asset,user) index would reject it anyway).
  */

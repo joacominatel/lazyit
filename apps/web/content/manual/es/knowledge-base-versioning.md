@@ -38,9 +38,9 @@ Esto es **auditabilidad por defecto**. Como el cuerpo anterior siempre se conser
 
 ## Cómo ver el historial de versiones
 
-Abre cualquier artículo y desplázate hasta el panel **Historial de versiones** al final de la página.
-Haz clic en **Historial** para abrir un panel lateral con todas las instantáneas guardadas, de más
-reciente a más antigua. Cada fila muestra:
+Abre cualquier artículo, elige el menú **⋯** (más acciones) en la parte superior derecha de la página
+y selecciona **Historial de versiones** para abrir un panel lateral con todas las instantáneas
+guardadas, de más reciente a más antigua. Cada fila muestra:
 
 - El número de versión (1, 2, 3 …)
 - El estado de borrador o publicado en ese momento
@@ -51,8 +51,8 @@ contenido completo de esa instantánea.
 
 ## Cómo restaurar una versión anterior
 
-Si una edición salió mal, puedes **restaurar** una instantánea anterior. Abre el panel **Historial**
-y haz clic en **Restaurar** en cualquier versión pasada (la última versión es el contenido vivo, así
+Si una edición salió mal, puedes **restaurar** una instantánea anterior. Abre **⋯ → Historial de
+versiones** y haz clic en **Restaurar** en cualquier versión pasada (la última versión es el contenido vivo, así
 que no hay nada que restaurar en ella). Confirma y lazyit vuelve a aplicar el **título, el cuerpo y
 el extracto** de esa versión al artículo vivo.
 

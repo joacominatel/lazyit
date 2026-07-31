@@ -1,11 +1,10 @@
 "use client";
 
-import { ArrowUturnLeftIcon, ClockIcon } from "@heroicons/react/24/outline";
+import { ArrowUturnLeftIcon } from "@heroicons/react/24/outline";
 import type { ArticleVersion } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { DetailPanel } from "@/components/detail-panel";
 import { MarkdownView } from "@/components/markdown-view";
 import {
   AlertDialog,
@@ -25,7 +24,6 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet";
 import { useRestoreArticleVersion } from "@/lib/api/hooks/use-article-mutations";
 import {
@@ -37,36 +35,39 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 
 /**
- * "Version History" panel on the KB article detail (ADR-0042, #604). Lists all saved
- * versions of the article (newest first) with author, timestamp and version number. A
- * secondary "History" affordance opens a side sheet so the primary read view stays clean.
+ * Version History as a CONTROLLED side sheet (#1106 Phase 2). In the calm reading view (#1106) the
+ * old always-on "Version History" DetailPanel is gone — history moves ENTIRELY behind the header's
+ * "⋯" menu, which drives `open`. This component is the same list/restore/read-only-snapshot machinery
+ * (ADR-0042, #604, #848), only its trigger changed: no DetailPanel, no SheetTrigger, just `open` /
+ * `onOpenChange` supplied by the menu.
  *
- * Clicking a version row opens a read-only content view of that snapshot in a second sheet
- * (same pattern as viewing the current article, but with a frozen body). Draft versions are
- * visible only to the author — the API enforces the same rules as for the live article.
- *
- * Restore (#848, `canWrite` only): replays a past version's title/body/excerpt through the normal
- * edit path, which appends a NEW version — history is never rewritten (ADR-0042). It does NOT change
- * the article's published/draft status. Gated on `article:write`; the API also enforces authorship.
+ * Clicking a version row opens a read-only content view of that snapshot in a second sheet. Draft
+ * versions are visible only to the author — the API enforces the same rules as for the live article.
+ * Restore (#848, `canWrite` only) replays a past version through the normal edit path, appending a NEW
+ * version — history is never rewritten. Gated on `article:write`; the API also enforces authorship.
  */
-export function ArticleVersionHistoryPanel({
+export function ArticleVersionHistorySheet({
   articleId,
   canWrite,
+  open,
+  onOpenChange,
 }: {
   articleId: string;
   canWrite: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations("kb");
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [selectedVersion, setSelectedVersion] = useState<
-    ArticleVersion | null
-  >(null);
+  const [selectedVersion, setSelectedVersion] = useState<ArticleVersion | null>(
+    null,
+  );
   const [restoreTarget, setRestoreTarget] = useState<ArticleVersion | null>(
     null,
   );
 
+  // Idle until the sheet is opened, so the reading page never pays for history it may not view.
   const { data: page, isLoading } = useArticleVersions(
-    historyOpen ? articleId : undefined,
+    open ? articleId : undefined,
   );
   const restoreVersion = useRestoreArticleVersion(articleId);
 
@@ -86,7 +87,7 @@ export function ArticleVersionHistoryPanel({
       onSuccess: () => {
         toast.success(t("versions.restoreToast", { n: version.version }));
         setRestoreTarget(null);
-        setHistoryOpen(false);
+        onOpenChange(false);
       },
       onError: (error) => notifyError(error, t("versions.restoreError")),
     });
@@ -104,7 +105,7 @@ export function ArticleVersionHistoryPanel({
       {/* Restore confirm — replays a past version as a NEW version (never rewrites history). */}
       <AlertDialog
         open={restoreTarget !== null}
-        onOpenChange={(open) => !open && setRestoreTarget(null)}
+        onOpenChange={(next) => !next && setRestoreTarget(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -134,24 +135,8 @@ export function ArticleVersionHistoryPanel({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* History list sheet */}
-      <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DetailPanel
-          title={t("versions.panelTitle")}
-          actions={
-            <SheetTrigger asChild>
-              <Button size="sm" variant="outline">
-                <ClockIcon />
-                {t("versions.viewHistory")}
-              </Button>
-            </SheetTrigger>
-          }
-        >
-          <p className="text-sm text-muted-foreground">
-            {t("versions.panelDescription")}
-          </p>
-        </DetailPanel>
-
+      {/* History list sheet (controlled by the header ⋯ menu) */}
+      <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent side="right" className="w-full sm:max-w-md">
           <SheetHeader>
             <SheetTitle>{t("versions.sheetTitle")}</SheetTitle>
@@ -174,9 +159,7 @@ export function ArticleVersionHistoryPanel({
                     key={v.id}
                     version={v}
                     authorName={resolveAuthor(v.editedById, usersById)}
-                    onView={() => {
-                      setSelectedVersion(v);
-                    }}
+                    onView={() => setSelectedVersion(v)}
                     // Restore is offered for past versions only — restoring the latest (the live
                     // content) would be a no-op (the API skips an identical snapshot anyway).
                     onRestore={
@@ -302,7 +285,7 @@ function VersionDetailSheet({
   const usersById = useUserNames(authorIds);
 
   return (
-    <Sheet open={version !== null} onOpenChange={(open) => !open && onClose()}>
+    <Sheet open={version !== null} onOpenChange={(next) => !next && onClose()}>
       <SheetContent side="right" className="w-full sm:max-w-2xl">
         <SheetHeader>
           <div className="flex items-center justify-between gap-2">

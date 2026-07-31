@@ -31,6 +31,7 @@ import { useAssets } from "@/lib/api/hooks/use-assets";
 import { useSetFolderAccessRules } from "@/lib/api/hooks/use-folder-access-rules";
 import { useUserNames } from "@/lib/api/hooks/use-users";
 import { notifyError } from "@/lib/api/notify-error";
+import { nextListKey } from "@/lib/list-key";
 import { cn } from "@/lib/utils";
 
 /**
@@ -49,7 +50,7 @@ export type RawAccessRules = FolderAccessRules | unknown;
 type StoredRule = { id: string; rule: FolderAccessRule };
 
 function withStableIds(rules: FolderAccessRules): StoredRule[] {
-  return (rules ?? []).map((rule) => ({ id: crypto.randomUUID(), rule }));
+  return (rules ?? []).map((rule) => ({ id: nextListKey(), rule }));
 }
 
 /**
@@ -162,7 +163,7 @@ export function FolderAccessRuleEditor({
   }, []);
 
   const addRule = useCallback((rule: FolderAccessRule) => {
-    setStoredRules((prev) => [...prev, { id: crypto.randomUUID(), rule }]);
+    setStoredRules((prev) => [...prev, { id: nextListKey(), rule }]);
     setDirty(true);
   }, []);
 

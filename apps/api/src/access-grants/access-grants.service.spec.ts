@@ -527,7 +527,23 @@ describe('AccessGrantsService', () => {
       const calls = accessGrant.update.mock.calls as UpdateCall[];
       expect(calls[0][0].data.revokedById).toBe(VALID_ACTOR);
       expect(calls[0][0].data.revokedBySaId).toBeUndefined();
-      // null notes → no notes key written (explicit clear is a no-op for revoke).
+    });
+
+    it('notes: null CLEARS the note; omitted (undefined) PRESERVES it — matching revoke()/updateNotes()', async () => {
+      accessGrant.findMany.mockResolvedValue([{ id: 'g1', revokedAt: null }]);
+      accessGrant.update.mockResolvedValue({});
+
+      // Explicit null → write `notes: null` (clear the existing note).
+      await service.batchRevoke(['g1'], null, HUMAN_PRINCIPAL);
+      let calls = accessGrant.update.mock.calls as UpdateCall[];
+      expect('notes' in calls[0][0].data).toBe(true);
+      expect(calls[0][0].data.notes).toBeNull();
+
+      accessGrant.update.mockClear();
+
+      // Omitted (undefined) → no `notes` key written (preserve whatever the grant already has).
+      await service.batchRevoke(['g1'], undefined, HUMAN_PRINCIPAL);
+      calls = accessGrant.update.mock.calls as UpdateCall[];
       expect('notes' in calls[0][0].data).toBe(false);
     });
 

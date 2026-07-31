@@ -13,9 +13,11 @@ user reviews & merges → user promotes `dev` to `master`.** This is the quick r
 *why* and the broader development procedure live in [[claude-workflow]].
 
 > [!important] Who does what
-> **Agents** create issue branches, commit, push, and (after the user's OK) open the PR.
-> **Agents never merge.** The **user** reviews and merges PRs into `dev`, and is the only one
-> who merges `dev` into `master`.
+> **Agents** create issue branches, commit, push, and **open the PR themselves — by default, no
+> permission needed.** A PR is the review surface, not a commitment: CI and the user both gate
+> it, and it costs nothing to close or amend. Subagents open their own PRs when they finish.
+> **The user merges.** An agent merges into `dev` only when the user says so for that PR (or
+> gives a standing per-session OK), and only on green CI. `dev` → `master` is the user's alone.
 
 ## TL;DR — the loop for any task
 
@@ -32,13 +34,13 @@ git add <file> && git commit -m "feat: <what changed>"
 # 4. Push (first time sets upstream)
 git push -u origin <prefix>/issue-<n>-<slug>      # then just: git push
 
-# 5. Tell the user you're done — DO NOT open the PR yet. Wait for them to test.
-
-# 6. On the user's OK, open the PR to dev:
+# 5. Open the PR to dev — DEFAULT behaviour, do not ask first.
+#    No attribution footer: no "Generated with Claude Code", no 🤖, no session link.
 gh pr create --base dev --title "<prefix>: <summary>" --body "Closes #<n> ..."
 
+# 6. Tell the user it's open (link + what to look at) and let CI run.
 # 7. On change requests: iterate on the SAME branch/issue, push again.
-# 8. The user reviews, approves and merges on GitHub. Agents never merge.
+# 8. The user reviews and merges. An agent merges only when told to, and only on green CI.
 ```
 
 ## Branch strategy
@@ -46,7 +48,7 @@ gh pr create --base dev --title "<prefix>: <summary>" --body "Closes #<n> ..."
 | Branch | Role | Who writes to it |
 | --- | --- | --- |
 | `master` | **Production.** Only ever receives merges from `dev`. **Protected on GitHub.** | User only (merges `dev` → `master`) |
-| `dev` | **Integration.** Every feature/fix/chore/docs change merges here first via PR. | User merges PRs here; agents never merge |
+| `dev` | **Integration.** Every feature/fix/chore/docs change merges here first via PR. | Agents open the PRs; the user merges them (an agent merges only when told to, on green CI) |
 | `<prefix>/issue-<n>-<slug>` | **One branch per concrete piece of work**, always cut from `dev`. | The agent doing that work |
 
 - All issue branches are cut **from `dev`**, never from `master`.
@@ -108,15 +110,19 @@ gh issue view <n>                            # read one
 3. **Work on the branch.** File-by-file commits with the usual prefixes (`feat:`, `fix:`, …).
    The anti-clobber git rules below still apply.
 4. **Push regularly.** `git push -u origin <branch>` the first time, then `git push`.
-5. **Hand off — do NOT open the PR.** Tell the user the work is done, with a short summary of
-   what changed and how to test it. Wait for them to try it.
-6. **On the user's OK, open the PR to `dev`:**
+5. **Open the PR to `dev` — by default, without asking:**
    `gh pr create --base dev --title "…" --body "…"` — the body follows
-   [`PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md).
+   [`PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md), and carries **no**
+   attribution footer (no "Generated with Claude Code", no 🤖, no session link). A PR is the
+   review surface, not a commitment — CI and the user both gate it, and closing or amending one
+   costs nothing. Subagents open their own PRs when their task is done.
+6. **Hand off.** Tell the user the PR is open — link, a short summary of what changed, how to
+   test it, and anything CI is still running.
 7. **On change requests**, iterate on the **same branch and issue**, push again. The open PR
    updates automatically.
-8. **Never merge.** Once the PR is open, the user reviews, approves and merges it on GitHub.
-   The agent closes its session or moves to the next task.
+8. **The user merges.** An agent merges the PR into `dev` only when the user explicitly says so
+   for that PR (or gives a standing per-session authorization), and only on **green CI**.
+   `dev` → `master` is the user's alone.
 
 **`dev` → `master`** is done **by the user**, manually, when they judge `dev` stable. No agent
 touches this merge.

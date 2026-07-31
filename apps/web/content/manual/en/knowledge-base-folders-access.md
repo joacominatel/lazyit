@@ -16,6 +16,10 @@ Every article has **exactly one home folder**, chosen as its **Category** when y
 can be nested, so you can build a tree such as `Servers / Linux / Provisioning`. Browse the tree
 from the folder sidebar in the Knowledge Base.
 
+- **Each folder shows how many articles it holds** — a small count on the folder row. It counts only
+  the articles **you can actually see** (published articles, plus your own drafts), so it never
+  reveals more than the folder's list would. A **restricted folder you cannot read shows no number**,
+  and folders on an older server simply show none until it is updated.
 - **Create a folder** from the **+** button on the article form (or where folders are managed) —
   give it a name and, optionally, a parent.
 - **Names are unique within their parent.** `Servers / Linux` and `Workstations / Linux` can both

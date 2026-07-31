@@ -139,12 +139,27 @@
   "code": {
     "copyCode": "Copiar código",
     "copied": "Código copiado",
-    "plainText": "texto"
+    "plainText": "texto",
+    "auto": "auto"
   },
   "mermaid": {
     "rendering": "Renderizando diagrama…",
     "renderError": "No se pudo renderizar este diagrama — revisa la sintaxis.",
     "ariaLabel": "Diagrama"
+  },
+  "callout": {
+    "note": "Nota",
+    "tip": "Consejo",
+    "important": "Importante",
+    "warning": "Advertencia",
+    "caution": "Precaución"
+  },
+  "anchor": {
+    "copyLink": "Copiar enlace a la sección",
+    "copied": "Enlace copiado"
+  },
+  "lightbox": {
+    "zoom": "Ampliar"
   },
   "filters": {
     "activeFilters": "Filtros activos",

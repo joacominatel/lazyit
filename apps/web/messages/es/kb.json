@@ -5,7 +5,7 @@
     "subtitle": "Documentación interna para el equipo.",
     "newArticle": "Nuevo artículo",
     "searchLabel": "Buscar artículos",
-    "searchPlaceholder": "Buscar por título…",
+    "searchPlaceholder": "Buscar artículos…",
     "errorTitle": "No se pudieron cargar los artículos",
     "noMatchFilters": "Ningún artículo coincide con tus filtros.",
     "noArticlesInFolder": "Aún no hay artículos en esta carpeta — abre una subcarpeta de arriba para seguir explorando.",
@@ -19,6 +19,21 @@
     "linkedCount": "{count} vinculados",
     "linkedTooltip": "{count, plural, one {Vinculado a # elemento} other {Vinculado a # elementos}}"
   },
+  "search": {
+    "degradedNote": "La búsqueda de texto completo no está disponible ahora mismo — se muestran coincidencias por título y resumen.",
+    "resultCount": "{count, plural, one {# resultado} other {# resultados}}",
+    "topResults": "{shown} de {total} resultados principales"
+  },
+  "quickSwitcher": {
+    "title": "Buscar artículos",
+    "description": "Salta a un artículo por título o contenido.",
+    "placeholder": "Buscar artículos…",
+    "heading": "Artículos",
+    "startTyping": "Escribe para buscar artículos por título o contenido…",
+    "searching": "Buscando…",
+    "unavailable": "La búsqueda no está disponible ahora mismo. Inténtalo de nuevo en un momento.",
+    "noResults": "Ningún artículo coincide con “{query}”."
+  },
   "filters": {
     "statusLabelName": "Estado",
     "linkedToLabelName": "Destino",
@@ -29,6 +44,7 @@
     "noAssets": "No se encontraron activos.",
     "noApplications": "No se encontraron aplicaciones.",
     "linkedOnly": "Solo vinculados",
+    "filtersButton": "Filtros",
     "chipSearch": "Búsqueda: “{query}”",
     "chipStatus": "Estado: {value}",
     "chipCategory": "Categoría: {value}",
@@ -57,6 +73,8 @@
     "categoryLabel": "Categoría",
     "categorySelect": "Selecciona una categoría",
     "categoryNone": "Aún no hay categorías",
+    "categorySearchPlaceholder": "Busca categorías por ruta…",
+    "categoryEmpty": "No hay categorías coincidentes",
     "categoryHint": "Aún no hay categorías: usa el botón + para crear una.",
     "categoryRequired": "La categoría es obligatoria",
     "excerptLabel": "Extracto",
@@ -72,7 +90,8 @@
       "saved": "Artículo guardado",
       "saveError": "No se pudo guardar el artículo",
       "draftCreated": "Borrador creado",
-      "createError": "No se pudo crear el artículo"
+      "createError": "No se pudo crear el artículo",
+      "slugTaken": "Ya existe una nota con ese nombre — probá con otro título."
     },
     "draft": {
       "restoreTitle": "Borrador sin guardar recuperado",
@@ -87,6 +106,22 @@
       "leave": "Descartar cambios"
     }
   },
+  "mdImport": {
+    "hint": "Arrastra aquí un archivo .md para rellenar el contenido",
+    "choose": "Elegir un archivo .md",
+    "overlay": "Suelta para importar su contenido",
+    "toast": {
+      "imported": "Markdown importado en el editor",
+      "wrongType": "Solo archivos .md, .markdown o .txt",
+      "tooLarge": "Ese archivo es demasiado grande: el límite es 1 MB"
+    },
+    "replaceConfirm": {
+      "title": "¿Reemplazar el contenido actual?",
+      "description": "El editor ya tiene contenido. Importar este archivo lo reemplaza por completo — esto no se puede deshacer.",
+      "cancel": "Conservar mi contenido",
+      "confirm": "Reemplazarlo"
+    }
+  },
   "detail": {
     "notFoundTitle": "Artículo no encontrado",
     "notFoundDescription": "Puede ser un borrador que no puedes ver, fue eliminado o la API no está disponible.",
@@ -98,13 +133,32 @@
     "publish": "Publicar",
     "unpublish": "Despublicar",
     "deleteAriaLabel": "Eliminar artículo",
+    "delete": "Eliminar",
+    "moreActions": "Más acciones",
     "deleteExtra": "Los artículos publicados son visibles para todo el equipo hasta entonces.",
+    "versionShort": "v{n}",
+    "updatedRelative": "Actualizado {rel}",
     "toast": {
       "published": "Artículo publicado",
       "publishError": "No se pudo publicar el artículo",
       "movedToDraft": "Devuelto a borrador",
       "unpublishError": "No se pudo despublicar el artículo"
     }
+  },
+  "covers": {
+    "label": "Incluye"
+  },
+  "connections": {
+    "railLabel": "Conexiones",
+    "referencedBy": "Referenciado por ({count})"
+  },
+  "toc": {
+    "label": "En esta página"
+  },
+  "siblings": {
+    "label": "Navegación de artículos",
+    "previous": "Anterior",
+    "next": "Siguiente"
   },
   "links": {
     "panelTitle": "Vinculado a",
@@ -186,6 +240,7 @@
   },
   "folders": {
     "treeLabel": "Explorar carpetas",
+    "mobileToggle": "Carpetas",
     "allArticles": "Todos los artículos",
     "empty": "Aún no hay carpetas",
     "expand": "Expandir {name}",
@@ -256,7 +311,8 @@
     "restoreError": "No se pudo restaurar la versión"
   },
   "wikiLinks": {
-    "unresolvedTooltip": "Documento aún no creado"
+    "unresolvedTooltip": "Documento aún no creado",
+    "createTooltip": "Crear esta nota"
   },
   "access": {
     "statePublic": "Público",
