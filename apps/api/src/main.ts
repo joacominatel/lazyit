@@ -8,6 +8,7 @@ import { AppModule } from './app.module';
 import { validateBootConfig } from './auth/boot-config';
 import { loadBootstrapOidcFile } from './auth/bootstrap-file';
 import { decideModeMarker } from './auth/mode-marker';
+import { resolveJsonBodyLimit } from './common/body-limit';
 import { addStandardErrorResponses } from './common/openapi-errors';
 import { resolveCorsOrigin } from './common/cors-origin';
 import { parseTrustProxy } from './common/trust-proxy';
@@ -31,6 +32,13 @@ async function bootstrap() {
   // Route Nest's own logs through Pino (structured logging — ADR-0031). bufferLogs holds the
   // bootstrap logs until the Pino logger is attached, so nothing is lost or double-formatted.
   app.useLogger(app.get(Logger));
+
+  // JSON body limit (#1132). Left unset, Nest-on-Express applies body-parser's own 100kb default —
+  // which silently 413s a legitimate reporting-agent report (ADR-0074): the contract allows 5000
+  // packages and a real 5000-package report measures ~350kb. Worse, install.sh reports that failure
+  // as "check the URL/token", so the operator debugs auth while the host never appears. Set it
+  // explicitly, before the routes are wired. See body-limit.ts for why the default is generous.
+  app.useBodyParser('json', { limit: resolveJsonBodyLimit(process.env) });
   // Ensure PrismaService.onModuleDestroy runs on SIGTERM/SIGINT (graceful $disconnect).
   app.enableShutdownHooks();
 
