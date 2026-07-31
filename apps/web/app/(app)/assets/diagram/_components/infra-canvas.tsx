@@ -25,7 +25,12 @@ import {
   ExclamationTriangleIcon,
   Squares2X2Icon,
 } from "@heroicons/react/24/outline";
-import type { InfraEdge, InfraEdgeKind, InfraNode } from "@lazyit/shared";
+import type {
+  InfraEdge,
+  InfraEdgeKind,
+  InfraNode,
+  InfraNodeListItem,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -168,7 +173,9 @@ function CanvasBoard({
   affectedIds,
   onApiReady,
 }: {
-  nodes: InfraNode[];
+  // The list row, NOT the full `InfraNode` (#1135): `GET /infra/nodes` no longer ships `specs`, and
+  // the board never wanted it — it renders label/kind/status/IP and positions from x/y.
+  nodes: InfraNodeListItem[];
   edges: InfraEdge[];
   /** At least one per-node edge fetch failed — some relationships are missing from the graph (#778). */
   edgesError: boolean;
