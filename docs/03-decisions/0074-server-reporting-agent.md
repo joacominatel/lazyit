@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-06-27
+updated: 2026-07-31
 deciders: [Joaquín Minatel]
 ---
 
@@ -239,6 +239,37 @@ liveness bit of §4 reports a **false outage**. Now bounded in three layers:
   (same-origin, no third party). The token is the operator's, scoped to one permission, revocable from
   the UI. A "download, inspect, then run" path is available for the cautious; the one-liner is the
   default.
+
+**Amendment (2026-07-31, #1134) — throttling `POST /infra/report`.** The bullets above reason about
+**authorization** and are right: one permission, a human gate, no secret reach, and a leaked token buys
+nothing but PENDING proposals a human discards. They said nothing about **availability**, and that was
+the gap: the endpoint is a write amplifier. Every unknown `externalId` mints a row carrying a `specs`
+jsonb blob, so a leaked token — or, far likelier, a misconfigured `OnUnitActiveSec=1s` — was unbounded
+row creation and unbounded jsonb churn on a self-hosted box with no ceiling. "Spam a human discards" is
+true of the *inventory*; it is not true of the *database*. Two limits close it:
+
+- **A fixed-window rate limit keyed on the SERVICE ACCOUNT** (`InfraReportRateLimitGuard`, the fourth
+  sibling of the setup/login/password-reset limiters in [[0086-local-authentication-mode]]).
+  Keyed on the SA id, **never the IP**: reporting agents sit behind a shared egress NAT, so an IP bucket
+  would let one noisy agent starve every other host at the same site. The SA id is also the only
+  *trustworthy* key — `reportingSource` is a client-chosen body field an attacker rotates per request,
+  while the SA is resolved server-side from the bearer token. A non-service caller (a human role
+  holding `infra:report`) falls back to the verified `req.ip` rather than going unthrottled.
+  Default **120/min** (`INFRA_REPORT_MAX_PER_WINDOW`, `INFRA_REPORT_WINDOW_MS`) — sized so a whole
+  estate sharing one token, all timers re-arming after a site-wide reboot, still fits.
+- **A hard cap on LIVE PENDING nodes per reporting service account** — default **50**
+  (`INFRA_REPORT_PENDING_CAP`), 429 past it. The rate limit bounds writes per minute, not rows over
+  time; without this a leaked token reporting fresh `externalId`s at a polite cadence still fills the
+  table over days. Only the CREATE branch is budgeted (a known host's check-in adds no row and is never
+  charged), and the count is scoped to **non-soft-deleted** rows — load-bearing, because discarding a
+  proposal *is* the soft delete (§3), so counting deleted rows would mean an operator who tidies their
+  tray never gets the budget back. Confirming frees a slot the same way.
+
+This needs a trustworthy per-reporter key on the row, so `InfraNode.reportedBySaId` is added (nullable
+FK → `ServiceAccount`, SetNull), stamped server-side on create **and re-stamped on every refresh** —
+which is what makes it self-healing: rows predating the column are attributed within one report cadence.
+The legitimate agent (one host, a report every 15 minutes) never approaches either limit and never even
+triggers the budget probe.
 
 ## Consequences
 
