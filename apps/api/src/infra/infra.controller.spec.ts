@@ -10,6 +10,7 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 import type { Permission } from '@lazyit/shared';
 import { InfraController } from './infra.controller';
 import { PERMISSION_KEY } from '../auth/require-permission.decorator';
+import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 
 // Permission gating (ADR-0070 §8): assert each route carries the right @RequirePermission metadata —
 // reads gate on `infra:read`, mutations on `infra:manage`, and asset-backed node create ALSO requires
@@ -20,6 +21,12 @@ import { PERMISSION_KEY } from '../auth/require-permission.decorator';
 function permsOf(method: keyof InfraController): Permission[] {
   const handler = InfraController.prototype[method] as unknown as object;
   return (Reflect.getMetadata(PERMISSION_KEY, handler) as Permission[]) ?? [];
+}
+
+/** The guard classes declared by `@UseGuards(...)` on a controller handler (or [] if none). */
+function guardsOf(method: keyof InfraController): unknown[] {
+  const handler = InfraController.prototype[method] as unknown as object;
+  return (Reflect.getMetadata('__guards__', handler) as unknown[]) ?? [];
 }
 
 describe('InfraController — permission gating (ADR-0070 §8)', () => {
@@ -53,5 +60,18 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       new Set<Permission>(['infra:manage', 'secret:read']),
     );
     expect(permsOf('detachSecret')).toEqual(['infra:manage']);
+  });
+});
+
+describe('InfraController — POST /infra/report throttling (#1134)', () => {
+  it('carries the per-service-account rate-limit guard', () => {
+    // The permission gate alone bounded WHO may report, never HOW MUCH — a leaked agent token was an
+    // unbounded row/jsonb writer. Reading the guard metadata is the lightest way to lock the wiring
+    // in: drop the decorator and the throttle silently disappears, with every other test still green.
+    expect(guardsOf('report')).toContain(InfraReportRateLimitGuard);
+  });
+
+  it('gates the report route on infra:report (unchanged by the throttle)', () => {
+    expect(permsOf('report')).toEqual(['infra:report']);
   });
 });
