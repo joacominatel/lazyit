@@ -3,6 +3,9 @@ import {
   type AgentReportHost,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
+  InfraNodeDetailSchema,
+  InfraNodeListItemSchema,
+  InfraNodeSchema,
   InfraShortcutSchema,
   IpAddressSchema,
   isPlausibleEdge,
@@ -73,6 +76,23 @@ describe("CreateInfraNodeSchema", () => {
     });
     expect(r.success).toBe(true);
     expect(r.success && r.data.ipAddress).toBe("10.0.0.5");
+  });
+});
+
+describe("InfraNodeListItemSchema (the lean list projection, #1135)", () => {
+  test("omits `specs` — the list row must never carry the inventory blob", () => {
+    expect(Object.keys(InfraNodeListItemSchema.shape)).not.toContain("specs");
+  });
+
+  test("keeps every OTHER node field, so the projection can only ever have dropped `specs`", () => {
+    const dropped = Object.keys(InfraNodeSchema.shape).filter(
+      (key) => !(key in InfraNodeListItemSchema.shape),
+    );
+    expect(dropped).toEqual(["specs"]);
+  });
+
+  test("the drill-in still carries `specs` — that is where the inventory panel reads it", () => {
+    expect(Object.keys(InfraNodeDetailSchema.shape)).toContain("specs");
   });
 });
 
