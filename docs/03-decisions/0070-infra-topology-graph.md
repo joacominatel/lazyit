@@ -19,8 +19,10 @@ review this revision folds in), now **accepted**: the **MVP + v1** are built and
 [[0019-asset-assignment-integrity]] (the timestamped-join pattern the edges reuse),
 [[0041-soft-delete-reuse-and-restore]], [[0046-roles-permissions-v2]],
 [[0048-service-accounts]] (the auth pattern the v2 reporting agent extends),
-[[0053-async-workers-bullmq-valkey]] (the substrate the agent feeds),
 [[0061-secret-manager-zero-knowledge]] (secrets attachable to asset-backed nodes).
+// this list originally also named ~~[[0053-async-workers-bullmq-valkey]] (the substrate the agent
+feeds)~~ — **corrected 2026-07-31, #1136:** the agent feeds no queue; report ingestion is inline and
+synchronous, see the §3 amendment in [[0074-server-reporting-agent]].
 
 This is a **new major** for lazyit. The ADR fixes the **data model and the phasing
 (MVP → v1 → v2 agent → future)** so the model is never re-migrated, while scoping what each phase ships.
@@ -234,7 +236,10 @@ rather than blocks, to stay generic.
 A future installable client (one per host) auto-discovers workloads and posts them. The model is ready:
 `source=AGENT`, `state=PENDING` (lands in a **review tray**, not the live map, until an operator
 confirms), `reportingSource` + `externalId` for idempotent reconciliation, `lastReportedAt` for liveness
-(stale → `OFFLINE`). It feeds the existing async substrate ([[0053-async-workers-bullmq-valkey]]).
+(stale → `OFFLINE`). ~~It feeds the existing async substrate
+([[0053-async-workers-bullmq-valkey]]).~~ — **corrected 2026-07-31, #1136:** it does not. The agent
+that shipped ingests inline and synchronously, with no queue in the path; see the §3 amendment in
+[[0074-server-reporting-agent]].
 
 **Trust model (sketch — fixed now because it shapes the schema, built in v2):**
 - **Enrollment**: each agent is a scoped credential modeled on [[0048-service-accounts]] — an

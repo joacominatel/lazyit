@@ -524,9 +524,20 @@ export class InfraService {
   /**
    * A page-less list of nodes, newest first, filtered; soft-deleted nodes excluded by the extension.
    * Each row carries the Servers-list payoff (ADR-0070 §6, issue #750): the linked Asset's inventory
-   * `assetName` and its active `owners` — joined in ONE query (a single relation `include`, NOT an
+   * `assetName` and its active `owners` — joined in ONE query (a single relation join, NOT an
    * N+1 per-row detail fetch), then flattened to the lean `InfraNodeListItem` wire shape. Mirrors the
    * `getNodeDetail` resolution: `label` always wins for display, `assetName` is the secondary name.
+   *
+   * PROJECTION, NOT `include` (issue #1135). An explicit `select` of exactly the columns the wire
+   * shape promises, so the ONE column it leaves out — `specs` — never crosses the wire. On an
+   * agent-reported host (ADR-0074) `specs` is the entire inventory blob, installed-software list and
+   * all (~1500 entries on a real Linux box); a bare `include` returns every scalar, so a 40-node
+   * estate turned each poll of this endpoint into megabytes. And this endpoint IS polled: the PENDING
+   * review tray every 40s (`INFRA_LIVE_POLL_MS`) and the create-agent wizard every 5s while the
+   * operator waits for their new host to check in. Nothing in a list renders `specs` — the drill-in
+   * (`getNodeDetail`) keeps the full blob for the reported-facts panel, which is its only reader.
+   * Keep this `select` in step with `InfraNodeListItemSchema`: a field added there but not here
+   * silently disappears from the list (the spec asserts the two agree).
    *
    * CRITICAL — the soft-delete extension only filters the TOP-LEVEL operation (`infraNode.findMany`),
    * NOT nested relation reads (verified against the Prisma query-extension docs). And a `where` filter
@@ -546,9 +557,29 @@ export class InfraService {
         ...(filters.state ? { state: filters.state } : {}),
       },
       orderBy: { createdAt: 'desc' },
-      include: {
+      select: {
+        id: true,
+        kind: true,
+        label: true,
+        status: true,
+        assetId: true,
+        ipAddress: true,
+        ipAddressSource: true,
+        shortcuts: true, // bounded by INFRA_SHORTCUTS_MAX — unlike `specs`, safe to carry per row
+        x: true,
+        y: true,
+        source: true,
+        state: true,
+        reportingSource: true,
+        externalId: true,
+        lastReportedAt: true,
+        agentVersion: true,
+        createdAt: true,
+        updatedAt: true,
+        deletedAt: true,
+        // NOTE: `specs` is deliberately absent (#1135) — see the doc comment.
         asset: {
-          // `deletedAt` is selected (not filterable on a to-one include) so the flatten can gate the
+          // `deletedAt` is selected (not filterable on a to-one relation) so the flatten can gate the
           // name — a soft-deleted asset must NOT leak its name through the list.
           select: {
             name: true,
@@ -576,7 +607,7 @@ export class InfraService {
 
     return rows.map(({ asset, ...node }) => ({
       ...node,
-      // Gate the name on the asset being live (the to-one include can't be where-filtered).
+      // Gate the name on the asset being live (the to-one relation can't be where-filtered).
       assetName: asset && asset.deletedAt === null ? asset.name : null,
       owners: (asset?.assignments ?? []).map((a) => ({
         assignmentId: a.id,

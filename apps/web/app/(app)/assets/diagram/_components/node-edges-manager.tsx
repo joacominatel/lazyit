@@ -4,7 +4,7 @@ import { ArrowPathIcon, PlusIcon } from "@heroicons/react/24/outline";
 import {
   type InfraEdge,
   InfraEdgeKindSchema,
-  type InfraNode,
+  type InfraNodeListItem,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
@@ -219,7 +219,9 @@ function AddEdgeDialog({
   onOpenChange: (open: boolean) => void;
   sourceId: string;
   sourceLabel: string;
-  nodes: InfraNode[];
+  // The `useInfraNodes` list row, NOT the full `InfraNode` (#1135): the list projection dropped
+  // `specs`, and the picker only ever read id/label plus the quick-view basics below.
+  nodes: InfraNodeListItem[];
 }) {
   const t = useTranslations("infra");
   const tc = useTranslations("common");
@@ -260,8 +262,9 @@ function AddEdgeDialog({
             kind: node.kind,
             status: node.status,
             ipAddress: node.ipAddress,
-            // `InfraNode` (the canvas node) carries no joined asset name — left undefined (the
-            // drill-in detail is where the linked asset surfaces).
+            // `assetName` is deliberately left undefined: this preview stays the canvas basics, and
+            // the linked asset is the drill-in's surface. (The row does carry it — unchanged by
+            // #1135, which only dropped `specs` — so this is a choice, not a missing field.)
           },
         }
       : null;
