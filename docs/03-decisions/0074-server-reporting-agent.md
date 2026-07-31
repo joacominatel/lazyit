@@ -142,9 +142,26 @@ keeping the human gate intact:
   history event per report (no audit-trail flooding) and **never** touches the Asset's human-owned
   `serial`/`name`/`modelId`; a soft-deleted asset is skipped. The three agent-owned keys
   (`host`/`software`/`reportedAt`) are replaced; every human-added specs key is preserved.
-- **Async:** heavy work (software-list diffing, search re-index) goes through a BullMQ queue on the
+- ~~**Async:** heavy work (software-list diffing, search re-index) goes through a BullMQ queue on the
   same Valkey substrate ([[0053-async-workers-bullmq-valkey]]), copying the `import-commit` worker
-  pattern. The endpoint returns fast (accepted), the work drains in the background.
+  pattern. The endpoint returns fast (accepted), the work drains in the background.~~ — **never built;
+  corrected below (2026-07-31, #1136).**
+
+**Amendment (2026-07-31, #1136) — correction: ingestion is inline, there is no report queue.** The
+struck bullet above describes a design that was never built, and the one that was built is the right
+one. `InfraService.ingestReport` (`apps/api/src/infra/infra.service.ts`) runs the whole upsert inline
+and synchronously — one `findFirst`, one `create`/`update`, an **awaited** linked-Asset specs sync —
+and the ack is returned only once the row is durable. The single piece of background work is the
+pre-existing fire-and-forget Meilisearch projection (`void this.syncNodeToSearch(…)`,
+[[0035-search-architecture]]), which is not a queue. The code states the call in place: *"no new BullMQ
+queue for MVP — reports are light; reuse the existing fire-and-forget search sync, add a queue only if
+report volume ever makes the inline upsert slow."* At the estate this ADR targets (5–20 people, one
+15-minute timer per host) a report is a millisecond-scale write: a queue hop would buy nothing and
+cost an eventual-consistency window in which a just-reported host is not yet on the map, plus a Valkey
+dependency on the one endpoint that should keep working when the rest of the stack is degraded. That
+code comment's volume trigger stands as the revisit condition — no queue until the inline upsert is
+measurably slow. // BullMQ ([[0053-async-workers-bullmq-valkey]]) remains the substrate for the heavy
+jobs it was chosen for (import commit); reporting is simply not one of them.
 
 ### §4 — Liveness & staleness
 
@@ -230,8 +247,8 @@ liveness bit of §4 reports a **false outage**. Now bounded in three layers:
 
 - **Single-permission blast radius.** The agent SA holds only `infra:report` (§5).
 - **Human gate.** Everything new is PENDING (§3); the official inventory is never mutated by a machine
-  without human confirmation. Auditability ([[0006-soft-delete-and-auditing]]) intact — agent writes
-  are SA-attributed in history.
+  without human confirmation. ~~Auditability ([[0006-soft-delete-and-auditing]]) intact — agent writes
+  are SA-attributed in history.~~ — **false; corrected below (2026-07-31, #1136).**
 - **No secret exposure.** The agent carries no crypto and reads no vault; INV-10
   ([[0061-secret-manager-zero-knowledge]]) is untouched — the agent module never imports the secret
   manager's value side.
@@ -239,6 +256,36 @@ liveness bit of §4 reports a **false outage**. Now bounded in three layers:
   (same-origin, no third party). The token is the operator's, scoped to one permission, revocable from
   the UI. A "download, inspect, then run" path is available for the cautious; the one-liner is the
   default.
+
+**Amendment (2026-07-31, #1136) — correction: agent writes are UNATTRIBUTED, by design.** The struck
+clause claimed a control this ADR does not have, in the one section that gets read precisely when
+someone is deciding whether the report endpoint is safe to expose. A security ADR that overstates its
+own controls is a liability, so state it plainly:
+
+- **No principal reaches the write.** `POST /infra/report` is the one topology route that takes no
+  `@CurrentPrincipal()`; `ingestReport(report)` calls `prisma.infraNode.create` / `.update` directly.
+  Nothing records *which* Service Account produced the row.
+- **No history event is emitted, deliberately.** The linked-Asset specs refresh writes `specs`
+  directly instead of going through `AssetsService.update` exactly so it emits no `SPECS_CHANGED`
+  event (§3 amendment 2026-07-18). At one report per host every 15 minutes, an event per report would
+  bury every human edit under ~96 no-op rows a day. The suppression is the right call; the consequence
+  is that **no attribution row is written at all.**
+- **`ServiceAccountAuditLog` does not cover it.** That table is the SA *lifecycle* log
+  (`MINT`/`ROTATE`/`REVOKE`/`RESTORE`/`PERMISSION_CHANGE`) written by the service-accounts module —
+  reporting writes nothing to it.
+
+What contains the agent is therefore **not** attribution but the two controls above it, and they hold
+on their own: a discovered host lands PENDING and cannot enter the official inventory until a human
+confirms it — and *that* write **is** attributed, since `confirmNode` mints the backing Asset through
+`AssetsService.create` with the operator's principal — while the SA holds `infra:report` and nothing
+else. The realistic worst case on a leaked token is PENDING spam a human discards, plus forged
+inventory facts (`specs`/`ipAddress`/`status`) on nodes the operator already confirmed; nothing is
+readable, nothing is deletable, no secret is reachable. The forensic trail is coarse but not empty:
+`source=AGENT`, `reportingSource`/`externalId`, `agentVersion` and `lastReportedAt` on the node, plus
+the SA's `lastUsedAt` stamped by the auth guard on every call. // The cheap way to buy the original
+claim back, if a compliance review ever demands it, is one provenance row per node **CREATE** (not per
+report) — deliberately not built today, because the per-report flooding is what made suppression
+correct in the first place.
 
 ## Consequences
 
