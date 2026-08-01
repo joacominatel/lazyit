@@ -1676,11 +1676,13 @@ describe('InfraService', () => {
       });
 
       it('a report that sends a list with NO fingerprint is still skippable — the server computes one', async () => {
-        // THE HALF THAT IS A GUARANTEE. FULL_REPORT is a pre-#1142 agent: it sends the whole list and
-        // claims nothing about it. If the skip depended on the client sending a fingerprint, then
-        // every legacy agent — and every attacker, who simply would not send one — would rewrite the
-        // blob on every report and #1153 would be a courtesy rather than a bound. The server
-        // fingerprints any list it receives with the same shared function the agent uses.
+        // THE HALF THAT NEEDS NO COOPERATION. FULL_REPORT is a pre-#1142 agent: it sends the whole
+        // list and claims nothing about it. If the skip depended on the client sending a fingerprint,
+        // then every legacy agent — and every attacker, who simply would not send one — would rewrite
+        // the blob on every report and the skip would reach only clients that opted into it. The
+        // server fingerprints any list it receives with the same shared function the agent uses.
+        // (Independence from cooperation is not a bound on a client that VARIES its report — see the
+        // residual documented on `refreshKnownNode`.)
         hostIsKnown();
         prisma.$queryRaw.mockResolvedValue(settled());
 
