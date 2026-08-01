@@ -72,8 +72,10 @@ interface AutoConfirmRulesDialogProps {
  *     already sitting in the review tray confirms behind the operator who is looking at it.
  *  2. **A rule needs a condition that can rule a proposal OUT.** None at all — or one spelled `*` /
  *     `0.0.0.0/0`, which matches every proposal there is — would be blanket auto-confirm, and the API
- *     refuses to store it. The form uses the very same `statesAutoConfirmCondition` the contract does,
- *     so it says so before the 400 does.
+ *     refuses to store it. Any pattern made only of wildcards is refused on the same footing, `?`
+ *     included: it narrows to one-character names rather than matching everything, and is refused
+ *     conservatively so the rule stays "the pattern has to carry a literal character". The form uses
+ *     the very same `statesAutoConfirmCondition` the contract does, so it says so before the 400 does.
  *
  * It lives here, on the tray, rather than in Settings: this is where an operator feels the cost that
  * makes a rule worth writing, and a rule written anywhere else is a setting nobody finds.
@@ -123,7 +125,9 @@ export function AutoConfirmRulesDialog({
   }
 
   // The SAME predicate the create contract and the matcher use, so the form refuses exactly what the
-  // API would: a wildcard-only pattern (`*`) or `0.0.0.0/0` is not a condition — it excludes nothing.
+  // API would: a wildcard-only pattern or `0.0.0.0/0` is not a condition. Most wildcard-only patterns
+  // (`*`, `**`, `*?*`) exclude nothing at all; `?` alone does narrow — to one-character names — and is
+  // refused with them conservatively, because "carries a literal" is the line an operator can see.
   const hasCondition = statesAutoConfirmCondition({
     hostnamePattern: hostnamePattern.trim() || null,
     subnetCidr: subnetCidr.trim() || null,
