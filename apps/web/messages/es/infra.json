@@ -74,7 +74,8 @@
     "containerCount": "{count, plural, one {# contenedor} other {# contenedores}}",
     "hostAlreadyReviewed": "Este servidor ya fue revisado.",
     "bulkConfirmAction": "Confirmar selección",
-    "bulkDiscardAction": "Descartar selección"
+    "bulkDiscardAction": "Descartar selección",
+    "overCap": "{count} seleccionados: una acción en conjunto toma como máximo {max}. Acotá la selección (un filtro ayuda) y hacelo en más de una pasada."
   },
   "merge": {
     "title": "Unificar {label} con otro servidor",
@@ -360,17 +361,17 @@
       "ANY": "Servidores y contenedores"
     },
     "hostnameLabel": "El nombre coincide con",
-    "hostnameDescription": "Usá * para cualquier secuencia de caracteres y ? para exactamente uno: srv-* coincide con srv-app-04. Tiene que coincidir el nombre completo, no una parte.",
+    "hostnameDescription": "Usá * para cualquier secuencia de caracteres y ? para exactamente uno: srv-* coincide con srv-app-04. Tiene que coincidir el nombre completo, no una parte. Un patrón hecho solo de comodines no es una condición: coincide con todos los hosts.",
     "subnetLabel": "Reporta desde la subred",
-    "subnetDescription": "Un bloque CIDR, IPv4 o IPv6. Un host que no reportó dirección nunca coincide con esto.",
+    "subnetDescription": "Un bloque CIDR, IPv4 o IPv6. Un host que no reportó dirección nunca coincide con esto. 0.0.0.0/0 tampoco es una condición: son todas las direcciones que existen.",
     "reportedKindLabel": "Reportado como",
     "reportedKindDescription": "Lo que el reporte del agente hizo que lazyit propusiera para este host, no lo que querés que sea.",
     "anyKind": "Cualquier tipo",
     "confirmAsKindLabel": "Confirmarlo como",
     "keepProposedKind": "Mantener el tipo reportado",
     "trackAsAssetLabel": "Registrar como activo de inventario",
-    "trackAsAssetDescription": "Activado para servidores y desactivado para contenedores por defecto, con el mismo criterio que al confirmar a mano.",
-    "needsCondition": "Una regla necesita al menos una condición: un patrón de nombre, una subred o un tipo reportado. Sin ninguna confirmaría todo lo que encuentre el agente.",
+    "trackAsAssetDescription": "Activado por defecto en una regla solo para servidores, y desactivado en cualquier regla que también pueda alcanzar contenedores, con el mismo criterio que al confirmar a mano. Activalo si esos contenedores realmente son algo que registrás.",
+    "needsCondition": "Una regla necesita al menos una condición que pueda descartar un host: un patrón de nombre con algo más que * y ?, una subred más acotada que 0.0.0.0/0, o un tipo reportado. Una condición que coincide con todo confirmaría todo lo que encuentre el agente.",
     "saveSubmit": "Guardar regla",
     "savedToast": "Regla guardada. Se aplica a partir del próximo reporte.",
     "saveError": "No se pudo guardar la regla.",
