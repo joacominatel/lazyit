@@ -7,7 +7,11 @@ import {
   CommandLineIcon,
   InformationCircleIcon,
 } from "@heroicons/react/24/outline";
-import type { CreateServiceAccount, InfraNodeListItem } from "@lazyit/shared";
+import {
+  isContainerChildExternalId,
+  type CreateServiceAccount,
+  type InfraNodeListItem,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -375,6 +379,11 @@ function StepInstall({
  * already present; the first PENDING agent node NOT in that baseline is "the one" this install produced.
  * Stops polling on close (the query's `enabled` is gated on this step being mounted). The node sits in
  * the Pending review tray regardless, so "I'll check later" is always a safe escape.
+ *
+ * Container CHILDREN are excluded from the match (#1139). A host that runs containers enrols them in
+ * the SAME request, immediately after itself, and the list is newest-first — so without this filter the
+ * wizard would announce `redis` as the server the operator just installed the agent on. The child is
+ * still in the tray; it is simply not the thing this step is waiting for.
  */
 function StepWait({
   name,
@@ -398,7 +407,10 @@ function StepWait({
 
   useEffect(() => {
     if (!pending) return;
-    const agentPending = pending.filter((node) => node.source === "AGENT");
+    const agentPending = pending.filter(
+      (node) =>
+        node.source === "AGENT" && !isContainerChildExternalId(node.externalId),
+    );
     // First data tick after entering the step: capture the pre-existing set, claim nothing yet.
     if (baselineRef.current === null) {
       baselineRef.current = new Set(agentPending.map((node) => node.id));
