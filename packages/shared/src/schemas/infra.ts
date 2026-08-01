@@ -452,7 +452,8 @@ export const AgentContainerPortProtocolSchema = z.enum(["tcp", "udp", "sctp"]);
  *    says WHICH list, so the server can tell an honest delta from a claim it cannot corroborate.
  *  - `unavailable` — the collector could not enumerate packages (no supported package manager, a
  *    timed-out `dpkg-query`); **keep what is stored**, because "I could not look" is not "there is
- *    nothing". `diagnostics.warnings` carries the reason.
+ *    nothing". `diagnostics.warnings` usually names the reason — the collector is silent about a
+ *    plain non-zero exit, which is an ANSWER elsewhere in the agent rather than a degradation.
  *  - `disabled` — the agent policy says do not report software; **clear the stored list**, so the
  *    panel stops showing an inventory nobody is collecting any more.
  *
@@ -1075,11 +1076,14 @@ export const AgentReportSchema = z.object({
    * A stable fingerprint of the software list the agent HAS (#1142) — sent alongside `reported` and
    * `unchanged` alike, computed by {@link softwareFingerprint}.
    *
-   * It is corroboration, not authority. The server stores the value the agent sent and compares the
-   * next `unchanged` claim against it; a claim it cannot corroborate — because the node holds no list,
-   * or holds one fingerprinted differently — is never resolved by guessing. The stored list is kept
-   * (never wiped on a doubt) and the ack asks for a full resend. That is what makes the delta
-   * self-healing across a discarded-and-rediscovered node, a restore from backup, and a merge.
+   * It is corroboration, not authority, and it is read on exactly ONE branch: an omitted list, where
+   * it is the claim being checked. A list that ARRIVES is fingerprinted by the server itself with this
+   * same function, so what a node stores is always the server's own reading of what it stored — which
+   * is what lets the server skip an unchanged write for a client that sends no fingerprint at all, an
+   * attacker included. A claim it cannot corroborate — the node holds no list, or one fingerprinted
+   * differently — is never resolved by guessing: the stored list is kept (never wiped on a doubt) and
+   * the ack asks for a full resend. That is what makes the delta self-healing across a
+   * discarded-and-rediscovered node, a restore from backup, and a merge.
    */
   softwareHash: z
     .string()
@@ -1169,12 +1173,14 @@ function softwareHash32(text: string, seed: number): number {
  * whole inventory for nothing. The count is folded in separately so a re-ordering and an added
  * duplicate can never look alike.
  *
- * Non-cryptographic, and that is a deliberate and bounded choice. What the fingerprint gates is
- * "believe the agent when it says nothing changed" — never what gets STORED, which is always a list
- * the agent actually sent. So the only failure it can cause is a chance collision between two
- * DIFFERENT package lists on the SAME host, at roughly 2⁻⁹⁶ per comparison; and an agent that could
- * forge a collision would only be lying to itself about its own node. Every other outcome — a
- * mismatch, a missing fingerprint, an unparsed one — resolves by writing, never by skipping.
+ * Non-cryptographic (three seeded 32-bit avalanche hashes over the canonical text, plus the package
+ * count), and that is a deliberate and bounded choice. What it gates is "was this the same list?" —
+ * never what gets STORED, which is always a list somebody actually sent. So the only failure it can
+ * cause is a chance collision between two DIFFERENT package lists on the SAME host, and a party who
+ * could construct one would only be lying about their own node's inventory. It is deliberately NOT
+ * claimed to be collision-resistant against a determined adversary; nothing here relies on that.
+ * Every other outcome — a mismatch, a missing fingerprint, an unparsed one — resolves by writing,
+ * never by skipping.
  */
 export function softwareFingerprint(software: readonly AgentSoftwarePackage[]): string {
   // An ABSENT optional field is encoded distinctly from an empty one. They are not the same claim,
