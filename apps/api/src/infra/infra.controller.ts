@@ -324,7 +324,7 @@ export class InfraController {
   @RequirePermission('infra:manage')
   @ApiOperation({
     summary:
-      'Update a node. assetId:null detaches the link (soft-deletes an auto-created Asset, un-links a pre-existing one — ADR-0070 §5).',
+      'Update a node. assetId accepts null and nothing else: it DETACHES the link (soft-deletes an auto-created Asset, un-links a pre-existing one — ADR-0070 §5). Re-pointing a node at a different asset is refused with a 400 — it would orphan the asset the node is carrying; link an asset at create time instead.',
   })
   @ApiOkResponse({ type: InfraNodeDto })
   updateNode(
