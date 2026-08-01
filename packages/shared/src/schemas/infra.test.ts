@@ -106,28 +106,26 @@ describe("CreateInfraNodeSchema", () => {
   });
 });
 
-describe("UpdateInfraNodeSchema — `assetId` DETACHES, and can do nothing else (#1117)", () => {
-  test("`assetId: null` is accepted — detach is the one asset-linkage edit a patch may make", () => {
+describe("UpdateInfraNodeSchema — `assetId` detaches, or first-attaches (#1117)", () => {
+  test("`assetId: null` is accepted — the detach (ADR-0070 §5)", () => {
     expect(UpdateInfraNodeSchema.safeParse({ assetId: null }).success).toBe(true);
   });
 
-  test("a cuid `assetId` is REFUSED — a patch may not re-point a node at another asset", () => {
-    const r = UpdateInfraNodeSchema.safeParse({ assetId: CUID });
-    expect(r.success).toBe(false);
+  test("a cuid `assetId` is accepted HERE — a first-attach is a legal patch", () => {
+    // Attaching an asset to a node that carries NONE is a working, non-orphaning operation, so the
+    // contract must let it through. The refusal that #1117 is about is the RE-POINT — swapping the
+    // asset of a node that already has one — and this schema cannot tell the two apart: only the
+    // node's CURRENT `assetId` decides, and a zod schema never sees the row. That refusal (and the
+    // liveness check on the id) therefore lives in `InfraService.updateNode`, which reads the node.
+    expect(UpdateInfraNodeSchema.safeParse({ assetId: CUID }).success).toBe(true);
   });
 
-  test("the refusal EXPLAINS itself: what is refused, why, and what to do instead", () => {
-    // The message is the whole feature for the operator who hits it. A bare "expected null,
-    // received string" tells them the shape and nothing about the rule, so these assertions pin
-    // the three things the message has to carry rather than just that a 400 happened.
-    const r = UpdateInfraNodeSchema.safeParse({ assetId: CUID });
-    const message = r.success ? "" : r.error.issues[0].message;
-    expect(message).toContain("null"); // what IS accepted
-    expect(message).toContain("orphan"); // why a re-point is refused rather than half-done
-    expect(message).toContain("POST /infra/nodes"); // the route that DOES link an asset
+  test("a malformed `assetId` is still refused — the shape check is unchanged", () => {
+    expect(UpdateInfraNodeSchema.safeParse({ assetId: "not-a-cuid" }).success).toBe(false);
+    expect(UpdateInfraNodeSchema.safeParse({ assetId: 42 }).success).toBe(false);
   });
 
-  test("every OTHER field a patch may carry is untouched by the refusal", () => {
+  test("every OTHER field a patch may carry still parses", () => {
     expect(
       UpdateInfraNodeSchema.safeParse({ label: "renamed", ipAddress: "10.0.0.5" }).success,
     ).toBe(true);
