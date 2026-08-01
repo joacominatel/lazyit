@@ -703,7 +703,10 @@ describe('InfraService', () => {
         }>(prisma.infraNode.create);
         expect(createArg.data.label).toBe('web-03');
         expect(createArg.data.ipAddress).toBe('10.0.0.12');
-        // The blob is the v1 facts plus the ONE documented server-side default (os.family=linux).
+        // The blob is the v1 facts plus the ONE documented server-side default (os.family=linux) —
+        // and, since #1142, the server's own fingerprint of the list it just stored. The agent sent
+        // no fingerprint (it predates the field); the server computes one anyway, which is what lets
+        // this same host's next report be skipped without the client cooperating.
         expect(createArg.data.specs).toEqual({
           host: {
             hostname: 'web-03',
@@ -716,6 +719,9 @@ describe('InfraService', () => {
             nics: [{ name: 'eth0', ipv4: ['10.0.0.12'] }],
           },
           software: [{ name: 'nginx', version: '1.27.0' }],
+          softwareHash: softwareFingerprint([
+            { name: 'nginx', version: '1.27.0' },
+          ]),
           reportedAt: '2026-07-31T12:00:00.000Z',
         });
         expect(ack.accepted).toBe(true);
@@ -1654,16 +1660,49 @@ describe('InfraService', () => {
         });
       });
 
-      it('a report with NO fingerprint always writes — an unverifiable claim never skips', async () => {
-        // FULL_REPORT is a pre-#1142 agent: it sends the list with nothing to compare it against.
-        // The stored blob may or may not hold the same packages and the server cannot tell, so it
-        // writes. Skip only on a confident match.
+      it('a report that sends a list with NO fingerprint is still skippable — the server computes one', async () => {
+        // THE HALF THAT IS A GUARANTEE. FULL_REPORT is a pre-#1142 agent: it sends the whole list and
+        // claims nothing about it. If the skip depended on the client sending a fingerprint, then
+        // every legacy agent — and every attacker, who simply would not send one — would rewrite the
+        // blob on every report and #1153 would be a courtesy rather than a bound. The server
+        // fingerprints any list it receives with the same shared function the agent uses.
         hostIsKnown();
         prisma.$queryRaw.mockResolvedValue(settled());
 
         await service.ingestReport(FULL_REPORT);
 
-        expect(written()).toHaveProperty('specs');
+        expect(written()).not.toHaveProperty('specs');
+      });
+
+      it('the fingerprint the server stores is its OWN, so a lying client cannot fake a match', async () => {
+        // A hostile report claiming the fingerprint of a list it did not send must not be able to
+        // make the next comparison agree with it.
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(
+          stored(
+            {
+              host: clone(FULL_REPORT.host),
+              reportedAt: '2026-06-27T11:00:00.000Z',
+              softwareHash: HASH,
+            },
+            true,
+          ),
+        );
+
+        await service.ingestReport(
+          AgentReportSchema.parse({
+            ...clone(FULL_REPORT),
+            software: [{ name: 'not-nginx' }],
+            softwareHash: HASH,
+          }),
+        );
+
+        // The list differs, so it is written — and stamped with the fingerprint of what was written.
+        const specs = written().specs as Record<string, unknown>;
+        expect(specs.software).toEqual([{ name: 'not-nginx' }]);
+        expect(specs.softwareHash).toBe(
+          softwareFingerprint([{ name: 'not-nginx' }]),
+        );
       });
 
       it('an OMITTED unchanged list keeps the stored one, and writes nothing at all', async () => {
