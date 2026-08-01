@@ -92,10 +92,10 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `label` | `string` | required; the canvas display name (always wins for display). |
 | `status` | `InfraNodeStatus` | `@default(UNKNOWN)`. |
 | `assetId` | `cuid?` | nullable FK → [[asset]], `onDelete: SetNull`. Default-on link; null = graph-only. |
-| `ipAddress` | `string?` | primary IP, **format-validated** (IPv4/IPv6) on write — no IPAM/registry/`@unique` ([[0090-ipam-validated-ip]] / #847). Agent-promoted from the report's primary IPv4, validate-or-drop (ADR-0074 §3 / #1081). |
+| `ipAddress` | `string?` | primary IP, **format-validated** (IPv4/IPv6) on write — no IPAM/registry/`@unique` ([[0090-ipam-validated-ip]] / #847). Agent-promoted from the report: IPv4 wherever the host has one, else its first routable IPv6 (link-local skipped) so a v6-only host still shows an address (#1138); validate-or-drop (ADR-0074 §3 / #1081). |
 | `ipAddressSource` | `InfraNodeIpSource` | `@default(AGENT)`; who owns `ipAddress` — `AGENT` (each report overwrites) vs `MANUAL` (a human edit the agent never clobbers, stamped server-side on an IP edit). #1081. |
 | `shortcuts` | `jsonb?` | `[{ label, url }]` SSH/web-UI/console links (max 20; URLs zod-validated). |
-| `specs` | `jsonb?` | loose per-kind attributes (ADR-0007 posture; per-kind validation deferred). On an agent-reported host this is the full inventory blob — **detail-only**, never on the list row (#1135). |
+| `specs` | `jsonb?` | loose per-kind attributes (ADR-0007 posture; per-kind validation deferred). On an agent-reported host this is the full inventory blob (`host`/`software`/`reportedAt`) — **detail-only**, never on the list row (#1135). It may also carry `agentSkew` (#1138): the bounded list of report ROOT keys this build did not understand and dropped, plus whether the agent is a newer build than the server. Self-healing (the blob is rewritten every report) and never copied into the linked `Asset.specs`. |
 | `x` / `y` | `float?` | canvas position (free-move board; persisted on drag-stop). |
 | `source` | `InfraNodeSource` | `@default(MANUAL)`; AGENT in v2. |
 | `state` | `InfraNodeState` | `@default(CONFIRMED)`; PENDING = the v2 review tray. |
