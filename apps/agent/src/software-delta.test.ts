@@ -97,7 +97,8 @@ describe("softwareWireFields — the client half of the delta (#1142)", () => {
  * how. An agent that omitted its list there would wipe the host's inventory, and because it believes
  * the list unchanged it would never send it again: permanent loss, no error anywhere.
  *
- * So the agent omits nothing until an ack has told it the server understands the three-state contract.
+ * So the agent omits an UNCHANGED list only once an ack has told it the server understands
+ * `softwareState`. `unavailable` and `disabled` are never gated — neither has a list to withhold.
  * The failure mode is always "sent more than necessary", never "deleted the operator's inventory".
  */
 describe("the capability handshake — new agent, old server (#1142)", () => {
@@ -107,8 +108,9 @@ describe("the capability handshake — new agent, old server (#1142)", () => {
     const { fields, cache } = softwareWireFields(reported, HASH, UNPROVEN);
     expect(fields.software).toEqual(PKGS);
     expect(fields.softwareState).toBe("reported");
-    // The fingerprint still travels: it costs 30 bytes, it is what the server stamps its own reading
-    // against, and an old server strips it harmlessly.
+    // The fingerprint still travels: it costs 30 bytes and an old server strips it harmlessly. It is
+    // NOT what a #1142 server compares on this branch — a list that arrives is fingerprinted by the
+    // server itself; the wire's hash is read only when the list is omitted.
     expect(fields.softwareHash).toBe(HASH);
     // …and the cache is still kept, so the very first ack from an upgraded instance is enough to
     // start saving on the run after it. No resend is needed to earn the delta back.
