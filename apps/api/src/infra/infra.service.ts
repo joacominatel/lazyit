@@ -110,13 +110,13 @@ type SoftwareDirective =
   | {
       mode: 'preserve';
       /**
-       * Whether the report CLAIMED `unchanged` — that it HAS a list identical to its last accepted
-       * one — as opposed to `unavailable`, which says it could not look and has nothing to send.
+       * Whether the report said `softwareState: 'unchanged'` — that it HAS a list identical to its
+       * last accepted one. True for that state and no other, so `unavailable` (and every state this
+       * build does not recognise, which the schema lands there) reads false.
        *
-       * The two preserve identically and differ in exactly one place: only the first is a claim that
-       * can be corroborated, and therefore only the first can be ASKED to prove itself. Asking a
-       * collector that could not enumerate to resend would be asking it, forever, for something it
-       * does not have.
+       * They all preserve identically and differ in exactly one place: only `unchanged` is a claim to
+       * HAVE a list, so only `unchanged` can be ASKED to prove it. Asking a collector that could not
+       * enumerate to resend would be asking it, forever, for something it does not have.
        */
       claimsUnchanged: boolean;
       claimedHash?: string;
@@ -3123,9 +3123,11 @@ const NODE_ONLY_SPECS_KEYS = [
  * since a transplanted list under the adopting node's old fingerprint would make the next comparison
  * read the wrong thing (recoverable — the ack asks for a resend — but avoidable here for free).
  *
- * By TWO keys on a report that does not own the list: the host path passes
- * `host`/`software`/`reportedAt` only when the report OWNS `software`, and `host`/`reportedAt` alone
- * on a `preserve`, where the Asset's own copy is deliberately left exactly as it is.
+ * By TWO keys on a report that does not OWN the list: the host path passes
+ * `host`/`software`/`reportedAt` only when {@link SpecsWritePlan.softwareOwned} is set, and
+ * `host`/`reportedAt` alone otherwise, leaving the Asset's own copy exactly as it is. That is every
+ * `preserve` EXCEPT the one that re-embeds the stored list into the blob it writes — having read the
+ * list back, that branch knows what the node holds and may say so.
  */
 const AGENT_OWNED_SPECS_KEYS = [
   'host',
