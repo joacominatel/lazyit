@@ -802,11 +802,14 @@ export class InfraService {
    * that varies its report: anything the comparison covers differing by one byte is a real change and
    * therefore writes, and that is deliberate — a comparison that ignored a difference would be losing
    * inventory. So a determined caller can still drive a rewrite per request, and #1142 made that
-   * cheaper for them, not dearer: `softwareState: 'unchanged'` reaches the same write with a few KB
-   * instead of a few hundred, and on the one branch that has to re-embed the list it also costs a
-   * read of it. Bounding THAT is the rate limiter's job (#1134) and, ultimately, not leaking the
-   * token; the honest ADR-0074 §8 posture is that `infra:report` is a low-value credential whose
-   * blast radius is noise, not damage. See the amendment in ADR-0074 §2.
+   * cheaper for them, not dearer: `softwareState: 'unchanged'` plus one varied host fact reaches the
+   * same write with a few KB instead of a few hundred, and on the one branch that has to re-embed the
+   * list it also costs a read of it. What bounds THAT is `InfraReportRateLimitGuard` (#1134), which
+   * caps this route at `INFRA_REPORT_MAX_PER_WINDOW_DEFAULT` (120) requests per service account per
+   * minute, and ultimately ADR-0074 §8's posture that `infra:report` is a low-value credential whose
+   * blast radius is noise rather than damage. What the skip removes is the same ~172,800 rewrites a
+   * day for a legitimate estate, and for a leaked token that merely REPLAYS a report. See the
+   * amendment in ADR-0074 §2.
    */
   private async refreshKnownNode(args: {
     node: { id: string; assetId: string | null; ipAddressSource: string };
@@ -930,9 +933,9 @@ export class InfraService {
    * for it is what buys the ~90% steady-state saving on every other report. A caller that does not
    * behave like a real agent can reach it on every request by claiming `unchanged` while varying a
    * host fact, which is the read half of the residual documented on
-   * {@link InfraService.refreshKnownNode}; it is bounded by the #1134 rate limiter, not by this
-   * comparison, and it is not new — before #1142 the same caller drove the same write by sending a
-   * different package list.
+   * {@link InfraService.refreshKnownNode}; it is bounded by `InfraReportRateLimitGuard` (#1134), not
+   * by this comparison, and the WRITE half is not new — before #1142 the same caller drove the same
+   * write by sending a different package list, at several hundred KB a request instead of a few.
    */
   private async planSpecsWrite(
     nodeId: string,
