@@ -11,6 +11,7 @@ import {
   AGENT_POLICY_DEFAULT,
   AgentReportSchema,
   InfraNodeListItemSchema,
+  softwareFingerprint,
 } from '@lazyit/shared';
 import { InfraService } from './infra.service';
 import { AgentPolicyService } from './agent-policy.service';
@@ -1410,6 +1411,478 @@ describe('InfraService', () => {
           reportingSource: 'agent:abc123',
           externalId: { startsWith: 'machine-id-xyz/container/' },
         });
+      });
+
+      // ── The confirmed child's linked Asset (#1157) ──────────────────────────
+
+      describe("a confirmed container child's linked Asset (#1157)", () => {
+        const CHILD_KEY = 'machine-id-xyz/container/redis';
+        const RUNNING = {
+          name: 'redis',
+          image: 'redis:7.4',
+          imageDigest: 'sha256:new',
+          state: 'running' as const,
+        };
+
+        /** A known child, already confirmed with an Asset, holding the facts from an older report. */
+        function childIsConfirmed(specs: unknown): void {
+          hostIsNew();
+          prisma.infraNode.findMany.mockResolvedValue([
+            {
+              id: 'node-c1',
+              externalId: CHILD_KEY,
+              specs,
+              assetId: 'asset-c1',
+            },
+          ]);
+        }
+
+        it('refreshes the Asset on every report — it no longer freezes at confirm time', async () => {
+          // `syncAssetSpecs` was called only from the HOST path, so a container confirmed with
+          // `trackAsAsset` (which defaults ON) kept the image tag, digest, runtime state and
+          // published ports it had the day it was confirmed, while its node panel stayed fresh. An
+          // operator reconciling an incident from the Asset page read a value that had not been
+          // true for weeks, with nothing saying so.
+          childIsConfirmed({
+            container: {
+              name: 'redis',
+              image: 'redis:7.2',
+              imageDigest: 'sha256:old',
+            },
+            reportedAt: '2026-06-01T00:00:00.000Z',
+          });
+          prisma.asset.findFirst.mockResolvedValue({
+            specs: {
+              container: {
+                name: 'redis',
+                image: 'redis:7.2',
+                imageDigest: 'sha256:old',
+              },
+              reportedAt: '2026-06-01T00:00:00.000Z',
+              _infraAutoCreated: true,
+            },
+          });
+
+          await service.ingestReport(reportWithContainers([RUNNING]), AGENT_SA);
+
+          const updated = firstArg<{
+            where: { id: string };
+            data: { specs: Record<string, unknown> };
+          }>(prisma.asset.update);
+          expect(updated.where).toEqual({ id: 'asset-c1' });
+          expect(updated.data.specs.container).toEqual(RUNNING);
+          expect(updated.data.specs.reportedAt).toBe(FULL_REPORT.reportedAt);
+          // Human-added and provenance keys survive; only the agent-owned ones are replaced.
+          expect(updated.data.specs._infraAutoCreated).toBe(true);
+        });
+
+        it('writes DIRECTLY — no AssetsService.update, so no SPECS_CHANGED event per report', async () => {
+          // The same discipline the host path established: an agent fact refresh must not flood the
+          // Asset's audit trail, and must never touch its human-owned serial/name/modelId.
+          childIsConfirmed({
+            container: { name: 'redis' },
+            reportedAt: '2026-06-01T00:00:00.000Z',
+          });
+          prisma.asset.findFirst.mockResolvedValue({ specs: {} });
+
+          await service.ingestReport(reportWithContainers([RUNNING]), AGENT_SA);
+
+          expect(prisma.asset.update).toHaveBeenCalled();
+          const data = firstArg<{ data: Record<string, unknown> }>(
+            prisma.asset.update,
+          ).data;
+          expect(Object.keys(data)).toEqual(['specs']);
+        });
+
+        it('skips a SOFT-DELETED asset — the findFirst is scoped, so there is nothing to write', async () => {
+          childIsConfirmed({
+            container: { name: 'redis' },
+            reportedAt: '2026-06-01T00:00:00.000Z',
+          });
+          prisma.asset.findFirst.mockResolvedValue(null);
+
+          await service.ingestReport(reportWithContainers([RUNNING]), AGENT_SA);
+
+          expect(prisma.asset.update).not.toHaveBeenCalled();
+        });
+
+        it('touches nothing for a graph-only child — no asset link, no sync', async () => {
+          hostIsNew();
+          prisma.infraNode.findMany.mockResolvedValue([
+            { id: 'node-c1', externalId: CHILD_KEY, specs: {}, assetId: null },
+          ]);
+
+          await service.ingestReport(reportWithContainers([RUNNING]), AGENT_SA);
+
+          expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+          expect(prisma.asset.update).not.toHaveBeenCalled();
+        });
+
+        it('a DISCARDED child never has facts resurrected onto its Asset', async () => {
+          // The child lookup is soft-delete-scoped, so a discarded node simply is not in the list.
+          // The host path gets this from its own scoped `findFirst`; this is the same guarantee.
+          hostIsNew();
+          prisma.infraNode.findMany.mockResolvedValue([]);
+          prisma.infraNode.create.mockResolvedValueOnce({
+            id: 'node-host',
+            state: 'PENDING',
+          });
+          prisma.infraNode.create.mockResolvedValue({ id: 'node-c-new' });
+
+          await service.ingestReport(reportWithContainers([RUNNING]), AGENT_SA);
+
+          expect(prisma.asset.update).not.toHaveBeenCalled();
+        });
+
+        it('an UNCHANGED container writes neither its own specs nor its Asset (#1153)', async () => {
+          // Without this the delta would simply move the write amplification one table across: a
+          // container that has not changed in weeks would still rewrite two jsonb columns every
+          // check-in. Its `lastReportedAt` still advances, which is what the staleness sweeper reads.
+          const same = {
+            container: RUNNING,
+            reportedAt: '2026-06-01T00:00:00.000Z',
+          };
+          childIsConfirmed(same);
+          prisma.asset.findFirst.mockResolvedValue({ specs: same });
+
+          await service.ingestReport(reportWithContainers([RUNNING]), AGENT_SA);
+
+          const data = firstArg<{ data: Record<string, unknown> }>(
+            prisma.infraNode.update,
+          ).data;
+          expect(data).not.toHaveProperty('specs');
+          expect(data.lastReportedAt).toBeInstanceOf(Date);
+          expect(data.status).toBe('ONLINE');
+          expect(prisma.asset.update).not.toHaveBeenCalled();
+        });
+      });
+    });
+
+    // ── The software delta + the unchanged-write skip (#1142/#1153) ───────────
+
+    describe('software delta + specs write skip (#1142/#1153)', () => {
+      const SOFTWARE = [{ name: 'nginx', version: '1.27.0' }];
+      const HASH = softwareFingerprint(SOFTWARE);
+
+      /** A #1142 agent's report: the list plus the fingerprint of it. */
+      const reportedFull = AgentReportSchema.parse({
+        ...clone(FULL_REPORT),
+        software: SOFTWARE,
+        softwareState: 'reported',
+        softwareHash: HASH,
+      });
+
+      /** The same host, omitting an unchanged list. */
+      const reportUnchanged = (hash = HASH) =>
+        AgentReportSchema.parse({
+          ...clone(FULL_REPORT),
+          software: undefined,
+          softwareState: 'unchanged',
+          softwareHash: hash,
+        });
+
+      /** The blob this exact report leaves on the node, as the stored-specs sub-select returns it. */
+      const stored = (
+        rest: Record<string, unknown>,
+        hasSoftware: boolean,
+      ): Array<Record<string, unknown>> => [
+        { host: rest.host ?? null, rest, hasSoftware },
+      ];
+
+      /** What the node holds after a `reportedFull` landed — the steady state this change targets. */
+      const settled = () =>
+        stored(
+          {
+            host: clone(FULL_REPORT.host),
+            reportedAt: '2026-06-27T11:00:00.000Z',
+            softwareHash: HASH,
+          },
+          true,
+        );
+
+      /** A known host whose refresh path the test drives. */
+      function hostIsKnown(): void {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+        });
+      }
+
+      /** The `data` the refresh wrote to `infraNode.update`. */
+      const written = () =>
+        firstArg<{ data: Record<string, unknown> }>(prisma.infraNode.update)
+          .data;
+
+      it('an identical report writes the HEARTBEAT and leaves the jsonb blob alone', async () => {
+        // The whole of #1153. `lastReportedAt`/`status` are what a check-in is FOR and are cheap
+        // scalar columns; the inventory blob is a multi-hundred-KB TOAST value that had nothing new
+        // in it. At the permitted report rate this is the difference between ~172,800 rewrites a day
+        // and none.
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+
+        await service.ingestReport(reportedFull);
+
+        expect(written()).not.toHaveProperty('specs');
+        expect(written().status).toBe('ONLINE');
+        expect(written().lastReportedAt).toBeInstanceOf(Date);
+        expect(written().agentVersion).toBe('1.0.0');
+      });
+
+      it('a CHANGED host fact writes the blob — the skip is never allowed to lose an update', async () => {
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(
+          stored(
+            {
+              host: { ...clone(FULL_REPORT.host), memoryBytes: 17179869184 },
+              reportedAt: '2026-06-27T11:00:00.000Z',
+              softwareHash: HASH,
+            },
+            true,
+          ),
+        );
+
+        await service.ingestReport(reportedFull);
+
+        expect(written().specs).toMatchObject({
+          host: { memoryBytes: 34359738368 },
+        });
+      });
+
+      it('a report with NO fingerprint always writes — an unverifiable claim never skips', async () => {
+        // FULL_REPORT is a pre-#1142 agent: it sends the list with nothing to compare it against.
+        // The stored blob may or may not hold the same packages and the server cannot tell, so it
+        // writes. Skip only on a confident match.
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+
+        await service.ingestReport(FULL_REPORT);
+
+        expect(written()).toHaveProperty('specs');
+      });
+
+      it('an OMITTED unchanged list keeps the stored one, and writes nothing at all', async () => {
+        // The #1142 payoff and the landmine it sits on: absent must mean "keep", and here it does,
+        // without the server ever reading the package list back.
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+
+        const ack = await service.ingestReport(reportUnchanged());
+
+        expect(written()).not.toHaveProperty('specs');
+        expect(ack).not.toHaveProperty('softwareResend');
+      });
+
+      it('an omitted list plus CHANGED host facts RE-EMBEDS the stored list, never dropping it', async () => {
+        // The blob is written wholesale, so writing the new host facts without the package list
+        // would delete it. This is the one path that pays to read the list back.
+        hostIsKnown();
+        prisma.$queryRaw
+          .mockResolvedValueOnce(
+            stored(
+              {
+                host: { ...clone(FULL_REPORT.host), memoryBytes: 17179869184 },
+                reportedAt: '2026-06-27T11:00:00.000Z',
+                softwareHash: HASH,
+              },
+              true,
+            ),
+          )
+          .mockResolvedValueOnce([{ software: SOFTWARE }]);
+
+        await service.ingestReport(reportUnchanged());
+
+        expect(written().specs).toMatchObject({
+          host: { memoryBytes: 34359738368 },
+          software: SOFTWARE,
+          softwareHash: HASH,
+        });
+      });
+
+      it('a PRE-#1142 agent that sends no list still CLEARS it — #1140 policy semantics survive', async () => {
+        // A host whose policy turned software collection off must stop showing an inventory nobody
+        // collects. Before `softwareState` existed, an absent key was the ONLY way to say that, and
+        // an upgraded server must keep reading an older agent that way.
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+        const legacy = AgentReportSchema.parse({
+          ...clone(FULL_REPORT),
+          software: undefined,
+        });
+
+        await service.ingestReport(legacy);
+
+        expect(written()).toHaveProperty('specs');
+        expect(written().specs).not.toHaveProperty('software');
+        expect(written().specs).not.toHaveProperty('softwareHash');
+      });
+
+      it('softwareState `disabled` CLEARS the stored list — turning collection off still empties it', async () => {
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+
+        await service.ingestReport(
+          AgentReportSchema.parse({
+            ...clone(FULL_REPORT),
+            software: undefined,
+            softwareState: 'disabled',
+          }),
+        );
+
+        expect(written().specs).not.toHaveProperty('software');
+      });
+
+      it('softwareState `disabled` on an already-empty node writes nothing — clearing is idempotent', async () => {
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(
+          stored(
+            {
+              host: clone(FULL_REPORT.host),
+              reportedAt: '2026-06-27T11:00:00.000Z',
+            },
+            false,
+          ),
+        );
+
+        await service.ingestReport(
+          AgentReportSchema.parse({
+            ...clone(FULL_REPORT),
+            software: undefined,
+            softwareState: 'disabled',
+          }),
+        );
+
+        expect(written()).not.toHaveProperty('specs');
+      });
+
+      it('softwareState `unavailable` PRESERVES — "I could not look" is not "there is nothing"', async () => {
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+
+        const ack = await service.ingestReport(
+          AgentReportSchema.parse({
+            ...clone(FULL_REPORT),
+            software: undefined,
+            softwareState: 'unavailable',
+          }),
+        );
+
+        expect(written()).not.toHaveProperty('specs');
+        // No fingerprint was claimed, so there is nothing to corroborate and nothing to ask for —
+        // a resend could not help a collector that could not enumerate.
+        expect(ack).not.toHaveProperty('softwareResend');
+      });
+
+      it('an UNCORROBORATED unchanged claim keeps the list and ASKS for a full one', async () => {
+        // The node holds a list fingerprinted differently — a restore from backup, a merge. The
+        // server does not guess: it keeps what it has and asks. Wiping on a doubt is the one outcome
+        // the three-state contract exists to make impossible.
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+
+        const ack = await service.ingestReport(reportUnchanged('1-9-deadbeef'));
+
+        expect(written()).not.toHaveProperty('specs');
+        expect(ack.softwareResend).toBe(true);
+      });
+
+      it('a NEW node asked to keep a list it never had gets its inventory requested, not left empty', async () => {
+        // The discarded-and-rediscovered host, and the re-install whose state file survived. Without
+        // the request its brand-new node would show an empty package list until the host's packages
+        // happened to change, which on a stable server is months.
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-new',
+          state: 'PENDING',
+        });
+
+        const ack = await service.ingestReport(reportUnchanged(), AGENT_SA);
+
+        const createArg = firstArg<{
+          data: { specs: Record<string, unknown> };
+        }>(prisma.infraNode.create);
+        expect(createArg.data.specs).not.toHaveProperty('software');
+        expect(createArg.data.specs).not.toHaveProperty('softwareHash');
+        expect(ack.softwareResend).toBe(true);
+      });
+
+      it('a fingerprint is never stored beside an absent list', async () => {
+        // A stored fingerprint that outlived its list would let the NEXT `unchanged` claim
+        // corroborate against a ghost and skip forever with nothing to show.
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(
+          stored(
+            {
+              host: { hostname: 'other' },
+              reportedAt: '2026-06-27T11:00:00.000Z',
+            },
+            false,
+          ),
+        );
+
+        await service.ingestReport(reportUnchanged());
+
+        expect(written().specs).not.toHaveProperty('softwareHash');
+      });
+
+      // ── The linked Asset (#1153: the skip must not move the write onto assets) ──
+
+      it('the linked Asset is not rewritten when its snapshot already matches', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          assetId: 'asset-1',
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+        });
+        prisma.$queryRaw.mockResolvedValue(settled());
+        prisma.asset.findFirst.mockResolvedValue({
+          specs: {
+            host: clone(FULL_REPORT.host),
+            software: SOFTWARE,
+            reportedAt: '2026-06-27T11:00:00.000Z',
+            _infraAutoCreated: true,
+          },
+        });
+
+        await service.ingestReport(reportedFull);
+
+        expect(prisma.asset.update).not.toHaveBeenCalled();
+      });
+
+      it('the linked Asset keeps its own software when the report PRESERVED the list', async () => {
+        // The report said nothing about the package list, so neither may the Asset sync. Deleting it
+        // here would be the same silent wipe one layer down.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          assetId: 'asset-1',
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+        });
+        prisma.$queryRaw.mockResolvedValue(settled());
+        prisma.asset.findFirst.mockResolvedValue({
+          specs: { host: { hostname: 'stale' }, software: SOFTWARE },
+        });
+
+        await service.ingestReport(reportUnchanged());
+
+        const updated = firstArg<{ data: { specs: Record<string, unknown> } }>(
+          prisma.asset.update,
+        );
+        expect(updated.data.specs.software).toEqual(SOFTWARE);
+        // …and the node's own fingerprint never reaches the Asset, where the panel would render it
+        // under "Custom fields" as though a human had typed it.
+        expect(updated.data.specs).not.toHaveProperty('softwareHash');
       });
     });
 
@@ -3003,9 +3476,9 @@ describe('InfraService', () => {
     });
 
     it('re-stamps identityConflict on every report, keeping the FIRST detection time', async () => {
-      // The blob is rewritten wholesale on every check-in, so a marker written once would be gone
-      // 15 minutes later — leaving the operator a notification pointing at a node that shows no
-      // evidence of why. It is re-stamped for as long as the collision lasts (and only then).
+      // A marker written once would be gone the first time anything else in the blob moved —
+      // leaving the operator a notification pointing at a node that shows no evidence of why. It is
+      // re-stamped for as long as the collision lasts (and only then).
       prisma.infraNode.findFirst
         .mockResolvedValueOnce(ORIGINAL)
         .mockResolvedValueOnce({
