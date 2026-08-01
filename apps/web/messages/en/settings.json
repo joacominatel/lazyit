@@ -223,7 +223,7 @@
     "stale": {
       "label": "Consider a host offline after (minutes)",
       "help": "How long lazyit waits after a host's last report before marking it offline on the map and raising a notification.",
-      "invalid": "Enter a whole number of minutes, at least {min}.",
+      "invalid": "Enter a whole number of minutes between {min} and {max}.",
       "belowInterval": "This must be longer than the reporting interval, or a healthy host is marked offline between two of its own reports."
     },
     "softwareMax": {
