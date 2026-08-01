@@ -121,15 +121,19 @@ correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin toca
   número de serie.
 - **Qué tipo de máquina es** — servidor, escritorio, notebook, máquina virtual o contenedor, y la
   virtualización sobre la que corre (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) cuando puede
-  determinarlo.
+  determinarlo. Cuando *no* puede — la herramienta que necesita no está instalada — reporta
+  **desconocido** en vez de adivinar, y lo aclara en las notas de abajo.
 - **Cuándo arrancó por última vez** — una sola marca de tiempo, para poder responder "¿este equipo
   realmente se reinició después de la ventana de parches?". No es monitoreo de uptime: un único valor,
   actualizado en cada reporte, sin histórico.
 - **Software instalado** — la lista de paquetes instalados, con versiones cuando están disponibles, y
   qué gestor de paquetes los reportó.
 - **Qué no pudo recopilar** — cada reporte también indica si corrió como root y nombra lo que tuvo que
-  omitir o lo que agotó su tiempo. Así una columna vacía de número de serie o modelo pasa a ser una
-  *respuesta* ("este host reporta sin privilegios") en vez de un misterio.
+  omitir o lo que agotó su tiempo. Si ejecutás el agente a mano (`lazyit-agent report --once`) imprime
+  esas notas ahí mismo, que suele ser la forma más rápida de responder "¿por qué está vacía la columna
+  de número de serie de este host?". lazyit además las guarda junto a los datos reportados del host,
+  para que una futura vista de parque pueda responderlo para todo el estado; hoy no se muestran en la
+  interfaz.
 
 Recopila todo lo que puede y simplemente omite lo que no puede leer, así una instalación sin
 privilegios igual reporta una imagen útil. **Nunca** lee secretos, archivos ni datos de aplicaciones,
@@ -173,10 +177,16 @@ nada, y las actualizaciones menores no la activan. Los agentes compilados desde 
 anteriores al versionado) reportan como `dev` y nunca muestran la insignia.
 
 **Actualizar tu instancia nunca rompe los agentes ya instalados.** No hace falta reinstalar nada: un
-agente más viejo sigue reportando igual que antes, y un agente *más nuevo* que reporta a un servidor
-más viejo también es aceptado — el servidor toma todos los datos que entiende y simplemente anota los
-que no, en vez de rechazar el reporte completo. Esa diferencia importa: un reporte rechazado haría
-desaparecer al servidor de tu inventario y parecería una caída. Un campo desactualizado, nunca.
+agente más viejo sigue reportando igual que antes, y cada dato que envía aterriza exactamente donde
+aterrizaba.
+
+**A partir de esta versión también vale el sentido inverso.** Un agente *más nuevo* que reporta a un
+servidor más viejo es aceptado: el servidor toma todos los datos que entiende y simplemente anota los
+que no, en vez de rechazar el reporte completo. Esa diferencia importa — un reporte rechazado haría
+desaparecer al servidor de tu inventario y parecería una caída, mientras que un campo desactualizado
+nunca lo hace. Ojo con el "a partir de esta versión": las instancias anteriores a esta release siguen
+rechazando un reporte que mencione algo que no reconocen, así que si vas a correr agentes que se
+actualizan por su cuenta, actualizá primero la instancia.
 
 ## Qué sigue
 

@@ -112,14 +112,18 @@ without touching anything you own (the asset's name, serial and model are never 
 - **Identity & hardware** — hostname, operating system and kernel, CPU and memory, disks and network
   interfaces (IPv4 **and** IPv6), and (only when it runs as root) manufacturer / model / serial.
 - **What kind of machine it is** — server, desktop, laptop, virtual machine or container, and the
-  virtualization it runs under (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) when it can tell.
+  virtualization it runs under (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) when it can tell. When
+  it *can't* tell — the probe it relies on isn't installed — it reports **unknown** rather than
+  guessing, and says so in the notes below.
 - **When it last booted** — a single timestamp, so you can answer "did this box actually reboot after
   the patch window?". It is not uptime monitoring: one value, refreshed on each report, no history.
 - **Installed software** — the list of installed packages, with versions where available, and which
   package manager reported them.
 - **What it couldn't collect** — each report also says whether it ran with root and names anything it
-  had to skip or that timed out. That is how an empty serial or model column becomes an *answer*
-  ("this host reports unprivileged") instead of a mystery.
+  had to skip or that timed out. Run the agent by hand (`lazyit-agent report --once`) and it prints
+  those notes right there, which is usually the fastest way to answer "why is this host's serial
+  column empty?". lazyit also stores them alongside the host's reported facts, so a future fleet view
+  can answer it for the whole estate; today nothing displays them in the interface.
 
 It collects whatever it can and simply omits anything it can't read, so an unprivileged install still
 reports a useful picture. It **never** reads secrets, files or application data, and it sends no
@@ -160,10 +164,16 @@ reporting normally, nothing is blocked, and minor updates don't raise it. Agents
 before versioning was added) report as `dev` and never show the badge.
 
 **Upgrading your instance never breaks the agents already installed.** You do not have to re-install
-anything: an older agent keeps reporting exactly as it did, and a *newer* agent reporting to an older
-server is accepted too — the server takes every fact it understands and simply notes the ones it
-doesn't, rather than rejecting the whole report. That distinction matters: a rejected report would make
-the server disappear from your inventory and look like an outage. A stale field never does.
+anything: an older agent keeps reporting exactly as it did, and every fact it sends lands exactly where
+it did before.
+
+**From this version onwards, the reverse also holds.** A *newer* agent reporting to an older server is
+accepted: the server takes every fact it understands and simply notes the ones it doesn't, rather than
+rejecting the whole report. That distinction matters — a rejected report would make the server
+disappear from your inventory and look like an outage, while a stale field never does. Note the "from
+this version onwards": instances older than this release still refuse a report that mentions anything
+they don't recognise, so if you plan to run agents that update on their own schedule, upgrade the
+instance first.
 
 ## What's next
 
