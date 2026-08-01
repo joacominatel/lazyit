@@ -36,7 +36,9 @@ import {
   loadState,
   writeCachedPolicy,
   writeState,
+  type AgentState,
 } from "./policy";
+import { softwareWireFields } from "./software-delta";
 
 // Build-time version stamp (ADR-0083 mechanism, issue #907): the compile scripts bake `APP_VERSION`
 // via `bun build --define` (git describe → env). A plain `bun run`/an unstamped compile falls back to
@@ -70,8 +72,17 @@ Local limits (/etc/lazyit-agent/config) — these VETO the server's policy, neve
   LAZYIT_EXCLUDE_NICS|MOUNTPOINTS|SOFTWARE=<comma-separated globs>
 `;
 
-/** Build + validate the report. Throws (caught by main) if collection produced something invalid. */
-async function buildReport(policy: AgentPolicy): Promise<AgentReport> {
+/**
+ * Build + validate the report. Throws (caught by main) if collection produced something invalid.
+ *
+ * `cachedSoftwareHash` is the fingerprint of the list the server is believed to hold (#1142); when it
+ * matches what was just collected, the list is omitted and only the fingerprint travels. The returned
+ * `softwareHash` is what to persist AFTER the server accepts the report — see {@link report}.
+ */
+async function buildReport(
+  policy: AgentPolicy,
+  cachedSoftwareHash: string | undefined,
+): Promise<{ report: AgentReport; softwareHash: string | undefined }> {
   const startedAt = Date.now();
   const machineId = await readMachineId();
   if (!machineId) {
@@ -88,10 +99,12 @@ async function buildReport(policy: AgentPolicy): Promise<AgentReport> {
     warnings.push(message);
   };
 
-  const [host, software] = await Promise.all([
+  const [host, collected] = await Promise.all([
     collectHost(warn, policy),
     collectSoftware(warn, policy),
   ]);
+  // The delta (#1142): what this report SAYS about software, and what to remember if it lands.
+  const { fields: software, cache: softwareHash } = softwareWireFields(collected, cachedSoftwareHash);
 
   const report: AgentReport = {
     agentVersion: AGENT_VERSION,
@@ -100,7 +113,7 @@ async function buildReport(policy: AgentPolicy): Promise<AgentReport> {
     externalId: machineId,
     reportedAt: new Date().toISOString(),
     host,
-    ...(software ? { software } : {}),
+    ...software,
     diagnostics: buildDiagnostics(
       warnings,
       process.getuid?.() === 0,
@@ -123,7 +136,7 @@ async function buildReport(policy: AgentPolicy): Promise<AgentReport> {
       `internal: collected an invalid report — ${JSON.stringify(parsed.error.issues)}`,
     );
   }
-  return parsed.data;
+  return { report: parsed.data, softwareHash };
 }
 
 /** Format the GiB string for the success summary (memory is reported in bytes). */
@@ -143,8 +156,9 @@ async function report(
   url: string,
   token: string,
   policy: AgentPolicy,
+  state: AgentState,
 ): Promise<void> {
-  const payload = await buildReport(policy);
+  const { report: payload, softwareHash } = await buildReport(policy, state.softwareHash);
   const base = url.replace(/\/+$/, "");
 
   let res: Response;
@@ -168,7 +182,7 @@ async function report(
   }
 
   const ack = (await res.json().catch(() => null)) as
-    | { nodeId?: string; state?: string; policy?: unknown }
+    | { nodeId?: string; state?: string; policy?: unknown; softwareResend?: unknown }
     | null;
   const { hostname, cpu, memoryBytes } = payload.host;
   const where = ack?.nodeId ? ` → node ${ack.nodeId} [${ack.state ?? "?"}]` : "";
@@ -181,10 +195,24 @@ async function report(
     console.warn(`lazyit-agent: ${warning}`);
   }
 
-  // The report SUCCEEDED, so this is the instant the cadence gate measures from. Written before the
-  // policy, and independently of it: a host whose policy cache could not be written must still not
-  // re-report on the next 5-minute tick.
-  await writeState({ lastSuccessMs: Date.now() }).catch((err: unknown) => {
+  // THE RESEND REQUEST (#1142). The server could not corroborate an `unchanged` claim — its stored
+  // list is missing or fingerprinted differently — so it kept what it had and asked for everything.
+  // Answering is simply forgetting: with no cached fingerprint the next run sends the whole list.
+  const resend = ack?.softwareResend === true;
+  if (resend) {
+    console.log(
+      "lazyit-agent: the server asked for the full software list — the next report will send it",
+    );
+  }
+
+  // The report SUCCEEDED, so this is the instant the cadence gate measures from — and the instant the
+  // software fingerprint becomes true, since it describes what the server now holds. Both are written
+  // before the policy, and independently of it: a host whose policy cache could not be written must
+  // still not re-report on the next 5-minute tick.
+  await writeState({
+    lastSuccessMs: Date.now(),
+    ...(softwareHash !== undefined && !resend ? { softwareHash } : {}),
+  }).catch((err: unknown) => {
     console.warn(
       `lazyit-agent: could not record the report time (${(err as Error).message}) — the next tick will report again`,
     );
@@ -248,10 +276,13 @@ async function main(): Promise<void> {
   // not merely by what it collects.
   const cached = await loadCachedPolicy();
   const policy = applyAgentPolicyVeto(cached, cfg.localLimits);
+  // Read ONCE and carried into the report: the same file holds the cadence clock and the software
+  // fingerprint (#1142), and re-reading it after the due gate would only invite the two to disagree.
+  const state = await loadState();
 
   if (!cfg.force) {
     const machineId = (await readMachineId()) ?? "";
-    const { lastSuccessMs } = await loadState();
+    const { lastSuccessMs } = state;
     if (
       !agentPolicyDue({
         nowMs: Date.now(),
@@ -271,7 +302,7 @@ async function main(): Promise<void> {
     }
   }
 
-  await report(cfg.url, cfg.token, policy);
+  await report(cfg.url, cfg.token, policy, state);
 }
 
 main().catch((err: unknown) => {
