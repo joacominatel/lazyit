@@ -106,15 +106,38 @@ if [ -n "$LEGACY_INTERVAL" ]; then
 # uncomment the LAZYIT_MIN_INTERVAL line below — a floor, never a shorter interval."
 fi
 
+# CARRY THIS HOST'S OWN SETTINGS ACROSS A RE-INSTALL (#1140). Re-running the installer is the
+# documented upgrade path and it rewrites this file — but since #1140 the file is also the ONLY place
+# the host's local VETO lives (`LAZYIT_COLLECT_*=false`, `LAZYIT_MIN_INTERVAL`, `LAZYIT_SOFTWARE_MAX`,
+# `LAZYIT_EXCLUDE_*`). Truncating it would silently re-enable collection the host's owner turned off,
+# on the upgrade path, with nothing on screen to say so — and on a self-hosted product that owner is
+# frequently not the person running the upgrade. So: everything is carried over EXCEPT the three keys
+# the installer owns (URL, TOKEN, and the ignored legacy INTERVAL), which the flags supply fresh.
+#
+# Merging rather than moving the veto to a file the installer never touches, because this file is
+# where every existing host already keeps it — the template below has invited exactly that since
+# #1140 — and a second file would orphan those settings on the very upgrade this is protecting.
+PRESERVED=""
+if [ -f "$CONFIG_FILE" ]; then
+  KEPT="$(grep -E '^[[:space:]]*LAZYIT_[A-Z0-9_]+=' "$CONFIG_FILE" 2>/dev/null \
+    | grep -Ev '^[[:space:]]*LAZYIT_(URL|TOKEN|INTERVAL)=' || true)"
+  if [ -n "$KEPT" ]; then
+    PRESERVED="# --- kept from this host's previous config (its own limits — the installer does not own these) ---
+$KEPT
+# --- end kept ---"
+  fi
+fi
+
 cat > "$CONFIG_FILE" <<EOF
 # lazyit reporting agent config (ADR-0074). Holds your instance URL + SA token. chmod 600.
 LAZYIT_URL=$URL
 LAZYIT_TOKEN=$TOKEN
 $LEGACY_NOTE
+$PRESERVED
 #
 # What this HOST refuses to do, whatever lazyit's policy says (#1140). These VETO the server's
 # policy and can never widen it: a collector switched off here cannot be switched back on remotely.
-# Uncomment what you need.
+# Uncomment what you need — re-running this installer keeps whatever you set here.
 #LAZYIT_COLLECT_HARDWARE=false
 #LAZYIT_COLLECT_DISKS=false
 #LAZYIT_COLLECT_NICS=false
