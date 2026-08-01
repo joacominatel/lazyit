@@ -35,6 +35,18 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     expect(permsOf('getNode')).toEqual(['infra:read']);
     expect(permsOf('getImpact')).toEqual(['infra:read']);
     expect(permsOf('listEdges')).toEqual(['infra:read']);
+    // The re-image adoption hint is a READ — it only suggests a merge, it never performs one (#1141).
+    expect(permsOf('identityMatches')).toEqual(['infra:read']);
+  });
+
+  it('gates the re-key/merge on infra:manage AND refuses a machine caller (#1141)', () => {
+    // Merging moves a dedup key between nodes and archives one of them — human curation, exactly like
+    // confirming a proposal. A reporting agent must never be able to re-key its own way out of the
+    // review tray, so the same HumanOnlyGuard that protects confirm protects this.
+    expect(permsOf('mergeNodeInto')).toEqual(['infra:manage']);
+    expect(guardsOf('mergeNodeInto').map((g) => (g as { name: string }).name)).toContain(
+      'HumanOnlyGuard',
+    );
   });
 
   it('gates plain mutations on infra:manage', () => {
