@@ -4,8 +4,11 @@ import {
   AGENT_EXTERNAL_ID_MAX,
   AGENT_IDENTIFIERS_MAX,
   AGENT_SKEW_PATHS_MAX,
+  AGENT_SOFTWARE_HASH_MAX,
   AGENT_WARNINGS_MAX,
+  AgentReportAckSchema,
   agentReportSkewPaths,
+  softwareFingerprint,
   disambiguateExternalId,
   hostIdentityEvidence,
   IDENTITY_DISCRIMINATOR_MAX,
@@ -1241,5 +1244,115 @@ describe("InfraIdentityMatchSchema — the re-image adoption hint (#1141)", () =
         value: "x",
       }).success,
     ).toBe(false);
+  });
+});
+
+// ── The software delta contract (#1142) — THREE answers, not two ──────────────────────────────────
+
+describe("softwareFingerprint — a stable, order-independent fingerprint of a package list (#1142)", () => {
+  const pkgs = [
+    { name: "nginx", version: "1.24.0", source: "dpkg" as const },
+    { name: "openssl", version: "3.0.13", source: "dpkg" as const },
+    { name: "zlib1g", source: "dpkg" as const },
+  ];
+
+  test("is stable across calls", () => {
+    expect(softwareFingerprint(pkgs)).toBe(softwareFingerprint(pkgs));
+  });
+
+  test("does NOT depend on the order the collector listed packages in", () => {
+    expect(softwareFingerprint([...pkgs].reverse())).toBe(softwareFingerprint(pkgs));
+  });
+
+  test("changes when a VERSION changes — the `apt upgrade` this whole delta exists to notice", () => {
+    const upgraded = [{ ...pkgs[0]!, version: "1.24.1" }, pkgs[1]!, pkgs[2]!];
+    expect(softwareFingerprint(upgraded)).not.toBe(softwareFingerprint(pkgs));
+  });
+
+  test("changes when a package is added or removed", () => {
+    expect(softwareFingerprint(pkgs.slice(0, 2))).not.toBe(softwareFingerprint(pkgs));
+    expect(softwareFingerprint([...pkgs, { name: "curl" }])).not.toBe(softwareFingerprint(pkgs));
+  });
+
+  test("distinguishes a missing version from an empty one, and a missing source from a named one", () => {
+    expect(softwareFingerprint([{ name: "a" }])).not.toBe(
+      softwareFingerprint([{ name: "a", version: "" }]),
+    );
+    expect(softwareFingerprint([{ name: "a" }])).not.toBe(
+      softwareFingerprint([{ name: "a", source: "dpkg" }]),
+    );
+  });
+
+  test("does not confuse two packages whose fields concatenate to the same text", () => {
+    expect(softwareFingerprint([{ name: "a", version: "b" }])).not.toBe(
+      softwareFingerprint([{ name: "ab" }]),
+    );
+  });
+
+  test("an EMPTY list has a fingerprint of its own — it is a positive finding, not an absence", () => {
+    expect(softwareFingerprint([])).toBe(softwareFingerprint([]));
+    expect(softwareFingerprint([])).not.toBe(softwareFingerprint([{ name: "a" }]));
+  });
+
+  test("fits the wire cap, and carries the canonical-form version so a future change forces a resend", () => {
+    expect(softwareFingerprint(pkgs).length).toBeLessThanOrEqual(AGENT_SOFTWARE_HASH_MAX);
+    expect(softwareFingerprint(pkgs).startsWith("1-")).toBe(true);
+  });
+});
+
+describe("AgentReportSchema — softwareState/softwareHash (#1142)", () => {
+  const base = {
+    agentVersion: "1.0.0",
+    reportingSource: "agent:abc",
+    externalId: "abc",
+    reportedAt: "2026-08-01T10:00:00.000Z",
+    host: { hostname: "web-03" },
+  };
+
+  test("a PRE-#1142 report carries neither key — both parse as absent", () => {
+    const parsed = AgentReportSchema.parse(base);
+    expect(parsed.softwareState).toBeUndefined();
+    expect(parsed.softwareHash).toBeUndefined();
+  });
+
+  test("the four states parse", () => {
+    for (const state of ["reported", "unchanged", "unavailable", "disabled"] as const) {
+      expect(AgentReportSchema.parse({ ...base, softwareState: state }).softwareState).toBe(state);
+    }
+  });
+
+  test("an UNKNOWN state degrades to `unavailable` — the PRESERVING answer, never the clearing one", () => {
+    // Degrade-never-reject, and the DIRECTION matters here: a future agent's new state must not make
+    // an older server WIPE an inventory whose fate it cannot interpret.
+    expect(AgentReportSchema.parse({ ...base, softwareState: "cataloged" }).softwareState).toBe(
+      "unavailable",
+    );
+    expect(AgentReportSchema.parse({ ...base, softwareState: 7 }).softwareState).toBe("unavailable");
+  });
+
+  test("a malformed hash degrades to absent rather than 400-ing the host out of the inventory", () => {
+    expect(AgentReportSchema.parse({ ...base, softwareHash: { nope: true } }).softwareHash).toBe(
+      undefined,
+    );
+  });
+
+  test("an over-long hash is DROPPED, not rejected — the host still reports", () => {
+    // Dropped rather than truncated, unlike the truncating caps elsewhere in this contract: a
+    // fingerprint is only useful whole. A truncated one would corroborate nothing while LOOKING like
+    // corroboration, whereas an absent one is honest and costs exactly one full resend.
+    const parsed = AgentReportSchema.parse({ ...base, softwareHash: "a".repeat(500) });
+    expect(parsed.softwareHash).toBeUndefined();
+  });
+});
+
+describe("AgentReportAckSchema — the resend request (#1142)", () => {
+  const ack = { nodeId: CUID, state: "PENDING" as const, accepted: true as const };
+
+  test("stays optional, so an ack from a pre-#1142 server still parses", () => {
+    expect(AgentReportAckSchema.parse(ack).softwareResend).toBeUndefined();
+  });
+
+  test("carries the resend request when the server could not corroborate an `unchanged` claim", () => {
+    expect(AgentReportAckSchema.parse({ ...ack, softwareResend: true }).softwareResend).toBe(true);
   });
 });
