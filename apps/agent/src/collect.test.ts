@@ -179,9 +179,19 @@ describe("chassisFor — what the host IS (#1138/#1139)", () => {
     expect(chassisFor("none", null)).toBe("unknown");
     expect(chassisFor("none", "not-a-number")).toBe("unknown");
   });
+
+  test("NO virtualization probe is `unknown` — it is not an assertion of bare metal", () => {
+    // `systemd-detect-virt` absent (a non-systemd distro, a minimal container image) used to be read
+    // as `none`, which then classified the host from DMI it does not own: inside a container `/sys`
+    // shows the HOST's chassis, so the container confidently reported `server`. "Unknown" and "none"
+    // are different facts and the contract has vocabulary for both.
+    expect(chassisFor(undefined, "17")).toBe("unknown");
+    expect(chassisFor(undefined, "3")).toBe("unknown");
+    expect(chassisFor(undefined, null)).toBe("unknown");
+  });
 });
 
-describe("parseNics — IPv6 + virtual-interface flag (#1138)", () => {
+describe("parseNics — IPv6 with enough context to pick a STABLE address (#1138)", () => {
   const IP_JSON = JSON.stringify([
     { ifname: "lo", addr_info: [{ family: "inet", local: "127.0.0.1" }] },
     {
@@ -189,21 +199,56 @@ describe("parseNics — IPv6 + virtual-interface flag (#1138)", () => {
       address: "aa:bb:cc:dd:ee:ff",
       addr_info: [
         { family: "inet", local: "10.0.0.12" },
-        { family: "inet6", local: "2001:db8::12" },
-        { family: "inet6", local: "fe80::1" },
+        {
+          family: "inet6",
+          local: "2001:db8::dead",
+          prefixlen: 64,
+          scope: "global",
+          temporary: true,
+        },
+        { family: "inet6", local: "2001:db8::12", prefixlen: 64, scope: "global" },
+        { family: "inet6", local: "fe80::1", prefixlen: 64, scope: "link" },
       ],
     },
     { ifname: "docker0", address: "02:42:ac:11:00:02", addr_info: [] },
   ]);
 
-  test("splits v4 and v6, keeping link-local (the promotion mapper decides, not the collector)", () => {
+  test("carries scope, prefix length and the RFC 4941 flags the promotion rule needs", () => {
     const nics = parseNics(IP_JSON);
     expect(nics?.[0]).toEqual({
       name: "eth0",
       mac: "aa:bb:cc:dd:ee:ff",
       ipv4: ["10.0.0.12"],
-      ipv6: ["2001:db8::12", "fe80::1"],
+      ipv6: [
+        {
+          address: "2001:db8::dead",
+          prefixLength: 64,
+          scope: "global",
+          temporary: true,
+        },
+        { address: "2001:db8::12", prefixLength: 64, scope: "global" },
+        { address: "fe80::1", prefixLength: 64, scope: "link" },
+      ],
     });
+  });
+
+  test("reads a spent preferred lifetime as deprecated (iproute2 does not always flag it)", () => {
+    const nics = parseNics(
+      JSON.stringify([
+        {
+          ifname: "eth0",
+          addr_info: [
+            {
+              family: "inet6",
+              local: "2001:db8::old",
+              scope: "global",
+              preferred_life_time: 0,
+            },
+          ],
+        },
+      ]),
+    );
+    expect(nics?.[0]?.ipv6?.[0]?.deprecated).toBe(true);
   });
 
   test("drops loopback and returns undefined when `ip -j addr` gave nothing usable", () => {
@@ -238,18 +283,20 @@ describe("parseTabbed — package-manager provenance (#1138)", () => {
 });
 
 describe("buildIdentifiers — the corroborating set #1141 consumes (#1138)", () => {
-  test("collects each identity fact it actually has, kinded", () => {
+  test("collects each identity fact it actually has, kinded and in its CANONICAL form", () => {
+    // The canonical form is the contract's (`normalizeIdentifierValue`), applied here too so the
+    // agent's own log and the server's stored evidence read identically.
     expect(
       buildIdentifiers({
-        machineId: "9f8d7c6b5a4e3f2a",
-        smbiosUuid: "4C4C4544-0043",
-        serial: "ABC123",
-        mac: "aa:bb:cc:dd:ee:ff",
+        machineId: "9F8D7C6B5A4E3F2A",
+        smbiosUuid: "{4C4C4544-0043-0010-8036-B1C04F574D32}",
+        serial: "  ABC   123  ",
+        mac: "AA-BB-CC-DD-EE-FF",
       }),
     ).toEqual([
       { kind: "machine-id", value: "9f8d7c6b5a4e3f2a" },
-      { kind: "smbios-uuid", value: "4C4C4544-0043" },
-      { kind: "serial", value: "ABC123" },
+      { kind: "smbios-uuid", value: "4c4c4544-0043-0010-8036-b1c04f574d32" },
+      { kind: "serial", value: "ABC 123" },
       { kind: "mac", value: "aa:bb:cc:dd:ee:ff" },
     ]);
   });
