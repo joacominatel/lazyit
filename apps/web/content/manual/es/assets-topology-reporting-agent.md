@@ -292,9 +292,9 @@ lazyit puede volver a activar un recolector desactivado localmente. Es a propós
 autoalojado, y quien administra un servidor no siempre es quien administra lazyit. La configuración
 local solo puede hacer que un host informe *menos*, nunca más. **Volver a ejecutar el comando de
 instalación la conserva.** Actualizar un agente reescribe ese archivo, así que el instalador traslada
-todas las líneas `LAZYIT_*` que encuentra —salvo la URL de la instancia y el token, que aporta el
-comando que acabás de ejecutar— y las delimita bajo una marca
-`--- kept from this host's previous config ---` para que veas exactamente qué sobrevivió. Una
+todas las líneas `LAZYIT_*` que encuentra —salvo las tres que le pertenecen (`LAZYIT_URL`,
+`LAZYIT_TOKEN` y la obsoleta `LAZYIT_INTERVAL`, que ya nadie lee)— y delimita lo que conservó bajo una
+marca `--- kept from this host's previous config ---` para que veas exactamente qué sobrevivió. Una
 actualización nunca vuelve a activar un recolector en silencio.
 
 **lazyit nunca puede indicarle a un agente que ejecute algo.** La política es una lista fija de

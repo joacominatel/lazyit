@@ -725,15 +725,17 @@ bounded by half the tick, so at most 149 s) is **subtracted** from each host's i
 offset actually buys is narrower than "it spreads the estate", and the narrow version is the true one:
 it **absorbs scheduler slack**, so a tick landing a hair short of the interval (systemd's
 `AccuracySec`, the previous run's own duration, `OnUnitActiveSec` re-arming from activation rather
-than from the report) reports instead of waiting a whole extra tick. It changes *which* tick reports
-only when the interval is **not** an exact multiple of the 5-minute tick; at a multiple — the 900 s
-default, and every round value the minutes-only editor makes natural — the tick that first reaches
-`interval − offset` is the same tick that first reaches `interval`, so hosts on the default cadence
-are de-phased by their own timers and not by this. The **reboot** case is likewise not its doing: that
-is handled by the state file *surviving* the reboot — a host that reported four minutes before it went
-down is still not due when it comes back. On the 900 s default the offset leaves an effective cadence
-of at least 751 s (83.4% of what was asked for), and at the 300 s minimum at least 151 s, so no
-cadence is ever cut to half or below.
+than from the report) reports instead of waiting a whole extra tick. It does **not** spread an estate:
+the gate is only ever evaluated *on* a tick, so the due instant is quantized to one, and an offset
+smaller than a tick moves a host's report by a whole tick or by nothing at all — never by the smooth
+few-seconds de-phasing "spreading" implies. At the 900 s default, and at every round value the
+minutes-only editor makes natural, the interval is an exact multiple of the tick, so there is no
+sub-tick position to be nudged into at all. Hosts that need de-phasing are de-phased by their own
+timers, whose phase follows each host's boot instant and run durations. The **reboot** case is
+likewise not its doing: that is handled by the state file *surviving* the reboot — a host that
+reported four minutes before it went down is still not due when it comes back. On the 900 s default
+the offset leaves an effective cadence of at least 751 s (83.4% of what was asked for), and at the
+300 s minimum at least 151 s, so no cadence is ever cut to half or below.
 
 **Subtracted, not added,** and the direction is load-bearing. Adding it would push the due instant
 *past* a scheduler tick whenever the tick and the interval are close — precisely the host that

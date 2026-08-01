@@ -273,7 +273,8 @@ lazyit can switch a locally-disabled collector back on. This is on purpose: lazy
 the person who owns a server is not always the person who administers lazyit. Local settings can only
 ever make a host report *less*, never more. **Re-running the install command keeps them.** Upgrading
 an agent rewrites that file, so the installer carries every `LAZYIT_*` line it finds across — apart
-from the instance URL and token, which the command you just ran supplies — and fences them under a
+from the three it owns itself (`LAZYIT_URL`, `LAZYIT_TOKEN` and the obsolete `LAZYIT_INTERVAL`, which
+nothing reads any more) — and fences what it kept under a
 `--- kept from this host's previous config ---` marker so you can see exactly what survived. An
 upgrade never quietly switches a collector back on.
 
