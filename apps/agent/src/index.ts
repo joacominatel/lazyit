@@ -38,7 +38,10 @@ import {
   writeState,
   type AgentState,
 } from "./policy";
-import { softwareWireFields } from "./software-delta";
+import {
+  serverUnderstandsSoftwareDelta,
+  softwareWireFields,
+} from "./software-delta";
 
 // Build-time version stamp (ADR-0083 mechanism, issue #907): the compile scripts bake `APP_VERSION`
 // via `bun build --define` (git describe → env). A plain `bun run`/an unstamped compile falls back to
@@ -76,12 +79,16 @@ Local limits (/etc/lazyit-agent/config) — these VETO the server's policy, neve
  * Build + validate the report. Throws (caught by main) if collection produced something invalid.
  *
  * `cachedSoftwareHash` is the fingerprint of the list the server is believed to hold (#1142); when it
- * matches what was just collected, the list is omitted and only the fingerprint travels. The returned
- * `softwareHash` is what to persist AFTER the server accepts the report — see {@link report}.
+ * matches what was just collected AND `serverUnderstandsDelta` says the server can read an omission,
+ * the list is omitted and only the fingerprint travels. Both conditions, never just the first: an
+ * older server strips `softwareState` instead of rejecting it and would read the omission as "no
+ * software". The returned `softwareHash` is what to persist AFTER the server accepts the report —
+ * see {@link report}.
  */
 async function buildReport(
   policy: AgentPolicy,
   cachedSoftwareHash: string | undefined,
+  serverUnderstandsDelta: boolean,
 ): Promise<{ report: AgentReport; softwareHash: string | undefined }> {
   const startedAt = Date.now();
   const machineId = await readMachineId();
@@ -104,7 +111,11 @@ async function buildReport(
     collectSoftware(warn, policy),
   ]);
   // The delta (#1142): what this report SAYS about software, and what to remember if it lands.
-  const { fields: software, cache: softwareHash } = softwareWireFields(collected, cachedSoftwareHash);
+  const { fields: software, cache: softwareHash } = softwareWireFields(
+    collected,
+    cachedSoftwareHash,
+    serverUnderstandsDelta,
+  );
 
   const report: AgentReport = {
     agentVersion: AGENT_VERSION,
@@ -158,7 +169,13 @@ async function report(
   policy: AgentPolicy,
   state: AgentState,
 ): Promise<void> {
-  const { report: payload, softwareHash } = await buildReport(policy, state.softwareHash);
+  const { report: payload, softwareHash } = await buildReport(
+    policy,
+    state.softwareHash,
+    // THE HANDSHAKE (#1142) — evidence a PREVIOUS ack gave us, never an assumption. Without it the
+    // whole package list rides this report, which is what the agent did before the delta existed.
+    state.softwareDelta === true,
+  );
   const base = url.replace(/\/+$/, "");
 
   let res: Response;
@@ -182,7 +199,13 @@ async function report(
   }
 
   const ack = (await res.json().catch(() => null)) as
-    | { nodeId?: string; state?: string; policy?: unknown; softwareResend?: unknown }
+    | {
+        nodeId?: string;
+        state?: string;
+        policy?: unknown;
+        softwareResend?: unknown;
+        softwareDelta?: unknown;
+      }
     | null;
   const { hostname, cpu, memoryBytes } = payload.host;
   const where = ack?.nodeId ? ` → node ${ack.nodeId} [${ack.state ?? "?"}]` : "";
@@ -205,6 +228,12 @@ async function report(
     );
   }
 
+  // THE CAPABILITY (#1142). Re-read from EVERY ack rather than latched once, so it heals in both
+  // directions: an upgraded instance starts advertising it and the next run starts saving payload, and
+  // an instance rolled back below #1142 stops advertising it and the next run goes back to sending the
+  // whole list. Absent means not proven — a pre-#1142 server, or an ack that could not be parsed.
+  const understandsDelta = serverUnderstandsSoftwareDelta(ack);
+
   // The report SUCCEEDED, so this is the instant the cadence gate measures from — and the instant the
   // software fingerprint becomes true, since it describes what the server now holds. Both are written
   // before the policy, and independently of it: a host whose policy cache could not be written must
@@ -212,6 +241,7 @@ async function report(
   await writeState({
     lastSuccessMs: Date.now(),
     ...(softwareHash !== undefined && !resend ? { softwareHash } : {}),
+    ...(understandsDelta ? { softwareDelta: true } : {}),
   }).catch((err: unknown) => {
     console.warn(
       `lazyit-agent: could not record the report time (${(err as Error).message}) — the next tick will report again`,
