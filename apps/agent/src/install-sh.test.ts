@@ -182,8 +182,110 @@ describe("private CA — the Manual used to say 'trust it system-wide', which is
     expect(script.match(/curl -fsSL --max-redirs 0 \$CURL_CA /g) ?? []).toHaveLength(2);
   });
 
+  // The behaviour this pattern buys is executed in "a re-install must not delete a setting the agent
+  // actually reads" below; this only pins that the CA key joins the owned set at all.
   test("it reaches the agent too, and replaces rather than duplicates an existing key", () => {
     expect(script).toContain("LAZYIT_CA_FILE=$CA_FILE");
-    expect(script).toContain("LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)=");
+    expect(script).toContain("LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)");
+  });
+});
+
+/**
+ * RE-INSTALL PRESERVATION, run rather than pattern-matched (#1137, and the same class of erasure
+ * #1160 fixed on the local veto).
+ *
+ * Re-running the installer is the documented upgrade path and it rewrites `/etc/lazyit-agent/config`
+ * wholesale, so anything the preservation pipeline does not match is DELETED from a working host.
+ * These tests execute the script's own two `grep -E` stages against a fixture, because the bug this
+ * covers was a regex that read plausibly and matched the wrong half of what `networkFrom` honours.
+ */
+describe("a re-install must not delete a setting the agent actually reads", () => {
+  /** The keep-pattern, lifted out of the script so the test cannot drift from what runs. */
+  const KEEP_PATTERN = script.match(/KEPT="\$\(grep -E '([^']+)'/)?.[1];
+  /** The installer-owned pattern, in both its forms: without `--ca-file`, and with it. */
+  const ownedPatterns = [...script.matchAll(/^[ \t]*OWNED='([^']+)'$/gm)].map(
+    (m) => m[1] as string,
+  );
+
+  /** Run the installer's real pipeline over a fixture config; answer the lines it would keep. */
+  async function preserved(config: string, owned: string): Promise<string[]> {
+    expect(KEEP_PATTERN).toBeTruthy();
+    const proc = Bun.spawn(
+      [
+        "sh",
+        "-c",
+        `grep -E '${KEEP_PATTERN}' | grep -Ev "^[[:space:]]*${owned}" || true`,
+      ],
+      { stdin: new TextEncoder().encode(config), stdout: "pipe", stderr: "pipe" },
+    );
+    const out = await new Response(proc.stdout).text();
+    return out.split("\n").filter((l) => l.length > 0);
+  }
+
+  test("the script still has both stages and both OWNED spellings", () => {
+    expect(KEEP_PATTERN).toBeTruthy();
+    expect(ownedPatterns).toHaveLength(2);
+  });
+
+  // `networkFrom` reads `https_proxy` exactly as it reads `HTTPS_PROXY` — the config template and
+  // the Manual both invite the file — so a pattern that matches only the UPPERCASE spelling deletes
+  // a documented, working proxy on the upgrade path, with nothing on screen to say so.
+  test("the LOWERCASE proxy spellings survive, because the agent honours them", async () => {
+    const kept = await preserved(
+      [
+        "https_proxy=http://proxy.corp:3128",
+        "http_proxy=http://proxy.corp:3128",
+        "no_proxy=lazyit.corp,.internal",
+        "lazyit_ca_file=/etc/pki/corp-root.pem",
+      ].join("\n"),
+      ownedPatterns[0] as string,
+    );
+    expect(kept).toEqual([
+      "https_proxy=http://proxy.corp:3128",
+      "http_proxy=http://proxy.corp:3128",
+      "no_proxy=lazyit.corp,.internal",
+      "lazyit_ca_file=/etc/pki/corp-root.pem",
+    ]);
+  });
+
+  test("the UPPERCASE spellings and the local veto still survive too", async () => {
+    const kept = await preserved(
+      [
+        "HTTPS_PROXY=http://proxy.corp:3128",
+        "NO_PROXY=.internal",
+        "LAZYIT_COLLECT_SOFTWARE=false",
+        "LAZYIT_MIN_INTERVAL=3600",
+      ].join("\n"),
+      ownedPatterns[0] as string,
+    );
+    expect(kept).toHaveLength(4);
+  });
+
+  test("the installer-owned keys are still dropped — the flags supply them fresh", async () => {
+    const kept = await preserved(
+      ["LAZYIT_URL=https://old.example.com", "LAZYIT_TOKEN=stale", "LAZYIT_INTERVAL=900"].join("\n"),
+      ownedPatterns[0] as string,
+    );
+    expect(kept).toEqual([]);
+  });
+
+  // Passing --ca-file means "this is the CA now", so the old line must go rather than be written a
+  // second time and leave which one wins to the parser — in EITHER spelling, since both are read.
+  test("--ca-file replaces an existing CA line in either spelling", async () => {
+    const kept = await preserved(
+      ["LAZYIT_CA_FILE=/old/upper.pem", "lazyit_ca_file=/old/lower.pem", "no_proxy=.internal"].join(
+        "\n",
+      ),
+      ownedPatterns[1] as string,
+    );
+    expect(kept).toEqual(["no_proxy=.internal"]);
+  });
+
+  test("a line that is not a config key at all is not carried over", async () => {
+    const kept = await preserved(
+      ["# a comment about HTTPS_PROXY", "PATH=/usr/bin", "", "SOMETHING_ELSE=1"].join("\n"),
+      ownedPatterns[0] as string,
+    );
+    expect(kept).toEqual([]);
   });
 });
