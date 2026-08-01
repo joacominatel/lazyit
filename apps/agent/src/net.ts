@@ -221,7 +221,10 @@ export interface ProbeAnswer {
  * A front door that demands its own basic auth also answers 401 here — which is why the pair is what
  * proves anything: this probe establishes that the route is gated, and {@link interpretProbe} then
  * requires the answer to CHANGE once the Service Account token is attached. A front door that rejects
- * both requests stays a failure, correctly attributed to the credential.
+ * both requests can therefore never produce a pass, which is the property that matters. It is not
+ * told apart from a bad token, though: the printed diagnosis names the Service Account, and in that
+ * one case the real cause is a layer in front. Distinguishing them needs something identifying in the
+ * answer, and a `HEAD` gives no body to read it out of.
  */
 export function interpretGuardProbe(status: number, statusText: string): ProbeVerdict {
   if (status === 401 || status === 403) {
