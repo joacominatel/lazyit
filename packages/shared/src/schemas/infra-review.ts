@@ -269,7 +269,15 @@ export function statesAutoConfirmCondition(
 }
 
 const RULE_CONDITION_ERROR =
-  "A rule must state at least one condition that can rule a proposal OUT: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern of only wildcards (or 0.0.0.0/0) excludes nothing, so a rule stating only those would auto-confirm everything — which ADR-0074 §1 rejected.";
+  "A rule must state at least one condition that can rule a proposal OUT: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern made only of wildcards is refused because it cannot meaningfully exclude anything — most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them, conservatively, so the line stays one you can check by looking. 0.0.0.0/0 is every address there is. ADR-0074 §1 rejected blanket auto-confirm.";
+
+/**
+ * The PATCH message. It names the real reason a patch is refused — the merged rule it would leave —
+ * rather than the create contract's "this rule states nothing", which would be untrue of a patch that
+ * simply drops one of several conditions.
+ */
+const PATCH_CONDITION_ERROR =
+  "This patch sets all three condition fields (hostname pattern, subnet and reported kind) and none of them can rule a proposal OUT, so whatever is stored now, the rule left behind would auto-confirm every proposal in its scope — which ADR-0074 §1 rejected. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. Dropping one condition while leaving another in place is fine.";
 
 const RuleWritableShape = {
   name: z.string().trim().min(1).max(INFRA_RULE_NAME_MAX),
@@ -307,19 +315,26 @@ export type CreateInfraAutoConfirmRule = z.infer<typeof CreateInfraAutoConfirmRu
 /**
  * `PATCH /infra/auto-confirm-rules/:id` body — any subset, never empty.
  *
- * The condition check here can only see the PATCH, so it refuses one whose own condition fields
- * exclude nothing — nulled, or widened to `*` / `/0`. That is genuinely partial protection: the API
- * re-validates the MERGED rule, which is the only place the stored row is visible. Both checks exist
- * because failing early gives the operator the real message, and failing late is what makes the
- * guarantee true.
+ * What this check may judge is the rule the patch LEAVES BEHIND, and the patch alone rarely settles
+ * that: the fields it omits keep their stored values, which this schema cannot see. So it refuses
+ * exactly one shape — a patch that RESTATES ALL THREE condition fields while none of them narrows.
+ * There the stored row contributes nothing to the merged conditions, the patch *is* them, and the
+ * result is knowably unusable.
+ *
+ * Judging the patch in isolation instead would refuse ordinary edits: `{ subnetCidr: null }` on a
+ * rule that also carries `hostnamePattern: "srv-*"` leaves a perfectly valid single-condition rule,
+ * and an operator must be able to make it. Every patch this schema admits is still checked against
+ * the genuinely merged rule by the API, which is the only layer that can read the stored row — and
+ * the matcher independently refuses to act on a rule that states no condition, so a row that somehow
+ * reached the table cannot auto-confirm anything either.
  */
 export const UpdateInfraAutoConfirmRuleSchema = requireAtLeastOneKey(
   z.strictObject(RuleWritableShape).partial(),
 ).refine(
   (patch) =>
-    !RULE_CONDITION_KEYS.some((key) => key in patch) ||
+    !RULE_CONDITION_KEYS.every((key) => key in patch) ||
     statesAutoConfirmCondition(patch),
-  { error: RULE_CONDITION_ERROR, path: ["hostnamePattern"] },
+  { error: PATCH_CONDITION_ERROR, path: ["hostnamePattern"] },
 );
 export type UpdateInfraAutoConfirmRule = z.infer<typeof UpdateInfraAutoConfirmRuleSchema>;
 
