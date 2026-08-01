@@ -149,9 +149,10 @@ caught"* and *"which hosts does this filter show"* can never be answered by two 
 Server-side paging of `GET /infra/nodes` is **out of scope** and tracked separately (#1152).
 
 **What a bulk action touches is the VISIBLE selection, and one function decides that for every
-surface.** The ticked-ids set outlives a filter change and nothing reads it directly: the count beside
-the buttons, the two dialogs and the ids in the request all come through `visibleSelection`, so a row a
-filter hides leaves the action *and* the count in the same instant it leaves the screen. Both halves
+surface.** The ticked-ids set outlives a filter change, and no action and no count is derived from it:
+the number beside the buttons, the two dialogs and the ids in the request all come through
+`visibleSelection`, so a row a filter hides leaves the action *and* the count in the same instant it
+leaves the screen. (The checkboxes read the raw set, but only ever to draw a row already on screen.) Both halves
 matter — the first makes the *click* honest, the second makes *"12 selected"* honest — and without
 them *select all → narrow the filter → Confirm* confirms rows nobody looked at, which is the worst kind
 of bulk action and precisely what the select-all label promises it is not. Re-widening the filter
