@@ -413,7 +413,7 @@ export function applyAgentPolicyVeto(policy: AgentPolicy, local: AgentLocalLimit
 // ── The tick gate (the interval inversion) ────────────────────────────────────────────────────────
 
 /**
- * A deterministic per-machine offset, in seconds, added to this host's interval.
+ * A deterministic per-machine offset, in seconds, SUBTRACTED from this host's interval.
  *
  * WHAT IT BUYS, precisely: hosts installed in the same rollout otherwise share an identical cadence
  * and stay phase-locked to each other forever, so an estate keeps reporting in one clump. A stable
@@ -422,6 +422,15 @@ export function applyAgentPolicyVeto(policy: AgentPolicy, local: AgentLocalLimit
  * WHAT IT DOES NOT BUY: it is not a reboot-window fix on its own. The reboot case is handled by the
  * state file surviving the reboot — a host that reported four minutes before it went down is still
  * not due when it comes back, so a site-wide reboot does not produce a site-wide report.
+ *
+ * SUBTRACTED, NEVER ADDED, and that direction is load-bearing rather than cosmetic. Adding it would
+ * push the due instant PAST a scheduler tick whenever the tick and the interval are close — the exact
+ * shape of a host that upgraded its binary without re-running `install.sh`, where the timer is still
+ * on the old 15-minute `OnUnitActiveSec` and the interval is the 15-minute default. That host would
+ * miss every other tick and quietly report half as often as configured. Being due slightly EARLY has
+ * no such failure mode: the tick simply catches it. The span is capped at half the smaller of the
+ * tick and the interval, so the effective cadence is never less than 87.5% of what was asked for on
+ * the default, and never below half on any value.
  *
  * FNV-1a over the machine id: a few lines, no dependency, and stable across runs and versions —
  * which matters, because an offset that moved between releases would re-clump the estate on upgrade.
@@ -433,9 +442,9 @@ export function policyJitterSeconds(machineId: string, intervalSeconds: number):
     hash ^= machineId.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  // Bounded by the TICK, never by the interval: the spread only has to exceed the granularity the
-  // scheduler can express, and a larger one would silently stretch a 5-minute cadence toward 10.
-  const span = Math.max(1, Math.min(AGENT_POLICY_TICK_SECONDS, intervalSeconds));
+  // Bounded by half the TICK, never by the interval: the spread only has to exceed the granularity
+  // the scheduler can express, and a larger one would meaningfully shorten a 5-minute cadence.
+  const span = Math.max(1, Math.floor(Math.min(AGENT_POLICY_TICK_SECONDS, intervalSeconds) / 2));
   return hash % span;
 }
 
@@ -472,6 +481,7 @@ export function agentPolicyDue({
   if (lastSuccessMs === undefined) return true;
   const elapsedMs = nowMs - lastSuccessMs;
   if (elapsedMs < 0) return true;
-  const dueAfterSeconds = policy.intervalSeconds + policyJitterSeconds(machineId, policy.intervalSeconds);
+  const dueAfterSeconds =
+    policy.intervalSeconds - policyJitterSeconds(machineId, policy.intervalSeconds);
   return elapsedMs >= dueAfterSeconds * 1000;
 }
