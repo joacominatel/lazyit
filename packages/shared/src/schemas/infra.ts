@@ -1756,7 +1756,8 @@ export const AgentReportAckSchema = z.object({
    * asks. The agent answers by dropping its cached fingerprint, so the next report carries everything.
    *
    * OPTIONAL in both directions, like `policy`: a pre-#1142 server omits it, and a pre-#1142 agent
-   * reads two fields off the ack and ignores the rest.
+   * reads the ack loosely — a handful of named keys, never a schema — so one it does not know is
+   * simply ignored.
    */
   softwareResend: z.boolean().optional(),
   /**
@@ -1784,7 +1785,8 @@ export const AgentReportAckSchema = z.object({
    * reporting interval of an empty panel, self-repaired — against permanent, silent loss without it.
    *
    * OPTIONAL in both directions, like `policy` and `softwareResend`: a pre-#1142 server omits it, and
-   * a pre-#1142 agent reads two fields off the ack and ignores the rest.
+   * a pre-#1142 agent reads the ack loosely — a handful of named keys, never a schema — so one it does
+   * not know is simply ignored.
    */
   softwareDelta: z.boolean().optional(),
 });
