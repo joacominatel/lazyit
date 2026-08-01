@@ -37,6 +37,7 @@ import {
   sanitizeIdentifierValue,
   sanitizeSerial,
   selectPrimaryMac,
+  UpdateInfraNodeSchema,
 } from "./infra";
 
 /**
@@ -102,6 +103,38 @@ describe("CreateInfraNodeSchema", () => {
     });
     expect(r.success).toBe(true);
     expect(r.success && r.data.ipAddress).toBe("10.0.0.5");
+  });
+});
+
+describe("UpdateInfraNodeSchema — `assetId` DETACHES, and can do nothing else (#1117)", () => {
+  test("`assetId: null` is accepted — detach is the one asset-linkage edit a patch may make", () => {
+    expect(UpdateInfraNodeSchema.safeParse({ assetId: null }).success).toBe(true);
+  });
+
+  test("a cuid `assetId` is REFUSED — a patch may not re-point a node at another asset", () => {
+    const r = UpdateInfraNodeSchema.safeParse({ assetId: CUID });
+    expect(r.success).toBe(false);
+  });
+
+  test("the refusal EXPLAINS itself: what is refused, why, and what to do instead", () => {
+    // The message is the whole feature for the operator who hits it. A bare "expected null,
+    // received string" tells them the shape and nothing about the rule, so these assertions pin
+    // the three things the message has to carry rather than just that a 400 happened.
+    const r = UpdateInfraNodeSchema.safeParse({ assetId: CUID });
+    const message = r.success ? "" : r.error.issues[0].message;
+    expect(message).toContain("null"); // what IS accepted
+    expect(message).toContain("orphan"); // why a re-point is refused rather than half-done
+    expect(message).toContain("POST /infra/nodes"); // the route that DOES link an asset
+  });
+
+  test("every OTHER field a patch may carry is untouched by the refusal", () => {
+    expect(
+      UpdateInfraNodeSchema.safeParse({ label: "renamed", ipAddress: "10.0.0.5" }).success,
+    ).toBe(true);
+  });
+
+  test("an empty patch is still refused (the at-least-one-key rule is unchanged)", () => {
+    expect(UpdateInfraNodeSchema.safeParse({}).success).toBe(false);
   });
 });
 
