@@ -53,9 +53,13 @@ import { pageSchema } from "./pagination";
  *     stopped reporting). Broadcast to the admin feed; deep-links to the topology map. ONE per outage
  *     (deduped on the node's last-report timestamp), never once-per-sweep.
  *   - `infra.identity_conflict` — two hosts are reporting the SAME `externalId` (ADR-0074 §3 amendment,
- *     issue #1141): the ingest found a report whose serial, MAC set and hostname ALL differ from the
- *     ones stored on the node that key already owns. Almost always a VM template or golden image with a
- *     baked `/etc/machine-id`. Broadcast to the admin feed; deep-links to the topology map. Emitted ONCE
+ *     issue #1141): the ingest found a report whose serial set AND MAC set BOTH differ from the ones
+ *     stored on the node that key already owns. The HOSTNAME is deliberately NOT part of that rule —
+ *     a golden image bakes one in, so gating on it would excuse the exact case the check exists for;
+ *     a SHARED hostname is instead named in the summary as corroborating detail. See
+ *     {@link isClonedMachineId} in `./infra`, which is the rule itself. Almost always a VM template or
+ *     golden image with a baked `/etc/machine-id`. Broadcast to the admin feed; deep-links to the
+ *     topology map. Emitted ONCE
  *     per newly-detected colliding host (`infra.identity_conflict:<peerNodeId>:<discriminator>`), never
  *     once per report — the clone keeps checking in every 15 minutes. This is the ONLY automatic action
  *     the collision detection takes: the report is still accepted, nothing is auto-merged or auto-split,
