@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { requireAtLeastOneKey } from "./primitives";
 import { ArticleListItemSchema } from "./article-list";
+// One-way only: `agent-policy` is a LEAF and never imports this file back (see its own note on why).
+import { AgentPolicySchema } from "./agent-policy";
 
 /**
  * Infra topology graph — InfraNode (the things) + InfraEdge (typed, timestamped relationships).
@@ -1522,14 +1524,31 @@ export function containerNodeStatus(state: AgentContainerState | undefined): Inf
 }
 
 /**
- * The minimal ack the report endpoint returns (ADR-0074 §3). Fire-and-forget by design: it confirms
- * the node id, its lifecycle `state` (PENDING for a freshly-discovered host, CONFIRMED once a human
- * has approved it) and that the report was accepted. Nothing more leaks back to the machine caller.
+ * The ack the report endpoint returns (ADR-0074 §3). It confirms the node id, its lifecycle `state`
+ * (PENDING for a freshly-discovered host, CONFIRMED once a human has approved it) and that the report
+ * was accepted.
+ *
+ * IT IS ALSO THE POLICY CHANNEL (#1140). `policy` carries the server-resolved configuration for this
+ * exact agent, and it rides HERE rather than on a `GET /agent/policy` of its own because this round
+ * trip is already authenticated, already per-agent and already happening: adding an endpoint would
+ * have bought a second auth surface, a second throttle and a bootstrap ordering problem, in exchange
+ * for nothing. The agent caches what it receives and applies it on its NEXT run, so the one-tick
+ * propagation delay means a bad policy can never brick a fleet mid-collection.
+ *
+ * Nothing else leaks back to the machine caller: the policy is a closed set of booleans, integers and
+ * globs ({@link AgentPolicySchema}) — never a command, a script, a path or a regex.
  */
 export const AgentReportAckSchema = z.object({
   nodeId: z.cuid(),
   state: InfraNodeStateSchema,
   accepted: z.literal(true),
+  /**
+   * OPTIONAL in both directions, which is what makes the rollout safe without a version handshake.
+   * A pre-#1140 SERVER omits it and a #1140 agent falls back to {@link AGENT_POLICY_DEFAULT}, i.e.
+   * exactly today's behaviour; a pre-#1140 AGENT parses the ack loosely (it reads two fields off the
+   * JSON and never validates it) so an ack carrying this key is simply ignored.
+   */
+  policy: AgentPolicySchema.optional(),
 });
 export type AgentReportAck = z.infer<typeof AgentReportAckSchema>;
 
