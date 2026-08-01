@@ -1869,6 +1869,81 @@ describe('InfraService', () => {
         expect(written().specs).not.toHaveProperty('softwareHash');
       });
 
+      // ── The capability handshake (#1142) — what stops a NEWER agent wiping an OLDER server ──
+
+      describe('the ack states this build understands `softwareState` (#1142)', () => {
+        // WHY THIS EXISTS. `AgentReportSchema`'s root is a LOOSE `z.object()` (the #1138 decision that
+        // keeps a newer agent from 400-ing itself off the map), so a server built before #1142 does
+        // not reject `softwareState`/`softwareHash` — it silently STRIPS them, sees no `software` key
+        // and clears the stored list. A new agent reporting to such a server would wipe the host's
+        // inventory and, believing the list unchanged, never send it again. The agent therefore omits
+        // nothing until an ack has SAID the server understands the contract, which makes this flag
+        // load-bearing on every path: an ack that forgets it costs the estate its bandwidth saving,
+        // and an agent that assumed it instead would cost the estate its inventory.
+
+        it('NEW AGENT → NEW SERVER: the refresh ack advertises the capability', async () => {
+          hostIsKnown();
+          prisma.$queryRaw.mockResolvedValue(settled());
+
+          const ack = await service.ingestReport(reportedFull);
+
+          expect(ack.softwareDelta).toBe(true);
+        });
+
+        it('a brand-new node advertises it too — the very first ack a fresh install ever sees', async () => {
+          prisma.infraNode.findFirst.mockResolvedValue(null);
+          prisma.infraNode.create.mockResolvedValue({
+            id: 'node-new',
+            state: 'PENDING',
+          });
+
+          const ack = await service.ingestReport(reportedFull, AGENT_SA);
+
+          expect(ack.softwareDelta).toBe(true);
+        });
+
+        it('OLD AGENT → NEW SERVER: a pre-#1142 report still lands, and the capability rides along', async () => {
+          // FULL_REPORT sends the list and claims nothing about it. The new field is meaningless to
+          // that agent — it reads two keys off the ack and ignores the rest — so the only thing that
+          // matters here is that advertising the capability changes nothing about how the old agent's
+          // report is stored.
+          hostIsKnown();
+          prisma.$queryRaw.mockResolvedValue(
+            stored(
+              {
+                host: { hostname: 'stale' },
+                reportedAt: '2026-06-27T11:00:00.000Z',
+              },
+              false,
+            ),
+          );
+
+          const ack = await service.ingestReport(FULL_REPORT);
+
+          expect(ack.accepted).toBe(true);
+          expect(ack.softwareDelta).toBe(true);
+          expect((written().specs as Record<string, unknown>).software).toEqual(
+            FULL_REPORT.software,
+          );
+        });
+
+        it('a report whose policy could not be resolved still advertises it', async () => {
+          // The capability is a fact about the BUILD, not about this request, so it must not ride on
+          // the same optional path as `policy` — a settings row that cannot be read would otherwise
+          // silently un-teach every agent in the estate and undo the whole delta.
+          hostIsKnown();
+          prisma.$queryRaw.mockResolvedValue(settled());
+          agentPolicy.resolveForReport.mockRejectedValueOnce(
+            new Error('settings unavailable'),
+          );
+
+          const ack = await service.ingestReport(reportedFull);
+
+          expect(ack).not.toHaveProperty('policy');
+          expect(ack.softwareDelta).toBe(true);
+        });
+      });
+
       // ── The linked Asset (#1153: the skip must not move the write onto assets) ──
 
       it('the linked Asset is not rewritten when its snapshot already matches', async () => {
