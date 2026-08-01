@@ -277,7 +277,7 @@ const RULE_CONDITION_ERROR =
  * simply drops one of several conditions.
  */
 const PATCH_CONDITION_ERROR =
-  "This patch sets all three condition fields (hostname pattern, subnet and reported kind) and none of them can rule a proposal OUT, so whatever is stored now, the rule left behind would auto-confirm every proposal in its scope — which ADR-0074 §1 rejected. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. Dropping one condition while leaving another in place is fine.";
+  "This patch sets all three condition fields (hostname pattern, subnet and reported kind) and none of them counts as a condition that can rule a proposal OUT, so whatever is stored now, the rule left behind would have none — and ADR-0074 §1 rejected rules that state no condition. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern made only of wildcards does not count: most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them, conservatively. Dropping one condition while leaving another in place is fine.";
 
 const RuleWritableShape = {
   name: z.string().trim().min(1).max(INFRA_RULE_NAME_MAX),
