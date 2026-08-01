@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AGENT_POLICY_DEFAULT, type AgentPolicy } from "@lazyit/shared";
-import { applyDiskPolicy, applyNicPolicy, applySoftwarePolicy } from "./collect";
+import { applyDiskPolicy, applyNicPolicy, applySoftwarePolicy, collectSoftware } from "./collect";
 
 /** Build a policy from the built-in default plus the one thing a test is about. */
 function policy(patch: Partial<AgentPolicy>): AgentPolicy {
@@ -155,22 +155,30 @@ describe("applySoftwarePolicy (#1140)", () => {
     expect(notes.join(" ")).toContain("truncated");
   });
 
-  test("collect.software=false omits the list and warns", () => {
+  test("collect.software=false is decided by collectSoftware, which reports it as DISABLED and warns", async () => {
+    // The toggle no longer lives here (#1142). `applySoftwarePolicy` filters a list it was given; only
+    // `collectSoftware` knows whether the collector was turned off, ran and found nothing, or could
+    // not run at all — and the server treats the first of those as "clear the stored list" and the
+    // third as "keep it", so the outcome has to be decided where the three are still distinguishable.
+    // Nothing is spawned on this path, so it is safe to exercise on any machine.
     const { warn, notes } = sink();
-    expect(
-      applySoftwarePolicy(software, policy({ collect: { ...AGENT_POLICY_DEFAULT.collect, software: false } }), warn),
-    ).toBeUndefined();
+    const collected = await collectSoftware(
+      warn,
+      policy({ collect: { ...AGENT_POLICY_DEFAULT.collect, software: false } }),
+    );
+    expect(collected).toEqual({ state: "disabled" });
     expect(notes).toHaveLength(1);
   });
 
-  test("a policy that filters everything away omits the list, matching the pre-#1140 empty case", () => {
-    // `collectSoftware` has always returned undefined rather than [] for "no packages", and the
-    // server reads an absent list as "the agent could not enumerate", so this stays consistent.
+  test("a policy that filters everything away yields an EMPTY list, not an absent one", () => {
+    // `[]` is a positive finding — the collector ran and the policy matched every package — and the
+    // server stores it as "no packages". Folding it to absent would make it indistinguishable from
+    // "we could not look", which since #1142 means the opposite thing (keep the stored list).
     const { warn } = sink();
     expect(
       applySoftwarePolicy(software, policy({
         exclude: { ...AGENT_POLICY_DEFAULT.exclude, softwareNames: ["*"] },
       }), warn),
-    ).toBeUndefined();
+    ).toEqual([]);
   });
 });
