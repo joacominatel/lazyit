@@ -1131,8 +1131,11 @@ catching a wrong URL or token before the operator gives up debugging. So `test` 
 `HEAD` with **no `authorization` header**: a lazyit instance answers `401` there, from the permission
 guard, before anything else runs. Only then does the authenticated answer mean something, because
 only then did the answer change *because of* the credential. A front door demanding its own basic
-auth answers `401` to both, and stays a failure attributed to the credential — correctly. Both
-requests are reads on the same route, so the second one writes exactly as much as the first: nothing.
+auth answers `401` to both and therefore can never produce a pass, which is the property that
+matters; it is *not* told apart from a bad token, and the printed diagnosis names the Service Account
+in a case where the real cause is a layer in front — distinguishing the two needs something
+identifying in the answer, and a `HEAD` gives no body to read it out of. Both requests are reads on
+the same route, so the second one writes exactly as much as the first: nothing.
 
 `test` also prints
 the effective policy, the last successful report and whether the next tick would report, which is the
