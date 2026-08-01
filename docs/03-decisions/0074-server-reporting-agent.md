@@ -843,9 +843,10 @@ recorder would list `softwareState` in `droppedPaths`; **recording is not preven
 So the ack states the server's capability — **`softwareDelta: true`**, a fact about the *build*, on
 every ack, through the channel #1140 already established for `policy`. The agent caches it in
 `state.json` beside its fingerprint and may omit a list only on a run that STARTED with that evidence
-already on disk; until then it sends everything, which costs exactly what a pre-#1142 agent cost. The
-first report against any server is therefore always a full one, and that single wasted payload is the
-entire price of the guarantee. The capability is re-read from every ack rather than latched once, so it
+already on disk; until then it sends everything, which costs exactly what a pre-#1142 agent cost. An
+agent that has never recorded the capability — a fresh install, a deleted or corrupt `state.json` —
+therefore always sends a full first report, and that single wasted payload is the entire price of the
+guarantee. The capability is re-read from every ack rather than latched once, so it
 also heals **downwards**: an instance rolled back below #1142 stops advertising it, the agent forgets
 it, and the next report carries the full list again — one report's exposure to the old clearing
 behaviour, self-repaired, instead of permanent silent loss. **The failure mode is always "sent more
