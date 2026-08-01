@@ -219,7 +219,10 @@ async function report(
   }
 
   // THE RESEND REQUEST (#1142). The server could not corroborate an `unchanged` claim — its stored
-  // list is missing or fingerprinted differently — so it kept what it had and asked for everything.
+  // list is missing, or fingerprinted differently, or the claim reached it carrying no fingerprint at
+  // all — so it kept what it had and asked for everything. That last case is why this build must
+  // handle the request even though it always sends a fingerprint: one that outgrows
+  // `AGENT_SOFTWARE_HASH_MAX` is dropped by `buildReport`'s own parse while the state survives.
   // Answering is simply forgetting: with no cached fingerprint the next run sends the whole list.
   const resend = ack?.softwareResend === true;
   if (resend) {
