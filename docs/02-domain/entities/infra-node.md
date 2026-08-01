@@ -46,9 +46,10 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   and is checked with the same soft-delete-scoped `assertExists` `createNode` uses — a **discarded**
   asset is a clean `404` instead of landing in the column (the FK only requires the row to *exist*,
   and a discarded asset's row does). Sending an `assetId` to a node that **already has** one is a
-  `400`: it dropped the old link without running the detach above, orphaning the auto-created Asset
-  it replaced. The remedy is the two-step — `assetId: null`, then the new id — which keeps the
-  §5 delete semantics on the outgoing asset instead of letting a machine decide them.
+  `400` — it used to drop the old link without running the detach above, so an **auto-created** Asset
+  it replaced was left live in inventory owned by nobody. The remedy is the two-step —
+  `assetId: null`, then the new id — which runs the §5 semantics on the outgoing asset with a human's
+  intent behind them instead of letting a machine decide.
 - **`label` always wins for display.** The canvas display name is `label`; the linked
   `asset.name` is shown only as a secondary "inventory name" (`assetName` on the detail read) — no
   silent copy, no drift.

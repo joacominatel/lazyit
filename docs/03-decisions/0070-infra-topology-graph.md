@@ -288,9 +288,12 @@ detail panel — no silent copy, no drift.
 > than the clean 404 `assertExists` gives — the issue that raised this called both cases linkable;
 > only the soft-deleted one was.) Adding `assertExists` closes that, and the operation keeps working.
 >
-> A **re-point** is the one that is actually broken: it drops the current link, leaving the
-> auto-created backing Asset live in inventory owned by nobody — the exact orphan this section exists
-> to forbid. It is refused rather than made to work, because making it work means deciding what
+> A **re-point** is the one that is actually broken: it drops the current link with no detach, so an
+> **auto-created** backing Asset — what a `trackAsAsset` node mints for itself, and therefore the
+> common case — is left live in inventory owned by nobody, the exact orphan this section exists to
+> forbid. (A *pre-existing* linked asset survives a re-point intact, exactly as it survives a detach;
+> the refusal covers both because the caller's id is checked against the node, not the provenance
+> marker.) It is refused rather than made to work, because making it work means deciding what
 > happens to the outgoing asset, and the only automatic answer — soft-deleting it — would delete a row
 > a human may have curated, which [[0006-soft-delete-and-auditing]] does not allow a machine to
 > decide. **The refusal is not a dead end:** detach (`assetId: null`, which runs §5 on the outgoing
