@@ -104,6 +104,11 @@ vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés tr
   configuraste: nombre, tipo, posición, responsable, activo vinculado y conexiones, y una IP que
   cargaste a mano sigue siendo tuya. Lo que se muda es la clave de reporte y los datos reportados que
   vienen con ella, así que una IP que había completado el *agente* pasa a ser la del host entrante.
+  **Si el servidor que elegís ya reporta con un agente propio, esa clave de reporte se reemplaza**: es
+  justo lo que querés después de una reinstalación, pero significa que un host que siga reportando con
+  la clave anterior vuelve como un servidor pendiente nuevo. La fila archivada deja registro de las dos
+  claves —la que entregó y la que se reemplazó— y ella misma ya no conserva ninguna, así que
+  restaurarla devolvería la entrada y tus ediciones, nunca la clave de reporte.
   Si los dos reportan el mismo número de serie o la misma dirección de placa de
   red, el diálogo te lo dice arriba (*"esto parece srv-app-04"*); eso solo aparece si ambos fueron
   reportados por un agente lo bastante reciente como para enviar esos datos, y es una sugerencia que
@@ -136,8 +141,16 @@ terminar con un inventario que se equivoca con total seguridad, y es la razón p
 `systemd-firstboot`.
 
 lazyit lo controla. Cuando un reporte reclama un ID que ya usa otro servidor, compara el hardware que
-reportan los dos: si el **número de serie, las direcciones de placa de red y el nombre de host son
-todos distintos**, son dos máquinas, no una. Cuando pasa eso:
+reportan los dos: si el **número de serie y las direcciones de placa de red son ambos distintos**, son
+dos máquinas, no una. Ambos, para que un cambio legítimo en un servidor real nunca se confunda con un
+clon: cambiar una placa de red mueve solo las direcciones, cambiar la placa madre mueve solo el serie.
+
+El **nombre de host queda deliberadamente fuera del control**: una máquina clonada de una plantilla
+suele traer también el nombre de la plantilla, así que exigir que los nombres difieran habría dejado
+pasar justamente los clones que esto existe para detectar. Cuando los dos servidores sí responden al
+mismo nombre, la notificación lo dice: es la señal más clara de que estás mirando una imagen dorada.
+
+Cuando se detectan dos máquinas:
 
 - El host nuevo obtiene **su propia entrada** en Revisión pendiente en lugar de pisar la primera. Sus
   datos reportados, su IP y su nombre de host quedan suyos.

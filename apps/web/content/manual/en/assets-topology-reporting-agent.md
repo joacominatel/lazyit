@@ -97,7 +97,11 @@ how long ago it last reported. For each one you have three choices:
   cloned host (below). The server you pick keeps what you set on it — its name, kind, position, owner,
   asset link and connections, and an IP you typed by hand stays yours. What moves is the reporting key
   and the reported facts that come with it, so an IP the *agent* filled in is replaced by the incoming
-  host's. If the two report the same
+  host's. **If the server you pick already reports through an agent of its own, that reporting key is
+  replaced** — which is exactly what you want after a reinstall, but it means a host still checking in
+  with the old key comes back as a new pending server. The archived row records both keys — the one it
+  handed over and the one that was replaced — and it no longer holds a reporting key itself, so
+  restoring it would bring back the entry and your edits, never the reporting key. If the two report the same
   hardware serial or network-card address, the dialog says so at the top (*"this looks like
   srv-app-04"*); that only appears when both were reported by an agent recent enough to send those
   details, and it is a suggestion you confirm, never a choice made for you.
@@ -127,8 +131,16 @@ row: one server on your map, twelve in your racks. It is the most common way an 
 confidently wrong, and it is why `systemd-firstboot` exists.
 
 lazyit checks. When a report claims an ID that another server already uses, it compares the hardware
-the two report: if the **serial number, the network-card addresses and the hostname all differ**, they
-are two machines, not one. When that happens:
+the two report: if the **serial number and the network-card addresses both differ**, they are two
+machines, not one. Both, so that one legitimate change on a real server is never mistaken for a clone —
+swapping a network card changes the addresses alone, replacing a board changes the serial alone.
+
+The **hostname is deliberately not part of that check**: a machine cloned from a template usually
+carries the template's name too, so requiring the names to differ would have let exactly the clones
+this exists to catch slip through. When both servers do answer to the same name, the notification says
+so — it is the clearest sign you are looking at a golden image.
+
+When two machines are found:
 
 - The new host gets **its own entry** in Pending review rather than overwriting the first one. Its
   reported facts, IP and hostname stay its own.
