@@ -14,6 +14,16 @@
  * `disabled` look alike from here (neither sends a list) and are opposites on the server: it PRESERVES
  * its stored list on the first and CLEARS it on the second. So a cached fingerprint stays accurate
  * through `unavailable` and becomes a lie through `disabled` — see {@link softwareWireFields}.
+ *
+ * AND THE OMISSION IS GATED ON A HANDSHAKE, not on the agent's own belief. `AgentReportSchema`'s root
+ * is a LOOSE `z.object()` — the #1138 decision that stops a newer agent from 400-ing itself off the
+ * map — so a server built before #1142 does not REJECT `softwareState`/`softwareHash`, it silently
+ * STRIPS them. It then sees no `software` key, reads that the only way it knows how, and clears the
+ * stored list. An agent that omitted its list there would wipe the host's inventory, and because it
+ * believes the list unchanged it would never send it again: permanent loss, no error anywhere. So the
+ * list is withheld only once an ack has stated the server understands the contract — see
+ * {@link serverUnderstandsSoftwareDelta}. Until then the whole list rides every report, which costs
+ * exactly what the pre-#1142 agent cost.
  */
 import { softwareFingerprint, type AgentReport, type AgentSoftwareState } from "@lazyit/shared";
 
@@ -37,15 +47,46 @@ export interface SoftwareWireFields {
 }
 
 /**
+ * Does this ack come from a server that understands the three-state contract (#1142)?
+ *
+ * The ack body is remote input and is read loosely by the agent (two fields off the JSON), so this
+ * accepts a LITERAL `true` and nothing else: a truthy string, a `1`, a missing body and an ack that
+ * failed to parse all read as "not proven". Getting this wrong in the permissive direction is the one
+ * mistake that costs an operator their inventory, so it is deliberately the strictest read in the file.
+ *
+ * It is also how the handshake heals DOWNWARDS. An instance rolled back below #1142 stops sending the
+ * key, this returns false for that ack, the agent forgets the evidence, and its next report carries
+ * the full list again — one report of exposure, self-repaired, rather than permanent silent loss.
+ */
+export function serverUnderstandsSoftwareDelta(ack: unknown): boolean {
+  return (
+    typeof ack === "object" &&
+    ack !== null &&
+    (ack as { softwareDelta?: unknown }).softwareDelta === true
+  );
+}
+
+/**
  * Decide what this report says about software, and what the agent should remember afterwards.
  *
  * `cache` is the fingerprint to persist once the report is ACCEPTED — never before, because a report
  * the server rejected changed nothing about what the server holds, and caching a fingerprint for a
  * list that never landed is exactly how a delta scheme starts lying.
+ *
+ * `serverUnderstandsDelta` is the handshake, and it is a REQUIRED argument rather than a defaulted one
+ * so that no future call site can acquire the destructive behaviour by forgetting a parameter. When it
+ * is false the collected list is sent in full even though the fingerprint matches — the failure mode
+ * of this whole scheme is "sent more than necessary", never "deleted the operator's inventory".
+ *
+ * It gates ONLY the `unchanged` branch. `unavailable` and `disabled` send no list either way, which is
+ * byte-for-byte what a pre-#1142 agent put on the wire when its collector failed or its policy turned
+ * software collection off — so an old server reads both exactly as it always did, and gating them
+ * would change nothing on the wire while costing the cache.
  */
 export function softwareWireFields(
   collection: SoftwareCollection,
   cachedHash: string | undefined,
+  serverUnderstandsDelta: boolean,
 ): { fields: SoftwareWireFields; cache: string | undefined } {
   if (collection.state === "disabled") {
     // The server clears its stored list for this one, so the cached fingerprint no longer describes
@@ -61,9 +102,12 @@ export function softwareWireFields(
     return { fields: { softwareState: "unavailable" }, cache: cachedHash };
   }
   const softwareHash = softwareFingerprint(collection.software);
-  if (cachedHash !== undefined && cachedHash === softwareHash) {
+  if (serverUnderstandsDelta && cachedHash !== undefined && cachedHash === softwareHash) {
     return { fields: { softwareState: "unchanged", softwareHash }, cache: softwareHash };
   }
+  // Either the list moved, or this server has not proved it can read an omission. Send everything —
+  // and KEEP the fingerprint either way, so the first ack from an upgraded instance is enough to start
+  // saving on the run after it, with no resend round trip to earn the delta back.
   return {
     fields: { software: collection.software, softwareState: "reported", softwareHash },
     cache: softwareHash,
