@@ -1266,18 +1266,23 @@ I/O, and this agent runs on database servers whose job is not being inventoried.
 run has a deadline — a one-shot behind a 5-minute tick and a server-set cadence — so yielding to
 every other process on the box costs the report nothing anyone can perceive.
 
-**What it does cost, and the ordering that pays for it.** Deprioritising the run makes the package
+**What it does cost, and the ordering that paid for it.** Deprioritising the run makes the package
 enumeration more likely to hit the agent's **10 s per-command collect budget**, on exactly the busy
-hosts that motivated the directives. A collect that times out produces no package list, and under
-the reading these two lines were written against — the one this ADR's §7 §1140 amendment describes —
-an **absent `software` key deletes the stored list** rather than preserving it. Three individually
-correct decisions composing into data loss: deprioritise → time out → omit → wipe. The fix is not a
-second timeout mechanism in the unit file but the wire state that already exists to say this:
-**#1142/#1153 (PR #1163) replaces the two-state reading with an explicit `softwareState`**, in which
-a collection that could not enumerate reports `unavailable` and the server **keeps** what it holds,
-while only an explicit `disabled` clears it. These two directives therefore ship **after** that
-change and not before — a merge-order requirement, recorded in the unit heredoc in `install.sh` as
-well so it is visible to whoever reads the unit next.
+hosts that motivated the directives. Until #1163 that was a **data-loss** cost and not a latency one:
+a collect that timed out produced no package list, and under the reading these two lines were
+originally written against, an **absent `software` key deleted the stored list** rather than
+preserving it. Three individually correct decisions composing into data loss: deprioritise → time
+out → omit → wipe.
+
+The fix was never a second timeout mechanism in the unit file, but the wire state that already
+existed to say this. **#1142/#1153 (PR #1163) replaced the two-state reading with an explicit
+`softwareState`** — the §2/§3 Amendment above — in which a collection that could not enumerate
+reports `unavailable` and the server **keeps** what it holds, while only an explicit `disabled`
+clears it. That change **landed first**, which is why these two directives are here at all; the chain
+now ends at *omit*, and a timed-out enumeration costs a stale **Collected** date rather than an
+inventory. What it leaves behind is no longer a merge order but an **invariant**, recorded in the
+unit heredoc in `install.sh` as well so whoever reads the unit next finds it: an absent package list
+must never again be given the meaning *delete*.
 
 **3. `RandomizedDelaySec` on the timer, which is a different layer from the agent's own jitter, and
 the distinction is the whole justification.** The per-machine offset in `agentPolicyDue` absorbs
