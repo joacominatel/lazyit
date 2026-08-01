@@ -95,7 +95,9 @@ describe('InfraController — forward-compatible report body (#1138)', () => {
     // already gone. The raw Express body is the only place that evidence still exists, so the handler
     // must hand it on — otherwise "degrade instead of reject" quietly becomes "degrade and forget".
     const infra = { ingestReport: jest.fn() };
-    const controller = new InfraController(infra as never);
+    // The #1140 policy service is a constructor dependency of the controller but plays no part in
+    // the report route — the policy is resolved inside `ingestReport`, not by the handler.
+    const controller = new InfraController(infra as never, {} as never);
     const raw = {
       agentVersion: '2.0.0',
       reportingSource: 'agent:x',
