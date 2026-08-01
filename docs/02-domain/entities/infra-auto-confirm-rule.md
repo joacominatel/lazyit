@@ -22,14 +22,25 @@ breath: a single Docker host enrols **itself plus one CONTAINER child per runnin
 modest host produces dozens of PENDING tray rows, each with its own confirm dialog. The gate was
 right; paying it per row was not. A control nobody can afford to use is not containment.
 
-**It does not reopen §1's rejection of blanket auto-confirm.** The rule *is* the human decision:
+**What it changes, stated first.** A proposal a rule matches is confirmed **by the machine, inside the
+report request**, and its Asset is minted then — no human looks at that row. The human decision moves
+*earlier* (authoring the rule), it does not disappear. That widens what a leaked `infra:report` token
+can do, which [[0074-server-reporting-agent]] §8's 2026-08-01 amendment states rather than hides.
 
-- a rule **must state at least one condition**, refused by the contract on write and by the matcher on
-  read, so neither a hand-inserted row nor one left by an older build can become a blanket rule;
+**It does not reopen §1's rejection of *blanket* auto-confirm.** The rule *is* the human decision:
+
+- a rule **must state at least one condition that can rule a proposal OUT** — a hostname glob carrying
+  a literal character (`*`, `**`, `*?*` and `?` match every name there is, so they state nothing), a
+  subnet narrower than `/0`, or a reported kind. One shared predicate,
+  `statesAutoConfirmCondition`, is applied by the create contract, by the service on the **merged**
+  patch and by the matcher on read, so neither a widened patch, a hand-inserted row nor one left by an
+  older build can become a blanket rule;
 - a **human authored it** (`createdById`), a service account cannot (`HumanOnlyGuard`), and the Asset
   an auto-confirm mints is created with that operator's principal — so §8's *"that write **is**
   attributed"* stays literally true;
 - a **human can revoke it**: disabling stops it matching on the next report, deleting soft-deletes it;
+- a **human discard outranks it**: a reporting key someone already discarded is never auto-confirmed on
+  a later report, so a discard cannot be undone by a machine repeating itself every fifteen minutes;
 - it is **never retroactive** — see below.
 
 ## Not retroactive
@@ -56,7 +67,7 @@ rule would confirm exactly the duplicate the detection exists to surface.
 | `subnetCidr` | `String?` | IPv4 or IPv6 CIDR, matched against the node's promoted primary IP with the shared `ipInCidr`. A host that reported **no** IP never matches — a stated condition is not a wildcard on missing evidence. |
 | `reportedKind` | `InfraNodeKind?` | Matches what the server **proposed** (`inferNodeKind`, #1139), not what the agent claimed. |
 | `confirmAsKind` | `InfraNodeKind?` | The kind override applied at confirm — the same field the review dialog offers. Null keeps the proposed kind. |
-| `trackAsAsset` | `Boolean` | `@default(true)` in the column; the API defaults a **CONTAINER** rule to `false` via the shared `defaultTrackAsAsset`. See the note below. |
+| `trackAsAsset` | `Boolean` | `@default(true)` in the column; the API defaults any rule that can reach a container child — **CONTAINER or ANY** — to `false` via the shared `defaultTrackAsAsset`. See the note below. |
 | `createdById` | `uuid?` | The authoring [[user]], `SetNull`. Null = the author was deleted; the rule keeps running, visibly unattributed. |
 | `matchCount` | `Int` | `@default(0)`. Incremented per fire, best-effort. |
 | `lastMatchedAt` | `DateTime?` | When it last fired. |
@@ -69,8 +80,11 @@ Indexes: `@@index([enabled])`, `@@index([createdById])`. Table `infra_auto_confi
 for a thing the operator owns, assigns, warranties and depreciates — a server. Its create path already
 described `trackAsAsset: false` as *"right for ephemeral containers"*. A container is replaced by the
 next `docker compose up --force-recreate`, has no SMBIOS serial for the confirm path's serial
-promotion to promote, and one Docker host can add dozens. It is a **default, not a rule**: a container
-that genuinely is a licensed appliance is tracked like anything else.
+promotion to promote, and one Docker host can add dozens. `defaultTrackAsAsset` is asked *"can this
+reach a container child?"*, not *"is this a CONTAINER rule?"*, so an **ANY** rule takes the child
+default too — the tray, the bulk dialog and the rule form therefore cannot disagree about a container.
+It is a **default, not a rule**: a container that genuinely is a licensed appliance is tracked like
+anything else, and the switch is in the form.
 
 ## Matching
 
@@ -88,10 +102,12 @@ one source here).
 - `GET /infra/auto-confirm-rules` — oldest first, **including disabled** rules (a hidden disabled rule
   is a surprise waiting for whoever re-enables it). Each row carries `createdByName` (null when the
   author is gone or soft-deleted), `matchCount` and `lastMatchedAt`. `infra:read`.
-- `POST /infra/auto-confirm-rules` — `infra:manage` + `asset:write` + **human-only**. 400 with no
-  condition.
+- `POST /infra/auto-confirm-rules` — `infra:manage` + `asset:write` + **human-only**. 400 when no
+  stated condition can rule a proposal out.
 - `PATCH /infra/auto-confirm-rules/:id` — same gate. 400 if the patch would leave the **merged** rule
-  with no condition (the patch alone cannot see the stored row, so both halves are checked).
+  with no such condition — nulling the last one, or widening it to an all-wildcard pattern or `/0`,
+  are the same blanket rule spelled three ways (the patch alone cannot see the stored row, so the
+  contract checks the patch and the service checks the merge).
 - `DELETE /infra/auto-confirm-rules/:id` — `infra:manage` + human-only. Soft delete. Nodes the rule
   already confirmed are **not** reverted: they are confirmed inventory rows a human policy approved,
   and un-confirming them would be as retroactive as applying a rule backwards.
