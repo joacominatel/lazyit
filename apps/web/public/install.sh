@@ -343,19 +343,27 @@ fi
 # The pattern is deliberately wider than `LAZYIT_*`: `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` live
 # here too since #1137, under the names every other tool on the host already uses.
 #
+# BOTH CASES, because the agent reads both. `networkFrom` honours `https_proxy` exactly as it honours
+# `HTTPS_PROXY` — the lowercase spelling is the one curl and Bun prefer, so it is the one an operator
+# is most likely to have copied off a working host — and a pattern that matched only the UPPERCASE
+# half would silently DELETE a working proxy on the upgrade path. Same erasure as the local veto in
+# #1160, one key over.
+#
 # `LAZYIT_CA_FILE` joins the owned set ONLY when --ca-file was passed. Passing it means "this is the
 # CA now", so keeping the old line as well would write the key twice and leave which one wins to the
-# parser; not passing it leaves whatever the host already had, like every other kept setting.
+# parser; not passing it leaves whatever the host already had, like every other kept setting. The
+# lowercase spelling is owned alongside it for the same reason it is kept alongside it: the agent
+# reads it, so leaving it behind would make an unrelated file the winner.
 OWNED='LAZYIT_(URL|TOKEN|INTERVAL)='
 CA_NOTE=""
 if [ -n "$CA_FILE" ]; then
-  OWNED='LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)='
+  OWNED='(LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)|lazyit_ca_file)='
   CA_NOTE="LAZYIT_CA_FILE=$CA_FILE"
 fi
 
 PRESERVED=""
 if [ -f "$CONFIG_FILE" ]; then
-  KEPT="$(grep -E '^[[:space:]]*(LAZYIT_[A-Z0-9_]+|HTTPS?_PROXY|NO_PROXY)=' "$CONFIG_FILE" 2>/dev/null \
+  KEPT="$(grep -E '^[[:space:]]*(LAZYIT_[A-Z0-9_]+|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy|lazyit_ca_file)=' "$CONFIG_FILE" 2>/dev/null \
     | grep -Ev "^[[:space:]]*$OWNED" || true)"
   if [ -n "$KEPT" ]; then
     PRESERVED="# --- kept from this host's previous config (its own limits — the installer does not own these) ---
@@ -433,6 +441,15 @@ ProtectControlGroups=yes
 # on database and application servers whose actual job is not being inventoried. Nothing here has a
 # deadline: the run is a one-shot with a 5-minute tick behind it and a server-set cadence in front,
 # so yielding to every other process on the box costs the report nothing anyone can perceive.
+#
+# WHAT THESE TWO LINES COST, AND WHY THE ORDER OF TWO PULL REQUESTS MATTERS. Deprioritising the run
+# makes \`dpkg-query\`/\`rpm -qa\` more likely to hit the agent's 10 s per-command collect budget — on
+# exactly the busy servers that motivated the directives. A collect that times out yields no package
+# list, and an absent \`software\` key on the wire is read by the server as DELETE, not as "unchanged"
+# (see applySoftwarePolicy in apps/agent/src/collect.ts). Three correct decisions composing into a
+# wiped inventory. #1142/#1163 replaces that reading with an explicit three-state \`softwareState\`
+# where a failed collection says \`unavailable\` and the server KEEPS what it holds; these lines must
+# not reach a host before it does.
 Nice=19
 IOSchedulingClass=idle
 EOF
