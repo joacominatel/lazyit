@@ -78,10 +78,16 @@ export function serverUnderstandsSoftwareDelta(ack: unknown): boolean {
  * is false the collected list is sent in full even though the fingerprint matches — the failure mode
  * of this whole scheme is "sent more than necessary", never "deleted the operator's inventory".
  *
- * It gates ONLY the `unchanged` branch. `unavailable` and `disabled` send no list either way, which is
- * byte-for-byte what a pre-#1142 agent put on the wire when its collector failed or its policy turned
- * software collection off — so an old server reads both exactly as it always did, and gating them
- * would change nothing on the wire while costing the cache.
+ * It gates ONLY the `unchanged` branch, because that is the only one whose absence a server could read
+ * as a durable "no software". `unavailable` and `disabled` carry no list with or without the
+ * handshake, so gating them would change nothing on the wire and would only cost the cache. An OLD
+ * server reads both as the pre-#1142 absent key and clears — which is exactly right for `disabled`,
+ * and for `unavailable` empties the panel until the next successful collection, which sends the whole
+ * list again because this agent has no evidence against that server. Not identical to the pre-#1142
+ * agent, which sent an empty ARRAY when its collector failed (`collectSoftware` folded a null stdout
+ * into `[]`) and so left an empty list stored rather than none; the panel is equally empty either way
+ * and neither state is durable. Only `unchanged` can cost an inventory permanently, and only
+ * `unchanged` is gated.
  */
 export function softwareWireFields(
   collection: SoftwareCollection,
