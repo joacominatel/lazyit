@@ -327,12 +327,18 @@ from it on container guests.
   the version. On a busy server this list is by far the largest thing a report carries and it changes
   only when somebody installs or upgrades something, so the agent sends it **once and then sends only
   a fingerprint of it** until it changes — which cuts a routine check-in to roughly a tenth of its
-  size. You never see this: the list on screen is always the current one. If lazyit ever cannot match
-  the fingerprint to what it holds (after restoring a backup, or after you discarded a server and it
-  was rediscovered), it keeps the list it has and asks the agent for a full one on its next report
-  rather than showing you an empty panel. Turning software collection **off** in the agent settings is
-  different and deliberate: the stored list is cleared, so you are never left reading package versions
-  nobody is collecting any more.
+  size. You never see this: the list on screen is always the current one. An agent only starts
+  skipping the list once lazyit has told it — in the reply to an earlier report — that this version
+  understands the shorthand, so an agent upgraded ahead of its instance simply keeps sending the whole
+  list. The saving arrives once both halves are new; no inventory is ever at risk while they are not.
+  If lazyit holds a list it can no longer match to the fingerprint (after restoring a backup, for
+  instance), it **keeps the list it has** and asks the agent for a full one on its next report, rather
+  than emptying the panel over a doubt. A server you **discarded** and that was then rediscovered is a
+  different case, and worth knowing: it comes back as a brand-new record with no package list at all,
+  so its Software panel is genuinely empty until the full list arrives with the next report — up to
+  one reporting interval (15 minutes by default). Turning software collection **off** in the agent
+  settings is different again, and deliberate: the stored list is cleared, so you are never left
+  reading package versions nobody is collecting any more.
 - **What it couldn't collect** — each report also says whether it ran with root and names anything it
   had to skip or that timed out. Run the agent by hand (`lazyit-agent report --once --force`) and it prints
   those notes right there, which is usually the fastest way to answer "why is this host's serial

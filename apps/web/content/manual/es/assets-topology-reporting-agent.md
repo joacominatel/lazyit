@@ -352,12 +352,18 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
   reporte y sólo cambia cuando alguien instala o actualiza algo, así que el agente la envía **una vez y
   después envía sólo una huella de ella** hasta que cambie, lo que reduce un reporte de rutina a
   aproximadamente una décima parte de su tamaño. Esto no se nota: la lista en pantalla siempre es la
-  actual. Si lazyit no logra hacer coincidir esa huella con lo que tiene guardado (después de restaurar
-  un respaldo, o después de que descartaste un servidor y volvió a descubrirse), conserva la lista que
-  ya tiene y le pide al agente una completa en el siguiente reporte, en lugar de mostrarte un panel
-  vacío. Desactivar la recolección de software en la configuración del agente es distinto y
-  deliberado: la lista guardada se borra, para que nunca quedes leyendo versiones de paquetes que ya
-  nadie está recolectando.
+  actual. Un agente sólo empieza a omitir la lista una vez que lazyit le avisó — en la respuesta a un
+  reporte anterior — que esta versión entiende esa abreviatura, así que un agente actualizado antes que
+  su instancia sigue enviando la lista completa. El ahorro llega cuando ambas mitades están al día; y
+  mientras no lo estén, ningún inventario corre riesgo. Si lazyit tiene una lista que ya no logra hacer
+  coincidir con la huella (después de restaurar un respaldo, por ejemplo), **conserva la lista que ya
+  tiene** y le pide al agente una completa en el siguiente reporte, en lugar de vaciar el panel ante
+  una duda. Un servidor que **descartaste** y que luego volvió a descubrirse es un caso distinto, y
+  conviene saberlo: vuelve como un registro nuevo, sin ninguna lista de paquetes, así que su panel de
+  Software está realmente vacío hasta que la lista completa llegue con el siguiente reporte — como
+  máximo un intervalo de reporte (15 minutos por defecto). Desactivar la recolección de software en la
+  configuración del agente es otra cosa distinta, y deliberada: la lista guardada se borra, para que
+  nunca quedes leyendo versiones de paquetes que ya nadie está recolectando.
 - **Qué no pudo recopilar** — cada reporte también indica si corrió como root y nombra lo que tuvo que
   omitir o lo que agotó su tiempo. Si ejecutás el agente a mano (`lazyit-agent report --once --force`) imprime
   esas notas ahí mismo, que suele ser la forma más rápida de responder "¿por qué está vacía la columna
