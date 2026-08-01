@@ -154,6 +154,42 @@ describe("state — the local clock the interval inversion runs on", () => {
       cleanup();
     }
   });
+
+  test("the server's delta capability round-trips beside the fingerprint (#1142)", async () => {
+    const { dir, cleanup } = scratch();
+    try {
+      const file = join(dir, "state.json");
+      await writeState(
+        { lastSuccessMs: 1_700_000_000_000, softwareHash: "1-2-abc", softwareDelta: true },
+        file,
+      );
+      expect(await loadState(file)).toEqual({
+        lastSuccessMs: 1_700_000_000_000,
+        softwareHash: "1-2-abc",
+        softwareDelta: true,
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("anything but a literal `true` capability reads as NOT PROVEN, so the whole list is sent", async () => {
+    // The permissive direction of this read is the one that costs an operator their inventory: a
+    // truthy-looking value would make the agent withhold its package list from a server that cannot
+    // read the omission. Absent, false, a string and a number all have to land on "not proven".
+    const { dir, cleanup } = scratch();
+    try {
+      const file = join(dir, "state.json");
+      for (const softwareDelta of ["true", 1, false, null, {}]) {
+        writeFileSync(file, JSON.stringify({ lastSuccessMs: 1, softwareDelta }));
+        expect((await loadState(file)).softwareDelta).toBeUndefined();
+      }
+      writeFileSync(file, JSON.stringify({ lastSuccessMs: 1 }));
+      expect((await loadState(file)).softwareDelta).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe("localLimitsFrom — the host's own config file, read as a VETO only", () => {
