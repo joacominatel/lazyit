@@ -685,9 +685,82 @@ describe('InfraService', () => {
           data: { specs: { agentSkew?: unknown } };
         }>(prisma.infraNode.create);
         expect(createArg.data.specs.agentSkew).toEqual({
-          unknownKeys: ['deltaSince'],
+          droppedPaths: ['deltaSince'],
           agentAhead: false, // agentVersion 1.0.0 vs server v1.4.2 — not ahead
           serverVersion: 'v1.4.2',
+        });
+      });
+
+      it('RECORDS a NESTED unknown key and a COERCED enum — not just the root', async () => {
+        // A root-only diff reports "everything understood" for the two shapes a v3 agent is most
+        // likely to send: a new key inside `host` (a nested `z.object` strips it silently) and an
+        // enum value our own `.catch()` coerces. `os.family` is the sharp one — the contract requires
+        // it so no consumer re-derives the platform, so swallowing a malformed one without a trace
+        // would defeat the reason it is required.
+        process.env.APP_VERSION = 'v1.4.2';
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-new',
+          state: 'PENDING',
+        });
+
+        const rawBody = {
+          ...V1_BODY,
+          host: {
+            ...V1_BODY.host,
+            tpmVersion: '2.0',
+            os: { ...V1_BODY.host.os, family: 'plan9' },
+          },
+        };
+        await service.ingestReport(
+          AgentReportSchema.parse(rawBody),
+          undefined,
+          rawBody,
+        );
+
+        const createArg = firstArg<{
+          data: {
+            specs: {
+              agentSkew?: { droppedPaths?: string[]; coercedPaths?: string[] };
+            };
+          };
+        }>(prisma.infraNode.create);
+        expect(createArg.data.specs.agentSkew?.droppedPaths).toEqual([
+          'host.tpmVersion',
+        ]);
+        expect(createArg.data.specs.agentSkew?.coercedPaths).toEqual([
+          'host.os.family',
+        ]);
+      });
+
+      it('PERSISTS diagnostics with the host inventory (an empty column becomes an answer)', async () => {
+        // The whole justification for `diagnostics` in #1138: a fleet view must be able to say
+        // "web-03: reporting unprivileged — no serial/model" instead of leaving the operator staring
+        // at an empty row. Parsing it off the wire and discarding it delivers none of that.
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-diag',
+          state: 'PENDING',
+        });
+
+        await service.ingestReport(
+          AgentReportSchema.parse({
+            ...V1_BODY,
+            diagnostics: {
+              warnings: ['hardware: skipped — dmidecode needs root'],
+              privileged: false,
+              durationMs: 812,
+            },
+          }),
+        );
+
+        const createArg = firstArg<{
+          data: { specs: { diagnostics?: unknown } };
+        }>(prisma.infraNode.create);
+        expect(createArg.data.specs.diagnostics).toEqual({
+          warnings: ['hardware: skipped — dmidecode needs root'],
+          privileged: false,
+          durationMs: 812,
         });
       });
 
@@ -733,9 +806,10 @@ describe('InfraService', () => {
         expect(createArg.data.specs).not.toHaveProperty('agentSkew');
       });
 
-      it('never leaks the skew diagnostic into the linked Asset specs (and clears a stale one)', async () => {
-        // `Asset.specs` is the INVENTORY snapshot an operator reads; a server-side wire diagnostic is
-        // not an inventory fact and must not accumulate there.
+      it('never leaks a REPORT DIAGNOSTIC into the linked Asset specs (and clears stale ones)', async () => {
+        // `Asset.specs` is the INVENTORY snapshot an operator reads. Neither the wire-skew record nor
+        // the collector's own run diagnostics are inventory facts; both stay on the node, where the
+        // reporting provenance already lives.
         prisma.infraNode.findFirst.mockResolvedValue({
           id: 'node-1',
           assetId: 'asset-1',
@@ -746,10 +820,18 @@ describe('InfraService', () => {
           state: 'CONFIRMED',
         });
         prisma.asset.findFirst.mockResolvedValue({
-          specs: { rack: 'A3', agentSkew: { unknownKeys: ['old'] } },
+          specs: {
+            rack: 'A3',
+            agentSkew: { droppedPaths: ['old'] },
+            diagnostics: { privileged: true },
+          },
         });
 
-        const rawBody = { ...V1_BODY, deltaSince: 'x' };
+        const rawBody = {
+          ...V1_BODY,
+          deltaSince: 'x',
+          diagnostics: { privileged: false, durationMs: 7 },
+        };
         await service.ingestReport(
           AgentReportSchema.parse(rawBody),
           undefined,
@@ -760,6 +842,7 @@ describe('InfraService', () => {
           data: { specs: Record<string, unknown> };
         }>(prisma.asset.update);
         expect(updateArg.data.specs).not.toHaveProperty('agentSkew');
+        expect(updateArg.data.specs).not.toHaveProperty('diagnostics');
         expect(updateArg.data.specs.rack).toBe('A3'); // human keys still preserved
       });
 
@@ -775,7 +858,20 @@ describe('InfraService', () => {
             ...V1_BODY,
             host: {
               hostname: 'v6-only',
-              nics: [{ name: 'eth0', ipv6: ['fe80::1', '2001:db8::7'] }],
+              nics: [
+                {
+                  name: 'eth0',
+                  ipv6: [
+                    { address: 'fe80::1', scope: 'link' },
+                    {
+                      address: '2001:db8::dead',
+                      scope: 'global',
+                      temporary: true,
+                    },
+                    { address: '2001:db8::7', scope: 'global' },
+                  ],
+                },
+              ],
             },
           }),
         );
@@ -783,6 +879,7 @@ describe('InfraService', () => {
         const createArg = firstArg<{
           data: { ipAddress?: string; ipAddressSource?: string };
         }>(prisma.infraNode.create);
+        // The link-local is unreachable and the temporary address rotates — neither belongs on a map.
         expect(createArg.data.ipAddress).toBe('2001:db8::7');
         expect(createArg.data.ipAddressSource).toBe('AGENT');
       });
@@ -976,6 +1073,42 @@ describe('InfraService', () => {
       }>(prisma.infraNode.update);
       expect(arg.data.state).toBe('CONFIRMED');
       expect(arg.data.assetId).toBe('asset-new');
+    });
+
+    it('never carries a REPORT DIAGNOSTIC into the minted Asset specs (#1138)', async () => {
+      // The repeat-report path strips these, but confirm mints the Asset from the node's WHOLE specs
+      // blob — so the guard has to hold on both paths, or the very first thing a confirmed host's
+      // inventory snapshot contains is a wire diagnostic about a report the SERVER half-understood.
+      const PENDING = {
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {
+          host: { hostname: 'web-01' },
+          reportedAt: '2026-07-31T12:00:00.000Z',
+          agentSkew: { droppedPaths: ['deltaSince'], agentAhead: true },
+          diagnostics: { privileged: false, durationMs: 812 },
+        },
+      };
+      mockDetailReadAfterConfirm(PENDING);
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+        assetId: 'asset-new',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      const createArg = firstArg<{ specs: Record<string, unknown> }>(
+        assets.create,
+      );
+      expect(createArg.specs).not.toHaveProperty('agentSkew');
+      expect(createArg.specs).not.toHaveProperty('diagnostics');
+      // The inventory facts and the provenance marker still land.
+      expect(createArg.specs.host).toEqual({ hostname: 'web-01' });
+      expect(createArg.specs._infraAutoCreated).toBe(true);
     });
 
     it('applies kind/label overrides and names the minted Asset with the override label', async () => {
