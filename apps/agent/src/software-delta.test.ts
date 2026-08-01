@@ -33,7 +33,8 @@ describe("softwareWireFields — the client half of the delta (#1142)", () => {
     expect(fields.software).toBeUndefined();
     expect(fields.softwareState).toBe("unchanged");
     // The fingerprint always rides along: without it the server has nothing to corroborate the claim
-    // against, and "unchanged" would be a client assertion the server had to take on faith.
+    // against, and answers by asking for the whole list back — so an omission that forgot it would
+    // cost the delta it was trying to buy.
     expect(fields.softwareHash).toBe(HASH);
     expect(cache).toBe(HASH);
   });
