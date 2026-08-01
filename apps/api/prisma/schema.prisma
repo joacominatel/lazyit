@@ -359,9 +359,6 @@ model ServiceAccount {
   accessGrantsRevoked   AccessGrant[]        @relation("AccessGrantRevokedBySa")
   articleVersionsEdited ArticleVersion[]     @relation("ArticleVersionEditorSa")
   articleLinksCreated   ArticleLink[]        @relation("ArticleLinkCreatorSa")
-  // Topology nodes this account reported (ADR-0074 / #1134) — the back side of the reporter
-  // attribution the live-PENDING budget counts on. SetNull, like every attribution above.
-  infraNodesReported    InfraNode[]          @relation("InfraNodeReporter")
 
   // Applications Workflow Engine (ADR-0054, epic #248). The service-account-actor sides of the
   // engine's attribution columns — all SetNull. A workflow runs AS a dedicated least-privilege
@@ -2628,13 +2625,6 @@ model InfraNode {
   externalId      String? // platform id (vmid/container-id) for reconciliation
   lastReportedAt  DateTime? // agent liveness; stale => OFFLINE
   agentVersion    String? // reporting agent's own build version at last check-in (#907; null = manual/pre-stamp)
-  // Which agent SERVICE ACCOUNT last reported this node (#1134). SERVER-derived from the bearer token,
-  // never a body field — unlike `reportingSource` (a client-chosen string an attacker can rotate), so
-  // it is trustworthy as the key of the live-PENDING budget that bounds agent-driven row creation.
-  // Nullable: manual nodes have no reporter, and rows predating the column self-heal on the next
-  // check-in. SetNull mirrors the other actor attributions — deleting the SA never deletes the node.
-  reportedBySaId  String?
-  reportedBySa    ServiceAccount? @relation("InfraNodeReporter", fields: [reportedBySaId], references: [id], onDelete: SetNull)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -2650,9 +2640,6 @@ model InfraNode {
   @@index([assetId])
   @@index([kind])
   @@index([state]) // the PENDING review-tray query
-  // The #1134 budget probe: "how many LIVE PENDING proposals does this reporter already own?" — run
-  // on the create branch of every unknown-host report, so it must not degrade into a scan.
-  @@index([reportedBySaId, state])
   // v2: partial UNIQUE (reportingSource, externalId) WHERE both NOT NULL — added with the agent
   // migration (the columns exist now, so it is a forward-only add, NOT a re-model). See ADR-0070 §4.
   // DO NOT add it in this foundation migration.
