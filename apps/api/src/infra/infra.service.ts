@@ -966,13 +966,22 @@ export class InfraService {
    * Tolerant by construction: a missing row, a null `specs` and a hand-edited blob all read as "no
    * evidence" — which `isClonedMachineId` treats as "nothing to corroborate" and the write planner
    * treats as "nothing matches, write".
+   *
+   * WHICH IS WHY THE DELETE IS GUARDED. `jsonb - text` raises `cannot delete from scalar` when
+   * `specs` holds a bare string or number rather than an object — a hand-edited row, or a restore
+   * that put one there. Unguarded that is not a degradation but a 500 on the REPORT path, so one
+   * edited row would stop a host checking in at all, and this contract's posture is degrade, never
+   * reject. `jsonb_typeof` sends every non-object to NULL, which is the "no evidence" the callers
+   * already handle. The other two operators need no guard: `->` and `jsonb_exists` are already total
+   * on a scalar (verified against `postgres:18-alpine`, the image compose pins).
    */
   private async storedNodeSpecs(nodeId: string): Promise<StoredNodeSpecs> {
     const rows = await this.prisma.$queryRaw<
       Array<{ host: unknown; rest: unknown; hasSoftware: boolean | null }>
     >(
       Prisma.sql`SELECT "specs"->'host' AS host,
-                        "specs" - 'software' AS rest,
+                        CASE WHEN jsonb_typeof("specs") = 'object'
+                             THEN "specs" - 'software' END AS rest,
                         COALESCE(jsonb_exists("specs", 'software'), false) AS "hasSoftware"
                    FROM "infra_nodes" WHERE "id" = ${nodeId}`,
     );
