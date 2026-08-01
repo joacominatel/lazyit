@@ -11,6 +11,7 @@
  * fact, which leaves an empty column that looks identical whether the host lacks `dmidecode`, the
  * agent lacks root, or a collector hung. The warnings sink is where that difference survives.
  */
+import { statSync } from "node:fs";
 import { hostname as osHostname } from "node:os";
 import {
   AGENT_CONTAINER_PORTS_MAX,
@@ -132,7 +133,15 @@ async function readText(path: string): Promise<string | null> {
   }
 }
 
-/** Does this path exist and is it readable? Used to tell a physical NIC from a virtual one. */
+/**
+ * Does a REGULAR FILE exist at this path? Used to tell a physical NIC from a virtual one, where both
+ * probed paths (`/sys/class/net/<n>/type`, `.../device/uevent`) are ordinary sysfs files.
+ *
+ * REGULAR FILE is the whole caveat, and it is not obvious: `Bun.file(path).exists()` resolves `false`
+ * for anything that is not a file — a directory, a device, and (verified on Bun 1.3.14) a unix SOCKET.
+ * `collectContainers` gated on this helper and was therefore dead on every host on earth; it now
+ * stats the path itself. Do not reach for this function to test a non-file.
+ */
 async function exists(path: string): Promise<boolean> {
   try {
     return await Bun.file(path).exists();
@@ -630,27 +639,40 @@ export function parseDockerContainers(body: string | null): Containers | undefin
  * opposite — that is the "why is this host's container list empty?" question #1138's warnings exist
  * to answer — so it warns.
  */
-async function collectContainers(warn: Warn): Promise<Host["containers"]> {
-  if (!(await exists(DOCKER_SOCKET))) return undefined;
+export async function collectContainers(
+  warn: Warn,
+  socket = DOCKER_SOCKET,
+): Promise<Host["containers"]> {
+  // `statSync`, NOT `Bun.file().exists()` — the latter is a REGULAR-FILE check and answers `false`
+  // for a unix socket (verified on Bun 1.3.14), which silently disabled this entire collector on
+  // every host. `node:fs` is the exception the repo's Bun-first rule leaves room for: Bun exposes no
+  // API that can tell a socket from a missing path. A throw here is the overwhelmingly common
+  // "this box does not run containers" case (ENOENT) or an unsearchable parent, and both are SILENT:
+  // warning would put a line in the majority of reports until operators learned to ignore the field.
+  try {
+    if (!statSync(socket).isSocket()) return undefined;
+  } catch {
+    return undefined;
+  }
   let body: string;
   try {
     // `unix:` routes the request over the socket; the host part is ignored but must be present.
     const res = await fetch("http://localhost/containers/json", {
-      unix: DOCKER_SOCKET,
+      unix: socket,
       signal: AbortSignal.timeout(COLLECT_TIMEOUT_MS),
     });
     if (!res.ok) {
-      warn(`containers: ${DOCKER_SOCKET} answered ${res.status} — container list omitted`);
+      warn(`containers: ${socket} answered ${res.status} — container list omitted`);
       return undefined;
     }
     body = await res.text();
   } catch {
-    warn(`containers: ${DOCKER_SOCKET} exists but could not be read — container list omitted`);
+    warn(`containers: ${socket} exists but could not be read — container list omitted`);
     return undefined;
   }
   const containers = parseDockerContainers(body);
   if (containers === undefined) {
-    warn(`containers: ${DOCKER_SOCKET} returned an unreadable list — container list omitted`);
+    warn(`containers: ${socket} returned an unreadable list — container list omitted`);
   }
   return containers;
 }
