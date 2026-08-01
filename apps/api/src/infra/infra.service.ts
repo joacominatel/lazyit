@@ -348,12 +348,20 @@ export class InfraService {
       void this.syncNodeToSearch(created.id);
       // The ONE place a saved rule can act on a HOST (#1145): a node that has just been proposed, in
       // the same request that proposed it. Nothing here can reach a node that already existed.
-      const state = await this.autoConfirmProposal(created.id, created.state, {
-        hostname: report.host.hostname,
-        ipAddress: primaryIpAddress ?? null,
-        kind: proposedKind,
-        isContainerChild: false,
-      });
+      const state = await this.autoConfirmProposal(
+        created.id,
+        created.state,
+        {
+          hostname: report.host.hostname,
+          ipAddress: primaryIpAddress ?? null,
+          kind: proposedKind,
+          isContainerChild: false,
+        },
+        {
+          reportingSource: report.reportingSource,
+          externalId: report.externalId,
+        },
+      );
       return this.reconcileContainers(
         { nodeId: created.id, state, accepted: true },
         report,
@@ -889,12 +897,19 @@ export class InfraService {
       // The child half of #1145. A container child is offered to the matcher under its CONTAINER
       // NAME, with no IP of its own — the host owns the address, and pretending the child reported
       // one would let a subnet rule confirm containers on the strength of their host's wire.
-      await this.autoConfirmProposal(created.id, 'PENDING', {
-        hostname: container.name,
-        ipAddress: null,
-        kind: 'CONTAINER',
-        isContainerChild: true,
-      });
+      await this.autoConfirmProposal(
+        created.id,
+        'PENDING',
+        {
+          hostname: container.name,
+          ipAddress: null,
+          kind: 'CONTAINER',
+          isContainerChild: true,
+        },
+        // The CHILD's own key — a container the operator discarded is as durable a decision as a
+        // discarded host, and its host having been confirmed says nothing about it.
+        { reportingSource: report.reportingSource, externalId },
+      );
     }
     if (budgetSpent) {
       // Says exactly what happened, no more: the containers that already had nodes were refreshed,
@@ -1019,6 +1034,14 @@ export class InfraService {
    * hand-confirmed one is attributed to the operator who clicked. A rule whose author has since been
    * deleted still fires, with no principal — stated rather than hidden, and visible on the rule.
    *
+   * **A DISCARD outranks every rule.** Discarding soft-deletes the row and keeps its reporting key,
+   * so the next report from that host creates a brand-new node under the same key — and a matching
+   * rule would confirm it, and mint another Asset, on the very next check-in. That would make a
+   * discard undoable by a machine: the operator says "not this one", and the estate says it again
+   * every fifteen minutes. So a key that a human has ALREADY discarded is enrolled, as it always was,
+   * and left PENDING for that human to decide a second time. The bulk-discard copy promises exactly
+   * this, and it is kept here rather than in the copy.
+   *
    * NEVER FAILS THE REPORT, on the same reasoning as the container reconcile: the node row is already
    * durable, so a failure here degrades to a node that stays PENDING — which is where it was going
    * anyway, and which the operator can act on — while throwing would make the host vanish from the
@@ -1028,8 +1051,15 @@ export class InfraService {
     nodeId: string,
     currentState: InfraNodeState,
     candidate: InfraAutoConfirmCandidate,
+    identity: { reportingSource: string; externalId: string },
   ): Promise<InfraNodeState> {
     try {
+      if (await this.wasDiscarded(identity)) {
+        this.logger.log(
+          `"${candidate.hostname}" (${nodeId}) reports under a key a human discarded — it stays PENDING for review rather than being auto-confirmed.`,
+        );
+        return currentState;
+      }
       const resolved = await this.autoConfirm.resolve(candidate);
       if (!resolved) return currentState;
       await this.confirmNode(
@@ -1053,6 +1083,31 @@ export class InfraService {
       );
       return currentState;
     }
+  }
+
+  /**
+   * Has a human already discarded this reporting key? Reads past the soft-delete filter with the
+   * ADR-0032 `includeSoftDeleted` escape hatch, because the discarded row is exactly what the normal
+   * read hides.
+   *
+   * A MERGED source is not a discard and cannot be confused with one: `mergeInto` clears the archived
+   * row's `reportingSource`/`externalId` (the pair moves to the adopting node), so only a genuine
+   * discard leaves a soft-deleted row still holding the key.
+   */
+  private async wasDiscarded(identity: {
+    reportingSource: string;
+    externalId: string;
+  }): Promise<boolean> {
+    const discarded = await this.prisma.infraNode.findFirst({
+      where: {
+        reportingSource: identity.reportingSource,
+        externalId: identity.externalId,
+        deletedAt: { not: null },
+      },
+      select: { id: true },
+      includeSoftDeleted: true,
+    } as Prisma.InfraNodeFindFirstArgs);
+    return discarded !== null;
   }
 
   /**
