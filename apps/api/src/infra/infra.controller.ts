@@ -9,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -23,6 +24,8 @@ import {
 import { createZodDto } from 'nestjs-zod';
 import type { Request } from 'express';
 import {
+  AgentPolicyOverrideSchema,
+  AgentPolicySettingsSchema,
   AgentReportAckSchema,
   AgentReportSchema,
   AttachInfraSecretSchema,
@@ -50,6 +53,7 @@ import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
 import { HumanOnlyGuard } from '../secret-manager/human-only.guard';
 import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
+import { AgentPolicyService } from './agent-policy.service';
 
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
@@ -65,6 +69,8 @@ class AgentReportAckDto extends createZodDto(AgentReportAckSchema) {}
 class ConfirmInfraNodeDto extends createZodDto(ConfirmInfraNodeSchema) {}
 class MergeInfraNodeDto extends createZodDto(MergeInfraNodeSchema) {}
 class InfraIdentityMatchDto extends createZodDto(InfraIdentityMatchSchema) {}
+class AgentPolicySettingsDto extends createZodDto(AgentPolicySettingsSchema) {}
+class AgentPolicyOverrideDto extends createZodDto(AgentPolicyOverrideSchema) {}
 
 /**
  * The "track as asset" toggle on node create (ADR-0070 §5), DEFAULT-ON. It is API logic, not part of
@@ -85,7 +91,96 @@ class PatchPositionDto extends createZodDto(PatchPositionSchema) {}
 @ApiTags('infra')
 @Controller('infra')
 export class InfraController {
-  constructor(private readonly infra: InfraService) {}
+  constructor(
+    private readonly infra: InfraService,
+    private readonly agentPolicy: AgentPolicyService,
+  ) {}
+
+  // ── Server-driven agent policy (ADR-0074 §7 amendment, #1140) ────────────────
+  //
+  // EVERY write here is HUMAN-ONLY and none of them is reachable with `infra:report`. That is the
+  // load-bearing security property of the whole feature: the reporting agent's Service Account can
+  // RECEIVE a policy on its ack and can never author one, so a leaked agent token cannot reconfigure
+  // the fleet it belongs to. The policy schema itself is a closed set of booleans, integers and glob
+  // strings — no commands, no scripts, no paths, no regex — so even a compromised ADMIN session
+  // cannot turn this channel into remote execution on the estate.
+
+  @Get('agent-policy')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      'The INSTANCE DEFAULT agent policy + the instance-wide policy revision (ADR-0074 §7 / #1140). `settings` is the stored layer an operator edits; `effective` is that layer resolved over the built-in defaults — it is NOT what a host with a service-account or node override runs, since those layers are narrower. Read-tolerant: a stored layer this build cannot parse resolves as "no override" rather than failing.',
+  })
+  @ApiOkResponse({ type: AgentPolicySettingsDto })
+  getAgentPolicy() {
+    return this.agentPolicy.getSettings();
+  }
+
+  @Put('agent-policy')
+  @RequirePermission('settings:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Replace the INSTANCE DEFAULT agent policy and bump the instance-wide revision (ADR-0074 §7 / #1140). The body is a PARTIAL policy — every omitted field falls back to the built-in default, and `{}` restores all of them. Agents pick the new policy up on their NEXT report (the ack is the channel), so a change propagates within one reporting interval and can never brick a fleet mid-collection. HUMAN-ONLY and settings:manage — a reporting agent can receive a policy, never author one.',
+  })
+  @ApiOkResponse({ type: AgentPolicySettingsDto })
+  putAgentPolicy(@Body() dto: AgentPolicyOverrideDto) {
+    return this.agentPolicy.setInstanceOverride(dto);
+  }
+
+  @Put('agent-policy/service-accounts/:id')
+  @RequirePermission('settings:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Set the per-SERVICE-ACCOUNT agent policy layer (ADR-0074 §7 / #1140) — the middle scope, and the only one that can configure a host before it has a node, since the "Add a server" wizard mints one service account per agent. Overrides the instance default; a node override still wins over it. 404 on an unknown or revoked account.',
+  })
+  @ApiOkResponse({ type: AgentPolicySettingsDto })
+  putServiceAccountAgentPolicy(
+    @Param('id') id: string,
+    @Body() dto: AgentPolicyOverrideDto,
+  ) {
+    return this.agentPolicy.setServiceAccountOverride(id, dto);
+  }
+
+  @Delete('agent-policy/service-accounts/:id')
+  @RequirePermission('settings:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Clear the per-service-account agent policy layer, so that account inherits the instance default again. Bumps the revision like any other policy write.',
+  })
+  @ApiOkResponse({ type: AgentPolicySettingsDto })
+  deleteServiceAccountAgentPolicy(@Param('id') id: string) {
+    return this.agentPolicy.setServiceAccountOverride(id, null);
+  }
+
+  @Put('nodes/:id/agent-policy')
+  @RequirePermission('infra:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Set the per-NODE agent policy layer (ADR-0074 §7 / #1140) — the narrowest scope, which wins over the service account and the instance default. `effective` in the response resolves this layer over the INSTANCE DEFAULT only: it deliberately omits the reporting account\'s layer, because the server does not know which account reports a node until one does.',
+  })
+  @ApiOkResponse({ type: AgentPolicySettingsDto })
+  putNodeAgentPolicy(
+    @Param('id') id: string,
+    @Body() dto: AgentPolicyOverrideDto,
+  ) {
+    return this.agentPolicy.setNodeOverride(id, dto);
+  }
+
+  @Delete('nodes/:id/agent-policy')
+  @RequirePermission('infra:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Clear a node\'s agent policy override, so it inherits its service account\'s layer and the instance default again. Bumps the revision like any other policy write.',
+  })
+  @ApiOkResponse({ type: AgentPolicySettingsDto })
+  deleteNodeAgentPolicy(@Param('id') id: string) {
+    return this.agentPolicy.setNodeOverride(id, null);
+  }
 
   // ── Reporting agent (ADR-0074) ───────────────────────────────────────────────
 
