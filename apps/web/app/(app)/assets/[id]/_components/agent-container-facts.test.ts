@@ -62,6 +62,13 @@ describe("getAgentContainerFacts — a container blob is not a custom field (#11
     expect(getAgentInventory(CONTAINER_SPECS)).toBeNull();
   });
 
+  test("a name is required — the identity key is the name, so a nameless blob is not one", () => {
+    // The server keys a child node on `<host>/container/<name>`, so a blob with no name could not
+    // have come from the reconcile. Rendering it under a Container heading would be a lie.
+    expect(getAgentContainerFacts({ container: { image: "nginx" } })).toBeNull();
+    expect(getAgentContainerFacts({ container: { name: "" } })).toBeNull();
+  });
+
   test("a partial container still renders — the collector reports what it can", () => {
     // ADR-0074's degrade-never-reject posture reaches the UI too: a name is all a container needs.
     const facts = getAgentContainerFacts({ container: { name: "redis" } });
