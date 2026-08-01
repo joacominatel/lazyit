@@ -110,8 +110,16 @@ without touching anything you own (the asset's name, serial and model are never 
 ## What the agent collects
 
 - **Identity & hardware** — hostname, operating system and kernel, CPU and memory, disks and network
-  interfaces, and (only when it runs as root) manufacturer / model / serial.
-- **Installed software** — the list of installed packages, with versions where available.
+  interfaces (IPv4 **and** IPv6), and (only when it runs as root) manufacturer / model / serial.
+- **What kind of machine it is** — server, desktop, laptop, virtual machine or container, and the
+  virtualization it runs under (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) when it can tell.
+- **When it last booted** — a single timestamp, so you can answer "did this box actually reboot after
+  the patch window?". It is not uptime monitoring: one value, refreshed on each report, no history.
+- **Installed software** — the list of installed packages, with versions where available, and which
+  package manager reported them.
+- **What it couldn't collect** — each report also says whether it ran with root and names anything it
+  had to skip or that timed out. That is how an empty serial or model column becomes an *answer*
+  ("this host reports unprivileged") instead of a mystery.
 
 It collects whatever it can and simply omits anything it can't read, so an unprivileged install still
 reports a useful picture. It **never** reads secrets, files or application data, and it sends no
@@ -150,6 +158,12 @@ your server, its row (and its detail panel) shows a small **Agent outdated** bad
 re-run the install command and pick up the latest binary. It's only a nudge: an outdated agent keeps
 reporting normally, nothing is blocked, and minor updates don't raise it. Agents built from source (or
 before versioning was added) report as `dev` and never show the badge.
+
+**Upgrading your instance never breaks the agents already installed.** You do not have to re-install
+anything: an older agent keeps reporting exactly as it did, and a *newer* agent reporting to an older
+server is accepted too — the server takes every fact it understands and simply notes the ones it
+doesn't, rather than rejecting the whole report. That distinction matters: a rejected report would make
+the server disappear from your inventory and look like an outage. A stale field never does.
 
 ## What's next
 
