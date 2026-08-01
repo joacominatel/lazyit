@@ -128,7 +128,17 @@ export function applySoftwarePolicy(
     return kept.slice(0, policy.softwareMax);
   }
   // `undefined` rather than `[]`, matching what `collectSoftware` has always returned for "nothing
-  // to report" — the server reads an absent list as "not enumerated" and leaves the stored one alone.
+  // to report". Be precise about what the server does with it TODAY, because it is the opposite of
+  // what "absent" intuitively suggests: `ingestReport` rebuilds the whole `specs` blob from the
+  // report and `refreshKnownNode` writes it wholesale, so an absent `software` key DELETES the
+  // stored list rather than preserving it. That is the behaviour we want here — a host whose policy
+  // turned software collection off should stop showing an inventory nobody is collecting any more,
+  // instead of a snapshot that ages silently with nothing on screen to say so.
+  //
+  // #1142 intends to give an absent key the meaning "unchanged". When it lands, this call site needs
+  // revisiting: "the collector could not enumerate packages" and "the policy says do not report
+  // packages" will need to be distinguishable, because only the first of them means "keep what you
+  // have" — the second still has to clear the list.
   return kept.length ? kept : undefined;
 }
 
