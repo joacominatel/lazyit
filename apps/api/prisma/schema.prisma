@@ -177,6 +177,11 @@ model User {
   // Consumable stock movements this user performed (ConsumableMovement.performedById). SetNull.
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
 
+  // Auto-confirm rules this user authored (ADR-0074 §1 amendment, #1145). SetNull: the rule is
+  // instance policy, so losing its author leaves it running and visibly unattributed rather than
+  // silently retiring a decision the estate depends on.
+  infraAutoConfirmRules InfraAutoConfirmRule[] @relation("InfraAutoConfirmRuleAuthor")
+
   // Permission-matrix edits this user performed (PermissionAuditLog.actorId). SetNull keeps the
   // append-only audit row when the actor is deleted (ADR-0046 P5). null = system/unknown actor.
   permissionAuditEntries PermissionAuditLog[] @relation("PermissionAuditActor")
@@ -2697,6 +2702,63 @@ model InfraNodeSecretRef {
   @@unique([nodeId, vaultId, handle])
   @@index([nodeId])
   @@map("infra_node_secret_refs")
+}
+
+/// Which half of a report an auto-confirm rule speaks for (ADR-0074 §1 amendment, #1145). Stated
+/// explicitly — ANY is chosen, never assumed by omission, so a host rule can never silently start
+/// confirming a Docker host's thirty container children.
+enum InfraAutoConfirmScope {
+  HOST
+  CONTAINER
+  ANY
+}
+
+/// An operator-authored AUTO-CONFIRM RULE (ADR-0074 §1 amendment, #1145) — the human judgement
+/// expressed ONCE instead of once per discovered host.
+///
+/// It does NOT reopen ADR-0074 §1's rejection of blanket auto-confirm: a rule must state at least one
+/// condition (enforced by the zod contract on write AND by the matcher on read), a human authored it,
+/// a human can disable or delete it, and `createdById` records WHICH human — the attribution the §8
+/// containment argument leans on, since an auto-confirmed node's backing Asset is minted with that
+/// operator's principal.
+///
+/// NOT RETROACTIVE, by construction: rules are read on the report CREATE branch only, so saving one
+/// can never confirm proposals already sitting in the tray. Mutable domain entity with a soft delete
+/// (ADR-0006) — a deleted rule stops matching but its history is kept.
+model InfraAutoConfirmRule {
+  id        String                @id @default(cuid())
+  name      String
+  enabled   Boolean               @default(true)
+  appliesTo InfraAutoConfirmScope @default(HOST)
+
+  // Conditions — all nullable, ANDed by the matcher, and at least one must be set (app-enforced: a
+  // rule with none is blanket auto-confirm). `reportedKind` matches what the server PROPOSED for the
+  // node (`inferNodeKind`); `confirmAsKind` is the override applied at confirm, exactly like the
+  // review dialog's kind field.
+  hostnamePattern String? // glob: `*` any run, `?` exactly one; anchored, case-insensitive
+  subnetCidr      String? // IPv4 or IPv6 CIDR matched against the node's promoted primary IP
+  reportedKind    InfraNodeKind?
+
+  confirmAsKind InfraNodeKind?
+  trackAsAsset  Boolean        @default(true) // the single confirm's default; the API defaults a CONTAINER rule to false
+
+  // The human who authored the rule. SetNull, never cascade: an operator leaving the company must not
+  // silently retire instance policy — the rule stays, visibly unattributed, until an admin revisits it.
+  createdById String?
+  createdBy   User?   @relation("InfraAutoConfirmRuleAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Server-owned observability. A rule that confirms hosts with no human present has to be legible,
+  // or the only way to notice it misfiring is to spot nodes nobody approved.
+  matchCount    Int       @default(0)
+  lastMatchedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([enabled])
+  @@index([createdById])
+  @@map("infra_auto_confirm_rules")
 }
 
 /// Which parent kind an Attachment hangs off (ADR-0082). Polymorphic by design — the model extends
