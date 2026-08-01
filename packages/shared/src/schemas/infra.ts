@@ -1508,6 +1508,26 @@ export function isContainerChildExternalId(externalId: string | null | undefined
 }
 
 /**
+ * The HOST key a container child was scoped to (#1145), or `undefined` when this is not a child key.
+ *
+ * The inverse of {@link containerExternalId}, exported for the same reason its siblings are: the
+ * review tray groups children under the host that reported them, and re-deriving the separator at the
+ * call site is how the two halves of one key rule drift apart.
+ *
+ * It splits on the FIRST separator, never the last. A container may legally be named `container` (or
+ * anything else containing the separator), and taking the last occurrence would let a container NAME
+ * decide which host key it resolves to — i.e. let a reported string re-parent a child onto a host it
+ * does not run on. The host half of the key is written first and is the half that is trustworthy.
+ */
+export function hostExternalIdOfContainerChild(
+  externalId: string | null | undefined,
+): string | undefined {
+  if (externalId === null || externalId === undefined) return undefined;
+  const at = externalId.indexOf(CONTAINER_ID_SEPARATOR);
+  return at > 0 ? externalId.slice(0, at) : undefined;
+}
+
+/**
  * A container's runtime state → the child node's `status` (#1139). A LIVENESS FACT the agent owns,
  * exactly like the host node's `status=ONLINE` on check-in — never curation.
  *
