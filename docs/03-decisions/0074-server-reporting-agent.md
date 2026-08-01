@@ -617,10 +617,14 @@ cutoff.
 structurally impossible: the moment the §7 amendment let an operator move a host to a daily report,
 that host would sit OFFLINE 23 hours out of 24 and nudge the bell every day. Each node is now judged
 against the `staleAfterSeconds` **it was actually served**, denormalized onto
-`InfraNode.policyStaleAfterSeconds` on every report (and onto each container child from its host, so a
-daily host's containers are not swept dark hourly). The env var remains the fallback for a manual
-node, an agent that predates the policy channel, and any report whose policy resolution failed — so an
-instance that configures nothing behaves exactly as it did. The sweep filters the per-node comparison
+`InfraNode.policyStaleAfterSeconds` on every report **that echoed a `policyRevision`** (and onto each
+container child from its host, so a daily host's containers are not swept dark hourly). The echo is
+the gate, not merely the resolution succeeding: an agent that predates the policy channel never
+receives, caches or applies a threshold, so writing the resolved one on its row would have overridden
+a deliberately tuned `INFRA_AGENT_STALE_AFTER_MS` for precisely the hosts the env var is documented to
+still cover. The env var remains the fallback for a manual node, an agent that predates the policy
+channel, and any report whose policy resolution failed — so an instance that configures nothing
+behaves exactly as it did. The sweep filters the per-node comparison
 in memory over the candidates already past the shortest possible threshold; that is a deliberate
 bound for a few-dozen-host product, not a claim that it scales indefinitely.
 
@@ -717,11 +721,19 @@ a **fixed 5-minute tick on every platform and never rewritten**, and the agent *
 `now - lastSuccessfulReport < policy.intervalSeconds`, tracked in `/var/lib/lazyit-agent/state.json`.
 The server then owns cadence from 5 minutes to 24 hours with zero unit-file mutation and identical
 semantics on every scheduler. A deterministic per-machine-id offset (FNV-1a over the machine id,
-bounded by half the tick) is **subtracted** from each host's interval so an estate installed in one
-rollout does not stay phase-locked forever. Stated precisely, because it is easy to overclaim: the
-**reboot** case is handled by the state file *surviving* the reboot — a host that reported four
-minutes before it went down is still not due when it comes back — and the offset only stops identical
-cadences from clumping.
+bounded by half the tick, so at most 149 s) is **subtracted** from each host's interval. What that
+offset actually buys is narrower than "it spreads the estate", and the narrow version is the true one:
+it **absorbs scheduler slack**, so a tick landing a hair short of the interval (systemd's
+`AccuracySec`, the previous run's own duration, `OnUnitActiveSec` re-arming from activation rather
+than from the report) reports instead of waiting a whole extra tick. It changes *which* tick reports
+only when the interval is **not** an exact multiple of the 5-minute tick; at a multiple — the 900 s
+default, and every round value the minutes-only editor makes natural — the tick that first reaches
+`interval − offset` is the same tick that first reaches `interval`, so hosts on the default cadence
+are de-phased by their own timers and not by this. The **reboot** case is likewise not its doing: that
+is handled by the state file *surviving* the reboot — a host that reported four minutes before it went
+down is still not due when it comes back. On the 900 s default the offset leaves an effective cadence
+of at least 751 s (83.4% of what was asked for), and at the 300 s minimum at least 151 s, so no
+cadence is ever cut to half or below.
 
 **Subtracted, not added,** and the direction is load-bearing. Adding it would push the due instant
 *past* a scheduler tick whenever the tick and the interval are close — precisely the host that
@@ -733,6 +745,20 @@ often as configured. Being due slightly *early* has no such failure mode: the ti
 `OnUnitActiveSec` they were given until the installer is re-run, which means their cadence cannot go
 *below* that value in the meantime. Everything else works immediately.
 
+**Re-running the installer keeps this host's own settings.** Re-running is the documented upgrade
+path, and it rewrites `/etc/lazyit-agent/config` — which since this amendment is also the *only* store
+of the local veto. Truncating it would silently re-enable collection the host's owner had turned off,
+on the upgrade path, with nothing on screen to say so; that is the worst possible failure mode for a
+security-relevant setting whose owner is frequently not the person running the upgrade. So the
+installer now **merges**: every `LAZYIT_*` assignment in the existing file is carried into the new one
+except the three keys the installer owns (`LAZYIT_URL`, `LAZYIT_TOKEN` and the ignored
+`LAZYIT_INTERVAL`), fenced by a comment marker so it is obvious what was kept. Merging rather than
+moving the veto into a second file the installer never touches, because this file is where every
+existing host already keeps it — the commented template `install.sh` writes has invited exactly that
+since this amendment — and a separate file would orphan those settings on the very upgrade this
+protects. Carrying unknown `LAZYIT_*` keys rather than an explicit allowlist means a veto key added by
+a later release survives an installer that predates it.
+
 **3. Two hard rules, enforced in code rather than promised in prose.**
 
 - **Local config may VETO, never widen.** `/etc/lazyit-agent/config` gains `LAZYIT_COLLECT_*=false`,
@@ -742,7 +768,11 @@ often as configured. Being due slightly *early* has no such failure mode: the ti
   the honest posture for a self-hosted product where the host owner and the lazyit admin are often
   different people, and it is documented as a feature. `LAZYIT_INTERVAL` is deliberately **not** read
   as the floor — `install.sh` wrote it on every host that exists, so doing so would have silently
-  pinned every upgraded install at 15 minutes.
+  pinned every upgraded install at 15 minutes. The union of the two exclusion lists is bounded by the
+  schema's 32-glob cap, and **the host's entries go in first**: something has to be dropped when both
+  sides are full, and what is dropped has to be the server's, or a policy that filled the cap would
+  discard the host's own exclusions and thereby *widen* what a root agent reports. That is the one
+  place the rule could have broken by construction, so it is pinned by a test rather than by prose.
 - **No server-pushed commands, scripts, paths or file reads. Ever.** `AgentPolicySchema` is a
   `z.strictObject` at every depth over booleans, integers and **globs** — the deliberate inverse of
   `AgentReportSchema`, whose root is loose so a newer agent never vanishes from the CMDB. The

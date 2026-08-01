@@ -271,7 +271,11 @@ can turn a collector off (`LAZYIT_COLLECT_SOFTWARE=false`), set a floor on how o
 exclusions (`LAZYIT_EXCLUDE_NICS=veth*`). Those settings **win**, always, and nothing you set in
 lazyit can switch a locally-disabled collector back on. This is on purpose: lazyit is self-hosted, and
 the person who owns a server is not always the person who administers lazyit. Local settings can only
-ever make a host report *less*, never more.
+ever make a host report *less*, never more. **Re-running the install command keeps them.** Upgrading
+an agent rewrites that file, so the installer carries every `LAZYIT_*` line it finds across — apart
+from the instance URL and token, which the command you just ran supplies — and fences them under a
+`--- kept from this host's previous config ---` marker so you can see exactly what survived. An
+upgrade never quietly switches a collector back on.
 
 **lazyit can never tell an agent to run something.** The policy is a fixed list of on/off switches,
 numbers and name patterns — there is no field for a command, a script, a file path or a regular
