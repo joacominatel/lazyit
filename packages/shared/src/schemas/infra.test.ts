@@ -20,6 +20,7 @@ import {
   primaryIp,
   primaryIpv4,
   primaryIpv6,
+  sanitizeIdentifierValue,
   sanitizeSerial,
   selectPrimaryMac,
 } from "./infra";
@@ -604,6 +605,95 @@ describe("identifiers[].value — one canonical form per kind, so #1141 can comp
 
   test("an identifier with no usable value is dropped, not rejected", () => {
     expect(identifiersOf([{ kind: "mac" }, { kind: "serial", value: "   " }])).toBeUndefined();
+  });
+
+  test("a MALFORMED element degrades the element, it does not 400 the host", () => {
+    // Same posture `nics[].ipv6` already takes: a third-party or older collector sending the wrong
+    // shape must not make the whole host vanish from the inventory. The bad element is dropped, the
+    // good ones survive, and `agentReportSkewPaths` still records that something was not understood.
+    expect(
+      identifiersOf(["aa:bb:cc:dd:ee:ff", 42, null, { kind: "serial", value: "SN-1" }]),
+    ).toEqual([{ kind: "serial", value: "SN-1" }]);
+    expect(identifiersOf([["nested"]])).toBeUndefined();
+  });
+
+  test("a malformed element is RECORDED as skew, so degrading is never silent", () => {
+    const body = {
+      ...V1_REPORT,
+      host: { ...V1_REPORT.host, identifiers: ["aa:bb:cc:dd:ee:ff"] },
+    };
+    const skew = agentReportSkewPaths(body, AgentReportSchema.parse(body));
+    expect([...skew.droppedPaths, ...skew.coercedPaths].some((p) => p.startsWith("host.identifiers"))).toBe(
+      true,
+    );
+  });
+});
+
+// ── identifiers[]: junk evidence never corroborates identity (#1138/#1141) ────────────────────────
+
+describe("sanitizeIdentifierValue — junk never becomes corroborating identity evidence", () => {
+  const identifiersOf = (identifiers: unknown) =>
+    AgentReportSchema.parse({ ...V1_REPORT, host: { ...V1_REPORT.host, identifiers } }).host
+      .identifiers;
+
+  test("reuses the SERIAL junk list — dmidecode placeholders are not evidence", () => {
+    // #1141 corroborates hosts by comparing these values. Two unrelated Dell boxes both reporting
+    // `Default string` would match as the SAME physical host — a confidently wrong CMDB, which is
+    // worse than an empty one. The `Asset.serial` path already refused these (`sanitizeSerial`);
+    // the identifier path must refuse the identical strings, from the identical list.
+    expect(sanitizeIdentifierValue("serial", "To be filled by O.E.M.")).toBeUndefined();
+    expect(sanitizeIdentifierValue("serial", "Default string")).toBeUndefined();
+    expect(sanitizeIdentifierValue("serial", "System Product Name")).toBeUndefined();
+    expect(sanitizeIdentifierValue("serial", "Not Specified")).toBeUndefined();
+    expect(sanitizeIdentifierValue("serial", "000000")).toBeUndefined();
+    expect(sanitizeIdentifierValue("serial", "......")).toBeUndefined();
+  });
+
+  test("rejects the notorious placeholder SMBIOS UUIDs", () => {
+    // Shipped verbatim on whole production runs of consumer boards — the single value most likely
+    // to collide across genuinely unrelated hosts.
+    expect(
+      sanitizeIdentifierValue("smbios-uuid", "03000200-0400-0500-0006-000700080009"),
+    ).toBeUndefined();
+    expect(
+      sanitizeIdentifierValue("smbios-uuid", "{03000200-0400-0500-0006-000700080009}"),
+    ).toBeUndefined();
+    expect(
+      sanitizeIdentifierValue("platform-uuid", "00000000-0000-0000-0000-000000000000"),
+    ).toBeUndefined();
+    expect(
+      sanitizeIdentifierValue("windows-machine-guid", "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"),
+    ).toBeUndefined();
+    expect(sanitizeIdentifierValue("machine-id", "00000000000000000000000000000000")).toBeUndefined();
+  });
+
+  test("rejects an all-zero MAC even though the separators hide the repetition", () => {
+    expect(sanitizeIdentifierValue("mac", "00-00-00-00-00-00")).toBeUndefined();
+  });
+
+  test("a REAL value survives, in its canonical form", () => {
+    expect(sanitizeIdentifierValue("serial", "  ABC   123  ")).toBe("ABC 123");
+    expect(sanitizeIdentifierValue("mac", "AA-BB-CC-DD-EE-FF")).toBe("aa:bb:cc:dd:ee:ff");
+    expect(sanitizeIdentifierValue("smbios-uuid", "{4C4C4544-0043-0010-8036-B1C04F574D32}")).toBe(
+      "4c4c4544-0043-0010-8036-b1c04f574d32",
+    );
+    // A vendor tag under the labelled escape hatch is opaque to us — pass it through untouched.
+    expect(sanitizeIdentifierValue("other", " A-17 ")).toBe("A-17");
+  });
+
+  test("junk is OMITTED from the wire set, never emitted with an empty value", () => {
+    expect(
+      identifiersOf([
+        { kind: "serial", value: "Default string" },
+        { kind: "smbios-uuid", value: "03000200-0400-0500-0006-000700080009" },
+      ]),
+    ).toBeUndefined();
+    expect(
+      identifiersOf([
+        { kind: "serial", value: "To be filled by O.E.M." },
+        { kind: "machine-id", value: "9F8D7C6B5A4E" },
+      ]),
+    ).toEqual([{ kind: "machine-id", value: "9f8d7c6b5a4e" }]);
   });
 });
 
