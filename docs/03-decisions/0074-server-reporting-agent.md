@@ -289,7 +289,8 @@ Added, all **additive and optional** except `os.family`:
 | `host.bootedAt` | *"did this box reboot after the patch window?"* — an **inventory** question. **ONE scalar**, overwritten each report. It is **not** a metric and must not become one: §1's line stays where it is. Stored on the node's blob; no surface displays it yet. |
 | `software[].source` (`dpkg`\|`rpm`\|`apk`\|`registry`\|`msi`\|`appx`\|`winget`\|`brew`\|`app-bundle`\|`pkg`) | provenance, which is what makes a cross-OS software list comparable rather than a bag of strings. Stored per package; the software panel still renders only name + version. |
 | `diagnostics?` (`{ warnings, privileged, durationMs }`) | what the collector **could not do**. An empty serial column looks identical whether the host lacks `dmidecode`, the agent lacks root, or a collector timed out (§7's #1133 path). **Stored** on the node's `specs` blob beside the host facts, so a fleet view can one day say *"web-03: reporting unprivileged, no serial/model"* — no UI reads it yet; the agent also echoes the same notes on stdout when run by hand. Emitted on **every** report, not only unhappy ones. |
-| `policyRevision?` | **reserved** for the policy channel. Defined now so it never has to be added under pressure. The server **parses it and discards it** — nothing stores it and nothing acts on it. Do not document it as a stored fact until the policy channel makes it one. |
+| `policyRevision?` | ~~**reserved** for the policy channel; the server parses it and discards it~~ — **the policy channel made it real; corrected 2026-08-01, #1140.** The server now persists the echo on the node (`policyRevision`, plus `policyAppliedAt` when it *changes*) and the drill-in compares it to the instance revision to say *applied* vs *pending*. Absent from any pre-#1140 agent, so an absent echo writes nothing rather than clearing a good value. See the §7 Amendment. |
+| `softwareState?` (`reported`\|`unchanged`\|`unavailable`\|`disabled`), `softwareHash?` | what the **absence** of `software` means, and which list the agent is claiming. Added by the §2/§3 Amendment (2026-08-01, #1142) below — the reason an omitted package list can mean *keep* without meaning *clear*. |
 
 **`os.family` is required on the wire and defaulted server-side to `linux`.** A discriminator that is
 optional is a discriminator every consumer has to re-derive, so it is required — and every agent that
@@ -403,8 +404,12 @@ array indices collapsed to `[]`) — the body is attacker-controlled and the res
 It rides the **existing** version handshake ([[0083-versioning-and-releases]] Amendment, #907) rather
 than inventing a surface: `agentVersion` already travels in every report and already has its own column,
 so the server can say the useful thing — *this agent is newer than me* — instead of the generic "I don't
-understand these fields". The record **self-heals**: the blob is rewritten wholesale on every report, so
-one clean check-in clears it, and it is deliberately **not** copied into the linked `Asset.specs`. Nor
+understand these fields". The record **self-heals**: `agentSkew` is part of what the write path
+compares, so the first clean check-in differs from what is stored and rewrites the blob without it.
+// This originally read *"the blob is rewritten wholesale on every report"* — true until the
+~~unconditional rewrite~~ became a **conditional** one; **corrected 2026-08-01, #1153.** The clearing
+still happens on the next clean report; it is the *mechanism* that changed, not the outcome. It is
+deliberately **not** copied into the linked `Asset.specs`. Nor
 is `diagnostics`: both are REPORT diagnostics, not inventory facts, and an Asset's specs are *merged*
 rather than rewritten, so anything that reaches them never clears itself. The same strip therefore
 applies on both Asset-facing paths — the repeat-report refresh and the review-tray confirm that mints
@@ -477,8 +482,11 @@ keeping the human gate intact:
   refreshes the linked Asset's `specs` inventory snapshot (host facts blob), so the Asset inventory panel
   stays fresh. Written **directly** (not via `AssetsService.update`) so it emits **no** `SPECS_CHANGED`
   history event per report (no audit-trail flooding) and **never** touches the Asset's human-owned
-  `serial`/`name`/`modelId`; a soft-deleted asset is skipped. The three agent-owned keys
-  (`host`/`software`/`reportedAt`) are replaced; every human-added specs key is preserved.
+  `serial`/`name`/`modelId`; a soft-deleted asset is skipped. The agent-owned keys
+  (`host`/`software`/`reportedAt`) are replaced; every human-added specs key is preserved. **Amended
+  2026-08-01 (#1153/#1157):** the sync is still *asked* on every report, but it writes only when the
+  merged snapshot differs from what is stored — and a confirmed **CONTAINER child** now gets the same
+  sync, which it never had.
 - ~~**Async:** heavy work (software-list diffing, search re-index) goes through a BullMQ queue on the
   same Valkey substrate ([[0053-async-workers-bullmq-valkey]]), copying the `import-commit` worker
   pattern. The endpoint returns fast (accepted), the work drains in the background.~~ — **never built;
@@ -736,11 +744,14 @@ peer node it collided with. **This is an identity choice, and it is effectively 
 weight as §2's canonicalisation rules — so it is stated here rather than left in code.
 
 **`identityConflict` is re-stamped on every report**, for as long as the collision lasts, keeping the
-`detectedAt` of the FIRST detection. The blob is rewritten wholesale on each check-in, so a marker
-written only when the node was created would be gone fifteen minutes later — leaving the operator
-holding a notification that points at a node showing no evidence of why it exists. It still
-**self-heals**: once the clone is given a real machine-id it takes the ordinary unknown-key path,
-nothing re-stamps, and the next blob rewrite drops the marker.
+`detectedAt` of the FIRST detection. A marker written only when the node was created would be gone the
+first time anything in the blob moved — leaving the operator holding a notification that points at a
+node showing no evidence of why it exists. It still **self-heals**: once the clone is given a real
+machine-id it takes the ordinary unknown-key path, nothing re-stamps, and the next blob write drops
+the marker. // "the blob is rewritten wholesale on each check-in" was the reason given here; since
+#1153 the rewrite is **conditional**, which changes nothing about this marker — it is part of what the
+write path compares, so a report that still carries it matches and a report that drops it writes.
+**Corrected 2026-08-01, #1153.**
 
 **Nothing is auto-merged and nothing is auto-split.** The only automatic action in the whole change is
 a notification; every mutation is a human action. The corroboration check can only ever *withhold* a
@@ -762,6 +773,104 @@ either side carries no evidence and the ingest behaves exactly as it did before 
 backfills itself on the first v2 report, and only reports from then on can be corroborated. Warning on
 *absence* would have lit up every legacy estate on the day it upgraded; that is why absence is not a
 difference. Existing nodes are never touched by the upgrade itself.
+
+---
+
+**Amendment (2026-08-01, #1142/#1153/#1157) — §2 + §3: stop rewriting inventory that did not change,
+and name the three things an absent `software` key can mean.**
+
+Every check-in rewrote the whole `specs` blob on the node, and a second time on the linked Asset. On a
+real Linux server that blob is ~350 KB, ~95% of it the installed-package list, and the package list
+changes when somebody runs `apt upgrade` — perhaps twice a month. At the shipped cadence that is ~96
+full rewrites of a multi-hundred-KB TOAST value per host per day, on two tables, for data that did not
+change: TOAST churn, autovacuum load and backup growth in exchange for nothing. Against a leaked
+`infra:report` token reporting the same `externalId` at the #1134 rate limit it is on the order of
+**172,800 rewrites a day** — and #1147 raised the ceiling on how large each one may be from Express's
+100 KB default to 8 MB, so the two changes had to be reconciled.
+
+**Two halves, and only one of them is a guarantee.** The agent hashes its package list, caches the
+fingerprint and omits an unchanged list — which cuts steady-state payload by roughly 90% and helps the
+honest majority. The server compares what arrived against what it holds and **skips the jsonb write
+when nothing changed** — which holds regardless of what the client sends, because an attacker does not
+cooperate. They ship together because separately the first one is a landmine.
+
+**The landmine, and the three-state contract that defuses it.** Before this, an absent `software` key
+DELETED the stored list, and #1140's `applySoftwarePolicy` depended on it: a policy that turns software
+collection off correctly empties a panel nobody is filling any more. Give "absent" the meaning
+*unchanged* and that same policy silently **freezes** a stale package list instead — the operator reads
+versions from months ago with nothing on screen saying so. So the wire now distinguishes **three**
+answers, not two, in an explicit `softwareState`:
+
+| `softwareState` | The agent is saying | The server |
+| --- | --- | --- |
+| `reported` | the list is in this report | stores it |
+| `unchanged` | identical to my last accepted report — `softwareHash` says which list | **keeps** what it holds |
+| `unavailable` | I could not enumerate packages (no package manager, a timed-out `dpkg-query`) | **keeps** what it holds |
+| `disabled` | policy says do not report software | **clears** the stored list |
+| *absent* | a pre-#1142 agent | **clears** — the pre-#1142 reading, unchanged |
+
+An **unrecognised** value degrades to `unavailable`, not to absent. Every other vocabulary in this
+contract degrades toward *we know less*; this is the one where "we know less" and "delete the
+operator's data" point in different directions, so the safe one is named. The destructive reading is
+reachable only from an explicit, recognised instruction, or from an agent that predates the field.
+
+**`softwareHash` is corroboration, never authority.** The server stores the fingerprint the agent sent
+and compares the next `unchanged` claim against it; it never recomputes one, because what is stored is
+always a list the agent itself sent, so a wrong fingerprint can only cost its own host one extra full
+report. A claim it *cannot* corroborate — the node holds no list, or holds one fingerprinted
+differently — is never resolved by guessing: the stored list is kept and the ack carries
+**`softwareResend: true`**, which the agent answers by forgetting its cache. That is what makes the
+delta self-healing across a node discarded and rediscovered, a restore from backup, and a merge. The
+fingerprint is a 96-bit non-cryptographic digest of a canonical, order-independent form (package
+manager output order is not a fact about the host) carrying a format version, so changing the
+canonicalisation costs one resend rather than a wrong answer.
+
+**What the server compares, and what it therefore skips.** Everything in the blob except the two
+fields that change on every report while the inventory does not: `reportedAt` and
+`diagnostics.durationMs`. A changed warning list, a changed `privileged` flag, a new `agentSkew` record
+and the `identityConflict` marker are all real changes and all write. **Skip only on a confident
+match** — a wasted write costs I/O, a missed one leaves an operator reading an inventory that has not
+been true for weeks. The package list is compared by fingerprint and is deliberately never read back:
+the hot path reads `specs - 'software'`, a few KB, which is the same lesson as #1135 one layer down.
+The one path that does read it back is a report that omitted the list while its *host facts* changed,
+because the blob is written wholesale and writing it without the list would delete it.
+
+**A consequence stated plainly: `specs.reportedAt` now dates the FACTS, not the check-in.** When the
+write is skipped the stored blob keeps the collection time it already had, so on the Asset inventory
+panel the label reads **"Collected {date}"** rather than "Reported {date}". *Is this host still
+checking in?* is answered by `InfraNode.lastReportedAt` — a scalar column written on every report, the
+one the §4 staleness sweeper and the `infra.agent_offline` notification already read — and by the
+topology node panel, not by a timestamp inside a blob. Two different questions that happened to share
+one answer while the blob was rewritten unconditionally.
+
+**The Asset half, and the container gap it closes (#1157).** Skipping the node's write and then
+rewriting the Asset would simply move the amplification one table across, so the linked-Asset sync
+decides its own write the same way. It is still *asked* on every report — an Asset linked to a node
+whose facts have not moved since would otherwise never receive them — and writes only when the merged
+snapshot differs. And `syncAssetSpecs` was called only from the **host** path, so a container child
+confirmed with `trackAsAsset` (which defaults ON) froze its Asset panel at the instant it was
+confirmed: image tag, digest, runtime state and published ports drifting silently while the node panel
+stayed fresh, with nothing marking it stale. The container path now performs the same sync, under the
+same discipline — a direct write (no `SPECS_CHANGED` event per report), human-owned
+`serial`/`name`/`modelId` untouched, a soft-deleted asset skipped, only the agent-owned keys replaced,
+and nothing resurrected onto a node that was since discarded (the child lookup is soft-delete-scoped,
+so a discarded child is simply not in it).
+
+**Explicitly rejected: splitting the package list into its own column.** It would make the node's
+remaining blob cheap to rewrite unconditionally and keep `reportedAt` fresh — at the cost of a
+migration, a backfill, a read-side recombination, and an `Asset.specs` that still has exactly one
+column and therefore still has this problem. Also rejected: *comparing the blob in SQL* (exact, but
+untestable in a suite with no database, and the honest comparison still has to exclude the same two
+volatile fields), and *trusting `unchanged` without corroboration* (which is how a rediscovered node
+ends up with a permanently empty package list).
+
+**Upgrade safety.** No column, no index, no backfill, no migration. A node stored before this carries
+no `softwareHash`, so its first post-upgrade report compares unequal and writes once — the fingerprint
+backfills itself, and every report after that can be skipped. A pre-#1142 **agent** sends neither new
+field and keeps its exact pre-#1142 semantics, including the #1140 policy clearing. The delta itself
+requires the **new agent binary**: an operator who upgrades only the instance gets the server-side
+write skip (which is the half that bounds abuse) and keeps paying full payload until the agents are
+reinstalled.
 
 ### §4 — Liveness & staleness
 
@@ -1164,3 +1273,8 @@ would be a separate ADR and arguably a separate product).
 - Server-driven agent policy (the ack as the config channel, the fixed-tick interval inversion, the
   local veto, the three scopes): §7 Amendment (2026-08-01), issue #1140 — the consumer of contract
   v2's reserved `policyRevision`, with a §4 amendment making the staleness threshold per node.
+- Software delta + the unchanged-write skip + the container child's Asset sync: §2/§3 Amendment
+  (2026-08-01), issues #1142, #1153 and #1157 — one change, because giving an absent `software` key
+  the meaning *unchanged* is only safe once the wire can also say *disabled*. It reconciles #1147's
+  raised body limit with #1134's bounded-but-nonzero refresh cost, and closes the gap the #1139
+  container work left: `syncAssetSpecs` ran on the host path only.
