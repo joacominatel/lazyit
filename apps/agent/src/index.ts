@@ -234,8 +234,9 @@ async function report(
   // whole list. Absent means not proven — a pre-#1142 server, or an ack that could not be parsed.
   const understandsDelta = serverUnderstandsSoftwareDelta(ack);
 
-  // The report SUCCEEDED, so this is the instant the cadence gate measures from — and the instant the
-  // software fingerprint becomes true, since it describes what the server now holds. Both are written
+  // The report SUCCEEDED, so this is the instant the cadence gate measures from, and the instant the
+  // software fingerprint is worth keeping. It describes what a #1142 server now holds; against a server
+  // that has not proved the capability nothing is ever omitted, so an inaccurate cache costs nothing. Both are written
   // before the policy, and independently of it: a host whose policy cache could not be written must
   // still not re-report on the next 5-minute tick.
   await writeState({
