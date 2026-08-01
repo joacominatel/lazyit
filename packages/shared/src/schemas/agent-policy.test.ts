@@ -276,13 +276,14 @@ describe("agentPolicyDue — the interval inversion: a fixed tick, a server-owne
     ).toBe(false);
   });
 
-  test("past the interval plus this machine's jitter ⇒ due", () => {
+  test("past the interval MINUS this machine's jitter ⇒ due", () => {
     const now = 10_000_000;
     const jitter = policyJitterSeconds(machineId, policy.intervalSeconds);
+    expect(jitter).toBeGreaterThan(0); // this machine id genuinely has an offset
     expect(
       agentPolicyDue({
         nowMs: now,
-        lastSuccessMs: now - (policy.intervalSeconds + jitter) * 1000 - 1,
+        lastSuccessMs: now - (policy.intervalSeconds - jitter) * 1000 - 1,
         policy,
         machineId,
       }),
@@ -290,11 +291,29 @@ describe("agentPolicyDue — the interval inversion: a fixed tick, a server-owne
     expect(
       agentPolicyDue({
         nowMs: now,
-        lastSuccessMs: now - (policy.intervalSeconds + jitter) * 1000 + 1000,
+        lastSuccessMs: now - (policy.intervalSeconds - jitter) * 1000 + 1000,
         policy,
         machineId,
       }),
     ).toBe(false);
+  });
+
+  test("jitter only ever makes a host EARLY — a tick at exactly the interval always reports", () => {
+    // The upgrade-path failure this direction exists to prevent: a host that installed the new
+    // binary without re-running install.sh still has the old 15-minute timer, and its interval is
+    // the 15-minute default. Adding jitter would push the due instant past that tick and halve the
+    // host's real reporting rate. Subtracting it cannot.
+    const now = 10_000_000;
+    for (const id of ["a", "bb", "ccc", "0123456789abcdef", "zz-top", machineId]) {
+      expect(
+        agentPolicyDue({
+          nowMs: now,
+          lastSuccessMs: now - policy.intervalSeconds * 1000,
+          policy: { ...policy, intervalSeconds: 900 },
+          machineId: id,
+        }),
+      ).toBe(true);
+    }
   });
 
   test("a clock that jumped BACKWARDS reports rather than sulking until the clock catches up", () => {
@@ -309,14 +328,14 @@ describe("agentPolicyDue — the interval inversion: a fixed tick, a server-owne
     const a = policyJitterSeconds(machineId, 3600);
     expect(policyJitterSeconds(machineId, 3600)).toBe(a);
     expect(a).toBeGreaterThanOrEqual(0);
-    expect(a).toBeLessThan(AGENT_POLICY_TICK_SECONDS);
+    expect(a).toBeLessThan(AGENT_POLICY_TICK_SECONDS / 2);
     expect(policyJitterSeconds("a-different-machine-id", 3600)).not.toBe(a);
   });
 
-  test("jitter never exceeds the interval itself, so a 5-minute cadence stays a 5-minute cadence", () => {
-    expect(policyJitterSeconds(machineId, AGENT_POLICY_TICK_SECONDS)).toBeLessThan(
-      AGENT_POLICY_TICK_SECONDS,
-    );
+  test("jitter never reaches half the interval, so a cadence stays recognisably that cadence", () => {
+    for (const interval of [AGENT_POLICY_TICK_SECONDS, 900, 3600, 86_400]) {
+      expect(policyJitterSeconds(machineId, interval)).toBeLessThan(interval / 2);
+    }
   });
 });
 
