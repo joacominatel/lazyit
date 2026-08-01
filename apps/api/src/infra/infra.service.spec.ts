@@ -17,6 +17,7 @@ import { ArticlesService } from '../articles/articles.service';
 import { SecretManagerService } from '../secret-manager/secret-manager.service';
 import { SearchService } from '../search/search.service';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` for types (erased) AND at runtime for `Prisma.PrismaClientKnownRequestError` (the P2002
@@ -113,14 +114,20 @@ describe('InfraService', () => {
   // `infra-node-enrollment.limiter.spec.ts`; here we only assert the service CHARGES it on exactly
   // the branch that grows the table, and never on the branch that does not.
   let enrollment: { assertWithinBudget: Mock };
-  // The tx client the $transaction callback receives (RUNS_ON migration writes through it).
+  // The ONE automatic action the #1141 clone detection takes — a broadcast bell nudge. Everything
+  // else it does is a human action, so this mock is also how the tests assert the SILENCE.
+  let notifications: { emit: Mock };
+  // The tx client the $transaction callback receives (RUNS_ON migration + the #1141 merge write
+  // through it — the merge needs both writes in one transaction or the dedup index refuses them).
   let txEdge: { create: Mock; updateMany: Mock };
+  let txNode: { update: Mock };
 
   beforeEach(async () => {
     txEdge = {
       create: jest.fn(),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     };
+    txNode = { update: jest.fn().mockResolvedValue({ id: 'node-keep' }) };
     prisma = {
       infraNode: {
         findFirst: jest.fn(),
@@ -144,8 +151,12 @@ describe('InfraService', () => {
       },
       asset: { findFirst: jest.fn(), update: jest.fn() },
       $transaction: jest.fn(
-        (cb: (tx: { infraEdge: typeof txEdge }) => unknown) =>
-          cb({ infraEdge: txEdge }),
+        (
+          cb: (tx: {
+            infraEdge: typeof txEdge;
+            infraNode: typeof txNode;
+          }) => unknown,
+        ) => cb({ infraEdge: txEdge, infraNode: txNode }),
       ),
       $queryRaw: jest.fn().mockResolvedValue([]),
     };
@@ -166,6 +177,8 @@ describe('InfraService', () => {
     search = { upsert: jest.fn(), remove: jest.fn() };
     // Default: within budget, so every pre-existing ingest test keeps exercising the normal path.
     enrollment = { assertWithinBudget: jest.fn() };
+    // `emit` is idempotent on its dedupeKey and never throws — the real one returns the row id or null.
+    notifications = { emit: jest.fn().mockResolvedValue(null) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -178,6 +191,7 @@ describe('InfraService', () => {
         { provide: SecretManagerService, useValue: secrets },
         { provide: SearchService, useValue: search },
         { provide: InfraNodeEnrollmentLimiter, useValue: enrollment },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
     service = moduleRef.get(InfraService);
@@ -2229,6 +2243,354 @@ describe('InfraService', () => {
         NotFoundException,
       );
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Identity corroboration on the report path (ADR-0074 §3 amendment, #1141) ─
+
+  describe('ingestReport — cloned machine-id detection', () => {
+    /** A v2 report carrying the two burned-in facts the corroboration rule compares. */
+    const reportFrom = (hostname: string, serial: string, mac: string) =>
+      AgentReportSchema.parse({
+        agentVersion: '2.0.0',
+        reportingSource: 'agent:clone',
+        externalId: 'machine-id-baked',
+        reportedAt: '2026-07-31T12:00:00.000Z',
+        host: {
+          hostname,
+          identifiers: [
+            { kind: 'machine-id', value: 'baked' },
+            { kind: 'serial', value: serial },
+            { kind: 'mac', value: mac },
+          ],
+        },
+      });
+
+    /** What the `specs->'host'` sub-select returns for the node that already owns the key. */
+    const storedHost = (
+      hostname: string,
+      identifiers?: Array<{ kind: string; value: string }>,
+    ) => [{ host: { hostname, ...(identifiers ? { identifiers } : {}) } }];
+
+    const ORIGINAL = { id: 'node-1', assetId: null, ipAddressSource: 'AGENT' };
+
+    it('NEVER splits a legacy node: no stored identifiers ⇒ the pre-#1141 refresh, and no nudge', async () => {
+      // The load-bearing upgrade promise. Every row stored before contract v2 carries no
+      // `identifiers[]`, so absence must read as "nothing to corroborate", never as "a different host".
+      prisma.infraNode.findFirst.mockResolvedValue(ORIGINAL);
+      prisma.$queryRaw.mockResolvedValue(storedHost('web-01'));
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      const ack = await service.ingestReport(
+        reportFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02'),
+      );
+
+      expect(prisma.infraNode.update).toHaveBeenCalledTimes(1);
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      expect(notifications.emit).not.toHaveBeenCalled();
+      expect(ack).toEqual({
+        nodeId: 'node-1',
+        state: 'CONFIRMED',
+        accepted: true,
+      });
+    });
+
+    it('NEVER splits when the evidence still corroborates (same serial, swapped NIC, new name)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(ORIGINAL);
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('web-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(
+        reportFrom('web-renamed', 'SN-ALPHA', 'aa:bb:cc:dd:ee:99'),
+      );
+
+      expect(prisma.infraNode.update).toHaveBeenCalledTimes(1);
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('a SECOND host on the same machine-id gets its OWN pending node, and the original is untouched', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL) // the key's current owner
+        .mockResolvedValueOnce(null); // the clone has no node of its own yet
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('web-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      const ack = await service.ingestReport(
+        reportFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02'),
+        AGENT_SA,
+      );
+
+      // The clone gets a DETERMINISTIC key of its own — the partial-unique dedup index physically
+      // forbids two live rows sharing one, and the clone must land on the same node every 15 minutes.
+      const createArg = firstArg<{
+        data: {
+          externalId: string;
+          reportingSource: string;
+          state: string;
+          label: string;
+          specs: { identityConflict?: { peerNodeId?: string } };
+        };
+      }>(prisma.infraNode.create);
+      expect(createArg.data.externalId).toBe('machine-id-baked#SN-BETA');
+      expect(createArg.data.reportingSource).toBe('agent:clone');
+      expect(createArg.data.state).toBe('PENDING');
+      expect(createArg.data.label).toBe('web-02');
+      expect(createArg.data.specs.identityConflict?.peerNodeId).toBe('node-1');
+
+      // NOTHING is auto-merged and nothing is auto-split: the node that owns the key is not written to.
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+      // It is a NEW row, so it is charged to the enrollment budget exactly like any other (#1134).
+      expect(enrollment.assertWithinBudget).toHaveBeenCalledWith(AGENT_SA);
+
+      // ONE nudge, naming the actual remedy — the only automatic action this whole change takes.
+      expect(notifications.emit).toHaveBeenCalledTimes(1);
+      const emitted = firstArg<{
+        type: string;
+        dedupeKey: string;
+        severity: string;
+        summary: string;
+        metadata: Record<string, unknown>;
+      }>(notifications.emit as Mock);
+      expect(emitted.type).toBe('infra.identity_conflict');
+      expect(emitted.dedupeKey).toBe(
+        'infra.identity_conflict:node-1:SN-BETA',
+      );
+      expect(emitted.summary).toContain('systemd-firstboot');
+      expect(emitted.metadata.peerNodeId).toBe('node-1');
+
+      // The report is ACCEPTED — degrade and inform, never reject (the contract's whole posture).
+      expect(ack).toEqual({
+        nodeId: 'node-2',
+        state: 'PENDING',
+        accepted: true,
+      });
+    });
+
+    it("the clone's NEXT report refreshes its own node and never re-nags", async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce({
+          id: 'node-2',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('web-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      const ack = await service.ingestReport(
+        reportFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02'),
+        AGENT_SA,
+      );
+
+      const updateArg = firstArg<{ where: { id: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(updateArg.where).toEqual({ id: 'node-2' });
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      // A known host adds no row, so it is never charged — and it never re-emits (#852 discipline).
+      expect(enrollment.assertWithinBudget).not.toHaveBeenCalled();
+      expect(notifications.emit).not.toHaveBeenCalled();
+      expect(ack.nodeId).toBe('node-2');
+    });
+  });
+
+  // ── Re-key / merge-into: the HUMAN half of identity reconciliation (#1141) ───
+
+  describe('mergeNodeInto', () => {
+    const SOURCE = {
+      id: 'node-dup',
+      label: 'srv-app-04',
+      reportingSource: 'agent:clone',
+      externalId: 'machine-id-new',
+      lastReportedAt: new Date('2026-07-31T12:00:00.000Z'),
+      agentVersion: '2.0.0',
+      status: 'ONLINE',
+      ipAddress: '10.0.0.9',
+      specs: { host: { hostname: 'srv-app-04' }, reportedAt: 'now' },
+      assetId: null,
+      deletedAt: null,
+    };
+    const TARGET = {
+      id: 'node-keep',
+      label: 'srv-app-04 (prod)',
+      state: 'CONFIRMED',
+      reportingSource: 'agent:old',
+      externalId: 'machine-id-old',
+      ipAddressSource: 'AGENT',
+      specs: { rack: 'B12' },
+      assetId: 'asset-1',
+      deletedAt: null,
+    };
+
+    it('transplants the agent identity onto the target and archives the duplicate', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(SOURCE)
+        .mockResolvedValueOnce(TARGET)
+        // The search re-projection and getNodeDetail both re-read the target after the merge.
+        .mockResolvedValue({ ...TARGET, externalId: 'machine-id-new' });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({ name: 'app-04' });
+
+      await service.mergeNodeInto('node-dup', 'node-keep', HUMAN);
+
+      // Both writes ride ONE transaction: the source must lose the key before the target can take it,
+      // or the partial-unique dedup index refuses the second write.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      const [archive, adopt] = txNode.update.mock.calls as Array<
+        [{ where: { id: string }; data: Record<string, unknown> }]
+      >;
+      expect(archive[0].where).toEqual({ id: 'node-dup' });
+      expect(archive[0].data.deletedAt).toBeInstanceOf(Date);
+      // The archived row IS the audit trail — it can never be overwritten by another report.
+      expect(archive[0].data.specs).toMatchObject({
+        _infraMergedInto: { nodeId: 'node-keep', byUserId: 'u-1' },
+      });
+
+      expect(adopt[0].where).toEqual({ id: 'node-keep' });
+      expect(adopt[0].data.externalId).toBe('machine-id-new');
+      expect(adopt[0].data.reportingSource).toBe('agent:clone');
+      expect(adopt[0].data.source).toBe('AGENT');
+      expect(adopt[0].data.lastReportedAt).toEqual(SOURCE.lastReportedAt);
+      expect(adopt[0].data.agentVersion).toBe('2.0.0');
+      // Human curation on the target survives — the merge moves IDENTITY, not curation.
+      expect(adopt[0].data).not.toHaveProperty('label');
+      expect(adopt[0].data).not.toHaveProperty('state');
+      expect(adopt[0].data).not.toHaveProperty('assetId');
+      // The target's own specs keys survive; the agent-owned facts come from the duplicate.
+      expect(adopt[0].data.specs).toMatchObject({
+        rack: 'B12',
+        host: { hostname: 'srv-app-04' },
+      });
+
+      // Search: the archived duplicate leaves the index, the adopting node is re-projected.
+      expect(search.remove).toHaveBeenCalledWith('infra', 'node-dup');
+      expect(search.upsert).toHaveBeenCalled();
+    });
+
+    it('never clobbers a MANUAL ip on the target, but seeds an AGENT one', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(SOURCE)
+        .mockResolvedValueOnce({ ...TARGET, ipAddressSource: 'MANUAL' })
+        .mockResolvedValue(TARGET);
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({ name: 'app-04' });
+
+      await service.mergeNodeInto('node-dup', 'node-keep', HUMAN);
+
+      const [, adopt] = txNode.update.mock.calls as Array<
+        [{ data: Record<string, unknown> }]
+      >;
+      expect(adopt[0].data).not.toHaveProperty('ipAddress');
+    });
+
+    it('refuses to merge a node into itself', async () => {
+      await expect(
+        service.mergeNodeInto('node-dup', 'node-dup', HUMAN),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses a source that carries no agent identity to transplant', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce({ ...SOURCE, externalId: null })
+        .mockResolvedValueOnce(TARGET);
+
+      await expect(
+        service.mergeNodeInto('node-dup', 'node-keep', HUMAN),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('404s on a missing / soft-deleted endpoint', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      await expect(
+        service.mergeNodeInto('nope', 'node-keep', HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  // ── Re-image adoption hints (#1141) ─────────────────────────────────────────
+
+  describe('findIdentityMatches', () => {
+    it('pairs a fresh proposal with the node that shares its burned-in serial', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-new' });
+      const host = (serial: string, mac: string) => [
+        {
+          host: {
+            hostname: 'srv-app-04',
+            identifiers: [
+              { kind: 'serial', value: serial },
+              { kind: 'mac', value: mac },
+            ],
+          },
+        },
+      ];
+      prisma.$queryRaw
+        // the subject's own evidence …
+        .mockResolvedValueOnce(host('SN-ALPHA', 'aa:bb:cc:dd:ee:01'))
+        // … then the candidate's, re-read so `matchedOn` names the fact that actually matched.
+        .mockResolvedValueOnce(host('SN-ALPHA', 'ff:ff:ff:ff:ff:fe'));
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-old',
+          label: 'srv-app-04',
+          kind: 'PHYSICAL_HOST',
+          status: 'OFFLINE',
+          state: 'CONFIRMED',
+        },
+      ]);
+
+      const matches = await service.findIdentityMatches('node-new');
+
+      expect(matches).toEqual([
+        {
+          id: 'node-old',
+          label: 'srv-app-04',
+          kind: 'PHYSICAL_HOST',
+          status: 'OFFLINE',
+          state: 'CONFIRMED',
+          matchedOn: 'serial',
+          value: 'SN-ALPHA',
+        },
+      ]);
+    });
+
+    it('a node with no stored evidence queries nothing and matches nothing', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-legacy' });
+      prisma.$queryRaw.mockResolvedValue([{ host: { hostname: 'web-01' } }]);
+
+      expect(await service.findIdentityMatches('node-legacy')).toEqual([]);
+      expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
     });
   });
 });
