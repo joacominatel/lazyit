@@ -2792,7 +2792,8 @@ describe('InfraService', () => {
 
     it('NEVER splits when the evidence still corroborates (same serial, swapped NIC, new name)', async () => {
       // Same reason as above: the second lookup must NOT hand back the owner row, or a rule that
-      // wrongly widened "all three differ" into "any one differs" would still look like a refresh.
+      // wrongly widened "serial AND MAC both differ" into "either one differs" would still look like
+      // a refresh. (There are TWO facts in the rule, not three — the hostname is not one of them.)
       prisma.infraNode.findFirst
         .mockResolvedValueOnce(ORIGINAL)
         .mockResolvedValueOnce(null);
