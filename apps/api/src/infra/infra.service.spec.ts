@@ -378,6 +378,9 @@ describe('InfraService', () => {
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
         policy: AGENT_POLICY_DEFAULT,
+        // #1142: and every ack states that this build understands `softwareState` — the evidence
+        // the agent needs before it may omit an unchanged package list.
+        softwareDelta: true,
       });
     });
 
@@ -421,6 +424,9 @@ describe('InfraService', () => {
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
         policy: AGENT_POLICY_DEFAULT,
+        // #1142: and every ack states that this build understands `softwareState` — the evidence
+        // the agent needs before it may omit an unchanged package list.
+        softwareDelta: true,
       });
     });
 
@@ -456,6 +462,9 @@ describe('InfraService', () => {
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
         policy: AGENT_POLICY_DEFAULT,
+        // #1142: and every ack states that this build understands `softwareState` — the evidence
+        // the agent needs before it may omit an unchanged package list.
+        softwareDelta: true,
       });
     });
 
@@ -493,6 +502,9 @@ describe('InfraService', () => {
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
         policy: AGENT_POLICY_DEFAULT,
+        // #1142: and every ack states that this build understands `softwareState` — the evidence
+        // the agent needs before it may omit an unchanged package list.
+        softwareDelta: true,
       });
     });
 
@@ -1322,6 +1334,9 @@ describe('InfraService', () => {
           // #1140: the ack is the policy channel, so an accepted report carries the resolved
           // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
           policy: AGENT_POLICY_DEFAULT,
+          // #1142: and every ack states that this build understands `softwareState` — the evidence
+          // the agent needs before it may omit an unchanged package list.
+          softwareDelta: true,
         });
       });
 
@@ -2042,6 +2057,9 @@ describe('InfraService', () => {
           // #1140: the ack is the policy channel, so an accepted report carries the resolved
           // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
           policy: AGENT_POLICY_DEFAULT,
+          // #1142: and every ack states that this build understands `softwareState` — the evidence
+          // the agent needs before it may omit an unchanged package list.
+          softwareDelta: true,
         });
         // Keyed on the SERVER-resolved principal — never on `reportingSource`, a client-chosen body
         // field an attacker rotates per request.
@@ -3421,6 +3439,9 @@ describe('InfraService', () => {
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
         policy: AGENT_POLICY_DEFAULT,
+        // #1142: and every ack states that this build understands `softwareState` — the evidence
+        // the agent needs before it may omit an unchanged package list.
+        softwareDelta: true,
       });
     });
 
@@ -3519,6 +3540,9 @@ describe('InfraService', () => {
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
         policy: AGENT_POLICY_DEFAULT,
+        // #1142: and every ack states that this build understands `softwareState` — the evidence
+        // the agent needs before it may omit an unchanged package list.
+        softwareDelta: true,
       });
     });
 
@@ -3670,6 +3694,9 @@ describe('InfraService', () => {
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
         policy: AGENT_POLICY_DEFAULT,
+        // #1142: and every ack states that this build understands `softwareState` — the evidence
+        // the agent needs before it may omit an unchanged package list.
+        softwareDelta: true,
       });
       const updateArg = firstArg<{
         where: { id: string };
