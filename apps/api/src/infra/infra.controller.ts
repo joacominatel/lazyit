@@ -90,11 +90,11 @@ export class InfraController {
   // unknown `externalId` mints a row carrying a `specs` jsonb blob, so a leaked token (or a
   // misconfigured `OnUnitActiveSec=1s`) was an unbounded DB-fill on a self-hosted box. The guard caps
   // reports per SERVICE ACCOUNT per window (never per IP — agents share an egress NAT); the service's
-  // live-PENDING budget caps the rows those reports can create.
+  // enrollment limiter caps how many NEW nodes those reports may create per window.
   @UseGuards(InfraReportRateLimitGuard)
   @ApiOperation({
     summary:
-      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet); a known host refreshes its inventory + liveness without touching human curation. Rate-limited per service account, and a new host is refused (429) while that account is at its live-PENDING cap. Returns a minimal ack.',
+      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet); a known host refreshes its inventory + liveness without touching human curation. Rate-limited per service account, and a NEW host is refused (429) once that account has enrolled its per-window quota of newly discovered hosts — already-known hosts keep refreshing regardless. Returns a minimal ack.',
   })
   @ApiOkResponse({ type: AgentReportAckDto })
   report(
