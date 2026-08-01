@@ -138,8 +138,11 @@ describe("the capability handshake — new agent, old server (#1142)", () => {
     // wire and would only cost the cache. Against an old server both read as the pre-#1142 absent
     // key and clear: right for `disabled`, and for `unavailable` an empty panel until the next
     // successful collection sends the whole list again — which it does, precisely because there is
-    // no evidence against that server. `unchanged` is the only branch whose omission can cost an
-    // inventory permanently, and it is the only one gated.
+    // no evidence against that server. That is exactly what a pre-#1142 agent did in both situations:
+    // `applySoftwarePolicy` returned `undefined` and never `[]`, and the report spread
+    // `...(software ? { software } : {})`, so an unenumerable collector and a disabling policy were
+    // indistinguishable on the wire and both cleared. `unchanged` is the only branch whose omission
+    // can cost an inventory permanently, and it is the only one gated.
     expect(softwareWireFields({ state: "unavailable" }, HASH, UNPROVEN)).toEqual(
       softwareWireFields({ state: "unavailable" }, HASH, PROVEN),
     );
