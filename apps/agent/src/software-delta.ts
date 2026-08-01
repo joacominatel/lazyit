@@ -22,17 +22,18 @@
  * stored list. An agent that omitted its list there would wipe the host's inventory, and because it
  * believes the list unchanged it would never send it again: permanent loss, no error anywhere. So the
  * list is withheld only once an ack has stated the server understands the contract — see
- * {@link serverUnderstandsSoftwareDelta}. Until then the whole list rides every report, which costs
- * exactly what the pre-#1142 agent cost.
+ * {@link serverUnderstandsSoftwareDelta}. Until then the whole list rides every report — the payload
+ * a pre-#1142 agent paid, plus the ~30 bytes of `softwareState` and `softwareHash`.
  */
 import { softwareFingerprint, type AgentReport, type AgentSoftwareState } from "@lazyit/shared";
 
 type Software = NonNullable<AgentReport["software"]>;
 
 /**
- * What the collector managed to do this run. Three outcomes, because the wire has three answers
- * (`AgentSoftwareStateSchema`) and collapsing any two of them is how an inventory silently rots or
- * silently empties.
+ * What the collector managed to do this run. Three outcomes rather than the wire's four, because
+ * `unchanged` is not something a collector can observe — {@link softwareWireFields} derives it from the
+ * cached fingerprint. Collapsing any two of these is how an inventory silently rots or silently
+ * empties.
  */
 export type SoftwareCollection =
   | { state: "reported"; software: Software }
@@ -47,7 +48,7 @@ export interface SoftwareWireFields {
 }
 
 /**
- * Does this ack come from a server that understands the three-state contract (#1142)?
+ * Does this ack come from a server that understands the `softwareState` contract (#1142)?
  *
  * The ack body is remote input and the agent reads it loosely — named keys off the parsed JSON, never
  * a schema — so this accepts a LITERAL `true` and nothing else: a truthy string, a `1`, a missing body
