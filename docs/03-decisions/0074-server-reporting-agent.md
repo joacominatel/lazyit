@@ -829,6 +829,51 @@ build stage — **not** a GitHub Release. The instance serves *its own* matching
 version-locked to the running server, works fully offline. (CI builds images with `push: false`
 today; this adds a build stage, not a publish job.)
 
+**Amendment (2026-08-01, #1137) — which artifact, and how you know it is the right one.** Two gaps
+in the paragraph above, both silent until a host was already broken.
+
+**The x86-64 artifact was the AVX2 one, and only that one.** `bun-linux-x64` assumes AVX2 (Haswell,
+2013). A pre-Haswell host, or a vSphere cluster whose EVC baseline masks the flag, does not report an
+error the operator can act on — it takes SIGILL, and the nastiest shape of this is a VM that ran the
+agent happily for months until a vMotion put it on older silicon. So the build stage now also emits
+`bun-linux-x64-baseline` as `lazyit-agent-x64-baseline`, `GET /agent/download` accepts it as a third
+arch, and `install.sh` reads `/proc/cpuinfo` and asks for it when `avx2` is absent (`--baseline`
+forces it for a cluster that may migrate later). A baseline download that 404s is a **hard failure**
+with its own message, never a silent fall back to the AVX2 build: handing that binary to the one host
+that cannot run it would trade a clear install error for a crash weeks later.
+
+**And whether a host can run the binary at all was checked nowhere — but the number everyone
+expected turned out to be wrong.** The premise this was raised on was "Bun needs glibc ≥ 2.29, so
+CentOS 7 (2.17) cannot run the agent". That is **not true of the artifacts this repo builds**: on Bun
+1.3.14 the compiled x64, x64-baseline and arm64 executables link no versioned symbol newer than
+`GLIBC_2.17`, which is exactly CentOS/RHEL 7's level. Writing `2.29` into the installer would have
+refused hosts that are fine, and it would have gone stale the next time Bun moves its floor — in
+either direction.
+
+So the check is **evidence rather than a version number**: after installing the binary and *before*
+writing a unit or arming a timer, `install.sh` runs `lazyit-agent --help`, which prints and exits
+without touching the network, `/etc` or any state, and fails precisely when the dynamic loader or the
+kernel cannot start the executable. A failure removes the binary again and says so, leaving the host
+as it was found. That replaces the real failure mode — a host that *looks* installed, has a timer
+armed, and silently never reports, with the only clue a `GLIBC_x.y not found` in a journal nobody
+reads. What remains genuinely unverified is the **kernel**: Bun states 5.6 recommended and 5.1
+minimum with degradation on 3.10 (RHEL 7), and this repo has no RHEL 7 host to settle it on. The run
+check answers that question per host, which is the point of asking the host instead of a table.
+
+**Each artifact now ships a `.sha256` beside it**, generated in the same build step that produced the
+binary, published by `GET /agent/checksum` (same `infra:report` gate) and compared by `install.sh`
+before installing. Before this, the installer's integrity check was TLS plus four bytes of ELF magic
+— which answers "did the bytes arrive intact from the origin I dialled" and says nothing about "are
+these the bytes the build produced", for a file that becomes **root on every host in the estate**.
+Stated honestly, and it is worth stating because the temptation is to oversell it: **this is a
+checksum, not a signature.** Anyone who can write both files in the API container defeats it, and it
+is not meant to survive that — cosign stays deferred below. What it buys is a corrupted layer, a
+half-written volume, a caching proxy serving a stale artifact, and a tamper that changed one file and
+not the other, all stopping at the installer instead of nowhere. A build that publishes no digest
+(any instance older than this) makes the installer **warn and continue**, because web and API ship
+from the same image and failing closed there would brick every install during a rollback;
+`--require-checksum` makes it fatal for an operator who wants that.
+
 ### §7 — The agent
 
 - **A Bun single-file executable**, not a Go/Rust binary and not a shell script. It imports the
@@ -977,6 +1022,106 @@ that keeps an estate visible.
 Reporting agents) and the node drill-in exposes the echoed revision. The per-node and
 per-service-account scopes are **API-only in this build** (`PUT /infra/nodes/:id/agent-policy`,
 `PUT /infra/agent-policy/service-accounts/:id`) — they work, and they have no editor yet.
+
+**Amendment (2026-08-01, #1137) — operational hardening: the unit, the network, and the two things
+an operator could not do.** Everything here is individually small. Collectively it is the difference
+between an agent that works on three test VMs and one that survives a real estate, and four of the
+items are things a prospective operator checks *before* deploying rather than after.
+
+**1. The unit is sandboxed.** It ran as full root — which it needs, because `dmidecode` reads
+`/dev/mem` — with none of the free confinement systemd offers, and a unit file is exactly what a
+security-conscious buyer opens first. It now carries `NoNewPrivileges`, `ProtectSystem=full`,
+`ProtectHome`, `PrivateTmp`, `ProtectKernelTunables` and `ProtectControlGroups`. None of them costs
+the agent anything it uses: it reads `/proc`, `/sys`, `/etc` and the package databases, and writes
+only `/var/lib/lazyit-agent`. `ProtectSystem=full` leaves `/var` writable while making `/usr`,
+`/boot` and `/etc` read-only, so the agent cannot rewrite its own binary or its own config;
+**`strict` is deliberately not used**, because it would take the state directory away and break the
+interval inversion. **`PrivateDevices=yes` is deliberately absent** and should stay absent: it would
+remove `/dev/mem`, and every host would silently lose its serial, manufacturer and model — the facts
+the #1141 clone check depends on. That is the exact shape of hardening that reads well in a unit file
+and quietly costs an inventory its data.
+
+**2. `Nice=19` and `IOSchedulingClass=idle`.** `rpm -qa` on a 3000-package host is real CPU and real
+I/O, and this agent runs on database servers whose job is not being inventoried. Nothing about the
+run has a deadline — a one-shot behind a 5-minute tick and a server-set cadence — so yielding to
+every other process on the box costs the report nothing anyone can perceive.
+
+**3. `RandomizedDelaySec` on the timer, which is a different layer from the agent's own jitter, and
+the distinction is the whole justification.** The per-machine offset in `agentPolicyDue` absorbs
+scheduler slack and, as the #1140 amendment says at length, **cannot spread an estate**: it is only
+ever evaluated *on* a tick, so its effect is quantized to one. The ticks themselves are what a
+patch-and-reboot window aligns, and this is the layer where the ticks live. Every elapse is delayed
+by 0–60 s, so hosts that came back together drift apart instead of POSTing a full inventory in the
+same second and running into the per-token report limit (#1134) — at the 120/min default, a
+100-server estate sharing one token needs roughly this much spread to fit. The cost is bounded and
+small: a report already lands at the first tick at or after its due instant, so it can be up to one
+tick late; this adds at most 60 s on top. Against the default staleness cutoff of three reporting
+intervals, both are far inside tolerance. Plain `RandomizedDelaySec` rather than
+`FixedRandomDelay=yes`, which would give each host a *stable* offset instead of a walk, because that
+directive needs systemd 247 and RHEL 8 ships 239 — a per-elapse random walk de-phases just as well
+and works everywhere.
+
+**4. Egress proxy and private CA — `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` and `LAZYIT_CA_FILE`.** Both
+are the norm in this segment and neither was reachable. A systemd unit starts with an almost-empty
+environment, so a host-wide proxy in `/etc/environment` or a shell profile is simply **not there**
+when the timer fires: the agent worked by hand and failed on the tick, which is the worst shape a
+networking bug can take. And an instance behind a LAN self-signed certificate had exactly one
+documented answer — trust that CA **system-wide** — which is a far larger grant than "one inventory
+agent talks to one host". Both are now read from `/etc/lazyit-agent/config` (environment still wins,
+per key) and applied **explicitly** on every request the agent makes, report and diagnostic alike, so
+a `test` that reached the instance cannot have taken a route the report does not. Bun honours the
+proxy variables by itself, but only from the process environment — the one place they are not — and a
+`NO_PROXY` living in the config file is invisible to it, so resolving both from one source is what
+keeps the two halves of the decision together. Neither is a policy field and neither ever will be:
+both name a local file or a local egress path, which is precisely the class of thing §7's second hard
+rule keeps the server from being able to say.
+
+**5. `lazyit-agent show` and `lazyit-agent test`.** The only feedback the agent ever gave was a
+one-line summary printed *after* a report the server had already accepted, so every diagnosis was a
+blind guess with a round trip attached. `show` runs the whole collector under the real policy —
+including this host's veto — and prints the report as JSON on stdout without sending it, so "why is
+this host's serial column empty" is answerable on a box with no credentials and no network. `test`
+checks config, DNS, TLS, the proxy, the CA and the token, and **writes nothing anywhere**: the probe
+is a `HEAD` on `GET /agent/download`, gated on the same `infra:report` permission as the report
+endpoint and a pure read, so it proves the exact credential the report uses without creating a
+PENDING node, touching a `specs` blob, consuming the per-token report budget or moving
+`lastReportedAt`. A `404` there is a **pass** — the guard runs before the handler, so it means the
+token was accepted and only then did the route say this image bundles no binary for that arch — and
+reporting it as a failure would send an operator to re-mint a token that works. `test` also prints
+the effective policy, the last successful report and whether the next tick would report, which is the
+other half of "this host is silent and I do not know why".
+
+**6. `install.sh --uninstall`.** There was no removal path: taking the agent off a host meant
+hand-deleting four files and two units, and "I will not deploy something I cannot cleanly remove" is
+a reasonable position to hold. It disarms the timer *first* (deleting the binary under an armed timer
+does not stop it — it turns every tick into a failed unit on a host somebody believes is clean), then
+removes both units, the binary and `/var/lib/lazyit-agent`.
+
+**The config file needed a decision, because #1140 made it two things at once.** It holds the SA
+token *and* it is the only store of the host's local veto. Uninstall **destroys the token,
+unconditionally** — a working credential for your instance must not survive on a host somebody just
+decommissioned and will hand on or wipe in six months — and by default removes the file with it.
+`--keep-config` is for the operator re-imaging a host that will get the agent back: it keeps the veto
+and the proxy settings, which are the host owner's and genuinely painful to lose, while still
+stripping `LAZYIT_TOKEN` and `LAZYIT_URL`. There is no flag that keeps the token. (Revoking the
+Service Account in lazyit remains the complete answer; this is the half the operator can do from the
+host.)
+
+**7. The documented production path keeps the token out of `ps`.** `--token <value>` is visible in
+`ps` for every user on the box while the install runs and lands in root's shell history. The window
+is short and the token is narrow, but it costs one flag to close, so `install.sh` and the binary both
+take `--token-file <path>` (`-` reads stdin) and `install.sh` also reads `LAZYIT_TOKEN` from the
+environment. `--token-file -` cannot be combined with `curl … | sh`, because the pipe already **is**
+the script's stdin — and that is enforced rather than merely documented: `cat` would read the rest of
+the script perfectly happily, so the installer rejects anything containing whitespace as "not a
+token" and names the mistake, instead of sending a few kilobytes of shell as a bearer token and
+reporting a 401 nobody can explain.
+
+**What reaches an existing host, and when.** Items 1, 2, 3, 6 and the artifact selection live in
+`install.sh`, so they land only where it is **re-run** — an installed agent keeps the unit it was
+given until its next upgrade, which is the same contract as the `--interval` note above. Items 4, 5
+and 7 are in the binary and arrive with it. Nothing here alters the wire contract, the policy schema
+or the data model.
 
 ### §8 — Security model
 
