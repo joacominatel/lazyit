@@ -632,7 +632,9 @@ describe('InfraService', () => {
           state: 'PENDING',
         });
 
-        const ack = await service.ingestReport(AgentReportSchema.parse(V1_BODY));
+        const ack = await service.ingestReport(
+          AgentReportSchema.parse(V1_BODY),
+        );
 
         const createArg = firstArg<{
           data: {
@@ -679,9 +681,9 @@ describe('InfraService', () => {
           rawBody,
         );
 
-        const createArg = firstArg<{ data: { specs: { agentSkew?: unknown } } }>(
-          prisma.infraNode.create,
-        );
+        const createArg = firstArg<{
+          data: { specs: { agentSkew?: unknown } };
+        }>(prisma.infraNode.create);
         expect(createArg.data.specs.agentSkew).toEqual({
           unknownKeys: ['deltaSince'],
           agentAhead: false, // agentVersion 1.0.0 vs server v1.4.2 — not ahead
@@ -725,9 +727,9 @@ describe('InfraService', () => {
           V1_BODY,
         );
 
-        const createArg = firstArg<{ data: { specs: Record<string, unknown> } }>(
-          prisma.infraNode.create,
-        );
+        const createArg = firstArg<{
+          data: { specs: Record<string, unknown> };
+        }>(prisma.infraNode.create);
         expect(createArg.data.specs).not.toHaveProperty('agentSkew');
       });
 
