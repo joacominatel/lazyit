@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AGENT_CONTAINERS_MAX,
   AGENT_IDENTIFIERS_MAX,
   AGENT_SKEW_PATHS_MAX,
   AGENT_WARNINGS_MAX,
@@ -7,15 +8,19 @@ import {
   type AgentReport,
   type AgentReportHost,
   AgentReportSchema,
+  containerExternalId,
+  containerNodeStatus,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
   InfraNodeDetailSchema,
   InfraNodeListItemSchema,
   InfraNodeSchema,
   InfraShortcutSchema,
+  inferNodeKind,
   IpAddressSchema,
   isPlausibleEdge,
   normalizeIdentifierValue,
+  PLAUSIBLE_EDGE_TARGETS,
   osFamily,
   primaryIp,
   primaryIpv4,
@@ -845,6 +850,157 @@ describe("primaryIp — IPv4 first, then a stable routable IPv6 (#1138)", () => 
     expect(primaryIpv6(host([{ name: "eth0", ipv6: [{ address: "2001:db8::5" }] }]))).toBe(
       "2001:db8::5",
     );
+  });
+});
+
+// ── Auto-kind + container child nodes (#1139) ─────────────────────────────────────────────────────
+
+/** A host block carrying only what the kind inference reads — the rest is irrelevant to the rule. */
+function kindHost(host: Partial<AgentReportHost>): AgentReportHost {
+  return AgentReportSchema.parse({ ...V1_REPORT, host: { hostname: "h", ...host } }).host;
+}
+
+describe("inferNodeKind — the CREATE-branch proposal (#1139)", () => {
+  test("a POSITIVE bare-metal finding is PHYSICAL_HOST", () => {
+    expect(inferNodeKind(kindHost({ virtualization: { type: "none" } }))).toBe("PHYSICAL_HOST");
+  });
+
+  test("every hypervisor is a VM — including the `other` catch-all", () => {
+    for (const type of ["kvm", "vmware", "hyperv", "xen", "other"] as const) {
+      expect(inferNodeKind(kindHost({ virtualization: { type } }))).toBe("VM");
+    }
+  });
+
+  test("the container runtimes are CONTAINER", () => {
+    for (const type of ["docker", "lxc", "wsl"] as const) {
+      expect(inferNodeKind(kindHost({ virtualization: { type } }))).toBe("CONTAINER");
+    }
+  });
+
+  test("NO evidence proposes nothing — the caller keeps today's default", () => {
+    // "the probe did not run" is not "bare metal". Guessing here silently pre-empts the human's call.
+    expect(inferNodeKind(kindHost({ chassis: "unknown" }))).toBeUndefined();
+    expect(inferNodeKind(kindHost({}))).toBeUndefined();
+  });
+
+  test("chassis answers only when no virtualization block did (a non-Linux collector)", () => {
+    expect(inferNodeKind(kindHost({ chassis: "vm" }))).toBe("VM");
+    expect(inferNodeKind(kindHost({ chassis: "container" }))).toBe("CONTAINER");
+    for (const chassis of ["server", "desktop", "laptop"] as const) {
+      expect(inferNodeKind(kindHost({ chassis }))).toBe("PHYSICAL_HOST");
+    }
+  });
+
+  test("virtualization WINS over chassis — a guest inherits its hypervisor's synthetic board", () => {
+    expect(inferNodeKind(kindHost({ chassis: "server", virtualization: { type: "kvm" } }))).toBe(
+      "VM",
+    );
+  });
+});
+
+describe("containerExternalId — the identity key, as permanent as the host one (#1139)", () => {
+  test("scopes the container's NAME to its host's externalId", () => {
+    expect(containerExternalId("9f8d7c6b", "web")).toBe("9f8d7c6b/container/web");
+  });
+
+  test("the same name on the same host is the SAME key — a recreate never mints a duplicate", () => {
+    expect(containerExternalId("m1", "api")).toBe(containerExternalId("m1", "api"));
+  });
+
+  test("the same name on ANOTHER host is a DIFFERENT key", () => {
+    expect(containerExternalId("m1", "api")).not.toBe(containerExternalId("m2", "api"));
+  });
+
+  test("can never collide with a host's own externalId (machine-ids carry no `/`)", () => {
+    expect(containerExternalId("m1", "api")).not.toBe("m1");
+    expect(containerExternalId("m1", "api")).toContain("/container/");
+  });
+});
+
+describe("containerNodeStatus — a reported liveness fact, never curation (#1139)", () => {
+  test("a running container is ONLINE", () => {
+    expect(containerNodeStatus("running")).toBe("ONLINE");
+  });
+
+  test("anything the runtime says is not running is OFFLINE", () => {
+    for (const state of ["exited", "dead", "paused", "created", "removing", "restarting"] as const) {
+      expect(containerNodeStatus(state)).toBe("OFFLINE");
+    }
+  });
+
+  test("a state this build does not recognise is UNKNOWN, never a guess", () => {
+    expect(containerNodeStatus("unknown")).toBe("UNKNOWN");
+    expect(containerNodeStatus(undefined)).toBe("UNKNOWN");
+  });
+});
+
+describe("PLAUSIBLE_EDGE_TARGETS already anticipates the agent's edge (#1139)", () => {
+  test("CONTAINER RUNS_ON PHYSICAL_HOST and CONTAINER RUNS_ON VM are both plausible", () => {
+    // The agent opens exactly this edge; if the table did not already allow it every report would
+    // log an "implausible edge" warning for a relationship the product was designed around.
+    expect(PLAUSIBLE_EDGE_TARGETS.RUNS_ON?.CONTAINER).toContain("PHYSICAL_HOST");
+    expect(isPlausibleEdge("RUNS_ON", "CONTAINER", "PHYSICAL_HOST")).toBe(true);
+    expect(isPlausibleEdge("RUNS_ON", "CONTAINER", "VM")).toBe(true);
+  });
+});
+
+describe("host.containers[] — additive, optional, degrade-never-reject (#1139)", () => {
+  const withContainers = (containers: unknown) =>
+    AgentReportSchema.parse({
+      ...V1_REPORT,
+      host: { ...V1_REPORT.host, containers },
+    }).host.containers;
+
+  test("carries the identity, the image and the published ports", () => {
+    expect(
+      withContainers([
+        {
+          name: "lazyit-api",
+          id: "3f2a1b0c9d8e",
+          image: "ghcr.io/acme/api:1.4.0",
+          imageDigest: "sha256:abc123",
+          state: "running",
+          ports: [{ containerPort: 3001, hostPort: 8081, hostIp: "0.0.0.0", protocol: "tcp" }],
+        },
+      ]),
+    ).toEqual([
+      {
+        name: "lazyit-api",
+        id: "3f2a1b0c9d8e",
+        image: "ghcr.io/acme/api:1.4.0",
+        imageDigest: "sha256:abc123",
+        state: "running",
+        ports: [{ containerPort: 3001, hostPort: 8081, hostIp: "0.0.0.0", protocol: "tcp" }],
+      },
+    ]);
+  });
+
+  test("an unknown runtime state degrades to `unknown` — never a 400 on the whole host", () => {
+    expect(withContainers([{ name: "c1", state: "hibernating" }])?.[0]?.state).toBe("unknown");
+  });
+
+  test("a nameless or malformed element is DROPPED, the rest of the host still lands", () => {
+    expect(withContainers([{ name: "keep" }, { name: "  " }, "not-an-object", 7, null])).toEqual([
+      { name: "keep" },
+    ]);
+  });
+
+  test("the set is TRUNCATED past the cap, never rejected", () => {
+    const many = Array.from({ length: AGENT_CONTAINERS_MAX + 40 }, (_, i) => ({ name: `c${i}` }));
+    expect(withContainers(many)).toHaveLength(AGENT_CONTAINERS_MAX);
+  });
+
+  test("an EMPTY list is a POSITIVE finding — `this host runs no containers` (not `omitted`)", () => {
+    // The distinction is load-bearing: an ABSENT key means the agent never probed and the server must
+    // touch nothing, while `[]` means the probe ran and found none, which retires the child nodes.
+    expect(withContainers([])).toEqual([]);
+    expect(AgentReportSchema.parse(V1_REPORT).host.containers).toBeUndefined();
+  });
+
+  test("a dropped element is recorded as SKEW, so the degradation is never silent", () => {
+    const raw = { ...V1_REPORT, host: { ...V1_REPORT.host, containers: [{ name: "" }] } };
+    const { coercedPaths, droppedPaths } = agentReportSkewPaths(raw, AgentReportSchema.parse(raw));
+    expect([...coercedPaths, ...droppedPaths].join(" ")).toContain("host.containers");
   });
 });
 
