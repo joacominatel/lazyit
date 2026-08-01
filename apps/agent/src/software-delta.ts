@@ -49,10 +49,11 @@ export interface SoftwareWireFields {
 /**
  * Does this ack come from a server that understands the three-state contract (#1142)?
  *
- * The ack body is remote input and is read loosely by the agent (two fields off the JSON), so this
- * accepts a LITERAL `true` and nothing else: a truthy string, a `1`, a missing body and an ack that
- * failed to parse all read as "not proven". Getting this wrong in the permissive direction is the one
- * mistake that costs an operator their inventory, so it is deliberately the strictest read in the file.
+ * The ack body is remote input and the agent reads it loosely — named keys off the parsed JSON, never
+ * a schema — so this accepts a LITERAL `true` and nothing else: a truthy string, a `1`, a missing body
+ * and an ack that failed to parse all read as "not proven". Getting this wrong in the permissive
+ * direction is the one mistake that costs an operator their inventory, so it is deliberately the
+ * strictest read in the file.
  *
  * It is also how the handshake heals DOWNWARDS. An instance rolled back below #1142 stops sending the
  * key, this returns false for that ack, the agent forgets the evidence, and its next report carries
