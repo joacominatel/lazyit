@@ -423,7 +423,7 @@ export class InfraController {
   @UseGuards(HumanOnlyGuard)
   @ApiOperation({
     summary:
-      'Save an auto-confirm rule (ADR-0074 §1 amendment, #1145). NOT RETROACTIVE: rules are evaluated only on reports that arrive AFTER they are saved, so proposals already in the review tray are never confirmed behind the operator. A rule MUST state at least one condition that can rule a proposal OUT — a hostname glob carrying a literal character (`*`, `**` and `*?*` match every name there is, so they state nothing), a subnet narrower than `/0`, or the kind the server proposed. A rule whose conditions exclude nothing IS blanket auto-confirm however it is spelled, and ADR-0074 §1 rejected that. `trackAsAsset` defaults ON for a HOST rule and OFF for any rule that can also reach a container child (CONTAINER or ANY). The authoring user is recorded and the Assets an auto-confirm mints are attributed to them. A key a human already DISCARDED is never auto-confirmed on a later report.',
+      'Save an auto-confirm rule (ADR-0074 §1 amendment, #1145). NOT RETROACTIVE: rules are evaluated only on reports that arrive AFTER they are saved, so proposals already in the review tray are never confirmed behind the operator. A rule MUST state at least one condition that can rule a proposal OUT — a hostname glob carrying a LITERAL character, a subnet narrower than `/0`, or the kind the server proposed. A glob made only of wildcards is refused: most of them (`*`, `**`, `*?*`) match every name there is, and the few that do narrow (`?` alone matches only one-character names) are refused with them conservatively, so "carries a literal" stays a line you can check by looking. `0.0.0.0/0` is refused on the exact claim — it is every address there is. A rule left with no condition that can exclude anything IS blanket auto-confirm however it is spelled, and ADR-0074 §1 rejected that. `trackAsAsset` defaults ON for a HOST rule and OFF for any rule that can also reach a container child (CONTAINER or ANY). The authoring user is recorded and the Assets an auto-confirm mints are attributed to them. A key a human already DISCARDED is never auto-confirmed on a later report.',
   })
   @ApiCreatedResponse({ type: InfraAutoConfirmRuleDto })
   createAutoConfirmRule(
@@ -438,7 +438,7 @@ export class InfraController {
   @UseGuards(HumanOnlyGuard)
   @ApiOperation({
     summary:
-      'Update a rule — including the `enabled` toggle, which is the fastest revocation (a disabled rule stops matching immediately). 400 if the patch would leave the MERGED rule with no condition that can rule a proposal out — nulling the last one, or widening it to an all-wildcard pattern or `/0`, are the same blanket rule spelled three ways.',
+      'Update a rule — including the `enabled` toggle, which is the fastest revocation (a disabled rule stops matching immediately). 400 if the patch would leave the MERGED rule with no condition that can rule a proposal out — nulling the last one, or widening it to a wildcard-only pattern or `/0`. Dropping ONE of several conditions is fine: the rule that survives still excludes proposals, and the check judges the merged rule, not the patch in isolation.',
   })
   @ApiOkResponse({ type: InfraAutoConfirmRuleDto })
   updateAutoConfirmRule(
