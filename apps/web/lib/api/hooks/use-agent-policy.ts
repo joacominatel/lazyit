@@ -21,8 +21,8 @@ export const agentPolicyKey = () => [...infraKeys.all, "agent-policy"] as const;
 export function useAgentPolicy() {
   return useQuery({
     queryKey: agentPolicyKey(),
-    // Wrapped rather than passed bare so TanStack's QueryFunctionContext is never forwarded as the
-    // getter's optional `signal` argument in an unexpected shape (the repo-wide ADR-0067 habit).
+    // Destructured rather than passed bare: `getAgentPolicy` takes an AbortSignal, and handing it
+    // TanStack's whole QueryFunctionContext would type-check as `unknown` and quietly send no signal.
     queryFn: ({ signal }) => getAgentPolicy(signal),
     staleTime: 5 * 60 * 1000,
   });
