@@ -100,6 +100,38 @@ A discovered host also **fills in its own IP address** the moment it reports —
 it. On every later report the IP is refreshed to the current value, **unless you've edited it by hand**
 on the node — a manual IP is treated as yours and the agent never overwrites it.
 
+**Each proposal now arrives already classified.** A newly discovered machine is proposed as a
+**virtual machine**, a **container** or a **physical host**, based on what it reports about itself,
+instead of every server landing as a physical host for you to correct one by one. When the agent
+genuinely can't tell — the probe it relies on isn't installed — it proposes *physical host*, exactly
+as before, rather than guessing. It's only a proposal: the Confirm dialog's **Kind** selector is
+right there, and once you've confirmed a node **no later report ever changes its kind again**, even
+if the machine starts reporting something different.
+
+### Containers show up as their own nodes
+
+If the host runs **Docker** (or a Docker-compatible runtime) and the agent can read its socket, each
+**running** container is proposed as its own **container** node, connected to the server it runs on by
+a **runs-on** link. That link is the point: it's what makes the **blast radius** of a server — "what
+breaks if this box goes down?" — include the containers on it, without you drawing a single
+connection by hand.
+
+A few things worth knowing:
+
+- **Containers are proposals too.** They land in the same Pending review tray, and you confirm or
+  discard them exactly like a server. A busy host can therefore add several proposals at once.
+- **A recreated container is the same node.** Redeploying (`docker compose up`, an image bump) does
+  not create a duplicate — containers are matched by **name** on that host, so your confirmed node,
+  its position and its links survive a redeploy.
+- **A container that stops** disappears from the report and its node is marked **offline**. It is
+  never removed behind your back — removing it is your call, with the same Discard action. If it comes
+  back under the same name, its node simply goes online again.
+- **Only running containers are reported.** A stopped one-shot job isn't inventory worth mapping.
+- **Nothing happens on hosts without Docker**, and an agent that can't read the container socket
+  simply reports no containers — it never removes the container nodes you already have.
+- The container's **image, digest and published ports** are recorded with the node's reported facts.
+  No screen displays them today.
+
 Once confirmed, a host keeps receiving fresh facts from the agent, but your edits — its name, kind,
 position, IP and connections — are yours and the agent never overwrites them. The reported inventory —
 operating system, CPU, memory, disks, network interfaces, serial and installed software — shows as a
@@ -116,8 +148,14 @@ without touching anything you own (the asset's name, serial and model are never 
 - **What kind of machine it is** — server, desktop, laptop, virtual machine or container, and the
   virtualization it runs under (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) when it can tell. When
   it *can't* tell — the probe it relies on isn't installed — it reports **unknown** rather than
-  guessing, and says so in the notes below. lazyit stores this alongside the host's other reported
-  facts; today nothing displays it in the interface.
+  guessing, and says so in the notes below. This is what lazyit uses to propose the **kind** of a
+  newly discovered machine (see Pending review above); the raw values are stored alongside the host's
+  other reported facts, and no screen displays them directly.
+- **The containers it runs** — name, image, image digest, state and published ports, for each
+  **running** container, when the host runs Docker (or a compatible runtime) and the agent can read
+  its socket. Each one becomes its own node linked to the host (see Pending review above). This is
+  still the local machine describing itself: the agent asks the runtime on that host what *it* is
+  running — it never scans your network.
 - **When it last booted** — a single timestamp, refreshed on each report, with no history kept: it's
   an inventory fact ("did this box actually reboot after the patch window?"), not uptime monitoring.
   Stored with the host's other reported facts and, like the machine type, not shown on any screen yet.
@@ -147,7 +185,8 @@ metrics.
   only to that instance, and it works fully offline. Tokens are revocable any time from
   [Service accounts](/help/users-permissions-service-accounts).
 - **Report limits.** Each token is limited two ways: **how often** it may report (default 120 times
-  per minute) and **how many newly discovered servers** it may add (default 100 per hour). Together
+  per minute) and **how many newly discovered nodes** it may add (default 100 per hour — a discovered
+  container counts the same as a discovered server, since both are rows in your inventory). Together
   they protect your database from a runaway or stolen agent — a token can no longer fill it with
   proposals. Both defaults assume roughly a **100-server** estate sharing one install token, so a
   normal rollout never hits them: all 100 servers can be discovered inside the first hour. Two things
@@ -170,7 +209,9 @@ before versioning was added) report as `dev` and never show the badge.
 
 **Upgrading your instance never breaks the agents already installed.** You do not have to re-install
 anything: an older agent keeps reporting exactly as it did, and every fact it sends lands exactly where
-it did before.
+it did before. In particular, **nothing you already have is re-classified**: the machine-kind proposal
+above applies only to servers discovered *from now on*, so every node in your inventory keeps the kind
+it has, and an older agent that reports no containers never removes container nodes.
 
 **From this version onwards, the reverse also holds.** A *newer* agent reporting to an older server is
 accepted: the server takes every fact it understands and simply notes the ones it doesn't, rather than
