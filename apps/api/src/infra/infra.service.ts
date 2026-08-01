@@ -916,8 +916,10 @@ export class InfraService {
    *
    *  1. **Does the package list change?** `replace` compares the incoming fingerprint against the
    *     stored one; `clear` is satisfied only when the node holds no list; `preserve` is trivially
-   *     satisfied, because it keeps the stored value literally. A `replace` whose report carried no
-   *     fingerprint is treated as CHANGED — an unverifiable claim writes, it never skips.
+   *     satisfied, because it keeps the stored value literally. The fingerprint compared on `replace`
+   *     is the SERVER's own, taken over the list that arrived, so a report that sent none is compared
+   *     just the same; it is a `replace` against a STORED blob carrying no fingerprint that cannot be
+   *     corroborated and therefore writes.
    *  2. **Does anything else change?** The rest of the blob is compared directly, with only the two
    *     per-report timestamps taken out ({@link withoutVolatileReportFacts}).
    *
