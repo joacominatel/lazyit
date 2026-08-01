@@ -24,7 +24,11 @@ import {
   type AgentReportAck,
   type AgentReportHost,
   type AttachInfraSecret,
+  type BulkConfirmInfraNodes,
+  type BulkDiscardInfraNodes,
   type ConfirmInfraNode,
+  type InfraBulkResponse,
+  type InfraBulkResult,
   type CreateInfraEdge,
   type CreateInfraNode,
   type HostIdentityEvidence,
@@ -34,6 +38,7 @@ import {
   type InfraImpactResponse,
   type InfraNodeChild,
   type InfraNodeKind,
+  type InfraAutoConfirmCandidate,
   type InfraNodeState,
   type InfraNodeStatus,
   type InfraSecretRef,
@@ -53,6 +58,7 @@ import { appVersion } from '../common/export-provenance';
 import type { Principal } from '../auth/principal';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
+import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 
 /** The node columns + linked Asset name `projectInfraNode` needs (the search projection shape). */
 const SEARCH_NODE_SELECT = {
@@ -97,6 +103,9 @@ export class InfraService {
     private readonly enrollment: InfraNodeEnrollmentLimiter,
     // The #1141 cloned-machine-id nudge — the ONE automatic action the collision detection takes.
     private readonly notifications: NotificationsService,
+    // The #1145 operator-authored auto-confirm rules. Consulted on the CREATE branches ONLY (never on
+    // a refresh, never on the clone branch) — that is what makes a saved rule non-retroactive.
+    private readonly autoConfirm: InfraAutoConfirmService,
   ) {}
 
   /**
@@ -312,13 +321,15 @@ export class InfraService {
     // New host: a PENDING proposal in the review tray. No backing Asset until a human confirms (§3).
     // Its `ipAddress` is seeded from the report (source=AGENT) so the topology card shows the IP with
     // zero hand-entry — an IP is a display fact; setting it pre-confirm does NOT bypass the human gate.
+    // The PROPOSAL (#1139). `undefined` means the report carried no evidence — the probe did not run,
+    // or the agent predates contract v2 — so the pre-#1139 default stands rather than a guess dressed
+    // as a finding. Only the create branch reads this. Hoisted out of the `data` literal because the
+    // #1145 rule matcher is asked about the kind the server PROPOSED, never one the agent chose.
+    const proposedKind = inferNodeKind(report.host) ?? 'PHYSICAL_HOST';
     try {
       const created = await this.prisma.infraNode.create({
         data: {
-          // The PROPOSAL (#1139). `undefined` means the report carried no evidence — the probe did
-          // not run, or the agent predates contract v2 — so the pre-#1139 default stands rather than
-          // a guess dressed as a finding. Only the create branch reads this.
-          kind: inferNodeKind(report.host) ?? 'PHYSICAL_HOST',
+          kind: proposedKind,
           label: report.host.hostname,
           status: 'ONLINE',
           source: 'AGENT',
@@ -335,8 +346,16 @@ export class InfraService {
         select: { id: true, state: true },
       });
       void this.syncNodeToSearch(created.id);
+      // The ONE place a saved rule can act on a HOST (#1145): a node that has just been proposed, in
+      // the same request that proposed it. Nothing here can reach a node that already existed.
+      const state = await this.autoConfirmProposal(created.id, created.state, {
+        hostname: report.host.hostname,
+        ipAddress: primaryIpAddress ?? null,
+        kind: proposedKind,
+        isContainerChild: false,
+      });
       return this.reconcileContainers(
-        { nodeId: created.id, state: created.state, accepted: true },
+        { nodeId: created.id, state, accepted: true },
         report,
         now,
         principal,
@@ -867,6 +886,15 @@ export class InfraService {
       });
       childIds.push(created.id);
       void this.syncNodeToSearch(created.id);
+      // The child half of #1145. A container child is offered to the matcher under its CONTAINER
+      // NAME, with no IP of its own — the host owns the address, and pretending the child reported
+      // one would let a subnet rule confirm containers on the strength of their host's wire.
+      await this.autoConfirmProposal(created.id, 'PENDING', {
+        hostname: container.name,
+        ipAddress: null,
+        kind: 'CONTAINER',
+        isContainerChild: true,
+      });
     }
     if (budgetSpent) {
       // Says exactly what happened, no more: the containers that already had nodes were refreshed,
@@ -970,6 +998,60 @@ export class InfraService {
           throw err;
         }
       }
+    }
+  }
+
+  /**
+   * Apply an operator-authored auto-confirm rule to a node that was JUST proposed (ADR-0074 §1
+   * amendment, #1145). Returns the state the node is now in, for the ack.
+   *
+   * Called from exactly two places, both of them a `create` this method's caller performed in the
+   * same request: the unknown-host branch of {@link ingestReport} and the new-child branch of
+   * {@link applyContainerTopology}. It is deliberately NOT called from the known-host refresh (a
+   * proposal already in the tray must never confirm behind the operator who is looking at it — that
+   * is the non-retroactivity promise, and it is kept by where this is called, not by a flag) and NOT
+   * from {@link ingestCollidingHost} (a cloned machine-id exists to be SEEN as two rows; a rule
+   * matching the hostname both clones share would confirm the very duplicate #1141 exists to surface).
+   *
+   * The confirm goes through {@link confirmNode} — the same method a human's tray click calls, with
+   * the RULE AUTHOR's principal. That is what keeps §8's containment argument true of an automatic
+   * confirm: the Asset it mints is attributed to the operator who wrote the rule, exactly as a
+   * hand-confirmed one is attributed to the operator who clicked. A rule whose author has since been
+   * deleted still fires, with no principal — stated rather than hidden, and visible on the rule.
+   *
+   * NEVER FAILS THE REPORT, on the same reasoning as the container reconcile: the node row is already
+   * durable, so a failure here degrades to a node that stays PENDING — which is where it was going
+   * anyway, and which the operator can act on — while throwing would make the host vanish from the
+   * inventory.
+   */
+  private async autoConfirmProposal(
+    nodeId: string,
+    currentState: InfraNodeState,
+    candidate: InfraAutoConfirmCandidate,
+  ): Promise<InfraNodeState> {
+    try {
+      const resolved = await this.autoConfirm.resolve(candidate);
+      if (!resolved) return currentState;
+      await this.confirmNode(
+        nodeId,
+        {
+          trackAsAsset: resolved.trackAsAsset,
+          ...(resolved.confirmAsKind !== null
+            ? { kind: resolved.confirmAsKind }
+            : {}),
+        },
+        resolved.author,
+      );
+      await this.autoConfirm.recordMatch(resolved.ruleId);
+      this.logger.log(
+        `Auto-confirmed "${candidate.hostname}" (${nodeId}) on rule "${resolved.ruleName}" (${resolved.ruleId}).`,
+      );
+      return 'CONFIRMED';
+    } catch (err) {
+      this.logger.warn(
+        `Auto-confirm rules could not be applied to ${candidate.hostname} (${nodeId}) — it stays PENDING in the review tray. ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return currentState;
     }
   }
 
@@ -1102,6 +1184,132 @@ export class InfraService {
     // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
     void this.syncNodeToSearch(updated.id);
     return this.getNodeDetail(id, principal);
+  }
+
+  /**
+   * Confirm MANY PENDING proposals in one request (ADR-0074 §1 amendment, #1145) — the tray's answer
+   * to a Docker host that enrols itself plus one CONTAINER child per running container.
+   *
+   * It DELEGATES, per item, to {@link confirmNode}: the same method the single tray click calls, with
+   * the same optional `trackAsAsset`/`kind`/`label` overrides. Bulk confirm is therefore incapable of
+   * having semantics of its own — no second Asset-minting path, no second serial promotion, no second
+   * idempotency rule to keep in step. What is genuinely new is only the batching.
+   *
+   * Overrides are PER ITEM, not per batch, because `label` is not a batch concept and because the
+   * confirmation a host and its containers want differs: the tray's default is `trackAsAsset` ON for a
+   * host and OFF for a child (`defaultTrackAsAsset`), and a per-batch flag could not express both.
+   *
+   * PER-ITEM OUTCOMES, not one all-or-nothing verdict — the degrade-never-reject posture the report
+   * path takes, applied to a human action. One node failing (a serial that collides with an existing
+   * Asset, a node another operator discarded a second earlier) must not discard the thirty-nine that
+   * succeeded and leave the operator unable to tell which. An already-CONFIRMED node reads `skipped`
+   * rather than failing, mirroring the single confirm's idempotency; a vanished one reads `notFound`.
+   *
+   * SEQUENTIAL, not `Promise.all`: each item can mint an Asset and re-index, so a 200-item batch fired
+   * at once is a thundering herd against the same tables — and a failure that is attributable to one
+   * item is worth more here than the milliseconds concurrency would buy.
+   */
+  async bulkConfirmNodes(
+    dto: BulkConfirmInfraNodes,
+    principal?: Principal,
+  ): Promise<InfraBulkResponse> {
+    // One read for the whole batch: which of these ids are live, and what state/label they carry. The
+    // soft-delete extension scopes it, so a discarded node simply does not come back.
+    const rows = await this.prisma.infraNode.findMany({
+      where: { id: { in: dto.items.map((item) => item.id) } },
+      select: { id: true, label: true, state: true },
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+
+    const results: InfraBulkResult[] = [];
+    for (const item of dto.items) {
+      const row = byId.get(item.id);
+      if (!row) {
+        results.push({
+          id: item.id,
+          outcome: 'notFound',
+          label: null,
+          message: null,
+        });
+        continue;
+      }
+      if (row.state !== 'PENDING') {
+        results.push({
+          id: item.id,
+          outcome: 'skipped',
+          label: row.label,
+          message: null,
+        });
+        continue;
+      }
+      const { id, ...overrides } = item;
+      try {
+        await this.confirmNode(id, overrides, principal);
+        results.push({
+          id,
+          outcome: 'applied',
+          label: row.label,
+          message: null,
+        });
+      } catch (err) {
+        results.push({
+          id,
+          outcome: 'failed',
+          label: row.label,
+          // The message the single action would have returned, verbatim — the tray shows it beside
+          // the row's name, which is the difference between "3 failed" and something actionable.
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return this.tallyBulk(results);
+  }
+
+  /**
+   * Discard MANY PENDING proposals in one request (#1145). Discard is still the EXISTING soft delete
+   * (ADR-0074 §3: there is no reject endpoint) — a discarded proposal is restorable and its history is
+   * kept — so this is `removeNode`'s semantics applied to a set, not a new lifecycle.
+   *
+   * One `updateMany` over the ids that are actually live, rather than a loop: unlike confirm there is
+   * no per-node work to attribute, so the whole batch is one statement and one pass of search removals
+   * (fire-and-forget, ADR-0035). An id that is already gone reads `notFound` and never widens the
+   * write, so a stale tray tab can never resurrect-then-delete anything.
+   */
+  async bulkDiscardNodes(dto: BulkDiscardInfraNodes): Promise<InfraBulkResponse> {
+    const rows = await this.prisma.infraNode.findMany({
+      where: { id: { in: dto.ids } },
+      select: { id: true, label: true },
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+
+    if (rows.length > 0) {
+      await this.prisma.infraNode.updateMany({
+        where: { id: { in: rows.map((row) => row.id) } },
+        data: { deletedAt: new Date() },
+      });
+      // Off the map ⇒ out of the search index, exactly like the single delete.
+      for (const row of rows) this.search.remove('infra', row.id);
+    }
+
+    return this.tallyBulk(
+      dto.ids.map((id) => {
+        const row = byId.get(id);
+        return row
+          ? { id, outcome: 'applied' as const, label: row.label, message: null }
+          : { id, outcome: 'notFound' as const, label: null, message: null };
+      }),
+    );
+  }
+
+  /** Count the per-item outcomes so the caller's toast never re-tallies them (one definition). */
+  private tallyBulk(results: InfraBulkResult[]): InfraBulkResponse {
+    return {
+      applied: results.filter((r) => r.outcome === 'applied').length,
+      skipped: results.filter((r) => r.outcome === 'skipped').length,
+      notFound: results.filter((r) => r.outcome === 'notFound').length,
+      failed: results.filter((r) => r.outcome === 'failed').length,
+      results,
+    };
   }
 
   /**
