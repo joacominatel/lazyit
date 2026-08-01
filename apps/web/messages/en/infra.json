@@ -61,7 +61,7 @@
     },
     "targetLabel": "Merge into",
     "targetPlaceholder": "Pick a server",
-    "targetDescription": "The server you pick keeps its own name, kind, position, owner and asset link — only the reporting key moves.",
+    "targetDescription": "The server you pick keeps its own name, kind, position, owner and asset link — only the reporting key moves. If it already reports through an agent of its own, that key is replaced: a host still checking in with it will come back as a new pending server.",
     "submit": "Merge",
     "mergedToast": "Server merged.",
     "error": "Could not merge this server."
