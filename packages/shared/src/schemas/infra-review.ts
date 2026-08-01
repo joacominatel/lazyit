@@ -49,6 +49,7 @@ export const INFRA_BULK_REVIEW_MAX = 200;
 export const BulkConfirmInfraNodeItemSchema = ConfirmInfraNodeSchema.extend({
   id: z.cuid(),
 });
+export type BulkConfirmInfraNodeItem = z.infer<typeof BulkConfirmInfraNodeItemSchema>;
 
 /** Duplicate ids in one batch would double-charge the per-item work and confuse the result counts. */
 function allUnique(ids: readonly string[]): boolean {
@@ -261,6 +262,18 @@ export const UpdateInfraAutoConfirmRuleSchema = requireAtLeastOneKey(
 );
 export type UpdateInfraAutoConfirmRule = z.infer<typeof UpdateInfraAutoConfirmRuleSchema>;
 
+/**
+ * The FIELDS a match reads — the wire shape's condition half, and nothing else.
+ *
+ * Structural rather than the whole `InfraAutoConfirmRule`, so the API can evaluate a DB row directly
+ * (whose timestamps are `Date`s, not the wire's ISO strings) without a cast that would quietly let a
+ * mis-shaped object through. It also states, in the type, exactly which fields decide a match.
+ */
+export type InfraAutoConfirmConditions = Pick<
+  InfraAutoConfirmRule,
+  "enabled" | "appliesTo" | "hostnamePattern" | "subnetCidr" | "reportedKind"
+>;
+
 /** What a rule is evaluated AGAINST: one freshly-proposed node, before it is written. */
 export interface InfraAutoConfirmCandidate {
   /** The reported hostname (a host) or container name (a child) — what becomes the node's label. */
@@ -283,7 +296,7 @@ export interface InfraAutoConfirmCandidate {
  * tray, which is where it was going anyway.
  */
 export function matchesAutoConfirmRule(
-  rule: InfraAutoConfirmRule,
+  rule: InfraAutoConfirmConditions,
   candidate: InfraAutoConfirmCandidate,
 ): boolean {
   if (!rule.enabled) return false;
@@ -309,10 +322,10 @@ export function matchesAutoConfirmRule(
  * exactly that reasoning. The caller supplies the order (the API lists oldest-first, deterministically)
  * and the UI shows it, so the operator can see which rule answers first.
  */
-export function firstMatchingAutoConfirmRule(
-  rules: readonly InfraAutoConfirmRule[],
+export function firstMatchingAutoConfirmRule<T extends InfraAutoConfirmConditions>(
+  rules: readonly T[],
   candidate: InfraAutoConfirmCandidate,
-): InfraAutoConfirmRule | undefined {
+): T | undefined {
   return rules.find((rule) => matchesAutoConfirmRule(rule, candidate));
 }
 
