@@ -31,6 +31,10 @@ import { RelatedArticlesPanel } from "@/components/related-articles-panel";
 import { AssetDocumentsPanel } from "./asset-documents-panel";
 import { AssetLocationPath } from "./asset-location-path";
 import {
+  AgentContainerPanel,
+  getAgentContainerFacts,
+} from "./agent-container-facts";
+import {
   AgentInventoryPanel,
   getAgentInventory,
 } from "./agent-inventory-panel";
@@ -201,6 +205,12 @@ export function AssetDetailView({ id }: { id: string }) {
   const agentInventory = getAgentInventory(
     asset.specs as Record<string, unknown> | null,
   );
+  // A CONTAINER child node (#1139) confirmed with asset tracking on — its blob is `{ container }`,
+  // never `{ host }`, so the inventory arm declines it and the custom-fields grid below would
+  // `JSON.stringify` the whole thing under a heading that means "a human typed this".
+  const agentContainer = agentInventory
+    ? null
+    : getAgentContainerFacts(asset.specs as Record<string, unknown> | null);
 
   function handleRelease(assignmentId: string) {
     setReleasingId(assignmentId);
@@ -420,6 +430,8 @@ export function AssetDetailView({ id }: { id: string }) {
 
       {agentInventory ? (
         <AgentInventoryPanel inventory={agentInventory} />
+      ) : agentContainer ? (
+        <AgentContainerPanel facts={agentContainer} />
       ) : (
         <DetailPanel title={t("customFieldsTitle")}>
           {specsEntries.length === 0 ? (

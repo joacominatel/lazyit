@@ -90,6 +90,36 @@ export class InfraNodeEnrollmentLimiter {
    */
   assertWithinBudget(principal?: Principal): void {
     const key = this.reporterKey(principal);
+    if (this.charge(key)) return;
+    this.logger.warn(
+      `infra report refused: ${key} has spent its budget of ${this.maxPerWindow} new node(s) this window. Known hosts keep reporting normally.`,
+    );
+    throw new HttpException(
+      'Too many newly discovered hosts in a short time. Already-known hosts keep reporting normally; new ones resume next window, or raise INFRA_REPORT_MAX_NEW_NODES_PER_WINDOW.',
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
+  }
+
+  /**
+   * Charge one enrollment and REPORT whether it fit, instead of throwing (#1139) — the shape the
+   * container child nodes need.
+   *
+   * Same key, same bucket, same rate as {@link assertWithinBudget}: a child node is a row on the same
+   * table, so giving it a budget of its own would defeat the limit the moment one report can enrol
+   * N+1 rows. What differs is the FAILURE MODE, and only because the caller's position differs. A
+   * host is enrolled before anything is durable, so refusing it means refusing the report — a 429 the
+   * agent retries. Children are reconciled AFTER the host row is committed, so throwing there would
+   * turn a partial success into a whole-report failure the agent reads as "nothing landed" and
+   * retries identically forever, while the operator loses the host too. Refusing quietly instead
+   * lands the host, enrols as many children as the window allows, and picks the rest up next report
+   * — the same "recovers by waiting, with no operator action" property #1134 chose a rate for.
+   */
+  tryCharge(principal?: Principal): boolean {
+    return this.charge(this.reporterKey(principal));
+  }
+
+  /** The bucket arithmetic both entry points share: charge one slot, or report the window is spent. */
+  private charge(key: string): boolean {
     const now = Date.now();
 
     // Opportunistic prune so the map cannot grow unbounded across many reporters.
@@ -98,20 +128,13 @@ export class InfraNodeEnrollmentLimiter {
     const bucket = this.buckets.get(key);
     if (!bucket || now - bucket.windowStart > this.windowMs) {
       this.buckets.set(key, { count: 1, windowStart: now });
-      return;
+      return true;
     }
 
-    if (bucket.count >= this.maxPerWindow) {
-      this.logger.warn(
-        `infra report refused: ${key} has enrolled ${bucket.count} new node(s) this window (max ${this.maxPerWindow}). Known hosts keep reporting normally.`,
-      );
-      throw new HttpException(
-        'Too many newly discovered hosts in a short time. Already-known hosts keep reporting normally; new ones resume next window, or raise INFRA_REPORT_MAX_NEW_NODES_PER_WINDOW.',
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+    if (bucket.count >= this.maxPerWindow) return false;
 
     bucket.count += 1;
+    return true;
   }
 
   /**

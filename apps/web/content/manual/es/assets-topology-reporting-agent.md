@@ -106,6 +106,41 @@ Un host descubierto también **completa su propia dirección IP** apenas reporta
 escribas. En cada reporte posterior la IP se actualiza al valor actual, **salvo que la hayas editado a
 mano** en el nodo: una IP manual se considera tuya y el agente nunca la sobrescribe.
 
+**Ahora cada propuesta llega ya clasificada.** Una máquina recién descubierta se propone como
+**máquina virtual**, **contenedor** o **host físico**, según lo que ella misma reporta, en vez de que
+todos los servidores aterricen como host físico para que los corrijas uno por uno. Cuando el agente
+realmente no puede determinarlo — la herramienta que necesita no está instalada — propone *host
+físico*, igual que antes, en vez de adivinar. Es solo una propuesta: el selector **Tipo** del diálogo
+de confirmación está ahí mismo, y una vez que confirmaste un nodo **ningún reporte posterior vuelve a
+cambiarle el tipo**, aunque la máquina empiece a reportar otra cosa.
+
+### Los contenedores aparecen como nodos propios
+
+Si el host corre **Docker** (o un runtime compatible) y el agente puede leer su socket, cada
+contenedor **en ejecución** se propone como su propio nodo de tipo **contenedor**, conectado al
+servidor donde corre por un vínculo **corre en**. Ese vínculo es el punto: es lo que hace que el
+**radio de impacto** de un servidor — "¿qué se rompe si se cae este equipo?" — incluya los
+contenedores que tiene arriba, sin que dibujes una sola conexión a mano.
+
+Algunas cosas que conviene saber:
+
+- **Los contenedores también son propuestas.** Llegan a la misma bandeja de Revisión pendiente, y los
+  confirmás o descartás igual que a un servidor. Un host cargado puede sumar varias propuestas de una.
+- **Un contenedor recreado es el mismo nodo.** Redesplegar (`docker compose up`, un cambio de imagen)
+  no crea un duplicado: los contenedores se identifican por **nombre** dentro de ese host, así que tu
+  nodo confirmado, su posición y sus vínculos sobreviven al redespliegue.
+- **Un contenedor que se detiene** desaparece del reporte y su nodo queda **fuera de línea**. Nunca se
+  elimina a tus espaldas: eliminarlo es decisión tuya, con la misma acción Descartar. Si vuelve con el
+  mismo nombre, su nodo simplemente vuelve a estar en línea.
+- **Solo se reportan los contenedores en ejecución.** Una tarea puntual ya terminada no es inventario
+  que valga la pena mapear.
+- **En hosts sin Docker no pasa nada**, y un agente que no puede leer el socket de contenedores
+  simplemente no reporta ninguno: nunca elimina los nodos de contenedor que ya tenés.
+- La **imagen, el digest, el id de runtime y los puertos publicados** del contenedor se muestran en el
+  propio nodo, en un panel de solo lectura **Contenedor** — abrí el contenedor en el diagrama o en la
+  lista de Servidores. Si lo confirmaste con el seguimiento como activo encendido, ese mismo panel
+  aparece también en su página de activo.
+
 Una vez confirmado, un host sigue recibiendo datos frescos del agente, pero tus ediciones — su
 nombre, tipo, posición, IP y conexiones — son tuyas y el agente nunca las sobrescribe. El inventario
 reportado — sistema operativo, CPU, memoria, discos, interfaces de red, número de serie y software
@@ -124,8 +159,16 @@ correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin toca
 - **Qué tipo de máquina es** — servidor, escritorio, notebook, máquina virtual o contenedor, y la
   virtualización sobre la que corre (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) cuando puede
   determinarlo. Cuando *no* puede — la herramienta que necesita no está instalada — reporta
-  **desconocido** en vez de adivinar, y lo aclara en las notas de abajo. lazyit lo guarda junto a los
-  demás datos reportados del host; hoy no se muestra en la interfaz.
+  **desconocido** en vez de adivinar, y lo aclara en las notas de abajo. Esto es lo que lazyit usa
+  para proponer el **tipo** de una máquina recién descubierta (ver Revisión pendiente, más arriba);
+  los valores en bruto se guardan junto a los demás datos reportados del host y ninguna pantalla los
+  muestra directamente.
+- **Los contenedores que corre** — nombre, imagen, digest de la imagen, estado y puertos publicados,
+  por cada contenedor **en ejecución**, cuando el host corre Docker (o un runtime compatible) y el
+  agente puede leer su socket. Cada uno se convierte en un nodo propio vinculado al host, con esos
+  datos en un panel **Contenedor** sobre el nodo (ver Revisión pendiente, más arriba). Sigue siendo la
+  máquina local describiéndose a sí misma: el agente le pregunta al runtime de ese host qué está
+  corriendo *él* — nunca escanea tu red.
 - **Cuándo arrancó por última vez** — una sola marca de tiempo, actualizada en cada reporte y sin
   histórico: es un dato de inventario ("¿este equipo realmente se reinició después de la ventana de
   parches?"), no monitoreo de uptime. Se guarda junto a los demás datos reportados del host y, igual
@@ -158,14 +201,17 @@ y no envía métricas.
   el agente solo se comunica con esa instancia y funciona totalmente sin conexión. Los tokens se pueden
   revocar en cualquier momento desde [Cuentas de servicio](/help/users-permissions-service-accounts).
 - **Límites de reporte.** Cada token está limitado de dos formas: **cada cuánto** puede reportar (por
-  defecto 120 veces por minuto) y **cuántos servidores recién descubiertos** puede agregar (por
-  defecto 100 por hora). Juntos protegen tu base de datos de un agente descontrolado o robado — un
+  defecto 120 veces por minuto) y **cuántos nodos recién descubiertos** puede agregar (por defecto 100
+  por hora — un contenedor descubierto cuenta igual que un servidor descubierto, porque ambos son
+  filas de tu inventario). Juntos protegen tu base de datos de un agente descontrolado o robado — un
   token ya no puede llenarla de propuestas. Ambos valores por defecto asumen un parque de unos **100
   servidores** compartiendo un mismo token de instalación, así que un despliegue normal nunca los
   alcanza: los 100 servidores pueden descubrirse dentro de la primera hora. Dos cosas conviene saber.
-  Un servidor que **ya confirmaste sigue reportando pase lo que pase**: alcanzar un límite solo
-  demora los descubrimientos *nuevos*, nunca la disponibilidad ni el inventario de los servidores que
-  ya tenés, así que no puede hacer que tu mapa muestre una caída falsa. Y **no hay que limpiar nada**
+  Un nodo que **ya confirmaste sigue reportando pase lo que pase** — sea servidor o contenedor.
+  Alcanzar un límite solo demora los descubrimientos *nuevos*, nunca la disponibilidad ni el
+  inventario de lo que ya tenés: un contenedor que sigue corriendo nunca se marca fuera de línea
+  solo porque el límite impidió agregar *otro* distinto. No puede hacer que tu mapa muestre una caída
+  falsa. Y **no hay que limpiar nada**
   para recuperarse: un agente rechazado simplemente tiene éxito en su próximo intento, en la ventana
   siguiente. Qué tan llena esté tu bandeja de Pendientes no afecta estos límites en absoluto. ¿Vas a
   desplegar más de 100 servidores de una vez? Dejá que se acomode en un par de horas, o subí
@@ -183,7 +229,10 @@ anteriores al versionado) reportan como `dev` y nunca muestran la insignia.
 
 **Actualizar tu instancia nunca rompe los agentes ya instalados.** No hace falta reinstalar nada: un
 agente más viejo sigue reportando igual que antes, y cada dato que envía aterriza exactamente donde
-aterrizaba.
+aterrizaba. En particular, **nada de lo que ya tenés se reclasifica**: la propuesta de tipo de máquina
+descrita más arriba se aplica solo a los servidores descubiertos *de ahora en adelante*, así que cada
+nodo de tu inventario conserva el tipo que tiene, y un agente viejo que no reporta contenedores nunca
+elimina nodos de contenedor.
 
 **A partir de esta versión también vale el sentido inverso.** Un agente *más nuevo* que reporta a un
 servidor más viejo es aceptado: el servidor toma todos los datos que entiende y simplemente anota los

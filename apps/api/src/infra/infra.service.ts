@@ -7,10 +7,15 @@ import {
 } from '@nestjs/common';
 import {
   agentReportSkewPaths,
+  containerExternalId,
+  containerExternalIdPrefix,
+  containerNodeStatus,
+  inferNodeKind,
   isNewerVersion,
   isPlausibleEdge,
   primaryIp,
   sanitizeSerial,
+  type AgentContainer,
   type AgentReport,
   type AgentReportAck,
   type AgentReportHost,
@@ -184,8 +189,17 @@ export class InfraService {
    * ponytail: no new BullMQ queue for MVP — reports are light; reuse the existing fire-and-forget
    * search sync, add a queue only if report volume ever makes the inline upsert slow.
    *
-   * ponytail: `kind` inference is deferred — the v1 contract carries no reliable virtualization hint,
-   * so every agent host lands as `PHYSICAL_HOST`; the human re-kinds it (VM/CONTAINER/…) on confirm.
+   * KIND IS NOW PROPOSED, NOT DEFAULTED (#1139). Contract v2 carries `host.virtualization` and
+   * `host.chassis`, so the CREATE branch asks the shared `inferNodeKind` mapper what the host IS
+   * instead of landing every one of them as `PHYSICAL_HOST` — a Proxmox host and its eight guests
+   * used to arrive as nine identical boxes an operator re-classified by hand before blast radius
+   * meant anything. A report with no evidence still lands on the old default, and the REFRESH branch
+   * never touches `kind` at all: the server proposes on create, the human still confirms.
+   *
+   * TOPOLOGY, NOT JUST INVENTORY (#1139). When the report carries `host.containers`, each container
+   * becomes a CONTAINER child node with an active `RUNS_ON` edge back to this host — see
+   * {@link reconcileContainers}. That is the first thing the agent produces that the graph can
+   * actually traverse.
    *
    * THROTTLED (#1134): the CREATE branch — the only branch that adds a row — first charges the
    * reporter's new-node enrollment budget ({@link InfraNodeEnrollmentLimiter}). The refresh branch is
@@ -249,13 +263,14 @@ export class InfraService {
     if (existing) {
       // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
       // human's and is deliberately left untouched. NOT throttled — it adds no row (#1134).
-      return this.refreshKnownNode(
+      const ack = await this.refreshKnownNode(
         existing,
         blob,
         now,
         report.agentVersion,
         primaryIpAddress,
       );
+      return this.reconcileContainers(ack, report, now, principal);
     }
 
     // Unknown host ⇒ a NEW row. This is the only branch that can grow the table, so it is the only one
@@ -268,7 +283,10 @@ export class InfraService {
     try {
       const created = await this.prisma.infraNode.create({
         data: {
-          kind: 'PHYSICAL_HOST',
+          // The PROPOSAL (#1139). `undefined` means the report carried no evidence — the probe did
+          // not run, or the agent predates contract v2 — so the pre-#1139 default stands rather than
+          // a guess dressed as a finding. Only the create branch reads this.
+          kind: inferNodeKind(report.host) ?? 'PHYSICAL_HOST',
           label: report.host.hostname,
           status: 'ONLINE',
           source: 'AGENT',
@@ -285,7 +303,12 @@ export class InfraService {
         select: { id: true, state: true },
       });
       void this.syncNodeToSearch(created.id);
-      return { nodeId: created.id, state: created.state, accepted: true };
+      return this.reconcileContainers(
+        { nodeId: created.id, state: created.state, accepted: true },
+        report,
+        now,
+        principal,
+      );
     } catch (err) {
       // Race: a concurrent report from the SAME host (the install's report racing the freshly-armed
       // systemd timer's first fire, or a re-install) inserted the dedup row between our findFirst and
@@ -306,13 +329,14 @@ export class InfraService {
         // No loop: after P2002 the row exists. If it somehow doesn't (e.g. it was soft-deleted in the
         // same instant so findFirst can't see it), rethrow the original error rather than inventing one.
         if (raced) {
-          return this.refreshKnownNode(
+          const ack = await this.refreshKnownNode(
             raced,
             blob,
             now,
             report.agentVersion,
             primaryIpAddress,
           );
+          return this.reconcileContainers(ack, report, now, principal);
         }
       }
       throw err;
@@ -417,6 +441,274 @@ export class InfraService {
     }
     void this.syncNodeToSearch(updated.id);
     return { nodeId: updated.id, state: updated.state, accepted: true };
+  }
+
+  /**
+   * Reconcile the containers a host reported into CONTAINER child nodes joined to it by an active
+   * `RUNS_ON` edge (#1139) — the first thing the agent produces that the topology GRAPH can traverse.
+   *
+   * Until this existed the agent produced not one edge: install it on a Proxmox host and its guests
+   * and you got unrelated boxes floating on a canvas, with the blast-radius traversal ADR-0070 §7 was
+   * built for reduced to a feature the operator had to hand-draw before using. `PLAUSIBLE_EDGE_TARGETS`
+   * has anticipated `CONTAINER -> PHYSICAL_HOST` since day one; this is what finally opens it.
+   *
+   * ABSENT AND EMPTY ARE DIFFERENT ANSWERS. An absent `containers` key means the collector never
+   * probed — an older agent, a non-Linux collector, an unreadable socket — so nothing is touched and a
+   * host keeps every child it already has. `[]` means the probe RAN and found none, which retires
+   * them. Conflating the two would let a downgraded agent silently wipe a host's whole topology.
+   *
+   * NEVER FAILS THE REPORT. Everything here runs after the host row is durable, so a failure degrades
+   * to a stale container topology and a warning — the same degrade-never-reject posture the contract
+   * takes. Losing the container list for one tick costs a field; losing the report makes the HOST
+   * vanish from the inventory, which is the failure class ADR-0074 §2's amendment exists to prevent.
+   */
+  private async reconcileContainers(
+    ack: AgentReportAck,
+    report: AgentReport,
+    now: Date,
+    principal?: Principal,
+  ): Promise<AgentReportAck> {
+    const containers = report.host.containers;
+    if (containers === undefined) return ack;
+    try {
+      await this.applyContainerTopology(
+        ack.nodeId,
+        containers,
+        report,
+        now,
+        principal,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Container topology for ${report.host.hostname} could not be reconciled — the host itself still reported. ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return ack;
+  }
+
+  /**
+   * The container reconcile proper (#1139), split out so {@link reconcileContainers} owns exactly one
+   * thing: the promise that none of this can fail the host's report.
+   *
+   * Children are reconciled on the SAME `(reportingSource, externalId)` unique index the host path
+   * uses — the child's `externalId` is `containerExternalId(host, name)` — so this needs no column, no
+   * index and no migration. The key is the container's NAME scoped to its host, deliberately and
+   * permanently: a runtime container id is regenerated by every `docker compose up --force-recreate`,
+   * so an id-keyed node would mint a fresh PENDING proposal on every deploy and orphan the last one.
+   *
+   * A child lands PENDING, like its host. ADR-0074 §1 ratified the review tray as the containment for
+   * everything a machine proposes, and a container node is not a lesser proposal than a host — it is
+   * a row in the official inventory the moment it is confirmed. // The tray ERGONOMICS of 40 children
+   * arriving as 40 individual items is a real and separate problem (grouping the tray by reporting
+   * host, a confirm-all-children action); it is a UI question, and answering it by quietly weakening
+   * the gate here would be the wrong place to answer it.
+   */
+  private async applyContainerTopology(
+    hostNodeId: string,
+    containers: readonly AgentContainer[],
+    report: AgentReport,
+    now: Date,
+    principal?: Principal,
+  ): Promise<void> {
+    // Every child this reporter already has for THIS host. Scoped by the prefix, because container
+    // names are only unique within one runtime: two hosts both running `redis` are two containers,
+    // and a host-less key would fuse them into one node whose RUNS_ON edge flapped between hosts.
+    const known: { id: string; externalId: string | null }[] =
+      (await this.prisma.infraNode.findMany({
+        where: {
+          reportingSource: report.reportingSource,
+          externalId: {
+            startsWith: containerExternalIdPrefix(report.externalId),
+          },
+        },
+        select: { id: true, externalId: true },
+      })) ?? [];
+    const knownByExternalId = new Map(
+      known.flatMap((n) =>
+        n.externalId ? [[n.externalId, n.id] as const] : [],
+      ),
+    );
+
+    // WHAT THE AGENT REPORTED — computed from the WHOLE list before anything is written, and
+    // deliberately independent of what this pass manages to enrol. The retire sweep below reads it,
+    // and it must answer "did the agent still list this container?", never "did the server get to
+    // it?". Built inside the loop it stopped at the enrollment budget, so every container after the
+    // refusal looked ABSENT and its still-running node was marked OFFLINE — a false outage invented
+    // by a throttle. The budget is per service account and shared fleet-wide, and children spend it
+    // too, so exhausting it mid-list is a normal rollout event.
+    const reported = new Set(
+      containers.map((c) => containerExternalId(report.externalId, c.name)),
+    );
+    const childIds: string[] = [];
+    let budgetSpent = false;
+    for (const container of containers) {
+      const externalId = containerExternalId(report.externalId, container.name);
+      // The child's whole inventory blob. Rewritten wholesale each report, exactly like the host's.
+      // No `host` key, because a container is not a host: the web `container` projection
+      // (`getAgentContainerFacts`) reads this shape and renders it as a Container panel — on the node
+      // drill-in and, once confirmed with asset tracking on, on the Asset detail page. Keep the
+      // `container` key: without it both surfaces fall back to the raw custom-fields grid, which
+      // JSON.stringifies the blob.
+      const specs = {
+        container,
+        reportedAt: report.reportedAt,
+      } as unknown as Prisma.InputJsonValue;
+      // A LIVENESS fact the agent owns, exactly like the host node's `status` on check-in.
+      const status = containerNodeStatus(container.state);
+
+      const existingId = knownByExternalId.get(externalId);
+      if (existingId !== undefined) {
+        // Facts + liveness only. `kind`/`label`/`state`/position stay the human's, on the same rule
+        // `refreshKnownNode` applies to hosts.
+        await this.prisma.infraNode.update({
+          where: { id: existingId },
+          data: {
+            specs,
+            status,
+            lastReportedAt: now,
+            agentVersion: report.agentVersion,
+          },
+        });
+        childIds.push(existingId);
+        void this.syncNodeToSearch(existingId);
+        continue;
+      }
+
+      // A child row costs the same enrollment slot a host does (#1134) — one report enrolling N+1
+      // rows must be as bounded as one enrolling one. A spent budget REFUSES instead of throwing:
+      // the host is already durable, and a 429 here would read to the agent as "nothing landed".
+      //
+      // It SKIPS, it does not BREAK. Breaking abandoned the rest of the list, so every already-known
+      // container listed after the refusal stopped having its `lastReportedAt` advanced and its
+      // RUNS_ON edge healed — the §4 staleness sweeper then retired running containers a few hours
+      // later, which is the same false outage the retire sweep above no longer produces immediately.
+      // Once refused, stop asking: a spent window stays spent for this report, and re-charging per
+      // remaining container would only add noise.
+      if (budgetSpent || !this.enrollment.tryCharge(principal)) {
+        budgetSpent = true;
+        continue;
+      }
+      const created = await this.prisma.infraNode.create({
+        data: {
+          kind: 'CONTAINER',
+          label: container.name,
+          status,
+          source: 'AGENT',
+          state: 'PENDING',
+          reportingSource: report.reportingSource,
+          externalId,
+          lastReportedAt: now,
+          agentVersion: report.agentVersion,
+          specs,
+        },
+        select: { id: true },
+      });
+      childIds.push(created.id);
+      void this.syncNodeToSearch(created.id);
+    }
+    if (budgetSpent) {
+      // Says exactly what happened, no more: the containers that already had nodes were refreshed,
+      // and the ones that did not have no node YET. An earlier draft of this line claimed "nothing
+      // was lost", which was both unfalsifiable and — while the sweep read a truncated list — false.
+      this.logger.warn(
+        `Enrollment budget spent while reconciling ${report.host.hostname}'s containers — containers with no node yet are NOT enrolled until a later report. Known children were still refreshed and none was retired.`,
+      );
+    }
+
+    await this.openMissingRunsOnEdges(childIds, hostNodeId, now);
+
+    // A container the reporter no longer lists goes OFFLINE. NOT soft-deleted: deleting is the
+    // human's call (the existing Discard), and an auto-delete would also churn — the dedup index is
+    // over LIVE rows, so a flapping container would accumulate a dead row per flap instead of
+    // reviving the one node the operator curated. Its `lastReportedAt` simply stops advancing, so the
+    // §4 staleness sweeper independently agrees.
+    const vanished = known
+      .filter((n) => n.externalId !== null && !reported.has(n.externalId))
+      .map((n) => n.id);
+    if (vanished.length) {
+      await this.prisma.infraNode.updateMany({
+        where: { id: { in: vanished } },
+        data: { status: 'OFFLINE' },
+      });
+      for (const id of vanished) void this.syncNodeToSearch(id);
+    }
+  }
+
+  /**
+   * Open the `RUNS_ON` edge for every child that has none (#1139) — SELF-HEALING rather than
+   * create-once, so a child whose edge was lost to a transient failure is not left floating
+   * unparented on the canvas forever.
+   *
+   * An edge to a LIVE target is left completely alone, which is what keeps this compatible with the
+   * one-active-RUNS_ON-per-source partial unique index (ADR-0070 §3) and with a human who
+   * deliberately re-parented a node. // A human who CLOSES the edge does get it re-opened on the next
+   * report: "this container executes on this host" is a reported fact, not a layout choice, and the
+   * same rule already applies to the node's IP.
+   *
+   * An edge to a DISCARDED (soft-deleted) target is NOT left alone — it is closed and re-opened here.
+   * Discarding a node soft-deletes the row and leaves its edges open, so a re-discovered host gets a
+   * brand-new node (the dedup lookup is live-scoped) while its children stay wired to the dead one:
+   * the child floats off the map and the new host shows no children. Only the soft-deleted case is
+   * healed, so a live re-parent stays the human's. Prisma's soft-delete extension filters only the
+   * TOP-LEVEL operation, so the nested `target` read genuinely returns the discarded row rather than
+   * `null` — which is exactly what makes the discarded case detectable here.
+   */
+  private async openMissingRunsOnEdges(
+    childIds: string[],
+    hostNodeId: string,
+    now: Date,
+  ): Promise<void> {
+    if (childIds.length === 0) return;
+    const active: {
+      id: string;
+      sourceId: string;
+      target: { deletedAt: Date | null } | null;
+    }[] =
+      (await this.prisma.infraEdge.findMany({
+        where: { sourceId: { in: childIds }, kind: 'RUNS_ON', endedAt: null },
+        select: {
+          id: true,
+          sourceId: true,
+          target: { select: { deletedAt: true } },
+        },
+      })) ?? [];
+    const parented = new Set<string>();
+    const toDiscardedHost: string[] = [];
+    for (const edge of active) {
+      // A missing `target` row can only mean the node is gone entirely (the FK cascades), which is
+      // the same orphan case: close the edge and re-parent.
+      if (edge.target && edge.target.deletedAt === null) {
+        parented.add(edge.sourceId);
+      } else {
+        toDiscardedHost.push(edge.id);
+      }
+    }
+    if (toDiscardedHost.length) {
+      // Close BEFORE opening: the partial unique index allows exactly one active RUNS_ON per source.
+      await this.prisma.infraEdge.updateMany({
+        where: { id: { in: toDiscardedHost } },
+        data: { endedAt: now },
+      });
+    }
+    for (const sourceId of childIds) {
+      if (parented.has(sourceId)) continue;
+      try {
+        await this.prisma.infraEdge.create({
+          data: { sourceId, targetId: hostNodeId, kind: 'RUNS_ON' },
+        });
+      } catch (err) {
+        // A concurrent report from the same host opened it first — the invariant HELD, so this is
+        // the success case arriving by another route, not a failure worth propagating.
+        if (
+          !(
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === 'P2002'
+          )
+        ) {
+          throw err;
+        }
+      }
+    }
   }
 
   /**

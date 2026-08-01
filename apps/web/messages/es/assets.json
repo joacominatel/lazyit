@@ -258,7 +258,27 @@
       "collapse": "Ocultar paquetes",
       "searchPlaceholder": "Buscar paquetes…",
       "noSoftware": "El agente no reportó paquetes instalados.",
-      "noMatches": "Ningún paquete coincide con \"{query}\"."
+      "noMatches": "Ningún paquete coincide con \"{query}\".",
+      "containerTitle": "Contenedor",
+      "containerName": "Nombre",
+      "image": "Imagen",
+      "imageDigest": "Digest de la imagen",
+      "containerId": "ID del contenedor",
+      "containerState": "Estado",
+      "containerStates": {
+        "running": "En ejecución",
+        "created": "Creado",
+        "restarting": "Reiniciando",
+        "paused": "Pausado",
+        "exited": "Detenido",
+        "removing": "Eliminándose",
+        "dead": "Muerto",
+        "unknown": "Desconocido"
+      },
+      "portsTitle": "Puertos publicados",
+      "containerPort": "Puerto del contenedor",
+      "hostPort": "Puerto del host",
+      "protocol": "Protocolo"
     },
     "ownersTitle": "Responsables",
     "assignUser": "Asignar usuario",
