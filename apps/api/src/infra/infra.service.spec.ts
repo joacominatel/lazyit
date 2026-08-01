@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import {
   AGENT_POLICY_DEFAULT,
+  AGENT_SOFTWARE_HASH_MAX,
   AgentReportSchema,
   InfraNodeListItemSchema,
   softwareFingerprint,
@@ -1867,6 +1868,79 @@ describe('InfraService', () => {
         expect(ack.softwareResend).toBe(true);
       });
 
+      it('an `unchanged` claim with NO fingerprint is the LEAST trusted, not the most', async () => {
+        // THE POSTURE, RIGHT WAY ROUND. A claim the server CAN check and that fails is answered
+        // (the test above); a claim it CANNOT check was believed forever, so the node preserved a
+        // list nobody had corroborated and never asked again. Least evidence must mean least trust.
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+
+        const ack = await service.ingestReport(
+          AgentReportSchema.parse({
+            ...clone(FULL_REPORT),
+            software: undefined,
+            softwareState: 'unchanged',
+          }),
+        );
+
+        // Still never resolved by wiping — the stored list is kept and a full one is asked for.
+        expect(written()).not.toHaveProperty('specs');
+        expect(ack.softwareResend).toBe(true);
+      });
+
+      it('a fingerprint OVER THE CAP reaches the server as an unverifiable claim, and is asked for', async () => {
+        // NOT ADVERSARIAL. `AGENT_SOFTWARE_HASH_MAX` bounds an attacker-controlled string that lands
+        // in a jsonb column, so it is a `.catch(undefined)` and not a rejection — which means a
+        // legitimate future agent whose fingerprint format outgrows 64 chars has the hash stripped by
+        // its OWN `safeParse` in `buildReport`, while `softwareState: 'unchanged'` survives intact.
+        const overCap = 'f'.repeat(AGENT_SOFTWARE_HASH_MAX + 1);
+        const parsed = AgentReportSchema.parse({
+          ...clone(FULL_REPORT),
+          software: undefined,
+          softwareState: 'unchanged',
+          softwareHash: overCap,
+        });
+        // The exact shape that reaches the wire: the claim without its corroboration.
+        expect(parsed.softwareHash).toBeUndefined();
+        expect(parsed.softwareState).toBe('unchanged');
+
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+
+        const ack = await service.ingestReport(parsed);
+
+        // It costs that agent a full list on the next report — "sent more than necessary", which is
+        // the only failure mode this contract accepts.
+        expect(ack.softwareResend).toBe(true);
+      });
+
+      it('a NEW node asked to keep a list it never had is asked for it WITHOUT a fingerprint too', async () => {
+        // THE WORST CASE. The create branch keyed its request on a fingerprint having arrived, so a
+        // brand-new node whose first report claimed `unchanged` and sent none was created with no
+        // software list and never asked for one — a permanently empty inventory with nothing on
+        // screen saying so, which is precisely what the three-state enum exists to prevent.
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-new',
+          state: 'PENDING',
+        });
+
+        const ack = await service.ingestReport(
+          AgentReportSchema.parse({
+            ...clone(FULL_REPORT),
+            software: undefined,
+            softwareState: 'unchanged',
+          }),
+          AGENT_SA,
+        );
+
+        const createArg = firstArg<{
+          data: { specs: Record<string, unknown> };
+        }>(prisma.infraNode.create);
+        expect(createArg.data.specs).not.toHaveProperty('software');
+        expect(ack.softwareResend).toBe(true);
+      });
+
       it('a fingerprint is never stored beside an absent list', async () => {
         // A stored fingerprint that outlived its list would let the NEXT `unchanged` claim
         // corroborate against a ghost and skip forever with nothing to show.
@@ -1884,6 +1958,130 @@ describe('InfraService', () => {
         await service.ingestReport(reportUnchanged());
 
         expect(written().specs).not.toHaveProperty('softwareHash');
+      });
+
+      // ── The node and its Asset must never disagree about the same host (#1153) ──────────────
+
+      describe('the Asset mirrors what the node HOLDS, never what the report brought', () => {
+        /** The same known host, this time asset-backed, so the specs sync actually runs. */
+        function hostIsKnownWithAsset(): void {
+          prisma.infraNode.findFirst.mockResolvedValue({
+            id: 'node-1',
+            assetId: 'asset-1',
+            ipAddressSource: 'AGENT',
+          });
+          prisma.infraNode.update.mockResolvedValue({
+            id: 'node-1',
+            state: 'CONFIRMED',
+          });
+        }
+
+        it('a list that VANISHED between the two reads leaves the Asset where the node is', async () => {
+          // `planSpecsWrite` skips the node write on this branch rather than write a blob that would
+          // delete the list it could not read back — "between lose the inventory and be late, late
+          // wins". Syncing the Asset from the REPORT then makes the Asset a report ahead of its own
+          // node: two surfaces disagreeing about one host, and the Asset is the one an operator
+          // reconciles from.
+          hostIsKnownWithAsset();
+          const held = {
+            host: { ...clone(FULL_REPORT.host), memoryBytes: 17179869184 },
+            reportedAt: '2026-06-27T11:00:00.000Z',
+          };
+          prisma.$queryRaw
+            .mockResolvedValueOnce(stored({ ...held, softwareHash: HASH }, true))
+            // … and the list is gone by the time it is read back (a concurrent report, a merge).
+            .mockResolvedValueOnce([{ software: null }]);
+          prisma.asset.findFirst.mockResolvedValue({ specs: clone(held) });
+
+          await service.ingestReport(reportUnchanged());
+
+          // The node kept its host facts …
+          expect(written()).not.toHaveProperty('specs');
+          // … so the Asset keeps exactly the same ones. The next report writes both together.
+          expect(prisma.asset.update).not.toHaveBeenCalled();
+        });
+
+        it('a RE-ORDERED package list rewrites neither the node nor its Asset', async () => {
+          // `softwareFingerprint` is ORDER-INDEPENDENT on purpose: `dpkg-query` and `rpm -qa` promise
+          // no order, and a list that re-sorted itself must not make a host resend its whole
+          // inventory. `isDeepStrictEqual` is not order-independent, so the node's write was skipped
+          // while the Asset's fired on every single report — the exact amplification #1153 exists to
+          // remove, surviving on the other table. Bounded to a pre-handshake agent (one that still
+          // sends the whole list), which is every agent until its instance is upgraded.
+          const TWO = [
+            { name: 'nginx', version: '1.27.0' },
+            { name: 'curl', version: '8.5.0' },
+          ];
+          const REVERSED = [...TWO].reverse();
+          const twoHash = softwareFingerprint(TWO);
+          expect(softwareFingerprint(REVERSED)).toBe(twoHash);
+
+          hostIsKnownWithAsset();
+          const held = {
+            host: clone(FULL_REPORT.host),
+            reportedAt: '2026-06-27T11:00:00.000Z',
+          };
+          prisma.$queryRaw.mockResolvedValue(
+            stored({ ...held, softwareHash: twoHash }, true),
+          );
+          prisma.asset.findFirst.mockResolvedValue({
+            specs: { ...clone(held), software: TWO },
+          });
+
+          await service.ingestReport(
+            AgentReportSchema.parse({ ...clone(FULL_REPORT), software: REVERSED }),
+          );
+
+          expect(written()).not.toHaveProperty('specs');
+          expect(prisma.asset.update).not.toHaveBeenCalled();
+        });
+
+        it('a package ADDED still writes the Asset — the skip is never allowed to lose a change', async () => {
+          // The guard on the test above: what is ignored is the ORDER, never the list.
+          const ONE = [{ name: 'nginx', version: '1.27.0' }];
+          const TWO = [...ONE, { name: 'curl', version: '8.5.0' }];
+
+          hostIsKnownWithAsset();
+          const held = {
+            host: clone(FULL_REPORT.host),
+            reportedAt: '2026-06-27T11:00:00.000Z',
+          };
+          prisma.$queryRaw.mockResolvedValue(
+            stored({ ...held, softwareHash: softwareFingerprint(ONE) }, true),
+          );
+          prisma.asset.findFirst.mockResolvedValue({
+            specs: { ...clone(held), software: ONE },
+          });
+
+          await service.ingestReport(
+            AgentReportSchema.parse({ ...clone(FULL_REPORT), software: TWO }),
+          );
+
+          const updated = firstArg<{ data: { specs: { software: unknown } } }>(
+            prisma.asset.update,
+          );
+          expect(updated.data.specs.software).toEqual(TWO);
+        });
+      });
+
+      it('the stored-specs projection cannot fail a check-in on a hand-edited `specs`', async () => {
+        // DEGRADE, NEVER REJECT — the posture the whole contract is built on, and this runs on the
+        // REPORT path. `jsonb - text` raises `cannot delete from scalar` when `specs` is a bare
+        // string or number rather than an object (verified against postgres:18-alpine, the pinned
+        // image), which would turn one hand-edited row into a host that can no longer check in at
+        // all. `->` and `jsonb_exists` are already total on a scalar, so the delete is the one
+        // operator that needs guarding. The suite mocks Prisma, so the guard is asserted where it
+        // lives — in the SQL — rather than by round-tripping a database this suite does not have.
+        hostIsKnown();
+        prisma.$queryRaw.mockResolvedValue(settled());
+
+        await service.ingestReport(reportedFull);
+
+        const sql = firstArg<{ strings: readonly string[] }>(
+          prisma.$queryRaw,
+        ).strings.join('');
+        expect(sql).toContain(`- 'software'`);
+        expect(sql).toMatch(/jsonb_typeof\("specs"\)\s*=\s*'object'/);
       });
 
       // ── The capability handshake (#1142) — what stops a NEWER agent wiping an OLDER server ──
