@@ -13,6 +13,18 @@ import { PrismaService } from '../prisma/prisma.service';
 
 type Mock = jest.Mock;
 
+/** The first argument of a mock's first call, typed — the sibling spec's helper, same reason. */
+function firstArg<T>(mock: Mock): T {
+  const calls = mock.mock.calls as unknown[][];
+  return calls[0][0] as T;
+}
+
+/** The first argument of a mock's Nth call, typed. */
+function nthArg<T>(mock: Mock, index: number): T {
+  const calls = mock.mock.calls as unknown[][];
+  return calls[index][0] as T;
+}
+
 interface PrismaMock {
   infraAutoConfirmRule: {
     findFirst: Mock;
@@ -81,10 +93,13 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
     it('lists oldest-first (the evaluation order) and flattens the author name', async () => {
       prisma.infraAutoConfirmRule.findMany.mockResolvedValue([row()]);
 
-      const rules = (await service.list()) as { createdByName: string | null }[];
+      const rules = (await service.list()) as {
+        createdByName: string | null;
+      }[];
 
       expect(
-        (prisma.infraAutoConfirmRule.findMany.mock.calls[0][0] as { orderBy: unknown }).orderBy,
+        firstArg<{ orderBy: unknown }>(prisma.infraAutoConfirmRule.findMany)
+          .orderBy,
       ).toEqual({ createdAt: 'asc' });
       expect(rules[0].createdByName).toBe('Ada Lovelace');
       expect(rules[0]).not.toHaveProperty('createdBy');
@@ -92,10 +107,18 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
 
     it('never leaks a soft-deleted author name (it reads as unattributed)', async () => {
       prisma.infraAutoConfirmRule.findMany.mockResolvedValue([
-        row({ createdBy: { firstName: 'Ada', lastName: 'Lovelace', deletedAt: new Date() } }),
+        row({
+          createdBy: {
+            firstName: 'Ada',
+            lastName: 'Lovelace',
+            deletedAt: new Date(),
+          },
+        }),
       ]);
 
-      const rules = (await service.list()) as { createdByName: string | null }[];
+      const rules = (await service.list()) as {
+        createdByName: string | null;
+      }[];
 
       expect(rules[0].createdByName).toBeNull();
     });
@@ -105,13 +128,14 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
     it('stamps the authoring human — the attribution §8 leans on', async () => {
       prisma.infraAutoConfirmRule.create.mockResolvedValue(row());
 
-      await service.create({ name: 'Prod servers', hostnamePattern: 'srv-*' }, HUMAN);
+      await service.create(
+        { name: 'Prod servers', hostnamePattern: 'srv-*' },
+        HUMAN,
+      );
 
-      const data = (
-        prisma.infraAutoConfirmRule.create.mock.calls[0][0] as {
-          data: { createdById: string | null };
-        }
-      ).data;
+      const { data } = firstArg<{ data: { createdById: string | null } }>(
+        prisma.infraAutoConfirmRule.create,
+      );
       expect(data.createdById).toBe('u-1');
     });
 
@@ -124,26 +148,31 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
         HUMAN,
       );
 
-      const calls = prisma.infraAutoConfirmRule.create.mock.calls as {
-        data: { trackAsAsset: boolean };
-      }[][];
-      expect(calls[0][0].data.trackAsAsset).toBe(true);
-      expect(calls[1][0].data.trackAsAsset).toBe(false);
+      type Call = { data: { trackAsAsset: boolean } };
+      expect(
+        nthArg<Call>(prisma.infraAutoConfirmRule.create, 0).data.trackAsAsset,
+      ).toBe(true);
+      expect(
+        nthArg<Call>(prisma.infraAutoConfirmRule.create, 1).data.trackAsAsset,
+      ).toBe(false);
     });
 
     it('honours an explicit trackAsAsset over the per-scope default', async () => {
       prisma.infraAutoConfirmRule.create.mockResolvedValue(row());
 
       await service.create(
-        { name: 'licensed appliance', appliesTo: 'CONTAINER', hostnamePattern: '*', trackAsAsset: true },
+        {
+          name: 'licensed appliance',
+          appliesTo: 'CONTAINER',
+          hostnamePattern: '*',
+          trackAsAsset: true,
+        },
         HUMAN,
       );
 
-      const data = (
-        prisma.infraAutoConfirmRule.create.mock.calls[0][0] as {
-          data: { trackAsAsset: boolean };
-        }
-      ).data;
+      const { data } = firstArg<{ data: { trackAsAsset: boolean } }>(
+        prisma.infraAutoConfirmRule.create,
+      );
       expect(data.trackAsAsset).toBe(true);
     });
   });
@@ -152,9 +181,9 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
     it('404s an unknown rule', async () => {
       prisma.infraAutoConfirmRule.findFirst.mockResolvedValue(null);
 
-      await expect(service.update('nope', { enabled: false })).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        service.update('nope', { enabled: false }),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('REFUSES a patch that clears the last remaining condition on the MERGED rule', async () => {
@@ -172,7 +201,9 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
       prisma.infraAutoConfirmRule.findFirst.mockResolvedValue(
         row({ subnetCidr: '10.20.0.0/16' }),
       );
-      prisma.infraAutoConfirmRule.update.mockResolvedValue(row({ hostnamePattern: null }));
+      prisma.infraAutoConfirmRule.update.mockResolvedValue(
+        row({ hostnamePattern: null }),
+      );
 
       await service.update('rule-1', { hostnamePattern: null });
 
@@ -187,11 +218,9 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
 
       await service.remove('rule-1');
 
-      const data = (
-        prisma.infraAutoConfirmRule.update.mock.calls[0][0] as {
-          data: { deletedAt: Date };
-        }
-      ).data;
+      const { data } = firstArg<{ data: { deletedAt: Date } }>(
+        prisma.infraAutoConfirmRule.update,
+      );
       expect(data.deletedAt).toBeInstanceOf(Date);
     });
   });
@@ -206,10 +235,9 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
 
       const resolved = await service.resolve(HOST_CANDIDATE);
 
-      const args = prisma.infraAutoConfirmRule.findMany.mock.calls[0][0] as {
-        where: unknown;
-        orderBy: unknown;
-      };
+      const args = firstArg<{ where: unknown; orderBy: unknown }>(
+        prisma.infraAutoConfirmRule.findMany,
+      );
       expect(args.where).toEqual({ enabled: true });
       expect(args.orderBy).toEqual({ createdAt: 'asc' });
       expect(resolved?.ruleId).toBe('rule-b');
@@ -254,9 +282,20 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
     it('exposes NO way to apply a rule to existing nodes — rules are never retroactive', () => {
       // Asserted structurally rather than behaviourally: the class has no method that could walk the
       // PENDING tray, so an operator saving a rule cannot have proposals confirm behind them.
-      const methods = Object.getOwnPropertyNames(InfraAutoConfirmService.prototype);
+      const methods = Object.getOwnPropertyNames(
+        InfraAutoConfirmService.prototype,
+      );
       expect(methods.sort()).toEqual(
-        ['constructor', 'create', 'flatten', 'list', 'recordMatch', 'remove', 'resolve', 'update'].sort(),
+        [
+          'constructor',
+          'create',
+          'flatten',
+          'list',
+          'recordMatch',
+          'remove',
+          'resolve',
+          'update',
+        ].sort(),
       );
     });
   });
@@ -267,11 +306,9 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
 
       await service.recordMatch('rule-1');
 
-      const data = (
-        prisma.infraAutoConfirmRule.update.mock.calls[0][0] as {
-          data: { matchCount: unknown; lastMatchedAt: Date };
-        }
-      ).data;
+      const { data } = firstArg<{
+        data: { matchCount: unknown; lastMatchedAt: Date };
+      }>(prisma.infraAutoConfirmRule.update);
       expect(data.matchCount).toEqual({ increment: 1 });
       expect(data.lastMatchedAt).toBeInstanceOf(Date);
     });

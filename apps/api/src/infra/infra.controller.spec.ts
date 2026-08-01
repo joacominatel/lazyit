@@ -100,9 +100,9 @@ describe('InfraController — the review tray at scale (#1145)', () => {
       'updateAutoConfirmRule',
       'removeAutoConfirmRule',
     ] as const) {
-      expect(guardsOf(route).map((g) => (g as { name: string }).name)).toContain(
-        'HumanOnlyGuard',
-      );
+      expect(
+        guardsOf(route).map((g) => (g as { name: string }).name),
+      ).toContain('HumanOnlyGuard');
     }
   });
 
@@ -141,7 +141,10 @@ describe('InfraController — forward-compatible report body (#1138)', () => {
     // must hand it on — otherwise "degrade instead of reject" quietly becomes "degrade and forget".
     const infra = { ingestReport: jest.fn() };
     const autoConfirm = { list: jest.fn() };
-    const controller = new InfraController(infra as never, autoConfirm as never);
+    const controller = new InfraController(
+      infra as never,
+      autoConfirm as never,
+    );
     const raw = {
       agentVersion: '2.0.0',
       reportingSource: 'agent:x',

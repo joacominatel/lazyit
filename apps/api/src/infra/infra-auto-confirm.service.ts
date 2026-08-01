@@ -132,9 +132,12 @@ export class InfraAutoConfirmService {
 
     const merged = {
       hostnamePattern:
-        'hostnamePattern' in dto ? dto.hostnamePattern : existing.hostnamePattern,
+        'hostnamePattern' in dto
+          ? dto.hostnamePattern
+          : existing.hostnamePattern,
       subnetCidr: 'subnetCidr' in dto ? dto.subnetCidr : existing.subnetCidr,
-      reportedKind: 'reportedKind' in dto ? dto.reportedKind : existing.reportedKind,
+      reportedKind:
+        'reportedKind' in dto ? dto.reportedKind : existing.reportedKind,
     };
     if (
       merged.hostnamePattern == null &&
@@ -233,7 +236,11 @@ export class InfraAutoConfirmService {
 
   /** Flatten the joined author into the wire shape's `createdByName` (null when gone or deleted). */
   private flatten(row: {
-    createdBy: { firstName: string; lastName: string; deletedAt: Date | null } | null;
+    createdBy: {
+      firstName: string;
+      lastName: string;
+      deletedAt: Date | null;
+    } | null;
     [key: string]: unknown;
   }) {
     const { createdBy, ...rule } = row;

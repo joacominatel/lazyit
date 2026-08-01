@@ -30,11 +30,10 @@ import {
   BulkDiscardInfraNodesSchema,
   ConfirmInfraNodeSchema,
   CreateInfraAutoConfirmRuleSchema,
-  InfraAutoConfirmRuleSchema,
-  InfraBulkResponseSchema,
-  UpdateInfraAutoConfirmRuleSchema,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
+  InfraAutoConfirmRuleSchema,
+  InfraBulkResponseSchema,
   InfraEdgeSchema,
   InfraIdentityMatchSchema,
   InfraImpactResponseSchema,
@@ -46,6 +45,7 @@ import {
   InfraNodeStatusSchema,
   InfraSecretRefSchema,
   MergeInfraNodeSchema,
+  UpdateInfraAutoConfirmRuleSchema,
   UpdateInfraNodeSchema,
 } from '@lazyit/shared';
 import { z } from 'zod';
@@ -72,10 +72,16 @@ class AgentReportAckDto extends createZodDto(AgentReportAckSchema) {}
 class ConfirmInfraNodeDto extends createZodDto(ConfirmInfraNodeSchema) {}
 class MergeInfraNodeDto extends createZodDto(MergeInfraNodeSchema) {}
 class InfraIdentityMatchDto extends createZodDto(InfraIdentityMatchSchema) {}
-class BulkConfirmInfraNodesDto extends createZodDto(BulkConfirmInfraNodesSchema) {}
-class BulkDiscardInfraNodesDto extends createZodDto(BulkDiscardInfraNodesSchema) {}
+class BulkConfirmInfraNodesDto extends createZodDto(
+  BulkConfirmInfraNodesSchema,
+) {}
+class BulkDiscardInfraNodesDto extends createZodDto(
+  BulkDiscardInfraNodesSchema,
+) {}
 class InfraBulkResponseDto extends createZodDto(InfraBulkResponseSchema) {}
-class InfraAutoConfirmRuleDto extends createZodDto(InfraAutoConfirmRuleSchema) {}
+class InfraAutoConfirmRuleDto extends createZodDto(
+  InfraAutoConfirmRuleSchema,
+) {}
 class CreateInfraAutoConfirmRuleDto extends createZodDto(
   CreateInfraAutoConfirmRuleSchema,
 ) {}

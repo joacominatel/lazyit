@@ -1275,7 +1275,9 @@ export class InfraService {
    * (fire-and-forget, ADR-0035). An id that is already gone reads `notFound` and never widens the
    * write, so a stale tray tab can never resurrect-then-delete anything.
    */
-  async bulkDiscardNodes(dto: BulkDiscardInfraNodes): Promise<InfraBulkResponse> {
+  async bulkDiscardNodes(
+    dto: BulkDiscardInfraNodes,
+  ): Promise<InfraBulkResponse> {
     const rows = await this.prisma.infraNode.findMany({
       where: { id: { in: dto.ids } },
       select: { id: true, label: true },

@@ -3361,9 +3361,16 @@ describe('InfraService', () => {
         { trackAsAsset: true, kind: 'VM' },
         HUMAN,
       );
-      expect(confirm).toHaveBeenCalledWith('node-c1', { trackAsAsset: false }, HUMAN);
+      expect(confirm).toHaveBeenCalledWith(
+        'node-c1',
+        { trackAsAsset: false },
+        HUMAN,
+      );
       expect(result.applied).toBe(2);
-      expect(result.results.map((r) => r.outcome)).toEqual(['applied', 'applied']);
+      expect(result.results.map((r) => r.outcome)).toEqual([
+        'applied',
+        'applied',
+      ]);
     });
 
     it('an already-CONFIRMED node is SKIPPED, not a failure (the single confirm is idempotent)', async () => {
@@ -3372,7 +3379,10 @@ describe('InfraService', () => {
         { id: 'node-1', label: 'web-01', state: 'CONFIRMED' },
       ]);
 
-      const result = await service.bulkConfirmNodes({ items: [{ id: 'node-1' }] }, HUMAN);
+      const result = await service.bulkConfirmNodes(
+        { items: [{ id: 'node-1' }] },
+        HUMAN,
+      );
 
       expect(result.skipped).toBe(1);
       expect(result.applied).toBe(0);
@@ -3388,7 +3398,10 @@ describe('InfraService', () => {
       const confirm = spyConfirm();
       prisma.infraNode.findMany.mockResolvedValue([]);
 
-      const result = await service.bulkConfirmNodes({ items: [{ id: 'gone' }] }, HUMAN);
+      const result = await service.bulkConfirmNodes(
+        { items: [{ id: 'gone' }] },
+        HUMAN,
+      );
 
       expect(confirm).not.toHaveBeenCalled();
       expect(result.notFound).toBe(1);
@@ -3429,7 +3442,9 @@ describe('InfraService', () => {
       ]);
       prisma.infraNode.updateMany.mockResolvedValue({ count: 2 });
 
-      const result = await service.bulkDiscardNodes({ ids: ['node-1', 'node-2'] });
+      const result = await service.bulkDiscardNodes({
+        ids: ['node-1', 'node-2'],
+      });
 
       const arg = firstArg<{
         where: { id: { in: string[] } };
@@ -3449,7 +3464,9 @@ describe('InfraService', () => {
       ]);
       prisma.infraNode.updateMany.mockResolvedValue({ count: 1 });
 
-      const result = await service.bulkDiscardNodes({ ids: ['node-1', 'gone'] });
+      const result = await service.bulkDiscardNodes({
+        ids: ['node-1', 'gone'],
+      });
 
       const arg = firstArg<{ where: { id: { in: string[] } } }>(
         prisma.infraNode.updateMany,
@@ -3570,11 +3587,17 @@ describe('InfraService', () => {
 
     it('an auto-confirm that FAILS never fails the report — the node simply stays PENDING', async () => {
       hostIsNew();
-      autoConfirm.resolve.mockRejectedValue(new Error('rule store unreachable'));
+      autoConfirm.resolve.mockRejectedValue(
+        new Error('rule store unreachable'),
+      );
 
       const ack = await service.ingestReport(RULED_REPORT, AGENT_SA);
 
-      expect(ack).toEqual({ nodeId: 'node-new', state: 'PENDING', accepted: true });
+      expect(ack).toEqual({
+        nodeId: 'node-new',
+        state: 'PENDING',
+        accepted: true,
+      });
     });
 
     it('NEVER RETROACTIVE: a KNOWN host refreshing is not re-evaluated against rules', async () => {
@@ -3669,5 +3692,4 @@ describe('InfraService', () => {
       });
     });
   });
-
 });
