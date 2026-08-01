@@ -229,6 +229,22 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
       expect(prisma.infraAutoConfirmRule.update).not.toHaveBeenCalled();
     });
 
+    it('ACCEPTS dropping one of two conditions — the survivor still rules proposals out', async () => {
+      // The reported symptom: a rule carrying both a hostname pattern and a subnet could not have the
+      // subnet removed, because the patch was judged on its own (`{ subnetCidr: null }` states no
+      // condition) instead of on the rule it leaves behind (`srv-*`, which plainly does).
+      prisma.infraAutoConfirmRule.findFirst.mockResolvedValue(
+        row({ hostnamePattern: 'srv-*', subnetCidr: '10.20.0.0/16' }),
+      );
+      prisma.infraAutoConfirmRule.update.mockResolvedValue(
+        row({ hostnamePattern: 'srv-*', subnetCidr: null }),
+      );
+
+      await service.update('rule-1', { subnetCidr: null });
+
+      expect(prisma.infraAutoConfirmRule.update).toHaveBeenCalled();
+    });
+
     it('allows a wildcard name once a REAL condition survives the merge', async () => {
       prisma.infraAutoConfirmRule.findFirst.mockResolvedValue(
         row({ subnetCidr: '10.20.0.0/16' }),
