@@ -134,9 +134,12 @@ describe("the capability handshake — new agent, old server (#1142)", () => {
   });
 
   test("`unavailable` and `disabled` are unaffected — neither has a list to withhold", () => {
-    // Both send no list with or without the handshake, which is byte-for-byte what a pre-#1142 agent
-    // did when its collector failed or its policy turned software off. Gating them would change
-    // nothing on the wire and would only cost the cache.
+    // Both send no list with or without the handshake, so gating them would change nothing on the
+    // wire and would only cost the cache. Against an old server both read as the pre-#1142 absent
+    // key and clear: right for `disabled`, and for `unavailable` an empty panel until the next
+    // successful collection sends the whole list again — which it does, precisely because there is
+    // no evidence against that server. `unchanged` is the only branch whose omission can cost an
+    // inventory permanently, and it is the only one gated.
     expect(softwareWireFields({ state: "unavailable" }, HASH, UNPROVEN)).toEqual(
       softwareWireFields({ state: "unavailable" }, HASH, PROVEN),
     );
