@@ -436,6 +436,46 @@ export const AgentContainerStateSchema = z.enum([
 /** Transport of a published container port. `sctp` is rare but real; the runtimes all emit it. */
 export const AgentContainerPortProtocolSchema = z.enum(["tcp", "udp", "sctp"]);
 
+/**
+ * What a report says about the installed-software list (#1142) — **THREE answers, not two.**
+ *
+ * Before this field the wire had exactly two: a `software` array, or nothing. The server read
+ * "nothing" as "no software" and DELETED whatever it held, which was the right reading of the only
+ * case that produced it — a policy that turned the collector off (#1140) — and the wrong reading of
+ * the case #1142 introduces, where the agent omits an unchanged list to save ~90% of the payload.
+ * Collapsing those two into one absent key gives an operator either an inventory that silently rots
+ * (a frozen package list from months ago, with nothing on screen saying so) or one that silently
+ * empties. This enum is what keeps them apart:
+ *
+ *  - `reported` — the list is IN this report; store it.
+ *  - `unchanged` — identical to the last accepted report; **keep what is stored**. `softwareHash`
+ *    says WHICH list, so the server can tell an honest delta from a claim it cannot corroborate.
+ *  - `unavailable` — the collector could not enumerate packages (no supported package manager, a
+ *    timed-out `dpkg-query`); **keep what is stored**, because "I could not look" is not "there is
+ *    nothing". `diagnostics.warnings` carries the reason.
+ *  - `disabled` — the agent policy says do not report software; **clear the stored list**, so the
+ *    panel stops showing an inventory nobody is collecting any more.
+ *
+ * An UNRECOGNISED value degrades to `unavailable`, not to absent — see the field on
+ * {@link AgentReportSchema}. Every other vocabulary in this contract degrades toward "we know less";
+ * this is the one where "we know less" and "delete the operator's data" are different directions, and
+ * the safe one is named.
+ */
+export const AgentSoftwareStateSchema = z.enum([
+  "reported",
+  "unchanged",
+  "unavailable",
+  "disabled",
+]);
+export type AgentSoftwareState = z.infer<typeof AgentSoftwareStateSchema>;
+
+/**
+ * Cap on `softwareHash`. Comfortably above what {@link softwareFingerprint} produces, so the cap is a
+ * bound on an attacker-controlled string that lands in a jsonb column, never a rejection of an agent
+ * whose fingerprint format this build does not recognise.
+ */
+export const AGENT_SOFTWARE_HASH_MAX = 64;
+
 /** Where a listed package came from — the provenance that makes a cross-OS software list comparable. */
 export const AgentSoftwareSourceSchema = z.enum([
   "dpkg",
@@ -999,7 +1039,15 @@ export const AgentReportSchema = z.object({
       .partial()
       .optional(),
   }),
-  /** Installed packages (dpkg/rpm/apk auto-detected). Capped — a sane upper bound, not a real limit. */
+  /**
+   * Installed packages (dpkg/rpm/apk auto-detected). Capped — a sane upper bound, not a real limit.
+   *
+   * PRESENT means "here is the list" and always wins over {@link AgentSoftwareStateSchema}. ABSENT is
+   * where the three-state contract lives: what it MEANS is decided by `softwareState`, and by nothing
+   * else. A report carrying neither key is a pre-#1142 agent and keeps the pre-#1142 reading — the
+   * list is cleared — because that is the only reading under which #1140's `LAZYIT_COLLECT_SOFTWARE=false`
+   * still stops showing an inventory nobody collects.
+   */
   software: z
     .array(
       z.object({
@@ -1011,6 +1059,35 @@ export const AgentReportSchema = z.object({
     )
     .max(5000)
     .optional(),
+  /**
+   * What the ABSENCE of `software` means (#1142). See {@link AgentSoftwareStateSchema} for the four
+   * answers and why they are four.
+   *
+   * `.catch("unavailable")` and NOT `.catch(undefined)`, deliberately. Absent (a pre-#1142 agent) and
+   * unrecognised (a post-#1142 agent this build predates) are different situations and must degrade
+   * differently: absent keeps today's clearing semantics, while a value we cannot interpret lands on
+   * the PRESERVING answer. Landing an unknown state on "absent" would let any future state name make
+   * an older server wipe a host's package list — the exact failure this field exists to prevent. The
+   * coercion is recorded by {@link agentReportSkewPaths}, so it is visible rather than silent.
+   */
+  softwareState: AgentSoftwareStateSchema.optional().catch("unavailable"),
+  /**
+   * A stable fingerprint of the software list the agent HAS (#1142) — sent alongside `reported` and
+   * `unchanged` alike, computed by {@link softwareFingerprint}.
+   *
+   * It is corroboration, not authority. The server stores the value the agent sent and compares the
+   * next `unchanged` claim against it; a claim it cannot corroborate — because the node holds no list,
+   * or holds one fingerprinted differently — is never resolved by guessing. The stored list is kept
+   * (never wiped on a doubt) and the ack asks for a full resend. That is what makes the delta
+   * self-healing across a discarded-and-rediscovered node, a restore from backup, and a merge.
+   */
+  softwareHash: z
+    .string()
+    .trim()
+    .min(1)
+    .max(AGENT_SOFTWARE_HASH_MAX)
+    .optional()
+    .catch(undefined),
   /**
    * What the collector could NOT do (#1138). This is what lets a fleet view say "web-03: reporting
    * unprivileged, no serial/model" instead of leaving the operator staring at an empty row wondering
@@ -1037,14 +1114,87 @@ export const AgentReportSchema = z.object({
     })
     .optional(),
   /**
-   * The policy revision the agent last applied (#1140, server-driven policy). RESERVED — defined so
-   * the field never has to be added under time pressure once the policy channel exists. Nothing
-   * consumes it and NOTHING STORES IT: this build parses it and discards it. Do not document it as a
-   * stored or acted-upon fact anywhere until #1140 makes it one.
+   * The policy revision the agent last applied (#1140, server-driven policy). Reserved by contract v2
+   * (#1138) and made REAL by the policy channel: the server now persists it on the node
+   * (`policyRevision`, plus `policyAppliedAt` when it CHANGES) and the node drill-in compares it to the
+   * instance revision to say *applied* vs *pending*. Absent from any pre-#1140 agent, which is why an
+   * absent echo writes nothing rather than clearing the stored value.
    */
   policyRevision: z.number().int().nonnegative().optional().catch(undefined),
 });
 export type AgentReport = z.infer<typeof AgentReportSchema>;
+
+/** One package as the wire carries it — the element type of a report's `software` list. */
+export type AgentSoftwarePackage = NonNullable<AgentReport["software"]>[number];
+
+// ── Software fingerprint (#1142) — the canonical form both sides agree on ─────────────────────────
+
+/** Separates the fields of one package. A control character, so no package string can contain it. */
+const SOFTWARE_FIELD_SEPARATOR = "\u001f";
+/** Stands in for an ABSENT optional field, so it never collides with an empty-string one. */
+const SOFTWARE_FIELD_ABSENT = "\u0000";
+/** Separates packages from each other. Same reasoning. */
+const SOFTWARE_ENTRY_SEPARATOR = "\u001e";
+
+/**
+ * The version of the canonical form below. It rides in the fingerprint, so changing how a list is
+ * canonicalised makes every stored fingerprint compare UNEQUAL to a new one — which requests a full
+ * resend rather than silently declaring an old list current. A format change is therefore a one-tick
+ * cost, never a correctness event.
+ */
+const SOFTWARE_FINGERPRINT_VERSION = "1";
+
+/**
+ * One 32-bit avalanche hash of `text` from `seed` (FNV-1a over UTF-16 code units + a Murmur3-style
+ * finalizer). Deliberately non-cryptographic and `Math.imul`-based: this runs over a few hundred KB
+ * on a host that has 5,000 packages, on every collection.
+ */
+function softwareHash32(text: string, seed: number): number {
+  let h = seed >>> 0;
+  for (let i = 0; i < text.length; i += 1) {
+    h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
+  }
+  h = Math.imul(h ^ (h >>> 16), 2246822507) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 3266489909) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/**
+ * A stable fingerprint of a reported software list (#1142) — the value an agent caches so it can omit
+ * an unchanged list, and the value a server stores so it can tell a corroborated `unchanged` from a
+ * claim about a list it does not hold.
+ *
+ * ORDER-INDEPENDENT, because package-manager output order is not a fact about the host: `dpkg-query`
+ * and `rpm -qa` do not promise one, and a list that re-sorted itself would make every host resend its
+ * whole inventory for nothing. The count is folded in separately so a re-ordering and an added
+ * duplicate can never look alike.
+ *
+ * Non-cryptographic, and that is a deliberate and bounded choice. What the fingerprint gates is
+ * "believe the agent when it says nothing changed" — never what gets STORED, which is always a list
+ * the agent actually sent. So the only failure it can cause is a chance collision between two
+ * DIFFERENT package lists on the SAME host, at roughly 2⁻⁹⁶ per comparison; and an agent that could
+ * forge a collision would only be lying to itself about its own node. Every other outcome — a
+ * mismatch, a missing fingerprint, an unparsed one — resolves by writing, never by skipping.
+ */
+export function softwareFingerprint(software: readonly AgentSoftwarePackage[]): string {
+  // An ABSENT optional field is encoded distinctly from an empty one. They are not the same claim,
+  // and folding them together would make the fingerprint quietly weaker than the list it stands for.
+  const field = (value: string | undefined): string => value ?? SOFTWARE_FIELD_ABSENT;
+  const entries = software.map(
+    (pkg) =>
+      `${pkg.name}${SOFTWARE_FIELD_SEPARATOR}${field(pkg.version)}${SOFTWARE_FIELD_SEPARATOR}${field(pkg.source)}`,
+  );
+  // An explicit comparator, not the default: this value is compared across two processes and two
+  // runtimes, so the ordering must be plain code-unit order and visibly so.
+  entries.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const text = entries.join(SOFTWARE_ENTRY_SEPARATOR);
+  const hex = (n: number): string => n.toString(16).padStart(8, "0");
+  return [
+    SOFTWARE_FINGERPRINT_VERSION,
+    software.length.toString(36),
+    `${hex(softwareHash32(text, 0x811c9dc5))}${hex(softwareHash32(text, 0x01000193))}${hex(softwareHash32(text, 0x9e3779b9))}`,
+  ].join("-");
+}
 
 // ── Skew recording (#1138) — what the server did NOT understand about a report ─────────────────────
 
@@ -1588,6 +1738,21 @@ export const AgentReportAckSchema = z.object({
    * JSON and never validates it) so an ack carrying this key is simply ignored.
    */
   policy: AgentPolicySchema.optional(),
+  /**
+   * "Send me the whole software list next time" (#1142) — the half of the delta that keeps it honest.
+   *
+   * The server sets it when a report claimed `softwareState: 'unchanged'` and it could NOT corroborate
+   * the claim: the node holds no list, or holds one whose stored fingerprint is not the one claimed.
+   * That happens for real — a node discarded and rediscovered starts empty while the agent's cache
+   * still says "unchanged", a restore from backup rewinds the stored list, a merge moves it — and
+   * without this the host's inventory would stay wrong until its packages happened to change, which on
+   * a stable server is months. The server NEVER resolves the doubt by wiping: it keeps what it has and
+   * asks. The agent answers by dropping its cached fingerprint, so the next report carries everything.
+   *
+   * OPTIONAL in both directions, like `policy`: a pre-#1142 server omits it, and a pre-#1142 agent
+   * reads two fields off the ack and ignores the rest.
+   */
+  softwareResend: z.boolean().optional(),
 });
 export type AgentReportAck = z.infer<typeof AgentReportAckSchema>;
 
