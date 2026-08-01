@@ -62,7 +62,11 @@ import { AgentPolicyService } from './agent-policy.service';
  * pre-#1140 agent (and a policy resolution that failed) from ever clearing a good value.
  */
 interface AgentPolicyWriteFields {
-  /** The staleness threshold this node was just SERVED — what the §4 sweeper judges it against. */
+  /**
+   * The staleness threshold this node was just SERVED — what the §4 sweeper judges it against.
+   * Absent unless the report ECHOED a revision: an agent that predates the policy channel is not
+   * running a served threshold, so its node keeps the `INFRA_AGENT_STALE_AFTER_MS` fallback.
+   */
   policyStaleAfterSeconds?: number;
   /** The revision the agent ECHOED. Absent when the agent sent none (any pre-#1140 build). */
   policyRevision?: number;
