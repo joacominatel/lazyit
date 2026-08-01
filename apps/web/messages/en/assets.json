@@ -258,7 +258,27 @@
       "collapse": "Hide packages",
       "searchPlaceholder": "Search packages…",
       "noSoftware": "The agent didn't report any installed packages.",
-      "noMatches": "No packages match \"{query}\"."
+      "noMatches": "No packages match \"{query}\".",
+      "containerTitle": "Container",
+      "containerName": "Name",
+      "image": "Image",
+      "imageDigest": "Image digest",
+      "containerId": "Container ID",
+      "containerState": "State",
+      "containerStates": {
+        "running": "Running",
+        "created": "Created",
+        "restarting": "Restarting",
+        "paused": "Paused",
+        "exited": "Exited",
+        "removing": "Removing",
+        "dead": "Dead",
+        "unknown": "Unknown"
+      },
+      "portsTitle": "Published ports",
+      "containerPort": "Container port",
+      "hostPort": "Host port",
+      "protocol": "Protocol"
     },
     "ownersTitle": "Owners",
     "assignUser": "Assign user",
