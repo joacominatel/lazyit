@@ -2686,7 +2686,9 @@ model InfraNode {
   // §4 sweeper can judge each node against the cadence IT was told, instead of one global env var
   // that made heterogeneous intervals structurally impossible (a daily reporter sat OFFLINE 23 hours
   // out of 24). Null = never served one; the sweeper falls back to the env default, i.e. today's
-  // behaviour. Rewritten on every report, so it self-heals after any policy change.
+  // behaviour. Written only when the report ECHOED a `policyRevision` — an agent that predates the
+  // policy channel is not running a served threshold, so it keeps the env var and this stays null —
+  // and rewritten on every such report, so it self-heals after any policy change.
   policyStaleAfterSeconds Int?
 
   createdAt DateTime  @default(now())
