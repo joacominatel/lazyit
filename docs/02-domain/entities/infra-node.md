@@ -41,6 +41,13 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
 - **Detach semantics (no orphans).** Patching `assetId: null` detaches: an **auto-created** Asset is
   **soft-deleted** (it never lingers in inventory owned by nobody); a **pre-existing linked** Asset is
   only un-linked, left intact.
+- **A patch may detach, and nothing else — no re-point** ([[0070-infra-topology-graph]] §5 note,
+  #1117). `assetId` accepts **`null` and nothing else**; any other value is a `400`. A re-point was
+  written with **no liveness check** (unlike `createNode`, which calls the soft-delete-scoped
+  `assertExists`; the FK only requires the row to *exist*, and a discarded asset's row does) and
+  **without running the detach above**, so it could link a **discarded** asset *and* orphan the
+  auto-created one it replaced. Refusing closes both without touching delete semantics. Linking a
+  node to a particular asset stays a **create-time** decision (`POST /infra/nodes` with `assetId`).
 - **`label` always wins for display.** The canvas display name is `label`; the linked
   `asset.name` is shown only as a secondary "inventory name" (`assetName` on the detail read) — no
   silent copy, no drift.
@@ -70,6 +77,13 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   listing goes `status=OFFLINE`; it is **never** auto-deleted — Discard stays the human's call — and
   the same name returning refreshes that same node back ONLINE. An **absent** `containers` key means
   the collector never probed and nothing is touched; `[]` means it probed and found none.
+- **A host in machine-id COLLISION has no container children at all (#1158).** The child key above is
+  derived from the **reported** `externalId`, which two clones share, so both would compute identical
+  container keys and each report would retire the other's still-running children. The #1141 collision
+  branch therefore skips container reconciliation entirely: a colliding host's containers go
+  **untracked** until its `/etc/machine-id` is fixed, then tracking resumes on its own. Deliberate and
+  deferred (re-deriving the key would re-key every existing child); the guarantee that a colliding
+  host's report never retires its peer's children is pinned by test.
 - **Access surface, not a network model** (scope cut). `ipAddress` is **format-validated** as an IPv4
   or IPv6 value on write (shared `IpAddressSchema`, native zod — [[0090-ipam-validated-ip]] / #847): a
   human edit that is malformed is a clean `400`, and the agent DROPS a garbage NIC value rather than
@@ -165,7 +179,8 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   return the node's updated resolved `secretRefs` ([[0073-infra-node-secret-linkage]], #801).
 - `POST /infra/nodes` — create; default asset-backed (`trackAsAsset`, §5).
 - `PATCH /infra/nodes/:id` — partial update (`status` toggle, `label`, `kind`, `ipAddress`,
-  `shortcuts`, `assetId: null` to detach).
+  `shortcuts`, `assetId: null` to detach — `assetId` accepts **null and nothing else**, `400`
+  otherwise, #1117).
 - `PATCH /infra/nodes/:id/position` — persist canvas `{ x, y }` (debounced on drag-stop).
 - `DELETE /infra/nodes/:id` — soft delete (off the map). `POST /infra/nodes/:id/restore` — back on.
 - `GET /infra/nodes/:id/impact` — **blast radius** ([[0070-infra-topology-graph]] §7): the downstream
