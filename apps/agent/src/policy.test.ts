@@ -127,6 +127,33 @@ describe("state — the local clock the interval inversion runs on", () => {
       cleanup();
     }
   });
+
+  test("the software fingerprint round-trips beside the clock (#1142)", async () => {
+    const { dir, cleanup } = scratch();
+    try {
+      const file = join(dir, "state.json");
+      await writeState({ lastSuccessMs: 1_700_000_000_000, softwareHash: "1-2-abc" }, file);
+      expect(await loadState(file)).toEqual({
+        lastSuccessMs: 1_700_000_000_000,
+        softwareHash: "1-2-abc",
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("a non-string fingerprint is dropped, which sends the whole list rather than a wrong claim", async () => {
+    // Every degenerate read of this file has to land on "I know nothing", because the ONE thing the
+    // agent must never do is claim `unchanged` on the strength of a fingerprint it cannot vouch for.
+    const { dir, cleanup } = scratch();
+    try {
+      const file = join(dir, "state.json");
+      writeFileSync(file, JSON.stringify({ lastSuccessMs: 1, softwareHash: { nope: true } }));
+      expect((await loadState(file)).softwareHash).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe("localLimitsFrom — the host's own config file, read as a VETO only", () => {
