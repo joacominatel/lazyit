@@ -2370,11 +2370,9 @@ describe('InfraService', () => {
         severity: string;
         summary: string;
         metadata: Record<string, unknown>;
-      }>(notifications.emit as Mock);
+      }>(notifications.emit);
       expect(emitted.type).toBe('infra.identity_conflict');
-      expect(emitted.dedupeKey).toBe(
-        'infra.identity_conflict:node-1:SN-BETA',
-      );
+      expect(emitted.dedupeKey).toBe('infra.identity_conflict:node-1:SN-BETA');
       expect(emitted.summary).toContain('systemd-firstboot');
       expect(emitted.metadata.peerNodeId).toBe('node-1');
 
