@@ -165,8 +165,11 @@ export type ProbeVerdict =
  *    a failure would send someone off to re-mint a token that works perfectly.
  *  - **3xx is the wrong origin**, never the token — `--url` pointing at the raw web port instead of
  *    the HTTPS front is the single most common install mistake (#980), and it authenticates nothing.
- *  - **429 is the per-token report limit** (#1134) doing its job. Naming it as a rate limit and not
- *    as a bad credential is the whole difference between waiting a minute and rotating a token.
+ *  - **429 is a rate limit somewhere in front**, not a bad credential. It is deliberately NOT
+ *    attributed to the per-service-account report limit (#1134): that guard is scoped to
+ *    `POST /infra/report` and cannot fire here, so a 429 on this route came from a reverse proxy or
+ *    a WAF between the host and the instance. Naming the wrong limiter would send an operator to
+ *    raise a setting that was never involved.
  */
 export function interpretProbe(status: number, statusText: string, arch: string): ProbeVerdict {
   if (status === 401 || status === 403) {
@@ -190,7 +193,7 @@ export function interpretProbe(status: number, statusText: string, arch: string)
       ok: false,
       headline: `the instance answered 429 ${statusText}`,
       detail:
-        "this Service Account is over its report rate limit right now — the credential is fine; wait for the window to roll, or raise INFRA_REPORT_MAX_PER_WINDOW",
+        "something in front of the instance is rate limiting this request (a reverse proxy or WAF — lazyit's own report limit does not cover this route). The credential is fine; wait, then try again",
     };
   }
   if (status === 404) {
