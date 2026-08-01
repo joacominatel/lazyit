@@ -7,8 +7,13 @@ import {
   HttpStatus,
   NotFoundException,
 } from '@nestjs/common';
-import { AgentReportSchema, InfraNodeListItemSchema } from '@lazyit/shared';
+import {
+  AGENT_POLICY_DEFAULT,
+  AgentReportSchema,
+  InfraNodeListItemSchema,
+} from '@lazyit/shared';
 import { InfraService } from './infra.service';
+import { AgentPolicyService } from './agent-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
@@ -118,6 +123,10 @@ describe('InfraService', () => {
   // The ONE automatic action the #1141 clone detection takes — a broadcast bell nudge. Everything
   // else it does is a human action, so this mock is also how the tests assert the SILENCE.
   let notifications: { emit: Mock };
+  // The #1140 policy channel. Its own resolution rules are covered in `agent-policy.service.spec.ts`;
+  // here we only assert that ingest ASKS it, hands it the node's own override, puts the answer in the
+  // ack, and survives it failing.
+  let agentPolicy: { resolveForReport: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration + the #1141 merge write
   // through it — the merge needs both writes in one transaction or the dedup index refuses them).
   let txEdge: { create: Mock; updateMany: Mock };
@@ -184,6 +193,11 @@ describe('InfraService', () => {
     };
     // `emit` is idempotent on its dedupeKey and never throws — the real one returns the row id or null.
     notifications = { emit: jest.fn().mockResolvedValue(null) };
+    // Default: the built-in policy at revision 0, i.e. exactly the pre-#1140 behaviour, so every
+    // pre-existing ingest test keeps asserting the same rows it always did.
+    agentPolicy = {
+      resolveForReport: jest.fn().mockResolvedValue(AGENT_POLICY_DEFAULT),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -197,6 +211,7 @@ describe('InfraService', () => {
         { provide: SearchService, useValue: search },
         { provide: InfraNodeEnrollmentLimiter, useValue: enrollment },
         { provide: NotificationsService, useValue: notifications },
+        { provide: AgentPolicyService, useValue: agentPolicy },
       ],
     }).compile();
     service = moduleRef.get(InfraService);
@@ -348,6 +363,9 @@ describe('InfraService', () => {
         nodeId: 'node-1',
         state: 'PENDING',
         accepted: true,
+        // #1140: the ack is the policy channel, so an accepted report carries the resolved
+        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        policy: AGENT_POLICY_DEFAULT,
       });
     });
 
@@ -388,6 +406,9 @@ describe('InfraService', () => {
         nodeId: 'node-1',
         state: 'CONFIRMED',
         accepted: true,
+        // #1140: the ack is the policy channel, so an accepted report carries the resolved
+        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        policy: AGENT_POLICY_DEFAULT,
       });
     });
 
@@ -420,6 +441,9 @@ describe('InfraService', () => {
         nodeId: 'node-2',
         state: 'PENDING',
         accepted: true,
+        // #1140: the ack is the policy channel, so an accepted report carries the resolved
+        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        policy: AGENT_POLICY_DEFAULT,
       });
     });
 
@@ -454,6 +478,9 @@ describe('InfraService', () => {
         nodeId: 'node-raced',
         state: 'PENDING',
         accepted: true,
+        // #1140: the ack is the policy channel, so an accepted report carries the resolved
+        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        policy: AGENT_POLICY_DEFAULT,
       });
     });
 
@@ -1274,6 +1301,9 @@ describe('InfraService', () => {
           nodeId: 'node-host',
           state: 'PENDING',
           accepted: true,
+          // #1140: the ack is the policy channel, so an accepted report carries the resolved
+          // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+          policy: AGENT_POLICY_DEFAULT,
         });
       });
 
@@ -1411,6 +1441,9 @@ describe('InfraService', () => {
           nodeId: 'node-1',
           state: 'PENDING',
           accepted: true,
+          // #1140: the ack is the policy channel, so an accepted report carries the resolved
+          // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+          policy: AGENT_POLICY_DEFAULT,
         });
         // Keyed on the SERVER-resolved principal — never on `reportingSource`, a client-chosen body
         // field an attacker rotates per request.
@@ -2787,6 +2820,9 @@ describe('InfraService', () => {
         nodeId: 'node-1',
         state: 'CONFIRMED',
         accepted: true,
+        // #1140: the ack is the policy channel, so an accepted report carries the resolved
+        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        policy: AGENT_POLICY_DEFAULT,
       });
     });
 
@@ -2882,6 +2918,9 @@ describe('InfraService', () => {
         nodeId: 'node-2',
         state: 'PENDING',
         accepted: true,
+        // #1140: the ack is the policy channel, so an accepted report carries the resolved
+        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        policy: AGENT_POLICY_DEFAULT,
       });
     });
 
@@ -3030,6 +3069,9 @@ describe('InfraService', () => {
         nodeId: 'node-2',
         state: 'PENDING',
         accepted: true,
+        // #1140: the ack is the policy channel, so an accepted report carries the resolved
+        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        policy: AGENT_POLICY_DEFAULT,
       });
       const updateArg = firstArg<{
         where: { id: string };
@@ -3310,6 +3352,185 @@ describe('InfraService', () => {
 
       expect(await service.findIdentityMatches('node-legacy')).toEqual([]);
       expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Server-driven agent policy on the report path (ADR-0074 §7 amendment, #1140) ────────────────
+
+  describe('ingestReport — the ack is the policy channel', () => {
+    const reportEchoing = (policyRevision?: number) =>
+      AgentReportSchema.parse({
+        agentVersion: '2.0.0',
+        reportingSource: 'agent:policy',
+        externalId: 'machine-id-policy',
+        reportedAt: '2026-08-01T12:00:00.000Z',
+        host: { hostname: 'web-09' },
+        ...(policyRevision !== undefined ? { policyRevision } : {}),
+      });
+
+    it('a NEW host gets the resolved policy in its ack and the served staleness on its row', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-p',
+        state: 'PENDING',
+      });
+      agentPolicy.resolveForReport.mockResolvedValue({
+        ...AGENT_POLICY_DEFAULT,
+        revision: 7,
+        staleAfterSeconds: 5400,
+      });
+
+      const ack = await service.ingestReport(reportEchoing(), AGENT_SA);
+
+      expect(ack.policy?.revision).toBe(7);
+      const createArg = firstArg<{
+        data: { policyStaleAfterSeconds?: number };
+      }>(prisma.infraNode.create);
+      expect(createArg.data.policyStaleAfterSeconds).toBe(5400);
+    });
+
+    it('the echoed policyRevision is PERSISTED — the difference between having config and believing it', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-p',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'web-09',
+        agentPolicy: null,
+        policyRevision: 6,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-p',
+        state: 'CONFIRMED',
+      });
+      agentPolicy.resolveForReport.mockResolvedValue({
+        ...AGENT_POLICY_DEFAULT,
+        revision: 7,
+      });
+
+      await service.ingestReport(reportEchoing(7), AGENT_SA);
+
+      const arg = firstArg<{
+        data: { policyRevision?: number; policyAppliedAt?: Date };
+      }>(prisma.infraNode.update);
+      expect(arg.data.policyRevision).toBe(7);
+      // It CHANGED (6 → 7), so the applied-at stamp moves with it.
+      expect(arg.data.policyAppliedAt).toBeInstanceOf(Date);
+    });
+
+    it('an UNCHANGED echo leaves policyAppliedAt alone, so "applied 3 days ago" stays true', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-p',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'web-09',
+        agentPolicy: null,
+        policyRevision: 7,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-p',
+        state: 'CONFIRMED',
+      });
+      agentPolicy.resolveForReport.mockResolvedValue({
+        ...AGENT_POLICY_DEFAULT,
+        revision: 7,
+      });
+
+      await service.ingestReport(reportEchoing(7), AGENT_SA);
+
+      const arg = firstArg<{
+        data: { policyRevision?: number; policyAppliedAt?: Date };
+      }>(prisma.infraNode.update);
+      expect(arg.data.policyAppliedAt).toBeUndefined();
+    });
+
+    it('a PRE-#1140 agent echoes nothing, and the server records nothing rather than guessing zero', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-old',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'web-09',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-old',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(reportEchoing(), AGENT_SA);
+
+      const arg = firstArg<{
+        data: { policyRevision?: number; policyAppliedAt?: Date };
+      }>(prisma.infraNode.update);
+      expect(arg.data.policyRevision).toBeUndefined();
+      expect(arg.data.policyAppliedAt).toBeUndefined();
+    });
+
+    it('the node override is passed to the resolver — the narrowest scope actually reaches it', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-p',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'web-09',
+        agentPolicy: { intervalSeconds: 3600 },
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-p',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(reportEchoing(), AGENT_SA);
+
+      expect(agentPolicy.resolveForReport).toHaveBeenCalledWith(AGENT_SA, {
+        intervalSeconds: 3600,
+      });
+    });
+
+    it('NEVER fails the report: a policy resolution failure degrades to an ack with no policy', async () => {
+      // The whole feature is configuration. A host that cannot be configured is a nuisance; a host
+      // that vanishes from the CMDB because its configuration could not be read is the failure class
+      // ADR-0074's degrade-never-reject posture exists to prevent.
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-p',
+        state: 'PENDING',
+      });
+      agentPolicy.resolveForReport.mockRejectedValue(new Error('db down'));
+
+      const ack = await service.ingestReport(reportEchoing(), AGENT_SA);
+
+      expect(ack.accepted).toBe(true);
+      expect(ack.policy).toBeUndefined();
+    });
+
+    it("a container child inherits its HOST's served staleness, so a daily host's containers don't go dark", async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-host', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-child' });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      agentPolicy.resolveForReport.mockResolvedValue({
+        ...AGENT_POLICY_DEFAULT,
+        staleAfterSeconds: 90_000,
+      });
+
+      await service.ingestReport(
+        AgentReportSchema.parse({
+          agentVersion: '2.0.0',
+          reportingSource: 'agent:policy',
+          externalId: 'machine-id-policy',
+          reportedAt: '2026-08-01T12:00:00.000Z',
+          host: { hostname: 'web-09', containers: [{ name: 'redis' }] },
+        }),
+        AGENT_SA,
+      );
+
+      const childArg = prisma.infraNode.create.mock.calls[1][0] as {
+        data: { policyStaleAfterSeconds?: number };
+      };
+      expect(childArg.data.policyStaleAfterSeconds).toBe(90_000);
     });
   });
 });
