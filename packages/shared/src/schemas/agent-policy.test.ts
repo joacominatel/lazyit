@@ -250,6 +250,27 @@ describe("applyAgentPolicyVeto — local config may VETO, never WIDEN (#1140, ha
     expect(applyAgentPolicyVeto(served, {})).toEqual(served);
   });
 
+  test("a server list AT THE CAP cannot displace the host's own exclusions", () => {
+    // The rule stated as code, at the one place it can break: the union is bounded by the schema's
+    // 32-glob cap, so something has to go when both sides are full. What goes is the SERVER's. A
+    // slice that dropped the host's entries would let a server policy WIDEN what a root agent
+    // reports — the exact thing hard rule 1 says cannot happen by construction.
+    const full = Array.from({ length: AGENT_POLICY_GLOBS_MAX }, (_, i) => `srv-nic-${i}`);
+    const atCap = resolveAgentPolicy(4, [{ exclude: { nicNames: full } }]);
+    const vetoed = applyAgentPolicyVeto(atCap, { exclude: { nicNames: ["veth*", "docker*"] } });
+    expect(vetoed.exclude.nicNames).toContain("veth*");
+    expect(vetoed.exclude.nicNames).toContain("docker*");
+    expect(vetoed.exclude.nicNames.length).toBe(AGENT_POLICY_GLOBS_MAX);
+    expect(AgentPolicySchema.safeParse(vetoed).success).toBe(true);
+  });
+
+  test("the host's own list is what survives when IT alone fills the cap", () => {
+    const localFull = Array.from({ length: AGENT_POLICY_GLOBS_MAX }, (_, i) => `host-mnt-${i}`);
+    const served32 = resolveAgentPolicy(4, [{ exclude: { mountpoints: ["/snap/*"] } }]);
+    const vetoed = applyAgentPolicyVeto(served32, { exclude: { mountpoints: localFull } });
+    expect(vetoed.exclude.mountpoints).toEqual(localFull);
+  });
+
   test("the vetoed result is still a valid policy — the veto can never produce an invalid one", () => {
     const vetoed = applyAgentPolicyVeto(served, {
       minIntervalSeconds: AGENT_POLICY_INTERVAL_MAX_SECONDS * 10,
@@ -298,18 +319,27 @@ describe("agentPolicyDue — the interval inversion: a fixed tick, a server-owne
     ).toBe(false);
   });
 
-  test("jitter only ever makes a host EARLY — a tick at exactly the interval always reports", () => {
+  test("jitter only ever makes a host EARLY — a tick a hair SHORT of the interval still reports", () => {
     // The upgrade-path failure this direction exists to prevent: a host that installed the new
     // binary without re-running install.sh still has the old 15-minute timer, and its interval is
-    // the 15-minute default. Adding jitter would push the due instant past that tick and halve the
-    // host's real reporting rate. Subtracting it cannot.
+    // the 15-minute default. Its tick lands a hair short of the interval (systemd's AccuracySec,
+    // the previous run's own duration, OnUnitActiveSec re-arming from activation) — and if the
+    // jitter were ADDED, that tick would be short of `interval + jitter` too, so the host would
+    // skip it and report every 30 minutes instead of every 15. Subtracting cannot do that.
+    //
+    // Elapsed is deliberately measured against the interval UNDER TEST and just below it, so the
+    // sign of the jitter decides the outcome: with `interval + jitter` this is false for every id.
+    const interval = 900;
+    const tested = { ...policy, intervalSeconds: interval };
     const now = 10_000_000;
     for (const id of ["a", "bb", "ccc", "0123456789abcdef", "zz-top", machineId]) {
+      // Every id used here has a non-zero offset, so "early" is a real claim for each of them.
+      expect(policyJitterSeconds(id, interval)).toBeGreaterThan(0);
       expect(
         agentPolicyDue({
           nowMs: now,
-          lastSuccessMs: now - policy.intervalSeconds * 1000,
-          policy: { ...policy, intervalSeconds: 900 },
+          lastSuccessMs: now - (interval - 1) * 1000,
+          policy: tested,
           machineId: id,
         }),
       ).toBe(true);
