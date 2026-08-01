@@ -9,26 +9,23 @@ import { INFRA_BULK_REVIEW_MAX } from "@lazyit/shared";
  */
 
 /**
- * Forget the ids a filter has hidden.
+ * The selected rows a bulk action may touch: the intersection of what is TICKED and what is VISIBLE.
  *
- * A bulk action must reach EXACTLY what the operator can see. Deriving the acted-on nodes from the
- * visible rows is half of that; this is the other half, and it is the half the *count* depends on —
- * "12 selected" beside a Confirm button has to mean twelve rows on screen, not twelve rows of which
- * four are behind a filter the operator has since narrowed. Without it, *select all → filter → Confirm*
- * confirms rows nobody looked at, and widening the filter again resurrects a selection the operator
- * has no memory of making.
+ * The raw selection is a set of ids that outlives a filter change, and that is fine as long as
+ * nothing ever reads it directly. Everything the operator sees or presses goes through this instead —
+ * the count beside the buttons, the two dialogs, and the ids in the request — so a row a filter hides
+ * is out of the action AND out of the count, in the same instant it leaves the screen. Selecting all,
+ * narrowing the filter and pressing Confirm therefore confirms exactly the rows still on screen.
  *
- * Returns the SAME set when nothing was hidden: the tray calls this from an effect that writes the
- * result back into state, so a fresh `Set` on every pass would re-render for its own sake forever.
+ * Re-widening the filter brings a hidden row back, ticked and counted again. That is the deliberate
+ * half: it is visible (the count goes up, the checkbox is drawn ticked, the row is on screen), which
+ * is the opposite of the failure this guards — acting on rows nobody can see.
  */
-export function pruneHiddenFromSelection(
+export function visibleSelection<T extends { id: string }>(
+  visibleRows: readonly T[],
   selected: ReadonlySet<string>,
-  visibleIds: readonly string[],
-): ReadonlySet<string> {
-  if (selected.size === 0) return selected;
-  const visible = new Set(visibleIds);
-  const kept = [...selected].filter((id) => visible.has(id));
-  return kept.length === selected.size ? selected : new Set(kept);
+): T[] {
+  return visibleRows.filter((row) => selected.has(row.id));
 }
 
 /**
