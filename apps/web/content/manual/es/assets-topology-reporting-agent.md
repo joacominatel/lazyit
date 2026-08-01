@@ -258,7 +258,17 @@ reportado — sistema operativo, CPU, memoria, discos, interfaces de red, númer
 instalado — se muestra como un panel de solo lectura **Datos reportados** en el propio nodo (abrí un
 nodo en el diagrama o en la lista de Servidores), y los mismos datos aparecen en el activo
 correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin tocar nada que sea tuyo
-(el nombre, el número de serie y el modelo del activo nunca cambian por un reporte).
+(el nombre, el número de serie y el modelo del activo nunca cambian por un reporte). Esto ahora
+incluye los **contenedores**: un contenedor que confirmaste como activo mantiene su imagen, su digest,
+su estado y sus puertos publicados al día en la página del activo, donde antes quedaban tal como
+estaban el día en que lo confirmaste.
+
+> [!tip] "Recolectado hace 3 días" no significa que el servidor haya dejado de reportar
+> El panel de inventario indica cuándo se **recolectaron esos datos**, y lazyit sólo reescribe el
+> inventario almacenado cuando algo cambió de verdad: un servidor cuyo software y hardware llevan dos
+> semanas estables conserva una marca de recolección de hace dos semanas mientras reporta perfectamente
+> cada pocos minutos. Para saber *si el host sigue reportando*, mirá su hora de **último reporte** en la
+> lista de Servidores o en el panel del nodo; esa avanza en cada reporte.
 
 ## Cuando dos servidores dicen ser la misma máquina
 
@@ -338,7 +348,28 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
   que el tipo de máquina, todavía no se muestra en ninguna pantalla.
 - **Software instalado** — la lista de paquetes instalados, con versiones cuando están disponibles. El
   agente además registra qué gestor de paquetes reportó cada uno; la lista en sí muestra el nombre y
-  la versión.
+  la versión. En un servidor con muchos paquetes esta lista es, de lejos, lo más pesado que viaja en un
+  reporte y sólo cambia cuando alguien instala o actualiza algo, así que el agente la envía **una vez y
+  después envía sólo una huella de ella** hasta que cambie, lo que reduce un reporte de rutina a
+  aproximadamente una décima parte de su tamaño. El panel sigue mostrando la lista completa: la
+  abreviatura es sólo la forma en que viaja. Conviene conocer un caso: cuando el agente no logra
+  enumerar los paquetes (no hay un gestor de paquetes compatible, o la recolección expiró), lazyit
+  **conserva la lista que ya tiene** en lugar de vaciar el panel, y el panel no lo señala por sí mismo
+  — la fecha de **Recolectado** es la que indica qué tan antigua es la lista. Un agente sólo empieza a
+  omitir la lista una vez que lazyit le avisó — en la respuesta a un reporte anterior — que esta versión
+  entiende esa abreviatura, así que un agente actualizado antes que su instancia sigue enviando la lista
+  completa. El ahorro llega cuando ambas mitades están al día. El único momento a tener en cuenta es el
+  movimiento inverso: **bajar** una instancia a una versión anterior a ésta mientras sus agentes ya son
+  nuevos cuesta un reporte, cuya lista esa versión anterior lee como «sin software»; el agente ve la
+  respuesta antigua y vuelve a enviar la lista completa en el reporte siguiente. Si lazyit tiene una lista que ya no logra hacer
+  coincidir con la huella (después de restaurar un respaldo, por ejemplo), **conserva la lista que ya
+  tiene** y le pide al agente una completa en el siguiente reporte, en lugar de vaciar el panel ante
+  una duda. Un servidor que **descartaste** y que luego volvió a descubrirse es un caso distinto, y
+  conviene saberlo: vuelve como un registro nuevo, sin ninguna lista de paquetes, así que su panel de
+  Software está realmente vacío hasta que la lista completa llegue con el siguiente reporte — como
+  máximo un intervalo de reporte (15 minutos por defecto). Desactivar la recolección de software en la
+  configuración del agente es otra cosa distinta, y deliberada: la lista guardada se borra, para que
+  nunca quedes leyendo versiones de paquetes que ya nadie está recolectando.
 - **Qué no pudo recopilar** — cada reporte también indica si corrió como root y nombra lo que tuvo que
   omitir o lo que agotó su tiempo. Si ejecutás el agente a mano (`lazyit-agent report --once --force`) imprime
   esas notas ahí mismo, que suele ser la forma más rápida de responder "¿por qué está vacía la columna

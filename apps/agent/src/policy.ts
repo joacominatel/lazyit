@@ -37,10 +37,33 @@ export const POLICY_DIR = "/var/lib/lazyit-agent";
 export const POLICY_FILE = `${POLICY_DIR}/policy.json`;
 export const STATE_FILE = `${POLICY_DIR}/state.json`;
 
-/** What the agent remembers between runs. Deliberately one field — this is a clock, not a database. */
+/**
+ * What the agent remembers between runs. Deliberately tiny — this is a clock and a checksum, not a
+ * database; nothing here is ever the source of a FACT, only of a decision the server can overrule.
+ */
 export interface AgentState {
   /** Epoch ms of the last report the server ACCEPTED. Absent on a first run or a deleted file. */
   lastSuccessMs?: number;
+  /**
+   * Fingerprint of the software list the last ACCEPTED report left the server holding (#1142) — what
+   * lets the next run omit an unchanged list. Absent means "send everything", which is why every
+   * degenerate read below (missing file, truncated JSON, a non-string value) lands there: forgetting
+   * costs one large report, and a WRONG fingerprint costs a wasted round trip — the server cannot
+   * corroborate the `unchanged` claim, keeps its list and asks for a resend, so it self-corrects on the
+   * next tick. Neither is durable; contrast `softwareDelta` below, where a wrong memory is.
+   */
+  softwareHash?: string;
+  /**
+   * Positive evidence, from the last accepted report's ack, that the server understands the #1142
+   * `softwareState` contract — the ONE thing that entitles the next run to omit an unchanged list.
+   *
+   * It is remembered rather than assumed because the contract root is a loose `z.object()` (#1138): a
+   * server built before #1142 does not reject `softwareState`/`softwareHash`, it silently strips them,
+   * then sees no `software` key and clears the stored list. So absence here — a first run, a deleted
+   * file, a corrupt one, an ack that never carried the key — always means "send the whole list", which
+   * costs bandwidth and nothing else. Only a literal `true` on the wire and on disk counts.
+   */
+  softwareDelta?: boolean;
 }
 
 /** Write `text` to `file` atomically-ish (temp + rename) with owner-only permissions. */
@@ -97,13 +120,35 @@ export async function writeCachedPolicy(
 export async function loadState(file = STATE_FILE): Promise<AgentState> {
   try {
     const parsed: unknown = JSON.parse(await Bun.file(file).text());
-    const value =
-      typeof parsed === "object" && parsed !== null
-        ? (parsed as { lastSuccessMs?: unknown }).lastSuccessMs
+    const raw = (
+      typeof parsed === "object" && parsed !== null ? parsed : {}
+    ) as {
+      lastSuccessMs?: unknown;
+      softwareHash?: unknown;
+      softwareDelta?: unknown;
+    };
+    const lastSuccessMs =
+      typeof raw.lastSuccessMs === "number" &&
+      Number.isFinite(raw.lastSuccessMs) &&
+      raw.lastSuccessMs > 0
+        ? raw.lastSuccessMs
         : undefined;
-    return typeof value === "number" && Number.isFinite(value) && value > 0
-      ? { lastSuccessMs: value }
-      : {};
+    // Each field is validated on its own: a corrupt clock must not cost the fingerprint (a needless
+    // full resend) and a corrupt fingerprint must not cost the clock (a needless report burst).
+    const softwareHash =
+      typeof raw.softwareHash === "string" && raw.softwareHash.length > 0
+        ? raw.softwareHash
+        : undefined;
+    // A LITERAL `true`, never a truthy value (#1142). This flag is the only thing standing between a
+    // matching fingerprint and an omitted package list, and an omitted list against a server that
+    // cannot read one wipes the host's inventory — so a hand-edited `"true"`, a `1` or anything else
+    // reads as not proven and the next report simply sends everything.
+    const softwareDelta = raw.softwareDelta === true ? true : undefined;
+    return {
+      ...(lastSuccessMs !== undefined ? { lastSuccessMs } : {}),
+      ...(softwareHash !== undefined ? { softwareHash } : {}),
+      ...(softwareDelta !== undefined ? { softwareDelta } : {}),
+    };
   } catch {
     return {};
   }
