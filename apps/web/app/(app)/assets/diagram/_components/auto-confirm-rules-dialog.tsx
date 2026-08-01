@@ -9,6 +9,7 @@ import {
 import {
   defaultTrackAsAsset,
   InfraNodeKindSchema,
+  statesAutoConfirmCondition,
   type CreateInfraAutoConfirmRule,
   type InfraAutoConfirmScope,
   type InfraNodeKind,
@@ -69,8 +70,10 @@ interface AutoConfirmRulesDialogProps {
  *
  *  1. **A rule is never retroactive.** It only sees reports that arrive after it is saved, so nothing
  *     already sitting in the review tray confirms behind the operator who is looking at it.
- *  2. **A rule needs at least one condition.** A rule with none would auto-confirm everything, and the
- *     API refuses to store one — the form says so before the 400 does.
+ *  2. **A rule needs a condition that can rule a proposal OUT.** None at all — or one spelled `*` /
+ *     `0.0.0.0/0`, which matches every proposal there is — would be blanket auto-confirm, and the API
+ *     refuses to store it. The form uses the very same `statesAutoConfirmCondition` the contract does,
+ *     so it says so before the 400 does.
  *
  * It lives here, on the tray, rather than in Settings: this is where an operator feels the cost that
  * makes a rule worth writing, and a rule written anywhere else is a setting nobody finds.
@@ -109,14 +112,23 @@ export function AutoConfirmRulesDialog({
     setTrackAsAsset(defaultTrackAsAsset(false));
   }
 
-  /** Keep the container default (OFF) in step with the scope the operator picked. */
+  /**
+   * Keep the container default (OFF) in step with the scope the operator picked — for `ANY` as well
+   * as `CONTAINER`, because an `ANY` rule reaches container children too and the server defaults it
+   * the same way. The switch stays right there for the operator who wants otherwise.
+   */
   function pickScope(scope: InfraAutoConfirmScope) {
     setAppliesTo(scope);
-    setTrackAsAsset(defaultTrackAsAsset(scope === "CONTAINER"));
+    setTrackAsAsset(defaultTrackAsAsset(scope !== "HOST"));
   }
 
-  const hasCondition =
-    hostnamePattern.trim() !== "" || subnetCidr.trim() !== "" || reportedKind !== NO_KIND;
+  // The SAME predicate the create contract and the matcher use, so the form refuses exactly what the
+  // API would: a wildcard-only pattern (`*`) or `0.0.0.0/0` is not a condition — it excludes nothing.
+  const hasCondition = statesAutoConfirmCondition({
+    hostnamePattern: hostnamePattern.trim() || null,
+    subnetCidr: subnetCidr.trim() || null,
+    reportedKind: reportedKind === NO_KIND ? null : reportedKind,
+  });
 
   function handleSave() {
     const body: CreateInfraAutoConfirmRule = {
