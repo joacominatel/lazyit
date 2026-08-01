@@ -4,11 +4,13 @@ import type {
   CreateInfraEdge,
   CreateInfraNode,
   InfraEdge,
+  InfraIdentityMatch,
   InfraImpactResponse,
   InfraNode,
   InfraNodeDetail,
   InfraNodeListItem,
   InfraSecretRef,
+  MergeInfraNode,
   UpdateInfraNode,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -148,6 +150,40 @@ export function confirmInfraNode(
   body: ConfirmInfraNode,
 ): Promise<InfraNodeDetail> {
   return apiFetch<InfraNodeDetail>(`${BASE}/nodes/${nodeId}/confirm`, {
+    method: "POST",
+    body,
+  });
+}
+
+/**
+ * Re-image adoption hints (`GET /infra/nodes/:id/identity-matches`, ADR-0074 §3 / #1141) — other live
+ * nodes whose stored corroborating evidence shares a burned-in serial or MAC with this one. Read-only:
+ * it is what lets the tray ask *"this looks like `srv-app-04` re-imaged — adopt?"* instead of leaving
+ * a curated node to drift OFFLINE beside a proposal nobody connects to it. Empty for a node reported
+ * by an agent older than contract v2 (no `identifiers[]` stored) — no hint is better than a wrong one.
+ */
+export function getInfraNodeIdentityMatches(
+  nodeId: string,
+  signal?: AbortSignal,
+): Promise<InfraIdentityMatch[]> {
+  return apiFetch<InfraIdentityMatch[]>(
+    `${BASE}/nodes/${nodeId}/identity-matches`,
+    { signal },
+  );
+}
+
+/**
+ * Re-key a duplicate into an existing node (`POST /infra/nodes/:id/merge-into`, ADR-0074 §3 / #1141):
+ * the addressed node's agent reporting key is transplanted onto `targetNodeId` so future reports land
+ * there, and the duplicate is archived with the merge stamped on it. Identity moves; curation does
+ * NOT — the target keeps its label, state, kind, position and asset link. Returns the target's
+ * refreshed detail.
+ */
+export function mergeInfraNodeInto(
+  nodeId: string,
+  body: MergeInfraNode,
+): Promise<InfraNodeDetail> {
+  return apiFetch<InfraNodeDetail>(`${BASE}/nodes/${nodeId}/merge-into`, {
     method: "POST",
     body,
   });

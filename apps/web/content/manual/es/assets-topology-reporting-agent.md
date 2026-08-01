@@ -86,7 +86,7 @@ tiene su propio botón de copiar:
 
 Los hosts descubiertos no entran directo a tu inventario: te esperan en la bandeja de **Revisión
 pendiente** arriba de la vista de Servidores, cada uno mostrando su nombre de host, su tipo, de dónde
-vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés dos opciones:
+vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés tres opciones:
 
 - **Confirmar** — suma el host a tu topología activa. Un diálogo breve te permite renombrarlo y
   cambiar su tipo antes, y ofrece un interruptor **Registrar como activo de inventario** (**activado**
@@ -96,6 +96,23 @@ vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés do
   hardware real, ese pasa a ser el serie del activo automáticamente (un texto de relleno como
   *"To be filled by O.E.M."*, o un serie que ya usa otro activo, se descarta). Desactivá el
   interruptor para dejar el nodo solo en el grafo.
+- **Unificar con…** — este host ya lo tenés. Elegí el servidor existente que realmente es y su clave
+  de reporte se muda ahí: los próximos reportes llegan a ese servidor y esta propuesta se archiva.
+  Usalo cuando una máquina fue **reinstalada** (un sistema operativo nuevo le da un machine ID nuevo,
+  así que vuelve como si fuera desconocida mientras el servidor que ya habías curado queda en silencio),
+  o cuando lazyit separó un host clonado (más abajo). El servidor que elijas conserva lo que
+  configuraste: nombre, tipo, posición, responsable, activo vinculado y conexiones, y una IP que
+  cargaste a mano sigue siendo tuya. Lo que se muda es la clave de reporte y los datos reportados que
+  vienen con ella, así que una IP que había completado el *agente* pasa a ser la del host entrante.
+  **Si el servidor que elegís ya reporta con un agente propio, esa clave de reporte se reemplaza**: es
+  justo lo que querés después de una reinstalación, pero significa que un host que siga reportando con
+  la clave anterior vuelve como un servidor pendiente nuevo. La fila archivada deja registro de las dos
+  claves —la que entregó y la que se reemplazó— y ella misma ya no conserva ninguna, así que
+  restaurarla devolvería la entrada y tus ediciones, nunca la clave de reporte.
+  Si los dos reportan el mismo número de serie o la misma dirección de placa de
+  red, el diálogo te lo dice arriba (*"esto parece srv-app-04"*); eso solo aparece si ambos fueron
+  reportados por un agente lo bastante reciente como para enviar esos datos, y es una sugerencia que
+  confirmás vos, nunca una decisión tomada por el sistema.
 - **Descartar** — elimina la propuesta. Es un borrado lógico (igual que quitar cualquier nodo del
   mapa): no se destruye nada y se puede restaurar más adelante. **Descartar no detiene al agente.**
   Si ese host todavía tiene el agente instalado y corriendo, su próximo reporte lo vuelve a informar
@@ -148,6 +165,58 @@ instalado — se muestra como un panel de solo lectura **Datos reportados** en e
 nodo en el diagrama o en la lista de Servidores), y los mismos datos aparecen en el activo
 correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin tocar nada que sea tuyo
 (el nombre, el número de serie y el modelo del activo nunca cambian por un reporte).
+
+## Cuando dos servidores dicen ser la misma máquina
+
+lazyit distingue tus servidores por el machine ID que Linux escribe al instalarse
+(`/etc/machine-id`). Funciona bien, hasta que se arma una **plantilla de VM o una imagen dorada que ya
+lo trae adentro**. Todas las máquinas clonadas de ahí reclaman la misma identidad y, sin un control,
+se apilarían en una sola fila: un servidor en tu mapa, doce en tus racks. Es la forma más común de
+terminar con un inventario que se equivoca con total seguridad, y es la razón por la que existe
+`systemd-firstboot`.
+
+lazyit lo controla. Cuando un reporte reclama un ID que ya usa otro servidor, compara el hardware que
+reportan los dos: si el **número de serie y las direcciones de placa de red son ambos distintos**, son
+dos máquinas, no una. Ambos, para que un cambio legítimo en un servidor real nunca se confunda con un
+clon: cambiar una placa de red mueve solo las direcciones, cambiar la placa madre mueve solo el serie.
+
+El **nombre de host queda deliberadamente fuera del control**: una máquina clonada de una plantilla
+suele traer también el nombre de la plantilla, así que exigir que los nombres difieran habría dejado
+pasar justamente los clones que esto existe para detectar. Cuando los dos servidores sí responden al
+mismo nombre, la notificación lo dice: es la señal más clara de que estás mirando una imagen dorada.
+
+Cuando se detectan dos máquinas:
+
+- El host nuevo obtiene **su propia entrada** en Revisión pendiente en lugar de pisar la primera. Sus
+  datos reportados, su IP y su nombre de host quedan suyos.
+- **No se unifica ni se cambia nada** en el servidor que ya estaba: el control solo puede frenar una
+  unificación, nunca reescribir algo que ya tenías.
+- Recibís **una sola notificación** en la campana (no una por cada reporte). El título nombra a los dos
+  hosts; el resumen arranca con el comando que lo soluciona (la campana recorta los resúmenes largos a
+  una línea: pasá el mouse por encima para leerlo completo). La fila enlaza al mapa de topología.
+
+La solución está en las máquinas, no en lazyit: en cada clon, borrá `/etc/machine-id`, ejecutá
+`systemd-firstboot --setup-machine-id` y reiniciá. Corregí también la plantilla, o cada clon futuro
+repite el problema. Una vez que el clon tiene un ID propio, simplemente reporta como un host nuevo:
+confirmalo, o usá **Unificar con…** para plegarlo sobre la entrada que lazyit le creó mientras tanto.
+
+Todo esto necesita los datos de hardware que envía un agente **actual**, y necesita que ese agente
+efectivamente los tenga. Dos cosas dejan a un host fuera del control, y ambas son silenciosas:
+
+- **Un agente viejo.** Los hosts que todavía corren un agente anterior a estos datos nunca se comparan
+  — ni generan avisos — hasta que reporten con uno actualizado; nada de lo que ya tenés se toca al
+  actualizar.
+- **No hay número de serie para comparar.** El control necesita un número de serie *y* direcciones de
+  placa de red. El número de serie lo da `dmidecode`, que solo responde si el agente corre **como
+  root** y la herramienta está instalada — y un **guest LXC o de contenedor no tiene número de serie
+  de hardware, punto**, corra como root o no. Un host sin número de serie se saltea igual que uno
+  viejo: lazyit lee un dato ausente como "nada para comparar", nunca como una diferencia, así que no
+  avisa sobre una suposición.
+
+Es decir que una flota con el agente más nuevo puede igual quedarse **sin ninguna detección de clones**
+— en silencio. La señal está en el panel de **Datos reportados**: si un host no muestra número de
+serie, ese host no se está controlando. Si la detección de clones te importa, corré el agente como root
+con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
 
 ## Qué recopila el agente
 

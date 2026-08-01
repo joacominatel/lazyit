@@ -447,6 +447,12 @@ export const AGENT_IDENTIFIERS_MAX = 16;
 /** Cap on a single identifier value — long enough for any real UUID/serial, short enough to be inert. */
 export const AGENT_IDENTIFIER_VALUE_MAX = 200;
 
+/**
+ * The wire cap on `externalId`. Named rather than inlined because #1141's {@link disambiguateExternalId}
+ * has to bound the key it derives against the same number.
+ */
+export const AGENT_EXTERNAL_ID_MAX = 200;
+
 /** Caps on `diagnostics.warnings` — same truncate-don't-reject rule as the identifier set. */
 export const AGENT_WARNINGS_MAX = 50;
 export const AGENT_WARNING_LENGTH_MAX = 300;
@@ -832,7 +838,7 @@ export const AgentReportSchema = z.object({
    * platform UUID on macOS. One host = one node, forever. Still the PRIMARY key; `host.identifiers`
    * corroborates it (#1141) but never replaces it.
    */
-  externalId: z.string().min(1).max(200),
+  externalId: z.string().min(1).max(AGENT_EXTERNAL_ID_MAX),
   /** When the agent gathered this report (ISO-8601). */
   reportedAt: z.iso.datetime(),
   host: z.object({
@@ -1278,6 +1284,141 @@ export function sanitizeSerial(host: AgentReportHost): string | undefined {
   return raw;
 }
 
+// ── Identity corroboration (#1141) — evidence beside the dedup key, never a second key ────────────
+//
+// `externalId` is `/etc/machine-id` and `reportingSource` is derived from the same value, so the
+// "composite" dedup key is machine-id twice. A VM template or golden image with a BAKED machine-id is
+// the single most common Proxmox/VMware/Packer mistake — it is the documented reason
+// `systemd-firstboot` exists — and against that key twelve cloned servers all match one node: the
+// label keeps whoever reported first, the IP flip-flops every report, and `specs` is whichever host
+// reported last. The CMDB shows 1 server; the estate has 12. A confidently wrong inventory is worse
+// than an empty one.
+//
+// These helpers are the whole detection surface, and they are deliberately NOT an identification-rule
+// engine: no priority table, no configurable entries, no reconciliation-precedence UI. ServiceNow's
+// IRE needs that because 14 discovery sources fight over one CI; there is exactly ONE source here.
+
+/**
+ * The corroborating facts of one host, read out of a report's `host` block (or out of the same block
+ * as it was stored in a node's `specs` jsonb — the two are the same shape, which is why this takes
+ * `unknown` and reads defensively rather than trusting a Prisma `JsonValue` cast).
+ *
+ * Only `host.identifiers` is read. `hardware.serial` is NOT a second source: it lands in the
+ * identifier set already, and two doors onto one comparison is exactly how the two sides come to
+ * disagree about what counts as evidence.
+ */
+export interface HostIdentityEvidence {
+  /** Sanitized, canonical `serial` identifiers — sorted + de-duplicated, so this is a SET. */
+  serials: string[];
+  /** Sanitized, canonical `mac` identifiers — sorted + de-duplicated. */
+  macs: string[];
+  /**
+   * The reported short hostname, or `""` when the block carries none. NOT part of
+   * {@link isClonedMachineId} — it is corroborating detail for the operator-facing message only.
+   */
+  hostname: string;
+}
+
+/** Sorted, de-duplicated — the comparison must be a property of the set, never of report order. */
+function identityValuesOf(list: unknown[], kind: AgentIdentifierKind): string[] {
+  const values = new Set<string>();
+  for (const entry of list) {
+    if (!isPlainObject(entry)) continue;
+    if (entry.kind !== kind) continue;
+    if (typeof entry.value !== "string") continue;
+    // Re-sanitized on READ as well as on parse: the stored blob may predate the #1138 sanitize rule
+    // or have been hand-edited, and an OEM placeholder must never corroborate two unrelated boards.
+    const value = sanitizeIdentifierValue(kind, entry.value);
+    if (value) values.add(value);
+  }
+  return [...values].sort();
+}
+
+/**
+ * The corroborating evidence carried by a report's (or a stored node's) `host` block. Everything
+ * degrades to an EMPTY set rather than throwing: this runs on the machine-facing report path, and a
+ * malformed stored blob must not be able to fail an ingest.
+ */
+export function hostIdentityEvidence(host: unknown): HostIdentityEvidence {
+  if (!isPlainObject(host)) return { serials: [], macs: [], hostname: "" };
+  const identifiers = Array.isArray(host.identifiers) ? host.identifiers : [];
+  return {
+    serials: identityValuesOf(identifiers, "serial"),
+    macs: identityValuesOf(identifiers, "mac"),
+    hostname: typeof host.hostname === "string" ? host.hostname.trim() : "",
+  };
+}
+
+/** Two sets share nothing — the "differ" half of the rule below. */
+function isDisjoint(a: string[], b: string[]): boolean {
+  const right = new Set(b);
+  return !a.some((value) => right.has(value));
+}
+
+/**
+ * Do these two reports, which agree on `externalId`, actually come from DIFFERENT physical hosts?
+ *
+ * True when the serial set AND the MAC set BOTH differ. Two facts, both burned into hardware — and
+ * the **hostname is deliberately not one of them**.
+ *
+ * WHY HOSTNAME IS NOT A GATE. An earlier draft of this rule required the hostname to differ too, and
+ * that excused the exact scenario the rule exists for: the archetypal golden-image clone has a baked
+ * machine-id *and a baked hostname* — that is what "cloned from a template" means. Requiring a
+ * hostname difference would have silently collapsed those hosts into one node, which is the failure
+ * #1141 was opened about. The hostname survives as corroborating DETAIL in the notification (and two
+ * hosts answering to one name is itself worth telling the operator), never as a condition.
+ *
+ * WHY BOTH, NOT EITHER. Hypervisors hand every guest its own SMBIOS serial and its own MACs, so two
+ * clones differ on both while sharing machine-id and name. Requiring BOTH to differ tolerates exactly
+ * one legitimate hardware change on a real box: a NIC swap moves the MACs alone, a board swap moves
+ * the serial alone. Both moving at once under one machine-id is overwhelmingly two machines.
+ *
+ * THE ERROR ASYMMETRY JUSTIFIES BIASING TOWARD DETECTION. A false positive costs one spurious PENDING
+ * node and one notification, which a human dismisses (and `merge-into` undoes). A false negative
+ * silently merges two production servers into one inventory row — the worst failure class in this
+ * product, because a confidently wrong CMDB is worse than an empty one.
+ *
+ * ABSENCE IS NOT A DIFFERENCE. Pre-v2 agents send no `identifiers[]` and every row stored before
+ * contract v2 has none, so an empty set on EITHER side returns false and the caller merges exactly as
+ * it did before. That is the load-bearing upgrade promise of #1141: the first v2 report backfills the
+ * evidence, and only reports from then on can be corroborated. Warning on absence would have made
+ * every legacy estate light up on the day it upgraded.
+ */
+export function isClonedMachineId(
+  stored: HostIdentityEvidence,
+  incoming: HostIdentityEvidence,
+): boolean {
+  if (!stored.serials.length || !incoming.serials.length) return false;
+  if (!stored.macs.length || !incoming.macs.length) return false;
+  return isDisjoint(stored.serials, incoming.serials) && isDisjoint(stored.macs, incoming.macs);
+}
+
+/** Cap on the discriminator half of a disambiguated key — long enough for any real serial or MAC. */
+export const IDENTITY_DISCRIMINATOR_MAX = 64;
+
+/**
+ * The strongest identity value a host offers, used to give a colliding clone its OWN stable dedup key.
+ * The serial wins because it is burned into the board; the lowest MAC is the fallback (the set is
+ * sorted, so "lowest" is total and independent of report order). `undefined` when there is no
+ * evidence — which by construction cannot happen on the path {@link isClonedMachineId} opens.
+ */
+export function identityDiscriminator(evidence: HostIdentityEvidence): string | undefined {
+  return evidence.serials[0] ?? evidence.macs[0];
+}
+
+/**
+ * The dedup key a colliding host gets instead of the one it claims: `<externalId>#<discriminator>`.
+ *
+ * The clone keeps reporting the same baked machine-id forever, so it needs a key that is DETERMINISTIC
+ * (the same clone must land on the same node every 15 minutes) and DISTINCT (the partial-unique
+ * `(reportingSource, externalId)` index over live rows physically forbids two live nodes sharing one).
+ * Deriving it from the burned-in serial gives both. It is intentionally human-readable rather than
+ * hashed: an operator staring at two rows in the tray should be able to see WHY they are two.
+ */
+export function disambiguateExternalId(externalId: string, discriminator: string): string {
+  return `${externalId.slice(0, AGENT_EXTERNAL_ID_MAX)}#${discriminator.slice(0, IDENTITY_DISCRIMINATOR_MAX)}`;
+}
+
 // ── Topology promotion (ADR-0074 §3 amendment, issue #1139) — kind + container child nodes ────────
 
 /** The virtualization types that make the host a CONTAINER rather than a VM. */
@@ -1408,6 +1549,44 @@ export const ConfirmInfraNodeSchema = z.strictObject({
   label: z.string().trim().min(1).max(200).optional(),
 });
 export type ConfirmInfraNode = z.infer<typeof ConfirmInfraNodeSchema>;
+
+// ── Re-key / merge-into (#1141) — the HUMAN half of identity reconciliation ────────────────────────
+
+/**
+ * `POST /infra/nodes/:id/merge-into` body: which EXISTING node the addressed one is really the same
+ * host as. The addressed node is the duplicate; its agent identity (`reportingSource`/`externalId`)
+ * is transplanted onto `targetNodeId` and the duplicate is soft-deleted.
+ *
+ * One field, and STRICT. The merge is the only place a node's dedup key can change after creation, so
+ * it must not become a side door through which curation fields (label, kind, state) ride along — those
+ * have their own PATCH, with its own permission and its own semantics.
+ */
+export const MergeInfraNodeSchema = z.strictObject({
+  targetNodeId: z.cuid(),
+});
+export type MergeInfraNode = z.infer<typeof MergeInfraNodeSchema>;
+
+/**
+ * One re-image adoption hint (`GET /infra/nodes/:id/identity-matches`): another live node whose stored
+ * corroborating evidence shares a burned-in fact with this one. It is what lets the tray say *"this
+ * looks like `srv-app-04` re-imaged — adopt?"* instead of leaving the operator to notice that a host
+ * they already own quietly went dark the same week a new proposal appeared.
+ *
+ * `matchedOn` is restricted to the two BURNED-IN facts. A hostname match is not evidence — hostnames
+ * are recycled deliberately (that is the entire point of a naming convention), so offering one as an
+ * adoption candidate would train the operator to click through a prompt that is usually wrong.
+ */
+export const InfraIdentityMatchSchema = z.object({
+  id: z.cuid(),
+  label: z.string(),
+  kind: InfraNodeKindSchema,
+  status: InfraNodeStatusSchema,
+  state: InfraNodeStateSchema,
+  matchedOn: z.enum(["serial", "mac"]),
+  /** The shared value itself, so the UI can show WHY these two rows are being paired. */
+  value: z.string(),
+});
+export type InfraIdentityMatch = z.infer<typeof InfraIdentityMatchSchema>;
 
 // ── Plausibility table (ADR-0070 §3) — data the API WARNS on, NOT a hard constraint ───────────────
 

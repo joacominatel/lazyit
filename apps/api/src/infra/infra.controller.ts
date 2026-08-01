@@ -30,6 +30,7 @@ import {
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
   InfraEdgeSchema,
+  InfraIdentityMatchSchema,
   InfraImpactResponseSchema,
   InfraNodeDetailSchema,
   InfraNodeKindSchema,
@@ -38,6 +39,7 @@ import {
   InfraNodeStateSchema,
   InfraNodeStatusSchema,
   InfraSecretRefSchema,
+  MergeInfraNodeSchema,
   UpdateInfraNodeSchema,
 } from '@lazyit/shared';
 import { z } from 'zod';
@@ -61,6 +63,8 @@ class AttachInfraSecretDto extends createZodDto(AttachInfraSecretSchema) {}
 class AgentReportDto extends createZodDto(AgentReportSchema) {}
 class AgentReportAckDto extends createZodDto(AgentReportAckSchema) {}
 class ConfirmInfraNodeDto extends createZodDto(ConfirmInfraNodeSchema) {}
+class MergeInfraNodeDto extends createZodDto(MergeInfraNodeSchema) {}
+class InfraIdentityMatchDto extends createZodDto(InfraIdentityMatchSchema) {}
 
 /**
  * The "track as asset" toggle on node create (ADR-0070 §5), DEFAULT-ON. It is API logic, not part of
@@ -243,6 +247,37 @@ export class InfraController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.infra.confirmNode(id, dto, principal);
+  }
+
+  // ── Identity reconciliation (ADR-0074 §3 amendment, #1141) ──────────────────
+
+  @Get('nodes/:id/identity-matches')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      'Other live nodes whose stored corroborating evidence (host.identifiers) shares a burned-in serial or MAC with this one — the "this looks like srv-app-04 re-imaged, adopt?" hint above a fresh proposal (ADR-0074 §3 / #1141). Read-only: it suggests a merge, it never performs one. Empty for a node reported by an agent older than contract v2 (no identifiers stored), and hostname matches are deliberately never offered.',
+  })
+  @ApiOkResponse({ type: [InfraIdentityMatchDto] })
+  identityMatches(@Param('id') id: string) {
+    return this.infra.findIdentityMatches(id);
+  }
+
+  @Post('nodes/:id/merge-into')
+  @RequirePermission('infra:manage')
+  // HUMAN-ONLY, for the same reason confirm is: this moves a dedup key between nodes and archives one
+  // of them. A reporting agent must never be able to re-key its own way out of the PENDING tray.
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Merge this (duplicate) node INTO an existing one: transplant its agent reporting key onto the target so future reports land there, then soft-delete this node with the merge stamped on it (the audit trail — there is no node history table). The re-image adoption path and the remedy for a cloned machine-id (ADR-0074 §3 / #1141). Identity moves; curation does NOT — the target keeps its label, state, kind, position and asset link. 400 on a self-merge or a source with no reporting key.',
+  })
+  @ApiOkResponse({ type: InfraNodeDetailDto })
+  mergeNodeInto(
+    @Param('id') id: string,
+    @Body() dto: MergeInfraNodeDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.infra.mergeNodeInto(id, dto.targetNodeId, principal);
   }
 
   // ── Node → secret linkage (ADR-0073, #801) ──────────────────────────────────

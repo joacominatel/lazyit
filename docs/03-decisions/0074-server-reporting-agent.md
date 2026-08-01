@@ -476,6 +476,123 @@ while the list is newest-first — so a host running containers would have had t
 `redis` as the server just installed. It now excludes container children via the key's own exported
 rule (`isContainerChildExternalId`), rather than re-deriving the separator at the call site.
 
+**Amendment (2026-07-31, #1141) — the dedup key is machine-id twice, so corroborate it.** §3's
+dedup bullets call `(reportingSource, externalId)` a **composite** key. It is not one. `externalId` is
+`/etc/machine-id` (`apps/agent/src/collect.ts`) and `reportingSource` is
+`agent:${machineId.slice(0, 12)}` (`apps/agent/src/index.ts`) — the same value twice, so the pair has
+exactly the uniqueness of its weaker half. And `/etc/machine-id` is not reliably unique: a VM template
+or golden image with a **baked** machine-id is the single most common Proxmox/VMware/Packer mistake, it
+is the documented reason `systemd-firstboot` exists, and Ubuntu cloud images shipped the footgun for
+years. Against a key that is machine-id twice, twelve cloned servers all matched **one node**: the label
+kept whoever reported first (correctly — that is human curation), `ipAddress` flip-flopped every
+report, and `specs` was whichever host reported last. The CMDB showed 1 server; the estate had 12, with
+no warning, no badge and no log line. **A confidently wrong inventory is worse than an empty one**, and
+this was the worst failure class in the system — it corrupted the map *silently*, which is the property
+that makes it worse than an outage.
+
+The mirror failure is the same root: **re-image**. Reinstall the OS on the same physical box and it
+mints a new machine-id, so it arrives as a brand-new PENDING proposal while the node the operator
+curated — asset link, owners, position, edges, KB links — drifts OFFLINE forever with nothing
+connecting the two. There was **no re-key and no merge path anywhere** in the service.
+
+Three parts, and deliberately **not** an engine:
+
+1. **Corroboration on match.** Matching still starts at `externalId` (unchanged, one indexed lookup).
+   On a match, the incoming `host.identifiers[]` are compared against the ones **already stored** in
+   that node's `specs` blob — contract v2 (§2 amendment, #1138) stores the whole `host` block on every
+   report, so this needs **no schema change and no migration**. If the serial set **and** the MAC set
+   both differ, the two reports are two hosts and the merge does not happen.
+
+   **The hostname is deliberately NOT part of the rule.** The issue this amendment implements
+   originally specified all three — serial, MAC set *and* hostname — and that was wrong, in the one way
+   that mattered: the archetypal golden-image clone has a baked machine-id **and a baked hostname**,
+   because that is what "cloned from a template" means. A hostname condition would have excused
+   precisely the scenario this whole amendment cites as its motivation, silently collapsing those hosts
+   into one node. The hostname survives as **corroborating detail in the notification** — two hosts
+   answering to one name is itself the template signature, and saying so is the difference between a
+   message that reads as confused and one that reads as evidence — never as a condition.
+
+   **Both, not either.** Serial and MAC are hardware-unique facts: a hypervisor hands every guest its
+   own SMBIOS serial and its own MACs, so cloned guests differ on both while sharing machine-id and
+   name. Requiring both to differ tolerates exactly one legitimate hardware change on a real box — a
+   NIC swap moves the MACs alone, a board swap moves the serial alone. Both moving at once under one
+   machine-id is overwhelmingly two machines.
+
+   **The error asymmetry justifies biasing toward detection.** A false positive costs one spurious
+   PENDING node and one notification, which a human dismisses and `merge-into` undoes. A false negative
+   silently merges two production servers into one inventory row — the worst failure class in this
+   product, and the one this amendment exists to end. When the two errors are that unequal, a rule
+   should lean toward the recoverable one.
+2. **Tell the operator; never block them.** The colliding host lands as its own `state=PENDING`
+   proposal and the report is **accepted** — degrade and inform, the same posture as the rest of the
+   contract, since a rejected report means the host *vanishes*, which is the failure being fixed, not a
+   remedy for it. One broadcast **`infra.identity_conflict`** nudge is emitted
+   ([[0056-in-app-notification-bell]]), deduped `infra.identity_conflict:<peerNodeId>:<discriminator>`
+   so a clone checking in every 15 minutes nudges **once** — the same one-per-event discipline §4's
+   `infra.agent_offline` follows. The summary names the **actual remedy** (`systemd-firstboot
+   --setup-machine-id` on the clones), because "identity conflict detected" would leave the operator
+   exactly as stuck as the silence did. It is **bell-only**: adding a type to the email allowlist is a
+   product call ([[0079-instance-smtp-outbound-email]] fork #1), not an implementation detail.
+3. **Re-key / merge-into as a HUMAN action.** `POST /infra/nodes/:id/merge-into` transplants the
+   addressed node's reporting key onto an existing node and soft-deletes the duplicate, in **one
+   transaction and in that order** (the partial-unique index covers live rows only, so the source must
+   lose the key before the target can take it). **Identity moves; curation does not** — `label`,
+   `state`, `kind`, `x`/`y`, `assetId` and the target's edges are never written.
+
+   The archived duplicate's own `reportingSource`/`externalId` are **cleared** as it is archived. They
+   have to be: the same pair is being written onto the target, and leaving them on the archived row
+   would make restoring it violate the partial-unique index — a soft delete that cannot be undone,
+   which [[0006-soft-delete-and-auditing]] does not allow. The values are not lost; they move into the
+   `_infraMergedInto` marker, and restoring the row brings back its curation, never the reporting key.
+
+   **A merge can destroy a live reporting key, and says so.** The re-image case always does: the target
+   still carries the key it had before the reinstall, a node holds exactly one, and the transplant
+   overwrites it. That key is therefore recorded on the archived row (`replacedTargetKey`) and logged,
+   and the merge dialog's copy states the consequence — a host still checking in under the replaced key
+   matches no live node and returns as a fresh PENDING proposal. Refusing the case instead was
+   rejected: it is the *primary* use case, not an edge one. `GET
+   /infra/nodes/:id/identity-matches` surfaces the adoption hint above a fresh proposal (*"this looks
+   like `srv-app-04` re-imaged"*) from a shared **serial or MAC**; a hostname match is deliberately
+   never offered, because recycling a hostname is a naming convention working as intended and a hint
+   that is usually wrong teaches the operator to click past the one time it is right.
+
+**A colliding host cannot keep the key it claims, so it gets a derived one.** The partial-unique
+`infra_nodes_reporting_source_external_id_key` physically forbids two live rows sharing a key, and the
+clone keeps reporting the same baked machine-id forever — so its node is keyed
+`<externalId>#<serial-or-MAC>`, which is deterministic (the same clone lands on the same node every
+15 minutes) and human-readable rather than hashed (an operator staring at two tray rows can see *why*
+they are two). The row also carries `specs.identityConflict` naming the value actually reported and the
+peer node it collided with. **This is an identity choice, and it is effectively permanent** — the same
+weight as §2's canonicalisation rules — so it is stated here rather than left in code.
+
+**`identityConflict` is re-stamped on every report**, for as long as the collision lasts, keeping the
+`detectedAt` of the FIRST detection. The blob is rewritten wholesale on each check-in, so a marker
+written only when the node was created would be gone fifteen minutes later — leaving the operator
+holding a notification that points at a node showing no evidence of why it exists. It still
+**self-heals**: once the clone is given a real machine-id it takes the ordinary unknown-key path,
+nothing re-stamps, and the next blob rewrite drops the marker.
+
+**Nothing is auto-merged and nothing is auto-split.** The only automatic action in the whole change is
+a notification; every mutation is a human action. The corroboration check can only ever *withhold* a
+merge that would otherwise have happened silently — it never rewrites, re-keys or archives an existing
+node. That is asserted by test, not by intention.
+
+**Explicitly rejected: a full identification-rule engine.** Priority tables, configurable identifier
+entries, a reconciliation-precedence UI. ServiceNow's IRE needs all of it because fourteen discovery
+sources fight over one CI; there is **exactly one source here**. Three hard-coded identifiers plus one
+warning covers this estate size completely, and a rule-ordering UI would be a permanent tax on every
+later feature. Also rejected: *making `reportingSource` genuinely independent of `externalId`* — it
+would need a per-host credential, which is #1146's exchange, and it fixes clones only for hosts
+installed *after* it ships. And *refusing the colliding report* — a 400 loses the host, which is
+strictly worse than listing it twice.
+
+**Upgrade safety.** No column, no index, no backfill, no migration. Pre-v2 agents send no
+`identifiers[]` and every row stored before contract v2 has none, so the check **skips silently** when
+either side carries no evidence and the ingest behaves exactly as it did before — the evidence
+backfills itself on the first v2 report, and only reports from then on can be corroborated. Warning on
+*absence* would have lit up every legacy estate on the day it upgraded; that is why absence is not a
+difference. Existing nodes are never touched by the upgrade itself.
+
 ### §4 — Liveness & staleness
 
 `lastReportedAt` is the heartbeat. A periodic **sweeper** (a plain in-process `setInterval`, `unref`'d
@@ -711,3 +828,6 @@ would be a separate ADR and arguably a separate product).
 - Auto-kind on create + containers as child nodes with `RUNS_ON` edges (the agent's first real
   topology): §3 Amendment (2026-07-31), issue #1139 — consumes contract v2's `virtualization`/`chassis`
   and adds `host.containers[]`.
+- Identity corroboration (cloned machine-id detection, the `infra.identity_conflict` nudge, node
+  re-key/merge-into): §3 Amendment (2026-07-31), issue #1141 — the consumer of contract v2's
+  `host.identifiers[]`.

@@ -28,9 +28,11 @@ import {
   getInfraNodeDetail,
   getInfraNodeEdges,
   getInfraNodeEdgesHistory,
+  getInfraNodeIdentityMatches,
   getInfraNodeImpact,
   getInfraNodes,
   type InfraNodeFilters,
+  mergeInfraNodeInto,
   restoreInfraNode,
   updateInfraNode,
   updateInfraNodePosition,
@@ -63,6 +65,8 @@ export const infraKeys = {
   edgeHistory: (nodeId: string) =>
     [...infraKeys.all, "edgeHistory", nodeId] as const,
   impact: (nodeId: string) => [...infraKeys.all, "impact", nodeId] as const,
+  identityMatches: (nodeId: string) =>
+    [...infraKeys.all, "identityMatches", nodeId] as const,
 };
 
 /** List topology nodes, optionally filtered. The canvas keeps the fetch client-side (React Flow is
@@ -303,6 +307,38 @@ export function useConfirmInfraNode() {
       confirmInfraNode(id, body),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Re-key a duplicate into an existing node (`POST /infra/nodes/:id/merge-into`, ADR-0074 §3 / #1141)
+ * — the adoption path for a re-imaged host and the remedy for a cloned machine-id. Invalidates
+ * `infraKeys.all` so the tray drops the archived duplicate and the adopting node picks up the
+ * transplanted reporting key in the same pass. The caller owns its toast/close + `notifyError` (the
+ * API 400s a self-merge and a source with no reporting key with a plain message).
+ */
+export function useMergeInfraNode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, targetNodeId }: { id: string; targetNodeId: string }) =>
+      mergeInfraNodeInto(id, { targetNodeId }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Adoption hints for one node (`GET /infra/nodes/:id/identity-matches`, #1141) — the live nodes that
+ * share a burned-in serial or MAC with it. Deliberately NOT on the tray's live poll: identity evidence
+ * only changes when a host is re-imaged or re-cabled, so re-fetching it every 40 seconds would pay for
+ * a jsonb containment scan to learn nothing. `enabled` gates it so a closed dialog fetches nothing.
+ */
+export function useInfraIdentityMatches(nodeId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: infraKeys.identityMatches(nodeId ?? ""),
+    queryFn: ({ signal }) =>
+      getInfraNodeIdentityMatches(nodeId as string, signal),
+    enabled: enabled && Boolean(nodeId),
   });
 }
 

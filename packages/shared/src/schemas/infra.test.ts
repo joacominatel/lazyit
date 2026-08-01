@@ -1,10 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import {
   AGENT_CONTAINERS_MAX,
+  AGENT_EXTERNAL_ID_MAX,
   AGENT_IDENTIFIERS_MAX,
   AGENT_SKEW_PATHS_MAX,
   AGENT_WARNINGS_MAX,
   agentReportSkewPaths,
+  disambiguateExternalId,
+  hostIdentityEvidence,
+  IDENTITY_DISCRIMINATOR_MAX,
+  identityDiscriminator,
+  InfraIdentityMatchSchema,
+  isClonedMachineId,
+  MergeInfraNodeSchema,
   type AgentReport,
   type AgentReportHost,
   AgentReportSchema,
@@ -1029,5 +1037,209 @@ describe("diagnostics — bounded by TRUNCATION, never by a 400 (#1138)", () => 
     });
     expect(parsed.diagnostics?.warnings).toHaveLength(AGENT_WARNINGS_MAX);
     for (const w of parsed.diagnostics?.warnings ?? []) expect(w.length).toBeLessThanOrEqual(300);
+  });
+});
+
+/**
+ * Identity corroboration (#1141) — the check that stops a cloned `/etc/machine-id` from silently
+ * collapsing twelve real servers into one CMDB row. The rule is deliberately narrow, and it is
+ * SILENT on absence: a pre-v2 agent (and every row stored before contract v2) carries no
+ * `identifiers[]`, so "no evidence" must never read as "a different host".
+ */
+describe("hostIdentityEvidence — the corroborating facts, read tolerantly (#1141)", () => {
+  const HOST = {
+    hostname: "web-01",
+    identifiers: [
+      { kind: "machine-id", value: "3f2a" },
+      { kind: "serial", value: "SN-ALPHA" },
+      { kind: "mac", value: "AA-BB-CC-DD-EE-FF" },
+      { kind: "mac", value: "00:11:22:33:44:55" },
+    ],
+  };
+
+  test("extracts the serial set, the MAC set and the hostname", () => {
+    const evidence = hostIdentityEvidence(HOST);
+    expect(evidence.serials).toEqual(["SN-ALPHA"]);
+    // Canonicalised (the Windows dash spelling folds onto the Linux one) and stable-sorted, so the
+    // comparison is a property of the SET and never of report order.
+    expect(evidence.macs).toEqual(["00:11:22:33:44:55", "aa:bb:cc:dd:ee:ff"]);
+    expect(evidence.hostname).toBe("web-01");
+  });
+
+  test("a pre-v2 host (no identifiers) yields EMPTY sets, never a fabricated one", () => {
+    // `hardware.serial` is deliberately NOT read back as identity evidence: one source of evidence,
+    // not two doors onto the same comparison.
+    const evidence = hostIdentityEvidence({ hostname: "web-01", hardware: { serial: "SN-ALPHA" } });
+    expect(evidence.serials).toEqual([]);
+    expect(evidence.macs).toEqual([]);
+    expect(evidence.hostname).toBe("web-01");
+  });
+
+  test("survives garbage: a non-object host, a non-array identifiers, junk elements", () => {
+    expect(hostIdentityEvidence(undefined).serials).toEqual([]);
+    expect(hostIdentityEvidence("nope").macs).toEqual([]);
+    expect(hostIdentityEvidence({ hostname: 7, identifiers: "x" }).hostname).toBe("");
+    const junk = hostIdentityEvidence({
+      hostname: "web-01",
+      identifiers: [null, 42, { kind: "serial" }, { kind: "serial", value: "Default string" }],
+    });
+    // `Default string` is an OEM placeholder — never corroborating evidence (#1138 sanitize rule).
+    expect(junk.serials).toEqual([]);
+  });
+});
+
+describe("isClonedMachineId — the narrow do-not-merge rule (#1141)", () => {
+  const evidence = (hostname: string, serial: string, mac: string) =>
+    hostIdentityEvidence({
+      hostname,
+      identifiers: [
+        { kind: "serial", value: serial },
+        { kind: "mac", value: mac },
+      ],
+    });
+
+  test("serial AND MAC both differ ⇒ two hosts share one machine-id", () => {
+    expect(
+      isClonedMachineId(
+        evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
+        evidence("web-02", "SN-BETA", "aa:bb:cc:dd:ee:02"),
+      ),
+    ).toBe(true);
+  });
+
+  test("THE MOTIVATING CASE: a golden-image clone keeps the baked hostname and is still caught", () => {
+    // "Cloned from a template" means the hostname was baked in alongside the machine-id — so a
+    // hostname gate would have excused precisely the scenario this whole rule exists for. The
+    // hypervisor still hands each guest its own SMBIOS serial and its own MACs, which is what makes
+    // the pair two machines.
+    expect(
+      isClonedMachineId(
+        evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
+        evidence("web-01", "SN-BETA", "aa:bb:cc:dd:ee:02"),
+      ),
+    ).toBe(true);
+    // Same host, same case-folded name: hostname carries no weight in either direction.
+    expect(
+      isClonedMachineId(
+        evidence("WEB-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
+        evidence("web-01", "SN-BETA", "aa:bb:cc:dd:ee:02"),
+      ),
+    ).toBe(true);
+  });
+
+  test("the SAME host checking in again is never a conflict", () => {
+    const same = evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01");
+    expect(isClonedMachineId(same, same)).toBe(false);
+  });
+
+  test("a NIC swap or a rename alone is never a conflict — the other fact still corroborates", () => {
+    expect(
+      isClonedMachineId(
+        evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
+        evidence("web-renamed", "SN-ALPHA", "aa:bb:cc:dd:ee:99"),
+      ),
+    ).toBe(false);
+    expect(
+      isClonedMachineId(
+        evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
+        evidence("web-02", "SN-BETA", "aa:bb:cc:dd:ee:01"),
+      ),
+    ).toBe(false);
+  });
+
+  test("a missing hostname on either side changes nothing — it is not part of the rule", () => {
+    const named = evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01");
+    const anonymous = hostIdentityEvidence({
+      identifiers: [
+        { kind: "serial", value: "SN-BETA" },
+        { kind: "mac", value: "aa:bb:cc:dd:ee:02" },
+      ],
+    });
+    expect(anonymous.hostname).toBe("");
+    expect(isClonedMachineId(named, anonymous)).toBe(true);
+    expect(isClonedMachineId(anonymous, named)).toBe(true);
+  });
+
+  test("SKIPS SILENTLY when either side carries no evidence — the pre-v2 upgrade promise", () => {
+    const legacy = hostIdentityEvidence({ hostname: "web-01" });
+    const v2 = evidence("web-02", "SN-BETA", "aa:bb:cc:dd:ee:02");
+    expect(isClonedMachineId(legacy, v2)).toBe(false);
+    expect(isClonedMachineId(v2, legacy)).toBe(false);
+    // Half the evidence is still no evidence: a serial with no MAC cannot carry the rule alone.
+    const serialOnly = hostIdentityEvidence({
+      hostname: "web-03",
+      identifiers: [{ kind: "serial", value: "SN-GAMMA" }],
+    });
+    expect(isClonedMachineId(serialOnly, v2)).toBe(false);
+  });
+});
+
+describe("identityDiscriminator / disambiguateExternalId (#1141)", () => {
+  test("prefers the serial, falls back to the lowest MAC, and is stable", () => {
+    const withSerial = hostIdentityEvidence({
+      hostname: "web-02",
+      identifiers: [
+        { kind: "serial", value: "SN-BETA" },
+        { kind: "mac", value: "aa:bb:cc:dd:ee:02" },
+      ],
+    });
+    expect(identityDiscriminator(withSerial)).toBe("SN-BETA");
+    const macOnly = hostIdentityEvidence({
+      hostname: "web-02",
+      identifiers: [
+        { kind: "mac", value: "ff:ff:ff:ff:ff:fe" },
+        { kind: "mac", value: "aa:bb:cc:dd:ee:02" },
+      ],
+    });
+    expect(identityDiscriminator(macOnly)).toBe("aa:bb:cc:dd:ee:02");
+    expect(identityDiscriminator(hostIdentityEvidence({ hostname: "x" }))).toBeUndefined();
+  });
+
+  test("the disambiguated key is deterministic and bounded", () => {
+    expect(disambiguateExternalId("machine-id-xyz", "SN-BETA")).toBe("machine-id-xyz#SN-BETA");
+    expect(disambiguateExternalId("machine-id-xyz", "SN-BETA")).toBe(
+      disambiguateExternalId("machine-id-xyz", "SN-BETA"),
+    );
+    const long = disambiguateExternalId("m".repeat(400), "s".repeat(400));
+    expect(long.length).toBeLessThanOrEqual(AGENT_EXTERNAL_ID_MAX + IDENTITY_DISCRIMINATOR_MAX + 1);
+    // The separator is what makes the key readable in the tray and greppable in the DB.
+    expect(long).toContain("#");
+  });
+});
+
+describe("MergeInfraNodeSchema — the re-key/merge-into body (#1141)", () => {
+  test("requires a cuid target and refuses anything else in the body", () => {
+    expect(MergeInfraNodeSchema.parse({ targetNodeId: CUID }).targetNodeId).toBe(CUID);
+    expect(MergeInfraNodeSchema.safeParse({ targetNodeId: "not-a-cuid" }).success).toBe(false);
+    expect(MergeInfraNodeSchema.safeParse({}).success).toBe(false);
+    // Strict: the merge must never become a smuggling route for curation fields.
+    expect(MergeInfraNodeSchema.safeParse({ targetNodeId: CUID, label: "x" }).success).toBe(false);
+  });
+});
+
+describe("InfraIdentityMatchSchema — the re-image adoption hint (#1141)", () => {
+  test("carries the peer node plus WHICH fact matched, so the UI can say why", () => {
+    const match = InfraIdentityMatchSchema.parse({
+      id: CUID,
+      label: "srv-app-04",
+      kind: "PHYSICAL_HOST",
+      status: "OFFLINE",
+      state: "CONFIRMED",
+      matchedOn: "serial",
+      value: "SN-ALPHA",
+    });
+    expect(match.matchedOn).toBe("serial");
+    // Only the two burned-in facts are evidence for adoption — a hostname match is not.
+    expect(
+      InfraIdentityMatchSchema.safeParse({
+        id: CUID,
+        label: "x",
+        kind: "PHYSICAL_HOST",
+        status: "ONLINE",
+        state: "PENDING",
+        matchedOn: "hostname",
+        value: "x",
+      }).success,
+    ).toBe(false);
   });
 });

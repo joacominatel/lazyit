@@ -6,6 +6,7 @@ import {
   BoltIcon,
   CheckBadgeIcon,
   CubeIcon,
+  DocumentDuplicateIcon,
   ExclamationTriangleIcon,
   KeyIcon,
   ShieldCheckIcon,
@@ -104,6 +105,15 @@ const TYPE_META: Record<
   },
   "infra.agent_offline": {
     icon: SignalSlashIcon,
+    tone: "bg-destructive/10 text-destructive",
+    href: () => "/assets/diagram",
+  },
+  // Two hosts are reporting one machine-id (ADR-0074 §3 amendment, #1141) — almost always a cloned VM
+  // template. Deep-links by TYPE to the topology map, where the review tray holds the separated host
+  // and its "Merge into" action. Destructive tone: a CMDB that is confidently wrong about how many
+  // servers exist is the worst failure this system has, so it must not read as an FYI.
+  "infra.identity_conflict": {
+    icon: DocumentDuplicateIcon,
     tone: "bg-destructive/10 text-destructive",
     href: () => "/assets/diagram",
   },
