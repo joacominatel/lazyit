@@ -19,8 +19,9 @@ import { ConfirmInfraNodeSchema, InfraNodeKindSchema, type InfraNodeKind } from 
  *  - **Saved auto-confirm rules.** The operator expresses their judgement ONCE ("hosts reporting from
  *    10.20.0.0/16 named `srv-*` are VMs I want tracked") instead of per host. The RULE is the human
  *    decision, so §8's containment argument survives: a human authored it, a human can revoke it, and
- *    the node records which human. A rule with NO condition is refused by the contract itself, because
- *    that is blanket auto-confirm, which §1 rejected and this does not reopen.
+ *    the node records which human. A rule whose conditions could exclude NOTHING — none stated, or
+ *    spelled `*` / `0.0.0.0/0` — is refused by the contract and ignored by the matcher, because that
+ *    is blanket auto-confirm, which §1 rejected and this does not reopen.
  *
  * **Rules are never retroactive.** They are read on the report CREATE branch and nowhere else, so an
  * operator saving a rule can never have proposals already sitting in their tray confirm behind them.
@@ -202,18 +203,68 @@ export const InfraAutoConfirmRuleSchema = z.object({
 });
 export type InfraAutoConfirmRule = z.infer<typeof InfraAutoConfirmRuleSchema>;
 
-/** The three condition fields. A rule must state at least one of them — see the refinement below. */
+/** The three condition fields. A patch mentioning any of them is re-checked — see the refinement. */
 const RULE_CONDITION_KEYS = ["hostnamePattern", "subnetCidr", "reportedKind"] as const;
 
-/** Does this object state at least one non-null condition? */
-function statesACondition(value: Record<string, unknown>): boolean {
-  return RULE_CONDITION_KEYS.some(
-    (key) => value[key] !== undefined && value[key] !== null,
+/** The condition half of a rule, as a create body, a patch, a wire rule or a DB row all express it. */
+export interface InfraAutoConfirmConditionFields {
+  hostnamePattern?: string | null;
+  subnetCidr?: string | null;
+  reportedKind?: InfraNodeKind | null;
+}
+
+/**
+ * Can this hostname pattern rule a name OUT? Only if it carries at least one LITERAL character. `*`
+ * spans any run and `?` the one character every reported hostname has, so `*`, `**` and `*?*` match
+ * every name the agent can report — they are the blanket rule spelled as a glob. A literal is what
+ * makes a pattern a condition: `srv-*` rules out `db-01`, and even `*.*` rules out a name with no dot.
+ *
+ * A pattern of only `?`s (`??` — "exactly two characters") is refused too, which is deliberately one
+ * notch stricter than the "matches everything" test: "carries a literal" is a line an operator can
+ * check by looking, and refusing costs only that the proposals wait in the tray, where they were
+ * going anyway.
+ */
+function narrowsByHostname(pattern: string | null | undefined): boolean {
+  if (!pattern) return false;
+  return pattern.replace(/[*?]/g, "").trim().length > 0;
+}
+
+/**
+ * Can this subnet rule an address out? Every prefix of at least one bit can. A `/0` block cannot: it
+ * is the entire IPv4 or IPv6 space, so as the only thing a rule states it means "any address at all",
+ * which is the blanket rule wearing a CIDR. A malformed block reads as no condition — it could never
+ * match anything anyway, and a rule resting on it must not act.
+ */
+function narrowsBySubnet(cidr: string | null | undefined): boolean {
+  if (!cidr) return false;
+  const block = parseCidr(cidr);
+  return block !== undefined && block.prefix > 0;
+}
+
+/**
+ * Does this rule state at least one condition that can EXCLUDE a proposal?
+ *
+ * "At least one non-null field" was not enough, and the gap was not theoretical: `hostnamePattern:
+ * "*"` is non-null and matches every proposal, so it would have stored a perfectly ordinary-looking
+ * BLANKET auto-confirm rule — the exact thing ADR-0074 §1 rejected and this feature promises cannot
+ * exist. A condition set that cannot rule anything out is not a condition set.
+ *
+ * Exported because the same answer must be given in four places — the create contract, the patch
+ * contract, the matcher (so a hand-inserted row cannot act either) and the rule form, which tells the
+ * operator before the 400 does.
+ */
+export function statesAutoConfirmCondition(
+  value: InfraAutoConfirmConditionFields,
+): boolean {
+  return (
+    narrowsByHostname(value.hostnamePattern) ||
+    narrowsBySubnet(value.subnetCidr) ||
+    (value.reportedKind !== undefined && value.reportedKind !== null)
   );
 }
 
 const RULE_CONDITION_ERROR =
-  "A rule must state at least one condition (hostname pattern, subnet or reported kind). A rule with none would auto-confirm everything, which ADR-0074 §1 rejected.";
+  "A rule must state at least one condition that can rule a proposal OUT: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern of only wildcards (or 0.0.0.0/0) excludes nothing, so a rule stating only those would auto-confirm everything — which ADR-0074 §1 rejected.";
 
 const RuleWritableShape = {
   name: z.string().trim().min(1).max(INFRA_RULE_NAME_MAX),
@@ -242,22 +293,27 @@ export const CreateInfraAutoConfirmRuleSchema = z
     confirmAsKind: RuleWritableShape.confirmAsKind.optional(),
     trackAsAsset: RuleWritableShape.trackAsAsset.optional(),
   })
-  .refine(statesACondition, { error: RULE_CONDITION_ERROR, path: ["hostnamePattern"] });
+  .refine(statesAutoConfirmCondition, {
+    error: RULE_CONDITION_ERROR,
+    path: ["hostnamePattern"],
+  });
 export type CreateInfraAutoConfirmRule = z.infer<typeof CreateInfraAutoConfirmRuleSchema>;
 
 /**
  * `PATCH /infra/auto-confirm-rules/:id` body — any subset, never empty.
  *
- * The condition check here can only see the PATCH, so it refuses a patch that nulls every condition it
- * mentions. That is genuinely partial protection: the API re-validates the MERGED rule, which is the
- * only place the stored row is visible. Both checks exist because failing early gives the operator the
- * real message, and failing late is what makes the guarantee true.
+ * The condition check here can only see the PATCH, so it refuses one whose own condition fields
+ * exclude nothing — nulled, or widened to `*` / `/0`. That is genuinely partial protection: the API
+ * re-validates the MERGED rule, which is the only place the stored row is visible. Both checks exist
+ * because failing early gives the operator the real message, and failing late is what makes the
+ * guarantee true.
  */
 export const UpdateInfraAutoConfirmRuleSchema = requireAtLeastOneKey(
   z.strictObject(RuleWritableShape).partial(),
 ).refine(
   (patch) =>
-    !RULE_CONDITION_KEYS.some((key) => key in patch) || statesACondition(patch),
+    !RULE_CONDITION_KEYS.some((key) => key in patch) ||
+    statesAutoConfirmCondition(patch),
   { error: RULE_CONDITION_ERROR, path: ["hostnamePattern"] },
 );
 export type UpdateInfraAutoConfirmRule = z.infer<typeof UpdateInfraAutoConfirmRuleSchema>;
@@ -300,9 +356,11 @@ export function matchesAutoConfirmRule(
   candidate: InfraAutoConfirmCandidate,
 ): boolean {
   if (!rule.enabled) return false;
-  // A rule with no condition is blanket auto-confirm. The create/update contract refuses to store one;
-  // this refuses to ACT on one, so a row hand-inserted or left by an older build cannot become one.
-  if (!statesACondition(rule as unknown as Record<string, unknown>)) return false;
+  // A rule whose conditions can exclude nothing IS blanket auto-confirm, whether it states no
+  // condition at all or spells one as `*` / `0.0.0.0/0`. The create/update contract refuses to store
+  // one; this refuses to ACT on one, so a row hand-inserted or left by an older build cannot become
+  // one either — it simply never matches, and its proposals stay PENDING in the tray.
+  if (!statesAutoConfirmCondition(rule)) return false;
 
   if (rule.appliesTo === "HOST" && candidate.isContainerChild) return false;
   if (rule.appliesTo === "CONTAINER" && !candidate.isContainerChild) return false;
