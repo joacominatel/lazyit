@@ -1,6 +1,6 @@
 /**
  * Agent configuration resolution (ADR-0074 §7). Three sources, precedence flags > env > file:
- *   1. CLI flags   — `--url`, `--token`, `--interval`
+ *   1. CLI flags   — `--url`, `--token` / `--token-file`, `--interval`
  *   2. environment — `LAZYIT_URL`, `LAZYIT_TOKEN`, `LAZYIT_INTERVAL`
  *   3. config file — `/etc/lazyit-agent/config` (simple `KEY=VALUE`, written by install.sh, chmod 600)
  *
@@ -10,9 +10,14 @@
  * `LAZYIT_MIN_INTERVAL`, `LAZYIT_SOFTWARE_MAX` and the `LAZYIT_EXCLUDE_*` glob lists. They are read
  * here into {@link AgentConfig.localLimits} and can only ever RESTRICT what the server asks for; see
  * `localLimitsFrom` for why nothing in that shape is able to widen anything.
+ *
+ * ...and, since #1137, how the agent gets OUT of the host: `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`
+ * and `LAZYIT_CA_FILE`, read from the same file into {@link AgentConfig.network} because a systemd
+ * unit's environment is almost empty and a host-wide proxy variable never reaches the timer.
  */
 import { parseArgs } from "node:util";
 import type { AgentLocalLimits } from "@lazyit/shared";
+import { type AgentNetwork, networkFrom } from "./net";
 import { localLimitsFrom } from "./policy";
 
 const CONFIG_FILE = "/etc/lazyit-agent/config";
@@ -52,7 +57,13 @@ export interface AgentConfig {
    * install — the keys are new and absent — so an upgrade changes nothing until an operator opts in.
    */
   localLimits: AgentLocalLimits;
-  /** The subcommand (only `report` exists today); defaults to `report`. */
+  /**
+   * Egress proxy + private CA (#1137). Empty on every existing install for the same reason: the keys
+   * are new, so a host that sets none of them makes exactly the direct, system-trust request it
+   * always made.
+   */
+  network: AgentNetwork;
+  /** The subcommand: `report` (the default, what the timer runs), `show` or `test`. */
   command: string;
   /** `report --once`: collect + POST once, then exit (what the timer runs). The only mode today. */
   once: boolean;
@@ -65,12 +76,19 @@ export interface AgentConfig {
   force: boolean;
 }
 
+/** Seams so the resolver is testable without an `/etc` to write to or a real stdin to feed. */
+export interface LoadConfigOptions {
+  env?: Record<string, string | undefined>;
+  configFile?: string;
+  readStdin?: () => Promise<string>;
+}
+
 /** Parse a tiny `KEY=VALUE` file (comments with `#`, optional surrounding quotes). Missing file → {}. */
-async function readConfigFile(): Promise<Record<string, string>> {
+async function readConfigFile(path: string): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   let text: string;
   try {
-    text = await Bun.file(CONFIG_FILE).text();
+    text = await Bun.file(path).text();
   } catch {
     return out; // no file is the normal case before install.sh has run
   }
@@ -93,7 +111,44 @@ async function readConfigFile(): Promise<Record<string, string>> {
   return out;
 }
 
-export async function loadConfig(argv: string[]): Promise<AgentConfig> {
+/**
+ * The token, out of a file or stdin rather than out of argv (#1137).
+ *
+ * `--token <value>` puts the Service Account token in root's shell history and, for the lifetime of
+ * the process, in `ps` output for every user on the box. The window is short and the token is narrow
+ * (`infra:report` only), but it costs one flag to close and it is the first thing a reviewer asks
+ * about. `-` reads stdin, so `... --token-file -` fed by a secret store never touches the disk either.
+ *
+ * Every failure here is LOUD. A token file that cannot be read, or that is empty, must not fall
+ * through to the environment or the config file: the operator asked for a specific credential, and
+ * quietly reporting under a different one is exactly the surprise this flag exists to avoid.
+ */
+async function readTokenFile(path: string, readStdin: () => Promise<string>): Promise<string> {
+  let raw: string;
+  try {
+    raw = path === "-" ? await readStdin() : await Bun.file(path).text();
+  } catch (err) {
+    throw new Error(
+      `could not read the token file ${path === "-" ? "from stdin" : path} — ${(err as Error).message}`,
+    );
+  }
+  const token = raw.trim();
+  if (!token) {
+    throw new Error(
+      `the token file ${path === "-" ? "on stdin" : path} is empty — nothing to authenticate with`,
+    );
+  }
+  return token;
+}
+
+export async function loadConfig(
+  argv: string[],
+  options: LoadConfigOptions = {},
+): Promise<AgentConfig> {
+  const env = options.env ?? process.env;
+  const configFile = options.configFile ?? CONFIG_FILE;
+  const readStdin = options.readStdin ?? (() => Bun.stdin.text());
+
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -101,6 +156,7 @@ export async function loadConfig(argv: string[]): Promise<AgentConfig> {
     options: {
       url: { type: "string" },
       token: { type: "string" },
+      "token-file": { type: "string" },
       interval: { type: "string" },
       once: { type: "boolean", default: false },
       force: { type: "boolean", default: false },
@@ -108,29 +164,41 @@ export async function loadConfig(argv: string[]): Promise<AgentConfig> {
     },
   });
 
-  const file = await readConfigFile();
+  const file = await readConfigFile(configFile);
   const pick = (flag: unknown, envKey: string, fileKey: string): string | undefined => {
     const f = typeof flag === "string" ? flag : undefined;
-    return f ?? process.env[envKey] ?? file[fileKey];
+    return f ?? env[envKey] ?? file[fileKey];
   };
+
+  const tokenFile = typeof values["token-file"] === "string" ? values["token-file"] : undefined;
+  if (tokenFile !== undefined && typeof values.token === "string") {
+    throw new Error(
+      "--token and --token-file are mutually exclusive — pass one, so it is unambiguous which credential this host uses",
+    );
+  }
+  const token =
+    tokenFile !== undefined
+      ? await readTokenFile(tokenFile, readStdin)
+      : pick(values.token, "LAZYIT_TOKEN", "LAZYIT_TOKEN");
 
   // The veto keys follow the same env-over-file precedence as everything else, so a limit can be set
   // in the unit's environment without editing the config file (containerised and image-baked installs).
   const limitSource: Record<string, string> = { ...file };
   for (const key of Object.keys(file)) {
-    const fromEnv = process.env[key];
+    const fromEnv = env[key];
     if (fromEnv !== undefined) limitSource[key] = fromEnv;
   }
   for (const key of LOCAL_LIMIT_KEYS) {
-    const fromEnv = process.env[key];
+    const fromEnv = env[key];
     if (fromEnv !== undefined) limitSource[key] = fromEnv;
   }
 
   return {
     url: pick(values.url, "LAZYIT_URL", "LAZYIT_URL"),
-    token: pick(values.token, "LAZYIT_TOKEN", "LAZYIT_TOKEN"),
+    ...(token !== undefined ? { token } : {}),
     interval: pick(values.interval, "LAZYIT_INTERVAL", "LAZYIT_INTERVAL"),
     localLimits: localLimitsFrom(limitSource),
+    network: networkFrom(file, env),
     command: positionals[0] ?? "report",
     once: Boolean(values.once),
     force: Boolean(values.force),
