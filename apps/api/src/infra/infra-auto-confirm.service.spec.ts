@@ -144,7 +144,11 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
 
       await service.create({ name: 'hosts', hostnamePattern: 'srv-*' }, HUMAN);
       await service.create(
-        { name: 'containers', appliesTo: 'CONTAINER', hostnamePattern: 'api-*' },
+        {
+          name: 'containers',
+          appliesTo: 'CONTAINER',
+          hostnamePattern: 'api-*',
+        },
         HUMAN,
       );
       // ANY reaches container children too, so it takes the child default rather than the host one:
@@ -217,7 +221,10 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
         service.update('rule-1', { hostnamePattern: '*' }),
       ).rejects.toBeInstanceOf(BadRequestException);
       await expect(
-        service.update('rule-1', { hostnamePattern: '*', subnetCidr: '0.0.0.0/0' }),
+        service.update('rule-1', {
+          hostnamePattern: '*',
+          subnetCidr: '0.0.0.0/0',
+        }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.infraAutoConfirmRule.update).not.toHaveBeenCalled();
     });
