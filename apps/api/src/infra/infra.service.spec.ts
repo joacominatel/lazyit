@@ -11,9 +11,8 @@ import {
   AGENT_POLICY_DEFAULT,
   AgentReportSchema,
   InfraNodeListItemSchema,
-  type UpdateInfraNode,
 } from '@lazyit/shared';
-import { InfraService } from './infra.service';
+import { InfraService, INFRA_NODE_ASSET_REPOINT_ERROR } from './infra.service';
 import { AgentPolicyService } from './agent-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
@@ -1823,7 +1822,7 @@ describe('InfraService', () => {
 
   // ── Detach semantics (ADR-0070 §5) — the orphan fix ─────────────────────────
 
-  describe('updateNode — detach (assetId: null)', () => {
+  describe('updateNode — asset linkage: detach, first-attach, and the refused re-point', () => {
     it('SOFT-DELETES an auto-created Asset on detach (it carries the provenance marker)', async () => {
       prisma.infraNode.findFirst.mockResolvedValue({
         id: 'node-1',
@@ -1882,47 +1881,90 @@ describe('InfraService', () => {
       expect(prisma.asset.findFirst).not.toHaveBeenCalled();
     });
 
-    it('REFUSES a re-point (a non-null assetId) and writes nothing (#1117)', async () => {
-      // A patch may detach; it may not swap one asset for another. Left permitted, a re-point was
-      // written straight through: `createNode` calls `assets.assertExists` (soft-delete-scoped),
-      // `updateNode` never did, and the FK only requires the row to EXIST — so a DISCARDED asset
-      // linked cleanly. And it never ran the §5 detach on the link it replaced, leaving an
-      // auto-created backing Asset live in inventory owned by nobody. Refusing closes both halves
-      // without touching delete semantics.
-      //
-      // `UpdateInfraNodeSchema` already refuses this shape at the contract boundary, so no HTTP
-      // caller reaches this guard — the cast is what a caller BYPASSING the pipe would look like,
-      // and the guard is what keeps the promise true for one.
+    it('REFUSES a RE-POINT — swapping the asset of an already-linked node (#1117)', async () => {
+      // The re-point is the half of #1117 that is actually broken. Written straight through, it
+      // dropped the previous link WITHOUT running the §5 detach above, leaving the auto-created
+      // backing Asset live in inventory owned by nobody — the exact orphan §5 exists to forbid.
+      // Refusing closes it without touching delete semantics (auto-soft-deleting the orphan would
+      // delete a row a human may have curated, which ADR-0006 does not let a machine decide).
       prisma.infraNode.findFirst.mockResolvedValue({
         id: 'node-1',
         assetId: 'asset-auto',
       });
 
       await expect(
-        service.updateNode(
-          'node-1',
-          { assetId: 'asset-other' } as unknown as UpdateInfraNode,
-          HUMAN,
-        ),
+        service.updateNode('node-1', { assetId: 'asset-other' }, HUMAN),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      // Nothing partial: no write, and the asset it would have orphaned is not even looked at.
+      // Nothing partial: no write, no liveness round-trip, and the asset it would have orphaned is
+      // not even looked at.
       expect(prisma.infraNode.update).not.toHaveBeenCalled();
+      expect(assets.assertExists).not.toHaveBeenCalled();
       expect(assets.remove).not.toHaveBeenCalled();
       expect(prisma.asset.findFirst).not.toHaveBeenCalled();
     });
 
-    it('the refusal names the remedy, not just the refusal (#1117)', async () => {
+    it('the re-point refusal names the REACHABLE remedy: detach first, then attach (#1117)', async () => {
+      // The caller is holding a node that already has an asset. Telling them "link it at create
+      // time instead" is useless — the node exists, and an agent-discovered one was never created
+      // by hand at all. Detach-then-attach is a route they can actually take, so the message has to
+      // be the one that names it.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-auto',
+      });
+
+      await expect(
+        service.updateNode('node-1', { assetId: 'asset-other' }),
+      ).rejects.toThrow(INFRA_NODE_ASSET_REPOINT_ERROR);
+
+      const message = INFRA_NODE_ASSET_REPOINT_ERROR;
+      expect(message).toContain('assetId: null'); // step one of the remedy
+      expect(message).toContain('orphan'); // why the re-point itself is refused
+      expect(message).not.toContain('POST /infra/nodes'); // NOT the remedy — the node already exists
+    });
+
+    it('ALLOWS a first-attach on an UNLINKED node, gated by the liveness check (#1117)', async () => {
+      // Attaching an asset to a node that carries none orphans nothing — there is no previous link
+      // to drop — so it stays allowed. What it was missing is the check `createNode` performs:
+      // `assets.assertExists`, whose `findFirst` the soft-delete extension scopes to LIVE rows. The
+      // FK only requires the row to EXIST and a discarded asset's row does, so without this a
+      // discarded asset went straight into the column.
       prisma.infraNode.findFirst.mockResolvedValue({
         id: 'node-1',
         assetId: null,
       });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-existing',
+      });
+
+      await service.updateNode('node-1', { assetId: 'asset-existing' }, HUMAN);
+
+      expect(assets.assertExists).toHaveBeenCalledWith('asset-existing');
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBe('asset-existing');
+      // Nothing is deleted on an attach — there was no link to detach.
+      expect(assets.remove).not.toHaveBeenCalled();
+    });
+
+    it('a first-attach to a DISCARDED asset 404s and writes nothing (#1117)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+      // What the soft-delete-scoped `assertExists` does with a discarded (or absent) id.
+      assets.assertExists.mockRejectedValueOnce(
+        new NotFoundException('Asset asset-discarded not found'),
+      );
 
       await expect(
-        service.updateNode('node-1', {
-          assetId: 'asset-other',
-        } as unknown as UpdateInfraNode),
-      ).rejects.toThrow(/assetId: null/);
+        service.updateNode('node-1', { assetId: 'asset-discarded' }, HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
     });
   });
 
