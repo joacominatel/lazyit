@@ -330,6 +330,85 @@ code comment's volume trigger stands as the revisit condition — no queue until
 measurably slow. // BullMQ ([[0053-async-workers-bullmq-valkey]]) remains the substrate for the heavy
 jobs it was chosen for (import commit); reporting is simply not one of them.
 
+**Amendment (2026-07-31, #1141) — the dedup key is machine-id twice, so corroborate it.** The bullets
+above call `(reportingSource, externalId)` a **composite** key. It is not one. `externalId` is
+`/etc/machine-id` (`apps/agent/src/collect.ts`) and `reportingSource` is
+`agent:${machineId.slice(0, 12)}` (`apps/agent/src/index.ts`) — the same value twice, so the pair has
+exactly the uniqueness of its weaker half. And `/etc/machine-id` is not reliably unique: a VM template
+or golden image with a **baked** machine-id is the single most common Proxmox/VMware/Packer mistake, it
+is the documented reason `systemd-firstboot` exists, and Ubuntu cloud images shipped the footgun for
+years. Against a key that is machine-id twice, twelve cloned servers all matched **one node**: the label
+kept whoever reported first (correctly — that is human curation), `ipAddress` flip-flopped every
+report, and `specs` was whichever host reported last. The CMDB showed 1 server; the estate had 12, with
+no warning, no badge and no log line. **A confidently wrong inventory is worse than an empty one**, and
+this was the worst failure class in the system — it corrupted the map *silently*, which is the property
+that makes it worse than an outage.
+
+The mirror failure is the same root: **re-image**. Reinstall the OS on the same physical box and it
+mints a new machine-id, so it arrives as a brand-new PENDING proposal while the node the operator
+curated — asset link, owners, position, edges, KB links — drifts OFFLINE forever with nothing
+connecting the two. There was **no re-key and no merge path anywhere** in the service.
+
+Three parts, and deliberately **not** an engine:
+
+1. **Corroboration on match.** Matching still starts at `externalId` (unchanged, one indexed lookup).
+   On a match, the incoming `host.identifiers[]` are compared against the ones **already stored** in
+   that node's `specs` blob — contract v2 (§2 amendment, #1138) stores the whole `host` block on every
+   report, so this needs **no schema change and no migration**. If the serial set **and** the MAC set
+   **and** the hostname *all* differ, the two reports are two hosts and the merge does not happen. All
+   three, because each one has a legitimate reason to change on a single box — a NIC swap, a rename, a
+   board replacement — so any single difference is noise, while all three at once on hosts claiming one
+   machine-id is the clone signature and nothing else produces it.
+2. **Tell the operator; never block them.** The colliding host lands as its own `state=PENDING`
+   proposal and the report is **accepted** — degrade and inform, the same posture as the rest of the
+   contract, since a rejected report means the host *vanishes*, which is the failure being fixed, not a
+   remedy for it. One broadcast **`infra.identity_conflict`** nudge is emitted
+   ([[0056-in-app-notification-bell]]), deduped `infra.identity_conflict:<peerNodeId>:<discriminator>`
+   so a clone checking in every 15 minutes nudges **once** — the same one-per-event discipline §4's
+   `infra.agent_offline` follows. The summary names the **actual remedy** (`systemd-firstboot
+   --setup-machine-id` on the clones), because "identity conflict detected" would leave the operator
+   exactly as stuck as the silence did. It is **bell-only**: adding a type to the email allowlist is a
+   product call ([[0079-instance-smtp-outbound-email]] fork #1), not an implementation detail.
+3. **Re-key / merge-into as a HUMAN action.** `POST /infra/nodes/:id/merge-into` transplants the
+   addressed node's reporting key onto an existing node and soft-deletes the duplicate, in **one
+   transaction and in that order** (the partial-unique index covers live rows only, so the source must
+   lose the key before the target can take it). **Identity moves; curation does not** — `label`,
+   `state`, `kind`, `x`/`y`, `assetId` and the target's edges are never written. `GET
+   /infra/nodes/:id/identity-matches` surfaces the adoption hint above a fresh proposal (*"this looks
+   like `srv-app-04` re-imaged"*) from a shared **serial or MAC**; a hostname match is deliberately
+   never offered, because recycling a hostname is a naming convention working as intended and a hint
+   that is usually wrong teaches the operator to click past the one time it is right.
+
+**A colliding host cannot keep the key it claims, so it gets a derived one.** The partial-unique
+`infra_nodes_reporting_source_external_id_key` physically forbids two live rows sharing a key, and the
+clone keeps reporting the same baked machine-id forever — so its node is keyed
+`<externalId>#<serial-or-MAC>`, which is deterministic (the same clone lands on the same node every
+15 minutes) and human-readable rather than hashed (an operator staring at two tray rows can see *why*
+they are two). The row also carries `specs.identityConflict` naming the value actually reported and the
+peer node it collided with. **This is an identity choice, and it is effectively permanent** — the same
+weight as §2's canonicalisation rules — so it is stated here rather than left in code.
+
+**Nothing is auto-merged and nothing is auto-split.** The only automatic action in the whole change is
+a notification; every mutation is a human action. The corroboration check can only ever *withhold* a
+merge that would otherwise have happened silently — it never rewrites, re-keys or archives an existing
+node. That is asserted by test, not by intention.
+
+**Explicitly rejected: a full identification-rule engine.** Priority tables, configurable identifier
+entries, a reconciliation-precedence UI. ServiceNow's IRE needs all of it because fourteen discovery
+sources fight over one CI; there is **exactly one source here**. Three hard-coded identifiers plus one
+warning covers this estate size completely, and a rule-ordering UI would be a permanent tax on every
+later feature. Also rejected: *making `reportingSource` genuinely independent of `externalId`* — it
+would need a per-host credential, which is #1146's exchange, and it fixes clones only for hosts
+installed *after* it ships. And *refusing the colliding report* — a 400 loses the host, which is
+strictly worse than listing it twice.
+
+**Upgrade safety.** No column, no index, no backfill, no migration. Pre-v2 agents send no
+`identifiers[]` and every row stored before contract v2 has none, so the check **skips silently** when
+either side carries no evidence and the ingest behaves exactly as it did before — the evidence
+backfills itself on the first v2 report, and only reports from then on can be corroborated. Warning on
+*absence* would have lit up every legacy estate on the day it upgraded; that is why absence is not a
+difference. Existing nodes are never touched by the upgrade itself.
+
 ### §4 — Liveness & staleness
 
 `lastReportedAt` is the heartbeat. A periodic **sweeper** (a plain in-process `setInterval`, `unref`'d
@@ -562,3 +641,6 @@ would be a separate ADR and arguably a separate product).
 - Contract v2 (OS-neutral wire, forward-compatible root, `diagnostics`): §2 Amendment (2026-07-31),
   issue #1138 — the prerequisite for multi-OS collectors, identity/dedup, auto-classification, the
   fleet view and the policy channel.
+- Identity corroboration (cloned machine-id detection, the `infra.identity_conflict` nudge, node
+  re-key/merge-into): §3 Amendment (2026-07-31), issue #1141 — the consumer of contract v2's
+  `host.identifiers[]`.

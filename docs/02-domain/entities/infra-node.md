@@ -95,12 +95,12 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `ipAddress` | `string?` | primary IP, **format-validated** (IPv4/IPv6) on write — no IPAM/registry/`@unique` ([[0090-ipam-validated-ip]] / #847). Agent-promoted from the report: IPv4 wherever the host has one, else its most **stable** routable IPv6 — link-local, temporary (RFC 4941) and deprecated addresses skipped, global unicast preferred over ULA — so a v6-only host shows an address that keeps resolving (#1138); validate-or-drop (ADR-0074 §3 / #1081). |
 | `ipAddressSource` | `InfraNodeIpSource` | `@default(AGENT)`; who owns `ipAddress` — `AGENT` (each report overwrites) vs `MANUAL` (a human edit the agent never clobbers, stamped server-side on an IP edit). #1081. |
 | `shortcuts` | `jsonb?` | `[{ label, url }]` SSH/web-UI/console links (max 20; URLs zod-validated). |
-| `specs` | `jsonb?` | loose per-kind attributes (ADR-0007 posture; per-kind validation deferred). On an agent-reported host this is the full inventory blob (`host`/`software`/`reportedAt`) — **detail-only**, never on the list row (#1135). It may also carry the two REPORT diagnostics (#1138): `diagnostics` (`{ warnings, privileged, durationMs }` — what the collector could not do, present whenever the agent sent it) and `agentSkew` (`{ droppedPaths?, coercedPaths?, agentAhead, serverVersion }` — the bounded wire paths this build dropped or had to coerce, at any depth, plus whether the agent is a newer build than the server; present only when there was skew). Both self-heal (the blob is rewritten every report), neither is ever copied into the linked `Asset.specs`, and neither is rendered today — the inventory panel excludes them from its custom-fields fallback rather than dumping them. |
+| `specs` | `jsonb?` | loose per-kind attributes (ADR-0007 posture; per-kind validation deferred). On an agent-reported host this is the full inventory blob (`host`/`software`/`reportedAt`) — **detail-only**, never on the list row (#1135). It may also carry the two REPORT diagnostics (#1138): `diagnostics` (`{ warnings, privileged, durationMs }` — what the collector could not do, present whenever the agent sent it) and `agentSkew` (`{ droppedPaths?, coercedPaths?, agentAhead, serverVersion }` — the bounded wire paths this build dropped or had to coerce, at any depth, plus whether the agent is a newer build than the server; present only when there was skew). Both self-heal (the blob is rewritten every report), neither is ever copied into the linked `Asset.specs`, and neither is rendered today — the inventory panel excludes them from its custom-fields fallback rather than dumping them. A third key joins them on a node whose machine-id collided (#1141): `identityConflict` (`{ reportedExternalId, peerNodeId, peerLabel, discriminator, detectedAt }`), which follows the same rules — node-only, never copied to the Asset, self-healing, and not rendered anywhere yet. An ARCHIVED node may also carry `_infraMergedInto` (`{ nodeId, label, externalId, reportingSource, at, byUserId? }`) — the merge provenance, and the only audit trail a re-key has. |
 | `x` / `y` | `float?` | canvas position (free-move board; persisted on drag-stop). |
 | `source` | `InfraNodeSource` | `@default(MANUAL)`; AGENT in v2. |
 | `state` | `InfraNodeState` | `@default(CONFIRMED)`; PENDING = the v2 review tray. |
 | `reportingSource` | `string?` | which agent/host reported it (v2 dedup scope). |
-| `externalId` | `string?` | platform id (vmid/container-id) for v2 reconciliation. |
+| `externalId` | `string?` | platform id (vmid/container-id) for v2 reconciliation. On an agent-reported host this is `/etc/machine-id` — **except** on a host whose machine-id collided with one already in use (a cloned VM template), where it is the derived `<machine-id>#<serial-or-MAC>` (ADR-0074 §3 / #1141). The value the host actually claims is then kept in `specs.identityConflict.reportedExternalId`. |
 | `lastReportedAt` | `datetime?` | v2 agent liveness (stale → OFFLINE). |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
@@ -150,11 +150,27 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   affected if this goes down."
 - `GET /infra/nodes/:id/edges?active=` — the node's [[infra-edge]]s (active-only by default; pass
   `active=false` for full history incl. closed migrations).
+- `GET /infra/nodes/:id/identity-matches` — other LIVE nodes sharing a **burned-in** fact (serial or
+  MAC) with this one, from the stored `host.identifiers[]` (ADR-0074 §3 / #1141). The *"this looks like
+  `srv-app-04` re-imaged — adopt?"* hint the review tray's merge dialog shows. Read-only, best-effort,
+  and **empty** for any node reported by an agent older than contract v2 (no evidence stored) — no
+  hint beats a wrong one. Hostname matches are never offered.
+- `POST /infra/nodes/:id/merge-into` — `{ targetNodeId }`. Re-key: transplant this node's agent
+  reporting key onto the target so future reports land there, then soft-delete this node with the
+  merge stamped into its `specs` (`_infraMergedInto`). **Identity moves; curation does not** — the
+  target keeps its `label`, `state`, `kind`, position, asset link and edges; its human-`MANUAL` IP is
+  never clobbered; its non-agent `specs` keys survive. `infra:manage` + human-only (a reporting agent
+  must never re-key its own way out of the PENDING tray). 400 on a self-merge or a source with no
+  reporting key. The archived duplicate **is** the audit trail — there is no `InfraNodeHistory`, and a
+  soft-deleted node can never be overwritten by a later report.
 
 ## Not yet implemented (deferred)
 
-- The **v2 reporting agent** (auto-discovery → PENDING tray, liveness, reconciliation/merge-on-confirm)
-  — its columns exist nullable now; its own major epic.
+- ~~The **v2 reporting agent** (auto-discovery → PENDING tray, liveness, reconciliation/merge-on-confirm)
+  — its columns exist nullable now; its own major epic.~~ **Shipped** ([[0074-server-reporting-agent]],
+  epic #831): auto-discovery into the PENDING tray, the staleness sweeper, and — as of #1141 — identity
+  corroboration plus an explicit `merge-into` re-key. Note the merge is a **separate human action**, not
+  the "merge-on-confirm" this bullet imagined: confirming still only promotes one proposal.
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
   per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]]; a
   dedicated `InfraNodeHistory`. → [[0070-infra-topology-graph]] "Future".
