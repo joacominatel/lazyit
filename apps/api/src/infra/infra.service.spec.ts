@@ -4,6 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
   HttpException,
+  HttpStatus,
   NotFoundException,
 } from '@nestjs/common';
 import { AgentReportSchema, InfraNodeListItemSchema } from '@lazyit/shared';
@@ -15,6 +16,7 @@ import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.
 import { ArticlesService } from '../articles/articles.service';
 import { SecretManagerService } from '../secret-manager/secret-manager.service';
 import { SearchService } from '../search/search.service';
+import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` for types (erased) AND at runtime for `Prisma.PrismaClientKnownRequestError` (the P2002
@@ -74,7 +76,6 @@ interface PrismaMock {
     findMany: Mock;
     create: Mock;
     update: Mock;
-    count: Mock;
   };
   infraEdge: {
     findFirst: Mock;
@@ -91,7 +92,7 @@ interface PrismaMock {
 }
 
 const HUMAN = { kind: 'human', user: { id: 'u-1' } } as never;
-/** The reporting agent's authenticated service principal (ADR-0048) — the #1134 PENDING-budget key. */
+/** The reporting agent's authenticated service principal (ADR-0048) — the #1134 enrollment key. */
 const AGENT_SA = {
   kind: 'service',
   serviceAccount: { id: 'sa-agent' },
@@ -108,6 +109,10 @@ describe('InfraService', () => {
   let secrets: { resolveHandlesMetadata: Mock; assertHandleAttachable: Mock };
   // The fire-and-forget search sync (ADR-0035): upsert on write, remove on soft-delete.
   let search: { upsert: Mock; remove: Mock };
+  // The #1134 new-node enrollment throttle. Its own rate behaviour is covered in
+  // `infra-node-enrollment.limiter.spec.ts`; here we only assert the service CHARGES it on exactly
+  // the branch that grows the table, and never on the branch that does not.
+  let enrollment: { assertWithinBudget: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration writes through it).
   let txEdge: { create: Mock; updateMany: Mock };
 
@@ -122,9 +127,6 @@ describe('InfraService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
-        // The #1134 live-PENDING budget probe. Default 0: an estate well under the cap, so every
-        // pre-existing ingest test keeps exercising the normal create path.
-        count: jest.fn().mockResolvedValue(0),
       },
       infraEdge: {
         findFirst: jest.fn(),
@@ -162,6 +164,8 @@ describe('InfraService', () => {
       assertHandleAttachable: jest.fn().mockResolvedValue(undefined),
     };
     search = { upsert: jest.fn(), remove: jest.fn() };
+    // Default: within budget, so every pre-existing ingest test keeps exercising the normal path.
+    enrollment = { assertWithinBudget: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -173,6 +177,7 @@ describe('InfraService', () => {
         { provide: ArticlesService, useValue: articles },
         { provide: SecretManagerService, useValue: secrets },
         { provide: SearchService, useValue: search },
+        { provide: InfraNodeEnrollmentLimiter, useValue: enrollment },
       ],
     }).compile();
     service = moduleRef.get(InfraService);
@@ -594,26 +599,14 @@ describe('InfraService', () => {
       expect(prisma.asset.update).not.toHaveBeenCalled();
     });
 
-    // ── The live-PENDING budget per service account (#1134) ───────────────────
+    // ── The new-node enrollment rate per reporter (#1134) ─────────────────────
 
-    describe('PENDING budget per service account (#1134)', () => {
-      const ENV_KEY = 'INFRA_REPORT_PENDING_CAP';
-      let savedCap: string | undefined;
-
-      beforeEach(() => {
-        savedCap = process.env[ENV_KEY];
-        delete process.env[ENV_KEY];
-      });
-
-      afterEach(() => {
-        if (savedCap === undefined) delete process.env[ENV_KEY];
-        else process.env[ENV_KEY] = savedCap;
-      });
-
-      it('THE HAPPY PATH: a known host checking in never spends (or probes) the budget', async () => {
+    describe('new-node enrollment throttle (#1134)', () => {
+      it('THE HAPPY PATH: a known host checking in is never charged the enrollment budget', async () => {
         // The legitimate agent — one node, a report every 15 minutes — takes the KNOWN-key refresh
-        // path. It creates no row, so it must not even be counted, let alone throttled. A limit that
-        // can 429 this case is worse than no limit at all.
+        // path. It creates no row, so it must not be charged, let alone throttled. A limit that can
+        // 429 this case is worse than no limit at all. This is also why an untriaged tray is now
+        // irrelevant: nothing about existing rows is consulted on this path or any other.
         prisma.infraNode.findFirst.mockResolvedValue({
           id: 'node-1',
           assetId: null,
@@ -623,19 +616,16 @@ describe('InfraService', () => {
           id: 'node-1',
           state: 'CONFIRMED',
         });
-        // Even a tray already AT the cap must not block an existing host's check-in.
-        prisma.infraNode.count.mockResolvedValue(9999);
 
         for (let tick = 0; tick < 96; tick++) {
           const ack = await service.ingestReport(FULL_REPORT, AGENT_SA);
           expect(ack.accepted).toBe(true);
         }
-        expect(prisma.infraNode.count).not.toHaveBeenCalled();
+        expect(enrollment.assertWithinBudget).not.toHaveBeenCalled();
         expect(prisma.infraNode.create).not.toHaveBeenCalled();
       });
 
-      it("THE HAPPY PATH: a brand-new host lands normally while the SA's tray is under the cap", async () => {
-        prisma.infraNode.count.mockResolvedValue(1); // one proposal already waiting — far from 50
+      it('charges the enrollment budget on the CREATE branch, keyed on the caller principal', async () => {
         prisma.infraNode.findFirst.mockResolvedValue(null);
         prisma.infraNode.create.mockResolvedValue({
           id: 'node-1',
@@ -649,11 +639,17 @@ describe('InfraService', () => {
           state: 'PENDING',
           accepted: true,
         });
+        // Keyed on the SERVER-resolved principal — never on `reportingSource`, a client-chosen body
+        // field an attacker rotates per request.
+        expect(enrollment.assertWithinBudget).toHaveBeenCalledTimes(1);
+        expect(enrollment.assertWithinBudget).toHaveBeenCalledWith(AGENT_SA);
       });
 
-      it('a NEW host is refused with 429 once the SA is at the live-PENDING cap', async () => {
-        prisma.infraNode.count.mockResolvedValue(50); // the default cap
+      it('a NEW host is refused (429) once the reporter has spent its window, and NO row is written', async () => {
         prisma.infraNode.findFirst.mockResolvedValue(null);
+        enrollment.assertWithinBudget.mockImplementation(() => {
+          throw new HttpException('too many', HttpStatus.TOO_MANY_REQUESTS);
+        });
 
         let thrown: unknown;
         try {
@@ -663,73 +659,34 @@ describe('InfraService', () => {
         }
         expect(thrown).toBeInstanceOf(HttpException);
         expect((thrown as HttpException).getStatus()).toBe(429);
-        // The point of the cap: no row is written past it.
+        // The whole point: the throttle runs BEFORE the insert, so nothing is created past it.
         expect(prisma.infraNode.create).not.toHaveBeenCalled();
       });
 
-      it('counts ONLY live (non-soft-deleted) PENDING rows for THAT service account', async () => {
-        // Load-bearing: soft-deleted rows must be excluded, otherwise DISCARDING proposals (the
-        // documented way to reject one) would never free the budget and the operator who tidies
-        // their tray would stay locked out forever.
-        prisma.infraNode.count.mockResolvedValue(0);
-        prisma.infraNode.findFirst.mockResolvedValue(null);
-        prisma.infraNode.create.mockResolvedValue({
-          id: 'node-1',
-          state: 'PENDING',
+      it('a throttled reporter still refreshes its already-known hosts', async () => {
+        // The property that makes this safe to ship: hitting the enrollment limit degrades
+        // DISCOVERY only. Liveness and inventory for hosts the operator already has never stop, so
+        // a tripped limit can never turn the topology map into a false outage.
+        enrollment.assertWithinBudget.mockImplementation(() => {
+          throw new HttpException('too many', HttpStatus.TOO_MANY_REQUESTS);
         });
-
-        await service.ingestReport(FULL_REPORT, AGENT_SA);
-
-        const countArg = firstArg<{ where: Record<string, unknown> }>(
-          prisma.infraNode.count,
-        );
-        expect(countArg.where).toEqual({
-          state: 'PENDING',
-          deletedAt: null,
-          reportedBySaId: 'sa-agent',
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-known',
+          assetId: null,
+          ipAddressSource: 'AGENT',
         });
-      });
-
-      it('discarding proposals frees the budget (cap-1 live rows → the next host is accepted)', async () => {
-        prisma.infraNode.count.mockResolvedValue(49); // one was discarded (soft-deleted)
-        prisma.infraNode.findFirst.mockResolvedValue(null);
-        prisma.infraNode.create.mockResolvedValue({
-          id: 'node-51',
-          state: 'PENDING',
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-known',
+          state: 'CONFIRMED',
         });
 
         const ack = await service.ingestReport(FULL_REPORT, AGENT_SA);
         expect(ack.accepted).toBe(true);
       });
 
-      it('honours INFRA_REPORT_PENDING_CAP (and ignores a non-numeric value)', async () => {
-        process.env[ENV_KEY] = '2';
-        prisma.infraNode.count.mockResolvedValue(2);
-        prisma.infraNode.findFirst.mockResolvedValue(null);
-
-        await expect(
-          service.ingestReport(FULL_REPORT, AGENT_SA),
-        ).rejects.toBeInstanceOf(HttpException);
-
-        process.env[ENV_KEY] = 'nonsense';
-        prisma.infraNode.count.mockResolvedValue(2); // well under the 50 default
-        prisma.infraNode.create.mockResolvedValue({
-          id: 'node-1',
-          state: 'PENDING',
-        });
-        await expect(
-          service.ingestReport(FULL_REPORT, AGENT_SA),
-        ).resolves.toEqual({
-          nodeId: 'node-1',
-          state: 'PENDING',
-          accepted: true,
-        });
-      });
-
-      it('a NON-service caller is budgeted under the UNATTRIBUTED bucket (never unbounded)', async () => {
-        // `infra:report` is grantable to a human role, and legacy rows carry no attribution. Both
-        // share the `reportedBySaId: null` bucket, so neither is a way around the cap.
-        prisma.infraNode.count.mockResolvedValue(0);
+      it('a NON-service caller is charged too (never a way around the limit)', async () => {
+        // `infra:report` is grantable to a human role. The limiter buckets by principal kind; the
+        // service's job is simply to hand it whatever principal it was called with.
         prisma.infraNode.findFirst.mockResolvedValue(null);
         prisma.infraNode.create.mockResolvedValue({
           id: 'node-1',
@@ -738,55 +695,13 @@ describe('InfraService', () => {
 
         await service.ingestReport(FULL_REPORT, HUMAN);
 
-        const countArg = firstArg<{ where: Record<string, unknown> }>(
-          prisma.infraNode.count,
-        );
-        expect(countArg.where.reportedBySaId).toBeNull();
+        expect(enrollment.assertWithinBudget).toHaveBeenCalledWith(HUMAN);
       });
 
-      it('stamps the reporting SA on CREATE, so the proposal is attributable', async () => {
-        prisma.infraNode.findFirst.mockResolvedValue(null);
-        prisma.infraNode.create.mockResolvedValue({
-          id: 'node-1',
-          state: 'PENDING',
-        });
-
-        await service.ingestReport(FULL_REPORT, AGENT_SA);
-
-        const createArg = firstArg<{
-          data: { reportedBySaId?: string | null };
-        }>(prisma.infraNode.create);
-        expect(createArg.data.reportedBySaId).toBe('sa-agent');
-      });
-
-      it('re-stamps the reporting SA on every REFRESH, so legacy rows self-heal after an upgrade', async () => {
-        // Upgrade safety: rows that predate the column carry `reportedBySaId: null`. The next
-        // check-in (≤ one report cadence away) attributes them, without touching human curation.
-        prisma.infraNode.findFirst.mockResolvedValue({
-          id: 'node-legacy',
-          assetId: null,
-          ipAddressSource: 'AGENT',
-        });
-        prisma.infraNode.update.mockResolvedValue({
-          id: 'node-legacy',
-          state: 'CONFIRMED',
-        });
-
-        await service.ingestReport(FULL_REPORT, AGENT_SA);
-
-        const updateArg = firstArg<{ data: Record<string, unknown> }>(
-          prisma.infraNode.update,
-        );
-        expect(updateArg.data.reportedBySaId).toBe('sa-agent');
-        // Still a facts-only refresh — curation is untouched.
-        expect(updateArg.data).not.toHaveProperty('state');
-        expect(updateArg.data).not.toHaveProperty('label');
-      });
-
-      it('the P2002 race loser skips the budget check and acks (a repeat report is idempotent)', async () => {
-        // The racing report already consumed the budget when it created the row; the loser only
-        // refreshes it, so it must not be charged (or refused) a second time.
-        prisma.infraNode.count.mockResolvedValue(0);
+      it('the P2002 race loser is charged once and still acks (a repeat report is idempotent)', async () => {
+        // The create attempt spends the slot even though the row turned out to already exist. That
+        // over-charges by one per race — rare, self-limiting, and the conservative direction: the
+        // limiter may cost a slot that went unused, never grant one that was not held.
         prisma.infraNode.findFirst
           .mockResolvedValueOnce(null)
           .mockResolvedValueOnce({ id: 'node-raced' });
@@ -798,7 +713,26 @@ describe('InfraService', () => {
 
         const ack = await service.ingestReport(FULL_REPORT, AGENT_SA);
         expect(ack.accepted).toBe(true);
-        expect(prisma.infraNode.count).toHaveBeenCalledTimes(1);
+        expect(enrollment.assertWithinBudget).toHaveBeenCalledTimes(1);
+      });
+
+      it('persists NO reporter attribution on the row — the throttle key never reaches the schema', async () => {
+        // The CEO decision behind this rework: no `reportedBySaId` column, no FK, no index, no
+        // migration. The principal is an EPHEMERAL throttle key only, so ADR-0074 §8's #1136
+        // correction — agent writes are unattributed — remains true.
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-1',
+          state: 'PENDING',
+        });
+
+        await service.ingestReport(FULL_REPORT, AGENT_SA);
+
+        const createArg = firstArg<{ data: Record<string, unknown> }>(
+          prisma.infraNode.create,
+        );
+        expect(createArg.data).not.toHaveProperty('reportedBySaId');
+        expect(JSON.stringify(createArg.data)).not.toContain('sa-agent');
       });
     });
   });
