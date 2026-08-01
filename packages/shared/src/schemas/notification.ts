@@ -59,8 +59,8 @@ import { pageSchema } from "./pagination";
  *     a SHARED hostname is instead named in the summary as corroborating detail. See
  *     {@link isClonedMachineId} in `./infra`, which is the rule itself. Almost always a VM template or
  *     golden image with a baked `/etc/machine-id`. Broadcast to the admin feed; deep-links to the
- *     topology map. Emitted ONCE
- *     per newly-detected colliding host (`infra.identity_conflict:<peerNodeId>:<discriminator>`), never
+ *     topology map. Emitted ONCE per newly-detected colliding host
+ *     (`infra.identity_conflict:<peerNodeId>:<discriminator>`), never
  *     once per report — the clone keeps checking in every 15 minutes. This is the ONLY automatic action
  *     the collision detection takes: the report is still accepted, nothing is auto-merged or auto-split,
  *     and the remedy (`systemd-firstboot --setup-machine-id`) is named in the summary.
