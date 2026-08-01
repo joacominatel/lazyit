@@ -574,12 +574,14 @@ export class InfraService {
       dedupeKey: `infra.identity_conflict:${peer.id}:${discriminator}`,
       severity: 'warning',
       title: `Two hosts share one machine-id: ${report.host.hostname} and ${peer.label}`,
+      // The remedy leads, deliberately: the bell renders a summary as ONE truncated line (full text
+      // on hover), so whatever an operator can act on has to be in the first few words. "Identity
+      // conflict detected" as an opener would leave them exactly as stuck as the silence did.
       summary:
-        `"${report.host.hostname}" reports the same machine-id as "${peer.label}" but different ` +
-        `hardware and a different hostname, so they are two servers, not one. This is almost always a ` +
-        `cloned VM template or golden image: run \`systemd-firstboot --setup-machine-id\` on the clones ` +
-        `(after removing /etc/machine-id) and reboot. Nothing was merged — the new host is waiting in ` +
-        `the review tray.`,
+        `Run \`systemd-firstboot --setup-machine-id\` on the clones — "${report.host.hostname}" and ` +
+        `"${peer.label}" report the same machine-id but different hardware, so they are two servers, ` +
+        `not one. Almost always a cloned VM template or golden image. Nothing was merged: the new host ` +
+        `is waiting in the review tray.`,
       // No entityType — the bell deep-links this type to the topology map, like agent_offline.
       metadata: {
         nodeId: created.id,
