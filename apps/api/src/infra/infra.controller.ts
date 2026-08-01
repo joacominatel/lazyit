@@ -10,6 +10,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -20,6 +21,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
+import type { Request } from 'express';
 import {
   AgentReportAckSchema,
   AgentReportSchema,
@@ -97,11 +99,17 @@ export class InfraController {
       'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet); a known host refreshes its inventory + liveness without touching human curation. Rate-limited per service account, and a NEW host is refused (429) once that account has enrolled its per-window quota of newly discovered hosts — already-known hosts keep refreshing regardless. Returns a minimal ack.',
   })
   @ApiOkResponse({ type: AgentReportAckDto })
+  // FORWARD-COMPATIBLE (#1138): the contract root is no longer `strictObject`, so a report from a
+  // NEWER agent degrades (unknown root keys stripped, host still ingested) instead of 400-ing — a host
+  // vanishing from the CMDB is strictly worse than one stale on new fields. The pipe strips those keys
+  // BEFORE this handler runs, so `req.body` — the raw parsed JSON, which the pipe does not mutate — is
+  // the only place the evidence survives. It is handed to the service, which records what it dropped.
   report(
     @Body() report: AgentReportDto,
+    @Req() req: Request,
     @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.infra.ingestReport(report, principal);
+    return this.infra.ingestReport(report, principal, req.body);
   }
 
   // ── Nodes ──────────────────────────────────────────────────────────────────
