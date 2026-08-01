@@ -1354,6 +1354,19 @@ export function containerExternalIdPrefix(hostExternalId: string): string {
 }
 
 /**
+ * Is this node a reported CONTAINER CHILD rather than a reporting host? (#1139)
+ *
+ * The key's own rule, exported so a consumer never re-derives it from the separator string. It exists
+ * because "the newest agent proposal" stopped meaning "the host that just checked in": children are
+ * created immediately after their host inside the same request, and the node list is newest-first, so
+ * a host reporting any container would otherwise have the create-agent wizard announce a container as
+ * the server the operator just installed the agent on.
+ */
+export function isContainerChildExternalId(externalId: string | null | undefined): boolean {
+  return externalId !== null && externalId !== undefined && externalId.includes(CONTAINER_ID_SEPARATOR);
+}
+
+/**
  * A container's runtime state → the child node's `status` (#1139). A LIVENESS FACT the agent owns,
  * exactly like the host node's `status=ONLINE` on check-in — never curation.
  *
