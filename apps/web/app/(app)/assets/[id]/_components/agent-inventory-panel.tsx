@@ -42,6 +42,13 @@ export interface AgentInventory {
  * could not understand about the report. Dumping them under "Custom fields" would put a raw JSON blob
  * on the panel of every host that merely reports unprivileged, labelled as if a human had typed it.
  * They stay out until a surface is designed for them (the fleet view).
+ *
+ * `identityConflict` and `_infraMergedInto` (#1141) are here for the same reason. The first records
+ * WHY a node exists separately from the one that owns its reported machine-id; the second is the merge
+ * provenance stamped on an archived duplicate. Both are node-blob bookkeeping, not something a human
+ * typed — and the host carrying `identityConflict` is precisely the one an operator opens this panel
+ * to understand, so a raw JSON dump under "Custom fields" is at its most misleading exactly there.
+ * The conflict is communicated by the notification and the review tray instead.
  */
 const INVENTORY_KEYS = new Set([
   "host",
@@ -50,6 +57,8 @@ const INVENTORY_KEYS = new Set([
   "_infraAutoCreated",
   "diagnostics",
   "agentSkew",
+  "identityConflict",
+  "_infraMergedInto",
 ]);
 
 /**
