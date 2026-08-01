@@ -1145,7 +1145,10 @@ export interface HostIdentityEvidence {
   serials: string[];
   /** Sanitized, canonical `mac` identifiers — sorted + de-duplicated. */
   macs: string[];
-  /** The reported short hostname, or `""` when the block carries none. */
+  /**
+   * The reported short hostname, or `""` when the block carries none. NOT part of
+   * {@link isClonedMachineId} — it is corroborating detail for the operator-facing message only.
+   */
   hostname: string;
 }
 
@@ -1188,10 +1191,25 @@ function isDisjoint(a: string[], b: string[]): boolean {
 /**
  * Do these two reports, which agree on `externalId`, actually come from DIFFERENT physical hosts?
  *
- * True only when the serial set, the MAC set AND the hostname ALL differ. Every one of those three
- * has a legitimate reason to change on a single host — a NIC swap, a rename, a board replacement —
- * so any single difference is noise; all three at once, on hosts that claim the same machine-id, is
- * the clone signature and nothing else produces it.
+ * True when the serial set AND the MAC set BOTH differ. Two facts, both burned into hardware — and
+ * the **hostname is deliberately not one of them**.
+ *
+ * WHY HOSTNAME IS NOT A GATE. An earlier draft of this rule required the hostname to differ too, and
+ * that excused the exact scenario the rule exists for: the archetypal golden-image clone has a baked
+ * machine-id *and a baked hostname* — that is what "cloned from a template" means. Requiring a
+ * hostname difference would have silently collapsed those hosts into one node, which is the failure
+ * #1141 was opened about. The hostname survives as corroborating DETAIL in the notification (and two
+ * hosts answering to one name is itself worth telling the operator), never as a condition.
+ *
+ * WHY BOTH, NOT EITHER. Hypervisors hand every guest its own SMBIOS serial and its own MACs, so two
+ * clones differ on both while sharing machine-id and name. Requiring BOTH to differ tolerates exactly
+ * one legitimate hardware change on a real box: a NIC swap moves the MACs alone, a board swap moves
+ * the serial alone. Both moving at once under one machine-id is overwhelmingly two machines.
+ *
+ * THE ERROR ASYMMETRY JUSTIFIES BIASING TOWARD DETECTION. A false positive costs one spurious PENDING
+ * node and one notification, which a human dismisses (and `merge-into` undoes). A false negative
+ * silently merges two production servers into one inventory row — the worst failure class in this
+ * product, because a confidently wrong CMDB is worse than an empty one.
  *
  * ABSENCE IS NOT A DIFFERENCE. Pre-v2 agents send no `identifiers[]` and every row stored before
  * contract v2 has none, so an empty set on EITHER side returns false and the caller merges exactly as
@@ -1205,8 +1223,6 @@ export function isClonedMachineId(
 ): boolean {
   if (!stored.serials.length || !incoming.serials.length) return false;
   if (!stored.macs.length || !incoming.macs.length) return false;
-  if (!stored.hostname || !incoming.hostname) return false;
-  if (stored.hostname.toLowerCase() === incoming.hostname.toLowerCase()) return false;
   return isDisjoint(stored.serials, incoming.serials) && isDisjoint(stored.macs, incoming.macs);
 }
 
