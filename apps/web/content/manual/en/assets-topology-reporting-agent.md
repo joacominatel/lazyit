@@ -129,8 +129,9 @@ A few things worth knowing:
 - **Only running containers are reported.** A stopped one-shot job isn't inventory worth mapping.
 - **Nothing happens on hosts without Docker**, and an agent that can't read the container socket
   simply reports no containers — it never removes the container nodes you already have.
-- The container's **image, digest and published ports** are recorded with the node's reported facts.
-  No screen displays them today.
+- The container's **image, image digest, runtime id and published ports** are shown on the node itself,
+  in a read-only **Container** panel — open the container on the diagram or the Servers list. If you
+  confirmed it with asset tracking on, the same panel appears on its asset page.
 
 Once confirmed, a host keeps receiving fresh facts from the agent, but your edits — its name, kind,
 position, IP and connections — are yours and the agent never overwrites them. The reported inventory —
@@ -153,9 +154,9 @@ without touching anything you own (the asset's name, serial and model are never 
   other reported facts, and no screen displays them directly.
 - **The containers it runs** — name, image, image digest, state and published ports, for each
   **running** container, when the host runs Docker (or a compatible runtime) and the agent can read
-  its socket. Each one becomes its own node linked to the host (see Pending review above). This is
-  still the local machine describing itself: the agent asks the runtime on that host what *it* is
-  running — it never scans your network.
+  its socket. Each one becomes its own node linked to the host, with those facts on a **Container**
+  panel on the node (see Pending review above). This is still the local machine describing itself: the
+  agent asks the runtime on that host what *it* is running — it never scans your network.
 - **When it last booted** — a single timestamp, refreshed on each report, with no history kept: it's
   an inventory fact ("did this box actually reboot after the patch window?"), not uptime monitoring.
   Stored with the host's other reported facts and, like the machine type, not shown on any screen yet.
@@ -190,9 +191,11 @@ metrics.
   they protect your database from a runaway or stolen agent — a token can no longer fill it with
   proposals. Both defaults assume roughly a **100-server** estate sharing one install token, so a
   normal rollout never hits them: all 100 servers can be discovered inside the first hour. Two things
-  are worth knowing. A server you've **already confirmed keeps reporting no matter what** — reaching
-  a limit delays only *new* discoveries, never the liveness and inventory of the servers you already
-  have, so it can never make your map show a false outage. And **nothing needs cleaning up** to
+  are worth knowing. A node you've **already confirmed keeps reporting no matter what** — server or
+  container alike. Reaching a limit delays only *new* discoveries, never the liveness and inventory
+  of what you already have: a container that is still running is never marked offline just because
+  the limit stopped the server from adding a *different* one. It can't make your map show a false
+  outage. And **nothing needs cleaning up** to
   recover: an agent that was turned away simply succeeds on its next attempt in the following window.
   How full your Pending tray is does not affect these limits at all. Rolling out more than 100
   servers at once? Either let it settle over a couple of hours, or raise

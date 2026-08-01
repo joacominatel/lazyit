@@ -136,8 +136,10 @@ Algunas cosas que conviene saber:
   que valga la pena mapear.
 - **En hosts sin Docker no pasa nada**, y un agente que no puede leer el socket de contenedores
   simplemente no reporta ninguno: nunca elimina los nodos de contenedor que ya tenés.
-- La **imagen, el digest y los puertos publicados** del contenedor se guardan junto a los datos
-  reportados del nodo. Hoy ninguna pantalla los muestra.
+- La **imagen, el digest, el id de runtime y los puertos publicados** del contenedor se muestran en el
+  propio nodo, en un panel de solo lectura **Contenedor** — abrí el contenedor en el diagrama o en la
+  lista de Servidores. Si lo confirmaste con el seguimiento como activo encendido, ese mismo panel
+  aparece también en su página de activo.
 
 Una vez confirmado, un host sigue recibiendo datos frescos del agente, pero tus ediciones — su
 nombre, tipo, posición, IP y conexiones — son tuyas y el agente nunca las sobrescribe. El inventario
@@ -163,9 +165,10 @@ correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin toca
   muestra directamente.
 - **Los contenedores que corre** — nombre, imagen, digest de la imagen, estado y puertos publicados,
   por cada contenedor **en ejecución**, cuando el host corre Docker (o un runtime compatible) y el
-  agente puede leer su socket. Cada uno se convierte en un nodo propio vinculado al host (ver Revisión
-  pendiente, más arriba). Sigue siendo la máquina local describiéndose a sí misma: el agente le
-  pregunta al runtime de ese host qué está corriendo *él* — nunca escanea tu red.
+  agente puede leer su socket. Cada uno se convierte en un nodo propio vinculado al host, con esos
+  datos en un panel **Contenedor** sobre el nodo (ver Revisión pendiente, más arriba). Sigue siendo la
+  máquina local describiéndose a sí misma: el agente le pregunta al runtime de ese host qué está
+  corriendo *él* — nunca escanea tu red.
 - **Cuándo arrancó por última vez** — una sola marca de tiempo, actualizada en cada reporte y sin
   histórico: es un dato de inventario ("¿este equipo realmente se reinició después de la ventana de
   parches?"), no monitoreo de uptime. Se guarda junto a los demás datos reportados del host y, igual
@@ -204,9 +207,11 @@ y no envía métricas.
   token ya no puede llenarla de propuestas. Ambos valores por defecto asumen un parque de unos **100
   servidores** compartiendo un mismo token de instalación, así que un despliegue normal nunca los
   alcanza: los 100 servidores pueden descubrirse dentro de la primera hora. Dos cosas conviene saber.
-  Un servidor que **ya confirmaste sigue reportando pase lo que pase**: alcanzar un límite solo
-  demora los descubrimientos *nuevos*, nunca la disponibilidad ni el inventario de los servidores que
-  ya tenés, así que no puede hacer que tu mapa muestre una caída falsa. Y **no hay que limpiar nada**
+  Un nodo que **ya confirmaste sigue reportando pase lo que pase** — sea servidor o contenedor.
+  Alcanzar un límite solo demora los descubrimientos *nuevos*, nunca la disponibilidad ni el
+  inventario de lo que ya tenés: un contenedor que sigue corriendo nunca se marca fuera de línea
+  solo porque el límite impidió agregar *otro* distinto. No puede hacer que tu mapa muestre una caída
+  falsa. Y **no hay que limpiar nada**
   para recuperarse: un agente rechazado simplemente tiene éxito en su próximo intento, en la ventana
   siguiente. Qué tan llena esté tu bandeja de Pendientes no afecta estos límites en absoluto. ¿Vas a
   desplegar más de 100 servidores de una vez? Dejá que se acomode en un par de horas, o subí

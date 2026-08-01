@@ -366,7 +366,11 @@ an active `RUNS_ON` edge to the reporting host. `PLAUSIBLE_EDGE_TARGETS.RUNS_ON`
 plausibility model changed. This stays inside §1's **self only** scope: it is the local runtime's own
 list of what it is executing, read over a local socket — not a network scan. **Running** containers
 only; a `RUNS_ON` edge describes what *executes*, and an exited one-shot job from six months ago has
-no relationship worth drawing.
+no relationship worth drawing. The collector decides whether to try the socket by **stat**ing it:
+`Bun.file(path).exists()` is a regular-file check that answers `false` for a unix socket, and gating
+on it made the whole collector unreachable on every host — the container half of this amendment
+existed only on paper until that check was corrected. The agent tests stand a real socket up and read
+a canned `/containers/json` off it, because a pure-parser suite is exactly what let it ship.
 
 **The child identity key is the container's NAME, scoped to its host** — `<host externalId>/container/<name>`
 — reconciled on the **same** `(reportingSource, externalId)` partial unique index the host path uses,
@@ -392,10 +396,15 @@ rows, so a flapping container would accumulate one dead row per flap instead of 
 the operator curated. Its `lastReportedAt` simply stops advancing, so the §4 staleness sweeper
 independently agrees. A container that comes back under the same name refreshes that same node back
 to ONLINE — no duplicate, no resurrection ceremony. The `RUNS_ON` edge is **self-healing**: an edge
-that is missing is re-opened, an edge that is already active is left completely alone (which is what
-keeps the one-active-`RUNS_ON`-per-source invariant intact). // A human who *closes* the edge does get
-it back next report: "this container executes on this host" is a reported fact, not a layout choice —
-the same rule `ipAddress` already follows, minus the `MANUAL` escape hatch, which does not exist here.
+that is missing is re-opened, and an edge whose target is a **discarded** (soft-deleted) host is
+closed and re-opened onto the live one. That second case is not hypothetical — discarding a node
+soft-deletes the row and leaves its edges open, and the next report cannot reuse the dead row, so
+without it a discarded-then-re-discovered host left its children wired to a node that is off the map,
+permanently. An edge to a **live** target is left completely alone, which is what keeps the
+one-active-`RUNS_ON`-per-source invariant intact and what keeps a deliberate human re-parent from
+being overwritten every fifteen minutes. // A human who *closes* the edge does get it back next
+report: "this container executes on this host" is a reported fact, not a layout choice — the same
+rule `ipAddress` already follows, minus the `MANUAL` escape hatch, which does not exist here.
 
 **Children land PENDING, like their hosts.** §1 ratified the review tray as the containment for
 everything a machine proposes, and a container node is not a lesser proposal — it is a row in the
@@ -409,11 +418,23 @@ the wrong mechanism. Nothing here changes the gate.
 enrolling N+1 rows must be as bounded as one enrolling one. The failure mode differs, and only because
 the caller's position differs: a host is enrolled before anything is durable, so refusing it refuses
 the report (429, retried); children are reconciled **after** the host row is committed, so the limiter
-gains a non-throwing `tryCharge` and a spent budget simply stops enrolling — the host lands, the
-remaining containers arrive on a later report. Throwing there would turn a partial success into a
-whole-report failure the agent reads as "nothing landed" and retries identically forever. For the same
-reason the **entire** container reconcile is wrapped: a failure degrades to a stale container topology
-plus a warning, never to a host vanishing from the inventory.
+gains a non-throwing `tryCharge` and a spent budget stops **creating** rows: the host lands, every
+container that already has a node is still refreshed, and the ones that do not have a node **yet**
+arrive on a later report. Throwing there would turn a partial success into a whole-report failure the
+agent reads as "nothing landed" and retries identically forever. For the same reason the **entire**
+container reconcile is wrapped: a failure degrades to a stale container topology plus a warning, never
+to a host vanishing from the inventory.
+
+**A refused enrolment must never become a retirement.** This budget is per service account and shared
+fleet-wide (`install.sh` writes the same operator token on every host), and children spend it too, so
+exhausting it mid-list is a **normal rollout event**, not an attack. The retire sweep therefore reads
+the set of externalIds computed from the **whole reported list** before anything is written — it
+answers "did the agent still list this container?", never "did the server get around to it?" — and
+the refusal **skips** the create rather than abandoning the rest of the list, so children after it
+keep their `lastReportedAt` advancing. Both halves matter: the first version marked still-running,
+already-confirmed children OFFLINE immediately, and stopping the loop would have had §4's staleness
+sweeper retire them a few hours later instead. A throttle that invents outages is worse than no
+throttle.
 
 **What this does NOT build.** Listening-socket `DEPENDS_ON` hints (`ss -lntp` as *suggested* edges a
 human accepts) are deliberately deferred: machine-guessed dependency topology is roughly 60% right,
@@ -433,11 +454,21 @@ retro-classifies the estate.
 list unfiltered by `state`, so a PENDING child renders with its edge), **in the Pending review tray**
 (which queries `state=PENDING` and applies no kind filter), **in a host's drill-in Children list**
 (which renders label + kind + status from the active inverse `RUNS_ON`), and **in the blast radius**
-(`GET /infra/nodes/:id/impact` filters on `deletedAt`, not on `state`). Their reported facts are **not**
-rendered anywhere: the Reported-facts panel keys off `specs.host.hostname`, which a container blob
-deliberately does not carry, so it correctly renders nothing rather than an empty host card. The
-image, digest, runtime id and published ports are **stored and not displayed** — the same disclosure
-`chassis`, `bootedAt` and `diagnostics` carry from the §2 amendment.
+(`GET /infra/nodes/:id/impact` filters on `deletedAt`, not on `state`). Their reported facts render in
+a **Container panel** — name, image, image digest, runtime state, container id and the published-ports
+table — on the node drill-in's Reported-facts section and, when a child is confirmed with asset
+tracking on, on that Asset's detail page.
+
+That panel exists because the alternative was worse, not because containers demanded a surface. The
+first cut asserted the facts were "stored and not displayed", reasoning that the host projection keys
+off `specs.host.hostname` and a container blob deliberately carries no `host`. It renders nothing on
+that route, true — but **both** callers fall back to the raw **Custom fields** grid when the host
+projection declines, and that grid renders every `specs` entry through `formatSpecValue`, which
+`JSON.stringify`s an object. Confirming a child mints an Asset by default, so the exact design choice
+cited as the reason nothing renders was what routed the whole blob into a JSON dump under a heading
+that means "a human typed this". A container arm of the projection (`getAgentContainerFacts` +
+`AgentContainerPanel`, disjoint from the host arm by construction) is the honest fix; the two arms
+share one renderer each, so there is no second layout to keep in step.
 
 One surface needed a fix rather than a disclosure: the **create-agent wizard's** "it checked in" step
 matched *the newest agent PENDING node*, and children are enrolled in the same request as their host
