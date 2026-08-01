@@ -235,6 +235,36 @@ function hostAssetFacts(plan: SpecsWritePlan): Record<string, unknown> {
 }
 
 /**
+ * What the node STILL HOLDS when a planned write is skipped (#1153) — the blob read back off the row,
+ * minus the package list its projection strips.
+ *
+ * It exists because `effective` is what a linked Asset mirrors, and on a skipped write the node's
+ * facts are the STORED ones. Handing the Asset this report's facts instead leaves it a report ahead
+ * of its own node: two surfaces disagreeing about one host, and the Asset is the one an operator
+ * reconciles from.
+ *
+ * `target` fills in the two REQUIRED keys when the stored blob is missing or hand-edited into a shape
+ * that carries neither. That is the tolerant reading, not a preference: a row with no readable host
+ * facts is one where nothing can diverge, because there is nothing stored to disagree with.
+ */
+function heldSpecs(
+  stored: StoredNodeSpecs,
+  target: AgentReportSpecsBlob,
+): AgentReportSpecsBlob {
+  const rest = stored.rest;
+  if (rest === undefined) return target;
+  const { host, reportedAt } = rest;
+  return {
+    ...(rest as Omit<AgentReportSpecsBlob, 'host' | 'reportedAt'>),
+    host:
+      typeof host === 'object' && host !== null && !Array.isArray(host)
+        ? (host as AgentReportHost)
+        : target.host,
+    reportedAt: typeof reportedAt === 'string' ? reportedAt : target.reportedAt,
+  };
+}
+
+/**
  * The blob keys that change on EVERY report while the INVENTORY does not (#1153) — stripped from both
  * sides before the stored blob and the incoming one are compared.
  *
@@ -1075,7 +1105,14 @@ export class InfraService {
       this.logger.warn(
         `Could not re-read the stored software list for node ${nodeId} — its host facts stay as they were until the next report rather than being written without it.`,
       );
-      return { effective: target, softwareOwned: false, resend };
+      // The node keeps what it held, so the Asset mirrors THAT and not this report. Syncing `target`
+      // here would put facts on the Asset the node does not store — and the Asset is the surface an
+      // operator reconciles from, so the two must never disagree about the same host.
+      return {
+        effective: heldSpecs(stored, target),
+        softwareOwned: false,
+        resend,
+      };
     }
     const write: AgentReportSpecsBlob = { ...target, software: preserved };
     return { write, effective: write, softwareOwned: true, resend };
