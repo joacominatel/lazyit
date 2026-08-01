@@ -365,10 +365,25 @@ export interface AgentLocalLimits {
   exclude?: Partial<AgentPolicyExclude>;
 }
 
-/** Union two glob lists without duplicates, bounded by the schema's own cap. */
-function unionGlobs(a: readonly string[], b: readonly string[] | undefined): string[] {
-  if (!b?.length) return [...a];
-  return [...new Set([...a, ...b])].slice(0, AGENT_POLICY_GLOBS_MAX);
+/**
+ * Union the server's glob list with the host's own, de-duplicated and bounded by the schema's cap.
+ *
+ * **THE HOST'S ENTRIES COME FIRST, and that ordering is the rule rather than a style choice.** The
+ * union has to be truncated somewhere — the result must stay a valid {@link AgentPolicySchema} value,
+ * whose lists cap at {@link AGENT_POLICY_GLOBS_MAX} — and a `Set` preserves insertion order, so
+ * whichever side is inserted first is the side that survives. Server-first meant a policy that filled
+ * the cap silently discarded every exclusion the HOST had asked for, i.e. a server-supplied value
+ * widening what a root agent reports: precisely what hard rule 1 says cannot happen. What gets dropped
+ * at the cap is therefore the server's, and dropping one of those can only ever make a host report
+ * MORE than the server asked for — never more than its own owner allowed.
+ *
+ * A host whose own list alone exceeds the cap keeps its first {@link AGENT_POLICY_GLOBS_MAX} patterns
+ * and loses the rest. That is the same limit the policy schema states, and the person who can see and
+ * shorten that file is the host owner themselves.
+ */
+function unionGlobs(server: readonly string[], local: readonly string[] | undefined): string[] {
+  if (!local?.length) return [...server].slice(0, AGENT_POLICY_GLOBS_MAX);
+  return [...new Set([...local, ...server])].slice(0, AGENT_POLICY_GLOBS_MAX);
 }
 
 /**
@@ -417,22 +432,35 @@ export function applyAgentPolicyVeto(policy: AgentPolicy, local: AgentLocalLimit
 /**
  * A deterministic per-machine offset, in seconds, SUBTRACTED from this host's interval.
  *
- * WHAT IT BUYS, precisely: hosts installed in the same rollout otherwise share an identical cadence
- * and stay phase-locked to each other forever, so an estate keeps reporting in one clump. A stable
- * per-machine offset makes each host's effective interval slightly different, so the clump spreads.
+ * WHAT IT BUYS, precisely — and this is narrower than "it spreads the estate", which is what an
+ * earlier version of this comment claimed: **it absorbs scheduler slack.** The agent only ever wakes
+ * on the tick, and a tick that lands a hair SHORT of the interval (systemd's `AccuracySec`, the
+ * previous run's own duration, `OnUnitActiveSec` re-arming from activation rather than from the
+ * report) would otherwise not be due, and the host would wait a whole extra tick. Subtracting a few
+ * seconds to a couple of minutes makes that tick report instead.
  *
- * WHAT IT DOES NOT BUY: it is not a reboot-window fix on its own. The reboot case is handled by the
- * state file surviving the reboot — a host that reported four minutes before it went down is still
- * not due when it comes back, so a site-wide reboot does not produce a site-wide report.
+ * WHEN IT SPREADS AN ESTATE, AND WHEN IT DOES NOT. It changes WHICH tick reports only when the
+ * interval is NOT an exact multiple of {@link AGENT_POLICY_TICK_SECONDS}. When it is a multiple — the
+ * 900 s default, and every round value the minutes-only editor makes natural — the tick that first
+ * reaches `interval - jitter` is the SAME tick that first reaches `interval`, because the previous
+ * tick sits a full tick earlier and the offset is always smaller than one tick. Two hosts on the
+ * default cadence are therefore de-phased by their own timers — `OnUnitActiveSec` re-arms from each
+ * host's own last activation, so its phase follows that host's boot instant and run durations — and
+ * not by this function. It is not a reboot-window fix either: that case is handled by the state file
+ * SURVIVING the reboot — a host that reported four minutes before it went down is still not due when
+ * it comes back.
  *
  * SUBTRACTED, NEVER ADDED, and that direction is load-bearing rather than cosmetic. Adding it would
  * push the due instant PAST a scheduler tick whenever the tick and the interval are close — the exact
  * shape of a host that upgraded its binary without re-running `install.sh`, where the timer is still
  * on the old 15-minute `OnUnitActiveSec` and the interval is the 15-minute default. That host would
  * miss every other tick and quietly report half as often as configured. Being due slightly EARLY has
- * no such failure mode: the tick simply catches it. The span is capped at half the smaller of the
- * tick and the interval, so the effective cadence is never less than 87.5% of what was asked for on
- * the default, and never below half on any value.
+ * no such failure mode: the tick simply catches it.
+ *
+ * THE BOUND, stated as the code computes it: the span is half the SMALLER of the tick and the
+ * interval, so the offset is at most 149 s on any interval of 300 s or more. On the 900 s default
+ * that is an effective cadence of at least 751 s — 83.4% of what was asked for — and at the 300 s
+ * minimum at least 151 s, so no cadence is ever cut to half or below.
  *
  * FNV-1a over the machine id: a few lines, no dependency, and stable across runs and versions —
  * which matters, because an offset that moved between releases would re-clump the estate on upgrade.
