@@ -72,7 +72,7 @@ import { AgentPolicyService } from './agent-policy.service';
  * Exported so the spec asserts the message the caller actually receives, not a copy of it.
  */
 export const INFRA_NODE_ASSET_REPOINT_ERROR =
-  'This node already carries an asset, and a patch cannot swap it for another in one step: the current link would be dropped without the detach that cleans up after it, orphaning an asset lazyit auto-created — it would linger in inventory owned by nobody. Send `assetId: null` first to detach (an auto-created asset is soft-deleted, a pre-existing one is left intact and merely un-linked), then a second patch carrying the new `assetId`. Attaching an asset to a node that carries none is allowed directly. ADR-0070 §5.';
+  'This node already carries an asset, and a patch cannot swap it for another in one step: the current link would be dropped without the detach that cleans up after it, orphaning that asset if lazyit auto-created it — it would be left in inventory owned by nobody. Send `assetId: null` first to detach (an auto-created asset is soft-deleted, a pre-existing one is left intact and merely un-linked), then a second patch carrying the new `assetId`. Attaching an asset to a node that carries none is allowed directly. ADR-0070 §5.';
 
 /**
  * The policy-related columns one report writes (#1140) — spread into the node `data` on every branch.
