@@ -788,11 +788,25 @@ change: TOAST churn, autovacuum load and backup growth in exchange for nothing. 
 **172,800 rewrites a day** — and #1147 raised the ceiling on how large each one may be from Express's
 100 KB default to 8 MB, so the two changes had to be reconciled.
 
-**Two halves, and only one of them is a guarantee.** The agent hashes its package list, caches the
+**Two halves, and precisely what each one bounds.** The agent hashes its package list, caches the
 fingerprint and omits an unchanged list — which cuts steady-state payload by roughly 90% and helps the
 honest majority. The server compares what arrived against what it holds and **skips the jsonb write
-when nothing changed** — which holds regardless of what the client sends, because an attacker does not
-cooperate. They ship together because separately the first one is a landmine.
+when nothing changed**. That second half does not need the client to **cooperate**: the comparison is
+made against the server's *own* fingerprint of whatever arrived, so a pre-#1142 agent and an attacker
+who sends no fingerprint at all are compared just the same, and a report that repeats what is stored
+writes nothing however it was produced. It is **not** a bound on a client that *varies* its report.
+Anything the comparison covers, differing by one byte, is a real change and therefore writes — which
+is deliberate, because a comparison that ignored a difference would be losing inventory. So a
+determined caller can still drive one rewrite per request, and #1142 made that **cheaper** for them,
+not dearer: `softwareState: 'unchanged'` plus one varied host fact reaches the same write with a few
+KB instead of a few hundred, and on that one branch it also costs a read of the stored list. Bounding
+*that* is the #1134 rate limiter's job and, ultimately, §8's posture that `infra:report` is a low-value
+credential whose blast radius is noise rather than damage. What #1153 removes is the ~172,800 rewrites
+a day of a legitimate estate — and of a leaked token that merely replays a report — not the ceiling on
+a caller who is deliberately making every request different. // the earlier wording here, *"holds
+regardless of what the client sends"*, promised the stronger bound and the code never delivered it.
+**Corrected 2026-08-01, review of #1163.** They ship together because separately the first one is a
+landmine.
 
 **The landmine, and the three-state contract that defuses it.** Before this, an absent `software` key
 DELETED the stored list, and #1140's `applySoftwarePolicy` depended on it: a policy that turns software
@@ -813,6 +827,33 @@ An **unrecognised** value degrades to `unavailable`, not to absent. Every other 
 contract degrades toward *we know less*; this is the one where "we know less" and "delete the
 operator's data" point in different directions, so the safe one is named. The destructive reading is
 reachable only from an explicit, recognised instruction, or from an agent that predates the field.
+
+**And the delta is gated on a capability handshake, because the loose root cuts both ways.** §2's
+contract root is a `z.object()` rather than a `strictObject` — the #1138 decision that stops a newer
+agent from 400-ing itself off the map. Its cost is that an older instance does not *reject* what it
+does not know; it silently **strips** it. So a #1142 agent reporting to a post-#1138, pre-#1142 server
+has `softwareState` and `softwareHash` removed on the way in, that server sees no `software` key, and
+it **clears the stored list** — the pre-#1142 reading, correctly applied to a report that never meant
+it. And because the agent believes the list unchanged, it never sends it again: the host's inventory
+is gone permanently, with no error anywhere and both Manual pages promising the opposite. The skew
+recorder would list `softwareState` in `droppedPaths`; **recording is not preventing.**
+
+So the ack states the server's capability — **`softwareDelta: true`**, a fact about the *build*, on
+every ack, through the channel #1140 already established for `policy`. The agent caches it in
+`state.json` beside its fingerprint and may omit a list only on a run that STARTED with that evidence
+already on disk; until then it sends everything, which costs exactly what a pre-#1142 agent cost. The
+first report against any server is therefore always a full one, and that single wasted payload is the
+entire price of the guarantee. The capability is re-read from every ack rather than latched once, so it
+also heals **downwards**: an instance rolled back below #1142 stops advertising it, the agent forgets
+it, and the next report carries the full list again — one report's exposure to the old clearing
+behaviour, self-repaired, instead of permanent silent loss. **The failure mode is always "sent more
+than necessary", never "deleted the operator's inventory."** All three cross-version directions — new
+agent → old server, new agent → new server, old agent → new server — are asserted by test.
+
+`unavailable` and `disabled` are deliberately **not** gated. Neither carries a list either way, and
+both are byte-for-byte what a pre-#1142 agent put on the wire when its collector failed or its policy
+turned software collection off, so an old server reads them exactly as it always did; gating them would
+change nothing on the wire and would only cost the cache.
 
 **`softwareHash` is corroboration, never authority.** The wire's fingerprint is read on exactly one
 branch — an omitted list, where it is the claim being checked. A list that *arrives* is fingerprinted
@@ -865,15 +906,25 @@ migration, a backfill, a read-side recombination, and an `Asset.specs` that stil
 column and therefore still has this problem. Also rejected: *comparing the blob in SQL* (exact, but
 untestable in a suite with no database, and the honest comparison still has to exclude the same two
 volatile fields), and *trusting `unchanged` without corroboration* (which is how a rediscovered node
-ends up with a permanently empty package list).
+ends up with a permanently empty package list). Also rejected: *inferring the server's capability
+from a version number* — the agent already knows `serverVersion` from the skew path and could guess.
+A guess that is wrong once is wrong for as long as the agent's cache lives, and the failure it would
+produce is the silent wipe the handshake exists to prevent; the ack costs one boolean and states the
+fact.
 
 **Upgrade safety.** No column, no index, no backfill, no migration. A node stored before this carries
 no `softwareHash`, so its first post-upgrade report compares unequal and writes once — the server
 stamps its own fingerprint as it writes, and every report after that can be skipped, **including from
 an agent that was never upgraded**. A pre-#1142 agent sends neither new field and keeps its exact
-pre-#1142 semantics, the #1140 policy clearing included. The client-side delta, and only that, requires
-the **new agent binary**: an operator who upgrades the instance alone gets the whole server-side write
-skip — the half that bounds abuse — and keeps paying full payload until the agents are reinstalled.
+pre-#1142 semantics, the #1140 policy clearing included.
+
+The client-side delta, and only that, requires the **new agent binary** — and, by construction, the new
+instance as well, since an agent that has not seen `softwareDelta: true` sends its whole list. So both
+one-sided upgrades are safe and neither saves anything: upgrade the instance alone and you get the whole
+server-side write skip while every agent keeps paying full payload; upgrade the agents alone and they
+keep paying it too, until the instance follows. Neither order can lose an inventory, and the ordering
+therefore does not need documenting as a procedure — only the fact that the saving appears when both
+halves are current.
 
 ### §4 — Liveness & staleness
 
@@ -986,7 +1037,11 @@ abolish. Four decisions close it, and the first three are effectively permanent.
 and the reserved `policyRevision` on the report (§2 amendment) becomes real: the agent echoes the
 generation it collected under. This round trip is already authenticated, already per-agent and
 already happening every interval, so a `GET /agent/policy` would have bought a second auth surface, a
-second throttle and a bootstrap ordering problem in exchange for nothing.
+second throttle and a bootstrap ordering problem in exchange for nothing. // The §2/§3 amendment
+(#1142) reuses this channel twice more: `softwareResend` asks for a full package list the server could
+not corroborate, and `softwareDelta` states that this build understands `softwareState` at all. Same
+shape as `policy` in every respect — optional in both directions, cached by the agent, acted on by the
+NEXT run.
 
 **Pickup is deliberately one tick behind.** Run N POSTs its report; the ack carries the policy; the
 agent writes it verbatim to `/var/lib/lazyit-agent/policy.json` and exits. Run N+1 loads it at
