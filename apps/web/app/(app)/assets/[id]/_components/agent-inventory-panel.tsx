@@ -49,10 +49,16 @@ export interface AgentInventory {
  * typed — and the host carrying `identityConflict` is precisely the one an operator opens this panel
  * to understand, so a raw JSON dump under "Custom fields" is at its most misleading exactly there.
  * The conflict is communicated by the notification and the review tray instead.
+ *
+ * `softwareHash` (#1142) is the last of them: the fingerprint the agent and server compare to decide
+ * whether the package list changed. It rides the NODE's blob only — the API strips it on every
+ * Asset-facing path — and a hex string under "Custom fields" would be noise on the very panel that
+ * already renders the list it stands for.
  */
 const INVENTORY_KEYS = new Set([
   "host",
   "software",
+  "softwareHash",
   "reportedAt",
   "_infraAutoCreated",
   "diagnostics",
