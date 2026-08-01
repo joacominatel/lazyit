@@ -395,6 +395,26 @@ export const AgentIdentifierKindSchema = z.enum([
   "other",
 ]);
 
+/**
+ * The lifecycle state a container runtime reports (#1139) — Docker's `State` vocabulary, which
+ * Podman and containerd mirror. `unknown` is the landing spot for anything else, on the same
+ * degrade-never-reject rule as every other vocabulary here: a runtime that invents a state must cost
+ * the operator a FACT, never the container.
+ */
+export const AgentContainerStateSchema = z.enum([
+  "running",
+  "created",
+  "restarting",
+  "paused",
+  "exited",
+  "removing",
+  "dead",
+  "unknown",
+]);
+
+/** Transport of a published container port. `sctp` is rare but real; the runtimes all emit it. */
+export const AgentContainerPortProtocolSchema = z.enum(["tcp", "udp", "sctp"]);
+
 /** Where a listed package came from — the provenance that makes a cross-OS software list comparable. */
 export const AgentSoftwareSourceSchema = z.enum([
   "dpkg",
@@ -436,6 +456,19 @@ export const AGENT_EXTERNAL_ID_MAX = 200;
 /** Caps on `diagnostics.warnings` — same truncate-don't-reject rule as the identifier set. */
 export const AGENT_WARNINGS_MAX = 50;
 export const AGENT_WARNING_LENGTH_MAX = 300;
+
+/**
+ * Cap on `host.containers` (#1139) — TRUNCATED past it, never rejected, same rule as the identifier
+ * set. 100 is deliberately generous for the estate ADR-0074 targets (a 5–20-person shop running
+ * Docker Compose) while still bounding what ONE report can ask the server to enrol: every element
+ * past the cap would be a child NODE, and the #1134 enrollment throttle charges each one. A host
+ * genuinely running more than 100 containers is a Kubernetes node, which is
+ * a different product conversation than the one ADR-0074 §1 scoped.
+ */
+export const AGENT_CONTAINERS_MAX = 100;
+
+/** Cap on the published-port list of ONE container — an inventory fact, not a port scan. */
+export const AGENT_CONTAINER_PORTS_MAX = 32;
 
 /**
  * The CANONICAL form of an identifier value for its kind (#1138) — the rule #1141 reconciles across
@@ -622,6 +655,120 @@ export const AgentIdentifierSchema = z.preprocess(
 export type AgentIdentifier = z.infer<typeof AgentIdentifierSchema>;
 
 /**
+ * One published port of a container (#1139). `containerPort` is the only required field — a port
+ * mapping with no container-side port is not a mapping — so an element without one is dropped by the
+ * array below. Every other field degrades to absent: a runtime that omits `hostPort` published the
+ * port on an ephemeral/random one, which is still worth recording as "this port is exposed".
+ */
+const AgentContainerPortObjectSchema = z
+  .object({
+    containerPort: z.number().int().min(0).max(65535).optional().catch(undefined),
+    hostPort: z.number().int().min(0).max(65535).optional().catch(undefined),
+    hostIp: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().slice(0, 64) || undefined),
+    protocol: AgentContainerPortProtocolSchema.optional().catch(undefined),
+  })
+  // Emit only the keys the runtime actually reported: a stored blob full of explicit `undefined`s
+  // reads as "we looked and found nothing" where the truth is "we were never told".
+  .transform((raw) => ({
+    ...(raw.containerPort !== undefined ? { containerPort: raw.containerPort } : {}),
+    ...(raw.hostPort !== undefined ? { hostPort: raw.hostPort } : {}),
+    ...(raw.hostIp !== undefined ? { hostIp: raw.hostIp } : {}),
+    ...(raw.protocol !== undefined ? { protocol: raw.protocol } : {}),
+  }));
+
+/** The wire form, tolerant of a non-object element — the posture every array in this contract takes. */
+const AgentContainerPortSchema = z.preprocess(
+  (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {}),
+  AgentContainerPortObjectSchema,
+);
+
+/**
+ * One container the host runs (#1139) — the child node the server mints, with an active `RUNS_ON`
+ * edge back to the reporting host. This is the first contract field that describes something OTHER
+ * than the reporting host itself, which is why `name` carries the whole weight: it is the IDENTITY
+ * KEY (see {@link containerExternalId}), and identity keys in this contract are permanent (ADR-0074
+ * §3 — one thing = one node, forever).
+ *
+ * `name` and NOT the runtime's container `id`, deliberately. A container id is regenerated on every
+ * `docker compose up --force-recreate`, every image bump and every `restart: always` rebuild, so an
+ * id-keyed node would mint a fresh PENDING proposal on each deploy and leave the old one behind — the
+ * duplicate-node failure this contract's host key was designed to avoid, reproduced one level down.
+ * A compose service's name is stable exactly across those events and is also what the operator calls
+ * the thing. The id still ships as corroborating EVIDENCE (like `host.identifiers`), never as a key.
+ *
+ * Every other field degrades to absent; an element left with no usable `name` is dropped by the array
+ * rather than 400-ing the whole host, and the drop is recorded by {@link agentReportSkewPaths}.
+ */
+const AgentContainerObjectSchema = z
+  .object({
+    name: z
+      .string()
+      .catch("")
+      .transform((v) => v.trim().slice(0, 200)),
+    /** The runtime's own container id — corroborating evidence, NEVER the identity key (see above). */
+    id: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().slice(0, 128) || undefined),
+    image: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().slice(0, 300) || undefined),
+    /** The immutable content digest — what actually pins "which build is running" across a tag reuse. */
+    imageDigest: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().slice(0, 200) || undefined),
+    /**
+     * ABSENT and `unknown` are different answers and both are kept: absent means the collector did
+     * not report a state at all, `unknown` means it reported one this build does not enumerate. A
+     * plain `.catch(undefined)` would have collapsed the second into the first and lost the fact that
+     * the runtime said SOMETHING — which is exactly the skew signal #1138 exists to preserve.
+     */
+    state: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) =>
+        v === undefined
+          ? undefined
+          : (AgentContainerStateSchema.safeParse(v.trim().toLowerCase()).data ?? "unknown"),
+      ),
+    ports: z
+      .array(AgentContainerPortSchema)
+      .optional()
+      .catch(undefined)
+      .transform((list) => {
+        const kept = list
+          ?.filter((p) => p.containerPort !== undefined)
+          .slice(0, AGENT_CONTAINER_PORTS_MAX);
+        return kept?.length ? kept : undefined;
+      }),
+  })
+  .transform((raw) => ({
+    name: raw.name,
+    ...(raw.id !== undefined ? { id: raw.id } : {}),
+    ...(raw.image !== undefined ? { image: raw.image } : {}),
+    ...(raw.imageDigest !== undefined ? { imageDigest: raw.imageDigest } : {}),
+    ...(raw.state !== undefined ? { state: raw.state } : {}),
+    ...(raw.ports !== undefined ? { ports: raw.ports } : {}),
+  }));
+
+/** The wire form of {@link AgentContainerObjectSchema}, tolerant of a non-object element. */
+export const AgentContainerSchema = z.preprocess(
+  (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {}),
+  AgentContainerObjectSchema,
+);
+export type AgentContainer = z.infer<typeof AgentContainerSchema>;
+
+/**
  * One IPv6 address as the OS reports it (#1138). A bare `string[]` was not enough to choose a node's
  * displayed address: without scope and the RFC 4941 flags, "the first non-`fe80:` entry" can be a
  * TEMPORARY privacy address (regenerated on a timer) or a DEPRECATED one (past its preferred
@@ -750,6 +897,26 @@ export const AgentReportSchema = z.object({
         // An EMPTY set says nothing; omit the key rather than assert "this host has no identity".
         return kept.length ? kept : undefined;
       })
+      .optional(),
+    /**
+     * The containers this host runs (#1139) — the one field in this contract that describes something
+     * other than the reporting host, because a container is a NODE of its own with a `RUNS_ON` edge
+     * back to its host, not an attribute of the host.
+     *
+     * ABSENT and EMPTY are DIFFERENT answers and the server acts on the difference. Absent = the
+     * collector never probed (no readable container socket, an older agent, a non-Linux collector),
+     * so the server must touch nothing — a host that stops reporting containers because its agent was
+     * downgraded must not retire the children it already has. `[]` = the probe RAN and found none,
+     * which is a positive finding that retires them. That is why this array does NOT collapse to
+     * `undefined` when empty, unlike {@link AGENT_IDENTIFIERS_MAX}'s set, where an empty set says
+     * nothing at all.
+     *
+     * TRUNCATED past {@link AGENT_CONTAINERS_MAX}; elements with no usable `name` — absent, empty, or
+     * a malformed non-object — are dropped, never 400-ed, and the drop is recorded in `agentSkew`.
+     */
+    containers: z
+      .array(AgentContainerSchema)
+      .transform((list) => list.filter((c) => c.name.length > 0).slice(0, AGENT_CONTAINERS_MAX))
       .optional(),
     /**
      * When the host last booted (ISO-8601). ONE scalar, deliberately: it answers "did this box reboot
@@ -1252,6 +1419,108 @@ export function disambiguateExternalId(externalId: string, discriminator: string
   return `${externalId.slice(0, AGENT_EXTERNAL_ID_MAX)}#${discriminator.slice(0, IDENTITY_DISCRIMINATOR_MAX)}`;
 }
 
+// ── Topology promotion (ADR-0074 §3 amendment, issue #1139) — kind + container child nodes ────────
+
+/** The virtualization types that make the host a CONTAINER rather than a VM. */
+const CONTAINER_VIRTUALIZATION = new Set<AgentVirtualizationType>(["docker", "lxc", "wsl"]);
+
+/** Chassis values that answer the kind question on their own, for a collector that has no virt probe. */
+const CHASSIS_KIND: Partial<Record<AgentChassis, InfraNodeKind>> = {
+  vm: "VM",
+  container: "CONTAINER",
+  server: "PHYSICAL_HOST",
+  desktop: "PHYSICAL_HOST",
+  laptop: "PHYSICAL_HOST",
+};
+
+/**
+ * The node `kind` a report PROPOSES for a newly-discovered host (#1139), or `undefined` when the
+ * report carries no evidence and the caller must keep its existing default.
+ *
+ * Until this existed, every agent-reported host landed as `PHYSICAL_HOST`: install the agent on a
+ * hypervisor and its eight guests and the operator got nine identical boxes to re-classify by hand
+ * before the blast-radius feature the graph was built for meant anything. Contract v2 already carries
+ * both facts this needs, so the inference is a mapping, not a heuristic.
+ *
+ * `virtualization` WINS over `chassis`, because a guest inherits its hypervisor's synthetic board and
+ * DMI happily calls a KVM guest a desktop; the Linux collector already resolves that precedence when
+ * it fills `chassis`, and re-stating it here is what makes the rule correct for a collector that
+ * reports the two independently. `chassis` is the fallback for exactly that case (a Windows/macOS
+ * collector with no `systemd-detect-virt` equivalent).
+ *
+ * NO EVIDENCE PROPOSES NOTHING. `chassis: 'unknown'` means the probe did not run — a different fact
+ * from "bare metal", which the contract spells `{ type: 'none' }` — so this returns `undefined` and
+ * the caller falls back to the pre-#1139 `PHYSICAL_HOST` default rather than dressing a guess up as a
+ * finding. That is also what keeps a legacy pre-v2 agent's report landing exactly where it always did.
+ *
+ * A PROPOSAL, never a verdict: this is read on the CREATE branch only. A node a human has already
+ * confirmed and classified is never re-kinded by a report — the agent owns facts, the human owns
+ * curation (ADR-0074 §3).
+ */
+export function inferNodeKind(host: AgentReportHost): InfraNodeKind | undefined {
+  const virtualization = host.virtualization?.type;
+  if (virtualization !== undefined) {
+    if (virtualization === "none") return "PHYSICAL_HOST";
+    return CONTAINER_VIRTUALIZATION.has(virtualization) ? "CONTAINER" : "VM";
+  }
+  return host.chassis !== undefined ? CHASSIS_KIND[host.chassis] : undefined;
+}
+
+/** The separator that scopes a container's name to its host. A machine-id/GUID/UUID never contains it. */
+const CONTAINER_ID_SEPARATOR = "/container/";
+
+/**
+ * The dedup `externalId` of a container child node (#1139) — the host's own `externalId`, the
+ * separator, and the container's name.
+ *
+ * This is as permanent as the host key ADR-0074 §3 froze, so the two choices in it are stated rather
+ * than left to be re-derived. It is keyed on the container's NAME because a runtime container id is
+ * regenerated by every recreate — an id-keyed node would mint a duplicate PENDING proposal on every
+ * `docker compose up` and orphan the old one. And it is SCOPED to the host because container names
+ * are only unique within one runtime: two hosts both running `redis` are two containers, and a
+ * host-less key would silently fuse them into one node whose `RUNS_ON` edge flapped between hosts.
+ *
+ * The separator cannot appear in a host `externalId` (a machine-id is hex, a Windows MachineGuid and
+ * a macOS platform UUID are hex-and-dashes), so a container key can never collide with a host key in
+ * the same `(reportingSource, externalId)` unique index the host path already uses — which is why
+ * this needs no column and no migration.
+ */
+export function containerExternalId(hostExternalId: string, containerName: string): string {
+  return `${hostExternalId}${CONTAINER_ID_SEPARATOR}${containerName}`;
+}
+
+/** Does this `externalId` belong to a container child of the given host? (the retire-sweep filter) */
+export function containerExternalIdPrefix(hostExternalId: string): string {
+  return `${hostExternalId}${CONTAINER_ID_SEPARATOR}`;
+}
+
+/**
+ * Is this node a reported CONTAINER CHILD rather than a reporting host? (#1139)
+ *
+ * The key's own rule, exported so a consumer never re-derives it from the separator string. It exists
+ * because "the newest agent proposal" stopped meaning "the host that just checked in": children are
+ * created immediately after their host inside the same request, and the node list is newest-first, so
+ * a host reporting any container would otherwise have the create-agent wizard announce a container as
+ * the server the operator just installed the agent on.
+ */
+export function isContainerChildExternalId(externalId: string | null | undefined): boolean {
+  return externalId !== null && externalId !== undefined && externalId.includes(CONTAINER_ID_SEPARATOR);
+}
+
+/**
+ * A container's runtime state → the child node's `status` (#1139). A LIVENESS FACT the agent owns,
+ * exactly like the host node's `status=ONLINE` on check-in — never curation.
+ *
+ * Only `running` is ONLINE. `paused`/`created`/`restarting` are deliberately grouped with `exited`:
+ * the question the map answers is "is this thing serving?", and none of them are. An unreported or
+ * unrecognised state is `UNKNOWN` rather than a guess in either direction — the same posture the
+ * contract takes everywhere else it lacks evidence.
+ */
+export function containerNodeStatus(state: AgentContainerState | undefined): InfraNodeStatus {
+  if (state === "running") return "ONLINE";
+  return state === undefined || state === "unknown" ? "UNKNOWN" : "OFFLINE";
+}
+
 /**
  * The minimal ack the report endpoint returns (ADR-0074 §3). Fire-and-forget by design: it confirms
  * the node id, its lifecycle `state` (PENDING for a freshly-discovered host, CONFIRMED once a human
@@ -1417,3 +1686,6 @@ export type AgentVirtualizationType = z.infer<typeof AgentVirtualizationTypeSche
 export type AgentIdentifierKind = z.infer<typeof AgentIdentifierKindSchema>;
 export type AgentSoftwareSource = z.infer<typeof AgentSoftwareSourceSchema>;
 export type AgentIpv6Scope = z.infer<typeof AgentIpv6ScopeSchema>;
+// Auto-kind + container child nodes (#1139).
+export type AgentContainerState = z.infer<typeof AgentContainerStateSchema>;
+export type AgentContainerPortProtocol = z.infer<typeof AgentContainerPortProtocolSchema>;

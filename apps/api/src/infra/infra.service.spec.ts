@@ -77,6 +77,7 @@ interface PrismaMock {
     findMany: Mock;
     create: Mock;
     update: Mock;
+    updateMany: Mock;
   };
   infraEdge: {
     findFirst: Mock;
@@ -113,7 +114,7 @@ describe('InfraService', () => {
   // The #1134 new-node enrollment throttle. Its own rate behaviour is covered in
   // `infra-node-enrollment.limiter.spec.ts`; here we only assert the service CHARGES it on exactly
   // the branch that grows the table, and never on the branch that does not.
-  let enrollment: { assertWithinBudget: Mock };
+  let enrollment: { assertWithinBudget: Mock; tryCharge: Mock };
   // The ONE automatic action the #1141 clone detection takes — a broadcast bell nudge. Everything
   // else it does is a human action, so this mock is also how the tests assert the SILENCE.
   let notifications: { emit: Mock };
@@ -134,6 +135,7 @@ describe('InfraService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       infraEdge: {
         findFirst: jest.fn(),
@@ -176,7 +178,10 @@ describe('InfraService', () => {
     };
     search = { upsert: jest.fn(), remove: jest.fn() };
     // Default: within budget, so every pre-existing ingest test keeps exercising the normal path.
-    enrollment = { assertWithinBudget: jest.fn() };
+    enrollment = {
+      assertWithinBudget: jest.fn(),
+      tryCharge: jest.fn().mockReturnValue(true),
+    };
     // `emit` is idempotent on its dedupeKey and never throws — the real one returns the row id or null.
     notifications = { emit: jest.fn().mockResolvedValue(null) };
 
@@ -896,6 +901,474 @@ describe('InfraService', () => {
         // The link-local is unreachable and the temporary address rotates — neither belongs on a map.
         expect(createArg.data.ipAddress).toBe('2001:db8::7');
         expect(createArg.data.ipAddressSource).toBe('AGENT');
+      });
+    });
+
+    // ── Auto-kind + container child nodes (#1139) ─────────────────────────────
+
+    /** A structural copy of a parsed report, so a fixture built from it never aliases the original. */
+    const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+    describe('auto-kind — the server PROPOSES, the human still confirms (#1139)', () => {
+      /** A report carrying whatever host facts the kind inference reads. */
+      const reportWith = (host: Record<string, unknown>) =>
+        AgentReportSchema.parse({
+          ...clone(FULL_REPORT),
+          host: { hostname: 'web-01', ...host },
+        });
+
+      beforeEach(() => {
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-1',
+          state: 'PENDING',
+        });
+      });
+
+      it('lands a KVM guest as a VM, not as one more PHYSICAL_HOST', async () => {
+        // The whole point of the issue: a Proxmox host and its 8 guests used to arrive as 9
+        // identical boxes the operator re-classified by hand before blast radius meant anything.
+        await service.ingestReport(
+          reportWith({ virtualization: { type: 'kvm' } }),
+        );
+        expect(
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
+        ).toBe('VM');
+      });
+
+      it('lands an LXC/Docker guest as a CONTAINER', async () => {
+        await service.ingestReport(
+          reportWith({ virtualization: { type: 'lxc' } }),
+        );
+        expect(
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
+        ).toBe('CONTAINER');
+      });
+
+      it('a POSITIVE bare-metal finding is PHYSICAL_HOST', async () => {
+        await service.ingestReport(
+          reportWith({ virtualization: { type: 'none' } }),
+        );
+        expect(
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
+        ).toBe('PHYSICAL_HOST');
+      });
+
+      it('NO evidence keeps the pre-#1139 default — a legacy agent lands exactly where it did', async () => {
+        // `chassis: unknown` means the probe did not run, which is NOT "bare metal". Guessing here
+        // would silently pre-empt the human's call; falling back is the honest answer.
+        await service.ingestReport(reportWith({ chassis: 'unknown' }));
+        expect(
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
+        ).toBe('PHYSICAL_HOST');
+
+        prisma.infraNode.create.mockClear();
+        await service.ingestReport(FULL_REPORT); // a pre-v2 report: no chassis, no virtualization
+        expect(
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
+        ).toBe('PHYSICAL_HOST');
+      });
+
+      it('NEVER re-kinds a node a human already confirmed and classified', async () => {
+        // The hard rule. `refreshKnownNode` exists to protect human curation: the agent owns FACTS,
+        // the human owns curation, and `kind` is curation the moment a human has touched it.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-known',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-known',
+          state: 'CONFIRMED',
+        });
+
+        await service.ingestReport(
+          reportWith({ virtualization: { type: 'vmware' } }),
+        );
+
+        expect(prisma.infraNode.create).not.toHaveBeenCalled();
+        const updateArg = firstArg<{ data: Record<string, unknown> }>(
+          prisma.infraNode.update,
+        );
+        expect(updateArg.data).not.toHaveProperty('kind');
+        expect(updateArg.data).not.toHaveProperty('label');
+        expect(updateArg.data).not.toHaveProperty('state');
+      });
+    });
+
+    describe('container child nodes + RUNS_ON edges (#1139)', () => {
+      /** A report whose host runs containers — `containers` ABSENT unless a test supplies it. */
+      const reportWithContainers = (containers?: unknown[]) =>
+        AgentReportSchema.parse({
+          ...clone(FULL_REPORT),
+          host: {
+            ...clone(FULL_REPORT.host),
+            ...(containers !== undefined ? { containers } : {}),
+          },
+        });
+
+      /** Land the host on the CREATE branch, with no container children known yet. */
+      function hostIsNew(): void {
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-host',
+          state: 'PENDING',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+      }
+
+      it('an ABSENT containers key touches nothing — a downgraded agent never retires children', async () => {
+        // ABSENT means "the collector never probed". Reading it as "this host runs none" would let
+        // an agent downgrade, or a momentarily unreadable socket, wipe a host's whole topology.
+        hostIsNew();
+        await service.ingestReport(reportWithContainers(), AGENT_SA);
+        expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+        expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+        expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+      });
+
+      it('mints a PENDING CONTAINER child with an ACTIVE RUNS_ON edge back to its host', async () => {
+        hostIsNew();
+        prisma.infraNode.create
+          .mockResolvedValueOnce({ id: 'node-host', state: 'PENDING' })
+          .mockResolvedValueOnce({ id: 'node-c1' });
+
+        await service.ingestReport(
+          reportWithContainers([
+            {
+              name: 'lazyit-api',
+              image: 'ghcr.io/acme/api:1.4.0',
+              state: 'running',
+            },
+          ]),
+          AGENT_SA,
+        );
+
+        const calls = prisma.infraNode.create.mock.calls as unknown[][];
+        const child = (calls[1][0] as { data: Record<string, unknown> }).data;
+        expect(child.kind).toBe('CONTAINER');
+        expect(child.label).toBe('lazyit-api');
+        // The human gate is untouched: a child is a PROPOSAL, exactly like its host (ADR-0074 §1).
+        expect(child.state).toBe('PENDING');
+        expect(child.source).toBe('AGENT');
+        expect(child.status).toBe('ONLINE');
+        // Keyed on the NAME, scoped to the host — never on the runtime id, which every recreate changes.
+        expect(child.externalId).toBe('machine-id-xyz/container/lazyit-api');
+        expect(child.reportingSource).toBe('agent:abc123');
+
+        expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+          data: { sourceId: 'node-c1', targetId: 'node-host', kind: 'RUNS_ON' },
+        });
+      });
+
+      it('a RECREATED container is refreshed, never duplicated — and never re-curated', async () => {
+        // `docker compose up --force-recreate` mints a brand-new runtime id every time. Keying on it
+        // would leave a fresh PENDING proposal per deploy and orphan the previous node.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-c1', externalId: 'machine-id-xyz/container/lazyit-api' },
+        ]);
+        // `target.deletedAt: null` — a LIVE host, which is what makes this edge "already parented".
+        prisma.infraEdge.findMany.mockResolvedValue([
+          { id: 'edge-1', sourceId: 'node-c1', target: { deletedAt: null } },
+        ]);
+
+        await service.ingestReport(
+          reportWithContainers([
+            { name: 'lazyit-api', id: 'aaaaaaaaaaaa', state: 'running' },
+          ]),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraNode.create).not.toHaveBeenCalled();
+        expect(enrollment.tryCharge).not.toHaveBeenCalled();
+        // Facts + liveness refresh; curation (kind/label/state/position) is left alone.
+        const childUpdate = (
+          prisma.infraNode.update.mock.calls as unknown[][]
+        ).find(
+          (c) => (c[0] as { where: { id: string } }).where.id === 'node-c1',
+        )?.[0] as { data: Record<string, unknown> };
+        expect(childUpdate.data.status).toBe('ONLINE');
+        expect(childUpdate.data).not.toHaveProperty('kind');
+        expect(childUpdate.data).not.toHaveProperty('label');
+        expect(childUpdate.data).not.toHaveProperty('state');
+        // The edge is already active — re-opening it would trip the one-active-RUNS_ON index.
+        expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+      });
+
+      it('re-opens a MISSING RUNS_ON edge (self-heal), so a child never floats unparented', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-c1', externalId: 'machine-id-xyz/container/lazyit-api' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([]); // no active RUNS_ON
+
+        await service.ingestReport(
+          reportWithContainers([{ name: 'lazyit-api', state: 'running' }]),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+          data: { sourceId: 'node-c1', targetId: 'node-host', kind: 'RUNS_ON' },
+        });
+      });
+
+      it('re-parents a child still wired to a DISCARDED host, instead of leaving it orphaned', async () => {
+        // Discarding a node soft-deletes it and leaves its edges open. The next report cannot reuse
+        // the dead row (the dedup lookup is live-scoped), so it mints a NEW host node — and the
+        // children, whose RUNS_ON edge was "active", were skipped by the self-heal and stayed wired
+        // to a node that is off the map. The child then floated unparented forever and the new host
+        // showed no children, which is precisely what §2's self-healing promises cannot happen.
+        prisma.infraNode.findFirst.mockResolvedValue(null); // the old host row is soft-deleted
+        prisma.infraNode.create.mockResolvedValueOnce({
+          id: 'node-host-2',
+          state: 'PENDING',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-c1', externalId: 'machine-id-xyz/container/lazyit-api' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([
+          {
+            id: 'edge-dead',
+            sourceId: 'node-c1',
+            target: { deletedAt: new Date('2026-07-01T00:00:00.000Z') },
+          },
+        ]);
+
+        await service.ingestReport(
+          reportWithContainers([{ name: 'lazyit-api', state: 'running' }]),
+          AGENT_SA,
+        );
+
+        // Close the edge to the discarded host FIRST — the one-active-RUNS_ON-per-source partial
+        // unique index would refuse a second open edge otherwise.
+        const closed = firstArg<{
+          where: { id: { in: string[] } };
+          data: { endedAt: Date };
+        }>(prisma.infraEdge.updateMany);
+        expect(closed.where).toEqual({ id: { in: ['edge-dead'] } });
+        expect(closed.data.endedAt).toBeInstanceOf(Date);
+        expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+          data: {
+            sourceId: 'node-c1',
+            targetId: 'node-host-2',
+            kind: 'RUNS_ON',
+          },
+        });
+      });
+
+      it('leaves a child a HUMAN re-parented onto another LIVE node completely alone', async () => {
+        // The rule the re-parenting fix must not break: only a DISCARDED target is healed. A live
+        // target is a human's deliberate curation ("this container really runs on that VM"), and
+        // re-pointing it every 15 minutes would make the graph un-editable.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-c1', externalId: 'machine-id-xyz/container/lazyit-api' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([
+          { id: 'edge-live', sourceId: 'node-c1', target: { deletedAt: null } },
+        ]);
+
+        await service.ingestReport(
+          reportWithContainers([{ name: 'lazyit-api', state: 'running' }]),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraEdge.updateMany).not.toHaveBeenCalled();
+        expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+      });
+
+      it('a VANISHED container goes OFFLINE — never soft-deleted behind the operator', async () => {
+        // Deleting is the human's call (the existing Discard action). Auto-deleting would also churn:
+        // the dedup index is over LIVE rows, so a flapping container would accumulate dead rows.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-gone', externalId: 'machine-id-xyz/container/old-job' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+
+        await service.ingestReport(reportWithContainers([]), AGENT_SA);
+
+        expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['node-gone'] } },
+          data: { status: 'OFFLINE' },
+        });
+        expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      });
+
+      it('an EMPTY list is a positive finding — the probe ran and this host runs none', async () => {
+        hostIsNew();
+        await service.ingestReport(reportWithContainers([]), AGENT_SA);
+        // It still LOOKS for children to retire (that is the whole difference from an absent key).
+        expect(prisma.infraNode.findMany).toHaveBeenCalled();
+      });
+
+      it('a spent enrollment budget stops enrolling children WITHOUT failing the host report', async () => {
+        // The host row is already durable here. A 429 would read to the agent as "nothing landed"
+        // and it would retry the identical report forever, losing the host as well as the children.
+        hostIsNew();
+        prisma.infraNode.create.mockResolvedValueOnce({
+          id: 'node-host',
+          state: 'PENDING',
+        });
+        enrollment.tryCharge.mockReturnValue(false);
+
+        const ack = await service.ingestReport(
+          reportWithContainers([{ name: 'a' }, { name: 'b' }]),
+          AGENT_SA,
+        );
+
+        expect(ack.accepted).toBe(true);
+        expect(prisma.infraNode.create).toHaveBeenCalledTimes(1); // the host only
+      });
+
+      it('a container reconcile failure NEVER fails the host report', async () => {
+        // Degrade, never reject — the same posture the contract takes. Losing the container topology
+        // for one tick is a stale field; losing the report makes the HOST vanish from the inventory.
+        hostIsNew();
+        prisma.infraNode.findMany.mockRejectedValue(new Error('db hiccup'));
+
+        const ack = await service.ingestReport(
+          reportWithContainers([{ name: 'a' }]),
+          AGENT_SA,
+        );
+        expect(ack).toEqual({
+          nodeId: 'node-host',
+          state: 'PENDING',
+          accepted: true,
+        });
+      });
+
+      it('a REFUSED enrollment never becomes a RETIREMENT — the budget stops creating, not the truth', async () => {
+        // The enrollment budget is per service account and shared fleet-wide, and children now spend
+        // it too, so exhausting it mid-list is a NORMAL rollout event, not an attack. The retire
+        // sweep must therefore only consider containers the AGENT reported as absent. Reading
+        // "the server declined to enrol this one" as "this one vanished" marked still-running,
+        // already-confirmed children OFFLINE — a false outage on the operator's canvas, produced by
+        // the throttle that was supposed to be invisible.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-keep', externalId: 'machine-id-xyz/container/keep' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([
+          {
+            id: 'edge-keep',
+            sourceId: 'node-keep',
+            target: { deletedAt: null },
+          },
+        ]);
+        enrollment.tryCharge.mockReturnValue(false);
+
+        // `brand-new` exhausts the budget; `keep` is listed AFTER it and is already known + running.
+        await service.ingestReport(
+          reportWithContainers([
+            { name: 'brand-new', state: 'running' },
+            { name: 'keep', state: 'running' },
+          ]),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+        // And it is still REFRESHED: abandoning the rest of the list would freeze its
+        // `lastReportedAt`, and the §4 staleness sweeper would retire it a few hours later instead —
+        // the same false outage, only slower and harder to trace back to the throttle.
+        const keepUpdate = (
+          prisma.infraNode.update.mock.calls as unknown[][]
+        ).find(
+          (c) => (c[0] as { where: { id: string } }).where.id === 'node-keep',
+        )?.[0] as { data: Record<string, unknown> } | undefined;
+        expect(keepUpdate?.data.status).toBe('ONLINE');
+        expect(keepUpdate?.data.lastReportedAt).toBeInstanceOf(Date);
+      });
+
+      it('still retires a container the agent genuinely stopped listing, budget or no budget', async () => {
+        // The other half of the same rule: a spent budget must not SUPPRESS a real retirement either.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-gone', externalId: 'machine-id-xyz/container/old-job' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+        enrollment.tryCharge.mockReturnValue(false);
+
+        await service.ingestReport(
+          reportWithContainers([{ name: 'brand-new', state: 'running' }]),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['node-gone'] } },
+          data: { status: 'OFFLINE' },
+        });
+      });
+
+      it('scopes the child lookup to THIS host, so two hosts running `redis` stay two nodes', async () => {
+        hostIsNew();
+        await service.ingestReport(
+          reportWithContainers([{ name: 'redis' }]),
+          AGENT_SA,
+        );
+        expect(
+          firstArg<{ where: Record<string, unknown> }>(
+            prisma.infraNode.findMany,
+          ).where,
+        ).toEqual({
+          reportingSource: 'agent:abc123',
+          externalId: { startsWith: 'machine-id-xyz/container/' },
+        });
       });
     });
 

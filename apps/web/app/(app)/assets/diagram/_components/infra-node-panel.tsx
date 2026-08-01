@@ -70,6 +70,10 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { statusTone } from "@/lib/infra/canvas";
 import {
+  AgentContainerPanel,
+  getAgentContainerFacts,
+} from "../../[id]/_components/agent-container-facts";
+import {
   AgentInventoryPanel,
   getAgentInventory,
 } from "../../[id]/_components/agent-inventory-panel";
@@ -1233,11 +1237,15 @@ function ChildrenSection({ nodes }: { nodes: InfraNodeChild[] }) {
 }
 
 /**
- * Reported facts (issue #1081) — the agent's host inventory carried in `node.specs`, rendered
- * read-only. Reuses the Assets detail projection ({@link getAgentInventory} + {@link AgentInventoryPanel})
- * so there is ONE renderer for agent inventory across the app (no duplicated cpu/ram/os/disks/serial
- * layout). Renders nothing when the specs don't parse as agent inventory (a manual/graph-only node
- * that happens to be flagged AGENT but has no host block).
+ * Reported facts (issue #1081) — the agent's inventory carried in `node.specs`, rendered read-only.
+ * Reuses the Assets detail projections ({@link getAgentInventory} + {@link AgentInventoryPanel} for a
+ * host, {@link getAgentContainerFacts} + {@link AgentContainerPanel} for a CONTAINER child, #1139) so
+ * there is ONE renderer per shape across the app — no duplicated cpu/ram/os/disks/serial layout, and
+ * no second place to keep the container layout in step with.
+ *
+ * The two arms are disjoint by construction (a host blob has `host.hostname`, a child blob has
+ * `container.name`), so the order below is readability, not precedence. Renders nothing when the
+ * specs parse as neither — a manual/graph-only node flagged AGENT with no reported block.
  */
 function ReportedFactsSection({
   specs,
@@ -1246,10 +1254,15 @@ function ReportedFactsSection({
 }) {
   const t = useTranslations("infra");
   const inventory = getAgentInventory(specs);
-  if (!inventory) return null;
+  const container = inventory ? null : getAgentContainerFacts(specs);
+  if (!inventory && !container) return null;
   return (
     <Section title={t("panel.reportedFactsTitle")}>
-      <AgentInventoryPanel inventory={inventory} />
+      {inventory ? (
+        <AgentInventoryPanel inventory={inventory} />
+      ) : container ? (
+        <AgentContainerPanel facts={container} />
+      ) : null}
     </Section>
   );
 }
