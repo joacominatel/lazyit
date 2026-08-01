@@ -47,14 +47,15 @@ export interface AgentState {
   /**
    * Fingerprint of the software list the last ACCEPTED report left the server holding (#1142) — what
    * lets the next run omit an unchanged list. Absent means "send everything", which is why every
-   * degenerate read below (missing file, truncated JSON, a non-string value) lands there: the failure
-   * mode of forgetting is one large report, and the failure mode of a wrong memory is an inventory
-   * that is never corrected.
+   * degenerate read below (missing file, truncated JSON, a non-string value) lands there: forgetting
+   * costs one large report, and a WRONG fingerprint costs a wasted round trip — the server cannot
+   * corroborate the `unchanged` claim, keeps its list and asks for a resend, so it self-corrects on the
+   * next tick. Neither is durable; contrast `softwareDelta` below, where a wrong memory is.
    */
   softwareHash?: string;
   /**
    * Positive evidence, from the last accepted report's ack, that the server understands the #1142
-   * three-state contract — the ONE thing that entitles the next run to omit an unchanged list.
+   * `softwareState` contract — the ONE thing that entitles the next run to omit an unchanged list.
    *
    * It is remembered rather than assumed because the contract root is a loose `z.object()` (#1138): a
    * server built before #1142 does not reject `softwareState`/`softwareHash`, it silently strips them,
