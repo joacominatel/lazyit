@@ -52,6 +52,14 @@ import { pageSchema } from "./pagination";
  *     #852; ADR-0074 §4): the staleness sweeper flipped a reporting-agent node CONFIRMED→OFFLINE (it
  *     stopped reporting). Broadcast to the admin feed; deep-links to the topology map. ONE per outage
  *     (deduped on the node's last-report timestamp), never once-per-sweep.
+ *   - `infra.identity_conflict` — two hosts are reporting the SAME `externalId` (ADR-0074 §3 amendment,
+ *     issue #1141): the ingest found a report whose serial, MAC set and hostname ALL differ from the
+ *     ones stored on the node that key already owns. Almost always a VM template or golden image with a
+ *     baked `/etc/machine-id`. Broadcast to the admin feed; deep-links to the topology map. Emitted ONCE
+ *     per newly-detected colliding host (`infra.identity_conflict:<peerNodeId>:<discriminator>`), never
+ *     once per report — the clone keeps checking in every 15 minutes. This is the ONLY automatic action
+ *     the collision detection takes: the report is still accepted, nothing is auto-merged or auto-split,
+ *     and the remedy (`systemd-firstboot --setup-machine-id`) is named in the summary.
  *   - `update.available`     — the weekly update-awareness nudge (ADR-0084 §2, issue #904): the opt-in
  *     GitHub-releases check observed a NEWER release than the running version. Broadcast to the admin
  *     feed (the audience that can act); deep-links to Settings → Instance. De-duped per newly-observed
@@ -100,6 +108,7 @@ export const NOTIFICATION_TYPES = [
   "secret.vault_setup",
   "permission_widened",
   "infra.agent_offline",
+  "infra.identity_conflict",
   "update.available",
   "access_request.created",
   "access_request.decided",
