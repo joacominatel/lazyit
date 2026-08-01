@@ -156,10 +156,10 @@ rows nobody looked at, which is the worst kind of bulk action and exactly what t
 is not.
 
 **3. Saved auto-confirm rules — the judgement expressed ONCE, not per host.** A rule is an
-operator-authored row (`InfraAutoConfirmRule`) stating at least one condition — a hostname glob, a
-subnet CIDR, or the `kind` the server **proposed** — plus what to do: `confirmAsKind` and
-`trackAsAsset`. It is evaluated on the report **CREATE** branch, and a match confirms the node through
-`confirmNode` with the **rule author's** principal.
+operator-authored row (`InfraAutoConfirmRule`) stating at least one condition that can rule a proposal
+out — a hostname glob, a subnet CIDR, or the `kind` the server **proposed** — plus what to do:
+`confirmAsKind` and `trackAsAsset`. It is evaluated on the report **CREATE** branch, and a match
+confirms the node through `confirmNode` with the **rule author's** principal.
 
 Blanket auto-confirm stays rejected, and the reasons are structural rather than intentional:
 
