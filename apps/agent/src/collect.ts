@@ -13,11 +13,15 @@
  */
 import { hostname as osHostname } from "node:os";
 import {
+  AGENT_CONTAINER_PORTS_MAX,
+  AGENT_CONTAINERS_MAX,
   AGENT_WARNING_LENGTH_MAX,
   AGENT_WARNINGS_MAX,
   sanitizeIdentifierValue,
   selectPrimaryMac,
   type AgentChassis,
+  type AgentContainerPortProtocol,
+  type AgentContainerState,
   type AgentIpv6Scope,
   type AgentNicIpv6,
   type AgentReport,
@@ -28,6 +32,7 @@ type Host = AgentReport["host"];
 type Software = NonNullable<AgentReport["software"]>;
 type Nics = NonNullable<Host["nics"]>;
 type Identifiers = NonNullable<Host["identifiers"]>;
+type Containers = NonNullable<Host["containers"]>;
 
 /**
  * Where a degraded collector reports itself (#1138). A sink rather than a return value because a
@@ -510,6 +515,146 @@ export function buildIdentifiers(facts: IdentifierFacts): Identifiers | undefine
   return identifiers.length ? identifiers : undefined;
 }
 
+/**
+ * The container runtime's local API socket (#1139). Docker's default path, which Podman's
+ * docker-compatible service is conventionally symlinked to — so one path covers both without the
+ * agent having to know which runtime it is talking to.
+ */
+export const DOCKER_SOCKET = "/var/run/docker.sock";
+
+/** One element of the runtime's `GET /containers/json`, in its own PascalCase spelling. */
+interface DockerContainer {
+  Id?: string;
+  Names?: string[];
+  Image?: string;
+  ImageID?: string;
+  State?: string;
+  Ports?: { IP?: string; PrivatePort?: number; PublicPort?: number; Type?: string }[];
+}
+
+/** The transports the contract enumerates, as a runtime set (the enum is erased at compile time). */
+const CONTAINER_PORT_PROTOCOLS = new Set<string>(["tcp", "udp", "sctp"]);
+
+/** The container states the contract enumerates, as a runtime set (same erasure, same reason). */
+const CONTAINER_STATES = new Set<string>([
+  "running",
+  "created",
+  "restarting",
+  "paused",
+  "exited",
+  "removing",
+  "dead",
+  "unknown",
+]);
+
+/**
+ * Map one runtime state onto the contract's vocabulary — anything unrecognised becomes `unknown`,
+ * mirroring {@link mapVirtualizationType}. The server's schema applies the same rule, so this is
+ * belt-and-braces rather than the only guard; what it buys is that the agent's own `--once` output
+ * and the stored fact read identically.
+ */
+function mapContainerState(raw: string): AgentContainerState {
+  const value = raw.trim().toLowerCase();
+  return CONTAINER_STATES.has(value) ? (value as AgentContainerState) : "unknown";
+}
+
+/**
+ * Parse a container runtime's `GET /containers/json` body into the contract's `containers` shape
+ * (#1139). Pure and separately exported so the mapping is unit-testable on a machine with no
+ * container runtime at all — which is every CI runner this repo has.
+ *
+ * `null` in, `undefined` out — and the same for a body that is not a JSON ARRAY. The distinction is
+ * load-bearing all the way to the server: an ABSENT `containers` key means "the agent never learned
+ * anything", so the server touches the child nodes it already has, while `[]` means "the probe ran
+ * and this host runs none", which retires them. A 404 page or a `{"message":"permission denied"}`
+ * error object is the first case, not the second — reading either as "no containers" would let a
+ * momentarily-unreachable socket wipe a host's whole container topology.
+ *
+ * The container ID is truncated to the 12-char short form `docker ps` prints: it rides as
+ * corroborating evidence, never as the identity key (that is the NAME — see `containerExternalId`),
+ * so the full 64-char digest would be noise on a fact nothing compares.
+ */
+export function parseDockerContainers(body: string | null): Containers | undefined {
+  if (!body) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+  const containers: Containers = [];
+  for (const raw of parsed as DockerContainer[]) {
+    // The runtime prefixes every name with `/`; the operator's name is what follows it. A container
+    // with several names (legacy links) reports the first, which is the one `docker ps` shows.
+    const name = raw?.Names?.[0]?.replace(/^\/+/, "").trim();
+    if (!name) continue;
+    const ports = (raw.Ports ?? [])
+      .filter((p) => Number.isInteger(p?.PrivatePort))
+      .slice(0, AGENT_CONTAINER_PORTS_MAX)
+      .map((p) => ({
+        containerPort: p.PrivatePort as number,
+        ...(Number.isInteger(p.PublicPort) ? { hostPort: p.PublicPort } : {}),
+        ...(p.IP?.trim() ? { hostIp: p.IP.trim() } : {}),
+        ...(p.Type && CONTAINER_PORT_PROTOCOLS.has(p.Type)
+          ? { protocol: p.Type as AgentContainerPortProtocol }
+          : {}),
+      }));
+    containers.push({
+      name: name.slice(0, 200),
+      ...(raw.Id?.trim() ? { id: raw.Id.trim().slice(0, 12) } : {}),
+      ...(raw.Image?.trim() ? { image: raw.Image.trim() } : {}),
+      ...(raw.ImageID?.trim() ? { imageDigest: raw.ImageID.trim() } : {}),
+      ...(raw.State?.trim() ? { state: mapContainerState(raw.State) } : {}),
+      ...(ports.length ? { ports } : {}),
+    });
+    if (containers.length >= AGENT_CONTAINERS_MAX) break;
+  }
+  return containers;
+}
+
+/**
+ * The containers this host runs (#1139) — the only collector here that discovers something OTHER
+ * than the host itself, which is what finally gives the topology graph an EDGE to draw.
+ *
+ * It stays inside ADR-0074 §1's "self only" scope: this is not network discovery, it is the local
+ * runtime's own list of what it is executing, read over a local unix socket the agent either can
+ * open or cannot. RUNNING containers only (the runtime's default, no `all=true`) — a `RUNS_ON` edge
+ * describes what is executing, an exited one-shot job from six months ago has no relationship worth
+ * drawing, and the node of a container that stops is not deleted but goes OFFLINE, which is a truer
+ * answer than listing it forever.
+ *
+ * A host with no socket is the overwhelmingly common case and files NO warning: "this box does not
+ * run Docker" is not a degradation, and warning on it would put a line in the majority of reports
+ * until the operator learned to ignore the field. A socket that EXISTS but cannot be read is the
+ * opposite — that is the "why is this host's container list empty?" question #1138's warnings exist
+ * to answer — so it warns.
+ */
+async function collectContainers(warn: Warn): Promise<Host["containers"]> {
+  if (!(await exists(DOCKER_SOCKET))) return undefined;
+  let body: string;
+  try {
+    // `unix:` routes the request over the socket; the host part is ignored but must be present.
+    const res = await fetch("http://localhost/containers/json", {
+      unix: DOCKER_SOCKET,
+      signal: AbortSignal.timeout(COLLECT_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      warn(`containers: ${DOCKER_SOCKET} answered ${res.status} — container list omitted`);
+      return undefined;
+    }
+    body = await res.text();
+  } catch {
+    warn(`containers: ${DOCKER_SOCKET} exists but could not be read — container list omitted`);
+    return undefined;
+  }
+  const containers = parseDockerContainers(body);
+  if (containers === undefined) {
+    warn(`containers: ${DOCKER_SOCKET} returned an unreadable list — container list omitted`);
+  }
+  return containers;
+}
+
 const SOFTWARE_CAP = 5000; // matches AgentReportSchema's software array max
 
 /**
@@ -606,12 +751,13 @@ export async function collectHost(warn: Warn = NO_WARN): Promise<Host> {
       // Root-readable only (mode 0400) — unprivileged runs simply omit this identifier.
       readText("/sys/class/dmi/id/product_uuid"),
     ]);
-  const [disks, nics, hardware, virtualization, machineId] = await Promise.all([
+  const [disks, nics, hardware, virtualization, machineId, containers] = await Promise.all([
     collectDisks(warn),
     collectNics(warn),
     collectHardware(warn),
     collectVirtualization(warn),
     readMachineId(),
+    collectContainers(warn),
   ]);
 
   const host: Host = { hostname: osHostname() || "unknown" };
@@ -635,6 +781,9 @@ export async function collectHost(warn: Warn = NO_WARN): Promise<Host> {
   host.chassis = chassisFor(virtualization?.type, chassisType);
   if (virtualization) host.virtualization = virtualization;
   if (identifiers) host.identifiers = identifiers;
+  // ABSENT (the probe could not run) and `[]` (it ran and found none) are different answers the
+  // server acts on differently, so an empty list is REPORTED rather than omitted (#1139).
+  if (containers !== undefined) host.containers = containers;
   if (bootedAt !== undefined) host.bootedAt = bootedAt;
   if (cpu) host.cpu = cpu;
   if (memoryBytes !== undefined) host.memoryBytes = memoryBytes;
