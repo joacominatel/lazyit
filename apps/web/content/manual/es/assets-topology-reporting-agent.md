@@ -200,9 +200,23 @@ La solución está en las máquinas, no en lazyit: en cada clon, borrá `/etc/ma
 repite el problema. Una vez que el clon tiene un ID propio, simplemente reporta como un host nuevo:
 confirmalo, o usá **Unificar con…** para plegarlo sobre la entrada que lazyit le creó mientras tanto.
 
-Todo esto necesita los datos de hardware que envía un agente **actual**. Los hosts que todavía corren
-un agente viejo nunca se comparan — ni generan avisos — hasta que reporten con uno actualizado; nada de
-lo que ya tenés se toca al actualizar.
+Todo esto necesita los datos de hardware que envía un agente **actual**, y necesita que ese agente
+efectivamente los tenga. Dos cosas dejan a un host fuera del control, y ambas son silenciosas:
+
+- **Un agente viejo.** Los hosts que todavía corren un agente anterior a estos datos nunca se comparan
+  — ni generan avisos — hasta que reporten con uno actualizado; nada de lo que ya tenés se toca al
+  actualizar.
+- **No hay número de serie para comparar.** El control necesita un número de serie *y* direcciones de
+  placa de red. El número de serie lo da `dmidecode`, que solo responde si el agente corre **como
+  root** y la herramienta está instalada — y un **guest LXC o de contenedor no tiene número de serie
+  de hardware, punto**, corra como root o no. Un host sin número de serie se saltea igual que uno
+  viejo: lazyit lee un dato ausente como "nada para comparar", nunca como una diferencia, así que no
+  avisa sobre una suposición.
+
+Es decir que una flota con el agente más nuevo puede igual quedarse **sin ninguna detección de clones**
+— en silencio. La señal está en el panel de **Datos reportados**: si un host no muestra número de
+serie, ese host no se está controlando. Si la detección de clones te importa, corré el agente como root
+con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
 
 ## Qué recopila el agente
 

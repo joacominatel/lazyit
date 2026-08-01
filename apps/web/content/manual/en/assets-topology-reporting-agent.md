@@ -188,9 +188,22 @@ The fix is on the machines, not in lazyit: on each clone, remove `/etc/machine-i
 it. Once a clone has a real ID of its own it simply reports as a new host — confirm it, or use
 **Merge into…** to fold it onto the entry lazyit created for it in the meantime.
 
-All of this needs the hardware details a **current** agent sends. Hosts still running an older agent
-are never compared — and never warned about — until they check in with an updated one; nothing you
-already have is touched by the upgrade.
+All of this needs the hardware details a **current** agent sends — and it needs that agent to actually
+have them. Two things leave a host out of the check, and both are silent:
+
+- **An older agent.** Hosts still running an agent from before these details existed are never
+  compared — and never warned about — until they check in with an updated one; nothing you already
+  have is touched by the upgrade.
+- **No serial to compare with.** The check needs a serial number *and* network-card addresses. The
+  serial comes from `dmidecode`, which only answers when the agent runs **as root** and the tool is
+  installed — and an **LXC or other container guest has no hardware serial at all**, root or not. A
+  host with no serial is skipped exactly like a legacy one: lazyit reads a missing fact as "nothing to
+  compare", never as a difference, so it will not warn on a guess.
+
+So a fleet on the newest agent can still get **no clone detection whatsoever** — silently. The tell is
+the **Reported facts** panel: if it shows no serial for a host, that host is not being checked. If
+clone detection matters to you, run the agent as root with `dmidecode` installed, and expect nothing
+from it on container guests.
 
 ## What the agent collects
 
