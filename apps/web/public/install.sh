@@ -11,7 +11,7 @@
 #
 # THE TIMER TICKS EVERY 5 MINUTES AND THAT NEVER CHANGES (ADR-0074 §7 amendment, #1140). It is not
 # the reporting cadence: the agent checks whether it is due and exits immediately when it is not.
-# CADENCE is set centrally in lazyit (Settings → Agents) and picked up on the next report, so
+# CADENCE is set centrally in lazyit (Settings → Instance → Reporting agents) and picked up on the next report, so
 # changing it never rewrites a unit file, never needs `daemon-reload`, and never needs an SSH
 # session. --interval is still accepted so existing automation does not break, but it is ignored.
 #
@@ -44,7 +44,7 @@ while [ $# -gt 0 ]; do
     -h|--help)
       echo "Usage: install.sh --url <url> --token <token>"
       echo "  --interval <dur>  accepted for compatibility and IGNORED — the reporting cadence"
-      echo "                    is set centrally in lazyit (Settings → Agents), not per host."
+      echo "                    is set centrally in lazyit (Settings → Instance → Reporting agents)."
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -102,7 +102,7 @@ umask 077
 LEGACY_NOTE=""
 if [ -n "$LEGACY_INTERVAL" ]; then
   LEGACY_NOTE="# --interval $LEGACY_INTERVAL was passed and IGNORED: reporting cadence is set in lazyit
-# (Settings -> Agents), not here. To make THIS host report LESS often than lazyit asks,
+# (Settings -> Instance -> Reporting agents), not here. To make THIS host report LESS often than lazyit asks,
 # uncomment the LAZYIT_MIN_INTERVAL line below — a floor, never a shorter interval."
 fi
 
@@ -174,7 +174,7 @@ echo "lazyit-agent install: sending the first report ..."
 if "$BIN_PATH" report --once --force; then
   echo
   echo "lazyit-agent install: done. The timer ticks every $TICK; how often this host actually"
-  echo "reports is set centrally in lazyit (Settings → Agents) and picked up on the next report."
+  echo "reports is set centrally in lazyit (Settings → Instance → Reporting agents) and picked up on the next report."
   echo "This host now appears in lazyit's infra topology PENDING tray — confirm it there to track it as an asset."
 else
   die "the first report failed — check the URL/token; the timer is installed and will retry"
