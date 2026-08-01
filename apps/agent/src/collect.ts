@@ -31,6 +31,7 @@ import {
   type AgentReport,
   type AgentVirtualizationType,
 } from "@lazyit/shared";
+import type { SoftwareCollection } from "./software-delta";
 
 type Host = AgentReport["host"];
 type Software = NonNullable<AgentReport["software"]>;
@@ -101,17 +102,19 @@ export function applyDiskPolicy(
  * Filter, then cap, the installed-package list. ORDER MATTERS: the cap is spent on packages that
  * survived the filters, so excluding kernel churn actually buys room rather than being wasted on
  * entries that were going to be dropped anyway.
+ *
+ * It returns a LIST, always — never `undefined`. The two ways a report can carry no software at all
+ * ("the collector could not enumerate" and "the policy says do not") are OUTCOMES, not filter results,
+ * and #1142 made the difference between them load-bearing: one preserves the stored inventory and the
+ * other clears it. They are decided in {@link collectSoftware}, where the information to tell them
+ * apart actually exists. An EMPTY result here is a positive finding — the policy matched everything —
+ * and stays `[]` so the server stores "no packages" rather than reading it as "we did not look".
  */
 export function applySoftwarePolicy(
-  software: Software | undefined,
+  software: Software,
   policy: AgentPolicy,
   warn: Warn = NO_WARN,
-): Software | undefined {
-  if (!policy.collect.software) {
-    warn("software: disabled by agent policy — installed package list omitted");
-    return undefined;
-  }
-  if (software === undefined) return undefined;
+): Software {
   const { softwareNames } = policy.exclude;
   const sources = policy.softwareSources;
   const kept = software.filter((pkg) => {
@@ -127,19 +130,7 @@ export function applySoftwarePolicy(
     );
     return kept.slice(0, policy.softwareMax);
   }
-  // `undefined` rather than `[]`, matching what `collectSoftware` has always returned for "nothing
-  // to report". Be precise about what the server does with it TODAY, because it is the opposite of
-  // what "absent" intuitively suggests: `ingestReport` rebuilds the whole `specs` blob from the
-  // report and `refreshKnownNode` writes it wholesale, so an absent `software` key DELETES the
-  // stored list rather than preserving it. That is the behaviour we want here — a host whose policy
-  // turned software collection off should stop showing an inventory nobody is collecting any more,
-  // instead of a snapshot that ages silently with nothing on screen to say so.
-  //
-  // #1142 intends to give an absent key the meaning "unchanged". When it lands, this call site needs
-  // revisiting: "the collector could not enumerate packages" and "the policy says do not report
-  // packages" will need to be distinguishable, because only the first of them means "keep what you
-  // have" — the second still has to clear the list.
-  return kept.length ? kept : undefined;
+  return kept;
 }
 
 /**
@@ -823,31 +814,42 @@ function parseApk(out: string | null): Software {
  *
  * The POLICY is checked before anything is spawned (#1140): a host whose policy turns software
  * collection off must not pay for `dpkg-query` over 3,000 packages just to throw the result away.
+ *
+ * It answers with an OUTCOME, not a maybe-list (#1142). `disabled` and `unavailable` both send no
+ * packages and mean opposite things to the server — the first clears the stored inventory, the second
+ * keeps it — and this is the only place in the agent where the two are still distinguishable. A
+ * collector that returned `undefined` for both would hand the server a question it cannot answer.
  */
 export async function collectSoftware(
   warn: Warn = NO_WARN,
   policy: AgentPolicy = AGENT_POLICY_DEFAULT,
-): Promise<Software | undefined> {
-  if (!policy.collect.software) return applySoftwarePolicy([], policy, warn);
-  let pkgs: Software = [];
+): Promise<SoftwareCollection> {
+  if (!policy.collect.software) {
+    warn("software: disabled by agent policy — installed package list omitted");
+    return { state: "disabled" };
+  }
+  let out: string | null = null;
+  let pkgs: Software;
   if (Bun.which("dpkg-query")) {
-    pkgs = parseTabbed(
-      await run(["dpkg-query", "-W", "-f=${Package}\\t${Version}\\n"], COLLECT_TIMEOUT_MS, warn),
-      "dpkg",
-    );
+    out = await run(["dpkg-query", "-W", "-f=${Package}\\t${Version}\\n"], COLLECT_TIMEOUT_MS, warn);
+    pkgs = parseTabbed(out, "dpkg");
   } else if (Bun.which("rpm")) {
-    pkgs = parseTabbed(
-      await run(["rpm", "-qa", "--qf", "%{NAME}\\t%{VERSION}-%{RELEASE}\\n"], COLLECT_TIMEOUT_MS, warn),
-      "rpm",
-    );
+    out = await run(["rpm", "-qa", "--qf", "%{NAME}\\t%{VERSION}-%{RELEASE}\\n"], COLLECT_TIMEOUT_MS, warn);
+    pkgs = parseTabbed(out, "rpm");
   } else if (Bun.which("apk")) {
-    pkgs = parseApk(await run(["apk", "info", "-v"], COLLECT_TIMEOUT_MS, warn));
+    out = await run(["apk", "info", "-v"], COLLECT_TIMEOUT_MS, warn);
+    pkgs = parseApk(out);
   } else {
     warn("software: no supported package manager (dpkg/rpm/apk) — installed list omitted");
+    return { state: "unavailable" };
   }
+  // A null stdout is the manager FAILING (missing binary, non-zero exit, the #1133 timeout), which is
+  // "we could not look" — never "this host has no packages". The two parsers both fold null into an
+  // empty list, so the distinction has to be made here, before it is lost.
+  if (out === null) return { state: "unavailable" };
   // SOFTWARE_CAP is the WIRE contract's own array max and stays as a backstop; the policy cap is
   // applied inside `applySoftwarePolicy` and is only ever equal to or lower than it.
-  return applySoftwarePolicy(pkgs.slice(0, SOFTWARE_CAP), policy, warn);
+  return { state: "reported", software: applySoftwarePolicy(pkgs.slice(0, SOFTWARE_CAP), policy, warn) };
 }
 
 /**
