@@ -12,7 +12,9 @@ import {
   ipInCidr,
   matchesAutoConfirmRule,
   matchesHostnamePattern,
+  statesAutoConfirmCondition,
   type InfraAutoConfirmRule,
+  type InfraAutoConfirmScope,
 } from "./infra-review";
 
 /** A saved rule with every optional condition empty — each test fills only what it exercises. */
@@ -203,19 +205,143 @@ describe("matchesAutoConfirmRule (#1145)", () => {
   });
 
   test("appliesTo separates a reporting host from a container child", () => {
-    const child = { ...host, hostname: "redis", kind: "CONTAINER" as const, isContainerChild: true };
-    expect(matchesAutoConfirmRule(rule({ appliesTo: "HOST", hostnamePattern: "*" }), host)).toBe(true);
-    expect(matchesAutoConfirmRule(rule({ appliesTo: "HOST", hostnamePattern: "*" }), child)).toBe(false);
-    expect(matchesAutoConfirmRule(rule({ appliesTo: "CONTAINER", hostnamePattern: "*" }), child)).toBe(true);
-    expect(matchesAutoConfirmRule(rule({ appliesTo: "CONTAINER", hostnamePattern: "*" }), host)).toBe(false);
-    expect(matchesAutoConfirmRule(rule({ appliesTo: "ANY", hostnamePattern: "*" }), host)).toBe(true);
-    expect(matchesAutoConfirmRule(rule({ appliesTo: "ANY", hostnamePattern: "*" }), child)).toBe(true);
+    // `srv-*` matches both fixtures, so only `appliesTo` decides — and it is a REAL condition, which
+    // a bare `*` is not (see the blanket-rule tests below).
+    const child = {
+      ...host,
+      hostname: "srv-redis",
+      kind: "CONTAINER" as const,
+      isContainerChild: true,
+    };
+    const scoped = (appliesTo: InfraAutoConfirmScope) =>
+      rule({ appliesTo, hostnamePattern: "srv-*" });
+    expect(matchesAutoConfirmRule(scoped("HOST"), host)).toBe(true);
+    expect(matchesAutoConfirmRule(scoped("HOST"), child)).toBe(false);
+    expect(matchesAutoConfirmRule(scoped("CONTAINER"), child)).toBe(true);
+    expect(matchesAutoConfirmRule(scoped("CONTAINER"), host)).toBe(false);
+    expect(matchesAutoConfirmRule(scoped("ANY"), host)).toBe(true);
+    expect(matchesAutoConfirmRule(scoped("ANY"), child)).toBe(true);
   });
 
   test("reportedKind matches the kind the SERVER proposed", () => {
     const r = rule({ reportedKind: "VM" });
     expect(matchesAutoConfirmRule(r, { ...host, kind: "VM" })).toBe(true);
     expect(matchesAutoConfirmRule(r, host)).toBe(false);
+  });
+});
+
+describe("a condition that excludes nothing is not a condition (#1145 blanket auto-confirm)", () => {
+  const host = {
+    hostname: "srv-app-04",
+    ipAddress: "10.20.3.7",
+    kind: "PHYSICAL_HOST" as const,
+    isContainerChild: false,
+  };
+
+  // A rule matching EVERY possible proposal is blanket auto-confirm however it is spelled. ADR-0074
+  // §1 rejected that, so it has to be unstorable AND unusable — not merely undocumented.
+  const excludesNothing = ["*", "**", "***", "*?*", "?*", "?", "??"];
+  const narrowing = ["srv-*", "*.*", "*-01"];
+
+  test.each(excludesNothing)("a hostname pattern of only wildcards (%p) states nothing", (pattern) => {
+    expect(statesAutoConfirmCondition({ hostnamePattern: pattern })).toBe(false);
+    expect(matchesAutoConfirmRule(rule({ hostnamePattern: pattern }), host)).toBe(false);
+    expect(
+      CreateInfraAutoConfirmRuleSchema.safeParse({ name: "everything", hostnamePattern: pattern })
+        .success,
+    ).toBe(false);
+  });
+
+  test("a pattern of only `?`s constrains LENGTH, and is refused anyway", () => {
+    // `??` does exclude `srv-01`, so this one is a deliberate over-refusal: the rule is "a pattern
+    // has to carry a literal character", which is a line an operator can check by looking, and
+    // "hostnames of exactly two characters" describes no estate anyone runs. Refusing is the safe
+    // direction — the proposals it would have confirmed simply wait in the tray.
+    expect(matchesHostnamePattern("??", "ab")).toBe(true);
+    expect(statesAutoConfirmCondition({ hostnamePattern: "??" })).toBe(false);
+  });
+
+  test.each(narrowing)("a pattern carrying a literal (%p) IS a condition", (pattern) => {
+    expect(statesAutoConfirmCondition({ hostnamePattern: pattern })).toBe(true);
+    expect(
+      CreateInfraAutoConfirmRuleSchema.safeParse({ name: "narrow", hostnamePattern: pattern })
+        .success,
+    ).toBe(true);
+  });
+
+  test("`*.*` is a near-miss that stays legal — it genuinely rules out a name with no dot", () => {
+    expect(matchesAutoConfirmRule(rule({ hostnamePattern: "*.*" }), host)).toBe(false);
+    expect(
+      matchesAutoConfirmRule(rule({ hostnamePattern: "*.*" }), {
+        ...host,
+        hostname: "srv-app-04.corp.local",
+      }),
+    ).toBe(true);
+  });
+
+  test("a /0 subnet spans the whole address space, so it states nothing either", () => {
+    expect(statesAutoConfirmCondition({ subnetCidr: "0.0.0.0/0" })).toBe(false);
+    expect(statesAutoConfirmCondition({ subnetCidr: "::/0" })).toBe(false);
+    expect(matchesAutoConfirmRule(rule({ subnetCidr: "0.0.0.0/0" }), host)).toBe(false);
+    expect(
+      CreateInfraAutoConfirmRuleSchema.safeParse({ name: "any ip", subnetCidr: "0.0.0.0/0" })
+        .success,
+    ).toBe(false);
+    // One bit of prefix already rules something out, so it is a (very wide) condition.
+    expect(statesAutoConfirmCondition({ subnetCidr: "0.0.0.0/1" })).toBe(true);
+  });
+
+  test("all-wildcard name AND /0 subnet together are still blanket — two nothings do not add up", () => {
+    const blanket = { hostnamePattern: "*", subnetCidr: "0.0.0.0/0" };
+    expect(statesAutoConfirmCondition(blanket)).toBe(false);
+    expect(matchesAutoConfirmRule(rule(blanket), host)).toBe(false);
+    expect(
+      CreateInfraAutoConfirmRuleSchema.safeParse({ name: "everything", ...blanket }).success,
+    ).toBe(false);
+  });
+
+  test("a wildcard name beside a REAL condition is fine — the rule still excludes proposals", () => {
+    expect(
+      statesAutoConfirmCondition({ hostnamePattern: "*", subnetCidr: "10.20.0.0/16" }),
+    ).toBe(true);
+    expect(statesAutoConfirmCondition({ hostnamePattern: "*", reportedKind: "VM" })).toBe(true);
+    expect(
+      CreateInfraAutoConfirmRuleSchema.safeParse({
+        name: "everything on the management wire",
+        hostnamePattern: "*",
+        subnetCidr: "10.20.0.0/16",
+      }).success,
+    ).toBe(true);
+    expect(
+      matchesAutoConfirmRule(rule({ hostnamePattern: "*", subnetCidr: "10.20.0.0/16" }), host),
+    ).toBe(true);
+  });
+
+  test("a reported kind is always a condition — it names one of several kinds", () => {
+    expect(statesAutoConfirmCondition({ reportedKind: "VM" })).toBe(true);
+    expect(statesAutoConfirmCondition({})).toBe(false);
+    expect(
+      statesAutoConfirmCondition({ hostnamePattern: null, subnetCidr: null, reportedKind: null }),
+    ).toBe(false);
+  });
+
+  test("a PATCH cannot widen a rule into a blanket one either", () => {
+    expect(
+      UpdateInfraAutoConfirmRuleSchema.safeParse({
+        hostnamePattern: "*",
+        subnetCidr: null,
+        reportedKind: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      UpdateInfraAutoConfirmRuleSchema.safeParse({
+        hostnamePattern: "*",
+        subnetCidr: "0.0.0.0/0",
+      }).success,
+    ).toBe(false);
+    expect(
+      UpdateInfraAutoConfirmRuleSchema.safeParse({ hostnamePattern: "srv-*" }).success,
+    ).toBe(true);
   });
 });
 
