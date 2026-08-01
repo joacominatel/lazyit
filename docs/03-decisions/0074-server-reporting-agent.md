@@ -1025,8 +1025,8 @@ per-service-account scopes are **API-only in this build** (`PUT /infra/nodes/:id
 
 **Amendment (2026-08-01, #1137) — operational hardening: the unit, the network, and the two things
 an operator could not do.** Everything here is individually small. Collectively it is the difference
-between an agent that works on three test VMs and one that survives a real estate, and four of the
-items are things a prospective operator checks *before* deploying rather than after.
+between an agent that works on three test VMs and one that survives a real estate — and several of
+these are things a prospective operator checks *before* deploying rather than after.
 
 **1. The unit is sandboxed.** It ran as full root — which it needs, because `dmidecode` reads
 `/dev/mem` — with none of the free confinement systemd offers, and a unit file is exactly what a
