@@ -463,6 +463,13 @@ export class InfraService {
    * `policyAppliedAt` moves only when the echoed revision CHANGES. Stamping it on every report would
    * make it a second `lastReportedAt` and destroy the one question it answers — *when did this host
    * pick the current config up?* — which is exactly what an operator asks after a fleet-wide change.
+   *
+   * `policyStaleAfterSeconds` is gated on the SAME echo, and that gate is the whole honesty of the
+   * column: it records the staleness this node's agent is actually judged by, and an agent that
+   * predates the policy channel never receives, caches or applies one — it reports on whatever
+   * `install.sh` gave its timer and echoes nothing. Writing the resolved value for such a node would
+   * silently override a deliberately tuned `INFRA_AGENT_STALE_AFTER_MS` for precisely the hosts the
+   * env var is documented to still cover (a pre-#1140 agent, a manual row, a failed resolution).
    */
   private policyWriteFields(
     report: AgentReport,
@@ -472,7 +479,7 @@ export class InfraService {
   ): AgentPolicyWriteFields {
     const echoed = report.policyRevision;
     return {
-      ...(policy !== undefined
+      ...(policy !== undefined && echoed !== undefined
         ? { policyStaleAfterSeconds: policy.staleAfterSeconds }
         : {}),
       ...(echoed !== undefined ? { policyRevision: echoed } : {}),
@@ -918,8 +925,13 @@ export class InfraService {
     // staleness threshold (#1140). Without this, moving a host to a daily cadence would leave its
     // containers on the global env cutoff and the §4 sweeper would report a false outage for every
     // one of them within the hour.
+    //
+    // Gated on the host's ECHO for exactly the reason `policyWriteFields` is: a child follows its
+    // host, and a host whose agent predates the policy channel is not running a served threshold.
+    // Containers arrived in contract v2 (#1139), one release before the policy channel, so an agent
+    // that reports children while echoing no revision is a real shape rather than a hypothetical.
     const childPolicyFields =
-      policy !== undefined
+      policy !== undefined && report.policyRevision !== undefined
         ? { policyStaleAfterSeconds: policy.staleAfterSeconds }
         : {};
     // Every child this reporter already has for THIS host. Scoped by the prefix, because container
