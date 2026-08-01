@@ -351,11 +351,17 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
   la versión. En un servidor con muchos paquetes esta lista es, de lejos, lo más pesado que viaja en un
   reporte y sólo cambia cuando alguien instala o actualiza algo, así que el agente la envía **una vez y
   después envía sólo una huella de ella** hasta que cambie, lo que reduce un reporte de rutina a
-  aproximadamente una décima parte de su tamaño. Esto no se nota: la lista en pantalla siempre es la
-  actual. Un agente sólo empieza a omitir la lista una vez que lazyit le avisó — en la respuesta a un
-  reporte anterior — que esta versión entiende esa abreviatura, así que un agente actualizado antes que
-  su instancia sigue enviando la lista completa. El ahorro llega cuando ambas mitades están al día; y
-  mientras no lo estén, ningún inventario corre riesgo. Si lazyit tiene una lista que ya no logra hacer
+  aproximadamente una décima parte de su tamaño. El panel sigue mostrando la lista completa: la
+  abreviatura es sólo la forma en que viaja. Conviene conocer un caso: cuando el agente no logra
+  enumerar los paquetes (no hay un gestor de paquetes compatible, o la recolección expiró), lazyit
+  **conserva la lista que ya tiene** en lugar de vaciar el panel, y el panel no lo señala por sí mismo
+  — la fecha de **Recolectado** es la que indica qué tan antigua es la lista. Un agente sólo empieza a
+  omitir la lista una vez que lazyit le avisó — en la respuesta a un reporte anterior — que esta versión
+  entiende esa abreviatura, así que un agente actualizado antes que su instancia sigue enviando la lista
+  completa. El ahorro llega cuando ambas mitades están al día. El único momento a tener en cuenta es el
+  movimiento inverso: **bajar** una instancia a una versión anterior a ésta mientras sus agentes ya son
+  nuevos cuesta un reporte, cuya lista esa versión anterior lee como «sin software»; el agente ve la
+  respuesta antigua y vuelve a enviar la lista completa en el reporte siguiente. Si lazyit tiene una lista que ya no logra hacer
   coincidir con la huella (después de restaurar un respaldo, por ejemplo), **conserva la lista que ya
   tiene** y le pide al agente una completa en el siguiente reporte, en lugar de vaciar el panel ante
   una duda. Un servidor que **descartaste** y que luego volvió a descubrirse es un caso distinto, y

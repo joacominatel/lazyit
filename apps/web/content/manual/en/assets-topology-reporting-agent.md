@@ -327,10 +327,16 @@ from it on container guests.
   the version. On a busy server this list is by far the largest thing a report carries and it changes
   only when somebody installs or upgrades something, so the agent sends it **once and then sends only
   a fingerprint of it** until it changes — which cuts a routine check-in to roughly a tenth of its
-  size. You never see this: the list on screen is always the current one. An agent only starts
-  skipping the list once lazyit has told it — in the reply to an earlier report — that this version
-  understands the shorthand, so an agent upgraded ahead of its instance simply keeps sending the whole
-  list. The saving arrives once both halves are new; no inventory is ever at risk while they are not.
+  size. The panel still shows the whole list — the shorthand is only how it travels. One case is worth
+  knowing: when the agent cannot enumerate packages at all (no supported package manager, or the
+  collection timed out), lazyit **keeps the list it already holds** rather than emptying the panel, and
+  the panel does not flag that on its own — the **Collected** date is what tells you how old the list
+  is. An agent only starts skipping the list once lazyit has told it — in the reply to an earlier
+  report — that this version understands the shorthand, so an agent upgraded ahead of its instance
+  simply keeps sending the whole list. The saving arrives once both halves are new. The one moment to
+  know about is the reverse move: **downgrading** an instance below this version while its agents are
+  already new costs one report, whose list that older version reads as "no software" — the agent sees
+  the older reply, and sends the whole list again on the report after it.
   If lazyit holds a list it can no longer match to the fingerprint (after restoring a backup, for
   instance), it **keeps the list it has** and asks the agent for a full one on its next report, rather
   than emptying the panel over a doubt. A server you **discarded** and that was then rediscovered is a
