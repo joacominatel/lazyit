@@ -1247,7 +1247,7 @@ describe("InfraIdentityMatchSchema — the re-image adoption hint (#1141)", () =
   });
 });
 
-// ── The software delta contract (#1142) — THREE answers, not two ──────────────────────────────────
+// ── The software delta contract (#1142) — FOUR answers, not two ───────────────────────────────────
 
 describe("softwareFingerprint — a stable, order-independent fingerprint of a package list (#1142)", () => {
   const pkgs = [
@@ -1339,7 +1339,8 @@ describe("AgentReportSchema — softwareState/softwareHash (#1142)", () => {
   test("an over-long hash is DROPPED, not rejected — the host still reports", () => {
     // Dropped rather than truncated, unlike the truncating caps elsewhere in this contract: a
     // fingerprint is only useful whole. A truncated one would corroborate nothing while LOOKING like
-    // corroboration, whereas an absent one is honest and costs exactly one full resend.
+    // corroboration, whereas an absent one is honest. It is not free, though: the resend request is
+    // keyed on a fingerprint having arrived, so a dropped one is preserved without one being asked for.
     const parsed = AgentReportSchema.parse({ ...base, softwareHash: "a".repeat(500) });
     expect(parsed.softwareHash).toBeUndefined();
   });
