@@ -99,8 +99,10 @@ type SoftwareDirective =
       /**
        * The fingerprint of that list, computed HERE and not taken from the wire. Taking the agent's
        * would make the write skip depend on the client sending one — so every pre-#1142 agent, and
-       * every attacker, would rewrite the blob on every report and #1153 would be a courtesy rather
-       * than a guarantee. Computing it costs a few milliseconds over the list we were sent anyway.
+       * every attacker, would rewrite the blob on every report and the skip would reach only clients
+       * that opted into it. Computing it costs a few milliseconds over the list we were sent anyway.
+       * (It buys independence from the client's COOPERATION, which is not the same as a bound on a
+       * client that varies its report — see {@link InfraService.refreshKnownNode}.)
        */
       hash: string;
     }
@@ -424,7 +426,10 @@ export class InfraService {
       reportedAt: report.reportedAt,
       // What the COLLECTOR could not do (#1138). Persisted beside the facts, because an empty
       // serial/model column is only an ANSWER ("web-03 reports unprivileged") if the reason survived
-      // the request. Overwritten wholesale each report, exactly like the facts themselves.
+      // the request. It is part of what the write path COMPARES (#1153), exactly like the facts
+      // themselves: a changed warning list or `privileged` flag is a real change and writes, an
+      // identical one is skipped, and `durationMs` is excluded because it moves on every report
+      // while nothing about the host does. When the blob is written it is replaced wholesale.
       ...(report.diagnostics !== undefined
         ? { diagnostics: report.diagnostics }
         : {}),
@@ -652,15 +657,31 @@ export class InfraService {
   }
 
   /**
-   * Put the resolved policy on the ack (#1140), or leave the ack exactly as it was when there is
-   * none. Applied at the LAST step of every ingest path rather than at each branch, so a branch added
-   * later cannot silently ship an ack that carries no configuration.
+   * The LAST step of every ingest path: everything an ack says about THIS SERVER rather than about
+   * this report — the resolved policy (#1140) and the software-delta capability (#1142). Applied here
+   * rather than at each branch, so a branch added later cannot silently ship an ack that carries
+   * neither.
+   *
+   * **`softwareDelta: true` is a statement about the BUILD, not about the request**, which is why it is
+   * unconditional while `policy` is not. This server understands `softwareState`, so an omitted package
+   * list is preserved rather than read as "no software" — and an agent may only start omitting once it
+   * has SEEN that. The contract root is a loose `z.object()` (the #1138 decision that keeps a newer
+   * agent from 400-ing itself off the map), so a server built before #1142 does not reject
+   * `softwareState`/`softwareHash`; it silently STRIPS them, sees no `software` key and clears the
+   * stored list — permanently, because the agent believes the list unchanged and never resends it.
+   * `agentSkew` would RECORD that strip on the node; only this handshake prevents it. A failed policy
+   * resolution must therefore never suppress this flag: that would un-teach every agent in the estate
+   * over a settings row nobody could read.
    */
-  private withPolicy(
+  private finishAck(
     ack: AgentReportAck,
     policy: AgentPolicy | undefined,
   ): AgentReportAck {
-    return policy === undefined ? ack : { ...ack, policy };
+    return {
+      ...ack,
+      softwareDelta: true,
+      ...(policy !== undefined ? { policy } : {}),
+    };
   }
 
   /**
@@ -772,8 +793,20 @@ export class InfraService {
    * inside it actually changed — see {@link planSpecsWrite}. At the default per-account rate limit a
    * leaked `infra:report` token could otherwise drive ~172,800 full rewrites a day of a multi-hundred-KB
    * TOAST value against a bounded set of rows, and #1147 raised the ceiling on how big each of those
-   * rewrites may be from 100 KB to 8 MB. This is the half that does not depend on the client
-   * cooperating: #1142 saves the honest agent's bandwidth, and this saves the write either way.
+   * rewrites may be from 100 KB to 8 MB.
+   *
+   * **What the skip does and does not bound.** It does not require the client to COOPERATE — the
+   * comparison uses the server's own fingerprint of whatever arrived, so a pre-#1142 agent and an
+   * attacker who sends no fingerprint at all are compared just the same, and a report that repeats
+   * what is stored writes nothing however it was produced. It is not, however, a bound on a client
+   * that varies its report: anything the comparison covers differing by one byte is a real change and
+   * therefore writes, and that is deliberate — a comparison that ignored a difference would be losing
+   * inventory. So a determined caller can still drive a rewrite per request, and #1142 made that
+   * cheaper for them, not dearer: `softwareState: 'unchanged'` reaches the same write with a few KB
+   * instead of a few hundred, and on the one branch that has to re-embed the list it also costs a
+   * read of it. Bounding THAT is the rate limiter's job (#1134) and, ultimately, not leaking the
+   * token; the honest ADR-0074 §8 posture is that `infra:report` is a low-value credential whose
+   * blast radius is noise, not damage. See the amendment in ADR-0074 §2.
    */
   private async refreshKnownNode(args: {
     node: { id: string; assetId: string | null; ipAddressSource: string };
@@ -892,9 +925,14 @@ export class InfraService {
    *
    * The ONE case that reads the stored package list back is `preserve` with the rest of the blob
    * changed: the new host facts have to be written, and writing them without re-embedding the list
-   * would delete it. That case is genuinely rare — when the software changed the agent sends it, so
-   * this is "host facts moved while the package list did not" — and paying a single large read for it
-   * is what buys the ~90% steady-state saving on every other report.
+   * would delete it. From a REAL agent that case is rare — when the software changed the agent sends
+   * it, so this is "host facts moved while the package list did not" — and paying a single large read
+   * for it is what buys the ~90% steady-state saving on every other report. A caller that does not
+   * behave like a real agent can reach it on every request by claiming `unchanged` while varying a
+   * host fact, which is the read half of the residual documented on
+   * {@link InfraService.refreshKnownNode}; it is bounded by the #1134 rate limiter, not by this
+   * comparison, and it is not new — before #1142 the same caller drove the same write by sending a
+   * different package list.
    */
   private async planSpecsWrite(
     nodeId: string,
@@ -1082,7 +1120,7 @@ export class InfraService {
     if (discriminator === undefined) {
       // Unreachable: the rule that got us here requires a serial AND a MAC on both sides. Falling
       // back to the ordinary refresh rather than throwing keeps the machine-facing path total.
-      return this.withPolicy(
+      return this.finishAck(
         await this.refreshKnownNode({
           node: { id: peer.id, assetId: null, ipAddressSource: 'AGENT' },
           blob,
@@ -1114,7 +1152,7 @@ export class InfraService {
         detectedAt:
           (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString(),
       };
-      return this.withPolicy(
+      return this.finishAck(
         await this.refreshKnownNode({
           node,
           blob: { ...blob, identityConflict: conflict },
@@ -1252,7 +1290,7 @@ export class InfraService {
     });
 
     void this.syncNodeToSearch(created.id);
-    return this.withPolicy(
+    return this.finishAck(
       {
         nodeId: created.id,
         state: created.state,
@@ -1296,7 +1334,7 @@ export class InfraService {
     policy?: AgentPolicy,
   ): Promise<AgentReportAck> {
     const containers = report.host.containers;
-    if (containers === undefined) return this.withPolicy(ack, policy);
+    if (containers === undefined) return this.finishAck(ack, policy);
     try {
       await this.applyContainerTopology(
         ack.nodeId,
@@ -1311,7 +1349,7 @@ export class InfraService {
         `Container topology for ${report.host.hostname} could not be reconciled — the host itself still reported. ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    return this.withPolicy(ack, policy);
+    return this.finishAck(ack, policy);
   }
 
   /**
@@ -1395,7 +1433,10 @@ export class InfraService {
     let budgetSpent = false;
     for (const container of containers) {
       const externalId = containerExternalId(report.externalId, container.name);
-      // The child's whole inventory blob. Rewritten wholesale each report, exactly like the host's.
+      // The child's whole inventory blob — what this report WOULD store. Whether it is stored is
+      // decided below: since #1153 the write is conditional on the facts actually having moved, on
+      // the host path and here alike. When it is written it replaces the column wholesale, which is
+      // why it has to be complete rather than a patch.
       // No `host` key, because a container is not a host: the web `container` projection
       // (`getAgentContainerFacts`) reads this shape and renders it as a Container panel — on the node
       // drill-in and, once confirmed with asset tracking on, on the Asset detail page. Keep the
