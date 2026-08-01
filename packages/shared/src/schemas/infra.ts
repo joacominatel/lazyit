@@ -654,16 +654,25 @@ export type AgentIdentifier = z.infer<typeof AgentIdentifierSchema>;
  * array below. Every other field degrades to absent: a runtime that omits `hostPort` published the
  * port on an ephemeral/random one, which is still worth recording as "this port is exposed".
  */
-const AgentContainerPortObjectSchema = z.object({
-  containerPort: z.number().int().min(0).max(65535).optional().catch(undefined),
-  hostPort: z.number().int().min(0).max(65535).optional().catch(undefined),
-  hostIp: z
-    .string()
-    .optional()
-    .catch(undefined)
-    .transform((v) => v?.trim().slice(0, 64) || undefined),
-  protocol: AgentContainerPortProtocolSchema.optional().catch(undefined),
-});
+const AgentContainerPortObjectSchema = z
+  .object({
+    containerPort: z.number().int().min(0).max(65535).optional().catch(undefined),
+    hostPort: z.number().int().min(0).max(65535).optional().catch(undefined),
+    hostIp: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().slice(0, 64) || undefined),
+    protocol: AgentContainerPortProtocolSchema.optional().catch(undefined),
+  })
+  // Emit only the keys the runtime actually reported: a stored blob full of explicit `undefined`s
+  // reads as "we looked and found nothing" where the truth is "we were never told".
+  .transform((raw) => ({
+    ...(raw.containerPort !== undefined ? { containerPort: raw.containerPort } : {}),
+    ...(raw.hostPort !== undefined ? { hostPort: raw.hostPort } : {}),
+    ...(raw.hostIp !== undefined ? { hostIp: raw.hostIp } : {}),
+    ...(raw.protocol !== undefined ? { protocol: raw.protocol } : {}),
+  }));
 
 /** The wire form, tolerant of a non-object element — the posture every array in this contract takes. */
 const AgentContainerPortSchema = z.preprocess(
