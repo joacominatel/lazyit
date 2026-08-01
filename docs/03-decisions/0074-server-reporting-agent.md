@@ -1046,6 +1046,19 @@ I/O, and this agent runs on database servers whose job is not being inventoried.
 run has a deadline — a one-shot behind a 5-minute tick and a server-set cadence — so yielding to
 every other process on the box costs the report nothing anyone can perceive.
 
+**What it does cost, and the ordering that pays for it.** Deprioritising the run makes the package
+enumeration more likely to hit the agent's **10 s per-command collect budget**, on exactly the busy
+hosts that motivated the directives. A collect that times out produces no package list, and under
+the reading these two lines were written against — the one this ADR's §7 §1140 amendment describes —
+an **absent `software` key deletes the stored list** rather than preserving it. Three individually
+correct decisions composing into data loss: deprioritise → time out → omit → wipe. The fix is not a
+second timeout mechanism in the unit file but the wire state that already exists to say this:
+**#1142/#1153 (PR #1163) replaces the two-state reading with an explicit `softwareState`**, in which
+a collection that could not enumerate reports `unavailable` and the server **keeps** what it holds,
+while only an explicit `disabled` clears it. These two directives therefore ship **after** that
+change and not before — a merge-order requirement, recorded in the unit heredoc in `install.sh` as
+well so it is visible to whoever reads the unit next.
+
 **3. `RandomizedDelaySec` on the timer, which is a different layer from the agent's own jitter, and
 the distinction is the whole justification.** The per-machine offset in `agentPolicyDue` absorbs
 scheduler slack and, as the #1140 amendment says at length, **cannot spread an estate**: it is only
@@ -1072,7 +1085,28 @@ per key) and applied **explicitly** on every request the agent makes, report and
 a `test` that reached the instance cannot have taken a route the report does not. Bun honours the
 proxy variables by itself, but only from the process environment — the one place they are not — and a
 `NO_PROXY` living in the config file is invisible to it, so resolving both from one source is what
-keeps the two halves of the decision together. Neither is a policy field and neither ever will be:
+keeps the two halves of the decision together.
+
+**"One source" is a promise, and it needs one more line of code to be true.** Passing an explicit
+`proxy` option is only half of taking the decision away from the runtime: Bun consults the ambient
+environment whenever the option is *absent*, so a config-file `NO_PROXY` could not stop an inherited
+`HTTPS_PROXY` — and, measured on Bun 1.3.14, an ambient `NO_PROXY` overrides even an explicit `proxy`
+option, so a host-wide bypass list could defeat the config file's proxy in the other direction. The
+agent therefore **blanks the six ambient spellings** once, after resolution and before the first
+request (`disableAmbientProxy`). Nothing is lost — the environment has already won, per key — and
+after it the agent's own resolution is the whole decision, which is what makes `test`'s "bypassed for
+this host (NO_PROXY)" line true rather than hopeful. Blanked rather than deleted, deliberately: on
+Bun 1.3.14 `delete process.env.HTTP_PROXY` leaves the proxy in force and assigning `""` does not.
+
+**Which spelling wins, checked against the tools it cites.** When a host sets both `HTTPS_PROXY` and
+`https_proxy`, the **lowercase** one wins — measured on curl 8.7.1 and Bun 1.3.14, both of which take
+the lowercase value (and curl ignores a bare `HTTP_PROXY` outright). An operator who copies a working
+pair off a host must get the same answer from the agent as from the tools they copied it from. The
+installer's re-install preservation matches **both cases** for the same reason: the agent reads both,
+so a pattern that carried only the UPPERCASE half would silently delete a working proxy on the
+upgrade path — the erasure #1160 fixed on the local veto, one key over.
+
+Neither is a policy field and neither ever will be:
 both name a local file or a local egress path, which is precisely the class of thing §7's second hard
 rule keeps the server from being able to say.
 
@@ -1085,9 +1119,22 @@ checks config, DNS, TLS, the proxy, the CA and the token, and **writes nothing a
 is a `HEAD` on `GET /agent/download`, gated on the same `infra:report` permission as the report
 endpoint and a pure read, so it proves the exact credential the report uses without creating a
 PENDING node, touching a `specs` blob, consuming the per-token report budget or moving
-`lastReportedAt`. A `404` there is a **pass** — the guard runs before the handler, so it means the
-token was accepted and only then did the route say this image bundles no binary for that arch — and
-reporting it as a failure would send an operator to re-mint a token that works. `test` also prints
+`lastReportedAt`.
+
+**The probe is sent twice, and the pair is what proves anything.** A `404` from that route is a
+**pass** — the guard runs before the handler, so it means the token was accepted and only then did
+the route say this image bundles no binary for that arch, and reporting that as a failure would send
+an operator to re-mint a token that works. But a lone `404` proves nothing: it is byte-for-byte what
+an ordinary web server, an S3 bucket or a reverse proxy that does not route `/api` answers, so a
+`--url` pointing at the wrong origin entirely produced **PASS** from the one command whose purpose is
+catching a wrong URL or token before the operator gives up debugging. So `test` first sends the same
+`HEAD` with **no `authorization` header**: a lazyit instance answers `401` there, from the permission
+guard, before anything else runs. Only then does the authenticated answer mean something, because
+only then did the answer change *because of* the credential. A front door demanding its own basic
+auth answers `401` to both, and stays a failure attributed to the credential — correctly. Both
+requests are reads on the same route, so the second one writes exactly as much as the first: nothing.
+
+`test` also prints
 the effective policy, the last successful report and whether the next tick would report, which is the
 other half of "this host is silent and I do not know why".
 

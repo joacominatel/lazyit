@@ -63,7 +63,10 @@ The button opens a short, guided wizard with three steps:
    > your instance is internal) to `/etc/lazyit-agent/config` afterwards. It has to go **there**, not
    > in `/etc/environment` or a shell profile: the agent runs from a systemd timer, and a timer does
    > not inherit the machine's login environment — which is why an agent can work when you run it by
-   > hand and stay silent on its own schedule.
+   > hand and stay silent on its own schedule. Lowercase (`https_proxy`, `no_proxy`) works too, and
+   > wins if you write both, the same way `curl` reads them. What you put in that file is the agent's
+   > **whole** answer: a `NO_PROXY` there does stop a proxy the machine set elsewhere, rather than
+   > losing to it. Re-running the installer keeps these lines, in either spelling.
 3. **Wait.** The wizard then waits for the server to report. As soon as the agent checks in — usually
    within a couple of minutes — it shows a success message and an inline **Confirm** button. You can
    confirm right there, or close the wizard and confirm later from the Pending review tray.
@@ -121,7 +124,10 @@ sudo lazyit-agent show    # what exactly would this host report?
 
 **`test`** checks the address, DNS, TLS, the proxy, the certificate authority and the token, and
 tells you which one is wrong — a redirect means you pointed it at the wrong port, a rejection means
-the token, a timeout means the network. It also prints how often this host is set to report, when it
+the token, a timeout means the network, and an address that answers but isn't lazyit is named as
+exactly that rather than passing. (It asks twice on purpose: once without your token, to confirm the
+address really is a lazyit instance that demands one, and once with it. Both are reads.) It also
+prints how often this host is set to report, when it
 last succeeded and whether the next tick would report at all, which is usually the answer to "this
 server has gone quiet". It writes nothing on the host and nothing in lazyit: no proposal appears, no
 server is marked as having just reported, and nothing is counted against the token's report limit.

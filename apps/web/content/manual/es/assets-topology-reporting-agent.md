@@ -68,7 +68,11 @@ El botón abre un asistente guiado y breve, de tres pasos:
    > `NO_PROXY` si tu instancia es interna) a `/etc/lazyit-agent/config` después. Tiene que ir **ahí**,
    > no en `/etc/environment` ni en un perfil de shell: el agente corre desde un timer de systemd, y un
    > timer no hereda el entorno de sesión de la máquina — por eso un agente puede funcionar cuando lo
-   > ejecutás a mano y quedarse callado en su propio horario.
+   > ejecutás a mano y quedarse callado en su propio horario. La forma en minúsculas (`https_proxy`,
+   > `no_proxy`) también funciona, y gana si escribís las dos, igual que las lee `curl`. Lo que pongas
+   > en ese archivo es la respuesta **completa** del agente: un `NO_PROXY` ahí sí frena un proxy que la
+   > máquina haya definido en otro lado, en vez de perder contra él. Reinstalar conserva esas líneas,
+   > en cualquiera de las dos formas.
 3. **Espera.** El asistente entonces espera a que el servidor reporte. Apenas el agente reporta —
    normalmente en un par de minutos — muestra un mensaje de éxito y un botón **Confirmar** en línea.
    Podés confirmar ahí mismo, o cerrar el asistente y confirmarlo más tarde desde la bandeja de
@@ -128,7 +132,10 @@ sudo lazyit-agent show    # ¿qué reportaría exactamente este host?
 
 **`test`** verifica la dirección, el DNS, el TLS, el proxy, la autoridad certificadora y el token, y
 te dice cuál está mal: una redirección significa que apuntaste al puerto equivocado, un rechazo
-significa el token, un timeout significa la red. También imprime cada cuánto está configurado este
+significa el token, un timeout significa la red, y una dirección que responde pero no es lazyit se
+informa exactamente como eso, en vez de pasar. (Pregunta dos veces a propósito: una sin tu token,
+para confirmar que la dirección es realmente una instancia de lazyit que exige uno, y otra con él.
+Las dos son lecturas.) También imprime cada cuánto está configurado este
 host para reportar, cuándo lo logró por última vez y si el próximo tick reportaría — que suele ser la
 respuesta a "este servidor se quedó callado". No escribe nada en el host ni en lazyit: no aparece
 ninguna propuesta, ningún servidor queda marcado como recién reportado, y no se cuenta nada contra el
