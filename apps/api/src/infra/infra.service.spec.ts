@@ -1068,7 +1068,10 @@ describe('InfraService', () => {
         prisma.infraNode.findMany.mockResolvedValue([
           { id: 'node-c1', externalId: 'machine-id-xyz/container/lazyit-api' },
         ]);
-        prisma.infraEdge.findMany.mockResolvedValue([{ sourceId: 'node-c1' }]);
+        // `target.deletedAt: null` — a LIVE host, which is what makes this edge "already parented".
+        prisma.infraEdge.findMany.mockResolvedValue([
+          { id: 'edge-1', sourceId: 'node-c1', target: { deletedAt: null } },
+        ]);
 
         await service.ingestReport(
           reportWithContainers([
@@ -1116,6 +1119,77 @@ describe('InfraService', () => {
         expect(prisma.infraEdge.create).toHaveBeenCalledWith({
           data: { sourceId: 'node-c1', targetId: 'node-host', kind: 'RUNS_ON' },
         });
+      });
+
+      it('re-parents a child still wired to a DISCARDED host, instead of leaving it orphaned', async () => {
+        // Discarding a node soft-deletes it and leaves its edges open. The next report cannot reuse
+        // the dead row (the dedup lookup is live-scoped), so it mints a NEW host node — and the
+        // children, whose RUNS_ON edge was "active", were skipped by the self-heal and stayed wired
+        // to a node that is off the map. The child then floated unparented forever and the new host
+        // showed no children, which is precisely what §2's self-healing promises cannot happen.
+        prisma.infraNode.findFirst.mockResolvedValue(null); // the old host row is soft-deleted
+        prisma.infraNode.create.mockResolvedValueOnce({
+          id: 'node-host-2',
+          state: 'PENDING',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-c1', externalId: 'machine-id-xyz/container/lazyit-api' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([
+          {
+            id: 'edge-dead',
+            sourceId: 'node-c1',
+            target: { deletedAt: new Date('2026-07-01T00:00:00.000Z') },
+          },
+        ]);
+
+        await service.ingestReport(
+          reportWithContainers([{ name: 'lazyit-api', state: 'running' }]),
+          AGENT_SA,
+        );
+
+        // Close the edge to the discarded host FIRST — the one-active-RUNS_ON-per-source partial
+        // unique index would refuse a second open edge otherwise.
+        expect(prisma.infraEdge.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['edge-dead'] } },
+          data: { endedAt: expect.any(Date) },
+        });
+        expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+          data: {
+            sourceId: 'node-c1',
+            targetId: 'node-host-2',
+            kind: 'RUNS_ON',
+          },
+        });
+      });
+
+      it('leaves a child a HUMAN re-parented onto another LIVE node completely alone', async () => {
+        // The rule the re-parenting fix must not break: only a DISCARDED target is healed. A live
+        // target is a human's deliberate curation ("this container really runs on that VM"), and
+        // re-pointing it every 15 minutes would make the graph un-editable.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-c1', externalId: 'machine-id-xyz/container/lazyit-api' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([
+          { id: 'edge-live', sourceId: 'node-c1', target: { deletedAt: null } },
+        ]);
+
+        await service.ingestReport(
+          reportWithContainers([{ name: 'lazyit-api', state: 'running' }]),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraEdge.updateMany).not.toHaveBeenCalled();
+        expect(prisma.infraEdge.create).not.toHaveBeenCalled();
       });
 
       it('a VANISHED container goes OFFLINE — never soft-deleted behind the operator', async () => {
@@ -1184,6 +1258,80 @@ describe('InfraService', () => {
           nodeId: 'node-host',
           state: 'PENDING',
           accepted: true,
+        });
+      });
+
+      it('a REFUSED enrollment never becomes a RETIREMENT — the budget stops creating, not the truth', async () => {
+        // The enrollment budget is per service account and shared fleet-wide, and children now spend
+        // it too, so exhausting it mid-list is a NORMAL rollout event, not an attack. The retire
+        // sweep must therefore only consider containers the AGENT reported as absent. Reading
+        // "the server declined to enrol this one" as "this one vanished" marked still-running,
+        // already-confirmed children OFFLINE — a false outage on the operator's canvas, produced by
+        // the throttle that was supposed to be invisible.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-keep', externalId: 'machine-id-xyz/container/keep' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([
+          { id: 'edge-keep', sourceId: 'node-keep', target: { deletedAt: null } },
+        ]);
+        enrollment.tryCharge.mockReturnValue(false);
+
+        // `brand-new` exhausts the budget; `keep` is listed AFTER it and is already known + running.
+        await service.ingestReport(
+          reportWithContainers([
+            { name: 'brand-new', state: 'running' },
+            { name: 'keep', state: 'running' },
+          ]),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+        // And it is still REFRESHED: abandoning the rest of the list would freeze its
+        // `lastReportedAt`, and the §4 staleness sweeper would retire it a few hours later instead —
+        // the same false outage, only slower and harder to trace back to the throttle.
+        const keepUpdate = (
+          prisma.infraNode.update.mock.calls as unknown[][]
+        ).find(
+          (c) => (c[0] as { where: { id: string } }).where.id === 'node-keep',
+        )?.[0] as { data: Record<string, unknown> } | undefined;
+        expect(keepUpdate?.data.status).toBe('ONLINE');
+        expect(keepUpdate?.data.lastReportedAt).toBeInstanceOf(Date);
+      });
+
+      it('still retires a container the agent genuinely stopped listing, budget or no budget', async () => {
+        // The other half of the same rule: a spent budget must not SUPPRESS a real retirement either.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          { id: 'node-gone', externalId: 'machine-id-xyz/container/old-job' },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+        enrollment.tryCharge.mockReturnValue(false);
+
+        await service.ingestReport(
+          reportWithContainers([{ name: 'brand-new', state: 'running' }]),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['node-gone'] } },
+          data: { status: 'OFFLINE' },
         });
       });
 
