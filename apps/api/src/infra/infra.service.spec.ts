@@ -892,11 +892,14 @@ describe('InfraService', () => {
 
     // ── Auto-kind + container child nodes (#1139) ─────────────────────────────
 
+    /** A structural copy of a parsed report, so a fixture built from it never aliases the original. */
+    const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
     describe('auto-kind — the server PROPOSES, the human still confirms (#1139)', () => {
       /** A report carrying whatever host facts the kind inference reads. */
       const reportWith = (host: Record<string, unknown>) =>
         AgentReportSchema.parse({
-          ...JSON.parse(JSON.stringify(FULL_REPORT)),
+          ...clone(FULL_REPORT),
           host: { hostname: 'web-01', ...host },
         });
 
@@ -911,23 +914,32 @@ describe('InfraService', () => {
       it('lands a KVM guest as a VM, not as one more PHYSICAL_HOST', async () => {
         // The whole point of the issue: a Proxmox host and its 8 guests used to arrive as 9
         // identical boxes the operator re-classified by hand before blast radius meant anything.
-        await service.ingestReport(reportWith({ virtualization: { type: 'kvm' } }));
+        await service.ingestReport(
+          reportWith({ virtualization: { type: 'kvm' } }),
+        );
         expect(
-          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data.kind,
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
         ).toBe('VM');
       });
 
       it('lands an LXC/Docker guest as a CONTAINER', async () => {
-        await service.ingestReport(reportWith({ virtualization: { type: 'lxc' } }));
+        await service.ingestReport(
+          reportWith({ virtualization: { type: 'lxc' } }),
+        );
         expect(
-          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data.kind,
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
         ).toBe('CONTAINER');
       });
 
       it('a POSITIVE bare-metal finding is PHYSICAL_HOST', async () => {
-        await service.ingestReport(reportWith({ virtualization: { type: 'none' } }));
+        await service.ingestReport(
+          reportWith({ virtualization: { type: 'none' } }),
+        );
         expect(
-          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data.kind,
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
         ).toBe('PHYSICAL_HOST');
       });
 
@@ -936,13 +948,15 @@ describe('InfraService', () => {
         // would silently pre-empt the human's call; falling back is the honest answer.
         await service.ingestReport(reportWith({ chassis: 'unknown' }));
         expect(
-          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data.kind,
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
         ).toBe('PHYSICAL_HOST');
 
         prisma.infraNode.create.mockClear();
         await service.ingestReport(FULL_REPORT); // a pre-v2 report: no chassis, no virtualization
         expect(
-          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data.kind,
+          firstArg<{ data: { kind: string } }>(prisma.infraNode.create).data
+            .kind,
         ).toBe('PHYSICAL_HOST');
       });
 
@@ -959,7 +973,9 @@ describe('InfraService', () => {
           state: 'CONFIRMED',
         });
 
-        await service.ingestReport(reportWith({ virtualization: { type: 'vmware' } }));
+        await service.ingestReport(
+          reportWith({ virtualization: { type: 'vmware' } }),
+        );
 
         expect(prisma.infraNode.create).not.toHaveBeenCalled();
         const updateArg = firstArg<{ data: Record<string, unknown> }>(
@@ -975,9 +991,9 @@ describe('InfraService', () => {
       /** A report whose host runs containers — `containers` ABSENT unless a test supplies it. */
       const reportWithContainers = (containers?: unknown[]) =>
         AgentReportSchema.parse({
-          ...JSON.parse(JSON.stringify(FULL_REPORT)),
+          ...clone(FULL_REPORT),
           host: {
-            ...JSON.parse(JSON.stringify(FULL_REPORT.host)),
+            ...clone(FULL_REPORT.host),
             ...(containers !== undefined ? { containers } : {}),
           },
         });
@@ -1011,7 +1027,11 @@ describe('InfraService', () => {
 
         await service.ingestReport(
           reportWithContainers([
-            { name: 'lazyit-api', image: 'ghcr.io/acme/api:1.4.0', state: 'running' },
+            {
+              name: 'lazyit-api',
+              image: 'ghcr.io/acme/api:1.4.0',
+              state: 'running',
+            },
           ]),
           AGENT_SA,
         );
@@ -1174,8 +1194,9 @@ describe('InfraService', () => {
           AGENT_SA,
         );
         expect(
-          firstArg<{ where: Record<string, unknown> }>(prisma.infraNode.findMany)
-            .where,
+          firstArg<{ where: Record<string, unknown> }>(
+            prisma.infraNode.findMany,
+          ).where,
         ).toEqual({
           reportingSource: 'agent:abc123',
           externalId: { startsWith: 'machine-id-xyz/container/' },
