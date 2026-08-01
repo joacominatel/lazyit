@@ -106,7 +106,20 @@ type SoftwareDirective =
        */
       hash: string;
     }
-  | { mode: 'preserve'; claimedHash?: string }
+  | {
+      mode: 'preserve';
+      /**
+       * Whether the report CLAIMED `unchanged` — that it HAS a list identical to its last accepted
+       * one — as opposed to `unavailable`, which says it could not look and has nothing to send.
+       *
+       * The two preserve identically and differ in exactly one place: only the first is a claim that
+       * can be corroborated, and therefore only the first can be ASKED to prove itself. Asking a
+       * collector that could not enumerate to resend would be asking it, forever, for something it
+       * does not have.
+       */
+      claimsUnchanged: boolean;
+      claimedHash?: string;
+    }
   | { mode: 'clear' };
 
 /**
@@ -140,10 +153,45 @@ function softwareDirective(report: AgentReport): SoftwareDirective {
   }
   return {
     mode: 'preserve',
+    claimsUnchanged: report.softwareState === 'unchanged',
     ...(report.softwareHash !== undefined
       ? { claimedHash: report.softwareHash }
       : {}),
   };
+}
+
+/**
+ * Should the ack ask this agent for its whole package list (#1142)? Answered the same way on the
+ * create branch and the refresh branch, which is why it lives here rather than twice.
+ *
+ * **Least evidence means least trust.** The first shape of this asked only when a fingerprint had
+ * ARRIVED and failed to corroborate — so a claim the server COULD check and that failed was answered,
+ * while one it could NOT check was believed forever. That is the posture inverted: the node preserved
+ * a list nobody had corroborated and never asked again. Worst case was the create branch, where a
+ * brand-new node whose first report claimed `unchanged` with no fingerprint was created with no
+ * software list at all and kept a permanently empty inventory — precisely the failure the three-state
+ * enum exists to prevent. It is reachable from a hand-rolled client, and — not adversarially — from a
+ * legitimate future agent whose fingerprint outgrows `AGENT_SOFTWARE_HASH_MAX`: that bound is a
+ * `.catch(undefined)` rather than a rejection, so the agent's OWN `safeParse` strips the hash while
+ * `softwareState: 'unchanged'` survives.
+ *
+ * So an `unchanged` claim is asked for the list unless the server can corroborate it. What that costs
+ * the over-cap agent is one full list every other report — it answers by forgetting its cache, sends
+ * everything, caches the fingerprint again, and claims `unchanged` again on the tick after. Sending
+ * more than necessary is the only failure mode this contract accepts; the alternative was an inventory
+ * that silently stayed empty.
+ *
+ * `unavailable` (and every state this build does not recognise, which the schema lands there) is NOT
+ * asked, because it never claimed to have a list. A fingerprint that arrives beside one is still
+ * checked, since a report that sent one is corroborable whatever it called itself.
+ */
+function softwareResendWanted(
+  software: SoftwareDirective,
+  stored: { hasSoftware: boolean; hash?: string },
+): boolean {
+  if (software.mode !== 'preserve') return false;
+  if (software.claimedHash === undefined) return software.claimsUnchanged;
+  return !stored.hasSoftware || stored.hash !== software.claimedHash;
 }
 
 /** The stored inventory blob, read back WITHOUT the package list (#1153). See {@link InfraService.storedNodeSpecs}. */
@@ -532,8 +580,9 @@ export class InfraService {
         ? { software: software.software, softwareHash: software.hash }
         : {}),
     };
-    const resend =
-      software.mode === 'preserve' && software.claimedHash !== undefined;
+    // A node that does not exist yet holds no list, so nothing an `unchanged` claim says about it
+    // can corroborate — with a fingerprint or without one. See {@link softwareResendWanted}.
+    const resend = softwareResendWanted(software, { hasSoftware: false });
     try {
       const created = await this.prisma.infraNode.create({
         data: {
@@ -976,12 +1025,13 @@ export class InfraService {
           ? !stored.hasSoftware
           : stored.hasSoftware && software.hash === storedHash;
     // The claim the server could not corroborate (#1142): the agent says its list is unchanged, and
-    // this node either holds none or holds one fingerprinted differently. Never resolved by wiping —
-    // the stored list is kept and the agent is asked for a full one on its next report.
-    const resend =
-      software.mode === 'preserve' &&
-      software.claimedHash !== undefined &&
-      (!stored.hasSoftware || storedHash !== software.claimedHash);
+    // this node either holds none, holds one fingerprinted differently, or the claim arrived with no
+    // fingerprint at all. Never resolved by wiping — the stored list is kept and the agent is asked
+    // for a full one on its next report. See {@link softwareResendWanted}.
+    const resend = softwareResendWanted(software, {
+      hasSoftware: stored.hasSoftware,
+      ...(storedHash !== undefined ? { hash: storedHash } : {}),
+    });
 
     if (restEqual && softwareEqual) {
       // NOTHING CHANGED. The stored blob is kept byte-for-byte, which is also why the effective
@@ -1301,8 +1351,9 @@ export class InfraService {
         state: created.state,
         accepted: true,
         // A brand-new row holds no list to keep, so an `unchanged` claim is one this server cannot
-        // honour — ask for the whole thing rather than leave the clone's inventory empty (#1142).
-        ...(software.mode === 'preserve' && software.claimedHash !== undefined
+        // honour — with a fingerprint or without one. Ask for the whole thing rather than leave the
+        // clone's inventory permanently empty (#1142). See {@link softwareResendWanted}.
+        ...(softwareResendWanted(software, { hasSoftware: false })
           ? { softwareResend: true }
           : {}),
       },
