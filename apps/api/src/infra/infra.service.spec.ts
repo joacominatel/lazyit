@@ -3664,6 +3664,52 @@ describe('InfraService', () => {
       expect(autoConfirm.resolve).not.toHaveBeenCalled();
     });
 
+    it('a DISCARDED identity is never auto-confirmed when it reports again', async () => {
+      // Discarding soft-deletes the row and keeps its reporting key, so the next report creates a
+      // brand-new node under the same key. Without this guard a matching rule would confirm it —
+      // and mint another Asset — every time the operator discarded it: the discard, a human decision,
+      // silently undone by a rule on the next check-in.
+      prisma.infraNode.findFirst.mockImplementation(
+        (args: { where?: { deletedAt?: unknown } }) =>
+          args.where?.deletedAt === undefined
+            ? Promise.resolve(null) // the live dedup lookup: nothing live under this key
+            : Promise.resolve({ id: 'node-discarded' }),
+      );
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-new',
+        state: 'PENDING',
+      });
+      const confirm = jest.spyOn(service, 'confirmNode');
+
+      const ack = await service.ingestReport(RULED_REPORT, AGENT_SA);
+
+      expect(autoConfirm.resolve).not.toHaveBeenCalled();
+      expect(confirm).not.toHaveBeenCalled();
+      // It is still enrolled, and still visible: the operator decides again, in the tray.
+      expect(ack.state).toBe('PENDING');
+    });
+
+    it('looks for the discarded row under the reporting key, past the soft-delete filter', async () => {
+      hostIsNew();
+
+      await service.ingestReport(RULED_REPORT, AGENT_SA);
+
+      const discardLookup = (
+        prisma.infraNode.findFirst.mock.calls as unknown[][]
+      )
+        .map((call) => call[0] as Record<string, unknown>)
+        .find((args) => args.includeSoftDeleted === true);
+      expect(discardLookup).toEqual({
+        where: {
+          reportingSource: 'agent:abc123',
+          externalId: 'machine-id-xyz',
+          deletedAt: { not: null },
+        },
+        select: { id: true },
+        includeSoftDeleted: true,
+      });
+    });
+
     it('a CONTAINER child is offered to the matcher as a child, with its container name', async () => {
       prisma.infraNode.findFirst.mockResolvedValue(null);
       prisma.infraNode.create
