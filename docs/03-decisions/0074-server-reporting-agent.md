@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-07-31
+updated: 2026-08-01
 deciders: [Joaquín Minatel]
 ---
 
@@ -612,6 +612,18 @@ never aborts the sweep). Deduped on the node's last-report instant → **one nud
 once-per-sweep. Still the coarse liveness bit — no metrics, no thresholds beyond the existing staleness
 cutoff.
 
+**Amendment (2026-08-01, #1140) — the threshold is per node, not one global env var.**
+`INFRA_AGENT_STALE_AFTER_MS` was a single instance-wide cutoff, which made heterogeneous cadences
+structurally impossible: the moment the §7 amendment let an operator move a host to a daily report,
+that host would sit OFFLINE 23 hours out of 24 and nudge the bell every day. Each node is now judged
+against the `staleAfterSeconds` **it was actually served**, denormalized onto
+`InfraNode.policyStaleAfterSeconds` on every report (and onto each container child from its host, so a
+daily host's containers are not swept dark hourly). The env var remains the fallback for a manual
+node, an agent that predates the policy channel, and any report whose policy resolution failed — so an
+instance that configures nothing behaves exactly as it did. The sweep filters the per-node comparison
+in memory over the candidates already past the shortest possible threshold; that is a deliberate
+bound for a few-dozen-host product, not a claim that it scales indefinitely.
+
 ### §5 — Auth & permission
 
 - The agent authenticates as a **Service Account** ([[0048-service-accounts]]) —
@@ -676,6 +688,86 @@ liveness bit of §4 reports a **false outage**. Now bounded in three layers:
 - **Per run:** the systemd unit sets `RuntimeMaxSec=120`, reaping the whole cgroup if a child
   outlives the agent. The per-command budget is deliberately far below it, so a degraded host still
   assembles and sends a **partial** report — reporting less beats reporting nothing.
+
+**Amendment (2026-08-01, #1140) — the agent is configured centrally, and the schedule is inverted.**
+The `Config` bullet above describes three settings in a per-host file, and one of them —
+`LAZYIT_INTERVAL` — was **never read by the binary**: the systemd timer owned cadence. Changing
+anything therefore meant SSH-ing to every host. That is a per-host config file behaving as a
+distributed spreadsheet, which is the exact artefact the Context section says lazyit exists to
+abolish. Four decisions close it, and the first three are effectively permanent.
+
+**1. The ack is the channel — no new endpoint.** `AgentReportAckSchema` gains an optional `policy`,
+and the reserved `policyRevision` on the report (§2 amendment) becomes real: the agent echoes the
+generation it collected under. This round trip is already authenticated, already per-agent and
+already happening every interval, so a `GET /agent/policy` would have bought a second auth surface, a
+second throttle and a bootstrap ordering problem in exchange for nothing.
+
+**Pickup is deliberately one tick behind.** Run N POSTs its report; the ack carries the policy; the
+agent writes it verbatim to `/var/lib/lazyit-agent/policy.json` and exits. Run N+1 loads it at
+startup and echoes its revision. No cache — a first run ever, a deleted file, or a server that
+predates this — means the built-in defaults, which are byte-for-byte the pre-#1140 behaviour, so
+there is no bootstrap and no chicken-and-egg. The delay is a **feature**: a policy is only ever
+applied by a run that started cleanly with it already on disk, so a bad policy cannot brick a fleet
+mid-collection and a rollback lands one tick after it is saved.
+
+**2. The interval inversion.** Cadence used to mean rewriting a unit file and `daemon-reload` — a root
+filesystem mutation driven by an HTTP response, which is an unpleasant capability to grant a fleet
+agent and which ports to neither launchd nor Windows Task Scheduler. Instead the timer is installed at
+a **fixed 5-minute tick on every platform and never rewritten**, and the agent **no-ops** when
+`now - lastSuccessfulReport < policy.intervalSeconds`, tracked in `/var/lib/lazyit-agent/state.json`.
+The server then owns cadence from 5 minutes to 24 hours with zero unit-file mutation and identical
+semantics on every scheduler. A deterministic per-machine-id offset (FNV-1a over the machine id,
+bounded by the tick) is added to each host's interval so an estate installed in one rollout does not
+stay phase-locked forever. Stated precisely, because it is easy to overclaim: the **reboot** case is
+handled by the state file *surviving* the reboot — a host that reported four minutes before it went
+down is still not due when it comes back — and the offset only stops identical cadences from clumping.
+
+`install.sh` still accepts `--interval` and **ignores** it; existing installs keep whatever
+`OnUnitActiveSec` they were given until the installer is re-run, which means their cadence cannot go
+*below* that value in the meantime. Everything else works immediately.
+
+**3. Two hard rules, enforced in code rather than promised in prose.**
+
+- **Local config may VETO, never widen.** `/etc/lazyit-agent/config` gains `LAZYIT_COLLECT_*=false`,
+  `LAZYIT_MIN_INTERVAL` (a floor), `LAZYIT_SOFTWARE_MAX` (a ceiling) and `LAZYIT_EXCLUDE_*` globs
+  (unioned in). There is no shape in `AgentLocalLimits` that can loosen anything: a local `true` is
+  simply not carried, because re-enabling a collector the server turned off would be widening. This is
+  the honest posture for a self-hosted product where the host owner and the lazyit admin are often
+  different people, and it is documented as a feature. `LAZYIT_INTERVAL` is deliberately **not** read
+  as the floor — `install.sh` wrote it on every host that exists, so doing so would have silently
+  pinned every upgraded install at 15 minutes.
+- **No server-pushed commands, scripts, paths or file reads. Ever.** `AgentPolicySchema` is a
+  `z.strictObject` at every depth over booleans, integers and **globs** — the deliberate inverse of
+  `AgentReportSchema`, whose root is loose so a newer agent never vanishes from the CMDB. The
+  directions are not symmetric: a report is data flowing into a server, a policy is instruction
+  flowing into a process running as root. Globs rather than regex because a server-supplied regex is a
+  ReDoS primitive against a root process, and the matcher is a two-pointer walk that compiles nothing.
+  The exclusion lists are **filters on facts already gathered** — a `mountpoints` entry says *do not
+  report this mountpoint*, never *read this path* — so nothing in the schema can widen what the agent
+  touches. If a future requirement seems to need an escape hatch here, it needs a new ADR and a very
+  good reason: the moment the server can push executable content to a root agent, §8's honest worst
+  case ("PENDING spam a human discards") becomes remote code execution as root on every host in the
+  estate, and the security argument for the `curl | sh` installer collapses with it.
+
+**4. Three scopes, no group machinery.** Most specific wins: **per-node** (post-confirm) >
+**per-service-account** (the natural anchor before a node exists, since the wizard mints one SA per
+agent) > **instance default** (a singleton `AgentPolicySettings` row). Deliberately no tags, groups,
+behaviours or dynamic membership: at this estate size "instance default plus one override" covers
+essentially every case, and when it stops, one `tag: string[]` on the node and one join is the answer,
+not a rules engine. Every write at any scope bumps one **instance-wide** revision counter — which
+means editing one node's override marks the whole fleet "pending" until each host next checks in. That
+is a deliberate trade for a single ordered number an operator can reason about.
+
+Storage is additive and nullable throughout (`InfraNode.agentPolicy` / `policyRevision` /
+`policyAppliedAt` / `policyStaleAfterSeconds`, `ServiceAccount.agentPolicy`, plus the singleton), and
+reads are **tolerant** while writes are **strict**: a stored layer this build cannot parse resolves as
+"no override" and is logged, never an exception, because one bad config row must not 500 the endpoint
+that keeps an estate visible.
+
+**Shipped surface, stated plainly.** The UI edits the **instance default** (Settings → Instance →
+Reporting agents) and the node drill-in exposes the echoed revision. The per-node and
+per-service-account scopes are **API-only in this build** (`PUT /infra/nodes/:id/agent-policy`,
+`PUT /infra/agent-policy/service-accounts/:id`) — they work, and they have no editor yet.
 
 ### §8 — Security model
 
@@ -831,3 +923,6 @@ would be a separate ADR and arguably a separate product).
 - Identity corroboration (cloned machine-id detection, the `infra.identity_conflict` nudge, node
   re-key/merge-into): §3 Amendment (2026-07-31), issue #1141 — the consumer of contract v2's
   `host.identifiers[]`.
+- Server-driven agent policy (the ack as the config channel, the fixed-tick interval inversion, the
+  local veto, the three scopes): §7 Amendment (2026-08-01), issue #1140 — the consumer of contract
+  v2's reserved `policyRevision`, with a §4 amendment making the staleness threshold per node.

@@ -121,6 +121,10 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `externalId` | `string?` | the reconciliation key. A reported HOST: its `/etc/machine-id` (Windows MachineGuid, macOS platform UUID) — **except** on a host whose machine-id collided with one already in use (a cloned VM template), where it is the derived `<machine-id>#<serial-or-MAC>` (ADR-0074 §3 / #1141) and the value the host actually claims is kept in `specs.identityConflict.reportedExternalId`. A reported CONTAINER child: `<host externalId>/container/<name>` (#1139) — name-keyed so a recreate is not a duplicate, host-scoped so two hosts' `redis` stay two nodes. The separator cannot occur in a host key, so the two spaces never collide on the shared partial unique index. |
 | `lastReportedAt` | `datetime?` | agent liveness (stale → OFFLINE). Advances for a host on every check-in and for a container child on every report that still lists it. |
 | `agentVersion` | `string?` | the reporting agent's build at its last check-in (#907); null for manual/pre-stamp nodes. |
+| `agentPolicy` | `jsonb?` | this node's own agent-policy override — the NARROWEST of the three #1140 scopes (instance default < service account < node). A partial `AgentPolicyOverride` (zod in `@lazyit/shared`): a closed set of booleans, integers and **glob** strings, never a command/script/path/regex. Null = "adds no override", which is every pre-#1140 row. Read-TOLERANT — an unparseable blob resolves as no override rather than failing a report. Written only by `PUT /infra/nodes/:id/agent-policy` (human-only); **no editor ships in this build** — the UI edits the instance default. |
+| `policyRevision` | `int?` | the policy generation the agent last **echoed** (#1140) — the acknowledgement half. Equal to the instance revision (`GET /infra/agent-policy`) = *applied*; lower = *pending* until the next check-in. Null for a manual node and for any agent predating the policy channel, which must render as "not reporting a policy", never as "pending". |
+| `policyAppliedAt` | `datetime?` | when the echoed revision last **changed** — i.e. when this host actually picked a new policy up. Deliberately not advanced on every report, or it would just be a second `lastReportedAt`. |
+| `policyStaleAfterSeconds` | `int?` | the staleness threshold last **served** to this node, denormalized so the §4 sweeper judges each node against the cadence it was told instead of one global env var (#1140). A container child inherits its host's. Null = never served one → the sweeper falls back to `INFRA_AGENT_STALE_AFTER_MS`. Rewritten every report, so it self-heals after any policy change. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete = off the map. |
@@ -188,6 +192,25 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   which the re-image case always does — the transplant **replaces** it; the displaced key is recorded
   as `_infraMergedInto.replacedTargetKey` and logged, and a host still checking in under it returns as
   a fresh PENDING proposal.
+
+### Server-driven agent policy (ADR-0074 §7 amendment / #1140)
+
+- `GET /infra/agent-policy` — the **instance default** layer plus the instance-wide `revision`
+  (`infra:read`). `settings` is the stored layer an operator edits; `effective` is that layer resolved
+  over the built-in defaults — it is what a host with **no narrower override** runs, and deliberately
+  not a promise about hosts that have one.
+- `PUT /infra/agent-policy` — replace the instance default and bump the revision
+  (`settings:manage`, human-only). The body is a PARTIAL policy: omitted fields fall back to the
+  built-in defaults, so `{}` restores all of them.
+- `PUT|DELETE /infra/agent-policy/service-accounts/:id` — the **middle** scope, and the only one that
+  can configure a host before it has a node (`settings:manage`, human-only).
+- `PUT|DELETE /infra/nodes/:id/agent-policy` — the **narrowest** scope (`infra:manage`, human-only).
+
+There is **no `GET /agent/policy`** and there never will be: the policy rides the existing report ack
+(`AgentReportAckSchema.policy`), which is already authenticated, already per-agent and already
+happening. Every write here is **human-only** — a reporting agent holding `infra:report` can *receive*
+a policy and can never author one. `PUT /infra/agent-policy` is the only one with a UI (Settings →
+Instance → Reporting agents); the two narrower scopes work but ship no editor in this build.
 
 ## Not yet implemented (deferred)
 
