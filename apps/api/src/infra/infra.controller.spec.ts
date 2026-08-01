@@ -95,8 +95,8 @@ describe('InfraController — forward-compatible report body (#1138)', () => {
     const validated = { ...raw, deltaSince: undefined };
     const principal = { kind: 'service' };
 
-    controller.report(
-      validated as never,
+    void controller.report(
+      validated,
       { body: raw } as never,
       principal as never,
     );
