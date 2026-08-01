@@ -19,6 +19,7 @@ import {
   isPlausibleEdge,
   primaryIp,
   sanitizeSerial,
+  softwareFingerprint,
   type AgentContainer,
   type AgentPolicy,
   type AgentReport,
@@ -95,7 +96,13 @@ type SoftwareDirective =
   | {
       mode: 'replace';
       software: NonNullable<AgentReport['software']>;
-      hash?: string;
+      /**
+       * The fingerprint of that list, computed HERE and not taken from the wire. Taking the agent's
+       * would make the write skip depend on the client sending one — so every pre-#1142 agent, and
+       * every attacker, would rewrite the blob on every report and #1153 would be a courtesy rather
+       * than a guarantee. Computing it costs a few milliseconds over the list we were sent anyway.
+       */
+      hash: string;
     }
   | { mode: 'preserve'; claimedHash?: string }
   | { mode: 'clear' };
@@ -110,15 +117,17 @@ type SoftwareDirective =
  * is not `disabled`, and every state it does NOT understand (the schema lands those on `unavailable`),
  * preserves. That asymmetry is deliberate: the destructive reading is reachable only from an explicit,
  * recognised instruction.
+ *
+ * The wire's `softwareHash` is read on ONE branch only — an omitted list, where it is the claim to be
+ * corroborated. A list that arrived is fingerprinted here, by the same shared function the agent uses,
+ * so what gets stored is always the server's own reading of what it stored.
  */
 function softwareDirective(report: AgentReport): SoftwareDirective {
   if (report.software !== undefined) {
     return {
       mode: 'replace',
       software: report.software,
-      ...(report.softwareHash !== undefined
-        ? { hash: report.softwareHash }
-        : {}),
+      hash: softwareFingerprint(report.software),
     };
   }
   if (
@@ -515,12 +524,7 @@ export class InfraService {
     const createSpecs: AgentReportSpecsBlob = {
       ...blob,
       ...(software.mode === 'replace'
-        ? {
-            software: software.software,
-            ...(software.hash !== undefined
-              ? { softwareHash: software.hash }
-              : {}),
-          }
+        ? { software: software.software, softwareHash: software.hash }
         : {}),
     };
     const resend =
@@ -927,9 +931,7 @@ export class InfraService {
         ? true
         : software.mode === 'clear'
           ? !stored.hasSoftware
-          : stored.hasSoftware &&
-            software.hash !== undefined &&
-            software.hash === storedHash;
+          : stored.hasSoftware && software.hash === storedHash;
     // The claim the server could not corroborate (#1142): the agent says its list is unchanged, and
     // this node either holds none or holds one fingerprinted differently. Never resolved by wiping —
     // the stored list is kept and the agent is asked for a full one on its next report.
@@ -1173,12 +1175,7 @@ export class InfraService {
           specs: {
             ...blob,
             ...(software.mode === 'replace'
-              ? {
-                  software: software.software,
-                  ...(software.hash !== undefined
-                    ? { softwareHash: software.hash }
-                    : {}),
-                }
+              ? { software: software.software, softwareHash: software.hash }
               : {}),
             identityConflict: conflict,
           },
@@ -2858,12 +2855,11 @@ type AgentReportSpecsBlob = {
   host: AgentReportHost;
   software?: AgentReport['software'];
   /**
-   * The fingerprint of the stored `software` list (#1142) — the value the AGENT computed and sent,
-   * kept verbatim so the next `unchanged` claim can be corroborated against it without reading the
-   * list back. Present only while a list is; it is never written beside an absent one, or a stored
-   * fingerprint would outlive the thing it describes and make a later claim corroborate against
-   * nothing. The server never recomputes it: what is stored is always a list the agent itself sent,
-   * so a wrong fingerprint can only cost its own host one extra full report.
+   * The fingerprint of the stored `software` list (#1142) — computed by the SERVER over the list it
+   * stored, so the next report can be compared to it without reading the list back, and so the
+   * comparison does not depend on the client having sent a fingerprint of its own. Present only while
+   * a list is; never written beside an absent one, or a stored fingerprint would outlive the thing it
+   * describes and let a later `unchanged` claim corroborate against nothing.
    */
   softwareHash?: string;
   reportedAt: string;
@@ -2938,13 +2934,12 @@ const NODE_ONLY_SPECS_KEYS = [
 
 /**
  * The `specs` keys an agent report OWNS (#1141) — the ones a merge transplants from the duplicate onto
- * the node adopting its identity, leaving every human-added key on the target intact. The same keys
- * {@link InfraService.syncAssetSpecs} is asked to replace on the host path: a node's agent-owned facts
- * and an Asset's agent-owned facts must not drift into two different lists.
- *
- * `softwareHash` moves WITH `software` (#1142), never apart from it. A transplanted list under the
- * adopting node's old fingerprint would make the next `unchanged` claim compare against the wrong
- * thing — recoverable (the ack asks for a resend) but avoidable here for free.
+ * the node adopting its identity, leaving every human-added key on the target intact. A superset of
+ * what {@link InfraService.syncAssetSpecs} replaces on the host path (`host`/`software`/`reportedAt`),
+ * by exactly one key: `softwareHash` is node bookkeeping that never reaches an Asset, but on a NODE it
+ * must move WITH the list it describes. A transplanted list under the adopting node's old fingerprint
+ * would make the next comparison read the wrong thing — recoverable (the ack asks for a resend) but
+ * avoidable here for free.
  */
 const AGENT_OWNED_SPECS_KEYS = [
   'host',
