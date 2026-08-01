@@ -439,16 +439,18 @@ export function applyAgentPolicyVeto(policy: AgentPolicy, local: AgentLocalLimit
  * report) would otherwise not be due, and the host would wait a whole extra tick. Subtracting a few
  * seconds to a couple of minutes makes that tick report instead.
  *
- * WHEN IT SPREADS AN ESTATE, AND WHEN IT DOES NOT. It changes WHICH tick reports only when the
- * interval is NOT an exact multiple of {@link AGENT_POLICY_TICK_SECONDS}. When it is a multiple — the
- * 900 s default, and every round value the minutes-only editor makes natural — the tick that first
- * reaches `interval - jitter` is the SAME tick that first reaches `interval`, because the previous
- * tick sits a full tick earlier and the offset is always smaller than one tick. Two hosts on the
- * default cadence are therefore de-phased by their own timers — `OnUnitActiveSec` re-arms from each
- * host's own last activation, so its phase follows that host's boot instant and run durations — and
- * not by this function. It is not a reboot-window fix either: that case is handled by the state file
- * SURVIVING the reboot — a host that reported four minutes before it went down is still not due when
- * it comes back.
+ * IT DOES NOT SPREAD AN ESTATE, which is what an earlier version of this comment claimed. The gate is
+ * only ever evaluated ON a tick, so the due instant is QUANTIZED to one: an offset smaller than a
+ * tick can move a host's report by a whole tick or by nothing at all, never by the smooth few-seconds
+ * de-phasing "spreading" implies — and at the 900 s default, and at every round value the minutes-only
+ * editor makes natural, the interval is an exact multiple of the tick, so there is no sub-tick
+ * position for a host to be nudged into. The two-valued outcome it DOES produce is the useful one
+ * above: a host whose lag exceeds its own offset waits the extra tick, one whose offset covers its lag
+ * does not. Hosts that genuinely need to be de-phased are de-phased by their own timers —
+ * `OnUnitActiveSec` re-arms from each host's own last activation, so its phase follows that host's
+ * boot instant and run durations — and not by this function. It is not a reboot-window fix either:
+ * that case is handled by the state file SURVIVING the reboot — a host that reported four minutes
+ * before it went down is still not due when it comes back.
  *
  * SUBTRACTED, NEVER ADDED, and that direction is load-bearing rather than cosmetic. Adding it would
  * push the due instant PAST a scheduler tick whenever the tick and the interval are close — the exact
@@ -462,9 +464,10 @@ export function applyAgentPolicyVeto(policy: AgentPolicy, local: AgentLocalLimit
  * that is an effective cadence of at least 751 s — 83.4% of what was asked for — and at the 300 s
  * minimum at least 151 s, so no cadence is ever cut to half or below.
  *
- * FNV-1a over the machine id: a few lines, no dependency, and stable across runs and versions —
- * which matters, because an offset that moved between releases would re-clump the estate on upgrade.
- * It is not a security primitive and is not used as one.
+ * FNV-1a over the machine id: a few lines, no dependency, and stable across runs and versions. The
+ * stability is what matters — an offset that moved between releases would silently change a host's
+ * effective cadence on every upgrade, and would make "why did this host report then?" irreproducible
+ * for whoever is debugging it. It is not a security primitive and is not used as one.
  */
 export function policyJitterSeconds(machineId: string, intervalSeconds: number): number {
   let hash = 0x811c9dc5;
@@ -472,8 +475,10 @@ export function policyJitterSeconds(machineId: string, intervalSeconds: number):
     hash ^= machineId.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  // Bounded by half the TICK, never by the interval: the spread only has to exceed the granularity
-  // the scheduler can express, and a larger one would meaningfully shorten a 5-minute cadence.
+  // Bounded by half the TICK, never by the interval: the offset only has to cover the slack between
+  // a tick and the interval it is a hair short of, and a larger one would meaningfully shorten a
+  // 5-minute cadence. `intervalSeconds` is in the `Math.min` for defence only — the schema floors the
+  // interval AT the tick, so on any policy this module produces the smaller value is always the tick.
   const span = Math.max(1, Math.floor(Math.min(AGENT_POLICY_TICK_SECONDS, intervalSeconds) / 2));
   return hash % span;
 }
