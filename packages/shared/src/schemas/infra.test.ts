@@ -1356,3 +1356,20 @@ describe("AgentReportAckSchema — the resend request (#1142)", () => {
     expect(AgentReportAckSchema.parse({ ...ack, softwareResend: true }).softwareResend).toBe(true);
   });
 });
+
+describe("AgentReportAckSchema — the capability handshake (#1142)", () => {
+  const ack = { nodeId: CUID, state: "PENDING" as const, accepted: true as const };
+
+  test("a pre-#1142 server's ack carries no capability, and that ABSENCE is the whole signal", () => {
+    // The contract root is a LOOSE `z.object()` (#1138), so a server that predates `softwareState`
+    // silently STRIPS it, sees no `software` key and clears the stored list. An agent that omitted
+    // its list against such a server would wipe the host's inventory — and, believing the list
+    // unchanged, would never send it again. So the omission is gated on POSITIVE evidence, and this
+    // absence is what withholds it.
+    expect(AgentReportAckSchema.parse(ack).softwareDelta).toBeUndefined();
+  });
+
+  test("a server that understands `softwareState` says so — the evidence that unlocks the omission", () => {
+    expect(AgentReportAckSchema.parse({ ...ack, softwareDelta: true }).softwareDelta).toBe(true);
+  });
+});
