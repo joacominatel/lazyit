@@ -44,9 +44,9 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     // confirming a proposal. A reporting agent must never be able to re-key its own way out of the
     // review tray, so the same HumanOnlyGuard that protects confirm protects this.
     expect(permsOf('mergeNodeInto')).toEqual(['infra:manage']);
-    expect(guardsOf('mergeNodeInto').map((g) => (g as { name: string }).name)).toContain(
-      'HumanOnlyGuard',
-    );
+    expect(
+      guardsOf('mergeNodeInto').map((g) => (g as { name: string }).name),
+    ).toContain('HumanOnlyGuard');
   });
 
   it('gates plain mutations on infra:manage', () => {
