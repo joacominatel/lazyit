@@ -25,6 +25,7 @@ import {
   type AgentReport,
   type AgentReportAck,
   type AgentReportHost,
+  type AgentSoftwarePackage,
   type AttachInfraSecret,
   type BulkConfirmInfraNodes,
   type BulkDiscardInfraNodes,
@@ -232,6 +233,29 @@ function hostAssetFacts(plan: SpecsWritePlan): Record<string, unknown> {
       ? { software: plan.effective.software }
       : {}),
   };
+}
+
+/**
+ * Are these two STORED package lists the same list, ordering aside (#1153)? The Asset-side answer to
+ * the question `softwareFingerprint` already answers for the node.
+ *
+ * Both sides come out of a jsonb column, so neither is known to be a package list at all: a
+ * hand-edited `specs` can put anything under `software`. Anything that is not an array of plain
+ * objects answers `false` — which is "compare them by value", the conservative reading, and never a
+ * throw on the report path.
+ */
+function sameSoftwareList(a: unknown, b: unknown): boolean {
+  const packages = (value: unknown): AgentSoftwarePackage[] | undefined =>
+    Array.isArray(value) &&
+    value.every(
+      (pkg) => typeof pkg === 'object' && pkg !== null && !Array.isArray(pkg),
+    )
+      ? (value as AgentSoftwarePackage[])
+      : undefined;
+  const left = packages(a);
+  const right = packages(b);
+  if (left === undefined || right === undefined) return false;
+  return softwareFingerprint(left) === softwareFingerprint(right);
 }
 
 /**
@@ -1872,6 +1896,14 @@ export class InfraService {
    * written — otherwise skipping the node's jsonb rewrite would simply move the write amplification
    * onto the Asset table. The comparison is over the WHOLE merged object, so a human key an older
    * build left behind, or an agent fact that moved by one byte, still writes.
+   *
+   * WITH ONE EXCEPTION, AND IT IS THE ONE THE NODE ALREADY MAKES. A re-ordered package list is not a
+   * changed one: `softwareFingerprint` is order-independent because `dpkg-query` and `rpm -qa` promise
+   * no order, so the node's own skip ignores it. `isDeepStrictEqual` does not, so the node's write was
+   * skipped while the Asset's fired on every single report from a host whose package manager re-sorted
+   * its output — the exact amplification this method exists to prevent, surviving on the other table.
+   * {@link sameSoftwareList} settles that one key by the same fingerprint the node uses; everything
+   * else, the list's CONTENTS included, still compares by value.
    */
   private async syncAssetSpecs(
     assetId: string,
@@ -1888,6 +1920,11 @@ export class InfraService {
     for (const key of ownedKeys) delete merged[key];
     for (const key of NODE_ONLY_SPECS_KEYS) delete merged[key];
     Object.assign(merged, facts);
+    // The same list in a different order is the same list — keep the stored ordering so the
+    // comparison below agrees with the node's own (see the JSDoc). A no-op when the orders match.
+    if (sameSoftwareList(merged.software, existing.software)) {
+      merged.software = existing.software;
+    }
     if (isDeepStrictEqual(merged, existing)) return;
     await this.prisma.asset.update({
       where: { id: assetId },
