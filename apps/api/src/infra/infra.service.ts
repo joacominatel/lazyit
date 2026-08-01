@@ -418,7 +418,11 @@ export class InfraService {
       select: { specs: true },
     });
     if (!asset) return; // soft-deleted / detached — nothing to refresh.
-    const { agentSkew: _serverDiagnostic, ...facts } = blob;
+    const facts: Omit<AgentReportSpecsBlob, 'agentSkew'> = {
+      host: blob.host,
+      ...(blob.software !== undefined ? { software: blob.software } : {}),
+      reportedAt: blob.reportedAt,
+    };
     const existing = (asset.specs ?? {}) as Record<string, unknown>;
     const merged: Record<string, unknown> = { ...existing };
     delete merged.host;
