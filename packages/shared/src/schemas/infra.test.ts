@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-  AGENT_REPORT_UNKNOWN_KEYS_MAX,
+  AGENT_IDENTIFIERS_MAX,
+  AGENT_SKEW_PATHS_MAX,
+  AGENT_WARNINGS_MAX,
+  agentReportSkewPaths,
   type AgentReport,
   type AgentReportHost,
   AgentReportSchema,
@@ -12,11 +15,13 @@ import {
   InfraShortcutSchema,
   IpAddressSchema,
   isPlausibleEdge,
+  normalizeIdentifierValue,
   osFamily,
   primaryIp,
   primaryIpv4,
+  primaryIpv6,
   sanitizeSerial,
-  unknownAgentReportKeys,
+  selectPrimaryMac,
 } from "./infra";
 
 /**
@@ -346,23 +351,91 @@ describe("AgentReportSchema v2 — forward-compat at the ROOT (the #1138 decisio
     expect(parsed.host).not.toHaveProperty("tpmVersion");
   });
 
-  test("unknownAgentReportKeys names what was dropped, so the signal is MOVED, not lost", () => {
-    expect(
-      unknownAgentReportKeys({ ...V1_REPORT, deltaSince: "x", policyAck: 3 }),
-    ).toEqual(["deltaSince", "policyAck"]);
-    expect(unknownAgentReportKeys(V1_REPORT)).toEqual([]);
-    // Never throws on a non-object body (the handler calls it before anything else has run).
-    expect(unknownAgentReportKeys(null)).toEqual([]);
-    expect(unknownAgentReportKeys("nope")).toEqual([]);
+});
+
+// ── Skew recording: what the server did not understand (#1138) ────────────────────────────────────
+
+/** Parse a body and diff it against its own parse — exactly what the API handler does. */
+const skewOf = (body: unknown) => agentReportSkewPaths(body, AgentReportSchema.parse(body));
+
+describe("agentReportSkewPaths — the skew recorder covers the whole body, not just the root", () => {
+  test("a report the server fully understands records nothing", () => {
+    expect(skewOf(V1_REPORT)).toEqual({ droppedPaths: [], coercedPaths: [] });
   });
 
-  test("unknownAgentReportKeys is BOUNDED — a hostile body can't stuff the record it lands in", () => {
+  test("names an unknown ROOT key it dropped", () => {
+    expect(skewOf({ ...V1_REPORT, deltaSince: "x", policyAck: 3 }).droppedPaths).toEqual([
+      "deltaSince",
+      "policyAck",
+    ]);
+  });
+
+  test("names an unknown NESTED key — the realistic skew, which a root-only diff cannot see", () => {
+    // Every field v2 itself added lands INSIDE a nested object, and a nested `z.object` strips
+    // silently. A recorder that only diffed root keys would report "everything understood" for the
+    // one shape a v3 agent is most likely to send.
+    const skew = skewOf({
+      ...V1_REPORT,
+      host: { ...V1_REPORT.host, tpmVersion: "2.0", os: { ...V1_REPORT.host.os, edition: "LTS" } },
+    });
+    expect(skew.droppedPaths).toContain("host.tpmVersion");
+    expect(skew.droppedPaths).toContain("host.os.edition");
+  });
+
+  test("names a COERCED enum value — a silent `.catch()` is skew too", () => {
+    const skew = skewOf({
+      ...V1_REPORT,
+      host: {
+        ...V1_REPORT.host,
+        os: { ...V1_REPORT.host.os, family: "plan9" },
+        virtualization: { type: "virtualbox" },
+      },
+    });
+    // The discriminator especially: the contract requires `os.family` precisely so no consumer
+    // re-derives it, so swallowing a malformed one without a trace would be self-defeating.
+    expect(skew.coercedPaths).toContain("host.os.family");
+    expect(skew.coercedPaths).toContain("host.virtualization.type");
+  });
+
+  test("collapses array indices, so one bad element never floods the record", () => {
+    const skew = skewOf({
+      ...V1_REPORT,
+      host: {
+        ...V1_REPORT.host,
+        identifiers: [
+          { kind: "machine-id", value: "abc" },
+          { kind: "efi-uuid", value: "def" },
+          { kind: "tpm-ek", value: "ghi" },
+        ],
+      },
+    });
+    expect(skew.coercedPaths).toEqual(["host.identifiers[].kind"]);
+  });
+
+  test("records TRUNCATION as a coercion (the bounded fields degrade, they do not reject)", () => {
+    const identifiers = Array.from({ length: AGENT_IDENTIFIERS_MAX + 8 }, (_, i) => ({
+      kind: "serial" as const,
+      value: `SN-${i}`,
+    }));
+    const skew = skewOf({ ...V1_REPORT, host: { ...V1_REPORT.host, identifiers } });
+    expect(skew.coercedPaths).toContain("host.identifiers[]");
+  });
+
+  test("BOUNDED — a hostile body cannot stuff the jsonb record it lands in", () => {
     const junk: Record<string, unknown> = { ...V1_REPORT };
-    for (let i = 0; i < 200; i += 1) junk[`junk${i}`] = i;
+    for (let i = 0; i < 500; i += 1) junk[`junk${i}`] = i;
     junk["x".repeat(500)] = 1;
-    const keys = unknownAgentReportKeys(junk);
-    expect(keys.length).toBeLessThanOrEqual(AGENT_REPORT_UNKNOWN_KEYS_MAX);
-    for (const key of keys) expect(key.length).toBeLessThanOrEqual(64);
+    const skew = agentReportSkewPaths(junk, AgentReportSchema.parse(junk));
+    expect(skew.droppedPaths.length).toBeLessThanOrEqual(AGENT_SKEW_PATHS_MAX);
+    for (const path of skew.droppedPaths) expect(path.length).toBeLessThanOrEqual(120);
+  });
+
+  test("never throws on a non-object body (it runs beside parsing, not after it)", () => {
+    expect(agentReportSkewPaths(null, null)).toEqual({ droppedPaths: [], coercedPaths: [] });
+    expect(agentReportSkewPaths("nope", "nope")).toEqual({
+      droppedPaths: [],
+      coercedPaths: [],
+    });
   });
 });
 
@@ -382,11 +455,13 @@ describe("AgentReportSchema v2 — the new OS-neutral fields (#1138)", () => {
         kernel: "10.0.20348",
         build: "20348.2527",
       },
+      fqdn: "dc-01.corp.example.com",
+      domain: { name: "corp.example.com", joined: true },
       chassis: "vm",
       virtualization: { type: "hyperv", host: "hv-cluster-01" },
       identifiers: [
-        { kind: "windows-machine-guid", value: "b1e0…" },
-        { kind: "smbios-uuid", value: "4C4C4544-0043" },
+        { kind: "windows-machine-guid", value: "b1e0f2a4-4c4c-4544-0043-0010ac110002" },
+        { kind: "smbios-uuid", value: "4c4c4544-0043-0010-8036-b1c04f574d32" },
       ],
       bootedAt: "2026-07-30T02:14:00.000Z",
       nics: [
@@ -394,7 +469,7 @@ describe("AgentReportSchema v2 — the new OS-neutral fields (#1138)", () => {
           name: "Ethernet",
           mac: "00:15:5d:01:02:03",
           ipv4: ["10.0.0.20"],
-          ipv6: ["2001:db8::20"],
+          ipv6: [{ address: "2001:db8::20", prefixLength: 64, scope: "global" }],
           isVirtual: true,
         },
       ],
@@ -436,7 +511,6 @@ describe("AgentReportSchema v2 — the new OS-neutral fields (#1138)", () => {
       software: [{ name: "brew-thing", source: "nix" }],
     });
     expect(parsed.host.virtualization?.type).toBe("other");
-    expect(parsed.host.identifiers?.[0]).toEqual({ kind: "other", value: "abc" });
     expect(parsed.host.chassis).toBeUndefined();
     expect(parsed.host.bootedAt).toBeUndefined();
     expect(parsed.software?.[0]).toEqual({ name: "brew-thing" });
@@ -449,44 +523,254 @@ describe("AgentReportSchema v2 — the new OS-neutral fields (#1138)", () => {
     });
     expect(parsed.host.os?.family).toBe("other");
   });
+
+  test("a Windows collector has somewhere to put FQDN and domain membership", () => {
+    // `host` carried only `hostname`, so a Windows collector would have had to overload it or wait
+    // for a v3 — exactly the future migration §3's "one host = one node, forever" forbids.
+    const parsed = AgentReportSchema.parse({
+      ...V1_REPORT,
+      host: {
+        ...V1_REPORT.host,
+        fqdn: "web-03.corp.example.com",
+        domain: { name: "corp.example.com", joined: true },
+      },
+    });
+    expect(parsed.host.fqdn).toBe("web-03.corp.example.com");
+    expect(parsed.host.domain).toEqual({ name: "corp.example.com", joined: true });
+  });
 });
 
-describe("primaryIp — IPv4 first, IPv6 fallback (#1138)", () => {
-  const host = (nics: AgentReportHost["nics"]): AgentReportHost =>
-    ({ hostname: "h", nics }) as AgentReportHost;
+// ── identifiers[]: a canonical form per kind, and a labelled escape hatch (#1138/#1141) ───────────
+
+describe("identifiers[].value — one canonical form per kind, so #1141 can compare across OSes", () => {
+  const identifiersOf = (identifiers: unknown) =>
+    AgentReportSchema.parse({ ...V1_REPORT, host: { ...V1_REPORT.host, identifiers } }).host
+      .identifiers;
+
+  test("MAC: casing and separators collapse to one form", () => {
+    // The same physical host reports `AA-BB-CC-DD-EE-FF` from Windows, `aa:bb:cc:dd:ee:ff` from
+    // Linux and `aabb.ccdd.eeff` from some switch agents. Unnormalized they are three hosts.
+    expect(normalizeIdentifierValue("mac", "AA-BB-CC-DD-EE-FF")).toBe("aa:bb:cc:dd:ee:ff");
+    expect(normalizeIdentifierValue("mac", "aabb.ccdd.eeff")).toBe("aa:bb:cc:dd:ee:ff");
+    expect(normalizeIdentifierValue("mac", " AABBCCDDEEFF ")).toBe("aa:bb:cc:dd:ee:ff");
+    expect(identifiersOf([{ kind: "mac", value: "AA-BB-CC-DD-EE-FF" }])?.[0]?.value).toBe(
+      "aa:bb:cc:dd:ee:ff",
+    );
+  });
+
+  test("UUIDs: braces stripped, lower-cased, dashed 8-4-4-4-12", () => {
+    expect(
+      normalizeIdentifierValue("windows-machine-guid", "{4C4C4544-0043-0010-8036-B1C04F574D32}"),
+    ).toBe("4c4c4544-0043-0010-8036-b1c04f574d32");
+    expect(
+      normalizeIdentifierValue("smbios-uuid", "4C4C45440043001080 36B1C04F574D32".replace(" ", "")),
+    ).toBe("4c4c4544-0043-0010-8036-b1c04f574d32");
+    expect(normalizeIdentifierValue("platform-uuid", "  4C4C4544-0043-0010-8036-B1C04F574D32 ")).toBe(
+      "4c4c4544-0043-0010-8036-b1c04f574d32",
+    );
+  });
+
+  test("serial: trimmed and internal whitespace collapsed, case PRESERVED (serials are cased)", () => {
+    expect(normalizeIdentifierValue("serial", "  ABC   123  ")).toBe("ABC 123");
+  });
+
+  test("machine-id: lower-cased (the one thing that differs between readers)", () => {
+    expect(normalizeIdentifierValue("machine-id", " 9F8D7C6B5A4E ")).toBe("9f8d7c6b5a4e");
+  });
+
+  test("an unrecognised kind keeps its wire label instead of vanishing into a bare `other`", () => {
+    // `.catch("other")` silently relabelled, which is the opposite of `software[].source` degrading
+    // to ABSENT — and left `other` inert: two identifiers of different kinds became indistinguishable.
+    expect(identifiersOf([{ kind: "efi-uuid", value: "abc" }])?.[0]).toEqual({
+      kind: "other",
+      namespace: "efi-uuid",
+      value: "abc",
+    });
+  });
+
+  test("an explicit `other` carries its own namespace label", () => {
+    expect(
+      identifiersOf([{ kind: "other", namespace: "vendor:acme-tag", value: "A-17" }])?.[0],
+    ).toEqual({ kind: "other", namespace: "vendor:acme-tag", value: "A-17" });
+  });
+
+  test("too many identifiers TRUNCATE, they never 400 the report", () => {
+    const many = Array.from({ length: AGENT_IDENTIFIERS_MAX + 8 }, (_, i) => ({
+      kind: "serial",
+      value: `SN-${i}`,
+    }));
+    expect(identifiersOf(many)).toHaveLength(AGENT_IDENTIFIERS_MAX);
+  });
+
+  test("an identifier with no usable value is dropped, not rejected", () => {
+    expect(identifiersOf([{ kind: "mac" }, { kind: "serial", value: "   " }])).toBeUndefined();
+  });
+});
+
+describe("selectPrimaryMac — WHICH mac becomes the identifier, specified and stable (#1138/#1141)", () => {
+  const nics = (list: unknown) =>
+    AgentReportSchema.parse({ ...V1_REPORT, host: { ...V1_REPORT.host, nics: list } }).host.nics;
+
+  test("independent of the order the kernel happens to enumerate interfaces in", () => {
+    // The collector took "whichever physical NIC `ip -j addr` listed first", i.e. ifindex order —
+    // which changes across a NIC swap, a driver load order change or a udev rename. #1141 compares
+    // these across reports, so the choice has to be a property of the SET, not of the listing.
+    const a = nics([
+      { name: "eth0", mac: "AA:BB:CC:00:00:02", isVirtual: false },
+      { name: "eth1", mac: "aa:bb:cc:00:00:01", isVirtual: false },
+    ]);
+    const b = nics([
+      { name: "eth1", mac: "aa:bb:cc:00:00:01", isVirtual: false },
+      { name: "eth0", mac: "AA:BB:CC:00:00:02", isVirtual: false },
+    ]);
+    expect(selectPrimaryMac(a)).toBe("aa:bb:cc:00:00:01");
+    expect(selectPrimaryMac(b)).toBe("aa:bb:cc:00:00:01");
+  });
+
+  test("prefers a physical, universally-administered MAC over container plumbing", () => {
+    expect(
+      selectPrimaryMac(
+        nics([
+          { name: "docker0", mac: "02:42:ac:11:00:02", isVirtual: true },
+          { name: "eth0", mac: "aa:bb:cc:dd:ee:ff", isVirtual: false },
+        ]),
+      ),
+    ).toBe("aa:bb:cc:dd:ee:ff");
+  });
+
+  test("still answers when /sys could not say which NIC is physical (locally-administered included)", () => {
+    // EC2 hands out `02:…` (locally administered) MACs on real ENIs — excluding them outright would
+    // leave every cloud host with no MAC evidence at all.
+    expect(selectPrimaryMac(nics([{ name: "ens5", mac: "02:aa:bb:cc:dd:ee" }]))).toBe(
+      "02:aa:bb:cc:dd:ee",
+    );
+  });
+
+  test("ignores loopback and all-zero MACs, and answers undefined when there is nothing to pick", () => {
+    expect(
+      selectPrimaryMac(nics([{ name: "tun0", mac: "00:00:00:00:00:00", isVirtual: true }])),
+    ).toBeUndefined();
+    expect(selectPrimaryMac(undefined)).toBeUndefined();
+  });
+});
+
+// ── nics[].ipv6: enough information to pick a STABLE address (#1138) ──────────────────────────────
+
+describe("primaryIp — IPv4 first, then a stable routable IPv6 (#1138)", () => {
+  const host = (nics: unknown): AgentReportHost =>
+    AgentReportSchema.parse({ ...V1_REPORT, host: { hostname: "h", nics } }).host;
 
   test("prefers IPv4 whenever the host has one (v1 behaviour, unchanged)", () => {
     expect(
-      primaryIp(
-        host([
-          { name: "eth0", ipv4: ["10.0.0.12"], ipv6: ["2001:db8::1"] },
-        ] as AgentReportHost["nics"]),
-      ),
+      primaryIp(host([{ name: "eth0", ipv4: ["10.0.0.12"], ipv6: [{ address: "2001:db8::1" }] }])),
     ).toBe("10.0.0.12");
   });
 
   test("falls back to IPv6 on a v6-only host (which used to show NO address at all)", () => {
-    expect(
-      primaryIp(host([{ name: "eth0", ipv6: ["2001:db8::5"] }] as AgentReportHost["nics"])),
-    ).toBe("2001:db8::5");
+    expect(primaryIp(host([{ name: "eth0", ipv6: [{ address: "2001:db8::5" }] }]))).toBe(
+      "2001:db8::5",
+    );
   });
 
-  test("skips link-local IPv6 — it is not an address the host is reachable at", () => {
+  test("a bare string is still accepted — the contract degrades, it does not reject", () => {
+    expect(primaryIp(host([{ name: "eth0", ipv6: ["2001:db8::5"] }]))).toBe("2001:db8::5");
+  });
+
+  test("NEVER promotes a temporary (privacy) address — it rotates, the map entry must not", () => {
+    // RFC 4941 privacy addresses are regenerated on a timer. Promoting one puts an address on the
+    // map that stops resolving to the host within hours.
     expect(
       primaryIp(
         host([
-          { name: "eth0", ipv6: ["fe80::1", "2001:db8::9"] },
-        ] as AgentReportHost["nics"]),
+          {
+            name: "eth0",
+            ipv6: [
+              { address: "2001:db8::dead:beef", scope: "global", temporary: true },
+              { address: "2001:db8::5", scope: "global" },
+            ],
+          },
+        ]),
+      ),
+    ).toBe("2001:db8::5");
+  });
+
+  test("NEVER promotes a deprecated address (its preferred lifetime has expired)", () => {
+    expect(
+      primaryIp(
+        host([
+          {
+            name: "eth0",
+            ipv6: [
+              { address: "2001:db8::old", scope: "global", deprecated: true },
+              { address: "2001:db8::5", scope: "global" },
+            ],
+          },
+        ]),
+      ),
+    ).toBe("2001:db8::5");
+  });
+
+  test("skips non-global scopes and link-local, however they are expressed", () => {
+    expect(
+      primaryIp(
+        host([
+          {
+            name: "eth0",
+            ipv6: [
+              { address: "fe80::1", scope: "link" },
+              { address: "fe80::2" }, // no scope reported — the prefix still says link-local
+              { address: "2001:db8::9", scope: "global" },
+            ],
+          },
+        ]),
       ),
     ).toBe("2001:db8::9");
+    expect(primaryIp(host([{ name: "eth0", ipv6: [{ address: "fe80::1" }] }]))).toBeUndefined();
+  });
+
+  test("prefers global unicast over a ULA, but takes the ULA rather than showing nothing", () => {
     expect(
-      primaryIp(host([{ name: "eth0", ipv6: ["fe80::1"] }] as AgentReportHost["nics"])),
-    ).toBeUndefined();
+      primaryIp(
+        host([
+          {
+            name: "eth0",
+            ipv6: [
+              { address: "fd00:1234::7", scope: "global" },
+              { address: "2001:db8::9", scope: "global" },
+            ],
+          },
+        ]),
+      ),
+    ).toBe("2001:db8::9");
+    expect(primaryIp(host([{ name: "eth0", ipv6: [{ address: "fd00:1234::7" }] }]))).toBe(
+      "fd00:1234::7",
+    );
   });
 
   test("drops a malformed IPv6 (validate-or-drop, ADR-0090)", () => {
-    expect(
-      primaryIp(host([{ name: "eth0", ipv6: ["2001:zz::1"] }] as AgentReportHost["nics"])),
-    ).toBeUndefined();
+    expect(primaryIp(host([{ name: "eth0", ipv6: [{ address: "2001:zz::1" }] }]))).toBeUndefined();
+  });
+
+  test("primaryIpv6 is the exported selection rule, not a private detail of primaryIp", () => {
+    expect(primaryIpv6(host([{ name: "eth0", ipv6: [{ address: "2001:db8::5" }] }]))).toBe(
+      "2001:db8::5",
+    );
+  });
+});
+
+describe("diagnostics — bounded by TRUNCATION, never by a 400 (#1138)", () => {
+  test("an over-long / over-full warning list is trimmed, not rejected", () => {
+    // These fields exist to serve agents that are NOT version-locked to the instance. Making them
+    // the only hard 400s in the contract would defeat the amendment they belong to.
+    const parsed = AgentReportSchema.parse({
+      ...V1_REPORT,
+      diagnostics: {
+        warnings: Array.from({ length: 200 }, (_, i) => `w${i}`.padEnd(900, "x")),
+        privileged: false,
+        durationMs: 812,
+      },
+    });
+    expect(parsed.diagnostics?.warnings).toHaveLength(AGENT_WARNINGS_MAX);
+    for (const w of parsed.diagnostics?.warnings ?? []) expect(w.length).toBeLessThanOrEqual(300);
   });
 });
