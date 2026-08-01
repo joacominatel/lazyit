@@ -543,9 +543,12 @@ export class InfraService {
     let budgetSpent = false;
     for (const container of containers) {
       const externalId = containerExternalId(report.externalId, container.name);
-      // The child's whole inventory blob. Rewritten wholesale each report, exactly like the host's —
-      // no `host` key, so the Reported-facts panel (which keys off `specs.host.hostname`) correctly
-      // renders nothing for a container rather than an empty host card.
+      // The child's whole inventory blob. Rewritten wholesale each report, exactly like the host's.
+      // No `host` key, because a container is not a host: the web `container` projection
+      // (`getAgentContainerFacts`) reads this shape and renders it as a Container panel — on the node
+      // drill-in and, once confirmed with asset tracking on, on the Asset detail page. Keep the
+      // `container` key: without it both surfaces fall back to the raw custom-fields grid, which
+      // JSON.stringifies the blob.
       const specs = {
         container,
         reportedAt: report.reportedAt,
