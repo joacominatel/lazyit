@@ -1988,7 +1988,9 @@ describe('InfraService', () => {
             reportedAt: '2026-06-27T11:00:00.000Z',
           };
           prisma.$queryRaw
-            .mockResolvedValueOnce(stored({ ...held, softwareHash: HASH }, true))
+            .mockResolvedValueOnce(
+              stored({ ...held, softwareHash: HASH }, true),
+            )
             // … and the list is gone by the time it is read back (a concurrent report, a merge).
             .mockResolvedValueOnce([{ software: null }]);
           prisma.asset.findFirst.mockResolvedValue({ specs: clone(held) });
@@ -2029,7 +2031,10 @@ describe('InfraService', () => {
           });
 
           await service.ingestReport(
-            AgentReportSchema.parse({ ...clone(FULL_REPORT), software: REVERSED }),
+            AgentReportSchema.parse({
+              ...clone(FULL_REPORT),
+              software: REVERSED,
+            }),
           );
 
           expect(written()).not.toHaveProperty('specs');
