@@ -814,11 +814,14 @@ contract degrades toward *we know less*; this is the one where "we know less" an
 operator's data" point in different directions, so the safe one is named. The destructive reading is
 reachable only from an explicit, recognised instruction, or from an agent that predates the field.
 
-**`softwareHash` is corroboration, never authority.** The server stores the fingerprint the agent sent
-and compares the next `unchanged` claim against it; it never recomputes one, because what is stored is
-always a list the agent itself sent, so a wrong fingerprint can only cost its own host one extra full
-report. A claim it *cannot* corroborate — the node holds no list, or holds one fingerprinted
-differently — is never resolved by guessing: the stored list is kept and the ack carries
+**`softwareHash` is corroboration, never authority.** The wire's fingerprint is read on exactly one
+branch — an omitted list, where it is the claim being checked. A list that *arrives* is fingerprinted
+by the **server**, with the same shared function the agent uses, so a node's stored fingerprint is
+always the server's own reading of what it stored. That is what makes the skip a bound rather than a
+courtesy: a client that sends no fingerprint at all — every pre-#1142 agent, and an attacker, who has
+no reason to cooperate — is compared just the same. A claim it *cannot* corroborate — the node holds no
+list, or holds one fingerprinted differently — is never resolved by guessing: the stored list is kept
+and the ack carries
 **`softwareResend: true`**, which the agent answers by forgetting its cache. That is what makes the
 delta self-healing across a node discarded and rediscovered, a restore from backup, and a merge. The
 fingerprint is a 96-bit non-cryptographic digest of a canonical, order-independent form (package
@@ -865,12 +868,12 @@ volatile fields), and *trusting `unchanged` without corroboration* (which is how
 ends up with a permanently empty package list).
 
 **Upgrade safety.** No column, no index, no backfill, no migration. A node stored before this carries
-no `softwareHash`, so its first post-upgrade report compares unequal and writes once — the fingerprint
-backfills itself, and every report after that can be skipped. A pre-#1142 **agent** sends neither new
-field and keeps its exact pre-#1142 semantics, including the #1140 policy clearing. The delta itself
-requires the **new agent binary**: an operator who upgrades only the instance gets the server-side
-write skip (which is the half that bounds abuse) and keeps paying full payload until the agents are
-reinstalled.
+no `softwareHash`, so its first post-upgrade report compares unequal and writes once — the server
+stamps its own fingerprint as it writes, and every report after that can be skipped, **including from
+an agent that was never upgraded**. A pre-#1142 agent sends neither new field and keeps its exact
+pre-#1142 semantics, the #1140 policy clearing included. The client-side delta, and only that, requires
+the **new agent binary**: an operator who upgrades the instance alone gets the whole server-side write
+skip — the half that bounds abuse — and keeps paying full payload until the agents are reinstalled.
 
 ### §4 — Liveness & staleness
 
