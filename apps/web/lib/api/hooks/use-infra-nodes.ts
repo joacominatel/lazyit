@@ -7,7 +7,13 @@ import {
 import { useMemo } from "react";
 import type {
   AttachInfraSecret,
+  BulkConfirmInfraNodes,
+  BulkDiscardInfraNodes,
   ConfirmInfraNode,
+  CreateInfraAutoConfirmRule,
+  InfraAutoConfirmRule,
+  InfraBulkResponse,
+  UpdateInfraAutoConfirmRule,
   CreateInfraEdge,
   InfraEdge,
   InfraImpactResponse,
@@ -18,7 +24,13 @@ import type {
 } from "@lazyit/shared";
 import {
   attachInfraNodeSecret,
+  bulkConfirmInfraNodes,
+  bulkDiscardInfraNodes,
   closeInfraEdge,
+  createInfraAutoConfirmRule,
+  deleteInfraAutoConfirmRule,
+  getInfraAutoConfirmRules,
+  updateInfraAutoConfirmRule,
   confirmInfraNode,
   createInfraEdge,
   createInfraNode,
@@ -67,6 +79,7 @@ export const infraKeys = {
   impact: (nodeId: string) => [...infraKeys.all, "impact", nodeId] as const,
   identityMatches: (nodeId: string) =>
     [...infraKeys.all, "identityMatches", nodeId] as const,
+  autoConfirmRules: () => [...infraKeys.all, "autoConfirmRules"] as const,
 };
 
 /** List topology nodes, optionally filtered. The canvas keeps the fetch client-side (React Flow is
@@ -339,6 +352,82 @@ export function useInfraIdentityMatches(nodeId: string | null, enabled = true) {
     queryFn: ({ signal }) =>
       getInfraNodeIdentityMatches(nodeId as string, signal),
     enabled: enabled && Boolean(nodeId),
+  });
+}
+
+// ── The review tray at scale (ADR-0074 §1 amendment, #1145) ────────────────────────────────────────
+
+/**
+ * Confirm many PENDING proposals at once (`POST /infra/nodes/bulk-confirm`). Invalidates
+ * `infraKeys.all` so the tray drops every confirmed row and the canvas/table refresh in one pass.
+ *
+ * It RESOLVES on a partial batch — the API answers per item — so the caller must read the response
+ * rather than treat "no throw" as "all forty landed". `notifyError` still covers a whole-request
+ * failure (a 403, a network drop).
+ */
+export function useBulkConfirmInfraNodes() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: BulkConfirmInfraNodes): Promise<InfraBulkResponse> =>
+      bulkConfirmInfraNodes(body),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/** Discard many proposals at once (`POST /infra/nodes/bulk-discard`) — soft delete, restorable. */
+export function useBulkDiscardInfraNodes() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: BulkDiscardInfraNodes): Promise<InfraBulkResponse> =>
+      bulkDiscardInfraNodes(body),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * The saved auto-confirm rules, oldest first — the order the server evaluates them in (first match
+ * wins), so the list renders in evaluation order without re-sorting. `enabled` gates the fetch on
+ * `infra:read` so a viewer without topology access never fires a 403.
+ */
+export function useInfraAutoConfirmRules(enabled = true) {
+  return useQuery({
+    queryKey: infraKeys.autoConfirmRules(),
+    queryFn: ({ signal }) => getInfraAutoConfirmRules(signal),
+    enabled,
+  });
+}
+
+/** Save a rule. It applies only to reports arriving AFTER it is saved — the UI says so explicitly. */
+export function useCreateInfraAutoConfirmRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateInfraAutoConfirmRule): Promise<InfraAutoConfirmRule> =>
+      createInfraAutoConfirmRule(body),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.autoConfirmRules() }),
+  });
+}
+
+/** Patch a rule — the `enabled` toggle is the fastest revocation (it stops matching immediately). */
+export function useUpdateInfraAutoConfirmRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateInfraAutoConfirmRule }) =>
+      updateInfraAutoConfirmRule(id, patch),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.autoConfirmRules() }),
+  });
+}
+
+/** Delete a rule (soft delete). Nodes it already confirmed stay confirmed — nothing is reverted. */
+export function useDeleteInfraAutoConfirmRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteInfraAutoConfirmRule(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.autoConfirmRules() }),
   });
 }
 
