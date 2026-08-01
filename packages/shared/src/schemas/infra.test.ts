@@ -931,11 +931,31 @@ describe("isClonedMachineId — the narrow do-not-merge rule (#1141)", () => {
       ],
     });
 
-  test("serial AND MAC AND hostname all differ ⇒ two hosts share one machine-id", () => {
+  test("serial AND MAC both differ ⇒ two hosts share one machine-id", () => {
     expect(
       isClonedMachineId(
         evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
         evidence("web-02", "SN-BETA", "aa:bb:cc:dd:ee:02"),
+      ),
+    ).toBe(true);
+  });
+
+  test("THE MOTIVATING CASE: a golden-image clone keeps the baked hostname and is still caught", () => {
+    // "Cloned from a template" means the hostname was baked in alongside the machine-id — so a
+    // hostname gate would have excused precisely the scenario this whole rule exists for. The
+    // hypervisor still hands each guest its own SMBIOS serial and its own MACs, which is what makes
+    // the pair two machines.
+    expect(
+      isClonedMachineId(
+        evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
+        evidence("web-01", "SN-BETA", "aa:bb:cc:dd:ee:02"),
+      ),
+    ).toBe(true);
+    // Same host, same case-folded name: hostname carries no weight in either direction.
+    expect(
+      isClonedMachineId(
+        evidence("WEB-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
+        evidence("web-01", "SN-BETA", "aa:bb:cc:dd:ee:02"),
       ),
     ).toBe(true);
   });
@@ -960,22 +980,17 @@ describe("isClonedMachineId — the narrow do-not-merge rule (#1141)", () => {
     ).toBe(false);
   });
 
-  test("a shared hostname holds the merge, even when the hardware differs", () => {
-    expect(
-      isClonedMachineId(
-        evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
-        evidence("web-01", "SN-BETA", "aa:bb:cc:dd:ee:02"),
-      ),
-    ).toBe(false);
-  });
-
-  test("hostname comparison is case-insensitive (DNS is)", () => {
-    expect(
-      isClonedMachineId(
-        evidence("WEB-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01"),
-        evidence("web-01", "SN-BETA", "aa:bb:cc:dd:ee:02"),
-      ),
-    ).toBe(false);
+  test("a missing hostname on either side changes nothing — it is not part of the rule", () => {
+    const named = evidence("web-01", "SN-ALPHA", "aa:bb:cc:dd:ee:01");
+    const anonymous = hostIdentityEvidence({
+      identifiers: [
+        { kind: "serial", value: "SN-BETA" },
+        { kind: "mac", value: "aa:bb:cc:dd:ee:02" },
+      ],
+    });
+    expect(anonymous.hostname).toBe("");
+    expect(isClonedMachineId(named, anonymous)).toBe(true);
+    expect(isClonedMachineId(anonymous, named)).toBe(true);
   });
 
   test("SKIPS SILENTLY when either side carries no evidence — the pre-v2 upgrade promise", () => {
