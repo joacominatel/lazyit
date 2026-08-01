@@ -18,6 +18,7 @@ import { SecretManagerService } from '../secret-manager/secret-manager.service';
 import { SearchService } from '../search/search.service';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
+import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` for types (erased) AND at runtime for `Prisma.PrismaClientKnownRequestError` (the P2002
@@ -118,6 +119,10 @@ describe('InfraService', () => {
   // The ONE automatic action the #1141 clone detection takes — a broadcast bell nudge. Everything
   // else it does is a human action, so this mock is also how the tests assert the SILENCE.
   let notifications: { emit: Mock };
+  // Operator-authored auto-confirm rules (#1145). Its own matching/CRUD behaviour is covered in
+  // `infra-auto-confirm.service.spec.ts`; here we assert WHERE the service consults it (the create
+  // branches, never the refresh one) and what it does with a match.
+  let autoConfirm: { resolve: Mock; recordMatch: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration + the #1141 merge write
   // through it — the merge needs both writes in one transaction or the dedup index refuses them).
   let txEdge: { create: Mock; updateMany: Mock };
@@ -184,6 +189,11 @@ describe('InfraService', () => {
     };
     // `emit` is idempotent on its dedupeKey and never throws — the real one returns the row id or null.
     notifications = { emit: jest.fn().mockResolvedValue(null) };
+    // Default: no rules saved, which is every existing test's world and every fresh instance's.
+    autoConfirm = {
+      resolve: jest.fn().mockResolvedValue(undefined),
+      recordMatch: jest.fn().mockResolvedValue(undefined),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -197,6 +207,7 @@ describe('InfraService', () => {
         { provide: SearchService, useValue: search },
         { provide: InfraNodeEnrollmentLimiter, useValue: enrollment },
         { provide: NotificationsService, useValue: notifications },
+        { provide: InfraAutoConfirmService, useValue: autoConfirm },
       ],
     }).compile();
     service = moduleRef.get(InfraService);
@@ -3312,4 +3323,351 @@ describe('InfraService', () => {
       expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
     });
   });
+
+  // ── The review tray at scale (ADR-0074 §1 amendment, #1145) ─────────────────
+
+  describe('bulkConfirmNodes', () => {
+    /**
+     * Bulk confirm DELEGATES to the very method a human's single confirm uses, so the per-item
+     * semantics (`trackAsAsset`, kind/label override, the serial promotion, idempotency) are the
+     * single confirm's own tests. These assert what is genuinely new: batching, per-item isolation
+     * and the outcome tally.
+     */
+    function spyConfirm() {
+      return jest
+        .spyOn(service, 'confirmNode')
+        .mockResolvedValue({ id: 'x', label: 'x' } as never);
+    }
+
+    it('applies EACH item with its OWN overrides — the same call the single confirm makes', async () => {
+      const confirm = spyConfirm();
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-host', label: 'srv-app-04', state: 'PENDING' },
+        { id: 'node-c1', label: 'redis', state: 'PENDING' },
+      ]);
+
+      const result = await service.bulkConfirmNodes(
+        {
+          items: [
+            { id: 'node-host', trackAsAsset: true, kind: 'VM' },
+            { id: 'node-c1', trackAsAsset: false },
+          ],
+        },
+        HUMAN,
+      );
+
+      expect(confirm).toHaveBeenCalledWith(
+        'node-host',
+        { trackAsAsset: true, kind: 'VM' },
+        HUMAN,
+      );
+      expect(confirm).toHaveBeenCalledWith('node-c1', { trackAsAsset: false }, HUMAN);
+      expect(result.applied).toBe(2);
+      expect(result.results.map((r) => r.outcome)).toEqual(['applied', 'applied']);
+    });
+
+    it('an already-CONFIRMED node is SKIPPED, not a failure (the single confirm is idempotent)', async () => {
+      spyConfirm();
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-1', label: 'web-01', state: 'CONFIRMED' },
+      ]);
+
+      const result = await service.bulkConfirmNodes({ items: [{ id: 'node-1' }] }, HUMAN);
+
+      expect(result.skipped).toBe(1);
+      expect(result.applied).toBe(0);
+      expect(result.results[0]).toEqual({
+        id: 'node-1',
+        outcome: 'skipped',
+        label: 'web-01',
+        message: null,
+      });
+    });
+
+    it('a node that vanished (a racing discard) is notFound and never reaches confirm', async () => {
+      const confirm = spyConfirm();
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      const result = await service.bulkConfirmNodes({ items: [{ id: 'gone' }] }, HUMAN);
+
+      expect(confirm).not.toHaveBeenCalled();
+      expect(result.notFound).toBe(1);
+      expect(result.results[0].outcome).toBe('notFound');
+    });
+
+    it('ONE failing item never throws away the rest — it is reported, by name', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-1', label: 'web-01', state: 'PENDING' },
+        { id: 'node-2', label: 'web-02', state: 'PENDING' },
+      ]);
+      jest
+        .spyOn(service, 'confirmNode')
+        .mockRejectedValueOnce(new ConflictException('serial already in use'))
+        .mockResolvedValue({ id: 'node-2' } as never);
+
+      const result = await service.bulkConfirmNodes(
+        { items: [{ id: 'node-1' }, { id: 'node-2' }] },
+        HUMAN,
+      );
+
+      expect(result.failed).toBe(1);
+      expect(result.applied).toBe(1);
+      expect(result.results[0]).toEqual({
+        id: 'node-1',
+        outcome: 'failed',
+        label: 'web-01',
+        message: 'serial already in use',
+      });
+    });
+  });
+
+  describe('bulkDiscardNodes', () => {
+    it('soft-deletes each node and tallies the outcomes', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-1', label: 'web-01', state: 'PENDING' },
+        { id: 'node-2', label: 'web-02', state: 'PENDING' },
+      ]);
+      prisma.infraNode.updateMany.mockResolvedValue({ count: 2 });
+
+      const result = await service.bulkDiscardNodes({ ids: ['node-1', 'node-2'] });
+
+      const arg = firstArg<{
+        where: { id: { in: string[] } };
+        data: { deletedAt: Date };
+      }>(prisma.infraNode.updateMany);
+      expect(arg.where.id.in).toEqual(['node-1', 'node-2']);
+      expect(arg.data.deletedAt).toBeInstanceOf(Date);
+      expect(result.applied).toBe(2);
+      // Off the map ⇒ out of the search index, exactly like the single delete (ADR-0035).
+      expect(search.remove).toHaveBeenCalledWith('infra', 'node-1');
+      expect(search.remove).toHaveBeenCalledWith('infra', 'node-2');
+    });
+
+    it('an id that is already gone is notFound and never widens the write', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-1', label: 'web-01', state: 'PENDING' },
+      ]);
+      prisma.infraNode.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.bulkDiscardNodes({ ids: ['node-1', 'gone'] });
+
+      const arg = firstArg<{ where: { id: { in: string[] } } }>(
+        prisma.infraNode.updateMany,
+      );
+      expect(arg.where.id.in).toEqual(['node-1']);
+      expect(result.applied).toBe(1);
+      expect(result.notFound).toBe(1);
+    });
+
+    it('a batch of nothing-but-missing ids writes nothing at all', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      const result = await service.bulkDiscardNodes({ ids: ['gone'] });
+
+      expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+      expect(result.notFound).toBe(1);
+    });
+  });
+
+  describe('auto-confirm rules on the report path (#1145)', () => {
+    /** Structured-clone by round-trip — the report fixtures are plain JSON (the sibling helper). */
+    const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+    const RULED_REPORT = AgentReportSchema.parse({
+      agentVersion: '1.0.0',
+      reportingSource: 'agent:abc123',
+      externalId: 'machine-id-xyz',
+      reportedAt: '2026-08-01T12:00:00.000Z',
+      host: {
+        hostname: 'srv-app-04',
+        os: { name: 'Ubuntu', version: '24.04', kernel: '6.8.0' },
+        virtualization: { type: 'kvm' },
+        nics: [{ name: 'eth0', ipv4: ['10.20.3.7'] }],
+      },
+    });
+
+    /** The unknown-key CREATE branch, with the node landing PENDING as it always has. */
+    function hostIsNew(): void {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-new',
+        state: 'PENDING',
+      });
+    }
+
+    it('with NO rules saved the node stays PENDING — a fresh instance is unchanged', async () => {
+      hostIsNew();
+      const confirm = jest.spyOn(service, 'confirmNode');
+
+      const ack = await service.ingestReport(RULED_REPORT, AGENT_SA);
+
+      expect(ack.state).toBe('PENDING');
+      expect(confirm).not.toHaveBeenCalled();
+      expect(autoConfirm.recordMatch).not.toHaveBeenCalled();
+    });
+
+    it('asks the matcher about the node the report PROPOSES — hostname, promoted IP, inferred kind', async () => {
+      hostIsNew();
+
+      await service.ingestReport(RULED_REPORT, AGENT_SA);
+
+      expect(autoConfirm.resolve).toHaveBeenCalledWith({
+        hostname: 'srv-app-04',
+        ipAddress: '10.20.3.7',
+        // `virtualization: kvm` ⇒ the server proposed VM (#1139); the rule matches what it proposed,
+        // never a value the agent chose.
+        kind: 'VM',
+        isContainerChild: false,
+      });
+    });
+
+    it('a match confirms through the SAME path a human uses, attributed to the rule AUTHOR', async () => {
+      hostIsNew();
+      const author = { kind: 'human', user: { id: 'u-author' } } as never;
+      autoConfirm.resolve.mockResolvedValue({
+        ruleId: 'rule-1',
+        ruleName: 'Prod servers',
+        confirmAsKind: 'VM',
+        trackAsAsset: true,
+        author,
+      });
+      const confirm = jest
+        .spyOn(service, 'confirmNode')
+        .mockResolvedValue({ id: 'node-new', state: 'CONFIRMED' } as never);
+
+      const ack = await service.ingestReport(RULED_REPORT, AGENT_SA);
+
+      expect(confirm).toHaveBeenCalledWith(
+        'node-new',
+        { trackAsAsset: true, kind: 'VM' },
+        author,
+      );
+      // The ack reports what the node actually IS now, not what it was a moment ago.
+      expect(ack.state).toBe('CONFIRMED');
+      expect(autoConfirm.recordMatch).toHaveBeenCalledWith('rule-1');
+    });
+
+    it('a rule with no kind override leaves the proposed kind alone', async () => {
+      hostIsNew();
+      autoConfirm.resolve.mockResolvedValue({
+        ruleId: 'rule-1',
+        ruleName: 'Prod servers',
+        confirmAsKind: null,
+        trackAsAsset: false,
+      });
+      const confirm = jest
+        .spyOn(service, 'confirmNode')
+        .mockResolvedValue({ id: 'node-new', state: 'CONFIRMED' } as never);
+
+      await service.ingestReport(RULED_REPORT, AGENT_SA);
+
+      expect(confirm).toHaveBeenCalledWith(
+        'node-new',
+        { trackAsAsset: false },
+        undefined,
+      );
+    });
+
+    it('an auto-confirm that FAILS never fails the report — the node simply stays PENDING', async () => {
+      hostIsNew();
+      autoConfirm.resolve.mockRejectedValue(new Error('rule store unreachable'));
+
+      const ack = await service.ingestReport(RULED_REPORT, AGENT_SA);
+
+      expect(ack).toEqual({ nodeId: 'node-new', state: 'PENDING', accepted: true });
+    });
+
+    it('NEVER RETROACTIVE: a KNOWN host refreshing is not re-evaluated against rules', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-known',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'srv-app-04',
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-known',
+        state: 'PENDING',
+      });
+
+      const ack = await service.ingestReport(RULED_REPORT, AGENT_SA);
+
+      expect(autoConfirm.resolve).not.toHaveBeenCalled();
+      // A proposal already sitting in the tray stays there — saving a rule cannot confirm it behind
+      // the operator's back.
+      expect(ack.state).toBe('PENDING');
+    });
+
+    it('a CLONED-machine-id proposal is never auto-confirmed — the operator must see the two rows', async () => {
+      const cloneReport = AgentReportSchema.parse({
+        ...clone(RULED_REPORT),
+        host: {
+          ...clone(RULED_REPORT.host),
+          identifiers: [
+            { kind: 'serial', value: 'SN-BRAVO' },
+            { kind: 'mac', value: 'aa:bb:cc:dd:ee:02' },
+          ],
+        },
+      });
+      prisma.infraNode.findFirst
+        // the dedup-key hit …
+        .mockResolvedValueOnce({
+          id: 'node-peer',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+          label: 'srv-app-04',
+        })
+        // … then the derived-key lookup for the clone's own node (none yet).
+        .mockResolvedValueOnce(null);
+      // The stored peer evidence: a different serial AND different MACs ⇒ two hosts (#1141).
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          host: {
+            hostname: 'srv-app-04',
+            identifiers: [
+              { kind: 'serial', value: 'SN-ALPHA' },
+              { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+            ],
+          },
+        },
+      ]);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-clone',
+        state: 'PENDING',
+      });
+
+      const ack = await service.ingestReport(cloneReport, AGENT_SA);
+
+      expect(ack.state).toBe('PENDING');
+      expect(autoConfirm.resolve).not.toHaveBeenCalled();
+    });
+
+    it('a CONTAINER child is offered to the matcher as a child, with its container name', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-host', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-c1' });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.ingestReport(
+        AgentReportSchema.parse({
+          ...clone(RULED_REPORT),
+          host: {
+            ...clone(RULED_REPORT.host),
+            containers: [{ name: 'redis', state: 'running' }],
+          },
+        }),
+        AGENT_SA,
+      );
+
+      expect(autoConfirm.resolve).toHaveBeenCalledWith({
+        hostname: 'redis',
+        // A container child has no IP of its own on the node (the host owns the address).
+        ipAddress: null,
+        kind: 'CONTAINER',
+        isContainerChild: true,
+      });
+    });
+  });
+
 });
