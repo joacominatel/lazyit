@@ -75,6 +75,51 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
   });
 });
 
+describe('InfraController — the review tray at scale (#1145)', () => {
+  it('gates bulk confirm exactly as the single confirm is gated, machine callers included', () => {
+    // Bulk confirm IS the single confirm run per item, so anything weaker here would be a second,
+    // cheaper door onto the same write — and the human gate ADR-0074 §1 chose lives on that door.
+    expect(new Set(permsOf('bulkConfirm'))).toEqual(
+      new Set<Permission>(['infra:manage', 'asset:write']),
+    );
+    expect(
+      guardsOf('bulkConfirm').map((g) => (g as { name: string }).name),
+    ).toContain('HumanOnlyGuard');
+  });
+
+  it('gates bulk discard exactly as the single discard is gated', () => {
+    expect(permsOf('bulkDiscard')).toEqual(['infra:manage']);
+  });
+
+  it('refuses a MACHINE author for every auto-confirm rule write', () => {
+    // The load-bearing guard of the whole amendment: a rule is the human decision that lets a later
+    // confirm happen with no human present. A service account authoring one would be the reporting
+    // agent granting itself the confirm §1/§8 denies it.
+    for (const route of [
+      'createAutoConfirmRule',
+      'updateAutoConfirmRule',
+      'removeAutoConfirmRule',
+    ] as const) {
+      expect(guardsOf(route).map((g) => (g as { name: string }).name)).toContain(
+        'HumanOnlyGuard',
+      );
+    }
+  });
+
+  it('gates rule reads on infra:read and rule authoring on infra:manage + asset:write', () => {
+    expect(permsOf('listAutoConfirmRules')).toEqual(['infra:read']);
+    // Authoring a rule authors a decision that will later mint Assets, so it carries the same pair
+    // the confirm it automates carries.
+    expect(new Set(permsOf('createAutoConfirmRule'))).toEqual(
+      new Set<Permission>(['infra:manage', 'asset:write']),
+    );
+    expect(new Set(permsOf('updateAutoConfirmRule'))).toEqual(
+      new Set<Permission>(['infra:manage', 'asset:write']),
+    );
+    expect(permsOf('removeAutoConfirmRule')).toEqual(['infra:manage']);
+  });
+});
+
 describe('InfraController — POST /infra/report throttling (#1134)', () => {
   it('carries the per-service-account rate-limit guard', () => {
     // The permission gate alone bounded WHO may report, never HOW MUCH — a leaked agent token was an
@@ -95,7 +140,8 @@ describe('InfraController — forward-compatible report body (#1138)', () => {
     // already gone. The raw Express body is the only place that evidence still exists, so the handler
     // must hand it on — otherwise "degrade instead of reject" quietly becomes "degrade and forget".
     const infra = { ingestReport: jest.fn() };
-    const controller = new InfraController(infra as never);
+    const autoConfirm = { list: jest.fn() };
+    const controller = new InfraController(infra as never, autoConfirm as never);
     const raw = {
       agentVersion: '2.0.0',
       reportingSource: 'agent:x',
