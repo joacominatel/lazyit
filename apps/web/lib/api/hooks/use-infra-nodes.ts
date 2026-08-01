@@ -388,8 +388,13 @@ export function useBulkDiscardInfraNodes() {
 
 /**
  * The saved auto-confirm rules, oldest first — the order the server evaluates them in (first match
- * wins), so the list renders in evaluation order without re-sorting. `enabled` gates the fetch on
- * `infra:read` so a viewer without topology access never fires a 403.
+ * wins), so the list renders in evaluation order without re-sorting.
+ *
+ * `enabled` is React Query's own gate and says nothing about permissions: the one caller passes the
+ * rules DIALOG's open state, so nothing is fetched until an operator opens it — a management surface
+ * behind a button should not poll on every tray render. The permission side is already covered
+ * upstream, by the tray that hosts the dialog rendering nothing without `infra:manage`, which is
+ * stricter than the `infra:read` the route itself requires.
  */
 export function useInfraAutoConfirmRules(enabled = true) {
   return useQuery({
