@@ -315,23 +315,129 @@ export const AttachInfraSecretSchema = z.strictObject({
   vaultId: z.cuid(),
 });
 
-// ── Server reporting agent (ADR-0074 §2) — the wire contract ──────────────────────────────────────
+// ── Server reporting agent (ADR-0074 §2) — the wire contract v2 (#1138) ───────────────────────────
+//
+// Contract v2 makes the wire genuinely OS-neutral, which ADR-0074 §1 always claimed and the v1 shape
+// was not: it had no platform discriminator to branch on, carried IPv4 only (a v6-only host reported
+// no address at all), and documented its single identity key as `/etc/machine-id` — which Windows and
+// macOS do not have. Every v2 field is ADDITIVE and OPTIONAL, except `os.family`, which is defaulted
+// so a pre-v2 agent keeps reporting through an instance upgrade untouched. See the ADR-0074 §2
+// amendment (2026-07-31, #1138) for the full reasoning.
+//
+// DEGRADE, NEVER REJECT — the posture every vocabulary below follows. An unknown enum VALUE is not a
+// 400: an enum member is a guess about a world (chassis types, hypervisors, package managers) that
+// keeps producing values we did not enumerate, and rejecting one costs the operator a whole HOST.
+// Vocabularies with a natural unknown member fall back to it (`other`/`unknown`); `software[].source`,
+// which has none, degrades to absent. The fact is lost; the host is not.
 
 /**
- * The report a self-installing Linux collector POSTs to `POST /infra/report` (ADR-0074). This single
- * zod schema is the SOURCE OF TRUTH for the wire, imported by BOTH the agent binary and the API
- * handler (the monorepo payoff — zero drift). Everything beyond the two dedup keys
- * (`reportingSource` + `externalId`) and `host.hostname` is OPTIONAL: the agent degrades gracefully
- * when it lacks privilege (`dmidecode` needs root) or a tool is missing, so a PARTIAL report is VALID
- * — never a 400 (ADR-0074 §2/§3). `strictObject` rejects unknown top-level keys (the agent is
- * version-locked to the instance — ADR-0074 §6 — so an unexpected key is a bug, not forward-compat).
+ * The platform discriminator (#1138) — the one thing every downstream consumer needs to branch on
+ * (auto-classification, per-OS collectors, the fleet view). REQUIRED on the wire but DEFAULTED to
+ * `linux` server-side, because every agent that exists before v2 is a Linux-only collector: an
+ * upgraded server reading an old report is reading a Linux host, and saying so is honest rather than
+ * inventing an `unknown`.
  */
-export const AgentReportSchema = z.strictObject({
-  /** The collector binary's own version (skew diagnostics). */
+export const AgentOsFamilySchema = z.enum(["linux", "windows", "darwin", "bsd", "other"]);
+
+/**
+ * What the host physically IS — the hint `kind` inference (#1139) will read to stop landing every
+ * reported host as `PHYSICAL_HOST`. `vm`/`container` come from the virtualization probe, the rest
+ * from SMBIOS chassis type (or its per-OS equivalent).
+ */
+export const AgentChassisSchema = z.enum([
+  "server",
+  "desktop",
+  "laptop",
+  "vm",
+  "container",
+  "unknown",
+]);
+
+/**
+ * The virtualization technology the host runs UNDER (`none` = bare metal). `other` is deliberate and
+ * load-bearing: `systemd-detect-virt` alone emits ~30 values and every OS adds more, so an
+ * unenumerated hypervisor degrades to "virtualized, kind unknown" instead of 400-ing the report.
+ */
+export const AgentVirtualizationTypeSchema = z.enum([
+  "none",
+  "kvm",
+  "vmware",
+  "hyperv",
+  "xen",
+  "lxc",
+  "docker",
+  "wsl",
+  "other",
+]);
+
+/**
+ * A corroborating host identifier (#1138) — the set the identity/dedup work (#1141) consumes to
+ * recognise the SAME host across a re-install, a NIC swap or an OS reinstall. `externalId` remains
+ * the PRIMARY dedup key (ADR-0074 §3: one host = one node, forever); these are evidence beside it,
+ * never a second key. `machine-id` is Linux, `windows-machine-guid` Windows, `platform-uuid` macOS,
+ * `smbios-uuid`/`serial`/`mac` are cross-platform hardware facts.
+ */
+export const AgentIdentifierKindSchema = z.enum([
+  "machine-id",
+  "smbios-uuid",
+  "windows-machine-guid",
+  "platform-uuid",
+  "serial",
+  "mac",
+  "other",
+]);
+
+/** Where a listed package came from — the provenance that makes a cross-OS software list comparable. */
+export const AgentSoftwareSourceSchema = z.enum([
+  "dpkg",
+  "rpm",
+  "apk",
+  "registry",
+  "msi",
+  "appx",
+  "winget",
+  "brew",
+  "app-bundle",
+  "pkg",
+]);
+
+/** Cap on `host.identifiers` — a corroborating SET, not a log; a sane upper bound, not a real limit. */
+export const AGENT_IDENTIFIERS_MAX = 16;
+
+/**
+ * The report a self-installing collector POSTs to `POST /infra/report` (ADR-0074). This single zod
+ * schema is the SOURCE OF TRUTH for the wire, imported by BOTH the agent binary and the API handler
+ * (the monorepo payoff — zero drift). Everything beyond the two dedup keys (`reportingSource` +
+ * `externalId`) and `host.hostname` is OPTIONAL: the agent degrades gracefully when it lacks privilege
+ * (`dmidecode` needs root) or a tool is missing, so a PARTIAL report is VALID — never a 400
+ * (ADR-0074 §2/§3).
+ *
+ * THE ROOT IS `z.object`, NOT `z.strictObject` (#1138). It was strict, on the rationale that the agent
+ * is version-locked to the instance it downloaded itself from (ADR-0074 §6) so an unknown key could
+ * only be a bug. That rationale holds today and stops holding the moment an agent ships on its own
+ * schedule — a Windows MSI pushed by GPO/Intune (#1144), self-update (#1146), or an agent baked into a
+ * golden image. Then a NEWER agent against an OLDER server was a hard 400, i.e. the host VANISHES from
+ * the inventory: for a CMDB that is strictly worse than accepting what we understand, and it is the
+ * same silent-and-misdiagnosed failure shape as #1132. The decisive detail is that only the ROOT was
+ * strict — every nested object here is a plain `z.object`, which strips unknown keys silently, so the
+ * schema already did forward-compat everywhere except its outermost layer. The strictness was
+ * inconsistent, not protective.
+ *
+ * The signal is MOVED, not lost: the handler diffs the raw body's root keys against
+ * {@link AGENT_REPORT_ROOT_KEYS} via {@link unknownAgentReportKeys} and records what it dropped, so a
+ * typo'd root key is still diagnosable — which matters most next to #1142, where an ABSENT `software`
+ * key will come to mean "unchanged".
+ */
+export const AgentReportSchema = z.object({
+  /** The collector binary's own version (skew diagnostics + the ADR-0083/#907 version handshake). */
   agentVersion: z.string().min(1).max(40),
   /** Stable per install (e.g. `agent:<machine-id-prefix>`); the dedup scope. */
   reportingSource: z.string().min(1).max(120),
-  /** `/etc/machine-id` — the stable per-OS-install dedup key. One host = one node, forever. */
+  /**
+   * The stable per-OS-install dedup key — `/etc/machine-id` on Linux, the MachineGuid on Windows, the
+   * platform UUID on macOS. One host = one node, forever. Still the PRIMARY key; `host.identifiers`
+   * corroborates it (#1141) but never replaces it.
+   */
   externalId: z.string().min(1).max(200),
   /** When the agent gathered this report (ISO-8601). */
   reportedAt: z.iso.datetime(),
@@ -340,12 +446,42 @@ export const AgentReportSchema = z.strictObject({
     hostname: z.string().min(1).max(255),
     os: z
       .object({
-        name: z.string().max(200),
-        version: z.string().max(200),
-        kernel: z.string().max(200),
+        /** REQUIRED on the wire, defaulted to `linux` for pre-v2 agents (see the schema note). */
+        family: AgentOsFamilySchema.catch("other").default("linux"),
+        name: z.string().max(200).optional(),
+        version: z.string().max(200).optional(),
+        kernel: z.string().max(200).optional(),
+        /** The build identifier where the platform has one distinct from `version` (Windows, macOS). */
+        build: z.string().max(200).optional(),
       })
-      .partial()
       .optional(),
+    /** What the host IS (#1139 will infer `kind` from it); degrades to absent on an unknown value. */
+    chassis: AgentChassisSchema.optional().catch(undefined),
+    /** What it runs UNDER. `{ type: 'none' }` is a POSITIVE bare-metal finding, not "unknown". */
+    virtualization: z
+      .object({
+        type: AgentVirtualizationTypeSchema.catch("other"),
+        /** The hypervisor host, when the guest can see it (rarely). */
+        host: z.string().max(200).optional(),
+      })
+      .optional(),
+    /** Corroborating identity evidence for #1141 — never a dedup key on its own. */
+    identifiers: z
+      .array(
+        z.object({
+          kind: AgentIdentifierKindSchema.catch("other"),
+          value: z.string().min(1).max(200),
+        }),
+      )
+      .max(AGENT_IDENTIFIERS_MAX)
+      .optional(),
+    /**
+     * When the host last booted (ISO-8601). ONE scalar, deliberately: it answers "did this box reboot
+     * after the patch window?", which is an INVENTORY question. It is NOT uptime monitoring and must
+     * never grow into a metric — ADR-0074 draws that line at inventory and this stays on the inventory
+     * side of it (a single timestamp, overwritten each report, never a series).
+     */
+    bootedAt: z.iso.datetime().optional().catch(undefined),
     cpu: z
       .object({
         model: z.string().max(200),
@@ -370,6 +506,11 @@ export const AgentReportSchema = z.strictObject({
           name: z.string().min(1).max(120),
           mac: z.string().max(64).optional(),
           ipv4: z.array(z.string().max(64)).max(64).optional(),
+          /** v1 carried IPv4 only while {@link IpAddressSchema} already accepted v6 — a v6-only host
+           * therefore reported NO address at all. Closed here (#1138). */
+          ipv6: z.array(z.string().max(64)).max(64).optional(),
+          /** True for veth/bridge/bond/tun interfaces — lets a consumer ignore container plumbing. */
+          isVirtual: z.boolean().optional(),
         }),
       )
       .max(64)
@@ -390,12 +531,68 @@ export const AgentReportSchema = z.strictObject({
       z.object({
         name: z.string().min(1).max(255),
         version: z.string().max(120).optional(),
+        /** Which manager listed it; degrades to ABSENT (not `other`) on an unknown value. */
+        source: AgentSoftwareSourceSchema.optional().catch(undefined),
       }),
     )
     .max(5000)
     .optional(),
+  /**
+   * What the collector could NOT do (#1138). This is what lets a fleet view say "web-03: reporting
+   * unprivileged, no serial/model" instead of leaving the operator staring at an empty row wondering
+   * whether the host is broken or the agent is. `warnings` names each collector that timed out or was
+   * skipped for lack of privilege (the #1133 timeout path), `privileged` says whether the run had
+   * root, `durationMs` how long collection took.
+   */
+  diagnostics: z
+    .object({
+      warnings: z.array(z.string().max(300)).max(50).optional(),
+      privileged: z.boolean().optional(),
+      durationMs: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
+  /**
+   * The policy revision the agent last applied (#1140, server-driven policy). RESERVED: defined here
+   * so the field never has to be added under time pressure once the policy channel exists. Nothing
+   * reads it today — the server accepts and stores it, and that is all.
+   */
+  policyRevision: z.number().int().nonnegative().optional(),
 });
 export type AgentReport = z.infer<typeof AgentReportSchema>;
+
+/**
+ * The root keys this server understands — the known set the handler diffs a raw body against. Derived
+ * from the schema itself so it can never drift from what is actually parsed.
+ */
+export const AGENT_REPORT_ROOT_KEYS: readonly string[] = Object.freeze(
+  Object.keys(AgentReportSchema.shape),
+);
+
+/** Cap on the recorded unknown-key list (see {@link unknownAgentReportKeys}). */
+export const AGENT_REPORT_UNKNOWN_KEYS_MAX = 10;
+
+/** Cap on each recorded key NAME — long enough to identify a real field, short enough to be inert. */
+const AGENT_REPORT_UNKNOWN_KEY_MAX_LENGTH = 64;
+
+/**
+ * The root keys of a raw report body this server does NOT understand — what the loosened root
+ * silently dropped (#1138). Pure, so the API can record it and any future consumer can reuse it.
+ *
+ * BOUNDED on purpose: the result is persisted, and the body is attacker-controlled (the report
+ * endpoint is machine-facing), so an unbounded diff would let a hostile caller write megabytes of
+ * junk key names into a jsonb column through a field designed to be a diagnostic. At most
+ * {@link AGENT_REPORT_UNKNOWN_KEYS_MAX} keys, each truncated — enough to say "this agent sent
+ * `deltaSince` and we ignored it", never enough to be a payload. Non-object bodies yield `[]` (the
+ * caller runs this before anything else has validated the body).
+ */
+export function unknownAgentReportKeys(body: unknown): string[] {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return [];
+  const known = new Set(AGENT_REPORT_ROOT_KEYS);
+  return Object.keys(body)
+    .filter((key) => !known.has(key))
+    .slice(0, AGENT_REPORT_UNKNOWN_KEYS_MAX)
+    .map((key) => key.slice(0, AGENT_REPORT_UNKNOWN_KEY_MAX_LENGTH));
+}
 
 /** The `host` block of a report — the subset the fact-promotion mappers below read (issue #1081). */
 export type AgentReportHost = AgentReport["host"];
@@ -410,6 +607,28 @@ export type AgentReportHost = AgentReport["host"];
 /** A NIC's first non-empty IPv4 (trimmed), or undefined when it advertises none. */
 function firstNicIpv4(nic: NonNullable<AgentReportHost["nics"]>[number]): string | undefined {
   return nic.ipv4?.map((ip) => ip.trim()).find((ip) => ip.length > 0);
+}
+
+/**
+ * A NIC's first non-empty, non-LINK-LOCAL IPv6 (trimmed). `fe80::/10` is filtered because a
+ * link-local address is not one the host is reachable at — promoting it to the node's `ipAddress`
+ * would put a value on the map that no operator can ever connect to.
+ */
+function firstNicIpv6(nic: NonNullable<AgentReportHost["nics"]>[number]): string | undefined {
+  return nic.ipv6
+    ?.map((ip) => ip.trim())
+    .find((ip) => ip.length > 0 && !ip.toLowerCase().startsWith("fe80:"));
+}
+
+/**
+ * The OS family of a report's host (#1138), with the pre-v2 default applied. The schema defaults
+ * `os.family` when an `os` block is present, but a partial report may omit `os` entirely — and every
+ * agent that predates contract v2 is a LINUX-only collector, so `linux` is the honest answer rather
+ * than an invented `other`. The one place the "server-side default" of ADR-0074 §2's amendment lives,
+ * so no consumer has to re-derive it.
+ */
+export function osFamily(host: AgentReportHost): AgentOsFamily {
+  return host.os?.family ?? "linux";
 }
 
 /**
@@ -430,6 +649,25 @@ export function primaryIpv4(host: AgentReportHost): string | undefined {
     // … else the first IPv4 on ANY NIC (loopback included — reached only when no non-lo NIC had one).
     nics.map(firstNicIpv4).find(Boolean);
   // Format-validate the winner; garbage is dropped (returns the trimmed value on success).
+  const parsed = IpAddressSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * The host's primary IP address for display (#1138): {@link primaryIpv4} when the host has ANY IPv4,
+ * else the first routable IPv6 (link-local skipped) on a non-loopback NIC, else any NIC's. IPv4 keeps
+ * winning wherever it exists, so every dual-stack node's `ipAddress` is exactly what it was before —
+ * the fallback only fires on a v6-ONLY host, which the v1 contract left with no address at all even
+ * though {@link IpAddressSchema} has always accepted v6. Same validate-or-drop rule: a malformed value
+ * is dropped, never a 400 on the whole report (ADR-0090 / ADR-0074 §3).
+ */
+export function primaryIp(host: AgentReportHost): string | undefined {
+  const ipv4 = primaryIpv4(host);
+  if (ipv4 !== undefined) return ipv4;
+  const nics = host.nics ?? [];
+  const candidate =
+    nics.filter((n) => n.name !== "lo").map(firstNicIpv6).find(Boolean) ??
+    nics.map(firstNicIpv6).find(Boolean);
   const parsed = IpAddressSchema.safeParse(candidate);
   return parsed.success ? parsed.data : undefined;
 }
@@ -586,3 +824,9 @@ export type InfraNodeChild = z.infer<typeof InfraNodeChildSchema>;
 export type InfraSecretRef = z.infer<typeof InfraSecretRefSchema>;
 export type AttachInfraSecret = z.infer<typeof AttachInfraSecretSchema>;
 export type InfraNodeDetail = z.infer<typeof InfraNodeDetailSchema>;
+// Agent report contract v2 (#1138).
+export type AgentOsFamily = z.infer<typeof AgentOsFamilySchema>;
+export type AgentChassis = z.infer<typeof AgentChassisSchema>;
+export type AgentVirtualizationType = z.infer<typeof AgentVirtualizationTypeSchema>;
+export type AgentIdentifierKind = z.infer<typeof AgentIdentifierKindSchema>;
+export type AgentSoftwareSource = z.infer<typeof AgentSoftwareSourceSchema>;
