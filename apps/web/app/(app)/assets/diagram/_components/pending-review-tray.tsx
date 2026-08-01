@@ -20,7 +20,7 @@ import {
   type InfraNodeListItem,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -44,7 +44,7 @@ import { BulkConfirmDialog, BulkDiscardDialog } from "./bulk-review-dialogs";
 import { ConfirmNodeDialog } from "./confirm-node-dialog";
 import { DeleteNodeDialog } from "./delete-node-dialog";
 import { MergeNodeDialog } from "./merge-node-dialog";
-import { exceedsBulkReviewCap, pruneHiddenFromSelection } from "./tray-selection";
+import { exceedsBulkReviewCap, visibleSelection } from "./tray-selection";
 
 /** Sort orders the tray offers. Every one is a total order over the loaded rows (no server paging). */
 type SortKey = "firstSeenDesc" | "firstSeenAsc" | "labelAsc" | "labelDesc";
@@ -81,9 +81,10 @@ interface TrayGroup {
  *  - **Checkboxes + bulk confirm / discard** ({@link BulkConfirmDialog}), which apply the SAME
  *    per-node overrides the single confirm takes. `trackAsAsset` defaults ON for hosts and OFF for
  *    container children (`defaultTrackAsAsset`) so a bulk confirm of one Docker host does not mint
- *    thirty Assets nobody will curate. The selection is always the VISIBLE set — a row a filter
- *    hides leaves it — and a selection over `INFRA_BULK_REVIEW_MAX` disables the two actions with
- *    the reason shown, rather than letting the contract reject the whole batch after the work.
+ *    thirty Assets nobody will curate. What a bulk action touches is always the VISIBLE selection —
+ *    a row a filter hides is out of the action and out of the count — and a selection over
+ *    `INFRA_BULK_REVIEW_MAX` disables the two actions with the reason shown, rather than letting the
+ *    contract reject the whole batch after the operator has done all of the selecting.
  *  - **Filter + sort**, entirely client-side over the already-loaded lean list (#1135 removed `specs`
  *    from it, and nothing here re-fattens it — a checkbox row reads `label`, `kind`, `ipAddress`,
  *    `createdAt` and `externalId`, all of which the list projection already carries).
@@ -227,18 +228,13 @@ export function PendingReviewTray() {
   }, [rows, hostLabels, sort]);
 
   const visibleIds = useMemo(() => rows.map((node) => node.id), [rows]);
-  // A bulk action reaches EXACTLY what the operator can see. Deriving the acted-on nodes from the
-  // VISIBLE rows is the half that makes it true on the click; the effect below is the half that makes
-  // the COUNT true, by forgetting a row the moment a filter hides it. Both are in `tray-selection.ts`,
-  // where they are tested — they were prose promises before, and prose cannot be held to account.
-  const selectedNodes = useMemo(
-    () => rows.filter((node) => selected.has(node.id)),
-    [rows, selected],
-  );
-
-  useEffect(() => {
-    setSelected((prev) => pruneHiddenFromSelection(prev, visibleIds));
-  }, [visibleIds]);
+  // A bulk action reaches EXACTLY what the operator can see. `selected` is a raw set of ids that
+  // outlives a filter change, and NOTHING reads it directly: the count, the two dialogs and the ids
+  // in the request all come through `visibleSelection`, so a row a filter hides leaves the action and
+  // the count in the same instant it leaves the screen. Tested in `tray-selection.ts` — it was a prose
+  // promise before, in this comment, in the select-all label and in the Manual, and prose cannot be
+  // held to account.
+  const selectedNodes = useMemo(() => visibleSelection(rows, selected), [rows, selected]);
 
   /** A batch is bounded by the contract (`INFRA_BULK_REVIEW_MAX`); the tray refuses before the API does. */
   const overCap = exceedsBulkReviewCap(selectedNodes.length);
@@ -359,9 +355,10 @@ export function PendingReviewTray() {
         ) : null}
       </div>
 
-      {/* Selection bar. The master checkbox covers what is VISIBLE, never what a filter hid — a
-          "select all" that silently reached filtered-out rows would be the worst kind of bulk action —
-          and narrowing a filter drops the rows it hides from the selection (see the effect above). */}
+      {/* Selection bar. The master checkbox, the count and the two buttons all describe the SAME set:
+          the ticked rows that are currently visible (`selectedNodes`). A "select all" that silently
+          reached filtered-out rows would be the worst kind of bulk action, so narrowing a filter takes
+          those rows out of all three at once. */}
       <div className="flex flex-wrap items-center gap-3 rounded-md border bg-card px-3 py-2">
         <label className="flex items-center gap-2 text-xs font-medium">
           <Checkbox
