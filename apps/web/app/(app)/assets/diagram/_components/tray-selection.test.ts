@@ -4,10 +4,11 @@
  *
  * Both were promises the copy made and the code did not keep:
  *
- *  1. **A selection never reaches a row the operator cannot see.** The tray's comment, the Manual in
- *     both languages and the "select everything shown" label all said so, while the selection was a
- *     plain set of ids that survived every filter change — so *select all → narrow the filter →
- *     Confirm* confirmed rows that were no longer on screen.
+ *  1. **A bulk action never reaches a row the operator cannot see.** The tray's comment, the Manual in
+ *     both languages and the "select everything shown" label all said so, while the acted-on nodes
+ *     were filtered out of the *unfiltered* pending list — so *select all → narrow the filter →
+ *     Confirm* confirmed rows that were no longer on screen, and the count beside the button counted
+ *     them.
  *  2. **A batch is bounded by `INFRA_BULK_REVIEW_MAX`.** The contract caps it at 200 and the schema's
  *     own comment claimed "the UI is what keeps a selection inside this bound", which nothing did: a
  *     selection of 201 was sent, rejected whole, and reported as a generic toast after the operator
@@ -15,38 +16,36 @@
  */
 import { INFRA_BULK_REVIEW_MAX } from "@lazyit/shared";
 import { describe, expect, test } from "bun:test";
-import { exceedsBulkReviewCap, pruneHiddenFromSelection } from "./tray-selection";
+import { exceedsBulkReviewCap, visibleSelection } from "./tray-selection";
 
-describe("pruneHiddenFromSelection (#1145)", () => {
-  test("drops the ids a filter has hidden", () => {
+const row = (id: string) => ({ id, label: id });
+
+describe("visibleSelection (#1145)", () => {
+  test("is the intersection of ticked and visible", () => {
     const selected = new Set(["a", "b", "c"]);
-    expect([...pruneHiddenFromSelection(selected, ["a", "c"])]).toEqual(["a", "c"]);
+    expect(visibleSelection([row("a"), row("c")], selected).map((r) => r.id)).toEqual(["a", "c"]);
   });
 
-  test("a narrowed filter cannot leave a single hidden row selected", () => {
+  test("a narrowed filter takes its hidden rows out of the action AND the count", () => {
+    // The operator ticked everything, then filtered down to the two `srv-` rows.
     const selected = new Set(["srv-1", "srv-2", "db-1"]);
-    // The operator selected everything, then filtered down to the two `srv-` rows.
-    const kept = pruneHiddenFromSelection(selected, ["srv-1", "srv-2"]);
-    expect(kept.has("db-1")).toBe(false);
-    expect(kept.size).toBe(2);
+    const acted = visibleSelection([row("srv-1"), row("srv-2")], selected);
+    expect(acted.map((r) => r.id)).toEqual(["srv-1", "srv-2"]);
+    // `db-1` is what a bulk confirm would have reached while the operator could not see it.
+    expect(acted.some((r) => r.id === "db-1")).toBe(false);
   });
 
-  test("returns the SAME set when nothing was hidden, so the effect cannot loop", () => {
-    // Referential identity is load-bearing: the tray calls this from an effect that writes the
-    // result back into state, and a fresh Set every time would re-render for its own sake forever.
-    const selected = new Set(["a", "b"]);
-    expect(pruneHiddenFromSelection(selected, ["a", "b", "c"])).toBe(selected);
-    expect(pruneHiddenFromSelection(selected, ["b", "a"])).toBe(selected);
+  test("a filter hiding everything leaves nothing to act on", () => {
+    expect(visibleSelection([], new Set(["a", "b"]))).toEqual([]);
   });
 
-  test("an empty selection is returned untouched, whatever is visible", () => {
-    const empty = new Set<string>();
-    expect(pruneHiddenFromSelection(empty, [])).toBe(empty);
-    expect(pruneHiddenFromSelection(empty, ["a"])).toBe(empty);
+  test("an empty selection acts on nothing, however much is visible", () => {
+    expect(visibleSelection([row("a"), row("b")], new Set())).toEqual([]);
   });
 
-  test("everything hidden clears the selection", () => {
-    expect(pruneHiddenFromSelection(new Set(["a", "b"]), []).size).toBe(0);
+  test("keeps the VISIBLE order, so the request mirrors the list the operator read", () => {
+    const selected = new Set(["b", "a"]);
+    expect(visibleSelection([row("a"), row("b")], selected).map((r) => r.id)).toEqual(["a", "b"]);
   });
 });
 
