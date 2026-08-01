@@ -2272,7 +2272,14 @@ describe('InfraService', () => {
       identifiers?: Array<{ kind: string; value: string }>,
     ) => [{ host: { hostname, ...(identifiers ? { identifiers } : {}) } }];
 
-    const ORIGINAL = { id: 'node-1', assetId: null, ipAddressSource: 'AGENT' };
+    // `label` is part of the real select: the nudge names the node the operator already has, which is
+    // the whole difference between an actionable warning and a cryptic one.
+    const ORIGINAL = {
+      id: 'node-1',
+      assetId: null,
+      ipAddressSource: 'AGENT',
+      label: 'web-01',
+    };
 
     it('NEVER splits a legacy node: no stored identifiers ⇒ the pre-#1141 refresh, and no nudge', async () => {
       // The load-bearing upgrade promise. Every row stored before contract v2 carries no
@@ -2438,6 +2445,148 @@ describe('InfraService', () => {
       expect(notifications.emit).not.toHaveBeenCalled();
       expect(ack.nodeId).toBe('node-2');
     });
+
+    it('THE MOTIVATING CASE: a golden-image clone that kept the template hostname still splits', async () => {
+      // A baked machine-id comes with a baked HOSTNAME — that is what "cloned from a template" means.
+      // The hypervisor still gives each guest its own SMBIOS serial and its own MACs, and those two
+      // facts alone are the rule. The hostname is corroborating detail in the message, not a gate.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce(null);
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('web-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      // Same hostname as the node that already owns the key — the case the first rule excused.
+      await service.ingestReport(
+        reportFrom('web-01', 'SN-BETA', 'aa:bb:cc:dd:ee:02'),
+        AGENT_SA,
+      );
+
+      expect(prisma.infraNode.create).toHaveBeenCalledTimes(1);
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+      // The shared hostname is REPORTED, since two hosts answering to one name is itself the
+      // golden-image signature and the operator would otherwise read the same name twice and wonder.
+      const emitted = firstArg<{ summary: string }>(notifications.emit);
+      expect(emitted.summary).toContain('same hostname');
+    });
+
+    it('re-stamps identityConflict on every report, keeping the FIRST detection time', async () => {
+      // The blob is rewritten wholesale on every check-in, so a marker written once would be gone
+      // 15 minutes later — leaving the operator a notification pointing at a node that shows no
+      // evidence of why. It is re-stamped for as long as the collision lasts (and only then).
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce({
+          id: 'node-2',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+      prisma.$queryRaw
+        // the peer's stored evidence …
+        .mockResolvedValueOnce(
+          storedHost('web-01', [
+            { kind: 'serial', value: 'SN-ALPHA' },
+            { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+          ]),
+        )
+        // … then the clone's own marker, from a detection three weeks ago.
+        .mockResolvedValueOnce([{ detectedAt: '2026-07-10T09:00:00.000Z' }]);
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      await service.ingestReport(
+        reportFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02'),
+        AGENT_SA,
+      );
+
+      const updateArg = firstArg<{
+        data: { specs: { identityConflict?: Record<string, unknown> } };
+      }>(prisma.infraNode.update);
+      expect(updateArg.data.specs.identityConflict).toEqual({
+        reportedExternalId: 'machine-id-baked',
+        peerNodeId: 'node-1',
+        peerLabel: 'web-01',
+        discriminator: 'SN-BETA',
+        // Preserved, not reset: the marker also says how long the collision has been true.
+        detectedAt: '2026-07-10T09:00:00.000Z',
+      });
+    });
+
+    it('the collision CREATE survives the concurrent-report race (P2002 → refresh, #1012)', async () => {
+      // The main ingest path has handled this race since #1012; the collision branch must too, or a
+      // clone reporting from two processes 500s exactly when the operator most needs a clear signal.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL) // the key's current owner
+        .mockResolvedValueOnce(null) // no node of its own yet …
+        .mockResolvedValueOnce({
+          // … until the racing report inserted one between the lookup and the create.
+          id: 'node-2',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('web-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.create.mockRejectedValue(new KnownError('P2002'));
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      const ack = await service.ingestReport(
+        reportFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02'),
+        AGENT_SA,
+      );
+
+      // Idempotent (ack), never a 500 — and the marker still lands, on the row the winner created.
+      expect(ack).toEqual({
+        nodeId: 'node-2',
+        state: 'PENDING',
+        accepted: true,
+      });
+      const updateArg = firstArg<{
+        where: { id: string };
+        data: { specs: { identityConflict?: { peerNodeId?: string } } };
+      }>(prisma.infraNode.update);
+      expect(updateArg.where).toEqual({ id: 'node-2' });
+      expect(updateArg.data.specs.identityConflict?.peerNodeId).toBe('node-1');
+      // The winning report already nudged, and the dedupe key is the same — the loser stays quiet.
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('rethrows a P2002 the collision branch cannot resolve, rather than looping', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null); // the raced row is not there (archived in the same instant)
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('web-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.create.mockRejectedValue(new KnownError('P2002'));
+
+      await expect(
+        service.ingestReport(
+          reportFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02'),
+          AGENT_SA,
+        ),
+      ).rejects.toMatchObject({ code: 'P2002' });
+    });
   });
 
   // ── Re-key / merge-into: the HUMAN half of identity reconciliation (#1141) ───
@@ -2512,6 +2661,84 @@ describe('InfraService', () => {
       // Search: the archived duplicate leaves the index, the adopting node is re-projected.
       expect(search.remove).toHaveBeenCalledWith('infra', 'node-dup');
       expect(search.upsert).toHaveBeenCalled();
+    });
+
+    it('clears the reporting key off the archived duplicate so it can be RESTORED', async () => {
+      // Soft delete is reversible in this codebase (ADR-0006). Leaving `reportingSource`/`externalId`
+      // on the archived row while the same pair lives on the target means restoring it violates the
+      // partial-unique dedup index and 500s — a soft delete that cannot be undone.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(SOURCE)
+        .mockResolvedValueOnce(TARGET)
+        .mockResolvedValue({ ...TARGET, externalId: 'machine-id-new' });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({ name: 'app-04' });
+
+      await service.mergeNodeInto('node-dup', 'node-keep', HUMAN);
+
+      const [archive] = txNode.update.mock.calls as Array<
+        [{ data: Record<string, unknown> }]
+      >;
+      expect(archive[0].data.reportingSource).toBeNull();
+      expect(archive[0].data.externalId).toBeNull();
+      // The key it carried is not lost — the merge marker is where it now lives.
+      expect(archive[0].data.specs).toMatchObject({
+        _infraMergedInto: {
+          externalId: 'machine-id-new',
+          reportingSource: 'agent:clone',
+        },
+      });
+    });
+
+    it('records the target reporting key a merge DESTROYS', async () => {
+      // The target may already report through an agent of its own (the re-image case always does).
+      // That key is overwritten and is then owned by nobody, so the merge has to say what it replaced
+      // — on the archived row, the only part of a merge a later report can never overwrite.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(SOURCE)
+        .mockResolvedValueOnce(TARGET)
+        .mockResolvedValue({ ...TARGET, externalId: 'machine-id-new' });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({ name: 'app-04' });
+
+      await service.mergeNodeInto('node-dup', 'node-keep', HUMAN);
+
+      const [archive] = txNode.update.mock.calls as Array<
+        [{ data: { specs: Record<string, unknown> } }]
+      >;
+      expect(archive[0].data.specs).toMatchObject({
+        _infraMergedInto: {
+          replacedTargetKey: {
+            reportingSource: 'agent:old',
+            externalId: 'machine-id-old',
+          },
+        },
+      });
+    });
+
+    it('records nothing replaced when the target had no reporting key of its own', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(SOURCE)
+        .mockResolvedValueOnce({
+          ...TARGET,
+          reportingSource: null,
+          externalId: null,
+        })
+        .mockResolvedValue({ ...TARGET, externalId: 'machine-id-new' });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({ name: 'app-04' });
+
+      await service.mergeNodeInto('node-dup', 'node-keep', HUMAN);
+
+      const [archive] = txNode.update.mock.calls as Array<
+        [{ data: { specs: { _infraMergedInto: Record<string, unknown> } } }]
+      >;
+      expect(archive[0].data.specs._infraMergedInto).not.toHaveProperty(
+        'replacedTargetKey',
+      );
     });
 
     it('never clobbers a MANUAL ip on the target, but seeds an AGENT one', async () => {
