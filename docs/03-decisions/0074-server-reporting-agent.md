@@ -860,11 +860,13 @@ both carry no `software` key with or without the handshake, so gating them would
 wire and would only cost the cache. An old server reads both as the pre-#1142 absent key and clears —
 exactly right for `disabled`, and for `unavailable` an empty panel until the next successful collection
 sends the whole list again, which it does precisely because the agent holds no evidence against that
-server. That is *not* identical to what a pre-#1142 agent did in the same situation: it sent an empty
-**array** when its collector failed (the collector folded a null stdout into `[]`), so the old server
-stored an empty list rather than none. The panel is equally empty either way and neither state is
-durable. **`unchanged` is the only branch whose omission can cost an inventory permanently, and it is
-the only one gated.**
+server. That is **exactly** what a pre-#1142 agent did in the same situation, and the two cases were
+never distinguishable: `applySoftwarePolicy` returned `undefined` — never `[]` — both when the
+collector enumerated nothing and when policy turned software collection off, and the report was
+assembled with `...(software ? { software } : {})`, so both left the `software` key **absent** and both
+made the server clear. Neither of these branches is worse than what the estate already runs.
+**`unchanged` is the only branch whose omission can cost an inventory permanently, and it is the only
+one gated.**
 
 **`softwareHash` is corroboration, never authority.** The wire's fingerprint is read on exactly one
 branch — an omitted list, where it is the claim being checked. A list that *arrives* is fingerprinted
