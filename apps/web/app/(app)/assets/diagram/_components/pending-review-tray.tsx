@@ -80,7 +80,7 @@ interface TrayGroup {
  *    per-node overrides the single confirm takes. `trackAsAsset` defaults ON for hosts and OFF for
  *    container children (`defaultTrackAsAsset`) so a bulk confirm of one Docker host does not mint
  *    thirty Assets nobody will curate.
- *  - **Filter + sort**, entirely client-side over the already-loaded lean list (#1150 removed `specs`
+ *  - **Filter + sort**, entirely client-side over the already-loaded lean list (#1135 removed `specs`
  *    from it, and nothing here re-fattens it — a checkbox row reads `label`, `kind`, `ipAddress`,
  *    `createdAt` and `externalId`, all of which the list projection already carries).
  *  - **Saved auto-confirm rules** ({@link AutoConfirmRulesDialog}) — the judgement expressed once
