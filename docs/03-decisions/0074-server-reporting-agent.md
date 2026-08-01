@@ -65,7 +65,7 @@ Constraints that shaped the decision:
 | **What it reports** | **Inventory only** — host identity, hardware facts, installed software. | Health snapshots; time-series metrics + alerting (a different product). |
 | **What it discovers** | **Self only** — the host the agent runs on. "Expand" = install it on more hosts. | Network scanning / agentless discovery (security surface, false positives, LAN noise). |
 | **OS targets** | **Linux only** — `x64` + `arm64`. | Windows (WMI service), macOS (launchd) — deferred, contract is OS-neutral so they can be added. |
-| **Trust** | **Review tray** — new hosts arrive `state=PENDING`, `source=AGENT`; a human confirms. | Auto-confirm (any agent noise dirties the official inventory with no containment). |
+| **Trust** | **Review tray** — new hosts arrive `state=PENDING`, `source=AGENT`; a human confirms. **Qualified by the 2026-08-01 amendment below: with an operator-authored auto-confirm rule saved, a proposal that rule matches is confirmed by the machine.** | ~~Auto-confirm~~ → **blanket** auto-confirm, i.e. with no operator-authored rule (any agent noise dirties the official inventory with no containment). |
 
 **Amendment (2026-08-01, #1145) — the gate is right; exercising it one dialog at a time is not.** The
 problem is the **cost** of the gate. The §3 amendment (#1139) named it as a real and separate problem
