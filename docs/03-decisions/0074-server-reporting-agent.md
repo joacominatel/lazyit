@@ -717,10 +717,17 @@ a **fixed 5-minute tick on every platform and never rewritten**, and the agent *
 `now - lastSuccessfulReport < policy.intervalSeconds`, tracked in `/var/lib/lazyit-agent/state.json`.
 The server then owns cadence from 5 minutes to 24 hours with zero unit-file mutation and identical
 semantics on every scheduler. A deterministic per-machine-id offset (FNV-1a over the machine id,
-bounded by the tick) is added to each host's interval so an estate installed in one rollout does not
-stay phase-locked forever. Stated precisely, because it is easy to overclaim: the **reboot** case is
-handled by the state file *surviving* the reboot — a host that reported four minutes before it went
-down is still not due when it comes back — and the offset only stops identical cadences from clumping.
+bounded by half the tick) is **subtracted** from each host's interval so an estate installed in one
+rollout does not stay phase-locked forever. Stated precisely, because it is easy to overclaim: the
+**reboot** case is handled by the state file *surviving* the reboot — a host that reported four
+minutes before it went down is still not due when it comes back — and the offset only stops identical
+cadences from clumping.
+
+**Subtracted, not added,** and the direction is load-bearing. Adding it would push the due instant
+*past* a scheduler tick whenever the tick and the interval are close — precisely the host that
+upgraded its binary without re-running `install.sh`, still on the old 15-minute `OnUnitActiveSec`
+with the 15-minute default interval. That host would miss every other tick and quietly report half as
+often as configured. Being due slightly *early* has no such failure mode: the tick catches it.
 
 `install.sh` still accepts `--interval` and **ignores** it; existing installs keep whatever
 `OnUnitActiveSec` they were given until the installer is re-run, which means their cadence cannot go
