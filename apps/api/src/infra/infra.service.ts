@@ -270,6 +270,7 @@ export class InfraService {
       if (isClonedMachineId(stored, incoming)) {
         return this.ingestCollidingHost(
           existing,
+          stored,
           incoming,
           report,
           blob,
@@ -474,6 +475,32 @@ export class InfraService {
   }
 
   /**
+   * When this node's collision was FIRST detected (#1141), or `undefined` if it carries no marker.
+   *
+   * The marker is re-stamped on every report (see {@link ingestCollidingHost}), and a marker whose
+   * timestamp moved with it would only ever say "still colliding" — the operator also needs "and it
+   * has been true since the 10th". So the re-stamp reads the first detection back and keeps it.
+   *
+   * Same posture as {@link storedHostIdentity}: a `->>` sub-select rather than reading the whole
+   * inventory blob back on a path that runs once per host every 15 minutes. Postgres returns SQL NULL
+   * (⇒ `null` here) for a missing node, a null `specs` and an absent key alike, so every degenerate
+   * case reads as "no marker yet" and the caller stamps `now`.
+   */
+  private async storedConflictDetectedAt(
+    nodeId: string,
+  ): Promise<string | undefined> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{ detectedAt: string | null }>
+    >(
+      Prisma.sql`SELECT "specs"->'identityConflict'->>'detectedAt' AS "detectedAt" FROM "infra_nodes" WHERE "id" = ${nodeId}`,
+    );
+    const detectedAt = rows[0]?.detectedAt;
+    return typeof detectedAt === 'string' && detectedAt.length > 0
+      ? detectedAt
+      : undefined;
+  }
+
+  /**
    * A SECOND physical host is reporting the `externalId` an existing node already owns (#1141) — the
    * cloned-VM-template case, which without this quietly collapsed a whole estate into one row.
    *
@@ -488,6 +515,12 @@ export class InfraService {
    *  3. **One nudge, naming the remedy.** Emitted only on the branch that CREATES the second node, and
    *     deduped on `(peer node, discriminator)`, so a clone checking in every 15 minutes nudges once —
    *     the same one-per-event discipline the staleness sweeper's `infra.agent_offline` follows.
+   *  4. **The marker is DURABLE.** `specs.identityConflict` is re-stamped on every report for as long
+   *     as the collision lasts. The blob is rewritten wholesale on each check-in, so a marker written
+   *     only at creation would be gone 15 minutes later — leaving the operator holding a notification
+   *     that points at a node showing no evidence of why. `detectedAt` keeps the FIRST detection
+   *     across re-stamps. It still SELF-HEALS: once the clone is given a real machine-id it takes the
+   *     ordinary unknown-key path, nothing re-stamps, and the next blob rewrite drops the marker.
    *
    * The new node cannot reuse the reported `externalId`: the partial-unique
    * `infra_nodes_reporting_source_external_id_key` physically forbids two live rows sharing one. It
@@ -497,6 +530,7 @@ export class InfraService {
    */
   private async ingestCollidingHost(
     peer: { id: string; label: string },
+    stored: HostIdentityEvidence,
     incoming: HostIdentityEvidence,
     report: AgentReport,
     blob: AgentReportSpecsBlob,
@@ -517,51 +551,95 @@ export class InfraService {
       );
     }
     const externalId = disambiguateExternalId(report.externalId, discriminator);
+    // Everything the marker says except WHEN — identical whether it is being stamped or re-stamped.
+    const conflictFacts = {
+      reportedExternalId: report.externalId,
+      peerNodeId: peer.id,
+      peerLabel: peer.label,
+      discriminator,
+    };
+    /** Refresh the clone's own node, carrying the collision marker with it (rule 4 above). */
+    const refreshWithMarker = async (node: {
+      id: string;
+      assetId: string | null;
+      ipAddressSource: string;
+    }): Promise<AgentReportAck> => {
+      const conflict: AgentReportIdentityConflict = {
+        ...conflictFacts,
+        detectedAt:
+          (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString(),
+      };
+      return this.refreshKnownNode(
+        node,
+        { ...blob, identityConflict: conflict },
+        now,
+        report.agentVersion,
+        primaryIpAddress,
+      );
+    };
 
     // Does this clone already have a node of its own? (Its second and every later report.)
     const own = await this.prisma.infraNode.findFirst({
       where: { reportingSource: report.reportingSource, externalId },
       select: { id: true, assetId: true, ipAddressSource: true },
     });
-    if (own) {
-      return this.refreshKnownNode(
-        own,
-        blob,
-        now,
-        report.agentVersion,
-        primaryIpAddress,
-      );
-    }
+    if (own) return refreshWithMarker(own);
 
     // A new row, so it is charged to the same enrollment budget as any other newly-enrolled host
     // (#1134) — a clone storm is exactly the unbounded row growth that limit exists to bound.
     this.enrollment.assertWithinBudget(principal);
 
     const conflict: AgentReportIdentityConflict = {
-      reportedExternalId: report.externalId,
-      peerNodeId: peer.id,
-      peerLabel: peer.label,
-      discriminator,
+      ...conflictFacts,
       detectedAt: now.toISOString(),
     };
-    const created = await this.prisma.infraNode.create({
-      data: {
-        kind: 'PHYSICAL_HOST',
-        label: report.host.hostname,
-        status: 'ONLINE',
-        source: 'AGENT',
-        state: 'PENDING',
-        reportingSource: report.reportingSource,
-        externalId,
-        lastReportedAt: now,
-        agentVersion: report.agentVersion,
-        ...(primaryIpAddress !== undefined
-          ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
-          : {}),
-        specs: { ...blob, identityConflict: conflict },
-      },
-      select: { id: true, state: true },
-    });
+    let created: { id: string; state: AgentReportAck['state'] };
+    try {
+      created = await this.prisma.infraNode.create({
+        data: {
+          kind: 'PHYSICAL_HOST',
+          label: report.host.hostname,
+          status: 'ONLINE',
+          source: 'AGENT',
+          state: 'PENDING',
+          reportingSource: report.reportingSource,
+          externalId,
+          lastReportedAt: now,
+          agentVersion: report.agentVersion,
+          ...(primaryIpAddress !== undefined
+            ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
+            : {}),
+          specs: { ...blob, identityConflict: conflict },
+        },
+        select: { id: true, state: true },
+      });
+    } catch (err) {
+      // The SAME concurrent-report race the main ingest path has handled since #1012, and it bites
+      // harder here: a newly-detected clone reporting from two processes at once would 500 at exactly
+      // the moment the operator most needs a clear signal. The derived key is deterministic, so the
+      // racing report inserted the very row we wanted — re-resolve it and refresh (ack, never 409).
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        const raced = await this.prisma.infraNode.findFirst({
+          where: { reportingSource: report.reportingSource, externalId },
+          select: { id: true, assetId: true, ipAddressSource: true },
+        });
+        // No loop and no nudge: after P2002 the row exists, and the report that WON it emitted the
+        // notification already (the dedupe key is identical, so a second emit would be dropped
+        // anyway). If the row somehow isn't there — soft-deleted in the same instant — rethrow the
+        // original error rather than invent one.
+        if (raced) return refreshWithMarker(raced);
+      }
+      throw err;
+    }
+
+    // Corroborating detail only — the two hosts agreeing on a name is the template signature, and it
+    // never gated the detection (see `isClonedMachineId`).
+    const sharesHostname =
+      incoming.hostname.length > 0 &&
+      stored.hostname.toLowerCase() === incoming.hostname.toLowerCase();
 
     this.logger.warn(
       `Two hosts are reporting externalId ${report.externalId}: "${peer.label}" (${peer.id}) and ` +
@@ -579,8 +657,15 @@ export class InfraService {
       // conflict detected" as an opener would leave them exactly as stuck as the silence did.
       summary:
         `Run \`systemd-firstboot --setup-machine-id\` on the clones — "${report.host.hostname}" and ` +
-        `"${peer.label}" report the same machine-id but different hardware, so they are two servers, ` +
-        `not one. Almost always a cloned VM template or golden image. Nothing was merged: the new host ` +
+        `"${peer.label}" report the same machine-id but a different hardware serial AND different ` +
+        `network cards, so they are two servers, not one. ` +
+        // Hostname is NOT part of the rule (a golden image bakes it in alongside the machine-id), but
+        // it is the detail that makes the message make sense: without this the operator reads what
+        // looks like one name twice and assumes the alert is confused.
+        (sharesHostname
+          ? `They also report the same hostname ("${incoming.hostname}") — the golden-image signature. `
+          : '') +
+        `Almost always a cloned VM template or golden image. Nothing was merged: the new host ` +
         `is waiting in the review tray.`,
       // No entityType — the bell deep-links this type to the topology map, like agent_offline.
       metadata: {
@@ -1149,9 +1234,22 @@ export class InfraService {
    *
    * THE ARCHIVED SOURCE IS THE AUDIT TRAIL. There is no `InfraNodeHistory` table (ADR-0074 §8 states
    * that plainly), so rather than pretend otherwise this stamps the merge onto the row it soft-deletes:
-   * who merged it, into what, when, and the key it carried. That row can never be overwritten by
-   * another report — a soft-deleted node no longer matches the dedup lookup — which is exactly why the
-   * record goes there and not onto the target, whose `specs` are rewritten wholesale every 15 minutes.
+   * who merged it, into what, when, the key it carried, and — when the target had one — the key that
+   * key REPLACED. That row can never be overwritten by another report — a soft-deleted node no longer
+   * matches the dedup lookup — which is exactly why the record goes there and not onto the target,
+   * whose `specs` are rewritten wholesale every 15 minutes.
+   *
+   * THE ARCHIVED SOURCE IS ALSO RESTORABLE. Its `reportingSource`/`externalId` are CLEARED as it is
+   * archived, because the same pair is being written onto the target and the partial-unique dedup
+   * index would refuse to bring the row back (a soft delete that cannot be undone is not the soft
+   * delete [[0006-soft-delete-and-auditing]] promises). Restoring it returns the row and its curation
+   * — never the reporting key, which now belongs to the node it was merged into.
+   *
+   * A MERGE CAN DESTROY A LIVE REPORTING KEY. The re-image case always does: the target still carries
+   * the key it had before the reinstall. That key is not saved anywhere on the live graph — the target
+   * has exactly one — so it is recorded on the archived row (`replacedTargetKey`) and logged. The
+   * consequence is worth knowing: if a host is still reporting under the replaced key, it now matches
+   * no live node and comes back as a fresh PENDING proposal.
    *
    * The source's linked Asset (if any) is deliberately left alone, matching `removeNode`: archiving a
    * node has never detached or soft-deleted its Asset, and a merge is not the place to invent that.
@@ -1186,12 +1284,26 @@ export class InfraService {
     }
     // The collision marker belongs to the row that WAS the duplicate; the merge is its resolution.
     for (const key of REPORT_DIAGNOSTIC_KEYS) delete mergedSpecs[key];
+    // The key the transplant OVERWRITES, when the target had one of its own. A node holds exactly one
+    // reporting key, so this value exists nowhere else the moment the write lands.
+    const replacedTargetKey =
+      target.reportingSource && target.externalId
+        ? {
+            reportingSource: target.reportingSource,
+            externalId: target.externalId,
+          }
+        : undefined;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.infraNode.update({
         where: { id: sourceId },
         data: {
           deletedAt: now,
+          // Cleared so the archived row can be RESTORED: the pair is about to live on the target, and
+          // the partial-unique index over live rows admits exactly one holder. The marker below keeps
+          // the value for the audit trail.
+          reportingSource: null,
+          externalId: null,
           specs: {
             ...sourceSpecs,
             [INFRA_MERGED_INTO_MARKER]: {
@@ -1201,6 +1313,7 @@ export class InfraService {
               reportingSource: source.reportingSource,
               at: now.toISOString(),
               ...(userId !== undefined ? { byUserId: userId } : {}),
+              ...(replacedTargetKey ? { replacedTargetKey } : {}),
             },
           },
         },
@@ -1224,7 +1337,10 @@ export class InfraService {
     });
 
     this.logger.log(
-      `Merged node ${sourceId} into ${targetNodeId}: reporting key ${source.reportingSource}/${source.externalId} transplanted, duplicate archived.`,
+      `Merged node ${sourceId} into ${targetNodeId}: reporting key ${source.reportingSource}/${source.externalId} transplanted, duplicate archived.` +
+        (replacedTargetKey
+          ? ` It REPLACED the target's own key ${replacedTargetKey.reportingSource}/${replacedTargetKey.externalId}, which is now held by no live node — a host still reporting under it returns as a new proposal.`
+          : ''),
     );
     // The duplicate is off the map; the adopting node changed enough to re-project (ADR-0035).
     this.search.remove('infra', sourceId);
@@ -1603,6 +1719,10 @@ export type AgentReportIdentityConflict = {
   peerNodeId: string;
   peerLabel: string;
   discriminator: string;
+  /**
+   * When the collision was FIRST seen — read back and carried across every re-stamp, so the marker
+   * says how long it has been true rather than only "still true as of the last check-in".
+   */
   detectedAt: string;
 };
 
@@ -1636,6 +1756,10 @@ const AGENT_OWNED_SPECS_KEYS = ['host', 'software', 'reportedAt'] as const;
  * table (ADR-0074 §8), so the soft-deleted row IS the audit trail — and unlike the adopting node, it
  * can never be overwritten by a later report, because a soft-deleted node no longer matches the dedup
  * lookup. Underscore-prefixed like `_infraAutoCreated`, marking it as provenance rather than a fact.
+ *
+ * It carries `{ nodeId, label, externalId, reportingSource, at, byUserId?, replacedTargetKey? }` — the
+ * reporting key the archived row gave up (its own columns are cleared so it stays restorable), and,
+ * when the target already had one, the key the transplant destroyed.
  */
 const INFRA_MERGED_INTO_MARKER = '_infraMergedInto';
 
