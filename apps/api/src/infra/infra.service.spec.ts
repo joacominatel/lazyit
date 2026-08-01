@@ -2277,11 +2277,23 @@ describe('InfraService', () => {
     it('NEVER splits a legacy node: no stored identifiers ⇒ the pre-#1141 refresh, and no nudge', async () => {
       // The load-bearing upgrade promise. Every row stored before contract v2 carries no
       // `identifiers[]`, so absence must read as "nothing to corroborate", never as "a different host".
-      prisma.infraNode.findFirst.mockResolvedValue(ORIGINAL);
+      //
+      // The `null` on the SECOND lookup is what makes this test bite. A blanket mock would hand the
+      // collision branch the same owner row when it goes looking for the clone's own node, so a
+      // wrongly-detected split would silently degenerate back into the refresh path and every
+      // assertion below would still pass — the test would assert the promise without testing it.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL) // the key's current owner
+        .mockResolvedValueOnce(null); // only ever reached if the rule wrongly fires
       prisma.$queryRaw.mockResolvedValue(storedHost('web-01'));
       prisma.infraNode.update.mockResolvedValue({
         id: 'node-1',
         state: 'CONFIRMED',
+      });
+      // So that a regression fails on the assertion below rather than on a null dereference.
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
       });
 
       const ack = await service.ingestReport(
@@ -2299,7 +2311,11 @@ describe('InfraService', () => {
     });
 
     it('NEVER splits when the evidence still corroborates (same serial, swapped NIC, new name)', async () => {
-      prisma.infraNode.findFirst.mockResolvedValue(ORIGINAL);
+      // Same reason as above: the second lookup must NOT hand back the owner row, or a rule that
+      // wrongly widened "all three differ" into "any one differs" would still look like a refresh.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce(null);
       prisma.$queryRaw.mockResolvedValue(
         storedHost('web-01', [
           { kind: 'serial', value: 'SN-ALPHA' },
@@ -2309,6 +2325,10 @@ describe('InfraService', () => {
       prisma.infraNode.update.mockResolvedValue({
         id: 'node-1',
         state: 'CONFIRMED',
+      });
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
       });
 
       await service.ingestReport(
