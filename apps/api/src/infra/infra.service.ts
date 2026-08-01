@@ -14,6 +14,7 @@ import {
   hostIdentityEvidence,
   identityDiscriminator,
   inferNodeKind,
+  INFRA_NODE_ASSET_REPOINT_ERROR,
   isClonedMachineId,
   isNewerVersion,
   isPlausibleEdge,
@@ -1835,8 +1836,32 @@ export class InfraService {
    * was AUTO-CREATED by a node (carries the provenance marker), it is SOFT-DELETED (it must not linger
    * in inventory owned-by-nobody); if it PRE-EXISTED, the node only nulls `assetId` and the asset is
    * left intact. Any other field is a plain update. 404 if the node is missing/soft-deleted.
+   *
+   * DETACH IS THE ONLY ASSET-LINKAGE EDIT A PATCH MAY MAKE (ADR-0070 §5 note, #1117). A non-null
+   * `assetId` — a RE-POINT — is refused with a 400. It used to be written straight through, and did
+   * two wrong things at once:
+   *
+   *  1. It linked with NO liveness check. `createNode` calls `assets.assertExists`, whose `findFirst`
+   *     the soft-delete extension scopes to live rows; this never called it. The FK only requires the
+   *     row to EXIST and a DISCARDED asset's row does, so a soft-deleted asset went straight into the
+   *     column. (A wholly non-existent id was at least stopped — by the FK, as a generic
+   *     `Invalid reference` 400 rather than the clean 404 `assertExists` gives.)
+   *  2. It dropped the previous link WITHOUT running the §5 detach below, leaving an auto-created
+   *     backing Asset live in inventory owned by nobody.
+   *
+   * Refusing closes both halves and leaves delete semantics exactly as ADR-0070 §5 wrote them — the
+   * alternative, auto-soft-deleting the asset a re-point orphaned, would delete a row a human may
+   * have curated.
+   *
+   * `UpdateInfraNodeSchema` refuses the same shape at the contract boundary, so an HTTP caller is
+   * stopped before this method runs and the guard below is unreachable through the API. It is here
+   * because this is the layer that writes `assetId` to the row, and a guarantee that holds only as
+   * long as one particular pipe ran is not a guarantee.
    */
   async updateNode(id: string, data: UpdateInfraNode, principal?: Principal) {
+    if (data.assetId !== undefined && data.assetId !== null) {
+      throw new BadRequestException(INFRA_NODE_ASSET_REPOINT_ERROR);
+    }
     const node = await this.getNode(id);
 
     // Detach branch: assetId explicitly set to null while a link exists → run the §5 detach semantics.
