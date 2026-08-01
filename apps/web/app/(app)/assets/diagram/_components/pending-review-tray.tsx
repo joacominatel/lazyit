@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowsPointingInIcon,
   CheckIcon,
   InboxArrowDownIcon,
   TrashIcon,
@@ -19,15 +20,21 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { AgentBadge, AgentFreshness } from "./agent-provenance";
 import { ConfirmNodeDialog } from "./confirm-node-dialog";
 import { DeleteNodeDialog } from "./delete-node-dialog";
+import { MergeNodeDialog } from "./merge-node-dialog";
 
 /**
  * The PENDING review tray (ADR-0074 §3) — the human gate over agent-discovered hosts. The reporting
  * agent lands every new host as `state=PENDING`, `source=AGENT`; the official inventory is never
  * mutated by a machine without human approval (the trust call, §1/§8). This surfaces those proposals
- * at the top of the Servers (Table) view with two actions per row:
+ * at the top of the Servers (Table) view with three actions per row:
  *
  *  - **Confirm** → {@link ConfirmNodeDialog} (`POST /infra/nodes/:id/confirm`): flips to CONFIRMED and,
  *    by default, mints a tracked Asset.
+ *  - **Merge into** → {@link MergeNodeDialog} (`POST /infra/nodes/:id/merge-into`, ADR-0074 §3 /
+ *    #1141): this proposal is a host the estate ALREADY has — a re-imaged box that came back with a
+ *    new `/etc/machine-id`, or a clone the report path separated out. Moves the reporting key onto the
+ *    existing node and archives this row, so the curated node keeps receiving reports instead of
+ *    drifting OFFLINE beside a duplicate.
  *  - **Discard** → {@link DeleteNodeDialog}. ponytail: discard = the existing soft-delete
  *    (`DELETE /infra/nodes/:id`), NO new endpoint — a discarded proposal is restorable, history kept.
  *
@@ -51,6 +58,9 @@ export function PendingReviewTray() {
     null,
   );
   const [discardTarget, setDiscardTarget] = useState<InfraNodeListItem | null>(
+    null,
+  );
+  const [mergeTarget, setMergeTarget] = useState<InfraNodeListItem | null>(
     null,
   );
 
@@ -105,6 +115,14 @@ export function PendingReviewTray() {
               <Button
                 size="sm"
                 variant="outline"
+                onClick={() => setMergeTarget(node)}
+              >
+                <ArrowsPointingInIcon />
+                {t("mergeAction")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 className="text-destructive hover:text-destructive"
                 onClick={() => setDiscardTarget(node)}
               >
@@ -122,6 +140,15 @@ export function PendingReviewTray() {
           open
           onOpenChange={(open) => !open && setConfirmTarget(null)}
           node={confirmTarget}
+        />
+      ) : null}
+
+      {mergeTarget ? (
+        <MergeNodeDialog
+          key={mergeTarget.id}
+          open
+          onOpenChange={(open) => !open && setMergeTarget(null)}
+          node={mergeTarget}
         />
       ) : null}
 
