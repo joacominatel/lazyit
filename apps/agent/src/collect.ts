@@ -15,7 +15,7 @@ import { hostname as osHostname } from "node:os";
 import {
   AGENT_WARNING_LENGTH_MAX,
   AGENT_WARNINGS_MAX,
-  normalizeIdentifierValue,
+  sanitizeIdentifierValue,
   selectPrimaryMac,
   type AgentChassis,
   type AgentIpv6Scope,
@@ -498,9 +498,13 @@ export function buildIdentifiers(facts: IdentifierFacts): Identifiers | undefine
   ] as const;
   const identifiers: Identifiers = [];
   for (const [kind, raw] of kinds) {
-    // Canonicalise HERE as well as at the schema, so what the agent prints locally and what the
-    // server stores are the same string — the contract owns the rule, this just applies it early.
-    const value = normalizeIdentifierValue(kind, raw ?? "").slice(0, 200);
+    // Canonicalise AND sanitize HERE as well as at the schema, so what the agent prints locally and
+    // what the server stores are the same string — the contract owns both rules, this applies them
+    // early. Sanitizing matters more than normalising: an OEM placeholder like `Default string` is
+    // shared by every unflashed board of its model, so shipping it would let #1141 corroborate two
+    // unrelated hosts into one. An identifier that sanitizes to nothing is OMITTED, never emitted
+    // with an empty value.
+    const value = sanitizeIdentifierValue(kind, raw ?? "")?.slice(0, 200);
     if (value) identifiers.push({ kind, value });
   }
   return identifiers.length ? identifiers : undefined;
