@@ -61,10 +61,13 @@ export interface ResolvedAutoConfirm {
  *
  * The gate is not weakened. §1 rejected BLANKET auto-confirm, and this does not reopen it:
  *
- *  - a rule must state at least one condition that can rule a proposal OUT (a hostname pattern is not
- *    one if it is all wildcards, and `0.0.0.0/0` is not one either) — refused by the contract on
- *    write, by this service on the merged patch, and by the matcher on read, so neither a
- *    hand-inserted row nor a row left by an older build can become a blanket rule;
+ *  - a rule must state at least one condition that can rule a proposal OUT. A hostname pattern made
+ *    only of wildcards is not one — most such patterns (`*`, `**`, `*?*`) match every hostname there
+ *    is, and the few that do narrow (`?` alone matches only one-character names) are refused with
+ *    them conservatively, so "carries a literal character" stays a line an operator can check by
+ *    looking. `0.0.0.0/0` is not one either, and there the claim is exact: it is every address there
+ *    is. Refused by the contract on write, by this service on the merged patch, and by the matcher on
+ *    read, so neither a hand-inserted row nor a row left by an older build can become a blanket rule;
  *  - a human authored it, and `createdById` records which human;
  *  - a human can disable or delete it, at which point it stops matching immediately;
  *  - and it is **never retroactive**. Rules are consulted on the report CREATE branch and nowhere
@@ -148,7 +151,7 @@ export class InfraAutoConfirmService {
     };
     if (!statesAutoConfirmCondition(merged)) {
       throw new BadRequestException(
-        'A rule must keep at least one condition that can rule a proposal OUT: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A rule left with none would auto-confirm everything, which ADR-0074 §1 rejected.',
+        'This patch would leave the rule with no condition that can rule a proposal OUT, so it would auto-confirm every proposal in its scope — which ADR-0074 §1 rejected. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern made only of wildcards does not count: most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them conservatively. Dropping one condition while another survives is fine.',
       );
     }
 
