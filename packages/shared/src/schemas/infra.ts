@@ -1082,12 +1082,16 @@ export const AgentReportSchema = z.object({
    * it is the claim being checked. A list that ARRIVES is fingerprinted by the server itself with this
    * same function, so what a node stores is always the server's own reading of what it stored — which
    * is what lets the server skip an unchanged write for a client that sends no fingerprint at all, an
-   * attacker included. An omission that ARRIVES WITH a fingerprint and fails to corroborate — the node
-   * holds no list, or one fingerprinted differently — is never resolved by guessing: the stored list is
-   * kept (never wiped on a doubt) and the ack asks for a full resend. That is what makes the delta
-   * self-healing across a discarded-and-rediscovered node, a restore from backup, and a merge. Note the
-   * limit of that guarantee: the resend request is keyed on a fingerprint HAVING arrived, so an
-   * `unchanged` claim carrying none is preserved without one.
+   * attacker included. An omission the server cannot corroborate — the node holds no list, holds one
+   * fingerprinted differently, or the `unchanged` claim arrived carrying NO fingerprint at all — is
+   * never resolved by guessing: the stored list is kept (never wiped on a doubt) and the ack asks for a
+   * full resend. That is what makes the delta self-healing across a discarded-and-rediscovered node, a
+   * restore from backup, and a merge.
+   *
+   * The third case is the one worth stating: a claim the server CANNOT check is the least corroborated
+   * of the three, so it is asked too. Keying the request on a fingerprint having arrived — which is
+   * what this shipped as, until the review of #1163 — trusted an unverifiable claim more than a
+   * verifiable one that failed, and on a brand-new node that meant a permanently empty inventory.
    */
   softwareHash: z
     .string()
@@ -1752,12 +1756,19 @@ export const AgentReportAckSchema = z.object({
    * "Send me the whole software list next time" (#1142) — the half of the delta that keeps it honest.
    *
    * The server sets it when a report claimed `softwareState: 'unchanged'` and it could NOT corroborate
-   * the claim: the node holds no list, or holds one whose stored fingerprint is not the one claimed.
-   * That happens for real — a node discarded and rediscovered starts empty while the agent's cache
-   * still says "unchanged", a restore from backup rewinds the stored list, a merge moves it — and
-   * without this the host's inventory would stay wrong until its packages happened to change, which on
+   * the claim: the node holds no list, holds one whose stored fingerprint is not the one claimed, or
+   * the claim arrived with no `softwareHash` at all — a claim the server cannot check is the least
+   * corroborated of the three, not the most trusted. All three happen for real: a node discarded and
+   * rediscovered starts empty while the agent's cache still says "unchanged", a restore from backup
+   * rewinds the stored list, a merge moves it, and a fingerprint that outgrows
+   * {@link AGENT_SOFTWARE_HASH_MAX} is stripped by the agent's OWN parse while the state survives.
+   * Without this the host's inventory would stay wrong until its packages happened to change, which on
    * a stable server is months. The server NEVER resolves the doubt by wiping: it keeps what it has and
    * asks. The agent answers by dropping its cached fingerprint, so the next report carries everything.
+   *
+   * NOT set for `unavailable`. It preserves the stored list identically, but it never claimed to HAVE
+   * one — asking it to resend would ask a collector that could not enumerate, forever, for something it
+   * does not have. A fingerprint that arrives beside it is still checked.
    *
    * OPTIONAL in both directions, like `policy`: a pre-#1142 server omits it, and a pre-#1142 agent
    * reads the ack loosely — a handful of named keys, never a schema — so one it does not know is
