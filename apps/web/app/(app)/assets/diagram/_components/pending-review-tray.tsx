@@ -11,6 +11,7 @@ import {
 } from "@heroicons/react/24/outline";
 import {
   hostExternalIdOfContainerChild,
+  INFRA_BULK_REVIEW_MAX,
   InfraNodeKindSchema,
   ipInCidr,
   isContainerChildExternalId,
@@ -19,7 +20,7 @@ import {
   type InfraNodeListItem,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -43,6 +44,7 @@ import { BulkConfirmDialog, BulkDiscardDialog } from "./bulk-review-dialogs";
 import { ConfirmNodeDialog } from "./confirm-node-dialog";
 import { DeleteNodeDialog } from "./delete-node-dialog";
 import { MergeNodeDialog } from "./merge-node-dialog";
+import { exceedsBulkReviewCap, pruneHiddenFromSelection } from "./tray-selection";
 
 /** Sort orders the tray offers. Every one is a total order over the loaded rows (no server paging). */
 type SortKey = "firstSeenDesc" | "firstSeenAsc" | "labelAsc" | "labelDesc";
@@ -79,7 +81,9 @@ interface TrayGroup {
  *  - **Checkboxes + bulk confirm / discard** ({@link BulkConfirmDialog}), which apply the SAME
  *    per-node overrides the single confirm takes. `trackAsAsset` defaults ON for hosts and OFF for
  *    container children (`defaultTrackAsAsset`) so a bulk confirm of one Docker host does not mint
- *    thirty Assets nobody will curate.
+ *    thirty Assets nobody will curate. The selection is always the VISIBLE set — a row a filter
+ *    hides leaves it — and a selection over `INFRA_BULK_REVIEW_MAX` disables the two actions with
+ *    the reason shown, rather than letting the contract reject the whole batch after the work.
  *  - **Filter + sort**, entirely client-side over the already-loaded lean list (#1135 removed `specs`
  *    from it, and nothing here re-fattens it — a checkbox row reads `label`, `kind`, `ipAddress`,
  *    `createdAt` and `externalId`, all of which the list projection already carries).
@@ -223,10 +227,21 @@ export function PendingReviewTray() {
   }, [rows, hostLabels, sort]);
 
   const visibleIds = useMemo(() => rows.map((node) => node.id), [rows]);
+  // A bulk action reaches EXACTLY what the operator can see. Deriving the acted-on nodes from the
+  // VISIBLE rows is the half that makes it true on the click; the effect below is the half that makes
+  // the COUNT true, by forgetting a row the moment a filter hides it. Both are in `tray-selection.ts`,
+  // where they are tested — they were prose promises before, and prose cannot be held to account.
   const selectedNodes = useMemo(
-    () => pending.filter((node) => selected.has(node.id)),
-    [pending, selected],
+    () => rows.filter((node) => selected.has(node.id)),
+    [rows, selected],
   );
+
+  useEffect(() => {
+    setSelected((prev) => pruneHiddenFromSelection(prev, visibleIds));
+  }, [visibleIds]);
+
+  /** A batch is bounded by the contract (`INFRA_BULK_REVIEW_MAX`); the tray refuses before the API does. */
+  const overCap = exceedsBulkReviewCap(selectedNodes.length);
 
   function toggle(ids: string[], next: boolean): void {
     setSelected((prev) => {
@@ -345,7 +360,8 @@ export function PendingReviewTray() {
       </div>
 
       {/* Selection bar. The master checkbox covers what is VISIBLE, never what a filter hid — a
-          "select all" that silently reached filtered-out rows would be the worst kind of bulk action. */}
+          "select all" that silently reached filtered-out rows would be the worst kind of bulk action —
+          and narrowing a filter drops the rows it hides from the selection (see the effect above). */}
       <div className="flex flex-wrap items-center gap-3 rounded-md border bg-card px-3 py-2">
         <label className="flex items-center gap-2 text-xs font-medium">
           <Checkbox
@@ -361,7 +377,7 @@ export function PendingReviewTray() {
         <div className="ml-auto flex items-center gap-2">
           <Button
             size="sm"
-            disabled={selectedNodes.length === 0}
+            disabled={selectedNodes.length === 0 || overCap}
             onClick={() => setBulkConfirmOpen(true)}
           >
             <CheckIcon />
@@ -371,13 +387,20 @@ export function PendingReviewTray() {
             size="sm"
             variant="outline"
             className="text-destructive hover:text-destructive"
-            disabled={selectedNodes.length === 0}
+            disabled={selectedNodes.length === 0 || overCap}
             onClick={() => setBulkDiscardOpen(true)}
           >
             <TrashIcon />
             {t("bulkDiscardAction")}
           </Button>
         </div>
+        {/* Said BEFORE the request, next to the disabled buttons, rather than as a toast after the
+            operator has done the selecting: the cap is the contract's, and this is where it is met. */}
+        {overCap ? (
+          <p className="w-full text-xs text-destructive">
+            {t("overCap", { max: INFRA_BULK_REVIEW_MAX, count: selectedNodes.length })}
+          </p>
+        ) : null}
       </div>
 
       {groups.length === 0 ? (
