@@ -7,6 +7,8 @@ import {
   AGENT_POLICY_INTERVAL_MAX_SECONDS,
   AGENT_POLICY_INTERVAL_MIN_SECONDS,
   AGENT_POLICY_SOFTWARE_MAX,
+  AGENT_POLICY_STALE_MAX_SECONDS,
+  AGENT_POLICY_STALE_MIN_SECONDS,
   AGENT_POLICY_TICK_SECONDS,
   AgentPolicyGlobSchema,
   type AgentPolicyCollect,
@@ -53,6 +55,13 @@ const COLLECTORS: readonly (keyof AgentPolicyCollect)[] = [
 /** Minutes ↔ seconds, so the operator types the unit they actually think in. */
 const MIN_MINUTES = AGENT_POLICY_INTERVAL_MIN_SECONDS / 60;
 const MAX_MINUTES = AGENT_POLICY_INTERVAL_MAX_SECONDS / 60;
+/**
+ * The staleness field has its OWN bounds, and they are not the interval's: the schema floors it at
+ * one tick and ceils it at 7 days. Validating only the floor let an operator type a value the API
+ * would reject, turning a fixable typo into a failed save with a 400 behind it.
+ */
+const STALE_MIN_MINUTES = AGENT_POLICY_STALE_MIN_SECONDS / 60;
+const STALE_MAX_MINUTES = AGENT_POLICY_STALE_MAX_SECONDS / 60;
 
 /** The editable shape — everything the form holds, flattened out of the nested policy groups. */
 interface FormState {
@@ -180,11 +189,14 @@ export function AgentPolicyEditor() {
     intervalMinutes > MAX_MINUTES
       ? t("interval.invalid", { min: MIN_MINUTES, max: MAX_MINUTES })
       : undefined;
-  // The staleness floor must clear the reporting interval, or the sweeper marks a perfectly healthy
-  // host OFFLINE between two of its own reports — the false outage this whole field exists to stop.
+  // Two independent constraints, both real. The RANGE is the schema's own (one tick to 7 days), and
+  // the RELATIONSHIP is that it must clear the reporting interval, or the sweeper marks a perfectly
+  // healthy host OFFLINE between two of its own reports — the false outage this field exists to stop.
   const staleError =
-    staleMinutes === undefined || staleMinutes < MIN_MINUTES
-      ? t("stale.invalid", { min: MIN_MINUTES })
+    staleMinutes === undefined ||
+    staleMinutes < STALE_MIN_MINUTES ||
+    staleMinutes > STALE_MAX_MINUTES
+      ? t("stale.invalid", { min: STALE_MIN_MINUTES, max: STALE_MAX_MINUTES })
       : intervalMinutes !== undefined && staleMinutes <= intervalMinutes
         ? t("stale.belowInterval")
         : undefined;
