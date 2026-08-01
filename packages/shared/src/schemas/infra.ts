@@ -1759,6 +1759,34 @@ export const AgentReportAckSchema = z.object({
    * reads two fields off the ack and ignores the rest.
    */
   softwareResend: z.boolean().optional(),
+  /**
+   * "I understand `softwareState`" (#1142) — the capability handshake the delta is GATED on, and the
+   * reason the delta cannot silently destroy an inventory.
+   *
+   * {@link AgentReportSchema}'s root is a LOOSE `z.object()`, which is the #1138 decision that stops a
+   * newer agent from 400-ing itself off the map against an older instance. Its cost is that an older
+   * instance does not reject what it does not know — it silently STRIPS it. So a #1142 agent that
+   * omitted its package list against a server built before this field would have its `softwareState`
+   * and `softwareHash` dropped on the way in; that server would see no `software` key, read it the only
+   * way it knows how, and CLEAR the stored list. And because the agent believes the list is unchanged,
+   * it would never send it again: the host's inventory would be gone permanently, with no error
+   * anywhere. `agentReportSkewPaths` would RECORD the strip on the node — recording is not preventing.
+   *
+   * So the agent may not omit anything until it has positive evidence, and this is that evidence. It
+   * is a statement about the BUILD, not about the report, so every ack carries it; the agent caches it
+   * beside its fingerprint and acts on it from the NEXT run, exactly as it does with `policy`. Until it
+   * sees this the agent sends the whole list every time — degrading to the pre-#1142 bandwidth, never
+   * to data loss.
+   *
+   * It is also self-healing DOWNWARDS: an instance rolled back to a pre-#1142 build stops sending the
+   * key, the agent drops the cached evidence on that ack, and its next report carries the full list
+   * again. That leaves exactly one report's worth of exposure to the old clearing behaviour — one
+   * reporting interval of an empty panel, self-repaired — against permanent, silent loss without it.
+   *
+   * OPTIONAL in both directions, like `policy` and `softwareResend`: a pre-#1142 server omits it, and
+   * a pre-#1142 agent reads two fields off the ack and ignores the rest.
+   */
+  softwareDelta: z.boolean().optional(),
 });
 export type AgentReportAck = z.infer<typeof AgentReportAckSchema>;
 
