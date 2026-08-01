@@ -558,7 +558,7 @@ export class InfraService {
         ...(primaryIpAddress !== undefined
           ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
           : {}),
-        specs: { ...blob, identityConflict: conflict } as Prisma.InputJsonValue,
+        specs: { ...blob, identityConflict: conflict },
       },
       select: { id: true, state: true },
     });
@@ -1202,7 +1202,7 @@ export class InfraService {
               at: now.toISOString(),
               ...(userId !== undefined ? { byUserId: userId } : {}),
             },
-          } as Prisma.InputJsonValue,
+          },
         },
       });
       await tx.infraNode.update({
