@@ -7,6 +7,7 @@ import {
 import {
   defaultTrackAsAsset,
   firstMatchingAutoConfirmRule,
+  statesAutoConfirmCondition,
   type CreateInfraAutoConfirmRule,
   type InfraAutoConfirmCandidate,
   type InfraAutoConfirmRule,
@@ -60,8 +61,10 @@ export interface ResolvedAutoConfirm {
  *
  * The gate is not weakened. §1 rejected BLANKET auto-confirm, and this does not reopen it:
  *
- *  - a rule must state at least one condition — refused by the contract on write and by the matcher on
- *    read, so neither a hand-inserted row nor a row left by an older build can become a blanket rule;
+ *  - a rule must state at least one condition that can rule a proposal OUT (a hostname pattern is not
+ *    one if it is all wildcards, and `0.0.0.0/0` is not one either) — refused by the contract on
+ *    write, by this service on the merged patch, and by the matcher on read, so neither a
+ *    hand-inserted row nor a row left by an older build can become a blanket rule;
  *  - a human authored it, and `createdById` records which human;
  *  - a human can disable or delete it, at which point it stops matching immediately;
  *  - and it is **never retroactive**. Rules are consulted on the report CREATE branch and nowhere
@@ -89,11 +92,14 @@ export class InfraAutoConfirmService {
   }
 
   /**
-   * Save a new rule. `trackAsAsset` defaults through the SHARED {@link defaultTrackAsAsset} — ON for a
-   * host rule, OFF for a container rule — so the rule form, the bulk dialog and this default can never
-   * disagree about what a container should do. The DB column's own default is the host value; this
-   * always passes an explicit boolean, so the column default is only ever the fallback for a row
-   * written by something other than this method.
+   * Save a new rule. `trackAsAsset` defaults through the SHARED {@link defaultTrackAsAsset}, and the
+   * argument is *"can this rule reach a container child?"* rather than *"is this a CONTAINER rule?"* —
+   * so an `ANY` rule takes the child default (OFF) too. That is what makes the claim true rather than
+   * nearly true: no default anywhere — tray, bulk dialog or rule — mints an Asset for a container.
+   * An operator who wants one says so explicitly, in the form, and that choice is honoured.
+   *
+   * The DB column's own default is the host value; this always passes an explicit boolean, so the
+   * column default is only ever the fallback for a row written by something other than this method.
    */
   async create(dto: CreateInfraAutoConfirmRule, principal?: Principal) {
     const appliesTo = dto.appliesTo ?? 'HOST';
@@ -107,7 +113,7 @@ export class InfraAutoConfirmService {
         reportedKind: dto.reportedKind ?? null,
         confirmAsKind: dto.confirmAsKind ?? null,
         trackAsAsset:
-          dto.trackAsAsset ?? defaultTrackAsAsset(appliesTo === 'CONTAINER'),
+          dto.trackAsAsset ?? defaultTrackAsAsset(appliesTo !== 'HOST'),
         // The human who authored the decision. A non-human caller cannot reach here (the route is
         // HumanOnlyGuard-ed), and if one ever did the rule is stored unattributed rather than under a
         // fabricated user id.
@@ -119,9 +125,10 @@ export class InfraAutoConfirmService {
   }
 
   /**
-   * Patch a rule. The merged result is re-checked for at least one condition: the patch shape alone
-   * cannot see the stored row, so a patch that nulls the only remaining condition would otherwise
-   * store a blanket rule through the one door the create contract closes.
+   * Patch a rule. The merged result is re-checked with the SAME shared predicate the create contract
+   * uses: the patch shape alone cannot see the stored row, so a patch that nulls the only remaining
+   * condition — or widens it to `*` / `0.0.0.0/0`, which is the same blanket rule spelled differently
+   * — would otherwise store one through the one door the create contract closes.
    */
   async update(id: string, dto: UpdateInfraAutoConfirmRule) {
     const existing = await this.prisma.infraAutoConfirmRule.findFirst({
@@ -139,13 +146,9 @@ export class InfraAutoConfirmService {
       reportedKind:
         'reportedKind' in dto ? dto.reportedKind : existing.reportedKind,
     };
-    if (
-      merged.hostnamePattern == null &&
-      merged.subnetCidr == null &&
-      merged.reportedKind == null
-    ) {
+    if (!statesAutoConfirmCondition(merged)) {
       throw new BadRequestException(
-        'A rule must keep at least one condition (hostname pattern, subnet or reported kind). A rule with none would auto-confirm everything, which ADR-0074 §1 rejected.',
+        'A rule must keep at least one condition that can rule a proposal OUT: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A rule left with none would auto-confirm everything, which ADR-0074 §1 rejected.',
       );
     }
 
