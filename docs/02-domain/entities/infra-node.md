@@ -112,6 +112,12 @@ Enums: `InfraNodeKind` = `PHYSICAL_HOST` · `VM` · `CONTAINER` · `CLUSTER` · 
 
 Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDING review-tray query).
 
+> **No reporter column, deliberately (#1134).** The `POST /infra/report` throttles bound agent row
+> creation by RATE, in memory, keyed on the server-resolved principal — so nothing on the row records
+> which service account reported it. Agent writes stay **unattributed**, exactly as ADR-0074 §8's
+> #1136 correction states. Per-reporter attribution becomes worth its migration only once
+> `install.sh` stops writing the same operator token on every host (#1146).
+
 ## Endpoints
 
 `apps/api/src/infra/` (`InfraModule`), all gated server-side (`infra:read` / `infra:manage`):

@@ -45,6 +45,7 @@ import { RequirePermission } from '../auth/require-permission.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
 import { HumanOnlyGuard } from '../secret-manager/human-only.guard';
+import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
@@ -85,13 +86,22 @@ export class InfraController {
   @Post('report')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('infra:report')
+  // THROTTLED (#1134): the permission alone bounded the blast radius but not the WRITE VOLUME — every
+  // unknown `externalId` mints a row carrying a `specs` jsonb blob, so a leaked token (or a
+  // misconfigured `OnUnitActiveSec=1s`) was an unbounded DB-fill on a self-hosted box. The guard caps
+  // reports per SERVICE ACCOUNT per window (never per IP — agents share an egress NAT); the service's
+  // enrollment limiter caps how many NEW nodes those reports may create per window.
+  @UseGuards(InfraReportRateLimitGuard)
   @ApiOperation({
     summary:
-      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet); a known host refreshes its inventory + liveness without touching human curation. Returns a minimal ack.',
+      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet); a known host refreshes its inventory + liveness without touching human curation. Rate-limited per service account, and a NEW host is refused (429) once that account has enrolled its per-window quota of newly discovered hosts — already-known hosts keep refreshing regardless. Returns a minimal ack.',
   })
   @ApiOkResponse({ type: AgentReportAckDto })
-  report(@Body() report: AgentReportDto) {
-    return this.infra.ingestReport(report);
+  report(
+    @Body() report: AgentReportDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.infra.ingestReport(report, principal);
   }
 
   // ── Nodes ──────────────────────────────────────────────────────────────────

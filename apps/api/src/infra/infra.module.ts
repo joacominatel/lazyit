@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { InfraController } from './infra.controller';
 import { InfraService } from './infra.service';
 import { InfraAgentStalenessSweeper } from './infra-agent-staleness.sweeper';
+import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
+import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { AssetsModule } from '../assets/assets.module';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
 import { ArticlesModule } from '../articles/articles.module';
@@ -28,7 +30,18 @@ import { NotificationsModule } from '../notifications/notifications.module';
   controllers: [InfraController],
   // InfraAgentStalenessSweeper: the periodic OFFLINE flip for stale agent nodes (ADR-0074 §4) — same
   // self-scheduled `setInterval` pattern as the other sweepers (no @nestjs/schedule dep).
-  providers: [InfraService, InfraAgentStalenessSweeper],
+  // InfraReportRateLimitGuard: the per-service-account throttle on POST /infra/report (#1134).
+  // InfraNodeEnrollmentLimiter: its row-growth counterpart (#1134) — how many NEW nodes one reporter
+  // may enroll per window. Both are registered here (not global) so their single-instance bucket maps
+  // are shared by every request to that one route — the same wiring SetupRateLimitGuard /
+  // LoginRateLimitGuard use in their modules. Singleton scope is load-bearing for both: a
+  // request-scoped provider would hand every call a fresh, empty map and silently disable the limit.
+  providers: [
+    InfraService,
+    InfraAgentStalenessSweeper,
+    InfraReportRateLimitGuard,
+    InfraNodeEnrollmentLimiter,
+  ],
   exports: [InfraService],
 })
 export class InfraModule {}

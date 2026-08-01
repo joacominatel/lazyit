@@ -37,6 +37,7 @@ import { SearchService } from '../search/search.service';
 import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
 import type { Principal } from '../auth/principal';
+import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 
 /** The node columns + linked Asset name `projectInfraNode` needs (the search projection shape). */
 const SEARCH_NODE_SELECT = {
@@ -77,6 +78,8 @@ export class InfraService {
     private readonly articles: ArticlesService,
     private readonly secrets: SecretManagerService,
     private readonly search: SearchService,
+    // The #1134 new-node enrollment throttle — charged on the ONE branch that grows the table.
+    private readonly enrollment: InfraNodeEnrollmentLimiter,
   ) {}
 
   /**
@@ -180,8 +183,21 @@ export class InfraService {
    *
    * ponytail: `kind` inference is deferred — the v1 contract carries no reliable virtualization hint,
    * so every agent host lands as `PHYSICAL_HOST`; the human re-kinds it (VM/CONTAINER/…) on confirm.
+   *
+   * THROTTLED (#1134): the CREATE branch — the only branch that adds a row — first charges the
+   * reporter's new-node enrollment budget ({@link InfraNodeEnrollmentLimiter}). The refresh branch is
+   * deliberately never charged: a known host checking in adds nothing, so the legitimate agent (one
+   * node, a report every 15 minutes) never touches this machinery at all — and a reporter that HAS
+   * tripped the limit keeps refreshing the hosts the operator already has, so a tripped limit can
+   * never manufacture a false outage on the topology map.
+   *
+   * The `principal` is used as an EPHEMERAL throttle key and is never persisted. ADR-0074 §8's #1136
+   * correction still holds in full: no `InfraNode` write records which service account produced it.
    */
-  async ingestReport(report: AgentReport): Promise<AgentReportAck> {
+  async ingestReport(
+    report: AgentReport,
+    principal?: Principal,
+  ): Promise<AgentReportAck> {
     // The inventory blob (ADR-0074 §2 / ADR-0007 jsonb posture): host facts + software under clear
     // keys, plus the report timestamp for provenance. Stored verbatim — validated already by
     // `AgentReportSchema` at the controller. `software` is omitted when the agent couldn't list it.
@@ -212,7 +228,7 @@ export class InfraService {
 
     if (existing) {
       // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
-      // human's and is deliberately left untouched.
+      // human's and is deliberately left untouched. NOT throttled — it adds no row (#1134).
       return this.refreshKnownNode(
         existing,
         blob,
@@ -221,6 +237,10 @@ export class InfraService {
         primaryIp,
       );
     }
+
+    // Unknown host ⇒ a NEW row. This is the only branch that can grow the table, so it is the only one
+    // the enrollment throttle charges (#1134).
+    this.enrollment.assertWithinBudget(principal);
 
     // New host: a PENDING proposal in the review tray. No backing Asset until a human confirms (§3).
     // Its `ipAddress` is seeded from the report (source=AGENT) so the topology card shows the IP with
@@ -298,7 +318,7 @@ export class InfraService {
     agentVersion: string,
     primaryIp: string | undefined,
   ): Promise<AgentReportAck> {
-    const data: Prisma.InfraNodeUpdateInput = {
+    const data: Prisma.InfraNodeUncheckedUpdateInput = {
       specs: blob,
       status: 'ONLINE',
       lastReportedAt: now,

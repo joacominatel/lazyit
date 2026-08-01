@@ -97,7 +97,10 @@ vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés do
   *"To be filled by O.E.M."*, o un serie que ya usa otro activo, se descarta). Desactivá el
   interruptor para dejar el nodo solo en el grafo.
 - **Descartar** — elimina la propuesta. Es un borrado lógico (igual que quitar cualquier nodo del
-  mapa): no se destruye nada y se puede restaurar más adelante.
+  mapa): no se destruye nada y se puede restaurar más adelante. **Descartar no detiene al agente.**
+  Si ese host todavía tiene el agente instalado y corriendo, su próximo reporte lo vuelve a informar
+  y reaparece como una propuesta nueva. Para que deje de aparecer, desinstalá el agente en ese host
+  — o revocá el token que usa.
 
 Un host descubierto también **completa su propia dirección IP** apenas reporta: no hace falta que la
 escribas. En cada reporte posterior la IP se actualiza al valor actual, **salvo que la hayas editado a
@@ -134,6 +137,20 @@ y no envía métricas.
 - **Autoalojado y compatible con redes aisladas.** El comando de instalación apunta a *tu* instancia,
   el agente solo se comunica con esa instancia y funciona totalmente sin conexión. Los tokens se pueden
   revocar en cualquier momento desde [Cuentas de servicio](/help/users-permissions-service-accounts).
+- **Límites de reporte.** Cada token está limitado de dos formas: **cada cuánto** puede reportar (por
+  defecto 120 veces por minuto) y **cuántos servidores recién descubiertos** puede agregar (por
+  defecto 100 por hora). Juntos protegen tu base de datos de un agente descontrolado o robado — un
+  token ya no puede llenarla de propuestas. Ambos valores por defecto asumen un parque de unos **100
+  servidores** compartiendo un mismo token de instalación, así que un despliegue normal nunca los
+  alcanza: los 100 servidores pueden descubrirse dentro de la primera hora. Dos cosas conviene saber.
+  Un servidor que **ya confirmaste sigue reportando pase lo que pase**: alcanzar un límite solo
+  demora los descubrimientos *nuevos*, nunca la disponibilidad ni el inventario de los servidores que
+  ya tenés, así que no puede hacer que tu mapa muestre una caída falsa. Y **no hay que limpiar nada**
+  para recuperarse: un agente rechazado simplemente tiene éxito en su próximo intento, en la ventana
+  siguiente. Qué tan llena esté tu bandeja de Pendientes no afecta estos límites en absoluto. ¿Vas a
+  desplegar más de 100 servidores de una vez? Dejá que se acomode en un par de horas, o subí
+  `INFRA_REPORT_MAX_NEW_NODES_PER_WINDOW` (y `INFRA_REPORT_MAX_PER_WINDOW`, los reportes permitidos
+  por minuto) en el entorno de tu instancia y reiniciala.
 
 ## Mantener el agente al día
 

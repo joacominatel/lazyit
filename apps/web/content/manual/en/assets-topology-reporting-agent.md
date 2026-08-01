@@ -91,7 +91,10 @@ how long ago it last reported. For each one you have two choices:
   *"To be filled by O.E.M."*, or a serial already used by another asset, is skipped). Turn the toggle
   off to keep the node graph-only.
 - **Discard** — removes the proposal. This is a soft delete (the same as removing any node from the
-  map): nothing is destroyed and it can be restored later.
+  map): nothing is destroyed and it can be restored later. **Discarding does not stop the agent.** If
+  that host still has the agent installed and running, its next check-in reports it again and it
+  comes back as a fresh proposal. To make it stop for good, uninstall the agent on that host — or
+  revoke the token it uses.
 
 A discovered host also **fills in its own IP address** the moment it reports — you don't have to type
 it. On every later report the IP is refreshed to the current value, **unless you've edited it by hand**
@@ -126,6 +129,19 @@ metrics.
 - **Self-hosted and air-gapped-safe.** The install command points at *your* instance, the agent talks
   only to that instance, and it works fully offline. Tokens are revocable any time from
   [Service accounts](/help/users-permissions-service-accounts).
+- **Report limits.** Each token is limited two ways: **how often** it may report (default 120 times
+  per minute) and **how many newly discovered servers** it may add (default 100 per hour). Together
+  they protect your database from a runaway or stolen agent — a token can no longer fill it with
+  proposals. Both defaults assume roughly a **100-server** estate sharing one install token, so a
+  normal rollout never hits them: all 100 servers can be discovered inside the first hour. Two things
+  are worth knowing. A server you've **already confirmed keeps reporting no matter what** — reaching
+  a limit delays only *new* discoveries, never the liveness and inventory of the servers you already
+  have, so it can never make your map show a false outage. And **nothing needs cleaning up** to
+  recover: an agent that was turned away simply succeeds on its next attempt in the following window.
+  How full your Pending tray is does not affect these limits at all. Rolling out more than 100
+  servers at once? Either let it settle over a couple of hours, or raise
+  `INFRA_REPORT_MAX_NEW_NODES_PER_WINDOW` (and `INFRA_REPORT_MAX_PER_WINDOW`, the reports allowed per
+  minute) in your instance's environment and restart it.
 
 ## Keeping the agent current
 

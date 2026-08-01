@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-06-27
+updated: 2026-07-31
 deciders: [Joaquín Minatel]
 ---
 
@@ -263,14 +263,65 @@ liveness bit of §4 reports a **false outage**. Now bounded in three layers:
   the UI. A "download, inspect, then run" path is available for the cautious; the one-liner is the
   default.
 
+**Amendment (2026-07-31, #1134) — throttling `POST /infra/report`.** The bullets above reason about
+**authorization** and are right: one permission, a human gate, no secret reach, and a leaked token buys
+nothing but PENDING proposals a human discards. They said nothing about **availability**, and that was
+the gap: the endpoint is a write amplifier. Every unknown `externalId` mints a row carrying a `specs`
+jsonb blob, so a leaked token — or, far likelier, a misconfigured `OnUnitActiveSec=1s` — was unbounded
+row creation and unbounded jsonb churn on a self-hosted box with no ceiling. "Spam a human discards" is
+true of the *inventory*; it is not true of the *database*. Two throttles close it, both keyed on the
+**server-resolved principal** and both **in-memory** — no new column, no FK, no index, no migration:
+
+- **Reports per window** (`InfraReportRateLimitGuard`, the fourth sibling of the
+  setup/login/password-reset limiters in [[0086-local-authentication-mode]]). Keyed on the SA id,
+  **never the IP**: reporting agents sit behind a shared egress NAT, so an IP bucket would let one
+  noisy agent starve every other host at the same site. The SA id is also the only *trustworthy* key —
+  `reportingSource` is a client-chosen body field an attacker rotates per request, while the SA is
+  resolved server-side from the bearer token. A non-service caller (a human role holding
+  `infra:report`) falls back to the verified `req.ip` rather than going unthrottled. Default
+  **120/min** (`INFRA_REPORT_MAX_PER_WINDOW`, `INFRA_REPORT_WINDOW_MS`).
+- **NEW nodes enrolled per window** (`InfraNodeEnrollmentLimiter`). The rate limit bounds how often a
+  reporter may *call*; this bounds how many of those calls may *grow the table*. Default **100 per
+  hour** (`INFRA_REPORT_MAX_NEW_NODES_PER_WINDOW`, `INFRA_REPORT_NEW_NODE_WINDOW_MS`), 429 past it.
+  Only the CREATE branch is charged — a known host's check-in adds no row and is never charged, so a
+  reporter that *has* tripped the limit keeps refreshing the hosts the operator already has and a
+  tripped limit can never manufacture a false outage on the map (§4).
+
+**The two defaults are coherent by construction:** both assume the same reference estate of **100
+hosts sharing one operator token**, which is the shape `install.sh` actually produces. 120 reports/min
+absorbs all 100 checking in inside one minute (a site-wide reboot re-arming every `Persistent=true`
+timer at once); 100 enrollments/hour lets that same estate enroll *completely* inside one window, so a
+greenfield rollout is refused by neither. Past that, growth is bounded at ~2,400 new rows/day instead
+of the ~172,800/day the rate limit alone would still allow.
+
+**Why a rate and not a stock cap.** The first design refused a report once the reporter already held
+*N live PENDING proposals*. It was rejected: it measures accumulation, not growth, so it punishes an
+operator with an untriaged tray exactly as hard as an attacker, and the only remedy it offers is to
+triage or delete rows — which an instance upgrading with a large existing tray must do *before* its
+next genuinely-new host can enroll. A rate has no such failure mode: pre-existing rows are irrelevant
+to it, and a throttled reporter recovers by **waiting**. It also needed a trustworthy per-reporter key
+*on the row* (a `reportedBySaId` FK), and per-SA isolation buys nothing today anyway — `install.sh`
+writes the same token on every host, so "per service account" is already "per estate". Real
+per-reporter isolation arrives with the enrollment-token → per-host-credential exchange (#1146); the
+in-memory key is ready for it, and no migration was paid in advance.
+
+**These are throttles, not hard ceilings** — stated plainly rather than overclaimed. The check is not
+transactional with the insert, so concurrent reports can overshoot a window by the number of requests
+in flight; the buckets are per-process, so N replicas allow N× the configured rate; and the window is
+fixed, not sliding, so a reporter can enroll up to 2× the rate across a boundary. What they convert is
+*unbounded* growth into *bounded* growth. The legitimate agent (one host, a report every 15 minutes)
+never approaches either.
+
 **Amendment (2026-07-31, #1136) — correction: agent writes are UNATTRIBUTED, by design.** The struck
 clause claimed a control this ADR does not have, in the one section that gets read precisely when
 someone is deciding whether the report endpoint is safe to expose. A security ADR that overstates its
 own controls is a liability, so state it plainly:
 
-- **No principal reaches the write.** The `POST /infra/report` handler takes no
-  `@CurrentPrincipal()`, so `ingestReport(report)` calls `prisma.infraNode.create` / `.update` with
+- **No principal reaches the write.** `ingestReport` calls `prisma.infraNode.create` / `.update` with
   nothing that identifies the caller. Nothing records *which* Service Account produced the row.
+  (Updated by #1134: the handler now *does* take a `@CurrentPrincipal()`, but purely as the
+  **in-memory throttle key** of the two limits above. It is read, bucketed and discarded — it reaches
+  no `data` payload and no column, so this bullet's conclusion is unchanged.)
 - **There is no node-history table to attribute to.** `InfraNodeHistory` does not exist — it is one
   of the deferred "Future" items in [[0070-infra-topology-graph]]. **No** `InfraNode` write is
   recorded in history, by an agent or by a human, so the struck clause described a table the schema
