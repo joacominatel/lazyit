@@ -41,13 +41,14 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
 - **Detach semantics (no orphans).** Patching `assetId: null` detaches: an **auto-created** Asset is
   **soft-deleted** (it never lingers in inventory owned by nobody); a **pre-existing linked** Asset is
   only un-linked, left intact.
-- **A patch may detach, and nothing else — no re-point** ([[0070-infra-topology-graph]] §5 note,
-  #1117). `assetId` accepts **`null` and nothing else**; any other value is a `400`. A re-point was
-  written with **no liveness check** (unlike `createNode`, which calls the soft-delete-scoped
-  `assertExists`; the FK only requires the row to *exist*, and a discarded asset's row does) and
-  **without running the detach above**, so it could link a **discarded** asset *and* orphan the
-  auto-created one it replaced. Refusing closes both without touching delete semantics. Linking a
-  node to a particular asset stays a **create-time** decision (`POST /infra/nodes` with `assetId`).
+- **A patch may attach or detach, but never RE-POINT** ([[0070-infra-topology-graph]] §5 note,
+  #1117). `assetId: null` detaches (above); an `assetId` on a node that carries **none** attaches,
+  and is checked with the same soft-delete-scoped `assertExists` `createNode` uses — a **discarded**
+  asset is a clean `404` instead of landing in the column (the FK only requires the row to *exist*,
+  and a discarded asset's row does). Sending an `assetId` to a node that **already has** one is a
+  `400`: it dropped the old link without running the detach above, orphaning the auto-created Asset
+  it replaced. The remedy is the two-step — `assetId: null`, then the new id — which keeps the
+  §5 delete semantics on the outgoing asset instead of letting a machine decide them.
 - **`label` always wins for display.** The canvas display name is `label`; the linked
   `asset.name` is shown only as a secondary "inventory name" (`assetName` on the detail read) — no
   silent copy, no drift.
@@ -179,8 +180,8 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   return the node's updated resolved `secretRefs` ([[0073-infra-node-secret-linkage]], #801).
 - `POST /infra/nodes` — create; default asset-backed (`trackAsAsset`, §5).
 - `PATCH /infra/nodes/:id` — partial update (`status` toggle, `label`, `kind`, `ipAddress`,
-  `shortcuts`, `assetId: null` to detach — `assetId` accepts **null and nothing else**, `400`
-  otherwise, #1117).
+  `shortcuts`, `assetId: null` to detach, an `assetId` to attach one to a node that has none —
+  **re-pointing an already-linked node is a `400`**, #1117).
 - `PATCH /infra/nodes/:id/position` — persist canvas `{ x, y }` (debounced on drag-stop).
 - `DELETE /infra/nodes/:id` — soft delete (off the map). `POST /infra/nodes/:id/restore` — back on.
 - `GET /infra/nodes/:id/impact` — **blast radius** ([[0070-infra-topology-graph]] §7): the downstream

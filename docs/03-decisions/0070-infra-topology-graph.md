@@ -265,34 +265,49 @@ and leaves the Asset intact. A node **reads inventory facts through `assetId`**;
 display name and always wins for display**, `asset.name` is shown as a secondary "inventory name" in the
 detail panel — no silent copy, no drift.
 
-> **Updated 2026-08-01 (#1117): a patch may DETACH the asset link, and may do nothing else to it.**
-> The detach semantics above were implemented; the *other* direction was never decided and quietly
-> worked. `PATCH /infra/nodes/:id` accepted any cuid in `assetId`, and `updateNode` handled only the
-> `null` case — so a **re-point** was written straight through and did two wrong things at once. It
-> linked **with no liveness check**: `createNode` calls `assets.assertExists`, whose read the
-> soft-delete extension scopes to live rows, and `updateNode` never called it — the FK only requires
-> the row to *exist*, and a **discarded** (soft-deleted) asset's row does, so a discarded asset went
-> straight into the column. (A wholly non-existent id was at least stopped, by the FK itself, as a
-> generic `Invalid reference` 400 rather than the clean 404 `assertExists` gives — the issue that
-> raised this called both cases linkable; only the soft-deleted one was.) And it **dropped the
-> previous link without running the detach above**, leaving an auto-created backing Asset live in
-> inventory owned by nobody — the exact orphan this section exists to forbid.
+> **Updated 2026-08-01 (#1117): a patch may ATTACH or DETACH the asset link; it may never RE-POINT
+> one.** The detach semantics above were implemented; the *other* direction was never decided and
+> quietly worked. `PATCH /infra/nodes/:id` accepted any cuid in `assetId`, and `updateNode` handled
+> only the `null` case, so a non-null id was written straight to the row — with **no liveness check**
+> and, when the node already had a link, **without running the detach above**.
 >
-> **The decision: `assetId` accepts `null` and nothing else; any other value is a 400** (refused by
-> `UpdateInfraNodeSchema`, and again by `InfraService.updateNode` for a caller that did not come
-> through the validation pipe). This closes both halves at once and — the reason it was chosen over
-> adding an `assertExists` plus a detach — it **changes no delete semantics**: the alternative,
-> auto-soft-deleting the Asset a re-point orphaned, would delete a row a human may have curated,
-> which [[0006-soft-delete-and-auditing]] does not allow a machine to decide. There is deliberately
-> **no re-attach for an existing node**: the one route that links a node to a particular asset stays
-> node creation (`POST /infra/nodes` with `assetId`); confirming an agent proposal with tracking on
-> mints a fresh one (ADR-0074 §3). If re-pointing is ever wanted, it is its own endpoint with its own
-> answer to the orphan, not a field on a partial update.
+> **The resulting contract, in full — three cases, and the line falls between the last two:**
+>
+> | `assetId` in the patch | node's current link | outcome |
+> | --- | --- | --- |
+> | `null` | any | **detach** — the §5 semantics above, unchanged |
+> | a cuid | **none** | **attach**, after `assets.assertExists` — `404` if that asset is missing or discarded |
+> | a cuid | **an asset** | **`400`** — the re-point |
+>
+> **Why the line is there.** The two non-null cases are not the same operation. A **first-attach** has
+> no previous link to drop, so it orphans nothing; it was only ever missing the check `createNode`
+> performs — `assets.assertExists`, whose read the soft-delete extension scopes to live rows. Without
+> it the FK was the only gate, and the FK requires the row to *exist*, which a **discarded**
+> (soft-deleted) asset's row does — so a discarded asset went straight into the column. (A wholly
+> non-existent id was at least stopped, by the FK itself, as a generic `Invalid reference` 400 rather
+> than the clean 404 `assertExists` gives — the issue that raised this called both cases linkable;
+> only the soft-deleted one was.) Adding `assertExists` closes that, and the operation keeps working.
+>
+> A **re-point** is the one that is actually broken: it drops the current link, leaving the
+> auto-created backing Asset live in inventory owned by nobody — the exact orphan this section exists
+> to forbid. It is refused rather than made to work, because making it work means deciding what
+> happens to the outgoing asset, and the only automatic answer — soft-deleting it — would delete a row
+> a human may have curated, which [[0006-soft-delete-and-auditing]] does not allow a machine to
+> decide. **The refusal is not a dead end:** detach (`assetId: null`, which runs §5 on the outgoing
+> asset with the human's intent behind it), then attach in a second patch. The 400 says exactly that.
+>
+> **Where it is enforced, and why not in the contract.** `InfraService.updateNode`, and only there —
+> the rule needs the node's *stored* `assetId`, which a zod schema never sees. `UpdateInfraNodeSchema`
+> therefore still accepts `z.cuid().nullable()` and cannot tell a re-point from a first-attach; there
+> is no second, narrower boundary to lean on.
+>
+> **If re-point is ever wanted**, it is its own endpoint with its own explicit answer to the outgoing
+> asset (keep it? discard it? hand it to the operator to decide?), not a field on a partial update —
+> which is exactly the decision this note refuses to make implicitly.
 >
 > **Nothing user-facing changes.** No lazyit surface has ever sent `assetId` in a patch — the node
 > panel patches `label`/`kind`/`status`/`ipAddress`/`shortcuts` only, and the canvas patches
-> position — so the exposure was a hand-crafted request by an `infra:manage` holder. The narrowed
-> contract type makes a re-point a **compile error** in `apps/web` rather than a runtime 400.
+> position — so the exposure was a hand-crafted request by an `infra:manage` holder.
 
 ### 6. Frontend — the canvas + the payoff in the MVP
 
