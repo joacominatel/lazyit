@@ -46,7 +46,25 @@
     "title": "Revisión pendiente",
     "description": "Hosts que descubrió el agente de reporte. Confirmá para sumarlos a tu inventario, o descartalos.",
     "confirmAction": "Confirmar",
+    "mergeAction": "Unificar con…",
     "discardAction": "Descartar"
+  },
+  "merge": {
+    "title": "Unificar {label} con otro servidor",
+    "description": "Usalo cuando este host ya lo tenés: un servidor que reinstalaste y volvió con un machine ID nuevo, o un clon que quedó separado. La clave de reporte pasa al servidor que elijas y sigue recibiendo reportes; esta fila se archiva.",
+    "suggestionsLabel": "Parece la misma máquina",
+    "suggestion": "Esto parece {label}",
+    "suggestionsDescription": "Estos servidores reportan el mismo número de serie o la misma dirección de placa de red que este. Es una sugerencia, no una decisión: elegí uno solo si sabés que ese equipo fue reinstalado.",
+    "matchedOn": {
+      "serial": "Mismo serie",
+      "mac": "Misma MAC"
+    },
+    "targetLabel": "Unificar con",
+    "targetPlaceholder": "Elegí un servidor",
+    "targetDescription": "El servidor que elijas conserva su nombre, tipo, posición, responsable y activo vinculado: solo se mueve la clave de reporte.",
+    "submit": "Unificar",
+    "mergedToast": "Servidor unificado.",
+    "error": "No se pudo unificar este servidor."
   },
   "confirm": {
     "title": "Confirmar este servidor",
