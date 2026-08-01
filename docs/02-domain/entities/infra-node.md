@@ -205,7 +205,7 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
 - The tray **groups children under their reporting host** (`hostExternalIdOfContainerChild` inverts
   the `<host>/container/<name>` key), so confirming a host with its containers is one selection. Its
   filters (name glob or substring, subnet CIDR, reported kind, host-vs-container) and sorts are
-  **client-side over the lean list row** — nothing was added back to the projection #1150 slimmed;
+  **client-side over the lean list row** — nothing was added back to the projection #1135 slimmed;
   the subnet filter reuses the same `ipInCidr` the auto-confirm rules use. Paging `GET /infra/nodes`
   is a separate concern (#1152).
 

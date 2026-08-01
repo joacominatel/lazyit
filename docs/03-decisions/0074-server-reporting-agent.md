@@ -120,7 +120,7 @@ so they cannot disagree). It is a **default, not a rule**: every item and every 
 way, so a container that genuinely is a licensed appliance is tracked like anything else.
 
 Filter (name glob or substring, subnet CIDR, reported kind, host-vs-container) and sort (first seen,
-name) are **client-side over the already-loaded lean list**. #1150 removed `specs` from that
+name) are **client-side over the already-loaded lean list**. #1135 removed `specs` from that
 projection precisely because the tray polls it, and nothing here re-fattens it — a checkbox row reads
 `label`, `kind`, `ipAddress`, `createdAt` and `externalId`, all of which the list already carries. The
 subnet box uses the **same** `ipInCidr` the saved rules use, so *"which hosts would this rule have
