@@ -313,7 +313,7 @@ function StepInstall({
     },
     {
       label: t("manual.step4"),
-      command: "sudo lazyit-agent report --once",
+      command: "sudo lazyit-agent report --once --force",
     },
   ];
 
