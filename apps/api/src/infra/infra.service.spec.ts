@@ -599,6 +599,193 @@ describe('InfraService', () => {
       expect(prisma.asset.update).not.toHaveBeenCalled();
     });
 
+    // ── Contract v2 tolerance + skew recording (#1138) ────────────────────────
+
+    describe('agent report contract v2 (#1138)', () => {
+      /** A report exactly as a PRE-v2 agent emits it — no os.family, no v2 field anywhere. */
+      const V1_BODY = {
+        agentVersion: '1.0.0',
+        reportingSource: 'agent:legacy',
+        externalId: 'machine-legacy',
+        reportedAt: '2026-07-31T12:00:00.000Z',
+        host: {
+          hostname: 'web-03',
+          os: { name: 'Ubuntu', version: '24.04', kernel: '6.8.0' },
+          nics: [{ name: 'eth0', ipv4: ['10.0.0.12'] }],
+        },
+        software: [{ name: 'nginx', version: '1.27.0' }],
+      };
+
+      const ORIGINAL_APP_VERSION = process.env.APP_VERSION;
+      afterEach(() => {
+        if (ORIGINAL_APP_VERSION === undefined) delete process.env.APP_VERSION;
+        else process.env.APP_VERSION = ORIGINAL_APP_VERSION;
+      });
+
+      it('a PRE-v2 report from an un-upgraded agent still ingests, unchanged', async () => {
+        // The load-bearing upgrade promise: an operator upgrades the INSTANCE while every agent in the
+        // estate keeps running the binary it was installed with. That report must still land, with the
+        // same facts, on the same node — anything else silently empties the map.
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-legacy',
+          state: 'PENDING',
+        });
+
+        const ack = await service.ingestReport(AgentReportSchema.parse(V1_BODY));
+
+        const createArg = firstArg<{
+          data: {
+            label: string;
+            ipAddress?: string;
+            specs: Record<string, unknown>;
+          };
+        }>(prisma.infraNode.create);
+        expect(createArg.data.label).toBe('web-03');
+        expect(createArg.data.ipAddress).toBe('10.0.0.12');
+        // The blob is the v1 facts plus the ONE documented server-side default (os.family=linux).
+        expect(createArg.data.specs).toEqual({
+          host: {
+            hostname: 'web-03',
+            os: {
+              family: 'linux',
+              name: 'Ubuntu',
+              version: '24.04',
+              kernel: '6.8.0',
+            },
+            nics: [{ name: 'eth0', ipv4: ['10.0.0.12'] }],
+          },
+          software: [{ name: 'nginx', version: '1.27.0' }],
+          reportedAt: '2026-07-31T12:00:00.000Z',
+        });
+        expect(ack.accepted).toBe(true);
+      });
+
+      it('RECORDS the unknown root keys it dropped, instead of losing the signal', async () => {
+        // The root is no longer strict, so a newer agent degrades instead of 400-ing the host out of
+        // the inventory — but a typo'd root key must not become silent, which is exactly the hazard
+        // next to #1142 (an absent `software` key will come to mean "unchanged").
+        process.env.APP_VERSION = 'v1.4.2';
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-new',
+          state: 'PENDING',
+        });
+
+        const rawBody = { ...V1_BODY, deltaSince: '2026-07-31T11:00:00.000Z' };
+        await service.ingestReport(
+          AgentReportSchema.parse(rawBody),
+          undefined,
+          rawBody,
+        );
+
+        const createArg = firstArg<{ data: { specs: { agentSkew?: unknown } } }>(
+          prisma.infraNode.create,
+        );
+        expect(createArg.data.specs.agentSkew).toEqual({
+          unknownKeys: ['deltaSince'],
+          agentAhead: false, // agentVersion 1.0.0 vs server v1.4.2 — not ahead
+          serverVersion: 'v1.4.2',
+        });
+      });
+
+      it('says the AGENT IS NEWER when it is — better diagnosis from data already on hand', async () => {
+        // `agentVersion` already travels in every report, so the server can name the real cause
+        // ("this agent is newer than me") instead of the generic "I do not understand these fields".
+        process.env.APP_VERSION = 'v1.4.2';
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-new',
+          state: 'PENDING',
+        });
+
+        const rawBody = { ...V1_BODY, agentVersion: 'v2.0.0', deltaSince: 'x' };
+        await service.ingestReport(
+          AgentReportSchema.parse(rawBody),
+          undefined,
+          rawBody,
+        );
+
+        const createArg = firstArg<{
+          data: { specs: { agentSkew?: { agentAhead?: boolean } } };
+        }>(prisma.infraNode.create);
+        expect(createArg.data.specs.agentSkew?.agentAhead).toBe(true);
+      });
+
+      it('a report the server fully understands records NO skew (it self-heals)', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-new',
+          state: 'PENDING',
+        });
+
+        await service.ingestReport(
+          AgentReportSchema.parse(V1_BODY),
+          undefined,
+          V1_BODY,
+        );
+
+        const createArg = firstArg<{ data: { specs: Record<string, unknown> } }>(
+          prisma.infraNode.create,
+        );
+        expect(createArg.data.specs).not.toHaveProperty('agentSkew');
+      });
+
+      it('never leaks the skew diagnostic into the linked Asset specs (and clears a stale one)', async () => {
+        // `Asset.specs` is the INVENTORY snapshot an operator reads; a server-side wire diagnostic is
+        // not an inventory fact and must not accumulate there.
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          assetId: 'asset-1',
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+        });
+        prisma.asset.findFirst.mockResolvedValue({
+          specs: { rack: 'A3', agentSkew: { unknownKeys: ['old'] } },
+        });
+
+        const rawBody = { ...V1_BODY, deltaSince: 'x' };
+        await service.ingestReport(
+          AgentReportSchema.parse(rawBody),
+          undefined,
+          rawBody,
+        );
+
+        const updateArg = firstArg<{
+          data: { specs: Record<string, unknown> };
+        }>(prisma.asset.update);
+        expect(updateArg.data.specs).not.toHaveProperty('agentSkew');
+        expect(updateArg.data.specs.rack).toBe('A3'); // human keys still preserved
+      });
+
+      it('promotes an IPv6 address on a v6-ONLY host (which used to show none at all)', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-v6',
+          state: 'PENDING',
+        });
+
+        await service.ingestReport(
+          AgentReportSchema.parse({
+            ...V1_BODY,
+            host: {
+              hostname: 'v6-only',
+              nics: [{ name: 'eth0', ipv6: ['fe80::1', '2001:db8::7'] }],
+            },
+          }),
+        );
+
+        const createArg = firstArg<{
+          data: { ipAddress?: string; ipAddressSource?: string };
+        }>(prisma.infraNode.create);
+        expect(createArg.data.ipAddress).toBe('2001:db8::7');
+        expect(createArg.data.ipAddressSource).toBe('AGENT');
+      });
+    });
+
     // ── The new-node enrollment rate per reporter (#1134) ─────────────────────
 
     describe('new-node enrollment throttle (#1134)', () => {
