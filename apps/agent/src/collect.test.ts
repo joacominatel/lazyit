@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { AGENT_CONTAINERS_MAX } from "@lazyit/shared";
 import {
   buildDiagnostics,
   buildIdentifiers,
@@ -7,6 +8,7 @@ import {
   collectOs,
   mapVirtualizationType,
   parseBootedAt,
+  parseDockerContainers,
   parseNics,
   parseTabbed,
   run,
@@ -279,6 +281,69 @@ describe("parseTabbed — package-manager provenance (#1138)", () => {
       { name: "nginx", version: "1.27.0", source: "dpkg" },
       { name: "openssl", version: "3.0.13", source: "dpkg" },
     ]);
+  });
+});
+
+describe("parseDockerContainers — the child nodes the graph was missing (#1139)", () => {
+  /** One element of `GET /containers/json`, in the runtime's own spelling. */
+  const RUNNING = {
+    Id: "3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a",
+    Names: ["/lazyit-api"],
+    Image: "ghcr.io/acme/api:1.4.0",
+    ImageID: "sha256:9f8d7c6b5a4e3f2a1b0c9d8e7f6a5b4c",
+    State: "running",
+    Ports: [{ IP: "0.0.0.0", PrivatePort: 3001, PublicPort: 8081, Type: "tcp" }],
+  };
+
+  test("maps a container onto the contract, stripping the leading slash off its name", () => {
+    expect(parseDockerContainers(JSON.stringify([RUNNING]))).toEqual([
+      {
+        name: "lazyit-api",
+        id: "3f2a1b0c9d8e",
+        image: "ghcr.io/acme/api:1.4.0",
+        imageDigest: "sha256:9f8d7c6b5a4e3f2a1b0c9d8e7f6a5b4c",
+        state: "running",
+        ports: [{ containerPort: 3001, hostPort: 8081, hostIp: "0.0.0.0", protocol: "tcp" }],
+      },
+    ]);
+  });
+
+  test("an EMPTY runtime list stays `[]` — the positive `runs no containers` finding", () => {
+    // Collapsing this to undefined would make "Docker is installed and empty" indistinguishable from
+    // "no Docker here", and the server acts on exactly that difference (it retires child nodes).
+    expect(parseDockerContainers("[]")).toEqual([]);
+  });
+
+  test("unreadable or non-JSON output omits the key entirely rather than asserting emptiness", () => {
+    expect(parseDockerContainers(null)).toBeUndefined();
+    expect(parseDockerContainers("<html>404</html>")).toBeUndefined();
+    expect(parseDockerContainers('{"message":"permission denied"}')).toBeUndefined();
+  });
+
+  test("a nameless container is dropped, the rest of the list survives", () => {
+    expect(
+      parseDockerContainers(JSON.stringify([{ Names: [], State: "running" }, RUNNING])),
+    ).toHaveLength(1);
+  });
+
+  test("an unmapped port (no host side) still records that the port is exposed", () => {
+    expect(
+      parseDockerContainers(
+        JSON.stringify([{ ...RUNNING, Ports: [{ PrivatePort: 5432, Type: "tcp" }] }]),
+      )?.[0]?.ports,
+    ).toEqual([{ containerPort: 5432, protocol: "tcp" }]);
+  });
+
+  test("the container id ships truncated — it is evidence, and the KEY is the name", () => {
+    // Keying on the id would mint a fresh PENDING proposal on every `docker compose up`; the short
+    // form is what the operator sees in `docker ps` and all the corroboration this needs.
+    const parsed = parseDockerContainers(JSON.stringify([RUNNING]));
+    expect(parsed?.[0]?.id).toBe("3f2a1b0c9d8e");
+  });
+
+  test("the list is capped at what the contract accepts, never beyond", () => {
+    const many = Array.from({ length: 250 }, (_, i) => ({ ...RUNNING, Names: [`/c${i}`] }));
+    expect(parseDockerContainers(JSON.stringify(many))).toHaveLength(AGENT_CONTAINERS_MAX);
   });
 });
 
