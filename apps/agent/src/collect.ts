@@ -12,10 +12,16 @@
  * agent lacks root, or a collector hung. The warnings sink is where that difference survives.
  */
 import { hostname as osHostname } from "node:os";
-import type {
-  AgentChassis,
-  AgentReport,
-  AgentVirtualizationType,
+import {
+  AGENT_WARNING_LENGTH_MAX,
+  AGENT_WARNINGS_MAX,
+  normalizeIdentifierValue,
+  selectPrimaryMac,
+  type AgentChassis,
+  type AgentIpv6Scope,
+  type AgentNicIpv6,
+  type AgentReport,
+  type AgentVirtualizationType,
 } from "@lazyit/shared";
 
 type Host = AgentReport["host"];
@@ -279,11 +285,19 @@ const SMBIOS_CHASSIS: Record<number, AgentChassis> = {
  * hypervisor's synthetic board: DMI happily calls a KVM guest a "desktop" (chassis type 3), which is
  * exactly the misclassification #1139 must not inherit. Only a host detect-virt calls bare metal
  * falls through to its chassis code; an unrecognised (`other`) virtualization still means virtualized.
+ *
+ * `undefined` — the probe did not RUN — is `unknown`, not `none`. Those are different facts and the
+ * contract has vocabulary for both. Reading a missing probe as a positive bare-metal finding meant
+ * classifying the host from DMI it does not own: inside a container `/sys/class/dmi` exposes the
+ * HOST's board, so a container on a distro without `systemd-detect-virt` reported `chassis: server`
+ * with full confidence. #1139 will infer `kind` from this field, and a wrong classification silently
+ * pre-empts the human's call where `unknown` leaves it intact.
  */
 export function chassisFor(
-  virtualization: AgentVirtualizationType,
+  virtualization: AgentVirtualizationType | undefined,
   smbiosChassisType: string | null,
 ): AgentChassis {
+  if (virtualization === undefined) return "unknown";
   if (CONTAINER_VIRT.has(virtualization)) return "container";
   if (virtualization !== "none") return "vm";
   const code = Number(smbiosChassisType?.trim());
@@ -298,7 +312,15 @@ export function chassisFor(
  * `degraded` flag instead of reading `null` as failure.
  */
 async function collectVirtualization(warn: Warn): Promise<Host["virtualization"]> {
-  if (!Bun.which("systemd-detect-virt")) return undefined;
+  if (!Bun.which("systemd-detect-virt")) {
+    // Worth a note precisely because the consequence is invisible otherwise: without this probe the
+    // host also reports `chassis: unknown`, and the operator would otherwise see two empty fields
+    // with no way to tell a missing tool from a fact the agent chose not to guess.
+    warn(
+      "virtualization: systemd-detect-virt unavailable — virtualization omitted and chassis left unknown",
+    );
+    return undefined;
+  }
   let degraded = false;
   const out = await run(["systemd-detect-virt"], COLLECT_TIMEOUT_MS, (message) => {
     degraded = true;
@@ -341,18 +363,54 @@ async function collectDisks(warn: Warn): Promise<Host["disks"]> {
   return disks.length ? disks.slice(0, 256) : undefined;
 }
 
+/** One `addr_info` entry of `ip -j addr`, restricted to the fields the contract has a home for. */
+interface IpAddrInfo {
+  family?: string;
+  local?: string;
+  prefixlen?: number;
+  scope?: string;
+  temporary?: boolean;
+  deprecated?: boolean;
+  preferred_life_time?: number;
+}
+
 interface IpAddr {
   ifname?: string;
   address?: string;
-  addr_info?: Array<{ family?: string; local?: string }>;
+  addr_info?: IpAddrInfo[];
+}
+
+/** iproute2's scope names, restricted to the contract's vocabulary (anything else is simply omitted). */
+const IPV6_SCOPES = new Set<string>(["global", "site", "link", "host"]);
+
+/**
+ * One IPv6 address with the context that makes it CHOOSABLE (#1138). Reporting bare strings left the
+ * server picking "the first non-`fe80:` entry", which on any modern desktop distro is an RFC 4941
+ * privacy address — temporary by design, regenerated on a timer, and therefore the worst possible
+ * value to pin a node's map entry to. `iproute2` already knows all of this; the collector just has to
+ * carry it. `preferred_life_time: 0` is read as deprecated because iproute2 reports the spent lifetime
+ * even on kernels/builds that do not also emit the boolean.
+ */
+function toNicIpv6(a: IpAddrInfo): AgentNicIpv6 | undefined {
+  const address = a.local?.trim();
+  if (!address) return undefined;
+  const scope = a.scope && IPV6_SCOPES.has(a.scope) ? (a.scope as AgentIpv6Scope) : undefined;
+  const deprecated = a.deprecated === true || a.preferred_life_time === 0;
+  return {
+    address,
+    ...(Number.isInteger(a.prefixlen) ? { prefixLength: a.prefixlen } : {}),
+    ...(scope ? { scope } : {}),
+    ...(a.temporary === true ? { temporary: true } : {}),
+    ...(deprecated ? { deprecated: true } : {}),
+  };
 }
 
 /**
  * Parse `ip -j addr` into the contract's NIC shape (#1138). BOTH families now: v1 carried IPv4 only
  * while the shared `IpAddressSchema` had always accepted v6, so a v6-only host reported no address at
- * all. Link-local (`fe80::`) addresses are kept verbatim — the collector reports what the interface
- * has, and the server's promotion mapper decides what is worth showing as the node's IP. Loopback is
- * dropped (it is never a host fact worth inventorying).
+ * all. Link-local addresses are kept verbatim — the collector reports what the interface has, and the
+ * server's promotion mapper (`primaryIpv6`) decides what is worth showing as the node's IP. Loopback
+ * is dropped (it is never a host fact worth inventorying).
  */
 export function parseNics(out: string | null): Nics | undefined {
   if (!out) return undefined;
@@ -368,7 +426,10 @@ export function parseNics(out: string | null): Nics | undefined {
     if (!name || name === "lo") continue;
     const addresses = n.addr_info ?? [];
     const ipv4 = addresses.filter((a) => a.family === "inet" && a.local).map((a) => a.local!);
-    const ipv6 = addresses.filter((a) => a.family === "inet6" && a.local).map((a) => a.local!);
+    const ipv6 = addresses
+      .filter((a) => a.family === "inet6")
+      .map(toNicIpv6)
+      .filter((a): a is AgentNicIpv6 => a !== undefined);
     const nic: Nics[number] = { name };
     if (n.address) nic.mac = n.address;
     if (ipv4.length) nic.ipv4 = ipv4.slice(0, 64);
@@ -437,8 +498,10 @@ export function buildIdentifiers(facts: IdentifierFacts): Identifiers | undefine
   ] as const;
   const identifiers: Identifiers = [];
   for (const [kind, raw] of kinds) {
-    const value = raw?.trim();
-    if (value) identifiers.push({ kind, value: value.slice(0, 200) });
+    // Canonicalise HERE as well as at the schema, so what the agent prints locally and what the
+    // server stores are the same string — the contract owns the rule, this just applies it early.
+    const value = normalizeIdentifierValue(kind, raw ?? "").slice(0, 200);
+    if (value) identifiers.push({ kind, value });
   }
   return identifiers.length ? identifiers : undefined;
 }
@@ -504,23 +567,21 @@ export async function collectSoftware(warn: Warn = NO_WARN): Promise<Software | 
   return pkgs.length ? pkgs.slice(0, SOFTWARE_CAP) : undefined;
 }
 
-/** The contract's caps on `diagnostics.warnings` — mirrored here so the agent never invalidates itself. */
-const WARNINGS_MAX = 50;
-const WARNING_LENGTH_MAX = 300;
-
 /**
  * The report's `diagnostics` block (#1138). ALWAYS emitted, even on a flawless run: `privileged` is
  * the answer to "why is web-03's serial column empty?", and it is only useful if it is there on every
- * report rather than only the unhappy ones. `warnings` is bounded to exactly what the contract accepts
- * — the agent validates its own report before POSTing, so an over-long diagnostic would turn a note
- * about a degraded fact into a total failure to report, which is precisely backwards.
+ * report rather than only the unhappy ones. `warnings` is bounded using the CONTRACT's own constants
+ * (the server truncates rather than rejecting, but the agent should not make it do that work) — a note
+ * about a degraded fact must never grow into a reason the report is worse.
  */
 export function buildDiagnostics(
   warnings: readonly string[],
   privileged: boolean,
   durationMs: number,
 ): NonNullable<AgentReport["diagnostics"]> {
-  const bounded = warnings.slice(0, WARNINGS_MAX).map((w) => w.slice(0, WARNING_LENGTH_MAX));
+  const bounded = warnings
+    .slice(0, AGENT_WARNINGS_MAX)
+    .map((w) => w.slice(0, AGENT_WARNING_LENGTH_MAX));
   return {
     ...(bounded.length ? { warnings: bounded } : {}),
     privileged,
@@ -553,19 +614,21 @@ export async function collectHost(warn: Warn = NO_WARN): Promise<Host> {
   const cpu = collectCpu(cpuinfo);
   const memoryBytes = collectMemoryBytes(meminfo);
   const bootedAt = parseBootedAt(procStat);
-  // The MAC of the first physical NIC (a virtual one is regenerated per boot, so it identifies
-  // nothing); falls back to the first NIC when /sys could not tell us which is which.
-  const macNic = nics?.find((n) => n.isVirtual === false && n.mac) ?? nics?.find((n) => n.mac);
+  // WHICH mac becomes the identifier is the contract's rule, not this collector's (#1138): it has to
+  // be a property of the NIC SET, because "whichever `ip -j addr` listed first" is kernel ifindex
+  // order and #1141 compares this value across reports.
   const identifiers = buildIdentifiers({
     machineId,
     smbiosUuid,
     serial: hardware?.serial,
-    mac: macNic?.mac,
+    mac: selectPrimaryMac(nics),
   });
 
   host.os = collectOs(osRelease, kernel);
-  // `virtualization` may be absent (no probe); then chassis rests on SMBIOS alone.
-  host.chassis = chassisFor(virtualization?.type ?? "none", chassisType);
+  // `virtualization` may be absent (the probe did not run). That is passed through as `undefined`,
+  // NOT as `none`: the SMBIOS chassis code is only this host's fact once something confirmed it is
+  // not a guest, and inside a container `/sys/class/dmi` is the host's, not ours.
+  host.chassis = chassisFor(virtualization?.type, chassisType);
   if (virtualization) host.virtualization = virtualization;
   if (identifiers) host.identifiers = identifiers;
   if (bootedAt !== undefined) host.bootedAt = bootedAt;
