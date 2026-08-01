@@ -139,12 +139,20 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
       expect(data.createdById).toBe('u-1');
     });
 
-    it('defaults trackAsAsset ON for a HOST rule and OFF for a CONTAINER rule', async () => {
+    it('defaults trackAsAsset OFF for every scope that can match a CONTAINER child', async () => {
       prisma.infraAutoConfirmRule.create.mockResolvedValue(row());
 
       await service.create({ name: 'hosts', hostnamePattern: 'srv-*' }, HUMAN);
       await service.create(
-        { name: 'containers', appliesTo: 'CONTAINER', hostnamePattern: '*' },
+        { name: 'containers', appliesTo: 'CONTAINER', hostnamePattern: 'api-*' },
+        HUMAN,
+      );
+      // ANY reaches container children too, so it takes the child default rather than the host one:
+      // otherwise a "servers and containers" rule would quietly mint an Asset per container, which is
+      // the one thing `defaultTrackAsAsset` exists to stop the tray, the bulk dialog and a rule
+      // disagreeing about.
+      await service.create(
+        { name: 'both', appliesTo: 'ANY', hostnamePattern: 'srv-*' },
         HUMAN,
       );
 
@@ -155,6 +163,9 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
       expect(
         nthArg<Call>(prisma.infraAutoConfirmRule.create, 1).data.trackAsAsset,
       ).toBe(false);
+      expect(
+        nthArg<Call>(prisma.infraAutoConfirmRule.create, 2).data.trackAsAsset,
+      ).toBe(false);
     });
 
     it('honours an explicit trackAsAsset over the per-scope default', async () => {
@@ -164,7 +175,7 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
         {
           name: 'licensed appliance',
           appliesTo: 'CONTAINER',
-          hostnamePattern: '*',
+          hostnamePattern: 'appliance-*',
           trackAsAsset: true,
         },
         HUMAN,
@@ -195,6 +206,33 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
         service.update('rule-1', { hostnamePattern: null }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.infraAutoConfirmRule.update).not.toHaveBeenCalled();
+    });
+
+    it('REFUSES a patch that WIDENS the merged rule into one that excludes nothing', async () => {
+      // `*` is non-null, so a "at least one field is set" check would have stored a blanket rule
+      // through the patch door. The merged rule has to be able to rule a proposal OUT.
+      prisma.infraAutoConfirmRule.findFirst.mockResolvedValue(row());
+
+      await expect(
+        service.update('rule-1', { hostnamePattern: '*' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.update('rule-1', { hostnamePattern: '*', subnetCidr: '0.0.0.0/0' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.infraAutoConfirmRule.update).not.toHaveBeenCalled();
+    });
+
+    it('allows a wildcard name once a REAL condition survives the merge', async () => {
+      prisma.infraAutoConfirmRule.findFirst.mockResolvedValue(
+        row({ subnetCidr: '10.20.0.0/16' }),
+      );
+      prisma.infraAutoConfirmRule.update.mockResolvedValue(
+        row({ hostnamePattern: '*', subnetCidr: '10.20.0.0/16' }),
+      );
+
+      await service.update('rule-1', { hostnamePattern: '*' });
+
+      expect(prisma.infraAutoConfirmRule.update).toHaveBeenCalled();
     });
 
     it('allows clearing one condition while another survives', async () => {
