@@ -35,8 +35,13 @@ import { ConfirmInfraNodeSchema, InfraNodeKindSchema, type InfraNodeKind } from 
  * Cap on ONE bulk request. Deliberately above `AGENT_CONTAINERS_MAX` (100) so a single Docker host's
  * whole reported topology — the host plus every child it may legally report — fits in one call, and
  * deliberately finite so a batch stays a bounded unit of work with a bounded response. A larger tray
- * is confirmed in more than one pass; the tray sends what the operator selected, and the UI is what
- * keeps a selection inside this bound.
+ * is confirmed in more than one pass.
+ *
+ * The tray enforces this bound BEFORE the request, by importing this constant (never restating the
+ * number) and disabling both bulk buttons with the count and the cap shown — see
+ * `exceedsBulkReviewCap`. That is deliberate rather than decorative: over the cap the whole batch is
+ * rejected, so saying so in a toast after the operator has done all of the selecting is the one
+ * moment the information is useless. This refinement is still the authority; the UI is the courtesy.
  */
 export const INFRA_BULK_REVIEW_MAX = 200;
 
@@ -278,8 +283,8 @@ const RuleWritableShape = {
 };
 
 /**
- * `POST /infra/auto-confirm-rules` body. `name` plus at least one condition; everything else has a
- * server-side default. Strict — `matchCount`, `lastMatchedAt` and the author are server-owned, and a
+ * `POST /infra/auto-confirm-rules` body. `name` plus at least one condition that can exclude
+ * something (see {@link statesAutoConfirmCondition}); everything else has a server-side default. Strict — `matchCount`, `lastMatchedAt` and the author are server-owned, and a
  * client that could set them could dress an unattributed rule up as somebody's decision.
  */
 export const CreateInfraAutoConfirmRuleSchema = z
