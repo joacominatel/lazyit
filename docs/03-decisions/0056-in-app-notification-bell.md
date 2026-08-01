@@ -384,9 +384,10 @@ queue, DSL or config.
 
 **Amendment (2026-07-31, #1141) — `infra.identity_conflict`.** A third literal, same shape and same
 discipline: emitted from `InfraService.ingestReport` ([[0074-server-reporting-agent]] §3 amendment) when a
-report matches an existing node's `externalId` while its serial, MAC set **and** hostname all differ — i.e.
+report matches an existing node's `externalId` while its serial **and** its MAC set both differ — i.e.
 two hosts sharing one `/etc/machine-id`, which is a cloned VM template far more often than it is anything
-else. `severity: warning`, metadata = both node ids + labels + the reported hostname + the discriminator,
+else. The hostname is not part of that rule (a golden image bakes one in), but a *shared* hostname is
+named in the summary as corroborating evidence. `severity: warning`, metadata = both node ids + the peer's label + the reported hostname + the discriminator,
 deep-linked (by type) to the topology map where the review tray holds the separated host. Dedupe
 `infra.identity_conflict:<peerNodeId>:<discriminator>` and emitted **only on the branch that creates the
 second node** → one nudge per newly-detected colliding host, never one per 15-minute check-in — the same

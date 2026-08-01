@@ -355,10 +355,28 @@ Three parts, and deliberately **not** an engine:
    On a match, the incoming `host.identifiers[]` are compared against the ones **already stored** in
    that node's `specs` blob — contract v2 (§2 amendment, #1138) stores the whole `host` block on every
    report, so this needs **no schema change and no migration**. If the serial set **and** the MAC set
-   **and** the hostname *all* differ, the two reports are two hosts and the merge does not happen. All
-   three, because each one has a legitimate reason to change on a single box — a NIC swap, a rename, a
-   board replacement — so any single difference is noise, while all three at once on hosts claiming one
-   machine-id is the clone signature and nothing else produces it.
+   both differ, the two reports are two hosts and the merge does not happen.
+
+   **The hostname is deliberately NOT part of the rule.** The issue this amendment implements
+   originally specified all three — serial, MAC set *and* hostname — and that was wrong, in the one way
+   that mattered: the archetypal golden-image clone has a baked machine-id **and a baked hostname**,
+   because that is what "cloned from a template" means. A hostname condition would have excused
+   precisely the scenario this whole amendment cites as its motivation, silently collapsing those hosts
+   into one node. The hostname survives as **corroborating detail in the notification** — two hosts
+   answering to one name is itself the template signature, and saying so is the difference between a
+   message that reads as confused and one that reads as evidence — never as a condition.
+
+   **Both, not either.** Serial and MAC are hardware-unique facts: a hypervisor hands every guest its
+   own SMBIOS serial and its own MACs, so cloned guests differ on both while sharing machine-id and
+   name. Requiring both to differ tolerates exactly one legitimate hardware change on a real box — a
+   NIC swap moves the MACs alone, a board swap moves the serial alone. Both moving at once under one
+   machine-id is overwhelmingly two machines.
+
+   **The error asymmetry justifies biasing toward detection.** A false positive costs one spurious
+   PENDING node and one notification, which a human dismisses and `merge-into` undoes. A false negative
+   silently merges two production servers into one inventory row — the worst failure class in this
+   product, and the one this amendment exists to end. When the two errors are that unequal, a rule
+   should lean toward the recoverable one.
 2. **Tell the operator; never block them.** The colliding host lands as its own `state=PENDING`
    proposal and the report is **accepted** — degrade and inform, the same posture as the rest of the
    contract, since a rejected report means the host *vanishes*, which is the failure being fixed, not a
@@ -373,7 +391,20 @@ Three parts, and deliberately **not** an engine:
    addressed node's reporting key onto an existing node and soft-deletes the duplicate, in **one
    transaction and in that order** (the partial-unique index covers live rows only, so the source must
    lose the key before the target can take it). **Identity moves; curation does not** — `label`,
-   `state`, `kind`, `x`/`y`, `assetId` and the target's edges are never written. `GET
+   `state`, `kind`, `x`/`y`, `assetId` and the target's edges are never written.
+
+   The archived duplicate's own `reportingSource`/`externalId` are **cleared** as it is archived. They
+   have to be: the same pair is being written onto the target, and leaving them on the archived row
+   would make restoring it violate the partial-unique index — a soft delete that cannot be undone,
+   which [[0006-soft-delete-and-auditing]] does not allow. The values are not lost; they move into the
+   `_infraMergedInto` marker, and restoring the row brings back its curation, never the reporting key.
+
+   **A merge can destroy a live reporting key, and says so.** The re-image case always does: the target
+   still carries the key it had before the reinstall, a node holds exactly one, and the transplant
+   overwrites it. That key is therefore recorded on the archived row (`replacedTargetKey`) and logged,
+   and the merge dialog's copy states the consequence — a host still checking in under the replaced key
+   matches no live node and returns as a fresh PENDING proposal. Refusing the case instead was
+   rejected: it is the *primary* use case, not an edge one. `GET
    /infra/nodes/:id/identity-matches` surfaces the adoption hint above a fresh proposal (*"this looks
    like `srv-app-04` re-imaged"*) from a shared **serial or MAC**; a hostname match is deliberately
    never offered, because recycling a hostname is a naming convention working as intended and a hint
@@ -387,6 +418,13 @@ clone keeps reporting the same baked machine-id forever — so its node is keyed
 they are two). The row also carries `specs.identityConflict` naming the value actually reported and the
 peer node it collided with. **This is an identity choice, and it is effectively permanent** — the same
 weight as §2's canonicalisation rules — so it is stated here rather than left in code.
+
+**`identityConflict` is re-stamped on every report**, for as long as the collision lasts, keeping the
+`detectedAt` of the FIRST detection. The blob is rewritten wholesale on each check-in, so a marker
+written only when the node was created would be gone fifteen minutes later — leaving the operator
+holding a notification that points at a node showing no evidence of why it exists. It still
+**self-heals**: once the clone is given a real machine-id it takes the ordinary unknown-key path,
+nothing re-stamps, and the next blob rewrite drops the marker.
 
 **Nothing is auto-merged and nothing is auto-split.** The only automatic action in the whole change is
 a notification; every mutation is a human action. The corroboration check can only ever *withhold* a

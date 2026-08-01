@@ -95,12 +95,13 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   once-per-sweep. Metadata = nodeId + label + last-report time.
 - **The report ingest** (`InfraService.ingestReport`, [[0074-server-reporting-agent]] §3 amendment /
   #1141) → **`infra.identity_conflict`**, a broadcast admin nudge when a report matches an existing
-  node's `externalId` while its serial, MAC set **and** hostname all differ — two hosts sharing one
-  `/etc/machine-id`, almost always a cloned VM template. Emitted **only on the branch that creates the
+  node's `externalId` while its serial **and** its MAC set both differ — two hosts sharing one
+  `/etc/machine-id`, almost always a cloned VM template (whose baked hostname is why the hostname is
+  corroborating detail in the summary, never part of the rule). Emitted **only on the branch that creates the
   second node**, not on every report; dedupe `infra.identity_conflict:<peerNodeId>:<discriminator>` →
   one nudge per newly-detected colliding host, never one per 15-minute check-in. The summary names the
-  remedy (`systemd-firstboot --setup-machine-id`). Metadata = both node ids + labels + the reported
-  hostname + the discriminator. This is the ONLY automatic action the collision detection takes: the
+  remedy (`systemd-firstboot --setup-machine-id`). Metadata = both node ids + the peer's label + the
+  reported hostname + the discriminator (the new node's own label *is* that hostname). This is the ONLY automatic action the collision detection takes: the
   report is still accepted and nothing is auto-merged or auto-split.
 
 ## API (poll) — read-path authZ (the auth contract)
