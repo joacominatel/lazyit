@@ -183,11 +183,15 @@ describe("interpretProbe — `lazyit-agent test` reading the instance's answer (
     expect(verdict.ok === false && verdict.detail).not.toMatch(/token/);
   });
 
-  test("429 — the per-token rate limit — is reported as itself, never as a bad token", () => {
+  // InfraReportRateLimitGuard is applied to POST /infra/report alone, so it cannot produce a 429
+  // here — attributing one to it would send an operator to raise a setting that was never involved.
+  test("429 is a rate limit in front, and is NOT blamed on lazyit's report limit", () => {
     const verdict = interpretProbe(429, "Too Many Requests", "x64");
     expect(verdict.ok).toBe(false);
     expect(verdict.ok === false && verdict.headline).toContain("429");
     expect(verdict.ok === false && verdict.detail).not.toMatch(/token is wrong/);
+    expect(verdict.ok === false && verdict.detail).not.toMatch(/INFRA_REPORT_MAX/);
+    expect(verdict.ok === false && verdict.detail).toMatch(/proxy|WAF/);
   });
 
   test("a 500 is the instance's problem, and says so", () => {
