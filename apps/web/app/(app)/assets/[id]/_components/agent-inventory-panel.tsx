@@ -33,8 +33,24 @@ export interface AgentInventory {
   extras: Array<[string, unknown]>;
 }
 
-/** Keys the structured panels own — everything else falls through to the custom-fields grid. */
-const INVENTORY_KEYS = new Set(["host", "software", "reportedAt", "_infraAutoCreated"]);
+/**
+ * Keys the structured panels own — everything else falls through to the custom-fields grid.
+ *
+ * `diagnostics` and `agentSkew` (#1138) are listed here to be EXCLUDED, not rendered. They ride the
+ * NODE's blob (never an Asset's — the API strips them on both Asset-facing paths), and they are
+ * machine bookkeeping about a single check-in: what the collector could not do, and what this build
+ * could not understand about the report. Dumping them under "Custom fields" would put a raw JSON blob
+ * on the panel of every host that merely reports unprivileged, labelled as if a human had typed it.
+ * They stay out until a surface is designed for them (the fleet view).
+ */
+const INVENTORY_KEYS = new Set([
+  "host",
+  "software",
+  "reportedAt",
+  "_infraAutoCreated",
+  "diagnostics",
+  "agentSkew",
+]);
 
 /**
  * Lightweight shape check (ADR-0074 §2): an agent-reported asset carries a nested `host` object with a
