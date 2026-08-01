@@ -1150,10 +1150,12 @@ describe('InfraService', () => {
 
         // Close the edge to the discarded host FIRST — the one-active-RUNS_ON-per-source partial
         // unique index would refuse a second open edge otherwise.
-        expect(prisma.infraEdge.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['edge-dead'] } },
-          data: { endedAt: expect.any(Date) },
-        });
+        const closed = firstArg<{
+          where: { id: { in: string[] } };
+          data: { endedAt: Date };
+        }>(prisma.infraEdge.updateMany);
+        expect(closed.where).toEqual({ id: { in: ['edge-dead'] } });
+        expect(closed.data.endedAt).toBeInstanceOf(Date);
         expect(prisma.infraEdge.create).toHaveBeenCalledWith({
           data: {
             sourceId: 'node-c1',
@@ -1281,7 +1283,11 @@ describe('InfraService', () => {
           { id: 'node-keep', externalId: 'machine-id-xyz/container/keep' },
         ]);
         prisma.infraEdge.findMany.mockResolvedValue([
-          { id: 'edge-keep', sourceId: 'node-keep', target: { deletedAt: null } },
+          {
+            id: 'edge-keep',
+            sourceId: 'node-keep',
+            target: { deletedAt: null },
+          },
         ]);
         enrollment.tryCharge.mockReturnValue(false);
 
