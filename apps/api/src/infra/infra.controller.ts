@@ -330,7 +330,7 @@ export class InfraController {
   @UseGuards(HumanOnlyGuard)
   @ApiOperation({
     summary:
-      'Save an auto-confirm rule (ADR-0074 §1 amendment, #1145). NOT RETROACTIVE: rules are evaluated only on reports that arrive AFTER they are saved, so proposals already in the review tray are never confirmed behind the operator. A rule MUST state at least one condition (hostname glob, subnet CIDR, or the kind the server proposed) — a rule with none would be blanket auto-confirm, which ADR-0074 §1 rejected. `trackAsAsset` defaults ON for a HOST rule and OFF for a CONTAINER rule. The authoring user is recorded and the Assets an auto-confirm mints are attributed to them.',
+      'Save an auto-confirm rule (ADR-0074 §1 amendment, #1145). NOT RETROACTIVE: rules are evaluated only on reports that arrive AFTER they are saved, so proposals already in the review tray are never confirmed behind the operator. A rule MUST state at least one condition that can rule a proposal OUT — a hostname glob carrying a literal character (`*`, `**` and `*?*` match every name there is, so they state nothing), a subnet narrower than `/0`, or the kind the server proposed. A rule whose conditions exclude nothing IS blanket auto-confirm however it is spelled, and ADR-0074 §1 rejected that. `trackAsAsset` defaults ON for a HOST rule and OFF for any rule that can also reach a container child (CONTAINER or ANY). The authoring user is recorded and the Assets an auto-confirm mints are attributed to them. A key a human already DISCARDED is never auto-confirmed on a later report.',
   })
   @ApiCreatedResponse({ type: InfraAutoConfirmRuleDto })
   createAutoConfirmRule(
@@ -345,7 +345,7 @@ export class InfraController {
   @UseGuards(HumanOnlyGuard)
   @ApiOperation({
     summary:
-      'Update a rule — including the `enabled` toggle, which is the fastest revocation (a disabled rule stops matching immediately). 400 if the patch would leave the MERGED rule with no condition.',
+      'Update a rule — including the `enabled` toggle, which is the fastest revocation (a disabled rule stops matching immediately). 400 if the patch would leave the MERGED rule with no condition that can rule a proposal out — nulling the last one, or widening it to an all-wildcard pattern or `/0`, are the same blanket rule spelled three ways.',
   })
   @ApiOkResponse({ type: InfraAutoConfirmRuleDto })
   updateAutoConfirmRule(
