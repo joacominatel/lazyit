@@ -1459,7 +1459,7 @@ describe('InfraService', () => {
           ]);
         }
 
-        it('refreshes the Asset on every report — it no longer freezes at confirm time', async () => {
+        it("refreshes the Asset whenever the container's facts CHANGE — it no longer freezes at confirm time", async () => {
           // `syncAssetSpecs` was called only from the HOST path, so a container confirmed with
           // `trackAsAsset` (which defaults ON) kept the image tag, digest, runtime state and
           // published ports it had the day it was confirmed, while its node panel stayed fresh. An
