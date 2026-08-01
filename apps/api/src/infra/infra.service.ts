@@ -524,7 +524,9 @@ export class InfraService {
         select: { id: true, externalId: true },
       })) ?? [];
     const knownByExternalId = new Map(
-      known.flatMap((n) => (n.externalId ? [[n.externalId, n.id] as const] : [])),
+      known.flatMap((n) =>
+        n.externalId ? [[n.externalId, n.id] as const] : [],
+      ),
     );
 
     const reported = new Set<string>();
