@@ -365,7 +365,7 @@
       "ANY": "Servers and containers"
     },
     "hostnameLabel": "Name matches",
-    "hostnameDescription": "Use * for any run of characters and ? for exactly one — srv-* matches srv-app-04. The whole name has to match, not just part of it. A pattern of nothing but wildcards isn't a condition: it matches every host there is.",
+    "hostnameDescription": "Use * for any run of characters and ? for exactly one — srv-* matches srv-app-04. The whole name has to match, not just part of it. A pattern of nothing but wildcards isn't a condition: it has to carry at least one literal character.",
     "subnetLabel": "Reports from subnet",
     "subnetDescription": "A CIDR block, IPv4 or IPv6. A host that reported no address never matches this. 0.0.0.0/0 isn't a condition either — it's every address there is.",
     "reportedKindLabel": "Reported as",
@@ -375,7 +375,7 @@
     "keepProposedKind": "Keep the reported kind",
     "trackAsAssetLabel": "Track as an inventory asset",
     "trackAsAssetDescription": "On by default for a servers-only rule, off for any rule that can also match containers — the same reasoning as confirming by hand. Turn it on if these containers really are things you track.",
-    "needsCondition": "A rule needs at least one condition that can rule a host out: a name pattern with something other than * and ?, a subnet narrower than 0.0.0.0/0, or a reported kind. A condition that matches everything would confirm everything the agent finds.",
+    "needsCondition": "A rule needs at least one condition that can rule a host out: a name pattern with something other than * and ?, a subnet narrower than 0.0.0.0/0, or a reported kind. Most wildcard-only patterns match every host there is, so they would confirm everything the agent finds; ? on its own matches only one-character names, and is refused along with them to keep the rule one you can check by looking.",
     "saveSubmit": "Save rule",
     "savedToast": "Rule saved. It applies from the next report onwards.",
     "saveError": "Couldn't save the rule.",
