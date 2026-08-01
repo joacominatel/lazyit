@@ -148,7 +148,11 @@ container — so the tray is built to be worked through in one pass rather than 
   through and you are told how many, and which one failed first.
 - **Filter** by name (`srv-*` works as a pattern) or IP, by subnet (`10.20.0.0/16`), by reported kind,
   and by servers-versus-containers — and **sort** by when something was first seen, or by name. These
-  narrow what you're looking at; a bulk action never reaches past what you can see.
+  narrow what you're looking at; a bulk action never reaches past what you can see. **Narrowing a
+  filter drops the rows it hides from your selection**, so the count beside the buttons always means
+  rows that are on screen — and widening the filter again doesn't bring an old selection back.
+- **One action takes at most 200 items.** Over that, the two buttons are disabled and tell you the
+  number, before you press anything. Filter it down and run it in more than one pass.
 
 ### Auto-confirm rules
 
@@ -161,14 +165,31 @@ condition: a **name pattern** (`*` for any run of characters, `?` for exactly on
 to match), a **subnet** in CIDR form, or the **kind the agent's report made lazyit propose**. It then
 says what to do: which kind to confirm it as, and whether to track it as an inventory asset.
 
-What you should know before writing one:
+**Be clear about what you're turning on.** A host a rule matches is confirmed the moment it reports —
+you never see that row in the tray, and if the rule says to track it, its asset is created too. You
+are still the one deciding; you're deciding *once, in advance*, for hosts you haven't met yet. That's
+the whole point, and it's also the cost: the narrower the rule, the smaller the surprise. If someone
+ever got hold of your agent's token, a host they invent that happens to fit one of your rules lands
+confirmed instead of waiting in the tray.
+
+What else you should know before writing one:
 
 - **A rule only applies from the next report onwards.** Nothing already waiting in your tray is
   confirmed behind you — those are still yours to review, one at a time or in bulk. Saving a rule
   never touches a proposal you can already see.
-- **A rule needs at least one condition.** lazyit will not save one without, because a rule with no
-  condition would confirm everything the agent ever finds — which is exactly the thing the pending
-  tray exists to prevent.
+- **A rule needs a condition that can actually rule something out.** A name pattern of nothing but
+  wildcards (`*`, `**`, `?`) matches every host there is, and `0.0.0.0/0` is every address there is —
+  lazyit refuses to save either, alone or together, because a rule that excludes nothing is just
+  "confirm everything the agent finds", which is exactly what the pending tray exists to prevent.
+  `srv-*` is a condition. `*` is not. You can still use `*` beside a real condition — *anything at
+  all, on `10.20.0.0/16`* is a rule; *anything at all, anywhere* is not.
+- **Anything you discarded stays discarded.** If you discard a proposal and the same machine reports
+  again, it comes back as a new pending item for you to look at — a rule never confirms it behind you.
+  Your "no" outranks your rules.
+- **The asset switch starts off for any rule that can match containers.** A servers-only rule defaults
+  to tracking them as assets; a containers rule *or* a "servers and containers" rule defaults to not
+  tracking, for the same reason the bulk dialog does. Turn it on if those containers really are things
+  you track.
 - **It is still your decision, and it is recorded as yours.** The rule shows who wrote it, and every
   asset it creates is attributed to you, the same as if you had clicked Confirm. Rules are listed in
   the order they are checked (the number on the left) and the **first** one that matches wins.

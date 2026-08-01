@@ -158,7 +158,12 @@ de a un cuadro de diálogo por vez.
 - **Filtrá** por nombre (`srv-*` funciona como patrón) o IP, por subred (`10.20.0.0/16`), por tipo
   reportado y por servidores frente a contenedores; y **ordená** por cuándo apareció por primera vez o
   por nombre. Los filtros acotan lo que estás viendo; una acción en conjunto nunca alcanza algo que no
-  podés ver.
+  podés ver. **Al acotar un filtro, las filas que quedan ocultas salen de la selección**, así que el
+  número que ves junto a los botones siempre son filas en pantalla; y volver a ampliar el filtro no
+  recupera una selección anterior.
+- **Una acción toma como máximo 200 elementos.** Por encima de eso los dos botones quedan
+  deshabilitados y te dicen el número, antes de que presiones nada. Acotá con un filtro y hacelo en
+  más de una pasada.
 
 ### Reglas de confirmación automática
 
@@ -172,14 +177,32 @@ uno; tiene que coincidir el nombre completo), una **subred** en formato CIDR, o 
 reporte del agente hizo que lazyit propusiera**. Después indica qué hacer: con qué tipo confirmarlo y
 si registrarlo como activo de inventario.
 
-Lo que conviene saber antes de escribir una:
+**Tené claro qué estás activando.** Un host que coincide con una regla se confirma en el momento en
+que reporta: esa fila nunca pasa por la bandeja, y si la regla indica registrarlo, también se crea su
+activo. La decisión sigue siendo tuya, pero la estás tomando *una vez y por adelantado*, para hosts
+que todavía no conocés. Eso es lo que la hace útil y también lo que cuesta: cuanto más acotada sea la
+regla, menor la sorpresa. Si alguien llegara a obtener el token de tu agente, un host inventado que
+encaje en alguna de tus reglas entra confirmado en lugar de quedar esperando en la bandeja.
+
+Lo demás que conviene saber antes de escribir una:
 
 - **Una regla se aplica solo a partir del próximo reporte.** Nada de lo que ya está esperando en tu
   bandeja se confirma por su cuenta: eso lo seguís revisando vos, de a uno o en conjunto. Guardar una
   regla nunca toca una propuesta que ya podés ver.
-- **Una regla necesita al menos una condición.** lazyit no guarda una sin condiciones, porque una
-  regla sin ninguna confirmaría todo lo que el agente encuentre, que es justamente lo que la bandeja
-  de pendientes existe para evitar.
+- **Una regla necesita una condición que pueda descartar algo.** Un patrón de nombre hecho solo de
+  comodines (`*`, `**`, `?`) coincide con todos los hosts que existan, y `0.0.0.0/0` son todas las
+  direcciones que existen: lazyit no guarda ninguna de las dos, ni por separado ni juntas, porque una
+  regla que no descarta nada es simplemente "confirmá todo lo que encuentre el agente", que es
+  justamente lo que la bandeja de pendientes existe para evitar. `srv-*` es una condición; `*` no lo
+  es. Igual podés usar `*` junto a una condición real: *cualquier cosa, en `10.20.0.0/16`* es una
+  regla; *cualquier cosa, en cualquier lado* no.
+- **Lo que descartaste queda descartado.** Si descartás una propuesta y esa misma máquina vuelve a
+  reportar, reaparece como un pendiente nuevo para que la mires: ninguna regla la confirma por su
+  cuenta. Tu "no" está por encima de tus reglas.
+- **La opción de activo arranca desactivada en toda regla que pueda alcanzar contenedores.** Una regla
+  solo de servidores los registra como activos por defecto; una regla de contenedores *o* una de
+  "servidores y contenedores" no los registra por defecto, con el mismo criterio que el cuadro de
+  selección. Activalo si esos contenedores realmente son algo que registrás.
 - **Sigue siendo tu decisión, y queda registrada como tuya.** La regla muestra quién la escribió, y
   cada activo que crea queda atribuido a vos, igual que si hubieras hecho clic en Confirmar. Las
   reglas se listan en el orden en que se evalúan (el número de la izquierda) y gana la **primera** que
