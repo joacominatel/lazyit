@@ -805,10 +805,11 @@ default — and ultimately §8's posture that `infra:report` is a low-value cred
 is noise rather than damage. What #1153 removes is the ~172,800 rewrites a day of a legitimate estate,
 and of a leaked token that merely replays a report; it is not a ceiling on a caller who is deliberately
 making every request different. The write half of that is not new either — before #1142 the same caller
-drove the same rewrite by sending a different package list, at several hundred KB a request. // the earlier wording here, *"holds
-regardless of what the client sends"*, promised the stronger bound and the code never delivered it.
-**Corrected 2026-08-01, review of #1163.** They ship together because separately the first one is a
-landmine.
+drove the same rewrite by sending a different package list, at several hundred KB a request.
+// the earlier wording here, *"holds regardless of what the client sends"*, promised the stronger bound
+and the code never delivered it. **Corrected 2026-08-01, review of #1163.**
+
+They ship together because separately the first one is a landmine.
 
 **The landmine, and the three-state contract that defuses it.** Before this, an absent `software` key
 DELETED the stored list, and #1140's `applySoftwarePolicy` depended on it: a policy that turns software
@@ -836,9 +837,10 @@ agent from 400-ing itself off the map. Its cost is that an older instance does n
 does not know; it silently **strips** it. So a #1142 agent reporting to a post-#1138, pre-#1142 server
 has `softwareState` and `softwareHash` removed on the way in, that server sees no `software` key, and
 it **clears the stored list** — the pre-#1142 reading, correctly applied to a report that never meant
-it. And because the agent believes the list unchanged, it never sends it again: the host's inventory
-is gone permanently, with no error anywhere and both Manual pages promising the opposite. The skew
-recorder would list `softwareState` in `droppedPaths`; **recording is not preventing.**
+it. And because the agent believes the list unchanged, it would never send it again: the host's
+inventory would be gone permanently, with no error anywhere and the Manual's *"the list on screen is
+always the current one"* quietly false. The skew recorder would list `softwareState` in
+`droppedPaths`; **recording is not preventing.**
 
 So the ack states the server's capability — **`softwareDelta: true`**, a fact about the *build*, on
 every ack, through the channel #1140 already established for `policy`. The agent caches it in
@@ -867,9 +869,11 @@ the only one gated.**
 **`softwareHash` is corroboration, never authority.** The wire's fingerprint is read on exactly one
 branch — an omitted list, where it is the claim being checked. A list that *arrives* is fingerprinted
 by the **server**, with the same shared function the agent uses, so a node's stored fingerprint is
-always the server's own reading of what it stored. That is what makes the skip a bound rather than a
-courtesy: a client that sends no fingerprint at all — every pre-#1142 agent, and an attacker, who has
-no reason to cooperate — is compared just the same. A claim it *cannot* corroborate — the node holds no
+always the server's own reading of what it stored. That is what makes the skip independent of the
+client's cooperation rather than something a client opts into: one that sends no fingerprint at all —
+every pre-#1142 agent, and an attacker, who has no reason to send one — is compared just the same. (It
+is *not* what makes it a bound on a client that varies its report; see "Two halves" above.) A claim it
+*cannot* corroborate — the node holds no
 list, or holds one fingerprinted differently — is never resolved by guessing: the stored list is kept
 and the ack carries
 **`softwareResend: true`**, which the agent answers by forgetting its cache. That is what makes the
@@ -883,10 +887,10 @@ fields that change on every report while the inventory does not: `reportedAt` an
 `diagnostics.durationMs`. A changed warning list, a changed `privileged` flag, a new `agentSkew` record
 and the `identityConflict` marker are all real changes and all write. **Skip only on a confident
 match** — a wasted write costs I/O, a missed one leaves an operator reading an inventory that has not
-been true for weeks. The package list is compared by fingerprint and is deliberately never read back:
-the hot path reads `specs - 'software'`, a few KB, which is the same lesson as #1135 one layer down.
-The one path that does read it back is a report that omitted the list while its *host facts* changed,
-because the blob is written wholesale and writing it without the list would delete it.
+been true for weeks. The package list is compared by fingerprint and is deliberately kept out of the
+hot path, which reads `specs - 'software'` — a few KB, the same lesson as #1135 one layer down. The one
+path that does read the list back is a report that omitted it while its *host facts* changed, because
+the blob is written wholesale and writing it without the list would delete it.
 
 **A consequence stated plainly: `specs.reportedAt` now dates the FACTS, not the check-in.** When the
 write is skipped the stored blob keeps the collection time it already had, so on the Asset inventory
