@@ -122,7 +122,7 @@ describe('InfraAgentStalenessSweeper (ADR-0074 §4 / #852)', () => {
 
     expect(await sweeper.sweep()).toBe(1);
     // The bulk flip now addresses the decided set by id — it cannot re-run the per-node comparison.
-    const arg = updateMany.mock.calls[0][0] as {
+    const arg = (updateMany.mock.calls as unknown[][])[0][0] as {
       where: { id: { in: string[] } };
     };
     expect(arg.where.id.in).toEqual(['n-tight']);

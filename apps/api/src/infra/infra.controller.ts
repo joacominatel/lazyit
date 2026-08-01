@@ -160,7 +160,7 @@ export class InfraController {
   @UseGuards(HumanOnlyGuard)
   @ApiOperation({
     summary:
-      'Set the per-NODE agent policy layer (ADR-0074 §7 / #1140) — the narrowest scope, which wins over the service account and the instance default. `effective` in the response resolves this layer over the INSTANCE DEFAULT only: it deliberately omits the reporting account\'s layer, because the server does not know which account reports a node until one does.',
+      "Set the per-NODE agent policy layer (ADR-0074 §7 / #1140) — the narrowest scope, which wins over the service account and the instance default. `effective` in the response resolves this layer over the INSTANCE DEFAULT only: it deliberately omits the reporting account's layer, because the server does not know which account reports a node until one does.",
   })
   @ApiOkResponse({ type: AgentPolicySettingsDto })
   putNodeAgentPolicy(
@@ -175,7 +175,7 @@ export class InfraController {
   @UseGuards(HumanOnlyGuard)
   @ApiOperation({
     summary:
-      'Clear a node\'s agent policy override, so it inherits its service account\'s layer and the instance default again. Bumps the revision like any other policy write.',
+      "Clear a node's agent policy override, so it inherits its service account's layer and the instance default again. Bumps the revision like any other policy write.",
   })
   @ApiOkResponse({ type: AgentPolicySettingsDto })
   deleteNodeAgentPolicy(@Param('id') id: string) {

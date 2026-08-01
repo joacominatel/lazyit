@@ -110,7 +110,8 @@ export class InfraAgentStalenessSweeper
       // more rows. It is only a cheap pre-filter — the per-node decision happens below — so it must
       // never exclude a node that its OWN threshold would have caught.
       const candidateCutoff = new Date(
-        now - Math.min(this.staleAfterMs, AGENT_POLICY_STALE_MIN_SECONDS * 1000),
+        now -
+          Math.min(this.staleAfterMs, AGENT_POLICY_STALE_MIN_SECONDS * 1000),
       );
       const where = {
         source: 'AGENT',

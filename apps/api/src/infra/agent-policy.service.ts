@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AgentPolicyOverrideSchema,
   resolveAgentPolicy,
@@ -50,7 +55,10 @@ export class AgentPolicyService {
    * `undefined`, i.e. "adds no override". Deliberately silent about the VALUE it rejected: the blob
    * is operator data and this line ends up in a log an operator reads.
    */
-  private parseOverride(stored: unknown, scope: string): AgentPolicyOverride | undefined {
+  private parseOverride(
+    stored: unknown,
+    scope: string,
+  ): AgentPolicyOverride | undefined {
     if (stored === null || stored === undefined) return undefined;
     const parsed = AgentPolicyOverrideSchema.safeParse(stored);
     if (parsed.success) return parsed.data;
@@ -66,7 +74,10 @@ export class AgentPolicyService {
    * `AssetTagScheme`/`SmtpSettings` self-heal precedent). Reading is the hot path — once per report —
    * so it does a plain `findUnique` first and only upserts when the row is genuinely absent.
    */
-  private async readSettingsRow(): Promise<{ revision: number; settings: unknown }> {
+  private async readSettingsRow(): Promise<{
+    revision: number;
+    settings: unknown;
+  }> {
     const row = await this.prisma.agentPolicySettings.findUnique({
       where: { id: SINGLETON_ID },
       select: { revision: true, settings: true },
@@ -165,13 +176,15 @@ export class AgentPolicyService {
    * a revision it never actually applied, which is precisely the lie the acknowledgement exists to
    * make impossible.
    */
-  async setInstanceOverride(override: unknown): Promise<AgentPolicySettingsState> {
+  async setInstanceOverride(
+    override: unknown,
+  ): Promise<AgentPolicySettingsState> {
     const settings = this.validate(override);
     await this.readSettingsRow();
     const row = await this.prisma.agentPolicySettings.update({
       where: { id: SINGLETON_ID },
       data: {
-        settings: settings as Prisma.InputJsonValue,
+        settings: settings,
         revision: { increment: 1 },
       },
       select: { revision: true },
@@ -192,7 +205,7 @@ export class AgentPolicyService {
    */
   async setServiceAccountOverride(
     serviceAccountId: string,
-    override: unknown | null,
+    override: unknown,
   ): Promise<AgentPolicySettingsState> {
     const value = override === null ? null : this.validate(override);
     const account = await this.prisma.serviceAccount.findFirst({
@@ -203,7 +216,8 @@ export class AgentPolicyService {
     await this.prisma.serviceAccount.update({
       where: { id: serviceAccountId },
       data: {
-        agentPolicy: value === null ? Prisma.DbNull : (value as Prisma.InputJsonValue),
+        agentPolicy:
+          value === null ? Prisma.DbNull : (value as Prisma.InputJsonValue),
       },
     });
     const revision = await this.bumpRevision();
@@ -213,7 +227,7 @@ export class AgentPolicyService {
   /** Set (or CLEAR, with `null`) the per-node layer — the narrowest scope, and the post-confirm one. */
   async setNodeOverride(
     nodeId: string,
-    override: unknown | null,
+    override: unknown,
   ): Promise<AgentPolicySettingsState> {
     const value = override === null ? null : this.validate(override);
     const node = await this.prisma.infraNode.findFirst({
@@ -224,7 +238,8 @@ export class AgentPolicyService {
     await this.prisma.infraNode.update({
       where: { id: nodeId },
       data: {
-        agentPolicy: value === null ? Prisma.DbNull : (value as Prisma.InputJsonValue),
+        agentPolicy:
+          value === null ? Prisma.DbNull : (value as Prisma.InputJsonValue),
       },
     });
     const revision = await this.bumpRevision();

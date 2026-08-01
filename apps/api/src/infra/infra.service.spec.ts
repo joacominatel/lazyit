@@ -3527,7 +3527,9 @@ describe('InfraService', () => {
         AGENT_SA,
       );
 
-      const childArg = prisma.infraNode.create.mock.calls[1][0] as {
+      const childArg = (
+        prisma.infraNode.create.mock.calls as unknown[][]
+      )[1][0] as {
         data: { policyStaleAfterSeconds?: number };
       };
       expect(childArg.data.policyStaleAfterSeconds).toBe(90_000);
