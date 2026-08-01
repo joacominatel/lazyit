@@ -17,6 +17,7 @@ import {
   InfraNodeSchema,
   InfraShortcutSchema,
   inferNodeKind,
+  isContainerChildExternalId,
   IpAddressSchema,
   isPlausibleEdge,
   normalizeIdentifierValue,
@@ -914,6 +915,16 @@ describe("containerExternalId — the identity key, as permanent as the host one
   test("can never collide with a host's own externalId (machine-ids carry no `/`)", () => {
     expect(containerExternalId("m1", "api")).not.toBe("m1");
     expect(containerExternalId("m1", "api")).toContain("/container/");
+  });
+
+  test("isContainerChildExternalId tells a child from the host that reported it", () => {
+    // A consumer that must show THE SERVER — the create-agent wizard's "it checked in" screen —
+    // needs this: children are created after their host, and the node list is newest-first, so
+    // "the newest agent proposal" is a container the moment a host reports any.
+    expect(isContainerChildExternalId(containerExternalId("m1", "api"))).toBe(true);
+    expect(isContainerChildExternalId("9f8d7c6b5a4e3f2a")).toBe(false);
+    expect(isContainerChildExternalId(null)).toBe(false);
+    expect(isContainerChildExternalId(undefined)).toBe(false);
   });
 });
 
