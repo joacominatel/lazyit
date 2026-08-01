@@ -84,11 +84,12 @@ export function serverUnderstandsSoftwareDelta(ack: unknown): boolean {
  * handshake, so gating them would change nothing on the wire and would only cost the cache. An OLD
  * server reads both as the pre-#1142 absent key and clears — which is exactly right for `disabled`,
  * and for `unavailable` empties the panel until the next successful collection, which sends the whole
- * list again because this agent has no evidence against that server. Not identical to the pre-#1142
- * agent, which sent an empty ARRAY when its collector failed (`collectSoftware` folded a null stdout
- * into `[]`) and so left an empty list stored rather than none; the panel is equally empty either way
- * and neither state is durable. Only `unchanged` can cost an inventory permanently, and only
- * `unchanged` is gated.
+ * list again because this agent has no evidence against that server. That is EXACTLY what a pre-#1142
+ * agent did in the same situation, and the two cases were never distinguishable: `applySoftwarePolicy`
+ * returned `undefined` — never `[]` — both when the collector enumerated nothing and when policy
+ * turned software collection off, and the report spread `...(software ? { software } : {})`, so both
+ * left the key ABSENT and both made the server clear. Neither branch is worse than what the estate
+ * already runs. Only `unchanged` can cost an inventory permanently, and only `unchanged` is gated.
  */
 export function softwareWireFields(
   collection: SoftwareCollection,
