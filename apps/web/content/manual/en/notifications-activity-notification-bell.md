@@ -40,6 +40,7 @@ The set of triggers is fixed and deliberately small — the bell is a curated nu
 | **Run failed** | A workflow run failed or escalated and stopped. |
 | **Sensitive permission granted** | A role-permission edit gave the Member or Viewer role a high-risk capability — instance settings, user management, access-grant control, or any delete permission. Links to the role-permission editor. |
 | **Agent offline** | A reporting agent stopped sending reports and its node was flipped offline. One notification per outage — not once per check. Links to the topology map. |
+| **Duplicate machine ID** | Two servers reported the same machine ID but different hardware — almost always a VM template or golden image cloned with one baked in. Both are listed separately (nothing is merged) and the notification names the fix. One notification per colliding host, not one per check-in. Links to the topology map. |
 | **Vault setup** | (Targeted, one-time) A person who can read secrets but has never set a vault passphrase is nudged at sign-in to set one up. |
 | **Access request decided** | (Targeted) Your own access request was approved or denied. Lands in your bell — and inbox, unless you opt out — so you don't have to poll your request list. Links to the application. |
 | **Warranty expiring** | An asset's warranty is within its look-ahead window (the last 90 days before it ends) and has not yet lapsed. One heads-up per asset, so you can renew or replace before the deadline instead of finding out after. Links to the asset. |

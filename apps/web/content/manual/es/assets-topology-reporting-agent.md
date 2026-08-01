@@ -86,7 +86,7 @@ tiene su propio botón de copiar:
 
 Los hosts descubiertos no entran directo a tu inventario: te esperan en la bandeja de **Revisión
 pendiente** arriba de la vista de Servidores, cada uno mostrando su nombre de host, su tipo, de dónde
-vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés dos opciones:
+vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés tres opciones:
 
 - **Confirmar** — suma el host a tu topología activa. Un diálogo breve te permite renombrarlo y
   cambiar su tipo antes, y ofrece un interruptor **Registrar como activo de inventario** (**activado**
@@ -96,6 +96,18 @@ vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés do
   hardware real, ese pasa a ser el serie del activo automáticamente (un texto de relleno como
   *"To be filled by O.E.M."*, o un serie que ya usa otro activo, se descarta). Desactivá el
   interruptor para dejar el nodo solo en el grafo.
+- **Unificar con…** — este host ya lo tenés. Elegí el servidor existente que realmente es y su clave
+  de reporte se muda ahí: los próximos reportes llegan a ese servidor y esta propuesta se archiva.
+  Usalo cuando una máquina fue **reinstalada** (un sistema operativo nuevo le da un machine ID nuevo,
+  así que vuelve como si fuera desconocida mientras el servidor que ya habías curado queda en silencio),
+  o cuando lazyit separó un host clonado (más abajo). El servidor que elijas conserva lo que
+  configuraste: nombre, tipo, posición, responsable, activo vinculado y conexiones, y una IP que
+  cargaste a mano sigue siendo tuya. Lo que se muda es la clave de reporte y los datos reportados que
+  vienen con ella, así que una IP que había completado el *agente* pasa a ser la del host entrante.
+  Si los dos reportan el mismo número de serie o la misma dirección de placa de
+  red, el diálogo te lo dice arriba (*"esto parece srv-app-04"*); eso solo aparece si ambos fueron
+  reportados por un agente lo bastante reciente como para enviar esos datos, y es una sugerencia que
+  confirmás vos, nunca una decisión tomada por el sistema.
 - **Descartar** — elimina la propuesta. Es un borrado lógico (igual que quitar cualquier nodo del
   mapa): no se destruye nada y se puede restaurar más adelante. **Descartar no detiene al agente.**
   Si ese host todavía tiene el agente instalado y corriendo, su próximo reporte lo vuelve a informar
@@ -113,6 +125,36 @@ instalado — se muestra como un panel de solo lectura **Datos reportados** en e
 nodo en el diagrama o en la lista de Servidores), y los mismos datos aparecen en el activo
 correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin tocar nada que sea tuyo
 (el nombre, el número de serie y el modelo del activo nunca cambian por un reporte).
+
+## Cuando dos servidores dicen ser la misma máquina
+
+lazyit distingue tus servidores por el machine ID que Linux escribe al instalarse
+(`/etc/machine-id`). Funciona bien, hasta que se arma una **plantilla de VM o una imagen dorada que ya
+lo trae adentro**. Todas las máquinas clonadas de ahí reclaman la misma identidad y, sin un control,
+se apilarían en una sola fila: un servidor en tu mapa, doce en tus racks. Es la forma más común de
+terminar con un inventario que se equivoca con total seguridad, y es la razón por la que existe
+`systemd-firstboot`.
+
+lazyit lo controla. Cuando un reporte reclama un ID que ya usa otro servidor, compara el hardware que
+reportan los dos: si el **número de serie, las direcciones de placa de red y el nombre de host son
+todos distintos**, son dos máquinas, no una. Cuando pasa eso:
+
+- El host nuevo obtiene **su propia entrada** en Revisión pendiente en lugar de pisar la primera. Sus
+  datos reportados, su IP y su nombre de host quedan suyos.
+- **No se unifica ni se cambia nada** en el servidor que ya estaba: el control solo puede frenar una
+  unificación, nunca reescribir algo que ya tenías.
+- Recibís **una sola notificación** en la campana (no una por cada reporte). El título nombra a los dos
+  hosts; el resumen arranca con el comando que lo soluciona (la campana recorta los resúmenes largos a
+  una línea: pasá el mouse por encima para leerlo completo). La fila enlaza al mapa de topología.
+
+La solución está en las máquinas, no en lazyit: en cada clon, borrá `/etc/machine-id`, ejecutá
+`systemd-firstboot --setup-machine-id` y reiniciá. Corregí también la plantilla, o cada clon futuro
+repite el problema. Una vez que el clon tiene un ID propio, simplemente reporta como un host nuevo:
+confirmalo, o usá **Unificar con…** para plegarlo sobre la entrada que lazyit le creó mientras tanto.
+
+Todo esto necesita los datos de hardware que envía un agente **actual**. Los hosts que todavía corren
+un agente viejo nunca se comparan — ni generan avisos — hasta que reporten con uno actualizado; nada de
+lo que ya tenés se toca al actualizar.
 
 ## Qué recopila el agente
 

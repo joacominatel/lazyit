@@ -81,7 +81,7 @@ button:
 
 Discovered hosts don't go straight into your inventory — they wait for you in the **Pending review**
 tray at the top of the Servers view, each showing its hostname, kind, where the report came from and
-how long ago it last reported. For each one you have two choices:
+how long ago it last reported. For each one you have three choices:
 
 - **Confirm** — adds the host to your live topology. A short dialog lets you rename it and change its
   kind first, and offers a **Track as an inventory asset** toggle (**on** by default): left on,
@@ -90,6 +90,17 @@ how long ago it last reported. For each one you have two choices:
   hardware **serial number**, it becomes that asset's serial automatically (a placeholder like
   *"To be filled by O.E.M."*, or a serial already used by another asset, is skipped). Turn the toggle
   off to keep the node graph-only.
+- **Merge into…** — this host is one you already have. Pick the existing server it really is, and its
+  reporting key moves there: future check-ins land on that server, and this proposal is archived. Use
+  it when a machine was **reinstalled** (a fresh OS gives it a new machine ID, so it comes back looking
+  like a stranger while the server you already curated goes quiet), or when lazyit separated out a
+  cloned host (below). The server you pick keeps what you set on it — its name, kind, position, owner,
+  asset link and connections, and an IP you typed by hand stays yours. What moves is the reporting key
+  and the reported facts that come with it, so an IP the *agent* filled in is replaced by the incoming
+  host's. If the two report the same
+  hardware serial or network-card address, the dialog says so at the top (*"this looks like
+  srv-app-04"*); that only appears when both were reported by an agent recent enough to send those
+  details, and it is a suggestion you confirm, never a choice made for you.
 - **Discard** — removes the proposal. This is a soft delete (the same as removing any node from the
   map): nothing is destroyed and it can be restored later. **Discarding does not stop the agent.** If
   that host still has the agent installed and running, its next check-in reports it again and it
@@ -106,6 +117,35 @@ operating system, CPU, memory, disks, network interfaces, serial and installed s
 read-only **Reported facts** panel right on the node (open a node on the diagram or Servers list), and
 the same facts appear on the corresponding asset. Both stay fresh: each new report updates them
 without touching anything you own (the asset's name, serial and model are never changed by a report).
+
+## When two servers claim to be the same machine
+
+lazyit tells your servers apart by the machine ID Linux writes at install time (`/etc/machine-id`).
+That works — until a **VM template or golden image is built with one already in it**. Every machine
+cloned from it then claims the same identity, and without a check they would all pile onto a single
+row: one server on your map, twelve in your racks. It is the most common way an inventory ends up
+confidently wrong, and it is why `systemd-firstboot` exists.
+
+lazyit checks. When a report claims an ID that another server already uses, it compares the hardware
+the two report: if the **serial number, the network-card addresses and the hostname all differ**, they
+are two machines, not one. When that happens:
+
+- The new host gets **its own entry** in Pending review rather than overwriting the first one. Its
+  reported facts, IP and hostname stay its own.
+- **Nothing is merged and nothing is changed** on the server that was already there — the check can
+  only ever hold a merge back, never rewrite something you already had.
+- You get **one notification** in the bell (not one per check-in). Its title names both hosts; its
+  summary opens with the command that fixes it (the bell shortens long summaries to one line — hover
+  the row to read it in full). The row links to the topology map.
+
+The fix is on the machines, not in lazyit: on each clone, remove `/etc/machine-id`, run
+`systemd-firstboot --setup-machine-id`, and reboot. Fix the template too, or every future clone repeats
+it. Once a clone has a real ID of its own it simply reports as a new host — confirm it, or use
+**Merge into…** to fold it onto the entry lazyit created for it in the meantime.
+
+All of this needs the hardware details a **current** agent sends. Hosts still running an older agent
+are never compared — and never warned about — until they check in with an updated one; nothing you
+already have is touched by the upgrade.
 
 ## What the agent collects
 
