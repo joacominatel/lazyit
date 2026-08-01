@@ -476,8 +476,8 @@ while the list is newest-first — so a host running containers would have had t
 `redis` as the server just installed. It now excludes container children via the key's own exported
 rule (`isContainerChildExternalId`), rather than re-deriving the separator at the call site.
 
-**Amendment (2026-07-31, #1141) — the dedup key is machine-id twice, so corroborate it.** The bullets
-above call `(reportingSource, externalId)` a **composite** key. It is not one. `externalId` is
+**Amendment (2026-07-31, #1141) — the dedup key is machine-id twice, so corroborate it.** §3's
+dedup bullets call `(reportingSource, externalId)` a **composite** key. It is not one. `externalId` is
 `/etc/machine-id` (`apps/agent/src/collect.ts`) and `reportingSource` is
 `agent:${machineId.slice(0, 12)}` (`apps/agent/src/index.ts`) — the same value twice, so the pair has
 exactly the uniqueness of its weaker half. And `/etc/machine-id` is not reliably unique: a VM template
