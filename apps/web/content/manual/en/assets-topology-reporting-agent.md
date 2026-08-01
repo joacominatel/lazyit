@@ -241,6 +241,16 @@ operating system, CPU, memory, disks, network interfaces, serial and installed s
 read-only **Reported facts** panel right on the node (open a node on the diagram or Servers list), and
 the same facts appear on the corresponding asset. Both stay fresh: each new report updates them
 without touching anything you own (the asset's name, serial and model are never changed by a report).
+This now includes **containers**: a container you confirmed as an asset keeps its image, digest, state
+and published ports up to date on its asset page, where previously they stayed as they were the day
+you confirmed it.
+
+> [!tip] "Collected 3 days ago" does not mean the server stopped reporting
+> The inventory panel is stamped with when those **facts were collected**, and lazyit only rewrites the
+> stored inventory when something in it actually changed — a server whose software and hardware have
+> been stable for a fortnight keeps a fortnight-old collection stamp while reporting perfectly well
+> every few minutes. To ask *"is this host still checking in?"*, look at the server's **last reported**
+> time on the Servers list or the node panel; that one advances on every single report.
 
 ## When two servers claim to be the same machine
 
@@ -314,7 +324,15 @@ from it on container guests.
   Stored with the host's other reported facts and, like the machine type, not shown on any screen yet.
 - **Installed software** — the list of installed packages, with versions where available. The agent
   also records which package manager reported each one; the package list itself shows the name and
-  the version.
+  the version. On a busy server this list is by far the largest thing a report carries and it changes
+  only when somebody installs or upgrades something, so the agent sends it **once and then sends only
+  a fingerprint of it** until it changes — which cuts a routine check-in to roughly a tenth of its
+  size. You never see this: the list on screen is always the current one. If lazyit ever cannot match
+  the fingerprint to what it holds (after restoring a backup, or after you discarded a server and it
+  was rediscovered), it keeps the list it has and asks the agent for a full one on its next report
+  rather than showing you an empty panel. Turning software collection **off** in the agent settings is
+  different and deliberate: the stored list is cleared, so you are never left reading package versions
+  nobody is collecting any more.
 - **What it couldn't collect** — each report also says whether it ran with root and names anything it
   had to skip or that timed out. Run the agent by hand (`lazyit-agent report --once --force`) and it prints
   those notes right there, which is usually the fastest way to answer "why is this host's serial
