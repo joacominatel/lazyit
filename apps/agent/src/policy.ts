@@ -52,6 +52,17 @@ export interface AgentState {
    * that is never corrected.
    */
   softwareHash?: string;
+  /**
+   * Positive evidence, from the last accepted report's ack, that the server understands the #1142
+   * three-state contract — the ONE thing that entitles the next run to omit an unchanged list.
+   *
+   * It is remembered rather than assumed because the contract root is a loose `z.object()` (#1138): a
+   * server built before #1142 does not reject `softwareState`/`softwareHash`, it silently strips them,
+   * then sees no `software` key and clears the stored list. So absence here — a first run, a deleted
+   * file, a corrupt one, an ack that never carried the key — always means "send the whole list", which
+   * costs bandwidth and nothing else. Only a literal `true` on the wire and on disk counts.
+   */
+  softwareDelta?: boolean;
 }
 
 /** Write `text` to `file` atomically-ish (temp + rename) with owner-only permissions. */
@@ -110,7 +121,11 @@ export async function loadState(file = STATE_FILE): Promise<AgentState> {
     const parsed: unknown = JSON.parse(await Bun.file(file).text());
     const raw = (
       typeof parsed === "object" && parsed !== null ? parsed : {}
-    ) as { lastSuccessMs?: unknown; softwareHash?: unknown };
+    ) as {
+      lastSuccessMs?: unknown;
+      softwareHash?: unknown;
+      softwareDelta?: unknown;
+    };
     const lastSuccessMs =
       typeof raw.lastSuccessMs === "number" &&
       Number.isFinite(raw.lastSuccessMs) &&
@@ -123,9 +138,15 @@ export async function loadState(file = STATE_FILE): Promise<AgentState> {
       typeof raw.softwareHash === "string" && raw.softwareHash.length > 0
         ? raw.softwareHash
         : undefined;
+    // A LITERAL `true`, never a truthy value (#1142). This flag is the only thing standing between a
+    // matching fingerprint and an omitted package list, and an omitted list against a server that
+    // cannot read one wipes the host's inventory — so a hand-edited `"true"`, a `1` or anything else
+    // reads as not proven and the next report simply sends everything.
+    const softwareDelta = raw.softwareDelta === true ? true : undefined;
     return {
       ...(lastSuccessMs !== undefined ? { lastSuccessMs } : {}),
       ...(softwareHash !== undefined ? { softwareHash } : {}),
+      ...(softwareDelta !== undefined ? { softwareDelta } : {}),
     };
   } catch {
     return {};
