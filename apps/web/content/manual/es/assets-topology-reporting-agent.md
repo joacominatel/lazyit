@@ -158,9 +158,10 @@ de a un cuadro de diálogo por vez.
 - **Filtrá** por nombre (`srv-*` funciona como patrón) o IP, por subred (`10.20.0.0/16`), por tipo
   reportado y por servidores frente a contenedores; y **ordená** por cuándo apareció por primera vez o
   por nombre. Los filtros acotan lo que estás viendo; una acción en conjunto nunca alcanza algo que no
-  podés ver. **Al acotar un filtro, las filas que quedan ocultas salen de la selección**, así que el
-  número que ves junto a los botones siempre son filas en pantalla; y volver a ampliar el filtro no
-  recupera una selección anterior.
+  podés ver. **Un filtro que oculta una fila marcada la saca de la acción y de la cuenta**, así que el
+  número que ves junto a los botones siempre son filas en pantalla. Si volvés a ampliar el filtro, esa
+  fila reaparece marcada y contada, algo que ves suceder, a diferencia de una confirmación que no
+  sabías que estabas haciendo.
 - **Una acción toma como máximo 200 elementos.** Por encima de eso los dos botones quedan
   deshabilitados y te dicen el número, antes de que presiones nada. Acotá con un filtro y hacelo en
   más de una pasada.

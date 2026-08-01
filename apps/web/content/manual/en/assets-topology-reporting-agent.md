@@ -148,9 +148,10 @@ container — so the tray is built to be worked through in one pass rather than 
   through and you are told how many, and which one failed first.
 - **Filter** by name (`srv-*` works as a pattern) or IP, by subnet (`10.20.0.0/16`), by reported kind,
   and by servers-versus-containers — and **sort** by when something was first seen, or by name. These
-  narrow what you're looking at; a bulk action never reaches past what you can see. **Narrowing a
-  filter drops the rows it hides from your selection**, so the count beside the buttons always means
-  rows that are on screen — and widening the filter again doesn't bring an old selection back.
+  narrow what you're looking at; a bulk action never reaches past what you can see. **A filter that
+  hides a ticked row takes it out of the action and out of the count**, so the number beside the
+  buttons always means rows on screen. Widening the filter again brings it back, ticked and counted —
+  which you can see happen, unlike a confirm you didn't know you were making.
 - **One action takes at most 200 items.** Over that, the two buttons are disabled and tell you the
   number, before you press anything. Filter it down and run it in more than one pass.
 

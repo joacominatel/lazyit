@@ -148,12 +148,17 @@ subnet box uses the **same** `ipInCidr` the saved rules use, so *"which hosts wo
 caught"* and *"which hosts does this filter show"* can never be answered by two implementations.
 Server-side paging of `GET /infra/nodes` is **out of scope** and tracked separately (#1152).
 
-**A selection is the VISIBLE set, and narrowing a filter forgets what it hides.** Both halves are
-needed: acting on the visible rows is what makes the *click* honest, and dropping a hidden row from
-the selection is what makes the *count* honest — "12 selected" beside a Confirm button has to mean
-twelve rows on screen. Without the second half, *select all → narrow the filter → Confirm* confirms
-rows nobody looked at, which is the worst kind of bulk action and exactly what the label promises it
-is not.
+**What a bulk action touches is the VISIBLE selection, and one function decides that for every
+surface.** The ticked-ids set outlives a filter change and nothing reads it directly: the count beside
+the buttons, the two dialogs and the ids in the request all come through `visibleSelection`, so a row a
+filter hides leaves the action *and* the count in the same instant it leaves the screen. Both halves
+matter — the first makes the *click* honest, the second makes *"12 selected"* honest — and without
+them *select all → narrow the filter → Confirm* confirms rows nobody looked at, which is the worst kind
+of bulk action and precisely what the select-all label promises it is not. Re-widening the filter
+brings a hidden row back, ticked and counted: deliberate, because that is *visible*, which is the
+opposite of the failure being guarded. Clearing the selection outright on every filter change was
+rejected — it would throw away a careful selection on one keystroke in the search box, and React's own
+guidance (and the repo's blocking lint rule) refuse the `setState`-in-effect that pruning would need.
 
 **3. Saved auto-confirm rules — the judgement expressed ONCE, not per host.** A rule is an
 operator-authored row (`InfraAutoConfirmRule`) stating at least one condition that can rule a proposal
