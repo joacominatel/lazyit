@@ -799,11 +799,13 @@ Anything the comparison covers, differing by one byte, is a real change and ther
 is deliberate, because a comparison that ignored a difference would be losing inventory. So a
 determined caller can still drive one rewrite per request, and #1142 made that **cheaper** for them,
 not dearer: `softwareState: 'unchanged'` plus one varied host fact reaches the same write with a few
-KB instead of a few hundred, and on that one branch it also costs a read of the stored list. Bounding
-*that* is the #1134 rate limiter's job and, ultimately, §8's posture that `infra:report` is a low-value
-credential whose blast radius is noise rather than damage. What #1153 removes is the ~172,800 rewrites
-a day of a legitimate estate — and of a leaked token that merely replays a report — not the ceiling on
-a caller who is deliberately making every request different. // the earlier wording here, *"holds
+KB instead of a few hundred, and on that one branch it also costs a read of the stored list. What
+bounds *that* is `InfraReportRateLimitGuard` (#1134) — 120 requests per service account per minute by
+default — and ultimately §8's posture that `infra:report` is a low-value credential whose blast radius
+is noise rather than damage. What #1153 removes is the ~172,800 rewrites a day of a legitimate estate,
+and of a leaked token that merely replays a report; it is not a ceiling on a caller who is deliberately
+making every request different. The write half of that is not new either — before #1142 the same caller
+drove the same rewrite by sending a different package list, at several hundred KB a request. // the earlier wording here, *"holds
 regardless of what the client sends"*, promised the stronger bound and the code never delivered it.
 **Corrected 2026-08-01, review of #1163.** They ship together because separately the first one is a
 landmine.
