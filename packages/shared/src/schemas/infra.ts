@@ -437,13 +437,15 @@ export const AgentContainerStateSchema = z.enum([
 export const AgentContainerPortProtocolSchema = z.enum(["tcp", "udp", "sctp"]);
 
 /**
- * What a report says about the installed-software list (#1142) — **THREE answers, not two.**
+ * What a report says about the installed-software list (#1142) — **FOUR answers, not two.**
  *
  * Before this field the wire had exactly two: a `software` array, or nothing. The server read
- * "nothing" as "no software" and DELETED whatever it held, which was the right reading of the only
- * case that produced it — a policy that turned the collector off (#1140) — and the wrong reading of
- * the case #1142 introduces, where the agent omits an unchanged list to save ~90% of the payload.
- * Collapsing those two into one absent key gives an operator either an inventory that silently rots
+ * "nothing" as "no software" and DELETED whatever it held. That reading was at least uniform:
+ * `applySoftwarePolicy` returned `undefined` for every empty outcome alike — a policy that turned the
+ * collector off (#1140), a collector that could not enumerate, a filter that excluded every package —
+ * so the absent key really did carry nothing beyond "no list in this report". It is the wrong reading
+ * of the case #1142 introduces, where the agent omits an unchanged list to save ~90% of the payload.
+ * Collapsing those outcomes into one absent key gives an operator either an inventory that silently rots
  * (a frozen package list from months ago, with nothing on screen saying so) or one that silently
  * empties. This enum is what keeps them apart:
  *
@@ -1080,10 +1082,12 @@ export const AgentReportSchema = z.object({
    * it is the claim being checked. A list that ARRIVES is fingerprinted by the server itself with this
    * same function, so what a node stores is always the server's own reading of what it stored — which
    * is what lets the server skip an unchanged write for a client that sends no fingerprint at all, an
-   * attacker included. A claim it cannot corroborate — the node holds no list, or one fingerprinted
-   * differently — is never resolved by guessing: the stored list is kept (never wiped on a doubt) and
-   * the ack asks for a full resend. That is what makes the delta self-healing across a
-   * discarded-and-rediscovered node, a restore from backup, and a merge.
+   * attacker included. An omission that ARRIVES WITH a fingerprint and fails to corroborate — the node
+   * holds no list, or one fingerprinted differently — is never resolved by guessing: the stored list is
+   * kept (never wiped on a doubt) and the ack asks for a full resend. That is what makes the delta
+   * self-healing across a discarded-and-rediscovered node, a restore from backup, and a merge. Note the
+   * limit of that guarantee: the resend request is keyed on a fingerprint HAVING arrived, so an
+   * `unchanged` claim carrying none is preserved without one.
    */
   softwareHash: z
     .string()
