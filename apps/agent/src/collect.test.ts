@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
+import { rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AGENT_CONTAINERS_MAX } from "@lazyit/shared";
 import {
   buildDiagnostics,
   buildIdentifiers,
   chassisFor,
   COLLECT_TIMEOUT_MS,
+  collectContainers,
   collectOs,
   mapVirtualizationType,
   parseBootedAt,
@@ -344,6 +350,142 @@ describe("parseDockerContainers — the child nodes the graph was missing (#1139
   test("the list is capped at what the contract accepts, never beyond", () => {
     const many = Array.from({ length: 250 }, (_, i) => ({ ...RUNNING, Names: [`/c${i}`] }));
     expect(parseDockerContainers(JSON.stringify(many))).toHaveLength(AGENT_CONTAINERS_MAX);
+  });
+});
+
+/**
+ * The IMPURE half of container discovery (#1139) — the socket boundary itself, not the parser.
+ *
+ * Every other container test here exercises `parseDockerContainers`, a pure function over a string.
+ * That suite was fully green while `collectContainers` could not run on ANY host: it gated on
+ * `Bun.file(path).exists()`, which is a REGULAR-FILE check and answers `false` for a unix socket, so
+ * the collector returned `undefined` everywhere and the whole container half of #1139 never reached
+ * the wire. A pure-function suite that never touches the boundary cannot catch that class of bug —
+ * so these tests stand a real unix socket up and make the collector actually talk to it.
+ */
+describe("collectContainers — the socket boundary, not the parser (#1139)", () => {
+  /** A throwaway socket path under the OS temp dir (unix sockets are path-length bound). */
+  function socketPath(): string {
+    return join(tmpdir(), `lazyit-agent-test-${randomUUID().slice(0, 8)}.sock`);
+  }
+
+  /** Stand up a canned container-runtime API on a unix socket; returns its stop function. */
+  function serveDocker(
+    path: string,
+    handler: (req: Request) => Response,
+  ): () => void {
+    const server = Bun.serve({ unix: path, fetch: handler });
+    return () => {
+      server.stop(true);
+      try {
+        rmSync(path);
+      } catch {
+        // The server usually unlinks it; a leftover in tmp is harmless either way.
+      }
+    };
+  }
+
+  test("reads the container list off a LIVE unix socket", async () => {
+    // The regression that matters: this is the only assertion in the repo that would have failed
+    // while the collector was dead on arrival.
+    const path = socketPath();
+    const stop = serveDocker(path, (req) => {
+      expect(new URL(req.url).pathname).toBe("/containers/json");
+      return new Response(
+        JSON.stringify([{ Names: ["/lazyit-api"], Image: "acme/api:1", State: "running" }]),
+      );
+    });
+    try {
+      const warnings: string[] = [];
+      const containers = await collectContainers((m) => warnings.push(m), path);
+      expect(containers).toEqual([
+        { name: "lazyit-api", image: "acme/api:1", state: "running" },
+      ]);
+      expect(warnings).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  test("a runtime with nothing running reports `[]` — the positive finding, not an omission", async () => {
+    // `[]` retires a host's child nodes server-side; `undefined` leaves them alone. The boundary has
+    // to preserve that difference, not just the parser.
+    const path = socketPath();
+    const stop = serveDocker(path, () => new Response("[]"));
+    try {
+      expect(await collectContainers(() => {}, path)).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  test("no socket at all is SILENT — most hosts do not run containers", async () => {
+    const warnings: string[] = [];
+    expect(
+      await collectContainers((m) => warnings.push(m), socketPath()),
+    ).toBeUndefined();
+    expect(warnings).toEqual([]);
+  });
+
+  test("a socket that exists but refuses the request WARNS and degrades, never throws", async () => {
+    // The "why is this host's container list empty?" case #1138's warnings exist to answer.
+    const path = socketPath();
+    const stop = serveDocker(path, () => new Response("permission denied", { status: 403 }));
+    try {
+      const warnings: string[] = [];
+      expect(await collectContainers((m) => warnings.push(m), path)).toBeUndefined();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("403");
+    } finally {
+      stop();
+    }
+  });
+
+  test("a path that is NOT a socket is no runtime at all — silent, never a warning", async () => {
+    // Whatever stray regular file sits at the runtime's path, it is not an API to talk to. Same
+    // silence as a missing path: this is not a degraded fact, it is the absence of a fact.
+    const path = socketPath();
+    writeFileSync(path, "");
+    try {
+      const warnings: string[] = [];
+      expect(
+        await collectContainers((m) => warnings.push(m), path),
+      ).toBeUndefined();
+      expect(warnings).toEqual([]);
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  test("a socket that drops the connection WARNS and degrades, never throws", async () => {
+    // A real socket whose server refuses to speak — the shape a half-dead dockerd leaves behind.
+    // `collectHost` awaits this collector directly, so a throw here would cost the whole report.
+    const path = socketPath();
+    const server = createServer((connection) => connection.destroy());
+    await new Promise<void>((resolve) => server.listen(path, resolve));
+    try {
+      const warnings: string[] = [];
+      expect(
+        await collectContainers((m) => warnings.push(m), path),
+      ).toBeUndefined();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("could not be read");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      rmSync(path, { force: true });
+    }
+  });
+
+  test("a runtime answering junk omits the list rather than asserting emptiness", async () => {
+    const path = socketPath();
+    const stop = serveDocker(path, () => new Response("<html>404</html>"));
+    try {
+      const warnings: string[] = [];
+      expect(await collectContainers((m) => warnings.push(m), path)).toBeUndefined();
+      expect(warnings).toHaveLength(1);
+    } finally {
+      stop();
+    }
   });
 });
 
