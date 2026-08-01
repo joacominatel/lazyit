@@ -111,13 +111,13 @@ Added, all **additive and optional** except `os.family`:
 | Field | What it answers |
 | --- | --- |
 | `os.family` (`linux`\|`windows`\|`darwin`\|`bsd`\|`other`) + `os.build` | the discriminator every consumer branches on; `build` is the identifier Windows/macOS keep distinct from `version`. |
-| `host.chassis` (`server`\|`desktop`\|`laptop`\|`vm`\|`container`\|`unknown`) | what the host *is* — the hint `kind` inference reads instead of landing every host as `PHYSICAL_HOST`. |
+| `host.chassis` (`server`\|`desktop`\|`laptop`\|`vm`\|`container`\|`unknown`) | what the host *is* — the hint #1139's `kind` inference **will** read instead of landing every host as `PHYSICAL_HOST`. Stored on the node's blob today; nothing reads or displays it yet. |
 | `host.virtualization` (`{ type, host? }`) | what it runs *under*. `{ type: 'none' }` is a **positive** bare-metal finding, not "unknown". |
 | `host.fqdn`, `host.domain` (`{ name?, joined? }`) | the Windows/macOS facts `host` had nowhere to put. `hostname` stays the SHORT name; without these a Windows collector would have to overload it or wait for a v3, and §3 says there is no v3 identity migration. Unpopulated on Linux today, which costs nothing. |
-| `host.identifiers[]` (`{ kind, namespace?, value }`) | the **corroborating** identity set. `externalId` stays the primary dedup key; these are evidence beside it, never a second key. `value` is **canonicalised per kind** (below); `namespace` labels an identifier whose `kind` this build does not recognise. |
+| `host.identifiers[]` (`{ kind, namespace?, value }`) | the **corroborating** identity set #1141 will consume. `externalId` stays the primary dedup key; these are evidence beside it, never a second key. `value` is **canonicalised and sanitized per kind** (below); `namespace` labels an identifier whose `kind` this build does not recognise. Stored on the node's blob; nothing compares or displays it yet. |
 | `nics[].ipv6[]` (`{ address, prefixLength?, scope?, temporary?, deprecated? }`), `nics[].isVirtual` | the v6-only host — with enough context to pick a **stable** address (below); and a way to ignore the container plumbing (`docker0`, `veth*`) that dominates a NIC list. |
-| `host.bootedAt` | *"did this box reboot after the patch window?"* — an **inventory** question. **ONE scalar**, overwritten each report. It is **not** a metric and must not become one: §1's line stays where it is. |
-| `software[].source` (`dpkg`\|`rpm`\|`apk`\|`registry`\|`msi`\|`appx`\|`winget`\|`brew`\|`app-bundle`\|`pkg`) | provenance, which is what makes a cross-OS software list comparable rather than a bag of strings. |
+| `host.bootedAt` | *"did this box reboot after the patch window?"* — an **inventory** question. **ONE scalar**, overwritten each report. It is **not** a metric and must not become one: §1's line stays where it is. Stored on the node's blob; no surface displays it yet. |
+| `software[].source` (`dpkg`\|`rpm`\|`apk`\|`registry`\|`msi`\|`appx`\|`winget`\|`brew`\|`app-bundle`\|`pkg`) | provenance, which is what makes a cross-OS software list comparable rather than a bag of strings. Stored per package; the software panel still renders only name + version. |
 | `diagnostics?` (`{ warnings, privileged, durationMs }`) | what the collector **could not do**. An empty serial column looks identical whether the host lacks `dmidecode`, the agent lacks root, or a collector timed out (§7's #1133 path). **Stored** on the node's `specs` blob beside the host facts, so a fleet view can one day say *"web-03: reporting unprivileged, no serial/model"* — no UI reads it yet; the agent also echoes the same notes on stdout when run by hand. Emitted on **every** report, not only unhappy ones. |
 | `policyRevision?` | **reserved** for the policy channel. Defined now so it never has to be added under pressure. The server **parses it and discards it** — nothing stores it and nothing acts on it. Do not document it as a stored fact until the policy channel makes it one. |
 
@@ -156,6 +156,27 @@ is ever stored. MACs → lower-case colon-grouped; the three UUID kinds → bare
 preserved** (vendors ship case-significant serials, and upper-casing would manufacture collisions on the
 unique `Asset.serial`). A value whose shape the rule does not recognise — an odd-length "MAC", a UUID
 that is not 32 hex digits — is never re-grouped or padded into one: conservative beats mangled.
+
+**Junk is never corroborating evidence: `identifiers[].value` is SANITIZED, not merely normalised.**
+Normalisation on its own made the OEM placeholders *consistently spelled*, which is exactly the wrong
+outcome for evidence #1141 compares. `To be filled by O.E.M.`, `Default string`, `System Product Name`
+and the notorious placeholder SMBIOS UUIDs (`03000200-0400-0500-0006-000700080009`, all-zero, all-F)
+are shipped verbatim on whole production runs, so two *unrelated* boards both reporting one would
+corroborate into a single physical host — the silent CMDB-corruption failure class this contract exists
+to prevent, and a confidently wrong inventory is worse than an empty one. The rule is the **same list**
+`sanitizeSerial` has used on `Asset.serial` since #1081 (`isJunkIdentityValue`), extended with the
+placeholder UUIDs and with a separator-stripped repetition check for the hex kinds — the separators in
+`00:00:00:00:00:00` and `00000000-0000-0000-0000-000000000000` would otherwise hide the repetition.
+Reusing that list rather than writing a second one is the point: identity evidence and `Asset.serial`
+can never disagree about what counts as junk. An identifier that sanitizes to nothing is **omitted**,
+never emitted with an empty value.
+
+**A malformed `identifiers[]` element degrades the element, not the host.** A non-object entry (a bare
+MAC string, a number, `null`) collapses to a dropped element and is recorded in `agentSkew`, matching
+the posture `nics[].ipv6` already takes on the identical reasoning — a third-party or older collector
+sending the simpler shape must not make the whole host vanish from the inventory with a 400. It stays
+consistent with the `kind`-is-constitutive rule above: an element with no kind cannot be compared to
+anything, so it is dropped rather than kept under a catch-all.
 
 **Which MAC becomes the `mac` identifier is specified, not incidental.** The rule is a property of the
 NIC *set*: canonicalise every candidate, discard loopback and all-zero addresses, rank by how likely the

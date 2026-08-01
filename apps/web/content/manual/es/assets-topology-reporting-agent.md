@@ -117,17 +117,22 @@ correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin toca
 ## Qué recopila el agente
 
 - **Identidad y hardware** — nombre de host, sistema operativo y kernel, CPU y memoria, discos e
-  interfaces de red (IPv4 **e** IPv6) y (solo cuando se ejecuta como root) fabricante / modelo /
-  número de serie.
+  interfaces de red y (solo cuando se ejecuta como root) fabricante / modelo / número de serie. Ahora
+  también lee direcciones **IPv6**: la lista de interfaces sigue mostrando la IPv4 de cada una, pero un
+  host que no tiene ninguna IPv4 por fin obtiene una dirección en el diagrama de infraestructura en vez
+  de un vacío.
 - **Qué tipo de máquina es** — servidor, escritorio, notebook, máquina virtual o contenedor, y la
   virtualización sobre la que corre (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) cuando puede
   determinarlo. Cuando *no* puede — la herramienta que necesita no está instalada — reporta
-  **desconocido** en vez de adivinar, y lo aclara en las notas de abajo.
-- **Cuándo arrancó por última vez** — una sola marca de tiempo, para poder responder "¿este equipo
-  realmente se reinició después de la ventana de parches?". No es monitoreo de uptime: un único valor,
-  actualizado en cada reporte, sin histórico.
-- **Software instalado** — la lista de paquetes instalados, con versiones cuando están disponibles, y
-  qué gestor de paquetes los reportó.
+  **desconocido** en vez de adivinar, y lo aclara en las notas de abajo. lazyit lo guarda junto a los
+  demás datos reportados del host; hoy no se muestra en la interfaz.
+- **Cuándo arrancó por última vez** — una sola marca de tiempo, actualizada en cada reporte y sin
+  histórico: es un dato de inventario ("¿este equipo realmente se reinició después de la ventana de
+  parches?"), no monitoreo de uptime. Se guarda junto a los demás datos reportados del host y, igual
+  que el tipo de máquina, todavía no se muestra en ninguna pantalla.
+- **Software instalado** — la lista de paquetes instalados, con versiones cuando están disponibles. El
+  agente además registra qué gestor de paquetes reportó cada uno; la lista en sí muestra el nombre y
+  la versión.
 - **Qué no pudo recopilar** — cada reporte también indica si corrió como root y nombra lo que tuvo que
   omitir o lo que agotó su tiempo. Si ejecutás el agente a mano (`lazyit-agent report --once`) imprime
   esas notas ahí mismo, que suele ser la forma más rápida de responder "¿por qué está vacía la columna

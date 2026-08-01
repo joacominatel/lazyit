@@ -110,15 +110,20 @@ without touching anything you own (the asset's name, serial and model are never 
 ## What the agent collects
 
 - **Identity & hardware** — hostname, operating system and kernel, CPU and memory, disks and network
-  interfaces (IPv4 **and** IPv6), and (only when it runs as root) manufacturer / model / serial.
+  interfaces, and (only when it runs as root) manufacturer / model / serial. It now reads **IPv6**
+  addresses too: the interface list still shows each interface's IPv4, but a host that has no IPv4 at
+  all finally gets an address on the infrastructure diagram instead of a blank.
 - **What kind of machine it is** — server, desktop, laptop, virtual machine or container, and the
   virtualization it runs under (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) when it can tell. When
   it *can't* tell — the probe it relies on isn't installed — it reports **unknown** rather than
-  guessing, and says so in the notes below.
-- **When it last booted** — a single timestamp, so you can answer "did this box actually reboot after
-  the patch window?". It is not uptime monitoring: one value, refreshed on each report, no history.
-- **Installed software** — the list of installed packages, with versions where available, and which
-  package manager reported them.
+  guessing, and says so in the notes below. lazyit stores this alongside the host's other reported
+  facts; today nothing displays it in the interface.
+- **When it last booted** — a single timestamp, refreshed on each report, with no history kept: it's
+  an inventory fact ("did this box actually reboot after the patch window?"), not uptime monitoring.
+  Stored with the host's other reported facts and, like the machine type, not shown on any screen yet.
+- **Installed software** — the list of installed packages, with versions where available. The agent
+  also records which package manager reported each one; the package list itself shows the name and
+  the version.
 - **What it couldn't collect** — each report also says whether it ran with root and names anything it
   had to skip or that timed out. Run the agent by hand (`lazyit-agent report --once`) and it prints
   those notes right there, which is usually the fastest way to answer "why is this host's serial
