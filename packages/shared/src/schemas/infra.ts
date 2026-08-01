@@ -376,6 +376,14 @@ export const AgentVirtualizationTypeSchema = z.enum([
  * the PRIMARY dedup key (ADR-0074 §3: one host = one node, forever); these are evidence beside it,
  * never a second key. `machine-id` is Linux, `windows-machine-guid` Windows, `platform-uuid` macOS,
  * `smbios-uuid`/`serial`/`mac` are cross-platform hardware facts.
+ *
+ * `other` is a LABELLED escape hatch, not an inert one: an identifier whose `kind` this build does
+ * not recognise keeps its wire label in `namespace` (see {@link AgentIdentifierSchema}). That is the
+ * deliberate asymmetry with `software[].source`, which degrades to ABSENT — a package's `source` is
+ * decoration on a fact that stands alone (the package name is still fully usable without it), while
+ * an identifier's `kind` is CONSTITUTIVE: a value with no kind cannot be compared to anything. The
+ * only degradations available are "drop the evidence" or "keep it under a catch-all", so we keep it,
+ * and we keep the label with it so two different unknown kinds never collapse into one.
  */
 export const AgentIdentifierKindSchema = z.enum([
   "machine-id",
@@ -401,8 +409,153 @@ export const AgentSoftwareSourceSchema = z.enum([
   "pkg",
 ]);
 
-/** Cap on `host.identifiers` — a corroborating SET, not a log; a sane upper bound, not a real limit. */
+/**
+ * IPv6 address scope as the OS reports it (`ip -j addr`'s `scope`, Windows' equivalent). Carried so
+ * the promotion mapper can tell a routable address from one that is only meaningful on the wire it
+ * sits on — see {@link primaryIpv6}.
+ */
+export const AgentIpv6ScopeSchema = z.enum(["global", "site", "link", "host"]);
+
+/**
+ * Cap on `host.identifiers` — a corroborating SET, not a log; a sane upper bound, not a real limit.
+ * Enforced by TRUNCATION, never by a 400: these fields exist to serve agents that are NOT
+ * version-locked to the instance, so making them the contract's only hard rejections would defeat
+ * the amendment they belong to.
+ */
 export const AGENT_IDENTIFIERS_MAX = 16;
+
+/** Cap on a single identifier value — long enough for any real UUID/serial, short enough to be inert. */
+export const AGENT_IDENTIFIER_VALUE_MAX = 200;
+
+/** Caps on `diagnostics.warnings` — same truncate-don't-reject rule as the identifier set. */
+export const AGENT_WARNINGS_MAX = 50;
+export const AGENT_WARNING_LENGTH_MAX = 300;
+
+/**
+ * The CANONICAL form of an identifier value for its kind (#1138) — the rule #1141 reconciles across
+ * operating systems. Without it the same physical host produces non-equal evidence depending on who
+ * read it: Windows prints a MAC as `AA-BB-CC-DD-EE-FF`, Linux as `aa:bb:cc:dd:ee:ff`, some switch
+ * agents as `aabb.ccdd.eeff`; a `product_uuid` comes back braced and upper-cased on Windows and bare
+ * lower-case on Linux. Three spellings of one fact are three hosts to anything that compares strings,
+ * so the contract — not each consumer — decides the spelling, and it decides it at PARSE time so the
+ * canonical form is what gets stored and what any future consumer sees.
+ *
+ * Deliberately conservative: a value that does not fit its kind's expected shape is trimmed and
+ * otherwise left alone rather than mangled. Serial CASE is preserved — vendors ship case-significant
+ * serials and upper-casing them would manufacture collisions on the unique `Asset.serial`.
+ */
+export function normalizeIdentifierValue(kind: AgentIdentifierKind, value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  switch (kind) {
+    case "mac":
+      return normalizeMacValue(trimmed);
+    case "smbios-uuid":
+    case "platform-uuid":
+    case "windows-machine-guid":
+      return normalizeUuidValue(trimmed);
+    case "machine-id":
+      // Hex, and the only variance between readers is casing.
+      return trimmed.toLowerCase();
+    case "serial":
+      // dmidecode and WMI disagree on internal padding; casing is meaningful, whitespace is not.
+      return trimmed.replace(/\s+/g, " ");
+    default:
+      return trimmed;
+  }
+}
+
+/** `AA-BB-CC-DD-EE-FF` / `aabb.ccdd.eeff` / `AABBCCDDEEFF` → `aa:bb:cc:dd:ee:ff` (EUI-48 and EUI-64). */
+function normalizeMacValue(value: string): string {
+  const hex = value.replace(/[^0-9a-fA-F]/g, "").toLowerCase();
+  // 12 hex = EUI-48, 16 = EUI-64, 40 = InfiniBand. Anything else is not a MAC we can regroup safely.
+  if (hex.length === 12 || hex.length === 16 || hex.length === 40) {
+    return (hex.match(/../g) ?? []).join(":");
+  }
+  return value.toLowerCase();
+}
+
+/** `{4C4C4544-…}` / `4C4C4544…` (undashed) → the bare lower-case dashed 8-4-4-4-12 form. */
+function normalizeUuidValue(value: string): string {
+  const bare = value.replace(/^[{(]+/, "").replace(/[)}]+$/, "").trim().toLowerCase();
+  const hex = bare.replace(/-/g, "");
+  if (!/^[0-9a-f]{32}$/.test(hex)) return bare;
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * One corroborating identifier, canonicalised at parse time (#1138). Every field degrades rather
+ * than rejects — `.catch("")` covers a missing/wrong-typed key, and an identifier left with no usable
+ * value is dropped by the array below instead of 400-ing the whole report.
+ *
+ * An unrecognised `kind` becomes `other` and its wire label is preserved in `namespace`, so the
+ * relabel is visible to a human and distinguishable from a different unknown kind. `namespace` is
+ * also how an agent deliberately namespaces its own identifier (`{ kind: 'other', namespace:
+ * 'vendor:acme-tag' }`) — the escape hatch carries meaning instead of swallowing it.
+ */
+export const AgentIdentifierSchema = z
+  .object({
+    kind: z
+      .string()
+      .catch("")
+      .transform((v) => v.trim().slice(0, 60)),
+    namespace: z
+      .string()
+      .catch("")
+      .transform((v) => v.trim().slice(0, 60)),
+    value: z
+      .string()
+      .catch("")
+      .transform((v) => v.trim().slice(0, AGENT_IDENTIFIER_VALUE_MAX)),
+  })
+  .transform((raw) => {
+    const known = AgentIdentifierKindSchema.safeParse(raw.kind);
+    const kind = known.success ? known.data : ("other" as const);
+    // An unknown kind is not thrown away: it becomes the namespace, unless the agent already set one.
+    const namespace = raw.namespace || (known.success ? "" : raw.kind);
+    return {
+      kind,
+      ...(namespace ? { namespace } : {}),
+      value: normalizeIdentifierValue(kind, raw.value),
+    };
+  });
+export type AgentIdentifier = z.infer<typeof AgentIdentifierSchema>;
+
+/**
+ * One IPv6 address as the OS reports it (#1138). A bare `string[]` was not enough to choose a node's
+ * displayed address: without scope and the RFC 4941 flags, "the first non-`fe80:` entry" can be a
+ * TEMPORARY privacy address (regenerated on a timer) or a DEPRECATED one (past its preferred
+ * lifetime) — either would put an address on the map that stops resolving to the host within hours.
+ * `prefixLength` rides along because it is free at collection time and the alternative is inferring
+ * it later from nothing.
+ */
+const AgentNicIpv6ObjectSchema = z.object({
+  address: z
+    .string()
+    .catch("")
+    .transform((v) => v.trim().slice(0, 64)),
+  prefixLength: z.number().int().min(0).max(128).optional().catch(undefined),
+  scope: AgentIpv6ScopeSchema.optional().catch(undefined),
+  /** RFC 4941 privacy address — rotates by design, so never a stable identity for the host. */
+  temporary: z.boolean().optional().catch(undefined),
+  /** Past its preferred lifetime: still bound, no longer used for new connections. */
+  deprecated: z.boolean().optional().catch(undefined),
+});
+export type AgentNicIpv6 = z.infer<typeof AgentNicIpv6ObjectSchema>;
+
+/**
+ * The wire form of {@link AgentNicIpv6ObjectSchema}, tolerant of a bare address string so a
+ * third-party or older collector that only has the address still reports it (degrade, never reject).
+ */
+export const AgentNicIpv6Schema = z.preprocess(
+  (v) =>
+    typeof v === "string"
+      ? { address: v }
+      : typeof v === "object" && v !== null && !Array.isArray(v)
+        ? v
+        : {},
+  AgentNicIpv6ObjectSchema,
+);
 
 /**
  * The report a self-installing collector POSTs to `POST /infra/report` (ADR-0074). This single zod
@@ -423,10 +576,10 @@ export const AGENT_IDENTIFIERS_MAX = 16;
  * schema already did forward-compat everywhere except its outermost layer. The strictness was
  * inconsistent, not protective.
  *
- * The signal is MOVED, not lost: the handler diffs the raw body's root keys against
- * {@link AGENT_REPORT_ROOT_KEYS} via {@link unknownAgentReportKeys} and records what it dropped, so a
- * typo'd root key is still diagnosable — which matters most next to #1142, where an ABSENT `software`
- * key will come to mean "unchanged".
+ * The signal is MOVED, not lost: the handler diffs the RAW body against its own parse via
+ * {@link agentReportSkewPaths} and records every path it dropped or had to coerce — at any depth, not
+ * just the root — so a typo'd key is still diagnosable, which matters most next to #1142, where an
+ * ABSENT `software` key will come to mean "unchanged".
  */
 export const AgentReportSchema = z.object({
   /** The collector binary's own version (skew diagnostics + the ADR-0083/#907 version handshake). */
@@ -442,8 +595,26 @@ export const AgentReportSchema = z.object({
   /** When the agent gathered this report (ISO-8601). */
   reportedAt: z.iso.datetime(),
   host: z.object({
-    /** The only REQUIRED host fact — used as the new node's label. */
+    /** The only REQUIRED host fact — used as the new node's label. The SHORT name, never an FQDN. */
     hostname: z.string().min(1).max(255),
+    /**
+     * The host's fully-qualified name where it has one (#1138). Separate from `hostname` on purpose:
+     * a Windows collector would otherwise have to overload `hostname` with `host.domain.tld` or wait
+     * for a v3, and §3 promises there is no v3 identity migration. Free to leave unset on Linux.
+     */
+    fqdn: z.string().trim().max(255).optional().catch(undefined),
+    /**
+     * Directory membership (#1138) — Active Directory / LDAP domain the host is joined to. `joined`
+     * distinguishes "joined to `corp.example.com`" from "workgroup/standalone", which is the fact an
+     * operator actually triages on; the same shape fits macOS directory binding and Linux realmd.
+     */
+    domain: z
+      .object({
+        name: z.string().trim().max(255).optional().catch(undefined),
+        joined: z.boolean().optional().catch(undefined),
+      })
+      .optional()
+      .catch(undefined),
     os: z
       .object({
         /** REQUIRED on the wire, defaulted to `linux` for pre-v2 agents (see the schema note). */
@@ -465,15 +636,18 @@ export const AgentReportSchema = z.object({
         host: z.string().max(200).optional(),
       })
       .optional(),
-    /** Corroborating identity evidence for #1141 — never a dedup key on its own. */
+    /**
+     * Corroborating identity evidence for #1141 — never a dedup key on its own. Values arrive
+     * CANONICALISED (see {@link normalizeIdentifierValue}); the set is TRUNCATED past
+     * {@link AGENT_IDENTIFIERS_MAX} and valueless entries are dropped, never 400-ed.
+     */
     identifiers: z
-      .array(
-        z.object({
-          kind: AgentIdentifierKindSchema.catch("other"),
-          value: z.string().min(1).max(200),
-        }),
-      )
-      .max(AGENT_IDENTIFIERS_MAX)
+      .array(AgentIdentifierSchema)
+      .transform((list) => {
+        const kept = list.filter((i) => i.value.length > 0).slice(0, AGENT_IDENTIFIERS_MAX);
+        // An EMPTY set says nothing; omit the key rather than assert "this host has no identity".
+        return kept.length ? kept : undefined;
+      })
       .optional(),
     /**
      * When the host last booted (ISO-8601). ONE scalar, deliberately: it answers "did this box reboot
@@ -506,9 +680,19 @@ export const AgentReportSchema = z.object({
           name: z.string().min(1).max(120),
           mac: z.string().max(64).optional(),
           ipv4: z.array(z.string().max(64)).max(64).optional(),
-          /** v1 carried IPv4 only while {@link IpAddressSchema} already accepted v6 — a v6-only host
-           * therefore reported NO address at all. Closed here (#1138). */
-          ipv6: z.array(z.string().max(64)).max(64).optional(),
+          /**
+           * v1 carried IPv4 only while {@link IpAddressSchema} already accepted v6 — a v6-only host
+           * therefore reported NO address at all. Closed here (#1138), with scope and the RFC 4941
+           * flags carried so {@link primaryIpv6} can promote a STABLE address rather than whichever
+           * one happens to be listed first. A bare string is still accepted and read as the address.
+           */
+          ipv6: z
+            .array(AgentNicIpv6Schema)
+            .transform((list) => {
+              const kept = list.filter((a) => a.address.length > 0).slice(0, 64);
+              return kept.length ? kept : undefined;
+            })
+            .optional(),
           /** True for veth/bridge/bond/tun interfaces — lets a consumer ignore container plumbing. */
           isVirtual: z.boolean().optional(),
         }),
@@ -546,52 +730,123 @@ export const AgentReportSchema = z.object({
    */
   diagnostics: z
     .object({
-      warnings: z.array(z.string().max(300)).max(50).optional(),
-      privileged: z.boolean().optional(),
-      durationMs: z.number().int().nonnegative().optional(),
+      warnings: z
+        .array(
+          z
+            .string()
+            .catch("")
+            .transform((w) => w.trim().slice(0, AGENT_WARNING_LENGTH_MAX)),
+        )
+        .transform((list) => {
+          const kept = list.filter((w) => w.length > 0).slice(0, AGENT_WARNINGS_MAX);
+          return kept.length ? kept : undefined;
+        })
+        .optional(),
+      privileged: z.boolean().optional().catch(undefined),
+      durationMs: z.number().int().nonnegative().optional().catch(undefined),
     })
     .optional(),
   /**
-   * The policy revision the agent last applied (#1140, server-driven policy). RESERVED: defined here
-   * so the field never has to be added under time pressure once the policy channel exists. Nothing
-   * reads it today — the server accepts and stores it, and that is all.
+   * The policy revision the agent last applied (#1140, server-driven policy). RESERVED — defined so
+   * the field never has to be added under time pressure once the policy channel exists. Nothing
+   * consumes it and NOTHING STORES IT: this build parses it and discards it. Do not document it as a
+   * stored or acted-upon fact anywhere until #1140 makes it one.
    */
-  policyRevision: z.number().int().nonnegative().optional(),
+  policyRevision: z.number().int().nonnegative().optional().catch(undefined),
 });
 export type AgentReport = z.infer<typeof AgentReportSchema>;
 
+// ── Skew recording (#1138) — what the server did NOT understand about a report ─────────────────────
+
+/** Cap on each recorded path list — the result is persisted and the body is attacker-controlled. */
+export const AGENT_SKEW_PATHS_MAX = 25;
+
+/** Cap on one recorded path — long enough to name a real field, short enough to be inert. */
+const AGENT_SKEW_PATH_LENGTH_MAX = 120;
+
+/** How deep the diff walks. Deeper than any shape this contract has, shallow enough to stay cheap. */
+const AGENT_SKEW_MAX_DEPTH = 12;
+
+/** Total nodes visited, so a pathological body cannot turn the diff into the expensive part. */
+const AGENT_SKEW_MAX_VISITS = 200_000;
+
+/** What a report carried that this build could not keep verbatim. */
+export interface AgentReportSkewPaths {
+  /** Wire paths whose data did not survive parsing at all (unknown keys, unusable values). */
+  droppedPaths: string[];
+  /** Wire paths whose value this build had to CHANGE to accept (enum `.catch()`, truncation, canonicalisation). */
+  coercedPaths: string[];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
- * The root keys this server understands — the known set the handler diffs a raw body against. Derived
- * from the schema itself so it can never drift from what is actually parsed.
- */
-export const AGENT_REPORT_ROOT_KEYS: readonly string[] = Object.freeze(
-  Object.keys(AgentReportSchema.shape),
-);
-
-/** Cap on the recorded unknown-key list (see {@link unknownAgentReportKeys}). */
-export const AGENT_REPORT_UNKNOWN_KEYS_MAX = 10;
-
-/** Cap on each recorded key NAME — long enough to identify a real field, short enough to be inert. */
-const AGENT_REPORT_UNKNOWN_KEY_MAX_LENGTH = 64;
-
-/**
- * The root keys of a raw report body this server does NOT understand — what the loosened root
- * silently dropped (#1138). Pure, so the API can record it and any future consumer can reuse it.
+ * Diff a RAW report body against its own parse (#1138) — the record that keeps the loosened contract
+ * honest.
  *
- * BOUNDED on purpose: the result is persisted, and the body is attacker-controlled (the report
- * endpoint is machine-facing), so an unbounded diff would let a hostile caller write megabytes of
- * junk key names into a jsonb column through a field designed to be a diagnostic. At most
- * {@link AGENT_REPORT_UNKNOWN_KEYS_MAX} keys, each truncated — enough to say "this agent sent
- * `deltaSince` and we ignored it", never enough to be a payload. Non-object bodies yield `[]` (the
- * caller runs this before anything else has validated the body).
+ * Diffing raw-against-parsed rather than raw-against-a-key-list is the whole point. A key-list diff
+ * only sees the ROOT, and every realistic future skew is either a NESTED key (which a plain
+ * `z.object` strips silently) or an unknown ENUM VALUE (which our own `.catch()` coerces silently) —
+ * so a root-only recorder would answer "everything understood" for exactly the reports it exists to
+ * flag. `os.family` is the sharpest case: the contract requires it precisely so no consumer
+ * re-derives the platform, then `.catch("other")` swallows a malformed one; if that is not recorded
+ * the requirement is self-defeating. Comparing against the parse also means this can never drift from
+ * the schema — it IS the schema's own output.
+ *
+ * BOUNDED on every axis, because the result lands in a jsonb column and the report endpoint is
+ * machine-facing: {@link AGENT_SKEW_PATHS_MAX} paths per list, each truncated, a depth cap, a visit
+ * cap, and array indices collapsed to `[]` so one bad element in a 5000-package list records one
+ * path rather than five thousand.
  */
-export function unknownAgentReportKeys(body: unknown): string[] {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) return [];
-  const known = new Set(AGENT_REPORT_ROOT_KEYS);
-  return Object.keys(body)
-    .filter((key) => !known.has(key))
-    .slice(0, AGENT_REPORT_UNKNOWN_KEYS_MAX)
-    .map((key) => key.slice(0, AGENT_REPORT_UNKNOWN_KEY_MAX_LENGTH));
+export function agentReportSkewPaths(raw: unknown, parsed: unknown): AgentReportSkewPaths {
+  const dropped = new Set<string>();
+  const coerced = new Set<string>();
+  let visits = 0;
+
+  const record = (into: Set<string>, path: string): void => {
+    if (into.size >= AGENT_SKEW_PATHS_MAX) return;
+    into.add(path.slice(0, AGENT_SKEW_PATH_LENGTH_MAX) || "(root)");
+  };
+
+  const walk = (rawValue: unknown, parsedValue: unknown, path: string, depth: number): void => {
+    if (depth > AGENT_SKEW_MAX_DEPTH || visits >= AGENT_SKEW_MAX_VISITS) return;
+    if (dropped.size >= AGENT_SKEW_PATHS_MAX && coerced.size >= AGENT_SKEW_PATHS_MAX) return;
+    visits += 1;
+
+    if (Array.isArray(rawValue)) {
+      if (!Array.isArray(parsedValue)) return record(coerced, path);
+      // A shorter parse means the contract truncated — a degradation the operator should see.
+      if (rawValue.length > parsedValue.length) record(coerced, `${path}[]`);
+      const shared = Math.min(rawValue.length, parsedValue.length);
+      for (let i = 0; i < shared; i += 1) walk(rawValue[i], parsedValue[i], `${path}[]`, depth + 1);
+      return;
+    }
+
+    if (isPlainObject(rawValue)) {
+      if (!isPlainObject(parsedValue)) return record(coerced, path);
+      for (const key of Object.keys(rawValue)) {
+        const child = path ? `${path}.${key}` : key;
+        const childRaw = rawValue[key];
+        if (childRaw === undefined) continue;
+        const childParsed = parsedValue[key];
+        // Absent from the parse ⇒ the key is unknown, or its value was unusable. Either way the wire
+        // said something this build kept nothing of.
+        if (childParsed === undefined) {
+          record(dropped, child);
+          continue;
+        }
+        walk(childRaw, childParsed, child, depth + 1);
+      }
+      return;
+    }
+
+    if (rawValue !== parsedValue) record(coerced, path);
+  };
+
+  walk(raw, parsed, "", 0);
+  return { droppedPaths: [...dropped], coercedPaths: [...coerced] };
 }
 
 /** The `host` block of a report — the subset the fact-promotion mappers below read (issue #1081). */
@@ -609,15 +864,91 @@ function firstNicIpv4(nic: NonNullable<AgentReportHost["nics"]>[number]): string
   return nic.ipv4?.map((ip) => ip.trim()).find((ip) => ip.length > 0);
 }
 
+/** `fe80::/10` — link-local. Reachable only on the wire it sits on, never a node's display address. */
+const IPV6_LINK_LOCAL = /^fe[89ab][0-9a-f]:/;
+
+/** `fc00::/7` — unique-local. Routable inside the estate, so a usable last resort, never the winner. */
+const IPV6_UNIQUE_LOCAL = /^f[cd][0-9a-f]{2}:/;
+
 /**
- * A NIC's first non-empty, non-LINK-LOCAL IPv6 (trimmed). `fe80::/10` is filtered because a
- * link-local address is not one the host is reachable at — promoting it to the node's `ipAddress`
- * would put a value on the map that no operator can ever connect to.
+ * Is this address one the node can be SHOWN as, indefinitely? (#1138)
+ *
+ * The three exclusions each answer a way the naive "first non-`fe80:` entry" rule goes wrong:
+ * `temporary` is an RFC 4941 privacy address, regenerated on a timer — promoting one puts an address
+ * on the map that stops resolving to the host within hours; `deprecated` is past its preferred
+ * lifetime and on its way out; a non-`global` scope is by definition not reachable from where an
+ * operator sits. The prefix checks stand in for scope when the collector could not report it.
  */
-function firstNicIpv6(nic: NonNullable<AgentReportHost["nics"]>[number]): string | undefined {
-  return nic.ipv6
-    ?.map((ip) => ip.trim())
-    .find((ip) => ip.length > 0 && !ip.toLowerCase().startsWith("fe80:"));
+function isStableRoutableIpv6(address: AgentNicIpv6): boolean {
+  const value = address.address.trim().toLowerCase();
+  if (!value) return false;
+  if (address.temporary === true || address.deprecated === true) return false;
+  if (address.scope !== undefined && address.scope !== "global") return false;
+  if (IPV6_LINK_LOCAL.test(value)) return false;
+  return value !== "::1" && value !== "::";
+}
+
+/**
+ * The host's most stable routable IPv6 (#1138), or `undefined` when it has none worth showing.
+ * Global unicast wins over a unique-local address, and within a tier the first NIC in report order
+ * wins; loopback is skipped (its only address is `::1`, which is excluded anyway). Exported because
+ * it is the contract's promotion RULE, which #1141 and any future consumer must be able to reuse
+ * rather than re-derive.
+ */
+export function primaryIpv6(host: AgentReportHost): string | undefined {
+  let uniqueLocal: string | undefined;
+  for (const nic of host.nics ?? []) {
+    if (nic.name === "lo") continue;
+    for (const address of nic.ipv6 ?? []) {
+      if (!isStableRoutableIpv6(address)) continue;
+      const value = address.address.trim();
+      if (IPV6_UNIQUE_LOCAL.test(value.toLowerCase())) {
+        uniqueLocal ??= value;
+        continue;
+      }
+      return value;
+    }
+  }
+  return uniqueLocal;
+}
+
+/** A MAC that is all zeroes carries no identity (unconfigured tun/tap, some hypervisor stubs). */
+const ZERO_MAC = /^0{2}(:0{2})+$/;
+
+/**
+ * Is the MAC locally administered (bit 0x02 of the first octet)? Bridges, veth pairs and systemd's
+ * generated interface MACs set it; a vendor-burned NIC address does not.
+ */
+function isLocallyAdministeredMac(mac: string): boolean {
+  const firstOctet = Number.parseInt(mac.slice(0, 2), 16);
+  return Number.isInteger(firstOctet) && (firstOctet & 0x02) !== 0;
+}
+
+/**
+ * WHICH MAC becomes the host's `mac` identifier (#1138) — a property of the SET, not of the listing.
+ *
+ * The collector used to take "whichever physical NIC `ip -j addr` listed first", i.e. kernel ifindex
+ * order, which changes on a driver load-order change, a udev rename or an added NIC. #1141 compares
+ * this value ACROSS reports, so a rule that depends on enumeration order would manufacture identity
+ * churn on hosts whose hardware never changed. The rule is therefore: canonicalise every candidate,
+ * discard loopback and all-zero addresses, rank by how likely the address is to be burned-in
+ * (physical beats unknown beats virtual; universally-administered beats locally-administered), and
+ * break ties by taking the lexicographically smallest — total, and independent of report order.
+ *
+ * Locally-administered MACs are ranked DOWN but never excluded: EC2 hands out `02:…` addresses on
+ * real ENIs, and excluding them would leave every cloud host with no MAC evidence at all.
+ */
+export function selectPrimaryMac(nics: AgentReportHost["nics"]): string | undefined {
+  const candidates: Array<{ mac: string; rank: number }> = [];
+  for (const nic of nics ?? []) {
+    if (nic.name === "lo" || !nic.mac) continue;
+    const mac = normalizeIdentifierValue("mac", nic.mac);
+    if (!mac || ZERO_MAC.test(mac)) continue;
+    const physicality = nic.isVirtual === false ? 0 : nic.isVirtual === true ? 4 : 2;
+    candidates.push({ mac, rank: physicality + (isLocallyAdministeredMac(mac) ? 1 : 0) });
+  }
+  candidates.sort((a, b) => a.rank - b.rank || (a.mac < b.mac ? -1 : a.mac > b.mac ? 1 : 0));
+  return candidates[0]?.mac;
 }
 
 /**
@@ -655,20 +986,16 @@ export function primaryIpv4(host: AgentReportHost): string | undefined {
 
 /**
  * The host's primary IP address for display (#1138): {@link primaryIpv4} when the host has ANY IPv4,
- * else the first routable IPv6 (link-local skipped) on a non-loopback NIC, else any NIC's. IPv4 keeps
- * winning wherever it exists, so every dual-stack node's `ipAddress` is exactly what it was before —
- * the fallback only fires on a v6-ONLY host, which the v1 contract left with no address at all even
- * though {@link IpAddressSchema} has always accepted v6. Same validate-or-drop rule: a malformed value
- * is dropped, never a 400 on the whole report (ADR-0090 / ADR-0074 §3).
+ * else the most stable routable IPv6 {@link primaryIpv6} can find. IPv4 keeps winning wherever it
+ * exists, so every dual-stack node's `ipAddress` is exactly what it was before — the fallback only
+ * fires on a v6-ONLY host, which the v1 contract left with no address at all even though
+ * {@link IpAddressSchema} has always accepted v6. Same validate-or-drop rule: a malformed value is
+ * dropped, never a 400 on the whole report (ADR-0090 / ADR-0074 §3).
  */
 export function primaryIp(host: AgentReportHost): string | undefined {
   const ipv4 = primaryIpv4(host);
   if (ipv4 !== undefined) return ipv4;
-  const nics = host.nics ?? [];
-  const candidate =
-    nics.filter((n) => n.name !== "lo").map(firstNicIpv6).find(Boolean) ??
-    nics.map(firstNicIpv6).find(Boolean);
-  const parsed = IpAddressSchema.safeParse(candidate);
+  const parsed = IpAddressSchema.safeParse(primaryIpv6(host));
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -830,3 +1157,4 @@ export type AgentChassis = z.infer<typeof AgentChassisSchema>;
 export type AgentVirtualizationType = z.infer<typeof AgentVirtualizationTypeSchema>;
 export type AgentIdentifierKind = z.infer<typeof AgentIdentifierKindSchema>;
 export type AgentSoftwareSource = z.infer<typeof AgentSoftwareSourceSchema>;
+export type AgentIpv6Scope = z.infer<typeof AgentIpv6ScopeSchema>;
