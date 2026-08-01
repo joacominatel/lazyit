@@ -274,6 +274,25 @@ export const InfraNodeDetailSchema = InfraNodeSchema.extend({
    * conflict". Exact-string match, so the same IPv6 typed in two forms won't pair (accepted best-effort).
    */
   ipConflict: z.array(InfraNodeChildSchema).nullish(),
+  /**
+   * The agent-policy generation this node last ECHOED (#1140) — the acknowledgement half of the
+   * policy channel, and the difference between having central configuration and believing you have
+   * it. Compare it to the instance revision from `GET /infra/agent-policy`: equal means *applied*,
+   * lower means *pending* until this host's next check-in.
+   *
+   * Null for a manual node and for any agent that predates the policy channel — which the UI must
+   * render as "not reporting a policy", never as "pending", since a pre-#1140 agent will never echo
+   * one however long it is waited for.
+   */
+  policyRevision: z.number().int().nonnegative().nullish(),
+  /**
+   * When the echoed revision last CHANGED — i.e. when this host actually picked a new policy up.
+   *
+   * The node's OWN policy override is deliberately NOT part of this shape. It exists as a column and
+   * as `PUT /infra/nodes/:id/agent-policy`, but the shipped UI edits the instance default only, so
+   * declaring the override here would advertise a drill-in surface this build does not have.
+   */
+  policyAppliedAt: z.iso.datetime().nullish(),
 });
 
 /**
