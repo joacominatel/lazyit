@@ -5,10 +5,25 @@
  * It reads its config (flags > env > /etc/lazyit-agent/config), gathers best-effort host facts,
  * validates the result against the SAME `AgentReportSchema` the API enforces (imported from
  * `@lazyit/shared` — zero drift, the whole point), then POSTs it to `${url}/api/infra/report` with the
- * Service Account bearer token. Default mode (`report --once`) does one collect + POST and exits — the
- * systemd timer (install.sh) owns scheduling, so there is no long-lived process.
+ * Service Account bearer token. Default mode (`report --once`) does one collect + POST and exits —
+ * there is no long-lived process.
+ *
+ * SCHEDULING IS NOW SPLIT (#1140). The systemd timer (install.sh) owns only the TICK — a fixed
+ * `AGENT_POLICY_TICK_SECONDS` on every platform, never rewritten — while the CADENCE belongs to the
+ * server and is enforced right here: a tick that arrives inside the interval exits without collecting
+ * anything. That inversion is what lets an operator move a fleet from 5 minutes to 24 hours from the
+ * lazyit UI with no unit file mutated, no `daemon-reload`, and identical semantics under launchd and
+ * Windows Task Scheduler. `--force` skips the gate (what install.sh and a human debugging a host run).
  */
-import { AgentReportSchema, type AgentReport } from "@lazyit/shared";
+import {
+  AgentPolicySchema,
+  AGENT_POLICY_TICK_SECONDS,
+  agentPolicyDue,
+  applyAgentPolicyVeto,
+  AgentReportSchema,
+  type AgentPolicy,
+  type AgentReport,
+} from "@lazyit/shared";
 import { loadConfig } from "./config";
 import {
   buildDiagnostics,
@@ -16,6 +31,12 @@ import {
   collectSoftware,
   readMachineId,
 } from "./collect";
+import {
+  loadCachedPolicy,
+  loadState,
+  writeCachedPolicy,
+  writeState,
+} from "./policy";
 
 // Build-time version stamp (ADR-0083 mechanism, issue #907): the compile scripts bake `APP_VERSION`
 // via `bun build --define` (git describe → env). A plain `bun run`/an unstamped compile falls back to
@@ -25,21 +46,32 @@ const AGENT_VERSION = process.env.APP_VERSION || "dev";
 const HELP = `lazyit-agent ${AGENT_VERSION} — server reporting agent (Linux)
 
 Usage:
-  lazyit-agent [report] [--once] [--url <url>] [--token <token>] [--interval <dur>]
+  lazyit-agent [report] [--once] [--force] [--url <url>] [--token <token>]
 
 Collects host inventory and reports it to your lazyit instance. Config resolves from
 flags > env (LAZYIT_URL / LAZYIT_TOKEN) > /etc/lazyit-agent/config. URL + token are required.
 
+The scheduler ticks every ${AGENT_POLICY_TICK_SECONDS / 60} minutes on every platform; the REPORTING CADENCE is set
+centrally in lazyit and enforced here, so a tick inside the interval exits without
+reporting. Use --force to report anyway.
+
 Options:
   --url <url>        Your lazyit instance base URL (e.g. https://lazyit.example.com)
   --token <token>    Service Account token holding the infra:report permission
-  --interval <dur>   Reporting cadence (used by the systemd timer, not the binary)
+  --interval <dur>   Legacy; ignored. Cadence is set in lazyit, not on the host.
   --once             Collect + report once, then exit (the default behaviour)
+  --force            Report even if the interval has not elapsed
   -h, --help         Show this help
+
+Local limits (/etc/lazyit-agent/config) — these VETO the server's policy, never widen it:
+  LAZYIT_COLLECT_HARDWARE|DISKS|NICS|SOFTWARE|CONTAINERS=false
+  LAZYIT_MIN_INTERVAL=<seconds>     never report more often than this
+  LAZYIT_SOFTWARE_MAX=<n>           never report more packages than this
+  LAZYIT_EXCLUDE_NICS|MOUNTPOINTS|SOFTWARE=<comma-separated globs>
 `;
 
 /** Build + validate the report. Throws (caught by main) if collection produced something invalid. */
-async function buildReport(): Promise<AgentReport> {
+async function buildReport(policy: AgentPolicy): Promise<AgentReport> {
   const startedAt = Date.now();
   const machineId = await readMachineId();
   if (!machineId) {
@@ -57,8 +89,8 @@ async function buildReport(): Promise<AgentReport> {
   };
 
   const [host, software] = await Promise.all([
-    collectHost(warn),
-    collectSoftware(warn),
+    collectHost(warn, policy),
+    collectSoftware(warn, policy),
   ]);
 
   const report: AgentReport = {
@@ -74,6 +106,13 @@ async function buildReport(): Promise<AgentReport> {
       process.getuid?.() === 0,
       Date.now() - startedAt,
     ),
+    // THE ECHO (#1140) — the generation this run actually collected under, which is what turns "we
+    // pushed a policy" into "we can see this host running it". The local veto never changes the
+    // revision, so this states "I have generation N", NOT "I obeyed all of it": a host that vetoes
+    // software collection still echoes N, and that is correct — the veto is the host's answer to the
+    // policy, not a different policy. Absent from a cache-less run only in the sense that the
+    // built-in default carries revision 0, which is exactly what a never-configured instance serves.
+    policyRevision: policy.revision,
   };
 
   // Validate against the shared contract BEFORE sending: a failure here is an agent bug, not a server
@@ -100,8 +139,12 @@ function gib(bytes: number | undefined): string {
  */
 const REPORT_TIMEOUT_MS = 30_000;
 
-async function report(url: string, token: string): Promise<void> {
-  const payload = await buildReport();
+async function report(
+  url: string,
+  token: string,
+  policy: AgentPolicy,
+): Promise<void> {
+  const payload = await buildReport(policy);
   const base = url.replace(/\/+$/, "");
 
   let res: Response;
@@ -125,7 +168,7 @@ async function report(url: string, token: string): Promise<void> {
   }
 
   const ack = (await res.json().catch(() => null)) as
-    | { nodeId?: string; state?: string }
+    | { nodeId?: string; state?: string; policy?: unknown }
     | null;
   const { hostname, cpu, memoryBytes } = payload.host;
   const where = ack?.nodeId ? ` → node ${ack.nodeId} [${ack.state ?? "?"}]` : "";
@@ -136,6 +179,48 @@ async function report(url: string, token: string): Promise<void> {
   // by hand after an install should see WHY a fact is missing without going to the UI (#1138).
   for (const warning of payload.diagnostics?.warnings ?? []) {
     console.warn(`lazyit-agent: ${warning}`);
+  }
+
+  // The report SUCCEEDED, so this is the instant the cadence gate measures from. Written before the
+  // policy, and independently of it: a host whose policy cache could not be written must still not
+  // re-report on the next 5-minute tick.
+  await writeState({ lastSuccessMs: Date.now() }).catch((err: unknown) => {
+    console.warn(
+      `lazyit-agent: could not record the report time (${(err as Error).message}) — the next tick will report again`,
+    );
+  });
+
+  // THE PICKUP (#1140). The ack's policy is cached VERBATIM and applied by the NEXT run, never this
+  // one. The one-tick delay is the feature: a policy is only ever applied by a run that started
+  // cleanly with it already on disk, so a bad policy cannot brick a fleet mid-collection and a
+  // rollback lands one tick after it is saved. An ack with no policy (a server that predates this)
+  // leaves the cache exactly as it was.
+  if (ack?.policy !== undefined) {
+    const parsed = AgentPolicySchema.safeParse(ack.policy);
+    if (!parsed.success) {
+      // The report direction degrades on purpose; THIS direction must not. A policy this build
+      // cannot fully validate is one it must not write to disk and act on as root next tick.
+      console.warn(
+        "lazyit-agent: the server sent a policy this build does not understand — keeping the cached one. Upgrade the agent.",
+      );
+    } else {
+      // Written on EVERY report, not only when the revision moved: the write is a few hundred bytes
+      // once per interval, and rewriting unconditionally is what lets a deleted or corrupted cache
+      // heal itself on the next check-in instead of leaving the host silently on the defaults.
+      await writeCachedPolicy(parsed.data).then(
+        () => {
+          if (parsed.data.revision !== policy.revision) {
+            console.log(
+              `lazyit-agent: agent policy v${parsed.data.revision} cached — it applies from the next run`,
+            );
+          }
+        },
+        (err: unknown) =>
+          console.warn(
+            `lazyit-agent: could not cache the agent policy (${(err as Error).message}) — this host keeps running v${policy.revision}`,
+          ),
+      );
+    }
   }
 }
 
@@ -155,7 +240,38 @@ async function main(): Promise<void> {
     );
   }
 
-  await report(cfg.url, cfg.token);
+  // THE INTERVAL INVERSION (#1140). Load the policy the LAST run cached, intersect it with whatever
+  // this host's own config file refuses to do, and only then decide whether this tick reports.
+  //
+  // The veto is applied BEFORE the due gate on purpose: `minIntervalSeconds` is one of the limits,
+  // so a host that refuses to report more than hourly must have that respected by the gate itself,
+  // not merely by what it collects.
+  const cached = await loadCachedPolicy();
+  const policy = applyAgentPolicyVeto(cached, cfg.localLimits);
+
+  if (!cfg.force) {
+    const machineId = (await readMachineId()) ?? "";
+    const { lastSuccessMs } = await loadState();
+    if (
+      !agentPolicyDue({
+        nowMs: Date.now(),
+        lastSuccessMs,
+        policy,
+        machineId,
+      })
+    ) {
+      // A NO-OP tick, and the reason it is safe for the scheduler to fire every few minutes on
+      // every platform. Deliberately quiet at log level `log`, not `warn`: this is the normal
+      // outcome of most ticks and journald should not read it as a problem.
+      const waited = lastSuccessMs !== undefined ? Math.round((Date.now() - lastSuccessMs) / 60_000) : 0;
+      console.log(
+        `lazyit-agent: not due yet (policy v${policy.revision} reports every ${Math.round(policy.intervalSeconds / 60)} min; last report ${waited} min ago) — nothing to do`,
+      );
+      return;
+    }
+  }
+
+  await report(cfg.url, cfg.token, policy);
 }
 
 main().catch((err: unknown) => {

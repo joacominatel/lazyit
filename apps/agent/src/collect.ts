@@ -16,11 +16,14 @@ import { hostname as osHostname } from "node:os";
 import {
   AGENT_CONTAINER_PORTS_MAX,
   AGENT_CONTAINERS_MAX,
+  AGENT_POLICY_DEFAULT,
   AGENT_WARNING_LENGTH_MAX,
   AGENT_WARNINGS_MAX,
+  matchesAnyGlob,
   sanitizeIdentifierValue,
   selectPrimaryMac,
   type AgentChassis,
+  type AgentPolicy,
   type AgentContainerPortProtocol,
   type AgentContainerState,
   type AgentIpv6Scope,
@@ -44,6 +47,100 @@ export type Warn = (message: string) => void;
 
 /** A no-op sink, so every collector stays callable without threading diagnostics through. */
 const NO_WARN: Warn = () => {};
+
+// ── Policy filters (ADR-0074 §7 amendment, #1140) ─────────────────────────────────────────────────
+//
+// Three pure functions applied to facts the collector has ALREADY gathered. They only ever REMOVE:
+// no policy field names a path to read, a command to run or a source to fetch, so nothing here can
+// widen what this process touches — which is the entire security posture of the policy channel.
+//
+// Every removal that is a POLICY decision files a warning. An empty NIC list that looks identical
+// whether the host has no interfaces, the collector failed, or an operator turned it off is exactly
+// the diagnostic gap #1138's `diagnostics.warnings` exists to close, and a central config channel is
+// the fastest new way to create it.
+
+/** Drop the NICs a policy excludes, or the whole fact when the collector is turned off. */
+export function applyNicPolicy(
+  nics: Nics | undefined,
+  policy: AgentPolicy,
+  warn: Warn = NO_WARN,
+): Nics | undefined {
+  if (!policy.collect.nics) {
+    warn("nics: disabled by agent policy — network interfaces omitted");
+    return undefined;
+  }
+  if (nics === undefined) return undefined;
+  const globs = policy.exclude.nicNames;
+  if (globs.length === 0) return nics;
+  // An EMPTY result is returned as `[]`, not folded to undefined: "the policy excluded them all" is
+  // a positive answer, and the contract already distinguishes absent from empty everywhere else.
+  return nics.filter((nic) => !matchesAnyGlob(globs, nic.name));
+}
+
+/** Drop the disks whose MOUNTPOINT a policy excludes, or the whole fact when disks are turned off. */
+export function applyDiskPolicy(
+  disks: NonNullable<Host["disks"]> | undefined,
+  policy: AgentPolicy,
+  warn: Warn = NO_WARN,
+): NonNullable<Host["disks"]> | undefined {
+  if (!policy.collect.disks) {
+    warn("disks: disabled by agent policy — block devices omitted");
+    return undefined;
+  }
+  if (disks === undefined) return undefined;
+  const globs = policy.exclude.mountpoints;
+  if (globs.length === 0) return disks;
+  // A disk with no mountpoint is NEVER matched: an unmounted disk is still a disk, and comparing an
+  // absent value against a glob would silently drop the spares and array members most worth seeing.
+  return disks.filter(
+    (disk) => disk.mountpoint === undefined || !matchesAnyGlob(globs, disk.mountpoint),
+  );
+}
+
+/**
+ * Filter, then cap, the installed-package list. ORDER MATTERS: the cap is spent on packages that
+ * survived the filters, so excluding kernel churn actually buys room rather than being wasted on
+ * entries that were going to be dropped anyway.
+ */
+export function applySoftwarePolicy(
+  software: Software | undefined,
+  policy: AgentPolicy,
+  warn: Warn = NO_WARN,
+): Software | undefined {
+  if (!policy.collect.software) {
+    warn("software: disabled by agent policy — installed package list omitted");
+    return undefined;
+  }
+  if (software === undefined) return undefined;
+  const { softwareNames } = policy.exclude;
+  const sources = policy.softwareSources;
+  const kept = software.filter((pkg) => {
+    if (softwareNames.length && matchesAnyGlob(softwareNames, pkg.name)) return false;
+    // An EMPTY list means "every source". A package the collector could not attribute cannot be
+    // shown to satisfy a non-empty filter, so it is dropped rather than admitted on a guess.
+    if (sources.length === 0) return true;
+    return pkg.source !== undefined && (sources as readonly string[]).includes(pkg.source);
+  });
+  if (kept.length > policy.softwareMax) {
+    warn(
+      `software: truncated to the policy cap of ${policy.softwareMax} (${kept.length} packages matched)`,
+    );
+    return kept.slice(0, policy.softwareMax);
+  }
+  // `undefined` rather than `[]`, matching what `collectSoftware` has always returned for "nothing
+  // to report". Be precise about what the server does with it TODAY, because it is the opposite of
+  // what "absent" intuitively suggests: `ingestReport` rebuilds the whole `specs` blob from the
+  // report and `refreshKnownNode` writes it wholesale, so an absent `software` key DELETES the
+  // stored list rather than preserving it. That is the behaviour we want here — a host whose policy
+  // turned software collection off should stop showing an inventory nobody is collecting any more,
+  // instead of a snapshot that ages silently with nothing on screen to say so.
+  //
+  // #1142 intends to give an absent key the meaning "unchanged". When it lands, this call site needs
+  // revisiting: "the collector could not enumerate packages" and "the policy says do not report
+  // packages" will need to be distinguishable, because only the first of them means "keep what you
+  // have" — the second still has to clear the list.
+  return kept.length ? kept : undefined;
+}
 
 /**
  * Per-command budget (#1133). Every collector is a local read that finishes in milliseconds on a
@@ -721,8 +818,17 @@ function parseApk(out: string | null): Software {
   return pkgs;
 }
 
-/** Auto-detect the package manager (dpkg → rpm → apk) and list installed packages, capped. */
-export async function collectSoftware(warn: Warn = NO_WARN): Promise<Software | undefined> {
+/**
+ * Auto-detect the package manager (dpkg → rpm → apk) and list installed packages, capped.
+ *
+ * The POLICY is checked before anything is spawned (#1140): a host whose policy turns software
+ * collection off must not pay for `dpkg-query` over 3,000 packages just to throw the result away.
+ */
+export async function collectSoftware(
+  warn: Warn = NO_WARN,
+  policy: AgentPolicy = AGENT_POLICY_DEFAULT,
+): Promise<Software | undefined> {
+  if (!policy.collect.software) return applySoftwarePolicy([], policy, warn);
   let pkgs: Software = [];
   if (Bun.which("dpkg-query")) {
     pkgs = parseTabbed(
@@ -739,7 +845,9 @@ export async function collectSoftware(warn: Warn = NO_WARN): Promise<Software | 
   } else {
     warn("software: no supported package manager (dpkg/rpm/apk) — installed list omitted");
   }
-  return pkgs.length ? pkgs.slice(0, SOFTWARE_CAP) : undefined;
+  // SOFTWARE_CAP is the WIRE contract's own array max and stays as a backstop; the policy cap is
+  // applied inside `applySoftwarePolicy` and is only ever equal to or lower than it.
+  return applySoftwarePolicy(pkgs.slice(0, SOFTWARE_CAP), policy, warn);
 }
 
 /**
@@ -764,8 +872,24 @@ export function buildDiagnostics(
   };
 }
 
-/** Gather the full `host` block of an AgentReport (hostname is the only guaranteed field). */
-export async function collectHost(warn: Warn = NO_WARN): Promise<Host> {
+/**
+ * Gather the full `host` block of an AgentReport (hostname is the only guaranteed field).
+ *
+ * The POLICY (#1140) decides which collectors run at all and which facts survive. A collector that
+ * is turned off is never SPAWNED, not merely filtered afterwards — turning `hardware` off has to
+ * actually stop the agent shelling out to `dmidecode`, or the setting buys the operator nothing on
+ * the host where they most likely reached for it (a box with a wedged BMC).
+ *
+ * Two identity consequences are worth stating rather than discovering: `hardware` off removes the
+ * SERIAL and `nics` off removes the primary MAC, and those are the two burned-in facts #1141's clone
+ * detection corroborates on. A host configured that way is still ingested — it simply cannot be told
+ * apart from a clone of itself. Each disabled collector files a warning, so the reason is visible on
+ * the node instead of being inferred from an empty column.
+ */
+export async function collectHost(
+  warn: Warn = NO_WARN,
+  policy: AgentPolicy = AGENT_POLICY_DEFAULT,
+): Promise<Host> {
   const [osRelease, kernel, cpuinfo, meminfo, procStat, chassisType, smbiosUuid] =
     await Promise.all([
       readText("/etc/os-release"),
@@ -777,14 +901,24 @@ export async function collectHost(warn: Warn = NO_WARN): Promise<Host> {
       // Root-readable only (mode 0400) — unprivileged runs simply omit this identifier.
       readText("/sys/class/dmi/id/product_uuid"),
     ]);
-  const [disks, nics, hardware, virtualization, machineId, containers] = await Promise.all([
-    collectDisks(warn),
-    collectNics(warn),
-    collectHardware(warn),
+  const [rawDisks, rawNics, hardware, virtualization, machineId, containers] = await Promise.all([
+    policy.collect.disks ? collectDisks(warn) : undefined,
+    policy.collect.nics ? collectNics(warn) : undefined,
+    policy.collect.hardware ? collectHardware(warn) : undefined,
     collectVirtualization(warn),
     readMachineId(),
-    collectContainers(warn),
+    policy.collect.containers ? collectContainers(warn) : undefined,
   ]);
+  if (!policy.collect.hardware) {
+    warn("hardware: disabled by agent policy — manufacturer/model/serial omitted");
+  }
+  if (!policy.collect.containers) {
+    warn("containers: disabled by agent policy — container list omitted");
+  }
+  // The filters also carry the "disabled by policy" warning for their own fact, so a disabled
+  // collector reads identically whether it was skipped here or filtered there.
+  const disks = applyDiskPolicy(rawDisks, policy, warn);
+  const nics = applyNicPolicy(rawNics, policy, warn);
 
   const host: Host = { hostname: osHostname() || "unknown" };
   const cpu = collectCpu(cpuinfo);

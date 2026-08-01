@@ -79,7 +79,7 @@ tiene su propio botón de copiar:
 4. **Enviá un primer reporte** para verificar que funciona:
 
    ```sh
-   sudo lazyit-agent report --once
+   sudo lazyit-agent report --once --force
    ```
 
 ## Revisión pendiente
@@ -246,7 +246,7 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
   agente además registra qué gestor de paquetes reportó cada uno; la lista en sí muestra el nombre y
   la versión.
 - **Qué no pudo recopilar** — cada reporte también indica si corrió como root y nombra lo que tuvo que
-  omitir o lo que agotó su tiempo. Si ejecutás el agente a mano (`lazyit-agent report --once`) imprime
+  omitir o lo que agotó su tiempo. Si ejecutás el agente a mano (`lazyit-agent report --once --force`) imprime
   esas notas ahí mismo, que suele ser la forma más rápida de responder "¿por qué está vacía la columna
   de número de serie de este host?". lazyit además las guarda junto a los datos reportados del host,
   para que una futura vista de parque pueda responderlo para todo el estado; hoy no se muestran en la
@@ -255,6 +255,60 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
 Recopila todo lo que puede y simplemente omite lo que no puede leer, así una instalación sin
 privilegios igual reporta una imagen útil. **Nunca** lee secretos, archivos ni datos de aplicaciones,
 y no envía métricas.
+
+## Configurá todos los agentes desde una sola pantalla
+
+No se editan los agentes host por host. **Configuración → Instancia → Agentes de inventario** define
+la política de todos los agentes del parque, y cada uno la toma en su próximo reporte.
+
+Lo que podés configurar ahí:
+
+- **Con qué frecuencia informa cada host** — de 5 minutos a 24 horas. Esta es la opción que antes
+  implicaba editar un temporizador de systemd en cada máquina.
+- **Cuánto espera lazyit antes de marcar un host fuera de línea.** Tiene que ser mayor que el
+  intervalo de informe, o un host perfectamente sano queda marcado fuera de línea entre dos de sus
+  propios reportes — el editor no te deja guardar un valor que provoque eso.
+- **Qué recolectores se ejecutan** — hardware, discos, interfaces de red, software instalado,
+  contenedores. Un recolector desactivado directamente no se ejecuta: el agente no reúne los datos
+  para después descartarlos.
+- **Qué dejar afuera** — patrones de nombre para interfaces de red (`veth*`, `docker*`), puntos de
+  montaje (`/var/lib/docker/*`, `/snap/*`) y paquetes (`linux-image-*`), más un tope estricto de
+  cuántos paquetes puede informar un host. `*` coincide con cualquier texto y `?` con un solo
+  carácter; no se aceptan expresiones regulares.
+
+Hay tres cosas que conviene saber antes de usarlo.
+
+**Un cambio llega en el próximo reporte, no al instante.** La política viaja de vuelta en el reporte
+de cada host, y el host la aplica en la ejecución *siguiente* — así que dejá pasar hasta dos
+intervalos. Esa demora es intencional: un agente solo aplica una política que ya tenía cuando
+arrancó, de modo que un error acá nunca puede interrumpir al parque a mitad de una recolección.
+
+**Cada host puede negarse, y lazyit no puede pasar por encima.** El propio
+`/etc/lazyit-agent/config` de un host puede desactivar un recolector
+(`LAZYIT_COLLECT_SOFTWARE=false`), fijar un piso de frecuencia (`LAZYIT_MIN_INTERVAL=3600`), limitar
+su lista de paquetes (`LAZYIT_SOFTWARE_MAX=500`) o agregar sus propias exclusiones
+(`LAZYIT_EXCLUDE_NICS=veth*`). Esa configuración **prevalece**, siempre, y nada de lo que definas en
+lazyit puede volver a activar un recolector desactivado localmente. Es a propósito: lazyit es
+autoalojado, y quien administra un servidor no siempre es quien administra lazyit. La configuración
+local solo puede hacer que un host informe *menos*, nunca más. **Volver a ejecutar el comando de
+instalación la conserva.** Actualizar un agente reescribe ese archivo, así que el instalador traslada
+todas las líneas `LAZYIT_*` que encuentra —salvo las tres que le pertenecen (`LAZYIT_URL`,
+`LAZYIT_TOKEN` y la obsoleta `LAZYIT_INTERVAL`, que ya nadie lee)— y delimita lo que conservó bajo una
+marca `--- kept from this host's previous config ---` para que veas exactamente qué sobrevivió. Una
+actualización nunca vuelve a activar un recolector en silencio.
+
+**lazyit nunca puede indicarle a un agente que ejecute algo.** La política es una lista fija de
+interruptores, números y patrones de nombre — no hay ningún campo para un comando, un script, una
+ruta de archivo ni una expresión regular, y no está previsto agregarlo. Eso es lo que mantiene el peor
+caso de un token de agente robado en "propuestas que descartás" y no en "código ajeno ejecutándose
+como root en todos tus servidores".
+
+**¿Se aplicó?** Cada host informa qué versión de la política está ejecutando, así podés distinguir
+"configurado" de "efectivamente aplicado". Abrí un servidor en el [diagrama de
+infraestructura](/help/assets-topology-diagram) y su panel muestra **Política v7 · aplicada** o
+**Política v8 · pendiente** — pendiente significa simplemente que ese host no reportó desde tu cambio.
+Un servidor descubierto por un agente anterior a esta versión no muestra ninguna de las dos, porque
+nunca informa una versión de política.
 
 ## Seguridad
 

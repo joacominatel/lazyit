@@ -342,6 +342,15 @@ model ServiceAccount {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
+  // The MIDDLE scope of the #1140 agent-policy resolution (instance default < service account <
+  // node). It is the natural anchor BEFORE a node exists: the "Add a server" wizard mints one SA per
+  // agent, so this is the only scope that can configure a host that has not reported yet. A partial
+  // `AgentPolicyOverride` (zod in @lazyit/shared) as jsonb; null = "adds no override", which is what
+  // every pre-#1140 row and every non-agent service account reads as. It is CONFIG, not a grant —
+  // the closed policy schema carries no commands, paths or scripts, so it can never widen what this
+  // account may do (that remains `ServiceAccountPermission`, and only that).
+  agentPolicy Json?
+
   // Direct permission grants (the authorization source — never a role).
   permissions ServiceAccountPermission[]
   // Append-only audit trail of mint / rotate / revoke / restore / permission-change.
@@ -762,6 +771,41 @@ model UpdateSettings {
 
   // No deletedAt: mutable instance config, never soft-deleted (same posture as SmtpSettings).
   @@map("update_settings")
+}
+
+/// Server-driven reporting-agent policy — the singleton config store for the INSTANCE DEFAULT layer
+/// and the instance-wide policy REVISION counter (ADR-0074 §7 amendment, issue #1140). Same singleton
+/// pattern as SmtpSettings/UpdateSettings (ADR-0063/0079/0084): ONE admin-only row, a migration CHECK
+/// pins the id, never soft-deleted.
+///
+/// It exists so an operator configures the whole fleet from the lazyit UI instead of SSH-ing to every
+/// host to edit `/etc/lazyit-agent/config` — a per-host config file being, precisely, the distributed
+/// spreadsheet this product exists to abolish. The policy rides the EXISTING report ack (no new
+/// endpoint, no polling); the agent caches it and applies it on its next run.
+///
+/// `settings` is a partial `AgentPolicyOverride` validated by zod in @lazyit/shared: a CLOSED set of
+/// booleans, integers and GLOB strings. It carries no commands, no scripts, no paths and no regex,
+/// deliberately and permanently — the moment a server could push executable content to a root agent,
+/// the `infra:report` token's blast radius would go from "PENDING spam a human discards" (ADR-0074
+/// §8) to remote code execution as root on every host in the estate.
+model AgentPolicySettings {
+  /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it).
+  id        String   @id @default("singleton")
+  /// The instance-wide policy generation. Bumped by ANY policy write at ANY scope (instance, service
+  /// account or node), served in every ack, and echoed back by each agent as `InfraNode.policyRevision`
+  /// — which is what lets the UI distinguish "v7 applied" from "v8 pending". Starts at 0, which is
+  /// also `AGENT_POLICY_DEFAULT.revision`, so an instance that never configures anything and an
+  /// instance that predates this table are indistinguishable to an agent. Monotonic, never reset.
+  revision  Int      @default(0)
+  /// The INSTANCE DEFAULT layer: a partial `AgentPolicyOverride`. null / `{}` = "every built-in
+  /// default stands", i.e. exactly the pre-#1140 agent behaviour. Read-TOLERANT — a blob this build
+  /// cannot parse resolves as "no override" rather than failing a report.
+  settings  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // No deletedAt: mutable instance config, never soft-deleted (same posture as SmtpSettings).
+  @@map("agent_policy_settings")
 }
 
 /// On-prem AD/LDAP directory-source connection — the singleton config store for the READ-ONLY directory
@@ -2625,6 +2669,27 @@ model InfraNode {
   externalId      String? // platform id (vmid/container-id) for reconciliation
   lastReportedAt  DateTime? // agent liveness; stale => OFFLINE
   agentVersion    String? // reporting agent's own build version at last check-in (#907; null = manual/pre-stamp)
+
+  // ── Server-driven agent policy (ADR-0074 §7 amendment, #1140) ────────────────────────────────────
+  // The NARROWEST scope of the three-level resolution (instance default < service account < node).
+  // A partial `AgentPolicyOverride` (zod in @lazyit/shared), jsonb per the ADR-0007 posture — null =
+  // "this node adds no override", which is the overwhelmingly normal case and what every pre-#1140
+  // row reads as. Read-TOLERANT: an unparseable blob resolves as "no override", never an error.
+  agentPolicy             Json?
+  // The ACKNOWLEDGEMENT half. `policyRevision` is what the agent ECHOED in its last report — the
+  // difference between having central config and believing you have it — and `policyAppliedAt` is
+  // when that echoed value last CHANGED, so the UI can say "v7 applied" vs "v8 pending". Both null
+  // for a manual node and for any agent that predates #1140.
+  policyRevision          Int?
+  policyAppliedAt         DateTime?
+  // The staleness threshold last SERVED to this node, in seconds — denormalized on purpose so the
+  // §4 sweeper can judge each node against the cadence IT was told, instead of one global env var
+  // that made heterogeneous intervals structurally impossible (a daily reporter sat OFFLINE 23 hours
+  // out of 24). Null = never served one; the sweeper falls back to the env default, i.e. today's
+  // behaviour. Written only when the report ECHOED a `policyRevision` — an agent that predates the
+  // policy channel is not running a served threshold, so it keeps the env var and this stays null —
+  // and rewritten on every such report, so it self-heals after any policy change.
+  policyStaleAfterSeconds Int?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

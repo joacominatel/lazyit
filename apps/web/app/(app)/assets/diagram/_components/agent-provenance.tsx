@@ -8,6 +8,7 @@ import type { InfraNodeStatus } from "@lazyit/shared";
 import { isMajorBehind } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { useAgentPolicy } from "@/lib/api/hooks/use-agent-policy";
 import { useInstanceVersion } from "@/lib/api/hooks/use-instance-version";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
@@ -105,5 +106,48 @@ export function AgentFreshness({
         </span>
       ) : null}
     </span>
+  );
+}
+
+/**
+ * The policy ACKNOWLEDGEMENT (ADR-0074 §7 amendment, issue #1140) — *"Policy v7 · applied"* versus
+ * *"Policy v8 · pending"*. Two integers, and the difference between having central configuration and
+ * merely believing you have it.
+ *
+ * Three states, and the third is the one worth being careful about:
+ *  - the node echoed the CURRENT revision ⇒ applied;
+ *  - it echoed an OLDER one ⇒ pending, because this host has not checked in since the policy changed;
+ *  - it has echoed NOTHING ⇒ render nothing at all. A manual node and an agent that predates the
+ *    policy channel both look like this, and neither will ever echo one however long you wait — so
+ *    showing "pending" would be a promise the estate cannot keep.
+ *
+ * Self-contained like {@link AgentOutdatedBadge}: it reads the instance policy (cached ~5 min, so
+ * mounting it per panel is cheap) rather than making the caller thread the revision through.
+ */
+export function AgentPolicyBadge({
+  policyRevision,
+  className,
+}: {
+  policyRevision: number | null | undefined;
+  className?: string;
+}) {
+  const t = useTranslations("infra.agent");
+  const { data } = useAgentPolicy();
+  if (policyRevision === null || policyRevision === undefined) return null;
+  if (data === undefined) return null;
+  const applied = policyRevision >= data.revision;
+  return (
+    <Badge
+      variant="outline"
+      className={cn("gap-1", className)}
+      title={t(applied ? "policyAppliedTooltip" : "policyPendingTooltip", {
+        revision: policyRevision,
+        current: data.revision,
+      })}
+    >
+      {t(applied ? "policyApplied" : "policyPending", {
+        revision: applied ? policyRevision : data.revision,
+      })}
+    </Badge>
   );
 }

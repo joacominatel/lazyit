@@ -74,7 +74,7 @@ button:
 4. **Send a first report** to check it works:
 
    ```sh
-   sudo lazyit-agent report --once
+   sudo lazyit-agent report --once --force
    ```
 
 ## Pending review
@@ -229,7 +229,7 @@ from it on container guests.
   also records which package manager reported each one; the package list itself shows the name and
   the version.
 - **What it couldn't collect** — each report also says whether it ran with root and names anything it
-  had to skip or that timed out. Run the agent by hand (`lazyit-agent report --once`) and it prints
+  had to skip or that timed out. Run the agent by hand (`lazyit-agent report --once --force`) and it prints
   those notes right there, which is usually the fastest way to answer "why is this host's serial
   column empty?". lazyit also stores them alongside the host's reported facts, so a future fleet view
   can answer it for the whole estate; today nothing displays them in the interface.
@@ -237,6 +237,57 @@ from it on container guests.
 It collects whatever it can and simply omits anything it can't read, so an unprivileged install still
 reports a useful picture. It **never** reads secrets, files or application data, and it sends no
 metrics.
+
+## Configure every agent from one screen
+
+You do not edit agents host by host. **Settings → Instance → Reporting agents** sets the policy for
+every agent in the estate, and each one picks it up on its next check-in.
+
+What you can set there:
+
+- **How often each host reports** — from 5 minutes to 24 hours. This is the setting that used to mean
+  editing a systemd timer on every machine.
+- **How long lazyit waits before calling a host offline.** It must be longer than the reporting
+  interval, or a perfectly healthy host gets marked offline between two of its own reports — the
+  editor will not let you save a value that would do that.
+- **Which collectors run** — hardware, disks, network interfaces, installed software, containers. A
+  collector that is off is never run at all: the agent does not gather the facts and then throw them
+  away.
+- **What to leave out** — name patterns for network interfaces (`veth*`, `docker*`), mountpoints
+  (`/var/lib/docker/*`, `/snap/*`) and packages (`linux-image-*`), plus a hard cap on how many
+  packages a host may report. `*` matches anything and `?` matches a single character; regular
+  expressions are not accepted.
+
+Three things are worth knowing before you use it.
+
+**A change lands on the next report, not instantly.** The policy travels back on each host's
+check-in, and the host applies it from the run *after* that — so allow up to two reporting intervals.
+That delay is deliberate: an agent only ever applies a policy it already had in hand when it started,
+so a mistake here can never interrupt a fleet halfway through collecting.
+
+**Each host can refuse, and lazyit cannot override that.** A host's own `/etc/lazyit-agent/config`
+can turn a collector off (`LAZYIT_COLLECT_SOFTWARE=false`), set a floor on how often it will report
+(`LAZYIT_MIN_INTERVAL=3600`), cap its own package list (`LAZYIT_SOFTWARE_MAX=500`) or add its own
+exclusions (`LAZYIT_EXCLUDE_NICS=veth*`). Those settings **win**, always, and nothing you set in
+lazyit can switch a locally-disabled collector back on. This is on purpose: lazyit is self-hosted, and
+the person who owns a server is not always the person who administers lazyit. Local settings can only
+ever make a host report *less*, never more. **Re-running the install command keeps them.** Upgrading
+an agent rewrites that file, so the installer carries every `LAZYIT_*` line it finds across — apart
+from the three it owns itself (`LAZYIT_URL`, `LAZYIT_TOKEN` and the obsolete `LAZYIT_INTERVAL`, which
+nothing reads any more) — and fences what it kept under a
+`--- kept from this host's previous config ---` marker so you can see exactly what survived. An
+upgrade never quietly switches a collector back on.
+
+**lazyit can never tell an agent to run something.** The policy is a fixed list of on/off switches,
+numbers and name patterns — there is no field for a command, a script, a file path or a regular
+expression, and there is no plan to add one. That is what keeps the worst case of a stolen agent token
+at "proposals you discard" rather than "someone else's code running as root on every server you own".
+
+**Did it take?** Each host reports back which version of the policy it is running, so you can tell
+"configured" from "actually applied". Open a server on the [infrastructure
+diagram](/help/assets-topology-diagram) and its panel shows **Policy v7 · applied** or **Policy v8 ·
+pending** — pending simply means that host has not checked in since your change. A server discovered
+by an agent older than this release shows neither, because it never reports a policy version at all.
 
 ## Security
 

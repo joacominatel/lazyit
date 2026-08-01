@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { requireAtLeastOneKey } from "./primitives";
 import { ArticleListItemSchema } from "./article-list";
+// One-way only: `agent-policy` is a LEAF and never imports this file back (see its own note on why).
+import { AgentPolicySchema } from "./agent-policy";
 
 /**
  * Infra topology graph — InfraNode (the things) + InfraEdge (typed, timestamped relationships).
@@ -272,6 +274,25 @@ export const InfraNodeDetailSchema = InfraNodeSchema.extend({
    * conflict". Exact-string match, so the same IPv6 typed in two forms won't pair (accepted best-effort).
    */
   ipConflict: z.array(InfraNodeChildSchema).nullish(),
+  /**
+   * The agent-policy generation this node last ECHOED (#1140) — the acknowledgement half of the
+   * policy channel, and the difference between having central configuration and believing you have
+   * it. Compare it to the instance revision from `GET /infra/agent-policy`: equal means *applied*,
+   * lower means *pending* until this host's next check-in.
+   *
+   * Null for a manual node and for any agent that predates the policy channel — which the UI must
+   * render as "not reporting a policy", never as "pending", since a pre-#1140 agent will never echo
+   * one however long it is waited for.
+   */
+  policyRevision: z.number().int().nonnegative().nullish(),
+  /**
+   * When the echoed revision last CHANGED — i.e. when this host actually picked a new policy up.
+   *
+   * The node's OWN policy override is deliberately NOT part of this shape. It exists as a column and
+   * as `PUT /infra/nodes/:id/agent-policy`, but the shipped UI edits the instance default only, so
+   * declaring the override here would advertise a drill-in surface this build does not have.
+   */
+  policyAppliedAt: z.iso.datetime().nullish(),
 });
 
 /**
@@ -1522,14 +1543,31 @@ export function containerNodeStatus(state: AgentContainerState | undefined): Inf
 }
 
 /**
- * The minimal ack the report endpoint returns (ADR-0074 §3). Fire-and-forget by design: it confirms
- * the node id, its lifecycle `state` (PENDING for a freshly-discovered host, CONFIRMED once a human
- * has approved it) and that the report was accepted. Nothing more leaks back to the machine caller.
+ * The ack the report endpoint returns (ADR-0074 §3). It confirms the node id, its lifecycle `state`
+ * (PENDING for a freshly-discovered host, CONFIRMED once a human has approved it) and that the report
+ * was accepted.
+ *
+ * IT IS ALSO THE POLICY CHANNEL (#1140). `policy` carries the server-resolved configuration for this
+ * exact agent, and it rides HERE rather than on a `GET /agent/policy` of its own because this round
+ * trip is already authenticated, already per-agent and already happening: adding an endpoint would
+ * have bought a second auth surface, a second throttle and a bootstrap ordering problem, in exchange
+ * for nothing. The agent caches what it receives and applies it on its NEXT run, so the one-tick
+ * propagation delay means a bad policy can never brick a fleet mid-collection.
+ *
+ * Nothing else leaks back to the machine caller: the policy is a closed set of booleans, integers and
+ * globs ({@link AgentPolicySchema}) — never a command, a script, a path or a regex.
  */
 export const AgentReportAckSchema = z.object({
   nodeId: z.cuid(),
   state: InfraNodeStateSchema,
   accepted: z.literal(true),
+  /**
+   * OPTIONAL in both directions, which is what makes the rollout safe without a version handshake.
+   * A pre-#1140 SERVER omits it and a #1140 agent falls back to {@link AGENT_POLICY_DEFAULT}, i.e.
+   * exactly today's behaviour; a pre-#1140 AGENT parses the ack loosely (it reads two fields off the
+   * JSON and never validates it) so an ack carrying this key is simply ignored.
+   */
+  policy: AgentPolicySchema.optional(),
 });
 export type AgentReportAck = z.infer<typeof AgentReportAckSchema>;
 

@@ -205,6 +205,64 @@
       }
     }
   },
+  "agentPolicy": {
+    "title": "Agentes de inventario",
+    "subtitle": "Cómo recolecta e informa cada agente de lazyit en este parque. Política v{revision}. Se configura una vez aquí — sin entrar a ningún host.",
+    "loadFailed": "No se pudo cargar la política de agentes.",
+    "saveFailed": "No se pudo guardar la política de agentes.",
+    "retry": "Reintentar",
+    "save": "Guardar política",
+    "saving": "Guardando…",
+    "saved": "Guardada como política v{revision}. Los agentes la aplican en su próximo informe.",
+    "propagation": "Un cambio se aplica en el próximo informe de cada host, y rige a partir de la ejecución siguiente. Esa demora es intencional: una política solo la aplica una ejecución que ya arrancó con ella, así que un error aquí nunca puede interrumpir al parque a mitad de una recolección. Esta es la configuración predeterminada de la instancia — los ajustes por agente y por host existen en la API pero todavía no tienen editor.",
+    "interval": {
+      "label": "Informar cada (minutos)",
+      "help": "Con qué frecuencia informa cada host. El planificador del host se activa cada {tick} minutos y no hace nada si el intervalo aún no se cumplió, así que cambiar esto nunca toca el temporizador del host.",
+      "invalid": "Ingresa un número entero de minutos entre {min} y {max}."
+    },
+    "stale": {
+      "label": "Considerar un host fuera de línea tras (minutos)",
+      "help": "Cuánto espera lazyit desde el último informe de un host antes de marcarlo fuera de línea en el mapa y generar una notificación.",
+      "invalid": "Ingresa un número entero de minutos entre {min} y {max}.",
+      "belowInterval": "Debe ser mayor que el intervalo de informe, o un host sano quedará marcado fuera de línea entre dos de sus propios informes."
+    },
+    "softwareMax": {
+      "label": "Máximo de paquetes por host",
+      "help": "Un tope estricto para la lista de software instalado. Bájalo en hosts donde esa lista es más ruido que inventario.",
+      "invalid": "Ingresa un número entero entre 0 y {max}."
+    },
+    "collect": {
+      "label": "Qué recolectan los agentes",
+      "help": "Un recolector desactivado no se ejecuta — el agente no reúne los datos para después descartarlos.",
+      "veto": "Un host siempre puede negarse: desactivar un recolector en el propio /etc/lazyit-agent/config de ese host prevalece sobre esta opción, y nada de aquí puede volver a activarlo.",
+      "hardware": "Fabricante, modelo y número de serie",
+      "disks": "Discos y puntos de montaje",
+      "nics": "Interfaces de red",
+      "software": "Software instalado",
+      "containers": "Contenedores"
+    },
+    "exclude": {
+      "nicNames": {
+        "label": "Ignorar interfaces de red",
+        "placeholder": "veth*, docker*, br-*",
+        "help": "Patrones de nombre separados por comas. * coincide con cualquier texto, ? con un solo carácter."
+      },
+      "mountpoints": {
+        "label": "Ignorar puntos de montaje",
+        "placeholder": "/var/lib/docker/*, /snap/*",
+        "help": "Los discos montados aquí quedan fuera del informe. Los discos sin montar nunca se ven afectados."
+      },
+      "softwareNames": {
+        "label": "Ignorar paquetes",
+        "placeholder": "linux-image-*",
+        "help": "Patrones de nombre de paquete a excluir — las compilaciones del kernel son el caso habitual."
+      }
+    },
+    "globs": {
+      "invalid": "“{value}” no es un patrón válido. Usa letras, dígitos, - _ / : y los comodines * y ? — no se aceptan expresiones regulares.",
+      "tooMany": "Como máximo {max} patrones por lista."
+    }
+  },
   "smtp": {
     "title": "Correo saliente (SMTP)",
     "subtitle": "Conecta un relay SMTP para que lazyit pueda enviar notificaciones por correo. Desactivado hasta que lo actives; la contraseña se guarda cifrada y no se vuelve a mostrar.",

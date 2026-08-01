@@ -40,7 +40,11 @@
     "reported": "reported {time}",
     "staleReported": "reported {time} · stale",
     "outdated": "Agent outdated",
-    "outdatedTooltip": "This agent ({agentVersion}) is a major version behind your server ({serverVersion}). Update the agent binary to stay compatible."
+    "outdatedTooltip": "This agent ({agentVersion}) is a major version behind your server ({serverVersion}). Update the agent binary to stay compatible.",
+    "policyApplied": "Policy v{revision} · applied",
+    "policyPending": "Policy v{revision} · pending",
+    "policyAppliedTooltip": "This host is running the current fleet agent policy (v{revision}).",
+    "policyPendingTooltip": "This host is still running policy v{revision}; the current one is v{current}. It picks the new one up on its next check-in and applies it from the run after that."
   },
   "pending": {
     "title": "Pending review",

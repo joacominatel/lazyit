@@ -56,6 +56,7 @@ export * from "./schemas/directory-connection";
 export * from "./schemas/dashboard";
 export * from "./schemas/folder";
 export * from "./schemas/import";
+export * from "./schemas/agent-policy";
 export * from "./schemas/infra";
 export * from "./schemas/instance";
 export * from "./schemas/location";

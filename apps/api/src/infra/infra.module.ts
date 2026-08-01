@@ -4,6 +4,7 @@ import { InfraService } from './infra.service';
 import { InfraAgentStalenessSweeper } from './infra-agent-staleness.sweeper';
 import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
+import { AgentPolicyService } from './agent-policy.service';
 import { AssetsModule } from '../assets/assets.module';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
 import { ArticlesModule } from '../articles/articles.module';
@@ -36,11 +37,15 @@ import { NotificationsModule } from '../notifications/notifications.module';
   // are shared by every request to that one route — the same wiring SetupRateLimitGuard /
   // LoginRateLimitGuard use in their modules. Singleton scope is load-bearing for both: a
   // request-scoped provider would hand every call a fresh, empty map and silently disable the limit.
+  // AgentPolicyService: the #1140 server-driven policy — resolution on the report path, and the three
+  // human-only write scopes (instance default, service account, node). Stateless, so scope is not
+  // load-bearing here the way it is for the two limiters above.
   providers: [
     InfraService,
     InfraAgentStalenessSweeper,
     InfraReportRateLimitGuard,
     InfraNodeEnrollmentLimiter,
+    AgentPolicyService,
   ],
   exports: [InfraService],
 })
