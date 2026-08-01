@@ -229,11 +229,13 @@ export function PendingReviewTray() {
 
   const visibleIds = useMemo(() => rows.map((node) => node.id), [rows]);
   // A bulk action reaches EXACTLY what the operator can see. `selected` is a raw set of ids that
-  // outlives a filter change, and NOTHING reads it directly: the count, the two dialogs and the ids
-  // in the request all come through `visibleSelection`, so a row a filter hides leaves the action and
-  // the count in the same instant it leaves the screen. Tested in `tray-selection.ts` — it was a prose
-  // promise before, in this comment, in the select-all label and in the Manual, and prose cannot be
-  // held to account.
+  // outlives a filter change; every ACTION and every COUNT goes through `visibleSelection` instead —
+  // the number beside the buttons, both dialogs and the ids in the request — so a row a filter hides
+  // leaves the action and the count in the same instant it leaves the screen. (The checkboxes below do
+  // read `selected` directly, but only ever for a row that is on screen, and `checkedState` is only
+  // ever asked about `visibleIds` or a group's own members.) `visibleSelection` and the cap live in
+  // `tray-selection.ts` and are asserted in `tray-selection.test.ts` — both were prose promises before,
+  // here, in the select-all label and in the Manual, and prose cannot be held to account.
   const selectedNodes = useMemo(() => visibleSelection(rows, selected), [rows, selected]);
 
   /** A batch is bounded by the contract (`INFRA_BULK_REVIEW_MAX`); the tray refuses before the API does. */
