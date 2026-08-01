@@ -48,6 +48,23 @@ const CONTAINER_KEYS = new Set([
 ]);
 
 /**
+ * The states this panel has a label for. `specs` is a raw `jsonb` column, so what comes back is
+ * whatever was stored — the contract coerces every unrecognised runtime state to `unknown` on the way
+ * IN, but a blob written by some other path would reach a missing-message error rather than a missing
+ * row. A state we cannot name is simply not shown; the rest of the panel still renders.
+ */
+const RENDERABLE_STATES = new Set([
+  "running",
+  "created",
+  "restarting",
+  "paused",
+  "exited",
+  "removing",
+  "dead",
+  "unknown",
+]);
+
+/**
  * Project a container child's `specs` blob, or `null` when this is not one.
  *
  * The shape check mirrors the host arm exactly (a nested object carrying its own name field), which
@@ -97,7 +114,7 @@ export function AgentContainerPanel({ facts }: { facts: AgentContainerFacts }) {
       value: container.imageDigest,
       mono: true,
     });
-  if (container.state)
+  if (container.state && RENDERABLE_STATES.has(container.state))
     rows.push({
       label: t("containerState"),
       value: t(`containerStates.${container.state}`),
