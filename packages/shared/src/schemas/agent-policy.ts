@@ -229,7 +229,8 @@ export const AgentPolicySchema = z.strictObject({
   collect: AgentPolicyCollectSchema,
   /**
    * Which package managers' output to keep. An EMPTY array means "keep every source", not "keep
-   * none" — the same posture the collector already takes toward a source it cannot identify.
+   * none". An empty filter is not a filter, and reading it as one would make the natural "I have not
+   * configured this" value silently blank a host's whole software list.
    */
   softwareSources: z.array(AgentPolicySoftwareSourceSchema).max(16),
   exclude: AgentPolicyExcludeSchema,
@@ -249,9 +250,10 @@ export type AgentPolicy = z.infer<typeof AgentPolicySchema>;
 export const AGENT_POLICY_DEFAULT: AgentPolicy = {
   revision: 0,
   intervalSeconds: 900,
-  // Three ticks past a 15-minute cadence — one missed report is a blip, three is an outage. It is
-  // the same "small multiple of the report interval" ADR-0074 §4 has always specified, now expressed
-  // as a policy field instead of a global env var.
+  // 45 minutes: three times the default cadence, so a host has to miss two reports before it is
+  // called dark and one dropped report never trips a false OFFLINE. It is deliberately the same
+  // value as `INFRA_AGENT_STALE_AFTER_MS_DEFAULT` — the "small multiple of the report interval"
+  // ADR-0074 §4 has always specified, now expressed as a policy field rather than a global env var.
   staleAfterSeconds: 2700,
   collect: {
     hardware: true,
@@ -376,8 +378,8 @@ function unionGlobs(a: readonly string[], b: readonly string[] | undefined): str
  * If `/etc/lazyit-agent/config` says `COLLECT_SOFTWARE=false`, no policy from any server can turn it
  * back on. lazyit is self-hosted, and the person who owns the host is frequently not the person who
  * administers lazyit; a central config channel that could silently expand what a root agent reads
- * would be asking one of them to trust the other unconditionally. This is five lines of intersection
- * and it is the honest posture — and it is documented as a selling point, not an escape hatch.
+ * would be asking one of them to trust the other unconditionally. It is documented to operators as a
+ * selling point, not smuggled in as an escape hatch.
  *
  * The result is always a VALID {@link AgentPolicySchema} value: the interval floor is clamped to the
  * schema's own maximum and a negative local cap clamps to zero, so a nonsense local file degrades to
