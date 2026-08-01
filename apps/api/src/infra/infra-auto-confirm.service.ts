@@ -76,7 +76,7 @@ export class InfraAutoConfirmService {
 
   /**
    * Every live rule, OLDEST FIRST — the deterministic evaluation order the matcher's "first match
-   * wins" reads, and the order the settings list shows, so an operator can see which rule answers
+   * wins" reads, and the order the rules list shows, so an operator can see which rule answers
    * first. Disabled rules are included: the list is a management surface, and hiding a rule an
    * operator disabled is how a forgotten rule becomes a surprise when someone re-enables it.
    */
