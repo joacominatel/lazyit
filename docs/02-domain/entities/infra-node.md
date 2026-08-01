@@ -102,7 +102,6 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `reportingSource` | `string?` | which agent/host reported it (v2 dedup scope). |
 | `externalId` | `string?` | platform id (vmid/container-id) for v2 reconciliation. |
 | `lastReportedAt` | `datetime?` | v2 agent liveness (stale → OFFLINE). |
-| `reportedBySaId` | `cuid?` | nullable FK → `ServiceAccount`, `onDelete: SetNull`. Which agent **service account** last reported this node — derived server-side from the bearer token (unlike `reportingSource`, a client-chosen string), so it is the trustworthy key of the per-reporter live-PENDING budget that bounds agent row creation (ADR-0074 §8 amendment / #1134). Null on manual nodes; a row predating the column self-heals on the next check-in. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete = off the map. |
@@ -111,8 +110,13 @@ Enums: `InfraNodeKind` = `PHYSICAL_HOST` · `VM` · `CONTAINER` · `CLUSTER` · 
 `STORAGE` · `APPLIANCE` · `OTHER`. `InfraNodeStatus` = `ONLINE` · `OFFLINE` · `UNKNOWN`.
 `InfraNodeSource` = `MANUAL` · `AGENT`. `InfraNodeState` = `CONFIRMED` · `PENDING`.
 
-Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDING review-tray query),
-`@@index([reportedBySaId, state])` (the #1134 budget probe: live PENDING rows for one reporter).
+Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDING review-tray query).
+
+> **No reporter column, deliberately (#1134).** The `POST /infra/report` throttles bound agent row
+> creation by RATE, in memory, keyed on the server-resolved principal — so nothing on the row records
+> which service account reported it. Agent writes stay **unattributed**, exactly as ADR-0074 §8's
+> #1136 correction states. Per-reporter attribution becomes worth its migration only once
+> `install.sh` stops writing the same operator token on every host (#1146).
 
 ## Endpoints
 
