@@ -151,7 +151,7 @@ export class InfraAutoConfirmService {
     };
     if (!statesAutoConfirmCondition(merged)) {
       throw new BadRequestException(
-        'This patch would leave the rule with no condition that can rule a proposal OUT, so it would auto-confirm every proposal in its scope — which ADR-0074 §1 rejected. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern made only of wildcards does not count: most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them conservatively. Dropping one condition while another survives is fine.',
+        'This patch would leave the rule with no condition that can rule a proposal OUT, and ADR-0074 §1 rejected rules that state no condition — a rule whose conditions cannot exclude anything is blanket auto-confirm. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern made only of wildcards does not count: most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them conservatively. Dropping one condition while another survives is fine.',
       );
     }
 
