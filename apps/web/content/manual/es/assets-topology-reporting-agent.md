@@ -190,11 +190,17 @@ Lo demás que conviene saber antes de escribir una:
 - **Una regla se aplica solo a partir del próximo reporte.** Nada de lo que ya está esperando en tu
   bandeja se confirma por su cuenta: eso lo seguís revisando vos, de a uno o en conjunto. Guardar una
   regla nunca toca una propuesta que ya podés ver.
-- **Una regla necesita una condición que pueda descartar algo.** Un patrón de nombre hecho solo de
-  comodines (`*`, `**`, `?`) coincide con todos los hosts que existan, y `0.0.0.0/0` son todas las
-  direcciones que existen: lazyit no guarda ninguna de las dos, ni por separado ni juntas, porque una
-  regla que no descarta nada es simplemente "confirmá todo lo que encuentre el agente", que es
-  justamente lo que la bandeja de pendientes existe para evitar. `srv-*` es una condición; `*` no lo
+- **Una regla necesita una condición que pueda descartar algo.** Un patrón de nombre tiene que llevar
+  al menos un carácter literal, y una subred tiene que ser más acotada que `/0`. La mayoría de los
+  patrones hechos solo de comodines (`*`, `**`, `*?*`) coinciden con todos los hosts que existan, igual
+  que `0.0.0.0/0` son todas las direcciones que existen: lazyit no guarda ninguna de las dos, ni por
+  separado ni juntas, porque una regla que no descarta nada es simplemente "confirmá todo lo que
+  encuentre el agente", que es justamente lo que la bandeja de pendientes existe para evitar. Algunos
+  patrones hechos solo de comodines sí acotan: `?` por sí solo coincide únicamente con nombres de un
+  carácter. lazyit también los rechaza, a propósito, porque "el patrón lleva un carácter literal" es
+  una línea que podés verificar a simple vista, y ningún parque de servidores se describe con "nombres
+  de exactamente un carácter": el costo de rechazarlos es solo que esas propuestas esperan en la
+  bandeja, que es adonde iban de todos modos. `srv-*` es una condición; `*` no lo
   es. Igual podés usar `*` junto a una condición real: *cualquier cosa, en `10.20.0.0/16`* es una
   regla; *cualquier cosa, en cualquier lado* no.
 - **Lo que descartaste queda descartado.** Si descartás una propuesta y esa misma máquina vuelve a

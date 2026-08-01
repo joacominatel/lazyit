@@ -178,10 +178,15 @@ What else you should know before writing one:
 - **A rule only applies from the next report onwards.** Nothing already waiting in your tray is
   confirmed behind you — those are still yours to review, one at a time or in bulk. Saving a rule
   never touches a proposal you can already see.
-- **A rule needs a condition that can actually rule something out.** A name pattern of nothing but
-  wildcards (`*`, `**`, `?`) matches every host there is, and `0.0.0.0/0` is every address there is —
-  lazyit refuses to save either, alone or together, because a rule that excludes nothing is just
-  "confirm everything the agent finds", which is exactly what the pending tray exists to prevent.
+- **A rule needs a condition that can actually rule something out.** A name pattern has to carry at
+  least one literal character, and a subnet has to be narrower than `/0`. Most patterns made only of
+  wildcards (`*`, `**`, `*?*`) match every host there is, just as `0.0.0.0/0` is every address there
+  is, so lazyit refuses to save either — alone or together — because a rule that excludes nothing is
+  just "confirm everything the agent finds", which is exactly what the pending tray exists to prevent.
+  A few wildcard-only patterns do narrow: `?` on its own matches only one-character hostnames. lazyit
+  refuses those too, deliberately, because "the pattern carries a literal character" is a line you can
+  check by looking, and no estate is described by "hostnames of exactly one character" — the cost of
+  refusing is only that those proposals wait in the tray, where they were going anyway.
   `srv-*` is a condition. `*` is not. You can still use `*` beside a real condition — *anything at
   all, on `10.20.0.0/16`* is a rule; *anything at all, anywhere* is not.
 - **Anything you discarded stays discarded.** If you discard a proposal and the same machine reports
