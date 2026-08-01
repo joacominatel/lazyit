@@ -7,14 +7,25 @@
 # systemd timer so the host keeps itself current in lazyit's PENDING tray.
 #
 #   curl -fsSL https://lazyit.example.com/install.sh | sh -s -- \
-#     --url https://lazyit.example.com --token lzit_sa_xxx [--interval 15m]
+#     --url https://lazyit.example.com --token lzit_sa_xxx
+#
+# THE TIMER TICKS EVERY 5 MINUTES AND THAT NEVER CHANGES (ADR-0074 §7 amendment, #1140). It is not
+# the reporting cadence: the agent checks whether it is due and exits immediately when it is not.
+# CADENCE is set centrally in lazyit (Settings → Agents) and picked up on the next report, so
+# changing it never rewrites a unit file, never needs `daemon-reload`, and never needs an SSH
+# session. --interval is still accepted so existing automation does not break, but it is ignored.
 #
 # Re-running upgrades cleanly (idempotent). Requires root (systemd + /usr/local/bin + /etc).
 set -eu
 
 URL=""
 TOKEN=""
-INTERVAL="15m"
+# The FIXED tick. Deliberately not configurable: the whole point of #1140 is that the schedule is one
+# unchanging thing on every platform while the cadence is a server-side setting.
+TICK="5min"
+# Accepted and ignored (see the note above). Recorded in the config file only so an operator who set
+# it can see what happened to it.
+LEGACY_INTERVAL=""
 
 die() {
   echo "lazyit-agent install: $1" >&2
@@ -28,10 +39,12 @@ while [ $# -gt 0 ]; do
     --url=*) URL="${1#*=}"; shift ;;
     --token) TOKEN="${2:-}"; shift 2 ;;
     --token=*) TOKEN="${1#*=}"; shift ;;
-    --interval) INTERVAL="${2:-}"; shift 2 ;;
-    --interval=*) INTERVAL="${1#*=}"; shift ;;
+    --interval) LEGACY_INTERVAL="${2:-}"; shift 2 ;;
+    --interval=*) LEGACY_INTERVAL="${1#*=}"; shift ;;
     -h|--help)
-      echo "Usage: install.sh --url <url> --token <token> [--interval <dur>]"
+      echo "Usage: install.sh --url <url> --token <token>"
+      echo "  --interval <dur>  accepted for compatibility and IGNORED — the reporting cadence"
+      echo "                    is set centrally in lazyit (Settings → Agents), not per host."
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -84,11 +97,34 @@ install -m 755 "$TMP_BIN" "$BIN_PATH"
 # --- config (chmod 600 — it holds the token) -------------------------------
 mkdir -p "$CONFIG_DIR"
 umask 077
+# Built before the heredoc rather than inside it: a command substitution that legitimately produces
+# nothing must not look like a failure to `set -e`.
+LEGACY_NOTE=""
+if [ -n "$LEGACY_INTERVAL" ]; then
+  LEGACY_NOTE="# --interval $LEGACY_INTERVAL was passed and IGNORED: reporting cadence is set in lazyit
+# (Settings -> Agents), not here. To make THIS host report LESS often than lazyit asks,
+# uncomment the LAZYIT_MIN_INTERVAL line below — a floor, never a shorter interval."
+fi
+
 cat > "$CONFIG_FILE" <<EOF
 # lazyit reporting agent config (ADR-0074). Holds your instance URL + SA token. chmod 600.
 LAZYIT_URL=$URL
 LAZYIT_TOKEN=$TOKEN
-LAZYIT_INTERVAL=$INTERVAL
+$LEGACY_NOTE
+#
+# What this HOST refuses to do, whatever lazyit's policy says (#1140). These VETO the server's
+# policy and can never widen it: a collector switched off here cannot be switched back on remotely.
+# Uncomment what you need.
+#LAZYIT_COLLECT_HARDWARE=false
+#LAZYIT_COLLECT_DISKS=false
+#LAZYIT_COLLECT_NICS=false
+#LAZYIT_COLLECT_SOFTWARE=false
+#LAZYIT_COLLECT_CONTAINERS=false
+#LAZYIT_MIN_INTERVAL=3600
+#LAZYIT_SOFTWARE_MAX=500
+#LAZYIT_EXCLUDE_NICS=veth*,docker*
+#LAZYIT_EXCLUDE_MOUNTPOINTS=/var/lib/docker/*,/snap/*
+#LAZYIT_EXCLUDE_SOFTWARE=linux-image-*
 EOF
 chmod 600 "$CONFIG_FILE"
 
@@ -112,11 +148,15 @@ EOF
 
 cat > "$TIMER" <<EOF
 [Unit]
-Description=lazyit reporting agent timer (periodic inventory report)
+Description=lazyit reporting agent timer (fixed 5-minute tick; cadence is set in lazyit)
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=$INTERVAL
+# THE TICK, NOT THE CADENCE (#1140). The agent exits immediately on a tick that is inside its
+# server-set reporting interval, so this value never has to change — which is exactly the point:
+# moving a fleet from 5 minutes to 24 hours is a setting in lazyit, not an SSH session and a
+# daemon-reload on every host. Leave it alone.
+OnUnitActiveSec=$TICK
 Persistent=true
 
 [Install]
@@ -127,10 +167,14 @@ systemctl daemon-reload
 systemctl enable --now lazyit-agent.timer >/dev/null 2>&1 || die "failed to enable the timer"
 
 # --- one immediate report --------------------------------------------------
+# --force, because the agent would otherwise honour the interval it just cached and a re-install
+# would print nothing useful. An installer that cannot tell you whether the token works is worse
+# than one that reports once more than strictly necessary.
 echo "lazyit-agent install: sending the first report ..."
-if "$BIN_PATH" report --once; then
+if "$BIN_PATH" report --once --force; then
   echo
-  echo "lazyit-agent install: done. The agent reports every $INTERVAL."
+  echo "lazyit-agent install: done. The timer ticks every $TICK; how often this host actually"
+  echo "reports is set centrally in lazyit (Settings → Agents) and picked up on the next report."
   echo "This host now appears in lazyit's infra topology PENDING tray — confirm it there to track it as an asset."
 else
   die "the first report failed — check the URL/token; the timer is installed and will retry"
