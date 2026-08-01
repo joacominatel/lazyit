@@ -37,10 +37,21 @@ export const POLICY_DIR = "/var/lib/lazyit-agent";
 export const POLICY_FILE = `${POLICY_DIR}/policy.json`;
 export const STATE_FILE = `${POLICY_DIR}/state.json`;
 
-/** What the agent remembers between runs. Deliberately one field — this is a clock, not a database. */
+/**
+ * What the agent remembers between runs. Deliberately tiny — this is a clock and a checksum, not a
+ * database; nothing here is ever the source of a FACT, only of a decision the server can overrule.
+ */
 export interface AgentState {
   /** Epoch ms of the last report the server ACCEPTED. Absent on a first run or a deleted file. */
   lastSuccessMs?: number;
+  /**
+   * Fingerprint of the software list the last ACCEPTED report left the server holding (#1142) — what
+   * lets the next run omit an unchanged list. Absent means "send everything", which is why every
+   * degenerate read below (missing file, truncated JSON, a non-string value) lands there: the failure
+   * mode of forgetting is one large report, and the failure mode of a wrong memory is an inventory
+   * that is never corrected.
+   */
+  softwareHash?: string;
 }
 
 /** Write `text` to `file` atomically-ish (temp + rename) with owner-only permissions. */
@@ -97,13 +108,25 @@ export async function writeCachedPolicy(
 export async function loadState(file = STATE_FILE): Promise<AgentState> {
   try {
     const parsed: unknown = JSON.parse(await Bun.file(file).text());
-    const value =
-      typeof parsed === "object" && parsed !== null
-        ? (parsed as { lastSuccessMs?: unknown }).lastSuccessMs
+    const raw = (
+      typeof parsed === "object" && parsed !== null ? parsed : {}
+    ) as { lastSuccessMs?: unknown; softwareHash?: unknown };
+    const lastSuccessMs =
+      typeof raw.lastSuccessMs === "number" &&
+      Number.isFinite(raw.lastSuccessMs) &&
+      raw.lastSuccessMs > 0
+        ? raw.lastSuccessMs
         : undefined;
-    return typeof value === "number" && Number.isFinite(value) && value > 0
-      ? { lastSuccessMs: value }
-      : {};
+    // Each field is validated on its own: a corrupt clock must not cost the fingerprint (a needless
+    // full resend) and a corrupt fingerprint must not cost the clock (a needless report burst).
+    const softwareHash =
+      typeof raw.softwareHash === "string" && raw.softwareHash.length > 0
+        ? raw.softwareHash
+        : undefined;
+    return {
+      ...(lastSuccessMs !== undefined ? { lastSuccessMs } : {}),
+      ...(softwareHash !== undefined ? { softwareHash } : {}),
+    };
   } catch {
     return {};
   }
