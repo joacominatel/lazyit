@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildDiagnostics,
   buildIdentifiers,
   chassisFor,
   COLLECT_TIMEOUT_MS,
@@ -84,6 +85,29 @@ describe("run — diagnostics warnings (#1138)", () => {
     const warnings: string[] = [];
     expect(await run(["false"], COLLECT_TIMEOUT_MS, (w) => warnings.push(w))).toBeNull();
     expect(warnings).toEqual([]);
+  });
+});
+
+describe("buildDiagnostics — bounded, and always present (#1138)", () => {
+  test("reports privilege + duration even when nothing went wrong", () => {
+    // "This host reports unprivileged" is a FACT the operator needs whether or not anything failed —
+    // it is the answer to "why is the serial column empty on web-03?".
+    expect(buildDiagnostics([], false, 812)).toEqual({
+      privileged: false,
+      durationMs: 812,
+    });
+  });
+
+  test("caps the warning list and truncates each message to what the contract accepts", () => {
+    // The agent validates its own report before POSTing, so an over-long warning would turn a
+    // DIAGNOSTIC into a hard failure to report at all — exactly backwards.
+    const diagnostics = buildDiagnostics(
+      Array.from({ length: 200 }, (_, i) => `w${i}`.padEnd(500, "x")),
+      true,
+      10,
+    );
+    expect(diagnostics.warnings).toHaveLength(50);
+    for (const w of diagnostics.warnings ?? []) expect(w.length).toBeLessThanOrEqual(300);
   });
 });
 
