@@ -11,7 +11,7 @@
  * fact, which leaves an empty column that looks identical whether the host lacks `dmidecode`, the
  * agent lacks root, or a collector hung. The warnings sink is where that difference survives.
  */
-import { statSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { hostname as osHostname } from "node:os";
 import {
   AGENT_CONTAINER_PORTS_MAX,
@@ -140,7 +140,7 @@ async function readText(path: string): Promise<string | null> {
  * REGULAR FILE is the whole caveat, and it is not obvious: `Bun.file(path).exists()` resolves `false`
  * for anything that is not a file — a directory, a device, and (verified on Bun 1.3.14) a unix SOCKET.
  * `collectContainers` gated on this helper and was therefore dead on every host on earth; it now
- * stats the path itself. Do not reach for this function to test a non-file.
+ * `stat`s the path itself. Do not reach for this function to test a non-file.
  */
 async function exists(path: string): Promise<boolean> {
   try {
@@ -643,14 +643,18 @@ export async function collectContainers(
   warn: Warn,
   socket = DOCKER_SOCKET,
 ): Promise<Host["containers"]> {
-  // `statSync`, NOT `Bun.file().exists()` — the latter is a REGULAR-FILE check and answers `false`
-  // for a unix socket (verified on Bun 1.3.14), which silently disabled this entire collector on
-  // every host. `node:fs` is the exception the repo's Bun-first rule leaves room for: Bun exposes no
-  // API that can tell a socket from a missing path. A throw here is the overwhelmingly common
-  // "this box does not run containers" case (ENOENT) or an unsearchable parent, and both are SILENT:
+  // `stat`, NOT `Bun.file().exists()` — the latter is a REGULAR-FILE check and answers `false` for a
+  // unix socket (verified on Bun 1.3.14), which silently disabled this entire collector on every
+  // host. `node:fs/promises` is the exception the repo's Bun-first rule leaves room for: Bun exposes
+  // no API that can tell a socket from a missing path. The ASYNC form, because `collectHost` fires
+  // every collector concurrently and the sync one would park the whole event loop on a filesystem
+  // call — the pathological-host failure mode #1133 exists to prevent.
+  //
+  // A throw here is the overwhelmingly common "this box does not run containers" case (ENOENT) or an
+  // unsearchable parent, and so is a path holding something that is not a socket. All are SILENT:
   // warning would put a line in the majority of reports until operators learned to ignore the field.
   try {
-    if (!statSync(socket).isSocket()) return undefined;
+    if (!(await stat(socket)).isSocket()) return undefined;
   } catch {
     return undefined;
   }
