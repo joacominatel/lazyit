@@ -442,14 +442,18 @@ ProtectControlGroups=yes
 # deadline: the run is a one-shot with a 5-minute tick behind it and a server-set cadence in front,
 # so yielding to every other process on the box costs the report nothing anyone can perceive.
 #
-# WHAT THESE TWO LINES COST, AND WHY THE ORDER OF TWO PULL REQUESTS MATTERS. Deprioritising the run
-# makes \`dpkg-query\`/\`rpm -qa\` more likely to hit the agent's 10 s per-command collect budget — on
-# exactly the busy servers that motivated the directives. A collect that times out yields no package
-# list, and an absent \`software\` key on the wire is read by the server as DELETE, not as "unchanged"
-# (see applySoftwarePolicy in apps/agent/src/collect.ts). Three correct decisions composing into a
-# wiped inventory. #1142/#1163 replaces that reading with an explicit three-state \`softwareState\`
-# where a failed collection says \`unavailable\` and the server KEEPS what it holds; these lines must
-# not reach a host before it does.
+# WHAT THESE TWO LINES COST, AND WHY THEY SHIPPED WHEN THEY DID. Deprioritising the run makes
+# \`dpkg-query\`/\`rpm -qa\` more likely to hit the agent's 10 s per-command collect budget — on exactly
+# the busy servers that motivated the directives. That used to be a DATA-LOSS risk and not a latency
+# one: a collect that timed out yielded no package list, and an absent \`software\` key on the wire was
+# read by the server as DELETE, not as "unchanged". Three correct decisions composing into a wiped
+# inventory: deprioritise → time out → omit → wipe.
+#
+# #1142/#1163 landed FIRST and replaced that reading, which is why these two lines are here at all. A
+# collect that cannot enumerate now says \`softwareState: unavailable\` (see \`collectSoftware\` in
+# apps/agent/src/collect.ts) and the server PRESERVES the list it holds; only an explicit \`disabled\`
+# clears it. The chain ends at "omit". What is left is an invariant, not a merge order: an absent
+# package list must never again be given the meaning "delete".
 Nice=19
 IOSchedulingClass=idle
 EOF
