@@ -173,9 +173,13 @@ Blanket auto-confirm stays rejected, and the reasons are structural rather than 
   was the first attempt and it was not enough: `hostnamePattern: "*"` is non-null and matches every
   proposal there is, so it would have stored an ordinary-looking **blanket** rule through the front
   door. The test is therefore *can this rule rule a proposal out* — a hostname glob has to carry a
-  literal character (`*`, `**`, `*?*` and `?` state nothing; `srv-*` and even `*.*` do), a subnet has
-  to be narrower than `/0`, and a reported kind always names one kind out of several. Two conditions
-  that each exclude nothing do not add up to one that does. It is enforced in three places — the
+  literal character (`srv-*` and even `*.*` do; a glob made only of wildcards does not), a subnet has
+  to be narrower than `/0`, and a reported kind always names one kind out of several. The wildcard-only
+  test is **deliberately one notch stricter than "matches everything"**: `*`, `**` and `*?*` genuinely
+  match every name there is, but `?` alone matches only one-character names and is refused with them
+  anyway. Refusing is the safe direction and "carries a literal" is a line an operator can check by
+  looking, where "could this glob ever exclude a hostname somebody actually runs" is not. Two
+  conditions that each exclude nothing do not add up to one that does. It is enforced in three places — the
   create contract, the service on the MERGED patch (the patch alone cannot see the stored row), and
   the matcher, which refuses to act on such a row so a hand-inserted one or one left by an older build
   never fires either. One shared predicate, `statesAutoConfirmCondition`, answers all three and the

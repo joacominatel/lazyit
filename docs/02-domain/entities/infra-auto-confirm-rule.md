@@ -30,8 +30,10 @@ can do, which [[0074-server-reporting-agent]] §8's 2026-08-01 amendment states 
 **It does not reopen §1's rejection of *blanket* auto-confirm.** The rule *is* the human decision:
 
 - a rule **must state at least one condition that can rule a proposal OUT** — a hostname glob carrying
-  a literal character (`*`, `**`, `*?*` and `?` match every name there is, so they state nothing), a
-  subnet narrower than `/0`, or a reported kind. One shared predicate,
+  a literal character, a subnet narrower than `/0`, or a reported kind. A glob made only of wildcards
+  states nothing usable: most of them (`*`, `**`, `*?*`) match every name there is, and the few that
+  do narrow (`?` alone matches only one-character names) are refused with them **conservatively**, so
+  the line stays "carries a literal", which an operator can check by looking. One shared predicate,
   `statesAutoConfirmCondition`, is applied by the create contract, by the service on the **merged**
   patch and by the matcher on read, so neither a widened patch, a hand-inserted row nor one left by an
   older build can become a blanket rule;
@@ -105,9 +107,11 @@ one source here).
 - `POST /infra/auto-confirm-rules` — `infra:manage` + `asset:write` + **human-only**. 400 when no
   stated condition can rule a proposal out.
 - `PATCH /infra/auto-confirm-rules/:id` — same gate. 400 if the patch would leave the **merged** rule
-  with no such condition — nulling the last one, or widening it to an all-wildcard pattern or `/0`,
-  are the same blanket rule spelled three ways (the patch alone cannot see the stored row, so the
-  contract checks the patch and the service checks the merge).
+  with no such condition — nulling the last one, or widening it to a wildcard-only pattern or `/0`.
+  Dropping **one** of several conditions is fine: the survivor still excludes proposals. The patch
+  alone cannot see the stored row, so the contract refuses only the shape it can settle on its own (a
+  patch that restates all three condition fields and narrows with none) and the service checks the
+  genuine merge.
 - `DELETE /infra/auto-confirm-rules/:id` — `infra:manage` + human-only. Soft delete. Nodes the rule
   already confirmed are **not** reverted: they are confirmed inventory rows a human policy approved,
   and un-confirming them would be as retroactive as applying a rule backwards.
