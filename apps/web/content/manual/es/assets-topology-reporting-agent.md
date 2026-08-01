@@ -131,6 +131,68 @@ físico*, igual que antes, en vez de adivinar. Es solo una propuesta: el selecto
 de confirmación está ahí mismo, y una vez que confirmaste un nodo **ningún reporte posterior vuelve a
 cambiarle el tipo**, aunque la máquina empiece a reportar otra cosa.
 
+### Revisar muchos a la vez
+
+Un solo host Docker puede agregar una docena de propuestas en un mismo reporte — él mismo más un nodo
+por cada contenedor en ejecución — así que la bandeja está pensada para resolverse de una pasada y no
+de a un cuadro de diálogo por vez.
+
+- **Los contenedores quedan debajo del servidor que los reportó.** Cada grupo se encabeza con el
+  nombre del servidor y la cantidad de contenedores, y la casilla de ese encabezado toma el servidor
+  **y** sus contenedores juntos. Así se confirma un host con todo lo que corre arriba en una sola
+  acción. Si el servidor ya lo confirmaste, sus contenedores nuevos igual aparecen bajo su nombre.
+- **Casillas y los dos botones de selección.** Marcá lo que quieras y usá **Confirmar selección** o
+  **Descartar selección**. Confirmar en conjunto hace exactamente lo mismo que confirmar de a uno:
+  seguís aprobando cada elemento, solo que sin un cuadro de diálogo por fila. **Seleccionar todo lo
+  visible** abarca lo que se está mostrando, nunca las filas que un filtro está ocultando.
+- **La opción de activo está separada.** En el cuadro de selección, los servidores se registran como
+  activos de inventario por defecto (igual que de a uno) y **los contenedores no se registran por
+  defecto**. Un contenedor lo reemplaza el próximo despliegue, no tiene número de serie que registrar
+  y un host movido puede sumar decenas, así que quedan en el mapa sin llenar tu lista de activos con
+  filas que nadie va a mantener. Los dos interruptores están ahí por si tu caso es distinto.
+- **Reclasificá toda la selección** con el selector de tipo si el agente se equivocó con todos.
+  Renombrar sigue estando en el cuadro de Confirmar individual, que es donde tiene sentido.
+- **Un resultado parcial se informa como tal.** Si algunos elementos no se pudieron aplicar — un
+  número de serie que choca con un activo existente, una propuesta que otra persona descartó un
+  momento antes — el resto igual se aplica y se te dice cuántos fueron y cuál falló primero.
+- **Filtrá** por nombre (`srv-*` funciona como patrón) o IP, por subred (`10.20.0.0/16`), por tipo
+  reportado y por servidores frente a contenedores; y **ordená** por cuándo apareció por primera vez o
+  por nombre. Los filtros acotan lo que estás viendo; una acción en conjunto nunca alcanza algo que no
+  podés ver.
+
+### Reglas de confirmación automática
+
+Si notás que tomás la misma decisión una y otra vez — *"todo lo que se llame `srv-*` en la VLAN de
+gestión es una máquina virtual y lo quiero registrado"* — podés escribirlo una sola vez. Abrí
+**Reglas de confirmación automática…** en la parte superior de la bandeja.
+
+Una regla tiene un **nombre**, a qué **se aplica** (servidores, contenedores o ambos) y al menos una
+condición: un **patrón de nombre** (`*` para cualquier secuencia de caracteres, `?` para exactamente
+uno; tiene que coincidir el nombre completo), una **subred** en formato CIDR, o el **tipo que el
+reporte del agente hizo que lazyit propusiera**. Después indica qué hacer: con qué tipo confirmarlo y
+si registrarlo como activo de inventario.
+
+Lo que conviene saber antes de escribir una:
+
+- **Una regla se aplica solo a partir del próximo reporte.** Nada de lo que ya está esperando en tu
+  bandeja se confirma por su cuenta: eso lo seguís revisando vos, de a uno o en conjunto. Guardar una
+  regla nunca toca una propuesta que ya podés ver.
+- **Una regla necesita al menos una condición.** lazyit no guarda una sin condiciones, porque una
+  regla sin ninguna confirmaría todo lo que el agente encuentre, que es justamente lo que la bandeja
+  de pendientes existe para evitar.
+- **Sigue siendo tu decisión, y queda registrada como tuya.** La regla muestra quién la escribió, y
+  cada activo que crea queda atribuido a vos, igual que si hubieras hecho clic en Confirmar. Las
+  reglas se listan en el orden en que se evalúan (el número de la izquierda) y gana la **primera** que
+  coincide.
+- **Podés dar marcha atrás cuando quieras.** El interruptor desactiva una regla al instante: desde el
+  próximo reporte nada vuelve a coincidir con ella, y borrarla la elimina. Los servidores que ya
+  confirmó quedan confirmados: ya son parte de tu inventario, y desconfirmarlos sería tan al revés
+  como aplicar una regla al pasado.
+- **Podés ver si está haciendo algo.** Cada regla muestra cuántas veces se usó y cuándo fue la última.
+- **Una regla de subred nunca coincide con un host que no reportó dirección**, y un **ID de máquina
+  clonado** nunca se confirma automáticamente: esas dos filas existen precisamente para que las veas
+  (más abajo).
+
 ### Los contenedores aparecen como nodos propios
 
 Si el host corre **Docker** (o un runtime compatible) y el agente puede leer su socket, cada
@@ -142,7 +204,9 @@ contenedores que tiene arriba, sin que dibujes una sola conexión a mano.
 Algunas cosas que conviene saber:
 
 - **Los contenedores también son propuestas.** Llegan a la misma bandeja de Revisión pendiente, y los
-  confirmás o descartás igual que a un servidor. Un host cargado puede sumar varias propuestas de una.
+  confirmás o descartás igual que a un servidor. Un host cargado puede sumar varias propuestas de una
+  vez, y para eso están la agrupación y las acciones en conjunto de más arriba: la bandeja pone los
+  contenedores de un host bajo su nombre, y la casilla de ese grupo los toma juntos.
 - **Un contenedor recreado es el mismo nodo.** Redesplegar (`docker compose up`, un cambio de imagen)
   no crea un duplicado: los contenedores se identifican por **nombre** dentro de ese host, así que tu
   nodo confirmado, su posición y sus vínculos sobreviven al redespliegue.
