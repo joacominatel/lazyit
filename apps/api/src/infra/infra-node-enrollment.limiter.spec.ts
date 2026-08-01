@@ -164,6 +164,44 @@ describe('InfraNodeEnrollmentLimiter (#1134)', () => {
     expect(attempt(limiter, agent)).toBeInstanceOf(HttpException);
   });
 
+  describe('tryCharge — the non-throwing sibling for CHILD enrollments (#1139)', () => {
+    it('shares ONE bucket with assertWithinBudget: a child node costs the same slot a host does', () => {
+      // Two budgets would defeat the limit the moment one report can enrol N+1 rows: a container
+      // node is a row on the same table and must be as bounded as the host that reported it.
+      process.env.INFRA_REPORT_MAX_NEW_NODES_PER_WINDOW = '2';
+      const limiter = new InfraNodeEnrollmentLimiter();
+      const agent = saPrincipal('sa-1');
+      expect(attempt(limiter, agent)).toBeUndefined(); // the host
+      expect(limiter.tryCharge(agent)).toBe(true); // one container
+      expect(limiter.tryCharge(agent)).toBe(false); // budget spent
+      expect(attempt(limiter, agent)).toBeInstanceOf(HttpException);
+    });
+
+    it('REFUSES rather than throws — a spent budget must never fail the host that reported', () => {
+      // The host is already durable by the time children are reconciled. Throwing here would turn a
+      // partially-enrolled container list into a 429 the agent reads as "the whole report failed",
+      // and it would retry the identical report forever.
+      process.env.INFRA_REPORT_MAX_NEW_NODES_PER_WINDOW = '1';
+      const limiter = new InfraNodeEnrollmentLimiter();
+      const agent = saPrincipal('sa-1');
+      expect(limiter.tryCharge(agent)).toBe(true);
+      expect(() => limiter.tryCharge(agent)).not.toThrow();
+      expect(limiter.tryCharge(agent)).toBe(false);
+    });
+
+    it('recovers on the next window, with no operator action', () => {
+      jest.useFakeTimers();
+      process.env.INFRA_REPORT_MAX_NEW_NODES_PER_WINDOW = '1';
+      process.env.INFRA_REPORT_NEW_NODE_WINDOW_MS = '60000';
+      const limiter = new InfraNodeEnrollmentLimiter();
+      const agent = saPrincipal('sa-1');
+      expect(limiter.tryCharge(agent)).toBe(true);
+      expect(limiter.tryCharge(agent)).toBe(false);
+      jest.advanceTimersByTime(60_001);
+      expect(limiter.tryCharge(agent)).toBe(true);
+    });
+  });
+
   it('ignores a non-numeric / non-positive override and keeps the safe default', () => {
     // A typo in a hand-edited env file must leave a limit that still limits — never one that
     // blocks every enrollment (`0`) and never one that is effectively off.
