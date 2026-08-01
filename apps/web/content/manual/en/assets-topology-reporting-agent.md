@@ -110,8 +110,25 @@ without touching anything you own (the asset's name, serial and model are never 
 ## What the agent collects
 
 - **Identity & hardware** — hostname, operating system and kernel, CPU and memory, disks and network
-  interfaces, and (only when it runs as root) manufacturer / model / serial.
-- **Installed software** — the list of installed packages, with versions where available.
+  interfaces, and (only when it runs as root) manufacturer / model / serial. It now reads **IPv6**
+  addresses too: the interface list still shows each interface's IPv4, but a host that has no IPv4 at
+  all finally gets an address on the infrastructure diagram instead of a blank.
+- **What kind of machine it is** — server, desktop, laptop, virtual machine or container, and the
+  virtualization it runs under (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) when it can tell. When
+  it *can't* tell — the probe it relies on isn't installed — it reports **unknown** rather than
+  guessing, and says so in the notes below. lazyit stores this alongside the host's other reported
+  facts; today nothing displays it in the interface.
+- **When it last booted** — a single timestamp, refreshed on each report, with no history kept: it's
+  an inventory fact ("did this box actually reboot after the patch window?"), not uptime monitoring.
+  Stored with the host's other reported facts and, like the machine type, not shown on any screen yet.
+- **Installed software** — the list of installed packages, with versions where available. The agent
+  also records which package manager reported each one; the package list itself shows the name and
+  the version.
+- **What it couldn't collect** — each report also says whether it ran with root and names anything it
+  had to skip or that timed out. Run the agent by hand (`lazyit-agent report --once`) and it prints
+  those notes right there, which is usually the fastest way to answer "why is this host's serial
+  column empty?". lazyit also stores them alongside the host's reported facts, so a future fleet view
+  can answer it for the whole estate; today nothing displays them in the interface.
 
 It collects whatever it can and simply omits anything it can't read, so an unprivileged install still
 reports a useful picture. It **never** reads secrets, files or application data, and it sends no
@@ -150,6 +167,18 @@ your server, its row (and its detail panel) shows a small **Agent outdated** bad
 re-run the install command and pick up the latest binary. It's only a nudge: an outdated agent keeps
 reporting normally, nothing is blocked, and minor updates don't raise it. Agents built from source (or
 before versioning was added) report as `dev` and never show the badge.
+
+**Upgrading your instance never breaks the agents already installed.** You do not have to re-install
+anything: an older agent keeps reporting exactly as it did, and every fact it sends lands exactly where
+it did before.
+
+**From this version onwards, the reverse also holds.** A *newer* agent reporting to an older server is
+accepted: the server takes every fact it understands and simply notes the ones it doesn't, rather than
+rejecting the whole report. That distinction matters — a rejected report would make the server
+disappear from your inventory and look like an outage, while a stale field never does. Note the "from
+this version onwards": instances older than this release still refuse a report that mentions anything
+they don't recognise, so if you plan to run agents that update on their own schedule, upgrade the
+instance first.
 
 ## What's next
 

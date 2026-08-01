@@ -96,6 +96,171 @@ Every hardware/identity field beyond the dedup keys is **optional**: the agent d
 when it lacks privilege (e.g. `dmidecode` needs root) or a tool is missing. A partial report is valid,
 never a 400.
 
+**Amendment (2026-07-31, #1138) — contract v2: the wire is now actually OS-neutral, and the root
+degrades instead of rejecting.** §1 calls this contract OS-neutral and the shape above is not, in three
+specific places. It carries **no platform discriminator** — `os` is a free-text `{name, version,
+kernel}` triple, so nothing downstream can branch on the platform. It carries **IPv4 only**, while the
+shared `IpAddressSchema` has always accepted v6, so a v6-only host reported *no address at all*. And it
+documents `externalId` as `/etc/machine-id`, which **Windows and macOS do not have**. Everything else
+genuinely was neutral; v2 closes those three and the contract survives Windows, macOS and BSD without
+another migration. This lands **once, before any new collector is written** — the identity choices here
+are effectively permanent, because §3 promises *one host = one node, forever*.
+
+Added, all **additive and optional** except `os.family`:
+
+| Field | What it answers |
+| --- | --- |
+| `os.family` (`linux`\|`windows`\|`darwin`\|`bsd`\|`other`) + `os.build` | the discriminator every consumer branches on; `build` is the identifier Windows/macOS keep distinct from `version`. |
+| `host.chassis` (`server`\|`desktop`\|`laptop`\|`vm`\|`container`\|`unknown`) | what the host *is* — the hint #1139's `kind` inference **will** read instead of landing every host as `PHYSICAL_HOST`. Stored on the node's blob today; nothing reads or displays it yet. |
+| `host.virtualization` (`{ type, host? }`) | what it runs *under*. `{ type: 'none' }` is a **positive** bare-metal finding, not "unknown". |
+| `host.fqdn`, `host.domain` (`{ name?, joined? }`) | the Windows/macOS facts `host` had nowhere to put. `hostname` stays the SHORT name; without these a Windows collector would have to overload it or wait for a v3, and §3 says there is no v3 identity migration. Unpopulated on Linux today, which costs nothing. |
+| `host.identifiers[]` (`{ kind, namespace?, value }`) | the **corroborating** identity set #1141 will consume. `externalId` stays the primary dedup key; these are evidence beside it, never a second key. `value` is **canonicalised and sanitized per kind** (below); `namespace` labels an identifier whose `kind` this build does not recognise. Stored on the node's blob; nothing compares or displays it yet. |
+| `nics[].ipv6[]` (`{ address, prefixLength?, scope?, temporary?, deprecated? }`), `nics[].isVirtual` | the v6-only host — with enough context to pick a **stable** address (below); and a way to ignore the container plumbing (`docker0`, `veth*`) that dominates a NIC list. |
+| `host.bootedAt` | *"did this box reboot after the patch window?"* — an **inventory** question. **ONE scalar**, overwritten each report. It is **not** a metric and must not become one: §1's line stays where it is. Stored on the node's blob; no surface displays it yet. |
+| `software[].source` (`dpkg`\|`rpm`\|`apk`\|`registry`\|`msi`\|`appx`\|`winget`\|`brew`\|`app-bundle`\|`pkg`) | provenance, which is what makes a cross-OS software list comparable rather than a bag of strings. Stored per package; the software panel still renders only name + version. |
+| `diagnostics?` (`{ warnings, privileged, durationMs }`) | what the collector **could not do**. An empty serial column looks identical whether the host lacks `dmidecode`, the agent lacks root, or a collector timed out (§7's #1133 path). **Stored** on the node's `specs` blob beside the host facts, so a fleet view can one day say *"web-03: reporting unprivileged, no serial/model"* — no UI reads it yet; the agent also echoes the same notes on stdout when run by hand. Emitted on **every** report, not only unhappy ones. |
+| `policyRevision?` | **reserved** for the policy channel. Defined now so it never has to be added under pressure. The server **parses it and discards it** — nothing stores it and nothing acts on it. Do not document it as a stored fact until the policy channel makes it one. |
+
+**`os.family` is required on the wire and defaulted server-side to `linux`.** A discriminator that is
+optional is a discriminator every consumer has to re-derive, so it is required — and every agent that
+predates v2 is a Linux-only collector, so reading an old report as Linux is *honest*, not a fallback.
+The shared `osFamily(host)` mapper is the one place that default lives, since a partial report may omit
+the `os` block entirely.
+
+**Degrade, never reject — the same rule one level down.** An unknown enum *value* is not a 400 either:
+an enum is a guess about a world (chassis types, hypervisors, package managers) that keeps producing
+values we did not enumerate — `systemd-detect-virt` alone emits ~30 — and rejecting one costs the
+operator a whole **host**. Vocabularies with a natural unknown member fall back to it (`other` /
+`unknown`); `software[].source`, which has none, degrades to absent. The **bounded** fields follow the
+same rule by TRUNCATING rather than rejecting: `host.identifiers` past 16 and `diagnostics.warnings`
+past 50 (or 300 chars) are trimmed, because those two fields exist precisely to serve agents that are
+*not* version-locked to the instance, and making them the contract's only hard 400s would defeat the
+amendment they belong to. The fact is lost; the host is not.
+
+**`software[].source` degrades to ABSENT while `identifiers[].kind` degrades to `other` — on purpose.**
+A package's `source` is *decoration* on a fact that stands alone: `{ name: "nginx" }` is still fully
+usable. An identifier's `kind` is *constitutive*: a value with no kind cannot be compared to anything,
+so "degrade to absent" is not available — the only choices are to drop the evidence or keep it under a
+catch-all. We keep it, and the catch-all carries its label: an unrecognised `kind` becomes
+`{ kind: 'other', namespace: '<the wire label>' }`. Without that, `.catch("other")` silently relabelled
+and two different unknown kinds collapsed into one indistinguishable bucket.
+
+**`identifiers[].value` has a canonical form per `kind`, enforced at parse time.** #1141 reconciles this
+evidence across operating systems, and the same physical host otherwise produces non-equal strings
+depending on who read it — Windows prints a MAC as `AA-BB-CC-DD-EE-FF`, Linux as `aa:bb:cc:dd:ee:ff`,
+some switch agents as `aabb.ccdd.eeff`; a `product_uuid` comes back braced and upper-cased on Windows
+and bare lower-case on Linux. Three spellings of one fact are three hosts to anything that compares
+strings, so the **contract** decides the spelling, not each consumer, and it decides it before the value
+is ever stored. MACs → lower-case colon-grouped; the three UUID kinds → bare lower-case dashed
+8-4-4-4-12; `machine-id` → lower-case; `serial` → trimmed with internal whitespace collapsed and **case
+preserved** (vendors ship case-significant serials, and upper-casing would manufacture collisions on the
+unique `Asset.serial`). A value whose shape the rule does not recognise — an odd-length "MAC", a UUID
+that is not 32 hex digits — is never re-grouped or padded into one: conservative beats mangled.
+
+**Junk is never corroborating evidence: `identifiers[].value` is SANITIZED, not merely normalised.**
+Normalisation on its own made the OEM placeholders *consistently spelled*, which is exactly the wrong
+outcome for evidence #1141 compares. `To be filled by O.E.M.`, `Default string`, `System Product Name`
+and the notorious placeholder SMBIOS UUIDs (`03000200-0400-0500-0006-000700080009`, all-zero, all-F)
+are shipped verbatim on whole production runs, so two *unrelated* boards both reporting one would
+corroborate into a single physical host — the silent CMDB-corruption failure class this contract exists
+to prevent, and a confidently wrong inventory is worse than an empty one. The rule is the **same list**
+`sanitizeSerial` has used on `Asset.serial` since #1081 (`isJunkIdentityValue`), extended with the
+placeholder UUIDs and with a separator-stripped repetition check for the hex kinds — the separators in
+`00:00:00:00:00:00` and `00000000-0000-0000-0000-000000000000` would otherwise hide the repetition.
+Reusing that list rather than writing a second one is the point: identity evidence and `Asset.serial`
+can never disagree about what counts as junk. An identifier that sanitizes to nothing is **omitted**,
+never emitted with an empty value.
+
+**A malformed `identifiers[]` element degrades the element, not the host.** A non-object entry (a bare
+MAC string, a number, `null`) collapses to a dropped element and is recorded in `agentSkew`, matching
+the posture `nics[].ipv6` already takes on the identical reasoning — a third-party or older collector
+sending the simpler shape must not make the whole host vanish from the inventory with a 400. It stays
+consistent with the `kind`-is-constitutive rule above: an element with no kind cannot be compared to
+anything, so it is dropped rather than kept under a catch-all.
+
+**Which MAC becomes the `mac` identifier is specified, not incidental.** The rule is a property of the
+NIC *set*: canonicalise every candidate, discard loopback and all-zero addresses, rank by how likely the
+address is to be burned in (physical beats unknown beats virtual; universally-administered beats
+locally-administered), and break ties lexicographically. "Whichever physical NIC the collector listed
+first" was kernel ifindex order, which changes on a driver load-order change, a udev rename or an added
+NIC — and #1141 compares this value *across reports*, so an order-dependent rule would manufacture
+identity churn on hosts whose hardware never changed. Locally-administered MACs are ranked down but
+never excluded: EC2 hands out `02:…` addresses on real ENIs.
+
+**`nics[].ipv6` carries scope and the RFC 4941 flags, and only a stable routable address is promoted.**
+A bare `string[]` was not enough to choose the node's displayed `ipAddress`: "the first non-`fe80:`
+entry" is, on any modern distro with privacy extensions, a **temporary** address that is regenerated on
+a timer — so the map entry would stop resolving to the host within hours. `primaryIpv6` therefore skips
+any address flagged temporary or deprecated, and any whose *reported* scope is not `global`; it also
+rejects `fe80::/10`, `::1` and `::` by prefix regardless, so a collector that could not report a scope
+still cannot slip one through. Among what survives it prefers global unicast to a ULA, but takes the
+ULA rather than showing nothing. IPv4 still wins wherever the host has one, so this can only ever fill a
+field that was previously blank.
+
+**`chassis` distinguishes "the probe did not run" from "bare metal".** `{ type: 'none' }` is a positive
+finding and stays one; an ABSENT `virtualization` block is not. The Linux collector reads its SMBIOS
+chassis code only once `systemd-detect-virt` has confirmed the host is not a guest, because inside a
+container `/sys/class/dmi` exposes the **host's** board — so treating a missing probe as `none` had a
+container reporting `chassis: server` with full confidence. The absent probe is reported in
+`diagnostics.warnings` rather than guessed around. Since #1139 will infer `kind` from this field, a
+wrong classification silently pre-empts the human's call where `unknown` leaves it intact.
+
+**The root is now `z.object`, not `z.strictObject`.** It was strict on the rationale that the agent is
+version-locked to the instance it downloaded itself from (§6), so an unknown key could only be a bug.
+That rationale holds *today* and **stops holding** the moment an agent ships on its own schedule — a
+Windows MSI pushed by GPO/Intune, self-update, or an agent baked into a golden image. Then a **newer
+agent against an older server was a hard 400**, which for a CMDB means the host **vanishes from the
+inventory**: the same silent-and-misdiagnosed failure shape as #1132, and strictly worse than a host
+that is merely stale on fields the server does not understand yet. The decisive detail is that only the
+**root** was strict — every nested object in the schema is a plain `z.object`, which strips unknown
+keys silently, and essentially every field above lands *inside* one of those. The schema already did
+forward-compat everywhere except its outermost layer: the strictness was **inconsistent, not
+protective**.
+
+**But the signal is moved, not lost — and it is recorded at every depth, not just the root.** The
+handler diffs the **raw body against its own parse** (`agentReportSkewPaths`) and records both
+`droppedPaths` (what did not survive parsing) and `coercedPaths` (what the build had to change to
+accept) in the node's `specs` blob under `agentSkew`, alongside a server-side warning. Diffing against
+the parse rather than against a root key list is the whole point: a key-list diff sees only the root,
+while *every* realistic future skew is either a **nested** key — which a plain `z.object` strips
+silently, and essentially every field this amendment adds lands inside one — or an unknown **enum
+value**, which our own `.catch()` coerces silently. `os.family` is the sharpest case: it is required
+precisely so no consumer re-derives the platform, so swallowing a malformed one without a trace would
+be self-defeating. Diffing against the parse also means the recorder can never drift from the schema,
+because it *is* the schema's output. Bounded on every axis (paths per list, path length, depth, visits,
+array indices collapsed to `[]`) — the body is attacker-controlled and the result is persisted.
+
+It rides the **existing** version handshake ([[0083-versioning-and-releases]] Amendment, #907) rather
+than inventing a surface: `agentVersion` already travels in every report and already has its own column,
+so the server can say the useful thing — *this agent is newer than me* — instead of the generic "I don't
+understand these fields". The record **self-heals**: the blob is rewritten wholesale on every report, so
+one clean check-in clears it, and it is deliberately **not** copied into the linked `Asset.specs`. Nor
+is `diagnostics`: both are REPORT diagnostics, not inventory facts, and an Asset's specs are *merged*
+rather than rewritten, so anything that reaches them never clears itself. The same strip therefore
+applies on both Asset-facing paths — the repeat-report refresh and the review-tray confirm that mints
+the Asset.
+
+**Rejected.** *Keeping the root strict* — it buys nothing the nested objects already refuse to enforce,
+and pays for it with vanishing hosts. *Loosening without recording* — a typo'd root key would become
+silent, which is dangerous next to a future delta protocol where an **absent** `software` key comes to
+mean "unchanged". *A `schemaVersion` field with accept-N-1* — it does not solve this case at all: an
+older server does not know a newer version exists and rejects it identically, so the whole cost buys a
+nicer error message in exchange for maintaining N-1 parse paths forever.
+
+**Upgrade safety.** Nothing here is a migration: no column, no index, no backfill. A pre-v2 agent's
+report parses **byte-identical** through an upgraded server except for the documented `os.family`
+default (pinned by a test — it is the load-bearing promise of this change), so an operator upgrades the
+instance while every agent in the estate keeps running the binary it was installed with, and nothing
+re-installs.
+
+**The forward tolerance is NOT retroactive, and must not be described as if it were.** A new server
+accepts everything an old agent omits — that direction always worked and still does. The other
+direction starts **with this build**: every server released before it has a `strictObject` root and
+hard-400s a report carrying a key it does not know, so a v2 agent reporting to a pre-v2 instance is
+still refused. The property is real and it is the entire point of the change; it simply only protects
+instances from this version forward, which is exactly why the loosening had to land *before* any agent
+ships on its own schedule rather than alongside the first one that does.
+
 ### §3 — Ingestion & reconciliation
 
 - **Endpoint:** `POST /infra/report`, authenticated by the agent's Service Account bearer token
@@ -394,3 +559,6 @@ would be a separate ADR and arguably a separate product).
 - Epic: #831
 - Version handshake (agent stamps + reports its build; `InfraNode.agentVersion` + an "Agent outdated"
   hint when a MAJOR behind the server): [[0083-versioning-and-releases]] Amendment (2026-07-02), issue #907.
+- Contract v2 (OS-neutral wire, forward-compatible root, `diagnostics`): §2 Amendment (2026-07-31),
+  issue #1138 — the prerequisite for multi-OS collectors, identity/dedup, auto-classification, the
+  fleet view and the policy channel.

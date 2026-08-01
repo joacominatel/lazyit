@@ -10,7 +10,12 @@
  */
 import { AgentReportSchema, type AgentReport } from "@lazyit/shared";
 import { loadConfig } from "./config";
-import { collectHost, collectSoftware, readMachineId } from "./collect";
+import {
+  buildDiagnostics,
+  collectHost,
+  collectSoftware,
+  readMachineId,
+} from "./collect";
 
 // Build-time version stamp (ADR-0083 mechanism, issue #907): the compile scripts bake `APP_VERSION`
 // via `bun build --define` (git describe → env). A plain `bun run`/an unstamped compile falls back to
@@ -35,6 +40,7 @@ Options:
 
 /** Build + validate the report. Throws (caught by main) if collection produced something invalid. */
 async function buildReport(): Promise<AgentReport> {
+  const startedAt = Date.now();
   const machineId = await readMachineId();
   if (!machineId) {
     throw new Error(
@@ -42,7 +48,18 @@ async function buildReport(): Promise<AgentReport> {
     );
   }
 
-  const [host, software] = await Promise.all([collectHost(), collectSoftware()]);
+  // Every collector that degrades files a note here (#1138). They are gathered rather than logged so
+  // they reach the SERVER: a warning in the host's own journal answers nobody's question about why an
+  // inventory row looks empty — the operator is looking at the fleet, not at 40 journals.
+  const warnings: string[] = [];
+  const warn = (message: string) => {
+    warnings.push(message);
+  };
+
+  const [host, software] = await Promise.all([
+    collectHost(warn),
+    collectSoftware(warn),
+  ]);
 
   const report: AgentReport = {
     agentVersion: AGENT_VERSION,
@@ -52,6 +69,11 @@ async function buildReport(): Promise<AgentReport> {
     reportedAt: new Date().toISOString(),
     host,
     ...(software ? { software } : {}),
+    diagnostics: buildDiagnostics(
+      warnings,
+      process.getuid?.() === 0,
+      Date.now() - startedAt,
+    ),
   };
 
   // Validate against the shared contract BEFORE sending: a failure here is an agent bug, not a server
@@ -110,6 +132,11 @@ async function report(url: string, token: string): Promise<void> {
   console.log(
     `lazyit-agent: reported ${hostname} (cpu: ${cpu?.model ?? "?"}, mem: ${gib(memoryBytes)})${where}`,
   );
+  // The same degradation notes that ride to the server, echoed locally: an operator running the agent
+  // by hand after an install should see WHY a fact is missing without going to the UI (#1138).
+  for (const warning of payload.diagnostics?.warnings ?? []) {
+    console.warn(`lazyit-agent: ${warning}`);
+  }
 }
 
 async function main(): Promise<void> {

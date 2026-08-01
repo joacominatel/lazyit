@@ -117,8 +117,28 @@ correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin toca
 ## Qué recopila el agente
 
 - **Identidad y hardware** — nombre de host, sistema operativo y kernel, CPU y memoria, discos e
-  interfaces de red y (solo cuando se ejecuta como root) fabricante / modelo / número de serie.
-- **Software instalado** — la lista de paquetes instalados, con versiones cuando están disponibles.
+  interfaces de red y (solo cuando se ejecuta como root) fabricante / modelo / número de serie. Ahora
+  también lee direcciones **IPv6**: la lista de interfaces sigue mostrando la IPv4 de cada una, pero un
+  host que no tiene ninguna IPv4 por fin obtiene una dirección en el diagrama de infraestructura en vez
+  de un vacío.
+- **Qué tipo de máquina es** — servidor, escritorio, notebook, máquina virtual o contenedor, y la
+  virtualización sobre la que corre (KVM, VMware, Hyper-V, Xen, LXC, Docker, WSL…) cuando puede
+  determinarlo. Cuando *no* puede — la herramienta que necesita no está instalada — reporta
+  **desconocido** en vez de adivinar, y lo aclara en las notas de abajo. lazyit lo guarda junto a los
+  demás datos reportados del host; hoy no se muestra en la interfaz.
+- **Cuándo arrancó por última vez** — una sola marca de tiempo, actualizada en cada reporte y sin
+  histórico: es un dato de inventario ("¿este equipo realmente se reinició después de la ventana de
+  parches?"), no monitoreo de uptime. Se guarda junto a los demás datos reportados del host y, igual
+  que el tipo de máquina, todavía no se muestra en ninguna pantalla.
+- **Software instalado** — la lista de paquetes instalados, con versiones cuando están disponibles. El
+  agente además registra qué gestor de paquetes reportó cada uno; la lista en sí muestra el nombre y
+  la versión.
+- **Qué no pudo recopilar** — cada reporte también indica si corrió como root y nombra lo que tuvo que
+  omitir o lo que agotó su tiempo. Si ejecutás el agente a mano (`lazyit-agent report --once`) imprime
+  esas notas ahí mismo, que suele ser la forma más rápida de responder "¿por qué está vacía la columna
+  de número de serie de este host?". lazyit además las guarda junto a los datos reportados del host,
+  para que una futura vista de parque pueda responderlo para todo el estado; hoy no se muestran en la
+  interfaz.
 
 Recopila todo lo que puede y simplemente omite lo que no puede leer, así una instalación sin
 privilegios igual reporta una imagen útil. **Nunca** lee secretos, archivos ni datos de aplicaciones,
@@ -160,6 +180,18 @@ desactualizado** — un aviso para volver a ejecutar el comando de instalación 
 binario. Es solo un empujón: un agente desactualizado sigue reportando con normalidad, no se bloquea
 nada, y las actualizaciones menores no la activan. Los agentes compilados desde el código fuente (o
 anteriores al versionado) reportan como `dev` y nunca muestran la insignia.
+
+**Actualizar tu instancia nunca rompe los agentes ya instalados.** No hace falta reinstalar nada: un
+agente más viejo sigue reportando igual que antes, y cada dato que envía aterriza exactamente donde
+aterrizaba.
+
+**A partir de esta versión también vale el sentido inverso.** Un agente *más nuevo* que reporta a un
+servidor más viejo es aceptado: el servidor toma todos los datos que entiende y simplemente anota los
+que no, en vez de rechazar el reporte completo. Esa diferencia importa — un reporte rechazado haría
+desaparecer al servidor de tu inventario y parecería una caída, mientras que un campo desactualizado
+nunca lo hace. Ojo con el "a partir de esta versión": las instancias anteriores a esta release siguen
+rechazando un reporte que mencione algo que no reconocen, así que si vas a correr agentes que se
+actualizan por su cuenta, actualizá primero la instancia.
 
 ## Qué sigue
 
