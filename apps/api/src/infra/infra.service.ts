@@ -1,8 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  HttpException,
-  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -38,8 +36,8 @@ import { SecretManagerService } from '../secret-manager/secret-manager.service';
 import { SearchService } from '../search/search.service';
 import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
-import { parseEnvInt } from '../common/parse-env-int';
-import { type Principal, isServicePrincipal } from '../auth/principal';
+import type { Principal } from '../auth/principal';
+import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 
 /** The node columns + linked Asset name `projectInfraNode` needs (the search projection shape). */
 const SEARCH_NODE_SELECT = {
@@ -68,22 +66,6 @@ export interface InfraNodeFilters {
  */
 const INFRA_AUTO_ASSET_MARKER = '_infraAutoCreated';
 
-/**
- * How many LIVE (non-soft-deleted) PENDING proposals ONE reporting service account may hold at once
- * (#1134, the availability half of ADR-0074 §8). Past it, a report for an UNKNOWN host is refused with
- * 429 instead of minting another row.
- *
- * Why a row cap on top of the request rate limit ({@link InfraReportRateLimitGuard}): the rate limit
- * bounds writes per minute, not rows in total — a leaked token reporting a fresh `externalId` at a
- * polite cadence would still fill the table over days. This is the ceiling that makes that impossible.
- *
- * 50 is sized for the product (5–20-person IT teams, a review tray a human actually triages), and it is
- * a ceiling on UNCONFIRMED proposals only: confirming a node or discarding it (the soft-delete) frees a
- * slot immediately, so it never becomes a permanent estate limit. A big-bang rollout of more than 50
- * hosts at once should raise `INFRA_REPORT_PENDING_CAP` (or confirm the tray as it fills).
- */
-export const INFRA_REPORT_PENDING_CAP_DEFAULT = 50;
-
 @Injectable()
 export class InfraService {
   private readonly logger = new Logger(InfraService.name);
@@ -96,6 +78,8 @@ export class InfraService {
     private readonly articles: ArticlesService,
     private readonly secrets: SecretManagerService,
     private readonly search: SearchService,
+    // The #1134 new-node enrollment throttle — charged on the ONE branch that grows the table.
+    private readonly enrollment: InfraNodeEnrollmentLimiter,
   ) {}
 
   /**
@@ -200,21 +184,20 @@ export class InfraService {
    * ponytail: `kind` inference is deferred — the v1 contract carries no reliable virtualization hint,
    * so every agent host lands as `PHYSICAL_HOST`; the human re-kinds it (VM/CONTAINER/…) on confirm.
    *
-   * BUDGETED (#1134): the CREATE branch — the only branch that adds a row — first checks the reporting
-   * service account's live-PENDING budget ({@link INFRA_REPORT_PENDING_CAP_DEFAULT}). The refresh
-   * branch is deliberately never budgeted: a known host checking in adds nothing, so the legitimate
-   * agent (one node, a report every 15 minutes) never touches this machinery at all.
+   * THROTTLED (#1134): the CREATE branch — the only branch that adds a row — first charges the
+   * reporter's new-node enrollment budget ({@link InfraNodeEnrollmentLimiter}). The refresh branch is
+   * deliberately never charged: a known host checking in adds nothing, so the legitimate agent (one
+   * node, a report every 15 minutes) never touches this machinery at all — and a reporter that HAS
+   * tripped the limit keeps refreshing the hosts the operator already has, so a tripped limit can
+   * never manufacture a false outage on the topology map.
+   *
+   * The `principal` is used as an EPHEMERAL throttle key and is never persisted. ADR-0074 §8's #1136
+   * correction still holds in full: no `InfraNode` write records which service account produced it.
    */
   async ingestReport(
     report: AgentReport,
     principal?: Principal,
   ): Promise<AgentReportAck> {
-    // The reporter key: the authenticated SA id, SERVER-derived from the bearer token. `null` for a
-    // non-service caller (a human role holding `infra:report`) — a real bucket, not an exemption, and
-    // the same bucket rows predating the column sit in until their next check-in re-stamps them.
-    const reportedBySaId = isServicePrincipal(principal)
-      ? principal.serviceAccount.id
-      : null;
     // The inventory blob (ADR-0074 §2 / ADR-0007 jsonb posture): host facts + software under clear
     // keys, plus the report timestamp for provenance. Stored verbatim — validated already by
     // `AgentReportSchema` at the controller. `software` is omitted when the agent couldn't list it.
@@ -245,20 +228,19 @@ export class InfraService {
 
     if (existing) {
       // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
-      // human's and is deliberately left untouched. NOT budgeted — it adds no row (#1134).
+      // human's and is deliberately left untouched. NOT throttled — it adds no row (#1134).
       return this.refreshKnownNode(
         existing,
         blob,
         now,
         report.agentVersion,
         primaryIp,
-        reportedBySaId,
       );
     }
 
     // Unknown host ⇒ a NEW row. This is the only branch that can grow the table, so it is the only one
-    // the live-PENDING budget gates (#1134).
-    await this.assertPendingBudget(reportedBySaId);
+    // the enrollment throttle charges (#1134).
+    this.enrollment.assertWithinBudget(principal);
 
     // New host: a PENDING proposal in the review tray. No backing Asset until a human confirms (§3).
     // Its `ipAddress` is seeded from the report (source=AGENT) so the topology card shows the IP with
@@ -275,7 +257,6 @@ export class InfraService {
           externalId: report.externalId,
           lastReportedAt: now,
           agentVersion: report.agentVersion,
-          reportedBySaId,
           ...(primaryIp !== undefined
             ? { ipAddress: primaryIp, ipAddressSource: 'AGENT' as const }
             : {}),
@@ -311,51 +292,10 @@ export class InfraService {
             now,
             report.agentVersion,
             primaryIp,
-            reportedBySaId,
           );
         }
       }
       throw err;
-    }
-  }
-
-  /**
-   * The live-PENDING budget gate (#1134): refuse a NEW agent proposal with 429 once this reporter
-   * already holds {@link INFRA_REPORT_PENDING_CAP_DEFAULT} un-triaged ones (`INFRA_REPORT_PENDING_CAP`
-   * overrides). This is the row ceiling the per-minute rate limiter cannot provide: the guard bounds
-   * writes per window, not rows over time, so without this a leaked token reporting a fresh
-   * `externalId` at a polite cadence would still fill the table.
-   *
-   * The count is scoped to LIVE rows (`deletedAt: null`) — LOAD-BEARING, not decoration. Discarding a
-   * proposal IS the soft-delete (`DELETE /infra/nodes/:id`, ADR-0074 §3 — there is no separate reject
-   * endpoint), so counting soft-deleted rows would mean the operator who tidies their tray never gets
-   * the budget back and stays locked out forever. Confirming a node frees a slot the same way (it
-   * leaves PENDING). The soft-delete extension would inject `deletedAt: null` here anyway; it is
-   * written explicitly because the guarantee is the whole point of the query, not an ambient default.
-   *
-   * 429 (not 403/409) on purpose: this is a THROTTLE, and it pairs with the guard's status so an agent
-   * — and an operator reading the log — sees one consistent "you are over a limit, back off" signal.
-   */
-  private async assertPendingBudget(
-    reportedBySaId: string | null,
-  ): Promise<void> {
-    // Read per call, not cached on the instance: an operator raising the cap mid-rollout should not
-    // have to restart the API to unblock their tray.
-    const cap = parseEnvInt(
-      'INFRA_REPORT_PENDING_CAP',
-      INFRA_REPORT_PENDING_CAP_DEFAULT,
-    );
-    const pending = await this.prisma.infraNode.count({
-      where: { state: 'PENDING', deletedAt: null, reportedBySaId },
-    });
-    if (pending >= cap) {
-      this.logger.warn(
-        `infra report refused: reporter ${reportedBySaId ?? '(unattributed)'} already holds ${pending} live PENDING node(s), cap ${cap}.`,
-      );
-      throw new HttpException(
-        `Too many pending discovered hosts awaiting review (${pending}). Confirm or discard proposals in the topology review tray, or raise INFRA_REPORT_PENDING_CAP.`,
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
     }
   }
 
@@ -377,20 +317,12 @@ export class InfraService {
     now: Date,
     agentVersion: string,
     primaryIp: string | undefined,
-    reportedBySaId: string | null,
   ): Promise<AgentReportAck> {
-    // Unchecked (scalar) input: this update writes the reporter FK by id, exactly as the create branch
-    // does — there is no relation object to connect through and no reason to invent one.
     const data: Prisma.InfraNodeUncheckedUpdateInput = {
       specs: blob,
       status: 'ONLINE',
       lastReportedAt: now,
       agentVersion,
-      // Re-stamp the reporter on every check-in (#1134). It is a machine FACT (who is reporting this
-      // host right now), not curation, so refreshing it belongs in this facts-only update — and it is
-      // what makes the attribution self-healing: a node created before the column existed, or one
-      // whose install was re-tokened to a new SA, is attributed within one report cadence.
-      reportedBySaId,
     };
     // Overwrite the IP with the live fact — but only when the agent owns it (never a MANUAL edit) and
     // the report actually carries one (never clear a good IP on a partial report). CEO policy #1081.
