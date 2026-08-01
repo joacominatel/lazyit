@@ -32,14 +32,18 @@ RUN bunx prisma generate          # -> apps/api/generated/prisma (compiled into 
 RUN bun run build                 # nest build -> apps/api/dist/src/main.js (sourceRoot: src)
 WORKDIR /app
 
-# ---- Agent binaries: Bun-compile the reporting agent for both Linux arches (ADR-0074 §6) ----
+# ---- Agent binaries: Bun-compile the reporting agent for every Linux target (ADR-0074 §6) ----
 # Reuses the builder (it already has bun + the built @lazyit/shared the agent imports for the SAME
-# zod contract the API validates — zero drift). Cross-compiles x64 + arm64; the API serves whichever
-# the operator's host needs via GET /agent/download. CI's "Build api image" job validates this stage.
+# zod contract the API validates — zero drift). Cross-compiles x64, x64-baseline and arm64; the API
+# serves whichever the operator's host needs via GET /agent/download. `x64-baseline` is the pre-AVX2
+# build (#1137): the ordinary x64 target assumes AVX2 (Haswell, 2013), so a pre-Haswell host or an
+# EVC-masked vSphere cluster would SIGILL on it. The compile step also writes a `.sha256` beside each
+# artifact, which GET /agent/checksum publishes and install.sh verifies.
+# CI's "Build api image" job validates this stage.
 FROM builder AS agent-builder
 WORKDIR /app
 COPY apps/agent/ apps/agent/
-RUN bun run --filter @lazyit/agent compile   # -> apps/agent/dist/lazyit-agent-{x64,arm64}
+RUN bun run --filter @lazyit/agent compile   # -> apps/agent/dist/lazyit-agent-{x64,x64-baseline,arm64}[.sha256]
 
 # ---- Prod deps: only the API's production tree, hoisted (flat node_modules) ----
 # --filter keeps the lockfile intact (so --production's implicit frozen check passes) while
@@ -83,9 +87,13 @@ COPY --from=builder   /app/apps/api/package.json       ./apps/api/package.json
 
 # Baked reporting-agent binaries (ADR-0074 §6) — served by GET /agent/download. AGENT_BIN_DIR points
 # the controller here; the binaries are streamed, never executed in this container.
+#
+# The whole dist/ directory rather than a line per artifact (#1137): it now holds three binaries and
+# a `.sha256` beside each, and a per-file list is exactly the kind of thing a later target gets added
+# to the compile script but not to here — which would ship a binary whose digest 404s, and quietly
+# turn the installer's integrity check back off.
 ENV AGENT_BIN_DIR=/app/agent/bin
-COPY --from=agent-builder /app/apps/agent/dist/lazyit-agent-x64   /app/agent/bin/lazyit-agent-x64
-COPY --from=agent-builder /app/apps/agent/dist/lazyit-agent-arm64 /app/agent/bin/lazyit-agent-arm64
+COPY --from=agent-builder /app/apps/agent/dist/ /app/agent/bin/
 
 # Create the attachments blob dir owned by the non-root runtime user (#1019). The named volume
 # (attachments_data:/app/attachments) is seeded from this path's ownership on first mount, so the
