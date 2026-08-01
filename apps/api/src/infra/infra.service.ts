@@ -1177,11 +1177,13 @@ function isSerialUniqueCollision(err: unknown): boolean {
  * the likeliest cause and the one the operator can act on; `serverVersion` names the build that did
  * the dropping, since the node records the agent's version but never the server's.
  */
-export interface AgentReportSkew {
+// A `type`, not an `interface`, on purpose: only a type alias gets an implicit index signature, which
+// is what Prisma's `InputJsonValue` requires of anything written into a jsonb column.
+export type AgentReportSkew = {
   unknownKeys: string[];
   agentAhead: boolean;
   serverVersion: string;
-}
+};
 
 /**
  * The inventory `specs` blob an agent report lands (#1081): host facts + optional software list + the
