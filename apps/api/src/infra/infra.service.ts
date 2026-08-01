@@ -7,6 +7,10 @@ import {
 } from '@nestjs/common';
 import {
   agentReportSkewPaths,
+  disambiguateExternalId,
+  hostIdentityEvidence,
+  identityDiscriminator,
+  isClonedMachineId,
   isNewerVersion,
   isPlausibleEdge,
   primaryIp,
@@ -18,7 +22,9 @@ import {
   type ConfirmInfraNode,
   type CreateInfraEdge,
   type CreateInfraNode,
+  type HostIdentityEvidence,
   type InfraEdgeKind,
+  type InfraIdentityMatch,
   type InfraImpactNode,
   type InfraImpactResponse,
   type InfraNodeChild,
@@ -41,6 +47,7 @@ import { parsePageQuery } from '../common/parse-page-query';
 import { appVersion } from '../common/export-provenance';
 import type { Principal } from '../auth/principal';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /** The node columns + linked Asset name `projectInfraNode` needs (the search projection shape). */
 const SEARCH_NODE_SELECT = {
@@ -83,6 +90,8 @@ export class InfraService {
     private readonly search: SearchService,
     // The #1134 new-node enrollment throttle — charged on the ONE branch that grows the table.
     private readonly enrollment: InfraNodeEnrollmentLimiter,
+    // The #1141 cloned-machine-id nudge — the ONE automatic action the collision detection takes.
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -243,10 +252,32 @@ export class InfraService {
         reportingSource: report.reportingSource,
         externalId: report.externalId,
       },
-      select: { id: true, assetId: true, ipAddressSource: true },
+      select: {
+        id: true,
+        assetId: true,
+        ipAddressSource: true,
+        // `label` is read for the #1141 collision nudge only — it names the node the operator already
+        // has, which is the whole difference between an actionable warning and a cryptic one.
+        label: true,
+      },
     });
 
     if (existing) {
+      // CORROBORATE before merging (#1141). The dedup key is machine-id twice, so a baked
+      // `/etc/machine-id` makes every clone of a template match here and write to ONE row.
+      const incoming = hostIdentityEvidence(report.host);
+      const stored = await this.storedHostIdentity(existing.id);
+      if (isClonedMachineId(stored, incoming)) {
+        return this.ingestCollidingHost(
+          existing,
+          incoming,
+          report,
+          blob,
+          now,
+          primaryIpAddress,
+          principal,
+        );
+      }
       // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
       // human's and is deliberately left untouched. NOT throttled — it adds no row (#1134).
       return this.refreshKnownNode(
@@ -417,6 +448,150 @@ export class InfraService {
     }
     void this.syncNodeToSearch(updated.id);
     return { nodeId: updated.id, state: updated.state, accepted: true };
+  }
+
+  /**
+   * The corroborating identity a node last reported, read STRAIGHT out of its stored `specs` blob
+   * (#1141). No schema change was needed for any of this: contract v2 already stores the whole `host`
+   * block, `identifiers[]` included, on every report.
+   *
+   * A raw sub-select rather than `select: { specs: true }` on purpose. `specs` is the entire inventory
+   * blob — up to 5,000 packages on a real Linux box — and this runs on the KNOWN-host path, i.e. once
+   * per host every 15 minutes forever. Reading the whole column back would roughly double the I/O of
+   * the hot path to compare four short strings; `specs->'host'` is a few KB. Same lesson as #1135, one
+   * layer down. Parameterized, and addressed by a primary key we resolved through the soft-delete-scoped
+   * `findFirst` a moment earlier.
+   */
+  private async storedHostIdentity(
+    nodeId: string,
+  ): Promise<HostIdentityEvidence> {
+    const rows = await this.prisma.$queryRaw<Array<{ host: unknown }>>(
+      Prisma.sql`SELECT "specs"->'host' AS host FROM "infra_nodes" WHERE "id" = ${nodeId}`,
+    );
+    // Tolerant by construction: a missing row, a null `specs` and a hand-edited blob all read as
+    // "no evidence", which `isClonedMachineId` treats as "nothing to corroborate".
+    return hostIdentityEvidence(rows[0]?.host);
+  }
+
+  /**
+   * A SECOND physical host is reporting the `externalId` an existing node already owns (#1141) — the
+   * cloned-VM-template case, which without this quietly collapsed a whole estate into one row.
+   *
+   * Three rules, in order of how much they matter:
+   *
+   *  1. **The report is still accepted.** Degrade and inform, never reject — the same posture the rest
+   *     of the contract takes. A host that 400s vanishes from the CMDB, which is the failure this
+   *     change exists to prevent, not a remedy for it.
+   *  2. **Nothing existing is touched.** The node that owns the key is not written to at all: no
+   *     re-label, no re-key, no soft-delete. The colliding host gets a NEW `state=PENDING` proposal,
+   *     which is exactly what an unrecognised host has always got, and the human gate does the rest.
+   *  3. **One nudge, naming the remedy.** Emitted only on the branch that CREATES the second node, and
+   *     deduped on `(peer node, discriminator)`, so a clone checking in every 15 minutes nudges once —
+   *     the same one-per-event discipline the staleness sweeper's `infra.agent_offline` follows.
+   *
+   * The new node cannot reuse the reported `externalId`: the partial-unique
+   * `infra_nodes_reporting_source_external_id_key` physically forbids two live rows sharing one. It
+   * therefore gets a DETERMINISTIC derived key (`<externalId>#<serial-or-MAC>`) so the same clone lands
+   * on the same node on every report — and so the operator can see, in the row itself, why there are
+   * two. See {@link disambiguateExternalId}.
+   */
+  private async ingestCollidingHost(
+    peer: { id: string; label: string },
+    incoming: HostIdentityEvidence,
+    report: AgentReport,
+    blob: AgentReportSpecsBlob,
+    now: Date,
+    primaryIpAddress: string | undefined,
+    principal?: Principal,
+  ): Promise<AgentReportAck> {
+    const discriminator = identityDiscriminator(incoming);
+    if (discriminator === undefined) {
+      // Unreachable: the rule that got us here requires a serial AND a MAC on both sides. Falling
+      // back to the ordinary refresh rather than throwing keeps the machine-facing path total.
+      return this.refreshKnownNode(
+        { id: peer.id, assetId: null, ipAddressSource: 'AGENT' },
+        blob,
+        now,
+        report.agentVersion,
+        primaryIpAddress,
+      );
+    }
+    const externalId = disambiguateExternalId(report.externalId, discriminator);
+
+    // Does this clone already have a node of its own? (Its second and every later report.)
+    const own = await this.prisma.infraNode.findFirst({
+      where: { reportingSource: report.reportingSource, externalId },
+      select: { id: true, assetId: true, ipAddressSource: true },
+    });
+    if (own) {
+      return this.refreshKnownNode(
+        own,
+        blob,
+        now,
+        report.agentVersion,
+        primaryIpAddress,
+      );
+    }
+
+    // A new row, so it is charged to the same enrollment budget as any other newly-enrolled host
+    // (#1134) — a clone storm is exactly the unbounded row growth that limit exists to bound.
+    this.enrollment.assertWithinBudget(principal);
+
+    const conflict: AgentReportIdentityConflict = {
+      reportedExternalId: report.externalId,
+      peerNodeId: peer.id,
+      peerLabel: peer.label,
+      discriminator,
+      detectedAt: now.toISOString(),
+    };
+    const created = await this.prisma.infraNode.create({
+      data: {
+        kind: 'PHYSICAL_HOST',
+        label: report.host.hostname,
+        status: 'ONLINE',
+        source: 'AGENT',
+        state: 'PENDING',
+        reportingSource: report.reportingSource,
+        externalId,
+        lastReportedAt: now,
+        agentVersion: report.agentVersion,
+        ...(primaryIpAddress !== undefined
+          ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
+          : {}),
+        specs: { ...blob, identityConflict: conflict } as Prisma.InputJsonValue,
+      },
+      select: { id: true, state: true },
+    });
+
+    this.logger.warn(
+      `Two hosts are reporting externalId ${report.externalId}: "${peer.label}" (${peer.id}) and ` +
+        `"${report.host.hostname}" (${created.id}). Almost always a cloned VM template with a baked ` +
+        `/etc/machine-id — nothing was merged; the second host landed as a separate PENDING proposal.`,
+    );
+    // Best-effort, exactly like the staleness sweeper's nudge: a failed emit must never fail a report.
+    await this.notifications.emit({
+      type: 'infra.identity_conflict',
+      dedupeKey: `infra.identity_conflict:${peer.id}:${discriminator}`,
+      severity: 'warning',
+      title: `Two hosts share one machine-id: ${report.host.hostname} and ${peer.label}`,
+      summary:
+        `"${report.host.hostname}" reports the same machine-id as "${peer.label}" but different ` +
+        `hardware and a different hostname, so they are two servers, not one. This is almost always a ` +
+        `cloned VM template or golden image: run \`systemd-firstboot --setup-machine-id\` on the clones ` +
+        `(after removing /etc/machine-id) and reboot. Nothing was merged — the new host is waiting in ` +
+        `the review tray.`,
+      // No entityType — the bell deep-links this type to the topology map, like agent_offline.
+      metadata: {
+        nodeId: created.id,
+        hostname: report.host.hostname,
+        peerNodeId: peer.id,
+        peerLabel: peer.label,
+        discriminator,
+      },
+    });
+
+    void this.syncNodeToSearch(created.id);
+    return { nodeId: created.id, state: created.state, accepted: true };
   }
 
   /**
@@ -947,6 +1122,177 @@ export class InfraService {
     return restored;
   }
 
+  // ── Identity reconciliation: the HUMAN half (ADR-0074 §3 amendment, #1141) ───────────────────────
+
+  /**
+   * Re-key a node: move the agent identity of `sourceId` onto `targetNodeId` and archive the source.
+   *
+   * This is the one operator action that closes BOTH identity failures the report path can only warn
+   * about:
+   *
+   *  - **Re-image.** Reinstalling the OS on the same box mints a new `/etc/machine-id`, so the host
+   *    arrives as a brand-new PENDING proposal while the node the operator curated — with its asset
+   *    link, owners, position, edges and KB links — drifts OFFLINE forever. Merging the proposal into
+   *    it transplants the new key and the curated node simply keeps living.
+   *  - **Clone collapse.** The same action adopts a separated clone into whichever node really is it.
+   *
+   * IDENTITY MOVES; CURATION DOES NOT. `label`, `state`, `kind`, `x`/`y`, `assetId` and the target's
+   * edges are never written — the agent owns facts, the human owns curation, and a merge is not a
+   * licence to break that. `specs` is MERGED the way {@link syncAssetSpecs} merges an Asset's: the
+   * agent-owned keys come from the source, every other key on the target survives.
+   *
+   * ONE TRANSACTION, in this order: archive the source (which is what frees its dedup key — the
+   * partial-unique index covers live rows only), then write that key onto the target. Reversed, the
+   * second write would collide with the first.
+   *
+   * THE ARCHIVED SOURCE IS THE AUDIT TRAIL. There is no `InfraNodeHistory` table (ADR-0074 §8 states
+   * that plainly), so rather than pretend otherwise this stamps the merge onto the row it soft-deletes:
+   * who merged it, into what, when, and the key it carried. That row can never be overwritten by
+   * another report — a soft-deleted node no longer matches the dedup lookup — which is exactly why the
+   * record goes there and not onto the target, whose `specs` are rewritten wholesale every 15 minutes.
+   *
+   * The source's linked Asset (if any) is deliberately left alone, matching `removeNode`: archiving a
+   * node has never detached or soft-deleted its Asset, and a merge is not the place to invent that.
+   */
+  async mergeNodeInto(
+    sourceId: string,
+    targetNodeId: string,
+    principal?: Principal,
+  ) {
+    if (sourceId === targetNodeId) {
+      throw new BadRequestException(
+        'A node cannot be merged into itself — pick the other node it is a duplicate of.',
+      );
+    }
+    const source = await this.getNode(sourceId); // 404 if missing/archived
+    const target = await this.getNode(targetNodeId);
+    if (!source.reportingSource || !source.externalId) {
+      throw new BadRequestException(
+        'This node carries no agent identity to transplant — merging only moves a reporting key from an agent-discovered node onto another node.',
+      );
+    }
+
+    const now = new Date();
+    const { userId } = this.actor.resolveActor(principal);
+    const sourceSpecs = (source.specs ?? {}) as Record<string, unknown>;
+    const targetSpecs = (target.specs ?? {}) as Record<string, unknown>;
+    // The agent-owned keys move with the identity; everything a human put on the target survives.
+    const mergedSpecs: Record<string, unknown> = { ...targetSpecs };
+    for (const key of AGENT_OWNED_SPECS_KEYS) {
+      if (sourceSpecs[key] === undefined) delete mergedSpecs[key];
+      else mergedSpecs[key] = sourceSpecs[key];
+    }
+    // The collision marker belongs to the row that WAS the duplicate; the merge is its resolution.
+    for (const key of REPORT_DIAGNOSTIC_KEYS) delete mergedSpecs[key];
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.infraNode.update({
+        where: { id: sourceId },
+        data: {
+          deletedAt: now,
+          specs: {
+            ...sourceSpecs,
+            [INFRA_MERGED_INTO_MARKER]: {
+              nodeId: target.id,
+              label: target.label,
+              externalId: source.externalId,
+              reportingSource: source.reportingSource,
+              at: now.toISOString(),
+              ...(userId !== undefined ? { byUserId: userId } : {}),
+            },
+          } as Prisma.InputJsonValue,
+        },
+      });
+      await tx.infraNode.update({
+        where: { id: targetNodeId },
+        data: {
+          source: 'AGENT',
+          reportingSource: source.reportingSource,
+          externalId: source.externalId,
+          lastReportedAt: source.lastReportedAt,
+          agentVersion: source.agentVersion,
+          status: source.status,
+          specs: mergedSpecs as Prisma.InputJsonValue,
+          // Same rule the report path follows (#1081): a human-curated IP is never clobbered.
+          ...(target.ipAddressSource !== 'MANUAL' && source.ipAddress
+            ? { ipAddress: source.ipAddress, ipAddressSource: 'AGENT' as const }
+            : {}),
+        },
+      });
+    });
+
+    this.logger.log(
+      `Merged node ${sourceId} into ${targetNodeId}: reporting key ${source.reportingSource}/${source.externalId} transplanted, duplicate archived.`,
+    );
+    // The duplicate is off the map; the adopting node changed enough to re-project (ADR-0035).
+    this.search.remove('infra', sourceId);
+    void this.syncNodeToSearch(targetNodeId);
+    return this.getNodeDetail(targetNodeId, principal);
+  }
+
+  /**
+   * Other live nodes whose stored corroborating evidence shares a BURNED-IN fact with this one
+   * (#1141) — the *"this looks like `srv-app-04` re-imaged — adopt?"* hint the review tray shows above
+   * a fresh proposal. Read-only, best-effort and never blocking: it suggests a merge, it never
+   * performs one.
+   *
+   * Empty for any node with no stored `identifiers[]`, which is every node an agent older than
+   * contract v2 reported — those simply get no hint, never a wrong one.
+   *
+   * Two facts only: a matching serial or a matching MAC. A hostname match is deliberately NOT offered,
+   * because recycling a hostname is a naming convention working as intended, and a hint that is usually
+   * wrong teaches the operator to click past the one time it is right.
+   *
+   * ponytail: the candidate lookup is a jsonb containment filter with no supporting GIN index, so it is
+   * a sequential scan over the node table. At the estate ADR-0074 targets (tens of nodes) that is far
+   * cheaper than the index it would otherwise need to maintain on every report — add the index if a
+   * fleet ever makes this the slow part. `matchedOn` is resolved by re-reading each CANDIDATE's
+   * evidence (a handful of PK-addressed few-KB reads, bounded by {@link IDENTITY_MATCH_MAX}) rather
+   * than by running one query per value, so the scan happens once.
+   */
+  async findIdentityMatches(id: string): Promise<InfraIdentityMatch[]> {
+    await this.getNode(id); // 404 if missing/archived
+    const evidence = await this.storedHostIdentity(id);
+    const clauses = [
+      ...evidence.serials.map((value) => identifierClause('serial', value)),
+      ...evidence.macs.map((value) => identifierClause('mac', value)),
+    ];
+    if (clauses.length === 0) return [];
+
+    const candidates = await this.prisma.infraNode.findMany({
+      where: { id: { not: id }, OR: clauses },
+      orderBy: { label: 'asc' },
+      take: IDENTITY_MATCH_MAX,
+      select: {
+        id: true,
+        label: true,
+        kind: true,
+        status: true,
+        state: true,
+      },
+    });
+
+    const matches: InfraIdentityMatch[] = [];
+    for (const candidate of candidates) {
+      const peer = await this.storedHostIdentity(candidate.id);
+      // The serial wins when both match: it is burned into the board, a MAC rides on a card.
+      const serial = evidence.serials.find((v) => peer.serials.includes(v));
+      const mac = serial
+        ? undefined
+        : evidence.macs.find((v) => peer.macs.includes(v));
+      const value = serial ?? mac;
+      // Defensive: the containment filter matched but the re-read does not agree (a blob edited
+      // between the two reads). Drop the candidate rather than claim a match we cannot name.
+      if (value === undefined) continue;
+      matches.push({
+        ...candidate,
+        matchedOn: serial !== undefined ? 'serial' : 'mac',
+        value,
+      });
+    }
+    return matches;
+  }
+
   // ── Edges ───────────────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -1237,6 +1583,25 @@ type AgentReportSpecsBlob = {
   reportedAt: string;
   diagnostics?: AgentReport['diagnostics'];
   agentSkew?: AgentReportSkew;
+  identityConflict?: AgentReportIdentityConflict;
+};
+
+/**
+ * Why this node exists as a SEPARATE row from the one that owns its reported `externalId` (#1141).
+ * Stamped on the colliding host's node, and re-stamped on every report for as long as the collision
+ * lasts — so it SELF-HEALS: the moment the operator runs `systemd-firstboot --setup-machine-id`, the
+ * clone reports a genuinely new machine-id, takes the ordinary unknown-key path, and the marker is
+ * gone with the next blob rewrite.
+ *
+ * `reportedExternalId` is the value the host actually claims, kept because the node's own `externalId`
+ * is the DERIVED key — without this the original is nowhere on the row.
+ */
+export type AgentReportIdentityConflict = {
+  reportedExternalId: string;
+  peerNodeId: string;
+  peerLabel: string;
+  discriminator: string;
+  detectedAt: string;
 };
 
 /**
@@ -1247,7 +1612,49 @@ type AgentReportSpecsBlob = {
  * reporting provenance already lives — and they self-heal there, since the node's blob is rewritten
  * wholesale on every report while an Asset's is merged.
  */
-const REPORT_DIAGNOSTIC_KEYS = ['diagnostics', 'agentSkew'] as const;
+const REPORT_DIAGNOSTIC_KEYS = [
+  'diagnostics',
+  'agentSkew',
+  // "Another host claims my machine-id" (#1141) describes the REPORT's identity, not the host's
+  // hardware, so it follows the same rule: it stays on the node and never reaches an Asset's specs,
+  // where a merged (never rewritten) blob would keep it long after the collision was resolved.
+  'identityConflict',
+] as const;
+
+/**
+ * The `specs` keys an agent report OWNS (#1141) — the ones a merge transplants from the duplicate onto
+ * the node adopting its identity, leaving every human-added key on the target intact. Deliberately the
+ * same three keys {@link InfraService.syncAssetSpecs} replaces wholesale: a node's agent-owned facts
+ * and an Asset's agent-owned facts must not drift into two different lists.
+ */
+const AGENT_OWNED_SPECS_KEYS = ['host', 'software', 'reportedAt'] as const;
+
+/**
+ * The merge provenance stamped on the ARCHIVED duplicate (#1141). There is no `InfraNodeHistory`
+ * table (ADR-0074 §8), so the soft-deleted row IS the audit trail — and unlike the adopting node, it
+ * can never be overwritten by a later report, because a soft-deleted node no longer matches the dedup
+ * lookup. Underscore-prefixed like `_infraAutoCreated`, marking it as provenance rather than a fact.
+ */
+const INFRA_MERGED_INTO_MARKER = '_infraMergedInto';
+
+/** How many adoption candidates one node may surface — a hint list, not a search result. */
+const IDENTITY_MATCH_MAX = 5;
+
+/**
+ * "Some live node's stored `host.identifiers` contains exactly this (kind, value)" — jsonb containment
+ * (`@>`), which is subset-wise, so a stored entry carrying an extra `namespace` still matches (#1141).
+ */
+function identifierClause(
+  kind: 'serial' | 'mac',
+  value: string,
+): Prisma.InfraNodeWhereInput {
+  return {
+    specs: {
+      path: ['host', 'identifiers'],
+      array_contains: [{ kind, value }],
+    },
+  };
+}
 
 /** The lean owner-user shape AssetAssignmentsService inlines when `includeUser: true`. */
 interface AssignmentUser {
