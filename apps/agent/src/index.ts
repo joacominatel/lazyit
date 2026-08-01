@@ -31,7 +31,7 @@ import {
   collectSoftware,
   readMachineId,
 } from "./collect";
-import { agentFetchInit, interpretProbe } from "./net";
+import { agentFetchInit, disableAmbientProxy, interpretProbe } from "./net";
 import {
   loadCachedPolicy,
   loadState,
@@ -277,9 +277,16 @@ const TEST_TIMEOUT_MS = 15_000;
  * that is not true. It also leaves the local state and policy caches alone, so a `test` cannot push
  * the next real report out by an interval.
  *
- * A `404` is a PASS. It means the request was authenticated and the route ran, and only then
- * reported that this build bundles no binary for that arch — a distinction worth printing, because
- * it is exactly the failure an operator would otherwise read as "my token is wrong".
+ * The probe is sent TWICE: once with no `authorization` header, once with the token. The token-less
+ * answer is what makes the second one mean anything. `GET /agent/download` is permission-gated, so a
+ * lazyit instance answers an anonymous request with 401 from the guard; a wrong `--url` pointed at an
+ * ordinary web server answers 404, which is byte-for-byte the same 404 lazyit returns when the image
+ * bundles no binary for that arch. Reading that lone 404 as a pass made this command report success
+ * for exactly the misconfiguration it exists to catch, so the pair is required: 401 without the
+ * token, something else with it, means the credential was evaluated and accepted.
+ *
+ * Both requests are `HEAD`s on the same read-only route, so the second one costs nothing the first
+ * did not and still writes nothing, anywhere.
  */
 async function test(cfg: AgentConfig): Promise<void> {
   const problems: string[] = [];
@@ -327,8 +334,9 @@ async function test(cfg: AgentConfig): Promise<void> {
     `policy v${policy.revision}: reports every ${Math.round(policy.intervalSeconds / 60)} min; last successful report ${ago}; next tick ${due ? "WOULD" : "would NOT"} report`,
   );
 
-  // `arch` only has to be a value the route accepts — the verdict comes from the status code, and a
-  // 404 for an unbundled arch is as good a proof of authentication as a 200.
+  // `arch` only has to be a value the route accepts — the verdict comes from the pair of status
+  // codes, and a 404 for an unbundled arch is as good a proof of authentication as a 200 PROVIDED
+  // the same request without the token was refused.
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const probe = `${base}/api/agent/download?arch=${arch}`;
   const init = agentFetchInit(cfg.network, probe);
@@ -336,23 +344,34 @@ async function test(cfg: AgentConfig): Promise<void> {
   else if (cfg.network.httpsProxy || cfg.network.httpProxy) say("proxy configured but bypassed for this host (NO_PROXY)");
   if (cfg.network.caFile) say(`trusting the CA bundle at ${cfg.network.caFile}`);
 
-  let res: Response;
-  try {
-    res = await fetch(probe, {
-      method: "HEAD",
-      headers: { authorization: `Bearer ${cfg.token as string}` },
-      redirect: "manual",
-      signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
-      ...init,
-    });
-  } catch (err) {
-    console.error(`lazyit-agent test: FAIL — could not reach ${probe}`);
-    throw new Error(
-      `${(err as Error).message} — check the URL, DNS, the firewall, HTTPS_PROXY, and LAZYIT_CA_FILE if your instance uses a private CA`,
-    );
-  }
+  /** One `HEAD` on the probe URL, with or without the credential. Same URL, same proxy, same CA. */
+  const head = async (authorization: string | undefined): Promise<Response> => {
+    try {
+      return await fetch(probe, {
+        method: "HEAD",
+        ...(authorization ? { headers: { authorization } } : {}),
+        redirect: "manual",
+        signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
+        ...init,
+      });
+    } catch (err) {
+      console.error(`lazyit-agent test: FAIL — could not reach ${probe}`);
+      throw new Error(
+        `${(err as Error).message} — check the URL, DNS, the firewall, HTTPS_PROXY, and LAZYIT_CA_FILE if your instance uses a private CA`,
+      );
+    }
+  };
 
-  const verdict = interpretProbe(res.status, res.statusText, arch);
+  // Token-less FIRST: if this origin is not a permission-gated lazyit route, nothing the
+  // authenticated request answers can be trusted, and saying so is the whole job of the command.
+  const anonymous = await head(undefined);
+  const authenticated = await head(`Bearer ${cfg.token as string}`);
+
+  const verdict = interpretProbe(
+    { status: anonymous.status, statusText: anonymous.statusText },
+    { status: authenticated.status, statusText: authenticated.statusText },
+    arch,
+  );
   if (!verdict.ok) {
     console.error(`lazyit-agent test: FAIL — ${verdict.headline}`);
     throw new Error(verdict.detail);
@@ -369,6 +388,13 @@ async function test(cfg: AgentConfig): Promise<void> {
 
 async function main(): Promise<void> {
   const cfg = await loadConfig(Bun.argv.slice(2));
+
+  // Once the config is resolved, the agent's own resolution is the WHOLE proxy decision (#1137).
+  // Every ambient variable has already been read into `cfg.network` — the environment WINS over the
+  // config file, per key — so silencing them now loses nothing and removes Bun's second, independent
+  // opinion, which would otherwise let an inherited HTTPS_PROXY beat a config-file NO_PROXY and make
+  // `test` print the opposite of what the report does. Before the first request, deliberately.
+  disableAmbientProxy(process.env);
 
   if (cfg.help) {
     console.log(HELP);
