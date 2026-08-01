@@ -37,7 +37,12 @@ import {
   loadState,
   writeCachedPolicy,
   writeState,
+  type AgentState,
 } from "./policy";
+import {
+  serverUnderstandsSoftwareDelta,
+  softwareWireFields,
+} from "./software-delta";
 
 // Build-time version stamp (ADR-0083 mechanism, issue #907): the compile scripts bake `APP_VERSION`
 // via `bun build --define` (git describe → env). A plain `bun run`/an unstamped compile falls back to
@@ -80,8 +85,21 @@ Getting out of the host (/etc/lazyit-agent/config; the environment wins over the
                                         internal CA system-wide
 `;
 
-/** Build + validate the report. Throws (caught by main) if collection produced something invalid. */
-async function buildReport(policy: AgentPolicy): Promise<AgentReport> {
+/**
+ * Build + validate the report. Throws (caught by main) if collection produced something invalid.
+ *
+ * `cachedSoftwareHash` is the fingerprint of the list the server is believed to hold (#1142); when it
+ * matches what was just collected AND `serverUnderstandsDelta` says the server can read an omission,
+ * the list is omitted and only the fingerprint travels. Both conditions, never just the first: an
+ * older server strips `softwareState` instead of rejecting it and would read the omission as "no
+ * software". The returned `softwareHash` is what to persist AFTER the server accepts the report —
+ * see {@link report}.
+ */
+async function buildReport(
+  policy: AgentPolicy,
+  cachedSoftwareHash: string | undefined,
+  serverUnderstandsDelta: boolean,
+): Promise<{ report: AgentReport; softwareHash: string | undefined }> {
   const startedAt = Date.now();
   const machineId = await readMachineId();
   if (!machineId) {
@@ -98,10 +116,16 @@ async function buildReport(policy: AgentPolicy): Promise<AgentReport> {
     warnings.push(message);
   };
 
-  const [host, software] = await Promise.all([
+  const [host, collected] = await Promise.all([
     collectHost(warn, policy),
     collectSoftware(warn, policy),
   ]);
+  // The delta (#1142): what this report SAYS about software, and what to remember if it lands.
+  const { fields: software, cache: softwareHash } = softwareWireFields(
+    collected,
+    cachedSoftwareHash,
+    serverUnderstandsDelta,
+  );
 
   const report: AgentReport = {
     agentVersion: AGENT_VERSION,
@@ -110,7 +134,7 @@ async function buildReport(policy: AgentPolicy): Promise<AgentReport> {
     externalId: machineId,
     reportedAt: new Date().toISOString(),
     host,
-    ...(software ? { software } : {}),
+    ...software,
     diagnostics: buildDiagnostics(
       warnings,
       process.getuid?.() === 0,
@@ -133,7 +157,7 @@ async function buildReport(policy: AgentPolicy): Promise<AgentReport> {
       `internal: collected an invalid report — ${JSON.stringify(parsed.error.issues)}`,
     );
   }
-  return parsed.data;
+  return { report: parsed.data, softwareHash };
 }
 
 /** Format the GiB string for the success summary (memory is reported in bytes). */
@@ -149,10 +173,20 @@ function gib(bytes: number | undefined): string {
  */
 const REPORT_TIMEOUT_MS = 30_000;
 
-async function report(cfg: AgentConfig, policy: AgentPolicy): Promise<void> {
+async function report(
+  cfg: AgentConfig,
+  policy: AgentPolicy,
+  state: AgentState,
+): Promise<void> {
   const url = cfg.url as string;
   const token = cfg.token as string;
-  const payload = await buildReport(policy);
+  const { report: payload, softwareHash } = await buildReport(
+    policy,
+    state.softwareHash,
+    // THE HANDSHAKE (#1142) — evidence a PREVIOUS ack gave us, never an assumption. Without it the
+    // whole package list rides this report, which is what the agent did before the delta existed.
+    state.softwareDelta === true,
+  );
   const base = url.replace(/\/+$/, "");
   const endpoint = `${base}/api/infra/report`;
 
@@ -181,7 +215,13 @@ async function report(cfg: AgentConfig, policy: AgentPolicy): Promise<void> {
   }
 
   const ack = (await res.json().catch(() => null)) as
-    | { nodeId?: string; state?: string; policy?: unknown }
+    | {
+        nodeId?: string;
+        state?: string;
+        policy?: unknown;
+        softwareResend?: unknown;
+        softwareDelta?: unknown;
+      }
     | null;
   const { hostname, cpu, memoryBytes } = payload.host;
   const where = ack?.nodeId ? ` → node ${ack.nodeId} [${ack.state ?? "?"}]` : "";
@@ -194,10 +234,35 @@ async function report(cfg: AgentConfig, policy: AgentPolicy): Promise<void> {
     console.warn(`lazyit-agent: ${warning}`);
   }
 
-  // The report SUCCEEDED, so this is the instant the cadence gate measures from. Written before the
-  // policy, and independently of it: a host whose policy cache could not be written must still not
-  // re-report on the next 5-minute tick.
-  await writeState({ lastSuccessMs: Date.now() }).catch((err: unknown) => {
+  // THE RESEND REQUEST (#1142). The server could not corroborate an `unchanged` claim — its stored
+  // list is missing, or fingerprinted differently, or the claim reached it carrying no fingerprint at
+  // all — so it kept what it had and asked for everything. That last case is why this build must
+  // handle the request even though it always sends a fingerprint: one that outgrows
+  // `AGENT_SOFTWARE_HASH_MAX` is dropped by `buildReport`'s own parse while the state survives.
+  // Answering is simply forgetting: with no cached fingerprint the next run sends the whole list.
+  const resend = ack?.softwareResend === true;
+  if (resend) {
+    console.log(
+      "lazyit-agent: the server asked for the full software list — the next report will send it",
+    );
+  }
+
+  // THE CAPABILITY (#1142). Re-read from EVERY ack rather than latched once, so it heals in both
+  // directions: an upgraded instance starts advertising it and the next run starts saving payload, and
+  // an instance rolled back below #1142 stops advertising it and the next run goes back to sending the
+  // whole list. Absent means not proven — a pre-#1142 server, or an ack that could not be parsed.
+  const understandsDelta = serverUnderstandsSoftwareDelta(ack);
+
+  // The report SUCCEEDED, so this is the instant the cadence gate measures from, and the instant the
+  // software fingerprint is worth keeping. It describes what a #1142 server now holds; against a server
+  // that has not proved the capability nothing is ever omitted, so an inaccurate cache costs nothing. Both are written
+  // before the policy, and independently of it: a host whose policy cache could not be written must
+  // still not re-report on the next 5-minute tick.
+  await writeState({
+    lastSuccessMs: Date.now(),
+    ...(softwareHash !== undefined && !resend ? { softwareHash } : {}),
+    ...(understandsDelta ? { softwareDelta: true } : {}),
+  }).catch((err: unknown) => {
     console.warn(
       `lazyit-agent: could not record the report time (${(err as Error).message}) — the next tick will report again`,
     );
@@ -254,9 +319,17 @@ async function effectivePolicy(cfg: AgentConfig): Promise<AgentPolicy> {
  * Stdout is ONLY the JSON, so `lazyit-agent show | jq .host.serial` works. The degradation notes go
  * to stderr as well as into `diagnostics.warnings` inside the document, which is where the server
  * reads them.
+ *
+ * The software list is ALWAYS printed in full, which is the one place this deliberately differs from
+ * the wire (#1142): a real report against a delta-capable server omits an unchanged list and sends
+ * only its fingerprint, and a diagnostic that reproduced that omission would answer "what does this
+ * host see" with "nothing new", which is the opposite of what it is being asked. So `show` passes no
+ * cached fingerprint and no handshake — the `reported` branch — and reads no `state.json`, which also
+ * keeps it from having an opinion about a run it is not making. `softwareState` in the output is
+ * therefore always `reported`, `unavailable` or `disabled`, never `unchanged`.
  */
 async function show(cfg: AgentConfig): Promise<void> {
-  const payload = await buildReport(await effectivePolicy(cfg));
+  const { report: payload } = await buildReport(await effectivePolicy(cfg), undefined, false);
   console.log(JSON.stringify(payload, null, 2));
   for (const warning of payload.diagnostics?.warnings ?? []) {
     console.warn(`lazyit-agent: ${warning}`);
@@ -426,10 +499,13 @@ async function main(): Promise<void> {
   // so a host that refuses to report more than hourly must have that respected by the gate itself,
   // not merely by what it collects.
   const policy = await effectivePolicy(cfg);
+  // Read ONCE and carried into the report: the same file holds the cadence clock and the software
+  // fingerprint (#1142), and re-reading it after the due gate would only invite the two to disagree.
+  const state = await loadState();
 
   if (!cfg.force) {
     const machineId = (await readMachineId()) ?? "";
-    const { lastSuccessMs } = await loadState();
+    const { lastSuccessMs } = state;
     if (
       !agentPolicyDue({
         nowMs: Date.now(),
@@ -449,7 +525,7 @@ async function main(): Promise<void> {
     }
   }
 
-  await report(cfg, policy);
+  await report(cfg, policy, state);
 }
 
 main().catch((err: unknown) => {

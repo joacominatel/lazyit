@@ -17,6 +17,10 @@ const NODE_SPECS = {
   host: { hostname: "web-03", os: { family: "linux", name: "Ubuntu" } },
   software: [{ name: "nginx", version: "1.27.0" }],
   reportedAt: "2026-07-31T12:00:00.000Z",
+  // The delta's fingerprint (#1142) — node bookkeeping, and the third of these keys. It is here in
+  // the SHARED fixture on purpose: an exclusion the fixtures never carry is an exclusion no test can
+  // hold, and this one was added to the panel's key set with nothing exercising it.
+  softwareHash: "1-2-9f3a1c4b7e2d5086a1b2c3d4",
   diagnostics: { privileged: false, durationMs: 812, warnings: ["hardware: skipped"] },
   agentSkew: {
     droppedPaths: ["host.tpmVersion"],
@@ -65,6 +69,16 @@ describe("getAgentInventory — the report diagnostics are not custom fields (#1
     expect(keys).not.toContain("_infraMergedInto");
     // Still only the human-added key — the new entries must not have swallowed anything else.
     expect(getAgentInventory(CONFLICTED_SPECS)?.extras).toEqual([["rack", "A3"]]);
+  });
+
+  test("keeps `softwareHash` out of it too (#1142)", () => {
+    // The fingerprint the agent and the server compare to decide whether the package list changed.
+    // It rides the NODE's blob only — the API strips it on every Asset-facing path — and the node
+    // panel feeds that blob straight in, so without an entry a hex string would render under
+    // "Custom fields", as though a human had typed it, on the very panel that already shows the
+    // list it stands for.
+    const keys = getAgentInventory(NODE_SPECS)?.extras.map(([key]) => key);
+    expect(keys).not.toContain("softwareHash");
   });
 
   test("a genuinely human-added key still falls through, so nothing else was swallowed", () => {

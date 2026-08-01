@@ -233,7 +233,7 @@
     "noCustomFields": "No custom fields recorded.",
     "inventory": {
       "hostTitle": "Host inventory",
-      "reportedAt": "Reported {date}",
+      "reportedAt": "Collected {date}",
       "noHostFacts": "The agent didn't report any host facts.",
       "os": "Operating system",
       "osVersion": "OS version",

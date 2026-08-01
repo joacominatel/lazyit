@@ -233,7 +233,7 @@
     "noCustomFields": "No se registraron campos personalizados.",
     "inventory": {
       "hostTitle": "Inventario del host",
-      "reportedAt": "Reportado {date}",
+      "reportedAt": "Recolectado {date}",
       "noHostFacts": "El agente no reportó datos del host.",
       "os": "Sistema operativo",
       "osVersion": "Versión del SO",
