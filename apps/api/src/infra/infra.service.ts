@@ -1047,7 +1047,7 @@ export class InfraService {
    * changed: the new host facts have to be written, and writing them without re-embedding the list
    * would delete it. From a REAL agent that case is rare — when the software changed the agent sends
    * it, so this is "host facts moved while the package list did not" — and paying a single large read
-   * for it is what buys the ~95% steady-state saving on every other report. A caller that does not
+   * for it is what buys the ~90% steady-state saving on every other report. A caller that does not
    * behave like a real agent can reach it on every request by claiming `unchanged` while varying a
    * host fact, which is the read half of the residual documented on
    * {@link InfraService.refreshKnownNode}; it is bounded by `InfraReportRateLimitGuard` (#1134), not
