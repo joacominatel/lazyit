@@ -6,11 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  agentReportSkewPaths,
   isNewerVersion,
   isPlausibleEdge,
   primaryIp,
   sanitizeSerial,
-  unknownAgentReportKeys,
   type AgentReport,
   type AgentReportAck,
   type AgentReportHost,
@@ -198,11 +198,11 @@ export class InfraService {
    * correction still holds in full: no `InfraNode` write records which service account produced it.
    *
    * FORWARD-COMPATIBLE (#1138): `AgentReportSchema`'s root is no longer strict, so a report carrying
-   * root keys this build does not know DEGRADES (the keys are stripped, the host still lands) instead
-   * of 400-ing — for a CMDB, a host vanishing from the inventory is strictly worse than a host that is
-   * slightly stale on new fields. The signal is MOVED, not lost: pass the RAW body as `rawBody` and the
-   * dropped keys are recorded on the node (see {@link agentSkew}) and logged, so the operator can still
-   * diagnose "this agent speaks a dialect I don't". Omitting `rawBody` simply records nothing.
+   * keys this build does not know DEGRADES (they are stripped, the host still lands) instead of
+   * 400-ing — for a CMDB, a host vanishing from the inventory is strictly worse than a host that is
+   * slightly stale on new fields. The signal is MOVED, not lost: pass the RAW body as `rawBody` and
+   * everything the parse dropped or had to coerce, at any depth, is recorded on the node (see
+   * {@link agentSkew}) and logged. Omitting `rawBody` simply records nothing.
    */
   async ingestReport(
     report: AgentReport,
@@ -220,6 +220,12 @@ export class InfraService {
       host: report.host,
       ...(report.software !== undefined ? { software: report.software } : {}),
       reportedAt: report.reportedAt,
+      // What the COLLECTOR could not do (#1138). Persisted beside the facts, because an empty
+      // serial/model column is only an ANSWER ("web-03 reports unprivileged") if the reason survived
+      // the request. Overwritten wholesale each report, exactly like the facts themselves.
+      ...(report.diagnostics !== undefined
+        ? { diagnostics: report.diagnostics }
+        : {}),
       ...(skew !== undefined ? { agentSkew: skew } : {}),
     };
     const specs = blob as Prisma.InputJsonValue;
@@ -319,10 +325,15 @@ export class InfraService {
    *
    * Loosening the contract root from `strictObject` to `object` traded a hard 400 (the host disappears
    * from the inventory) for silent stripping. Silence is the part that would be dangerous: a typo'd
-   * root key is indistinguishable from a field the server simply predates, and #1142 will give an
-   * ABSENT key semantics of its own ("unchanged"). So the drop is recorded on the node, inside the
-   * existing `specs` blob — no column, no migration, and it self-heals, since the blob is rewritten
-   * wholesale on every report (one clean check-in clears it).
+   * key is indistinguishable from a field the server simply predates, and #1142 will give an ABSENT
+   * key semantics of its own ("unchanged"). So the drop is recorded on the node, inside the existing
+   * `specs` blob — no column, no migration, and it self-heals, since the blob is rewritten wholesale
+   * on every report (one clean check-in clears it).
+   *
+   * The diff is against the PARSE, not against a root key list, so it covers the whole body: a nested
+   * key a plain `z.object` stripped, and an enum value a `.catch()` coerced, are both skew and both
+   * recorded. See `agentReportSkewPaths` for why a root-only recorder would have reported "everything
+   * understood" for precisely the reports this exists to flag.
    *
    * It rides the EXISTING version handshake (ADR-0083 amendment / #907) rather than inventing a
    * surface: `agentVersion` already travels in every report and already lives in its own queryable
@@ -337,17 +348,32 @@ export class InfraService {
   ): AgentReportSkew | undefined {
     if (rawBody === undefined) return undefined;
     // Bounded by the shared helper: the body is attacker-controlled, and this lands in a jsonb column.
-    const unknownKeys = unknownAgentReportKeys(rawBody);
-    if (unknownKeys.length === 0) return undefined;
+    const { droppedPaths, coercedPaths } = agentReportSkewPaths(
+      rawBody,
+      report,
+    );
+    if (droppedPaths.length === 0 && coercedPaths.length === 0)
+      return undefined;
     const serverVersion = appVersion();
     const agentAhead = isNewerVersion(report.agentVersion, serverVersion);
+    const what = [
+      droppedPaths.length ? `dropped [${droppedPaths.join(', ')}]` : '',
+      coercedPaths.length ? `coerced [${coercedPaths.join(', ')}]` : '',
+    ]
+      .filter(Boolean)
+      .join('; ');
     this.logger.warn(
-      `Agent report carried ${unknownKeys.length} unknown root key(s) [${unknownKeys.join(', ')}] — ` +
+      `Agent report not fully understood — ${what}. ` +
         (agentAhead
-          ? `agent ${report.agentVersion} is NEWER than this server (${serverVersion}); upgrade the instance to consume them.`
-          : `agent ${report.agentVersion}, server ${serverVersion}. The fields were ignored; the host still reported.`),
+          ? `Agent ${report.agentVersion} is NEWER than this server (${serverVersion}); upgrade the instance to consume it.`
+          : `Agent ${report.agentVersion}, server ${serverVersion}. The host still reported.`),
     );
-    return { unknownKeys, agentAhead, serverVersion };
+    return {
+      ...(droppedPaths.length ? { droppedPaths } : {}),
+      ...(coercedPaths.length ? { coercedPaths } : {}),
+      agentAhead,
+      serverVersion,
+    };
   }
 
   /**
@@ -404,10 +430,8 @@ export class InfraService {
    * NEVER touch the Asset's human-owned serial/name/modelId. A soft-deleted asset is skipped — the
    * soft-delete extension scopes `findFirst`, so a detached/archived asset simply resolves to null.
    *
-   * `agentSkew` (#1138) is deliberately NOT carried over and is stripped if an older build left one
-   * behind: `Asset.specs` is the INVENTORY snapshot an operator reads, and a wire-level diagnostic
-   * about a report the SERVER half-understood is not an inventory fact. It stays on the node, where
-   * the reporting provenance already lives.
+   * The {@link REPORT_DIAGNOSTIC_KEYS} (#1138) are deliberately NOT carried over, and are stripped if
+   * an older build left one behind.
    */
   private async syncAssetSpecs(
     assetId: string,
@@ -418,7 +442,10 @@ export class InfraService {
       select: { specs: true },
     });
     if (!asset) return; // soft-deleted / detached — nothing to refresh.
-    const facts: Omit<AgentReportSpecsBlob, 'agentSkew'> = {
+    const facts: Omit<
+      AgentReportSpecsBlob,
+      (typeof REPORT_DIAGNOSTIC_KEYS)[number]
+    > = {
       host: blob.host,
       ...(blob.software !== undefined ? { software: blob.software } : {}),
       reportedAt: blob.reportedAt,
@@ -428,7 +455,7 @@ export class InfraService {
     delete merged.host;
     delete merged.software;
     delete merged.reportedAt;
-    delete merged.agentSkew;
+    for (const key of REPORT_DIAGNOSTIC_KEYS) delete merged[key];
     Object.assign(merged, facts);
     await this.prisma.asset.update({
       where: { id: assetId },
@@ -473,7 +500,15 @@ export class InfraService {
       // rather than fail the confirm. `modelId` is deliberately left null (no AssetModel auto-create).
       const host = (hostSpecs.host ?? {}) as AgentReportHost;
       const serial = sanitizeSerial(host);
-      const assetSpecs = { ...hostSpecs, [INFRA_AUTO_ASSET_MARKER]: true };
+      const assetSpecs: Record<string, unknown> = {
+        ...hostSpecs,
+        [INFRA_AUTO_ASSET_MARKER]: true,
+      };
+      // Same rule as the repeat-report refresh (#1138): the report diagnostics stay on the node. This
+      // is the path that mints the Asset, so without the strip the very first thing a confirmed host's
+      // inventory snapshot carries is a diagnostic about a report the server half-understood — and
+      // unlike the node's blob, an Asset's specs are MERGED, so it would never clear itself.
+      for (const key of REPORT_DIAGNOSTIC_KEYS) delete assetSpecs[key];
       let created: { id: string };
       try {
         created = await this.assets.create(
@@ -1172,22 +1207,27 @@ function isSerialUniqueCollision(err: unknown): boolean {
 
 /**
  * What an upgraded server could not make sense of in a report (#1138) — recorded on the NODE, not
- * lost. `unknownKeys` are the (bounded, truncated) root keys the loosened contract stripped;
- * `agentAhead` says whether the reporting binary is a strictly newer build than this server, which is
- * the likeliest cause and the one the operator can act on; `serverVersion` names the build that did
- * the dropping, since the node records the agent's version but never the server's.
+ * lost. `droppedPaths` are the (bounded, truncated) wire paths whose data did not survive parsing;
+ * `coercedPaths` the ones whose value this build had to change to accept — a silently-coerced enum is
+ * skew too, and `os.family` is the case that matters, since the contract requires it precisely so no
+ * consumer re-derives the platform. `agentAhead` says whether the reporting binary is a strictly
+ * newer build than this server, which is the likeliest cause and the one the operator can act on;
+ * `serverVersion` names the build that did the dropping, since the node records the agent's version
+ * but never the server's.
  */
 // A `type`, not an `interface`, on purpose: only a type alias gets an implicit index signature, which
 // is what Prisma's `InputJsonValue` requires of anything written into a jsonb column.
 export type AgentReportSkew = {
-  unknownKeys: string[];
+  droppedPaths?: string[];
+  coercedPaths?: string[];
   agentAhead: boolean;
   serverVersion: string;
 };
 
 /**
  * The inventory `specs` blob an agent report lands (#1081): host facts + optional software list + the
- * report timestamp, plus the optional wire-skew diagnostic (#1138). A concrete type (not just
+ * report timestamp, plus the two REPORT DIAGNOSTICS (#1138) — what the collector could not do
+ * (`diagnostics`) and what the server could not understand (`agentSkew`). A concrete type (not just
  * `Prisma.InputJsonValue`) so the linked-Asset specs sync can spread its keys and the node/asset
  * snapshots stay identical.
  */
@@ -1195,8 +1235,19 @@ type AgentReportSpecsBlob = {
   host: AgentReportHost;
   software?: AgentReport['software'];
   reportedAt: string;
+  diagnostics?: AgentReport['diagnostics'];
   agentSkew?: AgentReportSkew;
 };
+
+/**
+ * The blob keys that describe the REPORT rather than the HOST (#1138). One list, because both places
+ * that copy a node's inventory into an `Asset` must strip exactly the same set: `Asset.specs` is the
+ * inventory snapshot an operator reads, and neither "the collector ran unprivileged" nor "the server
+ * did not understand `host.tpmVersion`" is an inventory fact. They stay on the node, where the
+ * reporting provenance already lives — and they self-heal there, since the node's blob is rewritten
+ * wholesale on every report while an Asset's is merged.
+ */
+const REPORT_DIAGNOSTIC_KEYS = ['diagnostics', 'agentSkew'] as const;
 
 /** The lean owner-user shape AssetAssignmentsService inlines when `includeUser: true`. */
 interface AssignmentUser {
