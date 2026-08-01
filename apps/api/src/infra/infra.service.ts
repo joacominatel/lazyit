@@ -910,9 +910,11 @@ export class InfraService {
    * list it also costs a read of it. What bounds THAT is `InfraReportRateLimitGuard` (#1134), which
    * caps this route at `INFRA_REPORT_MAX_PER_WINDOW_DEFAULT` (120) requests per service account per
    * minute, and ultimately ADR-0074 §8's posture that `infra:report` is a low-value credential whose
-   * blast radius is noise rather than damage. What the skip removes is the same ~172,800 rewrites a
-   * day for a legitimate estate, and for a leaked token that merely REPLAYS a report. See the
-   * amendment in ADR-0074 §2.
+   * blast radius is noise rather than damage. What the skip removes is the ~96 rewrites per host per
+   * day a legitimate estate pays at the default 900-second cadence — the ~172,800 figure above is the
+   * ABUSE ceiling, what the rate limit alone would still allow, not what an honest fleet drives — and,
+   * for a leaked token that merely REPLAYS a report, that ceiling too. See the amendment in
+   * ADR-0074 §2.
    */
   private async refreshKnownNode(args: {
     node: { id: string; assetId: string | null; ipAddressSource: string };
@@ -1033,7 +1035,8 @@ export class InfraService {
    *     just the same; it is a `replace` against a STORED blob carrying no fingerprint that cannot be
    *     corroborated and therefore writes.
    *  2. **Does anything else change?** The rest of the blob is compared directly, with only the two
-   *     per-report timestamps taken out ({@link withoutVolatileReportFacts}).
+   *     per-report facts taken out — WHEN the collector ran (`reportedAt`) and HOW LONG it took
+   *     (`diagnostics.durationMs`); one timestamp and one duration ({@link withoutVolatileReportFacts}).
    *
    * Only when BOTH say "no" is the write skipped. Everything else — a missing stored blob, a
    * fingerprint that does not corroborate, a value this build cannot compare — resolves by writing.
@@ -1044,7 +1047,7 @@ export class InfraService {
    * changed: the new host facts have to be written, and writing them without re-embedding the list
    * would delete it. From a REAL agent that case is rare — when the software changed the agent sends
    * it, so this is "host facts moved while the package list did not" — and paying a single large read
-   * for it is what buys the ~90% steady-state saving on every other report. A caller that does not
+   * for it is what buys the ~95% steady-state saving on every other report. A caller that does not
    * behave like a real agent can reach it on every request by claiming `unchanged` while varying a
    * host fact, which is the read half of the residual documented on
    * {@link InfraService.refreshKnownNode}; it is bounded by `InfraReportRateLimitGuard` (#1134), not
@@ -3115,11 +3118,14 @@ const NODE_ONLY_SPECS_KEYS = [
 /**
  * The `specs` keys an agent report OWNS (#1141) — the ones a merge transplants from the duplicate onto
  * the node adopting its identity, leaving every human-added key on the target intact. A superset of
- * what {@link InfraService.syncAssetSpecs} replaces on the host path (`host`/`software`/`reportedAt`),
- * by exactly one key: `softwareHash` is node bookkeeping that never reaches an Asset, but on a NODE it
- * must move WITH the list it describes. A transplanted list under the adopting node's old fingerprint
- * would make the next comparison read the wrong thing — recoverable (the ack asks for a resend) but
- * avoidable here for free.
+ * what {@link InfraService.syncAssetSpecs} replaces on the host path, by `softwareHash` — node
+ * bookkeeping that never reaches an Asset, but which on a NODE must move WITH the list it describes,
+ * since a transplanted list under the adopting node's old fingerprint would make the next comparison
+ * read the wrong thing (recoverable — the ack asks for a resend — but avoidable here for free).
+ *
+ * By TWO keys on a report that does not own the list: the host path passes
+ * `host`/`software`/`reportedAt` only when the report OWNS `software`, and `host`/`reportedAt` alone
+ * on a `preserve`, where the Asset's own copy is deliberately left exactly as it is.
  */
 const AGENT_OWNED_SPECS_KEYS = [
   'host',
