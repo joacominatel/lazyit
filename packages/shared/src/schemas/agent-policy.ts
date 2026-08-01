@@ -283,6 +283,22 @@ export const AgentPolicyOverrideSchema = z.strictObject({
 export type AgentPolicyOverride = z.infer<typeof AgentPolicyOverrideSchema>;
 
 /**
+ * What the policy admin endpoints return: the stored layer an operator EDITS, the instance-wide
+ * revision, and the layer RESOLVED so the UI can show what a host actually ends up with rather than
+ * making the operator do the merge in their head.
+ *
+ * `effective` is honest about its scope, and the honesty matters: for `GET /infra/agent-policy` it is
+ * the instance default resolved on its own, so a host that also has a service-account or node
+ * override will NOT get exactly this. The UI says so where it renders it.
+ */
+export const AgentPolicySettingsSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  settings: AgentPolicyOverrideSchema,
+  effective: AgentPolicySchema,
+});
+export type AgentPolicySettings = z.infer<typeof AgentPolicySettingsSchema>;
+
+/**
  * Flatten the scope layers into one complete policy — LATER LAYERS WIN, so callers pass them
  * least-specific first: `[instanceDefault, serviceAccount, node]`.
  *
