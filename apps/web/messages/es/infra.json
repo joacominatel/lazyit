@@ -365,7 +365,7 @@
       "ANY": "Servidores y contenedores"
     },
     "hostnameLabel": "El nombre coincide con",
-    "hostnameDescription": "Usá * para cualquier secuencia de caracteres y ? para exactamente uno: srv-* coincide con srv-app-04. Tiene que coincidir el nombre completo, no una parte. Un patrón hecho solo de comodines no es una condición: coincide con todos los hosts.",
+    "hostnameDescription": "Usá * para cualquier secuencia de caracteres y ? para exactamente uno: srv-* coincide con srv-app-04. Tiene que coincidir el nombre completo, no una parte. Un patrón hecho solo de comodines no es una condición: tiene que llevar al menos un carácter literal.",
     "subnetLabel": "Reporta desde la subred",
     "subnetDescription": "Un bloque CIDR, IPv4 o IPv6. Un host que no reportó dirección nunca coincide con esto. 0.0.0.0/0 tampoco es una condición: son todas las direcciones que existen.",
     "reportedKindLabel": "Reportado como",
@@ -375,7 +375,7 @@
     "keepProposedKind": "Mantener el tipo reportado",
     "trackAsAssetLabel": "Registrar como activo de inventario",
     "trackAsAssetDescription": "Activado por defecto en una regla solo para servidores, y desactivado en cualquier regla que también pueda alcanzar contenedores, con el mismo criterio que al confirmar a mano. Activalo si esos contenedores realmente son algo que registrás.",
-    "needsCondition": "Una regla necesita al menos una condición que pueda descartar un host: un patrón de nombre con algo más que * y ?, una subred más acotada que 0.0.0.0/0, o un tipo reportado. Una condición que coincide con todo confirmaría todo lo que encuentre el agente.",
+    "needsCondition": "Una regla necesita al menos una condición que pueda descartar un host: un patrón de nombre con algo más que * y ?, una subred más acotada que 0.0.0.0/0, o un tipo reportado. La mayoría de los patrones hechos solo de comodines coinciden con todos los hosts, así que confirmarían todo lo que encuentre el agente; ? por sí solo coincide únicamente con nombres de un carácter, y se rechaza junto con ellos para que la regla siga siendo simple de verificar.",
     "saveSubmit": "Guardar regla",
     "savedToast": "Regla guardada. Se aplica a partir del próximo reporte.",
     "saveError": "No se pudo guardar la regla.",
