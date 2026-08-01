@@ -123,6 +123,91 @@ as before, rather than guessing. It's only a proposal: the Confirm dialog's **Ki
 right there, and once you've confirmed a node **no later report ever changes its kind again**, even
 if the machine starts reporting something different.
 
+### Reviewing many at once
+
+A single Docker host can add a dozen proposals in one check-in — itself plus a node per running
+container — so the tray is built to be worked through in one pass rather than one dialog at a time.
+
+- **Containers sit under the server that reported them.** Each group is headed by the server's name
+  with a count of its containers, and the checkbox on that header takes the server **and** its
+  containers together. That is how you confirm a host with everything on it in one action. If you
+  already confirmed the server, its new containers still appear under its name.
+- **Checkboxes and the two bulk buttons.** Tick what you want, then **Confirm selected** or **Discard
+  selected**. Confirming in bulk does exactly what confirming one at a time does — you are still
+  approving each of them, just not one dialog at a time. **Select everything shown** covers what is
+  currently visible, never rows a filter is hiding.
+- **The asset toggle is split.** In the bulk dialog, servers default to being tracked as inventory
+  assets (as they do on their own) and **containers default to not being tracked**. A container is
+  replaced by your next deploy, has no serial to record, and one busy host can add dozens — so they
+  stay on the map without filling your asset list with rows nobody will maintain. Both switches are
+  right there if your situation is different.
+- **Re-classify the whole selection** with the kind selector if the agent got it wrong for all of
+  them. Renaming stays on the single Confirm dialog, where it means something.
+- **A partial result is reported as one.** If some items couldn't be applied — a serial that clashes
+  with an existing asset, a proposal someone else discarded a moment earlier — the rest still go
+  through and you are told how many, and which one failed first.
+- **Filter** by name (`srv-*` works as a pattern) or IP, by subnet (`10.20.0.0/16`), by reported kind,
+  and by servers-versus-containers — and **sort** by when something was first seen, or by name. These
+  narrow what you're looking at; a bulk action never reaches past what you can see. **A filter that
+  hides a ticked row takes it out of the action and out of the count**, so the number beside the
+  buttons always means rows on screen. Widening the filter again brings it back, ticked and counted —
+  which you can see happen, unlike a confirm you didn't know you were making.
+- **One action takes at most 200 items.** Over that, the two buttons are disabled and tell you the
+  number, before you press anything. Filter it down and run it in more than one pass.
+
+### Auto-confirm rules
+
+If you find yourself making the same call over and over — *"anything named `srv-*` on the management
+VLAN is a VM, track it"* — you can write that down once. Open **Auto-confirm rules…** at the top of
+the tray.
+
+A rule has a **name**, what it **applies to** (servers, containers, or both), and at least one
+condition: a **name pattern** (`*` for any run of characters, `?` for exactly one — the whole name has
+to match), a **subnet** in CIDR form, or the **kind the agent's report made lazyit propose**. It then
+says what to do: which kind to confirm it as, and whether to track it as an inventory asset.
+
+**Be clear about what you're turning on.** A host a rule matches is confirmed the moment it reports —
+you never see that row in the tray, and if the rule says to track it, its asset is created too. You
+are still the one deciding; you're deciding *once, in advance*, for hosts you haven't met yet. That's
+the whole point, and it's also the cost: the narrower the rule, the smaller the surprise. If someone
+ever got hold of your agent's token, a host they invent that happens to fit one of your rules lands
+confirmed instead of waiting in the tray.
+
+What else you should know before writing one:
+
+- **A rule only applies from the next report onwards.** Nothing already waiting in your tray is
+  confirmed behind you — those are still yours to review, one at a time or in bulk. Saving a rule
+  never touches a proposal you can already see.
+- **A rule needs a condition that can actually rule something out.** A name pattern has to carry at
+  least one literal character, and a subnet has to be narrower than `/0`. Most patterns made only of
+  wildcards (`*`, `**`, `*?*`) match every host there is, just as `0.0.0.0/0` is every address there
+  is, so lazyit refuses to save either — alone or together — because a rule that excludes nothing is
+  just "confirm everything the agent finds", which is exactly what the pending tray exists to prevent.
+  A few wildcard-only patterns do narrow: `?` on its own matches only one-character hostnames. lazyit
+  refuses those too, deliberately, because "the pattern carries a literal character" is a line you can
+  check by looking, and no estate is described by "hostnames of exactly one character" — the cost of
+  refusing is only that those proposals wait in the tray, where they were going anyway.
+  `srv-*` is a condition. `*` is not. You can still use `*` beside a real condition — *anything at
+  all, on `10.20.0.0/16`* is a rule; *anything at all, anywhere* is not.
+- **Anything you discarded stays discarded.** If you discard a proposal and the same machine reports
+  again, it comes back as a new pending item for you to look at — a rule never confirms it behind you.
+  Your "no" outranks your rules.
+- **The asset switch starts off for any rule that can match containers.** A servers-only rule defaults
+  to tracking them as assets; a containers rule *or* a "servers and containers" rule defaults to not
+  tracking, for the same reason the bulk dialog does. Turn it on if those containers really are things
+  you track.
+- **It is still your decision, and it is recorded as yours.** The rule shows who wrote it, and every
+  asset it creates is attributed to you, the same as if you had clicked Confirm. Rules are listed in
+  the order they are checked (the number on the left) and the **first** one that matches wins.
+- **You can take it back at any time.** The switch disables a rule immediately — from the next report
+  onwards nothing matches it again — and deleting removes it. Servers it already confirmed stay
+  confirmed: they are part of your inventory now, and un-confirming them would be as backwards as
+  applying a rule to the past.
+- **You can see whether it is doing anything.** Each rule shows how many times it has been used and
+  when it last was.
+- **A subnet rule never matches a host that reported no address**, and a **cloned machine ID** is
+  never auto-confirmed — those two rows exist precisely so you can see them (see below).
+
 ### Containers show up as their own nodes
 
 If the host runs **Docker** (or a Docker-compatible runtime) and the agent can read its socket, each
@@ -134,7 +219,9 @@ connection by hand.
 A few things worth knowing:
 
 - **Containers are proposals too.** They land in the same Pending review tray, and you confirm or
-  discard them exactly like a server. A busy host can therefore add several proposals at once.
+  discard them exactly like a server. A busy host can therefore add several proposals at once —
+  which is what the grouping and bulk actions above are for: the tray puts a host's containers under
+  its name, and its checkbox takes them together.
 - **A recreated container is the same node.** Redeploying (`docker compose up`, an image bump) does
   not create a duplicate — containers are matched by **name** on that host, so your confirmed node,
   its position and its links survive a redeploy.

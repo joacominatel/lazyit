@@ -65,7 +65,177 @@ Constraints that shaped the decision:
 | **What it reports** | **Inventory only** — host identity, hardware facts, installed software. | Health snapshots; time-series metrics + alerting (a different product). |
 | **What it discovers** | **Self only** — the host the agent runs on. "Expand" = install it on more hosts. | Network scanning / agentless discovery (security surface, false positives, LAN noise). |
 | **OS targets** | **Linux only** — `x64` + `arm64`. | Windows (WMI service), macOS (launchd) — deferred, contract is OS-neutral so they can be added. |
-| **Trust** | **Review tray** — new hosts arrive `state=PENDING`, `source=AGENT`; a human confirms. | Auto-confirm (any agent noise dirties the official inventory with no containment). |
+| **Trust** | **Review tray** — new hosts arrive `state=PENDING`, `source=AGENT`; a human confirms. **Qualified by the 2026-08-01 amendment below: with an operator-authored auto-confirm rule saved, a proposal that rule matches is confirmed by the machine.** | ~~Auto-confirm~~ → **blanket** auto-confirm, i.e. with no operator-authored rule (any agent noise dirties the official inventory with no containment). |
+
+**Amendment (2026-08-01, #1145) — the gate is right; exercising it one dialog at a time is not.** The
+problem is the **cost** of the gate. The §3 amendment (#1139) named it as a real and separate problem
+in the same breath as it created it — a single Docker host now enrols **itself plus one CONTAINER
+child per running container**, so one modest host produces dozens of tray rows where it used to
+produce one — and the tray answered with a Confirm/Discard pair per row, each opening a dialog, with
+no selection, no bulk action, no filter and no sort. At that shape the gate is not a control an
+operator exercises; it is one they route around by discarding in bulk or by never rolling the agent
+out past a handful of hosts. **A control nobody can afford to use is not containment.**
+
+**What this amendment does to the Trust row, stated plainly.** Two of the three mechanisms below are
+ergonomics and change no policy. The third — **saved auto-confirm rules** — changes what the Trust row
+describes, and pretending otherwise would be the more dangerous half of shipping it. With a rule saved,
+a proposal it matches is confirmed *by the machine, inside the report request, with no human looking at
+that row*, and the Asset it mints is created then and there. So: **not** every proposal still lands
+PENDING, and a machine **does** write the official inventory for the rows a rule covers.
+
+What stays rejected is what §1 actually rejected: **blanket** auto-confirm — an inventory that
+populates itself with no human decision anywhere. The shift is in *when* the human decides, not
+whether. An operator authors a rule once and the machine then applies **that operator's judgement** to
+rows the operator never sees individually; a rule that could not rule any proposal out is refused on
+write and ignored on read, precisely so "a rule" cannot degenerate into "everything". That is a real
+transfer of a human step, made deliberately, and it widens the `infra:report` blast radius — §8's
+*"the realistic worst case on a leaked token is PENDING spam a human discards"* no longer holds
+unchanged once an instance has rules. The §8 amendment below states the new worst case; it is not
+buried here.
+
+Three mechanisms, in ascending order of how much they change:
+
+**1. Bulk confirm / discard, which are the SINGLE actions run per item.** `POST
+/infra/nodes/bulk-confirm` takes `{ items: [{ id, trackAsAsset?, kind?, label? }] }` and applies each
+through the very `confirmNode` a tray click calls; bulk discard is the existing soft delete over a
+set. Overrides are **per item, not per batch**: `label` is not a batch concept (renaming forty nodes
+to one string is never what anyone meant), and a host and its containers want *different*
+`trackAsAsset` answers, which one batch-level flag could not express. Delegation rather than a second
+implementation is the load-bearing choice — there is no second Asset-minting path, no second serial
+promotion and no second idempotency rule to keep in step, so bulk confirm is structurally incapable of
+having semantics of its own. Each route carries the **same** gate as the single action it batches — bulk
+confirm `infra:manage` + `asset:write` + `HumanOnlyGuard`, exactly like `POST /nodes/:id/confirm`;
+bulk discard `infra:manage`, exactly like `DELETE /nodes/:id`. Anything weaker would be a cheaper door
+onto the same write.
+
+Outcomes are **per item** (`applied` / `skipped` / `notFound` / `failed` with the message the single
+action would have returned) rather than one all-or-nothing verdict — the degrade-never-reject posture
+of §2, applied to a human action. One node failing on a serial collision, or one another operator
+discarded a second earlier, must not throw away the thirty-nine that succeeded and leave the operator
+unable to tell which. Bounded at 200 items and applied **sequentially**: each item can mint an Asset
+and re-index, so firing a batch at once is a thundering herd against the same tables, and a failure
+attributable to one row is worth more than the milliseconds concurrency buys. The tray enforces that
+bound **before** the request — over the cap, the two buttons are disabled and say why, because a
+201-item batch is rejected whole and learning that from a toast after doing all of the selecting is
+the one moment the information is useless.
+
+**2. The tray groups by reporting host, and `trackAsAsset` inverts for a container child.** Grouping
+is the direct answer to #1139: a host and the containers it reported are one unit because that is how
+they arrived and how the operator thinks about them, so the group header's checkbox takes the host
+**and** its children — the "confirm a host with its containers" action expressed as a *selection*
+rather than as a second endpoint with its own rules. A child whose host is no longer pending still
+groups under that host, named from the already-loaded node list.
+
+The default flips because the confirm's meaning does. `trackAsAsset` defaults **ON** and stays ON for
+a host: a discovered server is exactly the thing [[0070-infra-topology-graph]] §5's default-on asset
+linkage was designed for. A container is not that thing, and ADR-0070 §5 already said so — its create
+path describes `trackAsAsset: false` as *"right for ephemeral containers"*. A container is replaced by
+the next `docker compose up --force-recreate`, has no SMBIOS serial for the confirm path's serial
+promotion to promote, and one Docker host can add dozens, so a default-ON bulk confirm would mint
+thirty Assets nobody assigns, warranties or depreciates. Children therefore default **OFF**
+(`defaultTrackAsAsset`, one shared definition the tray, the bulk dialog and the rule default all read
+so they cannot disagree). What that shared definition is asked is *"can this reach a container
+child?"*, not *"is this a CONTAINER rule?"* — so an **ANY**-scope rule takes the child default too,
+which is what makes "they cannot disagree" true rather than nearly true. It is a **default, not a
+rule**: every item and every rule can set it either way, so a container that genuinely is a licensed
+appliance is tracked like anything else.
+
+Filter (name glob or substring, subnet CIDR, reported kind, host-vs-container) and sort (first seen,
+name) are **client-side over the already-loaded lean list**. #1135 removed `specs` from that
+projection precisely because the tray polls it, and nothing here re-fattens it — a checkbox row reads
+`label`, `kind`, `ipAddress`, `createdAt` and `externalId`, all of which the list already carries. The
+subnet box uses the **same** `ipInCidr` the saved rules use, so *"which hosts would this rule have
+caught"* and *"which hosts does this filter show"* can never be answered by two implementations.
+Server-side paging of `GET /infra/nodes` is **out of scope** and tracked separately (#1152).
+
+**What a bulk action touches is the VISIBLE selection, and one function decides that for every
+surface.** The ticked-ids set outlives a filter change, and no action and no count is derived from it:
+the number beside the buttons, the two dialogs and the ids in the request all come through
+`visibleSelection`, so a row a filter hides leaves the action *and* the count in the same instant it
+leaves the screen. (The checkboxes read the raw set, but only ever to draw a row already on screen.) Both halves
+matter — the first makes the *click* honest, the second makes *"12 selected"* honest — and without
+them *select all → narrow the filter → Confirm* confirms rows nobody looked at, which is the worst kind
+of bulk action and precisely what the select-all label promises it is not. Re-widening the filter
+brings a hidden row back, ticked and counted: deliberate, because that is *visible*, which is the
+opposite of the failure being guarded. Clearing the selection outright on every filter change was
+rejected — it would throw away a careful selection on one keystroke in the search box, and React's own
+guidance (and the repo's blocking lint rule) refuse the `setState`-in-effect that pruning would need.
+
+**3. Saved auto-confirm rules — the judgement expressed ONCE, not per host.** A rule is an
+operator-authored row (`InfraAutoConfirmRule`) stating at least one condition that can rule a proposal
+out — a hostname glob, a subnet CIDR, or the `kind` the server **proposed** — plus what to do:
+`confirmAsKind` and `trackAsAsset`. It is evaluated on the report **CREATE** branch, and a match
+confirms the node through `confirmNode` with the **rule author's** principal.
+
+Blanket auto-confirm stays rejected, and the reasons are structural rather than intentional:
+
+- **A rule whose conditions could exclude NOTHING cannot exist.** "At least one non-null condition"
+  was the first attempt and it was not enough: `hostnamePattern: "*"` is non-null and matches every
+  proposal there is, so it would have stored an ordinary-looking **blanket** rule through the front
+  door. The test is therefore *can this rule rule a proposal out* — a hostname glob has to carry a
+  literal character (`srv-*` and even `*.*` do; a glob made only of wildcards does not), a subnet has
+  to be narrower than `/0`, and a reported kind always names one kind out of several. The wildcard-only
+  test is **deliberately one notch stricter than "matches everything"**: `*`, `**` and `*?*` genuinely
+  match every name there is, but `?` alone matches only one-character names and is refused with them
+  anyway. Refusing is the safe direction and "carries a literal" is a line an operator can check by
+  looking, where "could this glob ever exclude a hostname somebody actually runs" is not. Two
+  conditions that each exclude nothing do not add up to one that does. It is enforced in three places — the
+  create contract, the service on the MERGED patch (the patch alone cannot see the stored row), and
+  the matcher, which refuses to act on such a row so a hand-inserted one or one left by an older build
+  never fires either. One shared predicate, `statesAutoConfirmCondition`, answers all three and the
+  rule form as well, so the form says it before the 400 does.
+- **A human discard outranks every rule.** Discarding soft-deletes the node but keeps its reporting
+  key, so the next report from that host creates a new node under the same key — and a matching rule
+  would confirm it, and mint another Asset, on the very next check-in, making a human's "not this one"
+  undoable by a machine that says it again every fifteen minutes. A key a human has already discarded
+  is therefore enrolled as it always was and left **PENDING**, for that human to decide a second time.
+  (A merge is not a discard and cannot be confused with one: `mergeInto` moves the reporting key to
+  the adopting node, so only a genuine discard leaves a soft-deleted row still holding it.)
+- **The rule IS the human decision.** `createdById` records who wrote it, `HumanOnlyGuard` refuses a
+  service account outright — a machine authoring a rule would be the reporting agent granting itself
+  the confirm §1/§8 denies it — and the Asset an auto-confirm mints is created with that operator's
+  principal, so §8's *"that write **is** attributed"* stays literally true. A rule whose author was
+  since deleted still fires, unattributed and visibly so on the rule: instance policy must not retire
+  itself because someone left, and the alternative (silently confirming nothing) is a worse surprise.
+- **A human can revoke it**, and disabling is the fast path — a disabled rule stops matching on the
+  next report. Deleting soft-deletes it, keeping the record of the decision.
+- **First match wins, in `createdAt` order**, shown as a number on each row. Not "most specific":
+  specificity needs a metric operators must learn and maintainers must keep stable, and §3 already
+  rejected a rule-precedence engine on that reasoning.
+- **`matchCount` / `lastMatchedAt` are recorded**, because a rule that confirms hosts with no human
+  present has to be legible. Without them the only way to learn a rule is misfiring is to notice nodes
+  nobody approved — the exact failure the gate exists to prevent.
+
+**Rules are NEVER retroactive, and that is a property of where they are called, not a flag.** They are
+consulted on the create branches of `ingestReport` and `applyContainerTopology` — nodes being written
+in that same request — and nowhere else. The known-host refresh does not consult them, so a proposal
+already sitting in a tray the operator is looking at can never confirm behind them; the rule service
+exposes no method that could walk existing nodes, which is asserted structurally by test. The UI and
+the Manual both state it where the decision is made, not only in a release note.
+
+**One branch deliberately never auto-confirms: the cloned-machine-id path (§3 / #1141).** A clone's
+proposal exists precisely to be SEEN as a second row, and the archetypal clone shares its peer's
+hostname — so a hostname rule would confirm exactly the duplicate that detection exists to surface.
+
+**Failure degrades, it never fails the report.** The whole apply is wrapped: the node row is already
+durable, so a rule store that is unreachable leaves the node PENDING — where it was going anyway, and
+where the operator can act on it — while throwing would make the host vanish from the inventory, which
+is the failure class §2's amendment exists to prevent.
+
+**Rejected.** *Auto-confirm without an operator-authored rule* — §1's original call, unchanged.
+*A batch-level `trackAsAsset`* — it cannot express the host/container split, which is the case the
+whole amendment is about. *Reverting nodes when a rule is deleted* — they are confirmed inventory rows
+a human policy approved, and un-confirming them would be as retroactive as applying a rule backwards.
+*A rule-priority/reordering UI* — the §3 rejection of an identification-rule engine covers it; ordering
+by creation and showing the number is enough for this estate size.
+
+**Upgrade safety.** One **additive** migration: a new enum and a new table, no existing table touched,
+no column dropped or made `NOT NULL` without a default, nothing to backfill. An instance that upgrades
+lands with **zero rules**, which is byte-identical to the behaviour it had before — every discovered
+host keeps arriving PENDING until a human confirms it. The bulk routes are new endpoints; the single
+confirm, merge and discard routes are unchanged, so an operator who never opens the new affordances
+sees exactly the tray they had, plus a filter bar. Nothing in the report path changes for an instance
+with no rules beyond one indexed read that returns nothing.
 
 ### §2 — The report contract (`@lazyit/shared`)
 
@@ -910,6 +1080,30 @@ claim back, if a compliance review ever demands it, is one provenance row per no
 report) — deliberately not built today, because the per-report flooding is what made suppression
 correct in the first place.
 
+**Amendment (2026-08-01, #1145) — saved auto-confirm rules widen this blast radius, and the paragraph
+above no longer holds unchanged.** The §1 amendment adds operator-authored rules that confirm a
+matching proposal *inside the report request*. On an instance that has saved one, the two sentences
+above are no longer both true:
+
+- *"a discovered host lands PENDING and cannot enter the official inventory until a human confirms
+  it"* — true only for proposals **no rule matches**. A matched proposal is confirmed by the machine.
+- *"the realistic worst case on a leaked token is PENDING spam a human discards"* — the new worst case
+  is that a leaked token enrols hosts **shaped to match an existing rule** (a name matching the glob,
+  reporting from the right subnet, claiming the facts that make the server propose the right kind) and
+  those land **CONFIRMED**, each minting an Asset. Reversing that is a per-node cleanup, not a discard
+  of a tray.
+
+What still holds, and is what the risk was accepted on: an instance with **no rules** behaves exactly
+as this section described (that is every instance immediately after upgrading); the attacker cannot
+author a rule, because rule writes need `infra:manage` + `asset:write` + `HumanOnlyGuard` and the
+reporting SA holds `infra:report` and nothing else; a rule cannot be blanket, so the shape a forged
+report has to hit is one a human wrote down; the Asset is attributed to the **rule's author**, so
+these writes are attributed where an ordinary agent write is not; `matchCount` / `lastMatchedAt` make
+a firing rule visible without waiting for someone to notice unfamiliar nodes; and disabling the rule
+stops it on the next report. **The operator-facing consequence is the honest one to state: writing an
+auto-confirm rule is a decision to widen what a leaked `infra:report` token can do, in exchange for a
+gate the operator can actually afford to exercise.** The narrower the rule, the smaller the exchange.
+
 ## Consequences
 
 **Positive.** The inventory becomes self-populating and self-healing; the topology map reflects
@@ -962,6 +1156,11 @@ would be a separate ADR and arguably a separate product).
 - Identity corroboration (cloned machine-id detection, the `infra.identity_conflict` nudge, node
   re-key/merge-into): §3 Amendment (2026-07-31), issue #1141 — the consumer of contract v2's
   `host.identifiers[]`.
+- The review tray at scale (bulk confirm/discard, grouping by reporting host, filter/sort, and
+  operator-authored auto-confirm rules): §1 Amendment (2026-08-01), issue #1145 — the ergonomics debt
+  the #1139 container amendment named as it created it. It moves *when* the human decides, so it
+  carries a paired **§8 Amendment (2026-08-01)** stating the widened `infra:report` blast radius.
+  Server-side paging of `GET /infra/nodes` is tracked separately (#1152).
 - Server-driven agent policy (the ack as the config channel, the fixed-tick interval inversion, the
   local veto, the three scopes): §7 Amendment (2026-08-01), issue #1140 — the consumer of contract
   v2's reserved `policyRevision`, with a §4 amendment making the staleness threshold per node.

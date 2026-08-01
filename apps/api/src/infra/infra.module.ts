@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { InfraController } from './infra.controller';
 import { InfraService } from './infra.service';
+import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { InfraAgentStalenessSweeper } from './infra-agent-staleness.sweeper';
 import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
@@ -37,11 +38,15 @@ import { NotificationsModule } from '../notifications/notifications.module';
   // are shared by every request to that one route — the same wiring SetupRateLimitGuard /
   // LoginRateLimitGuard use in their modules. Singleton scope is load-bearing for both: a
   // request-scoped provider would hand every call a fresh, empty map and silently disable the limit.
+  // InfraAutoConfirmService: the operator-authored auto-confirm rules (#1145) — CRUD plus the
+  // read-only matcher InfraService consults on the report CREATE branches. Ordinary singleton; it
+  // holds no in-memory state (unlike the two limiters above), the rules live in the DB.
   // AgentPolicyService: the #1140 server-driven policy — resolution on the report path, and the three
   // human-only write scopes (instance default, service account, node). Stateless, so scope is not
   // load-bearing here the way it is for the two limiters above.
   providers: [
     InfraService,
+    InfraAutoConfirmService,
     InfraAgentStalenessSweeper,
     InfraReportRateLimitGuard,
     InfraNodeEnrollmentLimiter,

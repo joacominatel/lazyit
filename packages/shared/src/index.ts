@@ -58,6 +58,7 @@ export * from "./schemas/folder";
 export * from "./schemas/import";
 export * from "./schemas/agent-policy";
 export * from "./schemas/infra";
+export * from "./schemas/infra-review";
 export * from "./schemas/instance";
 export * from "./schemas/location";
 export * from "./schemas/location-list";

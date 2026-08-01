@@ -123,9 +123,12 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     // not (no deletedAt — a closed edge sets endedAt, an ADR-0019 lifecycle marker, and cascades).
     expect(SOFT_DELETABLE_MODELS.has('InfraNode')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('InfraEdge')).toBe(false);
+    // Auto-confirm rules (ADR-0074 §1 amendment, #1145) soft-delete: a deleted rule must stop matching
+    // reports, so its reads are auto-scoped like every other mutable domain entity.
+    expect(SOFT_DELETABLE_MODELS.has('InfraAutoConfirmRule')).toBe(true);
     // File attachments (ADR-0082): delete = soft delete; the GC sweep adjudicates the blob later.
     expect(SOFT_DELETABLE_MODELS.has('Attachment')).toBe(true);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(16);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(17);
   });
 
   it('auto-scopes ConsumableCategory reads to live rows (#321)', () => {

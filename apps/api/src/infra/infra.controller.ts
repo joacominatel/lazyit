@@ -29,9 +29,14 @@ import {
   AgentReportAckSchema,
   AgentReportSchema,
   AttachInfraSecretSchema,
+  BulkConfirmInfraNodesSchema,
+  BulkDiscardInfraNodesSchema,
   ConfirmInfraNodeSchema,
+  CreateInfraAutoConfirmRuleSchema,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
+  InfraAutoConfirmRuleSchema,
+  InfraBulkResponseSchema,
   InfraEdgeSchema,
   InfraIdentityMatchSchema,
   InfraImpactResponseSchema,
@@ -43,10 +48,12 @@ import {
   InfraNodeStatusSchema,
   InfraSecretRefSchema,
   MergeInfraNodeSchema,
+  UpdateInfraAutoConfirmRuleSchema,
   UpdateInfraNodeSchema,
 } from '@lazyit/shared';
 import { z } from 'zod';
 import { InfraService } from './infra.service';
+import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
@@ -69,6 +76,22 @@ class AgentReportAckDto extends createZodDto(AgentReportAckSchema) {}
 class ConfirmInfraNodeDto extends createZodDto(ConfirmInfraNodeSchema) {}
 class MergeInfraNodeDto extends createZodDto(MergeInfraNodeSchema) {}
 class InfraIdentityMatchDto extends createZodDto(InfraIdentityMatchSchema) {}
+class BulkConfirmInfraNodesDto extends createZodDto(
+  BulkConfirmInfraNodesSchema,
+) {}
+class BulkDiscardInfraNodesDto extends createZodDto(
+  BulkDiscardInfraNodesSchema,
+) {}
+class InfraBulkResponseDto extends createZodDto(InfraBulkResponseSchema) {}
+class InfraAutoConfirmRuleDto extends createZodDto(
+  InfraAutoConfirmRuleSchema,
+) {}
+class CreateInfraAutoConfirmRuleDto extends createZodDto(
+  CreateInfraAutoConfirmRuleSchema,
+) {}
+class UpdateInfraAutoConfirmRuleDto extends createZodDto(
+  UpdateInfraAutoConfirmRuleSchema,
+) {}
 class AgentPolicySettingsDto extends createZodDto(AgentPolicySettingsSchema) {}
 class AgentPolicyOverrideDto extends createZodDto(AgentPolicyOverrideSchema) {}
 
@@ -93,6 +116,9 @@ class PatchPositionDto extends createZodDto(PatchPositionSchema) {}
 export class InfraController {
   constructor(
     private readonly infra: InfraService,
+    // The #1145 auto-confirm rules. Their CRUD is its own service; InfraService only CONSULTS it, on
+    // the report create branches — the routes below never touch a node.
+    private readonly autoConfirm: InfraAutoConfirmService,
     private readonly agentPolicy: AgentPolicyService,
   ) {}
 
@@ -342,6 +368,96 @@ export class InfraController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.infra.confirmNode(id, dto, principal);
+  }
+
+  // ── The review tray at scale (ADR-0074 §1 amendment, #1145) ─────────────────
+
+  @Post('nodes/bulk-confirm')
+  // Identical posture to the single confirm — it IS the single confirm, run per item.
+  @RequirePermission('infra:manage', 'asset:write')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Confirm MANY PENDING proposals in one request (ADR-0074 §1 amendment, #1145). Each item carries the SAME optional overrides the single confirm takes (trackAsAsset, kind, label) and is applied through the SAME method, so the semantics are identical — this only removes the one-dialog-per-row cost of onboarding a host that reports its containers. PER-ITEM outcomes: `applied`, `skipped` (already CONFIRMED — the single confirm is idempotent), `notFound` (discarded meanwhile) or `failed` with the message the single action would have returned. One failing item never discards the rest. Sequential server-side; bounded at 200 items.',
+  })
+  @ApiOkResponse({ type: InfraBulkResponseDto })
+  bulkConfirm(
+    @Body() dto: BulkConfirmInfraNodesDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.infra.bulkConfirmNodes(dto, principal);
+  }
+
+  @Post('nodes/bulk-discard')
+  // Mirrors the single discard (DELETE /infra/nodes/:id): a topology edit, infra:manage only.
+  @RequirePermission('infra:manage')
+  @ApiOperation({
+    summary:
+      'Discard MANY proposals in one request (#1145). Discard is still the EXISTING soft delete — restorable, history kept; there is no reject endpoint (ADR-0074 §3). One statement for the whole batch. PER-ITEM outcomes: `applied`, or `notFound` for an id that was already gone (which never widens the write).',
+  })
+  @ApiOkResponse({ type: InfraBulkResponseDto })
+  bulkDiscard(@Body() dto: BulkDiscardInfraNodesDto) {
+    return this.infra.bulkDiscardNodes(dto);
+  }
+
+  // ── Auto-confirm rules (ADR-0074 §1 amendment, #1145) ───────────────────────
+
+  @Get('auto-confirm-rules')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      'List the operator-authored auto-confirm rules, OLDEST FIRST — the order the matcher evaluates them in (first match wins). Disabled rules are included: this is a management surface, and a hidden disabled rule is a surprise waiting for whoever re-enables it. Each row carries its author (null when the rule predates the column or its author was deleted) plus how many times it has fired and when it last did.',
+  })
+  @ApiOkResponse({ type: [InfraAutoConfirmRuleDto] })
+  listAutoConfirmRules() {
+    return this.autoConfirm.list();
+  }
+
+  @Post('auto-confirm-rules')
+  // Writing a rule is authoring a decision that will later mint Assets, so it carries the same pair
+  // the confirm it automates carries.
+  @RequirePermission('infra:manage', 'asset:write')
+  // HUMAN-ONLY, and this is the load-bearing guard of the whole amendment: a rule is the human
+  // decision that lets a later confirm happen without a human present, so a machine authoring one
+  // would be the reporting agent granting itself the confirm ADR-0074 §1/§8 denies it.
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Save an auto-confirm rule (ADR-0074 §1 amendment, #1145). NOT RETROACTIVE: rules are evaluated only on reports that arrive AFTER they are saved, so proposals already in the review tray are never confirmed behind the operator. A rule MUST state at least one condition that can rule a proposal OUT — a hostname glob carrying a LITERAL character, a subnet narrower than `/0`, or the kind the server proposed. A glob made only of wildcards is refused: most of them (`*`, `**`, `*?*`) match every name there is, and the few that do narrow (`?` alone matches only one-character names) are refused with them conservatively, so "carries a literal" stays a line you can check by looking. `0.0.0.0/0` is refused on the exact claim — it is every address there is. A rule stating no condition at all IS blanket auto-confirm however it is spelled, and ADR-0074 §1 rejected that; a rule the predicate refuses never fires either way, since the matcher applies the same test on read. `trackAsAsset` defaults ON for a HOST rule and OFF for any rule that can also reach a container child (CONTAINER or ANY). The authoring user is recorded and the Assets an auto-confirm mints are attributed to them. A key a human already DISCARDED is never auto-confirmed on a later report.',
+  })
+  @ApiCreatedResponse({ type: InfraAutoConfirmRuleDto })
+  createAutoConfirmRule(
+    @Body() dto: CreateInfraAutoConfirmRuleDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.autoConfirm.create(dto, principal);
+  }
+
+  @Patch('auto-confirm-rules/:id')
+  @RequirePermission('infra:manage', 'asset:write')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Update a rule — including the `enabled` toggle, which is the fastest revocation (a disabled rule stops matching immediately). 400 if the patch would leave the MERGED rule with no condition that can rule a proposal out — nulling the last one, or widening it to a wildcard-only pattern or `/0`. Dropping ONE of several conditions is fine: the rule that survives still excludes proposals, and the check judges the merged rule, not the patch in isolation.',
+  })
+  @ApiOkResponse({ type: InfraAutoConfirmRuleDto })
+  updateAutoConfirmRule(
+    @Param('id') id: string,
+    @Body() dto: UpdateInfraAutoConfirmRuleDto,
+  ) {
+    return this.autoConfirm.update(id, dto);
+  }
+
+  @Delete('auto-confirm-rules/:id')
+  @RequirePermission('infra:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Delete a rule (soft delete, ADR-0006 — it stops matching immediately, the record of the decision is kept). Nodes it already confirmed are NOT reverted: they are confirmed inventory rows a human policy approved, and un-confirming them would be as retroactive as applying a rule backwards.',
+  })
+  @ApiOkResponse({ type: InfraAutoConfirmRuleDto })
+  removeAutoConfirmRule(@Param('id') id: string) {
+    return this.autoConfirm.remove(id);
   }
 
   // ── Identity reconciliation (ADR-0074 §3 amendment, #1141) ──────────────────

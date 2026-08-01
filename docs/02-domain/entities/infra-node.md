@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-07-31
+updated: 2026-08-01
 ---
 
 # InfraNode
@@ -192,6 +192,28 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   which the re-image case always does — the transplant **replaces** it; the displaced key is recorded
   as `_infraMergedInto.replacedTargetKey` and logged, and a host still checking in under it returns as
   a fresh PENDING proposal.
+
+### Reviewing at scale (ADR-0074 §1 amendment, #1145)
+
+- `POST /infra/nodes/bulk-confirm` — `{ items: [{ id, trackAsAsset?, kind?, label? }] }`, max 200,
+  ids unique. Each item is applied through the **same** `confirmNode` the single route calls, so the
+  semantics are identical; overrides are per item because a host and its containers want different
+  `trackAsAsset` answers and `label` is not a batch concept. Same gate as the single confirm
+  (`infra:manage` + `asset:write` + human-only). Returns **per-item** outcomes
+  (`applied` / `skipped` — already CONFIRMED / `notFound` / `failed` with the message the single
+  action would have returned) plus counts; one failing item never discards the rest. Sequential
+  server-side (each item can mint an Asset and re-index).
+- `POST /infra/nodes/bulk-discard` — `{ ids }`, max 200. The existing soft delete over a set, in one
+  statement; an id already gone reads `notFound` and never widens the write. `infra:manage`, mirroring
+  `DELETE /infra/nodes/:id`.
+- The tray **groups children under their reporting host** (`hostExternalIdOfContainerChild` inverts
+  the `<host>/container/<name>` key), so confirming a host with its containers is one selection. Its
+  filters (name glob or substring, subnet CIDR, reported kind, host-vs-container) and sorts are
+  **client-side over the lean list row** — nothing was added back to the projection #1135 slimmed;
+  the subnet filter reuses the same `ipInCidr` the auto-confirm rules use. Paging `GET /infra/nodes`
+  is a separate concern (#1152).
+
+See [[infra-auto-confirm-rule]] for the saved-rule half of the same amendment.
 
 ### Server-driven agent policy (ADR-0074 §7 amendment / #1140)
 

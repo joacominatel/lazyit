@@ -39,6 +39,7 @@ node for ephemerals. Servers-only and platform-agnostic. v1 shipped (MVP + impac
 Servers list + Meili search); the reporting agent is a future major. See [[0070-infra-topology-graph]].
 
 - 🟢 [[infra-node]] — a thing on the map (host/VM/container/cluster/…); generic kinds, Asset-backed by default, soft-delete = off the map. [[0070-infra-topology-graph]]
+- 🟢 [[infra-auto-confirm-rule]] — an operator-authored rule that says once what a discovered host should become; never retroactive, always attributed, and refused without a condition. [[0074-server-reporting-agent]]
 - 🟢 [[infra-edge]] — a typed, timestamped relationship between two nodes (RUNS_ON / MEMBER_OF / DEPENDS_ON / BACKS_UP_TO / CONNECTS_TO); the [[asset-assignment]] lifecycle-join pattern. [[0070-infra-topology-graph]] · [[0019-asset-assignment-integrity]]
 
 ## People
