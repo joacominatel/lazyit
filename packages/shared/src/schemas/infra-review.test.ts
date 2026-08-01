@@ -230,7 +230,7 @@ describe("matchesAutoConfirmRule (#1145)", () => {
   });
 });
 
-describe("a condition that excludes nothing is not a condition (#1145 blanket auto-confirm)", () => {
+describe("a wildcard-only condition is not a condition (#1145 blanket auto-confirm)", () => {
   const host = {
     hostname: "srv-app-04",
     ipAddress: "10.20.3.7",
@@ -238,12 +238,15 @@ describe("a condition that excludes nothing is not a condition (#1145 blanket au
     isContainerChild: false,
   };
 
-  // A rule matching EVERY possible proposal is blanket auto-confirm however it is spelled. ADR-0074
-  // §1 rejected that, so it has to be unstorable AND unusable — not merely undocumented.
-  const excludesNothing = ["*", "**", "***", "*?*", "?*", "?", "??"];
+  // Every pattern here is made ONLY of wildcard characters, and every one is refused. Most of them
+  // (`*`, `**`, `***`, `*?*`, `?*`) genuinely match every proposal there is — blanket auto-confirm
+  // however it is spelled, which ADR-0074 §1 rejected, so it has to be unstorable AND unusable. The
+  // last two (`?`, `??`) only constrain LENGTH and are refused conservatively alongside them; see the
+  // dedicated test below for why that over-refusal is the deliberate, safe direction.
+  const wildcardOnly = ["*", "**", "***", "*?*", "?*", "?", "??"];
   const narrowing = ["srv-*", "*.*", "*-01"];
 
-  test.each(excludesNothing)("a hostname pattern of only wildcards (%p) states nothing", (pattern) => {
+  test.each(wildcardOnly)("a hostname pattern of only wildcards (%p) is refused", (pattern) => {
     expect(statesAutoConfirmCondition({ hostnamePattern: pattern })).toBe(false);
     expect(matchesAutoConfirmRule(rule({ hostnamePattern: pattern }), host)).toBe(false);
     expect(
@@ -334,13 +337,20 @@ describe("a condition that excludes nothing is not a condition (#1145 blanket au
       }).success,
     ).toBe(false);
     expect(
+      UpdateInfraAutoConfirmRuleSchema.safeParse({ hostnamePattern: "srv-*" }).success,
+    ).toBe(true);
+  });
+
+  test("a patch that leaves a condition field ALONE is the API's call, not the schema's", () => {
+    // `{ hostnamePattern: "*", subnetCidr: "0.0.0.0/0" }` says nothing about `reportedKind`, so the
+    // merged rule keeps whatever kind is stored — and a stored `reportedKind: "VM"` makes it a
+    // perfectly usable rule. The schema cannot see the row, so it must not guess: the API's merged
+    // re-check is what refuses this patch when the stored kind really is null.
+    expect(
       UpdateInfraAutoConfirmRuleSchema.safeParse({
         hostnamePattern: "*",
         subnetCidr: "0.0.0.0/0",
       }).success,
-    ).toBe(false);
-    expect(
-      UpdateInfraAutoConfirmRuleSchema.safeParse({ hostnamePattern: "srv-*" }).success,
     ).toBe(true);
   });
 });
@@ -418,6 +428,28 @@ describe("UpdateInfraAutoConfirmRuleSchema (#1145)", () => {
       UpdateInfraAutoConfirmRuleSchema.safeParse({
         hostnamePattern: null,
         subnetCidr: null,
+        reportedKind: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("dropping ONE of two conditions is a legitimate patch, not a blanket rule", () => {
+    // A rule with `hostnamePattern: "srv-*"` AND `subnetCidr` that drops the subnet is left a
+    // perfectly ordinary single-condition rule. The patch alone cannot see that, so refusing it here
+    // refuses a legal edit outright — the operator cannot narrow a rule down to one condition at all.
+    expect(UpdateInfraAutoConfirmRuleSchema.safeParse({ subnetCidr: null }).success).toBe(true);
+    expect(UpdateInfraAutoConfirmRuleSchema.safeParse({ hostnamePattern: null }).success).toBe(true);
+    expect(UpdateInfraAutoConfirmRuleSchema.safeParse({ reportedKind: null }).success).toBe(true);
+  });
+
+  test("a patch that RESTATES every condition and narrows with none is refused", () => {
+    // This is the one case the patch alone settles: when it fixes all three condition fields, the
+    // stored row contributes nothing to the merged rule, so the patch IS the merged rule's conditions
+    // and its emptiness is knowable here rather than only at the API's merged re-check.
+    expect(
+      UpdateInfraAutoConfirmRuleSchema.safeParse({
+        hostnamePattern: "*",
+        subnetCidr: "0.0.0.0/0",
         reportedKind: null,
       }).success,
     ).toBe(false);
