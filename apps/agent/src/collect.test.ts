@@ -308,4 +308,25 @@ describe("buildIdentifiers — the corroborating set #1141 consumes (#1138)", ()
     expect(buildIdentifiers({})).toBeUndefined();
     expect(buildIdentifiers({ machineId: "  ", serial: "" })).toBeUndefined();
   });
+
+  test("refuses the dmidecode junk placeholders instead of shipping them as evidence", () => {
+    // These are the literal strings OEMs flash on whole production runs. #1141 corroborates hosts
+    // by comparing identifier values, so two unrelated boxes both reporting `Default string` would
+    // match as the SAME physical host. `sanitizeSerial` already refused them on `Asset.serial`;
+    // the identifier path reuses that exact list rather than opening a second door for the junk.
+    expect(
+      buildIdentifiers({
+        serial: "To be filled by O.E.M.",
+        smbiosUuid: "03000200-0400-0500-0006-000700080009",
+        mac: "00:00:00:00:00:00",
+        machineId: "00000000000000000000000000000000",
+      }),
+    ).toBeUndefined();
+  });
+
+  test("keeps the real facts when only SOME of them are junk", () => {
+    expect(
+      buildIdentifiers({ machineId: "9F8D7C6B5A4E", serial: "Default string" }),
+    ).toEqual([{ kind: "machine-id", value: "9f8d7c6b5a4e" }]);
+  });
 });
