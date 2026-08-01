@@ -3,6 +3,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { AgentReportSchema, type AgentReport } from '@lazyit/shared';
 import request from 'supertest';
+import type { z } from 'zod';
 import {
   DEFAULT_JSON_BODY_LIMIT,
   EXPRESS_DEFAULT_JSON_BODY_LIMIT,
@@ -38,7 +39,10 @@ function reportWith(packageCount: number): AgentReport {
       memoryBytes: 68_719_476_736,
     },
     software: packages(packageCount),
-  } satisfies AgentReport);
+    // The WIRE shape, not the parsed one (#1138): contract v2 defaults `os.family` and canonicalises
+    // `host.identifiers`, so input and output diverged. This literal is what an agent PUTS ON the
+    // wire — checking it against the parsed type would demand fields the agent never sends.
+  } satisfies z.input<typeof AgentReportSchema>);
 }
 
 /** Boot a minimal app around a single echo route — no DB, no AppModule graph. */
