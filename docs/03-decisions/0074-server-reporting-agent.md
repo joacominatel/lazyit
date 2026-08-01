@@ -780,7 +780,7 @@ difference. Existing nodes are never touched by the upgrade itself.
 and name the three things an absent `software` key can mean.**
 
 Every check-in rewrote the whole `specs` blob on the node, and a second time on the linked Asset. On a
-real Linux server that blob is ~350 KB, ~95% of it the installed-package list, and the package list
+real Linux server that blob is ~350 KB, ~90% of it the installed-package list, and the package list
 changes when somebody runs `apt upgrade` — perhaps twice a month. At the shipped cadence that is ~96
 full rewrites of a multi-hundred-KB TOAST value per host per day, on two tables, for data that did not
 change: TOAST churn, autovacuum load and backup growth in exchange for nothing. Against a leaked
@@ -789,9 +789,9 @@ change: TOAST churn, autovacuum load and backup growth in exchange for nothing. 
 100 KB default to 8 MB, so the two changes had to be reconciled.
 
 **Two halves, and precisely what each one bounds.** The agent hashes its package list, caches the
-fingerprint and omits an unchanged list — which cuts steady-state payload by roughly 90% and helps the
-honest majority. The server compares what arrived against what it holds and **skips the jsonb write
-when nothing changed**. That second half does not need the client to **cooperate**: the comparison is
+fingerprint and omits an unchanged list — which takes that same ~90% off the steady-state report body
+and helps the honest majority. The server compares what arrived against what it holds and **skips the
+jsonb write when nothing changed**. That second half does not need the client to **cooperate**: the comparison is
 made against the server's *own* fingerprint of whatever arrived, so a pre-#1142 agent and an attacker
 who sends no fingerprint at all are compared just the same, and a report that repeats what is stored
 writes nothing however it was produced. It is **not** a bound on a client that *varies* its report.
@@ -802,8 +802,10 @@ not dearer: `softwareState: 'unchanged'` plus one varied host fact reaches the s
 KB instead of a few hundred, and on that one branch it also costs a read of the stored list. What
 bounds *that* is `InfraReportRateLimitGuard` (#1134) — 120 requests per service account per minute by
 default — and ultimately §8's posture that `infra:report` is a low-value credential whose blast radius
-is noise rather than damage. What #1153 removes is the ~172,800 rewrites a day of a legitimate estate,
-and of a leaked token that merely replays a report; it is not a ceiling on a caller who is deliberately
+is noise rather than damage. What #1153 removes is the ~96 rewrites per host per day a legitimate
+estate pays at the default 900-second cadence — the ~172,800 above is the *abuse ceiling*, what the
+rate limit alone would still allow, not what an honest fleet drives — and, for a leaked token that
+merely replays a report, that ceiling too; it is not a ceiling on a caller who is deliberately
 making every request different. The write half of that is not new either — before #1142 the same caller
 drove the same rewrite by sending a different package list, at several hundred KB a request.
 // the earlier wording here, *"holds regardless of what the client sends"*, promised the stronger bound
@@ -875,12 +877,27 @@ always the server's own reading of what it stored. That is what makes the skip i
 client's cooperation rather than something a client opts into: one that sends no fingerprint at all —
 every pre-#1142 agent, and an attacker, who has no reason to send one — is compared just the same. (It
 is *not* what makes it a bound on a client that varies its report; see "Two halves" above.) A claim it
-*cannot* corroborate — the node holds no
-list, or holds one fingerprinted differently — is never resolved by guessing: the stored list is kept
-and the ack carries
+*cannot* corroborate — the node holds no list, holds one fingerprinted differently, or the
+`unchanged` claim arrived carrying **no fingerprint at all** — is never resolved by guessing: the
+stored list is kept and the ack carries
 **`softwareResend: true`**, which the agent answers by forgetting its cache. That is what makes the
-delta self-healing across a node discarded and rediscovered, a restore from backup, and a merge. The
-fingerprint is a 96-bit non-cryptographic digest of a canonical, order-independent form (package
+delta self-healing across a node discarded and rediscovered, a restore from backup, and a merge.
+
+**Least evidence means least trust, and it did not at first.** The third case above was added in
+review of #1163: every resend site keyed the request on a fingerprint *having arrived*, so a claim the
+server *could* check and that failed was answered while one it *cannot* check was believed forever.
+The worst case was a create branch — the ordinary one and the clone split-off alike — where a
+brand-new node whose first report claimed `unchanged` with no fingerprint was created with no package
+list and never asked for one: a permanently empty inventory with nothing on screen saying so, which is
+the exact failure the state enum exists to prevent. It is reachable from a hand-rolled client and,
+without any adversary, from a future agent whose fingerprint outgrows `AGENT_SOFTWARE_HASH_MAX` — that
+cap is a `.catch(undefined)` rather than a rejection, so the agent's own `safeParse` strips the hash
+while `softwareState: 'unchanged'` survives. That agent now pays a full list every other report, which
+is the failure mode this contract accepts. `unavailable` is *not* asked: it preserves identically but
+never claimed to have a list, so asking it would ask a collector that could not enumerate, forever,
+for something it does not have.
+
+The fingerprint is a 96-bit non-cryptographic digest of a canonical, order-independent form (package
 manager output order is not a fact about the host) carrying a format version, so changing the
 canonicalisation costs one resend rather than a wrong answer.
 
@@ -894,6 +911,22 @@ hot path, which reads `specs - 'software'` — a few KB, the same lesson as #113
 path that does read the list back is a report that omitted it while its *host facts* changed, because
 the blob is written wholesale and writing it without the list would delete it.
 
+That read is allowed to come back empty — the list can vanish between the two reads, to a concurrent
+report or a merge — and when it does the node write is skipped rather than performed without the list:
+between losing the inventory and being one report late, late wins. **The linked Asset is then held at
+the same point**, mirroring what the node still holds rather than what the report brought. Syncing it
+from the report would leave the Asset a report ahead of its own node — two surfaces disagreeing about
+one host, and the Asset is the one an operator reconciles from. *(Corrected in review of #1163; the
+first implementation synced the Asset from the report.)*
+
+**Reading the stored blob back must never fail a check-in.** The projection strips the package list
+with `specs - 'software'`, and `jsonb - text` raises `cannot delete from scalar` against a `specs`
+somebody hand-edited into a bare string or number. On the *report* path that is not a degradation but
+a 500, so one edited row would stop its host checking in at all — against the degrade-never-reject
+posture the whole contract is built on. The delete is guarded by `jsonb_typeof`, which sends every
+non-object to NULL: the "no evidence" reading both callers already handle. *(Also corrected in review
+of #1163.)*
+
 **A consequence stated plainly: `specs.reportedAt` now dates the FACTS, not the check-in.** When the
 write is skipped the stored blob keeps the collection time it already had, so on the Asset inventory
 panel the label reads **"Collected {date}"** rather than "Reported {date}". *Is this host still
@@ -906,7 +939,12 @@ one answer while the blob was rewritten unconditionally.
 rewriting the Asset would simply move the amplification one table across, so the linked-Asset sync
 decides its own write the same way. It is still *asked* on every report — an Asset linked to a node
 whose facts have not moved since would otherwise never receive them — and writes only when the merged
-snapshot differs. And `syncAssetSpecs` was called only from the **host** path, so a container child
+snapshot differs, **judging the package list by the same order-independent fingerprint the node uses**.
+Comparing that one key byte-for-byte instead left the node's write skipped while the Asset's fired on
+every report from a host whose package manager re-sorted its output, which is this amplification
+surviving on the other table. Everything else, the list's contents included, still compares by value.
+*(Corrected in review of #1163.)* And `syncAssetSpecs` was called only from the **host** path, so a
+container child
 confirmed with `trackAsAsset` (which defaults ON) froze its Asset panel at the instant it was
 confirmed: image tag, digest, runtime state and published ports drifting silently while the node panel
 stayed fresh, with nothing marking it stale. The container path now performs the same sync, under the
