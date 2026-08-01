@@ -1,4 +1,6 @@
 import type {
+  AgentPolicyOverride,
+  AgentPolicySettings,
   AttachInfraSecret,
   BulkConfirmInfraNodes,
   BulkDiscardInfraNodes,
@@ -336,6 +338,32 @@ export function detachInfraNodeSecret(
 ): Promise<InfraSecretRef[]> {
   return apiFetch<InfraSecretRef[]>(`${BASE}/nodes/${nodeId}/secrets`, {
     method: "DELETE",
+    body,
+  });
+}
+
+/**
+ * Read the INSTANCE DEFAULT agent policy + the instance-wide revision (`GET /infra/agent-policy`,
+ * ADR-0074 §7 amendment / #1140). `settings` is the stored layer Settings → Instance edits;
+ * `effective` is that layer resolved over the built-in defaults — it is what a host with NO narrower
+ * override runs, and deliberately not a promise about hosts that do have one.
+ */
+export function getAgentPolicy(
+  signal?: AbortSignal,
+): Promise<AgentPolicySettings> {
+  return apiFetch<AgentPolicySettings>(`${BASE}/agent-policy`, { signal });
+}
+
+/**
+ * Replace the instance-default agent policy (`PUT /infra/agent-policy`). The body is a PARTIAL
+ * policy: every omitted field falls back to the built-in default, so `{}` restores all of them.
+ * Bumps the revision, which every agent then echoes back on its next report.
+ */
+export function putAgentPolicy(
+  body: AgentPolicyOverride,
+): Promise<AgentPolicySettings> {
+  return apiFetch<AgentPolicySettings>(`${BASE}/agent-policy`, {
+    method: "PUT",
     body,
   });
 }

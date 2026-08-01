@@ -5,6 +5,7 @@ import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { InfraAgentStalenessSweeper } from './infra-agent-staleness.sweeper';
 import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
+import { AgentPolicyService } from './agent-policy.service';
 import { AssetsModule } from '../assets/assets.module';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
 import { ArticlesModule } from '../articles/articles.module';
@@ -40,12 +41,16 @@ import { NotificationsModule } from '../notifications/notifications.module';
   // InfraAutoConfirmService: the operator-authored auto-confirm rules (#1145) — CRUD plus the
   // read-only matcher InfraService consults on the report CREATE branches. Ordinary singleton; it
   // holds no in-memory state (unlike the two limiters above), the rules live in the DB.
+  // AgentPolicyService: the #1140 server-driven policy — resolution on the report path, and the three
+  // human-only write scopes (instance default, service account, node). Stateless, so scope is not
+  // load-bearing here the way it is for the two limiters above.
   providers: [
     InfraService,
     InfraAutoConfirmService,
     InfraAgentStalenessSweeper,
     InfraReportRateLimitGuard,
     InfraNodeEnrollmentLimiter,
+    AgentPolicyService,
   ],
   exports: [InfraService],
 })

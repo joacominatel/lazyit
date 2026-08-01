@@ -14,7 +14,13 @@ import type {
   NotificationsService,
 } from '../notifications/notifications.service';
 
-type StaleNode = { id: string; label: string; lastReportedAt: Date | null };
+type StaleNode = {
+  id: string;
+  label: string;
+  lastReportedAt: Date | null;
+  /** The staleness this node was last SERVED (#1140). Absent ⇒ the env fallback applies. */
+  policyStaleAfterSeconds?: number | null;
+};
 /** The single-arg tuple of a `NotificationsService.emit` call — cast `mock.calls` to read it typed. */
 type EmitCall = [EmitNotificationInput];
 
@@ -81,5 +87,61 @@ describe('InfraAgentStalenessSweeper (ADR-0074 §4 / #852)', () => {
     const count = await sweeper.sweep();
     expect(count).toBe(0);
     expect(emit).not.toHaveBeenCalled();
+  });
+
+  // ── Per-node staleness (#1140) — what makes heterogeneous cadences possible at all ──────────────
+
+  it('does NOT flip a node whose SERVED threshold has not elapsed, even though the env default has', async () => {
+    // The host the operator moved to a daily cadence. Under one global cutoff it sat OFFLINE 23
+    // hours out of 24 and nudged the bell every day, which is what made a long cadence unusable.
+    const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const { sweeper, updateMany, emit } = makeSweeper([
+      {
+        id: 'n-daily',
+        label: 'backup-01',
+        lastReportedAt: anHourAgo,
+        policyStaleAfterSeconds: 90_000, // ~25 h
+      },
+    ]);
+
+    expect(await sweeper.sweep()).toBe(0);
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('flips a node whose SERVED threshold HAS elapsed, even when it is shorter than the env default', async () => {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const { sweeper, updateMany, emit } = makeSweeper([
+      {
+        id: 'n-tight',
+        label: 'edge-02',
+        lastReportedAt: tenMinutesAgo,
+        policyStaleAfterSeconds: 300, // 5 min, the tick floor
+      },
+    ]);
+
+    expect(await sweeper.sweep()).toBe(1);
+    // The bulk flip now addresses the decided set by id — it cannot re-run the per-node comparison.
+    const arg = (updateMany.mock.calls as unknown[][])[0][0] as {
+      where: { id: { in: string[] } };
+    };
+    expect(arg.where.id.in).toEqual(['n-tight']);
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a node that was NEVER served a policy falls back to the env default — the pre-#1140 behaviour', async () => {
+    // A manual row, or an agent that predates the policy channel. Long past the 45-minute default.
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const { sweeper, emit } = makeSweeper([
+      {
+        id: 'n-legacy',
+        label: 'web-07',
+        lastReportedAt: twoHoursAgo,
+        policyStaleAfterSeconds: null,
+      },
+    ]);
+
+    expect(await sweeper.sweep()).toBe(1);
+    expect(emit).toHaveBeenCalledTimes(1);
   });
 });

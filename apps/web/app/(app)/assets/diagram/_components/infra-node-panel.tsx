@@ -81,6 +81,7 @@ import {
   AgentBadge,
   AgentFreshness,
   AgentOutdatedBadge,
+  AgentPolicyBadge,
 } from "./agent-provenance";
 import { DeleteNodeDialog } from "./delete-node-dialog";
 import { NodeEdgesManager } from "./node-edges-manager";
@@ -246,6 +247,13 @@ function PanelBody({
           {node.source === "AGENT" ? <AgentBadge /> : null}
           {node.source === "AGENT" ? (
             <AgentOutdatedBadge agentVersion={node.agentVersion} />
+          ) : null}
+          {/* Whether this host has actually PICKED UP the current fleet policy (#1140). It renders
+              nothing for a node that has never echoed one — a manual node, or an agent older than
+              the policy channel — because those will never echo one, and "pending" would imply a
+              wait that resolves. */}
+          {node.source === "AGENT" ? (
+            <AgentPolicyBadge policyRevision={node.policyRevision} />
           ) : null}
         </div>
         {node.source === "AGENT" ? (

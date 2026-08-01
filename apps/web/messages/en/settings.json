@@ -205,6 +205,64 @@
       }
     }
   },
+  "agentPolicy": {
+    "title": "Reporting agents",
+    "subtitle": "How every lazyit agent in this estate collects and reports. Policy v{revision}. Saved here once — no host to log into.",
+    "loadFailed": "Could not load the agent policy.",
+    "saveFailed": "Could not save the agent policy.",
+    "retry": "Retry",
+    "save": "Save policy",
+    "saving": "Saving…",
+    "saved": "Saved as policy v{revision}. Agents apply it on their next report.",
+    "propagation": "A change takes effect on each host's next check-in, then applies from the run after that. That short delay is deliberate: a policy is only ever applied by a run that started with it already in place, so a mistake here can never interrupt a fleet mid-collection. This is the instance default — per-agent and per-host overrides exist in the API but have no editor yet.",
+    "interval": {
+      "label": "Report every (minutes)",
+      "help": "How often each host reports. The scheduler on the host ticks every {tick} minutes and does nothing on a tick inside this interval, so changing this never touches a host's timer.",
+      "invalid": "Enter a whole number of minutes between {min} and {max}."
+    },
+    "stale": {
+      "label": "Consider a host offline after (minutes)",
+      "help": "How long lazyit waits after a host's last report before marking it offline on the map and raising a notification.",
+      "invalid": "Enter a whole number of minutes between {min} and {max}.",
+      "belowInterval": "This must be longer than the reporting interval, or a healthy host is marked offline between two of its own reports."
+    },
+    "softwareMax": {
+      "label": "Maximum packages per host",
+      "help": "A hard cap on the installed-software list. Lower it on hosts whose package list is more noise than inventory.",
+      "invalid": "Enter a whole number between 0 and {max}."
+    },
+    "collect": {
+      "label": "What agents collect",
+      "help": "A collector that is off is never run — the agent does not gather the facts and then discard them.",
+      "veto": "A host can always refuse: turning a collector off in that host's own /etc/lazyit-agent/config wins over this setting, and nothing here can switch it back on.",
+      "hardware": "Manufacturer, model and serial",
+      "disks": "Disks and mountpoints",
+      "nics": "Network interfaces",
+      "software": "Installed software",
+      "containers": "Containers"
+    },
+    "exclude": {
+      "nicNames": {
+        "label": "Ignore network interfaces",
+        "placeholder": "veth*, docker*, br-*",
+        "help": "Comma-separated name patterns. * matches anything, ? matches one character."
+      },
+      "mountpoints": {
+        "label": "Ignore mountpoints",
+        "placeholder": "/var/lib/docker/*, /snap/*",
+        "help": "Disks mounted here are left out of the report. Unmounted disks are never affected."
+      },
+      "softwareNames": {
+        "label": "Ignore packages",
+        "placeholder": "linux-image-*",
+        "help": "Package name patterns to leave out — kernel builds are the usual case."
+      }
+    },
+    "globs": {
+      "invalid": "“{value}” is not a valid pattern. Use letters, digits, - _ / : and the * and ? wildcards — regular expressions are not accepted.",
+      "tooMany": "At most {max} patterns per list."
+    }
+  },
   "smtp": {
     "title": "Outbound email (SMTP)",
     "subtitle": "Connect an SMTP relay so lazyit can send email notifications. Off until you turn it on; the password is stored encrypted and never shown again.",

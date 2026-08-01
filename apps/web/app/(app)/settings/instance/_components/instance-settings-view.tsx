@@ -15,6 +15,7 @@ import { ApiError } from "@/lib/api/client";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { useInstanceVersion } from "@/lib/api/hooks/use-instance-version";
 import { AdminGate } from "../../_components/admin-gate";
+import { AgentPolicyEditor } from "./agent-policy-editor";
 import { AssetTagSchemeEditor } from "./asset-tag-scheme-editor";
 import { DirectorySettingsEditor } from "./directory-settings-editor";
 import { SmtpSettingsEditor } from "./smtp-settings-editor";
@@ -166,6 +167,9 @@ export function InstanceSettingsView() {
           <div className="space-y-6">
             <SmtpSettingsEditor />
             <DirectorySettingsEditor />
+            {/* The fleet's reporting-agent policy (#1140) — the surface that replaces editing
+                /etc/lazyit-agent/config on every host by hand. */}
+            <AgentPolicyEditor />
           </div>
         </div>
       </div>

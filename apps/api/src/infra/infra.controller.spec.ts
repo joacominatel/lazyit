@@ -141,9 +141,12 @@ describe('InfraController — forward-compatible report body (#1138)', () => {
     // must hand it on — otherwise "degrade instead of reject" quietly becomes "degrade and forget".
     const infra = { ingestReport: jest.fn() };
     const autoConfirm = { list: jest.fn() };
+    // The #1140 policy service is a constructor dependency of the controller but plays no part in
+    // the report route — the policy is resolved inside `ingestReport`, not by the handler.
     const controller = new InfraController(
       infra as never,
       autoConfirm as never,
+      {} as never,
     );
     const raw = {
       agentVersion: '2.0.0',

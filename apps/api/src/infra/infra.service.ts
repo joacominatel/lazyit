@@ -20,6 +20,7 @@ import {
   primaryIp,
   sanitizeSerial,
   type AgentContainer,
+  type AgentPolicy,
   type AgentReport,
   type AgentReportAck,
   type AgentReportHost,
@@ -59,6 +60,25 @@ import type { Principal } from '../auth/principal';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
+import { AgentPolicyService } from './agent-policy.service';
+
+/**
+ * The policy-related columns one report writes (#1140) — spread into the node `data` on every branch.
+ * Every key is OPTIONAL and an absent key means "leave the stored value alone", which is what keeps a
+ * pre-#1140 agent (and a policy resolution that failed) from ever clearing a good value.
+ */
+interface AgentPolicyWriteFields {
+  /**
+   * The staleness threshold this node was just SERVED — what the §4 sweeper judges it against.
+   * Absent unless the report ECHOED a revision: an agent that predates the policy channel is not
+   * running a served threshold, so its node keeps the `INFRA_AGENT_STALE_AFTER_MS` fallback.
+   */
+  policyStaleAfterSeconds?: number;
+  /** The revision the agent ECHOED. Absent when the agent sent none (any pre-#1140 build). */
+  policyRevision?: number;
+  /** Stamped ONLY when the echoed revision CHANGED, so "applied 3 days ago" stays true. */
+  policyAppliedAt?: Date;
+}
 
 /** The node columns + linked Asset name `projectInfraNode` needs (the search projection shape). */
 const SEARCH_NODE_SELECT = {
@@ -106,6 +126,8 @@ export class InfraService {
     // The #1145 operator-authored auto-confirm rules. Consulted on the CREATE branches ONLY (never on
     // a refresh, never on the clone branch) — that is what makes a saved rule non-retroactive.
     private readonly autoConfirm: InfraAutoConfirmService,
+    // The #1140 policy channel — resolution only; every WRITE to a policy scope is a human route.
+    private readonly agentPolicy: AgentPolicyService,
   ) {}
 
   /**
@@ -235,6 +257,12 @@ export class InfraService {
    * slightly stale on new fields. The signal is MOVED, not lost: pass the RAW body as `rawBody` and
    * everything the parse dropped or had to coerce, at any depth, is recorded on the node (see
    * {@link agentSkew}) and logged. Omitting `rawBody` simply records nothing.
+   *
+   * IT IS ALSO THE POLICY CHANNEL (#1140). The ack now carries the server-resolved configuration for
+   * this exact agent (instance default < service account < node), and the agent's ECHOED
+   * `policyRevision` — reserved but discarded until now — is persisted here. That echo is the whole
+   * difference between having central configuration and believing you have it. Nothing about it can
+   * fail a report: see {@link resolvePolicy}.
    */
   async ingestReport(
     report: AgentReport,
@@ -282,8 +310,15 @@ export class InfraService {
         // `label` is read for the #1141 collision nudge only — it names the node the operator already
         // has, which is the whole difference between an actionable warning and a cryptic one.
         label: true,
+        // The #1140 narrowest policy scope + the acknowledgement this report may advance.
+        agentPolicy: true,
+        policyRevision: true,
       },
     });
+
+    // Resolved ONCE per report, before any branch, so the ack, the create and the refresh all agree
+    // on the same generation. `undefined` when resolution failed — the report still lands.
+    const policy = await this.resolvePolicy(principal, existing?.agentPolicy);
 
     if (existing) {
       // CORROBORATE before merging (#1141). The dedup key is machine-id twice, so a baked
@@ -300,6 +335,7 @@ export class InfraService {
           now,
           primaryIpAddress,
           principal,
+          policy,
         );
       }
       // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
@@ -310,8 +346,9 @@ export class InfraService {
         now,
         report.agentVersion,
         primaryIpAddress,
+        this.policyWriteFields(report, existing.policyRevision, policy, now),
       );
-      return this.reconcileContainers(ack, report, now, principal);
+      return this.reconcileContainers(ack, report, now, principal, policy);
     }
 
     // Unknown host ⇒ a NEW row. This is the only branch that can grow the table, so it is the only one
@@ -341,6 +378,10 @@ export class InfraService {
           ...(primaryIpAddress !== undefined
             ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
             : {}),
+          // A brand-new node has no stored revision, so an agent that already echoes one is recorded
+          // as having applied it from its very first report (#1140) — a re-installed host whose cache
+          // survived must not read as "pending" forever.
+          ...this.policyWriteFields(report, null, policy, now),
           specs,
         },
         select: { id: true, state: true },
@@ -367,6 +408,7 @@ export class InfraService {
         report,
         now,
         principal,
+        policy,
       );
     } catch (err) {
       // Race: a concurrent report from the SAME host (the install's report racing the freshly-armed
@@ -383,7 +425,12 @@ export class InfraService {
             reportingSource: report.reportingSource,
             externalId: report.externalId,
           },
-          select: { id: true, assetId: true, ipAddressSource: true },
+          select: {
+            id: true,
+            assetId: true,
+            ipAddressSource: true,
+            policyRevision: true,
+          },
         });
         // No loop: after P2002 the row exists. If it somehow doesn't (e.g. it was soft-deleted in the
         // same instant so findFirst can't see it), rethrow the original error rather than inventing one.
@@ -394,12 +441,83 @@ export class InfraService {
             now,
             report.agentVersion,
             primaryIpAddress,
+            this.policyWriteFields(report, raced.policyRevision, policy, now),
           );
-          return this.reconcileContainers(ack, report, now, principal);
+          return this.reconcileContainers(ack, report, now, principal, policy);
         }
       }
       throw err;
     }
+  }
+
+  /**
+   * Resolve this agent's policy (#1140) — and NEVER let it fail the report.
+   *
+   * The try/catch is the whole method's reason to exist. Policy is configuration: a host that cannot
+   * be configured this tick keeps its cached policy and tries again in fifteen minutes, which costs
+   * nothing. A host whose REPORT 500s vanishes from the CMDB, shows OFFLINE on the map and nudges the
+   * bell — the failure class ADR-0074's degrade-never-reject posture exists to prevent. So a broken
+   * settings row, a DB hiccup or anything else degrades to an ack with NO `policy` key, which the
+   * agent already treats as "keep what you have".
+   */
+  private async resolvePolicy(
+    principal: Principal | undefined,
+    nodeOverride: unknown,
+  ): Promise<AgentPolicy | undefined> {
+    try {
+      return await this.agentPolicy.resolveForReport(principal, nodeOverride);
+    } catch (err) {
+      this.logger.warn(
+        `Could not resolve the agent policy — the report was still accepted and the agent keeps its cached policy. ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * Put the resolved policy on the ack (#1140), or leave the ack exactly as it was when there is
+   * none. Applied at the LAST step of every ingest path rather than at each branch, so a branch added
+   * later cannot silently ship an ack that carries no configuration.
+   */
+  private withPolicy(
+    ack: AgentReportAck,
+    policy: AgentPolicy | undefined,
+  ): AgentReportAck {
+    return policy === undefined ? ack : { ...ack, policy };
+  }
+
+  /**
+   * The policy columns this report writes (#1140). Every key is omitted rather than nulled when there
+   * is nothing to say, so a pre-#1140 agent, or a tick whose resolution failed, can never CLEAR a good
+   * stored value.
+   *
+   * `policyAppliedAt` moves only when the echoed revision CHANGES. Stamping it on every report would
+   * make it a second `lastReportedAt` and destroy the one question it answers — *when did this host
+   * pick the current config up?* — which is exactly what an operator asks after a fleet-wide change.
+   *
+   * `policyStaleAfterSeconds` is gated on the SAME echo, and that gate is the whole honesty of the
+   * column: it records the staleness this node's agent is actually judged by, and an agent that
+   * predates the policy channel never receives, caches or applies one — it reports on whatever
+   * `install.sh` gave its timer and echoes nothing. Writing the resolved value for such a node would
+   * silently override a deliberately tuned `INFRA_AGENT_STALE_AFTER_MS` for precisely the hosts the
+   * env var is documented to still cover (a pre-#1140 agent, a manual row, a failed resolution).
+   */
+  private policyWriteFields(
+    report: AgentReport,
+    storedRevision: number | null | undefined,
+    policy: AgentPolicy | undefined,
+    now: Date,
+  ): AgentPolicyWriteFields {
+    const echoed = report.policyRevision;
+    return {
+      ...(policy !== undefined && echoed !== undefined
+        ? { policyStaleAfterSeconds: policy.staleAfterSeconds }
+        : {}),
+      ...(echoed !== undefined ? { policyRevision: echoed } : {}),
+      ...(echoed !== undefined && echoed !== (storedRevision ?? undefined)
+        ? { policyAppliedAt: now }
+        : {}),
+    };
   }
 
   /**
@@ -477,12 +595,15 @@ export class InfraService {
     now: Date,
     agentVersion: string,
     primaryIpAddress: string | undefined,
+    // The #1140 policy columns. An EMPTY object is the pre-#1140 shape and writes nothing extra.
+    policyFields: AgentPolicyWriteFields = {},
   ): Promise<AgentReportAck> {
     const data: Prisma.InfraNodeUncheckedUpdateInput = {
       specs: blob,
       status: 'ONLINE',
       lastReportedAt: now,
       agentVersion,
+      ...policyFields,
     };
     // Overwrite the IP with the live fact — but only when the agent owns it (never a MANUAL edit) and
     // the report actually carries one (never clear a good IP on a partial report). CEO policy #1081.
@@ -588,17 +709,25 @@ export class InfraService {
     now: Date,
     primaryIpAddress: string | undefined,
     principal?: Principal,
+    // Resolved against the PEER's override, not the clone's own node: the clone's node may not exist
+    // yet, and once it does its own override applies from the next report. A colliding host is a
+    // configuration edge case of a configuration edge case; getting it merely correct-next-tick is
+    // the same one-tick propagation the whole feature is built on (#1140/#1141).
+    policy?: AgentPolicy,
   ): Promise<AgentReportAck> {
     const discriminator = identityDiscriminator(incoming);
     if (discriminator === undefined) {
       // Unreachable: the rule that got us here requires a serial AND a MAC on both sides. Falling
       // back to the ordinary refresh rather than throwing keeps the machine-facing path total.
-      return this.refreshKnownNode(
-        { id: peer.id, assetId: null, ipAddressSource: 'AGENT' },
-        blob,
-        now,
-        report.agentVersion,
-        primaryIpAddress,
+      return this.withPolicy(
+        await this.refreshKnownNode(
+          { id: peer.id, assetId: null, ipAddressSource: 'AGENT' },
+          blob,
+          now,
+          report.agentVersion,
+          primaryIpAddress,
+        ),
+        policy,
       );
     }
     const externalId = disambiguateExternalId(report.externalId, discriminator);
@@ -614,25 +743,35 @@ export class InfraService {
       id: string;
       assetId: string | null;
       ipAddressSource: string;
+      policyRevision?: number | null;
     }): Promise<AgentReportAck> => {
       const conflict: AgentReportIdentityConflict = {
         ...conflictFacts,
         detectedAt:
           (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString(),
       };
-      return this.refreshKnownNode(
-        node,
-        { ...blob, identityConflict: conflict },
-        now,
-        report.agentVersion,
-        primaryIpAddress,
+      return this.withPolicy(
+        await this.refreshKnownNode(
+          node,
+          { ...blob, identityConflict: conflict },
+          now,
+          report.agentVersion,
+          primaryIpAddress,
+          this.policyWriteFields(report, node.policyRevision, policy, now),
+        ),
+        policy,
       );
     };
 
     // Does this clone already have a node of its own? (Its second and every later report.)
     const own = await this.prisma.infraNode.findFirst({
       where: { reportingSource: report.reportingSource, externalId },
-      select: { id: true, assetId: true, ipAddressSource: true },
+      select: {
+        id: true,
+        assetId: true,
+        ipAddressSource: true,
+        policyRevision: true,
+      },
     });
     if (own) return refreshWithMarker(own);
 
@@ -660,6 +799,7 @@ export class InfraService {
           ...(primaryIpAddress !== undefined
             ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
             : {}),
+          ...this.policyWriteFields(report, null, policy, now),
           specs: { ...blob, identityConflict: conflict },
         },
         select: { id: true, state: true },
@@ -675,7 +815,12 @@ export class InfraService {
       ) {
         const raced = await this.prisma.infraNode.findFirst({
           where: { reportingSource: report.reportingSource, externalId },
-          select: { id: true, assetId: true, ipAddressSource: true },
+          select: {
+            id: true,
+            assetId: true,
+            ipAddressSource: true,
+            policyRevision: true,
+          },
         });
         // No loop and no nudge: after P2002 the row exists, and the report that WON it emitted the
         // notification already (the dedupe key is identical, so a second emit would be dropped
@@ -729,7 +874,10 @@ export class InfraService {
     });
 
     void this.syncNodeToSearch(created.id);
-    return { nodeId: created.id, state: created.state, accepted: true };
+    return this.withPolicy(
+      { nodeId: created.id, state: created.state, accepted: true },
+      policy,
+    );
   }
 
   /**
@@ -756,9 +904,12 @@ export class InfraService {
     report: AgentReport,
     now: Date,
     principal?: Principal,
+    // The host's resolved policy (#1140): it rides out on the ack, and its staleness threshold is
+    // stamped on each CHILD so a daily-cadence host's containers are not swept dark hourly.
+    policy?: AgentPolicy,
   ): Promise<AgentReportAck> {
     const containers = report.host.containers;
-    if (containers === undefined) return ack;
+    if (containers === undefined) return this.withPolicy(ack, policy);
     try {
       await this.applyContainerTopology(
         ack.nodeId,
@@ -766,13 +917,14 @@ export class InfraService {
         report,
         now,
         principal,
+        policy,
       );
     } catch (err) {
       this.logger.warn(
         `Container topology for ${report.host.hostname} could not be reconciled — the host itself still reported. ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    return ack;
+    return this.withPolicy(ack, policy);
   }
 
   /**
@@ -798,7 +950,21 @@ export class InfraService {
     report: AgentReport,
     now: Date,
     principal?: Principal,
+    policy?: AgentPolicy,
   ): Promise<void> {
+    // A child's liveness follows its HOST's cadence, so it is judged against the host's served
+    // staleness threshold (#1140). Without this, moving a host to a daily cadence would leave its
+    // containers on the global env cutoff and the §4 sweeper would report a false outage for every
+    // one of them within the hour.
+    //
+    // Gated on the host's ECHO for exactly the reason `policyWriteFields` is: a child follows its
+    // host, and a host whose agent predates the policy channel is not running a served threshold.
+    // Containers arrived in contract v2 (#1139), one release before the policy channel, so an agent
+    // that reports children while echoing no revision is a real shape rather than a hypothetical.
+    const childPolicyFields =
+      policy !== undefined && report.policyRevision !== undefined
+        ? { policyStaleAfterSeconds: policy.staleAfterSeconds }
+        : {};
     // Every child this reporter already has for THIS host. Scoped by the prefix, because container
     // names are only unique within one runtime: two hosts both running `redis` are two containers,
     // and a host-less key would fuse them into one node whose RUNS_ON edge flapped between hosts.
@@ -856,6 +1022,7 @@ export class InfraService {
             status,
             lastReportedAt: now,
             agentVersion: report.agentVersion,
+            ...childPolicyFields,
           },
         });
         childIds.push(existingId);
@@ -888,6 +1055,7 @@ export class InfraService {
           externalId,
           lastReportedAt: now,
           agentVersion: report.agentVersion,
+          ...childPolicyFields,
           specs,
         },
         select: { id: true },
