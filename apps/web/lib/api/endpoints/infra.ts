@@ -1,6 +1,12 @@
 import type {
   AttachInfraSecret,
+  BulkConfirmInfraNodes,
+  BulkDiscardInfraNodes,
   ConfirmInfraNode,
+  CreateInfraAutoConfirmRule,
+  InfraAutoConfirmRule,
+  InfraBulkResponse,
+  UpdateInfraAutoConfirmRule,
   CreateInfraEdge,
   CreateInfraNode,
   InfraEdge,
@@ -152,6 +158,72 @@ export function confirmInfraNode(
   return apiFetch<InfraNodeDetail>(`${BASE}/nodes/${nodeId}/confirm`, {
     method: "POST",
     body,
+  });
+}
+
+// ── The review tray at scale (ADR-0074 §1 amendment, #1145) ────────────────────────────────────────
+
+/**
+ * Confirm many PENDING proposals at once (`POST /infra/nodes/bulk-confirm`). Each item carries the
+ * SAME optional overrides the single confirm takes, and the API applies them through the same method —
+ * so this removes the one-dialog-per-row cost, never the human approval.
+ *
+ * Resolves even when some items failed: the response is PER-ITEM (`applied`/`skipped`/`notFound`/
+ * `failed` with a message), so the caller reports a partial batch instead of a bare "something broke".
+ */
+export function bulkConfirmInfraNodes(
+  body: BulkConfirmInfraNodes,
+): Promise<InfraBulkResponse> {
+  return apiFetch<InfraBulkResponse>(`${BASE}/nodes/bulk-confirm`, {
+    method: "POST",
+    body,
+  });
+}
+
+/** Discard many proposals at once (`POST /infra/nodes/bulk-discard`) — the existing soft delete, in bulk. */
+export function bulkDiscardInfraNodes(
+  body: BulkDiscardInfraNodes,
+): Promise<InfraBulkResponse> {
+  return apiFetch<InfraBulkResponse>(`${BASE}/nodes/bulk-discard`, {
+    method: "POST",
+    body,
+  });
+}
+
+/** The saved auto-confirm rules, oldest first — the order the server evaluates them in. */
+export function getInfraAutoConfirmRules(
+  signal?: AbortSignal,
+): Promise<InfraAutoConfirmRule[]> {
+  return apiFetch<InfraAutoConfirmRule[]>(`${BASE}/auto-confirm-rules`, { signal });
+}
+
+/** Save a rule. It applies only to reports that arrive AFTER it is saved — never retroactively. */
+export function createInfraAutoConfirmRule(
+  body: CreateInfraAutoConfirmRule,
+): Promise<InfraAutoConfirmRule> {
+  return apiFetch<InfraAutoConfirmRule>(`${BASE}/auto-confirm-rules`, {
+    method: "POST",
+    body,
+  });
+}
+
+/** Patch a rule — including the `enabled` toggle, which is the fastest way to revoke one. */
+export function updateInfraAutoConfirmRule(
+  ruleId: string,
+  body: UpdateInfraAutoConfirmRule,
+): Promise<InfraAutoConfirmRule> {
+  return apiFetch<InfraAutoConfirmRule>(`${BASE}/auto-confirm-rules/${ruleId}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+/** Delete a rule (soft delete). Nodes it already confirmed stay confirmed. */
+export function deleteInfraAutoConfirmRule(
+  ruleId: string,
+): Promise<InfraAutoConfirmRule> {
+  return apiFetch<InfraAutoConfirmRule>(`${BASE}/auto-confirm-rules/${ruleId}`, {
+    method: "DELETE",
   });
 }
 
