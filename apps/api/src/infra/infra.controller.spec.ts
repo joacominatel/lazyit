@@ -75,3 +75,32 @@ describe('InfraController — POST /infra/report throttling (#1134)', () => {
     expect(permsOf('report')).toEqual(['infra:report']);
   });
 });
+
+describe('InfraController — forward-compatible report body (#1138)', () => {
+  it('forwards the RAW body alongside the validated DTO', () => {
+    // The contract root is no longer strict, so the validation pipe STRIPS unknown root keys before
+    // the handler ever sees them: by the time `report` holds the DTO, what a newer agent sent is
+    // already gone. The raw Express body is the only place that evidence still exists, so the handler
+    // must hand it on — otherwise "degrade instead of reject" quietly becomes "degrade and forget".
+    const infra = { ingestReport: jest.fn() };
+    const controller = new InfraController(infra as never);
+    const raw = {
+      agentVersion: '2.0.0',
+      reportingSource: 'agent:x',
+      externalId: 'x',
+      reportedAt: '2026-07-31T12:00:00.000Z',
+      host: { hostname: 'h' },
+      deltaSince: '2026-07-31T11:00:00.000Z', // a root key this build predates
+    };
+    const validated = { ...raw, deltaSince: undefined };
+    const principal = { kind: 'service' };
+
+    controller.report(
+      validated as never,
+      { body: raw } as never,
+      principal as never,
+    );
+
+    expect(infra.ingestReport).toHaveBeenCalledWith(validated, principal, raw);
+  });
+});
