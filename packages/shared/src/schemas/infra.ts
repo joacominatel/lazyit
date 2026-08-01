@@ -484,16 +484,97 @@ function normalizeUuidValue(value: string): string {
 }
 
 /**
- * One corroborating identifier, canonicalised at parse time (#1138). Every field degrades rather
- * than rejects — `.catch("")` covers a missing/wrong-typed key, and an identifier left with no usable
- * value is dropped by the array below instead of 400-ing the whole report.
+ * dmidecode serial placeholders that mean "no real serial" — OEMs ship these literal strings on
+ * boards nobody flashed. Lower-cased for a case-insensitive match. `"0"` is also caught by the
+ * all-same-char guard below, but listed for clarity.
+ */
+const SERIAL_JUNK_PLACEHOLDERS = new Set([
+  "to be filled by o.e.m.",
+  "system product name",
+  "default string",
+  "none",
+  "not specified",
+  "o.e.m.",
+  "not applicable",
+  "0",
+]);
+
+/**
+ * SMBIOS/platform UUIDs shipped verbatim on whole production runs of consumer boards. All-zero and
+ * all-F are also caught by the repeated-character rule once separators are stripped; they are listed
+ * because naming them is the documentation, and a reader should not have to derive it.
+ */
+const PLACEHOLDER_IDENTITY_UUIDS = new Set([
+  "03000200-0400-0500-0006-000700080009",
+  "00000000-0000-0000-0000-000000000000",
+  "ffffffff-ffff-ffff-ffff-ffffffffffff",
+]);
+
+/** A single character repeated (`000000`, `......`) is a placeholder, not a real identity value. */
+const isRepeatedCharacter = (value: string): boolean => /^(.)\1*$/.test(value);
+
+/**
+ * The kinds whose canonical form is hex digits plus separators. Only these get the separator-stripped
+ * repetition check: `serial` keeps its #1081 rule verbatim (vendor formats are arbitrary, and
+ * stripping `-` from a real serial could turn a legitimate one into a false placeholder), and `other`
+ * is an opaque vendor tag we have no shape for.
+ */
+const HEX_IDENTIFIER_KINDS = new Set<AgentIdentifierKind>([
+  "machine-id",
+  "smbios-uuid",
+  "platform-uuid",
+  "windows-machine-guid",
+  "mac",
+]);
+
+/**
+ * The junk rule shared by every identity value we might promote — one list, one place. Extracted from
+ * {@link sanitizeSerial} (#1081) rather than re-derived, so `Asset.serial` and `host.identifiers`
+ * can never disagree about what counts as evidence.
+ */
+function isJunkIdentityValue(value: string): boolean {
+  return SERIAL_JUNK_PLACEHOLDERS.has(value.toLowerCase()) || isRepeatedCharacter(value);
+}
+
+/**
+ * The canonical form of an identifier value, or `undefined` when the value is JUNK (#1138).
+ *
+ * Normalisation alone was not enough: `normalizeIdentifierValue` made `Default string` and
+ * `03000200-0400-0500-0006-000700080009` *consistently spelled*, which is exactly the wrong outcome
+ * for evidence. #1141 corroborates hosts by COMPARING these values, so two unrelated boards both
+ * reporting an OEM placeholder would match as the same physical host — a confidently wrong CMDB,
+ * which is worse than an empty one. The `Asset.serial` path had refused these strings since #1081;
+ * this reuses that same list instead of opening a second door for the same junk.
+ *
+ * Callers must OMIT an identifier that sanitizes to nothing — never emit it with an empty value.
+ */
+export function sanitizeIdentifierValue(
+  kind: AgentIdentifierKind,
+  value: string,
+): string | undefined {
+  const normalized = normalizeIdentifierValue(kind, value);
+  if (!normalized || isJunkIdentityValue(normalized)) return undefined;
+  if (PLACEHOLDER_IDENTITY_UUIDS.has(normalized)) return undefined;
+  // The separators are what let junk through the check above: `00:00:00:00:00:00` and
+  // `00000000-0000-0000-0000-000000000000` are not "all the same character" until they are stripped.
+  if (HEX_IDENTIFIER_KINDS.has(kind) && isRepeatedCharacter(normalized.replace(/[-:.]/g, ""))) {
+    return undefined;
+  }
+  return normalized;
+}
+
+/**
+ * One corroborating identifier, canonicalised and SANITIZED at parse time (#1138). Every field
+ * degrades rather than rejects — `.catch("")` covers a missing/wrong-typed key, and an identifier
+ * left with no usable value (absent, empty, or junk) is dropped by the array below instead of
+ * 400-ing the whole report.
  *
  * An unrecognised `kind` becomes `other` and its wire label is preserved in `namespace`, so the
  * relabel is visible to a human and distinguishable from a different unknown kind. `namespace` is
  * also how an agent deliberately namespaces its own identifier (`{ kind: 'other', namespace:
  * 'vendor:acme-tag' }`) — the escape hatch carries meaning instead of swallowing it.
  */
-export const AgentIdentifierSchema = z
+const AgentIdentifierObjectSchema = z
   .object({
     kind: z
       .string()
@@ -516,9 +597,22 @@ export const AgentIdentifierSchema = z
     return {
       kind,
       ...(namespace ? { namespace } : {}),
-      value: normalizeIdentifierValue(kind, raw.value),
+      value: sanitizeIdentifierValue(kind, raw.value) ?? "",
     };
   });
+
+/**
+ * The wire form of {@link AgentIdentifierObjectSchema}, tolerant of a NON-OBJECT element — the same
+ * posture {@link AgentNicIpv6Schema} takes, on the same reasoning: a third-party or older collector
+ * sending the wrong shape must degrade to a dropped element, not make the whole host vanish from the
+ * inventory with a 400. A non-object has no `kind`, and a value with no kind cannot be compared to
+ * anything, so it collapses to `{}` and the array below drops it. The drop is never silent —
+ * {@link agentReportSkewPaths} records it against `host.identifiers`.
+ */
+export const AgentIdentifierSchema = z.preprocess(
+  (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {}),
+  AgentIdentifierObjectSchema,
+);
 export type AgentIdentifier = z.infer<typeof AgentIdentifierSchema>;
 
 /**
@@ -638,8 +732,10 @@ export const AgentReportSchema = z.object({
       .optional(),
     /**
      * Corroborating identity evidence for #1141 — never a dedup key on its own. Values arrive
-     * CANONICALISED (see {@link normalizeIdentifierValue}); the set is TRUNCATED past
-     * {@link AGENT_IDENTIFIERS_MAX} and valueless entries are dropped, never 400-ed.
+     * CANONICALISED and SANITIZED (see {@link sanitizeIdentifierValue}), so an OEM placeholder can
+     * never corroborate two unrelated hosts into one; the set is TRUNCATED past
+     * {@link AGENT_IDENTIFIERS_MAX} and entries left with no usable value — absent, empty, junk, or
+     * a malformed non-object element — are dropped, never 400-ed.
      */
     identifiers: z
       .array(AgentIdentifierSchema)
@@ -1000,34 +1096,18 @@ export function primaryIp(host: AgentReportHost): string | undefined {
 }
 
 /**
- * dmidecode serial placeholders that mean "no real serial" — OEMs ship these literal strings on
- * boards nobody flashed. Lower-cased for a case-insensitive match. `"0"` is also caught by the
- * all-same-char guard below, but listed for clarity.
- */
-const SERIAL_JUNK_PLACEHOLDERS = new Set([
-  "to be filled by o.e.m.",
-  "system product name",
-  "default string",
-  "none",
-  "not specified",
-  "o.e.m.",
-  "not applicable",
-  "0",
-]);
-
-/**
  * The host's hardware serial, sanitized (issue #1081): trimmed, with the well-known dmidecode junk
  * placeholders rejected (case-insensitive) and any all-same-character string (e.g. `000000`, `......`)
  * dropped. Returns `undefined` for an empty/absent/junk serial so the caller leaves the Asset serial
  * null (the raw value still survives verbatim in `specs.host.hardware.serial`). Never promote junk to
  * the unique canonical `Asset.serial`.
+ *
+ * The rule itself lives in {@link isJunkIdentityValue}, shared with {@link sanitizeIdentifierValue}
+ * so identity evidence and `Asset.serial` can never disagree about what counts as junk (#1138).
  */
 export function sanitizeSerial(host: AgentReportHost): string | undefined {
   const raw = host.hardware?.serial?.trim();
-  if (!raw) return undefined;
-  if (SERIAL_JUNK_PLACEHOLDERS.has(raw.toLowerCase())) return undefined;
-  // A single character repeated (length ≥ 1) is a placeholder, not a real serial.
-  if (/^(.)\1*$/.test(raw)) return undefined;
+  if (!raw || isJunkIdentityValue(raw)) return undefined;
   return raw;
 }
 
