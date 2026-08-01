@@ -26,11 +26,45 @@ const NODE_SPECS = {
   rack: "A3",
 };
 
+/**
+ * The same rule, one key later (ADR-0074 §3 amendment, issue #1141). A host whose `/etc/machine-id`
+ * collided with one already in use carries `identityConflict` on its node blob, and an ARCHIVED
+ * duplicate carries the `_infraMergedInto` merge provenance. Both are report/provenance bookkeeping
+ * exactly like the two above — and the node panel feeds the node's blob straight into this projection,
+ * so without an entry each would render as a raw JSON object under "Custom fields", on the panel of
+ * precisely the host an operator is trying to make sense of.
+ */
+const CONFLICTED_SPECS = {
+  ...NODE_SPECS,
+  identityConflict: {
+    reportedExternalId: "machine-id-baked",
+    peerNodeId: "node-1",
+    peerLabel: "web-01",
+    discriminator: "SN-BETA",
+    detectedAt: "2026-07-31T12:00:00.000Z",
+  },
+  _infraMergedInto: {
+    nodeId: "node-9",
+    label: "srv-app-04",
+    externalId: "machine-id-baked",
+    reportingSource: "agent:clone",
+    at: "2026-07-31T12:00:00.000Z",
+  },
+};
+
 describe("getAgentInventory — the report diagnostics are not custom fields (#1138)", () => {
   test("keeps `diagnostics` and `agentSkew` out of the custom-fields dump", () => {
     const keys = getAgentInventory(NODE_SPECS)?.extras.map(([key]) => key);
     expect(keys).not.toContain("diagnostics");
     expect(keys).not.toContain("agentSkew");
+  });
+
+  test("keeps `identityConflict` and `_infraMergedInto` out of it too (#1141)", () => {
+    const keys = getAgentInventory(CONFLICTED_SPECS)?.extras.map(([key]) => key);
+    expect(keys).not.toContain("identityConflict");
+    expect(keys).not.toContain("_infraMergedInto");
+    // Still only the human-added key — the new entries must not have swallowed anything else.
+    expect(getAgentInventory(CONFLICTED_SPECS)?.extras).toEqual([["rack", "A3"]]);
   });
 
   test("a genuinely human-added key still falls through, so nothing else was swallowed", () => {
