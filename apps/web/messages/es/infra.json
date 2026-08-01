@@ -61,7 +61,7 @@
     },
     "targetLabel": "Unificar con",
     "targetPlaceholder": "Elegí un servidor",
-    "targetDescription": "El servidor que elijas conserva su nombre, tipo, posición, responsable y activo vinculado: solo se mueve la clave de reporte. Si ya reporta con un agente propio, esa clave se reemplaza: un host que siga usándola volverá como un servidor pendiente nuevo.",
+    "targetDescription": "El servidor que elijas conserva su nombre, tipo, posición, responsable y activo vinculado. Todo lo que pertenece al agente se mueve con la clave de reporte: los datos reportados de hardware y software, el estado, el último reporte y la versión del agente — y también la IP, salvo que esa IP se haya cargado a mano. Si ya reporta con un agente propio, esa clave se reemplaza: un host que siga usándola volverá como un servidor pendiente nuevo.",
     "submit": "Unificar",
     "mergedToast": "Servidor unificado.",
     "error": "No se pudo unificar este servidor."
