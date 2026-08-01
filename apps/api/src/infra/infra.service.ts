@@ -529,12 +529,20 @@ export class InfraService {
       ),
     );
 
-    const reported = new Set<string>();
+    // WHAT THE AGENT REPORTED — computed from the WHOLE list before anything is written, and
+    // deliberately independent of what this pass manages to enrol. The retire sweep below reads it,
+    // and it must answer "did the agent still list this container?", never "did the server get to
+    // it?". Built inside the loop it stopped at the enrollment budget, so every container after the
+    // refusal looked ABSENT and its still-running node was marked OFFLINE — a false outage invented
+    // by a throttle. The budget is per service account and shared fleet-wide, and children spend it
+    // too, so exhausting it mid-list is a normal rollout event.
+    const reported = new Set(
+      containers.map((c) => containerExternalId(report.externalId, c.name)),
+    );
     const childIds: string[] = [];
     let budgetSpent = false;
     for (const container of containers) {
       const externalId = containerExternalId(report.externalId, container.name);
-      reported.add(externalId);
       // The child's whole inventory blob. Rewritten wholesale each report, exactly like the host's —
       // no `host` key, so the Reported-facts panel (which keys off `specs.host.hostname`) correctly
       // renders nothing for a container rather than an empty host card.
@@ -566,9 +574,16 @@ export class InfraService {
       // A child row costs the same enrollment slot a host does (#1134) — one report enrolling N+1
       // rows must be as bounded as one enrolling one. A spent budget REFUSES instead of throwing:
       // the host is already durable, and a 429 here would read to the agent as "nothing landed".
-      if (!this.enrollment.tryCharge(principal)) {
+      //
+      // It SKIPS, it does not BREAK. Breaking abandoned the rest of the list, so every already-known
+      // container listed after the refusal stopped having its `lastReportedAt` advanced and its
+      // RUNS_ON edge healed — the §4 staleness sweeper then retired running containers a few hours
+      // later, which is the same false outage the retire sweep above no longer produces immediately.
+      // Once refused, stop asking: a spent window stays spent for this report, and re-charging per
+      // remaining container would only add noise.
+      if (budgetSpent || !this.enrollment.tryCharge(principal)) {
         budgetSpent = true;
-        break;
+        continue;
       }
       const created = await this.prisma.infraNode.create({
         data: {
@@ -589,12 +604,15 @@ export class InfraService {
       void this.syncNodeToSearch(created.id);
     }
     if (budgetSpent) {
+      // Says exactly what happened, no more: the containers that already had nodes were refreshed,
+      // and the ones that did not have no node YET. An earlier draft of this line claimed "nothing
+      // was lost", which was both unfalsifiable and — while the sweep read a truncated list — false.
       this.logger.warn(
-        `Enrollment budget spent while reconciling ${report.host.hostname}'s containers — the remaining ones enroll on a later report. Nothing was lost.`,
+        `Enrollment budget spent while reconciling ${report.host.hostname}'s containers — containers with no node yet are NOT enrolled until a later report. Known children were still refreshed and none was retired.`,
       );
     }
 
-    await this.openMissingRunsOnEdges(childIds, hostNodeId);
+    await this.openMissingRunsOnEdges(childIds, hostNodeId, now);
 
     // A container the reporter no longer lists goes OFFLINE. NOT soft-deleted: deleting is the
     // human's call (the existing Discard), and an auto-delete would also churn — the dedup index is
@@ -618,23 +636,57 @@ export class InfraService {
    * create-once, so a child whose edge was lost to a transient failure is not left floating
    * unparented on the canvas forever.
    *
-   * Only an ABSENT active edge is opened. A child that already has one is left completely alone,
-   * which is what keeps this compatible with the one-active-RUNS_ON-per-source partial unique index
-   * (ADR-0070 §3) and with a human who deliberately re-parented a node. // A human who CLOSES the
-   * edge does get it re-opened on the next report: "this container executes on this host" is a
-   * reported fact, not a layout choice, and the same rule already applies to the node's IP.
+   * An edge to a LIVE target is left completely alone, which is what keeps this compatible with the
+   * one-active-RUNS_ON-per-source partial unique index (ADR-0070 §3) and with a human who
+   * deliberately re-parented a node. // A human who CLOSES the edge does get it re-opened on the next
+   * report: "this container executes on this host" is a reported fact, not a layout choice, and the
+   * same rule already applies to the node's IP.
+   *
+   * An edge to a DISCARDED (soft-deleted) target is NOT left alone — it is closed and re-opened here.
+   * Discarding a node soft-deletes the row and leaves its edges open, so a re-discovered host gets a
+   * brand-new node (the dedup lookup is live-scoped) while its children stay wired to the dead one:
+   * the child floats off the map and the new host shows no children. Only the soft-deleted case is
+   * healed, so a live re-parent stays the human's. Prisma's soft-delete extension filters only the
+   * TOP-LEVEL operation, so the nested `target` read genuinely returns the discarded row rather than
+   * `null` — which is exactly what makes the discarded case detectable here.
    */
   private async openMissingRunsOnEdges(
     childIds: string[],
     hostNodeId: string,
+    now: Date,
   ): Promise<void> {
     if (childIds.length === 0) return;
-    const active: { sourceId: string }[] =
+    const active: {
+      id: string;
+      sourceId: string;
+      target: { deletedAt: Date | null } | null;
+    }[] =
       (await this.prisma.infraEdge.findMany({
         where: { sourceId: { in: childIds }, kind: 'RUNS_ON', endedAt: null },
-        select: { sourceId: true },
+        select: {
+          id: true,
+          sourceId: true,
+          target: { select: { deletedAt: true } },
+        },
       })) ?? [];
-    const parented = new Set(active.map((e) => e.sourceId));
+    const parented = new Set<string>();
+    const toDiscardedHost: string[] = [];
+    for (const edge of active) {
+      // A missing `target` row can only mean the node is gone entirely (the FK cascades), which is
+      // the same orphan case: close the edge and re-parent.
+      if (edge.target && edge.target.deletedAt === null) {
+        parented.add(edge.sourceId);
+      } else {
+        toDiscardedHost.push(edge.id);
+      }
+    }
+    if (toDiscardedHost.length) {
+      // Close BEFORE opening: the partial unique index allows exactly one active RUNS_ON per source.
+      await this.prisma.infraEdge.updateMany({
+        where: { id: { in: toDiscardedHost } },
+        data: { endedAt: now },
+      });
+    }
     for (const sourceId of childIds) {
       if (parented.has(sourceId)) continue;
       try {
