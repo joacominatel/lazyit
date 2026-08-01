@@ -3380,13 +3380,45 @@ describe('InfraService', () => {
         staleAfterSeconds: 5400,
       });
 
-      const ack = await service.ingestReport(reportEchoing(), AGENT_SA);
+      const ack = await service.ingestReport(reportEchoing(7), AGENT_SA);
 
       expect(ack.policy?.revision).toBe(7);
       const createArg = firstArg<{
         data: { policyStaleAfterSeconds?: number };
       }>(prisma.infraNode.create);
       expect(createArg.data.policyStaleAfterSeconds).toBe(5400);
+    });
+
+    it('an agent that echoes NOTHING is never stamped with a served threshold — it is not running one', async () => {
+      // `policyStaleAfterSeconds` records the staleness the node's agent is actually judged by, and
+      // an agent that predates the policy channel never receives, caches or applies one: it reports
+      // on whatever `install.sh` gave its timer. Stamping the resolved 2700 s on its row would
+      // silently override a deliberately tuned INFRA_AGENT_STALE_AFTER_MS for exactly the hosts the
+      // env var is documented to still cover.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-old',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'web-09',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-old',
+        state: 'CONFIRMED',
+      });
+      agentPolicy.resolveForReport.mockResolvedValue({
+        ...AGENT_POLICY_DEFAULT,
+        revision: 7,
+        staleAfterSeconds: 5400,
+      });
+
+      await service.ingestReport(reportEchoing(), AGENT_SA);
+
+      const arg = firstArg<{
+        data: { policyStaleAfterSeconds?: number };
+      }>(prisma.infraNode.update);
+      expect(arg.data.policyStaleAfterSeconds).toBeUndefined();
     });
 
     it('the echoed policyRevision is PERSISTED — the difference between having config and believing it', async () => {
@@ -3523,6 +3555,7 @@ describe('InfraService', () => {
           externalId: 'machine-id-policy',
           reportedAt: '2026-08-01T12:00:00.000Z',
           host: { hostname: 'web-09', containers: [{ name: 'redis' }] },
+          policyRevision: 3,
         }),
         AGENT_SA,
       );
@@ -3533,6 +3566,39 @@ describe('InfraService', () => {
         data: { policyStaleAfterSeconds?: number };
       };
       expect(childArg.data.policyStaleAfterSeconds).toBe(90_000);
+    });
+
+    it("a pre-#1140 host's containers are not stamped either — a child follows its host exactly", async () => {
+      // Containers arrived in contract v2 (#1139), one release BEFORE the policy channel, so an
+      // agent that reports children while echoing no revision is a real shape, not a hypothetical.
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-host', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-child' });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      agentPolicy.resolveForReport.mockResolvedValue({
+        ...AGENT_POLICY_DEFAULT,
+        staleAfterSeconds: 90_000,
+      });
+
+      await service.ingestReport(
+        AgentReportSchema.parse({
+          agentVersion: '1.9.0',
+          reportingSource: 'agent:policy',
+          externalId: 'machine-id-policy',
+          reportedAt: '2026-08-01T12:00:00.000Z',
+          host: { hostname: 'web-09', containers: [{ name: 'redis' }] },
+        }),
+        AGENT_SA,
+      );
+
+      const childArg = (
+        prisma.infraNode.create.mock.calls as unknown[][]
+      )[1][0] as {
+        data: { policyStaleAfterSeconds?: number };
+      };
+      expect(childArg.data.policyStaleAfterSeconds).toBeUndefined();
     });
   });
 });
