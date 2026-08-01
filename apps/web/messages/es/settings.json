@@ -223,7 +223,7 @@
     "stale": {
       "label": "Considerar un host fuera de línea tras (minutos)",
       "help": "Cuánto espera lazyit desde el último informe de un host antes de marcarlo fuera de línea en el mapa y generar una notificación.",
-      "invalid": "Ingresa un número entero de minutos, como mínimo {min}.",
+      "invalid": "Ingresa un número entero de minutos entre {min} y {max}.",
       "belowInterval": "Debe ser mayor que el intervalo de informe, o un host sano quedará marcado fuera de línea entre dos de sus propios informes."
     },
     "softwareMax": {
