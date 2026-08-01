@@ -3746,6 +3746,37 @@ describe('InfraService', () => {
       });
     });
 
+    it("a clone's brand-new row is asked for its list, fingerprint or no fingerprint (#1142)", async () => {
+      // The THIRD resend site, and the same worst case as the ordinary create branch: a clone gets a
+      // new row holding no package list, so an `unchanged` claim about it can never corroborate. It
+      // was keyed on a fingerprint having arrived, so a claim carrying none left the split-off clone
+      // with a permanently empty inventory.
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce(null);
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('web-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      const clonedReport = reportFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02');
+      const ack = await service.ingestReport(
+        AgentReportSchema.parse({
+          ...clonedReport,
+          softwareState: 'unchanged',
+        }),
+        AGENT_SA,
+      );
+
+      expect(ack.softwareResend).toBe(true);
+    });
+
     it("the clone's NEXT report refreshes its own node and never re-nags", async () => {
       prisma.infraNode.findFirst
         .mockResolvedValueOnce(ORIGINAL)
