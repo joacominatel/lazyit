@@ -152,6 +152,17 @@ export const CreateInfraNodeSchema = z.strictObject({
   y: z.number().optional(),
 });
 
+/**
+ * Why a patch may only ever DETACH (#1117). Written for the operator holding the 400, so it names
+ * what is accepted, what a re-point would leave behind, and the route that does link an asset.
+ *
+ * Exported because the same answer is given in two places: this contract, which is what an HTTP
+ * caller actually hits, and `InfraService.updateNode`, which repeats the refusal for any caller
+ * that did not come through the validation pipe. One string, so the two cannot drift.
+ */
+export const INFRA_NODE_ASSET_REPOINT_ERROR =
+  "A node's asset link can only be REMOVED through this patch, never re-pointed: `assetId` accepts null and nothing else. Re-pointing would orphan the asset the node is carrying — one lazyit auto-created would stay in inventory owned by nobody — so it is refused rather than done by halves. Send `assetId: null` to detach (an auto-created asset is soft-deleted, a pre-existing one is left intact and merely un-linked). There is no re-attach for an existing node: the one route that links a node to a particular asset is creating the node against it (`POST /infra/nodes` with `assetId`). ADR-0070 §5.";
+
 /** Partial update; any subset of the editable fields (an empty body is rejected). */
 export const UpdateInfraNodeSchema = requireAtLeastOneKey(
   z
@@ -159,7 +170,10 @@ export const UpdateInfraNodeSchema = requireAtLeastOneKey(
       kind: InfraNodeKindSchema,
       label: z.string().trim().min(1).max(200),
       status: InfraNodeStatusSchema,
-      assetId: z.cuid().nullable(), // null detaches the asset link
+      // DETACH-ONLY (#1117). `null` runs the ADR-0070 §5 detach; any other value is refused with
+      // {@link INFRA_NODE_ASSET_REPOINT_ERROR}. The narrowed type is deliberate — it is what makes
+      // a re-point a compile error in `apps/web` rather than a 400 nobody sees until production.
+      assetId: z.null({ error: INFRA_NODE_ASSET_REPOINT_ERROR }),
       // Format-validated (ADR-0090, #847); `null` clears the IP (stamped MANUAL server-side).
       ipAddress: IpAddressSchema.nullable(),
       shortcuts: InfraShortcutsSchema.nullable(),
