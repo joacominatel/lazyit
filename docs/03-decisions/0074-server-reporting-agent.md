@@ -850,10 +850,16 @@ behaviour, self-repaired, instead of permanent silent loss. **The failure mode i
 than necessary", never "deleted the operator's inventory."** All three cross-version directions — new
 agent → old server, new agent → new server, old agent → new server — are asserted by test.
 
-`unavailable` and `disabled` are deliberately **not** gated. Neither carries a list either way, and
-both are byte-for-byte what a pre-#1142 agent put on the wire when its collector failed or its policy
-turned software collection off, so an old server reads them exactly as it always did; gating them would
-change nothing on the wire and would only cost the cache.
+`unavailable` and `disabled` are deliberately **not** gated, because neither has a list to withhold:
+both carry no `software` key with or without the handshake, so gating them would change nothing on the
+wire and would only cost the cache. An old server reads both as the pre-#1142 absent key and clears —
+exactly right for `disabled`, and for `unavailable` an empty panel until the next successful collection
+sends the whole list again, which it does precisely because the agent holds no evidence against that
+server. That is *not* identical to what a pre-#1142 agent did in the same situation: it sent an empty
+**array** when its collector failed (the collector folded a null stdout into `[]`), so the old server
+stored an empty list rather than none. The panel is equally empty either way and neither state is
+durable. **`unchanged` is the only branch whose omission can cost an inventory permanently, and it is
+the only one gated.**
 
 **`softwareHash` is corroboration, never authority.** The wire's fingerprint is read on exactly one
 branch — an omitted list, where it is the claim being checked. A list that *arrives* is fingerprinted
