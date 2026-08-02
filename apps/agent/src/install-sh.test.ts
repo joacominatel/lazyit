@@ -122,7 +122,8 @@ describe("uninstall — nobody deploys what they cannot cleanly remove", () => {
 describe("--url is the instance BASE url, and a wrong one is named instead of blamed on the token (#1166)", () => {
   test("the address of this script is refused, and BEFORE anything is downloaded", () => {
     const guard = script.indexOf("not the address of this script");
-    const download = script.indexOf("/api/agent/download");
+    // The real curl, not the `--help` line that also names the path it appends.
+    const download = script.indexOf('"$URL/api/agent/download');
     expect(guard).toBeGreaterThan(-1);
     expect(download).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(download);
