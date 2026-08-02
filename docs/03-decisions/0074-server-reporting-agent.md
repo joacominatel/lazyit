@@ -713,10 +713,17 @@ Three parts, and deliberately **not** an engine:
    remedy for it. One broadcast **`infra.identity_conflict`** nudge is emitted
    ([[0056-in-app-notification-bell]]), deduped `infra.identity_conflict:<peerNodeId>:<discriminator>`
    so a clone checking in every 15 minutes nudges **once** — the same one-per-event discipline §4's
-   `infra.agent_offline` follows. The summary names the **actual remedy** (`systemd-firstboot
-   --setup-machine-id` on the clones), because "identity conflict detected" would leave the operator
-   exactly as stuck as the silence did. It is **bell-only**: adding a type to the email allowlist is a
-   product call ([[0079-instance-smtp-outbound-email]] fork #1), not an implementation detail.
+   `infra.agent_offline` follows. The summary names the **actual remedy**, because "identity conflict
+   detected" would leave the operator exactly as stuck as the silence did — and since #1144 the remedy
+   is **chosen from the reporting host's `os.family`**: `systemd-firstboot --setup-machine-id` on the
+   clones on Linux, `sysprep /generalize` on Windows (the very property §3's Windows identity section
+   cites as the reason `MachineGuid` is a safer key than a baked machine-id). The colliding FACT is
+   renamed with it — the title and summary say `machine-id` on Linux and `MachineGuid` on Windows,
+   because a Windows operator has no `/etc/machine-id` to go and look at. Families lazyit ships no
+   agent for (`darwin`, `bsd`, `other`) get the action with **no command**: naming one for a platform
+   this product has never run on is the same defect wearing a different OS. It is **bell-only**:
+   adding a type to the email allowlist is a product call
+   ([[0079-instance-smtp-outbound-email]] fork #1), not an implementation detail.
 3. **Re-key / merge-into as a HUMAN action.** `POST /infra/nodes/:id/merge-into` transplants the
    addressed node's reporting key onto an existing node and soft-deletes the duplicate, in **one
    transaction and in that order** (the partial-unique index covers live rows only, so the source must
@@ -1463,6 +1470,19 @@ first enumerates nothing, `Win32_NetworkAdapter` joined to `Win32_NetworkAdapter
 Index (v4 **and** v6), `Win32_BIOS`, `Win32_ComputerSystemProduct`, and
 `Win32_SystemEnclosure.ChassisTypes` → `chassis`.
 
+**A per-fact failure inside that one call is EXPLAINED, not silent.** The script runs under
+`$ErrorActionPreference='SilentlyContinue'` — correct, because a class this SKU does not have must
+leave its key null rather than abort the document — but that made the single Windows sweep the only
+collector in this agent that could degrade with nothing in `diagnostics.warnings`, while every Linux
+probe warns. So the script clears `$Error`, and emits it as a bounded `errors[]` (last key in the
+hashtable literal, which is evaluated in written order, so it sees what the earlier keys raised);
+`buildWindowsHost` files each line as a warning and adds one per fact group the document came back
+empty for, naming the class and what it cost. Three rules keep the column readable: no document ⇒
+nothing (`collectHost` already files the one note saying the whole sweep failed), a policy-vetoed
+group is explained once by the policy's own note, and a healthy host is silent. This is what makes
+§2's rule — a degraded probe is reported in `diagnostics.warnings` rather than guessed around
+(#1138) — true on Windows as it already is on Linux.
+
 Two things it must NEVER do, and both are enforced by a test over the script text rather than left to
 memory. **Never `Win32_Product`:** enumerating that class makes the Windows Installer run a
 consistency check that RECONFIGURES every installed MSI package, floods the event log and takes
@@ -1553,7 +1573,14 @@ trigger occurs, with `-MultipleInstances IgnoreNew` making an overlap at boot a 
 corrections came with it: `-RepetitionDuration` is now **omitted** (the schema: "if no value is
 specified for the duration, then the pattern is repeated indefinitely"; the `[TimeSpan]::MaxValue`
 idiom is reported to fail XML validation from Windows 10 / Server 2016 on), with a long finite
-duration as the fallback for the older cmdlet that refuses an interval without one; and `-RandomDelay`
+duration as the fallback — wrapped around **both** calls that can reject a repetition, because the two
+documented errors name two different cmdlets: `New-ScheduledTaskTrigger` refuses an interval with no
+duration on the older cmdlet ("The RepetitionInterval and RepetitionDuration Job trigger parameters
+must be specified together"), while the MaxValue rejection ("(12,42):Duration:P99999999DT23H59M59S")
+comes from the cmdlet that WRITES the task, since the XML is validated at registration and not at
+construction. Wrapping only construction would have left the registration case aborting the install
+after the binary and the token file were on disk, which is exactly what the fallback exists to
+prevent; a second failure rethrows rather than retrying an identical registration. And `-RandomDelay`
 moved to the **time trigger**, because `New-ScheduledTaskSettingsSet` publishes no such parameter and
 passing it there throws under `$ErrorActionPreference='Stop'`, after the token file is already on
 disk — and it goes on the time trigger *only*, because `timeTriggerType` extends the trigger base

@@ -391,9 +391,11 @@ named in the summary as corroborating evidence. `severity: warning`, metadata = 
 deep-linked (by type) to the topology map where the review tray holds the separated host. Dedupe
 `infra.identity_conflict:<peerNodeId>:<discriminator>` and emitted **only on the branch that creates the
 second node** → one nudge per newly-detected colliding host, never one per 15-minute check-in — the same
-one-per-event rule `infra.agent_offline` follows above. The summary names the **remedy**
-(`systemd-firstboot --setup-machine-id` on the clones), because an alert an operator cannot act on is a
-worse outcome than the silence it replaced. It stays **bell-only**: the email allowlist
+one-per-event rule `infra.agent_offline` follows above. The summary names the **remedy for the
+reporting host's platform** (`systemd-firstboot --setup-machine-id` on Linux, `sysprep /generalize` on
+Windows; the action with no command for a family lazyit ships no agent for), because an alert an
+operator cannot act on is a worse outcome than the silence it replaced — and one naming a command
+their OS does not have is worse still. It stays **bell-only**: the email allowlist
 ([[0079-instance-smtp-outbound-email]] fork #1) is a product call, not something a feature adds to itself.
 
 All three are additive closed-enum literals (§5): the golden shared test asserts them, and — because the web bell's
