@@ -506,6 +506,11 @@ respuestas:
 - **Desactivar la recopilación de software** en la configuración del agente. Eso borra la lista de
   paquetes almacenada, como se explica más arriba, pero es un cambio de configuración: no se registra
   como miles de eliminaciones.
+- **Desactivar el recolector de discos, o excluir todos los puntos de montaje**, en la configuración
+  del agente. Eso deja a lazyit sin ninguna lectura de discos para comparar, y "sin lectura" no es
+  "los discos desaparecieron": no se registra nada. (Excluir solo *algunos* puntos de montaje es
+  distinto: la cantidad restante sí es una lectura real, y su cambio se registra — la misma entrada
+  que verías si la máquina realmente hubiera perdido un disco.)
 
 **Una máquina que estuvo mucho tiempo fuera de línea tiene un tope.** Cuando un host vuelve después de
 perderse varias ventanas de parches, su primer reporte puede diferir legítimamente en miles de

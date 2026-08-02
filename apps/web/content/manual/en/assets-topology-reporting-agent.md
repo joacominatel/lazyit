@@ -470,6 +470,11 @@ than answers:
 - **A container restarting.** That is liveness, and it is already on the node's status.
 - **Turning software collection off** in the agent settings. That clears the stored package list, as
   documented above, but it is a settings change — it is not recorded as thousands of removals.
+- **Turning the disk collector off, or excluding every mountpoint**, in the agent settings. That
+  leaves lazyit with no disk reading to compare against, and "no reading" is not "the disks are gone",
+  so nothing is recorded. (Excluding only *some* mountpoints is different: the remaining count is a
+  real reading, and a change to it is recorded — the same entry you would see if the machine really
+  had lost a disk.)
 
 **A machine that has been offline for a long time is capped.** When a host comes back after missing
 several patch windows, its first report can legitimately differ by thousands of packages. lazyit
