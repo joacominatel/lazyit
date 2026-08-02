@@ -41,6 +41,7 @@ import {
   InfraIdentityMatchSchema,
   InfraImpactResponseSchema,
   InfraNodeDetailSchema,
+  InfraNodeFactChangeListSchema,
   InfraNodeKindSchema,
   InfraNodeListItemSchema,
   InfraNodeSchema,
@@ -66,6 +67,9 @@ class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
 class InfraNodeDetailDto extends createZodDto(InfraNodeDetailSchema) {}
 class InfraImpactResponseDto extends createZodDto(InfraImpactResponseSchema) {}
+class InfraNodeFactChangeListDto extends createZodDto(
+  InfraNodeFactChangeListSchema,
+) {}
 class UpdateInfraNodeDto extends createZodDto(UpdateInfraNodeSchema) {}
 class InfraEdgeDto extends createZodDto(InfraEdgeSchema) {}
 class CreateInfraEdgeDto extends createZodDto(CreateInfraEdgeSchema) {}
@@ -282,6 +286,30 @@ export class InfraController {
   @ApiOkResponse({ type: InfraNodeDetailDto })
   getNode(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
     return this.infra.getNodeDetail(id, principal);
+  }
+
+  @Get('nodes/:id/changes')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      "A node's recorded fact history, newest first — what MOVED (packages added/removed/upgraded; OS, kernel, memory, disk, serial, container image), never one row per report. Keyset-paginated on the append-only id (ADR-0074 §3 amendment).",
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'cursor', required: false, type: Number })
+  @ApiOkResponse({ type: InfraNodeFactChangeListDto })
+  listNodeChanges(
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.infra.listNodeFactChanges(id, {
+      ...(limit !== undefined
+        ? { limit: this.parsePositiveInt(limit, 'limit') }
+        : {}),
+      ...(cursor !== undefined
+        ? { cursor: this.parsePositiveInt(cursor, 'cursor') }
+        : {}),
+    });
   }
 
   @Get('nodes/:id/impact')
@@ -574,5 +602,18 @@ export class InfraController {
       throw new BadRequestException(`Invalid ${name}`);
     }
     return result.data;
+  }
+
+  /**
+   * A positive integer query param (the Changes tab's `limit`/`cursor`). REJECTED rather than coerced:
+   * these two reach a `take` and a keyset `WHERE id <`, and a silent NaN would page unpredictably.
+   * The service still clamps `limit` to its own ceiling — this only refuses what is not a number.
+   */
+  private parsePositiveInt(value: string, name: string): number {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new BadRequestException(`Invalid ${name}`);
+    }
+    return parsed;
   }
 }

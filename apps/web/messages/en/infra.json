@@ -290,7 +290,35 @@
     "impactCount": "{count, plural, one {# node affected if this goes down} other {# nodes affected if this goes down}}",
     "impactDepth": "{depth, plural, one {# hop} other {# hops}}",
     "deleteAction": "Remove from map",
-    "loading": "Loading node…"
+    "loading": "Loading node…",
+    "tabs": {
+      "overview": "Overview",
+      "changes": "Changes"
+    }
+  },
+  "changes": {
+    "emptyTitle": "No recorded changes yet",
+    "emptyDescription": "Nothing tracked on this node has changed yet. Only real moves are recorded — a package installed, removed or upgraded, or the OS, kernel, memory, disk, serial or container image changing. A node nobody's agent reports on never gets an entry.",
+    "loadError": "Couldn't load the change history",
+    "loadMore": "Load older changes",
+    "loadingMore": "Loading…",
+    "kind": {
+      "PACKAGE_ADDED": "Installed",
+      "PACKAGE_REMOVED": "Removed",
+      "PACKAGE_VERSION": "Version",
+      "FACT_CHANGED": "Changed"
+    },
+    "facts": {
+      "hostOsName": "Operating system",
+      "hostOsVersion": "OS version",
+      "hostOsKernel": "Kernel",
+      "hostMemoryBytes": "Memory (bytes)",
+      "hostDisksTotalBytes": "Disk capacity (bytes)",
+      "hostDisksCount": "Disk count",
+      "hostHardwareSerial": "Hardware serial",
+      "containerImage": "Container image",
+      "containerImageDigest": "Image digest"
+    }
   },
   "delete": {
     "title": "Remove this node from the map?",

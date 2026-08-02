@@ -603,6 +603,67 @@ that enumerates installed MSI packages — asking that question makes Windows *r
 installed package, which floods the event log and takes minutes — and the deprecated `wmic` command,
 which Microsoft removed in Windows 11 24H2 and Server 2025.
 
+## What changed, and when
+
+Every panel above shows a machine **as it is now**. The **Changes** tab on a node shows the moments it
+**moved** — the answer to *"someone upgraded OpenSSL on db-01 last Tuesday and broke the app"*.
+
+Open a machine on the infrastructure diagram and switch from **Overview** to **Changes**. Each entry
+names what changed, its value before and after, and when lazyit recorded it. Newest first, with a
+button at the bottom to load older entries.
+
+**Only real changes are recorded.** A host that checks in every five minutes and never changes adds
+nothing at all — the list stays empty, however long it has been reporting. An entry appears when:
+
+- a package is **installed**, **removed**, or its **version changes** (an upgrade or a downgrade);
+- the **operating system**, its **version** or the **kernel** changes;
+- **memory**, **total disk capacity** or the **number of disks** changes;
+- the **hardware serial** changes;
+- a container's **image** or its **image digest** changes — that last one is the useful one, because a
+  digest moves when a `:latest` tag is re-pulled and nothing else on screen would tell you.
+
+**A few things are deliberately not recorded**, because they would fill the list with noise rather
+than answers:
+
+- **A machine's first report.** The first time lazyit sees a fact, it simply remembers it — it does not
+  record "3,000 packages installed". The same applies the first time any individual fact appears on a
+  host that had been reporting without it (a serial showing up after you give the agent root, for
+  example). Changes start being recorded from the second observation onwards, which is also why a
+  freshly upgraded instance starts with an empty list on every machine.
+- **A fact that disappears.** If the agent stops running as root, the serial stops arriving — that is
+  the agent losing an ability, not the chassis being swapped, so nothing is recorded.
+- **A container restarting.** That is liveness, and it is already on the node's status.
+- **Turning software collection off** in the agent settings. That clears the stored package list, as
+  documented above, but it is a settings change — it is not recorded as thousands of removals.
+- **Turning the disk collector off, or excluding every mountpoint**, in the agent settings. That
+  leaves lazyit with no disk reading to compare against, and "no reading" is not "the disks are gone",
+  so nothing is recorded.
+- **What an agent-settings change makes a machine stop reporting.** Excluding *some* mountpoints,
+  excluding package names, choosing which package managers count or lowering the package limit all
+  change what a machine **reports** — nothing was unplugged and nothing was uninstalled. lazyit knows
+  which generation of the settings each report was collected under, so on the first report a machine
+  sends after picking up a change it skips the disk and package entries and takes the new lists as its
+  starting point; from the next report on it is comparing like with like again. Facts no setting can
+  filter — the operating system, the kernel, memory, the serial, a container's image — are still
+  recorded in that same report. Two details worth knowing: the settings are estate-wide, so editing
+  them for one machine costs every machine that one report; and a change made in a host's **own**
+  `/etc/lazyit-agent/config` is invisible to lazyit, so tightening that file's exclusions there *can*
+  show up as packages being removed.
+
+**A machine that has been offline for a long time is capped.** When a host comes back after missing
+several patch windows, its first report can legitimately differ by thousands of packages. lazyit
+records up to **200 entries per machine per report** so one check-in cannot bury the list, and up to
+**500 per machine per hour**. Anything beyond that is not recorded; already-recorded entries are never
+removed. In normal operation you will never approach either number.
+
+The tab is **read-only** — entries are written by the agent and nothing else, and there is nothing to
+edit or delete. Removing a machine from the map hides its history along with the machine; restoring it
+brings both back.
+
+> [!info] No agent update needed
+> This works with the agents you already have installed. lazyit compares each report against what it
+> already holds, so nothing on your hosts has to change for the Changes tab to start filling.
+
 ## Configure every agent from one screen
 
 You do not edit agents host by host. **Settings → Instance → Reporting agents** sets the policy for

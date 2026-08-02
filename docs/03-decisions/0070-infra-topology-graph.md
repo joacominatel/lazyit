@@ -42,8 +42,11 @@ This is a **new major** for lazyit. The ADR fixes the **data model and the phasi
 > `reportingSource`, `externalId`, `lastReportedAt` — exist nullable now, but no agent code, no review
 > tray, no `(reportingSource, externalId)` composite unique index yet). **Future:** network depth
 > (VLAN/ports/subnets/IPAM), metrics/telemetry & alerting, per-kind `specs` schema validation (the
-> existing `TODO(specs)` debt), multi-board layouts, a `SERVICE` kind linked to [[application]], a
-> dedicated `InfraNodeHistory`. **v1 follow-ups:** **#750** — enrich `GET /infra/nodes` with the
+> existing `TODO(specs)` debt), multi-board layouts, a `SERVICE` kind linked to [[application]], ~~a
+> dedicated `InfraNodeHistory`~~ — **partly delivered 2026-08-02 (#1143)** as the append-only
+> `InfraNodeFactChange` ([[0074-server-reporting-agent]] §3 amendment): what the reporting agent
+> observed MOVE (packages, OS/kernel/memory/disk/serial, a container's image digest), not a log of
+> every column edit. Curation changes are still recorded nowhere. **v1 follow-ups:** **#750** — enrich `GET /infra/nodes` with the
 > linked asset's name/owner so the Servers list shows it inline and search can match asset name (today
 > the list row carries only `assetId`, surfaced as a Tracked/Graph-only indicator; the full name +
 > owners are one click away in the drill-in panel); and **asset→secret linkage** so the panel's
@@ -371,7 +374,8 @@ create also needs the relevant `assets:*`). Confirming a PENDING node needs `inf
   `(reportingSource, externalId)`, the composite unique index.
 - **Future** — network depth (VLAN/ports/subnets, real IPAM), metrics/telemetry overlay, alerting,
   per-kind `specs` schema validation (existing `TODO(specs)` debt), multi-board layouts, `SERVICE` node
-  kind linked to the existing `Application` entity, dedicated `InfraNodeHistory`.
+  kind linked to the existing `Application` entity, ~~dedicated `InfraNodeHistory`~~ — partly
+  delivered as `InfraNodeFactChange` (#1143; see the box above).
 
 ## Scope cuts (explicit non-goals)
 
