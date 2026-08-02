@@ -49,7 +49,11 @@ The button opens a short, guided wizard with three steps:
    The address is **your own lazyit instance** — the agent only ever talks to the server you run, and
    it must be the **public HTTPS origin** (the address you use in a browser, in front of the reverse
    proxy) — **never** the raw web port (`:3000`), which has no route for the agent download and will
-   make the install fail. Run it **as root** on Linux, or **as Administrator** on Windows. The token
+   make the install fail. It is the **base** address and nothing more: `https://your-instance`, not
+   `https://your-instance/install.sh` (the address of the script itself). The installer appends its
+   own paths, so a script address would make every request `…/install.sh/api/agent/download`; both
+   installers now check for that and say so, instead of failing later with a download error that
+   reads like a bad token. Run it **as root** on Linux, or **as Administrator** on Windows. The token
    is shown **only once**, so copy it (or download it) before continuing. If you'd rather inspect every step, expand **Install
    manually (step by step)** for the same install done by hand (download the binary, install it, write
    the config file, send a test report).

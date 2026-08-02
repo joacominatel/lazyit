@@ -1321,6 +1321,46 @@ not the other, all stopping at the installer instead of nowhere. A build that pu
 from the same image and failing closed there would brick every install during a rollback;
 `--require-checksum` makes it fatal for an operator who wants that.
 
+**Amendment (2026-08-02, #1166) — the installers are ASCII, and `--url` is checked before anything is
+downloaded.** Two defects found on the **first real Windows host**, during first-run validation.
+
+**`install.ps1` could not be parsed at all.** It shipped as UTF-8 with **no byte-order mark** and 45
+lines carrying non-ASCII characters. **Windows PowerShell 5.1 decodes a `.ps1` as ANSI unless a BOM
+says otherwise** — and 5.1 is what ships with Windows, so it is what a fresh host has. Every em dash
+came back through Windows-1252 as three characters ending in U+201D, a smart quote, which derails the
+token stream: nine cascading parse errors pointing at comment text, and nothing ran. PowerShell 7
+reads UTF-8 by default and parses the same bytes fine, which is exactly why review missed it. The
+irony worth recording is that the script already reasons about this trap **in the opposite
+direction** for the config file it writes ("`-Encoding UTF8` writes a BOM, which makes the FIRST key
+of the file unparseable"): the hazard was understood for the file being written and missed for the
+file doing the writing. **Both installers are now pure ASCII, enforced by a test**
+(`apps/agent/src/installers-encoding.test.ts`) that fails on any code point above U+007F. **ASCII
+rather than a BOM**, deliberately: these files are downloaded over HTTP, piped through `irm | iex` and
+`curl | sh`, saved by browsers and re-encoded by editors, so ASCII removes the dependency instead of
+betting on three leading bytes surviving every hop. `install.sh` is covered by the same rule even
+though POSIX `sh` does not care — it is the script `install.ps1` was written from and shares whole
+paragraphs of its prose, so an em dash there is a live source of the next one pasted into a file
+where it becomes a parse error.
+
+**`--url`/`-Url` pointing at the script itself failed looking like a bad token.** The operator passed
+`-Url http://<host>:8080/install.ps1`. Every request is built by appending a path, so the installer
+asked for `…/install.ps1/api/agent/download` and the failure that reached the operator was the
+download error, which names the token as a likely cause — sending them to rotate a Service Account
+credential that was never wrong. **Both installers now check the base URL before downloading
+anything**, and both carry the identical contract: **fatal** for the address of either installer, for
+an `/api` endpoint (which would produce `/api/api/…`), and for a missing scheme; **a warning that
+continues** for any other path, because lazyit sets no Next.js `basePath` so a path is almost always
+the same mistake in another shape, but a prefix-stripping reverse proxy really can mount an instance
+under one and **re-running the installer is the documented upgrade path** — refusing outright could
+break a deployment that works today. The fatal branches suggest the URL the operator meant. Both
+`--help`/`.PARAMETER Url` now state the base-URL form and name the wrong one.
+
+**What reaches an existing host.** Both installers are static assets under `apps/web/public/`, so an
+instance picks them up on its next deploy: no migration, no agent change, no wire-contract change.
+Hosts that already installed successfully are untouched — this blocked an install, it never corrupted
+one. **Not verified on Windows PowerShell 5.1**: this repo has no interpreter to ask, and installing
+on a real host remains the only proof the script RUNS.
+
 ### §7 — The agent
 
 - **A Bun single-file executable**, not a Go/Rust binary and not a shell script. It imports the
