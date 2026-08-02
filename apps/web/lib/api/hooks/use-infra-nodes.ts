@@ -1,4 +1,5 @@
 import {
+  useInfiniteQuery,
   useMutation,
   useQueries,
   useQuery,
@@ -37,6 +38,7 @@ import {
   type CreateInfraNodeInput,
   deleteInfraNode,
   detachInfraNodeSecret,
+  getInfraNodeChanges,
   getInfraNodeDetail,
   getInfraNodeEdges,
   getInfraNodeEdgesHistory,
@@ -77,6 +79,7 @@ export const infraKeys = {
   edgeHistory: (nodeId: string) =>
     [...infraKeys.all, "edgeHistory", nodeId] as const,
   impact: (nodeId: string) => [...infraKeys.all, "impact", nodeId] as const,
+  changes: (nodeId: string) => [...infraKeys.all, "changes", nodeId] as const,
   identityMatches: (nodeId: string) =>
     [...infraKeys.all, "identityMatches", nodeId] as const,
   autoConfirmRules: () => [...infraKeys.all, "autoConfirmRules"] as const,
@@ -252,6 +255,36 @@ export function useInfraImpact(nodeId: string | null, enabled: boolean) {
     queryKey: infraKeys.impact(nodeId ?? ""),
     queryFn: ({ signal }) => getInfraNodeImpact(nodeId as string, signal),
     enabled: enabled && Boolean(nodeId),
+  });
+}
+
+/** Per-page size for the Changes tab. The API clamps anything larger to its own ceiling. */
+const CHANGES_PAGE_SIZE = 50;
+
+/**
+ * A node's recorded fact history (`GET /infra/nodes/:id/changes`, ADR-0074 §3 amendment, #1143) —
+ * what MOVED, newest first, paged on the append-only autoincrement id.
+ *
+ * `enabled` gates the fetch on a selected node. Nothing gates it on the tab, because Radix unmounts
+ * an inactive `TabsContent` — the hook simply does not exist until the operator opens Changes. The
+ * key sits under `infraKeys.all`, so the ordinary mutation invalidation refreshes it with everything
+ * else, though nothing a human does in the panel writes to this table: only the ingest path appends.
+ */
+export function useInfraNodeChanges(nodeId: string | null) {
+  return useInfiniteQuery({
+    queryKey: infraKeys.changes(nodeId ?? ""),
+    queryFn: ({ pageParam, signal }) =>
+      getInfraNodeChanges(
+        nodeId as string,
+        {
+          limit: CHANGES_PAGE_SIZE,
+          ...(pageParam !== undefined ? { cursor: pageParam } : {}),
+        },
+        signal,
+      ),
+    enabled: Boolean(nodeId),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }
 
