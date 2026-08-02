@@ -52,7 +52,13 @@ written **only when something actually moved**, so a host nobody touched adds no
 - **The tracked vocabulary is short and closed.** Packages (added / removed / version changed) plus
   `host.os.name`, `host.os.version`, `host.os.kernel`, `host.memoryBytes`, `host.disks.totalBytes`,
   `host.disks.count`, `host.hardware.serial` — and, for a container child, `container.image` and
-  `container.imageDigest`. Everything else the report carries is either visible elsewhere or moves
+  `container.imageDigest`. **Both disk facts answer "no evidence" rather than `0`** when a report
+  carries no readable disk record: the agent's `exclude.mountpoints` policy sends `disks: []` on
+  purpose when its globs match everything (the #1140 policy amendment in
+  [[0074-server-reporting-agent]] §7), and
+  recording that would put `host.disks.count 2 → 0` — a chassis losing all of its storage — on screen
+  in exchange for an operator editing a setting. Excluding only *some* mountpoints still moves the
+  count and is recorded; that is a real reading. Everything else the report carries is either visible elsewhere or moves
   for reasons that are not inventory changes, and a history nobody trusts is worse than none.
 - **A container's runtime `state` is deliberately NOT recorded.** It is liveness: it already drives
   the child node's `status`, and a container that restarts nightly would write two rows a day forever.
@@ -64,8 +70,9 @@ written **only when something actually moved**, so a host nobody touched adds no
 - **Two caps, both on what goes IN.** At most **200 rows per node per report** (host facts first, then
   packages by name — a deterministic slice, so a host back from a long outage writes a bounded sample
   rather than a few thousand inserts), and at most **500 rows per node per rolling hour** (one
-  `COUNT`, run only when there is something to write). Over the ceiling the new rows are **dropped**;
-  nothing already recorded is ever deleted, because the table is append-only.
+  `COUNT`, run only when there is something to write, and answerable from the `(nodeId, createdAt)`
+  index — see Conventions below). Over the ceiling the new rows are **dropped**; nothing already
+  recorded is ever deleted, because the table is append-only.
 - **Nothing here may fail a check-in.** Every failure on this path — a constraint, a DB hiccup, a node
   deleted between the update and the insert, and the one stored-list read this feature adds to the
   report path — degrades to a warning and the report still acks. A host whose report 500s vanishes from
@@ -100,7 +107,36 @@ pure diff (`diffHostFacts`, `diffContainerFacts`, `diffSoftwareFacts`) live in `
 | `currentValue` | `string?` | absent on `PACKAGE_REMOVED`, and on a package that carried no version. |
 | `createdAt` | `DateTime` | `@default(now())` — when the **server** recorded it, within seconds of the report. |
 
-Indexed on `(nodeId, id)` — the one query this table has.
+**Two indexes, because the table has two queries that sort on different columns.**
+
+| Index | Serves |
+| --- | --- |
+| `(nodeId, id)` | the **read** — the per-node timeline: filter by node, order by `id` desc, cursor on `id`. |
+| `(nodeId, createdAt)` | the **write cap** — the rolling-hour `COUNT` the ingest runs before appending. |
+
+The second one is not redundant: the cap's predicate is a **range** on `createdAt`, which
+`(nodeId, id)` cannot answer — it could only walk every row the node owns and re-check each one.
+Nothing prunes this table, so the node with the most rows is by definition the abused one, and the cap
+would degrade to a sequential scan on the report ingest path at exactly the moment it fires. Measured
+on `postgres:18-alpine` at 2.16M rows for one node, on the SQL Prisma emits for that `count`: a
+parallel seq scan, 18,374 buffers, 38.6 ms without it; an index-only scan, 7 buffers, 0 heap fetches,
+0.11 ms with it.
+
+## Growth and retention
+
+**No retention ships, and nothing prunes this table.** It only ever grows until its node is
+**hard**-deleted (the FK cascade); soft-deleting a node — the only removal the product performs —
+keeps every row. The write caps bound the **rate**, not the total.
+
+- **Pathological ceiling:** 500 rows per node per rolling hour = 4.38M rows per node per year ≈
+  **670 MB**, at the ~154 bytes/row measured on `postgres:18-alpine` (heap plus all three indexes,
+  short values). Reaching it takes an abusive reporter running flat out for a year.
+- **Real estate:** a row is written only when something actually moved. Twenty hosts through two patch
+  windows a month is on the order of tens of thousands of rows a year — **single-digit MB**.
+- **Reclaiming space** is an explicit operator action, not a side effect of ingest: a time-bounded
+  `DELETE` is a one-off maintenance job (a scan — no index orders by `createdAt` alone, deliberately,
+  because that is not a hot path). Deleting recorded history to make room is not something an
+  append-only table ([[0006-soft-delete-and-auditing]]) gets to do quietly.
 
 ## Endpoints
 
@@ -109,7 +145,10 @@ Indexed on `(nodeId, id)` — the one query this table has.
   it saw, so nothing is skipped or repeated while reports keep landing. `limit` defaults to 50 and is
   clamped to 200; a non-integer or non-positive `limit`/`cursor` is a `400` rather than a silent
   coercion. `nextCursor` is `null` on the last page. `404` on a node that is off the map (soft-deleted)
-  or that never existed.
+  or that never existed — checked with a **lean** `select: { id: true }` existence lookup (soft-delete
+  scoped by the Prisma extension), never the node's whole row: a page must not drag the `specs` jsonb
+  and its installed-package list along to answer one boolean. That is the [[infra-node]] list defect
+  (#1135) in endpoint form, closed here rather than found later.
 
 Surfaced by the **Changes** tab on the topology node panel
 (`apps/web/app/(app)/assets/diagram/_components/node-changes-tab.tsx`). The query is gated on the tab

@@ -1052,8 +1052,15 @@ same way.
 `host.os.version`, `host.os.kernel`, `host.memoryBytes`, `host.disks.totalBytes`, `host.disks.count`
 and `host.hardware.serial`. Disk capacity is summed rather than recorded per device, because a
 per-device row would make every ephemeral loop/overlay mount a change and the operator question is
-about capacity; a disks array carrying no readable size answers "no evidence", never `0`, so an
-unprivileged report cannot read as "all storage disappeared". Everything else the report carries —
+about capacity. **Both disk facts answer "no evidence" rather than `0`** when the report carries no
+readable disk record — the total because an unprivileged report must not read as "all storage
+disappeared", and the count for a sharper reason: `applyDiskPolicy` (#1140) returns `disks: []`, not
+an omitted fact, when the operator's own `exclude.mountpoints` globs match everything, since "the
+policy matched them all" is a positive answer *about the collector*. Counting it would render a
+policy edit as `host.disks.count 2 → 0`, a chassis losing all of its storage — exactly the invented
+event that makes a history worthless. (Excluding only *some* mountpoints still moves the count, and
+is recorded: that is a real reading, indistinguishable by design from a disk actually being pulled.)
+Everything else the report carries —
 hostname, NICs, IPs, `bootedAt`, the warning list — is either visible elsewhere or moves for reasons
 that are not inventory changes, and a history nobody trusts is worse than none.
 
@@ -1071,7 +1078,15 @@ and 200 says *this changed a lot, here is a bounded sample* instead of turning o
 thousand inserts. The slice is deterministic — host facts first, then packages by name — so it is the
 same 200 rows whichever replica took the report. And at most **500 rows per node per rolling hour**,
 checked with one `COUNT` that runs only when there is something to write, which for a legitimate
-estate is a handful of times a month per host. That second cap is the one that matters against abuse:
+estate is a handful of times a month per host. **That `COUNT` must be answerable from an index, and
+the table carries a second one — `(nodeId, createdAt)` — for it alone.** Its predicate is a range on
+`createdAt`, which `(nodeId, id)` cannot serve; that index could only walk every row the node owns
+and re-check each one. Since nothing prunes this table, the node holding the most rows is by
+definition the abused one, so without the second index the mitigation would degrade to a sequential
+scan on the report ingest path at exactly the moment it fires. Measured on `postgres:18-alpine` at
+2.16M rows for one node, on the SQL Prisma emits for that `count`: a parallel seq scan, 18,374
+buffers, 38.6 ms without it; an index-only scan, 7 buffers, 0 heap fetches, 0.11 ms with it. That
+second cap is the one that matters against abuse:
 `InfraReportRateLimitGuard` (#1134) allows 120 reports per service account per minute, and a caller
 varying its package list on every request would otherwise turn that into on the order of 1.4M rows an
 hour on one node. Over either ceiling the new rows are **dropped** and the next window records again;
@@ -1103,9 +1118,21 @@ avoid, and the reason the bypass in `syncAssetSpecs` was correct in the first pl
 per change, to answer a question a handful of scalars answers); *per-device disk rows* (see above);
 *recording container `state`* (liveness dressed as inventory); and *pruning old rows to a per-node
 ceiling* — a bounded log is a reasonable thing to want, but deleting recorded history to make room is
-not something an append-only table gets to do quietly, and the two write-side caps bound the growth
-without it. If retention ever becomes necessary it should be an explicit, documented operator policy,
-not a side effect of ingest.
+not something an append-only table gets to do quietly. If retention ever becomes necessary it should
+be an explicit, documented operator policy, not a side effect of ingest.
+
+**So the growth story is stated here rather than discovered at month six.** *No retention ships.* The
+two write-side caps bound the **rate**, not the total: nothing prunes this table and it only ever
+grows until its node is **hard**-deleted (the FK cascade). Soft-deleting a node — the only removal the
+product performs — keeps every row. The arithmetic at the ceiling: 500 rows per node per rolling hour
+is 4.38M rows per node per year, about **670 MB** at the ~154 bytes/row measured on
+`postgres:18-alpine` (heap plus all three indexes, short values). That is the pathological case, and
+it requires an abusive reporter running flat out for a year. A real estate is nowhere near it, because
+a row is written only when something actually moved: twenty hosts through two patch windows a month
+is on the order of tens of thousands of rows a year — **single-digit MB**. If an operator ever does
+need to reclaim space, a time-bounded `DELETE` is a one-off maintenance job (a scan, since no index
+orders by `createdAt` alone — deliberately, because that is not a hot path), and it is theirs to run,
+not ingest's to do quietly.
 
 **Upgrade safety.** One additive migration: a new enum and a new table. No column is added to and no
 data is changed on any existing table, nothing is backfilled, and nothing needs to be — the seeding
