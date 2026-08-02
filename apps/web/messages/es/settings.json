@@ -261,7 +261,7 @@
     "exclude": {
       "title": "Exclusiones",
       "description": "Patrones de nombre separados por comas para lo que hay que dejar afuera de cada informe. * coincide con cualquier texto y ? con un solo carácter; no se aceptan expresiones regulares. Cada lista admite como máximo {max} patrones.",
-      "count": "{count, plural, =0 {Sin patrones} one {# patrón} other {# patrones}} de {max}",
+      "count": "{count, plural, =0 {Sin patrones} other {# de {max} patrones}}",
       "nicNames": {
         "label": "Ignorar interfaces de red",
         "placeholder": "veth*, docker*, br-*",
