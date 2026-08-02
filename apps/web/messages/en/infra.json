@@ -298,7 +298,7 @@
   },
   "changes": {
     "emptyTitle": "No recorded changes yet",
-    "emptyDescription": "Nothing on this node has changed since the agent first reported it. Only actual moves are recorded — a package installed, removed or upgraded, or the OS, kernel, memory, disk, serial or container image changing.",
+    "emptyDescription": "Nothing tracked on this node has changed yet. Only real moves are recorded — a package installed, removed or upgraded, or the OS, kernel, memory, disk, serial or container image changing. A node nobody's agent reports on never gets an entry.",
     "loadError": "Couldn't load the change history",
     "loadMore": "Load older changes",
     "loadingMore": "Loading…",

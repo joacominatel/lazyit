@@ -298,7 +298,7 @@
   },
   "changes": {
     "emptyTitle": "Todavía no hay cambios registrados",
-    "emptyDescription": "Nada en este nodo cambió desde que el agente lo reportó por primera vez. Solo se registran los cambios reales: un paquete instalado, eliminado o actualizado, o el sistema operativo, el kernel, la memoria, el disco, el número de serie o la imagen del contenedor.",
+    "emptyDescription": "Todavía no cambió nada de lo que se hace seguimiento en este nodo. Solo se registran los cambios reales: un paquete instalado, eliminado o actualizado, o el sistema operativo, el kernel, la memoria, el disco, el número de serie o la imagen del contenedor. Un nodo sobre el que ningún agente reporta nunca recibe una entrada.",
     "loadError": "No se pudo cargar el historial de cambios",
     "loadMore": "Cargar cambios anteriores",
     "loadingMore": "Cargando…",
