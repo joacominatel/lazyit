@@ -45,10 +45,10 @@ written **only when something actually moved**, so a host nobody touched adds no
   first post-upgrade tick writing one row per installed package. It covers a brand-new node, a node
   enrolled before the feature existed, a node whose stored package list was cleared, and a fact that
   had simply never been collected on that host before.
-- **A fact that DISAPPEARS records nothing either.** An agent that loses root stops reporting
-  `hardware.serial`; a downgraded agent stops reporting a field. Neither is the host changing, and a
-  row saying otherwise would be a change on screen that never happened. A row needs **both** sides
-  readable and different.
+- **A fact that DISAPPEARS records nothing either.** An agent that loses root (Administrator on a
+  Windows host) stops reporting `hardware.serial`; a downgraded agent stops reporting a field.
+  Neither is the host changing, and a row saying otherwise would be a change on screen that never
+  happened. A row needs **both** sides readable and different.
 - **The tracked vocabulary is short and closed.** Packages (added / removed / version changed) plus
   `host.os.name`, `host.os.version`, `host.os.kernel`, `host.memoryBytes`, `host.disks.totalBytes`,
   `host.disks.count`, `host.hardware.serial` — and, for a container child, `container.image` and
@@ -71,9 +71,10 @@ written **only when something actually moved**, so a host nobody touched adds no
   tracked fact, so a fact added later declares itself rather than inheriting the wrong answer. The
   cost is one report's worth of disk and package rows after any policy write (the revision is
   instance-wide), and the facts no policy filters — OS, kernel, memory, serial, container image and
-  digest — are still recorded in that same report. It does **not** see a host's own
-  `/etc/lazyit-agent/config`: the local veto moves no revision, so tightening its exclusions there is
-  recorded as removals. See [[0074-server-reporting-agent]] §3 for the full reasoning and the residual.
+  digest — are still recorded in that same report. It does **not** see a host's own config file
+  (`/etc/lazyit-agent/config`, or `%ProgramData%\lazyit-agent\config` on a Windows host): the local
+  veto moves no revision, so tightening its exclusions there is recorded as removals. See
+  [[0074-server-reporting-agent]] §3 for the full reasoning and the residual.
 - **A container's runtime `state` is deliberately NOT recorded.** It is liveness: it already drives
   the child node's `status`, and a container that restarts nightly would write two rows a day forever.
   The image **digest** is recorded precisely because it moves under an unchanged `:latest` tag — the

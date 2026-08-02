@@ -3672,7 +3672,12 @@ describe('InfraService', () => {
 
   describe('ingestReport — cloned machine-id detection', () => {
     /** A v2 report carrying the two burned-in facts the corroboration rule compares. */
-    const reportFrom = (hostname: string, serial: string, mac: string) =>
+    const reportFrom = (
+      hostname: string,
+      serial: string,
+      mac: string,
+      os?: { family: string },
+    ) =>
       AgentReportSchema.parse({
         agentVersion: '2.0.0',
         reportingSource: 'agent:clone',
@@ -3680,6 +3685,7 @@ describe('InfraService', () => {
         reportedAt: '2026-07-31T12:00:00.000Z',
         host: {
           hostname,
+          ...(os ? { os } : {}),
           identifiers: [
             { kind: 'machine-id', value: 'baked' },
             { kind: 'serial', value: serial },
@@ -3829,7 +3835,7 @@ describe('InfraService', () => {
       }>(notifications.emit);
       expect(emitted.type).toBe('infra.identity_conflict');
       expect(emitted.dedupeKey).toBe('infra.identity_conflict:node-1:SN-BETA');
-      expect(emitted.summary).toContain('systemd-firstboot');
+      expect(emitted.summary).toContain('systemd-firstboot --setup-machine-id');
       expect(emitted.metadata.peerNodeId).toBe('node-1');
 
       // The report is ACCEPTED — degrade and inform, never reject (the contract's whole posture).
@@ -3844,6 +3850,113 @@ describe('InfraService', () => {
         // the agent needs before it may omit an unchanged package list.
         softwareDelta: true,
       });
+    });
+
+    // #1144 made this branch reachable on WINDOWS: two machines cloned from one Windows image
+    // collide on `MachineGuid` exactly as two Linux clones collide on `/etc/machine-id`. Handing
+    // that operator `systemd-firstboot --setup-machine-id` names a command their OS does not have,
+    // and the remedy LEADS the summary, so it is the first thing they read.
+    it('names the WINDOWS remedy — sysprep, not systemd-firstboot — for a Windows collision', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce(null);
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('WIN-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      await service.ingestReport(
+        reportFrom('WIN-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02', {
+          family: 'windows',
+        }),
+        AGENT_SA,
+      );
+
+      const emitted = firstArg<{ title: string; summary: string }>(
+        notifications.emit,
+      );
+      // `sysprep /generalize` is what regenerates MachineGuid — the very property this PR's ADR
+      // amendment cites as the reason Windows identity is safer than a baked machine-id.
+      expect(emitted.summary).toContain('sysprep /generalize');
+      expect(emitted.summary).not.toContain('systemd-firstboot');
+      // …and the FACT they collided on is named by its Windows name, in the summary and in the
+      // title. "machine-id" is a Linux file; a Windows operator has no such thing to go and look at.
+      expect(emitted.summary).toContain('MachineGuid');
+      expect(emitted.summary).not.toContain('machine-id');
+      expect(emitted.title).toContain('MachineGuid');
+      expect(emitted.title).not.toContain('machine-id');
+    });
+
+    // The families this product ships no agent for (`darwin`, `bsd`, `other`). Inventing a command
+    // for a platform lazyit has never run on would be the same defect wearing a different OS, so the
+    // summary leads with the ACTION and names no command at all.
+    it('names no command for an OS family lazyit has no agent for', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce(null);
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('mac-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      await service.ingestReport(
+        reportFrom('mac-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02', {
+          family: 'darwin',
+        }),
+        AGENT_SA,
+      );
+
+      const emitted = firstArg<{ title: string; summary: string }>(
+        notifications.emit,
+      );
+      expect(emitted.summary).not.toContain('systemd-firstboot');
+      expect(emitted.summary).not.toContain('sysprep');
+      expect(emitted.summary).toContain(
+        'Give each clone its own machine identity',
+      );
+    });
+
+    // The pre-v2 default (`osFamily`): every agent that predates contract v2 is a Linux-only
+    // collector, so an `os`-less report must keep the Linux remedy rather than fall to the generic
+    // one. This is the upgrade promise — an estate that never re-runs install.sh reads the same
+    // sentence it read before.
+    it('an os-less pre-v2 report still gets the Linux remedy', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce(null);
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('web-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      await service.ingestReport(
+        reportFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02'),
+        AGENT_SA,
+      );
+
+      const emitted = firstArg<{ title: string; summary: string }>(
+        notifications.emit,
+      );
+      expect(emitted.summary).toContain('systemd-firstboot --setup-machine-id');
+      expect(emitted.title).toContain('machine-id');
     });
 
     it("a clone's brand-new row is asked for its list, fingerprint or no fingerprint (#1142)", async () => {

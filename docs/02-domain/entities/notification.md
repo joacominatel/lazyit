@@ -95,12 +95,16 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   once-per-sweep. Metadata = nodeId + label + last-report time.
 - **The report ingest** (`InfraService.ingestReport`, [[0074-server-reporting-agent]] §3 amendment /
   #1141) → **`infra.identity_conflict`**, a broadcast admin nudge when a report matches an existing
-  node's `externalId` while its serial **and** its MAC set both differ — two hosts sharing one
-  `/etc/machine-id`, almost always a cloned VM template (whose baked hostname is why the hostname is
+  node's `externalId` while its serial **and** its MAC set both differ — two hosts sharing one machine
+  identity (`/etc/machine-id` on Linux, `MachineGuid` on Windows), almost always a cloned VM template
+  or golden image (whose baked hostname is why the hostname is
   corroborating detail in the summary, never part of the rule). Emitted **only on the branch that creates the
   second node**, not on every report; dedupe `infra.identity_conflict:<peerNodeId>:<discriminator>` →
-  one nudge per newly-detected colliding host, never one per 15-minute check-in. The summary names the
-  remedy (`systemd-firstboot --setup-machine-id`). Metadata = both node ids + the peer's label + the
+  one nudge per newly-detected colliding host, never one per 15-minute check-in. The summary and title
+  name the remedy and the colliding fact for the **reporting host's `os.family`** —
+  `systemd-firstboot --setup-machine-id` / `machine-id` on Linux, `sysprep /generalize` / `MachineGuid`
+  on Windows, and the action with no command for a family lazyit ships no agent for (#1144).
+  Metadata = both node ids + the peer's label + the
   reported hostname + the discriminator (the new node's own label *is* that hostname). This is the ONLY automatic action the collision detection takes: the
   report is still accepted and nothing is auto-merged or auto-split.
 

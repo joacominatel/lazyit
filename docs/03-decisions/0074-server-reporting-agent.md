@@ -9,6 +9,12 @@ deciders: [Joaquín Minatel]
 
 # ADR-0074: Server reporting agent — self-installing Linux collector
 
+> [!note] ~~Linux collector~~ — **Linux and Windows**, since the 2026-08-02 (#1144) amendment to
+> §6/§7 below. The title and the `title:` frontmatter are left as they were written: this ADR is a
+> dated record, not a living document, and rewriting its heading would erase which decision was
+> made when. Every statement in it that says *Linux* and is now narrower than the code is
+> corrected in that amendment.
+
 ## Status
 
 **accepted** — 2026-06-27. Epic #831. This ADR fixes the **design, the wire contract, the
@@ -707,10 +713,17 @@ Three parts, and deliberately **not** an engine:
    remedy for it. One broadcast **`infra.identity_conflict`** nudge is emitted
    ([[0056-in-app-notification-bell]]), deduped `infra.identity_conflict:<peerNodeId>:<discriminator>`
    so a clone checking in every 15 minutes nudges **once** — the same one-per-event discipline §4's
-   `infra.agent_offline` follows. The summary names the **actual remedy** (`systemd-firstboot
-   --setup-machine-id` on the clones), because "identity conflict detected" would leave the operator
-   exactly as stuck as the silence did. It is **bell-only**: adding a type to the email allowlist is a
-   product call ([[0079-instance-smtp-outbound-email]] fork #1), not an implementation detail.
+   `infra.agent_offline` follows. The summary names the **actual remedy**, because "identity conflict
+   detected" would leave the operator exactly as stuck as the silence did — and since #1144 the remedy
+   is **chosen from the reporting host's `os.family`**: `systemd-firstboot --setup-machine-id` on the
+   clones on Linux, `sysprep /generalize` on Windows (the very property §3's Windows identity section
+   cites as the reason `MachineGuid` is a safer key than a baked machine-id). The colliding FACT is
+   renamed with it — the title and summary say `machine-id` on Linux and `MachineGuid` on Windows,
+   because a Windows operator has no `/etc/machine-id` to go and look at. Families lazyit ships no
+   agent for (`darwin`, `bsd`, `other`) get the action with **no command**: naming one for a platform
+   this product has never run on is the same defect wearing a different OS. It is **bell-only**:
+   adding a type to the email allowlist is a product call
+   ([[0079-instance-smtp-outbound-email]] fork #1), not an implementation detail.
 3. **Re-key / merge-into as a HUMAN action.** `POST /infra/nodes/:id/merge-into` transplants the
    addressed node's reporting key onto an existing node and soft-deletes the duplicate, in **one
    transaction and in that order** (the partial-unique index covers live rows only, so the source must
@@ -1036,7 +1049,8 @@ covers a brand-new node, a node enrolled before the feature existed, a node whos
 was cleared, and a fact that had never been collected on that host before. It is asserted by test on
 all four.
 
-*A fact that DISAPPEARS records nothing either.* An agent that loses root stops reporting
+*A fact that DISAPPEARS records nothing either.* An agent that loses root — Administrator on the
+Windows hosts #1144 adds, where the serial comes from `Win32_BIOS` — stops reporting
 `hardware.serial`; a downgraded agent stops reporting a field. Neither is the host changing, and a row
 saying otherwise would put a change on screen that never happened. **A row needs both sides readable
 and different** — which is the same degrade-never-reject reading every other absence in this contract
@@ -1110,12 +1124,13 @@ report. A real change landing in that same check-in is not recorded and the base
 the new lists. That is the safe direction to be wrong in: one check-in's disk and package rows,
 against an uninstall the operator can neither explain nor disprove. The facts no policy filters —
 OS, kernel, memory, serial, container image and digest — are still recorded in that same report, so
-the guard is per fact, never per report. **The residual it does not close** is the host's own
-`/etc/lazyit-agent/config` (§7's local veto): tightening `LAZYIT_EXCLUDE_SOFTWARE` or
+the guard is per fact, never per report. **The residual it does not close** is the host's own config
+file — `/etc/lazyit-agent/config`, or `%ProgramData%\lazyit-agent\config` on the Windows hosts the
+#1144 amendment adds (§7's local veto, on both): tightening `LAZYIT_EXCLUDE_SOFTWARE` or
 `LAZYIT_SOFTWARE_MAX` there narrows the filter without moving any revision, and those removals will
 be recorded. Closing that needs the wire to carry the fact that a list was locally filtered, which is
-a §2 contract change and is not made here; someone with root on a host editing that host's own filter
-is not the case this table exists to protect.
+a §2 contract change and is not made here; someone with root (Administrator on Windows) on a host
+editing that host's own filter is not the case this table exists to protect.
 
 **Container children are in, and the digest is why.** #1139 gave a container its own node and #1157
 gave it its own Asset sync; a container whose **image digest moves under an unchanged `:latest` tag**
@@ -1316,7 +1331,8 @@ from the same image and failing closed there would brick every install during a 
   process, no memory growth, crash-safe — a failed tick is simply retried next interval. Default
   interval: 15 min (configurable). // upgrade to a daemon only if sub-minute reporting is ever needed,
   which inventory never requires.
-- **Collection (Linux):** `hostname`/`/etc/os-release`/`uname` (identity, OS, kernel),
+- **Collection (Linux; Windows added 2026-08-02, #1144 — see the amendment below):**
+  `hostname`/`/etc/os-release`/`uname` (identity, OS, kernel),
   `/proc/cpuinfo` + `/proc/meminfo` (CPU/RAM), `lsblk`/`/sys` (disks), `ip`/`/sys/class/net` (NICs),
   `dmidecode` (manufacturer/model/serial — **root only, optional**), `dpkg-query`/`rpm -qa`/`apk info`
   (installed software, package-manager auto-detected). Anything unavailable is simply omitted.
@@ -1613,6 +1629,215 @@ reporting a 401 nobody can explain.
 given until its next upgrade, which is the same contract as the `--interval` note above. Items 4, 5
 and 7 are in the binary and arrive with it. Nothing here alters the wire contract, the policy schema
 or the data model.
+
+**Amendment (2026-08-02, #1144) — a second operating system, and the four things that had to move
+before it could exist.** ADR-0074's title says *Linux collector* and §7 said "Collection (Linux)".
+That was honest and it was also the product's largest commercial gap: a representative target estate
+is ~180 Windows endpoints and ~25 Windows Servers against ~40 Linux boxes, so an agent covering only
+Linux leaves the spreadsheet alive, and a surviving spreadsheet makes the Linux agent a demo rather
+than a reason to buy. The wire contract has been OS-neutral since #1138; this is the collector
+catching up. (This supersedes the agent half of #842. The network-sweep half of that issue is closed
+as **wontfix** against §1, which rejected network scanning outright.)
+
+**Identity — `MachineGuid`, and it is permanent.** §3 promises *one host = one node, forever*, so the
+Windows key cannot be revised later. `externalId` on Windows is
+`HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid`: generated once when the OS is installed,
+surviving reboots, renames and hardware changes — the same KIND of fact `/etc/machine-id` is — and,
+critically, **regenerated by `sysprep /generalize`**, so a properly prepared image does not collapse
+every clone onto one node. That is strictly better than the Linux baked-machine-id trap #1141 exists
+to detect. The corroborating set (`host.identifiers[]`) carries `windows-machine-guid`,
+`smbios-uuid` (`Win32_ComputerSystemProduct.UUID`), `serial` (`Win32_BIOS.SerialNumber`) and the
+primary `mac`, through the SAME `sanitizeIdentifierValue` canonicalisation and junk list the Linux
+collector uses — no second implementation, so the two platforms can never disagree about what counts
+as evidence. **The asymmetry is the reason the array exists:** MachineGuid survives a motherboard
+transplant but not an OS reinstall; the SMBIOS UUID is the reverse. Neither alone is enough.
+
+**Collection — one PowerShell call for the fact sweep, and two absolute prohibitions.** Everything
+needing CIM/WMI or the registry rides a single
+`powershell -NoProfile -NonInteractive -Command <script>`, emitting one
+`ConvertTo-Json -Compress -Depth 4` document; every mapper over it is pure and unit-tested. A ~400 ms
+interpreter start once per reporting interval is free, and a single impure boundary is the only shape
+this repo can TEST — CI is Linux and the developers are on macOS. **What a tick actually costs, since
+"one call per tick" was stated and was not true:** `readMachineGuid` makes a SECOND, much smaller
+PowerShell call for the dedup key, and must, because `index.ts` needs that key *before* the cadence
+gate — folding it into the sweep would make a tick that reports nothing pay for the full CIM walk.
+Both are memoized per process (the agent is a one-shot, so that is once per report), so a reporting
+tick is **two** `powershell.exe` starts and a not-due tick is **one**. Sources: `Win32_OperatingSystem`
+(name/version/**build** — "version 10" is useless to an operator, and Windows 11 reports major
+version 10), `Win32_ComputerSystem` (memory, manufacturer, model, **domain**),
+`Win32_Processor`, `Win32_DiskDrive` with `MSFT_PhysicalDisk` as the fallback for hosts where the
+first enumerates nothing, `Win32_NetworkAdapter` joined to `Win32_NetworkAdapterConfiguration` on
+Index (v4 **and** v6), `Win32_BIOS`, `Win32_ComputerSystemProduct`, and
+`Win32_SystemEnclosure.ChassisTypes` → `chassis`.
+
+**A per-fact failure inside that one call is EXPLAINED, not silent.** The script runs under
+`$ErrorActionPreference='SilentlyContinue'` — correct, because a class this SKU does not have must
+leave its key null rather than abort the document — but that made the single Windows sweep the only
+collector in this agent that could degrade with nothing in `diagnostics.warnings`, while every Linux
+probe warns. So the script clears `$Error`, and emits it as a bounded `errors[]` (last key in the
+hashtable literal, which is evaluated in written order, so it sees what the earlier keys raised);
+`buildWindowsHost` files each line as a warning and adds one per fact group the document came back
+empty for, naming the class and what it cost. Three rules keep the column readable: no document ⇒
+nothing (`collectHost` already files the one note saying the whole sweep failed), a policy-vetoed
+group is explained once by the policy's own note, and a healthy host is silent. This is what makes
+§2's rule — a degraded probe is reported in `diagnostics.warnings` rather than guessed around
+(#1138) — true on Windows as it already is on Linux.
+
+Two things it must NEVER do, and both are enforced by a test over the script text rather than left to
+memory. **Never `Win32_Product`:** enumerating that class makes the Windows Installer run a
+consistency check that RECONFIGURES every installed MSI package, floods the event log and takes
+minutes — the most notorious footgun in Windows inventory. **Never `wmic.exe`:** deprecated, and
+REMOVED in Windows 11 24H2 and Server 2025, so an agent built on it would work on an estate's old
+machines and silently stop working on its new ones. Software comes from **both** Uninstall hives —
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*` **and** the `WOW6432Node` mirror,
+because half a real inventory lives in the 32-bit hive and missing it is the single most common
+defect in homegrown inventory scripts — filtered on "has a `DisplayName`" and "not
+`SystemComponent=1`", stamped `software[].source: registry`. The filters live in the **mapper**, not
+in the PowerShell string: the script selects the three properties and filters nothing, so the rule
+sits in the one place this repo can test it.
+
+**Machine-wide only, and the Manual must not overstate it.** Both hives are under `HKLM`, so a
+**per-user** install — anything registered under `HKCU`, which is a large share of what a laptop user
+installs for themselves — is **not** in the list. Reading it means walking `HKU\<sid>` for every
+loaded profile from a SYSTEM context, which is its own piece of work behind its own policy flag and
+is deliberately **not** in #1144. The Manual therefore says *machine-wide* rather than claiming parity
+with the list Windows shows in *Apps & features*, which is a claim this collector cannot honour.
+
+**`chassis` follows a DIFFERENT rule on Windows, deliberately.** On Linux an absent virtualization
+probe forces `chassis: unknown`, because a container reading `/sys/class/dmi` gets the HOST's board
+and would confidently report `server`. A Windows agent installed by `install.ps1` runs on the machine
+whose enclosure it is reading, so it falls through to the SMBIOS code — which is what keeps
+laptop-vs-desktop-vs-server on every physical Windows host, and on an estate of 180 endpoints that is
+most of the value #1139 gets from the field. Virtualization itself is inferred from the hypervisor
+signature a guest advertises in its synthetic SMBIOS strings, and a non-match reports **nothing**
+rather than `none`: `none` is a positive bare-metal finding and there is no `systemd-detect-virt`
+here to produce one.
+
+**Containers: the named pipe is NOT dialled, and that is a decision, not an omission.** Docker
+Desktop and the Mirantis runtime expose the engine on `\\.\pipe\docker_engine` — a **named pipe**,
+not a unix socket. Bun documents `fetch({ unix })` as "the local file path to a unix domain socket"
+and says nothing about Windows, and Bun's named-pipe support has a documented history of ENOENT
+failures (oven-sh/bun #11820, #13042, #14329, #24682). **This repo cannot reach a Windows host to
+settle it empirically, and this campaign has already lost an entire feature to exactly this class of
+assumption** — `Bun.file().exists()` answers `false` for a unix socket, nobody checked, and
+`collectContainers` was dead on every host on earth. So the Windows collector shells out to
+`docker ps --format "{{json .}}"`, which Docker Desktop and Windows Server both put on the SYSTEM
+path, and maps it into the same `containers` shape the engine-API path produces. `tcp://localhost:2375`
+is **refused outright**, not merely unused: it is off by default and enabling it exposes an
+unauthenticated root-equivalent Docker API on the host, and an inventory agent must not leave an
+estate less safe than it found it. One fact is genuinely lost — the CLI does not render the image
+DIGEST, so `imageDigest` is absent from a Windows-reported container. Revisiting the pipe once a real
+Windows host has verified `fetch({ unix })` is a follow-up, not a blocker.
+
+**The Linux "install Docker later" property is preserved, and tested.** The lookup runs on EVERY tick
+and caches nothing, and a host with no client returns `undefined` **silently** — exactly as a Linux
+host with no socket does, and for the same reason: warning would put a line in the majority of the
+estate's reports until operators learned to ignore the field. Everything *after* a successful lookup
+warns — a stopped engine, a Desktop nobody is logged in to, a pipe ACL refusing SYSTEM, a timeout —
+because that is the "why is this host's container list empty?" question `diagnostics.warnings` exists
+to answer, and `run`'s own degradation notes are passed through rather than swallowed.
+
+**The lookup gets the same treatment as the pipe, and did not at first.** Refusing the named pipe as
+an unverified Windows boundary and then gating on a bare `Bun.which("docker")` was the same
+assumption wearing a different name — and this one's failure mode was **silent by design**: Windows
+has no execute bit and no extensionless executables, a bare name on PATH resolves through `PATHEXT`,
+whether Bun does that expansion on Windows is undocumented, and a miss meant a host running Docker
+Desktop reporting no containers for ever with nothing in `diagnostics.warnings`. The extensions are
+now walked explicitly (`PATHEXT`, falling back to `.COM;.EXE;.BAT;.CMD`, bare name last) in a pure
+function the tests drive, and the **resolved absolute path** is what gets spawned — which takes
+`Bun.spawn`'s own PATH resolution out of it too.
+
+**Scheduling: a Scheduled Task, not a Service.** It preserves the one-shot design of §7 exactly, and
+#1140's fixed-tick / server-cadence inversion was designed so the same semantics hold under Task
+Scheduler. `Register-ScheduledTask -User "SYSTEM" -RunLevel Highest`, **two triggers**,
+`StartWhenAvailable` (the `Persistent=true` analogue), a 60-second random delay on the **time**
+trigger (the `RandomizedDelaySec` analogue) and a 5-minute `ExecutionTimeLimit` (the `RuntimeMaxSec`
+analogue). It
+also runs **on battery**: most of a Windows estate is laptops, and a task that waited for mains power
+would leave roaming machines reporting only when docked. A Windows Service would force a daemon
+rewrite for zero benefit.
+
+**TWO triggers, and the first attempt at one was a blocker.** The systemd unit has two independent
+activations (`OnBootSec=` and `OnUnitActiveSec=`) and the translation had collapsed them into a single
+`-AtStartup` trigger carrying the repetition. That does not work, and Microsoft's own documentation
+says why: a repetition pattern is "how long the repetition pattern is repeated **after the task is
+started**", and Task Scheduler "can run a task any number of times **after a trigger is fired**" — an
+`-AtStartup` trigger "starts a task when the system is started" and does not fire for a boot that has
+already happened. On a machine that was already running, the install completed, the first manual
+report succeeded, and **the agent then never reported again until somebody rebooted the host**.
+`StartWhenAvailable` does not rescue it either: it "applies only to time-based tasks", which a boot
+trigger is not. So the tick now rides its own `-Once -At (Get-Date)` trigger, which begins repeating
+immediately, and the boot trigger (2-minute delay) keeps its own job of re-arming after a power-off;
+`Register-ScheduledTask -Trigger` takes an array and Task Scheduler starts the task when **any**
+trigger occurs, with `-MultipleInstances IgnoreNew` making an overlap at boot a no-op. Two adjacent
+corrections came with it: `-RepetitionDuration` is now **omitted** (the schema: "if no value is
+specified for the duration, then the pattern is repeated indefinitely"; the `[TimeSpan]::MaxValue`
+idiom is reported to fail XML validation from Windows 10 / Server 2016 on), with a long finite
+duration as the fallback — wrapped around **both** calls that can reject a repetition, because the two
+documented errors name two different cmdlets: `New-ScheduledTaskTrigger` refuses an interval with no
+duration on the older cmdlet ("The RepetitionInterval and RepetitionDuration Job trigger parameters
+must be specified together"), while the MaxValue rejection ("(12,42):Duration:P99999999DT23H59M59S")
+comes from the cmdlet that WRITES the task, since the XML is validated at registration and not at
+construction. Wrapping only construction would have left the registration case aborting the install
+after the binary and the token file were on disk, which is exactly what the fallback exists to
+prevent; a second failure rethrows rather than retrying an identical registration. And `-RandomDelay`
+moved to the **time trigger**, because `New-ScheduledTaskSettingsSet` publishes no such parameter and
+passing it there throws under `$ErrorActionPreference='Stop'`, after the token file is already on
+disk — and it goes on the time trigger *only*, because `timeTriggerType` extends the trigger base
+type with `RandomDelay` while `bootTriggerType` extends it with `Delay`, so a boot trigger has no
+schema home for one however willingly the cmdlet accepts the parameter. Nothing is lost: the estate's
+real de-phasing is the agent's own machine-id-keyed cadence jitter (#1140). **None of this is verified on a real Windows host** — nothing in this repo can run Task
+Scheduler — so it is what the documentation specifies, to be confirmed with
+`Get-ScheduledTask lazyit-agent | Select-Object -ExpandProperty Triggers` before any rollout.
+
+**It runs as `NT AUTHORITY\SYSTEM`, never a domain service account.** SYSTEM holds the local WMI/CIM
+rights the collector needs with **no credential stored anywhere on the host**; a domain account means
+a working password in a file on every machine in the estate and a standing pen-test finding. Without
+Administrator the collector **degrades** rather than failing — no serial, exactly as Linux without
+root — and `diagnostics.privileged` carries what the collection actually ran under, which is why
+`collectHost` now returns the privilege alongside the facts instead of `index.ts` asking
+`process.getuid()` (a function that does not exist on Windows and would have reported every SYSTEM
+run as unprivileged).
+
+**Distribution: `install.ps1`, and the artifact rename it forced.** The download controller keyed the
+filename on **arch alone**, so `lazyit-agent-x64` would have meant two different binaries the moment a
+second OS shipped. `GET /agent/download` and `/agent/checksum` now take an `os` parameter and serve
+`lazyit-agent-<os>-<arch>[.exe]`. **An omitted `os` still means Linux, and must keep meaning it:**
+every `install.sh` already deployed asks for `?arch=x64`, those copies live on the HOSTS rather than
+in the image, and upgrading the instance does not upgrade them. The config path is likewise
+platform-resolved (`%ProgramData%\lazyit-agent\config`) with a `--config` override, rather than the
+hard-coded `/etc/lazyit-agent/config` it was. `install.ps1` mirrors every check `install.sh` makes,
+including the ones #1137 added: elevation, arch, bearer-header download, `-MaximumRedirection 0`, **PE
+`MZ` magic** as the ELF-magic analogue, published-sha256 verification with `-RequireChecksum`, the
+run-once check before any task is registered, `-Uninstall` (which destroys the token unconditionally)
+and local-veto preservation across a re-install. The `chmod 600` analogue is an ACL: inheritance
+DISABLED — an inherited ACE cannot be removed while inheritance is on, and a fresh `%ProgramData%`
+directory grants Users read — rebuilt for SYSTEM + Administrators only. **An MSI is a later phase**
+and was not built: it is what GPO/Intune/SCCM push will need, and building it speculatively before
+the agent has run on a real estate would be guessing at the properties it should expose.
+
+**The binary is UNSIGNED, on purpose, and that is a GATE.** `bun build --compile
+--target=bun-windows-x64` produces a self-extracting-runtime executable that scores badly on AV
+heuristics and will be SmartScreen-flagged. It ships unsigned for **internal validation inside the
+organisation that builds lazyit** — own domain, own policies, own machines. An **OV/EV code-signing
+certificate is an explicit gate before any third party installs it**, not a blocker now and not a
+detail to discover later. The code is identical either way; only the signing step differs. This is
+stated in the installer's own header and in the Manual (en + es) so it cannot ship externally by
+accident.
+
+**The collector was SPLIT before any Windows code was written.** `collect.ts` became
+`collect/{shared,linux,windows,index}.ts`: OS-neutral primitives and pure mappers in `shared`, one
+file per OS, and a dispatcher that picks by `process.platform`. Growing the existing file with
+branches would have put two unrelated failure models in every function. The split is
+behaviour-preserving by construction — the pre-existing `collect.test.ts` and `collect-policy.test.ts`
+import from `./collect` and pass unchanged.
+
+**What reaches an existing host, and when.** Nothing here alters the wire contract, the policy schema,
+the data model or any migration; a Linux estate that upgrades its instance and never re-runs anything
+is untouched. `?arch=`-only downloads keep working forever. The renamed artifacts and the `os`
+parameter arrive with the API image. Windows support arrives only where `install.ps1` is **run**;
+there is no upgrade path that turns an existing Linux host into a Windows one, and none is wanted.
+
 
 ### §8 — Security model
 

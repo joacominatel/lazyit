@@ -20,10 +20,12 @@ import {
   isClonedMachineId,
   isNewerVersion,
   isPlausibleEdge,
+  osFamily,
   primaryIp,
   sanitizeSerial,
   softwareFingerprint,
   type AgentContainer,
+  type AgentOsFamily,
   type AgentPolicy,
   type AgentReport,
   type AgentReportAck,
@@ -409,6 +411,59 @@ export interface InfraNodeFilters {
  */
 const INFRA_AUTO_ASSET_MARKER = '_infraAutoCreated';
 
+/**
+ * The identity-collision remedy, PER PLATFORM (#1141 + #1144).
+ *
+ * Two things differ by OS and both of them are in the message an operator reads first: the command
+ * that gives a clone a fresh identity, and the NAME of the fact the two hosts collided on.
+ *
+ * - **Linux** collides on `/etc/machine-id`, and `systemd-firstboot --setup-machine-id` is what
+ *   regenerates it (the documented reason that tool exists).
+ * - **Windows** collides on `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid`, and
+ *   `sysprep /generalize` is what regenerates *that* — the very property ADR-0074's Windows identity
+ *   section names as the reason MachineGuid is a safer key than a baked machine-id. #1144 is what
+ *   makes this branch reachable on Windows at all: once Windows hosts report, two machines cloned
+ *   from one image collide here exactly as two Linux clones do, and a Linux-only sentence would hand
+ *   that operator a command their OS does not have.
+ *
+ * The families lazyit ships no agent for (`darwin`, `bsd`, `other`) are deliberately ABSENT rather
+ * than defaulted: naming a command for a platform this product has never run on is the same defect
+ * wearing a different OS. They get the action with no command — see {@link identityConflictRemedy}.
+ */
+const IDENTITY_CONFLICT_REMEDY: Partial<
+  Record<AgentOsFamily, { readonly command: string; readonly identity: string }>
+> = {
+  linux: {
+    command: 'systemd-firstboot --setup-machine-id',
+    identity: 'machine-id',
+  },
+  windows: { command: 'sysprep /generalize', identity: 'MachineGuid' },
+};
+
+/**
+ * How the nudge opens, and what it calls the colliding fact, for the reporting host's OS family.
+ *
+ * The family comes from the report being ingested — {@link osFamily}, which defaults an `os`-less
+ * pre-v2 report to `linux` because every agent that predates contract v2 was a Linux-only collector.
+ * The PEER's family is deliberately not consulted as a second source: the remedy is one sentence, and
+ * two hosts that collided on one identity value were cloned from one image.
+ */
+function identityConflictRemedy(family: AgentOsFamily): {
+  lead: string;
+  identity: string;
+} {
+  const remedy = IDENTITY_CONFLICT_REMEDY[family];
+  return remedy
+    ? {
+        lead: `Run \`${remedy.command}\` on the clones`,
+        identity: remedy.identity,
+      }
+    : {
+        lead: 'Give each clone its own machine identity',
+        identity: 'machine identity',
+      };
+}
+
 @Injectable()
 export class InfraService {
   private readonly logger = new Logger(InfraService.name);
@@ -634,8 +689,9 @@ export class InfraService {
       // identity the clone check needs, and everything the write planner has to compare against. The
       // package list is deliberately left in the database — see {@link storedNodeSpecs}.
       const stored = await this.storedNodeSpecs(existing.id);
-      // CORROBORATE before merging (#1141). The dedup key is machine-id twice, so a baked
-      // `/etc/machine-id` makes every clone of a template match here and write to ONE row.
+      // CORROBORATE before merging (#1141). The dedup key is the host's identity value twice, so a
+      // baked one — `/etc/machine-id` on Linux, `MachineGuid` on a Windows image `sysprep` never
+      // generalized — makes every clone of a template match here and write to ONE row.
       const incoming = hostIdentityEvidence(report.host);
       if (isClonedMachineId(stored.identity, incoming)) {
         return this.ingestCollidingHost(
@@ -914,11 +970,12 @@ export class InfraService {
    * check-in's worth of disk/package rows and a baseline that re-seeds from the new list, against an
    * invented uninstall that would make the whole tab untrustworthy.
    *
-   * **What it cannot see.** The host's own `/etc/lazyit-agent/config` may narrow the policy further
+   * **What it cannot see.** The host's own config file — `/etc/lazyit-agent/config` on Linux,
+   * `%ProgramData%\lazyit-agent\config` on Windows (#1144) — may narrow the policy further
    * (`LAZYIT_EXCLUDE_SOFTWARE`, `LAZYIT_SOFTWARE_MAX` — the local VETO), and editing that file moves
-   * no revision. Someone with root on the host editing the host's own filter is not the case this
-   * table exists to protect; see the ADR-0074 §3 amendment for the residual and what closing it
-   * would cost on the wire.
+   * no revision. Someone with root (Administrator on Windows) on the host editing the host's own
+   * filter is not the case this table exists to protect; see the ADR-0074 §3 amendment for the
+   * residual and what closing it would cost on the wire.
    */
   private samePolicyGeneration(
     report: AgentReport,
@@ -1729,25 +1786,31 @@ export class InfraService {
       incoming.hostname.length > 0 &&
       stored.hostname.toLowerCase() === incoming.hostname.toLowerCase();
 
+    // The command AND the name of the colliding fact, for the platform that is reporting. Both are
+    // Linux-shaped words on a Linux host and Windows-shaped words on a Windows one; #1144 made the
+    // second case reachable. See {@link identityConflictRemedy}.
+    const remedy = identityConflictRemedy(osFamily(report.host));
+
     this.logger.warn(
       `Two hosts are reporting externalId ${report.externalId}: "${peer.label}" (${peer.id}) and ` +
-        `"${report.host.hostname}" (${created.id}). Almost always a cloned VM template with a baked ` +
-        `/etc/machine-id — nothing was merged; the second host landed as a separate PENDING proposal.`,
+        `"${report.host.hostname}" (${created.id}). Almost always a cloned VM template or golden ` +
+        `image carrying a baked ${remedy.identity} — nothing was merged; the second host landed as ` +
+        `a separate PENDING proposal.`,
     );
     // Best-effort, exactly like the staleness sweeper's nudge: a failed emit must never fail a report.
     await this.notifications.emit({
       type: 'infra.identity_conflict',
       dedupeKey: `infra.identity_conflict:${peer.id}:${discriminator}`,
       severity: 'warning',
-      title: `Two hosts share one machine-id: ${report.host.hostname} and ${peer.label}`,
+      title: `Two hosts share one ${remedy.identity}: ${report.host.hostname} and ${peer.label}`,
       // The remedy leads, deliberately: the bell renders a summary as ONE truncated line (full text
       // on hover), so whatever an operator can act on has to be in the first few words. "Identity
       // conflict detected" as an opener would leave them exactly as stuck as the silence did.
       summary:
-        `Run \`systemd-firstboot --setup-machine-id\` on the clones — "${report.host.hostname}" and ` +
-        `"${peer.label}" report the same machine-id but a different hardware serial AND different ` +
-        `network cards, so they are two servers, not one. ` +
-        // Hostname is NOT part of the rule (a golden image bakes it in alongside the machine-id), but
+        `${remedy.lead} — "${report.host.hostname}" and ` +
+        `"${peer.label}" report the same ${remedy.identity} but a different hardware serial AND ` +
+        `different network cards, so they are two servers, not one. ` +
+        // Hostname is NOT part of the rule (a golden image bakes it in alongside the identity), but
         // it is the detail that makes the message make sense: without this the operator reads what
         // looks like one name twice and assumes the alert is confused.
         (sharesHostname
@@ -2949,7 +3012,8 @@ export class InfraService {
    * This is the one operator action that closes BOTH identity failures the report path can only warn
    * about:
    *
-   *  - **Re-image.** Reinstalling the OS on the same box mints a new `/etc/machine-id`, so the host
+   *  - **Re-image.** Reinstalling the OS on the same box mints a new identity key (a fresh
+   *    `/etc/machine-id` on Linux, a fresh `MachineGuid` on Windows), so the host
    *    arrives as a brand-new PENDING proposal while the node the operator curated — with its asset
    *    link, owners, position, edges and KB links — drifts OFFLINE forever. Merging the proposal into
    *    it transplants the new key and the curated node simply keeps living.
@@ -3458,8 +3522,9 @@ type ContainerSpecsBlob = {
 /**
  * Why this node exists as a SEPARATE row from the one that owns its reported `externalId` (#1141).
  * Stamped on the colliding host's node, and re-stamped on every report for as long as the collision
- * lasts — so it SELF-HEALS: the moment the operator runs `systemd-firstboot --setup-machine-id`, the
- * clone reports a genuinely new machine-id, takes the ordinary unknown-key path, and the marker is
+ * lasts — so it SELF-HEALS: the moment the operator runs the remedy the nudge named for that host's
+ * platform (`systemd-firstboot --setup-machine-id` on Linux, `sysprep /generalize` on Windows), the
+ * clone reports a genuinely new identity key, takes the ordinary unknown-key path, and the marker is
  * gone with the next blob rewrite.
  *
  * `reportedExternalId` is the value the host actually claims, kept because the node's own `externalId`

@@ -2,7 +2,10 @@
  * Agent configuration resolution (ADR-0074 §7). Three sources, precedence flags > env > file:
  *   1. CLI flags   — `--url`, `--token` / `--token-file`, `--interval`
  *   2. environment — `LAZYIT_URL`, `LAZYIT_TOKEN`, `LAZYIT_INTERVAL`
- *   3. config file — `/etc/lazyit-agent/config` (simple `KEY=VALUE`, written by install.sh, chmod 600)
+ *   3. config file — the platform's own path (simple `KEY=VALUE`, written by the installer):
+ *        Linux   `/etc/lazyit-agent/config` (chmod 600)
+ *        Windows `%ProgramData%\lazyit-agent\config` (ACL: SYSTEM + Administrators only)
+ *      `--config <path>` overrides it (#1144).
  *
  * URL + token are required to actually report; the binary errors loudly if either is missing.
  *
@@ -18,9 +21,8 @@
 import { parseArgs } from "node:util";
 import type { AgentLocalLimits } from "@lazyit/shared";
 import { type AgentNetwork, networkFrom } from "./net";
+import { defaultConfigFile } from "./paths";
 import { localLimitsFrom } from "./policy";
-
-const CONFIG_FILE = "/etc/lazyit-agent/config";
 
 /**
  * The local-veto keys (#1140), listed so they resolve from the environment even when the config file
@@ -65,6 +67,12 @@ export interface AgentConfig {
   network: AgentNetwork;
   /** The subcommand: `report` (the default, what the timer runs), `show` or `test`. */
   command: string;
+  /**
+   * The config file this run actually read (#1144). Carried rather than re-derived so every message
+   * that names a path names the SAME one the agent opened — including the one an operator passed with
+   * `--config`, and the platform default they may not know.
+   */
+  configFile: string;
   /** `report --once`: collect + POST once, then exit (what the timer runs). The only mode today. */
   once: boolean;
   help: boolean;
@@ -146,7 +154,6 @@ export async function loadConfig(
   options: LoadConfigOptions = {},
 ): Promise<AgentConfig> {
   const env = options.env ?? process.env;
-  const configFile = options.configFile ?? CONFIG_FILE;
   const readStdin = options.readStdin ?? (() => Bun.stdin.text());
 
   const { values, positionals } = parseArgs({
@@ -158,11 +165,26 @@ export async function loadConfig(
       token: { type: "string" },
       "token-file": { type: "string" },
       interval: { type: "string" },
+      /**
+       * WHERE to read the config file from (#1144). The platform default covers every install the
+       * installers produce; this exists for the ones they do not — a container image with the file
+       * baked somewhere else, a second instance on one host, a test. It cannot make the agent read a
+       * file it would otherwise refuse: the file is parsed identically wherever it came from.
+       */
+      config: { type: "string" },
       once: { type: "boolean", default: false },
       force: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
+
+  // Resolution order for WHERE the file is: `--config` (an explicit operator decision), then the
+  // test seam, then the platform default (#1144) — `/etc/lazyit-agent/config` on Linux,
+  // `%ProgramData%\lazyit-agent\config` on Windows.
+  const configFile =
+    (typeof values.config === "string" && values.config.trim() ? values.config.trim() : undefined) ??
+    options.configFile ??
+    defaultConfigFile(env);
 
   const file = await readConfigFile(configFile);
   const pick = (flag: unknown, envKey: string, fileKey: string): string | undefined => {
@@ -200,6 +222,7 @@ export async function loadConfig(
     localLimits: localLimitsFrom(limitSource),
     network: networkFrom(file, env),
     command: positionals[0] ?? "report",
+    configFile,
     once: Boolean(values.once),
     force: Boolean(values.force),
     help: Boolean(values.help),

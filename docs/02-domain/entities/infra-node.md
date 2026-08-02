@@ -65,6 +65,13 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   via [[0048-service-accounts]]), reconciled on the composite partial-unique
   `(reportingSource, externalId)` index over non-deleted rows. ~~No agent code ships in v1~~ — the
   agent shipped; this bullet described the pre-ADR-0074 state.
+- **TWO reporting platforms since #1144** (ADR-0074 §6/§7 amendment, 2026-08-02): Linux (systemd
+  timer, `install.sh`) and Windows (Scheduled Task as `NT AUTHORITY\SYSTEM`, `install.ps1`). Nothing
+  in this entity is per-platform — the wire contract has been OS-neutral since #1138, and the two
+  collectors produce the same shapes — but three columns are worth reading with it in mind:
+  `externalId` (below), `specs.host.os.family` (`windows` on those rows, and the one field every
+  consumer branches on), and `specs.software[].source`, which is `registry` for a Windows host
+  because the list comes from the Uninstall hives rather than a package manager.
 - **The report PROPOSES a `kind` on discovery, and never re-classifies (ADR-0074 §3 amendment, #1139).**
   A newly-discovered host's `kind` is mapped from the reported `host.virtualization` / `host.chassis`
   by the shared `inferNodeKind` (`none` → `PHYSICAL_HOST`, any hypervisor → `VM`,
@@ -86,7 +93,10 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   derived from the **reported** `externalId`, which two clones share, so both would compute identical
   container keys and each report would retire the other's still-running children. The #1141 collision
   branch therefore skips container reconciliation entirely: a colliding host's containers go
-  **untracked** until its `/etc/machine-id` is fixed, then tracking resumes on its own. Deliberate and
+  **untracked** until its `/etc/machine-id` — on Windows, its `MachineGuid` — is fixed, then tracking
+  resumes on its own. A Windows image prepared with `sysprep /generalize` regenerates that key per
+  clone and never enters this branch at all, which is the asymmetry the ADR-0074 §3 amendment for
+  #1144 documents: the Linux baked-machine-id trap has no automatic Windows equivalent. Deliberate and
   deferred (re-deriving the key would re-key every existing child); the guarantee that a colliding
   host's report never retires its peer's children is pinned by test.
 - **Access surface, not a network model** (scope cut). `ipAddress` is **format-validated** as an IPv4
@@ -137,7 +147,7 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `source` | `InfraNodeSource` | `@default(MANUAL)`; AGENT in v2. |
 | `state` | `InfraNodeState` | `@default(CONFIRMED)`; PENDING = the v2 review tray. |
 | `reportingSource` | `string?` | which agent/host reported it (the dedup scope; a container child carries its host's). |
-| `externalId` | `string?` | the reconciliation key. A reported HOST: its `/etc/machine-id` (Windows MachineGuid, macOS platform UUID) — **except** on a host whose machine-id collided with one already in use (a cloned VM template), where it is the derived `<machine-id>#<serial-or-MAC>` (ADR-0074 §3 / #1141) and the value the host actually claims is kept in `specs.identityConflict.reportedExternalId`. A reported CONTAINER child: `<host externalId>/container/<name>` (#1139) — name-keyed so a recreate is not a duplicate, host-scoped so two hosts' `redis` stay two nodes. The separator cannot occur in a host key, so the two spaces never collide on the shared partial unique index. |
+| `externalId` | `string?` | the reconciliation key. A reported HOST: its `/etc/machine-id` on Linux, `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` on Windows (#1144; macOS platform UUID is reserved, no collector ships) — **except** on a host whose machine-id collided with one already in use (a cloned VM template), where it is the derived `<machine-id>#<serial-or-MAC>` (ADR-0074 §3 / #1141) and the value the host actually claims is kept in `specs.identityConflict.reportedExternalId`. A reported CONTAINER child: `<host externalId>/container/<name>` (#1139) — name-keyed so a recreate is not a duplicate, host-scoped so two hosts' `redis` stay two nodes. The separator cannot occur in a host key, so the two spaces never collide on the shared partial unique index. |
 | `lastReportedAt` | `datetime?` | agent liveness (stale → OFFLINE). Advances for a host on every check-in and for a container child on every report that still lists it. |
 | `agentVersion` | `string?` | the reporting agent's build at its last check-in (#907); null for manual/pre-stamp nodes. |
 | `agentPolicy` | `jsonb?` | this node's own agent-policy override — the NARROWEST of the three #1140 scopes (instance default < service account < node). A partial `AgentPolicyOverride` (zod in `@lazyit/shared`): a closed set of booleans, integers and **glob** strings, never a command/script/path/regex. Null = "adds no override", which is every pre-#1140 row. Read-TOLERANT — an unparseable blob resolves as no override rather than failing a report. Written only by `PUT /infra/nodes/:id/agent-policy` (human-only); **no editor ships in this build** — the UI edits the instance default. |

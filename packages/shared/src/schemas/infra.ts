@@ -1476,13 +1476,14 @@ export function sanitizeSerial(host: AgentReportHost): string | undefined {
 
 // ── Identity corroboration (#1141) — evidence beside the dedup key, never a second key ────────────
 //
-// `externalId` is `/etc/machine-id` and `reportingSource` is derived from the same value, so the
-// "composite" dedup key is machine-id twice. A VM template or golden image with a BAKED machine-id is
-// the single most common Proxmox/VMware/Packer mistake — it is the documented reason
-// `systemd-firstboot` exists — and against that key twelve cloned servers all match one node: the
-// label keeps whoever reported first, the IP flip-flops every report, and `specs` is whichever host
-// reported last. The CMDB shows 1 server; the estate has 12. A confidently wrong inventory is worse
-// than an empty one.
+// `externalId` is the host's OS-install identity — `/etc/machine-id` on Linux,
+// `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` on Windows — and `reportingSource` is derived
+// from the same value, so the "composite" dedup key is that one identity twice. A VM template or
+// golden image built with a BAKED one is the single most common Proxmox/VMware/Packer mistake — it is
+// the documented reason `systemd-firstboot` and `sysprep /generalize` both exist — and against that
+// key twelve cloned servers all match one node: the label keeps whoever reported first, the IP
+// flip-flops every report, and `specs` is whichever host reported last. The CMDB shows 1 server; the
+// estate has 12. A confidently wrong inventory is worse than an empty one.
 //
 // These helpers are the whole detection surface, and they are deliberately NOT an identification-rule
 // engine: no priority table, no configurable entries, no reconciliation-precedence UI. ServiceNow's

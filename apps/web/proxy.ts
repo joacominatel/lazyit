@@ -51,10 +51,15 @@ function isPublicPath(pathname: string): boolean {
     pathname === "/reset-password" ||
     pathname === "/setup" ||
     pathname === "/" ||
-    // The reporting-agent installer (ADR-0074 §6) is a public `curl | sh` script served from
-    // /public — it carries NO secret (the operator passes the SA token as a flag). The extension
-    // allowlist above doesn't cover `.sh`, so allow it by exact path or it'd 302 to /login.
+    // The reporting-agent installers (ADR-0074 §6) are public scripts served from /public — they
+    // carry NO secret (the operator passes the SA token as a flag). The extension allowlist above
+    // doesn't cover `.sh` or `.ps1`, so allow them by exact path or they'd 302 to /login.
+    //
+    // `install.ps1` is the Windows half (#1144). It is listed HERE, one literal beside its sibling,
+    // rather than added to the extension regex: that pattern matches on suffix and would open every
+    // future `.ps1` anywhere under /public, which is a far wider grant than "these two files".
     pathname === "/install.sh" ||
+    pathname === "/install.ps1" ||
     // The Help / Manual surface is PUBLIC, login-free product documentation (ADR-0062 §3): it
     // lives in the `(marketing)` route group, but route groups add no URL segment, so `/help`
     // would otherwise fall through to route protection and redirect to /login. Allow `/help`
