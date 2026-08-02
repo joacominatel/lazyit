@@ -58,12 +58,15 @@ import { pageSchema } from "./pagination";
  *     a golden image bakes one in, so gating on it would excuse the exact case the check exists for;
  *     a SHARED hostname is instead named in the summary as corroborating detail. See
  *     {@link isClonedMachineId} in `./infra`, which is the rule itself. Almost always a VM template or
- *     golden image with a baked `/etc/machine-id`. Broadcast to the admin feed; deep-links to the
+ *     golden image with a baked identity value — `/etc/machine-id` on Linux, a `MachineGuid` that
+ *     `sysprep /generalize` never regenerated on Windows. Broadcast to the admin feed; deep-links to the
  *     topology map. Emitted ONCE per newly-detected colliding host
  *     (`infra.identity_conflict:<peerNodeId>:<discriminator>`), never
  *     once per report — the clone keeps checking in every 15 minutes. This is the ONLY automatic action
  *     the collision detection takes: the report is still accepted, nothing is auto-merged or auto-split,
- *     and the remedy (`systemd-firstboot --setup-machine-id`) is named in the summary.
+ *     and the remedy for the REPORTING HOST'S PLATFORM is named in the summary
+ *     (`systemd-firstboot --setup-machine-id` on Linux, `sysprep /generalize` on Windows; families
+ *     lazyit ships no agent for get the action with no command rather than an invented one).
  *   - `update.available`     — the weekly update-awareness nudge (ADR-0084 §2, issue #904): the opt-in
  *     GitHub-releases check observed a NEWER release than the running version. Broadcast to the admin
  *     feed (the audience that can act); deep-links to Settings → Instance. De-duped per newly-observed
