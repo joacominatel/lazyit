@@ -61,9 +61,10 @@ written **only when something actually moved**, so a host nobody touched adds no
   inventory changes, and a history nobody trusts is worse than none.
 - **A POLICY-SENSITIVE fact is compared only across ONE policy generation.** An agent policy (#1140)
   decides what the collector may *report*, so a fact a policy can filter would otherwise be recorded
-  as the machine moving. Four fields filter a list the report still carries — `exclude.mountpoints`
-  (which reaches `host.disks.totalBytes` and `host.disks.count`), `exclude.softwareNames`,
-  `softwareSources` and `softwareMax` (which reach every `PACKAGE_*` row) — so those facts are marked
+  as the machine moving. Four of the five fields that filter a list the report still carries reach a
+  tracked fact — `exclude.mountpoints` (which reaches `host.disks.totalBytes` and `host.disks.count`),
+  `exclude.softwareNames`, `softwareSources` and `softwareMax` (which reach every `PACKAGE_*` row);
+  the fifth, `exclude.nicNames`, filters NICs, which are not tracked — so those facts are marked
   `policySensitive` in the shared tracked-fact table and are diffed only when the agent's echoed
   `policyRevision` matches the one the node already held. Both absent counts as a match, which is what
   keeps a pre-#1140 agent's package history working. The marking is a **required** field on every

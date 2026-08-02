@@ -1066,8 +1066,10 @@ inventory changes, and a history nobody trusts is worse than none.
 The "no evidence" reading above answers one *shape* of the problem — the policy that excluded
 everything. The general shape is that an agent policy (§7) decides what the collector may **report**
 and says nothing about the machine, so any fact a policy can filter will otherwise be recorded as the
-machine moving. Four policy fields filter a list the report still carries, and between them they
-reach the two disk facts and the whole package half:
+machine moving. Five policy fields filter a list the report still carries; four of them reach a fact
+this table tracks, and between them they reach the two disk facts and the whole package half. (The
+fifth, `exclude.nicNames`, filters network interfaces — deliberately not tracked, so it reaches
+nothing here.)
 
 | Policy field | What it filters | Facts it can move |
 | --- | --- | --- |
