@@ -30,7 +30,13 @@
   discover later. The code is identical either way; only the signing step differs.
 
 .PARAMETER Url
-  Your lazyit instance base URL, e.g. https://lazyit.example.com
+  Your lazyit instance BASE URL - scheme, host and port, nothing else. For example
+  https://lazyit.example.com, or http://192.168.100.75:8080 on a LAN instance.
+
+  NOT the address of this script. Every request this installer makes is built by appending a path to
+  what you pass here, so -Url https://lazyit.example.com/install.ps1 asks the server for
+  https://lazyit.example.com/install.ps1/api/agent/download - which fails looking like a token
+  problem. The script checks for that before it downloads anything and says so.
 
 .PARAMETER Token
   A Service Account token holding the infra:report permission. Prefer -TokenFile or the
@@ -184,6 +190,33 @@ if (-not $Url)   { $Url   = $env:LAZYIT_URL }
 if (-not $Url)   { Die '-Url is required (your lazyit instance, e.g. https://lazyit.example.com)' }
 if (-not $Token) { Die 'a token is required - pass -Token, -TokenFile, or set $env:LAZYIT_TOKEN (needs infra:report)' }
 $Url = $Url.TrimEnd('/')
+
+# --- -Url IS THE INSTANCE BASE URL, NOT THE ADDRESS OF THIS SCRIPT (#1166) ---
+# Every request below is built as "$Url$Path", so the operator on the first Windows host passing
+# `-Url http://192.168.100.75:8080/install.ps1` asked the server for
+# http://192.168.100.75:8080/install.ps1/api/agent/download?os=windows&arch=x64 . What reaches the
+# operator is the download failure further down, which names the token as a likely cause - so they
+# go and rotate a Service Account credential that was never wrong. Checked HERE, before anything is
+# downloaded, so the message names the real mistake and suggests the URL they meant.
+if ($Url -notmatch '^https?://[^/]+') {
+  Die "-Url must be your lazyit instance base URL, starting with http:// or https:// (e.g. https://lazyit.example.com). Got: $Url"
+}
+# Whatever follows scheme://host[:port]. Empty for the ordinary case.
+$UrlPath = $Url -replace '^https?://[^/]+', ''
+if ($UrlPath -match '^/install\.(ps1|sh)') {
+  Die "-Url is your lazyit instance base URL, not the address of this script. You passed $Url; pass -Url $($Url -replace '/install\.(ps1|sh).*$', '') instead. The installer appends /api/agent/download to it itself."
+}
+if ($UrlPath -match '^/api(/|$)') {
+  Die "-Url is your lazyit instance base URL, not an API endpoint. You passed $Url, and the installer would then ask for $Url/api/agent/download. Pass -Url $($Url -replace '/api.*$', '')."
+}
+# ANY OTHER PATH IS A WARNING, NOT A REFUSAL, and that asymmetry is deliberate. lazyit sets no
+# Next.js basePath, so a path here is almost always the same mistake in a different shape - but a
+# reverse proxy that strips a prefix really can mount an instance under one, and re-running this
+# script is the documented UPGRADE path. Refusing outright would break a deployment that works
+# today; the two branches above are the only two shapes that can never be a valid base URL.
+if ($UrlPath) {
+  Write-Warning "lazyit-agent install: -Url carries a path ($UrlPath) and lazyit is served from the root of its origin, so this is usually a mistake - pass just the scheme, host and port. Continuing, in case your reverse proxy really does mount lazyit under that path."
+}
 
 # TLS 1.2 explicitly. Windows PowerShell 5.1 defaults its ServicePointManager to SSL3/TLS1.0 on
 # older builds, which a modern Caddy front refuses - the symptom is an opaque "underlying connection
