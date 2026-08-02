@@ -112,6 +112,16 @@ describe("the scheduled task is the systemd timer, one platform over", () => {
     expect(script).not.toContain(".Repetition =");
   });
 
+  test("the random delay rides the TIME trigger only — a boot trigger has nowhere to put it", () => {
+    // `timeTriggerType` extends the trigger base type with exactly one element, `RandomDelay`;
+    // `bootTriggerType` extends it with exactly one element, `Delay`. So a boot trigger has no schema
+    // home for a random delay however willingly `New-ScheduledTaskTrigger` accepts the parameter —
+    // and the estate's real de-phasing is the agent's own machine-id-keyed cadence jitter (#1140).
+    expect(script).toContain("New-ScheduledTaskTrigger -AtStartup\n");
+    expect(script).toContain("$bootTrigger.Delay = 'PT2M'");
+    expect(script).toContain("-Once -At (Get-Date) -RandomDelay $RandomDelay");
+  });
+
   test("the random delay rides the TRIGGERS — New-ScheduledTaskSettingsSet has no -RandomDelay", () => {
     // Documented on New-ScheduledTaskTrigger for every parameter set, and absent from
     // New-ScheduledTaskSettingsSet's syntax entirely. Passing it to the settings set throws
