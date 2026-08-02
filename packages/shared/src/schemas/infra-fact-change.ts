@@ -21,13 +21,14 @@ import { z } from "zod";
  * report path.
  *
  * A POLICY IS NOT AN EVENT — the rule every fact here inherits. An agent policy (#1140) decides what
- * the collector may REPORT; it says nothing about the machine. Four of its fields FILTER a list the
- * report still carries — `exclude.mountpoints`, `exclude.softwareNames`, `softwareSources` and
- * `softwareMax` — so an operator editing one makes facts move with nothing on the host moving. Every
- * fact those filters can reach is marked `policySensitive` in the tracked-fact tables below, and is
- * compared only when both observations ran under the same policy generation
- * ({@link InfraFactDiffContext}). The marking is a REQUIRED field, so a fact added to this diff
- * later has to answer the question rather than quietly inherit the wrong answer.
+ * the collector may REPORT; it says nothing about the machine. FIVE of its fields FILTER a list the
+ * report still carries — `exclude.nicNames`, `exclude.mountpoints`, `exclude.softwareNames`,
+ * `softwareSources` and `softwareMax` — so an operator editing one makes facts move with nothing on
+ * the host moving. Four of the five reach a fact tracked here; NICs are deliberately not tracked, so
+ * `exclude.nicNames` reaches none. Every fact those filters CAN reach is marked `policySensitive` in
+ * the tracked-fact tables below, and is compared only when both observations ran under the same
+ * policy generation ({@link InfraFactDiffContext}). The marking is a REQUIRED field, so a fact added
+ * to this diff later has to answer the question rather than quietly inherit the wrong answer.
  *
  * The other shape a policy takes — a `collect.*` toggle that omits a fact ENTIRELY — needs no such
  * marking: an absent fact is already silent under the seeding and disappearance rules on
@@ -163,8 +164,9 @@ function scalar(value: unknown): string | undefined {
  * test is narrow: could an operator edit a policy (#1140) and make this value change while the
  * machine it describes stands still? A policy that omits the fact ENTIRELY is not that case — an
  * absent fact is already silenced by the seeding/disappearance rules on {@link compareFacts} — so
- * only the FILTERS count: `exclude.mountpoints`, `exclude.softwareNames`, `softwareSources` and
- * `softwareMax`, which narrow a list the report still carries.
+ * only the FILTERS count: `exclude.nicNames`, `exclude.mountpoints`, `exclude.softwareNames`,
+ * `softwareSources` and `softwareMax`, which narrow a list the report still carries. Only four of
+ * those five can reach anything tracked here, since no NIC fact is.
  */
 interface TrackedFact {
   fact: string;
