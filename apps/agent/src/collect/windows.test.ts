@@ -720,8 +720,11 @@ describe("WINDOWS_FACTS_SCRIPT", () => {
     // the key is emitted LAST because a hashtable literal is evaluated in written order, which is the
     // only reason it sees the errors the earlier keys raised.
     expect(WINDOWS_FACTS_SCRIPT).toContain("$Error.Clear()");
-    expect(WINDOWS_FACTS_SCRIPT).toContain("errors=@(");
-    expect(WINDOWS_FACTS_SCRIPT.indexOf("errors=@(")).toBeGreaterThan(
+    // Anchored on the key BEFORE it, so a renamed or detached key cannot satisfy this by substring.
+    expect(WINDOWS_FACTS_SCRIPT).toContain("elevated=$el;errors=@($Error|");
+    // …and it is the last key in the literal, which is the only reason it sees what the earlier ones
+    // raised. `software=@(` is the last CIM/registry read before it.
+    expect(WINDOWS_FACTS_SCRIPT.indexOf("errors=@($Error|")).toBeGreaterThan(
       WINDOWS_FACTS_SCRIPT.indexOf("software=@("),
     );
     // Bounded: a pathological host must not turn the report into an error log.
