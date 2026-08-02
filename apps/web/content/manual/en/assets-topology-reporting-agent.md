@@ -472,9 +472,18 @@ than answers:
   documented above, but it is a settings change — it is not recorded as thousands of removals.
 - **Turning the disk collector off, or excluding every mountpoint**, in the agent settings. That
   leaves lazyit with no disk reading to compare against, and "no reading" is not "the disks are gone",
-  so nothing is recorded. (Excluding only *some* mountpoints is different: the remaining count is a
-  real reading, and a change to it is recorded — the same entry you would see if the machine really
-  had lost a disk.)
+  so nothing is recorded.
+- **What an agent-settings change makes a machine stop reporting.** Excluding *some* mountpoints,
+  excluding package names, choosing which package managers count or lowering the package limit all
+  change what a machine **reports** — nothing was unplugged and nothing was uninstalled. lazyit knows
+  which generation of the settings each report was collected under, so on the first report a machine
+  sends after picking up a change it skips the disk and package entries and takes the new lists as its
+  starting point; from the next report on it is comparing like with like again. Facts no setting can
+  filter — the operating system, the kernel, memory, the serial, a container's image — are still
+  recorded in that same report. Two details worth knowing: the settings are estate-wide, so editing
+  them for one machine costs every machine that one report; and a change made in a host's **own**
+  `/etc/lazyit-agent/config` is invisible to lazyit, so tightening that file's exclusions there *can*
+  show up as packages being removed.
 
 **A machine that has been offline for a long time is capped.** When a host comes back after missing
 several patch windows, its first report can legitimately differ by thousands of packages. lazyit

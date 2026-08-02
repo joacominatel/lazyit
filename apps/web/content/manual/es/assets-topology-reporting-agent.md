@@ -508,9 +508,19 @@ respuestas:
   como miles de eliminaciones.
 - **Desactivar el recolector de discos, o excluir todos los puntos de montaje**, en la configuración
   del agente. Eso deja a lazyit sin ninguna lectura de discos para comparar, y "sin lectura" no es
-  "los discos desaparecieron": no se registra nada. (Excluir solo *algunos* puntos de montaje es
-  distinto: la cantidad restante sí es una lectura real, y su cambio se registra — la misma entrada
-  que verías si la máquina realmente hubiera perdido un disco.)
+  "los discos desaparecieron": no se registra nada.
+- **Lo que una máquina deja de reportar por un cambio de configuración del agente.** Excluir
+  *algunos* puntos de montaje, excluir nombres de paquetes, elegir qué gestores de paquetes cuentan o
+  bajar el tope de paquetes cambian lo que una máquina **reporta**: no se desconectó nada ni se
+  desinstaló nada. lazyit sabe con qué generación de la configuración se recolectó cada reporte, así
+  que en el primer reporte que una máquina envía después de tomar un cambio omite las entradas de
+  discos y de paquetes y adopta las listas nuevas como punto de partida; desde el reporte siguiente
+  vuelve a comparar lo comparable. Los datos que ninguna configuración puede filtrar — el sistema
+  operativo, el kernel, la memoria, el número de serie, la imagen de un contenedor — sí se registran
+  en ese mismo reporte. Dos detalles que conviene saber: la configuración es de toda la instancia, así
+  que editarla para una máquina le cuesta ese reporte a todas; y un cambio hecho en el
+  `/etc/lazyit-agent/config` **del propio host** es invisible para lazyit, de modo que endurecer las
+  exclusiones ahí *sí* puede aparecer como paquetes eliminados.
 
 **Una máquina que estuvo mucho tiempo fuera de línea tiene un tope.** Cuando un host vuelve después de
 perderse varias ventanas de parches, su primer reporte puede diferir legítimamente en miles de
