@@ -181,8 +181,9 @@ actualización), usá la ruta completa: siempre funciona.
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" show
 ```
 
-El `&` y las comillas no son decorativos: `C:\Program Files` tiene un espacio, así que PowerShell
-necesita el operador de llamada para ejecutar la cadena entre comillas en vez de imprimirla.
+Ni las comillas ni el `&` son decorativos, y vienen de a pares: `C:\Program Files` tiene un espacio,
+así que la ruta hay que entrecomillarla — y entonces PowerShell se limitaría a *imprimir* esa cadena,
+por lo que `&`, el operador de llamada, es lo que la ejecuta.
 
 **`test`** verifica la dirección, el DNS, el TLS, el proxy, la autoridad certificadora y el token, y
 te dice cuál está mal: una redirección significa que apuntaste al puerto equivocado, un rechazo
@@ -220,7 +221,8 @@ administrador*). El instalador:
 5. agrega `C:\Program Files\lazyit-agent` al **PATH de la máquina**, para que los comandos de
    diagnóstico funcionen por nombre — igual que `/usr/local/bin` ya lo hace en Linux. Es lo único de
    esta lista que puede fallar sin consecuencias: si no se puede escribir, aparece una advertencia y
-   la instalación continúa, porque el agente nunca lee el PATH;
+   la instalación continúa, porque nadie más que vos al escribir el comando lo necesita: la tarea
+   programada ejecuta al agente por su ruta completa;
 6. escribe `C:\ProgramData\lazyit-agent\config` y lo restringe a **SYSTEM y Administradores
    únicamente** — el equivalente en Windows del `chmod 600` que usa en Linux, porque ese archivo
    contiene un token real;

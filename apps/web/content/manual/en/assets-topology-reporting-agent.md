@@ -169,8 +169,9 @@ which is the ordinary upgrade path anyway), use the full path — it always work
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" show
 ```
 
-The `&` and the quotes are not decoration: `C:\Program Files` has a space in it, so PowerShell needs
-the call operator to run the quoted string rather than print it.
+Neither the quotes nor the `&` is decoration, and they come as a pair: `C:\Program Files` has a space
+in it, so the path has to be quoted — and PowerShell would then just *print* that string, so `&`, the
+call operator, is what makes it run.
 
 **`test`** checks the address, DNS, TLS, the proxy, the certificate authority and the token, and
 tells you which one is wrong — a redirect means you pointed it at the wrong port, a rejection means
@@ -205,7 +206,8 @@ Run from an **elevated PowerShell** (right-click PowerShell → *Run as administ
 5. adds `C:\Program Files\lazyit-agent` to the **machine PATH**, so the diagnostic commands work by
    name — the same way `/usr/local/bin` already does on Linux. This is the one thing on the list
    that is allowed to fail: if it can't be written, you get a warning and the install carries on,
-   because the agent itself never reads PATH;
+   because nothing but your own typing needs it — the scheduled task runs the agent by its full
+   path;
 6. writes `C:\ProgramData\lazyit-agent\config` and locks it down to **SYSTEM and Administrators
    only** — the Windows equivalent of the `chmod 600` it uses on Linux, because that file holds a
    live token;
