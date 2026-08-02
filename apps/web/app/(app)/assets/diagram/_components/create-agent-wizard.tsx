@@ -5,6 +5,7 @@ import {
   CheckCircleIcon,
   CheckIcon,
   CommandLineIcon,
+  ExclamationTriangleIcon,
   InformationCircleIcon,
 } from "@heroicons/react/24/outline";
 import {
@@ -33,6 +34,13 @@ import { useInfraNodes } from "@/lib/api/hooks/use-infra-nodes";
 import { useCreateServiceAccount } from "@/lib/api/hooks/use-service-accounts";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
+import {
+  AGENT_PLATFORMS,
+  type AgentPlatform,
+  agentDiagnosticsCommand,
+  agentInstallCommand,
+  agentManualInstallSteps,
+} from "./agent-install-commands";
 import { ConfirmNodeDialog } from "./confirm-node-dialog";
 
 /**
@@ -277,7 +285,20 @@ function StepName({
   );
 }
 
-/** Step 2 — the one-liner, the requirements, the manual fallback, and the once-only token reveal. */
+/**
+ * Step 2 — the platform choice, the one-liner, the requirements, the inspect-first fallback, the
+ * post-install check, and the once-only token reveal.
+ *
+ * The platform switch is the point of #1168. Minting the Service Account and handing over the token
+ * is platform-neutral and always was; everything printed AROUND it assumed Linux, so an operator
+ * installing on Windows was handed a `curl … | sh` their host cannot run, at the one moment they are
+ * holding a token that is shown once and never again. The agent has been cross-platform since
+ * ADR-0074's Windows amendment (#1144) and the Manual has carried the PowerShell form since then —
+ * this wizard was the last surface that had not learned it.
+ *
+ * `linux` stays the default: it is what most of an estate's *servers* are, and it keeps the flow one
+ * paste long for everyone it already served.
+ */
 function StepInstall({
   token,
   name,
@@ -290,77 +311,36 @@ function StepInstall({
   onLockChange: (locked: boolean) => void;
 }) {
   const t = useTranslations("infra.wizard");
+  const [platform, setPlatform] = useState<AgentPlatform>("linux");
   const origin =
     typeof window !== "undefined"
       ? window.location.origin
       : "https://<your-instance>";
-  const oneLiner = `curl -fsSL ${origin}/install.sh | sudo sh -s -- --url ${origin} --token ${token}`;
-
-  // The credential-based manual path — mirrors install.sh + the agent's /etc/lazyit-agent/config
-  // contract so a cautious admin can reproduce the installer by hand, step by step.
-  const manualSteps = [
-    {
-      label: t("manual.step1"),
-      command: `curl -fsSL -H "Authorization: Bearer ${token}" "${origin}/api/agent/download?arch=x64" -o lazyit-agent`,
-    },
-    {
-      label: t("manual.step2"),
-      command: "chmod +x lazyit-agent && sudo mv lazyit-agent /usr/local/bin/",
-    },
-    {
-      label: t("manual.step3"),
-      command: `sudo install -d -m 700 /etc/lazyit-agent && printf 'LAZYIT_URL=%s\\nLAZYIT_TOKEN=%s\\n' "${origin}" "${token}" | sudo tee /etc/lazyit-agent/config >/dev/null && sudo chmod 600 /etc/lazyit-agent/config`,
-    },
-    {
-      label: t("manual.step4"),
-      command: "sudo lazyit-agent report --once --force",
-    },
-  ];
 
   return (
     <div className="space-y-4">
-      <Callout
-        tone="info"
-        icon={<CommandLineIcon />}
-        className="rounded-lg text-sm"
-      >
-        {t("requirements")}
-      </Callout>
-
-      <div className="space-y-2">
-        <p className="text-sm font-medium text-foreground">
-          {t("installTitle")}
-        </p>
-        <CommandBlock command={oneLiner} />
-        <p className="text-xs text-muted-foreground">{t("installHint")}</p>
-      </div>
-
-      <details className="group rounded-lg border bg-muted/30">
-        <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground select-none">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none">
-              ›
-            </span>
-            {t("manual.toggle")}
-          </span>
-        </summary>
-        <div className="space-y-3 px-3 pt-1 pb-3">
-          <p className="text-xs text-muted-foreground">{t("manual.intro")}</p>
-          <ol className="space-y-3">
-            {manualSteps.map((manualStep, index) => (
-              <li key={manualStep.command} className="space-y-1.5">
-                <p className="text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">
-                    {index + 1}.
-                  </span>{" "}
-                  {manualStep.label}
-                </p>
-                <CommandBlock command={manualStep.command} />
-              </li>
-            ))}
-          </ol>
+      <fieldset>
+        <legend className="mb-1.5 text-sm font-medium text-foreground">
+          {t("platform.label")}
+        </legend>
+        <div className="flex gap-1 rounded-lg border bg-muted/30 p-1">
+          {AGENT_PLATFORMS.map((candidate) => (
+            <Button
+              key={candidate}
+              type="button"
+              size="sm"
+              variant={platform === candidate ? "default" : "ghost"}
+              className="flex-1"
+              aria-pressed={platform === candidate}
+              onClick={() => setPlatform(candidate)}
+            >
+              {candidate === "windows" ? t("platform.windows") : t("platform.linux")}
+            </Button>
+          ))}
         </div>
-      </details>
+      </fieldset>
+
+      <PlatformInstall platform={platform} origin={origin} token={token} />
 
       <SecretReveal
         name={name}
@@ -370,6 +350,117 @@ function StepInstall({
         onLockedChange={onLockChange}
       />
     </div>
+  );
+}
+
+/**
+ * Everything in step 2 that differs by platform.
+ *
+ * The commands themselves live in {@link agentInstallCommand} & co — pure, and asserted against the
+ * two installers this instance actually serves, because "the command we print is the command
+ * install.ps1 accepts" is a claim, not a comment.
+ */
+function PlatformInstall({
+  platform,
+  origin,
+  token,
+}: {
+  platform: AgentPlatform;
+  origin: string;
+  token: string;
+}) {
+  const t = useTranslations("infra.wizard");
+  const isWindows = platform === "windows";
+
+  // ONE structure, label key and command together. These used to be two positionally-indexed arrays
+  // — the labels listed here, the commands built in the module — and nothing tied index N of one to
+  // index N of the other, so an edit could add a step to one side only and no test would notice.
+  // `agent-install-commands.test.ts` holds every `labelKey` below to the `stepN` keys both locale
+  // catalogs actually ship.
+  const manualSteps = agentManualInstallSteps(platform, origin, token);
+
+  return (
+    <>
+      <Callout
+        tone="info"
+        icon={<CommandLineIcon />}
+        className="rounded-lg text-sm"
+      >
+        {isWindows ? t("requirements.windows") : t("requirements.linux")}
+      </Callout>
+
+      {/* Said BEFORE they click, not after SmartScreen has. ADR-0074's Windows amendment records the
+          unsigned build as a deliberate internal-validation state with an explicit OV/EV gate before
+          third-party distribution — an operator who meets that warning without having been told
+          reasonably concludes the download is malicious, and stops. */}
+      {isWindows ? (
+        <Callout
+          tone="warning"
+          icon={<ExclamationTriangleIcon />}
+          className="rounded-lg text-sm"
+        >
+          {t("unsigned")}
+        </Callout>
+      ) : null}
+
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-foreground">
+          {t("installTitle")}
+        </p>
+        <CommandBlock command={agentInstallCommand(platform, origin, token)} />
+        <p className="text-xs text-muted-foreground">
+          {isWindows ? t("installHint.windows") : t("installHint.linux")}
+        </p>
+      </div>
+
+      <details className="group rounded-lg border bg-muted/30">
+        <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground select-none">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none">
+              ›
+            </span>
+            {isWindows ? t("manual.windows.toggle") : t("manual.linux.toggle")}
+          </span>
+        </summary>
+        <div className="space-y-3 px-3 pt-1 pb-3">
+          <p className="text-xs text-muted-foreground">
+            {isWindows ? t("manual.windows.intro") : t("manual.linux.intro")}
+          </p>
+          <ol className="space-y-3">
+            {manualSteps.map((step, index) => (
+              <li key={step.labelKey} className="space-y-1.5">
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {index + 1}.
+                  </span>{" "}
+                  {t(step.labelKey)}
+                </p>
+                <CommandBlock command={step.command} />
+              </li>
+            ))}
+          </ol>
+        </div>
+      </details>
+
+      {/* The check an operator reaches for when a host stays quiet — and the one that failed them on
+          Windows, where the install directory is not on PATH (#1167, open). The absolute form printed
+          here runs today AND once #1167 adds that PATH entry, so it needs no revision when it lands.
+
+          The Windows note carries the OTHER half of what the Linux `sudo` carries in the command
+          itself: this check needs an elevated PowerShell, because install.ps1 ACLs the config file to
+          SYSTEM + Administrators and the agent reads an unreadable config as an absent one. Without
+          it the operator gets "no URL configured" on a host that installed perfectly. */}
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-foreground">
+          {t("diagnostics.title")}
+        </p>
+        <CommandBlock command={agentDiagnosticsCommand(platform)} />
+        <p className="text-xs text-muted-foreground">
+          {t("diagnostics.hint")}
+          {isWindows ? ` ${t("diagnostics.windowsNote")}` : null}
+        </p>
+      </div>
+    </>
   );
 }
 

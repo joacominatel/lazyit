@@ -62,7 +62,8 @@ report came from and how fresh it is, with two actions: **Confirm** to add it to
 ## Add a server
 
 The **Add a server** button (top of this view, for people who can manage settings) generates the
-one-time install command for the reporting agent so a new Linux server can start reporting itself.
+one-time install command for the reporting agent — for a **Linux or a Windows** host, whichever you
+pick — so a new server can start reporting itself.
 See [Reporting agent](/help/assets-topology-reporting-agent).
 
 ## Opening a server

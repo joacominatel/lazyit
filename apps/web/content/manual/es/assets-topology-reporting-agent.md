@@ -32,8 +32,9 @@ El botón abre un asistente guiado y breve, de tres pasos:
 1. **Nombre y generación.** Poné un nombre que reconozcas más adelante (por ejemplo el nombre del
    servidor, como `web-prod-01`) y hacé clic en **Generar credenciales**. lazyit crea una cuenta de
    servicio limitada **únicamente** al permiso `infra:report`.
-2. **Instalación.** lazyit te muestra un **comando de instalación** listo para pegar con el token ya
-   incluido:
+2. **Instalación.** Elegí la plataforma de este servidor —**Linux** o **Windows**— y lazyit te muestra
+   el **comando de instalación** correspondiente, listo para pegar y con el token ya incluido. En
+   **Linux**:
 
    ```sh
    curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --url https://tu-instancia --token <token>
@@ -48,25 +49,37 @@ El botón abre un asistente guiado y breve, de tres pasos:
    (La forma con bloque de script no es adorno: el pipe `irm … | iex` no puede pasar parámetros.)
    Ver **[Hosts Windows](#hosts-windows)** más abajo para qué hace esa instalación y qué necesita.
 
+   La elección cambia todo lo que el asistente muestra alrededor: qué necesita el host, la vía para
+   inspeccionar antes de ejecutar, la verificación posterior y —en Windows— una afirmación clara de
+   que el ejecutable **todavía no está firmado**, para que te enteres antes de que te lo diga
+   SmartScreen.
+
    La dirección es **tu propia instancia de lazyit** — el agente solo se comunica con el servidor que
    vos ejecutás, y tiene que ser el **origen HTTPS público** (la dirección que usás en el navegador,
    delante del proxy reverso) — **nunca** el puerto crudo del web (`:3000`), que no tiene ruta para la
    descarga del agente y hará que la instalación falle. Es la dirección **base** y nada más:
-   `https://tu-instancia`, no `https://tu-instancia/install.sh` (la dirección del script en sí). El
-   instalador agrega sus propias rutas, así que una dirección de script haría que cada pedido fuera
-   `…/install.sh/api/agent/download`; ambos instaladores ahora lo verifican y lo indican, en lugar de
-   fallar más adelante con un error de descarga que parece un token inválido — y muestran la
-   dirección que querías usar, para pegarla directamente. Si un proxy reverso monta tu instancia bajo
-   una ruta (`https://it.example.com/lazyit`), esa ruta **sí** forma parte de tu dirección base:
-   pasala, y conservala en la dirección que los instaladores sugieren. Los instaladores advierten
-   sobre cualquier ruta — esa forma suele ser el error de más arriba — pero continúan, así que una
-   instancia bajo un prefijo se instala igual. Ejecutalo **como root**
-   en Linux, o **como
-   Administrador** en Windows. El token se muestra **una sola vez**, así que copialo (o descargalo)
-   antes de continuar. Si
-   preferís revisar cada paso, expandí **Instalar manualmente (paso a paso)** para la misma instalación
-   hecha a mano (descargar el binario, instalarlo, escribir el archivo de configuración y enviar un
-   reporte de prueba).
+   `https://tu-instancia`, no `https://tu-instancia/install.sh` —ni `https://tu-instancia/install.ps1`,
+   el de Windows—, que es la dirección del script en sí. El instalador agrega sus propias rutas, así
+   que una dirección de script haría que cada pedido fuera `…/install.sh/api/agent/download`; ambos
+   instaladores ahora lo verifican y lo indican, en lugar de fallar más adelante con un error de
+   descarga que parece un token inválido — y los dos muestran la dirección que querías usar.
+   Anotala mientras está en pantalla: en Linux el rechazo termina el `sh` del pipe y el mensaje te
+   queda en el prompt, pero en Windows el comando de una línea ejecuta el instalador como **bloque de
+   script**, así que el rechazo termina también la sesión de PowerShell y una consola elevada que
+   abriste con clic derecho se cierra en el acto. Si un proxy reverso monta tu instancia bajo una ruta
+   (`https://it.example.com/lazyit`), esa ruta **sí** forma parte de tu dirección base: pasala, y
+   conservala en la dirección que los instaladores sugieren. Los instaladores advierten sobre
+   cualquier ruta — esa forma suele ser el error de más arriba — pero continúan, así que una instancia
+   bajo un prefijo se instala igual. Los comandos del propio asistente nunca chocan con nada de esto:
+   la dirección la completa él a partir de la que estás navegando, así que esto importa cuando volvés
+   a ejecutar un instalador a mano.
+   Ejecutalo **como root** en Linux, o **como Administrador** en Windows. El token se muestra **una
+   sola vez**, así que copialo (o descargalo) antes de continuar. Si
+   preferís inspeccionar antes, el asistente tiene una sección plegada para eso y cambia según la
+   plataforma: en Linux, **Instalar manualmente (paso a paso)** es la misma instalación hecha a mano
+   (descargar el binario, instalarlo, escribir el archivo de configuración y enviar un reporte de
+   prueba); en Windows, **Descargar y leer el instalador primero** guarda `install.ps1` en tu carpeta
+   temporal para que lo leas y después ejecuta la copia que leíste.
 
    > **Mantené el token fuera de la shell.** Tal como está escrito arriba, el token queda visible en
    > `ps` para cualquier usuario de esa máquina durante los pocos segundos que dura la instalación, y
@@ -100,9 +113,9 @@ El botón abre un asistente guiado y breve, de tres pasos:
 
 ### Instalar manualmente (paso a paso)
 
-La sección plegada **Instalar manualmente** del asistente da la misma instalación comando por comando,
-para un administrador cauteloso que prefiere descargar e inspeccionar el binario primero. Cada paso
-tiene su propio botón de copiar:
+Con **Linux** seleccionado, la sección plegada **Instalar manualmente** del asistente da la misma
+instalación comando por comando, para un administrador cauteloso que prefiere descargar e inspeccionar
+el binario primero. Cada paso tiene su propio botón de copiar:
 
 1. **Descargá el binario** (usá `arch=arm64` en máquinas ARM; agregá `&os=windows` para un host
    Windows, que entrega `lazyit-agent-windows-x64.exe`):
@@ -126,6 +139,31 @@ tiene su propio botón de copiar:
    ```sh
    sudo lazyit-agent report --once --force
    ```
+
+Con **Windows** seleccionado la misma sección se llama **Descargar y leer el instalador primero**, y
+son dos pasos en lugar de cuatro. Reproducir `install.ps1` a mano implicaría escribir vos mismo la ACL
+del archivo de configuración y registrar la tarea programada, y una versión a medias de eso es peor
+que ninguna: lo que ofrece en cambio es la forma honesta de la misma intención — guardar el
+instalador, leerlo y ejecutar la copia que leíste.
+
+1. **Guardá el instalador** en tu carpeta temporal: una PowerShell elevada abre en
+   `C:\Windows\System32`, que no es lugar para dejar un script recién descargado:
+
+   ```powershell
+   irm https://tu-instancia/install.ps1 -OutFile "$env:TEMP\lazyit-install.ps1"
+   ```
+2. **Leé el archivo guardado y después ejecutalo:**
+
+   ```powershell
+   & ([scriptblock]::Create((Get-Content -Raw "$env:TEMP\lazyit-install.ps1"))) -Url https://tu-instancia -Token <token>
+   ```
+
+   Es la misma forma con bloque de script que el comando de una línea de arriba, leyendo del archivo
+   en lugar de la red. Está escrita así y no invocando el `.ps1` guardado porque un **archivo** `.ps1`
+   está sujeto a la política de ejecución de scripts del host —`Restricted` por defecto en las
+   ediciones cliente de Windows—, mientras que un bloque de script construido en memoria no lo está.
+   Si tu política ya permite scripts locales, `& "$env:TEMP\lazyit-install.ps1" -Url … -Token …` hace
+   exactamente lo mismo.
 
 ### Qué necesita un host para ejecutarlo
 
@@ -167,6 +205,15 @@ En Windows, los mismos dos comandos, desde una PowerShell elevada:
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" show
 ```
+
+La ruta completa no es exquisitez: en Windows el instalador no agrega su carpeta al `PATH`, así que
+`lazyit-agent test` a secas no es un comando ahí. El asistente muestra la forma que corresponde a la
+plataforma que elegiste, así que salís de él con una que funciona.
+
+Que sea **elevada** tampoco es opcional, y el asistente lo dice al lado del comando. El instalador
+restringe el archivo de configuración a SYSTEM y Administradores, así que un `test` ejecutado desde
+una PowerShell común no puede leer la URL ni el token y responde que no hay ninguno configurado, lo
+que se lee como una instalación rota y no como un clic derecho que faltó.
 
 **`test`** verifica la dirección, el DNS, el TLS, el proxy, la autoridad certificadora y el token, y
 te dice cuál está mal: una redirección significa que apuntaste al puerto equivocado, un rechazo
@@ -242,7 +289,8 @@ toca la tarea.
 
 El ejecutable de Windows está actualmente **sin firmar**. SmartScreen va a advertir sobre él, y
 algunos antivirus lo van a poner en cuarentena apenas lo vean: si la instalación falla en el paso de
-"ejecutarlo una vez", eso es lo primero que hay que revisar.
+"ejecutarlo una vez", eso es lo primero que hay que revisar. El asistente lo dice en la pestaña de
+Windows, antes de que ejecutes nada, para que la advertencia no sea la primera noticia que tenés.
 
 Es un estado deliberado y temporal, para **validación interna dentro de la organización que
 construye lazyit**, en su propio dominio y sus propias máquinas. **No despliegues este agente de

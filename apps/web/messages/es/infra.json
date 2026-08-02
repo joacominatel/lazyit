@@ -111,14 +111,14 @@
   },
   "onboarding": {
     "title": "Registrá servidores automáticamente",
-    "description": "Instalá un agente liviano en un servidor Linux y reporta su hardware y software a lazyit por sí solo: solo puede reportar, nada más.",
+    "description": "Instalá un agente liviano en un servidor Linux o Windows y reporta su hardware y software a lazyit por sí solo: solo puede reportar, nada más.",
     "cta": "Creá tu primer agente",
     "addAgent": "Agregar agente",
     "noPermissionHint": "Pedile a un administrador que agregue un agente de reporte: requiere el permiso de gestión de configuración."
   },
   "wizard": {
     "title": "Crear un agente de reporte",
-    "subtitle": "Instalá un agente de reporte en un servidor Linux en tres pasos.",
+    "subtitle": "Instalá un agente de reporte en un servidor Linux o Windows en tres pasos.",
     "steps": {
       "name": "Nombre",
       "install": "Instalar",
@@ -133,18 +133,43 @@
     "generate": "Generar credenciales",
     "createdToast": "Credenciales creadas.",
     "error": "No se pudieron crear las credenciales.",
-    "requirements": "Vas a ejecutar esto en un servidor Linux con acceso root.",
+    "platform": {
+      "label": "¿Qué plataforma es este servidor?",
+      "linux": "Linux",
+      "windows": "Windows"
+    },
+    "requirements": {
+      "linux": "Vas a ejecutar esto en un servidor Linux con systemd y curl, como root.",
+      "windows": "Vas a ejecutar esto desde una PowerShell elevada (clic derecho en PowerShell → Ejecutar como administrador) en Windows 10/11 o Windows Server 2016 o posterior, en x64. No hay build para ARM64, y el instalador se detiene en cualquier host que no sea x64. No hay nada más que instalar: el agente es un único ejecutable autocontenido, sin Node ni dependencias."
+    },
     "installTitle": "Ejecutá esto en tu servidor",
-    "installHint": "Copiá el comando y ejecutalo en el servidor Linux como root. El token se muestra una sola vez: capturalo antes de cerrar.",
+    "installHint": {
+      "linux": "Copiá el comando y ejecutalo en el servidor Linux como root. El token se muestra una sola vez: capturalo antes de cerrar.",
+      "windows": "Copiá el comando y ejecutalo desde una PowerShell elevada. La forma con bloque de script es deliberada: un pipe irm | iex no puede pasar la URL ni el token. El token se muestra una sola vez: capturalo antes de cerrar."
+    },
+    "unsigned": "El ejecutable de Windows todavía no está firmado, así que SmartScreen va a advertir sobre él y algunos antivirus pueden ponerlo en cuarentena. Es un estado deliberado para validación interna, no una señal de que la descarga esté mal.",
     "copyCommandAria": "Copiar el comando",
     "commandCopied": "Comando copiado.",
     "manual": {
-      "toggle": "Instalar manualmente (paso a paso)",
-      "intro": "¿Preferís revisar cada paso? Ejecutá estos en el servidor en lugar del comando de una línea de arriba.",
-      "step1": "Descargá el binario (usá arch=arm64 en máquinas ARM):",
-      "step2": "Hacelo ejecutable y movelo a su lugar:",
-      "step3": "Creá el archivo de configuración (contiene el token, así que chmod 600):",
-      "step4": "Enviá un primer reporte para verificar que funciona:"
+      "linux": {
+        "toggle": "Instalar manualmente (paso a paso)",
+        "intro": "¿Preferís revisar cada paso? Ejecutá estos en el servidor en lugar del comando de una línea de arriba.",
+        "step1": "Descargá el binario (usá arch=arm64 en máquinas ARM):",
+        "step2": "Hacelo ejecutable y movelo a su lugar:",
+        "step3": "Creá el archivo de configuración (contiene el token, así que chmod 600):",
+        "step4": "Enviá un primer reporte para verificar que funciona:"
+      },
+      "windows": {
+        "toggle": "Descargar y leer el instalador primero",
+        "intro": "¿Preferís leer el instalador antes de ejecutarlo? Descargalo, abrilo en un editor y después ejecutalo desde la misma PowerShell elevada.",
+        "step1": "Guardá el instalador en tu carpeta temporal (una PowerShell elevada arranca en C:\\Windows\\System32, que no es lugar para dejarlo):",
+        "step2": "Leé el archivo guardado y después ejecutalo: esta forma funciona sea cual sea la política de ejecución de scripts del host:"
+      }
+    },
+    "diagnostics": {
+      "title": "Verificá el host después",
+      "hint": "Es de solo lectura: no envía ni modifica nada. Responde si este host puede llegar a lazyit y si su token es válido.",
+      "windowsNote": "Ejecutalo desde una PowerShell elevada: el archivo de configuración del agente solo lo pueden leer SYSTEM y Administradores, así que sin elevación la verificación va a decir que no hay URL ni token configurados. La ruta va completa porque el instalador todavía no agrega su carpeta al PATH en Windows."
     },
     "waitTitle": "Esperando que {name} reporte…",
     "waitDescription": "Ejecutá el comando de instalación en tu servidor. Apenas el agente reporte, aparecerá acá, normalmente en un par de minutos.",
