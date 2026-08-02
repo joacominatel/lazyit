@@ -280,6 +280,98 @@ describe("buildWindowsHost", () => {
     expect(kinds).not.toContain("serial");
     expect(kinds).toContain("windows-machine-guid");
   });
+
+  // THE GAP THIS CLOSES. The sweep runs under `$ErrorActionPreference='SilentlyContinue'`, which is
+  // exactly right — one class this SKU does not have must not abort the whole document — but it also
+  // meant a per-fact failure produced a NULL key and NOTHING ELSE. Every Linux collector warns when
+  // it degrades; the single Windows call warned only when the whole document failed to arrive. The
+  // point of `diagnostics.warnings` (#1138) is that an empty column is explainable, so an operator
+  // looking at a blank serial on a Windows host must be able to learn why, exactly as on Linux.
+  describe("a per-fact failure inside the sweep is EXPLAINED, not silent", () => {
+    test("an empty serial files a note naming the class and what it cost", () => {
+      const { warn, notes } = sink();
+      const { host } = buildWindowsHost(
+        facts({ bios: { SerialNumber: null } }),
+        undefined,
+        AGENT_POLICY_DEFAULT,
+        warn,
+      );
+      expect(host.hardware?.serial).toBeUndefined();
+      expect(notes.some((n) => n.startsWith("hardware:") && n.includes("Win32_BIOS"))).toBe(true);
+    });
+
+    test("each empty fact group files its own note", () => {
+      const { warn, notes } = sink();
+      buildWindowsHost(
+        facts({
+          os: null,
+          cs: null,
+          cpu: [],
+          bios: null,
+          csp: null,
+          enclosure: null,
+          disks: [],
+          physicalDisks: [],
+          adapters: [],
+          adapterConfigs: [],
+          machineGuid: null,
+        }),
+        undefined,
+        AGENT_POLICY_DEFAULT,
+        warn,
+      );
+      for (const prefix of ["os:", "system:", "cpu:", "hardware:", "nics:", "disks:", "identity:"]) {
+        expect(notes.some((n) => n.startsWith(prefix))).toBe(true);
+      }
+    });
+
+    test("a healthy document files NOTHING — a warning per report would be noise", () => {
+      const { warn, notes } = sink();
+      buildWindowsHost(facts(), undefined, AGENT_POLICY_DEFAULT, warn);
+      expect(notes).toEqual([]);
+    });
+
+    test("a policy-vetoed group is explained ONCE, by the policy note", () => {
+      // Otherwise turning NICs off would file both "disabled by agent policy" and "enumerated
+      // nothing", and the second is not true — nothing was asked for.
+      const { warn, notes } = sink();
+      buildWindowsHost(
+        facts({ adapters: [], adapterConfigs: [], disks: [], physicalDisks: [], bios: null }),
+        undefined,
+        policy({
+          collect: { ...AGENT_POLICY_DEFAULT.collect, hardware: false, nics: false, disks: false },
+        }),
+        warn,
+      );
+      expect(notes.filter((n) => n.startsWith("nics:"))).toHaveLength(1);
+      expect(notes.filter((n) => n.startsWith("disks:"))).toHaveLength(1);
+      expect(notes.filter((n) => n.startsWith("hardware:"))).toHaveLength(1);
+      for (const note of notes) expect(note).toContain("disabled by agent policy");
+    });
+
+    test("the script's OWN error text is passed through — that is the 'why'", () => {
+      // `$ErrorActionPreference='SilentlyContinue'` still records what failed in `$Error`; the script
+      // now ships it, so "Access is denied" or "Invalid namespace" reaches the operator verbatim
+      // instead of being a null key.
+      const { warn, notes } = sink();
+      buildWindowsHost(
+        facts({ errors: ["Get-CimInstance: Access is denied.", "  ", 7] }),
+        undefined,
+        AGENT_POLICY_DEFAULT,
+        warn,
+      );
+      expect(notes).toContain("windows: Get-CimInstance: Access is denied.");
+      // Blank and non-string entries are dropped rather than shipped as empty warnings.
+      expect(notes).toHaveLength(1);
+    });
+
+    test("an absent document files the ONE big note, not nine small ones", () => {
+      // `collectHost` already says the whole sweep failed. Repeating it per fact group would bury it.
+      const { warn, notes } = sink();
+      buildWindowsHost(null, undefined, AGENT_POLICY_DEFAULT, warn);
+      expect(notes).toEqual([]);
+    });
+  });
 });
 
 describe("windowsVirtualization", () => {
@@ -619,5 +711,26 @@ describe("WINDOWS_FACTS_SCRIPT", () => {
 
   test("emits one compressed JSON document", () => {
     expect(WINDOWS_FACTS_SCRIPT).toContain("ConvertTo-Json -Compress -Depth 4");
+  });
+
+  test("SilentlyContinue still REPORTS: the sweep ships its own $Error text", () => {
+    // The whole point of `$ErrorActionPreference='SilentlyContinue'` is that one missing class does
+    // not abort the document — but the errors it swallows are still what answers "why is this column
+    // empty?". `$Error` is cleared first so nothing from before the sweep can land in the report, and
+    // the key is emitted LAST because a hashtable literal is evaluated in written order, which is the
+    // only reason it sees the errors the earlier keys raised.
+    expect(WINDOWS_FACTS_SCRIPT).toContain("$Error.Clear()");
+    expect(WINDOWS_FACTS_SCRIPT).toContain("errors=@(");
+    expect(WINDOWS_FACTS_SCRIPT.indexOf("errors=@(")).toBeGreaterThan(
+      WINDOWS_FACTS_SCRIPT.indexOf("software=@("),
+    );
+    // Bounded: a pathological host must not turn the report into an error log.
+    expect(WINDOWS_FACTS_SCRIPT).toContain("Select-Object -First 10");
+  });
+
+  test("every string in it is SINGLE-quoted — Windows has no argv", () => {
+    // A double quote anywhere would put the whole collector at the mercy of the command-line
+    // re-quoting round trip. Re-asserted here because the error-reporting addition writes strings too.
+    expect(WINDOWS_FACTS_SCRIPT).not.toContain('"');
   });
 });
