@@ -71,7 +71,7 @@ export default function AgentsSettingsPage() {
             <AgentPolicyEditor />
           </div>
           <div className="space-y-6">
-            <AgentScopesPanel revision={data?.revision} />
+            <AgentScopesPanel />
             <AutoConfirmRulesPanel />
           </div>
         </div>
