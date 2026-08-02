@@ -154,19 +154,35 @@ más viejo. `--baseline` lo fuerza si preferís no depender de la detección.
 ### Revisar un host sin esperar un reporte
 
 Dos comandos responden las dos preguntas que realmente vas a tener, y **ninguno de los dos envía ni
-cambia nada**:
+cambia nada**. En **Linux**:
 
 ```sh
 sudo lazyit-agent test    # ¿este host llega a lazyit, y su token sirve?
 sudo lazyit-agent show    # ¿qué reportaría exactamente este host?
 ```
 
-En Windows, los mismos dos comandos, desde una PowerShell elevada:
+En **Windows**, los mismos dos comandos desde una PowerShell elevada — sin `sudo`, que no es un
+comando de Windows:
+
+```powershell
+lazyit-agent test         # ¿este host llega a lazyit, y su token sirve?
+lazyit-agent show         # ¿qué reportaría exactamente este host?
+```
+
+El instalador agrega `C:\Program Files\lazyit-agent` al PATH de la máquina, y eso es lo que hace que
+el nombre suelto funcione — pero **solo en una PowerShell abierta después de la instalación**. Una
+consola que ya estaba abierta conserva el entorno con el que arrancó, igual que aquella en la que
+corrió el propio instalador. En esa consola, o en un host instalado con una versión anterior del
+script (volvé a ejecutar el instalador para resolverlo, que además es la vía normal de
+actualización), usá la ruta completa: siempre funciona.
 
 ```powershell
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" show
 ```
+
+El `&` y las comillas no son decorativos: `C:\Program Files` tiene un espacio, así que PowerShell
+necesita el operador de llamada para ejecutar la cadena entre comillas en vez de imprimirla.
 
 **`test`** verifica la dirección, el DNS, el TLS, el proxy, la autoridad certificadora y el token, y
 te dice cuál está mal: una redirección significa que apuntaste al puerto equivocado, un rechazo
@@ -201,10 +217,14 @@ administrador*). El instalador:
 3. compara la **huella** que tu instancia publica para ese ejecutable y rechaza una que no coincida;
 4. **lo ejecuta una vez** (`--help`) antes de registrar nada: si la máquina no puede arrancarlo,
    obtenés una sola frase clara, no se instala nada y no se registra ninguna tarea;
-5. escribe `C:\ProgramData\lazyit-agent\config` y lo restringe a **SYSTEM y Administradores
+5. agrega `C:\Program Files\lazyit-agent` al **PATH de la máquina**, para que los comandos de
+   diagnóstico funcionen por nombre — igual que `/usr/local/bin` ya lo hace en Linux. Es lo único de
+   esta lista que puede fallar sin consecuencias: si no se puede escribir, aparece una advertencia y
+   la instalación continúa, porque el agente nunca lee el PATH;
+6. escribe `C:\ProgramData\lazyit-agent\config` y lo restringe a **SYSTEM y Administradores
    únicamente** — el equivalente en Windows del `chmod 600` que usa en Linux, porque ese archivo
    contiene un token real;
-6. registra una **tarea programada** y envía un reporte, para que sepas de inmediato si el token
+7. registra una **tarea programada** y envía un reporte, para que sepas de inmediato si el token
    funciona.
 
 ### ¿Tengo que configurar algo?
@@ -217,7 +237,8 @@ parque.
 
 Ejecutar el agente a mano **sin** Administrador también funciona: simplemente reporta menos (por
 ejemplo, sin número de serie), igual que en Linux sin root, y `lazyit-agent show` te dice qué tuvo
-que omitir.
+que omitir. (Ese nombre se resuelve en cualquier PowerShell abierta después de la instalación; en una
+que ya estaba abierta, usá la ruta completa — ver [Revisar un host](#revisar-un-host-sin-esperar-un-reporte).)
 
 ### Una tarea programada, no un servicio
 
@@ -272,6 +293,7 @@ reportado desde Windows muestra la etiqueta de su imagen pero no el digest.
 | | Linux | Windows |
 | --- | --- | --- |
 | El programa | `/usr/local/bin/lazyit-agent` | `C:\Program Files\lazyit-agent\lazyit-agent.exe` |
+| Por qué `lazyit-agent` se resuelve | `/usr/local/bin` ya está en el PATH | el instalador agrega su directorio al PATH de la máquina |
 | Configuración (contiene el token) | `/etc/lazyit-agent/config` | `C:\ProgramData\lazyit-agent\config` |
 | Estado local | `/var/lib/lazyit-agent` | `C:\ProgramData\lazyit-agent\state` |
 | Qué lo ejecuta | timer de systemd | Tarea programada `lazyit-agent` |
@@ -304,8 +326,9 @@ En Windows, desde una PowerShell elevada:
 
 Detiene y elimina lo que ejecuta al agente — el timer y ambas unidades de systemd en Linux, la tarea
 programada en Windows — y después el binario, el estado local del agente y su archivo de
-configuración, incluido **el token**, que se destruye con cualquiera de las opciones. Es seguro
-ejecutarlo dos veces, y seguro sobre una instalación a medias.
+configuración, incluido **el token**, que se destruye con cualquiera de las opciones. En Windows
+también saca su directorio del PATH de la máquina, para que no quede nada apuntando a una carpeta
+que ya no existe. Es seguro ejecutarlo dos veces, y seguro sobre una instalación a medias.
 
 Si estás reimaginando una máquina que va a volver a tener el agente, agregá **`--keep-config`**
 (Linux) o **`-KeepConfig`** (Windows):
@@ -566,7 +589,9 @@ efectivamente los tenga. Dos cosas dejan a un host fuera del control, y ambas so
 
 Es decir que una flota con el agente más nuevo puede igual quedarse **sin ninguna detección de
 clones**. La señal está en el panel de **Datos reportados**: si un host no muestra número de serie, ese
-host no se está controlando. Para saber *por qué*, ejecutá `lazyit-agent show` en el host: sus notas de
+host no se está controlando. Para saber *por qué*, ejecutá `lazyit-agent show` en el host (con `sudo`
+en Linux; en Windows desde una PowerShell elevada, por nombre o por ruta completa — ver
+[Revisar un host](#revisar-un-host-sin-esperar-un-reporte)): sus notas de
 recolección ahora nombran la fuente que volvió vacía y el error detrás, tanto en Windows como en Linux
 (ver *Qué recopila el agente*, más abajo; todavía nada muestra esas notas en la interfaz). Si la
 detección de clones te importa, corré el agente como root (en Linux, con `dmidecode` instalado) o
@@ -634,7 +659,8 @@ desde la tarea programada (en Windows), y no esperes nada de él en guests de co
   también nombra **cada dato que volvió vacío** — el número de serie, los discos, las placas de red, la
   identidad de la máquina — y deja pasar el texto del error del propio Windows, que es la diferencia
   entre una columna vacía y una columna vacía sobre la que podés actuar. Si ejecutás
-  `lazyit-agent show` imprime esas notas ahí mismo, sin
+  `lazyit-agent show` — el comando exacto por plataforma está en
+  [Revisar un host](#revisar-un-host-sin-esperar-un-reporte) — imprime esas notas ahí mismo, sin
   enviar nada, que suele ser la forma más rápida de responder "¿por qué está vacía la columna
   de número de serie de este host?". (`lazyit-agent report --once --force` también las imprime, y
   envía el reporte.) lazyit además las guarda junto a los datos reportados del host,
