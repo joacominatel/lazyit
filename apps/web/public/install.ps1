@@ -438,21 +438,46 @@ $action = New-ScheduledTaskAction -Execute $BinPath -Argument 'report --once'
 $bootTrigger = New-ScheduledTaskTrigger -AtStartup
 $bootTrigger.Delay = 'PT2M'
 
-# `-RepetitionDuration` is deliberately NOT passed. The Task Scheduler schema is explicit — "if no
-# value is specified for the duration, then the pattern is repeated indefinitely" — and the
-# `[TimeSpan]::MaxValue` idiom this used to carry is reported to fail XML validation from Windows 10
-# / Server 2016 onwards ("Duration:P99999999DT23H59M59S ... incorrectly formatted or out of range"),
-# which would have aborted the registration outright. The OLDER cmdlet (Server 2012) is the reverse:
-# it refuses an interval with no duration, so that one case falls back to a long finite duration
-# rather than being left to fail.
-try {
-  $tickTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RandomDelay $RandomDelay `
-    -RepetitionInterval (New-TimeSpan -Minutes $TickMinutes) -ErrorAction Stop
-}
-catch {
-  $tickTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RandomDelay $RandomDelay `
+# `-RepetitionDuration` is deliberately NOT passed on the first attempt. The Task Scheduler schema is
+# explicit — "if no value is specified for the duration, then the pattern is repeated indefinitely" —
+# and the `[TimeSpan]::MaxValue` idiom this used to carry is reported to fail XML validation from
+# Windows 10 / Server 2016 onwards.
+#
+# TWO DIFFERENT CALLS CAN REJECT A REPETITION, and the documented errors name two different cmdlets:
+#
+#   * "New-ScheduledTaskTrigger : The RepetitionInterval and RepetitionDuration Job trigger
+#     parameters must be specified together." — the OLDER cmdlet (Server 2012) refusing an interval
+#     with no duration while the trigger OBJECT is being built.
+#   * "Set-ScheduledTask : The task XML contains a value which is incorrectly formatted or out of
+#     range. (12,42):Duration:P99999999DT23H59M59S" — the MaxValue case, rejected by the cmdlet that
+#     WRITES the task, because the XML is validated at registration and not at construction.
+#
+# So the fallback covers BOTH calls. Covering only the first would leave a duration the schema
+# dislikes aborting the install at `Register-ScheduledTask` — which runs AFTER the binary and the
+# token file are already on disk — with nothing to catch it, and a fallback that misses the call its
+# own failure mode is validated by is worse than no fallback, because it reads as handled.
+#
+# NOT VERIFIED ON A REAL WINDOWS HOST, like everything else in this block: both branches are what the
+# documented errors specify, not what a machine was observed doing.
+$FallbackDuration = New-TimeSpan -Days 3650
+
+# ONE builder, so the two attempts cannot drift apart. `[TimeSpan]::Zero` means "omit the duration",
+# which is the indefinite repetition this wants everywhere it is accepted.
+function New-TickTrigger([TimeSpan] $Duration) {
+  if ($Duration -eq [TimeSpan]::Zero) {
+    return New-ScheduledTaskTrigger -Once -At (Get-Date) -RandomDelay $RandomDelay `
+      -RepetitionInterval (New-TimeSpan -Minutes $TickMinutes) -ErrorAction Stop
+  }
+  New-ScheduledTaskTrigger -Once -At (Get-Date) -RandomDelay $RandomDelay `
     -RepetitionInterval (New-TimeSpan -Minutes $TickMinutes) `
-    -RepetitionDuration (New-TimeSpan -Days 3650)
+    -RepetitionDuration $Duration -ErrorAction Stop
+}
+
+$usedFallbackDuration = $false
+try { $tickTrigger = New-TickTrigger ([TimeSpan]::Zero) }
+catch {
+  $tickTrigger = New-TickTrigger $FallbackDuration
+  $usedFallbackDuration = $true
 }
 
 # `-RandomDelay` belongs to the TIME TRIGGER above and NOT to the settings set:
@@ -476,10 +501,27 @@ $settings = New-ScheduledTaskSettingsSet `
 
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
-Register-ScheduledTask -TaskName $TaskName `
-  -Action $action -Trigger @($bootTrigger, $tickTrigger) -Settings $settings -Principal $taskPrincipal `
-  -Description 'lazyit reporting agent — one-shot inventory report. Ticks every 5 minutes; the REPORTING CADENCE is set centrally in lazyit and enforced by the agent, so this task never has to change.' `
-  -Force | Out-Null
+# Reads `$tickTrigger` from the script scope on purpose, so the retry below only has to REPLACE the
+# trigger — every other argument stays written down once.
+function Register-AgentTask {
+  Register-ScheduledTask -TaskName $TaskName `
+    -Action $action -Trigger @($bootTrigger, $tickTrigger) -Settings $settings -Principal $taskPrincipal `
+    -Description 'lazyit reporting agent — one-shot inventory report. Ticks every 5 minutes; the REPORTING CADENCE is set centrally in lazyit and enforced by the agent, so this task never has to change.' `
+    -Force | Out-Null
+}
+
+# The second half of the compatibility fallback: this is where the task XML is validated, so this is
+# where a duration the schema dislikes actually surfaces. `try`/`catch` does not open a new scope in
+# PowerShell, so the assignment below really does replace the script-level `$tickTrigger`.
+try { Register-AgentTask }
+catch {
+  # If the first attempt ALREADY carried a finite duration, the repetition is not what this host is
+  # objecting to — rethrow rather than retry an identical registration and bury the real fault.
+  if ($usedFallbackDuration) { throw }
+  $tickTrigger = New-TickTrigger $FallbackDuration
+  $usedFallbackDuration = $true
+  Register-AgentTask
+}
 
 # --- one immediate report --------------------------------------------------
 # --force, because the agent would otherwise honour the interval it just cached and a re-install
