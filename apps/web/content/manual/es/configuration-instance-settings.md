@@ -27,6 +27,11 @@ La página de inicio de Configuración es una cuadrícula de tarjetas, cada una 
   [Permisos](/help/permissions).
 - **Cuentas de servicio** — crea y gestiona credenciales de API no humanas para CI, scripts e
   integraciones, acotadas por permiso y revocables.
+- **Agentes de inventario** — la política que ejecuta cada agente de lazyit de este parque: cada
+  cuánto informan los hosts, qué recolectores se ejecutan y qué dejar afuera, más las reglas de
+  confirmación automática y los ámbitos que pueden sobrescribir el predeterminado. Antes estaba en la
+  página Instancia; ahora esa página enlaza a la sección. Ver
+  [Agente de reporte](/help/assets-topology-reporting-agent).
 - **Integraciones y flujos** — la bandeja de tareas manuales entre aplicaciones para los flujos de
   aprovisionamiento. La automatización de cada aplicación se configura en su propia pestaña de Flujos.
 - **Instancia** — revisa cómo está configurada la instancia y gestiona el esquema de etiquetas de

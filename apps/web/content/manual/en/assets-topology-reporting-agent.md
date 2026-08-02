@@ -211,7 +211,7 @@ task's own one-minute random delay rides its five-minute tick, not its at-startu
 not what de-phases a floor that just rebooted.)
 
 As on Linux, **the 5-minute tick is not the reporting cadence.** How often a host actually reports is
-set centrally in **Settings → Instance → Reporting agents**; a tick that arrives too early exits
+set centrally in **Settings → Reporting agents**; a tick that arrives too early exits
 immediately without doing anything. Changing the cadence never touches the task.
 
 ### The binary is not code-signed yet
@@ -668,23 +668,36 @@ brings both back.
 
 ## Configure every agent from one screen
 
-You do not edit agents host by host. **Settings → Instance → Reporting agents** sets the policy for
-every agent in the estate, and each one picks it up on its next check-in.
+You do not edit agents host by host. **Settings → Reporting agents** — its own section in Settings,
+next to Service accounts — sets the policy for every agent in the estate, and each one picks it up on
+its next check-in.
 
-What you can set there:
+> **It used to live under Settings → Instance**, and the installer's own output and the comments it
+> writes into a host's config file still say so. That page now carries a link across to the section
+> instead of the editor, so following the older wording still gets you there in one more click.
 
-- **How often each host reports** — from 5 minutes to 24 hours. This is the setting that used to mean
-  editing a systemd timer on every machine.
-- **How long lazyit waits before calling a host offline.** It must be longer than the reporting
-  interval, or a perfectly healthy host gets marked offline between two of its own reports — the
-  editor will not let you save a value that would do that.
-- **Which collectors run** — hardware, disks, network interfaces, installed software, containers. A
-  collector that is off is never run at all: the agent does not gather the facts and then throw them
-  away.
-- **What to leave out** — name patterns for network interfaces (`veth*`, `docker*`), mountpoints
-  (`/var/lib/docker/*`, `/snap/*`) and packages (`linux-image-*`), plus a hard cap on how many
-  packages a host may report. `*` matches anything and `?` matches a single character; regular
-  expressions are not accepted.
+What you can set there, in three groups:
+
+- **Cadence** — how often each host reports (from 5 minutes to 24 hours; this is the setting that used
+  to mean editing a systemd timer on every machine), and how long lazyit waits before calling a host
+  offline. The second must be longer than the first, or a perfectly healthy host gets marked offline
+  between two of its own reports — the editor will not let you save a value that would do that, and it
+  says so under the field rather than after you press Save.
+- **What agents collect** — hardware, disks, network interfaces, installed software, containers, plus
+  a hard cap on how many packages a host may report. A collector that is off is never run at all: the
+  agent does not gather the facts and then throw them away.
+- **Exclusions** — name patterns for network interfaces (`veth*`, `docker*`), mountpoints
+  (`/var/lib/docker/*`, `/snap/*`) and packages (`linux-image-*`). `*` matches anything and `?`
+  matches a single character; regular expressions are not accepted, and each list holds at most 32
+  patterns. A list whose collector is switched off is still saved, but nothing runs it — the screen
+  says so beside the list rather than leaving you to wonder why the pattern did nothing.
+
+The same section also shows **where a policy comes from**. lazyit resolves three scopes, field by
+field, and the narrowest one that sets a field wins: a per-host override, then the reporting agent's
+service account, then this instance default. **Only the instance default has an editor** — the other
+two exist in the API and are marked on screen as having none, so you can see that the hierarchy is
+there instead of wondering why one host behaves differently. The [auto-confirm
+rules](#auto-confirm-rules) are linked from there too, since they are agent configuration as well.
 
 Three things are worth knowing before you use it.
 
@@ -712,10 +725,12 @@ expression, and there is no plan to add one. That is what keeps the worst case o
 at "proposals you discard" rather than "someone else's code running as root on every server you own".
 
 **Did it take?** Each host reports back which version of the policy it is running, so you can tell
-"configured" from "actually applied". Open a server on the [infrastructure
-diagram](/help/assets-topology-diagram) and its panel shows **Policy v7 · applied** or **Policy v8 ·
-pending** — pending simply means that host has not checked in since your change. A server discovered
-by an agent older than this release shows neither, because it never reports a policy version at all.
+"configured" from "actually applied". The version lazyit is currently serving sits next to the
+section's title (**Policy v8**). To see whether a given host has picked it up, open that server on the
+[infrastructure diagram](/help/assets-topology-diagram) and its panel shows **Policy v7 · applied** or
+**Policy v8 · pending** — pending simply means that host has not checked in since your change. A
+server discovered by an agent older than this release shows neither, because it never reports a policy
+version at all.
 
 ## Security
 
