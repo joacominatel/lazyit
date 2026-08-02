@@ -5,9 +5,10 @@
 .DESCRIPTION
   Served PUBLICLY from your own lazyit instance (same-origin, TLS-fronted). It carries NO secret:
   you pass the Service Account token (infra:report) yourself. It downloads the matching agent
-  executable from your instance, installs it under %ProgramFiles%, writes
-  C:\ProgramData\lazyit-agent\config with an ACL restricted to SYSTEM + Administrators, and registers
-  a Scheduled Task so the host keeps itself current in lazyit's PENDING tray.
+  executable from your instance, installs it under %ProgramFiles%, puts that directory on the machine
+  PATH so `lazyit-agent test` works by name in a new shell, writes C:\ProgramData\lazyit-agent\config
+  with an ACL restricted to SYSTEM + Administrators, and registers a Scheduled Task so the host keeps
+  itself current in lazyit's PENDING tray.
 
   A SCHEDULED TASK, NOT A SERVICE. That preserves the one-shot design of ADR-0074 section 7 exactly: the
   agent runs, gathers, POSTs and exits. A service would force a daemon rewrite for zero benefit, and
@@ -59,7 +60,7 @@
   Fail if this instance publishes no sha256 for the executable.
 
 .PARAMETER Uninstall
-  Stop and remove the agent, its task, its state and its token.
+  Stop and remove the agent, its task, its state, its PATH entry and its token.
 
 .PARAMETER KeepConfig
   With -Uninstall: keep this host's own limits for a later re-install. The token is destroyed either
@@ -125,6 +126,109 @@ function Say([string] $Message) {
   Write-Host "lazyit-agent install: $Message"
 }
 
+# --- the machine PATH ------------------------------------------------------
+# WHY THIS EXISTS (#1167). install.sh puts the agent in /usr/local/bin, which is on PATH on every
+# distribution this supports, so the `lazyit-agent test` the Manual documents just works there. This
+# installer puts it under %ProgramFiles%, which is on nobody's PATH - so the first real Windows host
+# answered that command with "The term 'lazyit-agent' is not recognized", at exactly the moment an
+# operator reaches for it: when something is already wrong.
+#
+# EVERY EDIT BELOW GOES THROUGH THE REGISTRY, and never through the two obvious shortcuts:
+#   * `setx` TRUNCATES what it writes at 1024 characters. A machine PATH longer than that comes back
+#     permanently shortened, on a host somebody just installed an inventory agent on.
+#   * [Environment]::GetEnvironmentVariable(...,'Machine') EXPANDS a REG_EXPAND_SZ value on the way
+#     out, and its SetEnvironmentVariable writes the result back as a plain REG_SZ. That round trip
+#     turns every %SystemRoot% entry the value had into a literal path and drops the indirection.
+# So the RAW value is read with DoNotExpandEnvironmentNames, edited as text, and written back under
+# its own value kind. Entries this script does not own come back byte for byte.
+$PathRegistryKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+
+# PURE - no registry, no environment of its own, both parameters in. That is what lets the contract
+# test in apps/agent run these two through real PowerShell on a Linux CI runner. ONE pair serves the
+# install and the uninstall, so "is it already there" and "which one do I remove" cannot drift apart.
+#
+# Each entry is EXPANDED before it is compared, so a PATH that already carries
+# %ProgramFiles%\lazyit-agent is recognised as this directory rather than joined by a second copy of
+# it. A surviving entry is kept VERBATIM. The comparison ignores case, because Windows paths do, and
+# a trailing backslash, because it is the same directory.
+function Split-LazyitPath([string] $RawPath, [string] $Dir) {
+  $target = $Dir.Trim().TrimEnd('\')
+  $kept = New-Object Collections.Generic.List[string]
+  $dropped = 0
+  foreach ($entry in ($RawPath -split ';')) {
+    $normal = [Environment]::ExpandEnvironmentVariables($entry).Trim().TrimEnd('\')
+    if ($normal -and $normal -ieq $target) {
+      $dropped++
+      continue
+    }
+    $kept.Add($entry)
+  }
+  return @{ Entries = $kept.ToArray(); Dropped = $dropped }
+}
+
+# The raw value with $Dir appended, or $null when it is already there - which is the ordinary answer
+# on the documented UPGRADE path, since re-running this script is how a host picks up a new agent.
+function Join-LazyitPath([string] $RawPath, [string] $Dir) {
+  if ((Split-LazyitPath $RawPath $Dir).Dropped -gt 0) { return $null }
+  if ($RawPath.Trim() -eq '') { return $Dir }
+  if ($RawPath.EndsWith(';')) { return "$RawPath$Dir" }
+  return "$RawPath;$Dir"
+}
+
+function Open-LazyitEnvironmentKey {
+  $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($PathRegistryKey, $true)
+  if (-not $key) { throw "cannot open HKLM\$PathRegistryKey for writing" }
+  return $key
+}
+
+# Tell the running desktop that the machine environment moved. WITHOUT THIS, a console opened from
+# the Start menu inherits the environment block explorer.exe cached when it started, so the bare name
+# would not work until the operator signed out - and the closing message would be promising
+# something false. HWND_BROADCAST 0xffff, WM_SETTINGCHANGE 0x1A, SMTO_ABORTIFHUNG 0x0002.
+function Publish-LazyitEnvironmentChange {
+  if (-not ('Lazyit.Env' -as [type])) {
+    Add-Type -Namespace Lazyit -Name Env -MemberDefinition @'
+[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+'@
+  }
+  $answer = [UIntPtr]::Zero
+  [void][Lazyit.Env]::SendMessageTimeout([IntPtr] 0xffff, 0x1A, [UIntPtr]::Zero, 'Environment', 0x0002, 5000, [ref] $answer)
+}
+
+# $true when it wrote the entry, $false when the host already had it. Throws on anything else, and
+# every caller treats that as a warning rather than a failure - see the call sites.
+function Add-InstallDirToPath {
+  $key = Open-LazyitEnvironmentKey
+  try {
+    $raw = [string] $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    # A machine PATH is REG_EXPAND_SZ; the value is written back under whatever kind it already has,
+    # and a host that somehow has none keeps the type Windows itself uses.
+    $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+    if ($null -ne $key.GetValue('Path')) { $kind = $key.GetValueKind('Path') }
+    $joined = Join-LazyitPath $raw $InstallDir
+    if ($null -eq $joined) { return $false }
+    $key.SetValue('Path', $joined, $kind)
+  }
+  finally { $key.Close() }
+  Publish-LazyitEnvironmentChange
+  return $true
+}
+
+# $true when it removed the entry, $false when the host did not have one.
+function Remove-InstallDirFromPath {
+  $key = Open-LazyitEnvironmentKey
+  try {
+    $raw = [string] $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $split = Split-LazyitPath $raw $InstallDir
+    if ($split.Dropped -eq 0) { return $false }
+    $key.SetValue('Path', ($split.Entries -join ';'), $key.GetValueKind('Path'))
+  }
+  finally { $key.Close() }
+  Publish-LazyitEnvironmentChange
+  return $true
+}
+
 # --- elevation -------------------------------------------------------------
 # The analogue of install.sh's `id -u` check, and it must run before ANY path below: writing to
 # %ProgramFiles%, setting an ACL and registering a task as SYSTEM all need Administrator.
@@ -144,6 +248,16 @@ if ($Uninstall) {
   catch { }
   Remove-Item -LiteralPath $BinPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+  # THE PATH ENTRY GOES WITH THE DIRECTORY IT POINTS AT (#1167). An entry naming a directory that no
+  # longer exists is exactly the residue this path exists to prevent - the argument #1137 made for
+  # the token and the state directory. It is removed AFTER the directory, and a failure only warns:
+  # by this point the task is unregistered and the executable is gone, so aborting would leave a
+  # host half-uninstalled over the one piece an operator can delete by hand.
+  $pathRemoved = $false
+  try { $pathRemoved = Remove-InstallDirFromPath }
+  catch {
+    Write-Warning "lazyit-agent install: could not remove $InstallDir from the machine PATH - remove it by hand from System Properties -> Environment Variables. $($_.Exception.Message)"
+  }
   # The policy + last-success cache (#1140). Local to the host and meaningless without the agent.
   Remove-Item -LiteralPath $StateDir -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -166,6 +280,7 @@ if ($Uninstall) {
   }
 
   Say "uninstalled - the executable, the scheduled task, $StateDir and the token are gone."
+  if ($pathRemoved) { Say "$InstallDir is off the machine PATH again (a console already open keeps the environment it started with)." }
   Write-Host 'This host stops reporting immediately. Its entry in lazyit is untouched: discard it there if you'
   Write-Host 'want it off the map, and revoke the Service Account token if no other host uses it.'
   exit 0
@@ -362,6 +477,21 @@ catch { $startable = $false }
 if (-not $startable) {
   Remove-Item -LiteralPath $BinPath -Force -ErrorAction SilentlyContinue
   Die "the agent executable will not start on this host. The most common cause is antivirus or SmartScreen quarantining it - this build is UNSIGNED (see the Manual). Run '$BinPath --help' by hand to see the message. Nothing has been installed and no task was registered."
+}
+
+# --- the bare name, in a new shell (#1167) ---------------------------------
+# Only now, with an executable that is in place and proven to start. NON-FATAL BY DESIGN: the
+# scheduled task runs $BinPath by absolute path, every message this script prints uses the absolute
+# path, and the agent never reads PATH - so a host whose machine PATH could not be written (a
+# locked-down registry ACL, a Group Policy preference that owns the value) is a fully working agent
+# missing a convenience. Throwing away a completed install over that would be the wrong trade.
+$onPath = $false
+try {
+  $null = Add-InstallDirToPath
+  $onPath = $true
+}
+catch {
+  Write-Warning "lazyit-agent install: could not add $InstallDir to the machine PATH, so 'lazyit-agent' will not be found by name. Nothing else is affected - the agent is installed and the task runs it by full path. $($_.Exception.Message)"
 }
 
 # --- config (ACL: SYSTEM + Administrators only - it holds the token) -------
@@ -595,3 +725,8 @@ Write-Host 'centrally in lazyit (Settings -> Instance -> Reporting agents) and p
 Write-Host "This host now appears in lazyit's infra topology PENDING tray - confirm it there to track it as an asset."
 Write-Host "Diagnostics: '$BinPath test' checks the URL, token and network; '$BinPath show' prints"
 Write-Host 'the report it would send. Removal: re-run this script with -Uninstall.'
+if ($onPath) {
+  Write-Host "$InstallDir is on the machine PATH, so 'lazyit-agent test' also works by name in a NEW"
+  Write-Host 'PowerShell. This console, and any other already open, keep the environment they started'
+  Write-Host 'with - the full paths above always work.'
+}
