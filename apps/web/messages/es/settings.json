@@ -226,6 +226,10 @@
     "saved": "Guardada como política v{revision}. Los agentes la aplican en su próximo informe.",
     "discard": "Descartar cambios",
     "dirty": "Cambios sin guardar",
+    "conflict": {
+      "body": "Esta política se guardó desde otro lugar mientras la editabas — ahora es la v{revision}. Tus cambios siguen aquí y todavía no se enviaron. Guarda para reemplazar la v{revision} por ellos, o recarga para partir de ella y perder lo que escribiste.",
+      "reload": "Recargar la política guardada"
+    },
     "propagation": "Un cambio se aplica en el próximo informe de cada host, y rige a partir de la ejecución siguiente. Esa demora es intencional: una política solo la aplica una ejecución que ya arrancó con ella, así que un error aquí nunca puede interrumpir al parque a mitad de una recolección.",
     "cadence": {
       "title": "Frecuencia",
@@ -250,7 +254,7 @@
     },
     "collect": {
       "title": "Qué recolectan los agentes",
-      "description": "Un recolector desactivado no se ejecuta — el agente no reúne los datos para después descartarlos.",
+      "description": "En Linux, un recolector desactivado no se ejecuta — el agente no reúne los datos para después descartarlos. En Windows eso solo vale para los contenedores: hardware, discos, interfaces de red y software instalado viajan todos en una única llamada de PowerShell que se ejecuta igual, así que apagar uno ahí mantiene el dato fuera del informe pero no le ahorra el trabajo al host.",
       "veto": "Un host siempre puede negarse. Desactivar un recolector en la configuración del propio agente de ese host — /etc/lazyit-agent/config en Linux, C:\\ProgramData\\lazyit-agent\\config en Windows — prevalece sobre esta opción, y nada de aquí puede volver a activarlo.",
       "hardware": "Fabricante, modelo y número de serie",
       "disks": "Discos y puntos de montaje",
@@ -302,7 +306,7 @@
       },
       "editedHere": "Se edita aquí",
       "noEditor": "Todavía sin editor",
-      "footer": "La API almacena los tres ámbitos, pero ninguna pantalla de lazyit escribe los dos más específicos. Así que esta página es lo que ejecuta un host — salvo que algo haya definido otro ámbito directamente por la API."
+      "footer": "La API almacena los tres ámbitos, pero ninguna pantalla de lazyit escribe los dos más específicos. Así que esta página es lo que ejecuta un host — salvo que alguno de los otros dos se haya definido directamente por la API, o que la configuración del agente en ese host vete una parte. Un ajuste local siempre puede hacer que un host informe menos de lo que pide esta página: un intervalo más largo, un tope de paquetes más bajo, exclusiones adicionales, un recolector apagado. Nada de aquí lo anula."
     },
     "rollout": {
       "title": "Despliegue",
@@ -313,7 +317,7 @@
     "autoConfirm": {
       "title": "Reglas de confirmación automática",
       "description": "Qué hosts descubiertos se confirman apenas informan, en lugar de esperar en Revisión pendiente. Una regla solo se aplica a los informes que llegan después de guardarla.",
-      "summary": "{total, plural, one {# regla} other {# reglas}}, {enabled} activas",
+      "summary": "{total, plural, one {# regla} other {# reglas}}, {enabled, plural, one {# activa} other {# activas}}",
       "empty": "Sin reglas — todo host descubierto espera en Revisión pendiente.",
       "manage": "Gestionar en la vista Servidores"
     }
