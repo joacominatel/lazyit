@@ -1257,6 +1257,12 @@ export class InfraService {
    * A node holding no list yet (`hasSoftware === false`) is the SEED case and is silent, which is what
    * keeps the first report after this ships from writing one row per installed package. The same rule
    * inside {@link diffHostFacts} covers every host fact.
+   *
+   * AND IT CANNOT FAIL THE CHECK-IN. The whole method is wrapped, because the one thing in it that can
+   * throw is a query this feature ADDED to the report path — the package read-back. Without the catch,
+   * a fact history nobody asked for could take a host off the map, which inverts the priority stated
+   * on {@link recordFactChanges}. A throw degrades to "no history for this report"; the report itself
+   * lands exactly as it did before this change.
    */
   private async hostFactChanges(
     nodeId: string,
@@ -1278,15 +1284,23 @@ export class InfraService {
     ) {
       return changes;
     }
-    const previous = await this.storedSoftware(nodeId);
-    return [
-      ...changes,
-      ...diffSoftwareFacts(
-        previous,
-        software.software,
-        INFRA_FACT_CHANGES_MAX_PER_REPORT - changes.length,
-      ),
-    ];
+    try {
+      const previous = await this.storedSoftware(nodeId);
+      return [
+        ...changes,
+        ...diffSoftwareFacts(
+          previous,
+          software.software,
+          INFRA_FACT_CHANGES_MAX_PER_REPORT - changes.length,
+        ),
+      ];
+    } catch (err) {
+      // The host facts that were already diffed are still good; only the package half is lost.
+      this.logger.warn(
+        `Could not read node ${nodeId}'s stored package list to diff it — its package changes are NOT recorded for this report, and the report was still accepted. ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return changes;
+    }
   }
 
   /**
@@ -1297,8 +1311,8 @@ export class InfraService {
    * carries it: a host whose report 500s vanishes from the CMDB, shows OFFLINE on the map and nudges
    * the bell (ADR-0074 §4), while a history row that was not written costs one line in a timeline. So
    * every failure — a constraint, a DB hiccup, a node deleted between the update and this insert —
-   * degrades to a warning and the report still acks. Same posture as `syncNodeToSearch` and
-   * `resolvePolicy`, for the same reason.
+   * degrades to a warning and the report still acks — the same posture, for the same reason, as
+   * {@link resolvePolicy}.
    *
    * The two caps are applied here rather than at the callers so neither can be forgotten by a path
    * added later: {@link INFRA_FACT_CHANGES_MAX_PER_REPORT} bounds one report, and the COUNT bounds one
