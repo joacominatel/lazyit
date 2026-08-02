@@ -35,7 +35,7 @@
     "@node-rs/argon2": "2.0.2",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
-    "bullmq": "^5.34.0",
+    "bullmq": "^6.0.0",
     "csv-parse": "^7.0.0",
     "ioredis": "^5.4.2",
     "jose": "^6.2.3",
