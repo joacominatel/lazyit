@@ -10,6 +10,9 @@ import {
   containerExternalId,
   containerExternalIdPrefix,
   containerNodeStatus,
+  diffContainerFacts,
+  diffHostFacts,
+  diffSoftwareFacts,
   disambiguateExternalId,
   hostIdentityEvidence,
   identityDiscriminator,
@@ -36,16 +39,21 @@ import {
   type CreateInfraNode,
   type HostIdentityEvidence,
   type InfraEdgeKind,
+  type InfraFactChangeDraft,
   type InfraIdentityMatch,
   type InfraImpactNode,
   type InfraImpactResponse,
   type InfraNodeChild,
   type InfraNodeKind,
   type InfraAutoConfirmCandidate,
+  type InfraNodeFactChangeList,
   type InfraNodeState,
   type InfraNodeStatus,
   type InfraSecretRef,
   type UpdateInfraNode,
+  INFRA_FACT_CHANGE_FACT_MAX,
+  INFRA_FACT_CHANGE_PAGE_SIZE,
+  INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
 } from '@lazyit/shared';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma } from '../../generated/prisma/client';
@@ -332,6 +340,39 @@ function withoutVolatileReportFacts(
   delete steadyDiagnostics.durationMs;
   return { ...rest, diagnostics: steadyDiagnostics };
 }
+
+/**
+ * Cap on the fact-history rows ONE report may write for ONE node (#1143).
+ *
+ * The flood this bounds is real and ordinary: a host that was offline through two patch windows comes
+ * back and its first report legitimately differs by a few thousand packages. 200 rows says *this host
+ * changed a lot, here is a bounded sample* instead of turning one check-in into a few thousand inserts.
+ * The slice is deterministic (host facts first, then packages by name), so it is the same 200 rows
+ * whichever replica took the report.
+ *
+ * A container child cannot approach it — {@link diffContainerFacts} tracks two facts — so the whole
+ * report is bounded by this plus twice `AGENT_CONTAINERS_MAX`, i.e. 400 rows, without any budget
+ * having to be threaded through the container reconciliation.
+ */
+const INFRA_FACT_CHANGES_MAX_PER_REPORT = 200;
+
+/**
+ * The rolling window and ceiling of the PER-NODE cap (#1143) — the bound the per-report cap alone
+ * does not give.
+ *
+ * `InfraReportRateLimitGuard` (#1134) allows 120 reports per service account per minute, and a caller
+ * that varies its package list on every request would otherwise turn that into ~1.4M rows an hour on
+ * one node. This ceiling makes it 500. It is checked with one COUNT, and ONLY on a report that
+ * actually has rows to write — which for a legitimate estate is a handful of times a month per host,
+ * so the steady-state cost of the cap is zero queries.
+ *
+ * Over the ceiling the rows are DROPPED, not queued and not deleted: this table is append-only
+ * (ADR-0006), so the bound is on what goes in, never on what is already recorded. A node that hits it
+ * is either under abuse or genuinely changing hundreds of times an hour, and in both cases the next
+ * window records again.
+ */
+const INFRA_FACT_CHANGES_WINDOW_MS = 60 * 60 * 1000;
+const INFRA_FACT_CHANGES_MAX_PER_NODE_WINDOW = 500;
 
 /** The node columns + linked Asset name `projectInfraNode` needs (the search projection shape). */
 const SEARCH_NODE_SELECT = {
@@ -948,6 +989,16 @@ export class InfraService {
       args.software,
       stored,
     );
+    // WHAT MOVED (#1143), computed BEFORE the write — the stored package list this may have to read
+    // back is about to be overwritten, so after the update there is nothing left to compare against.
+    // The rows themselves are inserted after the update lands, so a failed write never leaves a
+    // history row claiming a change that did not happen.
+    const factChanges = await this.hostFactChanges(
+      node.id,
+      stored,
+      plan,
+      args.software,
+    );
     const data: Prisma.InfraNodeUncheckedUpdateInput = {
       status: 'ONLINE',
       lastReportedAt: now,
@@ -965,6 +1016,7 @@ export class InfraService {
       data,
       select: { id: true, state: true },
     });
+    await this.recordFactChanges(node.id, factChanges);
     // Keep the linked Asset's specs snapshot fresh (agent-owned facts only). It is asked on EVERY
     // report even when the node's blob was skipped, and decides its own write the same way: an Asset
     // linked to a node whose facts have not changed since would otherwise never receive them.
@@ -1182,6 +1234,160 @@ export class InfraService {
     return Array.isArray(software)
       ? (software as NonNullable<AgentReport['software']>)
       : undefined;
+  }
+
+  /**
+   * WHAT MOVED on a host this report (#1143) — the rows the append-only fact history is about to
+   * record, or an empty list when nothing worth recording did.
+   *
+   * IT BUILDS ON #1153's COMPARISON RATHER THAN MAKING A SECOND ONE. `planSpecsWrite` has already
+   * decided whether the stored blob moved at all, and `plan.write === undefined` is that answer: a
+   * report that changed nothing skips both the jsonb write and this, for zero extra cost on the ~96
+   * reports a day per host that are the steady state.
+   *
+   * THE PACKAGE HALF IS THE EXPENSIVE ONE AND IS ENTERED ONLY WHEN IT HAS TO BE. Diffing packages
+   * needs the stored list, which #1153 deliberately keeps OUT of the hot path — reading it back on
+   * every report would undo the whole saving. So it is read only when the server's own fingerprint of
+   * what arrived already disagrees with the one the node holds, i.e. only on the reports where the
+   * package list genuinely moved: roughly twice a month per host, the same branch `apt upgrade`
+   * produces. `preserve` and `clear` never read it, and `clear` deliberately records NOTHING —
+   * `softwareState: 'disabled'` is a policy event, and rendering it as three thousand removals would
+   * be a lie about the host.
+   *
+   * A node holding no list yet (`hasSoftware === false`) is the SEED case and is silent, which is what
+   * keeps the first report after this ships from writing one row per installed package. The same rule
+   * inside {@link diffHostFacts} covers every host fact.
+   */
+  private async hostFactChanges(
+    nodeId: string,
+    stored: StoredNodeSpecs,
+    plan: SpecsWritePlan,
+    software: SoftwareDirective,
+  ): Promise<InfraFactChangeDraft[]> {
+    if (plan.write === undefined) return [];
+    const changes = diffHostFacts(stored.rest?.host, plan.write.host);
+    const storedHash =
+      typeof stored.rest?.softwareHash === 'string'
+        ? stored.rest.softwareHash
+        : undefined;
+    if (
+      software.mode !== 'replace' ||
+      !stored.hasSoftware ||
+      software.hash === storedHash ||
+      changes.length >= INFRA_FACT_CHANGES_MAX_PER_REPORT
+    ) {
+      return changes;
+    }
+    const previous = await this.storedSoftware(nodeId);
+    return [
+      ...changes,
+      ...diffSoftwareFacts(
+        previous,
+        software.software,
+        INFRA_FACT_CHANGES_MAX_PER_REPORT - changes.length,
+      ),
+    ];
+  }
+
+  /**
+   * Append what moved to the node's fact history (#1143) — the ONE write path for
+   * `InfraNodeFactChange`, shared by the host refresh and the container reconciliation.
+   *
+   * NOTHING HERE MAY FAIL A CHECK-IN. A history row is strictly less valuable than the report that
+   * carries it: a host whose report 500s vanishes from the CMDB, shows OFFLINE on the map and nudges
+   * the bell (ADR-0074 §4), while a history row that was not written costs one line in a timeline. So
+   * every failure — a constraint, a DB hiccup, a node deleted between the update and this insert —
+   * degrades to a warning and the report still acks. Same posture as `syncNodeToSearch` and
+   * `resolvePolicy`, for the same reason.
+   *
+   * The two caps are applied here rather than at the callers so neither can be forgotten by a path
+   * added later: {@link INFRA_FACT_CHANGES_MAX_PER_REPORT} bounds one report, and the COUNT bounds one
+   * node across {@link INFRA_FACT_CHANGES_WINDOW_MS}. The COUNT runs only when there is something to
+   * write, so a quiet estate never pays for it.
+   */
+  private async recordFactChanges(
+    nodeId: string,
+    changes: InfraFactChangeDraft[],
+  ): Promise<void> {
+    if (changes.length === 0) return;
+    try {
+      const recent = await this.prisma.infraNodeFactChange.count({
+        where: {
+          nodeId,
+          createdAt: {
+            gte: new Date(Date.now() - INFRA_FACT_CHANGES_WINDOW_MS),
+          },
+        },
+      });
+      const room = INFRA_FACT_CHANGES_MAX_PER_NODE_WINDOW - recent;
+      if (room <= 0) {
+        this.logger.warn(
+          `Node ${nodeId} has already recorded ${INFRA_FACT_CHANGES_MAX_PER_NODE_WINDOW} fact changes this hour — ${changes.length} more are DROPPED. Already-recorded history is untouched, and recording resumes in the next window.`,
+        );
+        return;
+      }
+      const rows = changes.slice(
+        0,
+        Math.min(room, INFRA_FACT_CHANGES_MAX_PER_REPORT),
+      );
+      await this.prisma.infraNodeFactChange.createMany({
+        data: rows.map((change) => ({
+          nodeId,
+          kind: change.kind,
+          fact: change.fact.slice(0, INFRA_FACT_CHANGE_FACT_MAX),
+          previousValue: change.previousValue ?? null,
+          currentValue: change.currentValue ?? null,
+        })),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Could not record ${changes.length} fact change(s) for node ${nodeId} — the report was still accepted. ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * A page of a node's recorded fact history (#1143), newest first — what the Changes tab reads.
+   *
+   * Keyset pagination on the autoincrement `id` rather than an offset: the table is append-only, so
+   * ids are monotonic and a cursor cannot skip or repeat a row while the operator pages, however many
+   * reports land in between. `nextCursor` is null on the last page.
+   *
+   * The node is resolved through the soft-delete-scoped {@link getNode} first, so a node that is off
+   * the map answers 404 rather than serving its history.
+   */
+  async listNodeFactChanges(
+    nodeId: string,
+    options: { limit?: number; cursor?: number } = {},
+  ): Promise<InfraNodeFactChangeList> {
+    await this.getNode(nodeId);
+    const limit = Math.min(
+      Math.max(options.limit ?? INFRA_FACT_CHANGE_PAGE_SIZE, 1),
+      INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
+    );
+    const rows = await this.prisma.infraNodeFactChange.findMany({
+      where: {
+        nodeId,
+        ...(options.cursor !== undefined ? { id: { lt: options.cursor } } : {}),
+      },
+      orderBy: { id: 'desc' },
+      // One extra row is the "is there another page?" probe — cheaper than a second COUNT query.
+      take: limit + 1,
+    });
+    const items = rows.slice(0, limit);
+    return {
+      items: items.map((row) => ({
+        id: row.id,
+        nodeId: row.nodeId,
+        kind: row.kind,
+        fact: row.fact,
+        previousValue: row.previousValue,
+        currentValue: row.currentValue,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      nextCursor:
+        rows.length > limit ? (items[items.length - 1]?.id ?? null) : null,
+    };
   }
 
   /**
@@ -1611,6 +1817,16 @@ export class InfraService {
                 : { reportedAt: specs.reportedAt }),
             }
           : specs;
+        // WHAT MOVED on this container (#1143), read off the SAME comparison the write rule above
+        // already made — computed before the update, for the same reason the host path computes it
+        // there: `storedSpecs` is about to be replaced. A container whose image digest moved under an
+        // unchanged `:latest` tag is the deploy nobody remembers doing, and it is exactly the kind of
+        // change this table exists for. Runtime `state` is deliberately NOT recorded — it is liveness,
+        // it already drives this node's `status`, and a nightly restart would write two rows a day
+        // forever. See {@link diffContainerFacts}.
+        const childChanges = unchanged
+          ? []
+          : diffContainerFacts(storedSpecs.container, specs.container);
         await this.prisma.infraNode.update({
           where: { id: child.id },
           data: {
@@ -1623,6 +1839,7 @@ export class InfraService {
             ...childPolicyFields,
           },
         });
+        await this.recordFactChanges(child.id, childChanges);
         // #1157: the host path has synced its linked Asset since #1081 and this one never did, so a
         // container confirmed with `trackAsAsset` froze its Asset panel at the instant it was
         // confirmed — image tag, digest, runtime state and published ports all drifting silently while
