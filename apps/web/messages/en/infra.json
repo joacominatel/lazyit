@@ -140,7 +140,7 @@
     },
     "requirements": {
       "linux": "You'll run this on a Linux server with systemd and curl, as root.",
-      "windows": "You'll run this from an elevated PowerShell (right-click PowerShell → Run as administrator) on a 64-bit Windows host. Nothing else to install: the agent is a single self-contained executable — no Node, no dependencies."
+      "windows": "You'll run this from an elevated PowerShell (right-click PowerShell → Run as administrator) on Windows 10/11 or Windows Server 2016 or newer, on x64. There's no ARM64 build, and the installer stops on any host that isn't x64. Nothing else to install: the agent is a single self-contained executable — no Node, no dependencies."
     },
     "installTitle": "Run this on your server",
     "installHint": {
@@ -162,14 +162,14 @@
       "windows": {
         "toggle": "Download and read the installer first",
         "intro": "Prefer to read the installer before it runs? Download it, open it in an editor, then run it from the same elevated PowerShell.",
-        "step1": "Download the installer:",
-        "step2": "Read it, then run it — this form runs whatever the host's script execution policy is:"
+        "step1": "Save the installer to your temp folder (an elevated PowerShell starts in C:\\Windows\\System32, which is no place to put it):",
+        "step2": "Read the saved file, then run it — this form runs whatever the host's script execution policy is:"
       }
     },
     "diagnostics": {
       "title": "Check the host afterwards",
       "hint": "Read-only: it sends nothing and changes nothing. It answers whether this host can reach lazyit and whether its token is good.",
-      "windowsPathNote": "The full path, because the installer doesn't add its folder to PATH on Windows yet."
+      "windowsNote": "Run it from an elevated PowerShell: the agent's config file can only be read by SYSTEM and Administrators, so without elevation the check reports that no URL and no token are configured. The path is written out in full because the installer doesn't add its folder to PATH on Windows yet."
     },
     "waitTitle": "Waiting for {name} to report…",
     "waitDescription": "Run the install command on your server. As soon as the agent checks in, it'll show up here — usually within a couple of minutes.",
