@@ -5187,11 +5187,17 @@ describe('InfraService', () => {
         true,
       );
 
-    function hostIsKnown(): void {
+    /**
+     * `policyRevision` is the generation the node's agent echoed on its PREVIOUS report — i.e. the
+     * one the stored facts were collected under. `null` is the pre-#1140 shape, which is also what
+     * every test that does not care about the policy channel gets.
+     */
+    function hostIsKnown(policyRevision: number | null = null): void {
       prisma.infraNode.findFirst.mockResolvedValue({
         id: 'node-db01',
         assetId: null,
         ipAddressSource: 'AGENT',
+        policyRevision,
       });
       prisma.infraNode.update.mockResolvedValue({
         id: 'node-db01',
@@ -5372,6 +5378,169 @@ describe('InfraService', () => {
       );
 
       expect(recorded()).toEqual([]);
+    });
+
+    // ── A policy edit is not a host event (#1140 → #1143) ────────────────────
+    //
+    // The disks guard above answers ONE shape of this: a policy that excluded EVERY mountpoint. The
+    // same operator action taken slightly differently — exclude some mountpoints, exclude some
+    // package names, narrow `softwareSources`, lower `softwareMax` — moves a fact without moving
+    // the host, and the server can see that it happened: the agent echoes the policy generation it
+    // collected under, and the node column holds the echo from its previous report.
+
+    it('a LOWERED software cap records no removals — the packages are still installed', async () => {
+      // `applySoftwarePolicy` truncates to `softwareMax` (#1140). The operator lowered it to keep
+      // reports small; every package past the cap leaves the list while staying on the host. Read
+      // as a diff that is an uninstall spree nobody performed.
+      hostIsKnown(6);
+      const PREVIOUS = [
+        { name: 'nginx', version: '1.27.0' },
+        { name: 'openssl', version: '3.0.13' },
+        { name: 'zlib1g', version: '1.3' },
+      ];
+      prisma.$queryRaw.mockResolvedValueOnce(
+        settled({ softwareHash: softwareFingerprint(PREVIOUS) }),
+      );
+
+      await service.ingestReport(
+        report({
+          software: [{ name: 'nginx', version: '1.27.0' }],
+          softwareHash: softwareFingerprint([
+            { name: 'nginx', version: '1.27.0' },
+          ]),
+          policyRevision: 7,
+        }),
+      );
+
+      expect(recorded()).toEqual([]);
+      // And the large read-back is not even paid for: the diff would discard every row it produced.
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('a mountpoint exclusion added to the policy is not a disk being pulled', async () => {
+      // The narrower sibling of the "excluded them ALL" case: `/snap/*` goes into
+      // `exclude.mountpoints`, one disk record leaves the array, and both disk facts move.
+      hostIsKnown(6);
+      prisma.$queryRaw.mockResolvedValue(
+        settled({
+          host: {
+            ...storedHost(),
+            disks: [
+              { device: 'sda', sizeBytes: 500 },
+              { device: 'loop0', sizeBytes: 1000, mountpoint: '/snap/core' },
+            ],
+          },
+        }),
+      );
+
+      await service.ingestReport(
+        report({
+          host: { ...clone(HOST), disks: [{ device: 'sda', sizeBytes: 500 }] },
+          policyRevision: 7,
+        }),
+      );
+
+      expect(recorded()).toEqual([]);
+    });
+
+    it('a policy edit never blinds the timeline to what DID move in the same report', async () => {
+      // The guard is per FACT, not per report. The kernel is not filtered by any policy field, so
+      // the patch window that landed in the same check-in is still recorded.
+      hostIsKnown(6);
+      prisma.$queryRaw.mockResolvedValue(
+        settled({
+          host: {
+            ...storedHost(),
+            os: { ...storedHost().os, kernel: '6.8.0-30-generic' },
+            disks: [
+              { device: 'sda', sizeBytes: 500 },
+              { device: 'loop0', sizeBytes: 1000, mountpoint: '/snap/core' },
+            ],
+          },
+        }),
+      );
+
+      await service.ingestReport(
+        report({
+          host: {
+            ...clone(HOST),
+            disks: [{ device: 'sda', sizeBytes: 500 }],
+          },
+          policyRevision: 7,
+        }),
+      );
+
+      expect(recorded()).toEqual([
+        {
+          nodeId: 'node-db01',
+          kind: 'FACT_CHANGED',
+          fact: 'host.os.kernel',
+          previousValue: '6.8.0-30-generic',
+          currentValue: '6.8.0-31-generic',
+        },
+      ]);
+    });
+
+    it('the SAME generation still records a real uninstall — the guard is not a blanket off switch', async () => {
+      hostIsKnown(7);
+      const PREVIOUS = [
+        { name: 'nginx', version: '1.27.0' },
+        { name: 'openssl', version: '3.0.13' },
+      ];
+      prisma.$queryRaw
+        .mockResolvedValueOnce(
+          settled({ softwareHash: softwareFingerprint(PREVIOUS) }),
+        )
+        .mockResolvedValueOnce([{ software: PREVIOUS }]);
+
+      await service.ingestReport(
+        report({
+          software: [{ name: 'nginx', version: '1.27.0' }],
+          softwareHash: softwareFingerprint([
+            { name: 'nginx', version: '1.27.0' },
+          ]),
+          policyRevision: 7,
+        }),
+      );
+
+      expect(recorded()).toEqual([
+        {
+          nodeId: 'node-db01',
+          kind: 'PACKAGE_REMOVED',
+          fact: 'openssl',
+          previousValue: '3.0.13',
+          currentValue: null,
+        },
+      ]);
+    });
+
+    it('a pre-#1140 agent, which echoes no generation at all, keeps its package history', async () => {
+      // Most of the fleet on the day this ships. No echo and no stored revision means no server
+      // policy is being applied, so no difference here can be a policy artefact — and reading the
+      // two absences as "the generation moved" would silence the whole estate's package history.
+      hostIsKnown(null);
+      const PREVIOUS = [
+        { name: 'nginx', version: '1.27.0' },
+        { name: 'openssl', version: '3.0.13' },
+      ];
+      prisma.$queryRaw
+        .mockResolvedValueOnce(
+          settled({ softwareHash: softwareFingerprint(PREVIOUS) }),
+        )
+        .mockResolvedValueOnce([{ software: PREVIOUS }]);
+
+      await service.ingestReport(
+        report({
+          software: [{ name: 'nginx', version: '1.27.0' }],
+          softwareHash: softwareFingerprint([
+            { name: 'nginx', version: '1.27.0' },
+          ]),
+        }),
+      );
+
+      expect(recorded()).toMatchObject([
+        { kind: 'PACKAGE_REMOVED', fact: 'openssl' },
+      ]);
     });
 
     it('an IDENTICAL report records nothing and does not even ask the per-node cap', async () => {
