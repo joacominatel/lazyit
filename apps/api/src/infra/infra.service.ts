@@ -970,11 +970,12 @@ export class InfraService {
    * check-in's worth of disk/package rows and a baseline that re-seeds from the new list, against an
    * invented uninstall that would make the whole tab untrustworthy.
    *
-   * **What it cannot see.** The host's own `/etc/lazyit-agent/config` may narrow the policy further
+   * **What it cannot see.** The host's own config file — `/etc/lazyit-agent/config` on Linux,
+   * `%ProgramData%\lazyit-agent\config` on Windows (#1144) — may narrow the policy further
    * (`LAZYIT_EXCLUDE_SOFTWARE`, `LAZYIT_SOFTWARE_MAX` — the local VETO), and editing that file moves
-   * no revision. Someone with root on the host editing the host's own filter is not the case this
-   * table exists to protect; see the ADR-0074 §3 amendment for the residual and what closing it
-   * would cost on the wire.
+   * no revision. Someone with root (Administrator on Windows) on the host editing the host's own
+   * filter is not the case this table exists to protect; see the ADR-0074 §3 amendment for the
+   * residual and what closing it would cost on the wire.
    */
   private samePolicyGeneration(
     report: AgentReport,
