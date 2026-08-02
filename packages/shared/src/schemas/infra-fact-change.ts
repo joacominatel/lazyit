@@ -271,8 +271,9 @@ function diskCount(disks: unknown): string | undefined {
  *    same rule for a brand-new node, a node enrolled before this feature, and a fact that simply had
  *    never been collected on this host before.
  *  - **No current value ⇒ no row.** A fact that DISAPPEARS is a collector that lost a capability — an
- *    agent downgraded, dmidecode no longer readable because the unit stopped running as root — not a
- *    host whose serial was removed. Recording it would put a change on screen that never happened.
+ *    agent downgraded, or the serial no longer readable because the run lost its privilege (dmidecode
+ *    needs root on Linux, `Win32_BIOS` needs Administrator on Windows) — not a host whose serial was
+ *    removed. Recording it would put a change on screen that never happened.
  *
  * A row is written only when BOTH sides are readable and they differ.
  */
