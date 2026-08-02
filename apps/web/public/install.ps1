@@ -95,9 +95,9 @@ Set-StrictMode -Version Latest
 # of #1140 is that the schedule is one unchanging thing on every platform while the cadence is a
 # server-side setting.
 $TickMinutes = 5
-# De-phasing, the RandomizedDelaySec analogue — carried by each TRIGGER (see below). Hosts that came
-# back from a patch window together would otherwise POST a full inventory in the same second and run
-# into the per-token report limit (#1134).
+# De-phasing, the RandomizedDelaySec analogue — carried by the TIME trigger (see below; a boot trigger
+# has no such element). Hosts that came back from a patch window together would otherwise POST a full
+# inventory in the same second and run into the per-token report limit (#1134).
 $RandomDelay = New-TimeSpan -Seconds 60
 # The outer bound on one run, the RuntimeMaxSec analogue. The agent bounds each collector itself
 # (#1133), but a child stuck in a kernel wait can outlive a kill; Task Scheduler reaps the job.
@@ -401,7 +401,7 @@ $lines.Add('#LAZYIT_CA_FILE=C:\ProgramData\lazyit-agent\internal-root.pem')
 # The systemd timer, one platform over. Every piece has a direct counterpart:
 #   AtStartup + Delay 2min      <- OnBootSec=2min
 #   Once + RepetitionInterval   <- OnUnitActiveSec=5min  (the TICK, not the cadence)
-#   RandomDelay 60s             <- RandomizedDelaySec=60s
+#   RandomDelay 60s             <- RandomizedDelaySec=60s  (time trigger only; see below)
 #   StartWhenAvailable          <- Persistent=true (catch up a tick missed while powered off)
 #   ExecutionTimeLimit 5min     <- RuntimeMaxSec=120, one layer out
 #   RunLevel Highest + SYSTEM   <- the unit running as root
@@ -429,7 +429,13 @@ $action = New-ScheduledTaskAction -Execute $BinPath -Argument 'report --once'
 # developers are on macOS). The shape above is what Microsoft's own documentation specifies; confirm
 # it with `Get-ScheduledTask lazyit-agent | Select-Object -ExpandProperty Triggers` on a running host
 # before any rollout.
-$bootTrigger = New-ScheduledTaskTrigger -AtStartup -RandomDelay $RandomDelay
+# NO -RandomDelay on this one, and that is not an oversight. `bootTriggerType` adds exactly one
+# element of its own to the trigger base type — `Delay` — while `RandomDelay` is added by
+# `timeTriggerType`, so a boot trigger has nowhere to put it however willingly the cmdlet accepts the
+# parameter. The fixed 2-minute delay is what a boot trigger has. Nothing is lost: the estate's real
+# de-phasing is the agent's own cadence jitter (#1140), which is keyed on the host's machine id, and
+# the tick trigger below carries the RandomDelay as well.
+$bootTrigger = New-ScheduledTaskTrigger -AtStartup
 $bootTrigger.Delay = 'PT2M'
 
 # `-RepetitionDuration` is deliberately NOT passed. The Task Scheduler schema is explicit — "if no
@@ -449,13 +455,14 @@ catch {
     -RepetitionDuration (New-TimeSpan -Days 3650)
 }
 
-# `-RandomDelay` belongs to the TRIGGER and only to the trigger: `New-ScheduledTaskSettingsSet`
-# publishes no such parameter, and passing it there throws "A parameter cannot be found that matches
-# parameter name 'RandomDelay'" — fatal under $ErrorActionPreference='Stop', AFTER the binary and the
-# token file are already on disk. It de-phases each trigger's own start (a random offset between the
-# trigger time and this span), which the 5-minute repetition then carries: a whole floor coming back
-# from a patch window together lands on different offsets instead of POSTing a full inventory in the
-# same second and running into the per-token report limit (#1134).
+# `-RandomDelay` belongs to the TIME TRIGGER above and NOT to the settings set:
+# `New-ScheduledTaskSettingsSet` publishes no such parameter, and passing it there throws "A parameter
+# cannot be found that matches parameter name 'RandomDelay'" — fatal under
+# $ErrorActionPreference='Stop', AFTER the binary and the token file are already on disk. On the time
+# trigger it is a random offset added to that trigger's start (`timeTriggerType` adds the element;
+# `bootTriggerType` does not), so hosts that came back from a patch window together do not all POST a
+# full inventory in the same second and hit the per-token report limit (#1134). The agent's own
+# cadence jitter (#1140), keyed on the machine id, is the layer that actually spreads the estate.
 $settings = New-ScheduledTaskSettingsSet `
   -StartWhenAvailable `
   -ExecutionTimeLimit $ExecutionTimeLimit `
