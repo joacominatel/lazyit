@@ -95,9 +95,9 @@ Set-StrictMode -Version Latest
 # of #1140 is that the schedule is one unchanging thing on every platform while the cadence is a
 # server-side setting.
 $TickMinutes = 5
-# Per-elapse de-phasing, the RandomizedDelaySec analogue. Hosts that came back from a patch window
-# together would otherwise POST a full inventory in the same second and run into the per-token report
-# limit (#1134).
+# De-phasing, the RandomizedDelaySec analogue — carried by each TRIGGER (see below). Hosts that came
+# back from a patch window together would otherwise POST a full inventory in the same second and run
+# into the per-token report limit (#1134).
 $RandomDelay = New-TimeSpan -Seconds 60
 # The outer bound on one run, the RuntimeMaxSec analogue. The agent bounds each collector itself
 # (#1133), but a child stuck in a kernel wait can outlive a kill; Task Scheduler reaps the job.
@@ -400,24 +400,64 @@ $lines.Add('#LAZYIT_CA_FILE=C:\ProgramData\lazyit-agent\internal-root.pem')
 # --- the scheduled task ----------------------------------------------------
 # The systemd timer, one platform over. Every piece has a direct counterpart:
 #   AtStartup + Delay 2min      <- OnBootSec=2min
-#   RepetitionInterval 5min     <- OnUnitActiveSec=5min  (the TICK, not the cadence)
+#   Once + RepetitionInterval   <- OnUnitActiveSec=5min  (the TICK, not the cadence)
 #   RandomDelay 60s             <- RandomizedDelaySec=60s
 #   StartWhenAvailable          <- Persistent=true (catch up a tick missed while powered off)
 #   ExecutionTimeLimit 5min     <- RuntimeMaxSec=120, one layer out
 #   RunLevel Highest + SYSTEM   <- the unit running as root
 $action = New-ScheduledTaskAction -Execute $BinPath -Argument 'report --once'
-$trigger = New-ScheduledTaskTrigger -AtStartup
-$trigger.Delay = 'PT2M'
-# A repetition attached to the startup trigger, so ONE trigger both catches a reboot and keeps
-# ticking. `RepetitionDuration` of [TimeSpan]::MaxValue is how Task Scheduler spells "indefinitely".
-$repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
-  -RepetitionInterval (New-TimeSpan -Minutes $TickMinutes) `
-  -RepetitionDuration ([TimeSpan]::MaxValue)).Repetition
-$trigger.Repetition = $repetition
 
+# TWO INDEPENDENT TRIGGERS, because the systemd unit has TWO INDEPENDENT ACTIVATIONS (`OnBootSec=`
+# and `OnUnitActiveSec=`) and collapsing them into one does not work here.
+#
+# A repetition is a property OF a trigger, and Microsoft defines it as "how long the repetition
+# pattern is repeated AFTER THE TASK IS STARTED"; Task Scheduler "can run a task any number of times
+# AFTER A TRIGGER IS FIRED". An `-AtStartup` trigger "starts a task when the system is started" — it
+# does not fire for a boot that has already happened. So a repetition hung on the startup trigger
+# ALONE never begins on a machine that is already running: the install completes, the first manual
+# report succeeds, and the host then reports NOTHING until somebody reboots it. `-StartWhenAvailable`
+# does not rescue that, because it "applies only to time-based tasks" and a boot trigger is not one.
+#
+# So the TICK gets its own time-based trigger starting NOW — which begins repeating immediately and
+# is also what makes `-StartWhenAvailable` meaningful — and the BOOT trigger keeps its own job of
+# re-arming the tick after a machine has been powered off. `Register-ScheduledTask -Trigger` takes
+# "an array of one or more trigger objects" (up to 48) and Task Scheduler "starts the task when ANY
+# of the triggers occur", so both simply coexist; `-MultipleInstances IgnoreNew` below is what makes
+# an overlap at boot a no-op rather than two concurrent runs.
+#
+# NOT VERIFIED ON A REAL WINDOWS HOST: nothing in this repo can run Task Scheduler (CI is Linux, the
+# developers are on macOS). The shape above is what Microsoft's own documentation specifies; confirm
+# it with `Get-ScheduledTask lazyit-agent | Select-Object -ExpandProperty Triggers` on a running host
+# before any rollout.
+$bootTrigger = New-ScheduledTaskTrigger -AtStartup -RandomDelay $RandomDelay
+$bootTrigger.Delay = 'PT2M'
+
+# `-RepetitionDuration` is deliberately NOT passed. The Task Scheduler schema is explicit — "if no
+# value is specified for the duration, then the pattern is repeated indefinitely" — and the
+# `[TimeSpan]::MaxValue` idiom this used to carry is reported to fail XML validation from Windows 10
+# / Server 2016 onwards ("Duration:P99999999DT23H59M59S ... incorrectly formatted or out of range"),
+# which would have aborted the registration outright. The OLDER cmdlet (Server 2012) is the reverse:
+# it refuses an interval with no duration, so that one case falls back to a long finite duration
+# rather than being left to fail.
+try {
+  $tickTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RandomDelay $RandomDelay `
+    -RepetitionInterval (New-TimeSpan -Minutes $TickMinutes) -ErrorAction Stop
+}
+catch {
+  $tickTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RandomDelay $RandomDelay `
+    -RepetitionInterval (New-TimeSpan -Minutes $TickMinutes) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
+}
+
+# `-RandomDelay` belongs to the TRIGGER and only to the trigger: `New-ScheduledTaskSettingsSet`
+# publishes no such parameter, and passing it there throws "A parameter cannot be found that matches
+# parameter name 'RandomDelay'" — fatal under $ErrorActionPreference='Stop', AFTER the binary and the
+# token file are already on disk. It de-phases each trigger's own start (a random offset between the
+# trigger time and this span), which the 5-minute repetition then carries: a whole floor coming back
+# from a patch window together lands on different offsets instead of POSTing a full inventory in the
+# same second and running into the per-token report limit (#1134).
 $settings = New-ScheduledTaskSettingsSet `
   -StartWhenAvailable `
-  -RandomDelay $RandomDelay `
   -ExecutionTimeLimit $ExecutionTimeLimit `
   -MultipleInstances IgnoreNew `
   -DontStopOnIdleEnd `
@@ -430,7 +470,7 @@ $settings = New-ScheduledTaskSettingsSet `
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
 Register-ScheduledTask -TaskName $TaskName `
-  -Action $action -Trigger $trigger -Settings $settings -Principal $taskPrincipal `
+  -Action $action -Trigger @($bootTrigger, $tickTrigger) -Settings $settings -Principal $taskPrincipal `
   -Description 'lazyit reporting agent — one-shot inventory report. Ticks every 5 minutes; the REPORTING CADENCE is set centrally in lazyit and enforced by the agent, so this task never has to change.' `
   -Force | Out-Null
 
