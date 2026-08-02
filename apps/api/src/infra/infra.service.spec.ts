@@ -5482,6 +5482,38 @@ describe('InfraService', () => {
 
     // ── Nothing here may fail a check-in ─────────────────────────────────────
 
+    it('a failed package read-back still ACKS the report, and keeps the host facts it already diffed', async () => {
+      // The read this feature ADDED to the report path. Before #1143 nothing on a `replace` report
+      // read the stored list back, so a failure here would be a 500 the fact history invented — a
+      // host off the map in exchange for a timeline row.
+      hostIsKnown();
+      const PREVIOUS = [{ name: 'openssl', version: '3.0.2' }];
+      prisma.$queryRaw
+        .mockResolvedValueOnce(
+          settled({
+            host: {
+              ...storedHost(),
+              os: { ...storedHost().os, kernel: 'old' },
+            },
+            softwareHash: softwareFingerprint(PREVIOUS),
+          }),
+        )
+        .mockRejectedValueOnce(new Error('connection reset'));
+
+      const ack = await service.ingestReport(report());
+
+      expect(ack.accepted).toBe(true);
+      expect(recorded()).toEqual([
+        {
+          nodeId: 'node-db01',
+          kind: 'FACT_CHANGED',
+          fact: 'host.os.kernel',
+          previousValue: 'old',
+          currentValue: '6.8.0-31-generic',
+        },
+      ]);
+    });
+
     it('a failed history write still ACKS the report — the host must never drop off the map', async () => {
       hostIsKnown();
       prisma.$queryRaw.mockResolvedValue(
