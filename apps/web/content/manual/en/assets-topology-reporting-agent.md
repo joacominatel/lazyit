@@ -684,8 +684,12 @@ What you can set there, in three groups:
   between two of its own reports — the editor will not let you save a value that would do that, and it
   says so under the field rather than after you press Save.
 - **What agents collect** — hardware, disks, network interfaces, installed software, containers, plus
-  a hard cap on how many packages a host may report. A collector that is off is never run at all: the
-  agent does not gather the facts and then throw them away.
+  a hard cap on how many packages a host may report. **On Linux** a collector that is off is never run
+  at all: the agent does not gather the facts and then throw them away. **On Windows** only containers
+  works that way — hardware, disks, network interfaces and the installed list all come out of a single
+  PowerShell call that runs whatever the policy says, so switching one off there keeps the fact out of
+  the report but does not save the host the work of collecting it. Either way, a switched-off
+  collector never reaches lazyit.
 - **Exclusions** — name patterns for network interfaces (`veth*`, `docker*`), mountpoints
   (`/var/lib/docker/*`, `/snap/*`) and packages (`linux-image-*`). `*` matches anything and `?`
   matches a single character; regular expressions are not accepted, and each list holds at most 32
@@ -706,7 +710,8 @@ check-in, and the host applies it from the run *after* that — so allow up to t
 That delay is deliberate: an agent only ever applies a policy it already had in hand when it started,
 so a mistake here can never interrupt a fleet halfway through collecting.
 
-**Each host can refuse, and lazyit cannot override that.** A host's own `/etc/lazyit-agent/config`
+**Each host can refuse, and lazyit cannot override that.** A host's own config file —
+`/etc/lazyit-agent/config` on Linux, `C:\ProgramData\lazyit-agent\config` on Windows —
 can turn a collector off (`LAZYIT_COLLECT_SOFTWARE=false`), set a floor on how often it will report
 (`LAZYIT_MIN_INTERVAL=3600`), cap its own package list (`LAZYIT_SOFTWARE_MAX=500`) or add its own
 exclusions (`LAZYIT_EXCLUDE_NICS=veth*`). Those settings **win**, always, and nothing you set in
