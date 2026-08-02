@@ -290,7 +290,35 @@
     "impactCount": "{count, plural, one {# nodo afectado si este se cae} other {# nodos afectados si este se cae}}",
     "impactDepth": "{depth, plural, one {# salto} other {# saltos}}",
     "deleteAction": "Quitar del mapa",
-    "loading": "Cargando nodo…"
+    "loading": "Cargando nodo…",
+    "tabs": {
+      "overview": "Resumen",
+      "changes": "Cambios"
+    }
+  },
+  "changes": {
+    "emptyTitle": "Todavía no hay cambios registrados",
+    "emptyDescription": "Nada en este nodo cambió desde que el agente lo reportó por primera vez. Solo se registran los cambios reales: un paquete instalado, eliminado o actualizado, o el sistema operativo, el kernel, la memoria, el disco, el número de serie o la imagen del contenedor.",
+    "loadError": "No se pudo cargar el historial de cambios",
+    "loadMore": "Cargar cambios anteriores",
+    "loadingMore": "Cargando…",
+    "kind": {
+      "PACKAGE_ADDED": "Instalado",
+      "PACKAGE_REMOVED": "Eliminado",
+      "PACKAGE_VERSION": "Versión",
+      "FACT_CHANGED": "Cambió"
+    },
+    "facts": {
+      "hostOsName": "Sistema operativo",
+      "hostOsVersion": "Versión del sistema",
+      "hostOsKernel": "Kernel",
+      "hostMemoryBytes": "Memoria (bytes)",
+      "hostDisksTotalBytes": "Capacidad de disco (bytes)",
+      "hostDisksCount": "Cantidad de discos",
+      "hostHardwareSerial": "Número de serie",
+      "containerImage": "Imagen del contenedor",
+      "containerImageDigest": "Digest de la imagen"
+    }
   },
   "delete": {
     "title": "¿Quitar este nodo del mapa?",
