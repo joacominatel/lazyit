@@ -1049,7 +1049,8 @@ covers a brand-new node, a node enrolled before the feature existed, a node whos
 was cleared, and a fact that had never been collected on that host before. It is asserted by test on
 all four.
 
-*A fact that DISAPPEARS records nothing either.* An agent that loses root stops reporting
+*A fact that DISAPPEARS records nothing either.* An agent that loses root — Administrator on the
+Windows hosts #1144 adds, where the serial comes from `Win32_BIOS` — stops reporting
 `hardware.serial`; a downgraded agent stops reporting a field. Neither is the host changing, and a row
 saying otherwise would put a change on screen that never happened. **A row needs both sides readable
 and different** — which is the same degrade-never-reject reading every other absence in this contract
@@ -1123,12 +1124,13 @@ report. A real change landing in that same check-in is not recorded and the base
 the new lists. That is the safe direction to be wrong in: one check-in's disk and package rows,
 against an uninstall the operator can neither explain nor disprove. The facts no policy filters —
 OS, kernel, memory, serial, container image and digest — are still recorded in that same report, so
-the guard is per fact, never per report. **The residual it does not close** is the host's own
-`/etc/lazyit-agent/config` (§7's local veto): tightening `LAZYIT_EXCLUDE_SOFTWARE` or
+the guard is per fact, never per report. **The residual it does not close** is the host's own config
+file — `/etc/lazyit-agent/config`, or `%ProgramData%\lazyit-agent\config` on the Windows hosts the
+#1144 amendment adds (§7's local veto, on both): tightening `LAZYIT_EXCLUDE_SOFTWARE` or
 `LAZYIT_SOFTWARE_MAX` there narrows the filter without moving any revision, and those removals will
 be recorded. Closing that needs the wire to carry the fact that a list was locally filtered, which is
-a §2 contract change and is not made here; someone with root on a host editing that host's own filter
-is not the case this table exists to protect.
+a §2 contract change and is not made here; someone with root (Administrator on Windows) on a host
+editing that host's own filter is not the case this table exists to protect.
 
 **Container children are in, and the digest is why.** #1139 gave a container its own node and #1157
 gave it its own Asset sync; a container whose **image digest moves under an unchanged `:latest` tag**
