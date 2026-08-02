@@ -11,9 +11,10 @@
  * then — the UI was the last surface that did not know Windows exists, which is where a real operator
  * found it, holding a once-only token that had just been minted for a host the command cannot run on.
  *
- * WINDOWS PATHS ARE WRITTEN `\\`. In a TypeScript string `".\install.ps1"` is `.install.ps1` — `\i`
- * is not an escape sequence, so the backslash is dropped silently. Every literal below doubles them
- * and the test asserts the result, because this is a mistake that reads as correct.
+ * WINDOWS PATHS ARE WRITTEN `\\`. In a TypeScript string `"$env:TEMP\lazyit-install.ps1"` is
+ * `$env:TEMPlazyit-install.ps1` — `\l` is not an escape sequence, so the backslash is dropped
+ * silently. Every literal below doubles them and the test asserts the result, because this is a
+ * mistake that reads as correct.
  */
 
 /** The platforms an agent binary is actually built for (ADR-0074 §6; `apps/agent/package.json`). */
@@ -29,6 +30,35 @@ export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
  * relocated or redirected.
  */
 const WINDOWS_AGENT_EXE = '"$env:ProgramFiles\\lazyit-agent\\lazyit-agent.exe"';
+
+/**
+ * Where the inspect-first path SAVES the installer, quoted for a `%TEMP%` under a profile whose name
+ * has a space in it.
+ *
+ * Explicit, and deliberately not the working directory: an elevated PowerShell — the one the wizard
+ * just told the operator to open — starts in `C:\Windows\System32`, so a bare `-OutFile .\install.ps1`
+ * writes a freshly downloaded script into the system directory. `%TEMP%` is writable by the operator
+ * who is already elevated, and the name is prefixed so the download does not silently overwrite an
+ * unrelated `install.ps1` already sitting there.
+ */
+const WINDOWS_INSTALLER_COPY = '"$env:TEMP\\lazyit-install.ps1"';
+
+/** A step of the inspect-first path: its `infra.wizard` message key, and the command it labels. */
+export type AgentManualStep = {
+  /**
+   * The catalog key for this step's label, relative to the `infra.wizard` namespace.
+   *
+   * The label and the command are ONE object on purpose. They used to be two positionally-indexed
+   * arrays — the labels read out of the catalog in the component, the commands built here — and
+   * nothing held index N of one to index N of the other, so an edit could add a step to one side
+   * only and every test still passed. `agent-install-commands.test.ts` now asserts these keys
+   * against the `stepN` keys BOTH locale catalogs actually ship, in order.
+   */
+  labelKey:
+    | `manual.linux.step${1 | 2 | 3 | 4}`
+    | `manual.windows.step${1 | 2}`;
+  command: string;
+};
 
 /**
  * The one command to paste, with the real instance origin and the real token already in it.
@@ -59,33 +89,62 @@ export function agentInstallCommand(
  * — not four copy-pasteable lines, and a half-done version of it is worse than none. So Windows gets
  * the honest form of the same intent: download the installer, read it, then run it.
  *
- * That second step runs the downloaded file through `[scriptblock]::Create` rather than as
- * `.\install.ps1`. Invoking a `.ps1` file is subject to the host's execution policy — `Restricted` by
+ * That second step runs the saved file through `[scriptblock]::Create` rather than invoking it as a
+ * `.ps1` file. Invoking a `.ps1` file is subject to the host's execution policy — `Restricted` by
  * default on Windows client editions — while a script block built in memory is not. It is not a
  * second spelling of the command: it is the form the installer's own header prescribes, sourced from
- * disk instead of from the network.
+ * disk ({@link WINDOWS_INSTALLER_COPY}) instead of from the network.
  */
-export function agentManualInstallCommands(
+export function agentManualInstallSteps(
   platform: AgentPlatform,
   origin: string,
   token: string,
-): string[] {
+): AgentManualStep[] {
   if (platform === "windows") {
     return [
-      `irm ${origin}/install.ps1 -OutFile .\\install.ps1`,
-      `& ([scriptblock]::Create((Get-Content -Raw .\\install.ps1))) -Url ${origin} -Token ${token}`,
+      {
+        labelKey: "manual.windows.step1",
+        command: `irm ${origin}/install.ps1 -OutFile ${WINDOWS_INSTALLER_COPY}`,
+      },
+      {
+        labelKey: "manual.windows.step2",
+        command: `& ([scriptblock]::Create((Get-Content -Raw ${WINDOWS_INSTALLER_COPY}))) -Url ${origin} -Token ${token}`,
+      },
     ];
   }
   return [
-    `curl -fsSL -H "Authorization: Bearer ${token}" "${origin}/api/agent/download?arch=x64" -o lazyit-agent`,
-    "chmod +x lazyit-agent && sudo mv lazyit-agent /usr/local/bin/",
-    `sudo install -d -m 700 /etc/lazyit-agent && printf 'LAZYIT_URL=%s\\nLAZYIT_TOKEN=%s\\n' "${origin}" "${token}" | sudo tee /etc/lazyit-agent/config >/dev/null && sudo chmod 600 /etc/lazyit-agent/config`,
-    "sudo lazyit-agent report --once --force",
+    {
+      labelKey: "manual.linux.step1",
+      command: `curl -fsSL -H "Authorization: Bearer ${token}" "${origin}/api/agent/download?arch=x64" -o lazyit-agent`,
+    },
+    {
+      labelKey: "manual.linux.step2",
+      command: "chmod +x lazyit-agent && sudo mv lazyit-agent /usr/local/bin/",
+    },
+    {
+      labelKey: "manual.linux.step3",
+      command: `sudo install -d -m 700 /etc/lazyit-agent && printf 'LAZYIT_URL=%s\\nLAZYIT_TOKEN=%s\\n' "${origin}" "${token}" | sudo tee /etc/lazyit-agent/config >/dev/null && sudo chmod 600 /etc/lazyit-agent/config`,
+    },
+    {
+      labelKey: "manual.linux.step4",
+      command: "sudo lazyit-agent report --once --force",
+    },
   ];
 }
 
 /**
  * The read-only check to run on the host afterwards — it sends nothing and changes nothing.
+ *
+ * BOTH FORMS NEED PRIVILEGE, and only one of them can carry it in the command. Linux has `sudo`:
+ * pasted into an unprivileged shell it prompts, then works. Windows PowerShell 5.1 has no `sudo`, and
+ * the in-command alternative — `Start-Process -Verb RunAs` — runs the check in a SECOND console whose
+ * output is not in the shell the operator is reading, through two layers of command-line parsing
+ * wrapped around a path with a space in it. So the requirement rides in the copy beside the command
+ * instead (`infra.wizard.diagnostics.windowsNote`, asserted in both locales by this module's test).
+ *
+ * It is not cosmetic. install.ps1 ACLs the config file to SYSTEM + Administrators; the agent's
+ * `readConfigFile` swallows a read error and returns an empty config; so an unelevated `test` reports
+ * that no URL and no token are configured — on a host that installed perfectly.
  *
  * Linux gets the bare name: install.sh puts the binary in `/usr/local/bin`, which is on PATH.
  *
