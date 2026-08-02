@@ -1844,10 +1844,12 @@ export class InfraService {
       } catch (err) {
         // A concurrent report from the same host opened it first — the invariant HELD, so this is
         // the success case arriving by another route, not a failure worth propagating.
-        if (!(
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2002'
-        )) {
+        if (
+          !(
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === 'P2002'
+          )
+        ) {
           throw err;
         }
       }
