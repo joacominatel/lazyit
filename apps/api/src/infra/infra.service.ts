@@ -653,6 +653,10 @@ export class InfraService {
       }
       // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
       // human's and is deliberately left untouched. NOT throttled — it adds no row (#1134).
+      const samePolicyGeneration = this.samePolicyGeneration(
+        report,
+        existing.policyRevision,
+      );
       const ack = await this.refreshKnownNode({
         node: existing,
         blob,
@@ -666,9 +670,17 @@ export class InfraService {
           policy,
           now,
         ),
+        samePolicyGeneration,
         stored,
       });
-      return this.reconcileContainers(ack, report, now, principal, policy);
+      return this.reconcileContainers(
+        ack,
+        report,
+        now,
+        samePolicyGeneration,
+        principal,
+        policy,
+      );
     }
 
     // Unknown host ⇒ a NEW row. This is the only branch that can grow the table, so it is the only one
@@ -747,6 +759,11 @@ export class InfraService {
         },
         report,
         now,
+        // A node created a moment ago has no stored revision — the same `null` the policy columns
+        // were just written against. Its own host facts have no baseline to diff anyway; a container
+        // child rediscovered under a node that was discarded and re-proposed does, and it gets the
+        // conservative answer.
+        this.samePolicyGeneration(report, null),
         principal,
         policy,
       );
@@ -775,6 +792,10 @@ export class InfraService {
         // No loop: after P2002 the row exists. If it somehow doesn't (e.g. it was soft-deleted in the
         // same instant so findFirst can't see it), rethrow the original error rather than inventing one.
         if (raced) {
+          const samePolicyGeneration = this.samePolicyGeneration(
+            report,
+            raced.policyRevision,
+          );
           const ack = await this.refreshKnownNode({
             node: raced,
             blob,
@@ -788,8 +809,16 @@ export class InfraService {
               policy,
               now,
             ),
+            samePolicyGeneration,
           });
-          return this.reconcileContainers(ack, report, now, principal, policy);
+          return this.reconcileContainers(
+            ack,
+            report,
+            now,
+            samePolicyGeneration,
+            principal,
+            policy,
+          );
         }
       }
       throw err;
@@ -864,6 +893,40 @@ export class InfraService {
    * silently override a deliberately tuned `INFRA_AGENT_STALE_AFTER_MS` for precisely the hosts the
    * env var is documented to still cover (a pre-#1140 agent, a manual row, a failed resolution).
    */
+  /**
+   * Did this report's facts and the node's STORED facts come out of the same #1140 policy generation
+   * (#1143)? The answer the fact diff needs before it may call a difference a change.
+   *
+   * **Where the distinction is made, and why here.** The agent knows which packages its policy
+   * filtered out; the server never sees them. But the server does not need the names — it only needs
+   * to know that the FILTER moved, and it already holds that: the agent echoes the generation it
+   * collected under in every report (`policyRevision`), and the node's column of the same name holds
+   * that echo from its previous report. So no wire field is added and no query is made; the
+   * comparison is two values already in hand, and an older agent needs no upgrade to be protected.
+   *
+   * **Both-absent is SAME, deliberately.** A pre-#1140 agent echoes nothing and applies no server
+   * policy, so it can produce no policy artefact — and reading its two absences as "the generation
+   * moved" would silence the package history of most of the fleet on the day this ships.
+   *
+   * **It is deliberately blunt in one direction.** The revision is instance-wide and bumps on ANY
+   * policy write at any scope, so editing one host's policy makes every host in the estate skip its
+   * policy-sensitive diff for one report. That is the safe direction to be wrong in: the cost is one
+   * check-in's worth of disk/package rows and a baseline that re-seeds from the new list, against an
+   * invented uninstall that would make the whole tab untrustworthy.
+   *
+   * **What it cannot see.** The host's own `/etc/lazyit-agent/config` may narrow the policy further
+   * (`LAZYIT_EXCLUDE_SOFTWARE`, `LAZYIT_SOFTWARE_MAX` — the local VETO), and editing that file moves
+   * no revision. Someone with root on the host editing the host's own filter is not the case this
+   * table exists to protect; see the ADR-0074 §3 amendment for the residual and what closing it
+   * would cost on the wire.
+   */
+  private samePolicyGeneration(
+    report: AgentReport,
+    storedRevision: number | null | undefined,
+  ): boolean {
+    return report.policyRevision === (storedRevision ?? undefined);
+  }
+
   private policyWriteFields(
     report: AgentReport,
     storedRevision: number | null | undefined,
@@ -986,6 +1049,12 @@ export class InfraService {
     primaryIpAddress: string | undefined;
     /** The #1140 policy columns. An EMPTY object is the pre-#1140 shape and writes nothing extra. */
     policyFields?: AgentPolicyWriteFields;
+    /**
+     * Did this report's collection run under the same #1140 policy generation as the stored facts
+     * it is about to be diffed against? See {@link InfraService.samePolicyGeneration}. Required, so
+     * a path added later cannot record a policy edit as a hardware or software event by omission.
+     */
+    samePolicyGeneration: boolean;
     /** Already-read stored blob, when the caller needed it too. Read here when it did not. */
     stored?: StoredNodeSpecs;
   }): Promise<AgentReportAck> {
@@ -1006,6 +1075,7 @@ export class InfraService {
       stored,
       plan,
       args.software,
+      args.samePolicyGeneration,
     );
     const data: Prisma.InfraNodeUncheckedUpdateInput = {
       status: 'ONLINE',
@@ -1268,6 +1338,15 @@ export class InfraService {
    * keeps the first report after this ships from writing one row per installed package. The same rule
    * inside {@link diffHostFacts} covers every host fact.
    *
+   * A POLICY GENERATION THAT MOVED SKIPS THE READ ENTIRELY. `samePolicyGeneration === false` means an
+   * operator's #1140 policy changed between the stored observation and this one, so the shared diff
+   * will discard every package row it could produce (`exclude.softwareNames`, `softwareSources` and
+   * `softwareMax` each empty packages out of a report that are still installed). Paying a
+   * several-hundred-KB read for rows that are about to be thrown away would be the one place this
+   * feature made the report path measurably slower for nothing. That skip is an OPTIMISATION, not
+   * the guard: the guard lives in {@link diffSoftwareFacts}, which is where a caller added later
+   * inherits it.
+   *
    * AND IT CANNOT FAIL THE CHECK-IN. Exactly one thing here can throw — the package read-back, a query
    * this feature ADDED to the report path — and it is the one thing inside the `try`; everything else
    * is a pure comparison over values already in hand. Without that catch, a fact history nobody asked
@@ -1280,9 +1359,12 @@ export class InfraService {
     stored: StoredNodeSpecs,
     plan: SpecsWritePlan,
     software: SoftwareDirective,
+    samePolicyGeneration: boolean,
   ): Promise<InfraFactChangeDraft[]> {
     if (plan.write === undefined) return [];
-    const changes = diffHostFacts(stored.rest?.host, plan.write.host);
+    const changes = diffHostFacts(stored.rest?.host, plan.write.host, {
+      samePolicyGeneration,
+    });
     const storedHash =
       typeof stored.rest?.softwareHash === 'string'
         ? stored.rest.softwareHash
@@ -1291,6 +1373,7 @@ export class InfraService {
       software.mode !== 'replace' ||
       !stored.hasSoftware ||
       software.hash === storedHash ||
+      !samePolicyGeneration ||
       changes.length >= INFRA_FACT_CHANGES_MAX_PER_REPORT
     ) {
       return changes;
@@ -1303,6 +1386,7 @@ export class InfraService {
           previous,
           software.software,
           INFRA_FACT_CHANGES_MAX_PER_REPORT - changes.length,
+          { samePolicyGeneration },
         ),
       ];
     } catch (err) {
@@ -1511,6 +1595,11 @@ export class InfraService {
           now,
           agentVersion: report.agentVersion,
           primaryIpAddress,
+          // This branch did not read the peer's stored revision (it writes no policy columns
+          // either), so it cannot show that the two observations shared a generation. Unproven
+          // reads as "the policy may have moved": the cost is a skipped diff on a branch documented
+          // as unreachable, against recording a policy edit as a hardware event.
+          samePolicyGeneration: false,
         }),
         policy,
       );
@@ -1548,6 +1637,10 @@ export class InfraService {
             node.policyRevision,
             policy,
             now,
+          ),
+          samePolicyGeneration: this.samePolicyGeneration(
+            report,
+            node.policyRevision,
           ),
         }),
         policy,
@@ -1712,6 +1805,11 @@ export class InfraService {
     ack: AgentReportAck,
     report: AgentReport,
     now: Date,
+    // The children ride the SAME report, collected by the same agent under the same policy, so the
+    // host's answer is theirs (#1143). Threaded rather than recomputed per child: a child's own
+    // `policyRevision` column is written from this very report, so reading it back would compare a
+    // value against itself and always answer "same" — the guard would exist and never fire.
+    samePolicyGeneration: boolean,
     principal?: Principal,
     // The host's resolved policy (#1140): it rides out on the ack, and its staleness threshold is
     // stamped on each CHILD so a daily-cadence host's containers are not swept dark hourly.
@@ -1725,6 +1823,7 @@ export class InfraService {
         containers,
         report,
         now,
+        samePolicyGeneration,
         principal,
         policy,
       );
@@ -1758,6 +1857,7 @@ export class InfraService {
     containers: readonly AgentContainer[],
     report: AgentReport,
     now: Date,
+    samePolicyGeneration: boolean,
     principal?: Principal,
     policy?: AgentPolicy,
   ): Promise<void> {
@@ -1863,7 +1963,9 @@ export class InfraService {
         // forever. See {@link diffContainerFacts}.
         const childChanges = unchanged
           ? []
-          : diffContainerFacts(storedSpecs.container, specs.container);
+          : diffContainerFacts(storedSpecs.container, specs.container, {
+              samePolicyGeneration,
+            });
         await this.prisma.infraNode.update({
           where: { id: child.id },
           data: {
