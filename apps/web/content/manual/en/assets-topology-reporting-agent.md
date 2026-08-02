@@ -54,12 +54,21 @@ The button opens a short, guided wizard with three steps:
    The address is **your own lazyit instance** — the agent only ever talks to the server you run, and
    it must be the **public HTTPS origin** (the address you use in a browser, in front of the reverse
    proxy) — **never** the raw web port (`:3000`), which has no route for the agent download and will
-   make the install fail. Run it **as root** on Linux, or **as Administrator** on Windows. The token
-   is shown **only once**, so copy it (or download it) before continuing. If you'd rather inspect
-   things first, the wizard has a collapsed section for it and it differs by platform: on Linux,
-   **Install manually (step by step)** is the same install done by hand (download the binary, install
-   it, write the config file, send a test report); on Windows, **Download and read the installer
-   first** saves `install.ps1` to your temp folder so you can read it, then runs the copy you read.
+   make the install fail. It is the **base** address and nothing more: `https://your-instance`, not
+   `https://your-instance/install.sh` (the address of the script itself). The installer appends its
+   own paths, so a script address would make every request `…/install.sh/api/agent/download`; both
+   installers now check for that and say so, instead of failing later with a download error that
+   reads like a bad token — and they print the address you meant, so you can paste it straight back.
+   If a reverse proxy mounts your instance under a path (`https://it.example.com/lazyit`), that path
+   **is** part of your base address: pass it, and keep it in the address the installers suggest. The
+   installers warn about any path — that shape is usually the mistake above — but they continue, so
+   a prefixed instance still installs.
+   Run it **as root** on Linux, or **as Administrator** on Windows. The token is shown **only once**,
+   so copy it (or download it) before continuing. If you'd rather inspect things first, the wizard
+   has a collapsed section for it and it differs by platform: on Linux, **Install manually (step by
+   step)** is the same install done by hand (download the binary, install it, write the config file,
+   send a test report); on Windows, **Download and read the installer first** saves `install.ps1` to
+   your temp folder so you can read it, then runs the copy you read.
 
    > **Keep the token out of the shell.** As written above, the token is visible in `ps` to every
    > user on that machine for the few seconds the install runs, and it lands in root's shell history.
