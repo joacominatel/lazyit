@@ -67,9 +67,10 @@ written **only when something actually moved**, so a host nobody touched adds no
   `COUNT`, run only when there is something to write). Over the ceiling the new rows are **dropped**;
   nothing already recorded is ever deleted, because the table is append-only.
 - **Nothing here may fail a check-in.** Every failure on this path — a constraint, a DB hiccup, a node
-  deleted between the update and the insert — degrades to a warning and the report still acks. A host
-  whose report 500s vanishes from the CMDB and shows OFFLINE; a history row that was not written costs
-  one line in a timeline. Same posture as the search sync and the policy resolution.
+  deleted between the update and the insert, and the one stored-list read this feature adds to the
+  report path — degrades to a warning and the report still acks. A host whose report 500s vanishes from
+  the CMDB and shows OFFLINE; a history row that was not written costs one line in a timeline. Same
+  posture as the agent-policy resolution, for the same reason.
 - **Read-only, always.** Only the ingest path appends. There is no create/update/delete API, and the
   Changes tab offers no affordance to add or remove a row.
 - **Permissions** ([[0046-roles-permissions-v2]]): `infra:read` to read a node's history. There is no
@@ -126,7 +127,8 @@ The **package** half is the expensive one and is entered only when it has to be.
 needs the stored list, which #1153 deliberately keeps out of the hot path — so it is read back only
 when the server's own fingerprint of what arrived already disagrees with the one the node holds, i.e.
 only on the reports where the package list genuinely moved (roughly the `apt upgrade` branch, twice a
-month per host). An `unchanged` or `disabled` report never reads it.
+month per host). The write planner still makes its own read on the `preserve`-with-changed-host-facts
+branch #1153 documents; the fact history adds nothing to it and takes no package rows off it.
 
 ## Links
 

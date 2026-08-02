@@ -1020,8 +1020,12 @@ what gates it: a report that changed nothing skips the blob write and the histor
 query. The **package** half is the one that costs something, because diffing packages needs the
 stored list and #1153 deliberately keeps it out of the hot path — so it is read back only when the
 server's own fingerprint of what arrived already disagrees with the one the node holds. That is the
-`apt upgrade` branch, roughly twice a month per host; an `unchanged`, `unavailable` or `disabled`
-report never reads it.
+`apt upgrade` branch, roughly twice a month per host. To be exact about which read this is: the
+#1153 write planner already makes its own read of the stored list on one branch — a report that
+omitted the list while its host facts changed — and the fact history adds **no** read of its own to
+that branch, takes **no** package rows off it, and adds none to `unavailable` or `disabled` either.
+The one read this amendment introduces is on the `replace`-with-a-different-fingerprint branch, and
+only there.
 
 **Two silences, and they are the whole safety argument.**
 
@@ -1077,7 +1081,11 @@ facts — so one report is bounded by 200 plus twice `AGENT_CONTAINERS_MAX`, i.e
 budget threaded through the container reconciliation.
 
 **Nothing on this path may fail a check-in.** A constraint, a DB hiccup, a node deleted between the
-node update and the insert — all degrade to a warning and the report still acks. A host whose report
+node update and the insert — all degrade to a warning and the report still acks, and so does the one
+read this amendment adds to the report path: if it fails, the host facts already diffed are still
+recorded, the package half is not, and nothing about the report changes. That guarantee is the point.
+An inventory feature that could take a host off the map would be a worse trade than not having the
+feature. A host whose report
 500s vanishes from the CMDB, shows OFFLINE on the map and nudges the bell (§4); a history row that was
 not written costs one line in a timeline. Same posture as the search sync and `resolvePolicy`, for the
 same reason. The diff itself is pure and lives in `@lazyit/shared`, reads every input as `unknown`,
