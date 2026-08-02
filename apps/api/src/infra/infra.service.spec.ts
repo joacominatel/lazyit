@@ -5351,6 +5351,27 @@ describe('InfraService', () => {
       expect(prisma.infraNodeFactChange.createMany).not.toHaveBeenCalled();
     });
 
+    it('an agent policy that excludes every mountpoint records NOTHING — not "the disks went 2 → 0"', async () => {
+      // The operator edits `exclude.mountpoints` and the next report legitimately carries
+      // `disks: []` — `applyDiskPolicy` (#1140) returns an EMPTY array rather than omitting the
+      // fact, because "the policy matched them all" is a positive answer about the collector. The
+      // hardware did not move. A Changes tab that turned a policy edit into a chassis losing all of
+      // its storage would be exactly the invented event that makes a history worth nothing.
+      hostIsKnown();
+      const withDisks = {
+        ...storedHost(),
+        disks: [
+          { device: 'sda', sizeBytes: 500 },
+          { device: 'sdb', sizeBytes: 1000 },
+        ],
+      };
+      prisma.$queryRaw.mockResolvedValue(settled({ host: withDisks }));
+
+      await service.ingestReport(report({ host: { ...clone(HOST), disks: [] } }));
+
+      expect(recorded()).toEqual([]);
+    });
+
     it('an IDENTICAL report records nothing and does not even ask the per-node cap', async () => {
       // The steady state — ~96 reports a host a day. #1153 already skipped the jsonb write here; this
       // reuses that same answer rather than making a second comparison, so it costs no query at all.
@@ -5683,6 +5704,27 @@ describe('InfraService', () => {
           prisma.infraNodeFactChange.findMany,
         );
         expect(arg.where.id).toEqual({ lt: 10 });
+      });
+
+      it('authorises the node WITHOUT reading its inventory blob — once per page (#1135)', async () => {
+        // The node lookup exists to answer "does this node exist, and is it on the map?", and that
+        // is all it may read. An unprojected `findFirst` pulls the whole `specs` jsonb, INCLUDING
+        // the installed-package list #1153 built `storedNodeSpecs` specifically to keep off hot
+        // paths — and this endpoint runs it once per page of a tab an operator scrolls. It is the
+        // #1135 defect class on a brand-new endpoint, so it is closed here rather than found later.
+        prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-db01' });
+        prisma.infraNodeFactChange.findMany.mockResolvedValue([]);
+
+        await service.listNodeFactChanges('node-db01');
+
+        const arg = firstArg<{
+          where: Record<string, unknown>;
+          select?: Record<string, unknown>;
+        }>(prisma.infraNode.findFirst);
+        expect(arg.select).toEqual({ id: true });
+        // Soft-delete scoping stays with the extension (InfraNode is registered), so a node off the
+        // map still 404s — asserted by the test below.
+        expect(arg.where).toEqual({ id: 'node-db01' });
       });
 
       it('404s on a node that is off the map rather than serving its history', async () => {
