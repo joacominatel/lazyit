@@ -19,6 +19,20 @@ import { z } from "zod";
  * it should. Everything below reads TOLERANTLY and answers "no change" on anything it cannot read —
  * the same degrade-never-reject posture the report contract is built on. It is never a throw on the
  * report path.
+ *
+ * A POLICY IS NOT AN EVENT — the rule every fact here inherits. An agent policy (#1140) decides what
+ * the collector may REPORT; it says nothing about the machine. Four of its fields FILTER a list the
+ * report still carries — `exclude.mountpoints`, `exclude.softwareNames`, `softwareSources` and
+ * `softwareMax` — so an operator editing one makes facts move with nothing on the host moving. Every
+ * fact those filters can reach is marked `policySensitive` in the tracked-fact tables below, and is
+ * compared only when both observations ran under the same policy generation
+ * ({@link InfraFactDiffContext}). The marking is a REQUIRED field, so a fact added to this diff
+ * later has to answer the question rather than quietly inherit the wrong answer.
+ *
+ * The other shape a policy takes — a `collect.*` toggle that omits a fact ENTIRELY — needs no such
+ * marking: an absent fact is already silent under the seeding and disappearance rules on
+ * {@link compareFacts}, and `softwareState: 'disabled'` is silent under the ones on
+ * {@link diffSoftwareFacts}.
  */
 
 /** What KIND of move a recorded row describes. Package rows carry the package name in `fact`. */
@@ -85,6 +99,32 @@ export const INFRA_FACT_CHANGE_PAGE_SIZE = 50;
 /** Ceiling on a requested page size — the panel paginates, it does not export. */
 export const INFRA_FACT_CHANGE_PAGE_SIZE_MAX = 200;
 
+/**
+ * What every diff below has to know before it can call a difference a CHANGE.
+ *
+ * A reporting agent applies a server-issued policy (#1140), and a policy is an operator deciding
+ * what the collector may report — not a statement about the host. Excluding a mountpoint, excluding
+ * a package name, narrowing `softwareSources` or lowering `softwareMax` all make facts leave the
+ * report while the machine they describe is untouched. Diffed naively, each of them writes history
+ * rows for an event that never happened, which is the one thing a history nobody can trust does.
+ */
+export interface InfraFactDiffContext {
+  /**
+   * Were the two observations being compared collected under the SAME agent policy generation?
+   *
+   * The server answers it, and it can, without asking the wire for anything new: the agent echoes
+   * the `revision` it collected under in every report (`policyRevision`), and the node column of the
+   * same name holds the echo from its previous report. Equal ⇒ both observations ran under one
+   * policy, so any difference in a policy-sensitive fact is the HOST moving. Different ⇒ the filter
+   * itself may have moved, and this diff cannot tell which, so it declines to guess.
+   *
+   * Both-absent counts as SAME: an agent that predates the policy channel echoes nothing and applies
+   * no server policy, so it can produce no policy artefact — and its package history must keep
+   * working, which is most of the fleet on the day this ships.
+   */
+  samePolicyGeneration: boolean;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -116,6 +156,23 @@ function scalar(value: unknown): string | undefined {
 }
 
 /**
+ * One fact the history tracks: how to read it, and whether an agent POLICY can move it.
+ *
+ * `policySensitive` is the whole class fix, and it is a REQUIRED field precisely so the next fact
+ * added to either table has to answer the question rather than inherit an unguarded default. The
+ * test is narrow: could an operator edit a policy (#1140) and make this value change while the
+ * machine it describes stands still? A policy that omits the fact ENTIRELY is not that case — an
+ * absent fact is already silenced by the seeding/disappearance rules on {@link compareFacts} — so
+ * only the FILTERS count: `exclude.mountpoints`, `exclude.softwareNames`, `softwareSources` and
+ * `softwareMax`, which narrow a list the report still carries.
+ */
+interface TrackedFact {
+  fact: string;
+  read: (source: unknown) => string | undefined;
+  policySensitive: boolean;
+}
+
+/**
  * The host facts worth a history row, in the order they are recorded.
  *
  * Deliberately SHORT, and it is the whole vocabulary: an OS or kernel move (the patch window), a
@@ -123,18 +180,36 @@ function scalar(value: unknown): string | undefined {
  * machines are colliding on one node). Everything else the report carries — hostname, NICs, IPs,
  * bootedAt, container state — is either already visible elsewhere or moves for reasons that are not
  * inventory changes, and a history nobody trusts is worse than none.
+ *
+ * The two DISK facts are the policy-sensitive ones: `exclude.mountpoints` filters the array both are
+ * derived from, so an operator adding `/snap/*` changes each of them without touching the chassis.
+ * Nothing filters an OS string, a memory size or a serial — the `collect.hardware` toggle omits the
+ * serial wholesale, which is a disappearance, not a change.
  */
-const TRACKED_HOST_FACTS: readonly {
-  fact: string;
-  read: (host: unknown) => string | undefined;
-}[] = [
-  { fact: "host.os.name", read: (h) => scalar(at(h, ["os", "name"])) },
-  { fact: "host.os.version", read: (h) => scalar(at(h, ["os", "version"])) },
-  { fact: "host.os.kernel", read: (h) => scalar(at(h, ["os", "kernel"])) },
-  { fact: "host.memoryBytes", read: (h) => scalar(at(h, ["memoryBytes"])) },
-  { fact: "host.disks.totalBytes", read: (h) => diskTotalBytes(at(h, ["disks"])) },
-  { fact: "host.disks.count", read: (h) => diskCount(at(h, ["disks"])) },
-  { fact: "host.hardware.serial", read: (h) => scalar(at(h, ["hardware", "serial"])) },
+const TRACKED_HOST_FACTS: readonly TrackedFact[] = [
+  { fact: "host.os.name", read: (h) => scalar(at(h, ["os", "name"])), policySensitive: false },
+  {
+    fact: "host.os.version",
+    read: (h) => scalar(at(h, ["os", "version"])),
+    policySensitive: false,
+  },
+  { fact: "host.os.kernel", read: (h) => scalar(at(h, ["os", "kernel"])), policySensitive: false },
+  {
+    fact: "host.memoryBytes",
+    read: (h) => scalar(at(h, ["memoryBytes"])),
+    policySensitive: false,
+  },
+  {
+    fact: "host.disks.totalBytes",
+    read: (h) => diskTotalBytes(at(h, ["disks"])),
+    policySensitive: true,
+  },
+  { fact: "host.disks.count", read: (h) => diskCount(at(h, ["disks"])), policySensitive: true },
+  {
+    fact: "host.hardware.serial",
+    read: (h) => scalar(at(h, ["hardware", "serial"])),
+    policySensitive: false,
+  },
 ];
 
 /**
@@ -182,6 +257,11 @@ function diskCount(disks: unknown): string | undefined {
 /**
  * Compare one fact across two observations.
  *
+ * A POLICY-SENSITIVE fact is skipped outright when the two observations did not run under the same
+ * policy generation ({@link InfraFactDiffContext}) — the filter may have moved rather than the host,
+ * and this comparison has no way to tell those apart. The guard is per FACT, not per report, so a
+ * policy edit never blinds the timeline to the kernel upgrade that landed in the same check-in.
+ *
  * TWO ABSENCES ARE DELIBERATELY SILENT, and they are the two that would otherwise flood the table:
  *
  *  - **No previous value ⇒ no row.** The first observation of a fact SEEDS the baseline. This is what
@@ -195,12 +275,14 @@ function diskCount(disks: unknown): string | undefined {
  * A row is written only when BOTH sides are readable and they differ.
  */
 function compareFacts(
-  tracked: typeof TRACKED_HOST_FACTS,
+  tracked: readonly TrackedFact[],
   previous: unknown,
   next: unknown,
+  context: InfraFactDiffContext,
 ): InfraFactChangeDraft[] {
   const changes: InfraFactChangeDraft[] = [];
-  for (const { fact, read } of tracked) {
+  for (const { fact, read, policySensitive } of tracked) {
+    if (policySensitive && !context.samePolicyGeneration) continue;
     const before = read(previous);
     const after = read(next);
     if (before === undefined || after === undefined || before === after) continue;
@@ -220,8 +302,12 @@ function compareFacts(
  * `previousHost` is whatever the node's column held — possibly `undefined`, possibly hand-edited into
  * a shape that is not a host block at all. Both read as "no baseline", which seeds silently.
  */
-export function diffHostFacts(previousHost: unknown, nextHost: unknown): InfraFactChangeDraft[] {
-  return compareFacts(TRACKED_HOST_FACTS, previousHost, nextHost);
+export function diffHostFacts(
+  previousHost: unknown,
+  nextHost: unknown,
+  context: InfraFactDiffContext,
+): InfraFactChangeDraft[] {
+  return compareFacts(TRACKED_HOST_FACTS, previousHost, nextHost, context);
 }
 
 /**
@@ -236,20 +322,48 @@ export function diffHostFacts(previousHost: unknown, nextHost: unknown): InfraFa
  * excluded because a published-port change is a compose edit the operator just made, and the shape is
  * an array whose ordering the runtime does not promise.
  */
-const TRACKED_CONTAINER_FACTS: readonly {
-  fact: string;
-  read: (container: unknown) => string | undefined;
-}[] = [
-  { fact: "container.image", read: (c) => scalar(at(c, ["image"])) },
-  { fact: "container.imageDigest", read: (c) => scalar(at(c, ["imageDigest"])) },
+const TRACKED_CONTAINER_FACTS: readonly TrackedFact[] = [
+  { fact: "container.image", read: (c) => scalar(at(c, ["image"])), policySensitive: false },
+  {
+    fact: "container.imageDigest",
+    read: (c) => scalar(at(c, ["imageDigest"])),
+    policySensitive: false,
+  },
 ];
 
-/** What moved between two stored `specs.container` blocks (#1143). Same seeding rules as the host. */
+/**
+ * Every KEYED fact a policy can move, for documentation and for the test that pins the set.
+ *
+ * Declared HERE rather than beside the guard so it reads both tables after they are initialised —
+ * a `const` that spreads a `const` declared further down is a temporal-dead-zone throw at import
+ * time, which in this package would break every consumer rather than one call.
+ *
+ * The PACKAGE half is policy-sensitive in its entirety — `exclude.softwareNames`, `softwareSources`
+ * and `softwareMax` each narrow the reported list — and its facts are package names rather than a
+ * fixed vocabulary, so {@link diffSoftwareFacts} guards the whole diff instead of appearing here.
+ */
+export const INFRA_POLICY_SENSITIVE_FACTS: readonly string[] = [
+  ...TRACKED_HOST_FACTS,
+  ...TRACKED_CONTAINER_FACTS,
+]
+  .filter((tracked) => tracked.policySensitive)
+  .map((tracked) => tracked.fact);
+
+/**
+ * What moved between two stored `specs.container` blocks (#1143). Same seeding rules as the host.
+ *
+ * It takes the policy context even though neither tracked container fact is policy-sensitive today:
+ * `collect.containers` is all-or-nothing (an omitted fact, which the disappearance rule silences)
+ * and no `exclude` list touches a container. Taking it anyway is what makes the rule INHERITED — a
+ * container fact added later declares `policySensitive` in the table above and is guarded from its
+ * first line, instead of shipping unguarded and being found by the same review twice.
+ */
 export function diffContainerFacts(
   previousContainer: unknown,
   nextContainer: unknown,
+  context: InfraFactDiffContext,
 ): InfraFactChangeDraft[] {
-  return compareFacts(TRACKED_CONTAINER_FACTS, previousContainer, nextContainer);
+  return compareFacts(TRACKED_CONTAINER_FACTS, previousContainer, nextContainer, context);
 }
 
 /** A package list read tolerantly into name → version. Malformed elements are dropped, never thrown on. */
@@ -276,6 +390,17 @@ function packageVersions(list: unknown): Map<string, string | undefined> | undef
  *  - An EMPTY or unreadable incoming list says nothing about packages. `softwareState: 'disabled'`
  *    clears a node's stored list because policy turned collection off; that is a POLICY event, and
  *    rendering it as three thousand removals would be actively misleading.
+ *  - A POLICY GENERATION that moved between the two observations silences the WHOLE diff. Turning
+ *    software collection off is not the only policy action that empties packages out of a report:
+ *    `exclude.softwareNames` drops the ones an operator does not want to see, `softwareSources`
+ *    keeps only some package managers', and `softwareMax` truncates what survives — each of them a
+ *    deliberate #1140 edit, each of them leaving the packages installed on the host, and each of
+ *    them otherwise arriving here as `PACKAGE_REMOVED` rows for an uninstall nobody performed. The
+ *    guard is the whole list rather than a per-package one because the server holds the policy, not
+ *    the filtered-out names: it can tell that the FILTER moved, never which package it removed.
+ *    The cost is one report's package diff after a policy write, and the baseline re-seeds from the
+ *    new list — a real upgrade in that same check-in is not recorded, which beats recording an
+ *    uninstall that never happened.
  *  - A package present on both sides at the same version writes nothing, and the comparison is by
  *    NAME rather than by position, so a package manager that re-sorts its output is not a change.
  *    That matters in its own right: the API caller normally reaches this only when the server's own
@@ -291,8 +416,10 @@ export function diffSoftwareFacts(
   previousList: unknown,
   nextList: unknown,
   limit: number,
+  context: InfraFactDiffContext,
 ): InfraFactChangeDraft[] {
   if (limit <= 0) return [];
+  if (!context.samePolicyGeneration) return [];
   const previous = packageVersions(previousList);
   const next = packageVersions(nextList);
   if (previous === undefined || previous.size === 0) return [];
