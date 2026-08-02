@@ -2707,6 +2707,9 @@ model InfraNode {
   // vaultId), NO FK to the SecretItem — mirrors KB chips + SecretAuditLog. INV-10: never a value.
   secretLinks InfraNodeSecretRef[]
 
+  // Append-only fact history (ADR-0074 §3 amendment, #1143) — what MOVED, never what was reported.
+  factChanges InfraNodeFactChange[]
+
   @@index([assetId])
   @@index([kind])
   @@index([state]) // the PENDING review-tray query
@@ -2767,6 +2770,52 @@ model InfraNodeSecretRef {
   @@unique([nodeId, vaultId, handle])
   @@index([nodeId])
   @@map("infra_node_secret_refs")
+}
+
+/// What KIND of move one recorded fact change describes (ADR-0074 §3 amendment, #1143). Mirrors
+/// `InfraFactChangeKindSchema` in @lazyit/shared. Package rows carry the package name in `fact`.
+enum InfraFactChangeKind {
+  PACKAGE_ADDED
+  PACKAGE_REMOVED
+  PACKAGE_VERSION // still installed, different version — an upgrade OR a downgrade
+  FACT_CHANGED // a tracked host or container fact moved from one known value to another
+}
+
+/// One thing that CHANGED on a node (ADR-0074 §3 amendment, #1143) — the row that turns the inventory
+/// from a current-state scraper into something that can answer *"when did this change?"*.
+///
+/// APPEND-ONLY (ADR-0006): `createdAt` only, no `updatedAt`, no `deletedAt`. Autoincrement id, the
+/// logs/history convention (ADR-0005) — it is also the pagination cursor for the Changes tab.
+///
+/// WRITTEN ONLY WHEN A DIFF EXISTS. The ingest path reuses the comparison #1153 already makes to
+/// decide whether the `specs` blob moved at all; a host nobody touched adds no row, ever. The FIRST
+/// observation of a fact SEEDS the baseline silently, so the first report after this ships cannot
+/// diff a whole host against nothing. See `diffHostFacts`/`diffSoftwareFacts` in @lazyit/shared.
+///
+/// Cascade on node delete, exactly like InfraEdge and InfraNodeSecretRef: a change record is
+/// meaningless without the node it describes, and the durable audit trail an operator reconciles from
+/// is the node's linked Asset (AssetHistory), not this table.
+model InfraNodeFactChange {
+  // autoincrement: a log/history table, never exposed as a durable external identifier (ADR-0005).
+  id     Int                 @id @default(autoincrement())
+  nodeId String
+  node   InfraNode           @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  kind   InfraFactChangeKind
+  /// The package name, or a tracked fact key such as `host.os.kernel` / `container.imageDigest`.
+  fact   String
+
+  // Both nullable, and BOTH sides are legitimately absent on some kinds: a PACKAGE_ADDED has no
+  // previous value, a PACKAGE_REMOVED no current one, and a package listed without a version has
+  // neither on the side that lacked it.
+  previousValue String?
+  currentValue  String?
+
+  createdAt DateTime @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006). (nodeId, id) serves the ONE query this table
+  // has — the per-node timeline: filter by node, order by id desc, cursor on id.
+  @@index([nodeId, id])
+  @@map("infra_node_fact_changes")
 }
 
 /// Which half of a report an auto-confirm rule speaks for (ADR-0074 §1 amendment, #1145). Stated
