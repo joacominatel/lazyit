@@ -55,14 +55,19 @@ The button opens a short, guided wizard with three steps:
    it must be the **public HTTPS origin** (the address you use in a browser, in front of the reverse
    proxy) — **never** the raw web port (`:3000`), which has no route for the agent download and will
    make the install fail. It is the **base** address and nothing more: `https://your-instance`, not
-   `https://your-instance/install.sh` (the address of the script itself). The installer appends its
-   own paths, so a script address would make every request `…/install.sh/api/agent/download`; both
-   installers now check for that and say so, instead of failing later with a download error that
-   reads like a bad token — and they print the address you meant, so you can paste it straight back.
-   If a reverse proxy mounts your instance under a path (`https://it.example.com/lazyit`), that path
-   **is** part of your base address: pass it, and keep it in the address the installers suggest. The
-   installers warn about any path — that shape is usually the mistake above — but they continue, so
-   a prefixed instance still installs.
+   `https://your-instance/install.sh` — nor `https://your-instance/install.ps1`, the Windows one —
+   which is the address of the script itself. The installer appends its own paths, so a script
+   address would make every request `…/install.sh/api/agent/download`; both installers now check for
+   that and say so, instead of failing later with a download error that reads like a bad token — and
+   both print the address you meant. Grab it while it is on screen: on Linux the refusal ends the
+   piped `sh` and leaves the message at your prompt, but on Windows the one-liner runs the installer
+   as a **script block**, so the refusal exits the PowerShell session along with it and an elevated
+   console you opened by right-clicking closes on the spot. If a reverse proxy mounts your instance
+   under a path (`https://it.example.com/lazyit`), that path **is** part of your base
+   address: pass it, and keep it in the address the installers suggest. The installers warn about any
+   path — that shape is usually the mistake above — but they continue, so a prefixed instance still
+   installs. The wizard's own commands never hit any of this: it fills the address in for you from
+   the one you are browsing, so this matters when you re-run an installer by hand.
    Run it **as root** on Linux, or **as Administrator** on Windows. The token is shown **only once**,
    so copy it (or download it) before continuing. If you'd rather inspect things first, the wizard
    has a collapsed section for it and it differs by platform: on Linux, **Install manually (step by

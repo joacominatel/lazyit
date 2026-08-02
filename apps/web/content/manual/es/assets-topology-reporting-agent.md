@@ -58,18 +58,23 @@ El botón abre un asistente guiado y breve, de tres pasos:
    vos ejecutás, y tiene que ser el **origen HTTPS público** (la dirección que usás en el navegador,
    delante del proxy reverso) — **nunca** el puerto crudo del web (`:3000`), que no tiene ruta para la
    descarga del agente y hará que la instalación falle. Es la dirección **base** y nada más:
-   `https://tu-instancia`, no `https://tu-instancia/install.sh` (la dirección del script en sí). El
-   instalador agrega sus propias rutas, así que una dirección de script haría que cada pedido fuera
-   `…/install.sh/api/agent/download`; ambos instaladores ahora lo verifican y lo indican, en lugar de
-   fallar más adelante con un error de descarga que parece un token inválido — y muestran la
-   dirección que querías usar, para pegarla directamente. Si un proxy reverso monta tu instancia bajo
-   una ruta (`https://it.example.com/lazyit`), esa ruta **sí** forma parte de tu dirección base:
-   pasala, y conservala en la dirección que los instaladores sugieren. Los instaladores advierten
-   sobre cualquier ruta — esa forma suele ser el error de más arriba — pero continúan, así que una
-   instancia bajo un prefijo se instala igual. Ejecutalo **como root**
-   en Linux, o **como
-   Administrador** en Windows. El token se muestra **una sola vez**, así que copialo (o descargalo)
-   antes de continuar. Si
+   `https://tu-instancia`, no `https://tu-instancia/install.sh` —ni `https://tu-instancia/install.ps1`,
+   el de Windows—, que es la dirección del script en sí. El instalador agrega sus propias rutas, así
+   que una dirección de script haría que cada pedido fuera `…/install.sh/api/agent/download`; ambos
+   instaladores ahora lo verifican y lo indican, en lugar de fallar más adelante con un error de
+   descarga que parece un token inválido — y los dos muestran la dirección que querías usar.
+   Anotala mientras está en pantalla: en Linux el rechazo termina el `sh` del pipe y el mensaje te
+   queda en el prompt, pero en Windows el comando de una línea ejecuta el instalador como **bloque de
+   script**, así que el rechazo termina también la sesión de PowerShell y una consola elevada que
+   abriste con clic derecho se cierra en el acto. Si un proxy reverso monta tu instancia bajo una ruta
+   (`https://it.example.com/lazyit`), esa ruta **sí** forma parte de tu dirección base: pasala, y
+   conservala en la dirección que los instaladores sugieren. Los instaladores advierten sobre
+   cualquier ruta — esa forma suele ser el error de más arriba — pero continúan, así que una instancia
+   bajo un prefijo se instala igual. Los comandos del propio asistente nunca chocan con nada de esto:
+   la dirección la completa él a partir de la que estás navegando, así que esto importa cuando volvés
+   a ejecutar un instalador a mano.
+   Ejecutalo **como root** en Linux, o **como Administrador** en Windows. El token se muestra **una
+   sola vez**, así que copialo (o descargalo) antes de continuar. Si
    preferís inspeccionar antes, el asistente tiene una sección plegada para eso y cambia según la
    plataforma: en Linux, **Instalar manualmente (paso a paso)** es la misma instalación hecha a mano
    (descargar el binario, instalarlo, escribir el archivo de configuración y enviar un reporte de

@@ -1921,7 +1921,18 @@ and against both locale catalogs as shipped:
   to the installer's own guard by a test rather than paraphrased.
 - **The Windows one-liner is the script-block form, not `irm … | iex`.** The pipe form runs the
   installer with no arguments at all, so `-Url` and `-Token` never arrive and it dies asking for
-  them. This is the same reason `install.ps1`'s own `.EXAMPLE` is written that way.
+  them. This is the same reason `install.ps1`'s own `.EXAMPLE` is written that way. **It also changes
+  what a fatal costs, which the #1166 amendment above did not have to think about because the wizard
+  emitted no PowerShell yet.** `Die` ends with `exit 1`, and `exit` inside a `&`-invoked script block
+  propagates out to the host, so a refusal takes the whole PowerShell session with it — an elevated
+  console opened by right-click closes on the spot, and #1166's carefully-built "pass `-Url <this>`
+  instead" suggestion goes with it. On Linux the same refusal only ends the piped `sh` and stays on
+  the operator's screen. The Manual says so on the Windows side rather than promising, platform-blind,
+  that the suggestion can be pasted straight back. **This is measured on PowerShell 7.6.4 only**
+  (`& ([scriptblock]::Create(<install.ps1's real Die + guard bytes>)) -Url …/install.ps1` printed the
+  message and exited the host); nothing here can run 5.1. Nothing about it argues for changing `Die` —
+  the wizard fills `-Url` in from `window.location.origin`, which has no path and cannot trip the
+  guard, so this is reachable only by hand-running an installer.
 - **The inspect-first path differs in kind, not just in spelling.** On Linux it is install.sh done by
   hand in four steps. On Windows it is *download the installer, read it, run the copy you read* —
   because reproducing `install.ps1` by hand means the config file's SYSTEM+Administrators ACL and the
