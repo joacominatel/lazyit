@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  lazyit reporting agent installer for Windows (ADR-0074 §6, issue #1144).
+  lazyit reporting agent installer for Windows (ADR-0074 section 6, issue #1144).
 
 .DESCRIPTION
   Served PUBLICLY from your own lazyit instance (same-origin, TLS-fronted). It carries NO secret:
@@ -9,7 +9,7 @@
   C:\ProgramData\lazyit-agent\config with an ACL restricted to SYSTEM + Administrators, and registers
   a Scheduled Task so the host keeps itself current in lazyit's PENDING tray.
 
-  A SCHEDULED TASK, NOT A SERVICE. That preserves the one-shot design of ADR-0074 §7 exactly: the
+  A SCHEDULED TASK, NOT A SERVICE. That preserves the one-shot design of ADR-0074 section 7 exactly: the
   agent runs, gathers, POSTs and exits. A service would force a daemon rewrite for zero benefit, and
   the fixed-tick / server-cadence inversion of #1140 was designed so the same semantics hold under
   Task Scheduler as under systemd.
@@ -25,7 +25,7 @@
 
   UNSIGNED, ON PURPOSE, FOR NOW. The executable this installs is not code-signed, so SmartScreen and
   some AV heuristics will flag it. That is an accepted, DELIBERATE state for internal validation
-  inside the organisation that builds lazyit — own domain, own policies, own machines. An OV/EV
+  inside the organisation that builds lazyit - own domain, own policies, own machines. An OV/EV
   code-signing certificate is an explicit GATE before any third party installs this, not a detail to
   discover later. The code is identical either way; only the signing step differs.
 
@@ -46,7 +46,7 @@
 
 .PARAMETER Baseline
   Install the pre-AVX2 x86-64 build. Windows exposes no equivalent of /proc/cpuinfo's flag list, so
-  unlike install.sh this cannot be auto-detected — pass it for a pre-Haswell host, or for a cluster
+  unlike install.sh this cannot be auto-detected - pass it for a pre-Haswell host, or for a cluster
   whose EVC/processor-compatibility baseline masks AVX2 and may live-migrate onto older silicon.
 
 .PARAMETER RequireChecksum
@@ -95,7 +95,7 @@ Set-StrictMode -Version Latest
 # of #1140 is that the schedule is one unchanging thing on every platform while the cadence is a
 # server-side setting.
 $TickMinutes = 5
-# De-phasing, the RandomizedDelaySec analogue — carried by the TIME trigger (see below; a boot trigger
+# De-phasing, the RandomizedDelaySec analogue - carried by the TIME trigger (see below; a boot trigger
 # has no such element). Hosts that came back from a patch window together would otherwise POST a full
 # inventory in the same second and run into the per-token report limit (#1134).
 $RandomDelay = New-TimeSpan -Seconds 60
@@ -159,7 +159,7 @@ if ($Uninstall) {
     Remove-Item -LiteralPath $ConfigDir -Recurse -Force -ErrorAction SilentlyContinue
   }
 
-  Say "uninstalled — the executable, the scheduled task, $StateDir and the token are gone."
+  Say "uninstalled - the executable, the scheduled task, $StateDir and the token are gone."
   Write-Host 'This host stops reporting immediately. Its entry in lazyit is untouched: discard it there if you'
   Write-Host 'want it off the map, and revoke the Service Account token if no other host uses it.'
   exit 0
@@ -169,10 +169,10 @@ if ($KeepConfig) { Die '-KeepConfig only means something with -Uninstall' }
 
 # --- token -----------------------------------------------------------------
 if ($TokenFile) {
-  if ($Token) { Die '-Token and -TokenFile are mutually exclusive — pass one' }
+  if ($Token) { Die '-Token and -TokenFile are mutually exclusive - pass one' }
   if (-not (Test-Path -LiteralPath $TokenFile)) { Die "cannot read the token file: $TokenFile" }
   $Token = (Get-Content -LiteralPath $TokenFile -Raw).Trim()
-  if (-not $Token) { Die 'the token file is empty — nothing to authenticate with' }
+  if (-not $Token) { Die 'the token file is empty - nothing to authenticate with' }
   # A Service Account token is one opaque word. Anything with whitespace in it is not one, and saying
   # which mistake it is costs one test.
   if ($Token -match '\s') { Die "what was read from $TokenFile is not a token (it contains whitespace)." }
@@ -182,11 +182,11 @@ if (-not $Token) { $Token = $env:LAZYIT_TOKEN }
 if (-not $Url)   { $Url   = $env:LAZYIT_URL }
 
 if (-not $Url)   { Die '-Url is required (your lazyit instance, e.g. https://lazyit.example.com)' }
-if (-not $Token) { Die 'a token is required — pass -Token, -TokenFile, or set $env:LAZYIT_TOKEN (needs infra:report)' }
+if (-not $Token) { Die 'a token is required - pass -Token, -TokenFile, or set $env:LAZYIT_TOKEN (needs infra:report)' }
 $Url = $Url.TrimEnd('/')
 
 # TLS 1.2 explicitly. Windows PowerShell 5.1 defaults its ServicePointManager to SSL3/TLS1.0 on
-# older builds, which a modern Caddy front refuses — the symptom is an opaque "underlying connection
+# older builds, which a modern Caddy front refuses - the symptom is an opaque "underlying connection
 # was closed" that reads like a certificate problem and is not.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -215,8 +215,8 @@ $headers = @{ Authorization = "Bearer $Token" }
 # curl for the installer's own download AND written into the config for the agent. On Windows only
 # the SECOND half happens: `Invoke-WebRequest` validates against the machine's certificate stores and
 # offers no per-request CA bundle. So an instance behind a private CA needs that CA in the Local
-# Machine "Trusted Root Certification Authorities" store for THIS SCRIPT to download — which on
-# Windows is the ordinary way to do it and what Group Policy already pushes — while the AGENT still
+# Machine "Trusted Root Certification Authorities" store for THIS SCRIPT to download - which on
+# Windows is the ordinary way to do it and what Group Policy already pushes - while the AGENT still
 # uses the bundle explicitly, machine trust untouched. Stated rather than glossed: an installer that
 # quietly did less than its Linux sibling would be found out on a LAN instance, at install time.
 function Invoke-LazyitDownload([string] $Path, [string] $OutFile) {
@@ -240,14 +240,14 @@ try {
 catch {
   if ($arch -eq 'x64-baseline') {
     # Deliberately NOT falling back to the ordinary x64 build. The baseline build was chosen because
-    # -Baseline said so, and the x64 build would take an illegal-instruction fault on such a host —
+    # -Baseline said so, and the x64 build would take an illegal-instruction fault on such a host -
     # trading a clear install error now for a crash later is a bad trade.
     Die 'download failed for the baseline x86-64 build, and this installer will not substitute the ordinary x64 build (it needs AVX2 and would crash on a host that asked for baseline). An instance that predates the Windows artifact does not carry it: upgrade lazyit, then re-run.'
   }
-  Die "download failed — check the URL, the token (needs infra:report), and that the Windows binary is bundled in this build. $($_.Exception.Message)"
+  Die "download failed - check the URL, the token (needs infra:report), and that the Windows binary is bundled in this build. $($_.Exception.Message)"
 }
 if (-not (Test-Path -LiteralPath $tmpBin) -or (Get-Item -LiteralPath $tmpBin).Length -eq 0) {
-  Die 'downloaded an empty file — aborting'
+  Die 'downloaded an empty file - aborting'
 }
 
 # Belt-and-braces: require the download to actually be a Windows PE executable (magic 4D 5A, 'MZ')
@@ -260,12 +260,12 @@ $stream = [IO.File]::OpenRead($tmpBin)
 try { $null = $stream.Read($magic, 0, 2) } finally { $stream.Dispose() }
 if ($magic[0] -ne 0x4D -or $magic[1] -ne 0x5A) {
   Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
-  Die 'downloaded file is not a Windows executable (no MZ header) — is -Url your lazyit HTTPS origin (the reverse proxy), not the raw web port :3000?'
+  Die 'downloaded file is not a Windows executable (no MZ header) - is -Url your lazyit HTTPS origin (the reverse proxy), not the raw web port :3000?'
 }
 
 # --- integrity: the digest the instance published --------------------------
 # TLS plus two bytes of PE magic answers "did the bytes arrive intact from the origin I dialled". It
-# does not answer "are these the bytes the build produced" — and this file becomes SYSTEM on every
+# does not answer "are these the bytes the build produced" - and this file becomes SYSTEM on every
 # host in the estate. STATED HONESTLY: this is a checksum, not a signature. Anyone who can write both
 # files in the API container defeats it, and it is not meant to survive that.
 $expected = ''
@@ -280,7 +280,7 @@ if ($expected) {
   $actual = (Get-FileHash -LiteralPath $tmpBin -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $expected) {
     Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
-    Die "checksum mismatch — the executable this instance served is not the one it published a digest for (expected $expected, got $actual). Nothing installed. Re-run; if it persists, treat the instance as suspect."
+    Die "checksum mismatch - the executable this instance served is not the one it published a digest for (expected $expected, got $actual). Nothing installed. Re-run; if it persists, treat the instance as suspect."
   }
   Say 'sha256 verified.'
 }
@@ -297,7 +297,7 @@ Move-Item -LiteralPath $tmpBin -Destination $BinPath -Force
 
 # --- can this host actually RUN it? ----------------------------------------
 # `--help` prints and exits: no network, no config, no state. It fails exactly when the host cannot
-# start the executable — an unsupported build, a missing OS component, or (the common one on Windows)
+# start the executable - an unsupported build, a missing OS component, or (the common one on Windows)
 # an AV product that quarantined an UNSIGNED binary between the download and now.
 #
 # This runs BEFORE the task is registered, because the alternative is the failure mode it replaces: a
@@ -310,15 +310,15 @@ try {
 catch { $startable = $false }
 if (-not $startable) {
   Remove-Item -LiteralPath $BinPath -Force -ErrorAction SilentlyContinue
-  Die "the agent executable will not start on this host. The most common cause is antivirus or SmartScreen quarantining it — this build is UNSIGNED (see the Manual). Run '$BinPath --help' by hand to see the message. Nothing has been installed and no task was registered."
+  Die "the agent executable will not start on this host. The most common cause is antivirus or SmartScreen quarantining it - this build is UNSIGNED (see the Manual). Run '$BinPath --help' by hand to see the message. Nothing has been installed and no task was registered."
 }
 
-# --- config (ACL: SYSTEM + Administrators only — it holds the token) -------
+# --- config (ACL: SYSTEM + Administrators only - it holds the token) -------
 New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
 New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
 
 # THE `chmod 600` ANALOGUE, and the one place a Windows installer is easiest to get wrong. A fresh
-# directory under %ProgramData% inherits an ACE granting Users read access — so a config file holding
+# directory under %ProgramData% inherits an ACE granting Users read access - so a config file holding
 # a live Service Account token would be readable by every interactive user on the host. Inheritance
 # is DISABLED (not merely edited: an inherited ACE cannot be removed while inheritance is on) and the
 # ACL is rebuilt with exactly two principals. The state directory and the config file inherit it.
@@ -338,14 +338,14 @@ $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544'))
 Set-Acl -LiteralPath $ConfigDir -AclObject $acl
 
 # CARRY THIS HOST'S OWN SETTINGS ACROSS A RE-INSTALL (#1140). Re-running the installer is the
-# documented upgrade path and it rewrites this file — but the file is also the ONLY place the host's
+# documented upgrade path and it rewrites this file - but the file is also the ONLY place the host's
 # local VETO lives (LAZYIT_COLLECT_*=false, LAZYIT_MIN_INTERVAL, LAZYIT_SOFTWARE_MAX, LAZYIT_EXCLUDE_*)
 # and, since #1137, its proxy and CA. Truncating it would silently re-enable collection the host's
-# owner turned off — or cut a proxied host off the network — on the upgrade path, with nothing on
+# owner turned off - or cut a proxied host off the network - on the upgrade path, with nothing on
 # screen to say so. So everything is carried over EXCEPT the keys the installer owns.
 #
 # The pattern is deliberately wider than LAZYIT_*: HTTPS_PROXY, HTTP_PROXY and NO_PROXY live here too,
-# under the names every other tool uses, and BOTH CASES, because the agent reads both — a pattern that
+# under the names every other tool uses, and BOTH CASES, because the agent reads both - a pattern that
 # matched only the uppercase half would silently delete a working proxy on the upgrade path.
 $owned = if ($CaFile) { '^\s*(LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)|lazyit_ca_file)=' } else { '^\s*LAZYIT_(URL|TOKEN|INTERVAL)=' }
 $preserved = @()
@@ -357,24 +357,24 @@ if (Test-Path -LiteralPath $ConfigFile) {
 
 $lines = New-Object Collections.Generic.List[string]
 $lines.Add('# lazyit reporting agent config (ADR-0074). Holds your instance URL + SA token.')
-$lines.Add('# ACL: SYSTEM + Administrators only. Do not relax it — this file holds a live credential.')
+$lines.Add('# ACL: SYSTEM + Administrators only. Do not relax it - this file holds a live credential.')
 $lines.Add("LAZYIT_URL=$Url")
 $lines.Add("LAZYIT_TOKEN=$Token")
 if ($CaFile) { $lines.Add("LAZYIT_CA_FILE=$CaFile") }
 if ($Interval) {
   $lines.Add("# -Interval $Interval was passed and IGNORED: reporting cadence is set in lazyit")
   $lines.Add('# (Settings -> Instance -> Reporting agents), not here. To make THIS host report LESS often than')
-  $lines.Add('# lazyit asks, uncomment LAZYIT_MIN_INTERVAL below — a floor, never a shorter interval.')
+  $lines.Add('# lazyit asks, uncomment LAZYIT_MIN_INTERVAL below - a floor, never a shorter interval.')
 }
 if ($preserved.Count -gt 0) {
-  $lines.Add("# --- kept from this host's previous config (its own limits — the installer does not own these) ---")
+  $lines.Add("# --- kept from this host's previous config (its own limits - the installer does not own these) ---")
   foreach ($line in $preserved) { $lines.Add($line) }
   $lines.Add('# --- end kept ---')
 }
 $lines.Add('#')
 $lines.Add('# What this HOST refuses to do, whatever lazyit''s policy says (#1140). These VETO the server''s')
 $lines.Add('# policy and can never widen it: a collector switched off here cannot be switched back on remotely.')
-$lines.Add('# Uncomment what you need — re-running this installer keeps whatever you set here.')
+$lines.Add('# Uncomment what you need - re-running this installer keeps whatever you set here.')
 $lines.Add('#LAZYIT_COLLECT_HARDWARE=false')
 $lines.Add('#LAZYIT_COLLECT_DISKS=false')
 $lines.Add('#LAZYIT_COLLECT_NICS=false')
@@ -387,7 +387,7 @@ $lines.Add('#LAZYIT_EXCLUDE_SOFTWARE=Microsoft Visual C++*')
 $lines.Add('#')
 $lines.Add('# How this host reaches your instance (#1137). A Scheduled Task running as SYSTEM inherits')
 $lines.Add('# SYSTEM''s environment, not the logged-on operator''s, so a proxy set in a user profile does NOT')
-$lines.Add('# reach the task — set it here. LAZYIT_CA_FILE is a PEM bundle the AGENT trusts, instead of')
+$lines.Add('# reach the task - set it here. LAZYIT_CA_FILE is a PEM bundle the AGENT trusts, instead of')
 $lines.Add('# trusting your internal CA machine-wide. Kept across a re-install like everything else above.')
 $lines.Add('#HTTPS_PROXY=http://proxy.example.com:3128')
 $lines.Add('#NO_PROXY=lazyit.example.com,.internal')
@@ -412,14 +412,14 @@ $action = New-ScheduledTaskAction -Execute $BinPath -Argument 'report --once'
 #
 # A repetition is a property OF a trigger, and Microsoft defines it as "how long the repetition
 # pattern is repeated AFTER THE TASK IS STARTED"; Task Scheduler "can run a task any number of times
-# AFTER A TRIGGER IS FIRED". An `-AtStartup` trigger "starts a task when the system is started" — it
+# AFTER A TRIGGER IS FIRED". An `-AtStartup` trigger "starts a task when the system is started" - it
 # does not fire for a boot that has already happened. So a repetition hung on the startup trigger
 # ALONE never begins on a machine that is already running: the install completes, the first manual
 # report succeeds, and the host then reports NOTHING until somebody reboots it. `-StartWhenAvailable`
 # does not rescue that, because it "applies only to time-based tasks" and a boot trigger is not one.
 #
-# So the TICK gets its own time-based trigger starting NOW — which begins repeating immediately and
-# is also what makes `-StartWhenAvailable` meaningful — and the BOOT trigger keeps its own job of
+# So the TICK gets its own time-based trigger starting NOW - which begins repeating immediately and
+# is also what makes `-StartWhenAvailable` meaningful - and the BOOT trigger keeps its own job of
 # re-arming the tick after a machine has been powered off. `Register-ScheduledTask -Trigger` takes
 # "an array of one or more trigger objects" (up to 48) and Task Scheduler "starts the task when ANY
 # of the triggers occur", so both simply coexist; `-MultipleInstances IgnoreNew` below is what makes
@@ -430,7 +430,7 @@ $action = New-ScheduledTaskAction -Execute $BinPath -Argument 'report --once'
 # it with `Get-ScheduledTask lazyit-agent | Select-Object -ExpandProperty Triggers` on a running host
 # before any rollout.
 # NO -RandomDelay on this one, and that is not an oversight. `bootTriggerType` adds exactly one
-# element of its own to the trigger base type — `Delay` — while `RandomDelay` is added by
+# element of its own to the trigger base type - `Delay` - while `RandomDelay` is added by
 # `timeTriggerType`, so a boot trigger has nowhere to put it however willingly the cmdlet accepts the
 # parameter. The fixed 2-minute delay is what a boot trigger has. Nothing is lost: the estate's real
 # de-phasing is the agent's own cadence jitter (#1140), which is keyed on the host's machine id, and
@@ -439,22 +439,22 @@ $bootTrigger = New-ScheduledTaskTrigger -AtStartup
 $bootTrigger.Delay = 'PT2M'
 
 # `-RepetitionDuration` is deliberately NOT passed on the first attempt. The Task Scheduler schema is
-# explicit — "if no value is specified for the duration, then the pattern is repeated indefinitely" —
+# explicit - "if no value is specified for the duration, then the pattern is repeated indefinitely" -
 # and the `[TimeSpan]::MaxValue` idiom this used to carry is reported to fail XML validation from
 # Windows 10 / Server 2016 onwards.
 #
 # TWO DIFFERENT CALLS CAN REJECT A REPETITION, and the documented errors name two different cmdlets:
 #
 #   * "New-ScheduledTaskTrigger : The RepetitionInterval and RepetitionDuration Job trigger
-#     parameters must be specified together." — the OLDER cmdlet (Server 2012) refusing an interval
+#     parameters must be specified together." - the OLDER cmdlet (Server 2012) refusing an interval
 #     with no duration while the trigger OBJECT is being built.
 #   * "Set-ScheduledTask : The task XML contains a value which is incorrectly formatted or out of
-#     range. (12,42):Duration:P99999999DT23H59M59S" — the MaxValue case, rejected by the cmdlet that
+#     range. (12,42):Duration:P99999999DT23H59M59S" - the MaxValue case, rejected by the cmdlet that
 #     WRITES the task, because the XML is validated at registration and not at construction.
 #
 # So the fallback covers BOTH calls. Covering only the first would leave a duration the schema
-# dislikes aborting the install at `Register-ScheduledTask` — which runs AFTER the binary and the
-# token file are already on disk — with nothing to catch it, and a fallback that misses the call its
+# dislikes aborting the install at `Register-ScheduledTask` - which runs AFTER the binary and the
+# token file are already on disk - with nothing to catch it, and a fallback that misses the call its
 # own failure mode is validated by is worse than no fallback, because it reads as handled.
 #
 # NOT VERIFIED ON A REAL WINDOWS HOST, like everything else in this block: both branches are what the
@@ -482,7 +482,7 @@ catch {
 
 # `-RandomDelay` belongs to the TIME TRIGGER above and NOT to the settings set:
 # `New-ScheduledTaskSettingsSet` publishes no such parameter, and passing it there throws "A parameter
-# cannot be found that matches parameter name 'RandomDelay'" — fatal under
+# cannot be found that matches parameter name 'RandomDelay'" - fatal under
 # $ErrorActionPreference='Stop', AFTER the binary and the token file are already on disk. On the time
 # trigger it is a random offset added to that trigger's start (`timeTriggerType` adds the element;
 # `bootTriggerType` does not), so hosts that came back from a patch window together do not all POST a
@@ -502,11 +502,11 @@ $settings = New-ScheduledTaskSettingsSet `
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
 # Reads `$tickTrigger` from the script scope on purpose, so the retry below only has to REPLACE the
-# trigger — every other argument stays written down once.
+# trigger - every other argument stays written down once.
 function Register-AgentTask {
   Register-ScheduledTask -TaskName $TaskName `
     -Action $action -Trigger @($bootTrigger, $tickTrigger) -Settings $settings -Principal $taskPrincipal `
-    -Description 'lazyit reporting agent — one-shot inventory report. Ticks every 5 minutes; the REPORTING CADENCE is set centrally in lazyit and enforced by the agent, so this task never has to change.' `
+    -Description 'lazyit reporting agent - one-shot inventory report. Ticks every 5 minutes; the REPORTING CADENCE is set centrally in lazyit and enforced by the agent, so this task never has to change.' `
     -Force | Out-Null
 }
 
@@ -516,7 +516,7 @@ function Register-AgentTask {
 try { Register-AgentTask }
 catch {
   # If the first attempt ALREADY carried a finite duration, the repetition is not what this host is
-  # objecting to — rethrow rather than retry an identical registration and bury the real fault.
+  # objecting to - rethrow rather than retry an identical registration and bury the real fault.
   if ($usedFallbackDuration) { throw }
   $tickTrigger = New-TickTrigger $FallbackDuration
   $usedFallbackDuration = $true
@@ -535,12 +535,12 @@ try {
 }
 catch { $reported = $false }
 if (-not $reported) {
-  Die "the first report failed — check the URL/token; the task is registered and will retry. '$BinPath test' says which part failed."
+  Die "the first report failed - check the URL/token; the task is registered and will retry. '$BinPath test' says which part failed."
 }
 
 Write-Host ''
 Say "done. The task ticks every $TickMinutes minutes; how often this host actually reports is set"
 Write-Host 'centrally in lazyit (Settings -> Instance -> Reporting agents) and picked up on the next report.'
-Write-Host "This host now appears in lazyit's infra topology PENDING tray — confirm it there to track it as an asset."
+Write-Host "This host now appears in lazyit's infra topology PENDING tray - confirm it there to track it as an asset."
 Write-Host "Diagnostics: '$BinPath test' checks the URL, token and network; '$BinPath show' prints"
 Write-Host 'the report it would send. Removal: re-run this script with -Uninstall.'
