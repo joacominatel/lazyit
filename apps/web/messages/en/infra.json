@@ -111,14 +111,14 @@
   },
   "onboarding": {
     "title": "Track servers automatically",
-    "description": "Install a lightweight agent on a Linux server and it reports its hardware & software to lazyit by itself — it can only report, nothing else.",
+    "description": "Install a lightweight agent on a Linux or Windows server and it reports its hardware & software to lazyit by itself — it can only report, nothing else.",
     "cta": "Create your first agent",
     "addAgent": "Add agent",
     "noPermissionHint": "Ask an administrator to add a reporting agent — it needs the manage-settings permission."
   },
   "wizard": {
     "title": "Create a reporting agent",
-    "subtitle": "Install a reporting agent on a Linux server in three steps.",
+    "subtitle": "Install a reporting agent on a Linux or Windows server in three steps.",
     "steps": {
       "name": "Name",
       "install": "Install",
@@ -133,18 +133,43 @@
     "generate": "Generate credentials",
     "createdToast": "Credentials created.",
     "error": "Couldn't create the credentials.",
-    "requirements": "You'll run this on a Linux server with root access.",
+    "platform": {
+      "label": "Which platform is this server?",
+      "linux": "Linux",
+      "windows": "Windows"
+    },
+    "requirements": {
+      "linux": "You'll run this on a Linux server with systemd and curl, as root.",
+      "windows": "You'll run this from an elevated PowerShell (right-click PowerShell → Run as administrator) on a 64-bit Windows host. Nothing else to install: the agent is a single self-contained executable — no Node, no dependencies."
+    },
     "installTitle": "Run this on your server",
-    "installHint": "Copy the command and run it on the Linux server as root. The token is shown only once — capture it before closing.",
+    "installHint": {
+      "linux": "Copy the command and run it on the Linux server as root. The token is shown only once — capture it before closing.",
+      "windows": "Copy the command and run it from an elevated PowerShell. The script-block form is deliberate: a plain irm | iex pipe can't pass the URL and the token. The token is shown only once — capture it before closing."
+    },
+    "unsigned": "The Windows executable isn't code-signed yet, so SmartScreen will warn about it and some antivirus products may quarantine it. That's a deliberate state for internal validation, not a sign the download is wrong.",
     "copyCommandAria": "Copy the command",
     "commandCopied": "Command copied.",
     "manual": {
-      "toggle": "Install manually (step by step)",
-      "intro": "Prefer to inspect each step? Run these on the server instead of the one-liner above.",
-      "step1": "Download the binary (use arch=arm64 on ARM machines):",
-      "step2": "Make it executable and move it into place:",
-      "step3": "Create the config file (it holds the token, so chmod 600):",
-      "step4": "Send a first report to check it works:"
+      "linux": {
+        "toggle": "Install manually (step by step)",
+        "intro": "Prefer to inspect each step? Run these on the server instead of the one-liner above.",
+        "step1": "Download the binary (use arch=arm64 on ARM machines):",
+        "step2": "Make it executable and move it into place:",
+        "step3": "Create the config file (it holds the token, so chmod 600):",
+        "step4": "Send a first report to check it works:"
+      },
+      "windows": {
+        "toggle": "Download and read the installer first",
+        "intro": "Prefer to read the installer before it runs? Download it, open it in an editor, then run it from the same elevated PowerShell.",
+        "step1": "Download the installer:",
+        "step2": "Read it, then run it — this form runs whatever the host's script execution policy is:"
+      }
+    },
+    "diagnostics": {
+      "title": "Check the host afterwards",
+      "hint": "Read-only: it sends nothing and changes nothing. It answers whether this host can reach lazyit and whether its token is good.",
+      "windowsPathNote": "The full path, because the installer doesn't add its folder to PATH on Windows yet."
     },
     "waitTitle": "Waiting for {name} to report…",
     "waitDescription": "Run the install command on your server. As soon as the agent checks in, it'll show up here — usually within a couple of minutes.",
