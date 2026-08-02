@@ -4,14 +4,20 @@
  * addressable: a representative target is ~180 Windows endpoints and ~25 Windows Servers against
  * ~40 Linux boxes.
  *
- * ONE PowerShell CALL PER TICK. Everything that needs CIM/WMI or the registry is gathered by a single
- * `powershell -NoProfile -NonInteractive -Command <script>` that emits ONE compressed JSON document;
- * every function in this file below that is a pure mapper over it. Two reasons, and the second is the
- * one that matters: a ~400 ms interpreter start once per reporting interval is free, and a single
- * impure boundary is the only shape this repo can actually TEST from a Linux CI runner and a macOS
- * laptop. The mappers are covered by `windows.test.ts`; the script's own OUTPUT is not covered by
- * anything here, and the only way to see it is `lazyit-agent show` on a real Windows host — which the
- * Manual documents as the diagnostic for "what would this machine report?".
+ * ONE PowerShell CALL FOR THE WHOLE FACT SWEEP. Everything that needs CIM/WMI or the registry is
+ * gathered by a single `powershell -NoProfile -NonInteractive -Command <script>` that emits ONE
+ * compressed JSON document; every function in this file below that is a pure mapper over it. Two
+ * reasons, and the second is the one that matters: a ~400 ms interpreter start once per reporting
+ * interval is free, and a single impure boundary is the only shape this repo can actually TEST from a
+ * Linux CI runner and a macOS laptop. The mappers are covered by `windows.test.ts`; the script's own
+ * OUTPUT is not covered by anything here, and the only way to see it is `lazyit-agent show` on a real
+ * Windows host — which the Manual documents as the diagnostic for "what would this machine report?".
+ *
+ * WHAT A TICK ACTUALLY COSTS, precisely, because "one call per tick" was not true and is worth
+ * stating exactly: {@link readMachineGuid} makes a SECOND, much smaller PowerShell call for the dedup
+ * key, and it has to, because `index.ts` needs that key BEFORE the cadence gate — folding it into the
+ * sweep would make a tick that reports nothing pay for the full CIM walk. Both calls are memoized per
+ * process, so a REPORTING tick is two `powershell.exe` starts and a tick that is not due is one.
  *
  * TWO PROHIBITIONS, both absolute:
  *
@@ -123,8 +129,10 @@ export const WINDOWS_FACTS_SCRIPT = [
     // has one, and its burned-in address is identity evidence, so it is deliberately kept.
     "adapters=@(Get-CimInstance -ClassName Win32_NetworkAdapter -Filter 'MACAddress IS NOT NULL'|Select-Object Index,NetConnectionID,MACAddress,PhysicalAdapter);" +
     "adapterConfigs=@(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'MACAddress IS NOT NULL'|Select-Object Index,MACAddress,IPAddress,IPSubnet);" +
-    // BOTH uninstall hives. Half of a real inventory lives in WOW6432Node and missing it is the #1
-    // thing homegrown inventory scripts get wrong.
+    // BOTH MACHINE-WIDE uninstall hives. Half of a real inventory lives in WOW6432Node and missing
+    // it is the #1 thing homegrown inventory scripts get wrong. Per-USER installs live under HKCU /
+    // HKU\<sid> and are NOT read — see `parseWindowsSoftware` for why that is its own piece of work.
+    // Nothing is filtered here; the DisplayName / SystemComponent rules live in the tested mapper.
     "software=@(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'|Select-Object DisplayName,DisplayVersion,SystemComponent);" +
     "machineGuid=$mg;" +
     "elevated=$el" +
@@ -231,11 +239,36 @@ export function parseWindowsBlob(raw: string | null): WindowsFacts | null {
   return parsed as WindowsFacts;
 }
 
-/** `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` — the primary `externalId` on Windows. */
-export async function readMachineGuid(warn: Warn = NO_WARN): Promise<string | null> {
+/**
+ * How this module spawns. Injectable so the tests can drive the two impure boundaries — the PowerShell
+ * calls and `docker ps` — without a Windows host; the production default is always {@link run}.
+ */
+export type Exec = typeof run;
+
+/** The memoized dedup-key read. See {@link readMachineGuid}. */
+let machineGuidRun: Promise<string | null> | undefined;
+
+/**
+ * `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` — the primary `externalId` on Windows.
+ *
+ * MEMOIZED, for the same reason {@link runFactsScript} is: `index.ts` asks for the dedup key TWICE on
+ * a reporting tick (once for the cadence jitter key before the due gate, once inside `buildReport`)
+ * and once on a tick that reports nothing at all. Without the memo that was an extra `powershell.exe`
+ * start every five minutes on every Windows host in the estate, including the ~11 ticks out of 12
+ * that do nothing. The memo holds the PROMISE, so a concurrent second caller joins the first call.
+ *
+ * Process-scoped is right here and would be wrong in a daemon: the agent is a one-shot (ADR-0074 §7),
+ * so "once per process" IS "once per report" and the value cannot go stale within one.
+ *
+ * This is deliberately NOT folded into {@link WINDOWS_FACTS_SCRIPT}, even though that document
+ * already carries `machineGuid`: the key is read BEFORE the cadence gate, so a tick that is not due
+ * would then pay for the full CIM sweep it exists to avoid. A tiny registry read is the right cost
+ * for the one fact every tick needs.
+ */
+export async function readMachineGuid(warn: Warn = NO_WARN, exec: Exec = run): Promise<string | null> {
   // Read through the same one-line PowerShell shape as everything else rather than a second
   // mechanism, so a host where PowerShell is blocked fails ONE way with ONE message.
-  const out = await run(
+  machineGuidRun ??= exec(
     [
       POWERSHELL,
       "-NoProfile",
@@ -246,7 +279,7 @@ export async function readMachineGuid(warn: Warn = NO_WARN): Promise<string | nu
     WINDOWS_COLLECT_TIMEOUT_MS,
     warn,
   );
-  const value = out?.trim();
+  const value = (await machineGuidRun)?.trim();
   return value ? value : null;
 }
 
@@ -332,8 +365,16 @@ export function windowsChassis(
  * Two filters, and both are the difference between an inventory an operator reads and a wall of
  * noise: an entry with no `DisplayName` is a fragment with nothing to display, and `SystemComponent=1`
  * is Microsoft's own flag for "do not show this in Programs and Features" — update stubs, runtime
- * shards, driver payloads. They are applied HERE as well as in the collection script so the rule is
- * testable and so a script that ever stops filtering cannot quietly change what gets reported.
+ * shards, driver payloads. They are applied HERE and ONLY here: {@link WINDOWS_FACTS_SCRIPT} selects
+ * the three properties and filters nothing, deliberately, so the rule lives in the one place this
+ * repo can actually test it rather than being split across a PowerShell string nothing here can run.
+ *
+ * WHAT IS NOT COLLECTED, and it is not a small gap: only the two MACHINE-WIDE (`HKLM`) Uninstall
+ * hives are read. A per-USER install — anything registered under `HKCU`, which is where a great deal
+ * of what a laptop user installs for themselves ends up — is NOT in this list, and reading it would
+ * mean walking `HKU\<sid>` for every loaded profile from a SYSTEM context. That is its own piece of
+ * work behind its own policy flag; until then the Manual says machine-wide rather than claiming
+ * parity with what Windows shows in Apps & features.
  *
  * The two hives list the same product twice on any machine with both a 64- and a 32-bit installer
  * registered, so identical name+version pairs are collapsed. Two DIFFERENT versions of the same name
@@ -347,7 +388,7 @@ export function parseWindowsSoftware(raw: unknown): Software {
     if (!name) continue;
     if (Number(entry.SystemComponent) === 1) continue;
     const version = entry.DisplayVersion?.trim();
-    const key = `${name} ${version ?? ""}`;
+    const key = `${name}\0${version ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     pkgs.push({ name: name.slice(0, 255), ...(version ? { version: version.slice(0, 120) } : {}), source: "registry" });
@@ -407,6 +448,52 @@ export async function collectSoftware(
  * {@link collectContainers} for what is used instead and why.
  */
 export const DOCKER_NAMED_PIPE = "\\\\.\\pipe\\docker_engine";
+
+/** An executable lookup on PATH: the name asked for, the absolute path found, or `null`. */
+export type Which = (name: string) => string | null;
+
+/**
+ * The extensions to try when the host exports no `PATHEXT`. The first four of Windows' own default,
+ * which are the ones an executable a program shells out to can plausibly carry.
+ */
+export const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
+
+/**
+ * Resolve the docker client to an ABSOLUTE PATH, applying PATHEXT explicitly (#1144).
+ *
+ * WHY THIS EXISTS AT ALL. Windows has no execute bit and no extensionless executables: a bare
+ * `docker` on PATH is `docker.exe` (or a `docker.cmd` shim), resolved through `PATHEXT`. Whether
+ * `Bun.which("docker")` performs that expansion on Windows is undocumented, and this repo cannot
+ * reach a Windows host to check — the SAME limit that kept {@link DOCKER_NAMED_PIPE} unopened. The
+ * difference is that this one failed SILENTLY BY DESIGN: a lookup that missed made a host running
+ * Docker Desktop report no containers, for ever, with nothing in `diagnostics.warnings` to say why.
+ * So the expansion happens HERE, where it is testable, instead of being assumed of the runtime.
+ *
+ * The bare name is tried LAST rather than not at all, so the same function still resolves on a POSIX
+ * host — the tests run on macOS and Linux, and a lookup that only worked on Windows could not be
+ * exercised anywhere this repo can reach.
+ */
+export function resolveDockerClient(
+  client: string,
+  which: Which,
+  pathext: string | undefined,
+): string | null {
+  const names: string[] = [];
+  // A name that already carries an extension is taken as written — appending a second one would look
+  // for `docker.exe.com`.
+  if (!/\.[a-z0-9]+$/i.test(client)) {
+    for (const ext of (pathext || DEFAULT_PATHEXT).split(";")) {
+      const trimmed = ext.trim();
+      if (trimmed) names.push(client + trimmed.toLowerCase());
+    }
+  }
+  names.push(client);
+  for (const name of names) {
+    const found = which(name);
+    if (found) return found;
+  }
+  return null;
+}
 
 /** One line of `docker ps --format {{json .}}` — the CLI's own shape, not the engine API's. */
 interface DockerCliContainer {
@@ -509,36 +596,40 @@ export function parseDockerCliContainers(out: string | null): Containers | undef
  *    identity the engine already trusts. A host where it is NOT on PATH degrades to "no container
  *    list", silently — the same outcome as a host with no Docker, which is the honest reading.
  *
+ * THE LOOKUP ITSELF GETS THE SAME TREATMENT AS THE PIPE. See {@link resolveDockerClient}: the
+ * extensions are tried explicitly rather than trusting `Bun.which` to apply PATHEXT on Windows, and
+ * the resolved ABSOLUTE PATH is what gets spawned, which keeps `Bun.spawn`'s own PATH resolution out
+ * of it too. Refusing one unverified Windows boundary and then leaning on another would have been
+ * the same mistake wearing a different name — and this one failed SILENTLY.
+ *
  * THE LINUX PROPERTY IS PRESERVED, and it is the one the operator asked about: the lookup happens on
  * EVERY tick and nothing is cached, so a host registered with no Docker that gets Docker installed a
  * month later reports its containers on the very next tick — no re-install, no state to clear. A host
  * with no Docker client at all is SILENT, exactly like a Linux host with no socket: warning there
  * would put a line in the majority of the estate's reports until operators learned to ignore it.
  *
- * A docker client that IS present but cannot answer (the engine is stopped, Desktop is not running
- * because nobody is logged in, the pipe ACL refuses SYSTEM) DOES warn — that is the "why is this
- * host's container list empty?" question `diagnostics.warnings` exists to answer.
+ * EVERYTHING AFTER A SUCCESSFUL LOOKUP WARNS. A client that resolved but cannot answer — the engine
+ * is stopped, Desktop is not running because nobody is logged in, the pipe ACL refuses SYSTEM, the
+ * call timed out — is the "why is this host's container list empty?" question `diagnostics.warnings`
+ * exists to answer, and `run`'s own degradation notes are passed straight through rather than
+ * swallowed into a local flag.
  */
 export async function collectContainers(
   warn: Warn,
   client = "docker",
+  which: Which = (name) => Bun.which(name),
+  pathext: string | undefined = process.env.PATHEXT,
+  exec: Exec = run,
 ): Promise<Host["containers"]> {
-  if (!Bun.which(client)) return undefined;
-  let degraded = false;
-  const out = await run(
-    [client, "ps", "--format", "{{json .}}"],
-    WINDOWS_COLLECT_TIMEOUT_MS,
-    () => {
-      degraded = true;
-    },
-  );
+  const resolved = resolveDockerClient(client, which, pathext);
+  if (!resolved) return undefined;
+  const out = await exec([resolved, "ps", "--format", "{{json .}}"], WINDOWS_COLLECT_TIMEOUT_MS, warn);
   if (out === null) {
     warn(
-      `containers: ${client} is installed but did not answer — container list omitted (is the engine running?)`,
+      `containers: ${resolved} is installed but did not answer — container list omitted (is the engine running?)`,
     );
     return undefined;
   }
-  if (degraded) return undefined;
   return parseDockerCliContainers(out);
 }
 
@@ -565,6 +656,18 @@ async function runFactsScript(warn: Warn): Promise<string | null> {
     warn,
   );
   return factsScriptRun;
+}
+
+/**
+ * Clear both process-scoped memos — the fact document and the dedup key.
+ *
+ * FOR TESTS ONLY. The agent is a one-shot, so nothing in production ever wants a second collection
+ * inside one process; a `bun test` process, in contrast, runs many scenarios back to back and would
+ * otherwise see the first one's memoized answer in all of them.
+ */
+export function resetWindowsCollectorMemos(): void {
+  factsScriptRun = undefined;
+  machineGuidRun = undefined;
 }
 
 /** `fe80::…` → link, `::1` → host, `fc00::/7` → site, everything else → global. */
