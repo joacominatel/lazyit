@@ -2795,6 +2795,16 @@ enum InfraFactChangeKind {
 /// Cascade on node delete, exactly like InfraEdge and InfraNodeSecretRef: a change record is
 /// meaningless without the node it describes, and the durable audit trail an operator reconciles from
 /// is the node's linked Asset (AssetHistory), not this table.
+///
+/// GROWTH, stated plainly because NO RETENTION SHIPS. Nothing prunes this table; it only ever grows
+/// until the node is hard-deleted (cascade) — soft-deleting a node keeps its history. The write caps
+/// bound the rate, not the total: 500 rows per node per rolling hour is 4.38M rows per node per year
+/// in the pathological case, ~670 MB at the ~154 bytes/row measured here (heap + indexes, short
+/// values). A real estate is nowhere near that — a host writes rows only when something actually
+/// moves, so a 20-host estate through two patch windows a month is on the order of tens of thousands
+/// of rows a year, i.e. single-digit MB. Pruning is deliberately left as an explicit operator action
+/// rather than a side effect of ingest; a time-based `DELETE` is a scan, but it is a one-off
+/// maintenance job, not a hot path.
 model InfraNodeFactChange {
   // autoincrement: a log/history table, never exposed as a durable external identifier (ADR-0005).
   id     Int                 @id @default(autoincrement())
@@ -2812,9 +2822,22 @@ model InfraNodeFactChange {
 
   createdAt DateTime @default(now())
 
-  // No updatedAt / deletedAt: append-only (ADR-0006). (nodeId, id) serves the ONE query this table
-  // has — the per-node timeline: filter by node, order by id desc, cursor on id.
+  // No updatedAt / deletedAt: append-only (ADR-0006).
+  //
+  // TWO indexes, because this table has two queries and they sort on different columns:
+  //   (nodeId, id)        the READ — the per-node timeline: filter by node, order by id desc,
+  //                       cursor on id.
+  //   (nodeId, createdAt) the WRITE CAP — the rolling-hour COUNT the ingest runs before appending.
+  //                       Its predicate is a createdAt RANGE, which (nodeId, id) cannot answer: it
+  //                       could only scan every row the node owns and re-check each one on the heap.
+  //                       That is the wrong shape for an abuse cap — the table has no retention, so
+  //                       the node with the most rows is the abused one, and the mitigation would
+  //                       degrade precisely when it fires, on the report ingest path. Verified on
+  //                       postgres:18-alpine at 2.16M rows for one node, on the SQL Prisma actually
+  //                       emits: without this index a parallel SEQ SCAN, 18,374 buffers, 38.6 ms;
+  //                       with it an INDEX ONLY SCAN, 7 buffers, 0 heap fetches, 0.11 ms.
   @@index([nodeId, id])
+  @@index([nodeId, createdAt])
   @@map("infra_node_fact_changes")
 }
 
