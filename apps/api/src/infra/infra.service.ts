@@ -1250,18 +1250,21 @@ export class InfraService {
    * every report would undo the whole saving. So it is read only when the server's own fingerprint of
    * what arrived already disagrees with the one the node holds, i.e. only on the reports where the
    * package list genuinely moved: roughly twice a month per host, the same branch `apt upgrade`
-   * produces. `preserve` and `clear` never read it, and `clear` deliberately records NOTHING —
-   * `softwareState: 'disabled'` is a policy event, and rendering it as three thousand removals would
-   * be a lie about the host.
+   * produces. THIS METHOD adds no such read on `preserve` or `clear` — said precisely, because
+   * `planSpecsWrite` still makes its OWN read on the `preserve`-with-changed-host-facts branch (it has
+   * to re-embed the list it is about to overwrite), and the fact history neither triggers that read nor
+   * takes any package rows off it. `clear` deliberately records NOTHING: `softwareState: 'disabled'`
+   * is a policy event, and rendering it as three thousand removals would be a lie about the host.
    *
    * A node holding no list yet (`hasSoftware === false`) is the SEED case and is silent, which is what
    * keeps the first report after this ships from writing one row per installed package. The same rule
    * inside {@link diffHostFacts} covers every host fact.
    *
-   * AND IT CANNOT FAIL THE CHECK-IN. The whole method is wrapped, because the one thing in it that can
-   * throw is a query this feature ADDED to the report path — the package read-back. Without the catch,
-   * a fact history nobody asked for could take a host off the map, which inverts the priority stated
-   * on {@link recordFactChanges}. A throw degrades to "no history for this report"; the report itself
+   * AND IT CANNOT FAIL THE CHECK-IN. Exactly one thing here can throw — the package read-back, a query
+   * this feature ADDED to the report path — and it is the one thing inside the `try`; everything else
+   * is a pure comparison over values already in hand. Without that catch, a fact history nobody asked
+   * for could take a host off the map, which inverts the priority stated on {@link recordFactChanges}.
+   * A throw degrades to "the host facts were recorded, the package half was not"; the report itself
    * lands exactly as it did before this change.
    */
   private async hostFactChanges(
@@ -1364,8 +1367,10 @@ export class InfraService {
    * A page of a node's recorded fact history (#1143), newest first — what the Changes tab reads.
    *
    * Keyset pagination on the autoincrement `id` rather than an offset: the table is append-only, so
-   * ids are monotonic and a cursor cannot skip or repeat a row while the operator pages, however many
-   * reports land in between. `nextCursor` is null on the last page.
+   * ids only ever grow and the pages walk strictly DOWNWARD, so a row already recorded when paging
+   * started can never be repeated or stepped over, however many reports land in between — including a
+   * concurrent report whose lower id commits after a higher one, which an offset would have shifted.
+   * `nextCursor` is null on the last page.
    *
    * The node is resolved through the soft-delete-scoped {@link getNode} first, so a node that is off
    * the map answers 404 rather than serving its history.
