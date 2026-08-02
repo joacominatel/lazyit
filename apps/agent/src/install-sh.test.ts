@@ -112,6 +112,61 @@ describe("uninstall — nobody deploys what they cannot cleanly remove", () => {
   });
 });
 
+/**
+ * THE SECOND DEFECT IN #1166, which install.sh shares with install.ps1 exactly. `--url` is the
+ * instance BASE url; every request is built as `"$URL/api/..."`. A `--url https://host/install.sh`
+ * therefore asks for `https://host/install.sh/api/agent/download?arch=...` and surfaces as a
+ * download failure whose message names the token as a likely cause — sending the operator to rotate
+ * a credential that was never wrong. The Windows operator hit it first; the shape is identical here.
+ */
+describe("--url is the instance BASE url, and a wrong one is named instead of blamed on the token (#1166)", () => {
+  test("the address of this script is refused, and BEFORE anything is downloaded", () => {
+    const guard = script.indexOf("not the address of this script");
+    const download = script.indexOf("/api/agent/download");
+    expect(guard).toBeGreaterThan(-1);
+    expect(download).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(download);
+    // Both installers are named: an operator working from the Windows one-liner passes
+    // /install.ps1 to this script just as easily as the other way round.
+    expect(script).toContain("/install.sh*|/install.ps1*)");
+  });
+
+  test("it suggests the URL the operator meant, rather than only rejecting the one they typed", () => {
+    expect(script).toContain("${URL%%/install.*}");
+  });
+
+  test("an /api endpoint is refused too — the installer appends /api/agent/download itself", () => {
+    expect(script).toContain("/api|/api/*)");
+    expect(script).toContain("not an API endpoint");
+  });
+
+  test("a --url with no scheme is refused by name, not left to fail inside curl", () => {
+    expect(script).toContain("http://*|https://*)");
+    expect(script).toContain("starting with http:// or https://");
+  });
+
+  // Any OTHER path only warns, for the same reason as in install.ps1: lazyit sets no basePath, so a
+  // path is almost always the mistake above wearing a different shape, but a prefix-stripping
+  // reverse proxy really can mount an instance under one and re-running this script IS the
+  // documented upgrade path. The two `die` branches are the cases that can never be a valid base.
+  test("any other path WARNS and continues, so a prefix-stripping proxy still installs", () => {
+    expect(script).toContain("carries a path");
+    expect(script).toMatch(/URL_PATH.*\n?.*lazyit is served from the root/);
+  });
+
+  test("the usage text shows the base-URL form and names the mistake", () => {
+    expect(script).toContain("--url <base-url>");
+    expect(script).toMatch(/NOT .*install\.sh/);
+  });
+
+  test("the guard runs on the value the flags produced, after the trailing slash is stripped", () => {
+    const trim = script.indexOf('URL="${URL%/}"');
+    const guard = script.indexOf("not the address of this script");
+    expect(trim).toBeGreaterThan(-1);
+    expect(trim).toBeLessThan(guard);
+  });
+});
+
 describe("artifact selection — a SIGILL months after a vMotion is not an acceptable failure", () => {
   test("a host without AVX2 gets the baseline build", () => {
     expect(script).toContain("x64-baseline");
