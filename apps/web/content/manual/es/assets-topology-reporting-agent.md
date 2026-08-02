@@ -58,7 +58,9 @@ El botón abre un asistente guiado y breve, de tres pasos:
    fallar más adelante con un error de descarga que parece un token inválido — y muestran la
    dirección que querías usar, para pegarla directamente. Si un proxy reverso monta tu instancia bajo
    una ruta (`https://it.example.com/lazyit`), esa ruta **sí** forma parte de tu dirección base:
-   pasala, y conservala en la dirección que los instaladores sugieren. Ejecutalo **como root**
+   pasala, y conservala en la dirección que los instaladores sugieren. Los instaladores advierten
+   sobre cualquier ruta — esa forma suele ser el error de más arriba — pero continúan, así que una
+   instancia bajo un prefijo se instala igual. Ejecutalo **como root**
    en Linux, o **como
    Administrador** en Windows. El token se muestra **una sola vez**, así que copialo (o descargalo)
    antes de continuar. Si

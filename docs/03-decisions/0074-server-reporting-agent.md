@@ -1342,8 +1342,12 @@ though POSIX `sh` does not care — it is the script `install.ps1` was written f
 paragraphs of its prose, so an em dash there is a live source of the next one pasted into a file
 where it becomes a parse error. **A BOM is checked separately, by reading bytes, on BOTH files** —
 the ASCII rule cannot see one: the test decodes the file, and decoding strips a leading U+FEFF before
-any rule inspects it. On `install.sh` a BOM is the more damaging of the two, because the kernel needs
-`#!` at offset 0: three bytes in front of the shebang and `curl … | sh` dies on line 1.
+any rule inspects it. On `install.sh` a BOM does not fail cleanly, which is what makes it worth a
+check: the kernel wants `#!` at offset 0, so a direct `execve` fails with `ENOEXEC`, but a shell
+retries an `ENOEXEC` file with `sh` — and `sh` no longer reads the shebang line as a comment, prints
+`sh: line 1: <BOM>#!/bin/sh: No such file or directory`, and **carries on installing**, because
+`set -eu` sits further down the file. The everyday result is an install one-liner that names
+`/bin/sh` in an error and then installs software as root anyway.
 
 **`--url`/`-Url` pointing at the script itself failed looking like a bad token.** The operator passed
 `-Url http://<host>:8080/install.ps1`. Every request is built by appending a path, so the installer
