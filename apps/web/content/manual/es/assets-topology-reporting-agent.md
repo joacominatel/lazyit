@@ -55,7 +55,10 @@ El botón abre un asistente guiado y breve, de tres pasos:
    `https://tu-instancia`, no `https://tu-instancia/install.sh` (la dirección del script en sí). El
    instalador agrega sus propias rutas, así que una dirección de script haría que cada pedido fuera
    `…/install.sh/api/agent/download`; ambos instaladores ahora lo verifican y lo indican, en lugar de
-   fallar más adelante con un error de descarga que parece un token inválido. Ejecutalo **como root**
+   fallar más adelante con un error de descarga que parece un token inválido — y muestran la
+   dirección que querías usar, para pegarla directamente. Si un proxy reverso monta tu instancia bajo
+   una ruta (`https://it.example.com/lazyit`), esa ruta **sí** forma parte de tu dirección base:
+   pasala, y conservala en la dirección que los instaladores sugieren. Ejecutalo **como root**
    en Linux, o **como
    Administrador** en Windows. El token se muestra **una sola vez**, así que copialo (o descargalo)
    antes de continuar. Si

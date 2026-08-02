@@ -53,7 +53,10 @@ The button opens a short, guided wizard with three steps:
    `https://your-instance/install.sh` (the address of the script itself). The installer appends its
    own paths, so a script address would make every request `…/install.sh/api/agent/download`; both
    installers now check for that and say so, instead of failing later with a download error that
-   reads like a bad token. Run it **as root** on Linux, or **as Administrator** on Windows. The token
+   reads like a bad token — and they print the address you meant, so you can paste it straight back.
+   If a reverse proxy mounts your instance under a path (`https://it.example.com/lazyit`), that path
+   **is** part of your base address: pass it, and keep it in the address the installers suggest.
+   Run it **as root** on Linux, or **as Administrator** on Windows. The token
    is shown **only once**, so copy it (or download it) before continuing. If you'd rather inspect every step, expand **Install
    manually (step by step)** for the same install done by hand (download the binary, install it, write
    the config file, send a test report).

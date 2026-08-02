@@ -1340,7 +1340,10 @@ rather than a BOM**, deliberately: these files are downloaded over HTTP, piped t
 betting on three leading bytes surviving every hop. `install.sh` is covered by the same rule even
 though POSIX `sh` does not care — it is the script `install.ps1` was written from and shares whole
 paragraphs of its prose, so an em dash there is a live source of the next one pasted into a file
-where it becomes a parse error.
+where it becomes a parse error. **A BOM is checked separately, by reading bytes, on BOTH files** —
+the ASCII rule cannot see one: the test decodes the file, and decoding strips a leading U+FEFF before
+any rule inspects it. On `install.sh` a BOM is the more damaging of the two, because the kernel needs
+`#!` at offset 0: three bytes in front of the shebang and `curl … | sh` dies on line 1.
 
 **`--url`/`-Url` pointing at the script itself failed looking like a bad token.** The operator passed
 `-Url http://<host>:8080/install.ps1`. Every request is built by appending a path, so the installer
@@ -1354,6 +1357,20 @@ the same mistake in another shape, but a prefix-stripping reverse proxy really c
 under one and **re-running the installer is the documented upgrade path** — refusing outright could
 break a deployment that works today. The fatal branches suggest the URL the operator meant. Both
 `--help`/`.PARAMETER Url` now state the base-URL form and name the wrong one.
+
+Three details of that contract are load-bearing, and all three were wrong in the first cut of the
+guard (#1171 review). **The installer filename is matched anywhere in the path, as a complete
+segment** — not only as its first segment. The prefix mount is exactly the deployment the warning
+branch exists to protect, and it is where the mistake is easiest to make: the operator copies
+`https://it.example.com/lazyit/install.ps1` out of the browser, and a start-anchored check waves it
+through into the original download failure. **The suggested replacement is built from the origin plus
+the path prefix**, never by pattern-stripping the whole URL string: `${URL%%/api*}` on
+`https://api.example.com/api` matches the `/api` inside the HOST and answers `https:/`. A suggestion
+is pasted, so a wrong one is worse than none. **The scheme is compared case-insensitively in both
+installers**, per RFC 3986 §3.1 and because `curl` and `Invoke-WebRequest` both accept `HTTPS://`;
+PowerShell's `-match` was already case-insensitive while `sh`'s `case` was not, so `HTTPS://host`
+installed on Windows and was refused on Linux. Two installers disagreeing about one input is the
+cheap kind of bug to prevent and the expensive kind to diagnose.
 
 **What reaches an existing host.** Both installers are static assets under `apps/web/public/`, so an
 instance picks them up on its next deploy: no migration, no agent change, no wire-contract change.
