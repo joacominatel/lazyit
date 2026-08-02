@@ -1849,9 +1849,9 @@ and had to leave for `/help` to find out what to type.
 
 Step 2 now takes a **platform choice** (Linux default) and switches four things with it: the
 requirements line, the emitted install command, the inspect-first path, and the post-install check.
-Three of those are worth stating because each is a promise about code this component does not
-contain, and `agent-install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}`
-as served:
+Each is worth stating because each is a promise about code this component does not contain, and
+`agent-install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}` as served
+and against both locale catalogs as shipped:
 
 - **The requirements line states the real constraint, not a friendly one.** Windows 10/11 or Server
   2016+, on **x64** — `install.ps1` dies on anything whose `PROCESSOR_ARCHITECTURE` is not `AMD64`,
@@ -1874,12 +1874,14 @@ as served:
   Manual documents is not a command on Windows today: the install directory is not on `PATH`
   (**#1167**, open). The absolute form runs both before and after that lands, so it needs no revision
   when it does; the test carries a tripwire assertion that fails the day `install.ps1` starts writing
-  `PATH`, so this paragraph gets re-read on purpose rather than quietly rotting. **The elevation
-  requirement rides in the copy beside it**, not in the command: PowerShell 5.1 has no `sudo`, and
-  every in-command elevation opens a second console the output disappears with. It is not optional —
-  the config file is ACL'd to SYSTEM + Administrators, the agent reads an unreadable config as an
-  absent one, and an unelevated `test` therefore announces that no URL and no token are configured on
-  a host that installed perfectly.
+  `PATH` with `setx` or `SetEnvironmentVariable` — a registry write straight to
+  `Session Manager\Environment` would slip past it — so this paragraph gets re-read on purpose rather
+  than quietly rotting. **The elevation requirement rides in the copy beside it**, not in the command:
+  PowerShell 5.1 has no `sudo`, and the in-command alternative (`Start-Process -Verb RunAs`) runs the
+  check in a second console whose output is not in the shell the operator is reading. It is not
+  optional — the config file is ACL'd to SYSTEM + Administrators, the agent reads an unreadable config
+  as an absent one, and an unelevated `test` therefore announces that no URL and no token are
+  configured on a host that installed perfectly.
 
 The wizard also **states plainly that the Windows executable is unsigned**, on the Windows tab, before
 anything is run. §8's gate below is a decision the operator meets as a SmartScreen warning, and an
