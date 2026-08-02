@@ -96,6 +96,9 @@ interface PrismaMock {
     updateMany: Mock;
   };
   infraNodeSecretRef: { findMany: Mock; upsert: Mock; deleteMany: Mock };
+  // The #1143 append-only fact history. `count` backs the per-node write cap, `createMany` is the
+  // ONE write path, `findMany` serves the Changes tab.
+  infraNodeFactChange: { count: Mock; createMany: Mock; findMany: Mock };
   asset: { findFirst: Mock; update: Mock };
   $transaction: Mock;
   $queryRaw: Mock;
@@ -166,6 +169,12 @@ describe('InfraService', () => {
         findMany: jest.fn().mockResolvedValue([]),
         upsert: jest.fn().mockResolvedValue(undefined),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      // Default: this node has recorded nothing yet, so the #1143 per-node window cap has full room.
+      infraNodeFactChange: {
+        count: jest.fn().mockResolvedValue(0),
+        createMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       asset: { findFirst: jest.fn(), update: jest.fn() },
       $transaction: jest.fn(
@@ -5107,6 +5116,526 @@ describe('InfraService', () => {
         data: { policyStaleAfterSeconds?: number };
       };
       expect(childArg.data.policyStaleAfterSeconds).toBeUndefined();
+    });
+  });
+
+  // ── Append-only fact history (ADR-0074 §3 amendment, #1143) ─────────────────
+  //
+  // The table exists to answer "someone upgraded OpenSSL on db-01 last Tuesday". What it records is
+  // the DIFF, never the report: the deliberate absence of a `SPECS_CHANGED` event per check-in
+  // (which would be ~96 no-op audit rows per host per day) is preserved exactly.
+
+  describe('fact history (#1143)', () => {
+    const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+    const HOST = {
+      hostname: 'db-01',
+      os: { name: 'Ubuntu', version: '24.04', kernel: '6.8.0-31-generic' },
+      memoryBytes: 34359738368,
+      hardware: { serial: 'SN-DB-01' },
+    };
+    const SOFTWARE = [
+      { name: 'nginx', version: '1.27.0' },
+      { name: 'openssl', version: '3.0.13' },
+    ];
+
+    /** A #1142 agent's full report for `db-01`, optionally with an edited host block / list. */
+    const report = (over: Record<string, unknown> = {}) =>
+      AgentReportSchema.parse({
+        agentVersion: '1.0.0',
+        reportingSource: 'agent:db01',
+        externalId: 'machine-id-db01',
+        reportedAt: '2026-08-02T12:00:00.000Z',
+        host: clone(HOST),
+        software: clone(SOFTWARE),
+        softwareState: 'reported',
+        softwareHash: softwareFingerprint(SOFTWARE),
+        ...over,
+      });
+
+    /** What the stored-specs sub-select returns for a node holding `rest` (+ whether it has a list). */
+    const stored = (rest: Record<string, unknown>, hasSoftware: boolean) => [
+      { host: rest.host ?? null, rest, hasSoftware },
+    ];
+
+    /**
+     * The host block a node holds after a `report()` landed — the PARSED one.
+     *
+     * It matters: `AgentReportSchema` defaults `os.family`, so a stored block built from the literal
+     * above would differ from every incoming report and #1153's comparison would never call anything
+     * unchanged. These tests would then all exercise the "something moved" branch and the ones
+     * asserting the quiet path would pass for the wrong reason.
+     */
+    const storedHost = () => clone(report().host);
+
+    /**
+     * The blob a node holds after a `report()` landed — the steady state.
+     *
+     * The host block is the PARSED one, not the literal above: `AgentReportSchema` defaults
+     * `os.family` and a stored block missing it would differ from every incoming report, so #1153's
+     * comparison would never call anything unchanged and these tests would silently exercise the
+     * wrong branch.
+     */
+    const settled = (over: Record<string, unknown> = {}) =>
+      stored(
+        {
+          host: clone(report().host),
+          reportedAt: '2026-08-02T11:00:00.000Z',
+          softwareHash: softwareFingerprint(SOFTWARE),
+          ...over,
+        },
+        true,
+      );
+
+    function hostIsKnown(): void {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-db01',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-db01',
+        state: 'CONFIRMED',
+      });
+    }
+
+    /** The rows the ingest appended, flattened out of `createMany`. */
+    const recorded = () => {
+      const calls = prisma.infraNodeFactChange.createMany.mock
+        .calls as unknown[][];
+      return calls.flatMap(
+        (call) => (call[0] as { data: Record<string, unknown>[] }).data,
+      );
+    };
+
+    // ── The upgrade trap: the FIRST observation seeds, it never diffs ─────────
+
+    it('a BRAND-NEW node records nothing — its first report is the baseline, not three thousand additions', async () => {
+      // The trap this feature could have shipped: every operator's first post-upgrade tick writing
+      // one row per installed package, per host. A node that does not exist yet has no previous
+      // observation of anything, so there is nothing to diff against.
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-db01',
+        state: 'PENDING',
+      });
+
+      await service.ingestReport(report(), AGENT_SA);
+
+      expect(prisma.infraNodeFactChange.createMany).not.toHaveBeenCalled();
+      expect(prisma.infraNodeFactChange.count).not.toHaveBeenCalled();
+    });
+
+    it('a node that holds NO package list seeds silently, however long the arriving list is', async () => {
+      // The same trap one step along: an estate upgrading into this has nodes whose stored blob
+      // predates the software contract, or whose list policy cleared. The first list to arrive is a
+      // first observation and must not read as three thousand installs.
+      hostIsKnown();
+      prisma.$queryRaw.mockResolvedValue(
+        stored(
+          { host: storedHost(), reportedAt: '2026-08-02T11:00:00.000Z' },
+          false,
+        ),
+      );
+
+      await service.ingestReport(
+        report({
+          software: Array.from({ length: 3000 }, (_, i) => ({
+            name: `pkg-${i}`,
+            version: '1',
+          })),
+          softwareHash: undefined,
+        }),
+      );
+
+      expect(prisma.infraNodeFactChange.createMany).not.toHaveBeenCalled();
+    });
+
+    it('a host fact observed for the FIRST time on an existing node seeds silently', async () => {
+      // An unprivileged agent enrolled this host with no dmidecode; the unit is fixed and a serial
+      // appears. That is the fact becoming observable, not the chassis being swapped.
+      hostIsKnown();
+      const withoutSerial = { ...storedHost(), hardware: undefined };
+      prisma.$queryRaw.mockResolvedValue(settled({ host: withoutSerial }));
+
+      await service.ingestReport(report());
+
+      expect(recorded()).toEqual([]);
+    });
+
+    it('a fact that DISAPPEARS records nothing — a collector that lost root did not change the host', async () => {
+      hostIsKnown();
+      prisma.$queryRaw.mockResolvedValue(settled());
+      const withoutSerial = { ...storedHost(), hardware: undefined };
+
+      await service.ingestReport(report({ host: withoutSerial }));
+
+      expect(recorded()).toEqual([]);
+    });
+
+    // ── What it DOES record ──────────────────────────────────────────────────
+
+    it('records a kernel move as one row, and nothing else', async () => {
+      hostIsKnown();
+      prisma.$queryRaw.mockResolvedValue(
+        settled({
+          host: {
+            ...storedHost(),
+            os: { ...storedHost().os, kernel: '6.8.0-30-generic' },
+          },
+        }),
+      );
+
+      await service.ingestReport(report());
+
+      expect(recorded()).toEqual([
+        {
+          nodeId: 'node-db01',
+          kind: 'FACT_CHANGED',
+          fact: 'host.os.kernel',
+          previousValue: '6.8.0-30-generic',
+          currentValue: '6.8.0-31-generic',
+        },
+      ]);
+    });
+
+    it('records the OpenSSL upgrade this feature exists for — reading the stored list back ONLY because the fingerprints already disagree', async () => {
+      hostIsKnown();
+      const PREVIOUS = [
+        { name: 'nginx', version: '1.27.0' },
+        { name: 'openssl', version: '3.0.2' },
+      ];
+      prisma.$queryRaw
+        // 1: the stored blob, MINUS the package list (`storedNodeSpecs`).
+        .mockResolvedValueOnce(
+          settled({ softwareHash: softwareFingerprint(PREVIOUS) }),
+        )
+        // 2: the stored list, read back only on this branch (`storedSoftware`).
+        .mockResolvedValueOnce([{ software: PREVIOUS }]);
+
+      await service.ingestReport(report());
+
+      expect(recorded()).toEqual([
+        {
+          nodeId: 'node-db01',
+          kind: 'PACKAGE_VERSION',
+          fact: 'openssl',
+          previousValue: '3.0.2',
+          currentValue: '3.0.13',
+        },
+      ]);
+    });
+
+    it('an IDENTICAL report records nothing and does not even ask the per-node cap', async () => {
+      // The steady state — ~96 reports a host a day. #1153 already skipped the jsonb write here; this
+      // reuses that same answer rather than making a second comparison, so it costs no query at all.
+      hostIsKnown();
+      prisma.$queryRaw.mockResolvedValue(settled());
+
+      await service.ingestReport(report());
+
+      expect(prisma.infraNodeFactChange.count).not.toHaveBeenCalled();
+      expect(prisma.infraNodeFactChange.createMany).not.toHaveBeenCalled();
+    });
+
+    it('an `unchanged` claim never records a package row, however much else moved', async () => {
+      hostIsKnown();
+      prisma.$queryRaw
+        // 1: the stored blob, minus the list (`storedNodeSpecs`).
+        .mockResolvedValueOnce(
+          settled({ host: { ...storedHost(), memoryBytes: 17179869184 } }),
+        )
+        // 2: the list `planSpecsWrite` re-embeds so writing the changed host facts cannot delete it.
+        // The fact history takes NO package rows off this read — a preserved list did not move.
+        .mockResolvedValueOnce([{ software: clone(SOFTWARE) }]);
+
+      await service.ingestReport(
+        report({
+          software: undefined,
+          softwareState: 'unchanged',
+          softwareHash: softwareFingerprint(SOFTWARE),
+        }),
+      );
+
+      // The memory move IS recorded; the package list was never claimed to have moved.
+      expect(recorded()).toEqual([
+        {
+          nodeId: 'node-db01',
+          kind: 'FACT_CHANGED',
+          fact: 'host.memoryBytes',
+          previousValue: '17179869184',
+          currentValue: '34359738368',
+        },
+      ]);
+    });
+
+    it('`disabled` clears the stored list WITHOUT recording it as thousands of removals', async () => {
+      // Policy turning software collection off is a policy event. Rendering it as a removal per
+      // package would put a fleet-wide uninstall on screen that never happened.
+      hostIsKnown();
+      prisma.$queryRaw.mockResolvedValue(settled());
+
+      await service.ingestReport(
+        report({
+          software: undefined,
+          softwareState: 'disabled',
+          softwareHash: undefined,
+        }),
+      );
+
+      expect(recorded()).toEqual([]);
+    });
+
+    // ── The two caps ─────────────────────────────────────────────────────────
+
+    it('caps ONE report at 200 rows, so a host back from a long outage cannot flood', async () => {
+      hostIsKnown();
+      const PREVIOUS = Array.from({ length: 900 }, (_, i) => ({
+        name: `pkg-${String(i).padStart(4, '0')}`,
+        version: '1',
+      }));
+      const NEXT = PREVIOUS.map((p) => ({ ...p, version: '2' }));
+      prisma.$queryRaw
+        .mockResolvedValueOnce(
+          settled({ softwareHash: softwareFingerprint(PREVIOUS) }),
+        )
+        .mockResolvedValueOnce([{ software: PREVIOUS }]);
+
+      await service.ingestReport(
+        report({ software: NEXT, softwareHash: softwareFingerprint(NEXT) }),
+      );
+
+      const rows = recorded();
+      expect(rows).toHaveLength(200);
+      // Deterministic: the same 200 rows whichever replica took the report.
+      expect(rows[0]).toMatchObject({ fact: 'pkg-0000' });
+      expect(rows[199]).toMatchObject({ fact: 'pkg-0199' });
+    });
+
+    it('DROPS rows once a node has recorded 500 changes this hour, and never deletes what is already there', async () => {
+      hostIsKnown();
+      prisma.infraNodeFactChange.count.mockResolvedValue(500);
+      prisma.$queryRaw.mockResolvedValue(
+        settled({
+          host: { ...storedHost(), os: { ...storedHost().os, kernel: 'old' } },
+        }),
+      );
+
+      await service.ingestReport(report());
+
+      expect(prisma.infraNodeFactChange.createMany).not.toHaveBeenCalled();
+      // Append-only (ADR-0006): the bound is on what goes IN, never on what is already recorded.
+      expect(
+        (prisma.infraNodeFactChange as unknown as Record<string, unknown>)
+          .deleteMany,
+      ).toBeUndefined();
+    });
+
+    it('writes only the remaining room when the node is part-way through its window', async () => {
+      hostIsKnown();
+      prisma.infraNodeFactChange.count.mockResolvedValue(499);
+      const PREVIOUS = [
+        { name: 'a', version: '1' },
+        { name: 'b', version: '1' },
+      ];
+      const NEXT = [
+        { name: 'a', version: '2' },
+        { name: 'b', version: '2' },
+      ];
+      prisma.$queryRaw
+        .mockResolvedValueOnce(
+          settled({ softwareHash: softwareFingerprint(PREVIOUS) }),
+        )
+        .mockResolvedValueOnce([{ software: PREVIOUS }]);
+
+      await service.ingestReport(
+        report({ software: NEXT, softwareHash: softwareFingerprint(NEXT) }),
+      );
+
+      expect(recorded()).toHaveLength(1);
+    });
+
+    // ── Nothing here may fail a check-in ─────────────────────────────────────
+
+    it('a failed history write still ACKS the report — the host must never drop off the map', async () => {
+      hostIsKnown();
+      prisma.$queryRaw.mockResolvedValue(
+        settled({
+          host: { ...storedHost(), os: { ...storedHost().os, kernel: 'old' } },
+        }),
+      );
+      prisma.infraNodeFactChange.createMany.mockRejectedValue(
+        new Error('deadlock detected'),
+      );
+
+      const ack = await service.ingestReport(report());
+
+      expect(ack.accepted).toBe(true);
+      expect(ack.nodeId).toBe('node-db01');
+    });
+
+    // ── Container children (#1139/#1157) ─────────────────────────────────────
+
+    describe('container children', () => {
+      const containerReport = (container: Record<string, unknown>) =>
+        AgentReportSchema.parse({
+          agentVersion: '1.0.0',
+          reportingSource: 'agent:docker',
+          externalId: 'machine-id-docker',
+          reportedAt: '2026-08-02T12:00:00.000Z',
+          host: { hostname: 'docker-01', containers: [container] },
+        });
+
+      function childIsKnown(specs: Record<string, unknown>): void {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          {
+            id: 'node-child',
+            externalId: 'machine-id-docker/container/redis',
+            specs,
+            assetId: null,
+          },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+        prisma.$queryRaw.mockResolvedValue([]);
+      }
+
+      it('records an image DIGEST move under an unchanged tag — the deploy nobody remembers doing', async () => {
+        childIsKnown({
+          container: {
+            name: 'redis',
+            image: 'redis:latest',
+            imageDigest: 'sha256:aaa',
+          },
+          reportedAt: '2026-08-02T11:00:00.000Z',
+        });
+
+        await service.ingestReport(
+          containerReport({
+            name: 'redis',
+            image: 'redis:latest',
+            imageDigest: 'sha256:bbb',
+          }),
+          AGENT_SA,
+        );
+
+        expect(recorded()).toEqual([
+          {
+            nodeId: 'node-child',
+            kind: 'FACT_CHANGED',
+            fact: 'container.imageDigest',
+            previousValue: 'sha256:aaa',
+            currentValue: 'sha256:bbb',
+          },
+        ]);
+      });
+
+      it('records NOTHING for a restart — runtime state is liveness, not inventory', async () => {
+        childIsKnown({
+          container: { name: 'redis', image: 'redis:7', state: 'running' },
+          reportedAt: '2026-08-02T11:00:00.000Z',
+        });
+
+        await service.ingestReport(
+          containerReport({ name: 'redis', image: 'redis:7', state: 'exited' }),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraNodeFactChange.createMany).not.toHaveBeenCalled();
+      });
+
+      it('a container enrolled for the FIRST time records nothing', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create
+          .mockResolvedValueOnce({ id: 'node-host', state: 'PENDING' })
+          .mockResolvedValueOnce({ id: 'node-child' });
+        prisma.infraNode.findMany.mockResolvedValue([]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+
+        await service.ingestReport(
+          containerReport({
+            name: 'redis',
+            image: 'redis:7',
+            imageDigest: 'sha256:aaa',
+          }),
+          AGENT_SA,
+        );
+
+        expect(prisma.infraNodeFactChange.createMany).not.toHaveBeenCalled();
+      });
+    });
+
+    // ── Reading it back ──────────────────────────────────────────────────────
+
+    describe('listNodeFactChanges', () => {
+      const row = (id: number) => ({
+        id,
+        nodeId: 'node-db01',
+        kind: 'FACT_CHANGED' as const,
+        fact: 'host.os.kernel',
+        previousValue: 'a',
+        currentValue: 'b',
+        createdAt: new Date('2026-08-02T12:00:00.000Z'),
+      });
+
+      it('serves newest first and reports no next page when the last one fits', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-db01' });
+        prisma.infraNodeFactChange.findMany.mockResolvedValue([row(9), row(8)]);
+
+        const page = await service.listNodeFactChanges('node-db01', {
+          limit: 2,
+        });
+
+        expect(page.nextCursor).toBeNull();
+        expect(page.items.map((i) => i.id)).toEqual([9, 8]);
+        expect(page.items[0].createdAt).toBe('2026-08-02T12:00:00.000Z');
+        const arg = firstArg<{
+          where: Record<string, unknown>;
+          orderBy: Record<string, unknown>;
+          take: number;
+        }>(prisma.infraNodeFactChange.findMany);
+        expect(arg.orderBy).toEqual({ id: 'desc' });
+        // One extra row is the "is there another page?" probe.
+        expect(arg.take).toBe(3);
+      });
+
+      it('hands back a keyset cursor when a further page exists', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-db01' });
+        prisma.infraNodeFactChange.findMany.mockResolvedValue([
+          row(9),
+          row(8),
+          row(7),
+        ]);
+
+        const page = await service.listNodeFactChanges('node-db01', {
+          limit: 2,
+          cursor: 10,
+        });
+
+        expect(page.items).toHaveLength(2);
+        expect(page.nextCursor).toBe(8);
+        const arg = firstArg<{ where: { id?: { lt: number } } }>(
+          prisma.infraNodeFactChange.findMany,
+        );
+        expect(arg.where.id).toEqual({ lt: 10 });
+      });
+
+      it('404s on a node that is off the map rather than serving its history', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.listNodeFactChanges('node-gone'),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        expect(prisma.infraNodeFactChange.findMany).not.toHaveBeenCalled();
+      });
     });
   });
 });
