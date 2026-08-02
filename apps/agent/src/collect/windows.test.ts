@@ -3,9 +3,13 @@ import { AGENT_POLICY_DEFAULT, type AgentPolicy } from "@lazyit/shared";
 import {
   buildWindowsHost,
   collectContainers,
+  DEFAULT_PATHEXT,
   parseDockerCliContainers,
   parseWindowsBlob,
   parseWindowsSoftware,
+  readMachineGuid,
+  resetWindowsCollectorMemos,
+  resolveDockerClient,
   WINDOWS_FACTS_SCRIPT,
   windowsChassis,
   windowsVirtualization,
@@ -13,11 +17,16 @@ import {
 } from "./windows";
 
 /**
- * Issue #1144 — the Windows collector. Every test here is a PURE mapper over a fixture, because the
- * only Windows host this repo can reach is the one an operator installs on: CI runs Linux and the
+ * Issue #1144 — the Windows collector. Almost every test here is a PURE mapper over a fixture, because
+ * the only Windows host this repo can reach is the one an operator installs on: CI runs Linux and the
  * developer machines run macOS. That is a real limitation and it shapes the design rather than being
- * worked around — everything that reads WMI/CIM/the registry happens in ONE PowerShell call whose
- * output is a JSON document, and everything that turns that document into a report is testable here.
+ * worked around — the whole WMI/CIM/registry sweep happens in ONE PowerShell call whose output is a
+ * JSON document (the dedup key is a second, much smaller call; see `readMachineGuid`), and everything
+ * that turns that document into a report is testable here.
+ *
+ * The two impure boundaries that are NOT pure mappers — the docker lookup and the PowerShell spawn —
+ * take an injected lookup/exec below rather than going untested, because the one that was left
+ * implicit is exactly the one that failed silently.
  *
  * What CANNOT be tested here is stated plainly rather than faked: whether the PowerShell script emits
  * the shape these fixtures describe. `WINDOWS_FACTS_SCRIPT` is asserted for the two things a mistake
@@ -415,19 +424,161 @@ describe("parseDockerCliContainers", () => {
   });
 });
 
+/**
+ * The `docker` LOOKUP is the same class of unverified Windows impure boundary this collector refused
+ * to take for the named pipe, so it gets the same treatment: nothing here relies on `Bun.which`
+ * guessing that a bare `docker` means `docker.exe`.
+ *
+ * Windows has no execute bit and no extensionless executables — a name on PATH resolves through
+ * PATHEXT. `Bun.which("docker")` doing that on Windows is undocumented and this repo cannot check it,
+ * and the cost of being wrong was SILENT BY DESIGN: a host running Docker Desktop would report no
+ * containers, for ever, with nothing in `diagnostics.warnings` to say why. So the extensions are
+ * tried explicitly here, and the resolved ABSOLUTE PATH is what gets spawned — which also takes
+ * `Bun.spawn`'s own PATH resolution out of the picture.
+ */
+describe("resolveDockerClient", () => {
+  test("finds docker.exe when the bare name does not resolve — Windows needs the extension", () => {
+    const which = (name: string) =>
+      name === "docker.exe" ? "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe" : null;
+    expect(resolveDockerClient("docker", which, DEFAULT_PATHEXT)).toBe(
+      "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+    );
+  });
+
+  test("walks the host's own PATHEXT, in its order", () => {
+    // A `docker.cmd` shim is what some Windows installs actually put on PATH.
+    const tried: string[] = [];
+    const which = (name: string) => {
+      tried.push(name);
+      return name === "docker.cmd" ? "C:\\tools\\docker.cmd" : null;
+    };
+    expect(resolveDockerClient("docker", which, ".COM;.EXE;.BAT;.CMD")).toBe("C:\\tools\\docker.cmd");
+    // It stops at the first hit, so the bare name is never reached here — the extensions are walked
+    // in PATHEXT's own order, which is what decides WHICH of two shims on PATH wins.
+    expect(tried).toEqual(["docker.com", "docker.exe", "docker.bat", "docker.cmd"]);
+  });
+
+  test("the bare name is the LAST resort, after every extension has missed", () => {
+    const tried: string[] = [];
+    const which = (name: string) => {
+      tried.push(name);
+      return name === "docker" ? "/usr/bin/docker" : null;
+    };
+    expect(resolveDockerClient("docker", which, ".COM;.EXE")).toBe("/usr/bin/docker");
+    expect(tried).toEqual(["docker.com", "docker.exe", "docker"]);
+  });
+
+  test("falls back to the built-in extension list when the host exports no PATHEXT", () => {
+    const which = (name: string) => (name === "docker.exe" ? "C:\\d\\docker.exe" : null);
+    expect(resolveDockerClient("docker", which, undefined)).toBe("C:\\d\\docker.exe");
+  });
+
+  test("a name that already carries an extension is looked up as written", () => {
+    const tried: string[] = [];
+    const which = (name: string) => {
+      tried.push(name);
+      return "C:\\d\\docker.exe";
+    };
+    expect(resolveDockerClient("docker.exe", which, DEFAULT_PATHEXT)).toBe("C:\\d\\docker.exe");
+    expect(tried).toEqual(["docker.exe"]);
+  });
+
+  test("nothing on PATH under any extension is null — the host simply has no Docker", () => {
+    expect(resolveDockerClient("docker", () => null, DEFAULT_PATHEXT)).toBeNull();
+  });
+});
+
 describe("collectContainers (Windows)", () => {
   test("a host with no docker client reports NOTHING and warns about NOTHING", async () => {
     // Requirement from the issue, restated: the Linux collector is silent about a box that does not
     // run containers, and the Windows one must be too — otherwise every one of ~180 endpoints files a
     // warning per report until the operator learns to ignore the field.
     //
-    // The lookup is by NAME on PATH and it happens on EVERY run, which is the whole answer to "if I
-    // install Docker later, does it start reporting?": nothing is cached, so the first tick after
-    // Docker appears finds it.
+    // The lookup happens on EVERY run and caches nothing, which is the whole answer to "if I install
+    // Docker later, does it start reporting?": the first tick after Docker appears finds it.
     const { warn, notes } = sink();
     const containers = await collectContainers(warn, "lazyit-nonexistent-docker-shim");
     expect(containers).toBeUndefined();
     expect(notes).toEqual([]);
+  });
+
+  test("spawns the RESOLVED PATH the lookup returned, not the bare name", async () => {
+    const spawned: string[][] = [];
+    const exec = async (args: string[]) => {
+      spawned.push(args);
+      return "";
+    };
+    await collectContainers(
+      sink().warn,
+      "docker",
+      (name) => (name === "docker.exe" ? "C:\\d\\docker.exe" : null),
+      DEFAULT_PATHEXT,
+      exec,
+    );
+    expect(spawned).toEqual([["C:\\d\\docker.exe", "ps", "--format", "{{json .}}"]]);
+  });
+
+  test("a client that IS there but cannot answer is VISIBLE in diagnostics.warnings", async () => {
+    // The failure this must never have again is the silent one. A resolved client that returns
+    // nothing — engine stopped, Desktop not running because nobody is logged in, the pipe ACL
+    // refusing SYSTEM — is exactly the "why is this host's container list empty?" question
+    // `diagnostics.warnings` exists to answer, so it says so and names the path it tried.
+    const { warn, notes } = sink();
+    const containers = await collectContainers(
+      warn,
+      "docker",
+      () => "C:\\d\\docker.exe",
+      DEFAULT_PATHEXT,
+      async () => null,
+    );
+    expect(containers).toBeUndefined();
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("C:\\d\\docker.exe");
+    expect(notes[0]).toContain("containers:");
+  });
+
+  test("the run's own degradation notes reach the report too", async () => {
+    // `run` files a note for a missing/unpermitted binary and for a timeout. Those used to be
+    // swallowed into a local flag, so a docker client that timed out looked identical to a host with
+    // no Docker at all.
+    const { warn, notes } = sink();
+    await collectContainers(
+      warn,
+      "docker",
+      () => "C:\\d\\docker.exe",
+      DEFAULT_PATHEXT,
+      async (_args, _timeout, runWarn) => {
+        runWarn?.("docker: timed out after 60000ms — fact omitted");
+        return null;
+      },
+    );
+    expect(notes.some((n) => n.includes("timed out"))).toBe(true);
+  });
+});
+
+describe("readMachineGuid", () => {
+  test("ONE PowerShell call per process, however often the run asks for the dedup key", async () => {
+    // `index.ts` asks twice on a reporting tick — once for the cadence jitter key before the due
+    // gate, once inside `buildReport` — and once on a tick that reports nothing. Un-memoized, that
+    // was an extra `powershell.exe` start per tick on every Windows host in the estate, including
+    // the ~11 out of 12 ticks that do nothing at all.
+    resetWindowsCollectorMemos();
+    let calls = 0;
+    const exec = async () => {
+      calls += 1;
+      return "f3b1a2c4-5d6e-4f70-8192-a3b4c5d6e7f8\r\n";
+    };
+    expect(await readMachineGuid(() => {}, exec)).toBe("f3b1a2c4-5d6e-4f70-8192-a3b4c5d6e7f8");
+    expect(await readMachineGuid(() => {}, exec)).toBe("f3b1a2c4-5d6e-4f70-8192-a3b4c5d6e7f8");
+    expect(calls).toBe(1);
+  });
+
+  test("an unreadable registry value is null, never an empty-string dedup key", async () => {
+    resetWindowsCollectorMemos();
+    expect(await readMachineGuid(() => {}, async () => null)).toBeNull();
+    resetWindowsCollectorMemos();
+    expect(await readMachineGuid(() => {}, async () => "   \r\n")).toBeNull();
+    resetWindowsCollectorMemos();
   });
 });
 
