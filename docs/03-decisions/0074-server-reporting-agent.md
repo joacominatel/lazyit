@@ -1060,9 +1060,9 @@ policy matched them all" is a positive answer *about the collector*. Counting it
 policy edit as `host.disks.count 2 → 0`, a chassis losing all of its storage — exactly the invented
 event that makes a history worthless. (Excluding only *some* mountpoints still moves the count, and
 is recorded: that is a real reading, indistinguishable by design from a disk actually being pulled.)
-Everything else the report carries —
-hostname, NICs, IPs, `bootedAt`, the warning list — is either visible elsewhere or moves for reasons
-that are not inventory changes, and a history nobody trusts is worse than none.
+Everything else the report carries — hostname, NICs, IPs, `bootedAt`, the warning list — is either
+visible elsewhere or moves for reasons that are not inventory changes, and a history nobody trusts is
+worse than none.
 
 **Container children are in, and the digest is why.** #1139 gave a container its own node and #1157
 gave it its own Asset sync; a container whose **image digest moves under an unchanged `:latest` tag**

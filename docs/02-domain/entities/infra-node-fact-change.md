@@ -55,11 +55,11 @@ written **only when something actually moved**, so a host nobody touched adds no
   `container.imageDigest`. **Both disk facts answer "no evidence" rather than `0`** when a report
   carries no readable disk record: the agent's `exclude.mountpoints` policy sends `disks: []` on
   purpose when its globs match everything (the #1140 policy amendment in
-  [[0074-server-reporting-agent]] §7), and
-  recording that would put `host.disks.count 2 → 0` — a chassis losing all of its storage — on screen
-  in exchange for an operator editing a setting. Excluding only *some* mountpoints still moves the
-  count and is recorded; that is a real reading. Everything else the report carries is either visible elsewhere or moves
-  for reasons that are not inventory changes, and a history nobody trusts is worse than none.
+  [[0074-server-reporting-agent]] §7), and recording that would put `host.disks.count 2 → 0` — a
+  chassis losing all of its storage — on screen in exchange for an operator editing a setting.
+  Excluding only *some* mountpoints still moves the count and is recorded; that is a real reading.
+  Everything else the report carries is either visible elsewhere or moves for reasons that are not
+  inventory changes, and a history nobody trusts is worse than none.
 - **A container's runtime `state` is deliberately NOT recorded.** It is liveness: it already drives
   the child node's `status`, and a container that restarts nightly would write two rows a day forever.
   The image **digest** is recorded precisely because it moves under an unchanged `:latest` tag — the
@@ -71,7 +71,7 @@ written **only when something actually moved**, so a host nobody touched adds no
   packages by name — a deterministic slice, so a host back from a long outage writes a bounded sample
   rather than a few thousand inserts), and at most **500 rows per node per rolling hour** (one
   `COUNT`, run only when there is something to write, and answerable from the `(nodeId, createdAt)`
-  index — see Conventions below). Over the ceiling the new rows are **dropped**; nothing already
+  index — see **Fields** below). Over the ceiling the new rows are **dropped**; nothing already
   recorded is ever deleted, because the table is append-only.
 - **Nothing here may fail a check-in.** Every failure on this path — a constraint, a DB hiccup, a node
   deleted between the update and the insert, and the one stored-list read this feature adds to the
