@@ -480,11 +480,14 @@ if (-not $startable) {
 }
 
 # --- the bare name, in a new shell (#1167) ---------------------------------
-# Only now, with an executable that is in place and proven to start. NON-FATAL BY DESIGN: the
-# scheduled task runs $BinPath by absolute path, every message this script prints uses the absolute
-# path, and the agent never reads PATH - so a host whose machine PATH could not be written (a
-# locked-down registry ACL, a Group Policy preference that owns the value) is a fully working agent
-# missing a convenience. Throwing away a completed install over that would be the wrong trade.
+# Only now, with an executable that is in place and proven to start. NON-FATAL BY DESIGN: nothing
+# needs THIS entry. The scheduled task runs $BinPath by absolute path and every message this script
+# prints uses the absolute path, so the agent is never located through PATH - it is only the
+# operator typing the bare name who is. (The agent does resolve `powershell.exe` and `docker`
+# through PATH while collecting; those are Windows' own entries and this one changes nothing about
+# them.) A host whose machine PATH could not be written - a locked-down registry ACL, a Group Policy
+# preference that owns the value - is a fully working agent missing a convenience, and throwing away
+# a completed install over that would be the wrong trade.
 $onPath = $false
 try {
   $null = Add-InstallDirToPath
