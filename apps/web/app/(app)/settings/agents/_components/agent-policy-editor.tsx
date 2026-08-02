@@ -1,6 +1,9 @@
 "use client";
 
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowPathIcon,
+  ExclamationTriangleIcon,
+} from "@heroicons/react/24/outline";
 import {
   AGENT_POLICY_DEFAULT,
   AGENT_POLICY_GLOBS_MAX,
@@ -17,6 +20,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Callout } from "@/components/callout";
 import { RequestIdNote } from "@/components/request-id-note";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +47,7 @@ import {
   useSaveAgentPolicy,
 } from "@/lib/api/hooks/use-agent-policy";
 import { notifyError } from "@/lib/api/notify-error";
+import { reseedAction } from "./agent-policy-reseed";
 
 /** The five collectors, in the order the policy schema declares them. */
 const COLLECTORS: readonly (keyof AgentPolicyCollect)[] = [
@@ -182,6 +187,13 @@ function seedFrom(effective: {
  * resolves as "no override" (`AgentPolicyService.parseOverride`) and the documented remedy is to
  * re-save it from here — which is a no-op as far as the form can tell, and would be unreachable
  * behind a dirty check.
+ *
+ * A policy write from ANOTHER scope, tab or API client bumps the same revision counter this form
+ * re-seeds on, so it used to silently replace an in-progress edit — and now that the action bar
+ * carries an "Unsaved changes" badge and a Discard button, it would have cleared those too, leaving
+ * the loss looking like an ordinary clean form. {@link reseedAction} holds the edit back in that one
+ * case and the page says so, with reloading left as the operator's explicit choice. It does not make
+ * the write safe: the PUT still replaces the whole instance layer and the last writer still wins.
  */
 export function AgentPolicyEditor() {
   const t = useTranslations("settings.agentPolicy");
@@ -194,19 +206,41 @@ export function AgentPolicyEditor() {
   const [form, setForm] = useState<FormState | null>(null);
   const [seeded, setSeeded] = useState<FormState | null>(null);
   const [seededRevision, setSeededRevision] = useState<number | null>(null);
+  /** The foreign generation an in-progress edit is being held against, or `null`. */
+  const [conflictRevision, setConflictRevision] = useState<number | null>(null);
+
+  /** Take the server's values, dropping whatever is in the form. The one deliberate discard. */
+  const reseed = (settings: NonNullable<typeof data>) => {
+    const next = seedFrom(settings.effective);
+    setSeededRevision(settings.revision);
+    setSeeded(next);
+    setForm(next);
+    setConflictRevision(null);
+  };
 
   // Re-seed from the persisted truth on load and after every save, so the fields can never drift
   // from what the server actually stores. Keyed on the REVISION rather than on the response object:
   // a save bumps it (so the form re-seeds), while a background refetch that returns the same
   // generation leaves an operator's half-finished edit exactly where it was.
   //
+  // `bumpRevision` fires on every policy write at EVERY scope, though, so that number also moves for
+  // a write this operator did not make. `reseedAction` is where the three cases are decided and
+  // argued; the only one that is not a plain re-seed is a foreign write against a dirty form, which
+  // KEEPS the edit and raises the notice below rather than overwriting it.
+  //
   // Adjusted during render, not in an effect — the React-sanctioned way to derive state from a
   // changed input, and the one that does not cause the cascading re-render an effect would.
-  if (data && seededRevision !== data.revision) {
-    const next = seedFrom(data.effective);
-    setSeededRevision(data.revision);
-    setSeeded(next);
-    setForm(next);
+  if (data) {
+    const action = reseedAction({
+      incomingRevision: data.revision,
+      seededRevision,
+      dirty: form !== null && seeded !== null && !sameForm(form, seeded),
+      savedRevision: save.data?.revision,
+    });
+    if (action === "seed") reseed(data);
+    else if (action === "conflict" && conflictRevision !== data.revision) {
+      setConflictRevision(data.revision);
+    }
   }
 
   if (isLoading || !form || !seeded) {
@@ -467,6 +501,20 @@ export function AgentPolicyEditor() {
       {/* One action bar for all three groups: the PUT replaces the whole instance layer, so the
           three cards are one edit and saving them separately would be a lie about the contract. */}
       <div className="space-y-3">
+        {/* A write from another scope, another tab or the API moved the revision under a dirty
+            form. The edit is still here and still unsent; reloading is the operator's call. */}
+        {conflictRevision !== null && data ? (
+          <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
+            <div className="space-y-3">
+              <p className="text-sm">
+                {t("conflict.body", { revision: conflictRevision })}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => reseed(data)}>
+                {t("conflict.reload")}
+              </Button>
+            </div>
+          </Callout>
+        ) : null}
         <p className="text-sm text-muted-foreground">{t("propagation")}</p>
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={onSave} disabled={blocked || save.isPending}>
