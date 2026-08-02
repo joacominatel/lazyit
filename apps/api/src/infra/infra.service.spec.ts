@@ -5326,6 +5326,31 @@ describe('InfraService', () => {
       ]);
     });
 
+    it('a node stored BEFORE the fingerprint existed records nothing when its list only re-sorted', async () => {
+      // The upgrade path with the sharpest edge. A pre-#1142 node holds a list and NO `softwareHash`,
+      // so its first report after an upgrade always looks like "the package list moved" and the
+      // stored list IS read back. If the diff compared by position, a package manager that re-sorted
+      // its output would then record one row per package on every host in the estate, once, on the
+      // day the operator upgraded. It compares by NAME.
+      hostIsKnown();
+      const RESORTED = [...clone(SOFTWARE)].reverse();
+      prisma.$queryRaw
+        .mockResolvedValueOnce(
+          stored(
+            { host: storedHost(), reportedAt: '2026-08-02T11:00:00.000Z' },
+            true,
+          ),
+        )
+        .mockResolvedValueOnce([{ software: RESORTED }]);
+
+      await service.ingestReport(report());
+
+      // The stored list WAS read back (two sub-selects) — the silence comes from the comparison,
+      // not from a short-circuit that never looked.
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+      expect(prisma.infraNodeFactChange.createMany).not.toHaveBeenCalled();
+    });
+
     it('an IDENTICAL report records nothing and does not even ask the per-node cap', async () => {
       // The steady state — ~96 reports a host a day. #1153 already skipped the jsonb write here; this
       // reuses that same answer rather than making a second comparison, so it costs no query at all.
