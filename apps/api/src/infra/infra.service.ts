@@ -366,6 +366,14 @@ const INFRA_FACT_CHANGES_MAX_PER_REPORT = 200;
  * actually has rows to write — which for a legitimate estate is a handful of times a month per host,
  * so the steady-state cost of the cap is zero queries.
  *
+ * THE COUNT MUST BE ANSWERABLE FROM AN INDEX, and that is not a detail. Its predicate is a RANGE on
+ * `createdAt`, so `(nodeId, id)` cannot serve it — that index could only walk every row the node owns
+ * and re-check each one. Nothing prunes this table, so the node holding the most rows is by definition
+ * the abused one, and the mitigation would degrade to a scan exactly when it fires, on the report
+ * ingest path. `(nodeId, createdAt)` is carried for this query alone; measured on postgres:18-alpine
+ * at 2.16M rows for one node, on the SQL Prisma emits for this very `count`, it is an index-only
+ * scan, 7 buffers, 0.11 ms, against a parallel seq scan, 18,374 buffers, 38.6 ms without it.
+ *
  * Over the ceiling the rows are DROPPED, not queued and not deleted: this table is append-only
  * (ADR-0006), so the bound is on what goes in, never on what is already recorded. A node that hits it
  * is either under abuse or genuinely changing hundreds of times an hour, and in both cases the next
@@ -1372,14 +1380,24 @@ export class InfraService {
    * concurrent report whose lower id commits after a higher one, which an offset would have shifted.
    * `nextCursor` is null on the last page.
    *
-   * The node is resolved through the soft-delete-scoped {@link getNode} first, so a node that is off
-   * the map answers 404 rather than serving its history.
+   * The node is checked for EXISTENCE first — soft-delete-scoped by the Prisma extension, so a node
+   * that is off the map answers 404 rather than serving its history. Deliberately NOT {@link getNode}:
+   * that is an unprojected `findFirst` and would pull the node's whole `specs` jsonb — including the
+   * installed-package list #1153 built {@link storedNodeSpecs} to keep off hot paths — on every page
+   * of a tab the operator scrolls, to read one boolean off it. `select: { id: true }` is the whole
+   * requirement (#1135 is the same defect class, found on the list endpoint).
    */
   async listNodeFactChanges(
     nodeId: string,
     options: { limit?: number; cursor?: number } = {},
   ): Promise<InfraNodeFactChangeList> {
-    await this.getNode(nodeId);
+    const node = await this.prisma.infraNode.findFirst({
+      where: { id: nodeId },
+      select: { id: true },
+    });
+    if (!node) {
+      throw new NotFoundException(`Infra node ${nodeId} not found`);
+    }
     const limit = Math.min(
       Math.max(options.limit ?? INFRA_FACT_CHANGE_PAGE_SIZE, 1),
       INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
