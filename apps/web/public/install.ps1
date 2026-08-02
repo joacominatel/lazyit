@@ -198,16 +198,34 @@ $Url = $Url.TrimEnd('/')
 # operator is the download failure further down, which names the token as a likely cause - so they
 # go and rotate a Service Account credential that was never wrong. Checked HERE, before anything is
 # downloaded, so the message names the real mistake and suggests the URL they meant.
+#
+# THE SCHEME IS COMPARED CASE-INSENSITIVELY, because -match and -replace are, and install.sh was
+# aligned to this side: RFC 3986 section 3.1 makes the scheme case-insensitive, and both
+# Invoke-WebRequest and curl accept HTTPS:// exactly as they accept https://. install.sh used a
+# case-sensitive `case` until #1171, so HTTPS://host installed on Windows and died on Linux.
 if ($Url -notmatch '^https?://[^/]+') {
   Die "-Url must be your lazyit instance base URL, starting with http:// or https:// (e.g. https://lazyit.example.com). Got: $Url"
 }
-# Whatever follows scheme://host[:port]. Empty for the ordinary case.
-$UrlPath = $Url -replace '^https?://[^/]+', ''
-if ($UrlPath -match '^/install\.(ps1|sh)') {
-  Die "-Url is your lazyit instance base URL, not the address of this script. You passed $Url; pass -Url $($Url -replace '/install\.(ps1|sh).*$', '') instead. The installer appends /api/agent/download to it itself."
+# Split into origin and path, and check the PATH from here on. Matching patterns against the whole
+# URL string is what made the first version of this guard suggest a BROKEN replacement: on
+# https://api.example.com/api, `$Url -replace '/api.*$', ''` strips from the /api inside the HOST and
+# answers `https:/`. A suggestion is pasted, so a wrong one is worse than none.
+$UrlPath   = $Url -replace '^https?://[^/]+', ''   # empty for the ordinary case
+$UrlOrigin = $Url.Substring(0, $Url.Length - $UrlPath.Length)
+
+# THIS SCRIPT'S NAME ANYWHERE IN THE PATH, not only as the first segment. A reverse proxy that
+# strips a prefix serves it at https://it.example.com/lazyit/install.ps1, and copying that address
+# out of the browser is precisely how the mistake gets made - in the one deployment shape the
+# warning branch below exists to protect. The appended '/' keeps the filename a COMPLETE path
+# segment, so /install.ps1x is not mistaken for this script and refused wrongly; the lazy (.*?)
+# captures the prefix to give back, which is empty when the script IS the whole path.
+if ("$UrlPath/" -match '^(.*?)/install\.(ps1|sh)/') {
+  Die "-Url is your lazyit instance base URL, not the address of this script. You passed $Url; pass -Url $($UrlOrigin + $Matches[1]) instead. The installer appends /api/agent/download to it itself."
 }
+# /api only at the START of the path. Under a prefix mount, /lazyit/api falls through to the warning
+# below rather than being refused - deliberately, since that is the shape a stripping proxy makes.
 if ($UrlPath -match '^/api(/|$)') {
-  Die "-Url is your lazyit instance base URL, not an API endpoint. You passed $Url, and the installer would then ask for $Url/api/agent/download. Pass -Url $($Url -replace '/api.*$', '')."
+  Die "-Url is your lazyit instance base URL, not an API endpoint. You passed $Url, and the installer would then ask for $Url/api/agent/download. Pass -Url $UrlOrigin."
 }
 # ANY OTHER PATH IS A WARNING, NOT A REFUSAL, and that asymmetry is deliberate. lazyit sets no
 # Next.js basePath, so a path here is almost always the same mistake in a different shape - but a
