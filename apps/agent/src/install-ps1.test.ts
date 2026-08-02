@@ -135,6 +135,42 @@ describe("the scheduled task is the systemd timer, one platform over", () => {
     expect(settings).not.toContain("-RandomDelay");
   });
 
+  // THE SECOND HALF OF THE SAME DEFECT. A repetition can be rejected by TWO different calls, and the
+  // two documented errors name two different cmdlets:
+  //
+  //   * `New-ScheduledTaskTrigger : The RepetitionInterval and RepetitionDuration Job trigger
+  //     parameters must be specified together.` — the older cmdlet (Server 2012), refusing an
+  //     interval with no duration while the trigger OBJECT is being built.
+  //   * `Set-ScheduledTask : The task XML contains a value which is incorrectly formatted or out of
+  //     range. (12,42):Duration:P99999999DT23H59M59S` — the `[TimeSpan]::MaxValue` idiom, rejected by
+  //     the REGISTERING cmdlet, because the task XML is validated there and not at construction.
+  //
+  // A fallback that wraps only construction therefore does not cover the call the duration is
+  // actually validated by — and registration is what runs AFTER the binary and the token file are
+  // already on disk. A fallback that misses its own case is worse than none: it reads as handled.
+  test("the repetition fallback covers REGISTRATION too, not only trigger construction", () => {
+    const registration = script.slice(script.indexOf("$taskPrincipal ="));
+    expect(registration.length).toBeGreaterThan(0);
+    // The register call is attempted inside a try, and the catch rebuilds the trigger with a finite,
+    // in-schema duration and registers again.
+    expect(registration).toContain("try { Register-AgentTask }");
+    expect(registration).toContain("$tickTrigger = New-TickTrigger $FallbackDuration");
+  });
+
+  test("the fallback fires ONCE — a second failure rethrows instead of burying the real error", () => {
+    // If the first attempt already carried a finite duration, the repetition is not what this host
+    // objects to, and retrying an identical registration would swallow whatever the real fault was.
+    expect(script).toContain("if ($usedFallbackDuration) { throw }");
+  });
+
+  test("the first attempt omits the duration, and MaxValue never comes back", () => {
+    // "If no value is specified for the duration, then the pattern is repeated indefinitely" — the
+    // finite duration is the COMPATIBILITY branch, never the default.
+    expect(script).toContain("New-TickTrigger ([TimeSpan]::Zero)");
+    expect(script).toContain("$FallbackDuration = New-TimeSpan -Days 3650");
+    expect(script).not.toContain("[TimeSpan]::MaxValue");
+  });
+
   test("one run is bounded — the RuntimeMaxSec analogue", () => {
     expect(script).toContain("-ExecutionTimeLimit $ExecutionTimeLimit");
     expect(script).toContain("$ExecutionTimeLimit = New-TimeSpan -Minutes 5");
