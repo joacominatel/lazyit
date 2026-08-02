@@ -85,8 +85,11 @@ while [ $# -gt 0 ]; do
     --uninstall) UNINSTALL=1; shift ;;
     --keep-config) KEEP_CONFIG=1; shift ;;
     -h|--help)
-      echo "Usage: install.sh --url <url> (--token <token> | --token-file <path>)"
+      echo "Usage: install.sh --url <base-url> (--token <token> | --token-file <path>)"
       echo "       install.sh --uninstall [--keep-config]"
+      echo "  --url <base-url>     your lazyit instance, scheme + host + port and nothing else:"
+      echo "                       e.g. https://lazyit.example.com  (NOT .../install.sh - this"
+      echo "                       script appends /api/agent/download to whatever you pass)"
       echo "  --token-file <path>  read the token from a file ('-' = stdin; not usable with curl | sh)"
       echo "                       LAZYIT_TOKEN in the environment works too, and keeps it out of ps."
       echo "  --ca-file <path>     PEM bundle to trust, instead of trusting your CA system-wide;"
@@ -187,6 +190,38 @@ URL="${URL:-${LAZYIT_URL:-}}"
 [ -n "$URL" ] || die "--url is required (your lazyit instance, e.g. https://lazyit.example.com)"
 [ -n "$TOKEN" ] || die "a token is required - pass --token, --token-file, or set LAZYIT_TOKEN (needs infra:report)"
 URL="${URL%/}" # strip a trailing slash
+
+# --- --url IS THE INSTANCE BASE URL, NOT THE ADDRESS OF THIS SCRIPT (#1166) ---
+# Every request below is built as "$URL/api/...", so `--url https://host/install.sh` asks the server
+# for https://host/install.sh/api/agent/download?arch=... . What reaches the operator is the download
+# failure further down, which names the token as a likely cause - so they go and rotate a Service
+# Account credential that was never wrong. It was a Windows operator who hit this first, on the
+# identical shape in install.ps1; nothing about the mistake is Windows-specific. Checked HERE, before
+# anything is downloaded, so the message names the real mistake and suggests the URL they meant.
+case "$URL" in
+  http://*|https://*) ;;
+  *) die "--url must be your lazyit instance base URL, starting with http:// or https:// (e.g. https://lazyit.example.com). Got: $URL" ;;
+esac
+# Whatever follows scheme://host[:port]. `${URL#*://}` drops the scheme; a host with no path has no
+# slash left in it, which is the ordinary case and yields an empty URL_PATH.
+URL_HOSTPATH="${URL#*://}"
+case "$URL_HOSTPATH" in
+  */*) URL_PATH="/${URL_HOSTPATH#*/}" ;;
+  *)   URL_PATH="" ;;
+esac
+case "$URL_PATH" in
+  /install.sh*|/install.ps1*)
+    die "--url is your lazyit instance base URL, not the address of this script. You passed $URL; pass --url ${URL%%/install.*} instead. The installer appends /api/agent/download to it itself." ;;
+  /api|/api/*)
+    die "--url is your lazyit instance base URL, not an API endpoint. You passed $URL, and the installer would then ask for $URL/api/agent/download. Pass --url ${URL%%/api*}." ;;
+  # ANY OTHER PATH IS A WARNING, NOT A REFUSAL, and that asymmetry is deliberate. lazyit sets no
+  # Next.js basePath, so a path here is almost always the same mistake in a different shape - but a
+  # reverse proxy that strips a prefix really can mount an instance under one, and re-running this
+  # script is the documented UPGRADE path. Refusing outright would break a deployment that works
+  # today; the two branches above are the only two shapes that can never be a valid base URL.
+  ?*)
+    echo "lazyit-agent install: --url carries a path ($URL_PATH) and lazyit is served from the root of its origin, so this is usually a mistake - pass just the scheme, host and port. Continuing, in case your reverse proxy really does mount lazyit under that path." >&2 ;;
+esac
 
 [ "$(id -u)" = "0" ] || die "must run as root (installs to /usr/local/bin, /etc and systemd)"
 command -v systemctl >/dev/null 2>&1 || die "systemd (systemctl) is required"
