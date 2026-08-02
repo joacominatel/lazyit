@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-08-01
+updated: 2026-08-02
 ---
 
 # InfraNode
@@ -27,6 +27,9 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   at create; deleting the asset **detaches** the node (audit > strict integrity), never deletes it.
 - **is the source of** N [[infra-edge]] (`edgesFrom`, relation `EdgeSource`).
 - **is the target of** N [[infra-edge]] (`edgesTo`, relation `EdgeTarget`).
+- **accumulates** N [[infra-node-fact-change]] (`factChanges`, `onDelete: Cascade`) — the append-only
+  record of what actually MOVED on this node, written by the agent ingest path only when a diff
+  exists ([[0074-server-reporting-agent]] §3 amendment, #1143).
 - **reads ownership / KB / secrets through** the linked [[asset]] — never a direct edge to a [[user]]
   ("servers-only graph"; ownership is the asset's [[asset-assignment]] join, [[asset-centric]]).
 
@@ -190,6 +193,11 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   affected if this goes down."
 - `GET /infra/nodes/:id/edges?active=` — the node's [[infra-edge]]s (active-only by default; pass
   `active=false` for full history incl. closed migrations).
+- `GET /infra/nodes/:id/changes?limit=&cursor=` — the node's [[infra-node-fact-change]] history,
+  newest first: what MOVED (a package added/removed/upgraded; the OS, kernel, memory, disk, serial or
+  a container's image digest), never one row per report. Keyset-paginated on the append-only `id`;
+  `limit` defaults to 50, clamped to 200. Read-only — only the ingest path appends
+  ([[0074-server-reporting-agent]] §3 amendment, #1143).
 - `GET /infra/nodes/:id/identity-matches` — other LIVE nodes sharing a **burned-in** fact (serial or
   MAC) with this one, from the stored `host.identifiers[]` (ADR-0074 §3 / #1141). The *"this looks like
   `srv-app-04` re-imaged — adopt?"* hint the review tray's merge dialog shows. Read-only, best-effort,
@@ -260,11 +268,15 @@ Instance → Reporting agents); the two narrower scopes work but ship no editor 
   the "merge-on-confirm" this bullet imagined: confirming still only promotes one proposal.
 - Listening-socket `DEPENDS_ON` **hints** (suggested edges a human accepts, never auto-created) —
   deferred on purpose, ADR-0074 §3 amendment (#1139).
+- ~~A dedicated `InfraNodeHistory`.~~ **Shipped** as [[infra-node-fact-change]] ([[0074-server-reporting-agent]]
+  §3 amendment, #1143) — narrower than the name implied, and deliberately so: it records the tracked
+  FACTS that moved (packages, OS/kernel/memory/disk/serial, a container's image digest), not every
+  edit to every column. Curation changes (label, kind, position, asset linkage) are still not logged.
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
-  per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]]; a
-  dedicated `InfraNodeHistory`. → [[0070-infra-topology-graph]] "Future".
+  per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]].
+  → [[0070-infra-topology-graph]] "Future".
 
-Related: [[infra-edge]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
+Related: [[infra-edge]] · [[infra-node-fact-change]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
 [[0070-infra-topology-graph]] · [[0074-server-reporting-agent]] · [[0019-asset-assignment-integrity]] ·
 [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] · [[0046-roles-permissions-v2]] ·
 [[0061-secret-manager-zero-knowledge]] · [[0048-service-accounts]]

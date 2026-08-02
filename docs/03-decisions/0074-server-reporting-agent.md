@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-08-01
+updated: 2026-08-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -997,6 +997,116 @@ keep paying it too, until the instance follows. Neither order can lose an invent
 therefore does not need documenting as a procedure — only the fact that the saving appears when both
 halves are current.
 
+**Amendment (2026-08-02, #1143) — §3: log the DIFF, so the inventory can answer "when did this
+change?".**
+
+Everything above stores the CURRENT value of every fact and nothing else. `dpkg -l` over SSH does
+that too. The question an operator actually brings to a CMDB is *"someone upgraded OpenSSL on db-01
+last Tuesday and broke the app"*, and until now nothing in this contract could answer it: the report
+path overwrites `specs` wholesale, and `syncAssetSpecs` deliberately bypasses `AssetsService.update`
+so **no `SPECS_CHANGED` history event fires per report**. That bypass is right and stays — 96 no-op
+audit rows per host per day would drown the trail it lives in. The audit-flood concern and the
+change-history need were never in conflict; the resolution is to log the **diff**, not the report.
+
+So: **`InfraNodeFactChange`**, an append-only table (`createdAt` only, no `updatedAt`, no `deletedAt`
+— [[0006-soft-delete-and-auditing]]; autoincrement id per [[0005-id-strategy]]), one row per thing
+that MOVED, and a **Changes** tab on the node panel that reads it. A host nobody touched adds no row,
+ever.
+
+**It reuses #1153's comparison rather than making a second one.** That amendment already compares
+what arrived against what the node holds, on every check-in, to decide whether the jsonb write can be
+skipped. That comparison IS the thing this feature wants to log, so the write planner's answer is
+what gates it: a report that changed nothing skips the blob write and the history alike, at no extra
+query. The **package** half is the one that costs something, because diffing packages needs the
+stored list and #1153 deliberately keeps it out of the hot path — so it is read back only when the
+server's own fingerprint of what arrived already disagrees with the one the node holds. That is the
+`apt upgrade` branch, roughly twice a month per host; an `unchanged`, `unavailable` or `disabled`
+report never reads it.
+
+**Two silences, and they are the whole safety argument.**
+
+*The first observation SEEDS the baseline.* A fact with no previous value records nothing. Without
+this rule the first report after this ships would diff a whole host against nothing and write a few
+thousand junk rows per host — on every instance, on the very upgrade this feature arrives in. It
+covers a brand-new node, a node enrolled before the feature existed, a node whose stored package list
+was cleared, and a fact that had never been collected on that host before. It is asserted by test on
+all four.
+
+*A fact that DISAPPEARS records nothing either.* An agent that loses root stops reporting
+`hardware.serial`; a downgraded agent stops reporting a field. Neither is the host changing, and a row
+saying otherwise would put a change on screen that never happened. **A row needs both sides readable
+and different** — which is the same degrade-never-reject reading every other absence in this contract
+gets.
+
+The same reasoning decides `disabled`: `softwareState: 'disabled'` clears a node's stored list because
+policy turned collection off, and rendering that as three thousand removals would be a lie about the
+host. A policy event is not an uninstall. An incoming list that is empty or unreadable is treated the
+same way.
+
+**The tracked vocabulary is short, closed, and stated here rather than left to the code.** Packages
+(added / removed / version changed — an upgrade *and* a downgrade both matter) plus `host.os.name`,
+`host.os.version`, `host.os.kernel`, `host.memoryBytes`, `host.disks.totalBytes`, `host.disks.count`
+and `host.hardware.serial`. Disk capacity is summed rather than recorded per device, because a
+per-device row would make every ephemeral loop/overlay mount a change and the operator question is
+about capacity; a disks array carrying no readable size answers "no evidence", never `0`, so an
+unprivileged report cannot read as "all storage disappeared". Everything else the report carries —
+hostname, NICs, IPs, `bootedAt`, the warning list — is either visible elsewhere or moves for reasons
+that are not inventory changes, and a history nobody trusts is worse than none.
+
+**Container children are in, and the digest is why.** #1139 gave a container its own node and #1157
+gave it its own Asset sync; a container whose **image digest moves under an unchanged `:latest` tag**
+is the deploy nobody remembers doing, and it is the single most useful row this table can hold. So
+`container.image` and `container.imageDigest` are recorded. The runtime **`state` is deliberately
+not**: it is liveness, it already drives the child node's `status` column, and a container that
+restarts nightly would write two rows a day forever. Published `ports` are out too — a port change is
+a compose edit the operator just made, and the runtime promises nothing about the array's ordering.
+
+**Two caps, both on what goes IN, never on what is already recorded.** At most **200 rows per node per
+report**: a host back from two missed patch windows legitimately differs by a few thousand packages,
+and 200 says *this changed a lot, here is a bounded sample* instead of turning one check-in into a few
+thousand inserts. The slice is deterministic — host facts first, then packages by name — so it is the
+same 200 rows whichever replica took the report. And at most **500 rows per node per rolling hour**,
+checked with one `COUNT` that runs only when there is something to write, which for a legitimate
+estate is a handful of times a month per host. That second cap is the one that matters against abuse:
+`InfraReportRateLimitGuard` (#1134) allows 120 reports per service account per minute, and a caller
+varying its package list on every request would otherwise turn that into on the order of 1.4M rows an
+hour on one node. Over either ceiling the new rows are **dropped** and the next window records again;
+nothing already recorded is deleted, because the table is append-only and that is not a property this
+amendment is willing to spend. A container child cannot approach the per-report cap — two tracked
+facts — so one report is bounded by 200 plus twice `AGENT_CONTAINERS_MAX`, i.e. 400 rows, with no
+budget threaded through the container reconciliation.
+
+**Nothing on this path may fail a check-in.** A constraint, a DB hiccup, a node deleted between the
+node update and the insert — all degrade to a warning and the report still acks. A host whose report
+500s vanishes from the CMDB, shows OFFLINE on the map and nudges the bell (§4); a history row that was
+not written costs one line in a timeline. Same posture as the search sync and `resolvePolicy`, for the
+same reason. The diff itself is pure and lives in `@lazyit/shared`, reads every input as `unknown`,
+and answers "no change" on anything it cannot parse — a hand-edited `specs` produces no rows and no
+throw.
+
+The read is `GET /infra/nodes/:id/changes?limit=&cursor=` (`infra:read`), newest first, keyset-paginated
+on the append-only id so nothing is skipped or repeated while reports keep landing. There is no write
+endpoint and there will not be one: only the ingest path appends, and the table is append-only, so
+there is nothing here for an operator to edit or delete.
+
+**Explicitly rejected: a `SPECS_CHANGED` event per report** — the flood this whole design exists to
+avoid, and the reason the bypass in `syncAssetSpecs` was correct in the first place. Also rejected:
+*recording the whole `specs` blob per version* (a second copy of the biggest column in the database,
+per change, to answer a question a handful of scalars answers); *per-device disk rows* (see above);
+*recording container `state`* (liveness dressed as inventory); and *pruning old rows to a per-node
+ceiling* — a bounded log is a reasonable thing to want, but deleting recorded history to make room is
+not something an append-only table gets to do quietly, and the two write-side caps bound the growth
+without it. If retention ever becomes necessary it should be an explicit, documented operator policy,
+not a side effect of ingest.
+
+**Upgrade safety.** One additive migration: a new enum and a new table. No column is added to and no
+data is changed on any existing table, nothing is backfilled, and nothing needs to be — the seeding
+rule above means an estate upgrading into this starts with an empty table and records its first row
+the first time something genuinely moves. **No agent change is required**: the diff is computed
+entirely server-side from reports the current fleet already sends, so an instance upgraded alone gets
+the full feature with every agent left exactly as it is. A downgrade leaves the table in place and
+simply stops appending to it.
+
 ### §4 — Liveness & staleness
 
 `lastReportedAt` is the heartbeat. A periodic **sweeper** (a plain in-process `setInterval`, `unref`'d
@@ -1489,10 +1599,15 @@ own controls is a liability, so state it plainly:
   (Updated by #1134: the handler now *does* take a `@CurrentPrincipal()`, but purely as the
   **in-memory throttle key** of the two limits above. It is read, bucketed and discarded — it reaches
   no `data` payload and no column, so this bullet's conclusion is unchanged.)
-- **There is no node-history table to attribute to.** `InfraNodeHistory` does not exist — it is one
-  of the deferred "Future" items in [[0070-infra-topology-graph]]. **No** `InfraNode` write is
-  recorded in history, by an agent or by a human, so the struck clause described a table the schema
-  has never had.
+- **The one node-history table there is records facts, not actors.** ~~`InfraNodeHistory` does not
+  exist — it is one of the deferred "Future" items in [[0070-infra-topology-graph]]. **No**
+  `InfraNode` write is recorded in history, by an agent or by a human.~~ **Updated 2026-08-02,
+  #1143:** `InfraNodeFactChange` now exists (the §3 amendment above) and records what MOVED on a node.
+  It changes nothing about attribution and is not a step toward it: its columns are the node, the
+  fact, the two values and `createdAt` — **no `performedById`, no `serviceAccountId`, no principal of
+  any kind reaches its write**, exactly like the `InfraNode` write beside it. A human's edits to a
+  node (label, kind, position, asset linkage) are still recorded nowhere. So this bullet's conclusion
+  stands verbatim: there is no table that says *which* Service Account produced a row.
 - **No history event is emitted, deliberately.** The linked-Asset specs refresh writes `specs`
   directly instead of going through `AssetsService.update` exactly so it emits no `SPECS_CHANGED`
   event (§3 amendment 2026-07-18). At one report per host every 15 minutes, an event per report would
@@ -1578,6 +1693,7 @@ would be a separate ADR and arguably a separate product).
 ## Links
 
 - Deferred by / fills the reserved columns of: [[0070-infra-topology-graph]]
+- Entities: [[infra-node]] · [[infra-node-fact-change]] (the §3 2026-08-02 amendment's table)
 - Auth: [[0048-service-accounts]] · Permissions: [[0046-roles-permissions-v2]]
 - Workers: [[0053-async-workers-bullmq-valkey]] · Specs: [[0007-flexible-asset-specs-jsonb]]
 - Deployment/origin: [[0026-reverse-proxy-tls]] · Auditing: [[0006-soft-delete-and-auditing]]
