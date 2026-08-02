@@ -39,7 +39,7 @@ import {
   type AgentPlatform,
   agentDiagnosticsCommand,
   agentInstallCommand,
-  agentManualInstallCommands,
+  agentManualInstallSteps,
 } from "./agent-install-commands";
 import { ConfirmNodeDialog } from "./confirm-node-dialog";
 
@@ -372,17 +372,12 @@ function PlatformInstall({
   const t = useTranslations("infra.wizard");
   const isWindows = platform === "windows";
 
-  // Literal message keys rather than one interpolated per index: the catalogs are what the en↔es
-  // parity check reads, and a key it cannot see written down is a key it cannot hold both locales to.
-  const manualLabels = isWindows
-    ? [t("manual.windows.step1"), t("manual.windows.step2")]
-    : [
-        t("manual.linux.step1"),
-        t("manual.linux.step2"),
-        t("manual.linux.step3"),
-        t("manual.linux.step4"),
-      ];
-  const manualCommands = agentManualInstallCommands(platform, origin, token);
+  // ONE structure, label key and command together. These used to be two positionally-indexed arrays
+  // — the labels listed here, the commands built in the module — and nothing tied index N of one to
+  // index N of the other, so an edit could add a step to one side only and no test would notice.
+  // `agent-install-commands.test.ts` holds every `labelKey` below to the `stepN` keys both locale
+  // catalogs actually ship.
+  const manualSteps = agentManualInstallSteps(platform, origin, token);
 
   return (
     <>
@@ -432,15 +427,15 @@ function PlatformInstall({
             {isWindows ? t("manual.windows.intro") : t("manual.linux.intro")}
           </p>
           <ol className="space-y-3">
-            {manualCommands.map((command, index) => (
-              <li key={command} className="space-y-1.5">
+            {manualSteps.map((step, index) => (
+              <li key={step.labelKey} className="space-y-1.5">
                 <p className="text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">
                     {index + 1}.
                   </span>{" "}
-                  {manualLabels[index]}
+                  {t(step.labelKey)}
                 </p>
-                <CommandBlock command={command} />
+                <CommandBlock command={step.command} />
               </li>
             ))}
           </ol>
@@ -449,7 +444,12 @@ function PlatformInstall({
 
       {/* The check an operator reaches for when a host stays quiet — and the one that failed them on
           Windows, where the install directory is not on PATH (#1167, open). The absolute form printed
-          here runs today AND once #1167 adds that PATH entry, so it needs no revision when it lands. */}
+          here runs today AND once #1167 adds that PATH entry, so it needs no revision when it lands.
+
+          The Windows note carries the OTHER half of what the Linux `sudo` carries in the command
+          itself: this check needs an elevated PowerShell, because install.ps1 ACLs the config file to
+          SYSTEM + Administrators and the agent reads an unreadable config as an absent one. Without
+          it the operator gets "no URL configured" on a host that installed perfectly. */}
       <div className="space-y-2">
         <p className="text-sm font-medium text-foreground">
           {t("diagnostics.title")}
@@ -457,7 +457,7 @@ function PlatformInstall({
         <CommandBlock command={agentDiagnosticsCommand(platform)} />
         <p className="text-xs text-muted-foreground">
           {t("diagnostics.hint")}
-          {isWindows ? ` ${t("diagnostics.windowsPathNote")}` : null}
+          {isWindows ? ` ${t("diagnostics.windowsNote")}` : null}
         </p>
       </div>
     </>
