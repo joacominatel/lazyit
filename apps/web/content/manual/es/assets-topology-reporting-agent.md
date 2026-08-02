@@ -570,11 +570,14 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
   parches?"), no monitoreo de uptime. Se guarda junto a los demás datos reportados del host y, igual
   que el tipo de máquina, todavía no se muestra en ninguna pantalla.
 - **Software instalado** — la lista de paquetes instalados, con versiones cuando están disponibles. En
-  Windows es la lista que el propio Windows muestra en *Aplicaciones y características*, leída tanto
-  de la mitad de 64 bits como de la de 32 bits del registro (perder la segunda es la forma clásica en
-  que un script de inventario casero pierde la mitad en silencio); las entradas que Windows marca
-  como ocultas — fragmentos de runtime y restos de actualizaciones — quedan afuera, así que la lista
-  es la que una persona reconocería. El
+  Windows es lo que está instalado **para toda la máquina**, leído tanto de la mitad de 64 bits como
+  de la de 32 bits del registro (perder la segunda es la forma clásica en que un script de inventario
+  casero pierde la mitad en silencio); las entradas que Windows marca como ocultas — fragmentos de
+  runtime y restos de actualizaciones — quedan afuera, así que la lista es la que una persona
+  reconocería. **El software que un usuario instaló sólo para sí mismo no aparece**: eso se registra
+  en la parte del registro de ese usuario y no en la de la máquina, así que la lista se parece a la
+  que Windows muestra en *Aplicaciones y características* pero no es la misma, y será más corta en una
+  notebook cuyo dueño instala cosas para su propia cuenta. El
   agente además registra qué gestor de paquetes o fuente reportó cada uno; la lista en sí muestra el nombre y
   la versión. En un servidor con muchos paquetes esta lista es, de lejos, lo más pesado que viaja en un
   reporte y sólo cambia cuando alguien instala o actualiza algo, así que el agente la envía **una vez y

@@ -533,10 +533,14 @@ from it on container guests.
   an inventory fact ("did this box actually reboot after the patch window?"), not uptime monitoring.
   Stored with the host's other reported facts and, like the machine type, not shown on any screen yet.
 - **Installed software** — the list of installed packages, with versions where available. On
-  Windows this is the list Windows itself shows in *Apps & features*, read from both the 64-bit and
-  the 32-bit halves of the registry (missing the second is the classic way a homemade inventory
-  script silently loses half of it); update stubs and runtime fragments Windows marks as hidden are
-  left out, so the list is the one a person would recognise. The agent
+  Windows it is what is installed **for the whole machine**, read from both the 64-bit and the
+  32-bit halves of the registry (missing the second is the classic way a homemade inventory script
+  silently loses half of it); update stubs and runtime fragments Windows marks as hidden are left
+  out, so the list is the one a person would recognise. **Software a user installed only for
+  themselves is not in it** — those register under the user's own part of the registry rather than
+  the machine's, so the list is close to what Windows shows in *Apps & features* but is not the same
+  list, and it will be shorter on a laptop whose owner installs things for their own account. The
+  agent
   also records which package manager or source reported each one; the package list itself shows the name and
   the version. On a busy server this list is by far the largest thing a report carries and it changes
   only when somebody installs or upgrades something, so the agent sends it **once and then sends only

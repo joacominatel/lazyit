@@ -1445,12 +1445,17 @@ collector uses — no second implementation, so the two platforms can never disa
 as evidence. **The asymmetry is the reason the array exists:** MachineGuid survives a motherboard
 transplant but not an OS reinstall; the SMBIOS UUID is the reverse. Neither alone is enough.
 
-**Collection — one PowerShell call, and two absolute prohibitions.** Everything needing CIM/WMI or
-the registry rides a single
-`powershell -NoProfile -NonInteractive -Command <script>` per tick, emitting one
+**Collection — one PowerShell call for the fact sweep, and two absolute prohibitions.** Everything
+needing CIM/WMI or the registry rides a single
+`powershell -NoProfile -NonInteractive -Command <script>`, emitting one
 `ConvertTo-Json -Compress -Depth 4` document; every mapper over it is pure and unit-tested. A ~400 ms
 interpreter start once per reporting interval is free, and a single impure boundary is the only shape
-this repo can TEST — CI is Linux and the developers are on macOS. Sources: `Win32_OperatingSystem`
+this repo can TEST — CI is Linux and the developers are on macOS. **What a tick actually costs, since
+"one call per tick" was stated and was not true:** `readMachineGuid` makes a SECOND, much smaller
+PowerShell call for the dedup key, and must, because `index.ts` needs that key *before* the cadence
+gate — folding it into the sweep would make a tick that reports nothing pay for the full CIM walk.
+Both are memoized per process (the agent is a one-shot, so that is once per report), so a reporting
+tick is **two** `powershell.exe` starts and a not-due tick is **one**. Sources: `Win32_OperatingSystem`
 (name/version/**build** — "version 10" is useless to an operator, and Windows 11 reports major
 version 10), `Win32_ComputerSystem` (memory, manufacturer, model, **domain**),
 `Win32_Processor`, `Win32_DiskDrive` with `MSFT_PhysicalDisk` as the fallback for hosts where the
@@ -1467,7 +1472,16 @@ machines and silently stop working on its new ones. Software comes from **both**
 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*` **and** the `WOW6432Node` mirror,
 because half a real inventory lives in the 32-bit hive and missing it is the single most common
 defect in homegrown inventory scripts — filtered on "has a `DisplayName`" and "not
-`SystemComponent=1`", stamped `software[].source: registry`.
+`SystemComponent=1`", stamped `software[].source: registry`. The filters live in the **mapper**, not
+in the PowerShell string: the script selects the three properties and filters nothing, so the rule
+sits in the one place this repo can test it.
+
+**Machine-wide only, and the Manual must not overstate it.** Both hives are under `HKLM`, so a
+**per-user** install — anything registered under `HKCU`, which is a large share of what a laptop user
+installs for themselves — is **not** in the list. Reading it means walking `HKU\<sid>` for every
+loaded profile from a SYSTEM context, which is its own piece of work behind its own policy flag and
+is deliberately **not** in #1144. The Manual therefore says *machine-wide* rather than claiming parity
+with the list Windows shows in *Apps & features*, which is a claim this collector cannot honour.
 
 **`chassis` follows a DIFFERENT rule on Windows, deliberately.** On Linux an absent virtualization
 probe forces `chassis: unknown`, because a container reading `/sys/class/dmi` gets the HOST's board
@@ -1495,21 +1509,55 @@ estate less safe than it found it. One fact is genuinely lost — the CLI does n
 DIGEST, so `imageDigest` is absent from a Windows-reported container. Revisiting the pipe once a real
 Windows host has verified `fetch({ unix })` is a follow-up, not a blocker.
 
-**The Linux "install Docker later" property is preserved, and tested.** `Bun.which("docker")` runs on
-EVERY tick and caches nothing, and a host with no client returns `undefined` **silently** — exactly
-as a Linux host with no socket does, and for the same reason: warning would put a line in the
-majority of the estate's reports until operators learned to ignore the field. A client that IS
-present but cannot answer warns, because that is the "why is this host's container list empty?"
-question `diagnostics.warnings` exists to answer.
+**The Linux "install Docker later" property is preserved, and tested.** The lookup runs on EVERY tick
+and caches nothing, and a host with no client returns `undefined` **silently** — exactly as a Linux
+host with no socket does, and for the same reason: warning would put a line in the majority of the
+estate's reports until operators learned to ignore the field. Everything *after* a successful lookup
+warns — a stopped engine, a Desktop nobody is logged in to, a pipe ACL refusing SYSTEM, a timeout —
+because that is the "why is this host's container list empty?" question `diagnostics.warnings` exists
+to answer, and `run`'s own degradation notes are passed through rather than swallowed.
+
+**The lookup gets the same treatment as the pipe, and did not at first.** Refusing the named pipe as
+an unverified Windows boundary and then gating on a bare `Bun.which("docker")` was the same
+assumption wearing a different name — and this one's failure mode was **silent by design**: Windows
+has no execute bit and no extensionless executables, a bare name on PATH resolves through `PATHEXT`,
+whether Bun does that expansion on Windows is undocumented, and a miss meant a host running Docker
+Desktop reporting no containers for ever with nothing in `diagnostics.warnings`. The extensions are
+now walked explicitly (`PATHEXT`, falling back to `.COM;.EXE;.BAT;.CMD`, bare name last) in a pure
+function the tests drive, and the **resolved absolute path** is what gets spawned — which takes
+`Bun.spawn`'s own PATH resolution out of it too.
 
 **Scheduling: a Scheduled Task, not a Service.** It preserves the one-shot design of §7 exactly, and
 #1140's fixed-tick / server-cadence inversion was designed so the same semantics hold under Task
-Scheduler. `Register-ScheduledTask -User "SYSTEM" -RunLevel Highest`, an `-AtStartup` trigger with a
-2-minute delay, a repetition interval of `AGENT_POLICY_TICK_SECONDS`, `StartWhenAvailable` (the
-`Persistent=true` analogue), a 60-second random delay (the `RandomizedDelaySec` analogue) and a
-5-minute `ExecutionTimeLimit` (the `RuntimeMaxSec` analogue). It also runs **on battery**: most of a
-Windows estate is laptops, and a task that waited for mains power would leave roaming machines
-reporting only when docked. A Windows Service would force a daemon rewrite for zero benefit.
+Scheduler. `Register-ScheduledTask -User "SYSTEM" -RunLevel Highest`, **two triggers**,
+`StartWhenAvailable` (the `Persistent=true` analogue), a 60-second random delay on each trigger (the
+`RandomizedDelaySec` analogue) and a 5-minute `ExecutionTimeLimit` (the `RuntimeMaxSec` analogue). It
+also runs **on battery**: most of a Windows estate is laptops, and a task that waited for mains power
+would leave roaming machines reporting only when docked. A Windows Service would force a daemon
+rewrite for zero benefit.
+
+**TWO triggers, and the first attempt at one was a blocker.** The systemd unit has two independent
+activations (`OnBootSec=` and `OnUnitActiveSec=`) and the translation had collapsed them into a single
+`-AtStartup` trigger carrying the repetition. That does not work, and Microsoft's own documentation
+says why: a repetition pattern is "how long the repetition pattern is repeated **after the task is
+started**", and Task Scheduler "can run a task any number of times **after a trigger is fired**" — an
+`-AtStartup` trigger "starts a task when the system is started" and does not fire for a boot that has
+already happened. On a machine that was already running, the install completed, the first manual
+report succeeded, and **the agent then never reported again until somebody rebooted the host**.
+`StartWhenAvailable` does not rescue it either: it "applies only to time-based tasks", which a boot
+trigger is not. So the tick now rides its own `-Once -At (Get-Date)` trigger, which begins repeating
+immediately, and the boot trigger (2-minute delay) keeps its own job of re-arming after a power-off;
+`Register-ScheduledTask -Trigger` takes an array and Task Scheduler starts the task when **any**
+trigger occurs, with `-MultipleInstances IgnoreNew` making an overlap at boot a no-op. Two adjacent
+corrections came with it: `-RepetitionDuration` is now **omitted** (the schema: "if no value is
+specified for the duration, then the pattern is repeated indefinitely"; the `[TimeSpan]::MaxValue`
+idiom is reported to fail XML validation from Windows 10 / Server 2016 on), with a long finite
+duration as the fallback for the older cmdlet that refuses an interval without one; and `-RandomDelay`
+moved to the **triggers**, because `New-ScheduledTaskSettingsSet` publishes no such parameter and
+passing it there throws under `$ErrorActionPreference='Stop'`, after the token file is already on
+disk. **None of this is verified on a real Windows host** — nothing in this repo can run Task
+Scheduler — so it is what the documentation specifies, to be confirmed with
+`Get-ScheduledTask lazyit-agent | Select-Object -ExpandProperty Triggers` before any rollout.
 
 **It runs as `NT AUTHORITY\SYSTEM`, never a domain service account.** SYSTEM holds the local WMI/CIM
 rights the collector needs with **no credential stored anywhere on the host**; a domain account means
