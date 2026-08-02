@@ -1838,6 +1838,43 @@ is untouched. `?arch=`-only downloads keep working forever. The renamed artifact
 parameter arrive with the API image. Windows support arrives only where `install.ps1` is **run**;
 there is no upgrade path that turns an existing Linux host into a Windows one, and none is wanted.
 
+**Amendment (2026-08-02, #1168) — the wizard was the last surface that did not know Windows exists.**
+The amendment above shipped the executable, `install.ps1` and the Manual's Windows section, and was
+then installed on a real Windows desktop. The first friction point was not any of them: it was the
+**create-agent wizard**. Minting the SA and revealing the token is platform-neutral and always was,
+but everything printed around it was Linux — the copy said "a Linux server with root access" and the
+only command emitted was `curl … | sudo sh`. An operator on Windows was therefore handed a command
+their host cannot run at the one moment they are holding a token that is shown once and never again,
+and had to leave for `/help` to find out what to type.
+
+Step 2 now takes a **platform choice** (Linux default) and switches four things with it: the
+requirements line, the emitted install command, the inspect-first path, and the post-install check.
+Three of those are worth stating because each is a promise about code this component does not
+contain, and `agent-install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}`
+as served:
+
+- **The Windows one-liner is the script-block form, not `irm … | iex`.** The pipe form runs the
+  installer with no arguments at all, so `-Url` and `-Token` never arrive and it dies asking for
+  them. This is the same reason `install.ps1`'s own `.EXAMPLE` is written that way.
+- **The inspect-first path differs in kind, not just in spelling.** On Linux it is install.sh done by
+  hand in four steps. On Windows it is *download the installer, read it, run the copy you read* —
+  because reproducing `install.ps1` by hand means the config file's SYSTEM+Administrators ACL and the
+  registered scheduled task, and a half-done version of those is worse than none. It runs the saved
+  file through `[scriptblock]::Create` rather than as `.\install.ps1`, because a `.ps1` **file** is
+  subject to the host's execution policy while a script block built in memory is not.
+- **The Windows diagnostic is the absolute path**, `& "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test`,
+  spelled the way `install.ps1` spells its own install directory. The bare `lazyit-agent test` the
+  Manual documents is not a command on Windows today: the install directory is not on `PATH`
+  (**#1167**, open). The absolute form runs both before and after that lands, so it needs no revision
+  when it does; the test carries a tripwire assertion that fails the day `install.ps1` starts writing
+  `PATH`, so this paragraph gets re-read on purpose rather than quietly rotting.
+
+The wizard also **states plainly that the Windows executable is unsigned**, on the Windows tab, before
+anything is run. §8's gate below is a decision the operator meets as a SmartScreen warning, and an
+operator who meets it with no warning of their own reasonably concludes the download is malicious and
+stops. Frontend and message catalogs only: no contract, schema, migration or installer change, and no
+existing agent is affected.
+
 
 ### §8 — Security model
 
