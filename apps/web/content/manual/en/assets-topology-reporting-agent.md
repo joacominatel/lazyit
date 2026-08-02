@@ -7,10 +7,10 @@ order: 3
 
 # Reporting agent
 
-The **reporting agent** populates your inventory for you. It's a small program you drop onto a Linux
-server with a single command; from then on the server reports *what it is* — its hardware and the
-software installed on it — back to lazyit and keeps that picture current, so you don't have to enter
-or maintain it by hand.
+The **reporting agent** populates your inventory for you. It's a small program you drop onto a
+**Linux or Windows** machine with a single command; from then on that machine reports *what it is* —
+its hardware and the software installed on it — back to lazyit and keeps that picture current, so you
+don't have to enter or maintain it by hand.
 
 It is deliberately narrow. The agent is **inventory-only**: it reports what a host is and what it
 runs, never metrics, alerts or time-series data. lazyit is a CMDB, not a monitoring tool. The agent
@@ -37,11 +37,20 @@ The button opens a short, guided wizard with three steps:
    curl -fsSL https://your-instance/install.sh | sudo sh -s -- --url https://your-instance --token <token>
    ```
 
+   On **Windows**, the same install with the same token, from an **elevated PowerShell**:
+
+   ```powershell
+   & ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Url https://your-instance -Token <token>
+   ```
+
+   (The script-block form is not decoration: the plain `irm … | iex` pipe cannot pass parameters.)
+   See **[Windows hosts](#windows-hosts)** below for what that install does and what it needs.
+
    The address is **your own lazyit instance** — the agent only ever talks to the server you run, and
    it must be the **public HTTPS origin** (the address you use in a browser, in front of the reverse
    proxy) — **never** the raw web port (`:3000`), which has no route for the agent download and will
-   make the install fail. Run it on a **Linux** server **as root**. The token is shown **only once**,
-   so copy it (or download it) before continuing. If you'd rather inspect every step, expand **Install
+   make the install fail. Run it **as root** on Linux, or **as Administrator** on Windows. The token
+   is shown **only once**, so copy it (or download it) before continuing. If you'd rather inspect every step, expand **Install
    manually (step by step)** for the same install done by hand (download the binary, install it, write
    the config file, send a test report).
 
@@ -77,11 +86,15 @@ The wizard's collapsed **Install manually** section gives the same install comma
 cautious admin who prefers to download and inspect the binary first. Each step has its own copy
 button:
 
-1. **Download the binary** (use `arch=arm64` on ARM machines):
+1. **Download the binary** (use `arch=arm64` on ARM machines; add `&os=windows` for a Windows host,
+   which serves `lazyit-agent-windows-x64.exe`):
 
    ```sh
-   curl -fsSL -H "Authorization: Bearer <token>" "https://your-instance/api/agent/download?arch=x64" -o lazyit-agent
+   curl -fsSL -H "Authorization: Bearer <token>" "https://your-instance/api/agent/download?os=linux&arch=x64" -o lazyit-agent
    ```
+
+   The `os` part is new. Older install commands that ask for `?arch=x64` with no `os` still work and
+   still get the Linux build — you do not have to re-run anything you already installed.
 2. **Make it executable and move it into place:**
 
    ```sh
@@ -97,8 +110,14 @@ button:
 
 ### What a host needs to run it
 
-A **Linux** machine with **systemd** and **curl**, on x86-64 or ARM64. The agent is a single
-self-contained binary — no runtime, no packages, nothing to install alongside it.
+On **Linux**: a machine with **systemd** and **curl**, on x86-64 or ARM64.
+
+On **Windows**: Windows 10/11 or Windows Server 2016 or newer, on **x64** (there is no ARM64 build).
+The only dependency is **PowerShell**, which ships with the operating system — you do **not** need
+Node, Python or anything else installed.
+
+On both, the agent is a single self-contained binary — no runtime, no packages, nothing to install
+alongside it.
 
 There is a floor on how old the machine's system libraries and kernel can be, and rather than print
 a version number that would go stale, **the installer tries running the binary before it sets
@@ -122,6 +141,13 @@ sudo lazyit-agent test    # can this host reach lazyit, and is its token good?
 sudo lazyit-agent show    # what exactly would this host report?
 ```
 
+On Windows, the same two commands, from an elevated PowerShell:
+
+```powershell
+& "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test
+& "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" show
+```
+
 **`test`** checks the address, DNS, TLS, the proxy, the certificate authority and the token, and
 tells you which one is wrong — a redirect means you pointed it at the wrong port, a rejection means
 the token, a timeout means the network, and an address that answers but isn't lazyit is named as
@@ -136,6 +162,101 @@ server is marked as having just reported, and nothing is counted against the tok
 "why is this host's serial column empty" or "why isn't this disk listed" — the notes at the end say
 what the agent had to skip and why. It works on a machine with no token and no network at all.
 
+## Windows hosts
+
+Everything above applies to Windows too — same wizard, same token, same Pending review, same
+settings screen. This section is only about what is *different*, and about the questions an operator
+asks the first time.
+
+### What the install actually does
+
+Run from an **elevated PowerShell** (right-click PowerShell → *Run as administrator*). The installer:
+
+1. checks it is elevated, and that the machine is x64;
+2. downloads the executable from **your** instance with your token, and refuses anything that isn't a
+   real Windows executable — the same guard the Linux installer applies to its own binary;
+3. compares the **fingerprint** your instance publishes for that executable and refuses a mismatch;
+4. **runs it once** (`--help`) before registering anything — if the machine can't start it, you get
+   one clear sentence, nothing is installed and no task is registered;
+5. writes `C:\ProgramData\lazyit-agent\config` and locks it down to **SYSTEM and Administrators
+   only** — the Windows equivalent of the `chmod 600` it uses on Linux, because that file holds a
+   live token;
+6. registers a **scheduled task**, and sends one report so you find out immediately whether the token
+   works.
+
+### Do I have to configure anything?
+
+No. **Administrator for the install, and that's it.** The task itself runs as
+**`NT AUTHORITY\SYSTEM`**, which already has the local rights it needs to read the machine's
+hardware, network and installed-software information — with **no password stored anywhere on the
+host**. That is precisely why it does *not* use a domain service account: that would mean a working
+credential sitting in a file on every machine in your estate.
+
+Running the agent by hand **without** Administrator still works — it just reports less (no serial
+number, for instance), exactly as it does on Linux without root, and `lazyit-agent show` tells you
+what it had to skip.
+
+### A scheduled task, not a service
+
+The agent is a one-shot program: it runs, gathers, reports and exits. On Windows that is a
+**scheduled task** (`lazyit-agent` in Task Scheduler), not a Windows service. It ticks every **5
+minutes**, catches up a tick missed while the machine was off, spreads itself out by up to a minute
+so a whole floor coming back from a patch window doesn't report in the same second, and **runs on
+battery** — most of a Windows estate is laptops, and a task that waited for mains power would leave
+roaming machines reporting only when docked.
+
+As on Linux, **the 5-minute tick is not the reporting cadence.** How often a host actually reports is
+set centrally in **Settings → Instance → Reporting agents**; a tick that arrives too early exits
+immediately without doing anything. Changing the cadence never touches the task.
+
+### The binary is not code-signed yet
+
+The Windows executable is currently **unsigned**. SmartScreen will warn about it, and some antivirus
+products will quarantine it on sight — if the install fails at the "run it once" step, that is the
+first thing to check.
+
+This is a deliberate, temporary state for **internal validation inside the organisation that builds
+lazyit**, on its own domain and its own machines. **Do not deploy this Windows agent to a customer or
+a third party until it is signed with an OV or EV code-signing certificate.** Signing changes nothing
+about how the agent behaves — it is the same program either way.
+
+### Does it report Docker containers, like Linux does?
+
+Yes, when the host has a Docker client installed and the engine is running — Docker Desktop or the
+container runtime on Windows Server. Containers appear exactly as they do from a Linux host: each one
+becomes its own node linked to the machine.
+
+And the answer to the obvious follow-up is also yes: **if you register a Windows machine with no
+Docker and install Docker a month later, it starts reporting its containers on the very next tick.**
+The agent looks for the runtime on every single run and remembers nothing — there is no re-install
+and nothing to reset. A machine with no Docker at all simply reports no container list, quietly, and
+that is not treated as a problem.
+
+One honest difference: on Windows the agent asks the `docker` command, where on Linux it reads the
+runtime's local socket directly. The facts that reach lazyit are the same, with one exception — the
+image **digest** is not available through the command, so a container reported from Windows shows its
+image tag but no digest.
+
+### Where things live
+
+| | Linux | Windows |
+| --- | --- | --- |
+| The program | `/usr/local/bin/lazyit-agent` | `C:\Program Files\lazyit-agent\lazyit-agent.exe` |
+| Configuration (holds the token) | `/etc/lazyit-agent/config` | `C:\ProgramData\lazyit-agent\config` |
+| Local state | `/var/lib/lazyit-agent` | `C:\ProgramData\lazyit-agent\state` |
+| What runs it | systemd timer | Scheduled Task `lazyit-agent` |
+
+Everything else — the local limits you can set, the proxy and certificate-authority settings, what
+survives a re-install — works identically and lives in that same configuration file, under the same
+key names.
+
+### Older or virtualised hardware
+
+On Linux the installer reads the CPU's own feature list and picks a compatible build automatically.
+Windows exposes no equivalent, so on a pre-2013 machine — or a Hyper-V/VMware cluster configured to
+present an older CPU to its guests — pass **`-Baseline`** to install the compatible build. If you get
+it wrong, the "run it once" check catches it before anything is registered.
+
 ## Removing the agent
 
 Re-run the install script with `--uninstall`:
@@ -144,12 +265,19 @@ Re-run the install script with `--uninstall`:
 sudo sh install.sh --uninstall
 ```
 
-It stops and disables the timer, then removes the binary, both systemd units, the agent's local state
-and its configuration file — including **the token**, which is destroyed whichever options you use.
-It's safe to run twice, and safe on a half-finished install.
+On Windows, from an elevated PowerShell:
 
-If you're re-imaging a machine that will get the agent back, add **`--keep-config`**: it keeps that
-host's own limits and its proxy settings (the things the machine's owner chose, which are annoying to
+```powershell
+& ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Uninstall
+```
+
+It stops and removes what runs the agent — the timer and both systemd units on Linux, the scheduled
+task on Windows — then the binary, the agent's local state and its configuration file, including
+**the token**, which is destroyed whichever options you use. It's safe to run twice, and safe on a
+half-finished install.
+
+If you're re-imaging a machine that will get the agent back, add **`--keep-config`** (Linux) or
+**`-KeepConfig`** (Windows): it keeps that host's own limits and its proxy settings (the things the machine's owner chose, which are annoying to
 reconstruct) and still strips the token and the instance address. There is no option that leaves the
 token behind — a working credential for your instance should not survive on a machine you just
 decommissioned.
@@ -404,8 +532,12 @@ from it on container guests.
 - **When it last booted** — a single timestamp, refreshed on each report, with no history kept: it's
   an inventory fact ("did this box actually reboot after the patch window?"), not uptime monitoring.
   Stored with the host's other reported facts and, like the machine type, not shown on any screen yet.
-- **Installed software** — the list of installed packages, with versions where available. The agent
-  also records which package manager reported each one; the package list itself shows the name and
+- **Installed software** — the list of installed packages, with versions where available. On
+  Windows this is the list Windows itself shows in *Apps & features*, read from both the 64-bit and
+  the 32-bit halves of the registry (missing the second is the classic way a homemade inventory
+  script silently loses half of it); update stubs and runtime fragments Windows marks as hidden are
+  left out, so the list is the one a person would recognise. The agent
+  also records which package manager or source reported each one; the package list itself shows the name and
   the version. On a busy server this list is by far the largest thing a report carries and it changes
   only when somebody installs or upgrades something, so the agent sends it **once and then sends only
   a fingerprint of it** until it changes — which cuts a routine check-in to roughly a tenth of its
@@ -427,8 +559,8 @@ from it on container guests.
   one reporting interval (15 minutes by default). Turning software collection **off** in the agent
   settings is different again, and deliberate: the stored list is cleared, so you are never left
   reading package versions nobody is collecting any more.
-- **What it couldn't collect** — each report also says whether it ran with root and names anything it
-  had to skip or that timed out. Run `lazyit-agent show` and it prints those notes right there,
+- **What it couldn't collect** — each report also says whether it ran with root (Administrator on
+  Windows) and names anything it had to skip or that timed out. Run `lazyit-agent show` and it prints those notes right there,
   without sending anything, which is usually the fastest way to answer "why is this host's serial
   column empty?". (`lazyit-agent report --once --force` prints them too, and sends the report.)
   lazyit also stores them alongside the host's reported facts, so a future fleet view
@@ -437,6 +569,12 @@ from it on container guests.
 It collects whatever it can and simply omits anything it can't read, so an unprivileged install still
 reports a useful picture. It **never** reads secrets, files or application data, and it sends no
 metrics.
+
+On Windows every one of those facts comes from a **single** query to the operating system's own
+inventory interfaces, made once per report. Two things it deliberately never touches: the WMI class
+that enumerates installed MSI packages — asking that question makes Windows *reconfigure* every
+installed package, which floods the event log and takes minutes — and the deprecated `wmic` command,
+which Microsoft removed in Windows 11 24H2 and Server 2025.
 
 ## Configure every agent from one screen
 
@@ -498,8 +636,14 @@ by an agent older than this release shows neither, because it never reports a po
   inventory when you confirm it. An automated writer can never silently change your official records.
 - **No secrets, ever.** The agent carries no keys and reads no vault — your secret values are
   untouched.
-- **A confined service.** The agent runs as root, because reading a machine's serial number and model
-  requires it — but the systemd unit it runs under is restricted well below what root can normally
+- **No stored credential on Windows.** The scheduled task runs as `NT AUTHORITY\SYSTEM`, which has
+  the local rights it needs without a password being written anywhere. A domain service account would
+  have meant a working credential in a file on every machine in the estate, so it is not offered.
+- **The Windows binary is not signed yet.** Stated plainly because it matters: it is fine for
+  internal validation on your own domain, and it is **not** ready to hand to a third party. See
+  [Windows hosts](#windows-hosts) above.
+- **A confined service.** On Linux the agent runs as root, because reading a machine's serial number
+  and model requires it — but the systemd unit it runs under is restricted well below what root can normally
   do: it cannot gain new privileges, cannot see users' home directories, gets a private `/tmp`, and
   cannot modify kernel settings, control groups, or even its own program and configuration. Open
   `/etc/systemd/system/lazyit-agent.service` and read it; it is short, and it is written to be read.
@@ -508,8 +652,8 @@ by an agent older than this release shows neither, because it never reports a po
 - **The download is checksummed.** Your instance publishes a fingerprint of the agent binary next to
   the binary itself, and the installer refuses to install one that doesn't match. This is an
   integrity check, not a cryptographic signature — it catches a corrupted or stale download, and a
-  tampered file where only one of the two was changed. Pass `--require-checksum` to make a *missing*
-  fingerprint fatal too.
+  tampered file where only one of the two was changed. Pass `--require-checksum` (or `-RequireChecksum` on Windows) to
+  make a *missing* fingerprint fatal too.
 - **It can use your CA, not the machine's.** `--ca-file` (or `LAZYIT_CA_FILE` in the config) points
   the agent at a certificate bundle it alone trusts, so an internal certificate authority never has
   to be installed machine-wide just so one inventory agent can report.

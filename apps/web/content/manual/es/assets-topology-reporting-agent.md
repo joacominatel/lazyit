@@ -7,10 +7,10 @@ order: 3
 
 # Agente de reporte
 
-El **agente de reporte** completa tu inventario por vos. Es un programa pequeño que instalás en un
-servidor Linux con un solo comando; a partir de ahí el servidor reporta *qué es* — su hardware y el
-software instalado — a lazyit y mantiene esa imagen actualizada, así no tenés que cargarla ni
-mantenerla a mano.
+El **agente de reporte** completa tu inventario por vos. Es un programa pequeño que instalás en una
+máquina **Linux o Windows** con un solo comando; a partir de ahí esa máquina reporta *qué es* — su
+hardware y el software instalado — a lazyit y mantiene esa imagen actualizada, así no tenés que
+cargarla ni mantenerla a mano.
 
 Es deliberadamente acotado. El agente reporta **solo inventario**: qué es un host y qué ejecuta,
 nunca métricas, alertas ni datos de series temporales. lazyit es un CMDB, no una herramienta de
@@ -39,11 +39,21 @@ El botón abre un asistente guiado y breve, de tres pasos:
    curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --url https://tu-instancia --token <token>
    ```
 
+   En **Windows**, la misma instalación con el mismo token, desde una PowerShell **elevada**:
+
+   ```powershell
+   & ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia -Token <token>
+   ```
+
+   (La forma con bloque de script no es adorno: el pipe `irm … | iex` no puede pasar parámetros.)
+   Ver **[Hosts Windows](#hosts-windows)** más abajo para qué hace esa instalación y qué necesita.
+
    La dirección es **tu propia instancia de lazyit** — el agente solo se comunica con el servidor que
    vos ejecutás, y tiene que ser el **origen HTTPS público** (la dirección que usás en el navegador,
    delante del proxy reverso) — **nunca** el puerto crudo del web (`:3000`), que no tiene ruta para la
-   descarga del agente y hará que la instalación falle. Ejecutalo en un servidor **Linux** **como
-   root**. El token se muestra **una sola vez**, así que copialo (o descargalo) antes de continuar. Si
+   descarga del agente y hará que la instalación falle. Ejecutalo **como root** en Linux, o **como
+   Administrador** en Windows. El token se muestra **una sola vez**, así que copialo (o descargalo)
+   antes de continuar. Si
    preferís revisar cada paso, expandí **Instalar manualmente (paso a paso)** para la misma instalación
    hecha a mano (descargar el binario, instalarlo, escribir el archivo de configuración y enviar un
    reporte de prueba).
@@ -84,11 +94,16 @@ La sección plegada **Instalar manualmente** del asistente da la misma instalaci
 para un administrador cauteloso que prefiere descargar e inspeccionar el binario primero. Cada paso
 tiene su propio botón de copiar:
 
-1. **Descargá el binario** (usá `arch=arm64` en máquinas ARM):
+1. **Descargá el binario** (usá `arch=arm64` en máquinas ARM; agregá `&os=windows` para un host
+   Windows, que entrega `lazyit-agent-windows-x64.exe`):
 
    ```sh
-   curl -fsSL -H "Authorization: Bearer <token>" "https://tu-instancia/api/agent/download?arch=x64" -o lazyit-agent
+   curl -fsSL -H "Authorization: Bearer <token>" "https://tu-instancia/api/agent/download?os=linux&arch=x64" -o lazyit-agent
    ```
+
+   La parte `os` es nueva. Los comandos de instalación anteriores, que piden `?arch=x64` sin `os`,
+   siguen funcionando y siguen recibiendo la compilación de Linux: no hace falta volver a ejecutar
+   nada de lo que ya instalaste.
 2. **Hacelo ejecutable y movelo a su lugar:**
 
    ```sh
@@ -104,8 +119,14 @@ tiene su propio botón de copiar:
 
 ### Qué necesita un host para ejecutarlo
 
-Una máquina **Linux** con **systemd** y **curl**, en x86-64 o ARM64. El agente es un único binario
-autocontenido: sin runtime, sin paquetes, nada que instalar al lado.
+En **Linux**: una máquina con **systemd** y **curl**, en x86-64 o ARM64.
+
+En **Windows**: Windows 10/11 o Windows Server 2016 o posterior, en **x64** (no hay compilación
+ARM64). La única dependencia es **PowerShell**, que viene con el sistema operativo — **no** necesitás
+Node, Python ni ninguna otra cosa instalada.
+
+En ambos, el agente es un único binario autocontenido: sin runtime, sin paquetes, nada que instalar
+al lado.
 
 Hay un piso de qué tan viejas pueden ser las bibliotecas del sistema y el kernel de la máquina, y en
 vez de imprimir un número de versión que quedaría desactualizado, **el instalador prueba ejecutar el
@@ -130,6 +151,13 @@ sudo lazyit-agent test    # ¿este host llega a lazyit, y su token sirve?
 sudo lazyit-agent show    # ¿qué reportaría exactamente este host?
 ```
 
+En Windows, los mismos dos comandos, desde una PowerShell elevada:
+
+```powershell
+& "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test
+& "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" show
+```
+
 **`test`** verifica la dirección, el DNS, el TLS, el proxy, la autoridad certificadora y el token, y
 te dice cuál está mal: una redirección significa que apuntaste al puerto equivocado, un rechazo
 significa el token, un timeout significa la red, y una dirección que responde pero no es lazyit se
@@ -146,6 +174,105 @@ límite de reportes del token.
 notas del final dicen qué tuvo que omitir el agente y por qué. Funciona en una máquina sin token y sin
 red alguna.
 
+## Hosts Windows
+
+Todo lo anterior también aplica a Windows: mismo asistente, mismo token, misma Revisión pendiente,
+misma pantalla de configuración. Esta sección es solo sobre lo que *cambia*, y sobre las preguntas
+que aparecen la primera vez.
+
+### Qué hace realmente la instalación
+
+Se ejecuta desde una PowerShell **elevada** (clic derecho en PowerShell → *Ejecutar como
+administrador*). El instalador:
+
+1. verifica que esté elevado y que la máquina sea x64;
+2. descarga el ejecutable desde **tu** instancia con tu token, y rechaza cualquier cosa que no sea un
+   ejecutable de Windows real — la misma protección que el instalador de Linux aplica a su binario;
+3. compara la **huella** que tu instancia publica para ese ejecutable y rechaza una que no coincida;
+4. **lo ejecuta una vez** (`--help`) antes de registrar nada: si la máquina no puede arrancarlo,
+   obtenés una sola frase clara, no se instala nada y no se registra ninguna tarea;
+5. escribe `C:\ProgramData\lazyit-agent\config` y lo restringe a **SYSTEM y Administradores
+   únicamente** — el equivalente en Windows del `chmod 600` que usa en Linux, porque ese archivo
+   contiene un token real;
+6. registra una **tarea programada** y envía un reporte, para que sepas de inmediato si el token
+   funciona.
+
+### ¿Tengo que configurar algo?
+
+No. **Administrador para instalar, y nada más.** La tarea corre como **`NT AUTHORITY\SYSTEM`**, que ya
+tiene los permisos locales necesarios para leer el hardware, la red y el software instalado de la
+máquina — **sin ninguna contraseña guardada en el host**. Justamente por eso *no* usa una cuenta de
+servicio de dominio: eso significaría una credencial que funciona, en un archivo, en cada máquina del
+parque.
+
+Ejecutar el agente a mano **sin** Administrador también funciona: simplemente reporta menos (por
+ejemplo, sin número de serie), igual que en Linux sin root, y `lazyit-agent show` te dice qué tuvo
+que omitir.
+
+### Una tarea programada, no un servicio
+
+El agente es un programa de una sola pasada: corre, recolecta, reporta y termina. En Windows eso es
+una **tarea programada** (`lazyit-agent` en el Programador de tareas), no un servicio de Windows.
+Corre cada **5 minutos**, recupera un ciclo perdido mientras la máquina estuvo apagada, se dispersa
+hasta un minuto para que todo un piso que vuelve de una ventana de parches no reporte en el mismo
+segundo, y **funciona con batería**: la mayor parte de un parque Windows son notebooks, y una tarea
+que esperara la corriente dejaría a las máquinas móviles reportando solo cuando están en el dock.
+
+Como en Linux, **el ciclo de 5 minutos no es la frecuencia de reporte.** Cada cuánto reporta
+realmente un host se define de forma central en **Configuración → Instancia → Agentes de reporte**;
+un ciclo que llega antes de tiempo termina de inmediato sin hacer nada. Cambiar la frecuencia nunca
+toca la tarea.
+
+### El binario todavía no está firmado
+
+El ejecutable de Windows está actualmente **sin firmar**. SmartScreen va a advertir sobre él, y
+algunos antivirus lo van a poner en cuarentena apenas lo vean: si la instalación falla en el paso de
+"ejecutarlo una vez", eso es lo primero que hay que revisar.
+
+Es un estado deliberado y temporal, para **validación interna dentro de la organización que
+construye lazyit**, en su propio dominio y sus propias máquinas. **No despliegues este agente de
+Windows en un cliente ni en un tercero hasta que esté firmado con un certificado de firma de código
+OV o EV.** Firmarlo no cambia nada del comportamiento del agente: es el mismo programa en ambos
+casos.
+
+### ¿Reporta contenedores Docker, como en Linux?
+
+Sí, cuando el host tiene un cliente Docker instalado y el motor está corriendo — Docker Desktop o el
+runtime de contenedores en Windows Server. Los contenedores aparecen exactamente igual que desde un
+host Linux: cada uno se convierte en un nodo propio vinculado a la máquina.
+
+Y la respuesta a la pregunta que sigue también es sí: **si registrás una máquina Windows sin Docker e
+instalás Docker un mes después, empieza a reportar sus contenedores en el ciclo siguiente.** El
+agente busca el runtime en cada ejecución y no recuerda nada: no hay que reinstalar ni reiniciar
+nada. Una máquina sin Docker simplemente no reporta lista de contenedores, en silencio, y eso no se
+trata como un problema.
+
+Una diferencia honesta: en Windows el agente le pregunta al comando `docker`, mientras que en Linux
+lee directamente el socket local del runtime. Los datos que llegan a lazyit son los mismos, con una
+excepción: el **digest** de la imagen no está disponible a través del comando, así que un contenedor
+reportado desde Windows muestra la etiqueta de su imagen pero no el digest.
+
+### Dónde vive cada cosa
+
+| | Linux | Windows |
+| --- | --- | --- |
+| El programa | `/usr/local/bin/lazyit-agent` | `C:\Program Files\lazyit-agent\lazyit-agent.exe` |
+| Configuración (contiene el token) | `/etc/lazyit-agent/config` | `C:\ProgramData\lazyit-agent\config` |
+| Estado local | `/var/lib/lazyit-agent` | `C:\ProgramData\lazyit-agent\state` |
+| Qué lo ejecuta | timer de systemd | Tarea programada `lazyit-agent` |
+
+Todo lo demás — los límites locales que podés fijar, la configuración de proxy y de autoridad
+certificadora, qué sobrevive a una reinstalación — funciona igual y vive en ese mismo archivo de
+configuración, con los mismos nombres de clave.
+
+### Hardware viejo o virtualizado
+
+En Linux el instalador lee la lista de características del propio CPU y elige automáticamente una
+compilación compatible. Windows no expone un equivalente, así que en una máquina anterior a 2013 — o
+en un clúster Hyper-V/VMware configurado para presentar un CPU más viejo a sus huéspedes — pasá
+**`-Baseline`** para instalar la compilación compatible. Si te equivocás, la verificación de
+"ejecutarlo una vez" lo detecta antes de registrar nada.
+
 ## Desinstalar el agente
 
 Volvé a ejecutar el script de instalación con `--uninstall`:
@@ -154,11 +281,19 @@ Volvé a ejecutar el script de instalación con `--uninstall`:
 sudo sh install.sh --uninstall
 ```
 
-Detiene y deshabilita el timer, y después elimina el binario, ambas unidades de systemd, el estado
-local del agente y su archivo de configuración — incluido **el token**, que se destruye con
-cualquiera de las opciones. Es seguro ejecutarlo dos veces, y seguro sobre una instalación a medias.
+En Windows, desde una PowerShell elevada:
 
-Si estás reimaginando una máquina que va a volver a tener el agente, agregá **`--keep-config`**:
+```powershell
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Uninstall
+```
+
+Detiene y elimina lo que ejecuta al agente — el timer y ambas unidades de systemd en Linux, la tarea
+programada en Windows — y después el binario, el estado local del agente y su archivo de
+configuración, incluido **el token**, que se destruye con cualquiera de las opciones. Es seguro
+ejecutarlo dos veces, y seguro sobre una instalación a medias.
+
+Si estás reimaginando una máquina que va a volver a tener el agente, agregá **`--keep-config`**
+(Linux) o **`-KeepConfig`** (Windows):
 conserva los límites propios de ese host y su configuración de proxy (lo que eligió el dueño de la
 máquina, que es molesto de reconstruir) y de todos modos quita el token y la dirección de la
 instancia. No hay ninguna opción que deje el token: una credencial que funciona contra tu instancia no
@@ -434,8 +569,13 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
   histórico: es un dato de inventario ("¿este equipo realmente se reinició después de la ventana de
   parches?"), no monitoreo de uptime. Se guarda junto a los demás datos reportados del host y, igual
   que el tipo de máquina, todavía no se muestra en ninguna pantalla.
-- **Software instalado** — la lista de paquetes instalados, con versiones cuando están disponibles. El
-  agente además registra qué gestor de paquetes reportó cada uno; la lista en sí muestra el nombre y
+- **Software instalado** — la lista de paquetes instalados, con versiones cuando están disponibles. En
+  Windows es la lista que el propio Windows muestra en *Aplicaciones y características*, leída tanto
+  de la mitad de 64 bits como de la de 32 bits del registro (perder la segunda es la forma clásica en
+  que un script de inventario casero pierde la mitad en silencio); las entradas que Windows marca
+  como ocultas — fragmentos de runtime y restos de actualizaciones — quedan afuera, así que la lista
+  es la que una persona reconocería. El
+  agente además registra qué gestor de paquetes o fuente reportó cada uno; la lista en sí muestra el nombre y
   la versión. En un servidor con muchos paquetes esta lista es, de lejos, lo más pesado que viaja en un
   reporte y sólo cambia cuando alguien instala o actualiza algo, así que el agente la envía **una vez y
   después envía sólo una huella de ella** hasta que cambie, lo que reduce un reporte de rutina a
@@ -469,6 +609,12 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
 Recopila todo lo que puede y simplemente omite lo que no puede leer, así una instalación sin
 privilegios igual reporta una imagen útil. **Nunca** lee secretos, archivos ni datos de aplicaciones,
 y no envía métricas.
+
+En Windows, todos esos datos provienen de una **única** consulta a las interfaces de inventario del
+propio sistema operativo, hecha una vez por reporte. Dos cosas que nunca toca, deliberadamente: la
+clase de WMI que enumera los paquetes MSI instalados — hacer esa pregunta hace que Windows
+*reconfigure* cada paquete instalado, lo que satura el registro de eventos y tarda minutos — y el
+comando `wmic`, ya obsoleto, que Microsoft eliminó en Windows 11 24H2 y Server 2025.
 
 ## Configurá todos los agentes desde una sola pantalla
 
@@ -534,8 +680,15 @@ nunca informa una versión de política.
   oficiales en silencio.
 - **Nunca secretos.** El agente no lleva claves ni lee ninguna bóveda — los valores de tus secretos
   quedan intactos.
-- **Un servicio confinado.** El agente corre como root, porque leer el número de serie y el modelo de
-  una máquina lo requiere — pero la unidad de systemd bajo la que corre está restringida bastante por
+- **Ninguna credencial guardada en Windows.** La tarea programada corre como `NT AUTHORITY\SYSTEM`,
+  que tiene los permisos locales necesarios sin que se escriba ninguna contraseña en ningún lado. Una
+  cuenta de servicio de dominio habría significado una credencial funcional en un archivo en cada
+  máquina del parque, así que no se ofrece.
+- **El binario de Windows todavía no está firmado.** Se dice claramente porque importa: sirve para
+  validación interna en tu propio dominio, y **no** está listo para entregarse a un tercero. Ver
+  [Hosts Windows](#hosts-windows), más arriba.
+- **Un servicio confinado.** En Linux el agente corre como root, porque leer el número de serie y el
+  modelo de una máquina lo requiere — pero la unidad de systemd bajo la que corre está restringida bastante por
   debajo de lo que root normalmente puede hacer: no puede obtener privilegios nuevos, no ve los
   directorios personales de los usuarios, tiene un `/tmp` privado, y no puede modificar parámetros del
   kernel, grupos de control, ni siquiera su propio programa y su configuración. Abrí
@@ -545,8 +698,8 @@ nunca informa una versión de política.
 - **La descarga se verifica.** Tu instancia publica una huella del binario del agente junto al binario
   mismo, y el instalador se niega a instalar uno que no coincida. Es una verificación de integridad,
   no una firma criptográfica: detecta una descarga corrupta o desactualizada, y una manipulación donde
-  se cambió solo uno de los dos archivos. Pasá `--require-checksum` para que una huella *ausente*
-  también sea fatal.
+  se cambió solo uno de los dos archivos. Pasá `--require-checksum` (o `-RequireChecksum` en Windows)
+  para que una huella *ausente* también sea fatal.
 - **Puede usar tu autoridad certificadora, no la de la máquina.** `--ca-file` (o `LAZYIT_CA_FILE` en
   la configuración) apunta el agente a un paquete de certificados en el que confía solo él, así que
   una autoridad certificadora interna nunca tiene que instalarse a nivel de toda la máquina solo para
