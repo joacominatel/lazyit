@@ -59,7 +59,7 @@ The button opens a short, guided wizard with three steps:
    things first, the wizard has a collapsed section for it and it differs by platform: on Linux,
    **Install manually (step by step)** is the same install done by hand (download the binary, install
    it, write the config file, send a test report); on Windows, **Download and read the installer
-   first** saves `install.ps1` so you can read it, then runs the copy you read.
+   first** saves `install.ps1` to your temp folder so you can read it, then runs the copy you read.
 
    > **Keep the token out of the shell.** As written above, the token is visible in `ps` to every
    > user on that machine for the few seconds the install runs, and it lands in root's shell history.
@@ -121,22 +121,23 @@ ACL and registering the scheduled task yourself, and a half-done version of that
 so what it offers instead is the honest form of the same intent: save the installer, read it, run the
 copy you read.
 
-1. **Download the installer:**
+1. **Save the installer** to your temp folder — an elevated PowerShell opens in
+   `C:\Windows\System32`, which is no place to leave a freshly downloaded script:
 
    ```powershell
-   irm https://your-instance/install.ps1 -OutFile .\install.ps1
+   irm https://your-instance/install.ps1 -OutFile "$env:TEMP\lazyit-install.ps1"
    ```
-2. **Read it, then run it:**
+2. **Read the saved file, then run it:**
 
    ```powershell
-   & ([scriptblock]::Create((Get-Content -Raw .\install.ps1))) -Url https://your-instance -Token <token>
+   & ([scriptblock]::Create((Get-Content -Raw "$env:TEMP\lazyit-install.ps1"))) -Url https://your-instance -Token <token>
    ```
 
    That is the same script-block form as the one-liner above, reading from the file instead of from
-   the network. It is written that way rather than as `.\install.ps1` because a `.ps1` **file** is
-   subject to the host's script execution policy — `Restricted` by default on Windows client editions
-   — while a script block built in memory is not. If your policy already allows local scripts,
-   `.\install.ps1 -Url … -Token …` does exactly the same thing.
+   the network. It is written that way rather than invoking the saved `.ps1` because a `.ps1` **file**
+   is subject to the host's script execution policy — `Restricted` by default on Windows client
+   editions — while a script block built in memory is not. If your policy already allows local
+   scripts, `& "$env:TEMP\lazyit-install.ps1" -Url … -Token …` does exactly the same thing.
 
 ### What a host needs to run it
 
@@ -181,6 +182,11 @@ On Windows, the same two commands, from an elevated PowerShell:
 The full path is not fussiness: on Windows the installer does not add its folder to `PATH`, so the
 bare `lazyit-agent test` is not a command there. The wizard prints whichever of the two forms matches
 the platform you picked, so you leave it holding one that runs.
+
+**Elevated** is not optional either, and the wizard says so beside the command. The installer locks
+the config file to SYSTEM and Administrators, so a `test` run from an ordinary PowerShell cannot read
+the URL or the token and reports that neither is configured — which reads like a broken install
+rather than a missing right-click.
 
 **`test`** checks the address, DNS, TLS, the proxy, the certificate authority and the token, and
 tells you which one is wrong — a redirect means you pointed it at the wrong port, a rejection means

@@ -1853,21 +1853,33 @@ Three of those are worth stating because each is a promise about code this compo
 contain, and `agent-install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}`
 as served:
 
+- **The requirements line states the real constraint, not a friendly one.** Windows 10/11 or Server
+  2016+, on **x64** — `install.ps1` dies on anything whose `PROCESSOR_ARCHITECTURE` is not `AMD64`,
+  because there is no `bun-windows-arm64` target. The wizard mints the Service Account in step 1, so
+  an operator who learns this in step 2 has already spent a token that is shown once; the copy is held
+  to the installer's own guard by a test rather than paraphrased.
 - **The Windows one-liner is the script-block form, not `irm … | iex`.** The pipe form runs the
   installer with no arguments at all, so `-Url` and `-Token` never arrive and it dies asking for
   them. This is the same reason `install.ps1`'s own `.EXAMPLE` is written that way.
 - **The inspect-first path differs in kind, not just in spelling.** On Linux it is install.sh done by
   hand in four steps. On Windows it is *download the installer, read it, run the copy you read* —
   because reproducing `install.ps1` by hand means the config file's SYSTEM+Administrators ACL and the
-  registered scheduled task, and a half-done version of those is worse than none. It runs the saved
-  file through `[scriptblock]::Create` rather than as `.\install.ps1`, because a `.ps1` **file** is
-  subject to the host's execution policy while a script block built in memory is not.
+  registered scheduled task, and a half-done version of those is worse than none. It saves the
+  installer to `$env:TEMP\lazyit-install.ps1` — named explicitly, because an elevated PowerShell opens
+  in `C:\Windows\System32` and a bare `-OutFile .\install.ps1` would drop a downloaded script there —
+  and runs that file through `[scriptblock]::Create` rather than invoking it, because a `.ps1` **file**
+  is subject to the host's execution policy while a script block built in memory is not.
 - **The Windows diagnostic is the absolute path**, `& "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test`,
   spelled the way `install.ps1` spells its own install directory. The bare `lazyit-agent test` the
   Manual documents is not a command on Windows today: the install directory is not on `PATH`
   (**#1167**, open). The absolute form runs both before and after that lands, so it needs no revision
   when it does; the test carries a tripwire assertion that fails the day `install.ps1` starts writing
-  `PATH`, so this paragraph gets re-read on purpose rather than quietly rotting.
+  `PATH`, so this paragraph gets re-read on purpose rather than quietly rotting. **The elevation
+  requirement rides in the copy beside it**, not in the command: PowerShell 5.1 has no `sudo`, and
+  every in-command elevation opens a second console the output disappears with. It is not optional —
+  the config file is ACL'd to SYSTEM + Administrators, the agent reads an unreadable config as an
+  absent one, and an unelevated `test` therefore announces that no URL and no token are configured on
+  a host that installed perfectly.
 
 The wizard also **states plainly that the Windows executable is unsigned**, on the Windows tab, before
 anything is run. §8's gate below is a decision the operator meets as a SmartScreen warning, and an

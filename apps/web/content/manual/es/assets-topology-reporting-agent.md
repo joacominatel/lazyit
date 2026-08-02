@@ -63,8 +63,8 @@ El botón abre un asistente guiado y breve, de tres pasos:
    preferís inspeccionar antes, el asistente tiene una sección plegada para eso y cambia según la
    plataforma: en Linux, **Instalar manualmente (paso a paso)** es la misma instalación hecha a mano
    (descargar el binario, instalarlo, escribir el archivo de configuración y enviar un reporte de
-   prueba); en Windows, **Descargar y leer el instalador primero** guarda `install.ps1` para que lo
-   leas y después ejecuta la copia que leíste.
+   prueba); en Windows, **Descargar y leer el instalador primero** guarda `install.ps1` en tu carpeta
+   temporal para que lo leas y después ejecuta la copia que leíste.
 
    > **Mantené el token fuera de la shell.** Tal como está escrito arriba, el token queda visible en
    > `ps` para cualquier usuario de esa máquina durante los pocos segundos que dura la instalación, y
@@ -131,22 +131,24 @@ del archivo de configuración y registrar la tarea programada, y una versión a 
 que ninguna: lo que ofrece en cambio es la forma honesta de la misma intención — guardar el
 instalador, leerlo y ejecutar la copia que leíste.
 
-1. **Descargá el instalador:**
+1. **Guardá el instalador** en tu carpeta temporal: una PowerShell elevada abre en
+   `C:\Windows\System32`, que no es lugar para dejar un script recién descargado:
 
    ```powershell
-   irm https://tu-instancia/install.ps1 -OutFile .\install.ps1
+   irm https://tu-instancia/install.ps1 -OutFile "$env:TEMP\lazyit-install.ps1"
    ```
-2. **Leelo y después ejecutalo:**
+2. **Leé el archivo guardado y después ejecutalo:**
 
    ```powershell
-   & ([scriptblock]::Create((Get-Content -Raw .\install.ps1))) -Url https://tu-instancia -Token <token>
+   & ([scriptblock]::Create((Get-Content -Raw "$env:TEMP\lazyit-install.ps1"))) -Url https://tu-instancia -Token <token>
    ```
 
    Es la misma forma con bloque de script que el comando de una línea de arriba, leyendo del archivo
-   en lugar de la red. Está escrita así y no como `.\install.ps1` porque un **archivo** `.ps1` está
-   sujeto a la política de ejecución de scripts del host —`Restricted` por defecto en las ediciones
-   cliente de Windows—, mientras que un bloque de script construido en memoria no lo está. Si tu
-   política ya permite scripts locales, `.\install.ps1 -Url … -Token …` hace exactamente lo mismo.
+   en lugar de la red. Está escrita así y no invocando el `.ps1` guardado porque un **archivo** `.ps1`
+   está sujeto a la política de ejecución de scripts del host —`Restricted` por defecto en las
+   ediciones cliente de Windows—, mientras que un bloque de script construido en memoria no lo está.
+   Si tu política ya permite scripts locales, `& "$env:TEMP\lazyit-install.ps1" -Url … -Token …` hace
+   exactamente lo mismo.
 
 ### Qué necesita un host para ejecutarlo
 
@@ -192,6 +194,11 @@ En Windows, los mismos dos comandos, desde una PowerShell elevada:
 La ruta completa no es exquisitez: en Windows el instalador no agrega su carpeta al `PATH`, así que
 `lazyit-agent test` a secas no es un comando ahí. El asistente muestra la forma que corresponde a la
 plataforma que elegiste, así que salís de él con una que funciona.
+
+Que sea **elevada** tampoco es opcional, y el asistente lo dice al lado del comando. El instalador
+restringe el archivo de configuración a SYSTEM y Administradores, así que un `test` ejecutado desde
+una PowerShell común no puede leer la URL ni el token y responde que no hay ninguno configurado, lo
+que se lee como una instalación rota y no como un clic derecho que faltó.
 
 **`test`** verifica la dirección, el DNS, el TLS, el proxy, la autoridad certificadora y el token, y
 te dice cuál está mal: una redirección significa que apuntaste al puerto equivocado, un rechazo
