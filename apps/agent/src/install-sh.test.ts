@@ -163,7 +163,8 @@ describe("--url is the instance BASE url, and a wrong one is named instead of bl
  * "must run as root" and nothing has happened. That is also the signal for "accepted": there is no
  * other way to observe it without installing. To keep that true no matter who runs the suite, PATH
  * is prefixed with an `id` shim that reports uid 1000 — a developer or container running `bun test`
- * as root would otherwise fall THROUGH the root check into a real install.
+ * as root would otherwise fall THROUGH the root check and on into the install path, which downloads
+ * and writes to /usr/local/bin and /etc.
  */
 const SHIM_DIR = join(tmpdir(), `lazyit-install-sh-guard-${process.pid}`);
 
