@@ -261,7 +261,7 @@
     "exclude": {
       "title": "Exclusions",
       "description": "Comma-separated name patterns for what to leave out of every report. * matches any run of characters and ? matches exactly one; regular expressions are not accepted. Each list holds at most {max} patterns.",
-      "count": "{count, plural, =0 {No patterns} one {# pattern} other {# patterns}} of {max}",
+      "count": "{count, plural, =0 {No patterns} other {# of {max} patterns}}",
       "nicNames": {
         "label": "Ignore network interfaces",
         "placeholder": "veth*, docker*, br-*",
