@@ -213,10 +213,15 @@ que omitir.
 
 El agente es un programa de una sola pasada: corre, recolecta, reporta y termina. En Windows eso es
 una **tarea programada** (`lazyit-agent` en el Programador de tareas), no un servicio de Windows.
-Corre cada **5 minutos**, recupera un ciclo perdido mientras la máquina estuvo apagada, se dispersa
-hasta un minuto para que todo un piso que vuelve de una ventana de parches no reporte en el mismo
-segundo, y **funciona con batería**: la mayor parte de un parque Windows son notebooks, y una tarea
-que esperara la corriente dejaría a las máquinas móviles reportando solo cuando están en el dock.
+Corre cada **5 minutos**, recupera un ciclo perdido mientras la máquina estuvo apagada y **funciona
+con batería**: la mayor parte de un parque Windows son notebooks, y una tarea que esperara la
+corriente dejaría a las máquinas móviles reportando solo cuando están en el dock.
+
+Todo un piso que vuelve de una ventana de parches igual no reporta en el mismo segundo, pero quien lo
+dispersa es **el agente, no la tarea**: cada host deriva un desfase pequeño y permanente de su propio
+machine ID, y llega a su momento de reportar en un instante distinto al de sus vecinos. (El retardo
+aleatorio de un minuto de la tarea viaja en su ciclo de cinco minutos, no en su disparador de
+arranque, así que no es lo que desfasa a un piso que acaba de reiniciarse.)
 
 Como en Linux, **el ciclo de 5 minutos no es la frecuencia de reporte.** Cada cuánto reporta
 realmente un host se define de forma central en **Configuración → Instancia → Agentes de reporte**;
@@ -495,12 +500,12 @@ estaban el día en que lo confirmaste.
 
 ## Cuando dos servidores dicen ser la misma máquina
 
-lazyit distingue tus servidores por el machine ID que Linux escribe al instalarse
-(`/etc/machine-id`). Funciona bien, hasta que se arma una **plantilla de VM o una imagen dorada que ya
-lo trae adentro**. Todas las máquinas clonadas de ahí reclaman la misma identidad y, sin un control,
-se apilarían en una sola fila: un servidor en tu mapa, doce en tus racks. Es la forma más común de
-terminar con un inventario que se equivoca con total seguridad, y es la razón por la que existe
-`systemd-firstboot`.
+lazyit distingue tus máquinas por la identidad que el sistema operativo escribe al instalarse:
+`/etc/machine-id` en Linux, `MachineGuid` en Windows. Funciona bien, hasta que se arma una **plantilla
+de VM o una imagen dorada que ya la trae adentro**. Todas las máquinas clonadas de ahí reclaman la
+misma identidad y, sin un control, se apilarían en una sola fila: un servidor en tu mapa, doce en tus
+racks. Es la forma más común de terminar con un inventario que se equivoca con total seguridad, y es
+la razón por la que existen tanto `systemd-firstboot` como `sysprep`.
 
 lazyit lo controla. Cuando un reporte reclama un ID que ya usa otro servidor, compara el hardware que
 reportan los dos: si el **número de serie y las direcciones de placa de red son ambos distintos**, son
@@ -522,10 +527,18 @@ Cuando se detectan dos máquinas:
   hosts; el resumen arranca con el comando que lo soluciona (la campana recorta los resúmenes largos a
   una línea: pasá el mouse por encima para leerlo completo). La fila enlaza al mapa de topología.
 
-La solución está en las máquinas, no en lazyit: en cada clon, borrá `/etc/machine-id`, ejecutá
-`systemd-firstboot --setup-machine-id` y reiniciá. Corregí también la plantilla, o cada clon futuro
-repite el problema. Una vez que el clon tiene un ID propio, simplemente reporta como un host nuevo:
-confirmalo, o usá **Unificar con…** para plegarlo sobre la entrada que lazyit le creó mientras tanto.
+La solución está en las máquinas, no en lazyit, y **el comando cambia según la plataforma**: por eso
+la notificación nombra el que corresponde al host que reportó.
+
+- **Linux.** En cada clon, borrá `/etc/machine-id`, ejecutá `systemd-firstboot --setup-machine-id` y
+  reiniciá.
+- **Windows.** En cada clon, ejecutá `sysprep /generalize`: eso es lo que genera un `MachineGuid`
+  nuevo. Una imagen de Windows capturada *sin* generalizarla es exactamente la forma en que un parque
+  Windows termina acá.
+
+Corregí también la plantilla, o cada clon futuro repite el problema. Una vez que el clon tiene un ID
+propio, simplemente reporta como un host nuevo: confirmalo, o usá **Unificar con…** para plegarlo
+sobre la entrada que lazyit le creó mientras tanto.
 
 Todo esto necesita los datos de hardware que envía un agente **actual**, y necesita que ese agente
 efectivamente los tenga. Dos cosas dejan a un host fuera del control, y ambas son silenciosas:
@@ -534,16 +547,20 @@ efectivamente los tenga. Dos cosas dejan a un host fuera del control, y ambas so
   — ni generan avisos — hasta que reporten con uno actualizado; nada de lo que ya tenés se toca al
   actualizar.
 - **No hay número de serie para comparar.** El control necesita un número de serie *y* direcciones de
-  placa de red. El número de serie lo da `dmidecode`, que solo responde si el agente corre **como
-  root** y la herramienta está instalada — y un **guest LXC o de contenedor no tiene número de serie
-  de hardware, punto**, corra como root o no. Un host sin número de serie se saltea igual que uno
-  viejo: lazyit lee un dato ausente como "nada para comparar", nunca como una diferencia, así que no
-  avisa sobre una suposición.
+  placa de red. En Linux el número de serie lo da `dmidecode`, que solo responde si el agente corre
+  **como root** y la herramienta está instalada — y un **guest LXC o de contenedor no tiene número de
+  serie de hardware, punto**, corra como root o no. En Windows lo da `Win32_BIOS` y requiere
+  **Administrador**, que la tarea programada ya tiene; ejecutado a mano desde una consola común, vuelve
+  vacío. Un host sin número de serie se saltea igual que uno viejo: lazyit lee un dato ausente como
+  "nada para comparar", nunca como una diferencia, así que no avisa sobre una suposición.
 
-Es decir que una flota con el agente más nuevo puede igual quedarse **sin ninguna detección de clones**
-— en silencio. La señal está en el panel de **Datos reportados**: si un host no muestra número de
-serie, ese host no se está controlando. Si la detección de clones te importa, corré el agente como root
-con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
+Es decir que una flota con el agente más nuevo puede igual quedarse **sin ninguna detección de
+clones**. La señal está en el panel de **Datos reportados**: si un host no muestra número de serie, ese
+host no se está controlando. Para saber *por qué*, ejecutá `lazyit-agent show` en el host: sus notas de
+recolección ahora nombran la fuente que volvió vacía y el error detrás, tanto en Windows como en Linux
+(ver *Qué recopila el agente*, más abajo; todavía nada muestra esas notas en la interfaz). Si la
+detección de clones te importa, corré el agente como root (en Linux, con `dmidecode` instalado) o
+desde la tarea programada (en Windows), y no esperes nada de él en guests de contenedor.
 
 ## Qué recopila el agente
 
@@ -601,8 +618,13 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
   máximo un intervalo de reporte (15 minutos por defecto). Desactivar la recolección de software en la
   configuración del agente es otra cosa distinta, y deliberada: la lista guardada se borra, para que
   nunca quedes leyendo versiones de paquetes que ya nadie está recolectando.
-- **Qué no pudo recopilar** — cada reporte también indica si corrió como root y nombra lo que tuvo que
-  omitir o lo que agotó su tiempo. Si ejecutás `lazyit-agent show` imprime esas notas ahí mismo, sin
+- **Qué no pudo recopilar** — cada reporte también indica si corrió como root (Administrador en
+  Windows) y nombra lo que tuvo que omitir o lo que agotó su tiempo. En Windows todo el barrido es una
+  sola llamada de PowerShell que sigue adelante ante una falla en lugar de abortar el reporte, así que
+  también nombra **cada dato que volvió vacío** — el número de serie, los discos, las placas de red, la
+  identidad de la máquina — y deja pasar el texto del error del propio Windows, que es la diferencia
+  entre una columna vacía y una columna vacía sobre la que podés actuar. Si ejecutás
+  `lazyit-agent show` imprime esas notas ahí mismo, sin
   enviar nada, que suele ser la forma más rápida de responder "¿por qué está vacía la columna
   de número de serie de este host?". (`lazyit-agent report --once --force` también las imprime, y
   envía el reporte.) lazyit además las guarda junto a los datos reportados del host,

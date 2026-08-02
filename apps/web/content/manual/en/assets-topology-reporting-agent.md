@@ -200,10 +200,15 @@ what it had to skip.
 
 The agent is a one-shot program: it runs, gathers, reports and exits. On Windows that is a
 **scheduled task** (`lazyit-agent` in Task Scheduler), not a Windows service. It ticks every **5
-minutes**, catches up a tick missed while the machine was off, spreads itself out by up to a minute
-so a whole floor coming back from a patch window doesn't report in the same second, and **runs on
-battery** — most of a Windows estate is laptops, and a task that waited for mains power would leave
-roaming machines reporting only when docked.
+minutes**, catches up a tick missed while the machine was off, and **runs on battery** — most of a
+Windows estate is laptops, and a task that waited for mains power would leave roaming machines
+reporting only when docked.
+
+A whole floor coming back from a patch window still doesn't report in the same second, but it is
+**the agent, not the task**, that spreads it out: each host derives a small, permanent offset from
+its own machine ID and reaches its reporting time at a different moment from its neighbours. (The
+task's own one-minute random delay rides its five-minute tick, not its at-startup trigger, so it is
+not what de-phases a floor that just rebooted.)
 
 As on Linux, **the 5-minute tick is not the reporting cadence.** How often a host actually reports is
 set centrally in **Settings → Instance → Reporting agents**; a tick that arrives too early exits
@@ -464,11 +469,12 @@ you confirmed it.
 
 ## When two servers claim to be the same machine
 
-lazyit tells your servers apart by the machine ID Linux writes at install time (`/etc/machine-id`).
-That works — until a **VM template or golden image is built with one already in it**. Every machine
-cloned from it then claims the same identity, and without a check they would all pile onto a single
-row: one server on your map, twelve in your racks. It is the most common way an inventory ends up
-confidently wrong, and it is why `systemd-firstboot` exists.
+lazyit tells your machines apart by the identity the operating system writes at install time —
+`/etc/machine-id` on Linux, `MachineGuid` on Windows. That works — until a **VM template or golden
+image is built with one already in it**. Every machine cloned from it then claims the same identity,
+and without a check they would all pile onto a single row: one server on your map, twelve in your
+racks. It is the most common way an inventory ends up confidently wrong, and it is why
+`systemd-firstboot` and `sysprep` both exist.
 
 lazyit checks. When a report claims an ID that another server already uses, it compares the hardware
 the two report: if the **serial number and the network-card addresses both differ**, they are two
@@ -490,10 +496,18 @@ When two machines are found:
   summary opens with the command that fixes it (the bell shortens long summaries to one line — hover
   the row to read it in full). The row links to the topology map.
 
-The fix is on the machines, not in lazyit: on each clone, remove `/etc/machine-id`, run
-`systemd-firstboot --setup-machine-id`, and reboot. Fix the template too, or every future clone repeats
-it. Once a clone has a real ID of its own it simply reports as a new host — confirm it, or use
-**Merge into…** to fold it onto the entry lazyit created for it in the meantime.
+The fix is on the machines, not in lazyit — and **the command differs by platform**, which is why the
+notification names the one for the host that reported:
+
+- **Linux.** On each clone, remove `/etc/machine-id`, run `systemd-firstboot --setup-machine-id`, and
+  reboot.
+- **Windows.** On each clone, run `sysprep /generalize` — that is what mints a fresh `MachineGuid`. A
+  Windows image that was captured *without* generalizing it is exactly how a Windows estate ends up
+  here.
+
+Fix the template too, or every future clone repeats it. Once a clone has a real ID of its own it
+simply reports as a new host — confirm it, or use **Merge into…** to fold it onto the entry lazyit
+created for it in the meantime.
 
 All of this needs the hardware details a **current** agent sends — and it needs that agent to actually
 have them. Two things leave a host out of the check, and both are silent:
@@ -501,16 +515,21 @@ have them. Two things leave a host out of the check, and both are silent:
 - **An older agent.** Hosts still running an agent from before these details existed are never
   compared — and never warned about — until they check in with an updated one; nothing you already
   have is touched by the upgrade.
-- **No serial to compare with.** The check needs a serial number *and* network-card addresses. The
-  serial comes from `dmidecode`, which only answers when the agent runs **as root** and the tool is
-  installed — and an **LXC or other container guest has no hardware serial at all**, root or not. A
-  host with no serial is skipped exactly like a legacy one: lazyit reads a missing fact as "nothing to
-  compare", never as a difference, so it will not warn on a guess.
+- **No serial to compare with.** The check needs a serial number *and* network-card addresses. On
+  Linux the serial comes from `dmidecode`, which only answers when the agent runs **as root** and the
+  tool is installed — and an **LXC or other container guest has no hardware serial at all**, root or
+  not. On Windows it comes from `Win32_BIOS` and needs **Administrator**, which the scheduled task
+  already has; run by hand from an ordinary prompt, it comes back empty. A host with no serial is
+  skipped exactly like a legacy one: lazyit reads a missing fact as "nothing to compare", never as a
+  difference, so it will not warn on a guess.
 
-So a fleet on the newest agent can still get **no clone detection whatsoever** — silently. The tell is
-the **Reported facts** panel: if it shows no serial for a host, that host is not being checked. If
-clone detection matters to you, run the agent as root with `dmidecode` installed, and expect nothing
-from it on container guests.
+So a fleet on the newest agent can still get **no clone detection whatsoever**. The tell is the
+**Reported facts** panel: if it shows no serial for a host, that host is not being checked. To find
+out *why*, run `lazyit-agent show` on the host — its collection notes now name the source that came
+back empty and the error behind it on Windows as well as on Linux (see *What the agent collects*
+below; nothing displays those notes in the interface yet). If clone detection matters to you, run the
+agent as root (Linux, with `dmidecode` installed) or from the scheduled task (Windows), and expect
+nothing from it on container guests.
 
 ## What the agent collects
 
@@ -564,7 +583,11 @@ from it on container guests.
   settings is different again, and deliberate: the stored list is cleared, so you are never left
   reading package versions nobody is collecting any more.
 - **What it couldn't collect** — each report also says whether it ran with root (Administrator on
-  Windows) and names anything it had to skip or that timed out. Run `lazyit-agent show` and it prints those notes right there,
+  Windows) and names anything it had to skip or that timed out. On Windows the whole sweep is one
+  PowerShell call that keeps going past a failure rather than aborting the report, so it also names
+  **each fact that came back empty** — the serial, the disks, the network cards, the machine identity —
+  and passes Windows' own error text through, which is the difference between a blank column and a
+  blank column you can act on. Run `lazyit-agent show` and it prints those notes right there,
   without sending anything, which is usually the fastest way to answer "why is this host's serial
   column empty?". (`lazyit-agent report --once --force` prints them too, and sends the report.)
   lazyit also stores them alongside the host's reported facts, so a future fleet view
