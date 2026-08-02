@@ -200,9 +200,9 @@ URL="${URL%/}" # strip a trailing slash
 # anything is downloaded, so the message names the real mistake and suggests the URL they meant.
 #
 # THE SCHEME IS COMPARED CASE-INSENSITIVELY. RFC 3986 section 3.1 makes the scheme case-insensitive,
-# curl accepts HTTPS:// exactly as it accepts https://, and install.ps1 built the same check on
-# PowerShell's -match, which is case-insensitive by default. A case-sensitive `case` here made the
-# two installers disagree about one input: HTTPS://host installed on Windows and died on Linux.
+# curl accepts HTTPS:// exactly as it accepts https://, and install.ps1 spells this check with
+# -notmatch, which is case-insensitive by default. A case-sensitive `case` here made the two
+# installers disagree about one input: HTTPS://host installed on Windows and died on Linux.
 case "$URL" in
   *://*) URL_SCHEME="$(printf '%s' "${URL%%://*}" | tr '[:upper:]' '[:lower:]')" ;;
   *)     URL_SCHEME="" ;;
