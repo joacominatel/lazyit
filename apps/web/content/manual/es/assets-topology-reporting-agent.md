@@ -470,6 +470,59 @@ Recopila todo lo que puede y simplemente omite lo que no puede leer, así una in
 privilegios igual reporta una imagen útil. **Nunca** lee secretos, archivos ni datos de aplicaciones,
 y no envía métricas.
 
+## Qué cambió, y cuándo
+
+Todos los paneles anteriores muestran una máquina **tal como está ahora**. La pestaña **Cambios** de
+un nodo muestra los momentos en que **se movió**: la respuesta a *"alguien actualizó OpenSSL en db-01
+el martes pasado y rompió la aplicación"*.
+
+Abrí una máquina en el diagrama de infraestructura y pasá de **Resumen** a **Cambios**. Cada entrada
+indica qué cambió, su valor antes y después, y cuándo lo registró lazyit. Las más recientes primero,
+con un botón al final para cargar las anteriores.
+
+**Solo se registran los cambios reales.** Un host que reporta cada cinco minutos y nunca cambia no
+agrega nada: la lista queda vacía por más tiempo que lleve reportando. Aparece una entrada cuando:
+
+- se **instala** un paquete, se **elimina** o **cambia su versión** (una actualización o una vuelta
+  atrás);
+- cambia el **sistema operativo**, su **versión** o el **kernel**;
+- cambia la **memoria**, la **capacidad total de disco** o la **cantidad de discos**;
+- cambia el **número de serie del hardware**;
+- cambia la **imagen** de un contenedor o su **digest** — este último es el más útil, porque el digest
+  se mueve cuando se vuelve a descargar una etiqueta `:latest` y ninguna otra pantalla te lo diría.
+
+**Algunas cosas quedan deliberadamente fuera**, porque llenarían la lista de ruido en lugar de
+respuestas:
+
+- **El primer reporte de una máquina.** La primera vez que lazyit ve un dato simplemente lo recuerda:
+  no registra "3.000 paquetes instalados". Lo mismo vale la primera vez que aparece un dato puntual en
+  un host que ya venía reportando sin él (por ejemplo, el número de serie que aparece después de darle
+  root al agente). Los cambios se registran a partir de la segunda observación, y por eso una
+  instancia recién actualizada arranca con la lista vacía en todas las máquinas.
+- **Un dato que desaparece.** Si el agente deja de ejecutarse como root, el número de serie deja de
+  llegar: eso es el agente perdiendo una capacidad, no un chasis reemplazado, así que no se registra
+  nada.
+- **El reinicio de un contenedor.** Eso es disponibilidad, y ya está en el estado del nodo.
+- **Desactivar la recopilación de software** en la configuración del agente. Eso borra la lista de
+  paquetes almacenada, como se explica más arriba, pero es un cambio de configuración: no se registra
+  como miles de eliminaciones.
+
+**Una máquina que estuvo mucho tiempo fuera de línea tiene un tope.** Cuando un host vuelve después de
+perderse varias ventanas de parches, su primer reporte puede diferir legítimamente en miles de
+paquetes. lazyit registra hasta **200 entradas por máquina y por reporte**, para que un solo reporte no
+sepulte la lista, y hasta **500 por máquina y por hora**. Lo que exceda esos topes no se registra; las
+entradas ya registradas nunca se eliminan. En operación normal nunca vas a acercarte a ninguno de los
+dos números.
+
+La pestaña es de **solo lectura**: las entradas las escribe el agente y nada más, y no hay nada que
+editar ni borrar. Quitar una máquina del mapa oculta su historial junto con la máquina; restaurarla
+devuelve las dos cosas.
+
+> [!info] No hace falta actualizar el agente
+> Esto funciona con los agentes que ya tenés instalados. lazyit compara cada reporte con lo que ya
+> tiene almacenado, así que no hay que cambiar nada en los hosts para que la pestaña Cambios empiece a
+> llenarse.
+
 ## Configurá todos los agentes desde una sola pantalla
 
 No se editan los agentes host por host. **Configuración → Instancia → Agentes de inventario** define

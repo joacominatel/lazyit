@@ -438,6 +438,53 @@ It collects whatever it can and simply omits anything it can't read, so an unpri
 reports a useful picture. It **never** reads secrets, files or application data, and it sends no
 metrics.
 
+## What changed, and when
+
+Every panel above shows a machine **as it is now**. The **Changes** tab on a node shows the moments it
+**moved** — the answer to *"someone upgraded OpenSSL on db-01 last Tuesday and broke the app"*.
+
+Open a machine on the infrastructure diagram and switch from **Overview** to **Changes**. Each entry
+names what changed, its value before and after, and when lazyit recorded it. Newest first, with a
+button at the bottom to load older entries.
+
+**Only real changes are recorded.** A host that checks in every five minutes and never changes adds
+nothing at all — the list stays empty, however long it has been reporting. An entry appears when:
+
+- a package is **installed**, **removed**, or its **version changes** (an upgrade or a downgrade);
+- the **operating system**, its **version** or the **kernel** changes;
+- **memory**, **total disk capacity** or the **number of disks** changes;
+- the **hardware serial** changes;
+- a container's **image** or its **image digest** changes — that last one is the useful one, because a
+  digest moves when a `:latest` tag is re-pulled and nothing else on screen would tell you.
+
+**A few things are deliberately not recorded**, because they would fill the list with noise rather
+than answers:
+
+- **A machine's first report.** The first time lazyit sees a fact, it simply remembers it — it does not
+  record "3,000 packages installed". The same applies the first time any individual fact appears on a
+  host that had been reporting without it (a serial showing up after you give the agent root, for
+  example). Changes start being recorded from the second observation onwards, which is also why a
+  freshly upgraded instance starts with an empty list on every machine.
+- **A fact that disappears.** If the agent stops running as root, the serial stops arriving — that is
+  the agent losing an ability, not the chassis being swapped, so nothing is recorded.
+- **A container restarting.** That is liveness, and it is already on the node's status.
+- **Turning software collection off** in the agent settings. That clears the stored package list, as
+  documented above, but it is a settings change — it is not recorded as thousands of removals.
+
+**A machine that has been offline for a long time is capped.** When a host comes back after missing
+several patch windows, its first report can legitimately differ by thousands of packages. lazyit
+records up to **200 entries per machine per report** so one check-in cannot bury the list, and up to
+**500 per machine per hour**. Anything beyond that is not recorded; already-recorded entries are never
+removed. In normal operation you will never approach either number.
+
+The tab is **read-only** — entries are written by the agent and nothing else, and there is nothing to
+edit or delete. Removing a machine from the map hides its history along with the machine; restoring it
+brings both back.
+
+> [!info] No agent update needed
+> This works with the agents you already have installed. lazyit compares each report against what it
+> already holds, so nothing on your hosts has to change for the Changes tab to start filling.
+
 ## Configure every agent from one screen
 
 You do not edit agents host by host. **Settings → Instance → Reporting agents** sets the policy for
