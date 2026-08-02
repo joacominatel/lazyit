@@ -57,9 +57,22 @@ written **only when something actually moved**, so a host nobody touched adds no
   purpose when its globs match everything (the #1140 policy amendment in
   [[0074-server-reporting-agent]] §7), and recording that would put `host.disks.count 2 → 0` — a
   chassis losing all of its storage — on screen in exchange for an operator editing a setting.
-  Excluding only *some* mountpoints still moves the count and is recorded; that is a real reading.
   Everything else the report carries is either visible elsewhere or moves for reasons that are not
   inventory changes, and a history nobody trusts is worse than none.
+- **A POLICY-SENSITIVE fact is compared only across ONE policy generation.** An agent policy (#1140)
+  decides what the collector may *report*, so a fact a policy can filter would otherwise be recorded
+  as the machine moving. Four fields filter a list the report still carries — `exclude.mountpoints`
+  (which reaches `host.disks.totalBytes` and `host.disks.count`), `exclude.softwareNames`,
+  `softwareSources` and `softwareMax` (which reach every `PACKAGE_*` row) — so those facts are marked
+  `policySensitive` in the shared tracked-fact table and are diffed only when the agent's echoed
+  `policyRevision` matches the one the node already held. Both absent counts as a match, which is what
+  keeps a pre-#1140 agent's package history working. The marking is a **required** field on every
+  tracked fact, so a fact added later declares itself rather than inheriting the wrong answer. The
+  cost is one report's worth of disk and package rows after any policy write (the revision is
+  instance-wide), and the facts no policy filters — OS, kernel, memory, serial, container image and
+  digest — are still recorded in that same report. It does **not** see a host's own
+  `/etc/lazyit-agent/config`: the local veto moves no revision, so tightening its exclusions there is
+  recorded as removals. See [[0074-server-reporting-agent]] §3 for the full reasoning and the residual.
 - **A container's runtime `state` is deliberately NOT recorded.** It is liveness: it already drives
   the child node's `status`, and a container that restarts nightly would write two rows a day forever.
   The image **digest** is recorded precisely because it moves under an unchanged `:latest` tag — the

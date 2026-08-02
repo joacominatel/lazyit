@@ -1058,11 +1058,62 @@ disappeared", and the count for a sharper reason: `applyDiskPolicy` (#1140) retu
 an omitted fact, when the operator's own `exclude.mountpoints` globs match everything, since "the
 policy matched them all" is a positive answer *about the collector*. Counting it would render a
 policy edit as `host.disks.count 2 → 0`, a chassis losing all of its storage — exactly the invented
-event that makes a history worthless. (Excluding only *some* mountpoints still moves the count, and
-is recorded: that is a real reading, indistinguishable by design from a disk actually being pulled.)
-Everything else the report carries — hostname, NICs, IPs, `bootedAt`, the warning list — is either
-visible elsewhere or moves for reasons that are not inventory changes, and a history nobody trusts is
-worse than none.
+event that makes a history worthless. Everything else the report carries — hostname, NICs, IPs,
+`bootedAt`, the warning list — is either visible elsewhere or moves for reasons that are not
+inventory changes, and a history nobody trusts is worse than none.
+
+**A POLICY IS NOT AN EVENT, and that is a rule about the whole vocabulary rather than about disks.**
+The "no evidence" reading above answers one *shape* of the problem — the policy that excluded
+everything. The general shape is that an agent policy (§7) decides what the collector may **report**
+and says nothing about the machine, so any fact a policy can filter will otherwise be recorded as the
+machine moving. Four policy fields filter a list the report still carries, and between them they
+reach the two disk facts and the whole package half:
+
+| Policy field | What it filters | Facts it can move |
+| --- | --- | --- |
+| `exclude.mountpoints` | disk records | `host.disks.totalBytes`, `host.disks.count` |
+| `exclude.softwareNames` | package names | every `PACKAGE_*` row |
+| `softwareSources` | which package managers count | every `PACKAGE_*` row |
+| `softwareMax` | how many packages survive | every `PACKAGE_*` row |
+
+Each of those is a deliberate operator action — excluding `/snap/*`, dropping `linux-image-*`,
+lowering a cap to keep reports small — and each leaves the disks attached and the packages installed.
+So the two disk facts are marked **policy-sensitive** in the tracked-fact table, the package half is
+policy-sensitive in its entirety (its facts are package names, not a fixed vocabulary), and a
+policy-sensitive fact is compared **only when both observations were collected under the same policy
+generation**. The marking is a *required* field on every tracked fact, so the next fact added to this
+diff has to answer the question instead of inheriting the wrong answer — which is how the disks
+arrived at it, one at a time, twice.
+
+The other shape a policy takes — a `collect.*` toggle that omits a fact entirely — needs no marking:
+an omitted fact is already silent under the two absence rules above, and `softwareState: 'disabled'`
+under the ones beside it.
+
+**Where the distinction is made, and why it is the server's.** There is a real asymmetry here: the
+agent knows *which* packages its policy filtered out, and the server never sees them. The server does
+not need the names. It only needs to know that the **filter moved**, and it already holds that —
+§7's echo. The agent reports the `policyRevision` it collected under, and `InfraNode.policyRevision`
+holds the last echo that node sent; equal means both observations ran under one policy, different
+means the filter itself may have moved and this comparison cannot tell which. So
+**no wire field is added**, nothing is asked of the fleet, and an agent that is never upgraded is
+protected by a server that was. A `softwareFiltered: true` flag on the report was considered and
+rejected on those grounds: it would have made the guard depend on agents upgrading, and the server's
+own bookkeeping already answers the question. Two absences count as *same* — a pre-#1140 agent echoes
+nothing and applies no server policy, so it can produce no policy artefact, and reading its silence
+as "the generation moved" would blank the package history of most of the fleet on the day this ships.
+
+**What it costs, stated plainly.** The revision is instance-wide and bumps on *any* policy write at
+*any* scope, so editing one host's policy makes every host skip its policy-sensitive diff for one
+report. A real change landing in that same check-in is not recorded and the baseline re-seeds from
+the new lists. That is the safe direction to be wrong in: one check-in's disk and package rows,
+against an uninstall the operator can neither explain nor disprove. The facts no policy filters —
+OS, kernel, memory, serial, container image and digest — are still recorded in that same report, so
+the guard is per fact, never per report. **The residual it does not close** is the host's own
+`/etc/lazyit-agent/config` (§7's local veto): tightening `LAZYIT_EXCLUDE_SOFTWARE` or
+`LAZYIT_SOFTWARE_MAX` there narrows the filter without moving any revision, and those removals will
+be recorded. Closing that needs the wire to carry the fact that a list was locally filtered, which is
+a §2 contract change and is not made here; someone with root on a host editing that host's own filter
+is not the case this table exists to protect.
 
 **Container children are in, and the digest is why.** #1139 gave a container its own node and #1157
 gave it its own Asset sync; a container whose **image digest moves under an unchanged `:latest` tag**
