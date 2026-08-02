@@ -65,6 +65,130 @@ describe("nothing is installed until the host has been checked", () => {
   });
 });
 
+/**
+ * THE SECOND DEFECT IN #1166. The operator on the first Windows host ran
+ * `-Url http://192.168.100.75:8080/install.ps1` — the address of the SCRIPT, not the address of the
+ * instance. Every request is built as `"$Url$Path"`, so that asks for
+ * `http://192.168.100.75:8080/install.ps1/api/agent/download?...`, and the failure that surfaces is
+ * a download error naming the token as a likely cause. The operator goes and rotates a credential
+ * that was never wrong. This block pins the guard that names the real mistake instead.
+ */
+describe("-Url is the instance BASE URL, and a wrong one is named instead of blamed on the token (#1166)", () => {
+  test("the address of this script is refused, and BEFORE anything is downloaded", () => {
+    const guard = script.indexOf("not the address of this script");
+    const download = script.indexOf("Invoke-LazyitDownload \"/api/agent/download");
+    expect(guard).toBeGreaterThan(-1);
+    expect(download).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(download);
+  });
+
+  test("an /api endpoint is refused too — the installer appends /api/agent/download itself", () => {
+    expect(script).toContain("not an API endpoint");
+  });
+
+  test("a -Url with no scheme is refused by name, not left to fail inside Invoke-WebRequest", () => {
+    expect(script).toContain("^https?://[^/]+");
+    expect(script).toContain("starting with http:// or https://");
+  });
+
+  // Any OTHER path only warns. lazyit sets no Next.js basePath, so a path is almost always the
+  // mistake above wearing a different shape — but a reverse proxy that strips a prefix really can
+  // mount an instance under one, and an installer that refused it would break an upgrade path that
+  // works today. The two Die branches above are the cases that can NEVER be a valid base URL.
+  test("any other path WARNS and continues, so a prefix-stripping proxy still installs", () => {
+    const warning = script.slice(script.indexOf("Write-Warning"), script.indexOf("[Net.ServicePointManager]"));
+    expect(warning).toContain("carries a path");
+    expect(script).not.toContain("Die \"-Url must not contain a path");
+  });
+
+  test("the parameter help shows the base-URL form and names the mistake", () => {
+    expect(script).toContain("Your lazyit instance BASE URL");
+    expect(script).toContain("NOT the address of this script");
+  });
+});
+
+/**
+ * WHICH BRANCH THE GUARD TAKES, decided by the shipped patterns rather than by a string match over
+ * them (#1171 review).
+ *
+ * The header above explains why this file does not execute PowerShell, and that has not changed.
+ * What changed is that asserting `toContain("^/install\\.(ps1|sh)")` was how a defect shipped: the
+ * string is present and correct-looking, and the `^` means the fatal branch only fires when the
+ * script is the FIRST path segment — so an instance mounted at https://it.example.com/lazyit, the
+ * one deployment shape the warning branch exists to protect, warned and then failed the #1166 way.
+ *
+ * So the two branch patterns are READ OUT OF the script and evaluated over a table of paths. The
+ * one thing this assumes is that these two particular patterns — `^(.*?)/install\.(ps1|sh)/` and
+ * `^/api(/|$)` — mean the same thing to JavaScript's engine as to .NET's over the inputs below.
+ * Neither uses a construct where the two engines differ (no balancing groups, no possessive
+ * quantifiers, no character-class subtraction, no named groups); the one difference that could
+ * matter, .NET's `$` also matching before a trailing newline, cannot bite on a URL path. The corpus
+ * below was additionally run through real `pwsh` by hand. It is a check on the LOGIC of the guard,
+ * not a substitute for a Windows host.
+ */
+describe("the -Url guard's branch patterns, evaluated over the paths operators actually pass", () => {
+  const GUARD = script.slice(
+    script.indexOf("# --- -Url IS THE INSTANCE BASE URL"),
+    script.indexOf("# TLS 1.2 explicitly."),
+  );
+
+  /**
+   * The guard's `-match` patterns, read out of the block above. `-notmatch` (the scheme check) has
+   * no `-match` substring, so it is excluded for free. Extraction happens INSIDE each test on
+   * purpose: doing it in the describe body would make a failed extraction abort registration, and
+   * the block would report zero tests instead of a failure — the exact "reads like coverage" trap
+   * the header of this file argues against.
+   */
+  function pattern(kind: "install" | "api"): RegExp {
+    const literals = [...GUARD.matchAll(/-match '([^']+)'/g)].map((m) => m[1] ?? "");
+    const found = literals.find((l) => l.includes(kind));
+    expect(found, `no -match literal mentioning ${kind} in the guard block; found ${JSON.stringify(literals)}`).toBeDefined();
+    return new RegExp(found ?? "");
+  }
+
+  test("the script is refused wherever it sits in the path, not only as the first segment", () => {
+    const scriptInPath = pattern("install");
+    // The guard appends a '/' before matching, so the filename has to be a COMPLETE path segment.
+    for (const path of ["/install.ps1", "/lazyit/install.ps1", "/lazyit/install.sh", "/a/b/install.ps1"]) {
+      expect(scriptInPath.test(`${path}/`), path).toBe(true);
+    }
+  });
+
+  test("the prefix it suggests keeping is everything before this script's own segment", () => {
+    const scriptInPath = pattern("install");
+    expect("/lazyit/install.ps1/".match(scriptInPath)?.[1]).toBe("/lazyit");
+    expect("/install.ps1/".match(scriptInPath)?.[1]).toBe("");
+  });
+
+  test("a path that merely starts like this script is not mistaken for it", () => {
+    const scriptInPath = pattern("install");
+    for (const path of ["/install.ps1x", "/install.shed", "/installer", "/lazyit"]) {
+      expect(scriptInPath.test(`${path}/`), path).toBe(false);
+    }
+  });
+
+  test("/api is fatal at the start of the path and falls through to the warning under a prefix", () => {
+    const apiInPath = pattern("api");
+    expect(apiInPath.test("/api")).toBe(true);
+    expect(apiInPath.test("/api/agent/download")).toBe(true);
+    expect(apiInPath.test("/apidocs")).toBe(false);
+    // Under a prefix mount /lazyit/api warns rather than dying — same as install.sh.
+    expect(apiInPath.test("/lazyit/api")).toBe(false);
+  });
+
+  // FINDING 3. Both suggestions used to be built by pattern-stripping the WHOLE URL string, which
+  // matched inside the host: `$Url -replace '/api.*$', ''` on https://api.example.com/api answers
+  // `https:/`. They are built from the origin + the path prefix now, and a suggestion is pasted, so
+  // a regression here hands the operator a URL that cannot work.
+  test("the suggested replacements are assembled from the origin, not stripped off the whole URL", () => {
+    // Comment lines are dropped first: the guard's own prose QUOTES the broken form it replaced,
+    // which is worth keeping and is not code.
+    const code = GUARD.split("\n").filter((line) => !line.trimStart().startsWith("#")).join("\n");
+    expect(code).toContain("$UrlOrigin");
+    expect(code).not.toMatch(/\$Url -replace '\/(install|api)/);
+  });
+});
+
 describe("the scheduled task is the systemd timer, one platform over", () => {
   test("it runs as SYSTEM at the highest run level — never a domain service account", () => {
     // SYSTEM has local WMI/CIM rights with NO credential stored on the host. A domain account would

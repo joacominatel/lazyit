@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { chmod, mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /**
@@ -109,6 +111,173 @@ describe("uninstall — nobody deploys what they cannot cleanly remove", () => {
     expect(script).toContain('rm -f "$CONFIG_FILE"');
     expect(script).toContain("--keep-config");
     expect(script).toMatch(/LAZYIT_TOKEN=/);
+  });
+});
+
+/**
+ * THE SECOND DEFECT IN #1166, which install.sh shares with install.ps1 exactly. `--url` is the
+ * instance BASE url; every request is built as `"$URL/api/..."`. A `--url https://host/install.sh`
+ * therefore asks for `https://host/install.sh/api/agent/download?arch=...` and surfaces as a
+ * download failure whose message names the token as a likely cause — sending the operator to rotate
+ * a credential that was never wrong. The Windows operator hit it first; the shape is identical here.
+ */
+describe("--url is the instance BASE url, and a wrong one is named instead of blamed on the token (#1166)", () => {
+  test("the address of this script is refused, and BEFORE anything is downloaded", () => {
+    const guard = script.indexOf("not the address of this script");
+    // The real curl, not the `--help` line that also names the path it appends.
+    const download = script.indexOf('"$URL/api/agent/download');
+    expect(guard).toBeGreaterThan(-1);
+    expect(download).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(download);
+  });
+
+  test("an /api endpoint is refused too — the installer appends /api/agent/download itself", () => {
+    expect(script).toContain("not an API endpoint");
+  });
+
+  test("the usage text shows the base-URL form and names the mistake", () => {
+    expect(script).toContain("--url <base-url>");
+    expect(script).toMatch(/NOT .*install\.sh/);
+  });
+
+  test("the guard runs on the value the flags produced, after the trailing slash is stripped", () => {
+    const trim = script.indexOf('URL="${URL%/}"');
+    const guard = script.indexOf("not the address of this script");
+    expect(trim).toBeGreaterThan(-1);
+    expect(trim).toBeLessThan(guard);
+  });
+});
+
+/**
+ * The same guard, RUN rather than grepped (#1171 review).
+ *
+ * Every assertion in the block above is a string match over the source, and that is exactly how two
+ * defects shipped: `/install.sh*` reads like "the script anywhere" and means "the script as the
+ * FIRST path segment", and `${URL%%/install.*}` reads like "drop the script" and means "drop from
+ * the first `/install.` in the whole URL — including the one inside a host called
+ * `install.example.com`", which answers `https:/`. A test that greps for those two strings is
+ * green on both bugs. These execute the shipped script and read what the operator would read.
+ *
+ * WHY THIS IS SAFE TO EXECUTE. The URL guard sits before the `id -u` root check, which is before
+ * every write, download and `systemctl` call, so a URL the guard accepts stops one line later with
+ * "must run as root" and nothing has happened. That is also the signal for "accepted": there is no
+ * other way to observe it without installing. To keep that true no matter who runs the suite, PATH
+ * is prefixed with an `id` shim that reports uid 1000 — a developer or container running `bun test`
+ * as root would otherwise fall THROUGH the root check and on into the install path, which downloads
+ * and writes to /usr/local/bin and /etc.
+ */
+const SHIM_DIR = join(tmpdir(), `lazyit-install-sh-guard-${process.pid}`);
+
+beforeAll(async () => {
+  await mkdir(SHIM_DIR, { recursive: true });
+  // Only `id` is shimmed. The guard itself shells out to `tr` (lowercasing the scheme) and the rest
+  // of the script to `uname`, `curl` and friends, so the real PATH stays behind this one.
+  await Bun.write(join(SHIM_DIR, "id"), '#!/bin/sh\nif [ "$1" = "-u" ]; then echo 1000; else exec /usr/bin/id "$@"; fi\n');
+  await chmod(join(SHIM_DIR, "id"), 0o755);
+});
+
+afterAll(async () => {
+  await rm(SHIM_DIR, { recursive: true, force: true });
+});
+
+/** Runs the installer with `--url <url>` and returns everything it said before it stopped. */
+async function guard(url: string): Promise<{ code: number; stderr: string }> {
+  const proc = Bun.spawn(["sh", INSTALL_SH, "--url", url, "--token", "lzit_sa_not_a_real_token"], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, PATH: `${SHIM_DIR}:${process.env.PATH}`, LAZYIT_URL: "", LAZYIT_TOKEN: "" },
+  });
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  return { code, stderr };
+}
+
+/** The message the script prints when a URL got PAST the guard: the very next check is `id -u`. */
+const PAST_THE_GUARD = "must run as root";
+
+describe("the --url guard, executed against the shipped install.sh (#1166)", () => {
+  test("the shim really does stand in for root, so 'accepted' means accepted", async () => {
+    const { stderr } = await guard("https://lazyit.example.com");
+    expect(stderr).toContain(PAST_THE_GUARD);
+    expect(stderr).not.toContain("--url");
+  });
+
+  // FINDING 2. The fatal branch was anchored to the FIRST path segment, so the one deployment shape
+  // the warning branch exists to protect — an instance mounted under a prefix by a stripping proxy —
+  // is the one where the operator copies `https://it.example.com/lazyit/install.sh` out of the
+  // browser and gets a warning, then the #1166 download failure the guard was written to prevent.
+  test("the script is refused wherever it sits in the path, not only as the first segment", async () => {
+    for (const url of [
+      "https://it.example.com/install.sh",
+      "https://it.example.com/lazyit/install.sh",
+      "https://it.example.com/lazyit/install.ps1",
+      "https://it.example.com/a/b/install.sh",
+    ]) {
+      const { code, stderr } = await guard(url);
+      expect(stderr, url).toContain("not the address of this script");
+      expect(code, url).toBe(1);
+    }
+  });
+
+  test("a path that merely starts like this script is not mistaken for it", async () => {
+    // `/install.shed` is not this script. The old `/install.sh*` glob said it was.
+    const { stderr } = await guard("https://it.example.com/install.shed");
+    expect(stderr).not.toContain("not the address of this script");
+    expect(stderr).toContain("carries a path");
+    expect(stderr).toContain(PAST_THE_GUARD);
+  });
+
+  // FINDING 3. The suggestion is pasted, so a wrong one is worse than none. Both of these stripped
+  // from the first match in the WHOLE URL string, which is inside the host, and answered `https:/`.
+  test("the suggested replacement is stripped by path, so a host label never truncates it", async () => {
+    const script1 = await guard("https://install.example.com/install.sh");
+    expect(script1.stderr).toContain("pass --url https://install.example.com instead");
+    const api = await guard("https://api.example.com/api");
+    expect(api.stderr).toContain("Pass --url https://api.example.com.");
+  });
+
+  test("the suggestion keeps the prefix a stripping proxy mounts the instance under", async () => {
+    const { stderr } = await guard("https://it.example.com/lazyit/install.ps1");
+    expect(stderr).toContain("pass --url https://it.example.com/lazyit instead");
+  });
+
+  // FINDING 4. `case` is case-sensitive and PowerShell's `-match` is not, so HTTPS://host installed
+  // on Windows and was refused here. RFC 3986 section 3.1 makes the scheme case-insensitive and curl
+  // agrees, so the two installers are aligned on accepting it — see install.ps1 for the same note.
+  test("an uppercase scheme is accepted, exactly as install.ps1 accepts it", async () => {
+    for (const url of ["HTTPS://lazyit.example.com", "Http://lazyit.example.com:8080"]) {
+      const { stderr } = await guard(url);
+      expect(stderr, url).not.toContain("starting with http:// or https://");
+      expect(stderr, url).toContain(PAST_THE_GUARD);
+    }
+  });
+
+  test("an uppercase scheme is still split into origin and path, so the guard keeps biting", async () => {
+    const { stderr } = await guard("HTTPS://it.example.com/lazyit/install.sh");
+    expect(stderr).toContain("pass --url HTTPS://it.example.com/lazyit instead");
+  });
+
+  test("no scheme at all is refused by name, not left to fail inside curl", async () => {
+    const { code, stderr } = await guard("192.168.100.75:8080");
+    expect(stderr).toContain("starting with http:// or https://");
+    expect(code).toBe(1);
+  });
+
+  test("an /api endpoint is refused, because the installer appends /api/agent/download itself", async () => {
+    for (const url of ["https://it.example.com/api", "https://it.example.com/api/agent/download"]) {
+      const { code, stderr } = await guard(url);
+      expect(stderr, url).toContain("not an API endpoint");
+      expect(code, url).toBe(1);
+    }
+  });
+
+  // Any OTHER path only warns, for the same reason as in install.ps1: lazyit sets no basePath, so a
+  // path is almost always one of the mistakes above wearing a different shape, but a prefix-stripping
+  // reverse proxy really can mount an instance under one and re-running this script IS the
+  // documented upgrade path. The `die` branches are the cases that can never be a valid base.
+  test("any other path WARNS and continues, so a prefix-stripping proxy still installs", async () => {
+    const { stderr } = await guard("https://it.example.com/lazyit");
+    expect(stderr).toContain("carries a path (/lazyit)");
+    expect(stderr).toContain(PAST_THE_GUARD);
   });
 });
 
