@@ -7,6 +7,7 @@ jest.mock('../../generated/prisma/client', () => ({
 }));
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
+import { BadRequestException } from '@nestjs/common';
 import type { Permission } from '@lazyit/shared';
 import { InfraController } from './infra.controller';
 import { PERMISSION_KEY } from '../auth/require-permission.decorator';
@@ -37,6 +38,48 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     expect(permsOf('listEdges')).toEqual(['infra:read']);
     // The re-image adoption hint is a READ — it only suggests a merge, it never performs one (#1141).
     expect(permsOf('identityMatches')).toEqual(['infra:read']);
+    // The append-only fact history (#1143). A READ, and the ONLY route this table has: nothing but
+    // the report ingest ever appends to it, so there is deliberately no write permission to gate.
+    expect(permsOf('listNodeChanges')).toEqual(['infra:read']);
+  });
+
+  describe('the Changes page params (#1143)', () => {
+    // `limit` reaches a `take` and `cursor` a keyset `WHERE id <`. A silently coerced NaN would page
+    // unpredictably, so both are REFUSED rather than defaulted — which the entity note promises.
+    const controller = new InfraController(
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    it.each(['abc', '0', '-1', '1.5', ''])(
+      'rejects limit=%p with a 400',
+      (limit) => {
+        expect(() => controller.listNodeChanges('n-1', limit)).toThrow(
+          BadRequestException,
+        );
+      },
+    );
+
+    it.each(['abc', '0', '-1'])('rejects cursor=%p with a 400', (cursor) => {
+      expect(() =>
+        controller.listNodeChanges('n-1', undefined, cursor),
+      ).toThrow(BadRequestException);
+    });
+
+    it('passes a valid pair straight through, and omits what was not sent', () => {
+      const infra = { listNodeFactChanges: jest.fn() };
+      const ok = new InfraController(infra as never, {} as never, {} as never);
+
+      void ok.listNodeChanges('n-1', '25', '900');
+      expect(infra.listNodeFactChanges).toHaveBeenCalledWith('n-1', {
+        limit: 25,
+        cursor: 900,
+      });
+
+      void ok.listNodeChanges('n-1');
+      expect(infra.listNodeFactChanges).toHaveBeenLastCalledWith('n-1', {});
+    });
   });
 
   it('gates the re-key/merge on infra:manage AND refuses a machine caller (#1141)', () => {
