@@ -179,8 +179,11 @@ describe("the -Url guard's branch patterns, evaluated over the paths operators a
   // `https:/`. They are built from the origin + the path prefix now, and a suggestion is pasted, so
   // a regression here hands the operator a URL that cannot work.
   test("the suggested replacements are assembled from the origin, not stripped off the whole URL", () => {
-    expect(GUARD).toContain("$UrlOrigin");
-    expect(GUARD).not.toMatch(/\$Url -replace '\/(install|api)/);
+    // Comment lines are dropped first: the guard's own prose QUOTES the broken form it replaced,
+    // which is worth keeping and is not code.
+    const code = GUARD.split("\n").filter((line) => !line.trimStart().startsWith("#")).join("\n");
+    expect(code).toContain("$UrlOrigin");
+    expect(code).not.toMatch(/\$Url -replace '\/(install|api)/);
   });
 });
 
