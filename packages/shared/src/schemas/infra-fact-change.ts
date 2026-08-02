@@ -30,10 +30,19 @@ export const InfraFactChangeKindSchema = z.enum([
 ]);
 export type InfraFactChangeKind = z.infer<typeof InfraFactChangeKindSchema>;
 
-/** Cap on a stored `fact` key. Comfortably above the contract's 255-char package-name ceiling. */
+/**
+ * Cap on a stored `fact` key — exactly the report contract's own package-name ceiling, since a package
+ * name IS a fact key here. No real name reaches it, and every tracked host/container key is far
+ * shorter; it exists so a hand-rolled client cannot make this column the widest thing in the table.
+ */
 export const INFRA_FACT_CHANGE_FACT_MAX = 255;
-/** Cap on a stored value. The widest tracked fact on the wire (`os.*`, `serial`) is 200 chars. */
-export const INFRA_FACT_CHANGE_VALUE_MAX = 255;
+/**
+ * Cap on a stored value, set to the widest tracked fact the contract admits: `container.image` at 300
+ * (`os.*` and `hardware.serial` are 200, a package version 120). Chosen so nothing this table records
+ * is ever truncated in normal operation — a truncated image tag is a value an operator would compare
+ * against a real one and get a wrong answer from.
+ */
+export const INFRA_FACT_CHANGE_VALUE_MAX = 300;
 
 /**
  * One change the ingest path is about to record — the pure diff's output, before it becomes a row.
@@ -254,9 +263,11 @@ function packageVersions(list: unknown): Map<string, string | undefined> | undef
  *    rendering it as three thousand removals would be actively misleading.
  *  - A package present on both sides at the same version writes nothing, and the comparison is by
  *    NAME rather than by position, so a package manager that re-sorts its output is not a change.
- *    (The caller reaches this function only when the server's own order-independent fingerprint of
- *    the two lists already disagreed — see `softwareFingerprint` — so re-sorting alone never gets
- *    here at all.)
+ *    That matters in its own right: the API caller normally reaches this only when the server's own
+ *    order-independent fingerprint of the two lists already disagreed, but a node stored before the
+ *    fingerprint existed holds none, and its first report after an upgrade therefore arrives here
+ *    with no disagreement established. Comparing by name means that report records nothing rather
+ *    than one row per package.
  *
  * Ordered by package name and then CAPPED, so one report after a six-month gap writes a bounded,
  * deterministic slice instead of a few thousand rows.
