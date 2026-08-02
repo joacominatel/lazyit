@@ -32,18 +32,30 @@ RUN bunx prisma generate          # -> apps/api/generated/prisma (compiled into 
 RUN bun run build                 # nest build -> apps/api/dist/src/main.js (sourceRoot: src)
 WORKDIR /app
 
-# ---- Agent binaries: Bun-compile the reporting agent for every Linux target (ADR-0074 §6) ----
+# ---- Agent binaries: Bun-compile the reporting agent for every target (ADR-0074 §6) ----
 # Reuses the builder (it already has bun + the built @lazyit/shared the agent imports for the SAME
-# zod contract the API validates — zero drift). Cross-compiles x64, x64-baseline and arm64; the API
-# serves whichever the operator's host needs via GET /agent/download. `x64-baseline` is the pre-AVX2
-# build (#1137): the ordinary x64 target assumes AVX2 (Haswell, 2013), so a pre-Haswell host or an
-# EVC-masked vSphere cluster would SIGILL on it. The compile step also writes a `.sha256` beside each
-# artifact, which GET /agent/checksum publishes and install.sh verifies.
+# zod contract the API validates — zero drift). Cross-compiles FIVE artifacts and the API serves
+# whichever the operator's host needs via GET /agent/download?os=&arch=.
+#
+# `x64-baseline` is the pre-AVX2 build (#1137): the ordinary x64 target assumes AVX2 (Haswell, 2013),
+# so a pre-Haswell host or an EVC-masked vSphere cluster would SIGILL on it. It is built for BOTH
+# operating systems because the failure is the hypervisor's, not the OS's — a Windows guest on an EVC
+# baseline is in exactly the same position as a Linux one.
+#
+# WINDOWS ARTIFACTS ARE CROSS-COMPILED HERE, on Linux, and the build stage never runs them. That is
+# the same property the arm64 artifact already relied on; `bun build --compile --target=` emits the
+# target's executable regardless of the builder's platform. There is no bun-windows-arm64 target,
+# which is why the controller refuses that combination by name rather than 404-ing on a missing file.
+#
+# The compile step also writes a `.sha256` beside each artifact, which GET /agent/checksum publishes
+# and install.sh / install.ps1 verify.
 # CI's "Build api image" job validates this stage.
 FROM builder AS agent-builder
 WORKDIR /app
 COPY apps/agent/ apps/agent/
-RUN bun run --filter @lazyit/agent compile   # -> apps/agent/dist/lazyit-agent-{x64,x64-baseline,arm64}[.sha256]
+# -> apps/agent/dist/lazyit-agent-linux-{x64,x64-baseline,arm64} and
+#    apps/agent/dist/lazyit-agent-windows-{x64,x64-baseline}.exe, each with a .sha256 beside it
+RUN bun run --filter @lazyit/agent compile
 
 # ---- Prod deps: only the API's production tree, hoisted (flat node_modules) ----
 # --filter keeps the lockfile intact (so --production's implicit frozen check passes) while
@@ -88,10 +100,11 @@ COPY --from=builder   /app/apps/api/package.json       ./apps/api/package.json
 # Baked reporting-agent binaries (ADR-0074 §6) — served by GET /agent/download. AGENT_BIN_DIR points
 # the controller here; the binaries are streamed, never executed in this container.
 #
-# The whole dist/ directory rather than a line per artifact (#1137): it now holds three binaries and
+# The whole dist/ directory rather than a line per artifact (#1137): it now holds five binaries and
 # a `.sha256` beside each, and a per-file list is exactly the kind of thing a later target gets added
 # to the compile script but not to here — which would ship a binary whose digest 404s, and quietly
-# turn the installer's integrity check back off.
+# turn the installer's integrity check back off. #1144 added two targets and needed no edit here,
+# which is the property working as intended.
 ENV AGENT_BIN_DIR=/app/agent/bin
 COPY --from=agent-builder /app/apps/agent/dist/ /app/agent/bin/
 
