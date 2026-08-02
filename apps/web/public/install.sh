@@ -198,30 +198,60 @@ URL="${URL%/}" # strip a trailing slash
 # Account credential that was never wrong. It was a Windows operator who hit this first, on the
 # identical shape in install.ps1; nothing about the mistake is Windows-specific. Checked HERE, before
 # anything is downloaded, so the message names the real mistake and suggests the URL they meant.
+#
+# THE SCHEME IS COMPARED CASE-INSENSITIVELY. RFC 3986 section 3.1 makes the scheme case-insensitive,
+# curl accepts HTTPS:// exactly as it accepts https://, and install.ps1 built the same check on
+# PowerShell's -match, which is case-insensitive by default. A case-sensitive `case` here made the
+# two installers disagree about one input: HTTPS://host installed on Windows and died on Linux.
 case "$URL" in
-  http://*|https://*) ;;
+  *://*) URL_SCHEME="$(printf '%s' "${URL%%://*}" | tr '[:upper:]' '[:lower:]')" ;;
+  *)     URL_SCHEME="" ;;
+esac
+case "$URL_SCHEME" in
+  http|https) ;;
   *) die "--url must be your lazyit instance base URL, starting with http:// or https:// (e.g. https://lazyit.example.com). Got: $URL" ;;
 esac
-# Whatever follows scheme://host[:port]. `${URL#*://}` drops the scheme; a host with no path has no
-# slash left in it, which is the ordinary case and yields an empty URL_PATH.
+# Split into origin and path, and check the PATH from here on. Matching patterns against the whole
+# URL string is what made the first version of this guard suggest a BROKEN replacement: on
+# https://api.example.com/api, `${URL%%/api*}` strips from the /api inside the HOST and answers
+# `https:/`. A suggestion is pasted, so a wrong one is worse than none.
+# `${URL#*://}` drops the scheme; a host with no path has no slash left in it, which is the ordinary
+# case and yields an empty URL_PATH.
 URL_HOSTPATH="${URL#*://}"
+URL_ORIGIN="${URL%%://*}://${URL_HOSTPATH%%/*}"
 case "$URL_HOSTPATH" in
   */*) URL_PATH="/${URL_HOSTPATH#*/}" ;;
   *)   URL_PATH="" ;;
 esac
-case "$URL_PATH" in
-  /install.sh*|/install.ps1*)
-    die "--url is your lazyit instance base URL, not the address of this script. You passed $URL; pass --url ${URL%%/install.*} instead. The installer appends /api/agent/download to it itself." ;;
-  /api|/api/*)
-    die "--url is your lazyit instance base URL, not an API endpoint. You passed $URL, and the installer would then ask for $URL/api/agent/download. Pass --url ${URL%%/api*}." ;;
-  # ANY OTHER PATH IS A WARNING, NOT A REFUSAL, and that asymmetry is deliberate. lazyit sets no
-  # Next.js basePath, so a path here is almost always the same mistake in a different shape - but a
-  # reverse proxy that strips a prefix really can mount an instance under one, and re-running this
-  # script is the documented UPGRADE path. Refusing outright would break a deployment that works
-  # today; the two branches above are the only two shapes that can never be a valid base URL.
-  ?*)
-    echo "lazyit-agent install: --url carries a path ($URL_PATH) and lazyit is served from the root of its origin, so this is usually a mistake - pass just the scheme, host and port. Continuing, in case your reverse proxy really does mount lazyit under that path." >&2 ;;
+
+# THIS SCRIPT'S NAME ANYWHERE IN THE PATH, not only as the first segment. A reverse proxy that
+# strips a prefix serves it at https://it.example.com/lazyit/install.sh, and copying that address
+# out of the browser is precisely how the mistake gets made - in the one deployment shape the
+# warning branch below exists to protect. Matching the trailing slash too keeps the filename a
+# COMPLETE path segment, so /install.shed is not mistaken for this script and refused wrongly.
+URL_IS_SCRIPT=0
+URL_SCRIPT_PREFIX=""
+case "$URL_PATH/" in
+  */install.sh/*)  URL_IS_SCRIPT=1; URL_SCRIPT_PREFIX="$URL_PATH/"; URL_SCRIPT_PREFIX="${URL_SCRIPT_PREFIX%%/install.sh/*}" ;;
+  */install.ps1/*) URL_IS_SCRIPT=1; URL_SCRIPT_PREFIX="$URL_PATH/"; URL_SCRIPT_PREFIX="${URL_SCRIPT_PREFIX%%/install.ps1/*}" ;;
 esac
+if [ "$URL_IS_SCRIPT" = "1" ]; then
+  die "--url is your lazyit instance base URL, not the address of this script. You passed $URL; pass --url $URL_ORIGIN$URL_SCRIPT_PREFIX instead. The installer appends /api/agent/download to it itself."
+fi
+# /api only at the START of the path. Under a prefix mount, /lazyit/api falls through to the warning
+# below rather than being refused - deliberately, since that is the shape a stripping proxy makes.
+case "$URL_PATH" in
+  /api|/api/*)
+    die "--url is your lazyit instance base URL, not an API endpoint. You passed $URL, and the installer would then ask for $URL/api/agent/download. Pass --url $URL_ORIGIN." ;;
+esac
+# ANY OTHER PATH IS A WARNING, NOT A REFUSAL, and that asymmetry is deliberate. lazyit sets no
+# Next.js basePath, so a path here is almost always the same mistake in a different shape - but a
+# reverse proxy that strips a prefix really can mount an instance under one, and re-running this
+# script is the documented UPGRADE path. Refusing outright would break a deployment that works
+# today; the two branches above are the only two shapes that can never be a valid base URL.
+if [ -n "$URL_PATH" ]; then
+  echo "lazyit-agent install: --url carries a path ($URL_PATH) and lazyit is served from the root of its origin, so this is usually a mistake - pass just the scheme, host and port. Continuing, in case your reverse proxy really does mount lazyit under that path." >&2
+fi
 
 [ "$(id -u)" = "0" ] || die "must run as root (installs to /usr/local/bin, /etc and systemd)"
 command -v systemctl >/dev/null 2>&1 || die "systemd (systemctl) is required"
