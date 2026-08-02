@@ -1470,10 +1470,12 @@ reads are **tolerant** while writes are **strict**: a stored layer this build ca
 "no override" and is logged, never an exception, because one bad config row must not 500 the endpoint
 that keeps an estate visible.
 
-**Shipped surface, stated plainly.** The UI edits the **instance default** (Settings → Instance →
-Reporting agents) and the node drill-in exposes the echoed revision. The per-node and
-per-service-account scopes are **API-only in this build** (`PUT /infra/nodes/:id/agent-policy`,
-`PUT /infra/agent-policy/service-accounts/:id`) — they work, and they have no editor yet.
+**Shipped surface, stated plainly.** The UI edits the **instance default** (Settings → Reporting
+agents; it lived under Settings → Instance until #1174 gave the agent surface its own section) and the
+node drill-in exposes the echoed revision. The per-node and per-service-account scopes are **API-only
+in this build** (`PUT /infra/nodes/:id/agent-policy`, `PUT /infra/agent-policy/service-accounts/:id`) —
+they work, they have no editor yet, and since #1174 the section says so on screen instead of leaving
+an operator to infer that only one scope exists.
 
 **Amendment (2026-08-01, #1137) — operational hardening: the unit, the network, and the two things
 an operator could not do.** Everything here is individually small. Collectively it is the difference

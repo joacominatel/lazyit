@@ -267,7 +267,8 @@ There is **no `GET /agent/policy`** and there never will be: the policy rides th
 (`AgentReportAckSchema.policy`), which is already authenticated, already per-agent and already
 happening. Every write here is **human-only** — a reporting agent holding `infra:report` can *receive*
 a policy and can never author one. `PUT /infra/agent-policy` is the only one with a UI (Settings →
-Instance → Reporting agents); the two narrower scopes work but ship no editor in this build.
+Reporting agents — its own section since #1174); the two narrower scopes work but ship no editor in
+this build, which that section now states on screen rather than implying only one scope exists.
 
 ## Not yet implemented (deferred)
 
