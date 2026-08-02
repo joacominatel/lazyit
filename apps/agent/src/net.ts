@@ -5,12 +5,15 @@
  * Both are the norm in the segment lazyit targets and neither was reachable before. A systemd unit
  * starts with an almost-empty environment, so a host-wide `HTTPS_PROXY` in `/etc/environment` or a
  * shell profile simply is not there when the timer fires — the agent would work by hand and fail on
- * the tick, which is the worst shape a networking bug can take. And an instance behind a LAN
- * self-signed certificate had exactly one documented answer: trust that CA **system-wide**, which is
- * a far larger grant than "one inventory agent talks to one host".
+ * the tick, which is the worst shape a networking bug can take. A Windows Scheduled Task running as
+ * SYSTEM has the same gap for the same reason (#1144): it inherits SYSTEM's environment, not the
+ * logged-on operator's. And an instance behind a LAN self-signed certificate had exactly one
+ * documented answer: trust that CA **system-wide**, which is a far larger grant than "one inventory
+ * agent talks to one host".
  *
- * So both settings are read from the agent's own `/etc/lazyit-agent/config` (env still wins, per key)
- * and applied EXPLICITLY on each request:
+ * So both settings are read from the agent's own config file — `/etc/lazyit-agent/config` on Linux,
+ * `%ProgramData%\lazyit-agent\config` on Windows — with the environment still winning per key, and
+ * applied EXPLICITLY on each request:
  *
  *  - `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` — resolved here and passed as fetch's `proxy` option
  *    rather than left to Bun's ambient environment handling. Bun does honour those variables on its
@@ -175,7 +178,7 @@ const AMBIENT_PROXY_KEYS = [
  * which is otherwise consulted in exactly the two places it must not be:
  *
  *  - **An omitted `proxy` option is not a direct connection.** Bun falls back to the environment,
- *    so a `NO_PROXY` written in `/etc/lazyit-agent/config` could not stop an `HTTPS_PROXY` the unit
+ *    so a `NO_PROXY` written in the agent's config file could not stop an `HTTPS_PROXY` the unit
  *    inherited — and `test` would cheerfully print "bypassed for this host (NO_PROXY)" about a
  *    request that went through the proxy anyway.
  *  - **An ambient `NO_PROXY` overrides even an EXPLICIT `proxy` option.** Measured, not assumed: with
