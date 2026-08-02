@@ -630,8 +630,9 @@ than answers:
   host that had been reporting without it (a serial showing up after you give the agent root, for
   example). Changes start being recorded from the second observation onwards, which is also why a
   freshly upgraded instance starts with an empty list on every machine.
-- **A fact that disappears.** If the agent stops running as root, the serial stops arriving — that is
-  the agent losing an ability, not the chassis being swapped, so nothing is recorded.
+- **A fact that disappears.** If the agent stops running as root (Administrator on Windows), the
+  serial stops arriving — that is the agent losing an ability, not the chassis being swapped, so
+  nothing is recorded.
 - **A container restarting.** That is liveness, and it is already on the node's status.
 - **Turning software collection off** in the agent settings. That clears the stored package list, as
   documented above, but it is a settings change — it is not recorded as thousands of removals.
@@ -647,8 +648,9 @@ than answers:
   filter — the operating system, the kernel, memory, the serial, a container's image — are still
   recorded in that same report. Two details worth knowing: the settings are estate-wide, so editing
   them for one machine costs every machine that one report; and a change made in a host's **own**
-  `/etc/lazyit-agent/config` is invisible to lazyit, so tightening that file's exclusions there *can*
-  show up as packages being removed.
+  configuration file — the one in the table above, `/etc/lazyit-agent/config` on Linux and
+  `C:\ProgramData\lazyit-agent\config` on Windows — is invisible to lazyit, so tightening that file's
+  exclusions there *can* show up as packages being removed.
 
 **A machine that has been offline for a long time is capped.** When a host comes back after missing
 several patch windows, its first report can legitimately differ by thousands of packages. lazyit

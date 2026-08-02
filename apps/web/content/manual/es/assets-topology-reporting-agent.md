@@ -670,9 +670,9 @@ respuestas:
   un host que ya venía reportando sin él (por ejemplo, el número de serie que aparece después de darle
   root al agente). Los cambios se registran a partir de la segunda observación, y por eso una
   instancia recién actualizada arranca con la lista vacía en todas las máquinas.
-- **Un dato que desaparece.** Si el agente deja de ejecutarse como root, el número de serie deja de
-  llegar: eso es el agente perdiendo una capacidad, no un chasis reemplazado, así que no se registra
-  nada.
+- **Un dato que desaparece.** Si el agente deja de ejecutarse como root (Administrador en Windows), el
+  número de serie deja de llegar: eso es el agente perdiendo una capacidad, no un chasis reemplazado,
+  así que no se registra nada.
 - **El reinicio de un contenedor.** Eso es disponibilidad, y ya está en el estado del nodo.
 - **Desactivar la recopilación de software** en la configuración del agente. Eso borra la lista de
   paquetes almacenada, como se explica más arriba, pero es un cambio de configuración: no se registra
@@ -689,9 +689,10 @@ respuestas:
   vuelve a comparar lo comparable. Los datos que ninguna configuración puede filtrar — el sistema
   operativo, el kernel, la memoria, el número de serie, la imagen de un contenedor — sí se registran
   en ese mismo reporte. Dos detalles que conviene saber: la configuración es de toda la instancia, así
-  que editarla para una máquina le cuesta ese reporte a todas; y un cambio hecho en el
-  `/etc/lazyit-agent/config` **del propio host** es invisible para lazyit, de modo que endurecer las
-  exclusiones ahí *sí* puede aparecer como paquetes eliminados.
+  que editarla para una máquina le cuesta ese reporte a todas; y un cambio hecho en el archivo de
+  configuración **del propio host** — el de la tabla de más arriba: `/etc/lazyit-agent/config` en
+  Linux y `C:\ProgramData\lazyit-agent\config` en Windows — es invisible para lazyit, de modo que
+  endurecer las exclusiones ahí *sí* puede aparecer como paquetes eliminados.
 
 **Una máquina que estuvo mucho tiempo fuera de línea tiene un tope.** Cuando un host vuelve después de
 perderse varias ventanas de parches, su primer reporte puede diferir legítimamente en miles de
