@@ -31,7 +31,8 @@ The button opens a short, guided wizard with three steps:
 1. **Name & generate.** Give the agent a name you'll recognise later (for example the server's name,
    like `web-prod-01`) and click **Generate credentials**. lazyit creates a service account scoped to
    **only** the `infra:report` permission.
-2. **Install.** lazyit shows a ready-to-paste **install command** with the token already filled in:
+2. **Install.** Pick the platform this server runs — **Linux** or **Windows** — and lazyit shows a
+   ready-to-paste **install command** for it, with the token already filled in. On **Linux**:
 
    ```sh
    curl -fsSL https://your-instance/install.sh | sudo sh -s -- --url https://your-instance --token <token>
@@ -46,13 +47,19 @@ The button opens a short, guided wizard with three steps:
    (The script-block form is not decoration: the plain `irm … | iex` pipe cannot pass parameters.)
    See **[Windows hosts](#windows-hosts)** below for what that install does and what it needs.
 
+   The choice changes everything the wizard prints alongside it: what the host needs, the
+   inspect-first path, the check to run afterwards, and — on Windows — a plain statement that the
+   executable is **not signed yet**, so you meet that fact before SmartScreen tells you.
+
    The address is **your own lazyit instance** — the agent only ever talks to the server you run, and
    it must be the **public HTTPS origin** (the address you use in a browser, in front of the reverse
    proxy) — **never** the raw web port (`:3000`), which has no route for the agent download and will
    make the install fail. Run it **as root** on Linux, or **as Administrator** on Windows. The token
-   is shown **only once**, so copy it (or download it) before continuing. If you'd rather inspect every step, expand **Install
-   manually (step by step)** for the same install done by hand (download the binary, install it, write
-   the config file, send a test report).
+   is shown **only once**, so copy it (or download it) before continuing. If you'd rather inspect
+   things first, the wizard has a collapsed section for it and it differs by platform: on Linux,
+   **Install manually (step by step)** is the same install done by hand (download the binary, install
+   it, write the config file, send a test report); on Windows, **Download and read the installer
+   first** saves `install.ps1` so you can read it, then runs the copy you read.
 
    > **Keep the token out of the shell.** As written above, the token is visible in `ps` to every
    > user on that machine for the few seconds the install runs, and it lands in root's shell history.
@@ -82,9 +89,9 @@ The button opens a short, guided wizard with three steps:
 
 ### Install manually (step by step)
 
-The wizard's collapsed **Install manually** section gives the same install command-by-command, for a
-cautious admin who prefers to download and inspect the binary first. Each step has its own copy
-button:
+With **Linux** selected, the wizard's collapsed **Install manually** section gives the same install
+command-by-command, for a cautious admin who prefers to download and inspect the binary first. Each
+step has its own copy button:
 
 1. **Download the binary** (use `arch=arm64` on ARM machines; add `&os=windows` for a Windows host,
    which serves `lazyit-agent-windows-x64.exe`):
@@ -107,6 +114,29 @@ button:
    ```sh
    sudo lazyit-agent report --once --force
    ```
+
+With **Windows** selected the same section is called **Download and read the installer first**, and it
+is two steps rather than four. Reproducing `install.ps1` by hand would mean writing the config file's
+ACL and registering the scheduled task yourself, and a half-done version of that is worse than none —
+so what it offers instead is the honest form of the same intent: save the installer, read it, run the
+copy you read.
+
+1. **Download the installer:**
+
+   ```powershell
+   irm https://your-instance/install.ps1 -OutFile .\install.ps1
+   ```
+2. **Read it, then run it:**
+
+   ```powershell
+   & ([scriptblock]::Create((Get-Content -Raw .\install.ps1))) -Url https://your-instance -Token <token>
+   ```
+
+   That is the same script-block form as the one-liner above, reading from the file instead of from
+   the network. It is written that way rather than as `.\install.ps1` because a `.ps1` **file** is
+   subject to the host's script execution policy — `Restricted` by default on Windows client editions
+   — while a script block built in memory is not. If your policy already allows local scripts,
+   `.\install.ps1 -Url … -Token …` does exactly the same thing.
 
 ### What a host needs to run it
 
@@ -147,6 +177,10 @@ On Windows, the same two commands, from an elevated PowerShell:
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" show
 ```
+
+The full path is not fussiness: on Windows the installer does not add its folder to `PATH`, so the
+bare `lazyit-agent test` is not a command there. The wizard prints whichever of the two forms matches
+the platform you picked, so you leave it holding one that runs.
 
 **`test`** checks the address, DNS, TLS, the proxy, the certificate authority and the token, and
 tells you which one is wrong — a redirect means you pointed it at the wrong port, a rejection means
@@ -218,7 +252,8 @@ immediately without doing anything. Changing the cadence never touches the task.
 
 The Windows executable is currently **unsigned**. SmartScreen will warn about it, and some antivirus
 products will quarantine it on sight — if the install fails at the "run it once" step, that is the
-first thing to check.
+first thing to check. The wizard says so on the Windows tab, before you run anything, so the warning
+is not the first you hear of it.
 
 This is a deliberate, temporary state for **internal validation inside the organisation that builds
 lazyit**, on its own domain and its own machines. **Do not deploy this Windows agent to a customer or
