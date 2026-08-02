@@ -21,9 +21,19 @@ CREATE TABLE "infra_node_fact_changes" (
     CONSTRAINT "infra_node_fact_changes_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex: the ONE query this table has — the per-node timeline (filter by node, order by id
--- desc, cursor on id). It also serves the per-node write cap's COUNT.
+-- CreateIndex: the READ — the per-node timeline (filter by node, order by id desc, cursor on id).
 CREATE INDEX "infra_node_fact_changes_nodeId_id_idx" ON "infra_node_fact_changes"("nodeId", "id");
+
+-- CreateIndex: the WRITE CAP — the rolling-hour COUNT the report ingest runs before it appends.
+-- Its predicate is `("nodeId" = $1 AND "createdAt" >= $2)`, a RANGE on createdAt, which the index
+-- above cannot answer: it could only walk every row the node owns and re-check each one. That is
+-- the wrong shape for an abuse cap, because nothing prunes this table and the node holding the most
+-- rows is by definition the abused one — the mitigation would collapse exactly when it fires, on
+-- the ingest path. Measured on postgres:18-alpine (the image compose.yaml pins) with 2.16M rows on
+-- one node, EXPLAIN-ing the SQL Prisma actually emits for that COUNT: WITHOUT this index a parallel
+-- seq scan, 18,374 buffers, 2.16M rows discarded by the filter, 38.6 ms; WITH it an index-only
+-- scan, 7 buffers, 0 heap fetches, 0.11 ms. The timeline query above keeps its own plan.
+CREATE INDEX "infra_node_fact_changes_nodeId_createdAt_idx" ON "infra_node_fact_changes"("nodeId", "createdAt");
 
 -- AddForeignKey: Cascade, like InfraEdge and InfraNodeSecretRef — a change record is meaningless
 -- without the node it describes.
