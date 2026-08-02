@@ -306,7 +306,7 @@
       },
       "editedHere": "Edited here",
       "noEditor": "No editor yet",
-      "footer": "The API stores all three scopes, but no screen in lazyit writes the narrower two. So this page is what a host runs — unless one of the other two was set through the API directly, or the host's own agent config vetoes part of it. A local setting can always make a host report less than this page asks: a longer interval, a lower package cap, extra exclusions, a collector switched off. Nothing here overrides one."
+      "footer": "The API stores all three scopes, but no screen in lazyit writes the narrower two. So this page is what a host runs — unless one of the other two was set through the API directly, or the host's own agent config vetoes part of it. A local setting can only ever make a host report less than this page asks, never more: a longer interval, a lower package cap, extra exclusions, a collector switched off. Nothing here overrides one."
     },
     "rollout": {
       "title": "Rollout",
