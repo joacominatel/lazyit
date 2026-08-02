@@ -119,10 +119,12 @@ describe("-Url is the instance BASE URL, and a wrong one is named instead of bla
  *
  * So the two branch patterns are READ OUT OF the script and evaluated over a table of paths. The
  * one thing this assumes is that these two particular patterns — `^(.*?)/install\.(ps1|sh)/` and
- * `^/api(/|$)` — mean the same thing to JavaScript's engine as to .NET's. Neither uses a construct
- * where the two differ (no balancing groups, no possessive quantifiers, no character-class
- * subtraction, no named group syntax), and the corpus below was additionally run through real
- * `pwsh` by hand. It is a check on the LOGIC, not a substitute for a Windows host.
+ * `^/api(/|$)` — mean the same thing to JavaScript's engine as to .NET's over the inputs below.
+ * Neither uses a construct where the two engines differ (no balancing groups, no possessive
+ * quantifiers, no character-class subtraction, no named groups); the one difference that could
+ * matter, .NET's `$` also matching before a trailing newline, cannot bite on a URL path. The corpus
+ * below was additionally run through real `pwsh` by hand. It is a check on the LOGIC of the guard,
+ * not a substitute for a Windows host.
  */
 describe("the -Url guard's branch patterns, evaluated over the paths operators actually pass", () => {
   const GUARD = script.slice(
