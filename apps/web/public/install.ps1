@@ -199,10 +199,10 @@ $Url = $Url.TrimEnd('/')
 # go and rotate a Service Account credential that was never wrong. Checked HERE, before anything is
 # downloaded, so the message names the real mistake and suggests the URL they meant.
 #
-# THE SCHEME IS COMPARED CASE-INSENSITIVELY, because -match and -replace are, and install.sh was
-# aligned to this side: RFC 3986 section 3.1 makes the scheme case-insensitive, and both
-# Invoke-WebRequest and curl accept HTTPS:// exactly as they accept https://. install.sh used a
-# case-sensitive `case` until #1171, so HTTPS://host installed on Windows and died on Linux.
+# THE SCHEME IS COMPARED CASE-INSENSITIVELY, because -notmatch and -replace both are, and install.sh
+# was aligned to this side rather than the other way round: RFC 3986 section 3.1 makes the scheme
+# case-insensitive, and both Invoke-WebRequest and curl accept HTTPS:// exactly as they accept
+# https://. Refusing a URL that works is the opposite of what this guard is for.
 if ($Url -notmatch '^https?://[^/]+') {
   Die "-Url must be your lazyit instance base URL, starting with http:// or https:// (e.g. https://lazyit.example.com). Got: $Url"
 }
