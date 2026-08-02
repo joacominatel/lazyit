@@ -723,8 +723,8 @@ y cada uno la toma en su próximo reporte.
 
 Lo que podés configurar ahí, en tres grupos:
 
-- **Frecuencia** — cada cuánto informa cada host (de 5 minutos a 24 horas; esta es la opción que antes
-  implicaba editar un temporizador de systemd en cada máquina) y cuánto espera lazyit antes de marcarlo
+- **Frecuencia** — cada cuánto informa cada host (de 5 minutos a 24 horas; en Linux esta es la opción
+  que antes implicaba editar un temporizador de systemd en cada máquina) y cuánto espera lazyit antes de marcarlo
   fuera de línea. El segundo valor tiene que ser mayor que el primero, o un host perfectamente sano
   queda marcado fuera de línea entre dos de sus propios reportes — el editor no te deja guardar un
   valor que provoque eso, y lo aclara debajo del campo en lugar de después de que presiones Guardar.

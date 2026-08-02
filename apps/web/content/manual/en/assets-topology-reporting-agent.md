@@ -678,8 +678,8 @@ its next check-in.
 
 What you can set there, in three groups:
 
-- **Cadence** — how often each host reports (from 5 minutes to 24 hours; this is the setting that used
-  to mean editing a systemd timer on every machine), and how long lazyit waits before calling a host
+- **Cadence** — how often each host reports (from 5 minutes to 24 hours; on Linux this is the setting
+  that used to mean editing a systemd timer on every machine), and how long lazyit waits before calling a host
   offline. The second must be longer than the first, or a perfectly healthy host gets marked offline
   between two of its own reports — the editor will not let you save a value that would do that, and it
   says so under the field rather than after you press Save.
