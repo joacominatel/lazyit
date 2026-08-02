@@ -46,9 +46,9 @@ written **only when something actually moved**, so a host nobody touched adds no
   enrolled before the feature existed, a node whose stored package list was cleared, and a fact that
   had simply never been collected on that host before.
 - **A fact that DISAPPEARS records nothing either.** An agent that loses root (Administrator on a
-  Windows host) stops reporting `hardware.serial`; a downgraded agent stops reporting a field. Neither is the host changing, and a
-  row saying otherwise would be a change on screen that never happened. A row needs **both** sides
-  readable and different.
+  Windows host) stops reporting `hardware.serial`; a downgraded agent stops reporting a field.
+  Neither is the host changing, and a row saying otherwise would be a change on screen that never
+  happened. A row needs **both** sides readable and different.
 - **The tracked vocabulary is short and closed.** Packages (added / removed / version changed) plus
   `host.os.name`, `host.os.version`, `host.os.kernel`, `host.memoryBytes`, `host.disks.totalBytes`,
   `host.disks.count`, `host.hardware.serial` — and, for a container child, `container.image` and
