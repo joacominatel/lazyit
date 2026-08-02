@@ -18,10 +18,19 @@ import { useInfraNodeChanges } from "@/lib/api/hooks/use-infra-nodes";
  * and always is: only the reporting agent's ingest path appends to this table, and the table is
  * append-only, so there is nothing here for an operator to edit or delete.
  *
- * Rendered inside a Radix `TabsContent`, which unmounts while inactive — so opening the node panel
- * fetches nothing until the operator asks for this tab.
+ * `active` is the panel's open tab, forwarded to the query's `enabled`: opening the node panel fetches
+ * nothing until the operator asks for this tab. It is passed explicitly rather than inferred from the
+ * tab primitive unmounting its inactive content, so the gate is this file's guarantee and not a
+ * library default a later `forceMount` could quietly remove.
  */
-export function NodeChangesTab({ nodeId }: { nodeId: string }) {
+export function NodeChangesTab({
+  nodeId,
+  active,
+}: {
+  nodeId: string;
+  /** Whether the Changes tab is the one currently open. */
+  active: boolean;
+}) {
   const t = useTranslations("infra");
   const { dateTime, relative } = useFormatters();
   const {
@@ -33,7 +42,7 @@ export function NodeChangesTab({ nodeId }: { nodeId: string }) {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useInfraNodeChanges(nodeId);
+  } = useInfraNodeChanges(nodeId, active);
 
   if (isLoading) {
     return (
