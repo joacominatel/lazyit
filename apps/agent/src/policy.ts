@@ -31,11 +31,24 @@ import {
   type AgentPolicy,
   type AgentPolicyCollect,
 } from "@lazyit/shared";
+import { defaultStateDir, PATH_SEPARATOR } from "./paths";
 
-/** State that survives a reboot, so a site-wide restart does not produce a site-wide report burst. */
-export const POLICY_DIR = "/var/lib/lazyit-agent";
-export const POLICY_FILE = `${POLICY_DIR}/policy.json`;
-export const STATE_FILE = `${POLICY_DIR}/state.json`;
+/**
+ * State that survives a reboot, so a site-wide restart does not produce a site-wide report burst.
+ *
+ * PLATFORM-RESOLVED since #1144: `/var/lib/lazyit-agent` on Linux, `%ProgramData%\lazyit-agent\state`
+ * on Windows. Resolved ONCE at module load rather than per call, so every function in this file and
+ * every message that names the directory agree about which one it is.
+ *
+ * The two files are written with owner-only permissions on Linux (`writePrivate` below). On Windows
+ * `chmod` maps only to the read-only attribute and does NOT restrict access — the protection there is
+ * the ACL `install.ps1` sets on `%ProgramData%\lazyit-agent`, which these files INHERIT. That is
+ * stated rather than assumed because the code looks identical on both platforms and does not do the
+ * same thing.
+ */
+export const POLICY_DIR = defaultStateDir();
+export const POLICY_FILE = `${POLICY_DIR}${PATH_SEPARATOR}policy.json`;
+export const STATE_FILE = `${POLICY_DIR}${PATH_SEPARATOR}state.json`;
 
 /**
  * What the agent remembers between runs. Deliberately tiny — this is a clock and a checksum, not a
