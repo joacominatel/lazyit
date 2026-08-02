@@ -94,10 +94,19 @@ const POWERSHELL = "powershell.exe";
  * `$ErrorActionPreference='SilentlyContinue'` is the best-effort contract expressed in PowerShell: a
  * class that does not exist on this SKU, a registry hive that is absent on 32-bit Windows, or a
  * namespace an unprivileged caller cannot open leaves its key null instead of aborting the document.
+ *
+ * SILENTLY-CONTINUE IS NOT SILENTLY-FORGET (#1138). The errors it swallows still land in `$Error`,
+ * and they are the answer to "why is this host's serial empty?" — so the document carries them out
+ * as `errors[]` and {@link buildWindowsHost} files each one as a warning. Without that, the one
+ * Windows call was the only collector in this agent that could degrade with nothing to show for it,
+ * while every Linux probe warns. `$Error` is CLEARED first so nothing from before the sweep can be
+ * attributed to it, and `errors` is the LAST key because a hashtable literal is evaluated in written
+ * order — which is the only reason it sees what the earlier keys raised.
  */
 export const WINDOWS_FACTS_SCRIPT = [
   "$ErrorActionPreference='SilentlyContinue'",
   "$ProgressPreference='SilentlyContinue'",
+  "$Error.Clear()",
   "$os=Get-CimInstance -ClassName Win32_OperatingSystem",
   "$cs=Get-CimInstance -ClassName Win32_ComputerSystem",
   // An ABSOLUTE instant, round-trip formatted HERE rather than left to ConvertTo-Json, whose
@@ -135,7 +144,11 @@ export const WINDOWS_FACTS_SCRIPT = [
     // Nothing is filtered here; the DisplayName / SystemComponent rules live in the tested mapper.
     "software=@(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'|Select-Object DisplayName,DisplayVersion,SystemComponent);" +
     "machineGuid=$mg;" +
-    "elevated=$el" +
+    "elevated=$el;" +
+    // LAST, deliberately — see the note above. `Activity` is the cmdlet that failed, which is what
+    // turns a bare "Access is denied." into something an operator can act on. Bounded at 10: a
+    // pathological host must degrade into a report, not into an error log.
+    "errors=@($Error|Select-Object -First 10|ForEach-Object{('{0}: {1}' -f $_.CategoryInfo.Activity,$_.Exception.Message)})" +
     "}|ConvertTo-Json -Compress -Depth 4",
 ].join(";");
 
@@ -189,6 +202,12 @@ export interface WindowsFacts {
   software?: unknown;
   machineGuid?: string | null;
   elevated?: boolean | null;
+  /**
+   * What `$ErrorActionPreference='SilentlyContinue'` swallowed, as `"<cmdlet>: <message>"` lines.
+   * `unknown` for the same reason every other key is loosely typed: this document is parsed from a
+   * host, not constructed here, so the mapper reads it defensively.
+   */
+  errors?: unknown;
 }
 
 interface WindowsCpu {
@@ -792,6 +811,10 @@ function buildDisks(facts: WindowsFacts): Disks | undefined {
  * reports `false`, because an unprivileged run and a failed run both mean "do not expect the
  * root-only facts", and claiming elevation the agent never confirmed would make
  * `diagnostics.privileged` useless for the one question it answers.
+ *
+ * IT ALSO EXPLAINS WHAT IT COULD NOT MAP (#1138). See {@link warnEmptyWindowsFacts}: a fact group the
+ * document came back empty for files its own note, so a blank column on a Windows row is answerable
+ * exactly as it is on Linux.
  */
 export function buildWindowsHost(
   facts: WindowsFacts | null,
@@ -883,7 +906,87 @@ export function buildWindowsHost(
   // server acts on differently, so an empty list is REPORTED rather than omitted (#1139).
   if (containers !== undefined) host.containers = containers;
 
+  warnEmptyWindowsFacts(facts, host, policy, warn);
+
   return { host, privileged: facts?.elevated === true };
+}
+
+/**
+ * Explain every column this document could not fill (#1138) — the Windows half of the rule every
+ * Linux collector already follows.
+ *
+ * It reads the ASSEMBLED host rather than the raw document on purpose: "was this fact reported?" is
+ * the question an operator is actually asking, and re-deriving it from the CIM keys would be a second
+ * copy of the mapping above, free to drift from it. The class name is still named, because "empty" is
+ * only half an answer — the other half is where to go and look.
+ *
+ * Three rules keep the notes worth reading:
+ *
+ *  - **No document ⇒ nothing here.** {@link collectHost} already files the one note that says the
+ *    whole sweep failed; nine more would bury it.
+ *  - **A policy veto is explained ONCE**, by the policy's own note. "Win32_BIOS returned nothing" is
+ *    not even true when nothing was asked for.
+ *  - **A healthy host is silent.** A warning on every report is noise, and noise is how the column
+ *    stops being read.
+ */
+function warnEmptyWindowsFacts(
+  facts: WindowsFacts | null,
+  host: Host,
+  policy: AgentPolicy,
+  warn: Warn,
+): void {
+  if (!facts) return;
+
+  // The script's OWN error text first — this is the "why" behind everything below, verbatim from the
+  // host ("Access is denied.", "Invalid namespace"). Non-strings and blanks are dropped rather than
+  // shipped as empty warnings: this array is parsed from a machine, not constructed here.
+  for (const line of asArray<unknown>(facts.errors)) {
+    const text = typeof line === "string" ? line.trim() : "";
+    if (text) warn(`windows: ${text}`);
+  }
+
+  // `host.os` always carries `family`, so "nothing was learned" is exactly "family and nothing else".
+  if (Object.keys(host.os ?? {}).length <= 1 && host.bootedAt === undefined) {
+    warn(
+      "os: Win32_OperatingSystem returned nothing — OS name, version, build and last-boot time omitted",
+    );
+  }
+  if (!facts.cs) {
+    warn(
+      "system: Win32_ComputerSystem returned nothing — manufacturer, model, memory and domain membership omitted",
+    );
+  }
+  if (!host.cpu) {
+    warn("cpu: Win32_Processor enumerated nothing — CPU model and core count omitted");
+  }
+  // Only when the policy ASKED for it — otherwise the hardware veto above, or `applyNicPolicy` /
+  // `applyDiskPolicy`, has already filed the one honest note.
+  if (policy.collect.hardware && host.hardware?.serial === undefined) {
+    warn(
+      "hardware: Win32_BIOS reported no serial number — serial omitted (reading it needs Administrator)",
+    );
+  }
+  if (policy.collect.nics && (host.nics === undefined || host.nics.length === 0)) {
+    warn("nics: Win32_NetworkAdapter enumerated nothing — network interfaces omitted");
+  }
+  if (policy.collect.disks && (host.disks === undefined || host.disks.length === 0)) {
+    warn(
+      "disks: neither Win32_DiskDrive nor MSFT_PhysicalDisk enumerated anything — block devices omitted",
+    );
+  }
+  // The identity evidence #1141 compares across reports. An absent MachineGuid is the sharpest of
+  // these: it is the host's PRIMARY key on this platform.
+  const kinds = new Set((host.identifiers ?? []).map((i) => i.kind));
+  if (!kinds.has("windows-machine-guid")) {
+    warn(
+      "identity: HKLM\\SOFTWARE\\Microsoft\\Cryptography\\MachineGuid was unreadable — the primary Windows identifier is omitted",
+    );
+  }
+  if (!kinds.has("smbios-uuid")) {
+    warn(
+      "identity: Win32_ComputerSystemProduct reported no usable UUID — the SMBIOS identifier is omitted",
+    );
+  }
 }
 
 /**
