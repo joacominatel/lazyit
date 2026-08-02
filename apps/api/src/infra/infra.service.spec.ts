@@ -5367,7 +5367,9 @@ describe('InfraService', () => {
       };
       prisma.$queryRaw.mockResolvedValue(settled({ host: withDisks }));
 
-      await service.ingestReport(report({ host: { ...clone(HOST), disks: [] } }));
+      await service.ingestReport(
+        report({ host: { ...clone(HOST), disks: [] } }),
+      );
 
       expect(recorded()).toEqual([]);
     });
