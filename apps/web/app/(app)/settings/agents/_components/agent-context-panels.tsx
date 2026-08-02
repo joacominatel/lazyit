@@ -38,11 +38,14 @@ const SCOPES = [
 /**
  * Where a policy comes from, and how far it has actually travelled.
  *
- * Two panels that answer the questions the editor beside them cannot: *which* scope an operator is
+ * Two sections that answer the questions the editor beside them cannot: *which* scope an operator is
  * editing (of the three the server resolves), and whether the fleet has picked the last change up.
  * Neither is editable — this is the read half of the section.
+ *
+ * Rollout deliberately carries no revision chip of its own: the number lives once, beside the page
+ * title, and a second identical badge a column away would read as two different facts.
  */
-export function AgentScopesPanel({ revision }: { revision: number | undefined }) {
+export function AgentScopesPanel() {
   const t = useTranslations("settings.agentPolicy");
 
   return (
@@ -77,16 +80,7 @@ export function AgentScopesPanel({ revision }: { revision: number | undefined })
         <p className="text-sm text-muted-foreground">{t("scopes.footer")}</p>
 
         <div className="space-y-3 border-t pt-5">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-medium">{t("rollout.title")}</h3>
-            {revision === undefined ? (
-              <Skeleton className="h-5 w-24" />
-            ) : (
-              <StatusBadge tone="neutral">
-                {t("revisionBadge", { revision })}
-              </StatusBadge>
-            )}
-          </div>
+          <h3 className="text-sm font-medium">{t("rollout.title")}</h3>
           <p className="text-sm text-muted-foreground">{t("rollout.body")}</p>
           <p className="text-sm text-muted-foreground">{t("rollout.legacy")}</p>
           <Button asChild variant="outline" size="sm">
