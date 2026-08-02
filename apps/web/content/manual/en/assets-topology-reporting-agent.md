@@ -45,10 +45,28 @@ The button opens a short, guided wizard with three steps:
    manually (step by step)** for the same install done by hand (download the binary, install it, write
    the config file, send a test report).
 
+   > **Keep the token out of the shell.** As written above, the token is visible in `ps` to every
+   > user on that machine for the few seconds the install runs, and it lands in root's shell history.
+   > If that matters where you work, two equivalent forms avoid it: put the token in the environment
+   > (`LAZYIT_TOKEN=… sh install.sh --url …`), or in a file and pass `--token-file /root/agent.token`.
+   > Download the script first for either. (`--token-file -` reads it from a pipe, which is why it
+   > can't be combined with `curl … | sh` — the pipe is already the script's input.)
+
    > **LAN deployment (no public domain)?** If your instance is reachable only by a LAN IP or hostname
-   > with a self-signed certificate, trust that certificate authority on the agent host **before**
-   > running the install command, or the download will be rejected as untrusted. See your deployment's
-   > LAN runbook for the one-line helper that does this.
+   > with a self-signed certificate, copy that certificate authority's `.pem` onto the agent host and
+   > pass **`--ca-file /path/to/ca.pem`**. The installer uses it for its own download *and* records it
+   > so the agent uses it on every report — you do **not** need to trust that authority system-wide,
+   > which would have been a much larger change to the machine than "one inventory agent talks to one
+   > server". Trusting it system-wide still works if that's already how your fleet is built.
+
+   > **Behind an egress proxy?** Pass nothing at install time; add `HTTPS_PROXY` (and `NO_PROXY` if
+   > your instance is internal) to `/etc/lazyit-agent/config` afterwards. It has to go **there**, not
+   > in `/etc/environment` or a shell profile: the agent runs from a systemd timer, and a timer does
+   > not inherit the machine's login environment — which is why an agent can work when you run it by
+   > hand and stay silent on its own schedule. Lowercase (`https_proxy`, `no_proxy`) works too, and
+   > wins if you write both, the same way `curl` reads them. What you put in that file is the agent's
+   > **whole** answer: a `NO_PROXY` there does stop a proxy the machine set elsewhere, rather than
+   > losing to it. Re-running the installer keeps these lines, in either spelling.
 3. **Wait.** The wizard then waits for the server to report. As soon as the agent checks in — usually
    within a couple of minutes — it shows a success message and an inline **Confirm** button. You can
    confirm right there, or close the wizard and confirm later from the Pending review tray.
@@ -76,6 +94,70 @@ button:
    ```sh
    sudo lazyit-agent report --once --force
    ```
+
+### What a host needs to run it
+
+A **Linux** machine with **systemd** and **curl**, on x86-64 or ARM64. The agent is a single
+self-contained binary — no runtime, no packages, nothing to install alongside it.
+
+There is a floor on how old the machine's system libraries and kernel can be, and rather than print
+a version number that would go stale, **the installer tries running the binary before it sets
+anything up**. If the machine can't start it, you get one clear sentence, nothing is installed and no
+timer is armed — instead of a host that looks fine and silently never reports.
+
+On x86-64 there are two builds and the installer picks between them by reading the CPU's own feature
+list: the ordinary one needs a 2013-or-later instruction set, and older machines — or VMware clusters
+configured to present an older CPU to their guests — get a **baseline** build automatically. This
+matters more than it sounds: a virtual machine can run happily for months and then start crashing the
+moment it migrates onto older hardware. `--baseline` forces it if you'd rather not depend on the
+detection.
+
+### Check a host without waiting for a report
+
+Two commands answer the two questions you'll actually have, and **neither sends or changes
+anything**:
+
+```sh
+sudo lazyit-agent test    # can this host reach lazyit, and is its token good?
+sudo lazyit-agent show    # what exactly would this host report?
+```
+
+**`test`** checks the address, DNS, TLS, the proxy, the certificate authority and the token, and
+tells you which one is wrong — a redirect means you pointed it at the wrong port, a rejection means
+the token, a timeout means the network, and an address that answers but isn't lazyit is named as
+exactly that rather than passing. (It asks twice on purpose: once without your token, to confirm the
+address really is a lazyit instance that demands one, and once with it. Both are reads.) It also
+prints how often this host is set to report, when it
+last succeeded and whether the next tick would report at all, which is usually the answer to "this
+server has gone quiet". It writes nothing on the host and nothing in lazyit: no proposal appears, no
+server is marked as having just reported, and nothing is counted against the token's report limit.
+
+**`show`** prints the full report as JSON, without sending it. This is the fastest way to answer
+"why is this host's serial column empty" or "why isn't this disk listed" — the notes at the end say
+what the agent had to skip and why. It works on a machine with no token and no network at all.
+
+## Removing the agent
+
+Re-run the install script with `--uninstall`:
+
+```sh
+sudo sh install.sh --uninstall
+```
+
+It stops and disables the timer, then removes the binary, both systemd units, the agent's local state
+and its configuration file — including **the token**, which is destroyed whichever options you use.
+It's safe to run twice, and safe on a half-finished install.
+
+If you're re-imaging a machine that will get the agent back, add **`--keep-config`**: it keeps that
+host's own limits and its proxy settings (the things the machine's owner chose, which are annoying to
+reconstruct) and still strips the token and the instance address. There is no option that leaves the
+token behind — a working credential for your instance should not survive on a machine you just
+decommissioned.
+
+Two things uninstalling does **not** do, deliberately. The server's entry in lazyit stays exactly as
+it is: discard it from the Servers view if you want it off the map. And the token is only removed
+*from that host* — if no other machine uses it, revoke the service account in
+[Service accounts](/help/users-permissions-service-accounts).
 
 ## Pending review
 
@@ -108,8 +190,8 @@ how long ago it last reported. For each one you have three choices:
 - **Discard** — removes the proposal. This is a soft delete (the same as removing any node from the
   map): nothing is destroyed and it can be restored later. **Discarding does not stop the agent.** If
   that host still has the agent installed and running, its next check-in reports it again and it
-  comes back as a fresh proposal. To make it stop for good, uninstall the agent on that host — or
-  revoke the token it uses.
+  comes back as a fresh proposal. To make it stop for good, uninstall the agent on that host
+  (`sudo sh install.sh --uninstall`, see **Removing the agent** above) — or revoke the token it uses.
 
 A discovered host also **fills in its own IP address** the moment it reports — you don't have to type
 it. On every later report the IP is refreshed to the current value, **unless you've edited it by hand**
@@ -346,9 +428,10 @@ from it on container guests.
   settings is different again, and deliberate: the stored list is cleared, so you are never left
   reading package versions nobody is collecting any more.
 - **What it couldn't collect** — each report also says whether it ran with root and names anything it
-  had to skip or that timed out. Run the agent by hand (`lazyit-agent report --once --force`) and it prints
-  those notes right there, which is usually the fastest way to answer "why is this host's serial
-  column empty?". lazyit also stores them alongside the host's reported facts, so a future fleet view
+  had to skip or that timed out. Run `lazyit-agent show` and it prints those notes right there,
+  without sending anything, which is usually the fastest way to answer "why is this host's serial
+  column empty?". (`lazyit-agent report --once --force` prints them too, and sends the report.)
+  lazyit also stores them alongside the host's reported facts, so a future fleet view
   can answer it for the whole estate; today nothing displays them in the interface.
 
 It collects whatever it can and simply omits anything it can't read, so an unprivileged install still
@@ -415,6 +498,21 @@ by an agent older than this release shows neither, because it never reports a po
   inventory when you confirm it. An automated writer can never silently change your official records.
 - **No secrets, ever.** The agent carries no keys and reads no vault — your secret values are
   untouched.
+- **A confined service.** The agent runs as root, because reading a machine's serial number and model
+  requires it — but the systemd unit it runs under is restricted well below what root can normally
+  do: it cannot gain new privileges, cannot see users' home directories, gets a private `/tmp`, and
+  cannot modify kernel settings, control groups, or even its own program and configuration. Open
+  `/etc/systemd/system/lazyit-agent.service` and read it; it is short, and it is written to be read.
+  It also runs at the **lowest CPU and disk priority the system has**, so listing three thousand
+  packages on a busy database server never competes with what that server is for.
+- **The download is checksummed.** Your instance publishes a fingerprint of the agent binary next to
+  the binary itself, and the installer refuses to install one that doesn't match. This is an
+  integrity check, not a cryptographic signature — it catches a corrupted or stale download, and a
+  tampered file where only one of the two was changed. Pass `--require-checksum` to make a *missing*
+  fingerprint fatal too.
+- **It can use your CA, not the machine's.** `--ca-file` (or `LAZYIT_CA_FILE` in the config) points
+  the agent at a certificate bundle it alone trusts, so an internal certificate authority never has
+  to be installed machine-wide just so one inventory agent can report.
 - **Self-hosted and air-gapped-safe.** The install command points at *your* instance, the agent talks
   only to that instance, and it works fully offline. Tokens are revocable any time from
   [Service accounts](/help/users-permissions-service-accounts).
@@ -442,6 +540,15 @@ your server, its row (and its detail panel) shows a small **Agent outdated** bad
 re-run the install command and pick up the latest binary. It's only a nudge: an outdated agent keeps
 reporting normally, nothing is blocked, and minor updates don't raise it. Agents built from source (or
 before versioning was added) report as `dev` and never show the badge.
+
+**Some improvements only arrive when you re-run the install command.** The agent is two things: a
+program, and the systemd service and timer that run it. Anything in the *program* — the diagnostics
+above, proxy and certificate-authority support — comes with a new binary. Anything in the *service
+and timer* — the confinement and low priority described under Security, and the spread-out schedule
+that stops a whole estate reporting in the same second after a maintenance window — is written when
+the installer runs, and an existing host keeps the unit it was originally given until you re-run it.
+Re-running is safe and keeps that host's own settings, so on a fleet you already have, this is worth
+doing once.
 
 **Upgrading your instance never breaks the agents already installed.** You do not have to re-install
 anything: an older agent keeps reporting exactly as it did, and every fact it sends lands exactly where

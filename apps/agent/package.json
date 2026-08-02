@@ -6,8 +6,10 @@
   "description": "lazyit server reporting agent — Linux inventory collector (ADR-0074, Phase 2)",
   "scripts": {
     "compile:x64": "bun build --compile --target=bun-linux-x64 --define process.env.APP_VERSION=\"\\\"${APP_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}\\\"\" --outfile dist/lazyit-agent-x64 src/index.ts",
+    "compile:x64-baseline": "bun build --compile --target=bun-linux-x64-baseline --define process.env.APP_VERSION=\"\\\"${APP_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}\\\"\" --outfile dist/lazyit-agent-x64-baseline src/index.ts",
     "compile:arm64": "bun build --compile --target=bun-linux-arm64 --define process.env.APP_VERSION=\"\\\"${APP_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}\\\"\" --outfile dist/lazyit-agent-arm64 src/index.ts",
-    "compile": "export APP_VERSION=\"${APP_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}\"; bun run compile:x64 && bun run compile:arm64",
+    "compile": "export APP_VERSION=\"${APP_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}\"; bun run compile:x64 && bun run compile:x64-baseline && bun run compile:arm64 && bun run checksums",
+    "checksums": "bun scripts/checksums.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

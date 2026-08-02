@@ -48,11 +48,31 @@ El botón abre un asistente guiado y breve, de tres pasos:
    hecha a mano (descargar el binario, instalarlo, escribir el archivo de configuración y enviar un
    reporte de prueba).
 
+   > **Mantené el token fuera de la shell.** Tal como está escrito arriba, el token queda visible en
+   > `ps` para cualquier usuario de esa máquina durante los pocos segundos que dura la instalación, y
+   > queda en el historial de la shell de root. Si eso importa donde trabajás, dos formas equivalentes
+   > lo evitan: poner el token en el entorno (`LAZYIT_TOKEN=… sh install.sh --url …`), o en un archivo
+   > y pasar `--token-file /root/agent.token`. Para cualquiera de las dos hay que descargar el script
+   > primero. (`--token-file -` lo lee de una tubería, y por eso no puede combinarse con
+   > `curl … | sh`: la tubería ya es la entrada del script.)
+
    > **¿Despliegue en LAN (sin dominio público)?** Si tu instancia solo es alcanzable por una IP o
-   > nombre de host de LAN con un certificado autofirmado, confiá en esa autoridad certificadora en el
-   > host del agente **antes** de correr el comando de instalación, o la descarga se rechazará por no
-   > ser confiable. Consultá el runbook de despliegue LAN de tu instalación para el helper de una línea
-   > que hace esto.
+   > nombre de host de LAN con un certificado autofirmado, copiá el `.pem` de esa autoridad
+   > certificadora al host del agente y pasá **`--ca-file /ruta/al/ca.pem`**. El instalador lo usa
+   > para su propia descarga *y* lo registra para que el agente lo use en cada reporte — **no** hace
+   > falta confiar en esa autoridad a nivel de todo el sistema, que sería un cambio mucho más grande
+   > en la máquina que "un agente de inventario habla con un servidor". Confiar en ella a nivel
+   > sistema sigue funcionando si tu flota ya está armada así.
+
+   > **¿Detrás de un proxy de salida?** No hace falta pasar nada al instalar; agregá `HTTPS_PROXY` (y
+   > `NO_PROXY` si tu instancia es interna) a `/etc/lazyit-agent/config` después. Tiene que ir **ahí**,
+   > no en `/etc/environment` ni en un perfil de shell: el agente corre desde un timer de systemd, y un
+   > timer no hereda el entorno de sesión de la máquina — por eso un agente puede funcionar cuando lo
+   > ejecutás a mano y quedarse callado en su propio horario. La forma en minúsculas (`https_proxy`,
+   > `no_proxy`) también funciona, y gana si escribís las dos, igual que las lee `curl`. Lo que pongas
+   > en ese archivo es la respuesta **completa** del agente: un `NO_PROXY` ahí sí frena un proxy que la
+   > máquina haya definido en otro lado, en vez de perder contra él. Reinstalar conserva esas líneas,
+   > en cualquiera de las dos formas.
 3. **Espera.** El asistente entonces espera a que el servidor reporte. Apenas el agente reporta —
    normalmente en un par de minutos — muestra un mensaje de éxito y un botón **Confirmar** en línea.
    Podés confirmar ahí mismo, o cerrar el asistente y confirmarlo más tarde desde la bandeja de
@@ -81,6 +101,73 @@ tiene su propio botón de copiar:
    ```sh
    sudo lazyit-agent report --once --force
    ```
+
+### Qué necesita un host para ejecutarlo
+
+Una máquina **Linux** con **systemd** y **curl**, en x86-64 o ARM64. El agente es un único binario
+autocontenido: sin runtime, sin paquetes, nada que instalar al lado.
+
+Hay un piso de qué tan viejas pueden ser las bibliotecas del sistema y el kernel de la máquina, y en
+vez de imprimir un número de versión que quedaría desactualizado, **el instalador prueba ejecutar el
+binario antes de configurar nada**. Si la máquina no puede arrancarlo, obtenés una sola frase clara,
+no se instala nada y no se arma ningún timer — en lugar de un host que parece estar bien y en silencio
+nunca reporta.
+
+En x86-64 hay dos builds y el instalador elige entre ellos leyendo la propia lista de capacidades de
+la CPU: el habitual necesita un conjunto de instrucciones de 2013 o posterior, y las máquinas más
+viejas — o los clústeres VMware configurados para presentar una CPU más antigua a sus invitados —
+reciben automáticamente un build **baseline**. Esto importa más de lo que parece: una máquina virtual
+puede funcionar sin problemas durante meses y empezar a fallar en el momento en que migra a hardware
+más viejo. `--baseline` lo fuerza si preferís no depender de la detección.
+
+### Revisar un host sin esperar un reporte
+
+Dos comandos responden las dos preguntas que realmente vas a tener, y **ninguno de los dos envía ni
+cambia nada**:
+
+```sh
+sudo lazyit-agent test    # ¿este host llega a lazyit, y su token sirve?
+sudo lazyit-agent show    # ¿qué reportaría exactamente este host?
+```
+
+**`test`** verifica la dirección, el DNS, el TLS, el proxy, la autoridad certificadora y el token, y
+te dice cuál está mal: una redirección significa que apuntaste al puerto equivocado, un rechazo
+significa el token, un timeout significa la red, y una dirección que responde pero no es lazyit se
+informa exactamente como eso, en vez de pasar. (Pregunta dos veces a propósito: una sin tu token,
+para confirmar que la dirección es realmente una instancia de lazyit que exige uno, y otra con él.
+Las dos son lecturas.) También imprime cada cuánto está configurado este
+host para reportar, cuándo lo logró por última vez y si el próximo tick reportaría — que suele ser la
+respuesta a "este servidor se quedó callado". No escribe nada en el host ni en lazyit: no aparece
+ninguna propuesta, ningún servidor queda marcado como recién reportado, y no se cuenta nada contra el
+límite de reportes del token.
+
+**`show`** imprime el reporte completo como JSON, sin enviarlo. Es la forma más rápida de responder
+"por qué está vacía la columna de número de serie de este host" o "por qué no aparece este disco": las
+notas del final dicen qué tuvo que omitir el agente y por qué. Funciona en una máquina sin token y sin
+red alguna.
+
+## Desinstalar el agente
+
+Volvé a ejecutar el script de instalación con `--uninstall`:
+
+```sh
+sudo sh install.sh --uninstall
+```
+
+Detiene y deshabilita el timer, y después elimina el binario, ambas unidades de systemd, el estado
+local del agente y su archivo de configuración — incluido **el token**, que se destruye con
+cualquiera de las opciones. Es seguro ejecutarlo dos veces, y seguro sobre una instalación a medias.
+
+Si estás reimaginando una máquina que va a volver a tener el agente, agregá **`--keep-config`**:
+conserva los límites propios de ese host y su configuración de proxy (lo que eligió el dueño de la
+máquina, que es molesto de reconstruir) y de todos modos quita el token y la dirección de la
+instancia. No hay ninguna opción que deje el token: una credencial que funciona contra tu instancia no
+debería sobrevivir en una máquina que acabás de dar de baja.
+
+Dos cosas que desinstalar **no** hace, deliberadamente. La entrada del servidor en lazyit queda tal
+como está: descartala desde la vista de Servidores si querés sacarla del mapa. Y el token solo se
+elimina *de ese host* — si ninguna otra máquina lo usa, revocá la cuenta de servicio en
+[Cuentas de servicio](/help/users-permissions-service-accounts).
 
 ## Revisión pendiente
 
@@ -117,7 +204,8 @@ vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés tr
   mapa): no se destruye nada y se puede restaurar más adelante. **Descartar no detiene al agente.**
   Si ese host todavía tiene el agente instalado y corriendo, su próximo reporte lo vuelve a informar
   y reaparece como una propuesta nueva. Para que deje de aparecer, desinstalá el agente en ese host
-  — o revocá el token que usa.
+  (`sudo sh install.sh --uninstall`, ver **Desinstalar el agente** más arriba) — o revocá el token
+  que usa.
 
 Un host descubierto también **completa su propia dirección IP** apenas reporta: no hace falta que la
 escribas. En cada reporte posterior la IP se actualiza al valor actual, **salvo que la hayas editado a
@@ -371,9 +459,10 @@ con `dmidecode` instalado, y no esperes nada de él en guests de contenedor.
   configuración del agente es otra cosa distinta, y deliberada: la lista guardada se borra, para que
   nunca quedes leyendo versiones de paquetes que ya nadie está recolectando.
 - **Qué no pudo recopilar** — cada reporte también indica si corrió como root y nombra lo que tuvo que
-  omitir o lo que agotó su tiempo. Si ejecutás el agente a mano (`lazyit-agent report --once --force`) imprime
-  esas notas ahí mismo, que suele ser la forma más rápida de responder "¿por qué está vacía la columna
-  de número de serie de este host?". lazyit además las guarda junto a los datos reportados del host,
+  omitir o lo que agotó su tiempo. Si ejecutás `lazyit-agent show` imprime esas notas ahí mismo, sin
+  enviar nada, que suele ser la forma más rápida de responder "¿por qué está vacía la columna
+  de número de serie de este host?". (`lazyit-agent report --once --force` también las imprime, y
+  envía el reporte.) lazyit además las guarda junto a los datos reportados del host,
   para que una futura vista de parque pueda responderlo para todo el estado; hoy no se muestran en la
   interfaz.
 
@@ -445,6 +534,23 @@ nunca informa una versión de política.
   oficiales en silencio.
 - **Nunca secretos.** El agente no lleva claves ni lee ninguna bóveda — los valores de tus secretos
   quedan intactos.
+- **Un servicio confinado.** El agente corre como root, porque leer el número de serie y el modelo de
+  una máquina lo requiere — pero la unidad de systemd bajo la que corre está restringida bastante por
+  debajo de lo que root normalmente puede hacer: no puede obtener privilegios nuevos, no ve los
+  directorios personales de los usuarios, tiene un `/tmp` privado, y no puede modificar parámetros del
+  kernel, grupos de control, ni siquiera su propio programa y su configuración. Abrí
+  `/etc/systemd/system/lazyit-agent.service` y leelo; es corto, y está escrito para ser leído. Además
+  corre con la **prioridad de CPU y disco más baja del sistema**, así que listar tres mil paquetes en
+  un servidor de base de datos ocupado nunca compite con aquello para lo que ese servidor existe.
+- **La descarga se verifica.** Tu instancia publica una huella del binario del agente junto al binario
+  mismo, y el instalador se niega a instalar uno que no coincida. Es una verificación de integridad,
+  no una firma criptográfica: detecta una descarga corrupta o desactualizada, y una manipulación donde
+  se cambió solo uno de los dos archivos. Pasá `--require-checksum` para que una huella *ausente*
+  también sea fatal.
+- **Puede usar tu autoridad certificadora, no la de la máquina.** `--ca-file` (o `LAZYIT_CA_FILE` en
+  la configuración) apunta el agente a un paquete de certificados en el que confía solo él, así que
+  una autoridad certificadora interna nunca tiene que instalarse a nivel de toda la máquina solo para
+  que un agente de inventario pueda reportar.
 - **Autoalojado y compatible con redes aisladas.** El comando de instalación apunta a *tu* instancia,
   el agente solo se comunica con esa instancia y funciona totalmente sin conexión. Los tokens se pueden
   revocar en cualquier momento desde [Cuentas de servicio](/help/users-permissions-service-accounts).
@@ -474,6 +580,16 @@ desactualizado** — un aviso para volver a ejecutar el comando de instalación 
 binario. Es solo un empujón: un agente desactualizado sigue reportando con normalidad, no se bloquea
 nada, y las actualizaciones menores no la activan. Los agentes compilados desde el código fuente (o
 anteriores al versionado) reportan como `dev` y nunca muestran la insignia.
+
+**Algunas mejoras solo llegan cuando volvés a ejecutar el comando de instalación.** El agente son dos
+cosas: un programa, y el servicio y el timer de systemd que lo ejecutan. Todo lo que está en el
+*programa* — los diagnósticos de más arriba, el soporte de proxy y de autoridad certificadora — llega
+con un binario nuevo. Todo lo que está en el *servicio y el timer* — el confinamiento y la prioridad
+baja descritos en Seguridad, y el horario distribuido que evita que todo el parque reporte en el mismo
+segundo después de una ventana de mantenimiento — se escribe cuando corre el instalador, y un host
+existente conserva la unidad que le tocó originalmente hasta que lo vuelvas a ejecutar. Volver a
+ejecutarlo es seguro y conserva la configuración propia de ese host, así que en una flota que ya
+tenés, vale la pena hacerlo una vez.
 
 **Actualizar tu instancia nunca rompe los agentes ya instalados.** No hace falta reinstalar nada: un
 agente más viejo sigue reportando igual que antes, y cada dato que envía aterriza exactamente donde

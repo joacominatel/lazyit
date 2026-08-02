@@ -24,13 +24,14 @@ import {
   type AgentPolicy,
   type AgentReport,
 } from "@lazyit/shared";
-import { loadConfig } from "./config";
+import { type AgentConfig, loadConfig } from "./config";
 import {
   buildDiagnostics,
   collectHost,
   collectSoftware,
   readMachineId,
 } from "./collect";
+import { agentFetchInit, disableAmbientProxy, interpretProbe } from "./net";
 import {
   loadCachedPolicy,
   loadState,
@@ -52,6 +53,8 @@ const HELP = `lazyit-agent ${AGENT_VERSION} — server reporting agent (Linux)
 
 Usage:
   lazyit-agent [report] [--once] [--force] [--url <url>] [--token <token>]
+  lazyit-agent show     Print the report this host WOULD send, as JSON. Sends nothing.
+  lazyit-agent test     Check config, network, TLS and the token. Writes nothing, anywhere.
 
 Collects host inventory and reports it to your lazyit instance. Config resolves from
 flags > env (LAZYIT_URL / LAZYIT_TOKEN) > /etc/lazyit-agent/config. URL + token are required.
@@ -63,6 +66,7 @@ reporting. Use --force to report anyway.
 Options:
   --url <url>        Your lazyit instance base URL (e.g. https://lazyit.example.com)
   --token <token>    Service Account token holding the infra:report permission
+  --token-file <p>   Read the token from a file ('-' = stdin), keeping it out of ps and history
   --interval <dur>   Legacy; ignored. Cadence is set in lazyit, not on the host.
   --once             Collect + report once, then exit (the default behaviour)
   --force            Report even if the interval has not elapsed
@@ -73,6 +77,12 @@ Local limits (/etc/lazyit-agent/config) — these VETO the server's policy, neve
   LAZYIT_MIN_INTERVAL=<seconds>     never report more often than this
   LAZYIT_SOFTWARE_MAX=<n>           never report more packages than this
   LAZYIT_EXCLUDE_NICS|MOUNTPOINTS|SOFTWARE=<comma-separated globs>
+
+Getting out of the host (/etc/lazyit-agent/config; the environment wins over the file):
+  HTTPS_PROXY / HTTP_PROXY / NO_PROXY   egress proxy, read from the file because a systemd
+                                        unit's environment does not carry the host's own
+  LAZYIT_CA_FILE=<path>                 PEM bundle the AGENT trusts, instead of trusting an
+                                        internal CA system-wide
 `;
 
 /**
@@ -164,11 +174,12 @@ function gib(bytes: number | undefined): string {
 const REPORT_TIMEOUT_MS = 30_000;
 
 async function report(
-  url: string,
-  token: string,
+  cfg: AgentConfig,
   policy: AgentPolicy,
   state: AgentState,
 ): Promise<void> {
+  const url = cfg.url as string;
+  const token = cfg.token as string;
   const { report: payload, softwareHash } = await buildReport(
     policy,
     state.softwareHash,
@@ -177,10 +188,11 @@ async function report(
     state.softwareDelta === true,
   );
   const base = url.replace(/\/+$/, "");
+  const endpoint = `${base}/api/infra/report`;
 
   let res: Response;
   try {
-    res = await fetch(`${base}/api/infra/report`, {
+    res = await fetch(endpoint, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -188,9 +200,13 @@ async function report(
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(REPORT_TIMEOUT_MS),
+      // The egress proxy and the private CA (#1137). Spread rather than hard-coded so `test` below
+      // takes byte-for-byte the same route: a diagnostic that reached the instance differently from
+      // the report would confirm a network the report never uses.
+      ...agentFetchInit(cfg.network, endpoint),
     });
   } catch (err) {
-    throw new Error(`could not reach ${base}/api/infra/report — ${(err as Error).message}`);
+    throw new Error(`could not reach ${endpoint} — ${(err as Error).message}`);
   }
 
   if (!res.ok) {
@@ -286,15 +302,189 @@ async function report(
   }
 }
 
+/** The policy this run applies: what the last run cached, narrowed by whatever this host refuses. */
+async function effectivePolicy(cfg: AgentConfig): Promise<AgentPolicy> {
+  return applyAgentPolicyVeto(await loadCachedPolicy(), cfg.localLimits);
+}
+
+/**
+ * `lazyit-agent show` — the report this host WOULD send, on stdout, as JSON (#1137).
+ *
+ * Until now the only feedback the agent ever gave was a one-line summary printed after a report the
+ * server had already ACCEPTED, so every question that starts "why is this host's serial column
+ * empty" had to be answered by changing something and waiting for a round trip. The whole collector
+ * runs here — under the real policy, including this host's veto — and nothing is sent, so the answer
+ * is available on a host with no credentials, no network and no instance to talk to at all.
+ *
+ * Stdout is ONLY the JSON, so `lazyit-agent show | jq .host.serial` works. The degradation notes go
+ * to stderr as well as into `diagnostics.warnings` inside the document, which is where the server
+ * reads them.
+ *
+ * The software list is ALWAYS printed in full, which is the one place this deliberately differs from
+ * the wire (#1142): a real report against a delta-capable server omits an unchanged list and sends
+ * only its fingerprint, and a diagnostic that reproduced that omission would answer "what does this
+ * host see" with "nothing new", which is the opposite of what it is being asked. So `show` passes no
+ * cached fingerprint and no handshake — the `reported` branch — and reads no `state.json`, which also
+ * keeps it from having an opinion about a run it is not making. `softwareState` in the output is
+ * therefore always `reported`, `unavailable` or `disabled`, never `unchanged`.
+ */
+async function show(cfg: AgentConfig): Promise<void> {
+  const { report: payload } = await buildReport(await effectivePolicy(cfg), undefined, false);
+  console.log(JSON.stringify(payload, null, 2));
+  for (const warning of payload.diagnostics?.warnings ?? []) {
+    console.warn(`lazyit-agent: ${warning}`);
+  }
+}
+
+/** How long `test` waits for the probe. Shorter than a report: a human is watching this one. */
+const TEST_TIMEOUT_MS = 15_000;
+
+/**
+ * `lazyit-agent test` — config, network, TLS, proxy and token, and NOTHING is written (#1137).
+ *
+ * The probe is a `HEAD` on `GET /api/agent/download`, which is gated on exactly the same
+ * `infra:report` permission as the report endpoint and is a pure read. That is the whole trick: it
+ * exercises the identical URL, proxy, CA and bearer token the report uses, and proves the token is
+ * accepted — without creating a PENDING node, touching a `specs` blob, consuming the per-token
+ * report budget (#1134) or moving `lastReportedAt`, so running it never makes the map say something
+ * that is not true. It also leaves the local state and policy caches alone, so a `test` cannot push
+ * the next real report out by an interval.
+ *
+ * The probe is sent TWICE: once with no `authorization` header, once with the token. The token-less
+ * answer is what makes the second one mean anything. `GET /agent/download` is permission-gated, so a
+ * lazyit instance answers an anonymous request with 401 from the guard; a wrong `--url` pointed at an
+ * ordinary web server answers 404, which is byte-for-byte the same 404 lazyit returns when the image
+ * bundles no binary for that arch. Reading that lone 404 as a pass made this command report success
+ * for exactly the misconfiguration it exists to catch, so the pair is required: 401 without the
+ * token, something else with it, means the credential was evaluated and accepted.
+ *
+ * Both requests are `HEAD`s on the same read-only route, so the second one costs nothing the first
+ * did not and still writes nothing, anywhere.
+ */
+async function test(cfg: AgentConfig): Promise<void> {
+  const problems: string[] = [];
+  const say = (line: string) => console.log(`lazyit-agent test: ${line}`);
+
+  if (!cfg.url) problems.push("no URL configured (--url, LAZYIT_URL, or /etc/lazyit-agent/config)");
+  if (!cfg.token) {
+    problems.push("no token configured (--token/--token-file, LAZYIT_TOKEN, or the config file)");
+  }
+  if (problems.length) {
+    for (const p of problems) console.error(`lazyit-agent test: FAIL — ${p}`);
+    throw new Error("configuration is incomplete — nothing to test against");
+  }
+
+  const base = (cfg.url as string).replace(/\/+$/, "");
+  say(`instance ${base}`);
+  say(`token present (${(cfg.token as string).length} characters; its value is never printed)`);
+
+  // Reported before the network probe rather than instead of it: an operator debugging a host wants
+  // both answers in one run. It is still FATAL — every report is keyed on the machine id, so a host
+  // without one cannot report at all, and a `test` that ended in PASS would be lying.
+  const machineId = await readMachineId();
+  if (machineId) {
+    say(`machine-id ${machineId.slice(0, 12)}… — this host's dedup key`);
+  } else {
+    console.error(
+      "lazyit-agent test: FAIL — /etc/machine-id is unreadable, so this host has no dedup key and cannot report",
+    );
+    problems.push("no readable /etc/machine-id");
+  }
+
+  const policy = await effectivePolicy(cfg);
+  const { lastSuccessMs } = await loadState();
+  const due = agentPolicyDue({
+    nowMs: Date.now(),
+    lastSuccessMs,
+    policy,
+    machineId: machineId ?? "",
+  });
+  const ago =
+    lastSuccessMs === undefined
+      ? "never"
+      : `${Math.round((Date.now() - lastSuccessMs) / 60_000)} min ago`;
+  say(
+    `policy v${policy.revision}: reports every ${Math.round(policy.intervalSeconds / 60)} min; last successful report ${ago}; next tick ${due ? "WOULD" : "would NOT"} report`,
+  );
+
+  // `arch` only has to be a value the route accepts — the verdict comes from the pair of status
+  // codes, and a 404 for an unbundled arch is as good a proof of authentication as a 200 PROVIDED
+  // the same request without the token was refused.
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const probe = `${base}/api/agent/download?arch=${arch}`;
+  const init = agentFetchInit(cfg.network, probe);
+  if (init.proxy) say(`via proxy ${init.proxy}`);
+  else if (cfg.network.httpsProxy || cfg.network.httpProxy) say("proxy configured but bypassed for this host (NO_PROXY)");
+  if (cfg.network.caFile) say(`trusting the CA bundle at ${cfg.network.caFile}`);
+
+  /** One `HEAD` on the probe URL, with or without the credential. Same URL, same proxy, same CA. */
+  const head = async (authorization: string | undefined): Promise<Response> => {
+    try {
+      return await fetch(probe, {
+        method: "HEAD",
+        ...(authorization ? { headers: { authorization } } : {}),
+        redirect: "manual",
+        signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
+        ...init,
+      });
+    } catch (err) {
+      console.error(`lazyit-agent test: FAIL — could not reach ${probe}`);
+      throw new Error(
+        `${(err as Error).message} — check the URL, DNS, the firewall, HTTPS_PROXY, and LAZYIT_CA_FILE if your instance uses a private CA`,
+      );
+    }
+  };
+
+  // Token-less FIRST: if this origin is not a permission-gated lazyit route, nothing the
+  // authenticated request answers can be trusted, and saying so is the whole job of the command.
+  const anonymous = await head(undefined);
+  const authenticated = await head(`Bearer ${cfg.token as string}`);
+
+  const verdict = interpretProbe(
+    { status: anonymous.status, statusText: anonymous.statusText },
+    { status: authenticated.status, statusText: authenticated.statusText },
+    arch,
+  );
+  if (!verdict.ok) {
+    console.error(`lazyit-agent test: FAIL — ${verdict.headline}`);
+    throw new Error(verdict.detail);
+  }
+  say(verdict.note);
+
+  if (problems.length) {
+    throw new Error(
+      `the instance is reachable, but this host still cannot report — ${problems.join("; ")}`,
+    );
+  }
+  say("PASS — nothing was written, here or in lazyit. `lazyit-agent show` prints what a report would carry.");
+}
+
 async function main(): Promise<void> {
   const cfg = await loadConfig(Bun.argv.slice(2));
+
+  // Once the config is resolved, the agent's own resolution is the WHOLE proxy decision (#1137).
+  // Every ambient variable has already been read into `cfg.network` — the environment WINS over the
+  // config file, per key — so silencing them now loses nothing and removes Bun's second, independent
+  // opinion, which would otherwise let an inherited HTTPS_PROXY beat a config-file NO_PROXY and make
+  // `test` print the opposite of what the report does. Before the first request, deliberately.
+  disableAmbientProxy(process.env);
 
   if (cfg.help) {
     console.log(HELP);
     return;
   }
+  if (cfg.command === "show") {
+    await show(cfg);
+    return;
+  }
+  if (cfg.command === "test") {
+    await test(cfg);
+    return;
+  }
   if (cfg.command !== "report") {
-    throw new Error(`unknown command "${cfg.command}" — try: lazyit-agent report --once`);
+    throw new Error(
+      `unknown command "${cfg.command}" — try: lazyit-agent report --once, lazyit-agent show, lazyit-agent test`,
+    );
   }
   if (!cfg.url || !cfg.token) {
     throw new Error(
@@ -308,8 +498,7 @@ async function main(): Promise<void> {
   // The veto is applied BEFORE the due gate on purpose: `minIntervalSeconds` is one of the limits,
   // so a host that refuses to report more than hourly must have that respected by the gate itself,
   // not merely by what it collects.
-  const cached = await loadCachedPolicy();
-  const policy = applyAgentPolicyVeto(cached, cfg.localLimits);
+  const policy = await effectivePolicy(cfg);
   // Read ONCE and carried into the report: the same file holds the cadence clock and the software
   // fingerprint (#1142), and re-reading it after the due gate would only invite the two to disagree.
   const state = await loadState();
@@ -336,7 +525,7 @@ async function main(): Promise<void> {
     }
   }
 
-  await report(cfg.url, cfg.token, policy, state);
+  await report(cfg, policy, state);
 }
 
 main().catch((err: unknown) => {
