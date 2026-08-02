@@ -16,6 +16,7 @@ import type {
   InfraImpactResponse,
   InfraNode,
   InfraNodeDetail,
+  InfraNodeFactChangeList,
   InfraNodeListItem,
   InfraSecretRef,
   MergeInfraNode,
@@ -269,6 +270,26 @@ export function mergeInfraNodeInto(
  * node carrying its minimum hop `depth`. The query that justifies a graph over a static picture; the
  * canvas highlights `affected` and dims the rest. Read-gated server-side (`infra:read`).
  */
+/**
+ * A page of a node's recorded fact history (`GET /infra/nodes/:id/changes`, ADR-0074 §3 amendment,
+ * #1143) — what MOVED, newest first. Keyset-paginated on the append-only autoincrement id: a page
+ * asks for rows BELOW the last id it saw, so nothing is skipped or repeated while reports land.
+ */
+export function getInfraNodeChanges(
+  nodeId: string,
+  params: { limit?: number; cursor?: number } = {},
+  signal?: AbortSignal,
+): Promise<InfraNodeFactChangeList> {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  if (params.cursor !== undefined) query.set("cursor", String(params.cursor));
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return apiFetch<InfraNodeFactChangeList>(
+    `${BASE}/nodes/${nodeId}/changes${suffix}`,
+    { signal },
+  );
+}
+
 export function getInfraNodeImpact(
   nodeId: string,
   signal?: AbortSignal,

@@ -10,6 +10,9 @@ import {
   containerExternalId,
   containerExternalIdPrefix,
   containerNodeStatus,
+  diffContainerFacts,
+  diffHostFacts,
+  diffSoftwareFacts,
   disambiguateExternalId,
   hostIdentityEvidence,
   identityDiscriminator,
@@ -36,16 +39,21 @@ import {
   type CreateInfraNode,
   type HostIdentityEvidence,
   type InfraEdgeKind,
+  type InfraFactChangeDraft,
   type InfraIdentityMatch,
   type InfraImpactNode,
   type InfraImpactResponse,
   type InfraNodeChild,
   type InfraNodeKind,
   type InfraAutoConfirmCandidate,
+  type InfraNodeFactChangeList,
   type InfraNodeState,
   type InfraNodeStatus,
   type InfraSecretRef,
   type UpdateInfraNode,
+  INFRA_FACT_CHANGE_FACT_MAX,
+  INFRA_FACT_CHANGE_PAGE_SIZE,
+  INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
 } from '@lazyit/shared';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma } from '../../generated/prisma/client';
@@ -333,6 +341,47 @@ function withoutVolatileReportFacts(
   return { ...rest, diagnostics: steadyDiagnostics };
 }
 
+/**
+ * Cap on the fact-history rows ONE report may write for ONE node (#1143).
+ *
+ * The flood this bounds is real and ordinary: a host that was offline through two patch windows comes
+ * back and its first report legitimately differs by a few thousand packages. 200 rows says *this host
+ * changed a lot, here is a bounded sample* instead of turning one check-in into a few thousand inserts.
+ * The slice is deterministic (host facts first, then packages by name), so it is the same 200 rows
+ * whichever replica took the report.
+ *
+ * A container child cannot approach it — {@link diffContainerFacts} tracks two facts — so the whole
+ * report is bounded by this plus twice `AGENT_CONTAINERS_MAX`, i.e. 400 rows, without any budget
+ * having to be threaded through the container reconciliation.
+ */
+const INFRA_FACT_CHANGES_MAX_PER_REPORT = 200;
+
+/**
+ * The rolling window and ceiling of the PER-NODE cap (#1143) — the bound the per-report cap alone
+ * does not give.
+ *
+ * `InfraReportRateLimitGuard` (#1134) allows 120 reports per service account per minute, and a caller
+ * that varies its package list on every request would otherwise turn that into ~1.4M rows an hour on
+ * one node. This ceiling makes it 500. It is checked with one COUNT, and ONLY on a report that
+ * actually has rows to write — which for a legitimate estate is a handful of times a month per host,
+ * so the steady-state cost of the cap is zero queries.
+ *
+ * THE COUNT MUST BE ANSWERABLE FROM AN INDEX, and that is not a detail. Its predicate is a RANGE on
+ * `createdAt`, so `(nodeId, id)` cannot serve it — that index could only walk every row the node owns
+ * and re-check each one. Nothing prunes this table, so the node holding the most rows is by definition
+ * the abused one, and the mitigation would degrade to a scan exactly when it fires, on the report
+ * ingest path. `(nodeId, createdAt)` is carried for this query alone; measured on postgres:18-alpine
+ * at 2.16M rows for one node, on the SQL Prisma emits for this very `count`, it is an index-only
+ * scan, 7 buffers, 0.11 ms, against a parallel seq scan, 18,374 buffers, 38.6 ms without it.
+ *
+ * Over the ceiling the rows are DROPPED, not queued and not deleted: this table is append-only
+ * (ADR-0006), so the bound is on what goes in, never on what is already recorded. A node that hits it
+ * is either under abuse or genuinely changing hundreds of times an hour, and in both cases the next
+ * window records again.
+ */
+const INFRA_FACT_CHANGES_WINDOW_MS = 60 * 60 * 1000;
+const INFRA_FACT_CHANGES_MAX_PER_NODE_WINDOW = 500;
+
 /** The node columns + linked Asset name `projectInfraNode` needs (the search projection shape). */
 const SEARCH_NODE_SELECT = {
   id: true,
@@ -604,6 +653,10 @@ export class InfraService {
       }
       // Known host: refresh inventory facts + liveness ONLY. Curation (state/label/x/y/asset) is the
       // human's and is deliberately left untouched. NOT throttled — it adds no row (#1134).
+      const samePolicyGeneration = this.samePolicyGeneration(
+        report,
+        existing.policyRevision,
+      );
       const ack = await this.refreshKnownNode({
         node: existing,
         blob,
@@ -617,9 +670,17 @@ export class InfraService {
           policy,
           now,
         ),
+        samePolicyGeneration,
         stored,
       });
-      return this.reconcileContainers(ack, report, now, principal, policy);
+      return this.reconcileContainers(
+        ack,
+        report,
+        now,
+        samePolicyGeneration,
+        principal,
+        policy,
+      );
     }
 
     // Unknown host ⇒ a NEW row. This is the only branch that can grow the table, so it is the only one
@@ -698,6 +759,11 @@ export class InfraService {
         },
         report,
         now,
+        // A node created a moment ago has no stored revision — the same `null` the policy columns
+        // were just written against. Its own host facts have no baseline to diff anyway; a container
+        // child rediscovered under a node that was discarded and re-proposed does, and it gets the
+        // conservative answer.
+        this.samePolicyGeneration(report, null),
         principal,
         policy,
       );
@@ -726,6 +792,10 @@ export class InfraService {
         // No loop: after P2002 the row exists. If it somehow doesn't (e.g. it was soft-deleted in the
         // same instant so findFirst can't see it), rethrow the original error rather than inventing one.
         if (raced) {
+          const samePolicyGeneration = this.samePolicyGeneration(
+            report,
+            raced.policyRevision,
+          );
           const ack = await this.refreshKnownNode({
             node: raced,
             blob,
@@ -739,8 +809,16 @@ export class InfraService {
               policy,
               now,
             ),
+            samePolicyGeneration,
           });
-          return this.reconcileContainers(ack, report, now, principal, policy);
+          return this.reconcileContainers(
+            ack,
+            report,
+            now,
+            samePolicyGeneration,
+            principal,
+            policy,
+          );
         }
       }
       throw err;
@@ -815,6 +893,40 @@ export class InfraService {
    * silently override a deliberately tuned `INFRA_AGENT_STALE_AFTER_MS` for precisely the hosts the
    * env var is documented to still cover (a pre-#1140 agent, a manual row, a failed resolution).
    */
+  /**
+   * Did this report's facts and the node's STORED facts come out of the same #1140 policy generation
+   * (#1143)? The answer the fact diff needs before it may call a difference a change.
+   *
+   * **Where the distinction is made, and why here.** The agent knows which packages its policy
+   * filtered out; the server never sees them. But the server does not need the names — it only needs
+   * to know that the FILTER moved, and it already holds that: the agent echoes the generation it
+   * collected under in every report (`policyRevision`), and the node's column of the same name holds
+   * that echo from its previous report. So no wire field is added and no query is made; the
+   * comparison is two values already in hand, and an older agent needs no upgrade to be protected.
+   *
+   * **Both-absent is SAME, deliberately.** A pre-#1140 agent echoes nothing and applies no server
+   * policy, so it can produce no policy artefact — and reading its two absences as "the generation
+   * moved" would silence the package history of most of the fleet on the day this ships.
+   *
+   * **It is deliberately blunt in one direction.** The revision is instance-wide and bumps on ANY
+   * policy write at any scope, so editing one host's policy makes every host in the estate skip its
+   * policy-sensitive diff for one report. That is the safe direction to be wrong in: the cost is one
+   * check-in's worth of disk/package rows and a baseline that re-seeds from the new list, against an
+   * invented uninstall that would make the whole tab untrustworthy.
+   *
+   * **What it cannot see.** The host's own `/etc/lazyit-agent/config` may narrow the policy further
+   * (`LAZYIT_EXCLUDE_SOFTWARE`, `LAZYIT_SOFTWARE_MAX` — the local VETO), and editing that file moves
+   * no revision. Someone with root on the host editing the host's own filter is not the case this
+   * table exists to protect; see the ADR-0074 §3 amendment for the residual and what closing it
+   * would cost on the wire.
+   */
+  private samePolicyGeneration(
+    report: AgentReport,
+    storedRevision: number | null | undefined,
+  ): boolean {
+    return report.policyRevision === (storedRevision ?? undefined);
+  }
+
   private policyWriteFields(
     report: AgentReport,
     storedRevision: number | null | undefined,
@@ -937,6 +1049,12 @@ export class InfraService {
     primaryIpAddress: string | undefined;
     /** The #1140 policy columns. An EMPTY object is the pre-#1140 shape and writes nothing extra. */
     policyFields?: AgentPolicyWriteFields;
+    /**
+     * Did this report's collection run under the same #1140 policy generation as the stored facts
+     * it is about to be diffed against? See {@link InfraService.samePolicyGeneration}. Required, so
+     * a path added later cannot record a policy edit as a hardware or software event by omission.
+     */
+    samePolicyGeneration: boolean;
     /** Already-read stored blob, when the caller needed it too. Read here when it did not. */
     stored?: StoredNodeSpecs;
   }): Promise<AgentReportAck> {
@@ -947,6 +1065,17 @@ export class InfraService {
       args.blob,
       args.software,
       stored,
+    );
+    // WHAT MOVED (#1143), computed BEFORE the write — the stored package list this may have to read
+    // back is about to be overwritten, so after the update there is nothing left to compare against.
+    // The rows themselves are inserted after the update lands, so a failed write never leaves a
+    // history row claiming a change that did not happen.
+    const factChanges = await this.hostFactChanges(
+      node.id,
+      stored,
+      plan,
+      args.software,
+      args.samePolicyGeneration,
     );
     const data: Prisma.InfraNodeUncheckedUpdateInput = {
       status: 'ONLINE',
@@ -965,6 +1094,7 @@ export class InfraService {
       data,
       select: { id: true, state: true },
     });
+    await this.recordFactChanges(node.id, factChanges);
     // Keep the linked Asset's specs snapshot fresh (agent-owned facts only). It is asked on EVERY
     // report even when the node's blob was skipped, and decides its own write the same way: an Asset
     // linked to a node whose facts have not changed since would otherwise never receive them.
@@ -1185,6 +1315,203 @@ export class InfraService {
   }
 
   /**
+   * WHAT MOVED on a host this report (#1143) — the rows the append-only fact history is about to
+   * record, or an empty list when nothing worth recording did.
+   *
+   * IT BUILDS ON #1153's COMPARISON RATHER THAN MAKING A SECOND ONE. `planSpecsWrite` has already
+   * decided whether the stored blob moved at all, and `plan.write === undefined` is that answer: a
+   * report that changed nothing skips both the jsonb write and this, for zero extra cost on the ~96
+   * reports a day per host that are the steady state.
+   *
+   * THE PACKAGE HALF IS THE EXPENSIVE ONE AND IS ENTERED ONLY WHEN IT HAS TO BE. Diffing packages
+   * needs the stored list, which #1153 deliberately keeps OUT of the hot path — reading it back on
+   * every report would undo the whole saving. So it is read only when the server's own fingerprint of
+   * what arrived already disagrees with the one the node holds, i.e. only on the reports where the
+   * package list genuinely moved: roughly twice a month per host, the same branch `apt upgrade`
+   * produces. THIS METHOD adds no such read on `preserve` or `clear` — said precisely, because
+   * `planSpecsWrite` still makes its OWN read on the `preserve`-with-changed-host-facts branch (it has
+   * to re-embed the list it is about to overwrite), and the fact history neither triggers that read nor
+   * takes any package rows off it. `clear` deliberately records NOTHING: `softwareState: 'disabled'`
+   * is a policy event, and rendering it as three thousand removals would be a lie about the host.
+   *
+   * A node holding no list yet (`hasSoftware === false`) is the SEED case and is silent, which is what
+   * keeps the first report after this ships from writing one row per installed package. The same rule
+   * inside {@link diffHostFacts} covers every host fact.
+   *
+   * A POLICY GENERATION THAT MOVED SKIPS THE READ ENTIRELY. `samePolicyGeneration === false` means an
+   * operator's #1140 policy changed between the stored observation and this one, so the shared diff
+   * will discard every package row it could produce (`exclude.softwareNames`, `softwareSources` and
+   * `softwareMax` each empty packages out of a report that are still installed). Paying a
+   * several-hundred-KB read for rows that are about to be thrown away would be the one place this
+   * feature made the report path measurably slower for nothing. That skip is an OPTIMISATION, not
+   * the guard: the guard lives in {@link diffSoftwareFacts}, which is where a caller added later
+   * inherits it.
+   *
+   * AND IT CANNOT FAIL THE CHECK-IN. Exactly one thing here can throw — the package read-back, a query
+   * this feature ADDED to the report path — and it is the one thing inside the `try`; everything else
+   * is a pure comparison over values already in hand. Without that catch, a fact history nobody asked
+   * for could take a host off the map, which inverts the priority stated on {@link recordFactChanges}.
+   * A throw degrades to "the host facts were recorded, the package half was not"; the report itself
+   * lands exactly as it did before this change.
+   */
+  private async hostFactChanges(
+    nodeId: string,
+    stored: StoredNodeSpecs,
+    plan: SpecsWritePlan,
+    software: SoftwareDirective,
+    samePolicyGeneration: boolean,
+  ): Promise<InfraFactChangeDraft[]> {
+    if (plan.write === undefined) return [];
+    const changes = diffHostFacts(stored.rest?.host, plan.write.host, {
+      samePolicyGeneration,
+    });
+    const storedHash =
+      typeof stored.rest?.softwareHash === 'string'
+        ? stored.rest.softwareHash
+        : undefined;
+    if (
+      software.mode !== 'replace' ||
+      !stored.hasSoftware ||
+      software.hash === storedHash ||
+      !samePolicyGeneration ||
+      changes.length >= INFRA_FACT_CHANGES_MAX_PER_REPORT
+    ) {
+      return changes;
+    }
+    try {
+      const previous = await this.storedSoftware(nodeId);
+      return [
+        ...changes,
+        ...diffSoftwareFacts(
+          previous,
+          software.software,
+          INFRA_FACT_CHANGES_MAX_PER_REPORT - changes.length,
+          { samePolicyGeneration },
+        ),
+      ];
+    } catch (err) {
+      // The host facts that were already diffed are still good; only the package half is lost.
+      this.logger.warn(
+        `Could not read node ${nodeId}'s stored package list to diff it — its package changes are NOT recorded for this report, and the report was still accepted. ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return changes;
+    }
+  }
+
+  /**
+   * Append what moved to the node's fact history (#1143) — the ONE write path for
+   * `InfraNodeFactChange`, shared by the host refresh and the container reconciliation.
+   *
+   * NOTHING HERE MAY FAIL A CHECK-IN. A history row is strictly less valuable than the report that
+   * carries it: a host whose report 500s vanishes from the CMDB, shows OFFLINE on the map and nudges
+   * the bell (ADR-0074 §4), while a history row that was not written costs one line in a timeline. So
+   * every failure — a constraint, a DB hiccup, a node deleted between the update and this insert —
+   * degrades to a warning and the report still acks — the same posture, for the same reason, as
+   * {@link resolvePolicy}.
+   *
+   * The two caps are applied here rather than at the callers so neither can be forgotten by a path
+   * added later: {@link INFRA_FACT_CHANGES_MAX_PER_REPORT} bounds one report, and the COUNT bounds one
+   * node across {@link INFRA_FACT_CHANGES_WINDOW_MS}. The COUNT runs only when there is something to
+   * write, so a quiet estate never pays for it.
+   */
+  private async recordFactChanges(
+    nodeId: string,
+    changes: InfraFactChangeDraft[],
+  ): Promise<void> {
+    if (changes.length === 0) return;
+    try {
+      const recent = await this.prisma.infraNodeFactChange.count({
+        where: {
+          nodeId,
+          createdAt: {
+            gte: new Date(Date.now() - INFRA_FACT_CHANGES_WINDOW_MS),
+          },
+        },
+      });
+      const room = INFRA_FACT_CHANGES_MAX_PER_NODE_WINDOW - recent;
+      if (room <= 0) {
+        this.logger.warn(
+          `Node ${nodeId} has already recorded ${INFRA_FACT_CHANGES_MAX_PER_NODE_WINDOW} fact changes this hour — ${changes.length} more are DROPPED. Already-recorded history is untouched, and recording resumes in the next window.`,
+        );
+        return;
+      }
+      const rows = changes.slice(
+        0,
+        Math.min(room, INFRA_FACT_CHANGES_MAX_PER_REPORT),
+      );
+      await this.prisma.infraNodeFactChange.createMany({
+        data: rows.map((change) => ({
+          nodeId,
+          kind: change.kind,
+          fact: change.fact.slice(0, INFRA_FACT_CHANGE_FACT_MAX),
+          previousValue: change.previousValue ?? null,
+          currentValue: change.currentValue ?? null,
+        })),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Could not record ${changes.length} fact change(s) for node ${nodeId} — the report was still accepted. ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * A page of a node's recorded fact history (#1143), newest first — what the Changes tab reads.
+   *
+   * Keyset pagination on the autoincrement `id` rather than an offset: the table is append-only, so
+   * ids only ever grow and the pages walk strictly DOWNWARD, so a row already recorded when paging
+   * started can never be repeated or stepped over, however many reports land in between — including a
+   * concurrent report whose lower id commits after a higher one, which an offset would have shifted.
+   * `nextCursor` is null on the last page.
+   *
+   * The node is checked for EXISTENCE first — soft-delete-scoped by the Prisma extension, so a node
+   * that is off the map answers 404 rather than serving its history. Deliberately NOT {@link getNode}:
+   * that is an unprojected `findFirst` and would pull the node's whole `specs` jsonb — including the
+   * installed-package list #1153 built {@link storedNodeSpecs} to keep off hot paths — on every page
+   * of a tab the operator scrolls, to read one boolean off it. `select: { id: true }` is the whole
+   * requirement (#1135 is the same defect class, found on the list endpoint).
+   */
+  async listNodeFactChanges(
+    nodeId: string,
+    options: { limit?: number; cursor?: number } = {},
+  ): Promise<InfraNodeFactChangeList> {
+    const node = await this.prisma.infraNode.findFirst({
+      where: { id: nodeId },
+      select: { id: true },
+    });
+    if (!node) {
+      throw new NotFoundException(`Infra node ${nodeId} not found`);
+    }
+    const limit = Math.min(
+      Math.max(options.limit ?? INFRA_FACT_CHANGE_PAGE_SIZE, 1),
+      INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
+    );
+    const rows = await this.prisma.infraNodeFactChange.findMany({
+      where: {
+        nodeId,
+        ...(options.cursor !== undefined ? { id: { lt: options.cursor } } : {}),
+      },
+      orderBy: { id: 'desc' },
+      // One extra row is the "is there another page?" probe — cheaper than a second COUNT query.
+      take: limit + 1,
+    });
+    const items = rows.slice(0, limit);
+    return {
+      items: items.map((row) => ({
+        id: row.id,
+        nodeId: row.nodeId,
+        kind: row.kind,
+        fact: row.fact,
+        previousValue: row.previousValue,
+        currentValue: row.currentValue,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      nextCursor:
+        rows.length > limit ? (items[items.length - 1]?.id ?? null) : null,
+    };
+  }
+
+  /**
    * When this node's collision was FIRST detected (#1141), or `undefined` if it carries no marker.
    *
    * The marker is re-stamped on every report (see {@link ingestCollidingHost}), and a marker whose
@@ -1268,6 +1595,11 @@ export class InfraService {
           now,
           agentVersion: report.agentVersion,
           primaryIpAddress,
+          // This branch did not read the peer's stored revision (it writes no policy columns
+          // either), so it cannot show that the two observations shared a generation. Unproven
+          // reads as "the policy may have moved": the cost is a skipped diff on a branch documented
+          // as unreachable, against recording a policy edit as a hardware event.
+          samePolicyGeneration: false,
         }),
         policy,
       );
@@ -1305,6 +1637,10 @@ export class InfraService {
             node.policyRevision,
             policy,
             now,
+          ),
+          samePolicyGeneration: this.samePolicyGeneration(
+            report,
+            node.policyRevision,
           ),
         }),
         policy,
@@ -1469,6 +1805,11 @@ export class InfraService {
     ack: AgentReportAck,
     report: AgentReport,
     now: Date,
+    // The children ride the SAME report, collected by the same agent under the same policy, so the
+    // host's answer is theirs (#1143). Threaded rather than recomputed per child: a child's own
+    // `policyRevision` column is written from this very report, so reading it back would compare a
+    // value against itself and always answer "same" — the guard would exist and never fire.
+    samePolicyGeneration: boolean,
     principal?: Principal,
     // The host's resolved policy (#1140): it rides out on the ack, and its staleness threshold is
     // stamped on each CHILD so a daily-cadence host's containers are not swept dark hourly.
@@ -1482,6 +1823,7 @@ export class InfraService {
         containers,
         report,
         now,
+        samePolicyGeneration,
         principal,
         policy,
       );
@@ -1515,6 +1857,7 @@ export class InfraService {
     containers: readonly AgentContainer[],
     report: AgentReport,
     now: Date,
+    samePolicyGeneration: boolean,
     principal?: Principal,
     policy?: AgentPolicy,
   ): Promise<void> {
@@ -1611,6 +1954,18 @@ export class InfraService {
                 : { reportedAt: specs.reportedAt }),
             }
           : specs;
+        // WHAT MOVED on this container (#1143), read off the SAME comparison the write rule above
+        // already made — computed before the update, for the same reason the host path computes it
+        // there: `storedSpecs` is about to be replaced. A container whose image digest moved under an
+        // unchanged `:latest` tag is the deploy nobody remembers doing, and it is exactly the kind of
+        // change this table exists for. Runtime `state` is deliberately NOT recorded — it is liveness,
+        // it already drives this node's `status`, and a nightly restart would write two rows a day
+        // forever. See {@link diffContainerFacts}.
+        const childChanges = unchanged
+          ? []
+          : diffContainerFacts(storedSpecs.container, specs.container, {
+              samePolicyGeneration,
+            });
         await this.prisma.infraNode.update({
           where: { id: child.id },
           data: {
@@ -1623,6 +1978,7 @@ export class InfraService {
             ...childPolicyFields,
           },
         });
+        await this.recordFactChanges(child.id, childChanges);
         // #1157: the host path has synced its linked Asset since #1081 and this one never did, so a
         // container confirmed with `trackAsAsset` froze its Asset panel at the instant it was
         // confirmed — image tag, digest, runtime state and published ports all drifting silently while
