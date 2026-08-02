@@ -3914,7 +3914,9 @@ describe('InfraService', () => {
       );
       expect(emitted.summary).not.toContain('systemd-firstboot');
       expect(emitted.summary).not.toContain('sysprep');
-      expect(emitted.summary).toContain('Give each clone its own machine identity');
+      expect(emitted.summary).toContain(
+        'Give each clone its own machine identity',
+      );
     });
 
     // The pre-v2 default (`osFamily`): every agent that predates contract v2 is a Linux-only
