@@ -324,7 +324,7 @@ export class InfraController {
   @RequirePermission('infra:manage')
   @ApiOperation({
     summary:
-      'Update a node. assetId:null detaches the link (soft-deletes an auto-created Asset, un-links a pre-existing one — ADR-0070 §5).',
+      'Update a node. assetId:null DETACHES the link (soft-deletes an auto-created Asset, un-links a pre-existing one — ADR-0070 §5); an assetId on a node that carries NONE attaches it (404 if that asset is missing or discarded). Re-pointing a node that ALREADY has an asset is a 400 — it would orphan the one it is carrying; detach first, then attach (#1117).',
   })
   @ApiOkResponse({ type: InfraNodeDto })
   updateNode(

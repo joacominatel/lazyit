@@ -14,7 +14,7 @@ import {
   InfraNodeListItemSchema,
   softwareFingerprint,
 } from '@lazyit/shared';
-import { InfraService } from './infra.service';
+import { InfraService, INFRA_NODE_ASSET_REPOINT_ERROR } from './infra.service';
 import { AgentPolicyService } from './agent-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
@@ -2632,7 +2632,7 @@ describe('InfraService', () => {
 
   // ── Detach semantics (ADR-0070 §5) — the orphan fix ─────────────────────────
 
-  describe('updateNode — detach (assetId: null)', () => {
+  describe('updateNode — asset linkage: detach, first-attach, and the refused re-point', () => {
     it('SOFT-DELETES an auto-created Asset on detach (it carries the provenance marker)', async () => {
       prisma.infraNode.findFirst.mockResolvedValue({
         id: 'node-1',
@@ -2689,6 +2689,92 @@ describe('InfraService', () => {
 
       expect(assets.remove).not.toHaveBeenCalled();
       expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('REFUSES a RE-POINT — swapping the asset of an already-linked node (#1117)', async () => {
+      // The re-point is the half of #1117 that is actually broken. Written straight through, it
+      // dropped the previous link WITHOUT running the §5 detach above, leaving the auto-created
+      // backing Asset live in inventory owned by nobody — the exact orphan §5 exists to forbid.
+      // Refusing closes it without touching delete semantics (auto-soft-deleting the orphan would
+      // delete a row a human may have curated, which ADR-0006 does not let a machine decide).
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-auto',
+      });
+
+      await expect(
+        service.updateNode('node-1', { assetId: 'asset-other' }, HUMAN),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      // Nothing partial: no write, no liveness round-trip, and the asset it would have orphaned is
+      // not even looked at.
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+      expect(assets.assertExists).not.toHaveBeenCalled();
+      expect(assets.remove).not.toHaveBeenCalled();
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('the re-point refusal names the REACHABLE remedy: detach first, then attach (#1117)', async () => {
+      // The caller is holding a node that already has an asset. Telling them "link it at create
+      // time instead" is useless — the node exists, and an agent-discovered one was never created
+      // by hand at all. Detach-then-attach is a route they can actually take, so the message has to
+      // be the one that names it.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-auto',
+      });
+
+      await expect(
+        service.updateNode('node-1', { assetId: 'asset-other' }),
+      ).rejects.toThrow(INFRA_NODE_ASSET_REPOINT_ERROR);
+
+      const message = INFRA_NODE_ASSET_REPOINT_ERROR;
+      expect(message).toContain('assetId: null'); // step one of the remedy
+      expect(message).toContain('orphan'); // why the re-point itself is refused
+      expect(message).not.toContain('POST /infra/nodes'); // NOT the remedy — the node already exists
+    });
+
+    it('ALLOWS a first-attach on an UNLINKED node, gated by the liveness check (#1117)', async () => {
+      // Attaching an asset to a node that carries none orphans nothing — there is no previous link
+      // to drop — so it stays allowed. What it was missing is the check `createNode` performs:
+      // `assets.assertExists`, whose `findFirst` the soft-delete extension scopes to LIVE rows. The
+      // FK only requires the row to EXIST and a discarded asset's row does, so without this a
+      // discarded asset went straight into the column.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-existing',
+      });
+
+      await service.updateNode('node-1', { assetId: 'asset-existing' }, HUMAN);
+
+      expect(assets.assertExists).toHaveBeenCalledWith('asset-existing');
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBe('asset-existing');
+      // Nothing is deleted on an attach — there was no link to detach.
+      expect(assets.remove).not.toHaveBeenCalled();
+    });
+
+    it('a first-attach to a DISCARDED asset 404s and writes nothing (#1117)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+      // What the soft-delete-scoped `assertExists` does with a discarded (or absent) id.
+      assets.assertExists.mockRejectedValueOnce(
+        new NotFoundException('Asset asset-discarded not found'),
+      );
+
+      await expect(
+        service.updateNode('node-1', { assetId: 'asset-discarded' }, HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
     });
   });
 
@@ -3963,6 +4049,149 @@ describe('InfraService', () => {
           AGENT_SA,
         ),
       ).rejects.toMatchObject({ code: 'P2002' });
+    });
+
+    // ── The container gap the collision branch deliberately leaves (#1158) ────
+    //
+    // READ THIS BEFORE WIRING CONTAINER RECONCILIATION INTO THE COLLISION BRANCH.
+    //
+    // A container child's dedup key is `containerExternalId(hostExternalId, name)` — derived from
+    // the host's REPORTED `externalId` (#1139). A colliding host's NODE gets a disambiguated key
+    // (`<externalId>#<discriminator>`, #1141), but the report it sent still carries the machine-id
+    // its peer is reporting too, so both clones compute IDENTICAL container keys. If the collision
+    // branch reconciled containers, each clone's report would claim its peer's children, and the
+    // retire sweep — which selects children by `containerExternalIdPrefix(report.externalId)` —
+    // would flip the peer's still-running containers to OFFLINE. Every cadence tick, in both
+    // directions, forever.
+    //
+    // So `ingestCollidingHost` returns WITHOUT calling `reconcileContainers`, at the cost of a
+    // narrower gap: a colliding host's containers are not tracked at all until its machine-id is
+    // fixed, at which point it takes the ordinary unknown-key path and tracking resumes by itself.
+    // Re-deriving the container key from the NODE's `externalId` is the proper fix and is DEFERRED
+    // (#1158) — it re-keys every existing container child, which is a data migration over the
+    // partial unique index or an operator-visible one-time re-enrolment, neither of them free.
+    //
+    // These two tests pin the ONE guarantee that makes that deferral safe to revisit: **a colliding
+    // host's report never retires its peer's container children.** If you change the derivation, or
+    // wire reconciliation in without changing it, this is the guarantee you are touching.
+    describe("containers: a colliding host's report never retires its peer's children (#1158)", () => {
+      /** The same clone report as above, now carrying a container list. */
+      const reportWithContainersFrom = (
+        hostname: string,
+        serial: string,
+        mac: string,
+        containers: unknown[],
+      ) =>
+        AgentReportSchema.parse({
+          agentVersion: '2.0.0',
+          reportingSource: 'agent:clone',
+          externalId: 'machine-id-baked',
+          reportedAt: '2026-07-31T12:00:00.000Z',
+          host: {
+            hostname,
+            identifiers: [
+              { kind: 'machine-id', value: 'baked' },
+              { kind: 'serial', value: serial },
+              { kind: 'mac', value: mac },
+            ],
+            containers,
+          },
+        });
+
+      /** The peer's children, keyed under the machine-id BOTH clones report. */
+      const PEER_CHILDREN = [
+        { id: 'node-peer-c1', externalId: 'machine-id-baked/container/redis' },
+        { id: 'node-peer-c2', externalId: 'machine-id-baked/container/api' },
+      ];
+
+      const STORED_PEER_IDENTITY = [
+        { kind: 'serial', value: 'SN-ALPHA' },
+        { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+      ];
+
+      /** Everything the container reconcile would have done, had it run. */
+      function expectNoContainerReconcile(): void {
+        // It never even LOOKS for children — `applyContainerTopology`'s prefix query is the first
+        // thing it does, so a silent findMany is the earliest evidence that reconciliation ran.
+        expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+        // …so nothing is retired. This is the assertion the whole deferral rests on.
+        expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+        // …and the peer's children are not re-parented onto the clone either.
+        expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+      }
+
+      it("a clone's FIRST report enrols its own node and leaves the peer's children alone", async () => {
+        prisma.infraNode.findFirst
+          .mockResolvedValueOnce(ORIGINAL) // the peer owns the reported key
+          .mockResolvedValueOnce(null); // the clone has no node of its own yet
+        prisma.$queryRaw.mockResolvedValue(
+          storedHost('web-01', STORED_PEER_IDENTITY),
+        );
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-2',
+          state: 'PENDING',
+        });
+        // Seeded so the retire sweep would have something to retire if it ran — without this the
+        // test would pass against a version that reconciles and simply finds nothing.
+        prisma.infraNode.findMany.mockResolvedValue(PEER_CHILDREN);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+
+        // `[]` is the maximally dangerous shape: a positive "the probe ran and this host runs none",
+        // which is exactly what retires every child under the prefix.
+        const ack = await service.ingestReport(
+          reportWithContainersFrom(
+            'web-02',
+            'SN-BETA',
+            'aa:bb:cc:dd:ee:02',
+            [],
+          ),
+          AGENT_SA,
+        );
+
+        expectNoContainerReconcile();
+        // The clone still lands — the report is accepted, only its containers go untracked.
+        expect(prisma.infraNode.create).toHaveBeenCalledTimes(1);
+        expect(ack.nodeId).toBe('node-2');
+        expect(ack.accepted).toBe(true);
+      });
+
+      it("a clone's STEADY-STATE report does not retire them either, list or no list", async () => {
+        // The second and every later report take the refresh branch, which is the one that runs
+        // every cadence tick forever — the branch where a thrash would actually live.
+        prisma.infraNode.findFirst
+          .mockResolvedValueOnce(ORIGINAL)
+          .mockResolvedValueOnce({
+            id: 'node-2',
+            assetId: null,
+            ipAddressSource: 'AGENT',
+          });
+        prisma.$queryRaw.mockResolvedValue(
+          storedHost('web-01', STORED_PEER_IDENTITY),
+        );
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-2',
+          state: 'PENDING',
+        });
+        prisma.infraNode.findMany.mockResolvedValue(PEER_CHILDREN);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+
+        // A NON-empty list this time: the clone runs a container of its own, whose key would be
+        // `machine-id-baked/container/redis` — byte-identical to the peer's first child.
+        await service.ingestReport(
+          reportWithContainersFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02', [
+            { name: 'redis', state: 'running' },
+          ]),
+          AGENT_SA,
+        );
+
+        expectNoContainerReconcile();
+        // Only the clone's OWN node is written — never the peer's child, and never the peer.
+        expect(prisma.infraNode.update).toHaveBeenCalledTimes(1);
+        const updateArg = firstArg<{ where: { id: string } }>(
+          prisma.infraNode.update,
+        );
+        expect(updateArg.where).toEqual({ id: 'node-2' });
+      });
     });
   });
 

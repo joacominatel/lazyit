@@ -743,6 +743,24 @@ they are two). The row also carries `specs.identityConflict` naming the value ac
 peer node it collided with. **This is an identity choice, and it is effectively permanent** — the same
 weight as §2's canonicalisation rules — so it is stated here rather than left in code.
 
+**A colliding host's CONTAINERS are not tracked, and that gap is deliberate (#1158, 2026-08-01).** A
+container child's key is `<hostExternalId>/container/<name>`, derived from the **reported**
+`externalId` — the very value both clones share. The node key is disambiguated; the container key is
+not, so two clones compute **identical** container keys. Reconciling containers on this branch would
+therefore have each clone's report claim its peer's children, and the retire sweep — which selects
+children by the reported key's prefix — would flip the peer's still-running containers to OFFLINE
+every cadence tick, in both directions. So the collision branch does **not** reconcile containers at
+all. The cost is narrower and it **self-clears**: a colliding host's containers go untracked until its
+`/etc/machine-id` is fixed, at which point it takes the ordinary unknown-key path and tracking resumes
+by itself. The proper fix — deriving the container key from the **node's** `externalId` — is
+**deferred**, because it re-keys every container child that already exists: either a data migration
+over the partial unique index or an operator-visible one-time re-enrolment in which confirmed children
+retire and return as PENDING. Neither is free, and a collision is an anomaly the product is actively
+surfacing for repair rather than a state anyone lives in. **The guarantee that makes the deferral safe
+to revisit — a colliding host's report never retires its peer's container children — is asserted by
+test** (`infra.service.spec.ts`, `#1158`), not left as a comment. Revisit if
+`infra.identity_conflict` turns out to fire often in practice.
+
 **`identityConflict` is re-stamped on every report**, for as long as the collision lasts, keeping the
 `detectedAt` of the FIRST detection. A marker written only when the node was created would be gone the
 first time anything in the blob moved — leaving the operator holding a notification that points at a

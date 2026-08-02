@@ -66,6 +66,18 @@ import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { AgentPolicyService } from './agent-policy.service';
 
 /**
+ * The 400 a RE-POINT gets (#1117) — `PATCH /infra/nodes/:id` with an `assetId` on a node that already
+ * carries one. Written for the operator holding it, so it names what the re-point would leave behind
+ * and the two-step that IS available to them: detach, then attach. It lives here rather than in the
+ * shared contract because the rule needs the node's stored `assetId`, which only this layer reads —
+ * `UpdateInfraNodeSchema` accepts any cuid and cannot tell a re-point from a first-attach.
+ *
+ * Exported so the spec asserts the message the caller actually receives, not a copy of it.
+ */
+export const INFRA_NODE_ASSET_REPOINT_ERROR =
+  'This node already carries an asset, and a patch cannot swap it for another in one step: the current link would be dropped without the detach that cleans up after it, orphaning that asset if lazyit auto-created it — it would be left in inventory owned by nobody. Send `assetId: null` first to detach (an auto-created asset is soft-deleted, a pre-existing one is left intact and merely un-linked), then a second patch carrying the new `assetId`. Attaching an asset to a node that carries none is allowed directly. ADR-0070 §5.';
+
+/**
  * The policy-related columns one report writes (#1140) — spread into the node `data` on every branch.
  * Every key is OPTIONAL and an absent key means "leave the stored value alone", which is what keeps a
  * pre-#1140 agent (and a policy resolution that failed) from ever clearing a good value.
@@ -2449,9 +2461,34 @@ export class InfraService {
    * was AUTO-CREATED by a node (carries the provenance marker), it is SOFT-DELETED (it must not linger
    * in inventory owned-by-nobody); if it PRE-EXISTED, the node only nulls `assetId` and the asset is
    * left intact. Any other field is a plain update. 404 if the node is missing/soft-deleted.
+   *
+   * A NON-NULL `assetId` splits in two (ADR-0070 §5 note, #1117), and only the node's CURRENT link
+   * tells them apart — which is why neither case can be decided by `UpdateInfraNodeSchema`:
+   *
+   *  - **First-attach** (the node carries NO asset) — ALLOWED. There is no previous link to drop, so
+   *    it orphans nothing. What it was missing is the liveness check `createNode` performs:
+   *    `assets.assertExists`, whose `findFirst` the soft-delete extension scopes to live rows. The FK
+   *    only requires the row to EXIST and a DISCARDED asset's row does, so without it a soft-deleted
+   *    asset went straight into the column. (A wholly non-existent id was at least stopped — by the
+   *    FK, as a generic `Invalid reference` 400 rather than the clean 404 `assertExists` gives.)
+   *  - **Re-point** (the node ALREADY carries an asset) — refused with a 400. It dropped the previous
+   *    link WITHOUT running the §5 detach below, leaving an auto-created backing Asset live in
+   *    inventory owned by nobody. Refusing leaves delete semantics exactly as §5 wrote them: the
+   *    alternative, auto-soft-deleting the asset a re-point orphaned, would delete a row a human may
+   *    have curated. The remedy is the two-step the operator can actually take — `assetId: null` to
+   *    detach (running §5 on the outgoing asset), then a second patch carrying the new id.
    */
   async updateNode(id: string, data: UpdateInfraNode, principal?: Principal) {
     const node = await this.getNode(id);
+
+    if (data.assetId != null) {
+      // Order matters: a re-point is refused for WHAT it is, before the incoming id is even resolved,
+      // so the caller gets the rule rather than a 404 about an asset that was never the problem.
+      if (node.assetId) {
+        throw new BadRequestException(INFRA_NODE_ASSET_REPOINT_ERROR);
+      }
+      await this.assets.assertExists(data.assetId);
+    }
 
     // Detach branch: assetId explicitly set to null while a link exists → run the §5 detach semantics.
     if (data.assetId === null && node.assetId) {

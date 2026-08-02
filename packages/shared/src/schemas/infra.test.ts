@@ -40,6 +40,7 @@ import {
   sanitizeIdentifierValue,
   sanitizeSerial,
   selectPrimaryMac,
+  UpdateInfraNodeSchema,
 } from "./infra";
 
 /**
@@ -105,6 +106,36 @@ describe("CreateInfraNodeSchema", () => {
     });
     expect(r.success).toBe(true);
     expect(r.success && r.data.ipAddress).toBe("10.0.0.5");
+  });
+});
+
+describe("UpdateInfraNodeSchema — `assetId` detaches, or first-attaches (#1117)", () => {
+  test("`assetId: null` is accepted — the detach (ADR-0070 §5)", () => {
+    expect(UpdateInfraNodeSchema.safeParse({ assetId: null }).success).toBe(true);
+  });
+
+  test("a cuid `assetId` is accepted HERE — a first-attach is a legal patch", () => {
+    // Attaching an asset to a node that carries NONE is a working, non-orphaning operation, so the
+    // contract must let it through. The refusal that #1117 is about is the RE-POINT — swapping the
+    // asset of a node that already has one — and this schema cannot tell the two apart: only the
+    // node's CURRENT `assetId` decides, and a zod schema never sees the row. That refusal (and the
+    // liveness check on the id) therefore lives in `InfraService.updateNode`, which reads the node.
+    expect(UpdateInfraNodeSchema.safeParse({ assetId: CUID }).success).toBe(true);
+  });
+
+  test("a malformed `assetId` is still refused — the shape check is unchanged", () => {
+    expect(UpdateInfraNodeSchema.safeParse({ assetId: "not-a-cuid" }).success).toBe(false);
+    expect(UpdateInfraNodeSchema.safeParse({ assetId: 42 }).success).toBe(false);
+  });
+
+  test("every OTHER field a patch may carry still parses", () => {
+    expect(
+      UpdateInfraNodeSchema.safeParse({ label: "renamed", ipAddress: "10.0.0.5" }).success,
+    ).toBe(true);
+  });
+
+  test("an empty patch is still refused (the at-least-one-key rule is unchanged)", () => {
+    expect(UpdateInfraNodeSchema.safeParse({}).success).toBe(false);
   });
 });
 

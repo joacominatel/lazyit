@@ -159,7 +159,12 @@ export const UpdateInfraNodeSchema = requireAtLeastOneKey(
       kind: InfraNodeKindSchema,
       label: z.string().trim().min(1).max(200),
       status: InfraNodeStatusSchema,
-      assetId: z.cuid().nullable(), // null detaches the asset link
+      // `null` runs the ADR-0070 §5 detach; a cuid ATTACHES — but only to a node that carries no
+      // asset yet. Swapping the asset of an already-linked node (a RE-POINT) is a 400, because it
+      // would drop the previous link without the §5 detach and orphan an auto-created asset (#1117).
+      // That rule needs the node's CURRENT `assetId`, which a schema never sees, so it is enforced
+      // in `InfraService.updateNode` — along with the soft-delete-scoped liveness check on the id.
+      assetId: z.cuid().nullable(),
       // Format-validated (ADR-0090, #847); `null` clears the IP (stamped MANUAL server-side).
       ipAddress: IpAddressSchema.nullable(),
       shortcuts: InfraShortcutsSchema.nullable(),
