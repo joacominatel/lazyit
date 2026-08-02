@@ -210,6 +210,9 @@ function PanelBody({
   const tone = statusTone(node.status);
   const updateNode = useUpdateInfraNode();
   const deleteNode = useDeleteInfraNode();
+  // The open tab. Held here (not left to the primitive's own state) because the Changes tab's query
+  // is gated on it — see `NodeChangesTab`.
+  const [tab, setTab] = useState("overview");
 
   function handleStatusChange(next: string) {
     updateNode.mutate(
@@ -293,11 +296,12 @@ function PanelBody({
 
       {/* Two tabs, and deliberately only two (#1143). Everything the panel already showed is the
           node as it is NOW; Changes is the node's history — what MOVED and when. They are different
-          questions and stacking the second under the first would have buried it below the edge
-          manager. Radix unmounts the inactive content, so opening the panel still fetches only the
-          detail; the history is read when the operator asks for it. */}
+          questions, and stacking the second under the first would have buried it below the edge
+          manager. The open tab is held here rather than left to the primitive, because the Changes
+          query is gated on it: opening the panel must fetch the detail and nothing else. */}
       <Tabs
-        defaultValue="overview"
+        value={tab}
+        onValueChange={setTab}
         className="flex min-h-0 flex-1 flex-col gap-0"
       >
         <TabsList className="shrink-0 px-4">
@@ -434,7 +438,7 @@ function PanelBody({
           value="changes"
           className="min-h-0 flex-1 overflow-y-auto p-4"
         >
-          <NodeChangesTab nodeId={node.id} />
+          <NodeChangesTab nodeId={node.id} active={tab === "changes"} />
         </TabsContent>
       </Tabs>
     </>
