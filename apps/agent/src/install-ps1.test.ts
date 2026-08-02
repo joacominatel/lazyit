@@ -86,6 +86,45 @@ describe("the scheduled task is the systemd timer, one platform over", () => {
     expect(script).toContain("-RandomDelay $RandomDelay");
   });
 
+  // THE BUG THIS PINS. A repetition is a property OF a trigger: Microsoft defines the repetition
+  // pattern as "how long the repetition pattern is repeated AFTER THE TASK IS STARTED", and Task
+  // Scheduler "can run a task any number of times after a trigger is fired". So a repetition hung on
+  // the -AtStartup trigger ALONE does not begin until the machine next BOOTS — and -AtStartup does
+  // not fire for a boot that already happened. On a running host that installer produced an agent
+  // that reported once and then went silent until somebody rebooted it. `-StartWhenAvailable` does
+  // not rescue it either: it "applies only to time-based tasks", which a boot trigger is not.
+  //
+  // The systemd unit this was translated from has TWO independent activations (OnBootSec= and
+  // OnUnitActiveSec=); the translation had collapsed them into one. Both must be registered.
+  test("TWO independent triggers are registered — the tick does not wait for a reboot", () => {
+    // The tick rides its own TIME-BASED trigger starting NOW, which is what makes the repetition
+    // begin at install time on a machine that is already running.
+    expect(script).toContain("New-ScheduledTaskTrigger -Once -At (Get-Date)");
+    expect(script).toContain("-RepetitionInterval (New-TimeSpan -Minutes $TickMinutes)");
+    // …and BOTH go to Register-ScheduledTask, which takes "an array of one or more trigger objects"
+    // and starts the task "when ANY of the triggers occur".
+    expect(script).toContain("-Trigger @($bootTrigger, $tickTrigger)");
+  });
+
+  test("the repetition is NOT grafted onto the startup trigger — that is the defect", () => {
+    // The old shape was `$trigger.Repetition = (New-ScheduledTaskTrigger -Once …).Repetition`, which
+    // is a single boot-gated trigger wearing a repetition it can never start.
+    expect(script).not.toContain(".Repetition =");
+  });
+
+  test("the random delay rides the TRIGGERS — New-ScheduledTaskSettingsSet has no -RandomDelay", () => {
+    // Documented on New-ScheduledTaskTrigger for every parameter set, and absent from
+    // New-ScheduledTaskSettingsSet's syntax entirely. Passing it to the settings set throws
+    // "A parameter cannot be found that matches parameter name 'RandomDelay'" — and with
+    // $ErrorActionPreference='Stop' that aborts the install AFTER the binary and config are written.
+    const settings = script.slice(
+      script.indexOf("$settings = New-ScheduledTaskSettingsSet"),
+      script.indexOf("$taskPrincipal ="),
+    );
+    expect(settings.length).toBeGreaterThan(0);
+    expect(settings).not.toContain("-RandomDelay");
+  });
+
   test("one run is bounded — the RuntimeMaxSec analogue", () => {
     expect(script).toContain("-ExecutionTimeLimit $ExecutionTimeLimit");
     expect(script).toContain("$ExecutionTimeLimit = New-TimeSpan -Minutes 5");
