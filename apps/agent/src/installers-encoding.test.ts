@@ -66,18 +66,28 @@ describe("the public installers are pure ASCII, so PowerShell 5.1 can parse one 
   /*
    * THE ASCII RULE ABOVE CANNOT SEE A BOM. This is the whole reason the next check reads BYTES
    * rather than characters. `Bun.file().text()` decodes UTF-8 and strips a leading U+FEFF as part of
-   * decoding, so the byte-order mark never reaches `findNonAscii`: on a file whose first three bytes
-   * are EF BB BF, `.text()` returns a string that starts at U+0023 ('#') and contains no U+FEFF
-   * anywhere, and the rule above passes with zero offenders. A BOM is invisible to it, not caught
-   * by it.
+   * decoding, so the byte-order mark never reaches `findNonAscii`: given a file whose bytes begin
+   * EF BB BF 23, `.text()` returns a string whose FIRST code point is U+0023 ('#'), with no U+FEFF
+   * anywhere in it, and the rule above passes with zero offenders. A BOM is invisible to that rule,
+   * not caught by it.
    *
-   * BOTH installers are checked, because the failure is worse in the one that never had the #1166
-   * bug. `install.sh` is executed by the kernel, which needs `#!` at OFFSET 0: three bytes in front
-   * of the shebang and `./install.sh` fails to exec outright, while the documented `curl ... | sh`
-   * prints `sh: line 1: <BOM>#!/bin/sh: No such file or directory`. `install.ps1` merely gets read
-   * as UTF-8 instead of ANSI, which is the direction #1166 wanted anyway. Notepad has defaulted to
-   * "UTF-8 with BOM" for years and these files are edited by Windows people, so this is one save
-   * away at any time.
+   * BOTH installers are checked, and `install.sh` is the one that needs it more even though it never
+   * had the #1166 bug. What a BOM does there, measured rather than assumed:
+   *
+   *   - `execve("./install.sh")` fails with ENOEXEC ("Exec format error"), because the kernel looks
+   *     for `#!` at OFFSET 0 and finds EF BB BF. Anything that execs the script directly - a
+   *     supervisor, a config-management tool, a language runtime's exec - stops there.
+   *   - Run through a shell instead (`./install.sh` from bash, or the documented `curl ... | sh`),
+   *     it does NOT stop. The shell retries an ENOEXEC file with `sh`, and `sh` no longer sees the
+   *     shebang line as a comment - the BOM is now the first character of the word - so it tries to
+   *     run it: `sh: line 1: <BOM>#!/bin/sh: No such file or directory`. Then it CARRIES ON and
+   *     installs, because `set -eu` is on a later line and is not in effect yet.
+   *
+   * So the everyday shape of this is not a clean failure: it is a one-liner that prints a "No such
+   * file or directory" naming /bin/sh and then installs software as root anyway. `install.ps1` gets
+   * off lighter - a BOM makes PowerShell 5.1 read it as UTF-8, which is the direction #1166 wanted.
+   * Notepad has defaulted to "UTF-8 with BOM" for years and these files are edited by Windows
+   * people, so this is one save away at any time.
    */
   for (const name of INSTALLERS) {
     test(`${name} does not start with a UTF-8 byte-order mark`, async () => {
@@ -87,7 +97,8 @@ describe("the public installers are pure ASCII, so PowerShell 5.1 can parse one 
         `${name} starts with a UTF-8 byte-order mark (EF BB BF). Save it as UTF-8 WITHOUT a BOM ` +
           `(#1166 chose ASCII over a BOM deliberately). The pure-ASCII rule above cannot catch this ` +
           `for you: Bun strips the BOM while decoding, so it never appears in the text that rule ` +
-          `inspects. On install.sh a BOM is fatal - the kernel needs "#!" at offset 0.`,
+          `inspects. On install.sh it breaks the shebang: execve fails with ENOEXEC, and through a ` +
+          `shell it prints "line 1: <BOM>#!/bin/sh: No such file or directory" and installs anyway.`,
       ).not.toEqual([0xef, 0xbb, 0xbf]);
     });
   }
