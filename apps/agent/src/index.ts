@@ -1,8 +1,14 @@
 #!/usr/bin/env bun
 /**
- * lazyit server reporting agent (ADR-0074 §7) — a Bun single-file executable, Linux-only collector.
+ * lazyit server reporting agent (ADR-0074 §7) — a Bun single-file executable.
  *
- * It reads its config (flags > env > /etc/lazyit-agent/config), gathers best-effort host facts,
+ * TWO PLATFORMS since #1144: Linux (systemd timer, `install.sh`) and Windows (Scheduled Task,
+ * `install.ps1`). The COLLECTOR is dispatched per OS behind `./collect`, and nothing else in this
+ * file branches on the platform — the wire contract, the policy channel, the software delta and the
+ * cadence gate are the same code on both, which is what makes a Windows host and a Linux host
+ * indistinguishable to the server.
+ *
+ * It reads its config (flags > env > the platform's config file), gathers best-effort host facts,
  * validates the result against the SAME `AgentReportSchema` the API enforces (imported from
  * `@lazyit/shared` — zero drift, the whole point), then POSTs it to `${url}/api/infra/report` with the
  * Service Account bearer token. Default mode (`report --once`) does one collect + POST and exits —
@@ -29,8 +35,11 @@ import {
   buildDiagnostics,
   collectHost,
   collectSoftware,
-  readMachineId,
+  HOST_ID_SOURCE,
+  IS_WINDOWS,
+  readHostId,
 } from "./collect";
+import { defaultConfigFile } from "./paths";
 import { agentFetchInit, disableAmbientProxy, interpretProbe } from "./net";
 import {
   loadCachedPolicy,
@@ -49,7 +58,10 @@ import {
 // "dev", which the server treats as "don't warn" (never nag a dev build). Mirrors GET /instance/version.
 const AGENT_VERSION = process.env.APP_VERSION || "dev";
 
-const HELP = `lazyit-agent ${AGENT_VERSION} — server reporting agent (Linux)
+/** The config path THIS build looks at by default, so the help text names the operator's own file. */
+const DEFAULT_CONFIG_FILE = defaultConfigFile();
+
+const HELP = `lazyit-agent ${AGENT_VERSION} — server reporting agent (${IS_WINDOWS ? "Windows" : "Linux"})
 
 Usage:
   lazyit-agent [report] [--once] [--force] [--url <url>] [--token <token>]
@@ -57,7 +69,7 @@ Usage:
   lazyit-agent test     Check config, network, TLS and the token. Writes nothing, anywhere.
 
 Collects host inventory and reports it to your lazyit instance. Config resolves from
-flags > env (LAZYIT_URL / LAZYIT_TOKEN) > /etc/lazyit-agent/config. URL + token are required.
+flags > env (LAZYIT_URL / LAZYIT_TOKEN) > ${DEFAULT_CONFIG_FILE}. URL + token are required.
 
 The scheduler ticks every ${AGENT_POLICY_TICK_SECONDS / 60} minutes on every platform; the REPORTING CADENCE is set
 centrally in lazyit and enforced here, so a tick inside the interval exits without
@@ -68,19 +80,21 @@ Options:
   --token <token>    Service Account token holding the infra:report permission
   --token-file <p>   Read the token from a file ('-' = stdin), keeping it out of ps and history
   --interval <dur>   Legacy; ignored. Cadence is set in lazyit, not on the host.
+  --config <path>    Read the config file from here instead of ${DEFAULT_CONFIG_FILE}
   --once             Collect + report once, then exit (the default behaviour)
   --force            Report even if the interval has not elapsed
   -h, --help         Show this help
 
-Local limits (/etc/lazyit-agent/config) — these VETO the server's policy, never widen it:
+Local limits (${DEFAULT_CONFIG_FILE}) — these VETO the server's policy, never widen it:
   LAZYIT_COLLECT_HARDWARE|DISKS|NICS|SOFTWARE|CONTAINERS=false
   LAZYIT_MIN_INTERVAL=<seconds>     never report more often than this
   LAZYIT_SOFTWARE_MAX=<n>           never report more packages than this
   LAZYIT_EXCLUDE_NICS|MOUNTPOINTS|SOFTWARE=<comma-separated globs>
 
-Getting out of the host (/etc/lazyit-agent/config; the environment wins over the file):
-  HTTPS_PROXY / HTTP_PROXY / NO_PROXY   egress proxy, read from the file because a systemd
-                                        unit's environment does not carry the host's own
+Getting out of the host (${DEFAULT_CONFIG_FILE}; the environment wins over the file):
+  HTTPS_PROXY / HTTP_PROXY / NO_PROXY   egress proxy, read from the file because neither a
+                                        systemd unit nor a Scheduled Task inherits the
+                                        host's own environment
   LAZYIT_CA_FILE=<path>                 PEM bundle the AGENT trusts, instead of trusting an
                                         internal CA system-wide
 `;
@@ -101,10 +115,13 @@ async function buildReport(
   serverUnderstandsDelta: boolean,
 ): Promise<{ report: AgentReport; softwareHash: string | undefined }> {
   const startedAt = Date.now();
-  const machineId = await readMachineId();
-  if (!machineId) {
+  // THE PRIMARY DEDUP KEY (ADR-0074 §3: one host = one node, forever). `/etc/machine-id` on Linux,
+  // `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` on Windows — the same KIND of fact on both:
+  // generated once when the OS was installed, surviving reboots, renames and hardware changes.
+  const hostId = await readHostId();
+  if (!hostId) {
     throw new Error(
-      "could not read /etc/machine-id (the dedup key) — is this a systemd Linux host?",
+      `could not read ${HOST_ID_SOURCE} (the dedup key) — this host cannot be identified, so nothing was sent`,
     );
   }
 
@@ -116,7 +133,7 @@ async function buildReport(
     warnings.push(message);
   };
 
-  const [host, collected] = await Promise.all([
+  const [{ host, privileged }, collected] = await Promise.all([
     collectHost(warn, policy),
     collectSoftware(warn, policy),
   ]);
@@ -129,17 +146,16 @@ async function buildReport(
 
   const report: AgentReport = {
     agentVersion: AGENT_VERSION,
-    // Stable per install, scoped to this machine-id (ADR-0074 §2).
-    reportingSource: `agent:${machineId.slice(0, 12)}`,
-    externalId: machineId,
+    // Stable per install, scoped to this host's dedup key (ADR-0074 §2).
+    reportingSource: `agent:${hostId.slice(0, 12)}`,
+    externalId: hostId,
     reportedAt: new Date().toISOString(),
     host,
     ...software,
-    diagnostics: buildDiagnostics(
-      warnings,
-      process.getuid?.() === 0,
-      Date.now() - startedAt,
-    ),
+    // The privilege the COLLECTION actually ran under, reported by the collector rather than
+    // re-derived here (#1144): `process.getuid` does not exist on Windows, so asking it there would
+    // report every SYSTEM run as unprivileged and make the field lie on most of the estate.
+    diagnostics: buildDiagnostics(warnings, privileged, Date.now() - startedAt),
     // THE ECHO (#1140) — the generation this run actually collected under, which is what turns "we
     // pushed a policy" into "we can see this host running it". The local veto never changes the
     // revision, so this states "I have generation N", NOT "I obeyed all of it": a host that vetoes
@@ -365,7 +381,7 @@ async function test(cfg: AgentConfig): Promise<void> {
   const problems: string[] = [];
   const say = (line: string) => console.log(`lazyit-agent test: ${line}`);
 
-  if (!cfg.url) problems.push("no URL configured (--url, LAZYIT_URL, or /etc/lazyit-agent/config)");
+  if (!cfg.url) problems.push(`no URL configured (--url, LAZYIT_URL, or ${cfg.configFile})`);
   if (!cfg.token) {
     problems.push("no token configured (--token/--token-file, LAZYIT_TOKEN, or the config file)");
   }
@@ -381,14 +397,14 @@ async function test(cfg: AgentConfig): Promise<void> {
   // Reported before the network probe rather than instead of it: an operator debugging a host wants
   // both answers in one run. It is still FATAL — every report is keyed on the machine id, so a host
   // without one cannot report at all, and a `test` that ended in PASS would be lying.
-  const machineId = await readMachineId();
-  if (machineId) {
-    say(`machine-id ${machineId.slice(0, 12)}… — this host's dedup key`);
+  const hostId = await readHostId();
+  if (hostId) {
+    say(`${HOST_ID_SOURCE} → ${hostId.slice(0, 12)}… — this host's dedup key`);
   } else {
     console.error(
-      "lazyit-agent test: FAIL — /etc/machine-id is unreadable, so this host has no dedup key and cannot report",
+      `lazyit-agent test: FAIL — ${HOST_ID_SOURCE} is unreadable, so this host has no dedup key and cannot report`,
     );
-    problems.push("no readable /etc/machine-id");
+    problems.push(`no readable ${HOST_ID_SOURCE}`);
   }
 
   const policy = await effectivePolicy(cfg);
@@ -397,7 +413,7 @@ async function test(cfg: AgentConfig): Promise<void> {
     nowMs: Date.now(),
     lastSuccessMs,
     policy,
-    machineId: machineId ?? "",
+    machineId: hostId ?? "",
   });
   const ago =
     lastSuccessMs === undefined
@@ -411,7 +427,10 @@ async function test(cfg: AgentConfig): Promise<void> {
   // codes, and a 404 for an unbundled arch is as good a proof of authentication as a 200 PROVIDED
   // the same request without the token was refused.
   const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const probe = `${base}/api/agent/download?arch=${arch}`;
+  // The `os` parameter joined the route in #1144, when a second platform made `lazyit-agent-x64` a
+  // filename that would collide across operating systems. It is sent explicitly rather than left to
+  // the route's compatibility default, so `test` probes the SAME artifact this host would download.
+  const probe = `${base}/api/agent/download?os=${IS_WINDOWS ? "windows" : "linux"}&arch=${arch}`;
   const init = agentFetchInit(cfg.network, probe);
   if (init.proxy) say(`via proxy ${init.proxy}`);
   else if (cfg.network.httpsProxy || cfg.network.httpProxy) say("proxy configured but bypassed for this host (NO_PROXY)");
@@ -488,7 +507,7 @@ async function main(): Promise<void> {
   }
   if (!cfg.url || !cfg.token) {
     throw new Error(
-      "missing URL and/or token — pass --url/--token, set LAZYIT_URL/LAZYIT_TOKEN, or write /etc/lazyit-agent/config",
+      `missing URL and/or token — pass --url/--token, set LAZYIT_URL/LAZYIT_TOKEN, or write ${cfg.configFile}`,
     );
   }
 
@@ -504,7 +523,7 @@ async function main(): Promise<void> {
   const state = await loadState();
 
   if (!cfg.force) {
-    const machineId = (await readMachineId()) ?? "";
+    const machineId = (await readHostId()) ?? "";
     const { lastSuccessMs } = state;
     if (
       !agentPolicyDue({
