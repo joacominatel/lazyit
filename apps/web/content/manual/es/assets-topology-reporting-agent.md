@@ -281,7 +281,7 @@ aleatorio de un minuto de la tarea viaja en su ciclo de cinco minutos, no en su 
 arranque, así que no es lo que desfasa a un piso que acaba de reiniciarse.)
 
 Como en Linux, **el ciclo de 5 minutos no es la frecuencia de reporte.** Cada cuánto reporta
-realmente un host se define de forma central en **Configuración → Instancia → Agentes de reporte**;
+realmente un host se define de forma central en **Configuración → Agentes de inventario**;
 un ciclo que llega antes de tiempo termina de inmediato sin hacer nada. Cambiar la frecuencia nunca
 toca la tarea.
 
@@ -770,23 +770,43 @@ devuelve las dos cosas.
 
 ## Configurá todos los agentes desde una sola pantalla
 
-No se editan los agentes host por host. **Configuración → Instancia → Agentes de inventario** define
-la política de todos los agentes del parque, y cada uno la toma en su próximo reporte.
+No se editan los agentes host por host. **Configuración → Agentes de inventario** — su propia sección
+en Configuración, al lado de Cuentas de servicio — define la política de todos los agentes del parque,
+y cada uno la toma en su próximo reporte.
 
-Lo que podés configurar ahí:
+> **Antes vivía en Configuración → Instancia**, y tanto la salida del instalador como los comentarios
+> que escribe en el archivo de configuración de un host lo siguen diciendo así. Esa página ahora
+> lleva un enlace a la sección en lugar del editor, así que seguir el texto viejo igual te deja donde
+> corresponde, a un clic más.
 
-- **Con qué frecuencia informa cada host** — de 5 minutos a 24 horas. Esta es la opción que antes
-  implicaba editar un temporizador de systemd en cada máquina.
-- **Cuánto espera lazyit antes de marcar un host fuera de línea.** Tiene que ser mayor que el
-  intervalo de informe, o un host perfectamente sano queda marcado fuera de línea entre dos de sus
-  propios reportes — el editor no te deja guardar un valor que provoque eso.
-- **Qué recolectores se ejecutan** — hardware, discos, interfaces de red, software instalado,
-  contenedores. Un recolector desactivado directamente no se ejecuta: el agente no reúne los datos
-  para después descartarlos.
-- **Qué dejar afuera** — patrones de nombre para interfaces de red (`veth*`, `docker*`), puntos de
-  montaje (`/var/lib/docker/*`, `/snap/*`) y paquetes (`linux-image-*`), más un tope estricto de
-  cuántos paquetes puede informar un host. `*` coincide con cualquier texto y `?` con un solo
-  carácter; no se aceptan expresiones regulares.
+Lo que podés configurar ahí, en tres grupos:
+
+- **Frecuencia** — cada cuánto informa cada host (de 5 minutos a 24 horas; en Linux esta es la opción
+  que antes implicaba editar un temporizador de systemd en cada máquina) y cuánto espera lazyit antes de marcarlo
+  fuera de línea. El segundo valor tiene que ser mayor que el primero, o un host perfectamente sano
+  queda marcado fuera de línea entre dos de sus propios reportes — el editor no te deja guardar un
+  valor que provoque eso, y lo aclara debajo del campo en lugar de después de que presiones Guardar.
+- **Qué recolectan los agentes** — hardware, discos, interfaces de red, software instalado y
+  contenedores, más un tope estricto de cuántos paquetes puede informar un host. **En Linux** un
+  recolector desactivado directamente no se ejecuta: el agente no reúne los datos para después
+  descartarlos. **En Windows** eso solo vale para los contenedores — hardware, discos, interfaces de
+  red y la lista de software salen todos de una única llamada de PowerShell que se ejecuta diga lo que
+  diga la política, así que apagar uno ahí mantiene el dato fuera del reporte pero no le ahorra al host
+  el trabajo de recolectarlo. En los dos casos, un recolector apagado nunca llega a lazyit.
+- **Exclusiones** — patrones de nombre para interfaces de red (`veth*`, `docker*`), puntos de montaje
+  (`/var/lib/docker/*`, `/snap/*`) y paquetes (`linux-image-*`). `*` coincide con cualquier texto y `?`
+  con un solo carácter; no se aceptan expresiones regulares, y cada lista admite como máximo 32
+  patrones. Una lista cuyo recolector está apagado igual se guarda, pero no la ejecuta nadie — la
+  pantalla lo dice al lado de la lista en vez de dejarte pensando por qué el patrón no hizo nada.
+
+Esa misma sección muestra además **de dónde sale una política**. lazyit resuelve tres ámbitos, campo
+por campo, y gana el más específico que defina ese campo: primero un ajuste por host, después la
+cuenta de servicio del agente que reporta, y al final este predeterminado de la instancia. **Solo el
+predeterminado de la instancia tiene editor** — los otros dos existen en la API y aparecen en pantalla
+marcados como que todavía no lo tienen, así que ves que la jerarquía está ahí en lugar de preguntarte
+por qué un host se comporta distinto. Las [reglas de confirmación
+automática](#reglas-de-confirmación-automática) también se enlazan desde ahí, porque también son
+configuración de agentes.
 
 Hay tres cosas que conviene saber antes de usarlo.
 
@@ -795,8 +815,9 @@ de cada host, y el host la aplica en la ejecución *siguiente* — así que dej�
 intervalos. Esa demora es intencional: un agente solo aplica una política que ya tenía cuando
 arrancó, de modo que un error acá nunca puede interrumpir al parque a mitad de una recolección.
 
-**Cada host puede negarse, y lazyit no puede pasar por encima.** El propio
-`/etc/lazyit-agent/config` de un host puede desactivar un recolector
+**Cada host puede negarse, y lazyit no puede pasar por encima.** El archivo de configuración del
+propio host —`/etc/lazyit-agent/config` en Linux, `C:\ProgramData\lazyit-agent\config` en
+Windows— puede desactivar un recolector
 (`LAZYIT_COLLECT_SOFTWARE=false`), fijar un piso de frecuencia (`LAZYIT_MIN_INTERVAL=3600`), limitar
 su lista de paquetes (`LAZYIT_SOFTWARE_MAX=500`) o agregar sus propias exclusiones
 (`LAZYIT_EXCLUDE_NICS=veth*`). Esa configuración **prevalece**, siempre, y nada de lo que definas en
@@ -816,11 +837,12 @@ caso de un token de agente robado en "propuestas que descartás" y no en "códig
 como root en todos tus servidores".
 
 **¿Se aplicó?** Cada host informa qué versión de la política está ejecutando, así podés distinguir
-"configurado" de "efectivamente aplicado". Abrí un servidor en el [diagrama de
-infraestructura](/help/assets-topology-diagram) y su panel muestra **Política v7 · aplicada** o
-**Política v8 · pendiente** — pendiente significa simplemente que ese host no reportó desde tu cambio.
-Un servidor descubierto por un agente anterior a esta versión no muestra ninguna de las dos, porque
-nunca informa una versión de política.
+"configurado" de "efectivamente aplicado". La versión que lazyit está sirviendo aparece al lado del
+título de la sección (**Política v8**). Para ver si un host determinado ya la tomó, abrí ese servidor
+en el [diagrama de infraestructura](/help/assets-topology-diagram): su panel muestra **Política v7 ·
+aplicada** o **Política v8 · pendiente** — pendiente significa simplemente que ese host no reportó
+desde tu cambio. Un servidor descubierto por un agente anterior a esta versión no muestra ninguna de
+las dos, porque nunca informa una versión de política.
 
 ## Seguridad
 

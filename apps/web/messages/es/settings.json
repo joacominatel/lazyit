@@ -26,6 +26,10 @@
       "title": "Cuentas de servicio",
       "description": "Crea y gestiona credenciales de API no humanas para CI, scripts e integraciones — acotadas por permiso y revocables."
     },
+    "agents": {
+      "title": "Agentes de inventario",
+      "description": "Define cómo informa y qué recolecta cada agente de lazyit de este parque, y revisa qué hosts descubiertos se confirman automáticamente."
+    },
     "integrations": {
       "title": "Integraciones y flujos",
       "description": "La bandeja de tareas manuales entre aplicaciones para los flujos de aprovisionamiento. La automatización por aplicación se configura en la pestaña Flujos de cada una."
@@ -58,6 +62,11 @@
       "zitadel": "Zitadel (incluido)",
       "generic-oidc": "OIDC genérico (usa el tuyo)",
       "local": "Cuentas locales"
+    },
+    "agentsMoved": {
+      "title": "Agentes de inventario",
+      "body": "La política de agentes del parque — frecuencia de informe, recolectores y exclusiones — ahora tiene su propia sección, junto con las reglas de confirmación automática y los ámbitos que pueden sobrescribirla.",
+      "link": "Abrir Agentes de inventario"
     },
     "updates": {
       "title": "Versión y actualizaciones",
@@ -207,14 +216,25 @@
   },
   "agentPolicy": {
     "title": "Agentes de inventario",
-    "subtitle": "Cómo recolecta e informa cada agente de lazyit en este parque. Política v{revision}. Se configura una vez aquí — sin entrar a ningún host.",
+    "subtitle": "La política predeterminada de todos los agentes de lazyit de este parque — con qué frecuencia informan, qué recolectan y qué dejan afuera. Se define una vez aquí, sin entrar a ningún host.",
+    "revisionBadge": "Política v{revision}",
     "loadFailed": "No se pudo cargar la política de agentes.",
     "saveFailed": "No se pudo guardar la política de agentes.",
     "retry": "Reintentar",
     "save": "Guardar política",
     "saving": "Guardando…",
     "saved": "Guardada como política v{revision}. Los agentes la aplican en su próximo informe.",
-    "propagation": "Un cambio se aplica en el próximo informe de cada host, y rige a partir de la ejecución siguiente. Esa demora es intencional: una política solo la aplica una ejecución que ya arrancó con ella, así que un error aquí nunca puede interrumpir al parque a mitad de una recolección. Esta es la configuración predeterminada de la instancia — los ajustes por agente y por host existen en la API pero todavía no tienen editor.",
+    "discard": "Descartar cambios",
+    "dirty": "Cambios sin guardar",
+    "conflict": {
+      "body": "Esta política se guardó desde otro lugar mientras la editabas — ahora es la v{revision}. Tus cambios siguen aquí y todavía no se enviaron. Guarda para reemplazar la v{revision} por ellos, o recarga para partir de ella y perder lo que escribiste.",
+      "reload": "Recargar la política guardada"
+    },
+    "propagation": "Un cambio se aplica en el próximo informe de cada host, y rige a partir de la ejecución siguiente. Esa demora es intencional: una política solo la aplica una ejecución que ya arrancó con ella, así que un error aquí nunca puede interrumpir al parque a mitad de una recolección.",
+    "cadence": {
+      "title": "Frecuencia",
+      "description": "Con qué frecuencia informa un host y cuánto espera lazyit antes de darlo por fuera de línea. Las dos están atadas: el umbral de fuera de línea tiene que ser mayor que el intervalo, o un host sano queda marcado fuera de línea entre dos de sus propios informes."
+    },
     "interval": {
       "label": "Informar cada (minutos)",
       "help": "Con qué frecuencia informa cada host. El planificador del host se activa cada {tick} minutos y no hace nada si el intervalo aún no se cumplió, así que cambiar esto nunca toca el temporizador del host.",
@@ -229,12 +249,13 @@
     "softwareMax": {
       "label": "Máximo de paquetes por host",
       "help": "Un tope estricto para la lista de software instalado. Bájalo en hosts donde esa lista es más ruido que inventario.",
-      "invalid": "Ingresa un número entero entre 0 y {max}."
+      "invalid": "Ingresa un número entero entre 0 y {max}.",
+      "inert": "El software instalado está desactivado arriba, así que este tope no cambia nada hasta que lo vuelvas a activar."
     },
     "collect": {
-      "label": "Qué recolectan los agentes",
-      "help": "Un recolector desactivado no se ejecuta — el agente no reúne los datos para después descartarlos.",
-      "veto": "Un host siempre puede negarse: desactivar un recolector en el propio /etc/lazyit-agent/config de ese host prevalece sobre esta opción, y nada de aquí puede volver a activarlo.",
+      "title": "Qué recolectan los agentes",
+      "description": "En Linux, un recolector desactivado no se ejecuta — el agente no reúne los datos para después descartarlos. En Windows eso solo vale para los contenedores: hardware, discos, interfaces de red y software instalado viajan todos en una única llamada de PowerShell que se ejecuta igual, así que apagar uno ahí mantiene el dato fuera del informe pero no le ahorra el trabajo al host.",
+      "veto": "Un host siempre puede negarse. Desactivar un recolector en la configuración del propio agente de ese host — /etc/lazyit-agent/config en Linux, C:\\ProgramData\\lazyit-agent\\config en Windows — prevalece sobre esta opción, y nada de aquí puede volver a activarlo.",
       "hardware": "Fabricante, modelo y número de serie",
       "disks": "Discos y puntos de montaje",
       "nics": "Interfaces de red",
@@ -242,25 +263,63 @@
       "containers": "Contenedores"
     },
     "exclude": {
+      "title": "Exclusiones",
+      "description": "Patrones de nombre separados por comas; tiene que coincidir el nombre completo, y no distingue mayúsculas de minúsculas. * representa cualquier texto y ? un solo carácter — no se aceptan expresiones regulares. Cada lista admite como máximo {max} patrones.",
+      "count": "{count, plural, =0 {Sin patrones} other {# de {max} patrones}}",
       "nicNames": {
         "label": "Ignorar interfaces de red",
         "placeholder": "veth*, docker*, br-*",
-        "help": "Patrones de nombre separados por comas. * coincide con cualquier texto, ? con un solo carácter."
+        "help": "Las interfaces cuyo nombre coincida quedan fuera del informe.",
+        "inert": "Las interfaces de red están desactivadas arriba, así que esta lista no cambia nada hasta que las vuelvas a activar."
       },
       "mountpoints": {
         "label": "Ignorar puntos de montaje",
         "placeholder": "/var/lib/docker/*, /snap/*",
-        "help": "Los discos montados aquí quedan fuera del informe. Los discos sin montar nunca se ven afectados."
+        "help": "Los discos montados aquí quedan fuera del informe. Los discos sin montar nunca se ven afectados.",
+        "inert": "Los discos y puntos de montaje están desactivados arriba, así que esta lista no cambia nada hasta que los vuelvas a activar."
       },
       "softwareNames": {
         "label": "Ignorar paquetes",
         "placeholder": "linux-image-*",
-        "help": "Patrones de nombre de paquete a excluir — las compilaciones del kernel son el caso habitual."
+        "help": "Patrones de nombre de paquete a excluir — las compilaciones del kernel son el caso habitual.",
+        "inert": "El software instalado está desactivado arriba, así que esta lista no cambia nada hasta que lo vuelvas a activar."
       }
     },
     "globs": {
       "invalid": "“{value}” no es un patrón válido. Usa letras, dígitos, - _ / : y los comodines * y ? — no se aceptan expresiones regulares.",
       "tooMany": "Como máximo {max} patrones por lista."
+    },
+    "scopes": {
+      "title": "De dónde sale una política",
+      "description": "Tres ámbitos, resueltos campo por campo — gana el más específico que defina ese campo.",
+      "instance": {
+        "label": "Predeterminado de la instancia",
+        "scope": "Todos los agentes de este parque."
+      },
+      "serviceAccount": {
+        "label": "Por cuenta de servicio",
+        "scope": "La credencial de un agente — el asistente Agregar un servidor crea una por agente."
+      },
+      "node": {
+        "label": "Por host",
+        "scope": "Un solo servidor."
+      },
+      "editedHere": "Se edita aquí",
+      "noEditor": "Todavía sin editor",
+      "footer": "La API almacena los tres ámbitos, pero ninguna pantalla de lazyit escribe los dos más específicos. Así que esta página es lo que ejecuta un host — salvo que alguno de los otros dos se haya definido directamente por la API, o que la configuración del agente en ese host vete una parte. Un ajuste local solo puede hacer que un host informe menos de lo que pide esta página, nunca más: un intervalo más largo, un tope de paquetes más bajo, exclusiones adicionales, un recolector apagado. Nada de aquí lo anula."
+    },
+    "rollout": {
+      "title": "Despliegue",
+      "body": "Cada host informa qué versión de la política está ejecutando realmente, así que “configurada” y “aplicada” siguen siendo cosas distintas. Un host toma un cambio en su próximo informe y lo aplica desde la ejecución siguiente.",
+      "legacy": "Un servidor descubierto por un agente anterior a este canal nunca informa una versión, y no muestra ni aplicada ni pendiente.",
+      "link": "Ver el estado por host en el diagrama de infraestructura"
+    },
+    "autoConfirm": {
+      "title": "Reglas de confirmación automática",
+      "description": "Qué hosts descubiertos se confirman apenas informan, en lugar de esperar en Revisión pendiente. Una regla solo se aplica a los informes que llegan después de guardarla.",
+      "summary": "{total, plural, one {# regla} other {# reglas}}, {enabled, plural, one {# activa} other {# activas}}",
+      "empty": "Sin reglas — todo host descubierto espera en Revisión pendiente.",
+      "manage": "Gestionar en la vista Servidores"
     }
   },
   "smtp": {

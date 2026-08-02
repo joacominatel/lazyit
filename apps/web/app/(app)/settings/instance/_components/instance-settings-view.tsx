@@ -1,21 +1,30 @@
 "use client";
 
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowPathIcon,
+  ArrowTopRightOnSquareIcon,
+} from "@heroicons/react/24/outline";
 import type { IntegrationMode } from "@lazyit/shared";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { RequestIdNote } from "@/components/request-id-note";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api/client";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { useInstanceVersion } from "@/lib/api/hooks/use-instance-version";
 import { AdminGate } from "../../_components/admin-gate";
-import { AgentPolicyEditor } from "./agent-policy-editor";
 import { AssetTagSchemeEditor } from "./asset-tag-scheme-editor";
 import { DirectorySettingsEditor } from "./directory-settings-editor";
 import { SmtpSettingsEditor } from "./smtp-settings-editor";
@@ -167,9 +176,26 @@ export function InstanceSettingsView() {
           <div className="space-y-6">
             <SmtpSettingsEditor />
             <DirectorySettingsEditor />
-            {/* The fleet's reporting-agent policy (#1140) — the surface that replaces editing
-                /etc/lazyit-agent/config on every host by hand. */}
-            <AgentPolicyEditor />
+            {/* The reporting-agent policy editor moved to Settings → Reporting agents (#1174). This
+                signpost stays because the Manual, install.sh and install.ps1 all still name this page
+                as where the reporting cadence is set — an operator who follows those lands here, and
+                must find the way onward rather than an editor that is no longer on the page. */}
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("instance.agentsMoved.title")}</CardTitle>
+                <CardDescription>
+                  {t("instance.agentsMoved.body")}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/settings/agents">
+                    {t("instance.agentsMoved.link")}
+                    <ArrowTopRightOnSquareIcon className="size-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </div>
