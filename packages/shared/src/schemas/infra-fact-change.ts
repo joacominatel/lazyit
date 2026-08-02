@@ -159,9 +159,24 @@ function diskTotalBytes(disks: unknown): string | undefined {
   return seen ? String(total) : undefined;
 }
 
-/** How many disks the host reports — a device added or removed at unchanged total capacity. */
+/**
+ * How many disks the host reports — a device added or removed at unchanged total capacity.
+ *
+ * Only readable disk RECORDS are counted, and a list carrying none answers `undefined` (no evidence),
+ * never `0` — exactly the guard {@link diskTotalBytes} already applies, for a sharper reason. An
+ * agent policy that excludes every mountpoint (#1140) sends `disks: []` on purpose: `applyDiskPolicy`
+ * returns an empty array rather than omitting the fact, because "the policy matched them all" is a
+ * positive answer about the COLLECTOR. It says nothing about the hardware. Counting it would render
+ * an operator's own policy edit as `host.disks.count 2 → 0` — a chassis losing all of its storage,
+ * which is precisely the reading a history nobody can trust would put on screen.
+ */
 function diskCount(disks: unknown): string | undefined {
-  return Array.isArray(disks) ? String(disks.length) : undefined;
+  if (!Array.isArray(disks)) return undefined;
+  let seen = 0;
+  for (const disk of disks) {
+    if (isPlainObject(disk)) seen += 1;
+  }
+  return seen > 0 ? String(seen) : undefined;
 }
 
 /**
