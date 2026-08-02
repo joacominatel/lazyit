@@ -48,6 +48,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
   SheetContent,
@@ -84,6 +85,7 @@ import {
   AgentPolicyBadge,
 } from "./agent-provenance";
 import { DeleteNodeDialog } from "./delete-node-dialog";
+import { NodeChangesTab } from "./node-changes-tab";
 import { NodeEdgesManager } from "./node-edges-manager";
 
 const STATUS_OPTIONS = InfraNodeStatusSchema.options;
@@ -289,126 +291,152 @@ function PanelBody({
         )}
       </SheetHeader>
 
-      <div className="flex-1 space-y-5 overflow-y-auto p-4">
-        {/* Details — the editable config, grouped near the TOP so operators find it where they expect
+      {/* Two tabs, and deliberately only two (#1143). Everything the panel already showed is the
+          node as it is NOW; Changes is the node's history — what MOVED and when. They are different
+          questions and stacking the second under the first would have buried it below the edge
+          manager. Radix unmounts the inactive content, so opening the panel still fetches only the
+          detail; the history is read when the operator asks for it. */}
+      <Tabs
+        defaultValue="overview"
+        className="flex min-h-0 flex-1 flex-col gap-0"
+      >
+        <TabsList className="shrink-0 px-4">
+          <TabsTrigger value="overview">{t("panel.tabs.overview")}</TabsTrigger>
+          <TabsTrigger value="changes">{t("panel.tabs.changes")}</TabsTrigger>
+        </TabsList>
+        <TabsContent
+          value="overview"
+          className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4"
+        >
+          {/* Details — the editable config, grouped near the TOP so operators find it where they expect
             (issue #764). Editable on `canManage`; read-only viewers get plain quick-facts instead. */}
-        {canManage ? (
-          <DetailsSection node={node} />
-        ) : (
-          <dl className="grid grid-cols-2 gap-3 text-sm">
-            <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">
-                {t("panel.ipLabel")}
-              </dt>
-              <dd
-                className={
-                  node.ipAddress ? "font-mono" : "text-muted-foreground"
-                }
-              >
-                {node.ipAddress ?? t("facts.noIp")}
-              </dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">
-                {t("panel.createdLabel")}
-              </dt>
-              <dd>{date(node.createdAt)}</dd>
-            </div>
-          </dl>
-        )}
+          {canManage ? (
+            <DetailsSection node={node} />
+          ) : (
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div className="min-w-0">
+                <dt className="text-xs text-muted-foreground">
+                  {t("panel.ipLabel")}
+                </dt>
+                <dd
+                  className={
+                    node.ipAddress ? "font-mono" : "text-muted-foreground"
+                  }
+                >
+                  {node.ipAddress ?? t("facts.noIp")}
+                </dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-xs text-muted-foreground">
+                  {t("panel.createdLabel")}
+                </dt>
+                <dd>{date(node.createdAt)}</dd>
+              </div>
+            </dl>
+          )}
 
-        {/* Soft duplicate-IP warning (ADR-0090, #847) — a NON-BLOCKING heads-up when other live nodes
+          {/* Soft duplicate-IP warning (ADR-0090, #847) — a NON-BLOCKING heads-up when other live nodes
             carry this node's exact IP. Display-only: the IP is still valid + saved (no DB uniqueness);
             this just names the peers so an operator can reconcile. Shown to every reader (a fact). */}
-        {(node.ipConflict?.length ?? 0) > 0 ? (
-          <IpConflictNotice
-            peers={node.ipConflict ?? []}
-            onSelectNode={onSelectNode}
-          />
-        ) : null}
+          {(node.ipConflict?.length ?? 0) > 0 ? (
+            <IpConflictNotice
+              peers={node.ipConflict ?? []}
+              onSelectNode={onSelectNode}
+            />
+          ) : null}
 
-        {/* Impact / blast radius (ADR-0070 §7, issue #755) — the query that justifies a graph. The
+          {/* Impact / blast radius (ADR-0070 §7, issue #755) — the query that justifies a graph. The
             toggle drives the canvas highlight (state lives in diagram-view); this surfaces the count
             + list. Shown to every reader (the API gates on infra:read). */}
-        <ImpactSection
-          impactOn={impactOn}
-          onToggleImpact={onToggleImpact}
-          impact={impact}
-          impactLoading={impactLoading}
-        />
+          <ImpactSection
+            impactOn={impactOn}
+            onToggleImpact={onToggleImpact}
+            impact={impact}
+            impactLoading={impactLoading}
+          />
 
-        {/* Status toggle (write — gated). */}
-        {canManage ? (
-          <Section title={t("panel.statusTitle")}>
-            <Select value={node.status} onValueChange={handleStatusChange}>
-              <SelectTrigger className="w-full" disabled={updateNode.isPending}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {t(`status.${status}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {t("panel.statusDescription")}
-            </p>
-          </Section>
-        ) : null}
+          {/* Status toggle (write — gated). */}
+          {canManage ? (
+            <Section title={t("panel.statusTitle")}>
+              <Select value={node.status} onValueChange={handleStatusChange}>
+                <SelectTrigger
+                  className="w-full"
+                  disabled={updateNode.isPending}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {t(`status.${status}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {t("panel.statusDescription")}
+              </p>
+            </Section>
+          ) : null}
 
-        {/* Reported facts (issue #1081) — the agent's host inventory (cpu/ram/os/disks/serial +
+          {/* Reported facts (issue #1081) — the agent's host inventory (cpu/ram/os/disks/serial +
             software), read-only. Only for AGENT nodes; reuses the Assets detail projection so there's
             one renderer for agent inventory across the app. */}
-        {node.source === "AGENT" ? (
-          <ReportedFactsSection specs={node.specs} />
-        ) : null}
+          {node.source === "AGENT" ? (
+            <ReportedFactsSection specs={node.specs} />
+          ) : null}
 
-        <Separator />
+          <Separator />
 
-        <OwnersSection owners={node.owners} />
-        <ArticlesSection articles={node.articleLinks} />
-        {canManage ? (
-          <SecretsEditor
-            key={`${node.id}:${JSON.stringify(node.secretRefs ?? [])}`}
-            nodeId={node.id}
-            secretRefs={node.secretRefs}
-          />
-        ) : (
-          <SecretsSection secretRefs={node.secretRefs} />
-        )}
-        {canManage ? (
-          <ShortcutsEditor
-            key={`${node.id}:${JSON.stringify(node.shortcuts ?? [])}`}
-            nodeId={node.id}
-            shortcuts={node.shortcuts}
-          />
-        ) : (
-          <ShortcutsSection shortcuts={node.shortcuts} />
-        )}
-        <ChildrenSection nodes={node.children} />
-
-        <Separator />
-
-        <NodeEdgesManager
-          nodeId={node.id}
-          nodeLabel={node.label}
-          canManage={canManage}
-        />
-
-        {/* Lifecycle: remove from map (soft-delete, restorable). */}
-        {canManage ? (
-          <>
-            <Separator />
-            <RemoveControl
-              label={node.label}
-              onConfirm={() => deleteNode.mutateAsync(node.id)}
-              onRemoved={onClose}
+          <OwnersSection owners={node.owners} />
+          <ArticlesSection articles={node.articleLinks} />
+          {canManage ? (
+            <SecretsEditor
+              key={`${node.id}:${JSON.stringify(node.secretRefs ?? [])}`}
+              nodeId={node.id}
+              secretRefs={node.secretRefs}
             />
-          </>
-        ) : null}
-      </div>
+          ) : (
+            <SecretsSection secretRefs={node.secretRefs} />
+          )}
+          {canManage ? (
+            <ShortcutsEditor
+              key={`${node.id}:${JSON.stringify(node.shortcuts ?? [])}`}
+              nodeId={node.id}
+              shortcuts={node.shortcuts}
+            />
+          ) : (
+            <ShortcutsSection shortcuts={node.shortcuts} />
+          )}
+          <ChildrenSection nodes={node.children} />
+
+          <Separator />
+
+          <NodeEdgesManager
+            nodeId={node.id}
+            nodeLabel={node.label}
+            canManage={canManage}
+          />
+
+          {/* Lifecycle: remove from map (soft-delete, restorable). */}
+          {canManage ? (
+            <>
+              <Separator />
+              <RemoveControl
+                label={node.label}
+                onConfirm={() => deleteNode.mutateAsync(node.id)}
+                onRemoved={onClose}
+              />
+            </>
+          ) : null}
+        </TabsContent>
+        <TabsContent
+          value="changes"
+          className="min-h-0 flex-1 overflow-y-auto p-4"
+        >
+          <NodeChangesTab nodeId={node.id} />
+        </TabsContent>
+      </Tabs>
     </>
   );
 }
@@ -666,7 +694,10 @@ function IpConflictNotice({
   return (
     <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
       <div className="flex items-start gap-2 text-sm font-medium text-warning-text">
-        <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <ExclamationTriangleIcon
+          className="mt-0.5 size-4 shrink-0"
+          aria-hidden
+        />
         <span>{t("panel.ipConflictWarning", { count: peers.length })}</span>
       </div>
       <ul className="space-y-1.5 text-sm">
@@ -956,7 +987,10 @@ function OwnersSection({ owners }: { owners: InfraNodeOwner[] }) {
                       {name || owner.email}
                     </Link>
                     {gone ? (
-                      <Badge variant="outline" className="text-muted-foreground">
+                      <Badge
+                        variant="outline"
+                        className="text-muted-foreground"
+                      >
                         {t("panel.ownerLeft")}
                       </Badge>
                     ) : null}
@@ -1039,7 +1073,9 @@ function SecretsSection({ secretRefs }: { secretRefs: InfraSecretRef[] }) {
                   className="size-4 shrink-0 text-muted-foreground"
                   aria-hidden
                 />
-                <span className="truncate text-sm font-medium">{ref.label}</span>
+                <span className="truncate text-sm font-medium">
+                  {ref.label}
+                </span>
               </div>
               {/* Reveal is client-side only (INV-10): SecretChip resolves the handle by-handle and
                   decrypts in the browser for vault members; non-members see a locked chip. */}
@@ -1088,7 +1124,9 @@ function SecretsEditor({
   const pending = attach.isPending || detach.isPending;
 
   // Hide handles already attached to this node (idempotent on the server, but no point offering them).
-  const attached = new Set(secretRefs.map((ref) => `${ref.vaultId}:${ref.handle}`));
+  const attached = new Set(
+    secretRefs.map((ref) => `${ref.vaultId}:${ref.handle}`),
+  );
   const items: ComboboxItem[] = (suggestions ?? [])
     .map((s) => ({
       value: `${s.vaultId}:${s.handle}`,
@@ -1139,7 +1177,9 @@ function SecretsEditor({
                   className="size-4 shrink-0 text-muted-foreground"
                   aria-hidden
                 />
-                <span className="truncate text-sm font-medium">{ref.label}</span>
+                <span className="truncate text-sm font-medium">
+                  {ref.label}
+                </span>
                 <Button
                   type="button"
                   variant="ghost"
@@ -1191,7 +1231,9 @@ function ShortcutsSection({
   return (
     <Section title={t("panel.shortcutsTitle")}>
       {list.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("panel.noShortcuts")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t("panel.noShortcuts")}
+        </p>
       ) : (
         <ul className="flex flex-wrap gap-2">
           {list.map((shortcut) => (
@@ -1233,7 +1275,11 @@ function ChildrenSection({ nodes }: { nodes: InfraNodeChild[] }) {
               <span className="text-xs text-muted-foreground">
                 {t(`kind.${child.kind}`)}
               </span>
-              <StatusBadge tone={statusTone(child.status)} dot className="ml-auto">
+              <StatusBadge
+                tone={statusTone(child.status)}
+                dot
+                className="ml-auto"
+              >
                 {t(`status.${child.status}`)}
               </StatusBadge>
             </li>
