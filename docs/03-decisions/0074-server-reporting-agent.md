@@ -1530,8 +1530,9 @@ function the tests drive, and the **resolved absolute path** is what gets spawne
 **Scheduling: a Scheduled Task, not a Service.** It preserves the one-shot design of §7 exactly, and
 #1140's fixed-tick / server-cadence inversion was designed so the same semantics hold under Task
 Scheduler. `Register-ScheduledTask -User "SYSTEM" -RunLevel Highest`, **two triggers**,
-`StartWhenAvailable` (the `Persistent=true` analogue), a 60-second random delay on each trigger (the
-`RandomizedDelaySec` analogue) and a 5-minute `ExecutionTimeLimit` (the `RuntimeMaxSec` analogue). It
+`StartWhenAvailable` (the `Persistent=true` analogue), a 60-second random delay on the **time**
+trigger (the `RandomizedDelaySec` analogue) and a 5-minute `ExecutionTimeLimit` (the `RuntimeMaxSec`
+analogue). It
 also runs **on battery**: most of a Windows estate is laptops, and a task that waited for mains power
 would leave roaming machines reporting only when docked. A Windows Service would force a daemon
 rewrite for zero benefit.
@@ -1553,9 +1554,12 @@ corrections came with it: `-RepetitionDuration` is now **omitted** (the schema: 
 specified for the duration, then the pattern is repeated indefinitely"; the `[TimeSpan]::MaxValue`
 idiom is reported to fail XML validation from Windows 10 / Server 2016 on), with a long finite
 duration as the fallback for the older cmdlet that refuses an interval without one; and `-RandomDelay`
-moved to the **triggers**, because `New-ScheduledTaskSettingsSet` publishes no such parameter and
+moved to the **time trigger**, because `New-ScheduledTaskSettingsSet` publishes no such parameter and
 passing it there throws under `$ErrorActionPreference='Stop'`, after the token file is already on
-disk. **None of this is verified on a real Windows host** — nothing in this repo can run Task
+disk — and it goes on the time trigger *only*, because `timeTriggerType` extends the trigger base
+type with `RandomDelay` while `bootTriggerType` extends it with `Delay`, so a boot trigger has no
+schema home for one however willingly the cmdlet accepts the parameter. Nothing is lost: the estate's
+real de-phasing is the agent's own machine-id-keyed cadence jitter (#1140). **None of this is verified on a real Windows host** — nothing in this repo can run Task
 Scheduler — so it is what the documentation specifies, to be confirmed with
 `Get-ScheduledTask lazyit-agent | Select-Object -ExpandProperty Triggers` before any rollout.
 
