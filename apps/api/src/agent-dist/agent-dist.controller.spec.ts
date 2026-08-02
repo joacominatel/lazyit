@@ -141,6 +141,55 @@ describe('AgentDistController — the os parameter and the legacy arch-only path
     expect(() => controller.download('arm64')).toThrow(NotFoundException);
   });
 
+  /**
+   * THE GUARANTEE ITSELF, which nothing pinned until now: the PRE-RENAME filename fallback.
+   *
+   * `AGENT_BIN_DIR` is overridable and an operator may mount it from outside the image, so upgrading
+   * the instance does not necessarily rename what is in it. A legacy (`os`-less) request must
+   * therefore still find `lazyit-agent-<arch>` when that is all the directory holds. The two tests
+   * above only prove that a legacy request finds the RENAMED artifact — deleting the fallback left
+   * every one of them green, which is exactly how a guarantee gets refactored away.
+   *
+   * Both write and then REMOVE their fixture, so neither depends on running before or after the
+   * tests that assert a 404 for the same arch.
+   */
+  it('falls back to the PRE-RENAME filename for an externally mounted AGENT_BIN_DIR', () => {
+    const legacy = 'lazyit-agent-arm64';
+    writeFileSync(join(BIN_DIR, legacy), 'ELF');
+    try {
+      const file = controller.download('arm64');
+      drain(file);
+      expect(file.options.disposition).toContain(legacy);
+    } finally {
+      rmSync(join(BIN_DIR, legacy), { force: true });
+    }
+  });
+
+  it('the pre-rename checksum is found the same way', () => {
+    const digest = 'c'.repeat(64);
+    const legacy = 'lazyit-agent-x64-baseline.sha256';
+    writeFileSync(join(BIN_DIR, legacy), `${digest}\n`);
+    try {
+      expect(controller.checksum('x64-baseline')).toBe(digest);
+    } finally {
+      rmSync(join(BIN_DIR, legacy), { force: true });
+    }
+  });
+
+  it('the fallback is LEGACY-ONLY — naming the os never reaches the pre-rename filename', () => {
+    // Otherwise `?os=linux&arch=arm64` on an instance mid-rename could serve a file whose OS nobody
+    // has checked. An explicit `os` means the caller knows about #1144 and gets the new layout only.
+    const legacy = 'lazyit-agent-arm64';
+    writeFileSync(join(BIN_DIR, legacy), 'ELF');
+    try {
+      expect(() => controller.download('arm64', 'linux')).toThrow(
+        NotFoundException,
+      );
+    } finally {
+      rmSync(join(BIN_DIR, legacy), { force: true });
+    }
+  });
+
   it('rejects an unknown os, and names the ones it has', () => {
     expect(() => controller.download('x64', 'darwin')).toThrow(
       NotFoundException,
