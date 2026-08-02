@@ -226,6 +226,10 @@
     "saved": "Saved as policy v{revision}. Agents apply it on their next report.",
     "discard": "Discard changes",
     "dirty": "Unsaved changes",
+    "conflict": {
+      "body": "This policy was saved from somewhere else while you were editing — it is now v{revision}. Your changes are still here and have not been sent. Save to replace v{revision} with them, or reload to start from it and lose what you typed.",
+      "reload": "Reload the saved policy"
+    },
     "propagation": "A change takes effect on each host's next check-in, then applies from the run after that. That short delay is deliberate: a policy is only ever applied by a run that started with it already in place, so a mistake here can never interrupt a fleet mid-collection.",
     "cadence": {
       "title": "Cadence",
@@ -250,7 +254,7 @@
     },
     "collect": {
       "title": "What agents collect",
-      "description": "A collector that is off is never run — the agent does not gather the facts and then discard them.",
+      "description": "On Linux a collector that is off is never run — the agent does not gather the facts and then discard them. On Windows only containers works that way: hardware, disks, network interfaces and installed software all ride one PowerShell call that runs either way, so switching one off there keeps the fact out of the report but does not save the host the work.",
       "veto": "A host can always refuse. Turning a collector off in that host's own agent config — /etc/lazyit-agent/config on Linux, C:\\ProgramData\\lazyit-agent\\config on Windows — wins over this setting, and nothing here can switch it back on.",
       "hardware": "Manufacturer, model and serial",
       "disks": "Disks and mountpoints",
@@ -302,7 +306,7 @@
       },
       "editedHere": "Edited here",
       "noEditor": "No editor yet",
-      "footer": "The API stores all three scopes, but no screen in lazyit writes the narrower two. So this page is what a host runs — unless something set one of the other scopes through the API directly."
+      "footer": "The API stores all three scopes, but no screen in lazyit writes the narrower two. So this page is what a host runs — unless one of the other two was set through the API directly, or the host's own agent config vetoes part of it. A local setting can always make a host report less than this page asks: a longer interval, a lower package cap, extra exclusions, a collector switched off. Nothing here overrides one."
     },
     "rollout": {
       "title": "Rollout",
