@@ -168,7 +168,9 @@ describe("the scheduled task is the systemd timer, one platform over", () => {
     // finite duration is the COMPATIBILITY branch, never the default.
     expect(script).toContain("New-TickTrigger ([TimeSpan]::Zero)");
     expect(script).toContain("$FallbackDuration = New-TimeSpan -Days 3650");
-    expect(script).not.toContain("[TimeSpan]::MaxValue");
+    // The idiom itself is still NAMED in the comment that explains why it is gone — what must never
+    // come back is PASSING it, so the assertion is on the argument and not on the word.
+    expect(script).not.toContain("-RepetitionDuration ([TimeSpan]::MaxValue)");
   });
 
   test("one run is bounded — the RuntimeMaxSec analogue", () => {
