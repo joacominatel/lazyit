@@ -98,6 +98,26 @@ describe("diffHostFacts", () => {
     ]);
   });
 
+  it("a disks list the AGENT POLICY emptied is no evidence, not every disk disappearing", () => {
+    // `applyDiskPolicy` (#1140) returns `[]` — not `undefined` — when the operator's mountpoint
+    // globs exclude every mounted filesystem, because "the policy matched them all" is a positive
+    // answer to the collector. It is NOT a positive answer about the hardware, and the operator who
+    // just edited a policy must never read `host.disks.count 2 → 0` off the Changes tab: that is a
+    // hardware event the table would have invented out of a configuration change.
+    //
+    // `host.disks.totalBytes` already refuses to answer `0` here. The count now refuses too.
+    expect(
+      diffHostFacts(
+        { disks: [{ device: "sda", sizeBytes: 500 }, { device: "sdb", sizeBytes: 1000 }] },
+        { disks: [] },
+      ),
+    ).toEqual([]);
+    // The same silence in reverse: an empty stored list is no baseline to diff against either.
+    expect(diffHostFacts({ disks: [] }, { disks: [{ device: "sda" }] })).toEqual([]);
+    // And an array carrying no readable disk record at all says nothing — same rule as the sibling.
+    expect(diffHostFacts({ disks: [{ device: "sda" }] }, { disks: ["nonsense", 7] })).toEqual([]);
+  });
+
   it("emits nothing when nothing tracked moved, however much else did", () => {
     expect(
       diffHostFacts(
