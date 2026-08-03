@@ -26,6 +26,10 @@ The Settings home is a grid of cards, each opening a focused sub-area:
   [Permissions](/help/permissions).
 - **Service accounts** — create and manage non-human API credentials for CI, scripts and
   integrations, scoped by permission and revocable.
+- **Reporting agents** — the policy every lazyit agent in this estate runs: how often hosts report,
+  which collectors run, and what to leave out — plus the auto-confirm rules and the scopes that can
+  override the default. This used to sit on the Instance page; the Instance page now links across to
+  it. See [Reporting agent](/help/assets-topology-reporting-agent).
 - **Integrations & workflows** — the cross-application manual-task inbox for provisioning workflows.
   Per-application automation is configured on each application's own Workflows tab.
 - **Instance** — review how this instance is configured and manage the asset-tag scheme.

@@ -14,8 +14,14 @@ only).
 
 ## Designing the scheme
 
-The editor has four fields and a **live preview** that shows exactly what the next tag will look like
-as you type:
+The editor has four fields and a **live preview** that shows the tag the next asset would really get
+as you type — the skip-existing rule below is already applied to it, so if the counter's number is
+taken the preview shows the free one that would be used instead, and says how many it stepped over.
+It never reserves that number, so it reflects the estate right now rather than promising a tag. With
+the scheme switched off, the card is labelled **Tag shape** and shows no number at all — your prefix
+and suffix around a described slot (`IT-` then *4 digits*) — because nothing is being assigned and any
+number printed there would be one the allocator will never hand out. If the check itself fails, the
+card says so and offers a **Retry** rather than waiting silently.
 
 - **Prefix** — text before the number (e.g. `IT-`). Optional.
 - **Suffix** — text after the number (e.g. `-HW`). Optional.

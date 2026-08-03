@@ -38,6 +38,12 @@ describe("Notification type catalog (catalog-as-code)", () => {
     expect(NOTIFICATION_TYPES).toContain("infra.agent_offline");
   });
 
+  test("the cloned-machine-id alert type is present (ADR-0074 §3 amendment, #1141)", () => {
+    // The ONE automatic action #1141 takes. Everything else it does is a human action, so if this
+    // type ever disappears the clone detection becomes silent — which is the failure it exists to fix.
+    expect(NOTIFICATION_TYPES).toContain("infra.identity_conflict");
+  });
+
   test("the targeted check-out acknowledgement nudge type is present (ADR-0089 Part B, #1029)", () => {
     expect(NOTIFICATION_TYPES).toContain("asset_assignment.acknowledged");
   });

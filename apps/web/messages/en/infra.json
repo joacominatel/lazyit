@@ -14,7 +14,8 @@
     "kind": "Kind",
     "status": "Status",
     "ip": "IP",
-    "noIp": "—"
+    "noIp": "—",
+    "impact": "Blast radius"
   },
   "kind": {
     "PHYSICAL_HOST": "Physical host",
@@ -40,13 +41,63 @@
     "reported": "reported {time}",
     "staleReported": "reported {time} · stale",
     "outdated": "Agent outdated",
-    "outdatedTooltip": "This agent ({agentVersion}) is a major version behind your server ({serverVersion}). Update the agent binary to stay compatible."
+    "outdatedTooltip": "This agent ({agentVersion}) is a major version behind your server ({serverVersion}). Update the agent binary to stay compatible.",
+    "policyApplied": "Policy v{revision} · applied",
+    "policyPending": "Policy v{revision} · pending",
+    "policyAppliedTooltip": "This host is running the current fleet agent policy (v{revision}).",
+    "policyPendingTooltip": "This host is still running policy v{revision}; the current one is v{current}. It picks the new one up on its next check-in and applies it from the run after that."
   },
   "pending": {
     "title": "Pending review",
     "description": "Hosts the reporting agent discovered. Confirm to add them to your inventory, or discard.",
     "confirmAction": "Confirm",
-    "discardAction": "Discard"
+    "mergeAction": "Merge into…",
+    "discardAction": "Discard",
+    "rulesAction": "Auto-confirm rules…",
+    "searchPlaceholder": "Search name or IP (srv-* works too)",
+    "subnetPlaceholder": "Subnet, e.g. 10.20.0.0/16",
+    "scopeLabel": "Servers or containers",
+    "scope": {
+      "ALL": "Servers + containers",
+      "HOST": "Servers only",
+      "CONTAINER": "Containers only"
+    },
+    "kindFilterLabel": "Reported kind",
+    "kindFilterAll": "Any kind",
+    "sortLabel": "Sort",
+    "sort": {
+      "firstSeenDesc": "Newest first",
+      "firstSeenAsc": "Oldest first",
+      "labelAsc": "Name A–Z",
+      "labelDesc": "Name Z–A"
+    },
+    "clearFilters": "Clear filters",
+    "noMatches": "No pending items match these filters.",
+    "selectAll": "Select everything shown",
+    "selectedCount": "{count, plural, =0 {Nothing selected} one {# selected} other {# selected}}",
+    "selectGroup": "Select {host} and its containers",
+    "containerCount": "{count, plural, one {# container} other {# containers}}",
+    "hostAlreadyReviewed": "This server has already been reviewed.",
+    "bulkConfirmAction": "Confirm selected",
+    "bulkDiscardAction": "Discard selected",
+    "overCap": "{count} selected — one bulk action takes at most {max}. Narrow the selection (a filter helps) and run it in more than one pass."
+  },
+  "merge": {
+    "title": "Merge {label} into another server",
+    "description": "Use this when this host is one you already have — a server that was re-imaged and came back with a new machine ID, or a clone that was separated out. The reporting key moves to the server you pick, so it keeps receiving reports; this row is archived.",
+    "suggestionsLabel": "Looks like the same machine",
+    "suggestion": "This looks like {label}",
+    "suggestionsDescription": "These servers report the same hardware serial or network card address as this one. A suggestion, not a decision — pick one only if you know that box was re-imaged.",
+    "matchedOn": {
+      "serial": "Same serial",
+      "mac": "Same MAC"
+    },
+    "targetLabel": "Merge into",
+    "targetPlaceholder": "Pick a server",
+    "targetDescription": "The server you pick keeps its own name, kind, position, owner and asset link. Everything the agent owns moves onto it with the reporting key: the reported hardware and software facts, the status, the last check-in and the agent version — and the IP too, unless that IP was set by hand. If it already reports through an agent of its own, that key is replaced: a host still checking in with it will come back as a new pending server.",
+    "submit": "Merge",
+    "mergedToast": "Server merged.",
+    "error": "Could not merge this server."
   },
   "confirm": {
     "title": "Confirm this server",
@@ -61,14 +112,24 @@
   },
   "onboarding": {
     "title": "Track servers automatically",
-    "description": "Install a lightweight agent on a Linux server and it reports its hardware & software to lazyit by itself — it can only report, nothing else.",
+    "description": "Install a lightweight agent on a Linux or Windows server and it reports its hardware & software to lazyit by itself — it can only report, nothing else.",
     "cta": "Create your first agent",
-    "addAgent": "Add agent",
     "noPermissionHint": "Ask an administrator to add a reporting agent — it needs the manage-settings permission."
+  },
+  "add": {
+    "action": "Add",
+    "agentLabel": "Install a reporting agent",
+    "agentDescription": "Best for a server: it fills in its own hardware, software and status, and goes offline on its own when it stops checking in.",
+    "manualLabel": "Add a node by hand",
+    "manualDescription": "For anything that can't run an agent — a switch, a firewall, a NAS. You keep it up to date yourself."
+  },
+  "canvas": {
+    "openDetails": "Details",
+    "nodeActions": "Actions for {label}"
   },
   "wizard": {
     "title": "Create a reporting agent",
-    "subtitle": "Install a reporting agent on a Linux server in three steps.",
+    "subtitle": "Install a reporting agent on a Linux or Windows server in three steps.",
     "steps": {
       "name": "Name",
       "install": "Install",
@@ -83,18 +144,43 @@
     "generate": "Generate credentials",
     "createdToast": "Credentials created.",
     "error": "Couldn't create the credentials.",
-    "requirements": "You'll run this on a Linux server with root access.",
+    "platform": {
+      "label": "Which platform is this server?",
+      "linux": "Linux",
+      "windows": "Windows"
+    },
+    "requirements": {
+      "linux": "You'll run this on a Linux server with systemd and curl, as root.",
+      "windows": "You'll run this from an elevated PowerShell (right-click PowerShell → Run as administrator) on Windows 10/11 or Windows Server 2016 or newer, on x64. There's no ARM64 build, and the installer stops on any host that isn't x64. Nothing else to install: the agent is a single self-contained executable — no Node, no dependencies."
+    },
     "installTitle": "Run this on your server",
-    "installHint": "Copy the command and run it on the Linux server as root. The token is shown only once — capture it before closing.",
+    "installHint": {
+      "linux": "Copy the command and run it on the Linux server as root. The token is shown only once — capture it before closing.",
+      "windows": "Copy the command and run it from an elevated PowerShell. The script-block form is deliberate: a plain irm | iex pipe can't pass the URL and the token. The token is shown only once — capture it before closing."
+    },
+    "unsigned": "The Windows executable isn't code-signed yet, so SmartScreen will warn about it and some antivirus products may quarantine it. That's a deliberate state for internal validation, not a sign the download is wrong.",
     "copyCommandAria": "Copy the command",
     "commandCopied": "Command copied.",
     "manual": {
-      "toggle": "Install manually (step by step)",
-      "intro": "Prefer to inspect each step? Run these on the server instead of the one-liner above.",
-      "step1": "Download the binary (use arch=arm64 on ARM machines):",
-      "step2": "Make it executable and move it into place:",
-      "step3": "Create the config file (it holds the token, so chmod 600):",
-      "step4": "Send a first report to check it works:"
+      "linux": {
+        "toggle": "Install manually (step by step)",
+        "intro": "Prefer to inspect each step? Run these on the server instead of the one-liner above.",
+        "step1": "Download the binary (use arch=arm64 on ARM machines):",
+        "step2": "Make it executable and move it into place:",
+        "step3": "Create the config file (it holds the token, so chmod 600):",
+        "step4": "Send a first report to check it works:"
+      },
+      "windows": {
+        "toggle": "Download and read the installer first",
+        "intro": "Prefer to read the installer before it runs? Download it, open it in an editor, then run it from the same elevated PowerShell.",
+        "step1": "Save the installer to your temp folder (an elevated PowerShell starts in C:\\Windows\\System32, which is no place to put it):",
+        "step2": "Read the saved file, then run it — this form runs whatever the host's script execution policy is:"
+      }
+    },
+    "diagnostics": {
+      "title": "Check the host afterwards",
+      "hint": "Read-only: it sends nothing and changes nothing. It answers whether this host can reach lazyit and whether its token is good.",
+      "windowsNote": "Run it from an elevated PowerShell: the agent's config file can only be read by SYSTEM and Administrators, so without elevation the check reports that no URL and no token are configured. The path is written out in full because this console cannot see the folder the installer just put on PATH — a running PowerShell keeps the environment it started with, so the bare lazyit-agent test only works in one opened after the install."
     },
     "waitTitle": "Waiting for {name} to report…",
     "waitDescription": "Run the install command on your server. As soon as the agent checks in, it'll show up here — usually within a couple of minutes.",
@@ -213,7 +299,6 @@
     "statusUpdatedToast": "Status updated.",
     "statusError": "Couldn't update the status.",
     "detailsTitle": "Details",
-    "reportedFactsTitle": "Reported facts",
     "labelLabel": "Name",
     "labelEditHint": "Click the title to rename",
     "labelEmpty": "A name is required.",
@@ -232,15 +317,50 @@
     "shortcutRemove": "Remove shortcut",
     "shortcutInvalid": "Each shortcut needs a label and a valid URL.",
     "shortcutsSavedToast": "Shortcuts updated.",
-    "impactTitle": "Impact / blast radius",
     "impactShow": "Show blast radius",
     "impactHide": "Hide blast radius",
-    "impactDescription": "If this node goes down, what stops with it? Highlights the downstream nodes on the map.",
+    "impactDescription": "If this node goes down, what stops with it? Highlights the affected nodes on the map.",
     "impactSafe": "Nothing depends on this node — safe to take down.",
     "impactCount": "{count, plural, one {# node affected if this goes down} other {# nodes affected if this goes down}}",
     "impactDepth": "{depth, plural, one {# hop} other {# hops}}",
+    "impactLoading": "Working out the blast radius…",
+    "impactError": "Couldn't work out the blast radius.",
+    "impactListShow": "List them",
+    "impactListHide": "Hide the list",
+    "impactListLabel": "Affected nodes",
     "deleteAction": "Remove from map",
-    "loading": "Loading node…"
+    "loading": "Loading node…",
+    "tabs": {
+      "general": "General",
+      "facts": "Reported facts",
+      "software": "Software",
+      "connections": "Connections",
+      "changes": "Changes"
+    }
+  },
+  "changes": {
+    "emptyTitle": "No recorded changes yet",
+    "emptyDescription": "Nothing tracked on this node has changed yet. Only real moves are recorded — a package installed, removed or upgraded, or the OS, kernel, memory, disk, serial or container image changing. A node nobody's agent reports on never gets an entry.",
+    "loadError": "Couldn't load the change history",
+    "loadMore": "Load older changes",
+    "loadingMore": "Loading…",
+    "kind": {
+      "PACKAGE_ADDED": "Installed",
+      "PACKAGE_REMOVED": "Removed",
+      "PACKAGE_VERSION": "Version",
+      "FACT_CHANGED": "Changed"
+    },
+    "facts": {
+      "hostOsName": "Operating system",
+      "hostOsVersion": "OS version",
+      "hostOsKernel": "Kernel",
+      "hostMemoryBytes": "Memory (bytes)",
+      "hostDisksTotalBytes": "Disk capacity (bytes)",
+      "hostDisksCount": "Disk count",
+      "hostHardwareSerial": "Hardware serial",
+      "containerImage": "Container image",
+      "containerImageDigest": "Image digest"
+    }
   },
   "delete": {
     "title": "Remove this node from the map?",
@@ -279,5 +399,67 @@
     "selfNode": "this node",
     "since": "since {date}",
     "ended": "ended {date}"
+  },
+  "bulk": {
+    "confirmTitle": "{count, plural, one {Confirm # item} other {Confirm # items}}",
+    "confirmDescription": "Each item is confirmed exactly as it would be one at a time: {hosts, plural, one {# server} other {# servers}} and {containers, plural, =0 {no containers} one {# container} other {# containers}}. You are still approving every one of them.",
+    "trackHostsLabel": "Track the {count, plural, one {server} other {# servers}} as inventory assets",
+    "trackHostsDescription": "On by default, as for a single confirm — a server is a thing you own, assign and warranty, so it gets an Asset carrying the reported host facts.",
+    "trackContainersLabel": "Track the {count, plural, one {container} other {# containers}} as inventory assets",
+    "trackContainersDescription": "Off by default. A container is replaced by the next deploy, has no serial to record, and one Docker host can add dozens — so they stay on the map without adding Assets nobody will curate. Turn it on if a container really is something you track.",
+    "kindLabel": "Re-classify all of them as",
+    "kindKeep": "Keep what the agent reported",
+    "kindDescription": "Leave this alone unless the agent got the classification wrong for the whole selection.",
+    "confirmSubmit": "{count, plural, one {Confirm # item} other {Confirm # items}}",
+    "confirmError": "Couldn't confirm the selection.",
+    "discardTitle": "{count, plural, one {Discard # item} other {Discard # items}}",
+    "discardDescription": "This takes them off the map. Their history is kept and they can be restored later — the same as discarding one at a time. If the agent reports them again they will come back as new pending items.",
+    "discardSubmit": "{count, plural, one {Discard # item} other {Discard # items}}",
+    "discardError": "Couldn't discard the selection.",
+    "appliedToast": "{count, plural, one {# item done} other {# items done}}.",
+    "partialToast": "{applied} done, {failed} could not be applied.",
+    "failureDetail": "{label}: {message}"
+  },
+  "rules": {
+    "title": "Auto-confirm rules",
+    "description": "Write down a judgement once instead of repeating it for every discovered host. A rule you wrote is still your decision — you can disable or delete it at any time, and every server it confirms is recorded against your name.",
+    "notRetroactive": "A rule only applies to reports that arrive after you save it. Nothing already waiting in this tray will be confirmed behind you — those are still yours to review.",
+    "empty": "No rules yet. Every discovered host waits here until you confirm it.",
+    "addAction": "Add a rule",
+    "nameLabel": "Name",
+    "namePlaceholder": "Production servers on the management VLAN",
+    "scopeLabel": "Applies to",
+    "scope": {
+      "HOST": "Reporting servers",
+      "CONTAINER": "Containers",
+      "ANY": "Servers and containers"
+    },
+    "hostnameLabel": "Name matches",
+    "hostnameDescription": "Use * for any run of characters and ? for exactly one — srv-* matches srv-app-04. The whole name has to match, not just part of it. A pattern of nothing but wildcards isn't a condition: it has to carry at least one literal character.",
+    "subnetLabel": "Reports from subnet",
+    "subnetDescription": "A CIDR block, IPv4 or IPv6. A host that reported no address never matches this. 0.0.0.0/0 isn't a condition either — it's every address there is.",
+    "reportedKindLabel": "Reported as",
+    "reportedKindDescription": "What the agent's report made lazyit propose for this host — not what you want it to become.",
+    "anyKind": "Any kind",
+    "confirmAsKindLabel": "Confirm it as",
+    "keepProposedKind": "Keep the reported kind",
+    "trackAsAssetLabel": "Track as an inventory asset",
+    "trackAsAssetDescription": "On by default for a servers-only rule, off for any rule that can also match containers — the same reasoning as confirming by hand. Turn it on if these containers really are things you track.",
+    "needsCondition": "A rule needs at least one condition that can rule a host out: a name pattern with something other than * and ?, a subnet narrower than 0.0.0.0/0, or a reported kind. Most wildcard-only patterns match every host there is, so they would confirm everything the agent finds; ? on its own matches only one-character names, and is refused along with them to keep the rule one you can check by looking.",
+    "saveSubmit": "Save rule",
+    "savedToast": "Rule saved. It applies from the next report onwards.",
+    "saveError": "Couldn't save the rule.",
+    "deleteLabel": "Delete rule",
+    "deletedToast": "Rule deleted. Servers it already confirmed are unchanged.",
+    "deleteError": "Couldn't delete the rule.",
+    "enabledLabel": "Rule enabled",
+    "tracksAsset": "Tracks as asset",
+    "conditionHostname": "Name {pattern}",
+    "conditionSubnet": "From {cidr}",
+    "conditionKind": "Reported as {kind}",
+    "author": "Written by {name}",
+    "authorUnknown": "Author no longer in the directory",
+    "lastMatched": "{count, plural, one {Used # time} other {Used # times}}, last on {when}",
+    "neverMatched": "Not used yet"
   }
 }

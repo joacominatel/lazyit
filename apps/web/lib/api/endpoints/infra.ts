@@ -1,14 +1,25 @@
 import type {
+  AgentPolicyOverride,
+  AgentPolicySettings,
   AttachInfraSecret,
+  BulkConfirmInfraNodes,
+  BulkDiscardInfraNodes,
   ConfirmInfraNode,
+  CreateInfraAutoConfirmRule,
+  InfraAutoConfirmRule,
+  InfraBulkResponse,
+  UpdateInfraAutoConfirmRule,
   CreateInfraEdge,
   CreateInfraNode,
   InfraEdge,
+  InfraIdentityMatch,
   InfraImpactResponse,
   InfraNode,
   InfraNodeDetail,
+  InfraNodeFactChangeList,
   InfraNodeListItem,
   InfraSecretRef,
+  MergeInfraNode,
   UpdateInfraNode,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -153,12 +164,132 @@ export function confirmInfraNode(
   });
 }
 
+// ── The review tray at scale (ADR-0074 §1 amendment, #1145) ────────────────────────────────────────
+
+/**
+ * Confirm many PENDING proposals at once (`POST /infra/nodes/bulk-confirm`). Each item carries the
+ * SAME optional overrides the single confirm takes, and the API applies them through the same method —
+ * so this removes the one-dialog-per-row cost, never the human approval.
+ *
+ * Resolves even when some items failed: the response is PER-ITEM (`applied`/`skipped`/`notFound`/
+ * `failed` with a message), so the caller reports a partial batch instead of a bare "something broke".
+ */
+export function bulkConfirmInfraNodes(
+  body: BulkConfirmInfraNodes,
+): Promise<InfraBulkResponse> {
+  return apiFetch<InfraBulkResponse>(`${BASE}/nodes/bulk-confirm`, {
+    method: "POST",
+    body,
+  });
+}
+
+/** Discard many proposals at once (`POST /infra/nodes/bulk-discard`) — the existing soft delete, in bulk. */
+export function bulkDiscardInfraNodes(
+  body: BulkDiscardInfraNodes,
+): Promise<InfraBulkResponse> {
+  return apiFetch<InfraBulkResponse>(`${BASE}/nodes/bulk-discard`, {
+    method: "POST",
+    body,
+  });
+}
+
+/** The saved auto-confirm rules, oldest first — the order the server evaluates them in. */
+export function getInfraAutoConfirmRules(
+  signal?: AbortSignal,
+): Promise<InfraAutoConfirmRule[]> {
+  return apiFetch<InfraAutoConfirmRule[]>(`${BASE}/auto-confirm-rules`, { signal });
+}
+
+/** Save a rule. It applies only to reports that arrive AFTER it is saved — never retroactively. */
+export function createInfraAutoConfirmRule(
+  body: CreateInfraAutoConfirmRule,
+): Promise<InfraAutoConfirmRule> {
+  return apiFetch<InfraAutoConfirmRule>(`${BASE}/auto-confirm-rules`, {
+    method: "POST",
+    body,
+  });
+}
+
+/** Patch a rule — including the `enabled` toggle, which is the fastest way to revoke one. */
+export function updateInfraAutoConfirmRule(
+  ruleId: string,
+  body: UpdateInfraAutoConfirmRule,
+): Promise<InfraAutoConfirmRule> {
+  return apiFetch<InfraAutoConfirmRule>(`${BASE}/auto-confirm-rules/${ruleId}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+/** Delete a rule (soft delete). Nodes it already confirmed stay confirmed. */
+export function deleteInfraAutoConfirmRule(
+  ruleId: string,
+): Promise<InfraAutoConfirmRule> {
+  return apiFetch<InfraAutoConfirmRule>(`${BASE}/auto-confirm-rules/${ruleId}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Re-image adoption hints (`GET /infra/nodes/:id/identity-matches`, ADR-0074 §3 / #1141) — other live
+ * nodes whose stored corroborating evidence shares a burned-in serial or MAC with this one. Read-only:
+ * it is what lets the tray ask *"this looks like `srv-app-04` re-imaged — adopt?"* instead of leaving
+ * a curated node to drift OFFLINE beside a proposal nobody connects to it. Empty for a node reported
+ * by an agent older than contract v2 (no `identifiers[]` stored) — no hint is better than a wrong one.
+ */
+export function getInfraNodeIdentityMatches(
+  nodeId: string,
+  signal?: AbortSignal,
+): Promise<InfraIdentityMatch[]> {
+  return apiFetch<InfraIdentityMatch[]>(
+    `${BASE}/nodes/${nodeId}/identity-matches`,
+    { signal },
+  );
+}
+
+/**
+ * Re-key a duplicate into an existing node (`POST /infra/nodes/:id/merge-into`, ADR-0074 §3 / #1141):
+ * the addressed node's agent reporting key is transplanted onto `targetNodeId` so future reports land
+ * there, and the duplicate is archived with the merge stamped on it. Identity moves; curation does
+ * NOT — the target keeps its label, state, kind, position and asset link. Returns the target's
+ * refreshed detail.
+ */
+export function mergeInfraNodeInto(
+  nodeId: string,
+  body: MergeInfraNode,
+): Promise<InfraNodeDetail> {
+  return apiFetch<InfraNodeDetail>(`${BASE}/nodes/${nodeId}/merge-into`, {
+    method: "POST",
+    body,
+  });
+}
+
 /**
  * Blast radius (`GET /infra/nodes/:id/impact`, ADR-0070 §7) — the downstream set affected if this
  * node goes down: a transitive traversal over ACTIVE inverse RUNS_ON/DEPENDS_ON edges, each affected
  * node carrying its minimum hop `depth`. The query that justifies a graph over a static picture; the
  * canvas highlights `affected` and dims the rest. Read-gated server-side (`infra:read`).
  */
+/**
+ * A page of a node's recorded fact history (`GET /infra/nodes/:id/changes`, ADR-0074 §3 amendment,
+ * #1143) — what MOVED, newest first. Keyset-paginated on the append-only autoincrement id: a page
+ * asks for rows BELOW the last id it saw, so nothing is skipped or repeated while reports land.
+ */
+export function getInfraNodeChanges(
+  nodeId: string,
+  params: { limit?: number; cursor?: number } = {},
+  signal?: AbortSignal,
+): Promise<InfraNodeFactChangeList> {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  if (params.cursor !== undefined) query.set("cursor", String(params.cursor));
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return apiFetch<InfraNodeFactChangeList>(
+    `${BASE}/nodes/${nodeId}/changes${suffix}`,
+    { signal },
+  );
+}
+
 export function getInfraNodeImpact(
   nodeId: string,
   signal?: AbortSignal,
@@ -228,6 +359,32 @@ export function detachInfraNodeSecret(
 ): Promise<InfraSecretRef[]> {
   return apiFetch<InfraSecretRef[]>(`${BASE}/nodes/${nodeId}/secrets`, {
     method: "DELETE",
+    body,
+  });
+}
+
+/**
+ * Read the INSTANCE DEFAULT agent policy + the instance-wide revision (`GET /infra/agent-policy`,
+ * ADR-0074 §7 amendment / #1140). `settings` is the stored layer Settings → Instance edits;
+ * `effective` is that layer resolved over the built-in defaults — it is what a host with NO narrower
+ * override runs, and deliberately not a promise about hosts that do have one.
+ */
+export function getAgentPolicy(
+  signal?: AbortSignal,
+): Promise<AgentPolicySettings> {
+  return apiFetch<AgentPolicySettings>(`${BASE}/agent-policy`, { signal });
+}
+
+/**
+ * Replace the instance-default agent policy (`PUT /infra/agent-policy`). The body is a PARTIAL
+ * policy: every omitted field falls back to the built-in default, so `{}` restores all of them.
+ * Bumps the revision, which every agent then echoes back on its next report.
+ */
+export function putAgentPolicy(
+  body: AgentPolicyOverride,
+): Promise<AgentPolicySettings> {
+  return apiFetch<AgentPolicySettings>(`${BASE}/agent-policy`, {
+    method: "PUT",
     body,
   });
 }

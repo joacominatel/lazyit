@@ -70,6 +70,18 @@ export const assetTagSchemeKeys = {
     width?: number;
   }) => [...["asset-tag-scheme"], "seed-suggestion", params] as const,
   /**
+   * The next tag the scheme would allocate for a pattern (#1180). Keyed by the whole pattern
+   * INCLUDING the counter floor `from`, because changing the floor changes the answer — sharing a key
+   * across floors would serve one floor's preview for another and re-introduce the lie this fixes.
+   * Sits under the `all` prefix so a save (or a backfill apply) invalidates it with everything else.
+   */
+  nextPreview: (params: {
+    prefix?: string;
+    suffix?: string;
+    width?: number;
+    from?: number;
+  }) => [...["asset-tag-scheme"], "next-preview", params] as const,
+  /**
    * A backfill preview page (ADR-0068 §4). Keyed by the scope + page window so paging within the
    * wizard caches per page; switching mode/model is a distinct key (a fresh preview).
    */

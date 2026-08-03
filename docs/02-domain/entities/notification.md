@@ -54,7 +54,9 @@ anti-join over the small admin cohort.
 
 `critical_app_access` · `admin_granted` · `low_stock` · `workflow.manual_task` · `workflow.run_failed` ·
 **`secret.vault_setup`** (the targeted login nudge, #453) · **`permission_widened`** + **`infra.agent_offline`**
-(the two sensitive-audit / liveness alerts, #852 — [[0056-in-app-notification-bell]] amendment 2026-06-30).
+(the two sensitive-audit / liveness alerts, #852 — [[0056-in-app-notification-bell]] amendment 2026-06-30) ·
+**`infra.identity_conflict`** (two hosts reporting one machine-id — [[0074-server-reporting-agent]] §3
+amendment, #1141; bell-only, not emailed).
 Catalog-as-code: a typo can't mint a type, and `api` (emit) + `web` (render a closed set of icons/copy) agree
 by construction. Adding a type later is an additive shared-package change (and a web exhaustive-map
 re-typecheck — `TYPE_META` is keyed on the enum).
@@ -91,6 +93,20 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   `infra.agent_offline:<nodeId>:<lastReportedAt>` → one nudge per outage (a node stuck OFFLINE across sweeps
   is not re-selected; a genuinely new outage has a fresh last-report instant ⇒ a fresh nudge), never
   once-per-sweep. Metadata = nodeId + label + last-report time.
+- **The report ingest** (`InfraService.ingestReport`, [[0074-server-reporting-agent]] §3 amendment /
+  #1141) → **`infra.identity_conflict`**, a broadcast admin nudge when a report matches an existing
+  node's `externalId` while its serial **and** its MAC set both differ — two hosts sharing one machine
+  identity (`/etc/machine-id` on Linux, `MachineGuid` on Windows), almost always a cloned VM template
+  or golden image (whose baked hostname is why the hostname is
+  corroborating detail in the summary, never part of the rule). Emitted **only on the branch that creates the
+  second node**, not on every report; dedupe `infra.identity_conflict:<peerNodeId>:<discriminator>` →
+  one nudge per newly-detected colliding host, never one per 15-minute check-in. The summary and title
+  name the remedy and the colliding fact for the **reporting host's `os.family`** —
+  `systemd-firstboot --setup-machine-id` / `machine-id` on Linux, `sysprep /generalize` / `MachineGuid`
+  on Windows, and the action with no command for a family lazyit ships no agent for (#1144).
+  Metadata = both node ids + the peer's label + the
+  reported hostname + the discriminator (the new node's own label *is* that hostname). This is the ONLY automatic action the collision detection takes: the
+  report is still accepted and nothing is auto-merged or auto-split.
 
 ## API (poll) — read-path authZ (the auth contract)
 

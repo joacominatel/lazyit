@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-06-23
+updated: 2026-08-02
 ---
 
 # InfraNode
@@ -27,6 +27,9 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   at create; deleting the asset **detaches** the node (audit > strict integrity), never deletes it.
 - **is the source of** N [[infra-edge]] (`edgesFrom`, relation `EdgeSource`).
 - **is the target of** N [[infra-edge]] (`edgesTo`, relation `EdgeTarget`).
+- **accumulates** N [[infra-node-fact-change]] (`factChanges`, `onDelete: Cascade`) — the append-only
+  record of what actually MOVED on this node, written by the agent ingest path only when a diff
+  exists ([[0074-server-reporting-agent]] §3 amendment, #1143).
 - **reads ownership / KB / secrets through** the linked [[asset]] — never a direct edge to a [[user]]
   ("servers-only graph"; ownership is the asset's [[asset-assignment]] join, [[asset-centric]]).
 
@@ -41,17 +44,61 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
 - **Detach semantics (no orphans).** Patching `assetId: null` detaches: an **auto-created** Asset is
   **soft-deleted** (it never lingers in inventory owned by nobody); a **pre-existing linked** Asset is
   only un-linked, left intact.
+- **A patch may attach or detach, but never RE-POINT** ([[0070-infra-topology-graph]] §5 note,
+  #1117). `assetId: null` detaches (above); an `assetId` on a node that carries **none** attaches,
+  and is checked with the same soft-delete-scoped `assertExists` `createNode` uses — a **discarded**
+  asset is a clean `404` instead of landing in the column (the FK only requires the row to *exist*,
+  and a discarded asset's row does). Sending an `assetId` to a node that **already has** one is a
+  `400` — it used to drop the old link without running the detach above, so an **auto-created** Asset
+  it replaced was left live in inventory owned by nobody. The remedy is the two-step —
+  `assetId: null`, then the new id — which runs the §5 semantics on the outgoing asset with a human's
+  intent behind them instead of letting a machine decide.
 - **`label` always wins for display.** The canvas display name is `label`; the linked
   `asset.name` is shown only as a secondary "inventory name" (`assetName` on the detail read) — no
   silent copy, no drift.
 - **Soft delete = off the map, history kept** ([[0006-soft-delete-and-auditing]]). `DELETE` sets
   `deletedAt` (node off the canvas), `POST …/restore` clears it (back on the map). The Asset behind a
   node is never hard-deleted.
-- **Provenance + lifecycle columns exist now, exercised in v2** ([[0070-infra-topology-graph]] §4).
+- **Provenance + lifecycle columns are LIVE** ([[0070-infra-topology-graph]] §4, [[0074-server-reporting-agent]]).
   `source` (MANUAL | AGENT), `state` (CONFIRMED | PENDING — the review tray), `reportingSource`,
-  `externalId`, `lastReportedAt` sit nullable/defaulted; the installable reporting agent that fills
-  them is a future major (extends [[0048-service-accounts]] auth). No agent code ships in v1; the
-  composite partial-unique `(reportingSource, externalId)` index is a forward-only add deferred with it.
+  `externalId`, `lastReportedAt`, `agentVersion` are filled by the installable reporting agent (auth
+  via [[0048-service-accounts]]), reconciled on the composite partial-unique
+  `(reportingSource, externalId)` index over non-deleted rows. ~~No agent code ships in v1~~ — the
+  agent shipped; this bullet described the pre-ADR-0074 state.
+- **TWO reporting platforms since #1144** (ADR-0074 §6/§7 amendment, 2026-08-02): Linux (systemd
+  timer, `install.sh`) and Windows (Scheduled Task as `NT AUTHORITY\SYSTEM`, `install.ps1`). Nothing
+  in this entity is per-platform — the wire contract has been OS-neutral since #1138, and the two
+  collectors produce the same shapes — but three columns are worth reading with it in mind:
+  `externalId` (below), `specs.host.os.family` (`windows` on those rows, and the one field every
+  consumer branches on), and `specs.software[].source`, which is `registry` for a Windows host
+  because the list comes from the Uninstall hives rather than a package manager.
+- **The report PROPOSES a `kind` on discovery, and never re-classifies (ADR-0074 §3 amendment, #1139).**
+  A newly-discovered host's `kind` is mapped from the reported `host.virtualization` / `host.chassis`
+  by the shared `inferNodeKind` (`none` → `PHYSICAL_HOST`, any hypervisor → `VM`,
+  `docker`/`lxc`/`wsl` → `CONTAINER`); a report with **no evidence** — `chassis: unknown`, or a pre-v2
+  agent — keeps the `PHYSICAL_HOST` default rather than guessing. It is read on the **create branch
+  only**: a node that already exists is never re-kinded by a report, confirmed or not. The human's
+  `kind` override at the confirm gate is the correction path.
+- **A reported container becomes a CHILD node (#1139).** When a report carries `host.containers[]`,
+  each entry is a `CONTAINER` node (`source=AGENT`, `state=PENDING`) joined to the reporting host by
+  an **active `RUNS_ON`** [[infra-edge]] — the agent's first real topology, and what makes the
+  blast-radius traversal meaningful without hand-drawing. Its `externalId` is
+  `<host externalId>/container/<name>`: keyed on the container **name** (a runtime container id is
+  regenerated by every recreate, so an id key would mint a duplicate proposal per deploy) and
+  **scoped to the host** (names are unique only within one runtime). A container the reporter stops
+  listing goes `status=OFFLINE`; it is **never** auto-deleted — Discard stays the human's call — and
+  the same name returning refreshes that same node back ONLINE. An **absent** `containers` key means
+  the collector never probed and nothing is touched; `[]` means it probed and found none.
+- **A host in machine-id COLLISION has no container children at all (#1158).** The child key above is
+  derived from the **reported** `externalId`, which two clones share, so both would compute identical
+  container keys and each report would retire the other's still-running children. The #1141 collision
+  branch therefore skips container reconciliation entirely: a colliding host's containers go
+  **untracked** until its `/etc/machine-id` — on Windows, its `MachineGuid` — is fixed, then tracking
+  resumes on its own. A Windows image prepared with `sysprep /generalize` regenerates that key per
+  clone and never enters this branch at all, which is the asymmetry the ADR-0074 §3 amendment for
+  #1144 documents: the Linux baked-machine-id trap has no automatic Windows equivalent. Deliberate and
+  deferred (re-deriving the key would re-key every existing child); the guarantee that a colliding
+  host's report never retires its peer's children is pinned by test.
 - **Access surface, not a network model** (scope cut). `ipAddress` is **format-validated** as an IPv4
   or IPv6 value on write (shared `IpAddressSchema`, native zod — [[0090-ipam-validated-ip]] / #847): a
   human edit that is malformed is a clean `400`, and the agent DROPS a garbage NIC value rather than
@@ -92,16 +139,21 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `label` | `string` | required; the canvas display name (always wins for display). |
 | `status` | `InfraNodeStatus` | `@default(UNKNOWN)`. |
 | `assetId` | `cuid?` | nullable FK → [[asset]], `onDelete: SetNull`. Default-on link; null = graph-only. |
-| `ipAddress` | `string?` | primary IP, **format-validated** (IPv4/IPv6) on write — no IPAM/registry/`@unique` ([[0090-ipam-validated-ip]] / #847). Agent-promoted from the report's primary IPv4, validate-or-drop (ADR-0074 §3 / #1081). |
+| `ipAddress` | `string?` | primary IP, **format-validated** (IPv4/IPv6) on write — no IPAM/registry/`@unique` ([[0090-ipam-validated-ip]] / #847). Agent-promoted from the report: IPv4 wherever the host has one, else its most **stable** routable IPv6 — link-local, temporary (RFC 4941) and deprecated addresses skipped, global unicast preferred over ULA — so a v6-only host shows an address that keeps resolving (#1138); validate-or-drop (ADR-0074 §3 / #1081). |
 | `ipAddressSource` | `InfraNodeIpSource` | `@default(AGENT)`; who owns `ipAddress` — `AGENT` (each report overwrites) vs `MANUAL` (a human edit the agent never clobbers, stamped server-side on an IP edit). #1081. |
 | `shortcuts` | `jsonb?` | `[{ label, url }]` SSH/web-UI/console links (max 20; URLs zod-validated). |
-| `specs` | `jsonb?` | loose per-kind attributes (ADR-0007 posture; per-kind validation deferred). |
+| `specs` | `jsonb?` | loose per-kind attributes (ADR-0007 posture; per-kind validation deferred). On an agent-reported host this is the full inventory blob (`host`/`software`/`reportedAt`) — **detail-only**, never on the list row (#1135). **Written only when its facts CHANGE (#1153)**, not on every check-in: the column is a multi-hundred-KB TOAST value and rewriting it unchanged was pure churn. Two consequences worth knowing before reading a stored blob: `reportedAt` dates the **facts** (when this snapshot was collected), not the last check-in — liveness is `lastReportedAt` below — and a node stored before #1153 that holds a package list writes once more on its first post-upgrade report, after which it can be skipped like any other (one that holds none compares equal immediately and never pays it). A companion key `softwareHash` (#1142) carries the **server's** fingerprint of the stored package list, present only while a list is. What lets a report OMIT an unchanged list without the absence being read as "no software" is `softwareState: 'unchanged'` — the server reads the absence from that field and nothing else. `softwareHash` is corroboration rather than authority: it is read on the omitted-list branch only, to tell an honest delta from a claim the server cannot vouch for (which is answered with `softwareResend`, never by wiping — and so is an `unchanged` claim that arrives with NO fingerprint, since a claim the server cannot check is the least corroborated of all, not the most trusted), and it is what lets the write skip work for a client that sends no fingerprint of its own. An agent only starts omitting once an ack has carried `softwareDelta: true` (#1142): the contract root is a loose `z.object()`, so a server that predates the field would STRIP `softwareState`, see no `software` key and clear the stored list for good — the omission is therefore gated on positive evidence, never on the agent's own belief. It may also carry the two REPORT diagnostics (#1138): `diagnostics` (`{ warnings, privileged, durationMs }` — what the collector could not do, present whenever the agent sent it) and `agentSkew` (`{ droppedPaths?, coercedPaths?, agentAhead, serverVersion }` — the bounded wire paths this build dropped or had to coerce, at any depth, plus whether the agent is a newer build than the server; present only when there was skew). Both self-heal (they are part of what the write path compares, so the first clean report rewrites the blob without them), neither is ever copied into the linked `Asset.specs` — nor is `softwareHash` — and none is rendered today: the inventory panel excludes them from its custom-fields fallback rather than dumping them. A further key joins them on a node whose machine-id collided (#1141): `identityConflict` (`{ reportedExternalId, peerNodeId, peerLabel, discriminator, detectedAt }`), which follows the same rules — node-only, never copied to the Asset, and not rendered anywhere yet. Unlike the others it is **re-stamped on every report** for as long as the collision lasts (`detectedAt` keeps the FIRST detection), because a marker written once would be wiped the first time anything else in the blob moved; it still self-heals, since a clone given a real machine-id stops taking that branch and the next write drops it. An ARCHIVED node may also carry `_infraMergedInto` (`{ nodeId, label, externalId, reportingSource, at, byUserId?, replacedTargetKey? }`) — the merge provenance, and the only audit trail a re-key has. `externalId`/`reportingSource` there are the key the archived row gave up (its own columns are cleared so it stays restorable); `replacedTargetKey` is present only when the merge overwrote a reporting key the target already had. On an agent-reported CONTAINER child (#1139) the blob is `{ container, reportedAt }` instead — deliberately carrying **no** `host` key, so the host projection declines it and a dedicated **container** projection (`getAgentContainerFacts`) renders it instead: name, image, image digest, runtime state, container id and the published-ports table, on the node drill-in and on a confirmed child's Asset detail page. That second panel is not decoration — without it both surfaces fell through to the raw **Custom fields** grid, which `JSON.stringify`s an object, so a confirmed container's whole blob rendered as one line of JSON. |
 | `x` / `y` | `float?` | canvas position (free-move board; persisted on drag-stop). |
 | `source` | `InfraNodeSource` | `@default(MANUAL)`; AGENT in v2. |
 | `state` | `InfraNodeState` | `@default(CONFIRMED)`; PENDING = the v2 review tray. |
-| `reportingSource` | `string?` | which agent/host reported it (v2 dedup scope). |
-| `externalId` | `string?` | platform id (vmid/container-id) for v2 reconciliation. |
-| `lastReportedAt` | `datetime?` | v2 agent liveness (stale → OFFLINE). |
+| `reportingSource` | `string?` | which agent/host reported it (the dedup scope; a container child carries its host's). |
+| `externalId` | `string?` | the reconciliation key. A reported HOST: its `/etc/machine-id` on Linux, `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` on Windows (#1144; macOS platform UUID is reserved, no collector ships) — **except** on a host whose machine-id collided with one already in use (a cloned VM template), where it is the derived `<machine-id>#<serial-or-MAC>` (ADR-0074 §3 / #1141) and the value the host actually claims is kept in `specs.identityConflict.reportedExternalId`. A reported CONTAINER child: `<host externalId>/container/<name>` (#1139) — name-keyed so a recreate is not a duplicate, host-scoped so two hosts' `redis` stay two nodes. The separator cannot occur in a host key, so the two spaces never collide on the shared partial unique index. |
+| `lastReportedAt` | `datetime?` | agent liveness (stale → OFFLINE). Advances for a host on every check-in and for a container child on every report that still lists it. |
+| `agentVersion` | `string?` | the reporting agent's build at its last check-in (#907); null for manual/pre-stamp nodes. |
+| `agentPolicy` | `jsonb?` | this node's own agent-policy override — the NARROWEST of the three #1140 scopes (instance default < service account < node). A partial `AgentPolicyOverride` (zod in `@lazyit/shared`): a closed set of booleans, integers and **glob** strings, never a command/script/path/regex. Null = "adds no override", which is every pre-#1140 row. Read-TOLERANT — an unparseable blob resolves as no override rather than failing a report. Written only by `PUT /infra/nodes/:id/agent-policy` (human-only); **no editor ships in this build** — the UI edits the instance default. |
+| `policyRevision` | `int?` | the policy generation the agent last **echoed** (#1140) — the acknowledgement half. Equal to the instance revision (`GET /infra/agent-policy`) = *applied*; lower = *pending* until the next check-in. Null for a manual node and for any agent predating the policy channel, which must render as "not reporting a policy", never as "pending". |
+| `policyAppliedAt` | `datetime?` | when the echoed revision last **changed** — i.e. when this host actually picked a new policy up. Deliberately not advanced on every report, or it would just be a second `lastReportedAt`. |
+| `policyStaleAfterSeconds` | `int?` | the staleness threshold last **served** to this node, denormalized so the §4 sweeper judges each node against the cadence it was told instead of one global env var (#1140). A container child inherits its host's. Written only when the report **echoed a `policyRevision`** — an agent that predates the policy channel is not running a served threshold, so its row stays null and keeps the env var — and rewritten on every such report, so it self-heals after any policy change. Null = never served one → the sweeper falls back to `INFRA_AGENT_STALE_AFTER_MS`. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete = off the map. |
@@ -112,14 +164,24 @@ Enums: `InfraNodeKind` = `PHYSICAL_HOST` · `VM` · `CONTAINER` · `CLUSTER` · 
 
 Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDING review-tray query).
 
+> **No reporter column, deliberately (#1134).** The `POST /infra/report` throttles bound agent row
+> creation by RATE, in memory, keyed on the server-resolved principal — so nothing on the row records
+> which service account reported it. Agent writes stay **unattributed**, exactly as ADR-0074 §8's
+> #1136 correction states. Per-reporter attribution becomes worth its migration only once
+> `install.sh` stops writing the same operator token on every host (#1146).
+
 ## Endpoints
 
 `apps/api/src/infra/` (`InfraModule`), all gated server-side (`infra:read` / `infra:manage`):
 
-- `GET /infra/nodes?kind=&status=&state=` — list (plain `InfraNode[]`, **no page envelope** — the
-  estate is small by design; excludes soft-deleted, newest first). Carries `assetId` (the linkage),
-  not the asset name/owners (those are detail-only). Enriching the list row with the asset name +
-  owner is a tracked follow-up (#750).
+- `GET /infra/nodes?kind=&status=&state=` — list (plain `InfraNodeListItem[]`, **no page envelope** —
+  the estate is small by design; excludes soft-deleted, newest first). Each row is the node PLUS the
+  linked Asset's inventory `assetName` and its active `owners`, joined in ONE query and flattened
+  (#750) — a soft-deleted asset never leaks its name. **Minus `specs`** (#1135): a lean `select`
+  projection omits the blob, because on an agent-reported host it is the whole inventory
+  (installed-software list included) and this endpoint is polled — every 40s by the PENDING review
+  tray, every 5s by the create-agent wizard. Nothing renders `specs` from a list row; read it from
+  the drill-in below. A `take`/pagination pass is still a tracked follow-up.
 - `GET /infra/nodes/:id` — the enriched **drill-in** (`InfraNodeDetail`): the node plus its
   asset-backed payoff — `assetName`, active `owners`, published `articleLinks`, `secretRefs`
   (HANDLES only, never values — INV-10, [[0061-secret-manager-zero-knowledge]]; resolved from the
@@ -132,7 +194,8 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   return the node's updated resolved `secretRefs` ([[0073-infra-node-secret-linkage]], #801).
 - `POST /infra/nodes` — create; default asset-backed (`trackAsAsset`, §5).
 - `PATCH /infra/nodes/:id` — partial update (`status` toggle, `label`, `kind`, `ipAddress`,
-  `shortcuts`, `assetId: null` to detach).
+  `shortcuts`, `assetId: null` to detach, an `assetId` to attach one to a node that has none —
+  **re-pointing an already-linked node is a `400`**, #1117).
 - `PATCH /infra/nodes/:id/position` — persist canvas `{ x, y }` (debounced on drag-stop).
 - `DELETE /infra/nodes/:id` — soft delete (off the map). `POST /infra/nodes/:id/restore` — back on.
 - `GET /infra/nodes/:id/impact` — **blast radius** ([[0070-infra-topology-graph]] §7): the downstream
@@ -140,16 +203,91 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   affected if this goes down."
 - `GET /infra/nodes/:id/edges?active=` — the node's [[infra-edge]]s (active-only by default; pass
   `active=false` for full history incl. closed migrations).
+- `GET /infra/nodes/:id/changes?limit=&cursor=` — the node's [[infra-node-fact-change]] history,
+  newest first: what MOVED (a package added/removed/upgraded; the OS, kernel, memory, disk, serial or
+  a container's image digest), never one row per report. Keyset-paginated on the append-only `id`;
+  `limit` defaults to 50, clamped to 200. Read-only — only the ingest path appends
+  ([[0074-server-reporting-agent]] §3 amendment, #1143).
+- `GET /infra/nodes/:id/identity-matches` — other LIVE nodes sharing a **burned-in** fact (serial or
+  MAC) with this one, from the stored `host.identifiers[]` (ADR-0074 §3 / #1141). The *"this looks like
+  `srv-app-04` re-imaged — adopt?"* hint the review tray's merge dialog shows. Read-only, best-effort,
+  and **empty** for any node reported by an agent older than contract v2 (no evidence stored) — no
+  hint beats a wrong one. Hostname matches are never offered.
+- `POST /infra/nodes/:id/merge-into` — `{ targetNodeId }`. Re-key: transplant this node's agent
+  reporting key onto the target so future reports land there, then soft-delete this node with the
+  merge stamped into its `specs` (`_infraMergedInto`). **Identity moves; curation does not** — the
+  target keeps its `label`, `state`, `kind`, position, asset link and edges; its human-`MANUAL` IP is
+  never clobbered; its non-agent `specs` keys survive. `infra:manage` + human-only (a reporting agent
+  must never re-key its own way out of the PENDING tray). 400 on a self-merge or a source with no
+  reporting key. The archived duplicate **is** the audit trail — there is no `InfraNodeHistory`, and a
+  soft-deleted node can never be overwritten by a later report. Its own `reportingSource`/`externalId`
+  are **cleared** as it is archived (they now live on the target, and the partial-unique index admits
+  one holder), so it stays **restorable** per [[0006-soft-delete-and-auditing]] — restoring returns the
+  row and its curation, never the reporting key. If the target already had a reporting key of its own —
+  which the re-image case always does — the transplant **replaces** it; the displaced key is recorded
+  as `_infraMergedInto.replacedTargetKey` and logged, and a host still checking in under it returns as
+  a fresh PENDING proposal.
+
+### Reviewing at scale (ADR-0074 §1 amendment, #1145)
+
+- `POST /infra/nodes/bulk-confirm` — `{ items: [{ id, trackAsAsset?, kind?, label? }] }`, max 200,
+  ids unique. Each item is applied through the **same** `confirmNode` the single route calls, so the
+  semantics are identical; overrides are per item because a host and its containers want different
+  `trackAsAsset` answers and `label` is not a batch concept. Same gate as the single confirm
+  (`infra:manage` + `asset:write` + human-only). Returns **per-item** outcomes
+  (`applied` / `skipped` — already CONFIRMED / `notFound` / `failed` with the message the single
+  action would have returned) plus counts; one failing item never discards the rest. Sequential
+  server-side (each item can mint an Asset and re-index).
+- `POST /infra/nodes/bulk-discard` — `{ ids }`, max 200. The existing soft delete over a set, in one
+  statement; an id already gone reads `notFound` and never widens the write. `infra:manage`, mirroring
+  `DELETE /infra/nodes/:id`.
+- The tray **groups children under their reporting host** (`hostExternalIdOfContainerChild` inverts
+  the `<host>/container/<name>` key), so confirming a host with its containers is one selection. Its
+  filters (name glob or substring, subnet CIDR, reported kind, host-vs-container) and sorts are
+  **client-side over the lean list row** — nothing was added back to the projection #1135 slimmed;
+  the subnet filter reuses the same `ipInCidr` the auto-confirm rules use. Paging `GET /infra/nodes`
+  is a separate concern (#1152).
+
+See [[infra-auto-confirm-rule]] for the saved-rule half of the same amendment.
+
+### Server-driven agent policy (ADR-0074 §7 amendment / #1140)
+
+- `GET /infra/agent-policy` — the **instance default** layer plus the instance-wide `revision`
+  (`infra:read`). `settings` is the stored layer an operator edits; `effective` is that layer resolved
+  over the built-in defaults — it is what a host with **no narrower override** runs, and deliberately
+  not a promise about hosts that have one.
+- `PUT /infra/agent-policy` — replace the instance default and bump the revision
+  (`settings:manage`, human-only). The body is a PARTIAL policy: omitted fields fall back to the
+  built-in defaults, so `{}` restores all of them.
+- `PUT|DELETE /infra/agent-policy/service-accounts/:id` — the **middle** scope, and the only one that
+  can configure a host before it has a node (`settings:manage`, human-only).
+- `PUT|DELETE /infra/nodes/:id/agent-policy` — the **narrowest** scope (`infra:manage`, human-only).
+
+There is **no `GET /agent/policy`** and there never will be: the policy rides the existing report ack
+(`AgentReportAckSchema.policy`), which is already authenticated, already per-agent and already
+happening. Every write here is **human-only** — a reporting agent holding `infra:report` can *receive*
+a policy and can never author one. `PUT /infra/agent-policy` is the only one with a UI (Settings →
+Reporting agents — its own section since #1174); the two narrower scopes work but ship no editor in
+this build, which that section now states on screen rather than implying only one scope exists.
 
 ## Not yet implemented (deferred)
 
-- The **v2 reporting agent** (auto-discovery → PENDING tray, liveness, reconciliation/merge-on-confirm)
-  — its columns exist nullable now; its own major epic.
+- ~~The **v2 reporting agent** (auto-discovery → PENDING tray, liveness, reconciliation/merge-on-confirm)
+  — its columns exist nullable now; its own major epic.~~ **Shipped** ([[0074-server-reporting-agent]],
+  epic #831): auto-discovery into the PENDING tray, the staleness sweeper, and — as of #1141 — identity
+  corroboration plus an explicit `merge-into` re-key. Note the merge is a **separate human action**, not
+  the "merge-on-confirm" this bullet imagined: confirming still only promotes one proposal.
+- Listening-socket `DEPENDS_ON` **hints** (suggested edges a human accepts, never auto-created) —
+  deferred on purpose, ADR-0074 §3 amendment (#1139).
+- ~~A dedicated `InfraNodeHistory`.~~ **Shipped** as [[infra-node-fact-change]] ([[0074-server-reporting-agent]]
+  §3 amendment, #1143) — narrower than the name implied, and deliberately so: it records the tracked
+  FACTS that moved (packages, OS/kernel/memory/disk/serial, a container's image digest), not every
+  edit to every column. Curation changes (label, kind, position, asset linkage) are still not logged.
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
-  per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]]; a
-  dedicated `InfraNodeHistory`. → [[0070-infra-topology-graph]] "Future".
+  per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]].
+  → [[0070-infra-topology-graph]] "Future".
 
-Related: [[infra-edge]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
-[[0070-infra-topology-graph]] · [[0019-asset-assignment-integrity]] ·
+Related: [[infra-edge]] · [[infra-node-fact-change]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
+[[0070-infra-topology-graph]] · [[0074-server-reporting-agent]] · [[0019-asset-assignment-integrity]] ·
 [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] · [[0046-roles-permissions-v2]] ·
 [[0061-secret-manager-zero-knowledge]] · [[0048-service-accounts]]

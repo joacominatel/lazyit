@@ -19,8 +19,10 @@ review this revision folds in), now **accepted**: the **MVP + v1** are built and
 [[0019-asset-assignment-integrity]] (the timestamped-join pattern the edges reuse),
 [[0041-soft-delete-reuse-and-restore]], [[0046-roles-permissions-v2]],
 [[0048-service-accounts]] (the auth pattern the v2 reporting agent extends),
-[[0053-async-workers-bullmq-valkey]] (the substrate the agent feeds),
 [[0061-secret-manager-zero-knowledge]] (secrets attachable to asset-backed nodes).
+// this list originally also named ~~[[0053-async-workers-bullmq-valkey]] (the substrate the agent
+feeds)~~ — **corrected 2026-07-31, #1136:** the agent feeds no queue; report ingestion is inline and
+synchronous, see the §3 amendment in [[0074-server-reporting-agent]].
 
 This is a **new major** for lazyit. The ADR fixes the **data model and the phasing
 (MVP → v1 → v2 agent → future)** so the model is never re-migrated, while scoping what each phase ships.
@@ -40,8 +42,11 @@ This is a **new major** for lazyit. The ADR fixes the **data model and the phasi
 > `reportingSource`, `externalId`, `lastReportedAt` — exist nullable now, but no agent code, no review
 > tray, no `(reportingSource, externalId)` composite unique index yet). **Future:** network depth
 > (VLAN/ports/subnets/IPAM), metrics/telemetry & alerting, per-kind `specs` schema validation (the
-> existing `TODO(specs)` debt), multi-board layouts, a `SERVICE` kind linked to [[application]], a
-> dedicated `InfraNodeHistory`. **v1 follow-ups:** **#750** — enrich `GET /infra/nodes` with the
+> existing `TODO(specs)` debt), multi-board layouts, a `SERVICE` kind linked to [[application]], ~~a
+> dedicated `InfraNodeHistory`~~ — **partly delivered 2026-08-02 (#1143)** as the append-only
+> `InfraNodeFactChange` ([[0074-server-reporting-agent]] §3 amendment): what the reporting agent
+> observed MOVE (packages, OS/kernel/memory/disk/serial, a container's image digest), not a log of
+> every column edit. Curation changes are still recorded nowhere. **v1 follow-ups:** **#750** — enrich `GET /infra/nodes` with the
 > linked asset's name/owner so the Servers list shows it inline and search can match asset name (today
 > the list row carries only `assetId`, surfaced as a Tracked/Graph-only indicator; the full name +
 > owners are one click away in the drill-in panel); and **asset→secret linkage** so the panel's
@@ -234,7 +239,10 @@ rather than blocks, to stay generic.
 A future installable client (one per host) auto-discovers workloads and posts them. The model is ready:
 `source=AGENT`, `state=PENDING` (lands in a **review tray**, not the live map, until an operator
 confirms), `reportingSource` + `externalId` for idempotent reconciliation, `lastReportedAt` for liveness
-(stale → `OFFLINE`). It feeds the existing async substrate ([[0053-async-workers-bullmq-valkey]]).
+(stale → `OFFLINE`). ~~It feeds the existing async substrate
+([[0053-async-workers-bullmq-valkey]]).~~ — **corrected 2026-07-31, #1136:** it does not. The agent
+that shipped ingests inline and synchronously, with no queue in the path; see the §3 amendment in
+[[0074-server-reporting-agent]].
 
 **Trust model (sketch — fixed now because it shapes the schema, built in v2):**
 - **Enrollment**: each agent is a scoped credential modeled on [[0048-service-accounts]] — an
@@ -259,6 +267,53 @@ inventory owned-by-nobody); if the Asset pre-existed and was merely linked, deta
 and leaves the Asset intact. A node **reads inventory facts through `assetId`**; **`label` is the canvas
 display name and always wins for display**, `asset.name` is shown as a secondary "inventory name" in the
 detail panel — no silent copy, no drift.
+
+> **Updated 2026-08-01 (#1117): a patch may ATTACH or DETACH the asset link; it may never RE-POINT
+> one.** The detach semantics above were implemented; the *other* direction was never decided and
+> quietly worked. `PATCH /infra/nodes/:id` accepted any cuid in `assetId`, and `updateNode` handled
+> only the `null` case, so a non-null id was written straight to the row — with **no liveness check**
+> and, when the node already had a link, **without running the detach above**.
+>
+> **The resulting contract, in full — three cases, and the line falls between the last two:**
+>
+> | `assetId` in the patch | node's current link | outcome |
+> | --- | --- | --- |
+> | `null` | any | **detach** — the §5 semantics above, unchanged |
+> | a cuid | **none** | **attach**, after `assets.assertExists` — `404` if that asset is missing or discarded |
+> | a cuid | **an asset** | **`400`** — the re-point |
+>
+> **Why the line is there.** The two non-null cases are not the same operation. A **first-attach** has
+> no previous link to drop, so it orphans nothing; it was only ever missing the check `createNode`
+> performs — `assets.assertExists`, whose read the soft-delete extension scopes to live rows. Without
+> it the FK was the only gate, and the FK requires the row to *exist*, which a **discarded**
+> (soft-deleted) asset's row does — so a discarded asset went straight into the column. (A wholly
+> non-existent id was at least stopped, by the FK itself, as a generic `Invalid reference` 400 rather
+> than the clean 404 `assertExists` gives — the issue that raised this called both cases linkable;
+> only the soft-deleted one was.) Adding `assertExists` closes that, and the operation keeps working.
+>
+> A **re-point** is the one that is actually broken: it drops the current link with no detach, so an
+> **auto-created** backing Asset — what a `trackAsAsset` node mints for itself, and therefore the
+> common case — is left live in inventory owned by nobody, the exact orphan this section exists to
+> forbid. (A *pre-existing* linked asset survives a re-point intact, exactly as it survives a detach;
+> the refusal covers both because the caller's id is checked against the node, not the provenance
+> marker.) It is refused rather than made to work, because making it work means deciding what
+> happens to the outgoing asset, and the only automatic answer — soft-deleting it — would delete a row
+> a human may have curated, which [[0006-soft-delete-and-auditing]] does not allow a machine to
+> decide. **The refusal is not a dead end:** detach (`assetId: null`, which runs §5 on the outgoing
+> asset with the human's intent behind it), then attach in a second patch. The 400 says exactly that.
+>
+> **Where it is enforced, and why not in the contract.** `InfraService.updateNode`, and only there —
+> the rule needs the node's *stored* `assetId`, which a zod schema never sees. `UpdateInfraNodeSchema`
+> therefore still accepts `z.cuid().nullable()` and cannot tell a re-point from a first-attach; there
+> is no second, narrower boundary to lean on.
+>
+> **If re-point is ever wanted**, it is its own endpoint with its own explicit answer to the outgoing
+> asset (keep it? discard it? hand it to the operator to decide?), not a field on a partial update —
+> which is exactly the decision this note refuses to make implicitly.
+>
+> **Nothing user-facing changes.** No lazyit surface has ever sent `assetId` in a patch — the node
+> panel patches `label`/`kind`/`status`/`ipAddress`/`shortcuts` only, and the canvas patches
+> position — so the exposure was a hand-crafted request by an `infra:manage` holder.
 
 ### 6. Frontend — the canvas + the payoff in the MVP
 
@@ -287,6 +342,52 @@ list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (c
 > ADR-0049's budget and `prefers-reduced-motion` (the cinematic deep-link fit-view at ~400ms is the
 > one allowed exception). The pure helpers (`edgeStyle`/`layoutNodes`/`placementOffset`) are
 > unit-tested in `apps/web/lib/infra/canvas.test.ts`.
+
+> **Amendment (2026-08-02, #1181 + #1182) — the drill-in is a tabbed modal, click no longer opens it,
+> and the Map can reach the agent.** Three sentences above are now wrong about the shipped screen.
+>
+> **"Click = a drill-in panel"** is no longer true, and the reason is §7. The panel became a right-hand
+> `Sheet` carrying, in one scroll, identity + provenance badges, the editable fields, the blast-radius
+> action, the whole ADR-0074 reported-facts block (a container's published-ports table was clipped
+> horizontally in normal use), the installed-software list and the #1143 Changes tab. It was not merely
+> cramped: everything on it carried equal weight, so an operator read all of it to find one thing. It is
+> now a **large tabbed modal** (`node-detail-modal.tsx`) — General · Reported facts · Software ·
+> Connections · Changes — whose tab set ADAPTS per node, derived from the two `specs` projections rather
+> than from `source`, so a container never opens onto the host renderer and an agent node with no
+> reported block gets no empty facts tab (the #1139 no-raw-JSON-fallthrough rule, restated as a tab
+> rule and unit-tested in `node-detail-tabs.test.ts`). Because a modal covers the board, **clicking a
+> node now only SELECTS it**: an on-canvas action bar appears under the selected card, and the modal
+> opens from its **Details** button, a double-click, or the `?node=` deep-link (which still opens it, so
+> the Table→Map round-trip is unchanged). That round-trip needed a fix to be true at all: the param was
+> read once, in a `useState` initializer, and an in-app row click is a client-side navigation to the
+> same route — the view never remounted, so the link flipped to the Map and selected nothing. `?node=`
+> is now applied whenever it changes (`node-deep-link.ts`), which is also what makes it correct to say
+> a row lands on the node it named.
+>
+> **§7's blast radius moved onto the canvas.** Its entire output is drawn on the graph, so requiring an
+> operator to open a panel, scroll, click and then look back at the map was three steps too many for an
+> answer already on screen. The toggle is on the selected node's action bar; a bottom-centre summary
+> gives the count (or the reassuring "safe to take down"), and the per-node hop depth rides in the hover
+> quick-facts card. The affected LIST moved with it rather than being dropped: the summary enumerates
+> the affected nodes — label, kind, hop depth, shallowest first — behind a disclosure that is open by
+> default and scrolls inside itself. Highlighting answers *roughly how bad* and the count answers *how
+> many*; neither answers **which ones** in a form an operator can scan, count or copy, and a host with
+> a dozen dependents is otherwise a cluster of glowing cards to be read off the canvas by eye. The
+> summary also carries the two states a bare count cannot: the query still in flight (a board that has
+> not changed yet reads as "the button didn't work") and the query that FAILED — which must never
+> render as the reassuring empty radius, the way an errored query did in the rail.
+>
+> **The payoff panel is still the payoff** — the claim that this beats a Draw.io diagram holds; what
+> changed is the container it ships in.
+>
+> **The Map can now reach the reporting agent (#1181).** The header's "Add node" button was the Map's
+> only add path, and the ADR-0074 wizard that mints the agent's Service Account lived exclusively in the
+> Table view. One control now carries both, agent first, deliberately inverting the default: an
+> agent-reported node self-populates, stays current and goes OFFLINE on its own, while a hand-drawn one
+> is accurate for as long as someone remembers to edit it. Manual is the fallback for what cannot run an
+> agent. The two paths carry different permissions (`settings:manage` vs `infra:manage`) and the control
+> renders only what the caller holds; with one path it collapses to a plain button. Nothing about the
+> wizard itself changed — it is reached, not rebuilt.
 
 ### 7. Impact / blast-radius — the query that justifies a graph
 
@@ -319,7 +420,8 @@ create also needs the relevant `assets:*`). Confirming a PENDING node needs `inf
   `(reportingSource, externalId)`, the composite unique index.
 - **Future** — network depth (VLAN/ports/subnets, real IPAM), metrics/telemetry overlay, alerting,
   per-kind `specs` schema validation (existing `TODO(specs)` debt), multi-board layouts, `SERVICE` node
-  kind linked to the existing `Application` entity, dedicated `InfraNodeHistory`.
+  kind linked to the existing `Application` entity, ~~dedicated `InfraNodeHistory`~~ — partly
+  delivered as `InfraNodeFactChange` (#1143; see the box above).
 
 ## Scope cuts (explicit non-goals)
 

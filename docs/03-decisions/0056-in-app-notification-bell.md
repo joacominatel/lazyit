@@ -382,7 +382,23 @@ queue, DSL or config.
   is excluded from the flip yet may still get one nudge (a tiny two-query race, deduped, on a small cohort).
   Ceiling: the exact flipped set would need a `RETURNING` clause (raw SQL) or a per-node update.
 
-Both are additive closed-enum literals (§5): the golden shared test asserts them, and — because the web bell's
+**Amendment (2026-07-31, #1141) — `infra.identity_conflict`.** A third literal, same shape and same
+discipline: emitted from `InfraService.ingestReport` ([[0074-server-reporting-agent]] §3 amendment) when a
+report matches an existing node's `externalId` while its serial **and** its MAC set both differ — i.e.
+two hosts sharing one `/etc/machine-id`, which is a cloned VM template far more often than it is anything
+else. The hostname is not part of that rule (a golden image bakes one in), but a *shared* hostname is
+named in the summary as corroborating evidence. `severity: warning`, metadata = both node ids + the peer's label + the reported hostname + the discriminator,
+deep-linked (by type) to the topology map where the review tray holds the separated host. Dedupe
+`infra.identity_conflict:<peerNodeId>:<discriminator>` and emitted **only on the branch that creates the
+second node** → one nudge per newly-detected colliding host, never one per 15-minute check-in — the same
+one-per-event rule `infra.agent_offline` follows above. The summary names the **remedy for the
+reporting host's platform** (`systemd-firstboot --setup-machine-id` on Linux, `sysprep /generalize` on
+Windows; the action with no command for a family lazyit ships no agent for), because an alert an
+operator cannot act on is a worse outcome than the silence it replaced — and one naming a command
+their OS does not have is worse still. It stays **bell-only**: the email allowlist
+([[0079-instance-smtp-outbound-email]] fork #1) is a product call, not something a feature adds to itself.
+
+All three are additive closed-enum literals (§5): the golden shared test asserts them, and — because the web bell's
 `TYPE_META` is an **exhaustive `Record<NotificationType, …>`** that CI type-checks — each new literal needs a
 `TYPE_META` entry (icon + tone + by-type deep-link) or `apps/web` fails to compile. That one-entry-per-type
 cost is the standard catalog-as-code tax (§6), not scope creep into web app logic.

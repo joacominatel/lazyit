@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   ASSET_TAG_AFFIX_MAX,
   ASSET_TAG_WIDTH_MAX,
+  AssetTagNextPreviewQuerySchema,
+  AssetTagNextPreviewSchema,
   AssetTagSchemeSchema,
   UpdateAssetTagSchemeSchema,
   renderAssetTag,
@@ -130,5 +132,73 @@ describe("renderAssetTag (shared allocation/preview formula)", () => {
   test("null/absent affixes render as empty (suffix supported)", () => {
     expect(renderAssetTag({ prefix: null, suffix: null, width: null }, 7)).toBe("7");
     expect(renderAssetTag({ width: 3, suffix: "-EOL" }, 7)).toBe("007-EOL");
+  });
+});
+
+describe("AssetTagNextPreview contract (the truthful next-tag preview, #1180)", () => {
+  test("query coerces the numeric params that arrive as query strings", () => {
+    expect(
+      AssetTagNextPreviewQuerySchema.parse({ prefix: "IT#", width: "4", from: "1000" }),
+    ).toEqual({ prefix: "IT#", width: 4, from: 1000 });
+  });
+
+  test("query accepts a fully empty pattern (no affixes, counter from the stored scheme)", () => {
+    expect(AssetTagNextPreviewQuerySchema.parse({})).toEqual({});
+  });
+
+  test("query rejects a negative `from` and an out-of-range width", () => {
+    expect(AssetTagNextPreviewQuerySchema.safeParse({ from: "-1" }).success).toBe(false);
+    expect(
+      AssetTagNextPreviewQuerySchema.safeParse({ width: String(ASSET_TAG_WIDTH_MAX + 1) })
+        .success,
+    ).toBe(false);
+  });
+
+  test("response models the allocatable case: number + rendered tag + how many were skipped", () => {
+    const parsed = AssetTagNextPreviewSchema.parse({
+      fromNumber: 1000,
+      number: 1001,
+      tag: "IT#1001",
+      skippedCount: 1,
+      exhausted: false,
+    });
+    expect(parsed.number).toBe(1001);
+    expect(parsed.tag).toBe("IT#1001");
+  });
+
+  test("response models the exhausted case: no number, no tag", () => {
+    expect(
+      AssetTagNextPreviewSchema.parse({
+        fromNumber: INT4_MAX,
+        number: null,
+        tag: null,
+        skippedCount: 1,
+        exhausted: true,
+      }).tag,
+    ).toBeNull();
+  });
+
+  test("response rejects a tag without a number (the two always move together)", () => {
+    expect(
+      AssetTagNextPreviewSchema.safeParse({
+        fromNumber: 1,
+        number: null,
+        tag: "IT#1",
+        skippedCount: 0,
+        exhausted: true,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("response rejects a number without a tag (the two always move together)", () => {
+    expect(
+      AssetTagNextPreviewSchema.safeParse({
+        fromNumber: 1,
+        number: 1,
+        tag: null,
+        skippedCount: 0,
+        exhausted: false,
+      }).success,
+    ).toBe(false);
   });
 });

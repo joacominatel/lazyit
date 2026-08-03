@@ -2,6 +2,7 @@ import type {
   AssetTagBackfillMode,
   AssetTagBackfillPreview,
   AssetTagBackfillResult,
+  AssetTagNextPreview,
   AssetTagScheme,
   AssetTagSeedSuggestion,
   UpdateAssetTagScheme,
@@ -23,7 +24,13 @@ const BASE = "/config/asset-tag-scheme";
 /**
  * Read the current scheme (`GET /config/asset-tag-scheme`). Returns the persisted scheme or — when no
  * scheme was ever configured — an explicit `enabled: false` default with the next-allocatable
- * `nextNumber`. Public to any authenticated user (the asset-form hint reads it), unlike the PUT.
+ * `nextNumber`.
+ *
+ * Gated `settings:manage` server-side, like every other route on this controller (403 otherwise).
+ * That is deliberate for the settings editor, and it is why the asset-form's auto-tag hint only
+ * appears for an admin: for anyone else this query 403s, `data` stays undefined, and the form falls
+ * back to its labelled example. Callers must therefore treat the scheme as OPTIONAL context, never as
+ * a precondition for creating an asset — the server allocates the tag either way.
  */
 export function getAssetTagScheme(signal?: AbortSignal): Promise<AssetTagScheme> {
   return apiFetch<AssetTagScheme>(BASE, { signal });
@@ -70,6 +77,44 @@ export function getAssetTagSeedSuggestion(
   const search = qs.toString();
   return apiFetch<AssetTagSeedSuggestion>(
     search ? `${BASE}/seed-suggestion?${search}` : `${BASE}/seed-suggestion`,
+    { signal },
+  );
+}
+
+/**
+ * Query params for the next-tag preview — the pattern to preview. Affixes are sent VERBATIM (an
+ * omitted affix means "no affix"), so the editor can preview a pattern it has not saved yet. `from`
+ * is the counter floor; omit it to let the server use the stored `nextNumber`.
+ */
+export interface AssetTagNextPreviewParams {
+  prefix?: string;
+  suffix?: string;
+  width?: number;
+  from?: number;
+}
+
+/**
+ * Read the tag the scheme would allocate next (`GET /config/asset-tag-scheme/next-tag`, #1180).
+ *
+ * The API runs the SAME skip-existing selection the allocator runs (ADR-0068 §1) over the live
+ * estate, so this is the number the server would assign for this pattern at this instant — not the
+ * raw counter, which may already be taken. It is a preview, NOT a reservation: nothing is consumed
+ * and the counter never advances, so it is safe to refetch as the operator types. `skippedCount`
+ * says how many already-taken numbers were stepped over; `exhausted` mirrors the allocator's
+ * int4-ceiling freeze with a null number/tag instead of a 400. `settings:manage`.
+ */
+export function getAssetTagNextPreview(
+  params: AssetTagNextPreviewParams = {},
+  signal?: AbortSignal,
+): Promise<AssetTagNextPreview> {
+  const qs = new URLSearchParams();
+  if (params.prefix) qs.set("prefix", params.prefix);
+  if (params.suffix) qs.set("suffix", params.suffix);
+  if (params.width !== undefined) qs.set("width", String(params.width));
+  if (params.from !== undefined) qs.set("from", String(params.from));
+  const search = qs.toString();
+  return apiFetch<AssetTagNextPreview>(
+    search ? `${BASE}/next-tag?${search}` : `${BASE}/next-tag`,
     { signal },
   );
 }

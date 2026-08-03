@@ -52,6 +52,21 @@ import { pageSchema } from "./pagination";
  *     #852; ADR-0074 §4): the staleness sweeper flipped a reporting-agent node CONFIRMED→OFFLINE (it
  *     stopped reporting). Broadcast to the admin feed; deep-links to the topology map. ONE per outage
  *     (deduped on the node's last-report timestamp), never once-per-sweep.
+ *   - `infra.identity_conflict` — two hosts are reporting the SAME `externalId` (ADR-0074 §3 amendment,
+ *     issue #1141): the ingest found a report whose serial set AND MAC set BOTH differ from the ones
+ *     stored on the node that key already owns. The HOSTNAME is deliberately NOT part of that rule —
+ *     a golden image bakes one in, so gating on it would excuse the exact case the check exists for;
+ *     a SHARED hostname is instead named in the summary as corroborating detail. See
+ *     {@link isClonedMachineId} in `./infra`, which is the rule itself. Almost always a VM template or
+ *     golden image with a baked identity value — `/etc/machine-id` on Linux, a `MachineGuid` that
+ *     `sysprep /generalize` never regenerated on Windows. Broadcast to the admin feed; deep-links to the
+ *     topology map. Emitted ONCE per newly-detected colliding host
+ *     (`infra.identity_conflict:<peerNodeId>:<discriminator>`), never
+ *     once per report — the clone keeps checking in every 15 minutes. This is the ONLY automatic action
+ *     the collision detection takes: the report is still accepted, nothing is auto-merged or auto-split,
+ *     and the remedy for the REPORTING HOST'S PLATFORM is named in the summary
+ *     (`systemd-firstboot --setup-machine-id` on Linux, `sysprep /generalize` on Windows; families
+ *     lazyit ships no agent for get the action with no command rather than an invented one).
  *   - `update.available`     — the weekly update-awareness nudge (ADR-0084 §2, issue #904): the opt-in
  *     GitHub-releases check observed a NEWER release than the running version. Broadcast to the admin
  *     feed (the audience that can act); deep-links to Settings → Instance. De-duped per newly-observed
@@ -100,6 +115,7 @@ export const NOTIFICATION_TYPES = [
   "secret.vault_setup",
   "permission_widened",
   "infra.agent_offline",
+  "infra.identity_conflict",
   "update.available",
   "access_request.created",
   "access_request.decided",

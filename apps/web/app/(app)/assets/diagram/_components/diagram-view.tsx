@@ -1,23 +1,21 @@
 "use client";
 
-import {
-  PlusIcon,
-  ShareIcon,
-  TableCellsIcon,
-} from "@heroicons/react/24/outline";
+import { ShareIcon, TableCellsIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/page-header";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useInfraImpact } from "@/lib/api/hooks/use-infra-nodes";
 import { buildNextUrl } from "@/lib/hooks/list-params-url";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
+import { AddNodeMenu } from "./add-node-menu";
+import { CreateAgentWizard } from "./create-agent-wizard";
 import { CreateNodeDialog } from "./create-node-dialog";
 import { InfraCanvas, type InfraCanvasApi } from "./infra-canvas";
-import { InfraNodePanel } from "./infra-node-panel";
+import { nodeToOpenFromUrl } from "./node-deep-link";
+import { NodeDetailModal } from "./node-detail-modal";
 import { ServersTableView } from "./servers-table-view";
 
 /**
@@ -37,43 +35,61 @@ import { ServersTableView } from "./servers-table-view";
  * a fixed viewport-relative height so pan/zoom has room without the page itself scrolling; the Table
  * view is a normal scrolling page, so the height clamp applies only to the Map.
  *
- * `selectedId` is the selection seam the canvas (#741) exposes via `onSelectNode`: clicking a node
- * sets it and opens the {@link InfraNodePanel} (owner/KB/secret-handles/shortcuts/children + the
- * write controls). The header's "Add node" action is gated on `infra:manage` (read-only viewers
- * still get the board + the read-only panel; the API is the real gate).
+ * **Selection and detail are two different things** since #1182. `selectedId` is what the canvas
+ * highlights and what the on-canvas action bar acts on; `detailId` is what the {@link NodeDetailModal}
+ * shows. Clicking a node only selects it, because the detail is now a large modal and opening one
+ * over the board on every click would bury the map the operator came to read — and would make the
+ * blast-radius control, whose entire output is drawn on that map, unusable. Detail opens from the
+ * action bar's **Details** button, a double-click, or a deep link.
  *
- * A `?node=<id>` query param seeds the initial selection so a Table row (or any deep-link) can land
- * on the Map with that node's drill-in panel open. ponytail: a one-shot seed via `useState`'s
- * initializer (read once on mount), not a synced effect — the URL drives the FIRST open, then the
- * user owns the selection. The panel works from a bare nodeId alone (it fetches its own detail), so
- * no canvas pan is needed for the payoff to show.
+ * A `?node=<id>` query param drives BOTH, so a Table row (or any deep-link) lands on the Map with
+ * that node selected and its detail open. It is applied whenever the param CHANGES, not only on
+ * mount: a row click is a client-side navigation to this same route, so this component never
+ * remounts and a `useState` initializer would never see the new id — which is exactly the gap
+ * between what `diagramHref` promised and what a row click actually did (#1182). It is not applied
+ * on every render either; {@link nodeToOpenFromUrl} holds that rule, so once the URL has landed the
+ * operator owns the selection and a detail they closed stays closed.
  *
  * `?focus=1` (issue #765) additionally asks the canvas to *fly to* the seeded node — used by the
- * future Assets "View in topology" button. The canvas exposes a `focusNode(id)` primitive via
- * `onApiReady`; we call it once, the first time the API is ready, if the deep-link asked for it
- * (`?node=&focus=1`). A bare `?node=` (no focus) just opens the panel, no camera move.
+ * Assets "View in topology" button. The canvas exposes a `focusNode(id)` primitive via `onApiReady`;
+ * we call it once, the first time the API is ready, if the deep-link asked for it (`?node=&focus=1`).
+ * A bare `?node=` (no focus) just opens the detail, no camera move.
  *
- * Impact / blast-radius (ADR-0070 §7, issue #755) lives HERE because the canvas and the panel both
- * read it: `impactOn` is the toggle the panel flips; the impact query runs once for the selected
- * node and feeds the panel its count/list AND the canvas its highlight set. Selecting another node
- * (or closing the panel) turns impact mode off so a stale radius never lingers — minimal lifted
- * state, no global store (the seam #741 already exposes for selection).
+ * Impact / blast-radius (ADR-0070 §7, issue #755) lives HERE because the query is per-selected-node:
+ * `impactOn` is the toggle the canvas's action bar flips, and the one response feeds the canvas its
+ * highlight set, its count and its enumerated list of affected nodes. Its in-flight and error states
+ * are forwarded too, so the operator gets an answer to the click before the radius exists and never
+ * gets the reassuring "safe to take down" from a query that failed. Selecting another node (or
+ * clearing the selection) turns impact mode off so a stale radius never lingers — minimal lifted
+ * state, no global store.
+ *
+ * The header's add affordance (#1181) leads with the reporting agent and keeps the hand-drawn node
+ * one click behind it; see {@link AddNodeMenu}. The two paths carry different permissions, so each is
+ * gated on its own and the control renders only what this operator can actually do.
  */
 export function DiagramView() {
   const t = useTranslations("infra");
   const canManage = useCan("infra:manage");
+  // Minting the reporting agent's Service Account needs settings:manage — the gate on every
+  // /service-accounts route (ADR-0048) — a different permission from the infra:manage that gates
+  // putting a node on the map by hand.
+  const canMintAgent = useCan("settings:manage");
   const searchParams = useSearchParams();
   const view = searchParams.get("view") === "table" ? "table" : "map";
-  const initialNodeId = searchParams.get("node");
-  const [selectedId, setSelectedId] = useState<string | null>(initialNodeId);
+  // The `?node=` the URL carries right now. Read on every render (not once): it is what both the
+  // initial state below and the deep-link effect further down are driven by.
+  const nodeParam = searchParams.get("node");
+  const [selectedId, setSelectedId] = useState<string | null>(nodeParam);
+  const [detailId, setDetailId] = useState<string | null>(nodeParam);
   const [impactOn, setImpactOn] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // One-shot deep-link focus (issue #765): if the URL is `?node=&focus=1`, fly to that node the
   // first time the canvas API is ready. Read once on mount (the URL drives the FIRST landing, then
   // the user owns the camera); the ref is nulled after firing so a later API re-ready never re-fires.
   const pendingFocusRef = useRef<string | null>(
-    initialNodeId && searchParams.get("focus") === "1" ? initialNodeId : null,
+    nodeParam && searchParams.get("focus") === "1" ? nodeParam : null,
   );
   const onCanvasReady = useCallback((api: InfraCanvasApi) => {
     const target = pendingFocusRef.current;
@@ -89,17 +105,43 @@ export function DiagramView() {
     setImpactOn(false);
   }
 
-  const { data: impact, isLoading: impactLoading } = useInfraImpact(
-    selectedId,
-    impactOn,
-  );
-  // The id set the canvas highlights — only meaningful while impact mode is on for THIS node.
-  const affectedIds = useMemo(
-    () =>
-      impactOn && impact ? new Set(impact.affected.map((n) => n.id)) : undefined,
-    [impactOn, impact],
-  );
+  // Opening a node's detail also selects it, so closing the modal leaves the operator looking at the
+  // node they were just reading about, with its action bar in place.
+  function openDetail(nodeId: string) {
+    if (nodeId !== selectedId) selectNode(nodeId);
+    setDetailId(nodeId);
+  }
+
+  // Apply `?node=` whenever the URL names one this view has not applied yet (#1182). The ref
+  // remembers what was applied — including the null the URL goes back to — so the same row clicked
+  // again after clearing the selection still opens, while an unrelated re-render never re-opens a
+  // detail the operator closed. The state is set directly rather than through `openDetail` so the
+  // effect depends on the URL alone.
+  const appliedNodeRef = useRef<string | null>(nodeParam);
+  useEffect(() => {
+    const target = nodeToOpenFromUrl(appliedNodeRef.current, nodeParam);
+    appliedNodeRef.current = nodeParam;
+    if (target === null) return;
+    setSelectedId(target);
+    setImpactOn(false);
+    setDetailId(target);
+  }, [nodeParam]);
+
+  const {
+    data: impact,
+    isError: impactError,
+    refetch: refetchImpact,
+  } = useInfraImpact(selectedId, impactOn);
   const impactRootId = impactOn ? selectedId : null;
+
+  const addAffordance = (
+    <AddNodeMenu
+      canCreateAgent={canMintAgent}
+      canCreateManual={canManage}
+      onCreateAgent={() => setWizardOpen(true)}
+      onCreateManual={() => setCreateOpen(true)}
+    />
+  );
 
   return (
     <div
@@ -118,12 +160,7 @@ export function DiagramView() {
         actions={
           <div className="flex shrink-0 items-center gap-2">
             <ViewToggle view={view} />
-            {canManage ? (
-              <Button onClick={() => setCreateOpen(true)}>
-                <PlusIcon />
-                {t("create.action")}
-              </Button>
-            ) : null}
+            {addAffordance}
           </div>
         }
       />
@@ -135,20 +172,29 @@ export function DiagramView() {
           <div className="min-h-0 flex-1">
             <InfraCanvas
               onSelectNode={selectNode}
+              selectedId={selectedId}
+              onOpenDetail={openDetail}
               impactRootId={impactRootId}
-              affectedIds={affectedIds}
+              // Gated on the toggle, not just on the data: the query keeps its last answer cached,
+              // and the canvas reads "resolved" as "not undefined". Until the radius for THIS node
+              // has actually come back, the board must not dim to the reassuring
+              // nothing-depends-on-this state and then re-light (#775).
+              impact={impactOn ? impact : undefined}
+              // The query errored and has nothing cached for this node: the canvas says so instead
+              // of sitting on the in-flight skeleton — and never renders it as "safe to take down".
+              impactFailed={impactOn && impactError}
+              impactOn={impactOn}
+              onToggleImpact={() => setImpactOn((on) => !on)}
+              onRetryImpact={() => void refetchImpact()}
               onApiReady={onCanvasReady}
+              emptyAction={addAffordance}
             />
           </div>
 
-          <InfraNodePanel
-            nodeId={selectedId}
-            onClose={() => selectNode(null)}
-            onSelectNode={selectNode}
-            impactOn={impactOn}
-            onToggleImpact={() => setImpactOn((on) => !on)}
-            impact={impactOn ? impact : undefined}
-            impactLoading={impactOn && impactLoading}
+          <NodeDetailModal
+            nodeId={detailId}
+            onClose={() => setDetailId(null)}
+            onSelectNode={openDetail}
           />
         </>
       )}
@@ -156,15 +202,18 @@ export function DiagramView() {
       {canManage ? (
         <CreateNodeDialog open={createOpen} onOpenChange={setCreateOpen} />
       ) : null}
+      {canMintAgent ? (
+        <CreateAgentWizard open={wizardOpen} onOpenChange={setWizardOpen} />
+      ) : null}
     </div>
   );
 }
 
 /**
  * The Map ⇄ Table segmented control (#760). A compact two-tab `Tabs` (the shadcn primitive the
- * Reports screen already uses — NO new dependency) sitting in the header actions slot, left of "Add
- * node". It drives `?view` directly: switching writes the param with `buildNextUrl` so every OTHER
- * param (the Table filters + a `?node=` selection) is preserved across the switch, then `router
+ * Reports screen already uses — NO new dependency) sitting in the header actions slot, left of the
+ * add affordance. It drives `?view` directly: switching writes the param with `buildNextUrl` so every
+ * OTHER param (the Table filters + a `?node=` selection) is preserved across the switch, then `router
  * .replace(..., { scroll: false })` keeps the URL shareable/Back-navigable without a scroll jump.
  * `inventory` pillar tint on the active underline so the toggle wears the Topology hue (ADR-0049).
  */

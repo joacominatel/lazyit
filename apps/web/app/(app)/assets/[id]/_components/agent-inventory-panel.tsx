@@ -33,8 +33,39 @@ export interface AgentInventory {
   extras: Array<[string, unknown]>;
 }
 
-/** Keys the structured panels own — everything else falls through to the custom-fields grid. */
-const INVENTORY_KEYS = new Set(["host", "software", "reportedAt", "_infraAutoCreated"]);
+/**
+ * Keys the structured panels own — everything else falls through to the custom-fields grid.
+ *
+ * `diagnostics` and `agentSkew` (#1138) are listed here to be EXCLUDED, not rendered. They ride the
+ * NODE's blob (never an Asset's — the API strips them on both Asset-facing paths), and they are
+ * machine bookkeeping about a single check-in: what the collector could not do, and what this build
+ * could not understand about the report. Dumping them under "Custom fields" would put a raw JSON blob
+ * on the panel of every host that merely reports unprivileged, labelled as if a human had typed it.
+ * They stay out until a surface is designed for them (the fleet view).
+ *
+ * `identityConflict` and `_infraMergedInto` (#1141) are here for the same reason. The first records
+ * WHY a node exists separately from the one that owns its reported machine-id; the second is the merge
+ * provenance stamped on an archived duplicate. Both are node-blob bookkeeping, not something a human
+ * typed — and the host carrying `identityConflict` is precisely the one an operator opens this panel
+ * to understand, so a raw JSON dump under "Custom fields" is at its most misleading exactly there.
+ * The conflict is communicated by the notification and the review tray instead.
+ *
+ * `softwareHash` (#1142) is the last of them: the fingerprint the agent and server compare to decide
+ * whether the package list changed. It rides the NODE's blob only — the API strips it on every
+ * Asset-facing path — and a hex string under "Custom fields" would be noise on the very panel that
+ * already renders the list it stands for.
+ */
+const INVENTORY_KEYS = new Set([
+  "host",
+  "software",
+  "softwareHash",
+  "reportedAt",
+  "_infraAutoCreated",
+  "diagnostics",
+  "agentSkew",
+  "identityConflict",
+  "_infraMergedInto",
+]);
 
 /**
  * Lightweight shape check (ADR-0074 §2): an agent-reported asset carries a nested `host` object with a
@@ -79,8 +110,21 @@ function formatBytes(bytes: number | undefined): string {
  * A structured, read-only render of ADR-0074 agent inventory carried in `Asset.specs` — the Host facts
  * panel plus a searchable/collapsible Software list. Replaces the raw-JSON custom-fields dump for
  * agent-reported assets; humans don't edit these facts (the agent owns them).
+ *
+ * `showSoftware` exists for the topology node-detail modal (#1182), which gives the package list a tab
+ * of its own — it is the largest single block a host reports, and it was the biggest contributor to
+ * the one-scroll rail this modal replaced. That caller renders the host facts with `showSoftware={false}`
+ * and mounts {@link AgentSoftwarePanel} on its own tab. The Asset detail page passes nothing and keeps
+ * the combined render it has always had: on a page that scrolls, the two belong together.
  */
-export function AgentInventoryPanel({ inventory }: { inventory: AgentInventory }) {
+export function AgentInventoryPanel({
+  inventory,
+  showSoftware = true,
+}: {
+  inventory: AgentInventory;
+  /** Render the installed-software list under the host facts. Default on. */
+  showSoftware?: boolean;
+}) {
   const t = useTranslations("assets.detail.inventory");
   const tc = useTranslations("common");
   const tf = useTranslations("assets.detail");
@@ -210,15 +254,30 @@ export function AgentInventoryPanel({ inventory }: { inventory: AgentInventory }
         )}
       </DetailPanel>
 
-      {software !== undefined && <SoftwarePanel software={software} />}
+      {showSoftware && software !== undefined && (
+        <AgentSoftwarePanel software={software} />
+      )}
     </>
   );
 }
 
-/** Searchable + collapsible installed-package list — a count, a filter and expand-on-demand rows. */
-function SoftwarePanel({ software }: { software: AgentSoftware }) {
+/**
+ * Searchable + collapsible installed-package list — a count, a filter and expand-on-demand rows.
+ *
+ * `defaultExpanded` is for a surface where the list IS the surface: the node-detail modal's Software
+ * tab (#1182) opens it already expanded, because an operator who clicked a tab named "Software" has
+ * already asked the question the collapse was there to defer. On the Asset detail page it stays
+ * collapsed — the list can run to hundreds of rows and it sits between other panels there.
+ */
+export function AgentSoftwarePanel({
+  software,
+  defaultExpanded = false,
+}: {
+  software: AgentSoftware;
+  defaultExpanded?: boolean;
+}) {
   const t = useTranslations("assets.detail.inventory");
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {

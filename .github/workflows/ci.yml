@@ -147,6 +147,13 @@ jobs:
         working-directory: apps/web
         run: bun test
 
+      # Agent tests (#1133) pin the collector's bounded-wait contract — that a hung command is
+      # killed and degrades to null rather than hanging the report. Spawns real processes (echo,
+      # false, sleep), so it needs a runner shell, not a DOM; `bun test` like the two steps above.
+      - name: Test agent
+        working-directory: apps/agent
+        run: bun test
+
       # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
       # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three
       # workspaces; on a cache hit unchanged ones are replayed instead of recompiled.

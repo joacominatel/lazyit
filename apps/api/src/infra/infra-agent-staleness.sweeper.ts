@@ -4,6 +4,7 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
+import { AGENT_POLICY_STALE_MIN_SECONDS } from '@lazyit/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -16,9 +17,14 @@ function envMs(name: string, fallback: number): number {
 }
 
 /**
- * Staleness threshold: how long since a node's last report before it is flipped OFFLINE. Default is a
- * small multiple (3×) of the agent's 15-min report cadence (ADR-0074 §4/§7) — a node misses two ticks
- * before it is declared dark, so a single dropped report never trips a false OFFLINE.
+ * FALLBACK staleness threshold: how long since a node's last report before it is flipped OFFLINE, for
+ * a node that has not been served one of its own. Default is a small multiple (3×) of the agent's
+ * 15-min report cadence (ADR-0074 §4/§7) — a node misses two ticks before it is declared dark, so a
+ * single dropped report never trips a false OFFLINE.
+ *
+ * It is no longer the ONLY threshold (#1140). A node the policy channel has reached carries the
+ * staleness it was served in `policyStaleAfterSeconds` and is judged against THAT; this env var
+ * covers manual nodes, agents that predate the policy channel, and any tick whose resolution failed.
  */
 export const INFRA_AGENT_STALE_AFTER_MS_DEFAULT = 45 * 60 * 1000; // 45 minutes
 /** How often the sweep runs. Once per report cadence is ample for a coarse liveness bit. */
@@ -35,8 +41,13 @@ export const INFRA_AGENT_SWEEP_INTERVAL_MS_DEFAULT = 15 * 60 * 1000; // 15 minut
  * dependency — it isn't installed), `unref`'d so it never holds the process open, NOT started under
  * `NODE_ENV=test` (the Jest suite mocks Prisma / has no real DB), re-entrancy guarded so a slow pass
  * never overlaps the next tick, and the whole pass try/caught so a transient DB error never crashes
- * the app. Threshold + interval are env-tunable (`INFRA_AGENT_STALE_AFTER_MS` /
- * `INFRA_AGENT_SWEEP_INTERVAL_MS`) with sane defaults.
+ * the app. The sweep INTERVAL and the FALLBACK threshold are env-tunable
+ * (`INFRA_AGENT_SWEEP_INTERVAL_MS` / `INFRA_AGENT_STALE_AFTER_MS`) with sane defaults.
+ *
+ * The THRESHOLD is now per node (#1140), not one global value: each node is judged against the
+ * staleness its own resolved policy served it (`policyStaleAfterSeconds`), falling back to the env
+ * default when it has none. That is what makes heterogeneous cadences possible at all — under one
+ * global cutoff, a host the operator moved to a daily report sat OFFLINE 23 hours out of 24.
  *
  * ponytail: the bulk flip is ONE `updateMany`; it does NOT re-index each flipped node into search (that
  * would be an N-query fan-out). The search `status` is cosmetic drift that the node's next report
@@ -94,26 +105,60 @@ export class InfraAgentStalenessSweeper
     }
     this.running = true;
     try {
-      const cutoff = new Date(Date.now() - this.staleAfterMs);
+      const now = Date.now();
+      // The WIDEST cutoff any node could use: the env default or the policy floor, whichever admits
+      // more rows. It is only a cheap pre-filter — the per-node decision happens below — so it must
+      // never exclude a node that its OWN threshold would have caught.
+      const candidateCutoff = new Date(
+        now -
+          Math.min(this.staleAfterMs, AGENT_POLICY_STALE_MIN_SECONDS * 1000),
+      );
       const where = {
         source: 'AGENT',
         status: { not: 'OFFLINE' },
         deletedAt: null,
-        lastReportedAt: { lt: cutoff },
+        lastReportedAt: { lt: candidateCutoff },
       } as const;
       // Snapshot the nodes about to transition INTO OFFLINE — the `status != OFFLINE` filter guarantees
       // these are genuine transitions, so we get the transition set the bulk `updateMany` can't return.
-      const transitioning = await this.prisma.infraNode.findMany({
+      const candidates = await this.prisma.infraNode.findMany({
         where,
-        select: { id: true, label: true, lastReportedAt: true },
+        select: {
+          id: true,
+          label: true,
+          lastReportedAt: true,
+          policyStaleAfterSeconds: true,
+        },
       });
+      // PER-NODE, not one global cutoff (#1140). The threshold used to be a single env var, which made
+      // heterogeneous cadences structurally impossible: a host the operator moved to a daily report sat
+      // OFFLINE 23 hours out of 24 and nudged the bell every day. Each node is now judged against the
+      // staleness it was actually SERVED, and a node that has never been served one (a manual row, a
+      // pre-#1140 agent, a policy resolution that failed) falls back to the env default — i.e. exactly
+      // the previous behaviour.
+      //
+      // Filtering in memory rather than in SQL is deliberate and bounded: lazyit is a 5–20-person,
+      // few-dozen-host product, the candidate set is only the agent nodes that are already past the
+      // SHORTEST possible threshold, and the alternative is hand-written SQL with an interval
+      // expression that Prisma cannot type. Revisit it if an estate ever makes this the slow part.
+      const transitioning = candidates.filter((node) => {
+        const perNodeMs =
+          node.policyStaleAfterSeconds !== null &&
+          node.policyStaleAfterSeconds !== undefined
+            ? node.policyStaleAfterSeconds * 1000
+            : this.staleAfterMs;
+        // `lastReportedAt` is never null here: the query's `lt` comparison already excludes NULLs,
+        // exactly as it did before this change. The `?? 0` is a type narrowing, not a policy.
+        return (node.lastReportedAt?.getTime() ?? 0) < now - perNodeMs;
+      });
+      if (transitioning.length === 0) return 0;
       const { count } = await this.prisma.infraNode.updateMany({
-        where,
+        where: { id: { in: transitioning.map((n) => n.id) } },
         data: { status: 'OFFLINE' },
       });
       if (count > 0) {
         this.logger.log(
-          `Flipped ${count} stale agent node(s) to OFFLINE (no report since ${cutoff.toISOString()}).`,
+          `Flipped ${count} stale agent node(s) to OFFLINE, each judged against the staleness threshold it was last served (default ${this.staleAfterMs}ms).`,
         );
       }
       // One broadcast nudge per OFFLINE transition (ADR-0056 amendment / #852), POST-flip + best-effort
