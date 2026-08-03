@@ -784,12 +784,15 @@ What you can set there, in three groups:
   between two of its own reports — the editor will not let you save a value that would do that, and it
   says so under the field rather than after you press Save.
 - **What agents collect** — hardware, disks, network interfaces, installed software, containers, plus
-  a hard cap on how many packages a host may report. **On Linux** a collector that is off is never run
-  at all: the agent does not gather the facts and then throw them away. **On Windows** only containers
-  works that way — hardware, disks, network interfaces and the installed list all come out of a single
-  PowerShell call that runs whatever the policy says, so switching one off there keeps the fact out of
-  the report but does not save the host the work of collecting it. Either way, a switched-off
-  collector never reaches lazyit.
+  a hard cap on how many packages a host may report. **A collector that is off is never run**, on
+  either platform: the agent does not gather the facts and then throw them away. On Windows that
+  used to be true only of containers, because everything else came out of one PowerShell call that
+  ran whatever the policy said; since v1.10 that call is built from the collectors the policy
+  actually wants, so switching one off stops the host doing the work as well as keeping the fact out
+  of the report. One exception worth knowing on Windows: turning **hardware** off stops the agent
+  reading the BIOS serial, and still keeps the manufacturer and model out of the report — but those
+  two ride along with facts lazyit needs anyway (memory, domain membership), so the host is not
+  spared that particular read.
 - **Exclusions** — name patterns for network interfaces (`veth*`, `docker*`), mountpoints
   (`/var/lib/docker/*`, `/snap/*`) and packages (`linux-image-*`). `*` matches anything and `?`
   matches a single character; regular expressions are not accepted, and each list holds at most 32
