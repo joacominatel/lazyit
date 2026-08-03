@@ -249,8 +249,9 @@ saltos de distancia está.
 
 Un pequeño cartel abajo trae el resto de la respuesta: **cuántos** nodos quedan afectados y **cuáles**
 —debajo del número se listan los nodos afectados, cada uno con su tipo y a cuántos saltos está, los
-más cercanos primero—. La lista viene abierta y tiene su propio desplazamiento; **Ocultar la lista**
-la pliega cuando preferís ver todo el tablero, y **Ocultar radio de afectación** apaga todo. El
+más cercanos primero—. La lista viene abierta y tiene su propio desplazamiento; el chevron al lado
+del número la pliega cuando preferís ver todo el tablero, y **Ocultar radio de afectación** apaga
+todo. El
 resaltado te dice de un vistazo qué tan grave es; la lista es lo que se puede recorrer, contar o
 copiar. Mientras el radio se está calculando el cartel lo dice, y si la consulta falla también lo
 dice, con un botón **Reintentar**: una consulta que falló nunca se muestra como "nada depende de este
