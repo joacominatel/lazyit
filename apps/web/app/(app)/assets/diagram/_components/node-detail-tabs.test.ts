@@ -68,8 +68,11 @@ describe("planNodeDetailTabs", () => {
   });
 
   test("an agent host that reported no software list gets no software tab", () => {
-    const { software: _dropped, ...noSoftware } = HOST_SPECS;
-    const plan = planNodeDetailTabs({ source: "AGENT", specs: noSoftware });
+    // An absent list is not an empty one: the collector could not read packages on this host.
+    const plan = planNodeDetailTabs({
+      source: "AGENT",
+      specs: { host: HOST_SPECS.host, reportedAt: HOST_SPECS.reportedAt },
+    });
     expect(plan.tabs).toEqual(["general", "facts", "connections", "changes"]);
     expect(plan.factsArm).toBe("host");
   });
