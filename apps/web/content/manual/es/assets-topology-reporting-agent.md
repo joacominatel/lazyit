@@ -98,6 +98,16 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    > en la máquina que "un agente de inventario habla con un servidor". Confiar en ella a nivel
    > sistema sigue funcionando si tu flota ya está armada así.
 
+   > **¿`http://` plano, sin TLS?** Los instaladores lo rechazan salvo que lo aceptes explícitamente
+   > — **`--allow-insecure-http`** en Linux, **`-AllowInsecureHttp`** en Windows — porque el costo es
+   > real y permanente, y conviene aceptarlo a sabiendas y no por omisión. En un canal sin cifrar,
+   > cualquiera en el camino de red puede reemplazar el programa del agente (que después corre como
+   > root, o como SYSTEM en Windows) — y el token queda guardado con esa dirección, así que vuelve a
+   > cruzar la red sin cifrar en **cada reporte que ese host envíe**, no solo durante la
+   > instalación. En una LAN físicamente confiable puede ser un intercambio aceptable — para eso
+   > existe la opción — pero la solución honesta cuesta un archivo: una autoridad certificadora
+   > interna más `--ca-file` (arriba) elimina las dos exposiciones.
+
    > **¿Detrás de un proxy de salida?** No hace falta pasar nada al instalar; agregá `HTTPS_PROXY` (y
    > `NO_PROXY` si tu instancia es interna) a `/etc/lazyit-agent/config` después. Tiene que ir **ahí**,
    > no en `/etc/environment` ni en un perfil de shell: el agente corre desde un timer de systemd, y un
@@ -264,7 +274,9 @@ administrador*). El instalador:
 1. verifica que esté elevado y que la máquina sea x64;
 2. descarga el ejecutable desde **tu** instancia con tu token, y rechaza cualquier cosa que no sea un
    ejecutable de Windows real — la misma protección que el instalador de Linux aplica a su binario;
-3. compara la **huella** que tu instancia publica para ese ejecutable y rechaza una que no coincida;
+3. compara la **huella** que tu instancia publica para ese ejecutable y rechaza una que no coincida —
+   y se niega a continuar si la huella no se puede obtener, en vez de encogerse de hombros e
+   instalar igual (la salida de emergencia está en [Seguridad](#seguridad));
 4. **lo ejecuta una vez** (`--help`) antes de registrar nada: si la máquina no puede arrancarlo,
    obtenés una sola frase clara, no se instala nada y no se registra ninguna tarea;
 5. agrega `C:\Program Files\lazyit-agent` al **PATH de la máquina**, para que los comandos de
@@ -905,11 +917,23 @@ las dos, porque nunca informa una versión de política.
   `/etc/systemd/system/lazyit-agent.service` y leelo; es corto, y está escrito para ser leído. Además
   corre con la **prioridad de CPU y disco más baja del sistema**, así que listar tres mil paquetes en
   un servidor de base de datos ocupado nunca compite con aquello para lo que ese servidor existe.
-- **La descarga se verifica.** Tu instancia publica una huella del binario del agente junto al binario
-  mismo, y el instalador se niega a instalar uno que no coincida. Es una verificación de integridad,
-  no una firma criptográfica: detecta una descarga corrupta o desactualizada, y una manipulación donde
-  se cambió solo uno de los dos archivos. Pasá `--require-checksum` (o `-RequireChecksum` en Windows)
-  para que una huella *ausente* también sea fatal.
+- **La descarga se verifica, y la verificación no se puede saltear.** Tu instancia publica una huella
+  del binario del agente junto al binario mismo, y el instalador se niega a instalar uno que no
+  coincida — o uno que **no pudo verificar**: una huella que no se puede obtener ahora detiene la
+  instalación en vez de degradarse a una advertencia, porque una verificación que falla en abierto es
+  una verificación que un atacante elimina con solo hacerla fallar. Si tu instancia es más vieja que
+  el instalador y no publica huella, pasá el digest vos mismo — `--sha256 <hex>` en Linux, `-Sha256`
+  en Windows — obtenido por un canal que no sea la propia descarga, o actualizá la instancia. Es una
+  verificación de integridad, no una firma criptográfica: detecta una descarga corrupta o
+  desactualizada, y una manipulación donde se cambió solo uno de los dos archivos.
+  (`--require-checksum` y `-RequireChecksum` se siguen aceptando para que la automatización existente
+  no se rompa; simplemente describen lo que ahora es el comportamiento por omisión.)
+- **HTTP sin cifrar es una decisión explícita.** Una dirección de instancia `http://` es rechazada
+  por ambos instaladores salvo que pases `--allow-insecure-http` (`-AllowInsecureHttp` en Windows), y
+  el rechazo dice con todas las letras qué expone ese canal: el programa que va a correr como root o
+  SYSTEM, y el token — reenviado sin cifrar en cada reporte de ahí en adelante. El intercambio está
+  explicado en el paso de instalación de arriba; cuando puedas, preferí `--ca-file` con una autoridad
+  certificadora interna.
 - **Puede usar tu autoridad certificadora, no la de la máquina.** `--ca-file` (o `LAZYIT_CA_FILE` en
   la configuración) apunta el agente a un paquete de certificados en el que confía solo él, así que
   una autoridad certificadora interna nunca tiene que instalarse a nivel de toda la máquina solo para
