@@ -317,7 +317,6 @@
     "shortcutRemove": "Remove shortcut",
     "shortcutInvalid": "Each shortcut needs a label and a valid URL.",
     "shortcutsSavedToast": "Shortcuts updated.",
-    "impactTitle": "Impact / blast radius",
     "impactShow": "Show blast radius",
     "impactHide": "Hide blast radius",
     "impactDescription": "If this node goes down, what stops with it? Highlights the affected nodes on the map.",
