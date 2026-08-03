@@ -19,8 +19,8 @@ import { Button } from "@/components/ui/button";
  *  - **While the estate's agent-status is still loading** (`hasAgents === undefined`): render nothing,
  *    so the hero never flashes in then collapses.
  *
- * `canMint` gates the create CTA on `settings:manage` (minting the agent's Service Account needs it —
- * §6 / ADR-0048). Without it the hero shows a muted hint instead of a dead button.
+ * `canMint` gates the create CTA on `settings:manage` — the gate on every `/service-accounts` route,
+ * so on minting one (ADR-0048). Without it the hero shows a muted hint instead of a dead button.
  */
 export function AgentOnboarding({
   canMint,
