@@ -166,41 +166,53 @@ export const WINDOWS_COLLECT_TIMEOUT_MS = 60_000;
 
 // ── The document the script emits ─────────────────────────────────────────────────────────────────
 
-/** One entry of either Uninstall hive, as `Get-ItemProperty` hands it over. */
+/**
+ * One entry of either Uninstall hive, as `Get-ItemProperty` hands it over.
+ *
+ * Every field is `unknown`, not the type it SHOULD hold (#1188): this hive is written by arbitrary
+ * third-party installers, and a `DisplayVersion` stored as REG_DWORD reaches this process through
+ * `ConvertTo-Json` as a number, a REG_MULTI_SZ `DisplayName` as an array of strings. The mapper
+ * guards; it does not trust.
+ */
 export interface WindowsUninstallEntry {
-  DisplayName?: string | null;
-  DisplayVersion?: string | null;
-  /** A DWORD; `1` marks an update stub or runtime fragment nobody wants in an inventory. */
-  SystemComponent?: number | null;
+  DisplayName?: unknown;
+  DisplayVersion?: unknown;
+  /** Normally a DWORD; `1` marks an update stub or runtime fragment nobody wants in an inventory. */
+  SystemComponent?: unknown;
 }
 
-/** The single JSON document the collection script produces. Every key may be absent or null. */
+/**
+ * The single JSON document the collection script produces. Every key may be absent or null — and
+ * every STRING-typed fact is declared `unknown` (#1188), because the document is parsed from a host,
+ * not constructed here: a registry value or CIM property of the wrong type must cost its field,
+ * never the report. {@link str} is the one gate they all pass through.
+ */
 export interface WindowsFacts {
   os?: {
-    Caption?: string | null;
-    Version?: string | null;
-    BuildNumber?: string | null;
+    Caption?: unknown;
+    Version?: unknown;
+    BuildNumber?: unknown;
     /** Round-trip ('o') formatted UTC, produced by the script — never a raw CIM DateTime. */
-    LastBootUpTime?: string | null;
+    LastBootUpTime?: unknown;
   } | null;
   cs?: {
     TotalPhysicalMemory?: number | string | null;
-    Manufacturer?: string | null;
-    Model?: string | null;
-    Domain?: string | null;
+    Manufacturer?: unknown;
+    Model?: unknown;
+    Domain?: unknown;
     PartOfDomain?: boolean | null;
-    DNSHostName?: string | null;
+    DNSHostName?: unknown;
   } | null;
   cpu?: unknown;
-  bios?: { SerialNumber?: string | null } | null;
-  csp?: { UUID?: string | null } | null;
+  bios?: { SerialNumber?: unknown } | null;
+  csp?: { UUID?: unknown } | null;
   enclosure?: { ChassisTypes?: number[] | number | null } | null;
   disks?: unknown;
   physicalDisks?: unknown;
   adapters?: unknown;
   adapterConfigs?: unknown;
   software?: unknown;
-  machineGuid?: string | null;
+  machineGuid?: unknown;
   elevated?: boolean | null;
   /**
    * What `$ErrorActionPreference='SilentlyContinue'` swallowed, as `"<cmdlet>: <message>"` lines.
@@ -211,23 +223,23 @@ export interface WindowsFacts {
 }
 
 interface WindowsCpu {
-  Name?: string | null;
+  Name?: unknown;
   NumberOfCores?: number | null;
   NumberOfLogicalProcessors?: number | null;
 }
 interface WindowsDiskDrive {
-  DeviceID?: string | null;
-  Model?: string | null;
+  DeviceID?: unknown;
+  Model?: unknown;
   Size?: number | string | null;
 }
 interface WindowsPhysicalDisk {
-  FriendlyName?: string | null;
+  FriendlyName?: unknown;
   Size?: number | string | null;
 }
 interface WindowsAdapter {
   Index?: number | null;
-  NetConnectionID?: string | null;
-  MACAddress?: string | null;
+  NetConnectionID?: unknown;
+  MACAddress?: unknown;
   PhysicalAdapter?: boolean | null;
 }
 interface WindowsAdapterConfig {
@@ -235,6 +247,21 @@ interface WindowsAdapterConfig {
   MACAddress?: string | null;
   IPAddress?: string[] | string | null;
   IPSubnet?: string[] | string | null;
+}
+
+/**
+ * A host-parsed value as a trimmed, non-empty string — or `undefined` for anything else (#1188).
+ *
+ * Optional chaining only guards null/undefined, and the collection document does not guarantee its
+ * types: `.trim()` on a REG_DWORD-turned-number was a TypeError that rejected the WHOLE report,
+ * every tick, until the offending software was uninstalled. Deliberately no `String()` here — a
+ * stringified array or object is not a fact, it is junk consistently spelled. Where a number IS
+ * genuinely meaningful (a numeric `DisplayVersion`), the caller coerces it explicitly.
+ */
+function str(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 /**
@@ -399,18 +426,37 @@ export function windowsChassis(
  * registered, so identical name+version pairs are collapsed. Two DIFFERENT versions of the same name
  * are kept: that is a real and interesting state (a half-finished upgrade), not a duplicate.
  */
-export function parseWindowsSoftware(raw: unknown): Software {
+export function parseWindowsSoftware(raw: unknown, warn: Warn = NO_WARN): Software {
   const seen = new Set<string>();
   const pkgs: Software = [];
+  let malformed = 0;
   for (const entry of asArray<WindowsUninstallEntry>(raw)) {
-    const name = entry?.DisplayName?.trim();
+    const rawName = entry?.DisplayName;
+    // A name of the WRONG TYPE (REG_MULTI_SZ, REG_DWORD — #1188) is not the silent fragment case
+    // below: it is an entry an operator can see in Programs and Features that will never reach the
+    // inventory, so its skip is counted and explained after the loop. Never fatal, either way.
+    if (rawName != null && typeof rawName !== "string") {
+      malformed += 1;
+      continue;
+    }
+    const name = str(rawName);
     if (!name) continue;
     if (Number(entry.SystemComponent) === 1) continue;
-    const version = entry.DisplayVersion?.trim();
+    // A REG_DWORD version IS a meaningful version (`5` → "5"), so a finite number is coerced;
+    // anything else non-string costs the FIELD, not the entry.
+    const version =
+      typeof entry.DisplayVersion === "number" && Number.isFinite(entry.DisplayVersion)
+        ? String(entry.DisplayVersion)
+        : str(entry.DisplayVersion);
     const key = `${name}\0${version ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     pkgs.push({ name: name.slice(0, 255), ...(version ? { version: version.slice(0, 120) } : {}), source: "registry" });
+  }
+  if (malformed) {
+    warn(
+      `software: skipped ${malformed} uninstall ${malformed === 1 ? "entry" : "entries"} whose DisplayName is not a string — third-party installers write non-string registry values`,
+    );
   }
   return pkgs;
 }
@@ -443,7 +489,7 @@ export async function collectSoftware(
     );
     return { state: "unavailable" };
   }
-  const pkgs = parseWindowsSoftware(blob.software);
+  const pkgs = parseWindowsSoftware(blob.software, warn);
   return {
     state: "reported",
     software: applySoftwarePolicy(pkgs.slice(0, SOFTWARE_CAP), policy, warn),
@@ -752,12 +798,13 @@ function buildNics(facts: WindowsFacts): Nics | undefined {
   }
   const nics: Nics = [];
   for (const adapter of adapters) {
-    const name = adapter?.NetConnectionID?.trim();
+    const name = str(adapter?.NetConnectionID);
     if (!name) continue;
     const cfg = typeof adapter.Index === "number" ? configs.get(adapter.Index) : undefined;
     const { ipv4, ipv6 } = cfg ? splitAddresses(cfg) : { ipv4: [], ipv6: [] };
     const nic: Nics[number] = { name };
-    if (adapter.MACAddress?.trim()) nic.mac = adapter.MACAddress.trim();
+    const mac = str(adapter.MACAddress);
+    if (mac) nic.mac = mac;
     if (typeof adapter.PhysicalAdapter === "boolean") nic.isVirtual = !adapter.PhysicalAdapter;
     if (ipv4.length) nic.ipv4 = ipv4;
     if (ipv6.length) nic.ipv6 = ipv6;
@@ -779,8 +826,8 @@ function buildNics(facts: WindowsFacts): Nics | undefined {
  */
 function buildDisks(facts: WindowsFacts): Disks | undefined {
   /** One entry, or nothing when the source could not even name the device. */
-  const toDisk = (device: string | undefined, size: unknown): Disks[number] | undefined => {
-    const name = device?.trim();
+  const toDisk = (device: unknown, size: unknown): Disks[number] | undefined => {
+    const name = str(device);
     if (!name) return undefined;
     const sizeBytes = size != null ? Number(size) : Number.NaN;
     return {
@@ -823,17 +870,17 @@ export function buildWindowsHost(
   warn: Warn,
 ): HostFacts {
   const cs = facts?.cs ?? undefined;
-  const dnsHostName = cs?.DNSHostName?.trim();
+  const dnsHostName = str(cs?.DNSHostName);
   const host: Host = { hostname: dnsHostName || osHostname() || "unknown" };
 
   host.os = {
     family: "windows",
     ...clean({
-      name: facts?.os?.Caption?.trim(),
-      version: facts?.os?.Version?.trim(),
+      name: str(facts?.os?.Caption),
+      version: str(facts?.os?.Version),
       // The number an operator actually names a Windows release by (26100 = 24H2). Without it,
       // `version: "10.0.26100"` is the only clue and `Windows 11` reports a major version of 10.
-      build: facts?.os?.BuildNumber?.trim(),
+      build: str(facts?.os?.BuildNumber),
     }),
   };
 
@@ -842,7 +889,7 @@ export function buildWindowsHost(
   // as an AD domain would be a confidently wrong answer. `joined: false` is still reported — "not in
   // the directory" is the fact an operator triages on, and it is different from "we never looked".
   const joined = cs?.PartOfDomain;
-  const domainName = cs?.Domain?.trim();
+  const domainName = str(cs?.Domain);
   if (typeof joined === "boolean") {
     host.domain = { ...(joined && domainName ? { name: domainName } : {}), joined };
     if (joined && domainName && dnsHostName) {
@@ -855,7 +902,7 @@ export function buildWindowsHost(
   // report on Linux (that one counts logical CPUs). The two collectors therefore disagree about SMT,
   // which is stated here rather than discovered: `cores` on Windows excludes hyper-threads.
   const cores = cpus.reduce((n, c) => n + (Number(c?.NumberOfCores) || 0), 0);
-  const cpu = clean({ model: cpus[0]?.Name?.trim(), cores: cores || undefined });
+  const cpu = clean({ model: str(cpus[0]?.Name), cores: cores || undefined });
   if (cpu) host.cpu = cpu;
 
   const memoryBytes = cs?.TotalPhysicalMemory != null ? Number(cs.TotalPhysicalMemory) : undefined;
@@ -863,7 +910,7 @@ export function buildWindowsHost(
     host.memoryBytes = memoryBytes;
   }
 
-  const bootedAt = facts?.os?.LastBootUpTime?.trim();
+  const bootedAt = str(facts?.os?.LastBootUpTime);
   if (bootedAt) {
     const parsed = new Date(bootedAt);
     if (!Number.isNaN(parsed.getTime())) host.bootedAt = parsed.toISOString();
@@ -871,11 +918,11 @@ export function buildWindowsHost(
 
   const hardware = policy.collect.hardware
     ? clean({
-        manufacturer: cs?.Manufacturer?.trim(),
-        model: cs?.Model?.trim(),
+        manufacturer: str(cs?.Manufacturer),
+        model: str(cs?.Model),
         // The serial needs Administrator, exactly as dmidecode needs root on Linux; an unprivileged
         // run simply gets nothing here and `diagnostics.privileged` explains the empty column.
-        serial: facts?.bios?.SerialNumber?.trim(),
+        serial: str(facts?.bios?.SerialNumber),
       })
     : undefined;
   if (!policy.collect.hardware) {
@@ -888,13 +935,13 @@ export function buildWindowsHost(
   if (nics) host.nics = nics;
   if (disks) host.disks = disks;
 
-  const virtualization = windowsVirtualization(cs?.Manufacturer, cs?.Model);
+  const virtualization = windowsVirtualization(str(cs?.Manufacturer), str(cs?.Model));
   host.chassis = windowsChassis(virtualization, facts?.enclosure?.ChassisTypes);
   if (virtualization) host.virtualization = { type: virtualization };
 
   const identifiers = buildIdentifiers({
-    windowsMachineGuid: facts?.machineGuid,
-    smbiosUuid: facts?.csp?.UUID,
+    windowsMachineGuid: str(facts?.machineGuid),
+    smbiosUuid: str(facts?.csp?.UUID),
     serial: hardware?.serial,
     // WHICH mac is the contract's rule, not this collector's (#1138): it must be a property of the
     // NIC SET, because adapter enumeration order is not stable and #1141 compares this across reports.
