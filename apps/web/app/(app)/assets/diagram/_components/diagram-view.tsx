@@ -63,8 +63,9 @@ import { ServersTableView } from "./servers-table-view";
 export function DiagramView() {
   const t = useTranslations("infra");
   const canManage = useCan("infra:manage");
-  // Minting the reporting agent's Service Account needs settings:manage (ADR-0074 §6 / ADR-0048) —
-  // a different permission from the infra:manage that gates putting a node on the map by hand.
+  // Minting the reporting agent's Service Account needs settings:manage — the gate on every
+  // /service-accounts route (ADR-0048) — a different permission from the infra:manage that gates
+  // putting a node on the map by hand.
   const canMintAgent = useCan("settings:manage");
   const searchParams = useSearchParams();
   const view = searchParams.get("view") === "table" ? "table" : "map";
