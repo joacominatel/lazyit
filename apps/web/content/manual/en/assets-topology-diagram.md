@@ -18,8 +18,9 @@ filterable list of the same nodes — see [Servers list](/help/assets-topology-s
 
 > Anyone who can view the topology sees the map and the read-only detail of each node. Adding nodes,
 > drawing connections, changing a status or taking a node off the map needs the manage-topology
-> permission; installing a reporting agent needs manage-settings on top of that, because it mints a
-> token. Without a permission its controls simply don't appear.
+> permission; installing a reporting agent needs the manage-settings permission instead — a separate
+> one, not an addition — because it mints a token. Without a permission its controls simply don't
+> appear.
 
 ## The canvas
 
@@ -60,7 +61,7 @@ With the right permissions you'll see an **Add** button in the page header, offe
   permission, because it mints a token.
 - **Add a node by hand** — for anything that can't run an agent (a switch, a firewall, a NAS), or for
   a machine you just want on the map now. You keep a hand-drawn node up to date yourself. This needs
-  the manage topology permission.
+  the manage-topology permission.
 
 If you only hold one of the two permissions, the button is simply that one path. If you hold neither,
 there's no button — the map stays fully readable, it just isn't editable.

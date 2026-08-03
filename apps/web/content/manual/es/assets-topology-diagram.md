@@ -20,8 +20,9 @@ es una lista plana y filtrable de los mismos nodos — ver
 
 > Cualquiera que pueda ver la topología ve el mapa y el detalle de solo lectura de cada nodo.
 > Agregar nodos, dibujar conexiones, cambiar un estado o quitar un nodo del mapa requiere el permiso
-> de gestión de topología; instalar un agente de reporte requiere además el de gestión de
-> configuración, porque genera un token. Sin un permiso, sus controles simplemente no aparecen.
+> de gestión de topología; instalar un agente de reporte requiere en cambio el de gestión de
+> configuración —un permiso aparte, no un agregado—, porque genera un token. Sin un permiso, sus
+> controles simplemente no aparecen.
 
 ## El lienzo
 
