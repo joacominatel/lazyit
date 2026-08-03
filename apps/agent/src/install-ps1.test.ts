@@ -41,11 +41,16 @@ describe("nothing is installed until the host has been checked", () => {
     expect(script).toContain("0x5A");
   });
 
-  test("the published sha256 is compared, and -RequireChecksum makes its absence fatal", () => {
+  test("the published sha256 is compared, and the check is REQUIRED — it cannot fail open (#1190)", () => {
     expect(script).toContain("Get-FileHash");
     expect(script).toContain("^[0-9a-f]{64}$");
     expect(script).toContain("checksum mismatch");
-    expect(script).toContain("-RequireChecksum was passed but this instance published no sha256");
+    // THE FAIL-OPEN SHAPE THIS REPLACES. Any error fetching the digest silently degraded the check
+    // to a warning unless -RequireChecksum was passed — so an attacker who could 404 one route
+    // stripped the verification entirely. A check the party being checked can strip is not a check.
+    expect(script).not.toContain("catch { $expected = '' }");
+    expect(script).not.toContain("Pass -RequireChecksum to make this fatal");
+    expect(script).toContain("checksum verification is REQUIRED");
   });
 
   test("a redirect is a hard failure, not a followed hop (#980)", () => {
@@ -724,5 +729,130 @@ describe("there is no windows/arm64 build, and the installer says so rather than
     // And it never silently substitutes the AVX2 build for the baseline one, which would trade a
     // clear install error for an illegal-instruction crash weeks later.
     expect(script).toContain("will not substitute the ordinary x64 build");
+  });
+});
+
+/**
+ * PLAIN HTTP IS AN EXPLICIT DECISION, NOT A DEFAULT (#1190).
+ *
+ * Three behaviours compounded: an http -Url was accepted silently, the executable AND its sha256
+ * travelled over that same cleartext channel (so an on-path attacker serves a malicious PE with a
+ * matching digest), and the http URL was persisted into the config — putting the SA token on the
+ * wire in cleartext on every later report, indefinitely. ADR-0087's LAN reality means http stays
+ * POSSIBLE, but behind an opt-in whose warning names what it costs.
+ */
+describe("plain http needs -AllowInsecureHttp, and the cost is named (#1190)", () => {
+  /** The gate's block, located by its own heading comment. */
+  const gate = () => {
+    const block = script.slice(
+      script.indexOf("# --- plain http is an explicit decision"),
+      script.indexOf("[Net.ServicePointManager]"),
+    );
+    expect(block.length).toBeGreaterThan(0);
+    return block;
+  };
+
+  test("-AllowInsecureHttp is a declared parameter", () => {
+    expect(script).toMatch(/\[switch\] \$AllowInsecureHttp/);
+  });
+
+  test("http without the flag is a hard stop that names BOTH exposures", () => {
+    const block = gate();
+    // The refusal must say what cleartext costs: the executable that will run as SYSTEM, and the
+    // token that is persisted with this URL and re-exposed on every report the host ever sends.
+    expect(block).toContain('Die "-Url uses plain http');
+    expect(block).toContain("SYSTEM");
+    expect(block).toContain("token");
+    expect(block).toContain("every report");
+    expect(block).toContain("-AllowInsecureHttp");
+  });
+
+  test("with the flag, a loud warning still names both exposures", () => {
+    const block = gate();
+    expect(block).toContain("Write-Warning");
+    expect(block).toContain("cleartext");
+  });
+
+  test("the gate sits before anything is downloaded", () => {
+    const gateAt = script.indexOf("# --- plain http is an explicit decision");
+    const download = script.indexOf('Invoke-LazyitDownload "/api/agent/download');
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeLessThan(download);
+  });
+});
+
+describe("the out-of-band digest escape hatch (#1190)", () => {
+  /** The integrity block, from its heading to the install of the verified file. */
+  const integrity = () => {
+    const block = script.slice(
+      script.indexOf("# --- integrity:"),
+      script.indexOf("New-Item -ItemType Directory -Path $InstallDir"),
+    );
+    expect(block.length).toBeGreaterThan(0);
+    return block;
+  };
+
+  test("-Sha256 is a declared parameter, validated as 64 hex characters", () => {
+    expect(script).toMatch(/\[string\] \$Sha256/);
+    expect(integrity()).toContain("^[0-9a-fA-F]{64}$");
+  });
+
+  test("when passed, it replaces the fetch — the digest arrives on a channel the server does not control", () => {
+    const block = integrity();
+    expect(block).toContain("if ($Sha256)");
+    expect(block).toContain("ToLowerInvariant()");
+  });
+
+  test("a failed or invalid digest fetch names -Sha256 as the way out, and removes the download", () => {
+    const block = integrity();
+    expect(block).toContain("pass -Sha256");
+    // Every hard stop in the block cleans up the temp download first: the invalid -Sha256, the
+    // failed fetch, the non-digest answer, and the mismatch.
+    expect(block.split("Remove-Item -LiteralPath $tmpBin").length - 1).toBeGreaterThanOrEqual(4);
+  });
+
+  test("-RequireChecksum stays accepted for existing automation — it is simply the default now", () => {
+    expect(script).toMatch(/\[switch\] \$RequireChecksum/);
+  });
+});
+
+/**
+ * THE INSTALLED BINARY MUST NOT KEEP THE USER-TEMP DACL (#1189).
+ *
+ * The exe is downloaded to %TEMP% — whose ACL grants the installing user's SID FullControl — and
+ * moved into %ProgramFiles%. On the same volume a move is a rename and KEEPS the source DACL, so
+ * the binary the Scheduled Task runs as SYSTEM every tick stayed writable by that user's
+ * medium-integrity (non-elevated) processes: overwrite the file, get SYSTEM within one tick. The
+ * config dir's ACL was carefully hardened; the binary's never was.
+ *
+ * Like the rest of this file, this asserts the SCRIPT's logic and ordering — Linux CI has no
+ * Windows ACLs to execute, so the reset itself is proven by `icacls /reset`'s documented contract
+ * ("replaces ACLs with default inherited ACLs"), not by observation here.
+ */
+describe("the installed binary carries the Program Files ACL, not the user-temp one (#1189)", () => {
+  test("the ACL is reset to inherited-only right after the move, before anything is run or registered", () => {
+    const move = script.indexOf("Move-Item -LiteralPath $tmpBin");
+    const reset = script.indexOf("icacls.exe");
+    const runCheck = script.indexOf("& $BinPath --help");
+    expect(move).toBeGreaterThan(-1);
+    expect(reset).toBeGreaterThan(move);
+    expect(reset).toBeLessThan(runCheck);
+    expect(script).toContain("/reset");
+  });
+
+  test("a failed reset is fatal and removes the binary — a SYSTEM exe writable by a user is not an install", () => {
+    const block = script.slice(script.indexOf("icacls.exe"), script.indexOf("& $BinPath --help"));
+    expect(block).toContain("Die ");
+    expect(block).toContain("Remove-Item -LiteralPath $BinPath");
+  });
+
+  test("re-running the installer heals an existing binary's ACL — the reset is unconditional (upgrade path)", () => {
+    // The move replaces the binary on every run and the reset always follows it, so re-running the
+    // installer — the documented upgrade path — repairs a host installed by the Move-Item era.
+    const block = script.slice(
+      script.indexOf("Move-Item -LiteralPath $tmpBin"),
+      script.indexOf("& $BinPath --help"),
+    );
+    expect(block).not.toContain("if (Test-Path");
   });
 });
