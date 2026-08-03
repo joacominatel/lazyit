@@ -2,7 +2,6 @@
 
 import {
   ArrowTopRightOnSquareIcon,
-  BoltIcon,
   BookOpenIcon,
   CheckIcon,
   CubeIcon,
@@ -10,12 +9,10 @@ import {
   KeyIcon,
   PencilSquareIcon,
   PlusIcon,
-  ShieldCheckIcon,
   TrashIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import type {
-  InfraImpactResponse,
   InfraNodeChild,
   InfraNodeDetail,
   InfraNodeKind,
@@ -31,7 +28,7 @@ import {
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { UserAvatar } from "@/components/user-avatar";
 import { SecretChip } from "@/components/markdown-secret-chip-view";
@@ -39,6 +36,13 @@ import { Combobox, type ComboboxItem } from "@/components/combobox";
 import { ErrorState } from "@/components/resource-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -48,16 +52,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useAttachInfraSecret,
   useDeleteInfraNode,
@@ -76,6 +73,7 @@ import {
 } from "../../[id]/_components/agent-container-facts";
 import {
   AgentInventoryPanel,
+  AgentSoftwarePanel,
   getAgentInventory,
 } from "../../[id]/_components/agent-inventory-panel";
 import {
@@ -87,43 +85,48 @@ import {
 import { DeleteNodeDialog } from "./delete-node-dialog";
 import { NodeChangesTab } from "./node-changes-tab";
 import { NodeEdgesManager } from "./node-edges-manager";
+import { planNodeDetailTabs, type NodeDetailTabId } from "./node-detail-tabs";
 
 const STATUS_OPTIONS = InfraNodeStatusSchema.options;
 const KIND_OPTIONS = InfraNodeKindSchema.options;
 
 /**
- * The drill-in panel (ADR-0070 §6, issue #742) — the whole reason this beats a Draw.io diagram. A
- * right-side Sheet that opens when a node is selected on the canvas (`onSelectNode` seam from #741),
- * surfacing the asset-backed payoff: owner(s), KB links, secret HANDLES (never values — INV-10),
- * shortcuts, IP, added-at and the children list (active inverse RUNS_ON), plus the node's connections.
+ * The node drill-in (ADR-0070 §6, issue #742) — since #1182 a LARGE TABBED MODAL rather than the
+ * right-hand rail it started as.
+ *
+ * The rail was designed for a hand-drawn node with a label and a kind. Contract v2 then filled it:
+ * identity and provenance badges, the editable fields, the blast-radius action, the whole reported
+ * facts block (a container's published-ports table was already cut off horizontally in normal use),
+ * the installed-software list, and a Changes tab. The problem was never only width — everything on
+ * that rail carried the same weight, so an operator read all of it to find one thing.
+ *
+ * So: tabs, and only tabs that answer a question someone arrives with. **General** is what this node
+ * is and who is responsible for it; **Reported facts** is what the machine says it is made of;
+ * **Software** is what is installed on it; **Connections** is what it is wired to and what runs on
+ * it; **Changes** is what moved. The set ADAPTS per node — see {@link planNodeDetailTabs}, which
+ * derives it from the `specs` projections rather than from `source`, so a container never opens onto
+ * the host renderer and an agent node with no reported block gets no empty facts tab.
+ *
+ * **Blast radius moved OUT** and onto the canvas (#1182). Its entire output is drawn on the graph —
+ * it highlights the dependent nodes — so an action whose answer is already on screen has no business
+ * behind a modal the operator then has to close in order to read it.
  *
  * `label` is the title (the canvas display name always wins); `assetName` is the secondary inventory
- * name. Write controls (status toggle, edge create/close, remove-from-map) are gated on `infra:manage`
- * — read-only viewers see the same facts without the affordances (so the API never 403s on a render).
+ * name. Write controls (rename, kind/IP/status, edges, secrets, shortcuts, remove-from-map) are gated
+ * on `infra:manage` — read-only viewers see the same facts without the affordances, so the API never
+ * 403s on a render.
  */
-export function InfraNodePanel({
+export function NodeDetailModal({
   nodeId,
   onClose,
   onSelectNode,
-  impactOn,
-  onToggleImpact,
-  impact,
-  impactLoading,
 }: {
-  /** The selected node id, or null when nothing is selected (the Sheet is closed). */
+  /** The node whose detail is open, or null when the modal is closed. */
   nodeId: string | null;
-  /** Called to clear the selection (Sheet dismissed). */
+  /** Called to close the modal. Selection on the canvas is the caller's business, not ours. */
   onClose: () => void;
-  /** Re-select another node in place (used by the duplicate-IP peers to jump across — #847). */
+  /** Open another node's detail in place (used by the duplicate-IP peers to jump across — #847). */
   onSelectNode: (nodeId: string) => void;
-  /** Whether blast-radius mode is on for this node (ADR-0070 §7, issue #755). */
-  impactOn: boolean;
-  /** Toggle blast-radius mode for the selected node. */
-  onToggleImpact: () => void;
-  /** The blast-radius result (root + affected set) — present only while impact mode is on. */
-  impact: InfraImpactResponse | undefined;
-  /** Whether the impact query is in flight. */
-  impactLoading: boolean;
 }) {
   const t = useTranslations("infra");
   const canManage = useCan("infra:manage");
@@ -136,29 +139,31 @@ export function InfraNodePanel({
   } = useInfraNodeDetail(nodeId);
 
   return (
-    <Sheet open={nodeId !== null} onOpenChange={(open) => !open && onClose()}>
-      {/* Default (modal) sheet behaviour is correct here: the canvas owns pointer interactions, and a
-          non-modal sheet would let a stray canvas click dismiss the panel mid-read. */}
-      <SheetContent side="right" className="w-full gap-0 sm:max-w-md">
+    <Dialog open={nodeId !== null} onOpenChange={(open) => !open && onClose()}>
+      {/* The base DialogContent scrolls its whole body; this one must not. The header and the tab bar
+          stay put while only the active tab's panel scrolls, so the node you are reading never loses
+          its name off the top. Hence the explicit grid rows + `overflow-hidden`, and `p-0` because
+          each region owns its own padding. */}
+      <DialogContent className="grid h-[min(46rem,calc(100svh-3rem))] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-3xl lg:max-w-5xl">
         {isLoading ? (
-          // Radix requires a DialogTitle (here SheetTitle) in EVERY content branch for screen
-          // readers (issue #762). The skeleton has no visible title, so we give it an sr-only one.
+          // Radix requires a DialogTitle in EVERY content branch for screen readers (issue #762).
+          // The skeleton has no visible title, so we give it an sr-only one.
           <>
-            <SheetHeader className="sr-only">
-              <SheetTitle>{t("panel.loading")}</SheetTitle>
-              <SheetDescription>{t("panel.loading")}</SheetDescription>
-            </SheetHeader>
-            <PanelSkeleton label={t("panel.loading")} />
+            <DialogHeader className="sr-only">
+              <DialogTitle>{t("panel.loading")}</DialogTitle>
+              <DialogDescription>{t("panel.loading")}</DialogDescription>
+            </DialogHeader>
+            <ModalSkeleton label={t("panel.loading")} />
           </>
         ) : isError || !node ? (
-          // A failed detail fetch is recoverable — mirror the canvas's ErrorState (with onRetry)
-          // a few files over (issue #776), reusing the shared retry affordance. The SheetTitle stays
+          // A failed detail fetch is recoverable — mirror the canvas's ErrorState (with onRetry) a
+          // few files over (issue #776), reusing the shared retry affordance. The DialogTitle stays
           // sr-only so Radix gets its required title for screen readers (the #762 a11y fix).
-          <div className="flex h-full flex-col p-6">
-            <SheetHeader className="sr-only">
-              <SheetTitle>{t("panel.loadError")}</SheetTitle>
-              <SheetDescription>{t("panel.loadError")}</SheetDescription>
-            </SheetHeader>
+          <div className="row-span-2 flex h-full flex-col p-6">
+            <DialogHeader className="sr-only">
+              <DialogTitle>{t("panel.loadError")}</DialogTitle>
+              <DialogDescription>{t("panel.loadError")}</DialogDescription>
+            </DialogHeader>
             <div className="flex flex-1 items-center justify-center">
               <ErrorState
                 title={t("panel.loadError")}
@@ -169,64 +174,49 @@ export function InfraNodePanel({
             </div>
           </div>
         ) : (
-          <PanelBody
+          <ModalBody
             node={node}
             canManage={canManage}
             onClose={onClose}
             onSelectNode={onSelectNode}
-            impactOn={impactOn}
-            onToggleImpact={onToggleImpact}
-            impact={impact}
-            impactLoading={impactLoading}
           />
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-/** The loaded panel. Split out so hooks here only run once a node has resolved. */
-function PanelBody({
+/** The loaded modal. Split out so hooks here only run once a node has resolved. */
+function ModalBody({
   node,
   canManage,
   onClose,
   onSelectNode,
-  impactOn,
-  onToggleImpact,
-  impact,
-  impactLoading,
 }: {
   node: InfraNodeDetail;
   canManage: boolean;
   onClose: () => void;
   onSelectNode: (nodeId: string) => void;
-  impactOn: boolean;
-  onToggleImpact: () => void;
-  impact: InfraImpactResponse | undefined;
-  impactLoading: boolean;
 }) {
   const t = useTranslations("infra");
-  const { date } = useFormatters();
   const tone = statusTone(node.status);
   const updateNode = useUpdateInfraNode();
-  const deleteNode = useDeleteInfraNode();
-  // The open tab. Held here (not left to the primitive's own state) because the Changes tab's query
-  // is gated on it — see `NodeChangesTab`.
-  const [tab, setTab] = useState("overview");
 
-  function handleStatusChange(next: string) {
-    updateNode.mutate(
-      { id: node.id, patch: { status: next as InfraNodeStatus } },
-      {
-        onSuccess: () => toast.success(t("panel.statusUpdatedToast")),
-        onError: (error) => notifyError(error, t("panel.statusError")),
-      },
-    );
-  }
+  const plan = useMemo(
+    () => planNodeDetailTabs({ source: node.source, specs: node.specs }),
+    [node.source, node.specs],
+  );
+
+  // The open tab. Held here (not left to the primitive's own state) for two reasons: the Changes
+  // tab's query is gated on it (see `NodeChangesTab`), and the tab set differs per node — jumping
+  // from a host to a container (the duplicate-IP peers do exactly that) must not leave the modal
+  // pointing at a `software` tab that node does not have. `active` falls back to General for that.
+  const [tab, setTab] = useState<NodeDetailTabId>("general");
+  const active: NodeDetailTabId = plan.tabs.includes(tab) ? tab : "general";
 
   return (
     <>
-      <SheetHeader className="gap-2 border-b">
+      <DialogHeader className="gap-2 border-b px-5 pt-5 pb-3 text-left">
         {canManage ? (
           <EditableTitle
             key={`${node.id}:${node.label}`}
@@ -237,11 +227,11 @@ function PanelBody({
             }
           />
         ) : (
-          <SheetTitle className="pr-8 text-base">{node.label}</SheetTitle>
+          <DialogTitle className="pr-10 text-base">{node.label}</DialogTitle>
         )}
-        <SheetDescription className="sr-only">
+        <DialogDescription className="sr-only">
           {t(`kind.${node.kind}`)}
-        </SheetDescription>
+        </DialogDescription>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">{t(`kind.${node.kind}`)}</Badge>
           <StatusBadge tone={tone} dot>
@@ -260,14 +250,14 @@ function PanelBody({
           {node.source === "AGENT" ? (
             <AgentPolicyBadge policyRevision={node.policyRevision} />
           ) : null}
+          {node.source === "AGENT" ? (
+            <AgentFreshness
+              reportingSource={node.reportingSource}
+              lastReportedAt={node.lastReportedAt}
+              status={node.status}
+            />
+          ) : null}
         </div>
-        {node.source === "AGENT" ? (
-          <AgentFreshness
-            reportingSource={node.reportingSource}
-            lastReportedAt={node.lastReportedAt}
-            status={node.status}
-          />
-        ) : null}
         {node.assetName ? (
           <p className="text-xs text-muted-foreground">
             {t("panel.inventoryName")}:{" "}
@@ -292,28 +282,101 @@ function PanelBody({
             {t("panel.noInventoryName")}
           </p>
         )}
-      </SheetHeader>
+      </DialogHeader>
 
-      {/* Two tabs, and deliberately only two (#1143). Everything the panel already showed is the
-          node as it is NOW; Changes is the node's history — what MOVED and when. They are different
-          questions, and stacking the second under the first would have buried it below the edge
-          manager. The open tab is held here rather than left to the primitive, because the Changes
-          query is gated on it: opening the panel must fetch the detail and nothing else. */}
       <Tabs
-        value={tab}
-        onValueChange={setTab}
-        className="flex min-h-0 flex-1 flex-col gap-0"
+        value={active}
+        onValueChange={(next) => setTab(next as NodeDetailTabId)}
+        className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-0"
       >
-        <TabsList className="shrink-0 px-4">
-          <TabsTrigger value="overview">{t("panel.tabs.overview")}</TabsTrigger>
-          <TabsTrigger value="changes">{t("panel.tabs.changes")}</TabsTrigger>
+        {/* The tab bar scrolls sideways rather than wrapping: five triggers in Spanish are wider than
+            three in English, and a wrapped second row would push the content down by a line this
+            fixed-height layout has not reserved. */}
+        <TabsList className="px-5">
+          {plan.tabs.map((id) => (
+            <TabsTrigger
+              key={id}
+              value={id}
+              indicatorClassName="data-[state=active]:border-pillar-inventory"
+            >
+              {t(`panel.tabs.${id}`)}
+            </TabsTrigger>
+          ))}
         </TabsList>
+
         <TabsContent
-          value="overview"
-          className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4"
+          value="general"
+          className="min-h-0 space-y-6 overflow-y-auto p-5"
         >
-          {/* Details — the editable config, grouped near the TOP so operators find it where they expect
-            (issue #764). Editable on `canManage`; read-only viewers get plain quick-facts instead. */}
+          <GeneralTab
+            node={node}
+            canManage={canManage}
+            onSelectNode={onSelectNode}
+            onRemoved={onClose}
+          />
+        </TabsContent>
+
+        {plan.factsArm ? (
+          <TabsContent value="facts" className="min-h-0 overflow-y-auto p-5">
+            <ReportedFactsTab specs={node.specs} arm={plan.factsArm} />
+          </TabsContent>
+        ) : null}
+
+        {plan.tabs.includes("software") ? (
+          <TabsContent value="software" className="min-h-0 overflow-y-auto p-5">
+            <SoftwareTab specs={node.specs} />
+          </TabsContent>
+        ) : null}
+
+        <TabsContent
+          value="connections"
+          className="min-h-0 space-y-6 overflow-y-auto p-5"
+        >
+          <ChildrenSection nodes={node.children} />
+          <Separator />
+          <NodeEdgesManager
+            nodeId={node.id}
+            nodeLabel={node.label}
+            canManage={canManage}
+          />
+        </TabsContent>
+
+        <TabsContent value="changes" className="min-h-0 overflow-y-auto p-5">
+          <NodeChangesTab nodeId={node.id} active={active === "changes"} />
+        </TabsContent>
+      </Tabs>
+    </>
+  );
+}
+
+/**
+ * **General** — what this node is, and who is responsible for it.
+ *
+ * The editable configuration sits at the top left, where an operator expects it (issue #764); the
+ * asset-backed payoff the drill-in exists for (owners, KB, secret handles, shortcuts) fills the rest.
+ * Two columns from `lg` up: the modal is wide enough that a single column would leave half the
+ * surface empty and still make the reader scroll. Removing the node from the map closes the tab,
+ * because lifecycle belongs with identity and nowhere else.
+ */
+function GeneralTab({
+  node,
+  canManage,
+  onSelectNode,
+  onRemoved,
+}: {
+  node: InfraNodeDetail;
+  canManage: boolean;
+  onSelectNode: (nodeId: string) => void;
+  onRemoved: () => void;
+}) {
+  const t = useTranslations("infra");
+  const { date } = useFormatters();
+  const deleteNode = useDeleteInfraNode();
+
+  return (
+    <>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="space-y-5">
           {canManage ? (
             <DetailsSection node={node} />
           ) : (
@@ -339,9 +402,10 @@ function PanelBody({
             </dl>
           )}
 
-          {/* Soft duplicate-IP warning (ADR-0090, #847) — a NON-BLOCKING heads-up when other live nodes
-            carry this node's exact IP. Display-only: the IP is still valid + saved (no DB uniqueness);
-            this just names the peers so an operator can reconcile. Shown to every reader (a fact). */}
+          {/* Soft duplicate-IP warning (ADR-0090, #847) — a NON-BLOCKING heads-up when other live
+            nodes carry this node's exact IP. Display-only: the IP is still valid + saved (no DB
+            uniqueness); this just names the peers so an operator can reconcile. Shown to every reader
+            (a fact), and kept directly under the IP field it is about. */}
           {(node.ipConflict?.length ?? 0) > 0 ? (
             <IpConflictNotice
               peers={node.ipConflict ?? []}
@@ -349,103 +413,97 @@ function PanelBody({
             />
           ) : null}
 
-          {/* Impact / blast radius (ADR-0070 §7, issue #755) — the query that justifies a graph. The
-            toggle drives the canvas highlight (state lives in diagram-view); this surfaces the count
-            + list. Shown to every reader (the API gates on infra:read). */}
-          <ImpactSection
-            impactOn={impactOn}
-            onToggleImpact={onToggleImpact}
-            impact={impact}
-            impactLoading={impactLoading}
-          />
-
           {/* Status toggle (write — gated). */}
-          {canManage ? (
-            <Section title={t("panel.statusTitle")}>
-              <Select value={node.status} onValueChange={handleStatusChange}>
-                <SelectTrigger
-                  className="w-full"
-                  disabled={updateNode.isPending}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {t(`status.${status}`)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                {t("panel.statusDescription")}
-              </p>
-            </Section>
-          ) : null}
+          {canManage ? <StatusSection node={node} /> : null}
+        </div>
 
-          {/* Reported facts (issue #1081) — the agent's host inventory (cpu/ram/os/disks/serial +
-            software), read-only. Only for AGENT nodes; reuses the Assets detail projection so there's
-            one renderer for agent inventory across the app. */}
-          {node.source === "AGENT" ? (
-            <ReportedFactsSection specs={node.specs} />
-          ) : null}
-
-          <Separator />
-
+        <div className="space-y-5">
           <OwnersSection owners={node.owners} />
           <ArticlesSection articles={node.articleLinks} />
-          {canManage ? (
-            <SecretsEditor
-              key={`${node.id}:${JSON.stringify(node.secretRefs ?? [])}`}
-              nodeId={node.id}
-              secretRefs={node.secretRefs}
-            />
-          ) : (
-            <SecretsSection secretRefs={node.secretRefs} />
-          )}
-          {canManage ? (
-            <ShortcutsEditor
-              key={`${node.id}:${JSON.stringify(node.shortcuts ?? [])}`}
-              nodeId={node.id}
-              shortcuts={node.shortcuts}
-            />
-          ) : (
-            <ShortcutsSection shortcuts={node.shortcuts} />
-          )}
-          <ChildrenSection nodes={node.children} />
+        </div>
+      </div>
 
-          <Separator />
+      <Separator />
 
-          <NodeEdgesManager
+      <div className="grid gap-6 lg:grid-cols-2">
+        {canManage ? (
+          <SecretsEditor
+            key={`${node.id}:${JSON.stringify(node.secretRefs ?? [])}`}
             nodeId={node.id}
-            nodeLabel={node.label}
-            canManage={canManage}
+            secretRefs={node.secretRefs}
           />
+        ) : (
+          <SecretsSection secretRefs={node.secretRefs} />
+        )}
+        {canManage ? (
+          <ShortcutsEditor
+            key={`${node.id}:${JSON.stringify(node.shortcuts ?? [])}`}
+            nodeId={node.id}
+            shortcuts={node.shortcuts}
+          />
+        ) : (
+          <ShortcutsSection shortcuts={node.shortcuts} />
+        )}
+      </div>
 
-          {/* Lifecycle: remove from map (soft-delete, restorable). */}
-          {canManage ? (
-            <>
-              <Separator />
-              <RemoveControl
-                label={node.label}
-                onConfirm={() => deleteNode.mutateAsync(node.id)}
-                onRemoved={onClose}
-              />
-            </>
-          ) : null}
-        </TabsContent>
-        <TabsContent
-          value="changes"
-          className="min-h-0 flex-1 overflow-y-auto p-4"
-        >
-          <NodeChangesTab nodeId={node.id} active={tab === "changes"} />
-        </TabsContent>
-      </Tabs>
+      {/* Lifecycle: remove from map (soft-delete, restorable). */}
+      {canManage ? (
+        <>
+          <Separator />
+          <RemoveControl
+            label={node.label}
+            onConfirm={() => deleteNode.mutateAsync(node.id)}
+            onRemoved={onRemoved}
+          />
+        </>
+      ) : null}
     </>
   );
 }
 
-/** A titled panel section with the app's small uppercase label. */
+/**
+ * **Reported facts** — the agent's own account of the machine, read-only.
+ *
+ * Reuses the Assets detail projections ({@link getAgentInventory} + {@link AgentInventoryPanel} for a
+ * host, {@link getAgentContainerFacts} + {@link AgentContainerPanel} for a CONTAINER child, #1139) so
+ * there is ONE renderer per shape across the app — no duplicated cpu/ram/os/disks/serial layout, and
+ * no second place to keep the container layout in step with.
+ *
+ * `arm` comes from {@link planNodeDetailTabs}, which resolved it from these same two projections, so
+ * this tab exists only when one of them matched. It re-runs the projection rather than taking the
+ * parsed object as a prop, which keeps the "declines the other kind's blob" contract in one place: if
+ * the arm and the blob ever disagreed this renders nothing, instead of falling through to a raw JSON
+ * dump — the defect #1139 fixed, and the one easiest to reintroduce while moving components.
+ */
+function ReportedFactsTab({
+  specs,
+  arm,
+}: {
+  specs: Record<string, unknown> | null;
+  arm: "host" | "container";
+}) {
+  const inventory = arm === "host" ? getAgentInventory(specs) : null;
+  const container = arm === "container" ? getAgentContainerFacts(specs) : null;
+  if (inventory) {
+    return <AgentInventoryPanel inventory={inventory} showSoftware={false} />;
+  }
+  if (container) return <AgentContainerPanel facts={container} />;
+  return null;
+}
+
+/**
+ * **Software** — the installed-package list. It is the largest single block a host reports and the
+ * biggest reason the old rail scrolled as far as it did, so it gets its own room. Expanded on
+ * arrival: an operator who clicked a tab named "Software" has already asked the question the
+ * collapse was there to defer.
+ */
+function SoftwareTab({ specs }: { specs: Record<string, unknown> | null }) {
+  const inventory = getAgentInventory(specs);
+  if (!inventory?.software) return null;
+  return <AgentSoftwarePanel software={inventory.software} defaultExpanded />;
+}
+
+/** A titled section with the app's small uppercase label. */
 function Section({
   title,
   children,
@@ -464,7 +522,7 @@ function Section({
 }
 
 /**
- * Click-to-rename panel title (issue #764, manager-only). Reads as the plain `SheetTitle` until
+ * Click-to-rename modal title (issue #764, manager-only). Reads as the plain `DialogTitle` until
  * clicked, then becomes an inline `Input` that commits on blur/Enter and cancels on Esc — the same
  * lightweight, non-animated inline-edit pattern used for the IP field below. Empty input cancels
  * (a node always needs a name; the shared schema also rejects an empty label server-side).
@@ -507,7 +565,7 @@ function EditableTitle({
 
   if (!editing) {
     return (
-      <SheetTitle asChild className="pr-8 text-base">
+      <DialogTitle asChild className="pr-10 text-base">
         <button
           type="button"
           onClick={() => setEditing(true)}
@@ -520,7 +578,7 @@ function EditableTitle({
             aria-hidden
           />
         </button>
-      </SheetTitle>
+      </DialogTitle>
     );
   }
 
@@ -542,16 +600,16 @@ function EditableTitle({
           setEditing(false);
         }
       }}
-      className="h-8 text-base font-semibold"
+      className="h-8 max-w-md text-base font-semibold"
     />
   );
 }
 
 /**
  * The editable Details block (issue #764, manager-only): kind (a `Select`) + IP (an inline input).
- * Grouped near the TOP of the panel so config sits where an operator expects it. Each field patches
- * the node on its own via `useUpdateInfraNode` — optimistic through the shared query invalidation, so
- * the canvas card re-renders live. The added-on date stays read-only (it isn't editable).
+ * Each field patches the node on its own via `useUpdateInfraNode` — optimistic through the shared
+ * query invalidation, so the canvas card re-renders live. The added-on date stays read-only (it isn't
+ * editable).
  */
 function DetailsSection({ node }: { node: InfraNodeDetail }) {
   const t = useTranslations("infra");
@@ -609,6 +667,42 @@ function DetailsSection({ node }: { node: InfraNodeDetail }) {
           <p className="text-sm">{date(node.createdAt)}</p>
         </div>
       </div>
+    </Section>
+  );
+}
+
+/** The live-state select (write — the caller gates it on `infra:manage`). */
+function StatusSection({ node }: { node: InfraNodeDetail }) {
+  const t = useTranslations("infra");
+  const updateNode = useUpdateInfraNode();
+
+  function handleStatusChange(next: string) {
+    updateNode.mutate(
+      { id: node.id, patch: { status: next as InfraNodeStatus } },
+      {
+        onSuccess: () => toast.success(t("panel.statusUpdatedToast")),
+        onError: (error) => notifyError(error, t("panel.statusError")),
+      },
+    );
+  }
+
+  return (
+    <Section title={t("panel.statusTitle")}>
+      <Select value={node.status} onValueChange={handleStatusChange}>
+        <SelectTrigger className="w-full" disabled={updateNode.isPending}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {STATUS_OPTIONS.map((status) => (
+            <SelectItem key={status} value={status}>
+              {t(`status.${status}`)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        {t("panel.statusDescription")}
+      </p>
     </Section>
   );
 }
@@ -683,9 +777,9 @@ function InlineIpField({
  * Non-blocking duplicate-IP notice (ADR-0090, issue #847). Renders only when the backend's `ipConflict`
  * read field reports other LIVE nodes carrying this node's exact `ipAddress`. A soft signal, never a
  * block — the IP is a valid, saved value (there is no DB uniqueness) — so it wears the `warning` tone
- * (not `destructive`) and reuses the panel's own list idiom: each peer is a button that re-selects that
- * node in place (`onSelectNode`) so an operator can jump over and reconcile, with kind + status in a
- * tooltip. Parent gates on the count, so `peers` here is always non-empty.
+ * (not `destructive`) and reuses the modal's own list idiom: each peer is a button that opens that
+ * node's detail in place (`onSelectNode`) so an operator can jump over and reconcile, with kind +
+ * status in a tooltip. The caller gates on the count, so `peers` here is always non-empty.
  */
 function IpConflictNotice({
   peers,
@@ -879,88 +973,6 @@ function ShortcutsEditor({
   );
 }
 
-/**
- * Impact / blast radius (ADR-0070 §7, issue #755). A toggle that asks the headline graph question —
- * "if this node goes down, what's affected?" — and, when on, surfaces the count + the affected list
- * (label + kind + status + hop depth) while the canvas highlights the same set. An empty result is
- * the *good* news, so it reads as reassurance ("safe to take down"), never a scary empty state.
- */
-function ImpactSection({
-  impactOn,
-  onToggleImpact,
-  impact,
-  impactLoading,
-}: {
-  impactOn: boolean;
-  onToggleImpact: () => void;
-  impact: InfraImpactResponse | undefined;
-  impactLoading: boolean;
-}) {
-  const t = useTranslations("infra");
-  const affected = impact?.affected ?? [];
-  const count = affected.length;
-  // Shallowest first, then alphabetical — the immediate blast radius reads before the transitive tail.
-  const ordered = [...affected].sort(
-    (a, b) => a.depth - b.depth || a.label.localeCompare(b.label),
-  );
-
-  return (
-    <Section title={t("panel.impactTitle")}>
-      <Button
-        variant={impactOn ? "default" : "outline"}
-        size="sm"
-        className="w-full"
-        onClick={onToggleImpact}
-        aria-pressed={impactOn}
-      >
-        <BoltIcon />
-        {impactOn ? t("panel.impactHide") : t("panel.impactShow")}
-      </Button>
-      <p className="mt-1.5 text-xs text-muted-foreground">
-        {t("panel.impactDescription")}
-      </p>
-
-      {impactOn ? (
-        impactLoading ? (
-          <div className="mt-3 space-y-2" role="status">
-            <Skeleton className="h-5 w-2/3" />
-            <Skeleton className="h-12 w-full" />
-          </div>
-        ) : count === 0 ? (
-          // Empty = reassuring, not alarming (ADR-0070 §7).
-          <div className="mt-3 flex items-start gap-2 rounded-md border border-success/40 bg-success/5 p-3 text-sm text-success">
-            <ShieldCheckIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
-            <span>{t("panel.impactSafe")}</span>
-          </div>
-        ) : (
-          <div className="mt-3 space-y-2">
-            <p className="text-sm font-medium text-destructive">
-              {t("panel.impactCount", { count })}
-            </p>
-            <ul className="space-y-1.5 text-sm">
-              {ordered.map((item) => (
-                <li key={item.id} className="flex items-center gap-2">
-                  <CubeIcon
-                    className="size-4 shrink-0 text-muted-foreground"
-                    aria-hidden
-                  />
-                  <span className="truncate font-medium">{item.label}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {t(`kind.${item.kind}`)}
-                  </span>
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                    {t("panel.impactDepth", { depth: item.depth })}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )
-      ) : null}
-    </Section>
-  );
-}
-
 /** Active owners via the linked Asset's assignments (asset-centric — ADR-0004/0019). */
 function OwnersSection({ owners }: { owners: InfraNodeOwner[] }) {
   const t = useTranslations("infra");
@@ -1060,7 +1072,7 @@ function ArticlesSection({
  * Secret references — HANDLES ONLY, never values (INV-10, ADR-0061). We render each `handle` as a
  * label + a {@link SecretChip}: the same by-handle reveal used by KB prose, so a vault member can
  * unlock the value in place (client-side decrypt) while non-members see a locked chip. The server
- * never sees plaintext; the panel only ever holds the handle + label metadata.
+ * never sees plaintext; this surface only ever holds the handle + label metadata.
  */
 function SecretsSection({ secretRefs }: { secretRefs: InfraSecretRef[] }) {
   const t = useTranslations("infra");
@@ -1106,9 +1118,9 @@ function SecretsSection({ secretRefs }: { secretRefs: InfraSecretRef[] }) {
  * A handle needs its `vaultId` to attach, so each suggestion is keyed by `${vaultId}:${handle}` and
  * the chosen `{ handle, vaultId }` recovered from the suggestion on select. Already-attached handles
  * are filtered out of the picker (the backend is idempotent anyway). Attach/detach act immediately
- * (no draft) and the panel detail refreshes via the hooks' `infraKeys.all` invalidation. Errors —
+ * (no draft) and the node detail refreshes via the hooks' `infraKeys.all` invalidation. Errors —
  * including the API's friendly 403 ("not a member of the vault that holds this secret") — surface via
- * `notifyError`, exactly like the other panel mutations.
+ * `notifyError`, exactly like the other mutations here.
  */
 function SecretsEditor({
   nodeId,
@@ -1295,39 +1307,8 @@ function ChildrenSection({ nodes }: { nodes: InfraNodeChild[] }) {
 }
 
 /**
- * Reported facts (issue #1081) — the agent's inventory carried in `node.specs`, rendered read-only.
- * Reuses the Assets detail projections ({@link getAgentInventory} + {@link AgentInventoryPanel} for a
- * host, {@link getAgentContainerFacts} + {@link AgentContainerPanel} for a CONTAINER child, #1139) so
- * there is ONE renderer per shape across the app — no duplicated cpu/ram/os/disks/serial layout, and
- * no second place to keep the container layout in step with.
- *
- * The two arms are disjoint by construction (a host blob has `host.hostname`, a child blob has
- * `container.name`), so the order below is readability, not precedence. Renders nothing when the
- * specs parse as neither — a manual/graph-only node flagged AGENT with no reported block.
- */
-function ReportedFactsSection({
-  specs,
-}: {
-  specs: Record<string, unknown> | null;
-}) {
-  const t = useTranslations("infra");
-  const inventory = getAgentInventory(specs);
-  const container = inventory ? null : getAgentContainerFacts(specs);
-  if (!inventory && !container) return null;
-  return (
-    <Section title={t("panel.reportedFactsTitle")}>
-      {inventory ? (
-        <AgentInventoryPanel inventory={inventory} />
-      ) : container ? (
-        <AgentContainerPanel facts={container} />
-      ) : null}
-    </Section>
-  );
-}
-
-/**
  * The remove-from-map control (soft-delete) — a destructive button + the confirm dialog. Keeps the
- * dialog's open-state local; on a confirmed remove it closes the whole panel (the node is off the map).
+ * dialog's open-state local; on a confirmed remove it closes the whole modal (the node is off the map).
  */
 function RemoveControl({
   label,
@@ -1364,18 +1345,20 @@ function RemoveControl({
   );
 }
 
-/** Loading skeleton mirroring the panel's header + a few section blocks. */
-function PanelSkeleton({ label }: { label: string }) {
+/** Loading skeleton mirroring the modal's header + a couple of content blocks. */
+function ModalSkeleton({ label }: { label: string }) {
   return (
-    <div className="space-y-5 p-4" role="status" aria-label={label}>
-      <Skeleton className="h-6 w-2/3" />
+    <div className="row-span-2 space-y-5 p-5" role="status" aria-label={label}>
+      <Skeleton className="h-6 w-2/3 max-w-sm" />
       <div className="flex gap-2">
         <Skeleton className="h-5 w-20" />
         <Skeleton className="h-5 w-16" />
       </div>
-      <Skeleton className="h-16 w-full" />
-      <Skeleton className="h-24 w-full" />
-      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-9 w-full max-w-md" />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-40 w-full" />
+      </div>
     </div>
   );
 }
