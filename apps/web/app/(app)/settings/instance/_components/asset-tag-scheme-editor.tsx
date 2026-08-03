@@ -44,6 +44,10 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { AssetTagBackfillDialog } from "./asset-tag-backfill-dialog";
+import {
+  assetTagPreviewState,
+  assetTagShapeParts,
+} from "./asset-tag-preview";
 
 /** A blank/absent affix → undefined (for the debounced seed-suggestion key). */
 function trimToUndefined(value: string | undefined): string | undefined {
@@ -84,7 +88,9 @@ function emptyToUndefined(value: string | undefined): string | undefined {
  * (ADR-0068 §1) — and that lookup needs the estate and is bounded server-side, so the browser cannot
  * reproduce it. Rendering `nextNumber` locally is what made this card claim `IT-1000` while the server
  * allocated `IT-1001`. The preview is not a reservation: nothing is consumed, so a create that lands
- * first still takes the slot and the next preview moves on.
+ * first still takes the slot and the next preview moves on. With the scheme OFF there is no allocation
+ * and therefore no tag to show, so the card renders the pattern's SHAPE instead — never a number, which
+ * would be the same lie under a different label. Both decisions live in `./asset-tag-preview`, unit-tested.
  *
  * Mounted under the {@link AdminGate} that wraps the whole Instance page, so this only ever renders for
  * a caller who holds `settings:manage`; the API's `@RequirePermission` guard is still the real boundary
@@ -180,27 +186,26 @@ export function AssetTagSchemeEditor() {
     enabled: Boolean(enabled),
   });
   const previewData = nextPreview.data;
-  // With the scheme OFF nothing is allocated at all, so there is no next tag to report — show the
-  // shape the pattern renders instead, explicitly labelled as a shape by `preview.disabledLabel`.
-  // Rendering a number here would be the same class of lie: a plausible tag nothing will ever assign.
-  // Built from the UNDEBOUNCED fields: it is a pure local render with no request behind it, so there
-  // is nothing to wait for and lagging it 400ms would only make the shape disagree with the inputs.
-  const shapeTag = renderAssetTag(
-    { prefix: emptyToUndefined(prefix), suffix: emptyToUndefined(suffix), width },
-    startNumber !== undefined && Number.isFinite(startNumber)
-      ? startNumber
-      : (data?.nextNumber ?? 1),
-  );
+  // What the card shows right now (`assetTagPreviewState`, unit-tested next door). Two states matter:
+  //
+  //  - SCHEME OFF → a shape, never a number. Nothing is allocated with the scheme off, so there is no
+  //    next tag; rendering the counter anyway (as this card did, first as "Next tag" and then under a
+  //    "Tag shape" label) is the very defect of #1180 — a plausible value nothing will ever assign.
+  //    The shape is built from the UNDEBOUNCED fields: it is a pure local render with no request
+  //    behind it, so lagging it 400ms would only make it disagree with the inputs.
+  //  - LOOKUP FAILED → its own state with a retry. Falling back to the pending copy would leave the
+  //    card on "Checking…" indefinitely, indistinguishable from a slow answer and with no way out.
+  const previewState = assetTagPreviewState({
+    enabled: Boolean(enabled),
+    isError: nextPreview.isError,
+    data: previewData,
+  });
+  const shapeParts = assetTagShapeParts({ prefix, suffix, width });
   const previewLabel = enabled ? t("preview.label") : t("preview.disabledLabel");
-  const previewTag = enabled
-    ? previewData?.exhausted
-      ? t("preview.exhausted")
-      : (previewData?.tag ?? t("preview.loading"))
-    : shapeTag;
   // "1000 is taken, so the next free one is 1001" — the one signal that tells a working counter from
-  // a broken one. Only meaningful when the walk actually stepped over something.
+  // a broken one. Only meaningful when the walk actually answered and stepped over something.
   const skippedCount =
-    enabled && previewData && !previewData.exhausted ? previewData.skippedCount : 0;
+    previewState.kind === "tag" ? (previewData?.skippedCount ?? 0) : 0;
 
   const [backfillOpen, setBackfillOpen] = useState(false);
 
@@ -258,7 +263,8 @@ export function AssetTagSchemeEditor() {
               />
 
               {/* Live preview — the tag the next create would ACTUALLY get (server-computed, #1180),
-                  or, with the scheme off, the shape the pattern renders (labelled as such). */}
+                  or, with the scheme off, the pattern's shape: affixes plus a described number slot,
+                  with no number anywhere in it. */}
               <div
                 aria-live="polite"
                 className="flex flex-col gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3"
@@ -267,9 +273,54 @@ export function AssetTagSchemeEditor() {
                   <span className="text-sm font-medium text-muted-foreground">
                     {previewLabel}
                   </span>
-                  <code className="rounded bg-background px-2 py-1 font-mono text-sm font-semibold tabular-nums">
-                    {previewTag}
-                  </code>
+                  {previewState.kind === "tag" ? (
+                    <code className="rounded bg-background px-2 py-1 font-mono text-sm font-semibold tabular-nums">
+                      {previewState.tag}
+                    </code>
+                  ) : previewState.kind === "shape" ? (
+                    // Affixes verbatim, the number as a DESCRIBED slot ("4 digits") — deliberately
+                    // not monospace and not a digit, so the shape cannot be read as a tag.
+                    <span className="flex items-center gap-0.5 rounded bg-background px-2 py-1 font-mono text-sm font-semibold">
+                      {shapeParts.map((part) =>
+                        part.kind === "literal" ? (
+                          <span key={`literal-${part.text}`}>{part.text}</span>
+                        ) : (
+                          <span
+                            key="number-slot"
+                            className="rounded bg-muted px-1.5 font-sans text-xs font-medium text-muted-foreground"
+                          >
+                            {t("preview.digits", { count: part.width })}
+                          </span>
+                        ),
+                      )}
+                    </span>
+                  ) : previewState.kind === "error" ? (
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm text-destructive">
+                        {t("preview.error")}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void nextPreview.refetch()}
+                        disabled={nextPreview.isFetching}
+                      >
+                        <ArrowPathIcon
+                          className={
+                            nextPreview.isFetching ? "animate-spin" : undefined
+                          }
+                        />
+                        {t("retry")}
+                      </Button>
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      {previewState.kind === "exhausted"
+                        ? t("preview.exhausted")
+                        : t("preview.loading")}
+                    </span>
+                  )}
                 </div>
                 {skippedCount > 0 ? (
                   <p className="text-xs text-muted-foreground">
