@@ -858,7 +858,8 @@ function CanvasBoard({
  * hue measures 3.72:1 and 3.93:1 in the light theme, under the 4.5:1 floor. Tint, border and icon
  * carry the distinction instead — the same trade `Callout` makes app-wide (ADR-0049, issue #812).
  * The two neutral arms (loading, failed) take no status tint at all, so the same rule holds there by
- * construction; every arm keeps its words on `text-foreground`.
+ * construction: every arm's words are `text-foreground` over its own surface, and no arm paints a
+ * status hue onto readable text.
  */
 function ImpactSummary({
   plan,
@@ -908,13 +909,7 @@ function ImpactSummary({
 
         {/* Only the sentence is the live region: the list below is normal content the operator
             reads at their own pace, not something to have read out on every toggle. */}
-        <span
-          role="status"
-          className={cn(
-            "min-w-0 flex-1 font-medium",
-            plan.state === "loading" && "text-muted-foreground",
-          )}
-        >
+        <span role="status" className="min-w-0 flex-1 font-medium">
           {plan.state === "loading"
             ? t("panel.impactLoading")
             : plan.state === "failed"
