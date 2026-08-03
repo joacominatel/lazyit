@@ -32,8 +32,9 @@ El botón abre un asistente guiado y breve, de tres pasos:
 1. **Nombre y generación.** Poné un nombre que reconozcas más adelante (por ejemplo el nombre del
    servidor, como `web-prod-01`) y hacé clic en **Generar credenciales**. lazyit crea una cuenta de
    servicio limitada **únicamente** al permiso `infra:report`.
-2. **Instalación.** lazyit te muestra un **comando de instalación** listo para pegar con el token ya
-   incluido:
+2. **Instalación.** Elegí la plataforma de este servidor —**Linux** o **Windows**— y lazyit te muestra
+   el **comando de instalación** correspondiente, listo para pegar y con el token ya incluido. En
+   **Linux**:
 
    ```sh
    curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --url https://tu-instancia --token <token>
@@ -48,25 +49,37 @@ El botón abre un asistente guiado y breve, de tres pasos:
    (La forma con bloque de script no es adorno: el pipe `irm … | iex` no puede pasar parámetros.)
    Ver **[Hosts Windows](#hosts-windows)** más abajo para qué hace esa instalación y qué necesita.
 
+   La elección cambia todo lo que el asistente muestra alrededor: qué necesita el host, la vía para
+   inspeccionar antes de ejecutar, la verificación posterior y —en Windows— una afirmación clara de
+   que el ejecutable **todavía no está firmado**, para que te enteres antes de que te lo diga
+   SmartScreen.
+
    La dirección es **tu propia instancia de lazyit** — el agente solo se comunica con el servidor que
    vos ejecutás, y tiene que ser el **origen HTTPS público** (la dirección que usás en el navegador,
    delante del proxy reverso) — **nunca** el puerto crudo del web (`:3000`), que no tiene ruta para la
    descarga del agente y hará que la instalación falle. Es la dirección **base** y nada más:
-   `https://tu-instancia`, no `https://tu-instancia/install.sh` (la dirección del script en sí). El
-   instalador agrega sus propias rutas, así que una dirección de script haría que cada pedido fuera
-   `…/install.sh/api/agent/download`; ambos instaladores ahora lo verifican y lo indican, en lugar de
-   fallar más adelante con un error de descarga que parece un token inválido — y muestran la
-   dirección que querías usar, para pegarla directamente. Si un proxy reverso monta tu instancia bajo
-   una ruta (`https://it.example.com/lazyit`), esa ruta **sí** forma parte de tu dirección base:
-   pasala, y conservala en la dirección que los instaladores sugieren. Los instaladores advierten
-   sobre cualquier ruta — esa forma suele ser el error de más arriba — pero continúan, así que una
-   instancia bajo un prefijo se instala igual. Ejecutalo **como root**
-   en Linux, o **como
-   Administrador** en Windows. El token se muestra **una sola vez**, así que copialo (o descargalo)
-   antes de continuar. Si
-   preferís revisar cada paso, expandí **Instalar manualmente (paso a paso)** para la misma instalación
-   hecha a mano (descargar el binario, instalarlo, escribir el archivo de configuración y enviar un
-   reporte de prueba).
+   `https://tu-instancia`, no `https://tu-instancia/install.sh` —ni `https://tu-instancia/install.ps1`,
+   el de Windows—, que es la dirección del script en sí. El instalador agrega sus propias rutas, así
+   que una dirección de script haría que cada pedido fuera `…/install.sh/api/agent/download`; ambos
+   instaladores ahora lo verifican y lo indican, en lugar de fallar más adelante con un error de
+   descarga que parece un token inválido — y los dos muestran la dirección que querías usar.
+   Anotala mientras está en pantalla: en Linux el rechazo termina el `sh` del pipe y el mensaje te
+   queda en el prompt, pero en Windows el comando de una línea ejecuta el instalador como **bloque de
+   script**, así que el rechazo termina también la sesión de PowerShell y una consola elevada que
+   abriste con clic derecho se cierra en el acto. Si un proxy reverso monta tu instancia bajo una ruta
+   (`https://it.example.com/lazyit`), esa ruta **sí** forma parte de tu dirección base: pasala, y
+   conservala en la dirección que los instaladores sugieren. Los instaladores advierten sobre
+   cualquier ruta — esa forma suele ser el error de más arriba — pero continúan, así que una instancia
+   bajo un prefijo se instala igual. Los comandos del propio asistente nunca chocan con nada de esto:
+   la dirección la completa él a partir de la que estás navegando, así que esto importa cuando volvés
+   a ejecutar un instalador a mano.
+   Ejecutalo **como root** en Linux, o **como Administrador** en Windows. El token se muestra **una
+   sola vez**, así que copialo (o descargalo) antes de continuar. Si
+   preferís inspeccionar antes, el asistente tiene una sección plegada para eso y cambia según la
+   plataforma: en Linux, **Instalar manualmente (paso a paso)** es la misma instalación hecha a mano
+   (descargar el binario, instalarlo, escribir el archivo de configuración y enviar un reporte de
+   prueba); en Windows, **Descargar y leer el instalador primero** guarda `install.ps1` en tu carpeta
+   temporal para que lo leas y después ejecuta la copia que leíste.
 
    > **Mantené el token fuera de la shell.** Tal como está escrito arriba, el token queda visible en
    > `ps` para cualquier usuario de esa máquina durante los pocos segundos que dura la instalación, y
@@ -100,9 +113,9 @@ El botón abre un asistente guiado y breve, de tres pasos:
 
 ### Instalar manualmente (paso a paso)
 
-La sección plegada **Instalar manualmente** del asistente da la misma instalación comando por comando,
-para un administrador cauteloso que prefiere descargar e inspeccionar el binario primero. Cada paso
-tiene su propio botón de copiar:
+Con **Linux** seleccionado, la sección plegada **Instalar manualmente** del asistente da la misma
+instalación comando por comando, para un administrador cauteloso que prefiere descargar e inspeccionar
+el binario primero. Cada paso tiene su propio botón de copiar:
 
 1. **Descargá el binario** (usá `arch=arm64` en máquinas ARM; agregá `&os=windows` para un host
    Windows, que entrega `lazyit-agent-windows-x64.exe`):
@@ -126,6 +139,31 @@ tiene su propio botón de copiar:
    ```sh
    sudo lazyit-agent report --once --force
    ```
+
+Con **Windows** seleccionado la misma sección se llama **Descargar y leer el instalador primero**, y
+son dos pasos en lugar de cuatro. Reproducir `install.ps1` a mano implicaría escribir vos mismo la ACL
+del archivo de configuración y registrar la tarea programada, y una versión a medias de eso es peor
+que ninguna: lo que ofrece en cambio es la forma honesta de la misma intención — guardar el
+instalador, leerlo y ejecutar la copia que leíste.
+
+1. **Guardá el instalador** en tu carpeta temporal: una PowerShell elevada abre en
+   `C:\Windows\System32`, que no es lugar para dejar un script recién descargado:
+
+   ```powershell
+   irm https://tu-instancia/install.ps1 -OutFile "$env:TEMP\lazyit-install.ps1"
+   ```
+2. **Leé el archivo guardado y después ejecutalo:**
+
+   ```powershell
+   & ([scriptblock]::Create((Get-Content -Raw "$env:TEMP\lazyit-install.ps1"))) -Url https://tu-instancia -Token <token>
+   ```
+
+   Es la misma forma con bloque de script que el comando de una línea de arriba, leyendo del archivo
+   en lugar de la red. Está escrita así y no invocando el `.ps1` guardado porque un **archivo** `.ps1`
+   está sujeto a la política de ejecución de scripts del host —`Restricted` por defecto en las
+   ediciones cliente de Windows—, mientras que un bloque de script construido en memoria no lo está.
+   Si tu política ya permite scripts locales, `& "$env:TEMP\lazyit-install.ps1" -Url … -Token …` hace
+   exactamente lo mismo.
 
 ### Qué necesita un host para ejecutarlo
 
@@ -184,6 +222,16 @@ actualización), usá la ruta completa: siempre funciona.
 Ni las comillas ni el `&` son decorativos, y vienen de a pares: `C:\Program Files` tiene un espacio,
 así que la ruta hay que entrecomillarla — y entonces PowerShell se limitaría a *imprimir* esa cadena,
 por lo que `&`, el operador de llamada, es lo que la ejecuta.
+
+El asistente de **Agregar un servidor** muestra esta forma con ruta completa en su pestaña de Windows
+y no el nombre suelto, y es a propósito: la consola donde lo vas a pegar suele ser la misma PowerShell
+elevada desde la que acabás de instalar, que es justamente la consola a la que la nueva entrada del
+PATH no llega. Así salís del asistente con un comando que funciona ahí y en cualquier otro lado.
+
+Que sea **elevada** tampoco es opcional, y el asistente lo dice al lado del comando. El instalador
+restringe el archivo de configuración a SYSTEM y Administradores, así que un `test` ejecutado desde
+una PowerShell común no puede leer la URL ni el token y responde que no hay ninguno configurado, lo
+que se lee como una instalación rota y no como un clic derecho que faltó.
 
 **`test`** verifica la dirección, el DNS, el TLS, el proxy, la autoridad certificadora y el token, y
 te dice cuál está mal: una redirección significa que apuntaste al puerto equivocado, un rechazo
@@ -257,7 +305,7 @@ aleatorio de un minuto de la tarea viaja en su ciclo de cinco minutos, no en su 
 arranque, así que no es lo que desfasa a un piso que acaba de reiniciarse.)
 
 Como en Linux, **el ciclo de 5 minutos no es la frecuencia de reporte.** Cada cuánto reporta
-realmente un host se define de forma central en **Configuración → Instancia → Agentes de reporte**;
+realmente un host se define de forma central en **Configuración → Agentes de inventario**;
 un ciclo que llega antes de tiempo termina de inmediato sin hacer nada. Cambiar la frecuencia nunca
 toca la tarea.
 
@@ -265,7 +313,8 @@ toca la tarea.
 
 El ejecutable de Windows está actualmente **sin firmar**. SmartScreen va a advertir sobre él, y
 algunos antivirus lo van a poner en cuarentena apenas lo vean: si la instalación falla en el paso de
-"ejecutarlo una vez", eso es lo primero que hay que revisar.
+"ejecutarlo una vez", eso es lo primero que hay que revisar. El asistente lo dice en la pestaña de
+Windows, antes de que ejecutes nada, para que la advertencia no sea la primera noticia que tenés.
 
 Es un estado deliberado y temporal, para **validación interna dentro de la organización que
 construye lazyit**, en su propio dominio y sus propias máquinas. **No despliegues este agente de
@@ -750,23 +799,43 @@ devuelve las dos cosas.
 
 ## Configurá todos los agentes desde una sola pantalla
 
-No se editan los agentes host por host. **Configuración → Instancia → Agentes de inventario** define
-la política de todos los agentes del parque, y cada uno la toma en su próximo reporte.
+No se editan los agentes host por host. **Configuración → Agentes de inventario** — su propia sección
+en Configuración, al lado de Cuentas de servicio — define la política de todos los agentes del parque,
+y cada uno la toma en su próximo reporte.
 
-Lo que podés configurar ahí:
+> **Antes vivía en Configuración → Instancia**, y tanto la salida del instalador como los comentarios
+> que escribe en el archivo de configuración de un host lo siguen diciendo así. Esa página ahora
+> lleva un enlace a la sección en lugar del editor, así que seguir el texto viejo igual te deja donde
+> corresponde, a un clic más.
 
-- **Con qué frecuencia informa cada host** — de 5 minutos a 24 horas. Esta es la opción que antes
-  implicaba editar un temporizador de systemd en cada máquina.
-- **Cuánto espera lazyit antes de marcar un host fuera de línea.** Tiene que ser mayor que el
-  intervalo de informe, o un host perfectamente sano queda marcado fuera de línea entre dos de sus
-  propios reportes — el editor no te deja guardar un valor que provoque eso.
-- **Qué recolectores se ejecutan** — hardware, discos, interfaces de red, software instalado,
-  contenedores. Un recolector desactivado directamente no se ejecuta: el agente no reúne los datos
-  para después descartarlos.
-- **Qué dejar afuera** — patrones de nombre para interfaces de red (`veth*`, `docker*`), puntos de
-  montaje (`/var/lib/docker/*`, `/snap/*`) y paquetes (`linux-image-*`), más un tope estricto de
-  cuántos paquetes puede informar un host. `*` coincide con cualquier texto y `?` con un solo
-  carácter; no se aceptan expresiones regulares.
+Lo que podés configurar ahí, en tres grupos:
+
+- **Frecuencia** — cada cuánto informa cada host (de 5 minutos a 24 horas; en Linux esta es la opción
+  que antes implicaba editar un temporizador de systemd en cada máquina) y cuánto espera lazyit antes de marcarlo
+  fuera de línea. El segundo valor tiene que ser mayor que el primero, o un host perfectamente sano
+  queda marcado fuera de línea entre dos de sus propios reportes — el editor no te deja guardar un
+  valor que provoque eso, y lo aclara debajo del campo en lugar de después de que presiones Guardar.
+- **Qué recolectan los agentes** — hardware, discos, interfaces de red, software instalado y
+  contenedores, más un tope estricto de cuántos paquetes puede informar un host. **En Linux** un
+  recolector desactivado directamente no se ejecuta: el agente no reúne los datos para después
+  descartarlos. **En Windows** eso solo vale para los contenedores — hardware, discos, interfaces de
+  red y la lista de software salen todos de una única llamada de PowerShell que se ejecuta diga lo que
+  diga la política, así que apagar uno ahí mantiene el dato fuera del reporte pero no le ahorra al host
+  el trabajo de recolectarlo. En los dos casos, un recolector apagado nunca llega a lazyit.
+- **Exclusiones** — patrones de nombre para interfaces de red (`veth*`, `docker*`), puntos de montaje
+  (`/var/lib/docker/*`, `/snap/*`) y paquetes (`linux-image-*`). `*` coincide con cualquier texto y `?`
+  con un solo carácter; no se aceptan expresiones regulares, y cada lista admite como máximo 32
+  patrones. Una lista cuyo recolector está apagado igual se guarda, pero no la ejecuta nadie — la
+  pantalla lo dice al lado de la lista en vez de dejarte pensando por qué el patrón no hizo nada.
+
+Esa misma sección muestra además **de dónde sale una política**. lazyit resuelve tres ámbitos, campo
+por campo, y gana el más específico que defina ese campo: primero un ajuste por host, después la
+cuenta de servicio del agente que reporta, y al final este predeterminado de la instancia. **Solo el
+predeterminado de la instancia tiene editor** — los otros dos existen en la API y aparecen en pantalla
+marcados como que todavía no lo tienen, así que ves que la jerarquía está ahí en lugar de preguntarte
+por qué un host se comporta distinto. Las [reglas de confirmación
+automática](#reglas-de-confirmación-automática) también se enlazan desde ahí, porque también son
+configuración de agentes.
 
 Hay tres cosas que conviene saber antes de usarlo.
 
@@ -775,8 +844,9 @@ de cada host, y el host la aplica en la ejecución *siguiente* — así que dej�
 intervalos. Esa demora es intencional: un agente solo aplica una política que ya tenía cuando
 arrancó, de modo que un error acá nunca puede interrumpir al parque a mitad de una recolección.
 
-**Cada host puede negarse, y lazyit no puede pasar por encima.** El propio
-`/etc/lazyit-agent/config` de un host puede desactivar un recolector
+**Cada host puede negarse, y lazyit no puede pasar por encima.** El archivo de configuración del
+propio host —`/etc/lazyit-agent/config` en Linux, `C:\ProgramData\lazyit-agent\config` en
+Windows— puede desactivar un recolector
 (`LAZYIT_COLLECT_SOFTWARE=false`), fijar un piso de frecuencia (`LAZYIT_MIN_INTERVAL=3600`), limitar
 su lista de paquetes (`LAZYIT_SOFTWARE_MAX=500`) o agregar sus propias exclusiones
 (`LAZYIT_EXCLUDE_NICS=veth*`). Esa configuración **prevalece**, siempre, y nada de lo que definas en
@@ -796,11 +866,12 @@ caso de un token de agente robado en "propuestas que descartás" y no en "códig
 como root en todos tus servidores".
 
 **¿Se aplicó?** Cada host informa qué versión de la política está ejecutando, así podés distinguir
-"configurado" de "efectivamente aplicado". Abrí un servidor en el [diagrama de
-infraestructura](/help/assets-topology-diagram) y su panel muestra **Política v7 · aplicada** o
-**Política v8 · pendiente** — pendiente significa simplemente que ese host no reportó desde tu cambio.
-Un servidor descubierto por un agente anterior a esta versión no muestra ninguna de las dos, porque
-nunca informa una versión de política.
+"configurado" de "efectivamente aplicado". La versión que lazyit está sirviendo aparece al lado del
+título de la sección (**Política v8**). Para ver si un host determinado ya la tomó, abrí ese servidor
+en el [diagrama de infraestructura](/help/assets-topology-diagram): su panel muestra **Política v7 ·
+aplicada** o **Política v8 · pendiente** — pendiente significa simplemente que ese host no reportó
+desde tu cambio. Un servidor descubierto por un agente anterior a esta versión no muestra ninguna de
+las dos, porque nunca informa una versión de política.
 
 ## Seguridad
 

@@ -66,8 +66,8 @@ propuesta. Ver [Agente de reporte](/help/assets-topology-reporting-agent) para e
 ## Agregar un servidor
 
 El botón **Agregar un servidor** (arriba de esta vista, para quienes pueden gestionar la
-configuración) genera el comando de instalación de un solo uso del agente de reporte para que un
-servidor Linux nuevo empiece a reportarse. Ver
+configuración) genera el comando de instalación de un solo uso del agente de reporte —para un host
+**Linux o Windows**, el que elijas— para que un servidor nuevo empiece a reportarse. Ver
 [Agente de reporte](/help/assets-topology-reporting-agent).
 
 ## Abrir un servidor

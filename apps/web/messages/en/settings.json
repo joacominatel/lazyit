@@ -26,6 +26,10 @@
       "title": "Service accounts",
       "description": "Create and manage non-human API credentials for CI, scripts and integrations — scoped by permission and revocable."
     },
+    "agents": {
+      "title": "Reporting agents",
+      "description": "Set how every lazyit agent in this estate reports and what it collects, and review which discovered hosts are confirmed automatically."
+    },
     "integrations": {
       "title": "Integrations & workflows",
       "description": "The cross-application manual-task inbox for provisioning workflows. Per-app automation is configured on each application's Workflows tab."
@@ -58,6 +62,11 @@
       "zitadel": "Zitadel (bundled)",
       "generic-oidc": "Generic OIDC (bring your own)",
       "local": "Local accounts"
+    },
+    "agentsMoved": {
+      "title": "Reporting agents",
+      "body": "The fleet's agent policy — reporting cadence, collectors and exclusions — now has its own section, together with the auto-confirm rules and the scopes that can override it.",
+      "link": "Open Reporting agents"
     },
     "updates": {
       "title": "Version & updates",
@@ -207,14 +216,25 @@
   },
   "agentPolicy": {
     "title": "Reporting agents",
-    "subtitle": "How every lazyit agent in this estate collects and reports. Policy v{revision}. Saved here once — no host to log into.",
+    "subtitle": "The default policy for every lazyit agent in this estate — how often they report, what they collect and what they leave out. Set here once, with no host to log into.",
+    "revisionBadge": "Policy v{revision}",
     "loadFailed": "Could not load the agent policy.",
     "saveFailed": "Could not save the agent policy.",
     "retry": "Retry",
     "save": "Save policy",
     "saving": "Saving…",
     "saved": "Saved as policy v{revision}. Agents apply it on their next report.",
-    "propagation": "A change takes effect on each host's next check-in, then applies from the run after that. That short delay is deliberate: a policy is only ever applied by a run that started with it already in place, so a mistake here can never interrupt a fleet mid-collection. This is the instance default — per-agent and per-host overrides exist in the API but have no editor yet.",
+    "discard": "Discard changes",
+    "dirty": "Unsaved changes",
+    "conflict": {
+      "body": "This policy was saved from somewhere else while you were editing — it is now v{revision}. Your changes are still here and have not been sent. Save to replace v{revision} with them, or reload to start from it and lose what you typed.",
+      "reload": "Reload the saved policy"
+    },
+    "propagation": "A change takes effect on each host's next check-in, then applies from the run after that. That short delay is deliberate: a policy is only ever applied by a run that started with it already in place, so a mistake here can never interrupt a fleet mid-collection.",
+    "cadence": {
+      "title": "Cadence",
+      "description": "How often a host reports, and how long lazyit waits before calling it offline. The two are tied together: the offline threshold has to be longer than the interval, or a healthy host is marked offline between two of its own reports."
+    },
     "interval": {
       "label": "Report every (minutes)",
       "help": "How often each host reports. The scheduler on the host ticks every {tick} minutes and does nothing on a tick inside this interval, so changing this never touches a host's timer.",
@@ -229,12 +249,13 @@
     "softwareMax": {
       "label": "Maximum packages per host",
       "help": "A hard cap on the installed-software list. Lower it on hosts whose package list is more noise than inventory.",
-      "invalid": "Enter a whole number between 0 and {max}."
+      "invalid": "Enter a whole number between 0 and {max}.",
+      "inert": "Installed software is off above, so this cap changes nothing until you turn it back on."
     },
     "collect": {
-      "label": "What agents collect",
-      "help": "A collector that is off is never run — the agent does not gather the facts and then discard them.",
-      "veto": "A host can always refuse: turning a collector off in that host's own /etc/lazyit-agent/config wins over this setting, and nothing here can switch it back on.",
+      "title": "What agents collect",
+      "description": "On Linux a collector that is off is never run — the agent does not gather the facts and then discard them. On Windows only containers works that way: hardware, disks, network interfaces and installed software all ride one PowerShell call that runs either way, so switching one off there keeps the fact out of the report but does not save the host the work.",
+      "veto": "A host can always refuse. Turning a collector off in that host's own agent config — /etc/lazyit-agent/config on Linux, C:\\ProgramData\\lazyit-agent\\config on Windows — wins over this setting, and nothing here can switch it back on.",
       "hardware": "Manufacturer, model and serial",
       "disks": "Disks and mountpoints",
       "nics": "Network interfaces",
@@ -242,25 +263,63 @@
       "containers": "Containers"
     },
     "exclude": {
+      "title": "Exclusions",
+      "description": "Comma-separated name patterns; the whole name has to match, and matching is case-insensitive. * stands for any run of characters, ? for exactly one — regular expressions are not accepted. Each list holds at most {max} patterns.",
+      "count": "{count, plural, =0 {No patterns} other {# of {max} patterns}}",
       "nicNames": {
         "label": "Ignore network interfaces",
         "placeholder": "veth*, docker*, br-*",
-        "help": "Comma-separated name patterns. * matches anything, ? matches one character."
+        "help": "Interfaces whose name matches are left out of the report.",
+        "inert": "Network interfaces are off above, so this list changes nothing until you turn them back on."
       },
       "mountpoints": {
         "label": "Ignore mountpoints",
         "placeholder": "/var/lib/docker/*, /snap/*",
-        "help": "Disks mounted here are left out of the report. Unmounted disks are never affected."
+        "help": "Disks mounted here are left out of the report. Unmounted disks are never affected.",
+        "inert": "Disks and mountpoints are off above, so this list changes nothing until you turn them back on."
       },
       "softwareNames": {
         "label": "Ignore packages",
         "placeholder": "linux-image-*",
-        "help": "Package name patterns to leave out — kernel builds are the usual case."
+        "help": "Package name patterns to leave out — kernel builds are the usual case.",
+        "inert": "Installed software is off above, so this list changes nothing until you turn it back on."
       }
     },
     "globs": {
       "invalid": "“{value}” is not a valid pattern. Use letters, digits, - _ / : and the * and ? wildcards — regular expressions are not accepted.",
       "tooMany": "At most {max} patterns per list."
+    },
+    "scopes": {
+      "title": "Where a policy comes from",
+      "description": "Three scopes, resolved field by field — the narrowest one that sets a field wins.",
+      "instance": {
+        "label": "Instance default",
+        "scope": "Every agent in this estate."
+      },
+      "serviceAccount": {
+        "label": "Per service account",
+        "scope": "One agent's credential — the Add a server wizard mints one per agent."
+      },
+      "node": {
+        "label": "Per host",
+        "scope": "One server."
+      },
+      "editedHere": "Edited here",
+      "noEditor": "No editor yet",
+      "footer": "The API stores all three scopes, but no screen in lazyit writes the narrower two. So this page is what a host runs — unless one of the other two was set through the API directly, or the host's own agent config vetoes part of it. A local setting can only ever make a host report less than this page asks, never more: a longer interval, a lower package cap, extra exclusions, a collector switched off. Nothing here overrides one."
+    },
+    "rollout": {
+      "title": "Rollout",
+      "body": "Each host echoes the policy version it is actually running, so “configured” and “applied” stay different things. A host picks a change up on its next check-in and applies it from the run after that.",
+      "legacy": "A server discovered by an agent older than this channel never echoes a version at all, and shows neither applied nor pending.",
+      "link": "See per-host status on the infrastructure diagram"
+    },
+    "autoConfirm": {
+      "title": "Auto-confirm rules",
+      "description": "Which discovered hosts are confirmed the moment they report instead of waiting in Pending review. A rule only ever applies to reports that arrive after you save it.",
+      "summary": "{total, plural, one {# rule} other {# rules}}, {enabled} enabled",
+      "empty": "No rules — every discovered host waits in Pending review.",
+      "manage": "Manage on the Servers view"
     }
   },
   "smtp": {

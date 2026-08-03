@@ -7,6 +7,7 @@ import {
   KeyIcon,
   MapPinIcon,
   ServerStackIcon,
+  SignalIcon,
   TagIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -28,6 +29,7 @@ interface SettingsSection {
     | "imports"
     | "roles"
     | "serviceAccounts"
+    | "agents"
     | "instance"
     | "integrations";
   icon: ComponentType<{ className?: string }>;
@@ -58,6 +60,9 @@ const SECTIONS: SettingsSection[] = [
     key: "serviceAccounts",
     icon: KeyIcon,
   },
+  // Next to Service accounts on purpose (#1174): the "Add a server" wizard mints one service account
+  // per agent, so the credential and the policy it carries are the same subject two cards apart.
+  { href: "/settings/agents", key: "agents", icon: SignalIcon },
   {
     href: "/settings/integrations/tasks",
     key: "integrations",

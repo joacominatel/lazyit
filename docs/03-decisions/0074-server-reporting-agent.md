@@ -1531,10 +1531,12 @@ reads are **tolerant** while writes are **strict**: a stored layer this build ca
 "no override" and is logged, never an exception, because one bad config row must not 500 the endpoint
 that keeps an estate visible.
 
-**Shipped surface, stated plainly.** The UI edits the **instance default** (Settings → Instance →
-Reporting agents) and the node drill-in exposes the echoed revision. The per-node and
-per-service-account scopes are **API-only in this build** (`PUT /infra/nodes/:id/agent-policy`,
-`PUT /infra/agent-policy/service-accounts/:id`) — they work, and they have no editor yet.
+**Shipped surface, stated plainly.** The UI edits the **instance default** (Settings → Reporting
+agents; it lived under Settings → Instance until #1174 gave the agent surface its own section) and the
+node drill-in exposes the echoed revision. The per-node and per-service-account scopes are **API-only
+in this build** (`PUT /infra/nodes/:id/agent-policy`, `PUT /infra/agent-policy/service-accounts/:id`) —
+they work, they have no editor yet, and since #1174 the section says so on screen instead of leaving
+an operator to infer that only one scope exists.
 
 **Amendment (2026-08-01, #1137) — operational hardening: the unit, the network, and the two things
 an operator could not do.** Everything here is individually small. Collectively it is the difference
@@ -1898,6 +1900,77 @@ the data model or any migration; a Linux estate that upgrades its instance and n
 is untouched. `?arch=`-only downloads keep working forever. The renamed artifacts and the `os`
 parameter arrive with the API image. Windows support arrives only where `install.ps1` is **run**;
 there is no upgrade path that turns an existing Linux host into a Windows one, and none is wanted.
+
+**Amendment (2026-08-02, #1168) — the wizard was the last surface that did not know Windows exists.**
+The amendment above shipped the executable, `install.ps1` and the Manual's Windows section, and was
+then installed on a real Windows desktop. The first friction point was not any of them: it was the
+**create-agent wizard**. Minting the SA and revealing the token is platform-neutral and always was,
+but everything printed around it was Linux — the copy said "a Linux server with root access" and the
+only command emitted was `curl … | sudo sh`. An operator on Windows was therefore handed a command
+their host cannot run at the one moment they are holding a token that is shown once and never again,
+and had to leave for `/help` to find out what to type.
+
+Step 2 now takes a **platform choice** (Linux default) and switches four things with it: the
+requirements line, the emitted install command, the inspect-first path, and the post-install check.
+Each is worth stating because each is a promise about code this component does not contain, and
+`agent-install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}` as served
+and against both locale catalogs as shipped:
+
+- **The requirements line states the real constraint, not a friendly one.** Windows 10/11 or Server
+  2016+, on **x64** — `install.ps1` dies on anything whose `PROCESSOR_ARCHITECTURE` is not `AMD64`,
+  because there is no `bun-windows-arm64` target. The wizard mints the Service Account in step 1, so
+  an operator who learns this in step 2 has already spent a token that is shown once; the copy is held
+  to the installer's own guard by a test rather than paraphrased.
+- **The Windows one-liner is the script-block form, not `irm … | iex`.** The pipe form runs the
+  installer with no arguments at all, so `-Url` and `-Token` never arrive and it dies asking for
+  them. This is the same reason `install.ps1`'s own `.EXAMPLE` is written that way. **It also changes
+  what a fatal costs, which the #1166 amendment above did not have to think about because the wizard
+  emitted no PowerShell yet.** `Die` ends with `exit 1`, and `exit` inside a `&`-invoked script block
+  propagates out to the host, so a refusal takes the whole PowerShell session with it — an elevated
+  console opened by right-click closes on the spot, and #1166's carefully-built "pass `-Url <this>`
+  instead" suggestion goes with it. On Linux the same refusal only ends the piped `sh` and stays on
+  the operator's screen. The Manual says so on the Windows side rather than promising, platform-blind,
+  that the suggestion can be pasted straight back. **This is measured on PowerShell 7.6.4 only**
+  (`& ([scriptblock]::Create(<install.ps1's real Die + guard bytes>)) -Url …/install.ps1` printed the
+  message and exited the host); nothing here can run 5.1. Nothing about it argues for changing `Die` —
+  the wizard fills `-Url` in from `window.location.origin`, which has no path and cannot trip the
+  guard, so this is reachable only by hand-running an installer.
+- **The inspect-first path differs in kind, not just in spelling.** On Linux it is install.sh done by
+  hand in four steps. On Windows it is *download the installer, read it, run the copy you read* —
+  because reproducing `install.ps1` by hand means the config file's SYSTEM+Administrators ACL and the
+  registered scheduled task, and a half-done version of those is worse than none. It saves the
+  installer to `$env:TEMP\lazyit-install.ps1` — named explicitly, because an elevated PowerShell opens
+  in `C:\Windows\System32` and a bare `-OutFile .\install.ps1` would drop a downloaded script there —
+  and runs that file through `[scriptblock]::Create` rather than invoking it, because a `.ps1` **file**
+  is subject to the host's execution policy while a script block built in memory is not.
+- **The Windows diagnostic is the absolute path**, `& "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test`,
+  spelled the way `install.ps1` spells its own install directory. It was chosen when the bare
+  `lazyit-agent test` the Manual documents was not a command on Windows at all — the install directory
+  was not on `PATH` (**#1167**, then open) — precisely because the absolute form runs both before and
+  after that lands. **#1167 has since landed**: `install.ps1` now edits the machine `PATH` through the
+  registry — deliberately not through `setx`, which truncates at 1024 characters, nor through
+  `[Environment]::SetEnvironmentVariable`, which flattens a `REG_EXPAND_SZ` into a `REG_SZ` on the way
+  back — so the bare name resolves in a **new** shell, and the command printed here needed no revision,
+  as designed. **It stays the absolute form**, because the console this gets pasted into is usually the
+  elevated PowerShell the install just ran in, and a running process keeps the environment block it
+  started with: the one shell guaranteed not to see the new entry is the one the operator is holding.
+  The wizard's copy says that. The tripwire that was supposed to force this paragraph's re-read
+  asserted `setx` and `SetEnvironmentVariable` were absent — a registry write was expected to slip
+  past it, and it only caught this one because both names appear in the comment explaining why neither
+  is used. It is now a positive assertion that the `PATH` write is still there, because the copy beside
+  the command depends on it. **The elevation requirement rides in the copy beside it**, not in the
+  command:
+  PowerShell 5.1 has no `sudo`, and the in-command alternative (`Start-Process -Verb RunAs`) runs the
+  check in a second console whose output is not in the shell the operator is reading. It is not
+  optional — the config file is ACL'd to SYSTEM + Administrators, the agent reads an unreadable config
+  as an absent one, and an unelevated `test` therefore announces that no URL and no token are
+  configured on a host that installed perfectly.
+
+The wizard also **states plainly that the Windows executable is unsigned**, on the Windows tab, before
+anything is run. §8's gate below is a decision the operator meets as a SmartScreen warning, and an
+operator who meets it with no warning of their own reasonably concludes the download is malicious and
+stops. Frontend and message catalogs only: no contract, schema, migration or installer change, and no
+existing agent is affected.
 
 
 ### §8 — Security model

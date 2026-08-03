@@ -31,7 +31,8 @@ The button opens a short, guided wizard with three steps:
 1. **Name & generate.** Give the agent a name you'll recognise later (for example the server's name,
    like `web-prod-01`) and click **Generate credentials**. lazyit creates a service account scoped to
    **only** the `infra:report` permission.
-2. **Install.** lazyit shows a ready-to-paste **install command** with the token already filled in:
+2. **Install.** Pick the platform this server runs — **Linux** or **Windows** — and lazyit shows a
+   ready-to-paste **install command** for it, with the token already filled in. On **Linux**:
 
    ```sh
    curl -fsSL https://your-instance/install.sh | sudo sh -s -- --url https://your-instance --token <token>
@@ -46,22 +47,33 @@ The button opens a short, guided wizard with three steps:
    (The script-block form is not decoration: the plain `irm … | iex` pipe cannot pass parameters.)
    See **[Windows hosts](#windows-hosts)** below for what that install does and what it needs.
 
+   The choice changes everything the wizard prints alongside it: what the host needs, the
+   inspect-first path, the check to run afterwards, and — on Windows — a plain statement that the
+   executable is **not signed yet**, so you meet that fact before SmartScreen tells you.
+
    The address is **your own lazyit instance** — the agent only ever talks to the server you run, and
    it must be the **public HTTPS origin** (the address you use in a browser, in front of the reverse
    proxy) — **never** the raw web port (`:3000`), which has no route for the agent download and will
    make the install fail. It is the **base** address and nothing more: `https://your-instance`, not
-   `https://your-instance/install.sh` (the address of the script itself). The installer appends its
-   own paths, so a script address would make every request `…/install.sh/api/agent/download`; both
-   installers now check for that and say so, instead of failing later with a download error that
-   reads like a bad token — and they print the address you meant, so you can paste it straight back.
-   If a reverse proxy mounts your instance under a path (`https://it.example.com/lazyit`), that path
-   **is** part of your base address: pass it, and keep it in the address the installers suggest. The
-   installers warn about any path — that shape is usually the mistake above — but they continue, so
-   a prefixed instance still installs.
-   Run it **as root** on Linux, or **as Administrator** on Windows. The token
-   is shown **only once**, so copy it (or download it) before continuing. If you'd rather inspect every step, expand **Install
-   manually (step by step)** for the same install done by hand (download the binary, install it, write
-   the config file, send a test report).
+   `https://your-instance/install.sh` — nor `https://your-instance/install.ps1`, the Windows one —
+   which is the address of the script itself. The installer appends its own paths, so a script
+   address would make every request `…/install.sh/api/agent/download`; both installers now check for
+   that and say so, instead of failing later with a download error that reads like a bad token — and
+   both print the address you meant. Grab it while it is on screen: on Linux the refusal ends the
+   piped `sh` and leaves the message at your prompt, but on Windows the one-liner runs the installer
+   as a **script block**, so the refusal exits the PowerShell session along with it and an elevated
+   console you opened by right-clicking closes on the spot. If a reverse proxy mounts your instance
+   under a path (`https://it.example.com/lazyit`), that path **is** part of your base
+   address: pass it, and keep it in the address the installers suggest. The installers warn about any
+   path — that shape is usually the mistake above — but they continue, so a prefixed instance still
+   installs. The wizard's own commands never hit any of this: it fills the address in for you from
+   the one you are browsing, so this matters when you re-run an installer by hand.
+   Run it **as root** on Linux, or **as Administrator** on Windows. The token is shown **only once**,
+   so copy it (or download it) before continuing. If you'd rather inspect things first, the wizard
+   has a collapsed section for it and it differs by platform: on Linux, **Install manually (step by
+   step)** is the same install done by hand (download the binary, install it, write the config file,
+   send a test report); on Windows, **Download and read the installer first** saves `install.ps1` to
+   your temp folder so you can read it, then runs the copy you read.
 
    > **Keep the token out of the shell.** As written above, the token is visible in `ps` to every
    > user on that machine for the few seconds the install runs, and it lands in root's shell history.
@@ -91,9 +103,9 @@ The button opens a short, guided wizard with three steps:
 
 ### Install manually (step by step)
 
-The wizard's collapsed **Install manually** section gives the same install command-by-command, for a
-cautious admin who prefers to download and inspect the binary first. Each step has its own copy
-button:
+With **Linux** selected, the wizard's collapsed **Install manually** section gives the same install
+command-by-command, for a cautious admin who prefers to download and inspect the binary first. Each
+step has its own copy button:
 
 1. **Download the binary** (use `arch=arm64` on ARM machines; add `&os=windows` for a Windows host,
    which serves `lazyit-agent-windows-x64.exe`):
@@ -116,6 +128,30 @@ button:
    ```sh
    sudo lazyit-agent report --once --force
    ```
+
+With **Windows** selected the same section is called **Download and read the installer first**, and it
+is two steps rather than four. Reproducing `install.ps1` by hand would mean writing the config file's
+ACL and registering the scheduled task yourself, and a half-done version of that is worse than none —
+so what it offers instead is the honest form of the same intent: save the installer, read it, run the
+copy you read.
+
+1. **Save the installer** to your temp folder — an elevated PowerShell opens in
+   `C:\Windows\System32`, which is no place to leave a freshly downloaded script:
+
+   ```powershell
+   irm https://your-instance/install.ps1 -OutFile "$env:TEMP\lazyit-install.ps1"
+   ```
+2. **Read the saved file, then run it:**
+
+   ```powershell
+   & ([scriptblock]::Create((Get-Content -Raw "$env:TEMP\lazyit-install.ps1"))) -Url https://your-instance -Token <token>
+   ```
+
+   That is the same script-block form as the one-liner above, reading from the file instead of from
+   the network. It is written that way rather than invoking the saved `.ps1` because a `.ps1` **file**
+   is subject to the host's script execution policy — `Restricted` by default on Windows client
+   editions — while a script block built in memory is not. If your policy already allows local
+   scripts, `& "$env:TEMP\lazyit-install.ps1" -Url … -Token …` does exactly the same thing.
 
 ### What a host needs to run it
 
@@ -172,6 +208,16 @@ which is the ordinary upgrade path anyway), use the full path — it always work
 Neither the quotes nor the `&` is decoration, and they come as a pair: `C:\Program Files` has a space
 in it, so the path has to be quoted — and PowerShell would then just *print* that string, so `&`, the
 call operator, is what makes it run.
+
+The **Add a server** wizard prints this full-path form on its Windows tab rather than the bare name,
+and that is deliberate: the console you would paste it into is usually the elevated PowerShell you
+just installed from, which is exactly the console the new PATH entry does not reach. So you leave the
+wizard holding a command that runs there as well as everywhere else.
+
+**Elevated** is not optional either, and the wizard says so beside the command. The installer locks
+the config file to SYSTEM and Administrators, so a `test` run from an ordinary PowerShell cannot read
+the URL or the token and reports that neither is configured — which reads like a broken install
+rather than a missing right-click.
 
 **`test`** checks the address, DNS, TLS, the proxy, the certificate authority and the token, and
 tells you which one is wrong — a redirect means you pointed it at the wrong port, a rejection means
@@ -242,14 +288,15 @@ task's own one-minute random delay rides its five-minute tick, not its at-startu
 not what de-phases a floor that just rebooted.)
 
 As on Linux, **the 5-minute tick is not the reporting cadence.** How often a host actually reports is
-set centrally in **Settings → Instance → Reporting agents**; a tick that arrives too early exits
+set centrally in **Settings → Reporting agents**; a tick that arrives too early exits
 immediately without doing anything. Changing the cadence never touches the task.
 
 ### The binary is not code-signed yet
 
 The Windows executable is currently **unsigned**. SmartScreen will warn about it, and some antivirus
 products will quarantine it on sight — if the install fails at the "run it once" step, that is the
-first thing to check.
+first thing to check. The wizard says so on the Windows tab, before you run anything, so the warning
+is not the first you hear of it.
 
 This is a deliberate, temporary state for **internal validation inside the organisation that builds
 lazyit**, on its own domain and its own machines. **Do not deploy this Windows agent to a customer or
@@ -703,23 +750,40 @@ brings both back.
 
 ## Configure every agent from one screen
 
-You do not edit agents host by host. **Settings → Instance → Reporting agents** sets the policy for
-every agent in the estate, and each one picks it up on its next check-in.
+You do not edit agents host by host. **Settings → Reporting agents** — its own section in Settings,
+next to Service accounts — sets the policy for every agent in the estate, and each one picks it up on
+its next check-in.
 
-What you can set there:
+> **It used to live under Settings → Instance**, and the installer's own output and the comments it
+> writes into a host's config file still say so. That page now carries a link across to the section
+> instead of the editor, so following the older wording still gets you there in one more click.
 
-- **How often each host reports** — from 5 minutes to 24 hours. This is the setting that used to mean
-  editing a systemd timer on every machine.
-- **How long lazyit waits before calling a host offline.** It must be longer than the reporting
-  interval, or a perfectly healthy host gets marked offline between two of its own reports — the
-  editor will not let you save a value that would do that.
-- **Which collectors run** — hardware, disks, network interfaces, installed software, containers. A
-  collector that is off is never run at all: the agent does not gather the facts and then throw them
-  away.
-- **What to leave out** — name patterns for network interfaces (`veth*`, `docker*`), mountpoints
-  (`/var/lib/docker/*`, `/snap/*`) and packages (`linux-image-*`), plus a hard cap on how many
-  packages a host may report. `*` matches anything and `?` matches a single character; regular
-  expressions are not accepted.
+What you can set there, in three groups:
+
+- **Cadence** — how often each host reports (from 5 minutes to 24 hours; on Linux this is the setting
+  that used to mean editing a systemd timer on every machine), and how long lazyit waits before calling a host
+  offline. The second must be longer than the first, or a perfectly healthy host gets marked offline
+  between two of its own reports — the editor will not let you save a value that would do that, and it
+  says so under the field rather than after you press Save.
+- **What agents collect** — hardware, disks, network interfaces, installed software, containers, plus
+  a hard cap on how many packages a host may report. **On Linux** a collector that is off is never run
+  at all: the agent does not gather the facts and then throw them away. **On Windows** only containers
+  works that way — hardware, disks, network interfaces and the installed list all come out of a single
+  PowerShell call that runs whatever the policy says, so switching one off there keeps the fact out of
+  the report but does not save the host the work of collecting it. Either way, a switched-off
+  collector never reaches lazyit.
+- **Exclusions** — name patterns for network interfaces (`veth*`, `docker*`), mountpoints
+  (`/var/lib/docker/*`, `/snap/*`) and packages (`linux-image-*`). `*` matches anything and `?`
+  matches a single character; regular expressions are not accepted, and each list holds at most 32
+  patterns. A list whose collector is switched off is still saved, but nothing runs it — the screen
+  says so beside the list rather than leaving you to wonder why the pattern did nothing.
+
+The same section also shows **where a policy comes from**. lazyit resolves three scopes, field by
+field, and the narrowest one that sets a field wins: a per-host override, then the reporting agent's
+service account, then this instance default. **Only the instance default has an editor** — the other
+two exist in the API and are marked on screen as having none, so you can see that the hierarchy is
+there instead of wondering why one host behaves differently. The [auto-confirm
+rules](#auto-confirm-rules) are linked from there too, since they are agent configuration as well.
 
 Three things are worth knowing before you use it.
 
@@ -728,7 +792,8 @@ check-in, and the host applies it from the run *after* that — so allow up to t
 That delay is deliberate: an agent only ever applies a policy it already had in hand when it started,
 so a mistake here can never interrupt a fleet halfway through collecting.
 
-**Each host can refuse, and lazyit cannot override that.** A host's own `/etc/lazyit-agent/config`
+**Each host can refuse, and lazyit cannot override that.** A host's own config file —
+`/etc/lazyit-agent/config` on Linux, `C:\ProgramData\lazyit-agent\config` on Windows —
 can turn a collector off (`LAZYIT_COLLECT_SOFTWARE=false`), set a floor on how often it will report
 (`LAZYIT_MIN_INTERVAL=3600`), cap its own package list (`LAZYIT_SOFTWARE_MAX=500`) or add its own
 exclusions (`LAZYIT_EXCLUDE_NICS=veth*`). Those settings **win**, always, and nothing you set in
@@ -747,10 +812,12 @@ expression, and there is no plan to add one. That is what keeps the worst case o
 at "proposals you discard" rather than "someone else's code running as root on every server you own".
 
 **Did it take?** Each host reports back which version of the policy it is running, so you can tell
-"configured" from "actually applied". Open a server on the [infrastructure
-diagram](/help/assets-topology-diagram) and its panel shows **Policy v7 · applied** or **Policy v8 ·
-pending** — pending simply means that host has not checked in since your change. A server discovered
-by an agent older than this release shows neither, because it never reports a policy version at all.
+"configured" from "actually applied". The version lazyit is currently serving sits next to the
+section's title (**Policy v8**). To see whether a given host has picked it up, open that server on the
+[infrastructure diagram](/help/assets-topology-diagram) and its panel shows **Policy v7 · applied** or
+**Policy v8 · pending** — pending simply means that host has not checked in since your change. A
+server discovered by an agent older than this release shows neither, because it never reports a policy
+version at all.
 
 ## Security
 
