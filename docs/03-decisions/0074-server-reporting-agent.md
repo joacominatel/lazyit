@@ -1316,10 +1316,15 @@ Stated honestly, and it is worth stating because the temptation is to oversell i
 checksum, not a signature.** Anyone who can write both files in the API container defeats it, and it
 is not meant to survive that — cosign stays deferred below. What it buys is a corrupted layer, a
 half-written volume, a caching proxy serving a stale artifact, and a tamper that changed one file and
-not the other, all stopping at the installer instead of nowhere. A build that publishes no digest
+not the other, all stopping at the installer instead of nowhere. ~~A build that publishes no digest
 (any instance older than this) makes the installer **warn and continue**, because web and API ship
 from the same image and failing closed there would brick every install during a rollback;
-`--require-checksum` makes it fatal for an operator who wants that.
+`--require-checksum` makes it fatal for an operator who wants that.~~ — **superseded (2026-08-03,
+#1190): verification is required by default and cannot fail open — a check the party being checked
+can strip by failing one fetch is not a check. A build that publishes no digest is now FATAL; the one
+escape is `--sha256`/`-Sha256`, a digest obtained out of band, and `--require-checksum`/
+`-RequireChecksum` stays accepted and means nothing. Plain-`http` URLs moved behind the explicit
+`--allow-insecure-http`/`-AllowInsecureHttp` opt-in at the same time ([[0087-plain-http-lan-deployment-axis]]).**
 
 **Amendment (2026-08-02, #1166) — the installers are ASCII, and `--url` is checked before anything is
 downloaded.** Two defects found on the **first real Windows host**, during first-run validation.
@@ -1985,7 +1990,11 @@ existing agent is affected.
 - **`curl | sh` posture.** The installer is served by the operator's own TLS-fronted instance
   (same-origin, no third party). The token is the operator's, scoped to one permission, revocable from
   the UI. A "download, inspect, then run" path is available for the cautious; the one-liner is the
-  default.
+  default. **Amended (2026-08-03, #1190):** the served executable is verified against its published
+  sha256 **by default, fail-closed** (`--sha256`/`-Sha256` is the out-of-band escape for an instance
+  that publishes none), and "TLS-fronted" is the default rather than a guarantee — a plain-`http`
+  instance installs only behind the explicit `--allow-insecure-http`/`-AllowInsecureHttp` opt-in,
+  which names both cleartext exposures ([[0087-plain-http-lan-deployment-axis]]).
 
 **Amendment (2026-07-31, #1134) — throttling `POST /infra/report`.** The bullets above reason about
 **authorization** and are right: one permission, a human gate, no secret reach, and a leaked token buys
