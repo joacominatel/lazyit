@@ -117,3 +117,64 @@ export const UpdateAssetTagSchemeSchema = z.strictObject({
 
 export type AssetTagScheme = z.infer<typeof AssetTagSchemeSchema>;
 export type UpdateAssetTagScheme = z.infer<typeof UpdateAssetTagSchemeSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Truthful next-tag preview (#1180)                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `GET /config/asset-tag-scheme/next-tag` query — the pattern to preview. The affixes are taken
+ * VERBATIM from the query (an absent affix means "no affix", never "reuse the saved one"), so the
+ * settings editor can preview the IN-PROGRESS pattern it is composing before saving. `from` is the
+ * counter floor to walk from; omit it to use the instance's stored `nextNumber`.
+ *
+ * Why the affixes are not inferred server-side: the editor's whole job is to preview an unsaved
+ * pattern, and "the operator cleared the prefix" must be distinguishable from "the operator sent no
+ * prefix key". Verbatim affixes make the two identical, which is the only unambiguous reading.
+ */
+export const AssetTagNextPreviewQuerySchema = z.object({
+  prefix: z.string().optional(),
+  suffix: z.string().optional(),
+  width: z.coerce.number().int().min(0).max(ASSET_TAG_WIDTH_MAX).optional(),
+  /** Counter floor for the skip-existing walk; omit to use the stored `nextNumber`. */
+  from: z.coerce.number().int().min(0).optional(),
+});
+export type AssetTagNextPreviewQuery = z.infer<
+  typeof AssetTagNextPreviewQuerySchema
+>;
+
+/**
+ * `GET /config/asset-tag-scheme/next-tag` response — the number the SKIP-EXISTING selection
+ * (ADR-0068 §1) picks for this pattern, and its rendered tag.
+ *
+ * `number` is the smallest `n >= fromNumber` whose rendered tag is not already on a LIVE asset —
+ * chosen by the SAME selection the allocator runs, over the same live estate. It is therefore what
+ * the allocator would pick for this pattern at this instant; it is NOT a reservation (nothing is
+ * consumed and no counter moves), so a create that lands first still wins the slot and the next
+ * preview moves on. `skippedCount` = `number - fromNumber`: how many already-taken numbers the walk
+ * stepped over, which is exactly the signal the operator needs to tell a working counter from a
+ * broken one.
+ *
+ * `exhausted` mirrors the allocator's int4-ceiling freeze: when the first free slot is past
+ * `INT4_MAX` there is nothing allocatable, so `number` and `tag` are BOTH null. Outside that case
+ * both are non-null — they always move together (enforced below), so a caller never has to reason
+ * about a tag with no number behind it.
+ */
+export const AssetTagNextPreviewSchema = z
+  .object({
+    /** The counter floor the walk started from (the request's `from`, or the stored `nextNumber`). */
+    fromNumber: z.number().int(),
+    /** The first free number, or null when the sequence is exhausted past int4. */
+    number: z.number().int().nullable(),
+    /** `renderAssetTag(pattern, number)`, or null when the sequence is exhausted. */
+    tag: z.string().nullable(),
+    /** How many already-taken numbers the skip-existing walk stepped over. */
+    skippedCount: z.number().int(),
+    /** True when the first free slot is past the int4 ceiling (the allocator would 400). */
+    exhausted: z.boolean(),
+  })
+  .refine((value) => (value.number === null) === (value.tag === null), {
+    message: "`number` and `tag` must both be present or both be null",
+    path: ["tag"],
+  });
+export type AssetTagNextPreview = z.infer<typeof AssetTagNextPreviewSchema>;
