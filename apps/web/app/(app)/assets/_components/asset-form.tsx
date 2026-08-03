@@ -13,7 +13,6 @@ import {
   AssetStatusSchema,
   cloneAssetDefaults,
   CreateAssetSchema,
-  renderAssetTag,
   type SpecsWarning,
   UpdateAssetSchema,
   validateSpecsAgainstDictionary,
@@ -52,7 +51,10 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
-import { useAssetTagScheme } from "@/lib/api/hooks/use-asset-tag-scheme";
+import {
+  useAssetTagNextPreview,
+  useAssetTagScheme,
+} from "@/lib/api/hooks/use-asset-tag-scheme";
 import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
@@ -238,18 +240,28 @@ export function AssetForm({
       : "",
   );
 
-  // Asset-tag scheme hint (ADR-0063, #363): on CREATE, when the org enabled an auto-tag scheme, hint the
-  // next auto-generated tag as the `assetTag` placeholder so the operator knows leaving it blank
-  // auto-assigns. The field stays optional and an explicit value still wins (the scheme only fills the
-  // gap server-side). Never shown on edit, and a no-op when the scheme is OFF/absent (today's behaviour).
+  // Asset-tag scheme hint (ADR-0063, #363 · #1180): on CREATE, when the org enabled an auto-tag scheme,
+  // tell the operator which tag leaving this blank would assign. The field stays optional and an explicit
+  // value still wins (the scheme only fills the gap server-side). Never shown on edit, and absent when
+  // the scheme is OFF (today's behaviour) or when the caller lacks `settings:manage` (the scheme read is
+  // admin-gated, so `tagScheme` is simply undefined for everyone else — the form must not depend on it).
   const { data: tagScheme } = useAssetTagScheme();
   // Distinct existing company values for the free-text autocomplete datalist (ADR-0076). A plain
   // suggestion list — the operator can still type a brand-new value.
   const { data: companies } = useAssetCompanies();
-  const autoTagHint =
-    !isEdit && tagScheme?.enabled
-      ? renderAssetTag(tagScheme, tagScheme.nextNumber)
-      : undefined;
+  // The tag that would actually be assigned — a SERVER read, because the allocator skips forward past
+  // numbers whose tag already exists (ADR-0068 §1) and that walk needs the live estate. Rendering
+  // `nextNumber` locally is the #1180 lie: with LZ-1000 already taken it said LZ-1000 while the server
+  // assigned LZ-1001. Idle unless we're creating under an enabled scheme. Read-only — previewing does
+  // not reserve the number, so the tag the create finally gets can differ if someone else creates first.
+  const autoTagEnabled = !isEdit && Boolean(tagScheme?.enabled);
+  const { data: nextTagPreview } = useAssetTagNextPreview({
+    prefix: tagScheme?.prefix ?? undefined,
+    suffix: tagScheme?.suffix ?? undefined,
+    width: tagScheme?.width ?? undefined,
+    enabled: autoTagEnabled,
+  });
+  const autoTagHint = autoTagEnabled ? nextTagPreview?.tag : undefined;
 
   // Specs source: the edited asset's specs, or the clone source's (deep-copied by the sanitizer).
   const specsSource = asset?.specs ?? cloneSource?.specs;
@@ -638,14 +650,20 @@ export function AssetForm({
                   onChange={(event) =>
                     field.onChange(event.target.value || undefined)
                   }
-                  placeholder={
-                    autoTagHint
-                      ? t("assetTagAutoHint", { tag: autoTagHint })
-                      : t("assetTagPlaceholder")
-                  }
+                  // ALWAYS the labelled example (#1180). The placeholder used to double as the
+                  // computed next tag, so an operator with an `LZ-` prefix read the `LZ-0001` example
+                  // as a real value and concluded the counter was broken. The example now says it is
+                  // one, and the computed value lives in its own slot below — different words,
+                  // different position, different styling.
+                  placeholder={t("assetTagPlaceholder")}
                   className="font-mono"
                   aria-invalid={fieldState.invalid || undefined}
                 />
+                {autoTagHint ? (
+                  <FieldDescription>
+                    {t("assetTagAutoHint", { tag: autoTagHint })}
+                  </FieldDescription>
+                ) : null}
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}
