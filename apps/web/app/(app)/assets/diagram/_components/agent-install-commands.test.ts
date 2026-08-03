@@ -217,7 +217,7 @@ describe("agentDiagnosticsCommand", () => {
     expect(script).toContain("/usr/local/bin");
   });
 
-  test("Windows runs the ABSOLUTE path, because the install dir is not on PATH (#1167)", async () => {
+  test("Windows runs the ABSOLUTE path — the one form the pasting console can always run", async () => {
     const command = agentDiagnosticsCommand("windows");
     expect(command).toBe(
       '& "$env:ProgramFiles\\lazyit-agent\\lazyit-agent.exe" test',
@@ -227,13 +227,18 @@ describe("agentDiagnosticsCommand", () => {
     const script = await Bun.file(installerPath("install.ps1")).text();
     expect(script).toContain("Join-Path $env:ProgramFiles 'lazyit-agent'");
     expect(script).toContain("'lazyit-agent.exe'");
-    // #1167 is open: nothing in install.ps1 puts that directory on PATH, so the bare name would
-    // raise CommandNotFoundException. This assertion is a tripwire for the TWO spellings a PATH
-    // write would plausibly use — `setx` and `[Environment]::SetEnvironmentVariable` — and it is a
-    // tripwire, not a proof: a registry write straight to `Session Manager\Environment` would slip
-    // past it. Either way the absolute form above stays correct, so what a red here buys is a
-    // re-read of this comment, not a change to the command.
-    expect(script).not.toMatch(/setx|SetEnvironmentVariable/i);
+    // This assertion used to be the INVERSE — a tripwire asserting nothing in install.ps1 wrote PATH
+    // — from when #1167 was open and the bare name raised CommandNotFoundException. #1167 has landed
+    // and the installer now edits the machine PATH through the registry, so the tripwire has fired
+    // and is replaced by what it was watching for. The absolute form above did not need revising,
+    // which was the reason it was chosen.
+    //
+    // It is asserted POSITIVELY now because the copy beside the command depends on it: `windowsNote`
+    // tells the operator the full path is printed because their own console cannot see the new entry
+    // — a sentence that becomes nonsense if the entry stops being written at all.
+    expect(script).toContain(
+      "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+    );
   });
 
   test("neither form carries the other platform's privilege verb", () => {

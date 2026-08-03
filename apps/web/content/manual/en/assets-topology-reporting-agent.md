@@ -179,23 +179,40 @@ detection.
 ### Check a host without waiting for a report
 
 Two commands answer the two questions you'll actually have, and **neither sends or changes
-anything**:
+anything**. On **Linux**:
 
 ```sh
 sudo lazyit-agent test    # can this host reach lazyit, and is its token good?
 sudo lazyit-agent show    # what exactly would this host report?
 ```
 
-On Windows, the same two commands, from an elevated PowerShell:
+On **Windows**, the same two commands from an elevated PowerShell — no `sudo`, which is not a
+Windows command:
+
+```powershell
+lazyit-agent test         # can this host reach lazyit, and is its token good?
+lazyit-agent show         # what exactly would this host report?
+```
+
+The installer puts `C:\Program Files\lazyit-agent` on the machine PATH, which is what makes the bare
+name work — but **only in a PowerShell opened after the install**. A console that was already open
+keeps the environment it started with, and so does the one the installer itself ran in. In that
+console, or on a host installed with an older version of the script (re-run the installer to fix it,
+which is the ordinary upgrade path anyway), use the full path — it always works:
 
 ```powershell
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test
 & "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" show
 ```
 
-The full path is not fussiness: on Windows the installer does not add its folder to `PATH`, so the
-bare `lazyit-agent test` is not a command there. The wizard prints whichever of the two forms matches
-the platform you picked, so you leave it holding one that runs.
+Neither the quotes nor the `&` is decoration, and they come as a pair: `C:\Program Files` has a space
+in it, so the path has to be quoted — and PowerShell would then just *print* that string, so `&`, the
+call operator, is what makes it run.
+
+The **Add a server** wizard prints this full-path form on its Windows tab rather than the bare name,
+and that is deliberate: the console you would paste it into is usually the elevated PowerShell you
+just installed from, which is exactly the console the new PATH entry does not reach. So you leave the
+wizard holding a command that runs there as well as everywhere else.
 
 **Elevated** is not optional either, and the wizard says so beside the command. The installer locks
 the config file to SYSTEM and Administrators, so a `test` run from an ordinary PowerShell cannot read
@@ -232,10 +249,15 @@ Run from an **elevated PowerShell** (right-click PowerShell → *Run as administ
 3. compares the **fingerprint** your instance publishes for that executable and refuses a mismatch;
 4. **runs it once** (`--help`) before registering anything — if the machine can't start it, you get
    one clear sentence, nothing is installed and no task is registered;
-5. writes `C:\ProgramData\lazyit-agent\config` and locks it down to **SYSTEM and Administrators
+5. adds `C:\Program Files\lazyit-agent` to the **machine PATH**, so the diagnostic commands work by
+   name — the same way `/usr/local/bin` already does on Linux. This is the one thing on the list
+   that is allowed to fail: if it can't be written, you get a warning and the install carries on,
+   because nothing but your own typing needs it — the scheduled task runs the agent by its full
+   path;
+6. writes `C:\ProgramData\lazyit-agent\config` and locks it down to **SYSTEM and Administrators
    only** — the Windows equivalent of the `chmod 600` it uses on Linux, because that file holds a
    live token;
-6. registers a **scheduled task**, and sends one report so you find out immediately whether the token
+7. registers a **scheduled task**, and sends one report so you find out immediately whether the token
    works.
 
 ### Do I have to configure anything?
@@ -248,7 +270,8 @@ credential sitting in a file on every machine in your estate.
 
 Running the agent by hand **without** Administrator still works — it just reports less (no serial
 number, for instance), exactly as it does on Linux without root, and `lazyit-agent show` tells you
-what it had to skip.
+what it had to skip. (That name resolves in any PowerShell opened after the install; in one that was
+already open, use the full path — see [Check a host](#check-a-host-without-waiting-for-a-report).)
 
 ### A scheduled task, not a service
 
@@ -302,6 +325,7 @@ image tag but no digest.
 | | Linux | Windows |
 | --- | --- | --- |
 | The program | `/usr/local/bin/lazyit-agent` | `C:\Program Files\lazyit-agent\lazyit-agent.exe` |
+| Why `lazyit-agent` resolves | `/usr/local/bin` is already on PATH | the installer adds its directory to the machine PATH |
 | Configuration (holds the token) | `/etc/lazyit-agent/config` | `C:\ProgramData\lazyit-agent\config` |
 | Local state | `/var/lib/lazyit-agent` | `C:\ProgramData\lazyit-agent\state` |
 | What runs it | systemd timer | Scheduled Task `lazyit-agent` |
@@ -333,8 +357,9 @@ On Windows, from an elevated PowerShell:
 
 It stops and removes what runs the agent — the timer and both systemd units on Linux, the scheduled
 task on Windows — then the binary, the agent's local state and its configuration file, including
-**the token**, which is destroyed whichever options you use. It's safe to run twice, and safe on a
-half-finished install.
+**the token**, which is destroyed whichever options you use. On Windows it also takes its
+directory back off the machine PATH, so nothing is left pointing at a folder that no longer exists.
+It's safe to run twice, and safe on a half-finished install.
 
 If you're re-imaging a machine that will get the agent back, add **`--keep-config`** (Linux) or
 **`-KeepConfig`** (Windows): it keeps that host's own limits and its proxy settings (the things the machine's owner chose, which are annoying to
@@ -580,11 +605,12 @@ have them. Two things leave a host out of the check, and both are silent:
 
 So a fleet on the newest agent can still get **no clone detection whatsoever**. The tell is the
 **Reported facts** panel: if it shows no serial for a host, that host is not being checked. To find
-out *why*, run `lazyit-agent show` on the host — its collection notes now name the source that came
-back empty and the error behind it on Windows as well as on Linux (see *What the agent collects*
-below; nothing displays those notes in the interface yet). If clone detection matters to you, run the
-agent as root (Linux, with `dmidecode` installed) or from the scheduled task (Windows), and expect
-nothing from it on container guests.
+out *why*, run `lazyit-agent show` on the host (`sudo` on Linux; on Windows an elevated PowerShell,
+by name or by full path — see [Check a host](#check-a-host-without-waiting-for-a-report)) — its
+collection notes now name the source that came back empty and the error behind it on Windows as well
+as on Linux (see *What the agent collects* below; nothing displays those notes in the interface yet).
+If clone detection matters to you, run the agent as root (Linux, with `dmidecode` installed) or from
+the scheduled task (Windows), and expect nothing from it on container guests.
 
 ## What the agent collects
 
@@ -642,7 +668,8 @@ nothing from it on container guests.
   PowerShell call that keeps going past a failure rather than aborting the report, so it also names
   **each fact that came back empty** — the serial, the disks, the network cards, the machine identity —
   and passes Windows' own error text through, which is the difference between a blank column and a
-  blank column you can act on. Run `lazyit-agent show` and it prints those notes right there,
+  blank column you can act on. Run `lazyit-agent show` — the exact command per platform is under
+  [Check a host](#check-a-host-without-waiting-for-a-report) — and it prints those notes right there,
   without sending anything, which is usually the fastest way to answer "why is this host's serial
   column empty?". (`lazyit-agent report --once --force` prints them too, and sends the report.)
   lazyit also stores them alongside the host's reported facts, so a future fleet view

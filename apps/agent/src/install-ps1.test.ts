@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AGENT_POLICY_TICK_SECONDS } from "@lazyit/shared";
 import { defaultConfigFile, defaultStateDir } from "./paths";
@@ -362,6 +364,311 @@ describe("the config file holds a live credential and is protected like one", ()
   });
 });
 
+/**
+ * THE INSTALL DIRECTORY ON THE MACHINE PATH (#1167).
+ *
+ * `install.sh` drops the agent in `/usr/local/bin`, which is on PATH on every distribution this
+ * supports, so `sudo lazyit-agent test` — the command the Manual documents — just works. This
+ * installer drops it in `%ProgramFiles%\lazyit-agent`, which is on nobody's PATH, and never wrote
+ * one. The first real Windows host answered the documented command with
+ * `The term 'lazyit-agent' is not recognized`, at exactly the moment an operator reaches for it:
+ * when something is already wrong.
+ *
+ * HOW THIS IS TESTED. The two functions that decide the edit are PURE — they take the raw PATH
+ * string and a directory and answer a string, with no registry and no environment of their own. That
+ * is what makes them runnable off Windows: the corpus below is executed by real PowerShell
+ * (`pwsh`, which the ubuntu-latest CI image ships and `brew install powershell` provides), against
+ * the functions read OUT OF the shipped `install.ps1` rather than a copy pasted in here.
+ *
+ * On a machine with no PowerShell at all the same corpus runs through a model of those two
+ * functions, and the assertion message names which engine answered — a fallback that asserts the
+ * same table is not the "silently does nothing" trap the header of this file argues against, but it
+ * is weaker, so the text checks below pin the operations the model mirrors. CI runs the real one.
+ */
+const PATH_DIR = "C:\\Program Files\\lazyit-agent";
+
+type PathCase = {
+  /** What the machine PATH holds before the installer touches it (the RAW registry value). */
+  raw: string;
+  /** How many entries `Split-LazyitPath` recognises as the install directory. */
+  dropped: number;
+  /** What survives that split, joined back with ';' — the uninstall answer. */
+  kept: string;
+  /** What `Join-LazyitPath` answers: the new value, or null when it is already there. */
+  joined: string | null;
+};
+
+const PATH_CASES: Record<string, PathCase> = {
+  "a PATH without it gets it appended": {
+    raw: "C:\\Windows\\system32;C:\\Windows",
+    dropped: 0,
+    kept: "C:\\Windows\\system32;C:\\Windows",
+    joined: "C:\\Windows\\system32;C:\\Windows;C:\\Program Files\\lazyit-agent",
+  },
+  // THE IDEMPOTENCE THAT MATTERS. Re-running the installer is the documented upgrade path, so this
+  // case runs on every host in the estate that is ever upgraded, not on an exotic one.
+  "a re-install does not append it a second time": {
+    raw: "C:\\Windows;C:\\Program Files\\lazyit-agent",
+    dropped: 1,
+    kept: "C:\\Windows",
+    joined: null,
+  },
+  "a trailing backslash is the same directory": {
+    raw: "C:\\Program Files\\lazyit-agent\\;C:\\Windows",
+    dropped: 1,
+    kept: "C:\\Windows",
+    joined: null,
+  },
+  "case does not make it a different directory — Windows paths are not case-sensitive": {
+    raw: "c:\\program files\\LAZYIT-AGENT;C:\\Windows",
+    dropped: 1,
+    kept: "C:\\Windows",
+    joined: null,
+  },
+  // An entry somebody wrote by hand as a variable is still this directory. Expanding the entry
+  // before comparing is what keeps the upgrade path from stacking a second copy beside it.
+  "an entry written unexpanded is recognised as this directory": {
+    raw: "%ProgramFiles%\\lazyit-agent;C:\\Windows",
+    dropped: 1,
+    kept: "C:\\Windows",
+    joined: null,
+  },
+  "a directory that merely starts the same is left alone": {
+    raw: "C:\\Program Files\\lazyit-agent-old;C:\\Program Files\\lazyit-agentx",
+    dropped: 0,
+    kept: "C:\\Program Files\\lazyit-agent-old;C:\\Program Files\\lazyit-agentx",
+    joined: "C:\\Program Files\\lazyit-agent-old;C:\\Program Files\\lazyit-agentx;C:\\Program Files\\lazyit-agent",
+  },
+  // THE DESTRUCTIVE ONE. The machine PATH is a REG_EXPAND_SZ holding literal `%SystemRoot%`
+  // entries. Anything that reads it expanded and writes the result back flattens those forever, on
+  // every host that installs an inventory agent. Entries this script does not own come back byte
+  // for byte, in both directions.
+  "an unexpanded entry the installer does not own survives verbatim": {
+    raw: "%SystemRoot%\\system32;C:\\Program Files\\lazyit-agent;C:\\tools",
+    dropped: 1,
+    kept: "%SystemRoot%\\system32;C:\\tools",
+    joined: null,
+  },
+  "a value that already ends in a separator does not gain an empty entry": {
+    raw: "C:\\Windows;",
+    dropped: 0,
+    kept: "C:\\Windows;",
+    joined: "C:\\Windows;C:\\Program Files\\lazyit-agent",
+  },
+  "an empty PATH becomes just this directory": {
+    raw: "",
+    dropped: 0,
+    kept: "",
+    joined: "C:\\Program Files\\lazyit-agent",
+  },
+  "whitespace around an entry does not hide it": {
+    raw: "C:\\Windows; C:\\Program Files\\lazyit-agent ",
+    dropped: 1,
+    kept: "C:\\Windows",
+    joined: null,
+  },
+};
+
+/** A complete `function <name>(...) { ... }` definition, read out of the shipped installer. */
+function powershellFunction(name: string): string {
+  const start = script.indexOf(`function ${name}(`);
+  expect(start, `install.ps1 defines no function ${name}`).toBeGreaterThan(-1);
+  let depth = 0;
+  for (let i = script.indexOf("{", start); i < script.length; i += 1) {
+    if (script[i] === "{") depth += 1;
+    else if (script[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return script.slice(start, i + 1);
+    }
+  }
+  throw new Error(`unbalanced braces in ${name}`);
+}
+
+type PathAnswer = { dropped: number; kept: string; joined: string | null };
+
+const POWERSHELL = Bun.which("pwsh") ?? Bun.which("powershell");
+
+/** The shipped functions, run by real PowerShell over the corpus. */
+function answersFromPowerShell(shell: string): Record<string, PathAnswer> {
+  const dir = mkdtempSync(join(tmpdir(), "lazyit-install-ps1-"));
+  const casesFile = join(dir, "cases.json");
+  const driver = join(dir, "driver.ps1");
+  writeFileSync(
+    casesFile,
+    JSON.stringify(
+      Object.entries(PATH_CASES).map(([name, one]) => ({ name, raw: one.raw, dir: PATH_DIR })),
+    ),
+  );
+  writeFileSync(
+    driver,
+    [
+      // The same strictness the installer itself runs under, so a strict-mode fault in either
+      // function surfaces here rather than on a Windows host.
+      "Set-StrictMode -Version Latest",
+      "$ErrorActionPreference = 'Stop'",
+      // The corpus is a Windows PATH; give the process the one variable it expands.
+      "$env:ProgramFiles = 'C:\\Program Files'",
+      powershellFunction("Split-LazyitPath"),
+      powershellFunction("Join-LazyitPath"),
+      "foreach ($case in (Get-Content -LiteralPath $args[0] -Raw | ConvertFrom-Json)) {",
+      "  $split = Split-LazyitPath $case.raw $case.dir",
+      "  [pscustomobject]@{",
+      "    name = $case.name",
+      "    dropped = $split.Dropped",
+      "    kept = ($split.Entries -join ';')",
+      "    joined = (Join-LazyitPath $case.raw $case.dir)",
+      "  } | ConvertTo-Json -Compress",
+      "}",
+      "",
+    ].join("\n"),
+  );
+
+  const run = Bun.spawnSync([shell, "-NoProfile", "-File", driver, casesFile]);
+  const stdout = new TextDecoder().decode(run.stdout);
+  expect(
+    run.exitCode,
+    `${shell} could not run the shipped PATH functions:\n${new TextDecoder().decode(run.stderr)}`,
+  ).toBe(0);
+
+  const answers: Record<string, PathAnswer> = {};
+  for (const line of stdout.split("\n").filter((one) => one.trim() !== "")) {
+    const parsed = JSON.parse(line) as { name: string; dropped: number; kept: string; joined: string | null };
+    answers[parsed.name] = { dropped: parsed.dropped, kept: parsed.kept, joined: parsed.joined };
+  }
+  return answers;
+}
+
+/** The same two functions, modelled — used only where there is no PowerShell to ask. */
+function answersFromModel(): Record<string, PathAnswer> {
+  const environment: Record<string, string> = { programfiles: "C:\\Program Files" };
+  const expand = (value: string) =>
+    value.replace(/%([^%]+)%/g, (whole, name: string) => environment[name.toLowerCase()] ?? whole);
+  const normalise = (value: string) => expand(value).trim().replace(/\\+$/, "");
+  const target = normalise(PATH_DIR).toLowerCase();
+
+  const answers: Record<string, PathAnswer> = {};
+  for (const [name, one] of Object.entries(PATH_CASES)) {
+    const kept: string[] = [];
+    let dropped = 0;
+    for (const entry of one.raw.split(";")) {
+      const normal = normalise(entry);
+      if (normal !== "" && normal.toLowerCase() === target) dropped += 1;
+      else kept.push(entry);
+    }
+    let joined: string | null = null;
+    if (dropped === 0) {
+      if (one.raw.trim() === "") joined = PATH_DIR;
+      else if (one.raw.endsWith(";")) joined = `${one.raw}${PATH_DIR}`;
+      else joined = `${one.raw};${PATH_DIR}`;
+    }
+    answers[name] = { dropped, kept: kept.join(";"), joined };
+  }
+  return answers;
+}
+
+const ENGINE = POWERSHELL ? `real PowerShell (${POWERSHELL})` : "the model (no pwsh on this machine)";
+
+/**
+ * Memoised, and resolved INSIDE a test rather than in the describe body on purpose: an extraction
+ * that throws while the block is being registered reports zero tests instead of a failure, which is
+ * the "reads like coverage" trap this file's header argues against.
+ */
+let memoised: Record<string, PathAnswer> | undefined;
+function answers(): Record<string, PathAnswer> {
+  memoised ??= POWERSHELL ? answersFromPowerShell(POWERSHELL) : answersFromModel();
+  return memoised;
+}
+
+describe("the install directory lands on the machine PATH, once (#1167)", () => {
+
+  test("both halves of the edit are PURE functions, so they can be run off Windows", () => {
+    // If either stops taking the raw value as a parameter, the corpus below stops testing the
+    // shipped logic and starts testing whatever it closed over.
+    expect(powershellFunction("Split-LazyitPath")).toContain("function Split-LazyitPath([string] $RawPath, [string] $Dir)");
+    expect(powershellFunction("Join-LazyitPath")).toContain("function Join-LazyitPath([string] $RawPath, [string] $Dir)");
+    // The operations the model mirrors, so the fallback engine is not asserting against a fantasy.
+    const split = powershellFunction("Split-LazyitPath");
+    expect(split).toContain("-split ';'");
+    expect(split).toContain("[Environment]::ExpandEnvironmentVariables");
+    expect(split).toContain("TrimEnd('\\')");
+    expect(split).toContain("-ieq");
+  });
+
+  for (const [name, expected] of Object.entries(PATH_CASES)) {
+    test(name, () => {
+      const answer = answers()[name];
+      expect(answer, `${name}: ${ENGINE} answered nothing`).toBeDefined();
+      expect({ ...answer }, `${name}, answered by ${ENGINE}`).toEqual({
+        dropped: expected.dropped,
+        kept: expected.kept,
+        joined: expected.joined,
+      });
+    });
+  }
+});
+
+/**
+ * The registry side of the same edit — which cannot be executed off Windows, so it is pinned by the
+ * two idioms it must never come back to.
+ */
+describe("the PATH edit goes through the registry, and never abandons an install that fails it", () => {
+  test("neither setx nor .NET's machine-target setter is used to write it", () => {
+    // `setx` TRUNCATES what it writes at 1024 characters: a longer machine PATH comes back
+    // permanently shortened on a host somebody just installed an inventory agent on.
+    expect(script).not.toContain("setx ");
+    // .NET expands a REG_EXPAND_SZ value on the way out and writes the result back as a plain
+    // REG_SZ, which flattens every `%SystemRoot%` entry the value had. The words appear in the
+    // comment that explains why they are gone, so the assertion is on the CALL.
+    expect(script).not.toContain("[Environment]::SetEnvironmentVariable(");
+    // On the CALL, and on BOTH of them. Asserted as a bare word this passes on the comment that
+    // explains why the option is there, which is how a green test hides a value read expanded.
+    const rawRead = "$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)";
+    expect(script.split(rawRead).length - 1, "both the add and the remove path must read the RAW value").toBe(2);
+    // And written back under the kind it already had, so a REG_EXPAND_SZ does not become a REG_SZ
+    // whose %SystemRoot% entries stop expanding.
+    expect(script.split("GetValueKind('Path')").length - 1).toBe(2);
+  });
+
+  test("a new console really does see it — the environment change is broadcast", () => {
+    // Without WM_SETTINGCHANGE (0x1A) to HWND_BROADCAST (0xffff), a console opened from the Start
+    // menu inherits the environment block explorer.exe cached when it started, and the closing
+    // message below would be promising something false until the operator signed out.
+    // The CALL, with its arguments: both the constant and the function name appear in the comment
+    // above it and in the DllImport beside it, so a bare-word assertion stays green on a script that
+    // declares the import and never invokes it.
+    expect(script).toContain(
+      "[Lazyit.Env]::SendMessageTimeout([IntPtr] 0xffff, 0x1A, [UIntPtr]::Zero, 'Environment', 0x0002, 5000, [ref] $answer)",
+    );
+    // …and both edits publish it. Removing the entry without telling the desktop leaves the bare
+    // name resolving to a deleted executable in every console that had already picked it up.
+    expect(script.split("  Publish-LazyitEnvironmentChange\n").length - 1).toBe(2);
+  });
+
+  test("failing to write it warns and continues — the agent does not need it", () => {
+    // The task runs $BinPath by absolute path and every message this script prints does the same, so
+    // a host with a locked-down registry ACL is a fully working agent missing a convenience. Aborting
+    // there would throw away a completed install over one.
+    const call = script.slice(script.indexOf("$onPath = $false"), script.indexOf("# --- config (ACL"));
+    expect(call.length).toBeGreaterThan(0);
+    expect(call).toContain("Add-InstallDirToPath");
+    expect(call).toContain("Write-Warning");
+    expect(call).not.toContain("Die ");
+  });
+
+  test("it happens only after the executable has been proven to start", () => {
+    const runCheck = script.indexOf("& $BinPath --help");
+    const pathEdit = script.indexOf("$onPath = $false");
+    expect(pathEdit).toBeGreaterThan(runCheck);
+  });
+
+  test("the closing message keeps the absolute path and does not promise this console", () => {
+    const closing = script.slice(script.indexOf("Say \"done."));
+    expect(closing).toContain("'$BinPath test'");
+    expect(closing).toContain("NEW");
+    expect(closing).toContain("already open");
+  });
+});
+
 describe("uninstall", () => {
   test("disarms the task BEFORE removing the executable", () => {
     const unregister = script.indexOf("Unregister-ScheduledTask");
@@ -375,6 +682,21 @@ describe("uninstall", () => {
     // which is the host owner's setting, while still stripping the token and the URL.
     expect(script).toContain("^\\s*LAZYIT_(TOKEN|URL)=");
     expect(script).toContain("Remove-Item -LiteralPath $StateDir");
+  });
+
+  // A PATH entry pointing at a directory that no longer exists is exactly the residue this path
+  // exists to prevent — the argument #1137 made for the token and the state directory. It is
+  // removed AFTER the directory, and like the install side it warns rather than aborting: a failure
+  // here must not leave a half-uninstalled host, and the token has already gone by then.
+  test("the PATH entry goes with the directory it points at (#1167)", () => {
+    const removeDir = script.indexOf("Remove-Item -LiteralPath $InstallDir");
+    // The CALL, not the function definition far above it.
+    const removePath = script.indexOf("$pathRemoved = Remove-InstallDirFromPath");
+    expect(removeDir).toBeGreaterThan(-1);
+    expect(removePath).toBeGreaterThan(removeDir);
+    const block = script.slice(removeDir, script.indexOf("if ($KeepConfig -and"));
+    expect(block).toContain("Write-Warning");
+    expect(block).not.toContain("Die ");
   });
 });
 

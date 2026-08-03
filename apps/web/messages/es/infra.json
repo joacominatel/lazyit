@@ -169,7 +169,7 @@
     "diagnostics": {
       "title": "Verificá el host después",
       "hint": "Es de solo lectura: no envía ni modifica nada. Responde si este host puede llegar a lazyit y si su token es válido.",
-      "windowsNote": "Ejecutalo desde una PowerShell elevada: el archivo de configuración del agente solo lo pueden leer SYSTEM y Administradores, así que sin elevación la verificación va a decir que no hay URL ni token configurados. La ruta va completa porque el instalador todavía no agrega su carpeta al PATH en Windows."
+      "windowsNote": "Ejecutalo desde una PowerShell elevada: el archivo de configuración del agente solo lo pueden leer SYSTEM y Administradores, así que sin elevación la verificación va a decir que no hay URL ni token configurados. La ruta va completa porque esta consola no ve la carpeta que el instalador acaba de agregar al PATH: una PowerShell en ejecución conserva el entorno con el que arrancó, así que lazyit-agent test a secas recién funciona en una abierta después de la instalación."
     },
     "waitTitle": "Esperando que {name} reporte…",
     "waitDescription": "Ejecutá el comando de instalación en tu servidor. Apenas el agente reporte, aparecerá acá, normalmente en un par de minutos.",

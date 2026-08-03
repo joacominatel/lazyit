@@ -443,8 +443,11 @@ function PlatformInstall({
       </details>
 
       {/* The check an operator reaches for when a host stays quiet — and the one that failed them on
-          Windows, where the install directory is not on PATH (#1167, open). The absolute form printed
-          here runs today AND once #1167 adds that PATH entry, so it needs no revision when it lands.
+          Windows, where the install directory used to be off PATH entirely. #1167 has since landed,
+          so the bare `lazyit-agent test` resolves in a NEW shell; the absolute form printed here is
+          kept because the shell this gets pasted into is usually the elevated PowerShell the install
+          just ran in, which never sees the new entry. It needed no revision when #1167 landed, which
+          was the point of choosing it.
 
           The Windows note carries the OTHER half of what the Linux `sudo` carries in the command
           itself: this check needs an elevated PowerShell, because install.ps1 ACLs the config file to

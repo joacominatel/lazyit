@@ -148,11 +148,14 @@ export function agentManualInstallSteps(
  *
  * Linux gets the bare name: install.sh puts the binary in `/usr/local/bin`, which is on PATH.
  *
- * Windows gets the ABSOLUTE path, because install.ps1 installs under `%ProgramFiles%` and never adds
- * that directory to PATH — the bare `lazyit-agent test` the Manual documents raises
- * CommandNotFoundException there today. That is issue #1167, still open. When it lands, the bare name
- * will ALSO work in a new shell; the absolute form printed here keeps working either way, so this
- * command needs no revision when it does.
+ * Windows gets the ABSOLUTE path. It was chosen when install.ps1 installed under `%ProgramFiles%` and
+ * left that directory off PATH, so the bare `lazyit-agent test` the Manual documents raised
+ * CommandNotFoundException (#1167) — chosen so it would need no revision when that was fixed. #1167
+ * has since landed and the installer now writes the machine PATH, so the bare name resolves too, in a
+ * NEW shell. THE ABSOLUTE FORM STAYS, and not out of inertia: the shell this command gets pasted into
+ * is usually the elevated PowerShell the install just ran in, and a running process keeps the
+ * environment block it started with — the one console guaranteed NOT to see the new entry is the one
+ * the operator is holding. `windowsNote` says exactly that.
  */
 export function agentDiagnosticsCommand(platform: AgentPlatform): string {
   return platform === "windows"

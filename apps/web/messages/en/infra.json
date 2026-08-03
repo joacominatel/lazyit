@@ -169,7 +169,7 @@
     "diagnostics": {
       "title": "Check the host afterwards",
       "hint": "Read-only: it sends nothing and changes nothing. It answers whether this host can reach lazyit and whether its token is good.",
-      "windowsNote": "Run it from an elevated PowerShell: the agent's config file can only be read by SYSTEM and Administrators, so without elevation the check reports that no URL and no token are configured. The path is written out in full because the installer doesn't add its folder to PATH on Windows yet."
+      "windowsNote": "Run it from an elevated PowerShell: the agent's config file can only be read by SYSTEM and Administrators, so without elevation the check reports that no URL and no token are configured. The path is written out in full because this console cannot see the folder the installer just put on PATH — a running PowerShell keeps the environment it started with, so the bare lazyit-agent test only works in one opened after the install."
     },
     "waitTitle": "Waiting for {name} to report…",
     "waitDescription": "Run the install command on your server. As soon as the agent checks in, it'll show up here — usually within a couple of minutes.",

@@ -1944,13 +1944,22 @@ and against both locale catalogs as shipped:
   and runs that file through `[scriptblock]::Create` rather than invoking it, because a `.ps1` **file**
   is subject to the host's execution policy while a script block built in memory is not.
 - **The Windows diagnostic is the absolute path**, `& "$env:ProgramFiles\lazyit-agent\lazyit-agent.exe" test`,
-  spelled the way `install.ps1` spells its own install directory. The bare `lazyit-agent test` the
-  Manual documents is not a command on Windows today: the install directory is not on `PATH`
-  (**#1167**, open). The absolute form runs both before and after that lands, so it needs no revision
-  when it does; the test carries a tripwire assertion that fails the day `install.ps1` starts writing
-  `PATH` with `setx` or `SetEnvironmentVariable` — a registry write straight to
-  `Session Manager\Environment` would slip past it — so this paragraph gets re-read on purpose rather
-  than quietly rotting. **The elevation requirement rides in the copy beside it**, not in the command:
+  spelled the way `install.ps1` spells its own install directory. It was chosen when the bare
+  `lazyit-agent test` the Manual documents was not a command on Windows at all — the install directory
+  was not on `PATH` (**#1167**, then open) — precisely because the absolute form runs both before and
+  after that lands. **#1167 has since landed**: `install.ps1` now edits the machine `PATH` through the
+  registry — deliberately not through `setx`, which truncates at 1024 characters, nor through
+  `[Environment]::SetEnvironmentVariable`, which flattens a `REG_EXPAND_SZ` into a `REG_SZ` on the way
+  back — so the bare name resolves in a **new** shell, and the command printed here needed no revision,
+  as designed. **It stays the absolute form**, because the console this gets pasted into is usually the
+  elevated PowerShell the install just ran in, and a running process keeps the environment block it
+  started with: the one shell guaranteed not to see the new entry is the one the operator is holding.
+  The wizard's copy says that. The tripwire that was supposed to force this paragraph's re-read
+  asserted `setx` and `SetEnvironmentVariable` were absent — a registry write was expected to slip
+  past it, and it only caught this one because both names appear in the comment explaining why neither
+  is used. It is now a positive assertion that the `PATH` write is still there, because the copy beside
+  the command depends on it. **The elevation requirement rides in the copy beside it**, not in the
+  command:
   PowerShell 5.1 has no `sudo`, and the in-command alternative (`Start-Process -Verb RunAs`) runs the
   check in a second console whose output is not in the shell the operator is reading. It is not
   optional — the config file is ACL'd to SYSTEM + Administrators, the agent reads an unreadable config
