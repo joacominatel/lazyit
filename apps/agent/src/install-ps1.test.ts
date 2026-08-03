@@ -705,6 +705,50 @@ describe("uninstall", () => {
   });
 });
 
+/**
+ * A FAILURE MUST BE CHECKABLE BY A SCRIPT (#1191). The script runs under
+ * `$ErrorActionPreference='Stop'`, which makes `Write-Error` ITSELF a terminating error — so the old
+ * `Write-Error` + `exit 1` pair never reached its exit: every Die stopped on an unhandled error
+ * record, and a fleet script checking `$LASTEXITCODE` saw a raw record instead of a clean code.
+ * `throw` is the deliberate replacement: `powershell -File` and `-Command` both turn an uncaught
+ * throw into process exit code 1, and — the reason it wins over `Write-Host` + `exit` — the
+ * `& ([scriptblock]::Create((irm ...)))` form the Manual documents keeps an INTERACTIVE operator's
+ * elevated console open on a mistyped token instead of slamming it shut.
+ */
+describe("Die produces a clean, script-checkable failure (#1191)", () => {
+  test("it throws — Write-Error under 'Stop' never reaches an exit line", () => {
+    const die = powershellFunction("Die");
+    expect(die).toContain('throw "lazyit-agent install: $Message"');
+    expect(die).not.toContain("Write-Error");
+    expect(die).not.toContain("exit 1");
+  });
+
+  // EXECUTED where the harness allows (#1193 convention), same engine rule as the PATH corpus:
+  // real PowerShell when the machine has one, and the text assertion above is the whole check when
+  // it does not — never a test that silently does nothing.
+  test(`an uncaught Die exits the interpreter with code 1 (checked by ${ENGINE})`, () => {
+    if (!POWERSHELL) return; // the throw-shape test above is the model half
+    const dir = mkdtempSync(join(tmpdir(), "lazyit-install-ps1-die-"));
+    const driver = join(dir, "die.ps1");
+    writeFileSync(
+      driver,
+      [
+        // The same preferences the installer itself runs under — the exact combination that made
+        // the old Write-Error shape unreachable.
+        "$ErrorActionPreference = 'Stop'",
+        "Set-StrictMode -Version Latest",
+        powershellFunction("Die"),
+        "Die 'the token is required'",
+        "",
+      ].join("\n"),
+    );
+    const run = Bun.spawnSync([POWERSHELL, "-NoProfile", "-File", driver]);
+    expect(run.exitCode, "an uncaught throw must reach the caller as exit code 1").toBe(1);
+    const stderr = new TextDecoder().decode(run.stderr);
+    expect(stderr).toContain("lazyit-agent install: the token is required");
+  });
+});
+
 describe("the unsigned-binary state is stated, not hidden", () => {
   test("the script says so where an operator will read it", () => {
     // An OV/EV code-signing certificate is an explicit GATE before any third party installs this.
@@ -722,6 +766,35 @@ describe("there is no windows/arm64 build, and the installer says so rather than
   test("a non-AMD64 host is refused by name", () => {
     expect(script).toContain("PROCESSOR_ARCHITECTURE");
     expect(script).toContain("there is no ARM64 target");
+  });
+
+  // THE WOW64 MISDETECT THIS PINS (#1191). Inside a 32-bit PowerShell on x64 Windows —
+  // exactly what RMM/deployment tools commonly spawn, the fleet-install vector — the variable
+  // PROCESSOR_ARCHITECTURE answers 'x86': the PROCESS architecture, not the machine's. The first
+  // cut gated on it alone, so a perfectly supported x64 host died with "unsupported architecture".
+  test("the gate decides on the MACHINE architecture — PROCESSOR_ARCHITEW6432 is consulted (#1191)", () => {
+    // PROCESSOR_ARCHITEW6432 exists only inside a WOW64 process and holds the real architecture;
+    // Is64BitOperatingSystem is the belt for a host that exports neither.
+    const w6432 = script.indexOf("PROCESSOR_ARCHITEW6432");
+    const gate = script.indexOf("-ne 'AMD64'");
+    expect(w6432).toBeGreaterThan(-1);
+    expect(w6432).toBeLessThan(gate);
+    expect(script).toContain("[Environment]::Is64BitOperatingSystem");
+  });
+
+  test("a 32-bit shell on x64 Windows is INSTRUCTED to relaunch, never refused as unsupported (#1191)", () => {
+    // Proceeding from the WOW64 shell would install under the wrong Program Files (%ProgramFiles%
+    // answers 'Program Files (x86)' there), so the shell is named as the problem and the exact
+    // 64-bit interpreter to relaunch from is given: SysNative is how a 32-bit process reaches the
+    // real System32.
+    expect(script).toContain("[Environment]::Is64BitProcess");
+    expect(script).toContain("SysNative\\WindowsPowerShell\\v1.0\\powershell.exe");
+    // The instruction lives on its own branch, after the machine has been established as AMD64 —
+    // an ARM64 host still gets the honest unsupported-architecture refusal.
+    const wow64Branch = script.indexOf("[Environment]::Is64BitProcess");
+    const unsupported = script.indexOf("unsupported architecture");
+    expect(unsupported).toBeGreaterThan(-1);
+    expect(wow64Branch).toBeGreaterThan(unsupported);
   });
 
   test("-Baseline is explicit because Windows has no /proc/cpuinfo to auto-detect from", () => {

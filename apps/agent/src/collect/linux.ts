@@ -113,6 +113,9 @@ export function collectOs(osRelease: string | null, kernel: string | null): Host
 function collectCpu(cpuinfo: string | null): Host["cpu"] {
   if (!cpuinfo) return undefined;
   const model = cpuinfo.match(/^model name\s*:\s*(.+)$/m)?.[1]?.trim();
+  // LOGICAL CPUs — each `processor :` line is a hyper-thread. This IS the wire semantic of
+  // `host.cpu.cores` on every platform (#1191): the fleet was measured against this count first, so
+  // the Windows collector aligned to it rather than the other way round.
   const cores = cpuinfo.match(/^processor\s*:/gm)?.length;
   return clean({ model, cores });
 }

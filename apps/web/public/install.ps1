@@ -137,9 +137,15 @@ $ConfigDir  = Join-Path $env:ProgramData 'lazyit-agent'
 $ConfigFile = Join-Path $ConfigDir 'config'
 $StateDir   = Join-Path $ConfigDir 'state'
 
+# A FAILURE MUST BE CHECKABLE BY A SCRIPT (#1191). Under $ErrorActionPreference='Stop' a Write-Error
+# is ITSELF a terminating error, so the old Write-Error + exit pair never reached its exit line -
+# every failure stopped on an unhandled error record instead of a clean code. `throw` is deliberate:
+# powershell -File and -Command both turn an uncaught throw into process exit code 1, which is what a
+# fleet script checks - and, unlike Write-Host + exit, the & ([scriptblock]::Create((irm ...))) form
+# the Manual documents keeps an INTERACTIVE operator's elevated console open on a mistyped token
+# instead of closing it.
 function Die([string] $Message) {
-  Write-Error "lazyit-agent install: $Message"
-  exit 1
+  throw "lazyit-agent install: $Message"
 }
 
 function Say([string] $Message) {
@@ -400,9 +406,25 @@ if ($CaFile) {
 # --- arch ------------------------------------------------------------------
 # There is no bun-windows-arm64 target, so an ARM64 host has no artifact and saying so plainly beats
 # downloading an x64 executable that WOW64 might or might not emulate acceptably.
+#
+# THE GATE DECIDES ON THE MACHINE, NOT THE PROCESS (#1191). Inside a 32-BIT PowerShell on x64
+# Windows - which is exactly what RMM and deployment tools commonly spawn, the fleet-install vector -
+# PROCESSOR_ARCHITECTURE answers 'x86': the architecture of the PROCESS asking, not of the machine.
+# PROCESSOR_ARCHITEW6432 exists only inside a WOW64 process and holds the real one; the
+# Is64BitOperatingSystem check is the belt for a host that exports neither. Without this, a perfectly
+# supported x64 host was refused as "unsupported architecture".
 $machine = $env:PROCESSOR_ARCHITECTURE
+if ($env:PROCESSOR_ARCHITEW6432) { $machine = $env:PROCESSOR_ARCHITEW6432 }
+elseif ($machine -eq 'x86' -and [Environment]::Is64BitOperatingSystem) { $machine = 'AMD64' }
 if ($machine -ne 'AMD64') {
   Die "unsupported architecture: $machine (only x64 Windows is built; there is no ARM64 target)"
+}
+# The machine is x64 - but a 32-bit shell must still not RUN the install: %ProgramFiles% answers
+# 'Program Files (x86)' under WOW64, so proceeding would install beside (not over) a 64-bit install
+# and put the agent under the wrong directory. INSTRUCT rather than refuse blind: SysNative is the
+# alias a 32-bit process uses to reach the real System32, so the command below works from THIS shell.
+if (-not [Environment]::Is64BitProcess) {
+  Die "this shell is a 32-bit PowerShell on 64-bit Windows (WOW64), and installing from it would land the agent under the wrong Program Files. Re-run this installer from a 64-bit PowerShell - from this very shell you can start one with: & $env:SystemRoot\SysNative\WindowsPowerShell\v1.0\powershell.exe"
 }
 $arch = if ($Baseline) { 'x64-baseline' } else { 'x64' }
 
