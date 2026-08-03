@@ -8,7 +8,8 @@
  * is the fallback for the switch, the firewall and the NAS that cannot run one.
  *
  * The two paths are gated by DIFFERENT permissions — minting the agent's Service Account needs
- * `settings:manage` (ADR-0074 §6 / ADR-0048), putting a node on the map needs `infra:manage` — so
+ * `settings:manage`, the gate on every `/service-accounts` route (ADR-0048), while putting a node on
+ * the map needs `infra:manage` — so
  * every combination has to resolve to something honest rather than a dead menu entry.
  */
 import { describe, expect, test } from "bun:test";
