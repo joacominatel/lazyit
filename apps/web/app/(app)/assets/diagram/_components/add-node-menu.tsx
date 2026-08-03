@@ -17,6 +17,31 @@ import {
 import { addNodeOptions, type AddNodeOption } from "./add-node-options";
 
 /**
+ * How each add path presents itself — the single table every branch below reads.
+ *
+ * It exists so the rendered order comes from {@link addNodeOptions} rather than from JSX. Writing the
+ * two menu items out by hand would look identical on screen while quietly cutting the planner out of
+ * the decision, and the unit test that pins the agent-first order would have gone on passing over a
+ * menu whose markup said otherwise. That order is a product call, so it gets exactly one place that
+ * can express it.
+ */
+const OPTION_PRESENTATION: Record<
+  AddNodeOption,
+  { Icon: typeof ServerStackIcon; labelKey: string; descriptionKey: string }
+> = {
+  agent: {
+    Icon: ServerStackIcon,
+    labelKey: "agentLabel",
+    descriptionKey: "agentDescription",
+  },
+  manual: {
+    Icon: PencilSquareIcon,
+    labelKey: "manualLabel",
+    descriptionKey: "manualDescription",
+  },
+};
+
+/**
  * The Topology screen's "add" affordance (issue #1181).
  *
  * The Map — the view the topology exists for, and where an operator goes to notice what is missing —
@@ -38,7 +63,7 @@ export function AddNodeMenu({
   onCreateAgent,
   onCreateManual,
 }: {
-  /** `settings:manage` — required to mint the agent's Service Account (ADR-0074 §6 / ADR-0048). */
+  /** `settings:manage` — the gate on every `/service-accounts` route, so on minting one (ADR-0048). */
   canCreateAgent: boolean;
   /** `infra:manage` — required to put a node on the map. */
   canCreateManual: boolean;
@@ -54,10 +79,11 @@ export function AddNodeMenu({
 
   if (options.length === 1) {
     const only = options[0];
+    const { Icon, labelKey } = OPTION_PRESENTATION[only];
     return (
       <Button onClick={() => run(only)}>
-        {only === "agent" ? <ServerStackIcon /> : <PlusIcon />}
-        {t(only === "agent" ? "agentLabel" : "manualLabel")}
+        <Icon />
+        {t(labelKey)}
       </Button>
     );
   }
@@ -76,30 +102,24 @@ export function AddNodeMenu({
           that is accurate for as long as someone remembers to edit it, and the labels alone do not
           say that. */}
       <DropdownMenuContent align="end" className="max-w-[22rem] min-w-[18rem]">
-        <DropdownMenuItem
-          className="items-start gap-3 px-2 py-2.5"
-          onSelect={onCreateAgent}
-        >
-          <ServerStackIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <span className="flex flex-col gap-0.5">
-            <span className="font-medium">{t("agentLabel")}</span>
-            <span className="text-xs text-muted-foreground">
-              {t("agentDescription")}
-            </span>
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="items-start gap-3 px-2 py-2.5"
-          onSelect={onCreateManual}
-        >
-          <PencilSquareIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <span className="flex flex-col gap-0.5">
-            <span className="font-medium">{t("manualLabel")}</span>
-            <span className="text-xs text-muted-foreground">
-              {t("manualDescription")}
-            </span>
-          </span>
-        </DropdownMenuItem>
+        {options.map((option) => {
+          const { Icon, labelKey, descriptionKey } = OPTION_PRESENTATION[option];
+          return (
+            <DropdownMenuItem
+              key={option}
+              className="items-start gap-3 px-2 py-2.5"
+              onSelect={() => run(option)}
+            >
+              <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <span className="flex flex-col gap-0.5">
+                <span className="font-medium">{t(labelKey)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {t(descriptionKey)}
+                </span>
+              </span>
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
