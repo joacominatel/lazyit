@@ -616,8 +616,9 @@ function CanvasBoard({
           setSelectedEdgeId(null);
           onSelectNode?.(node.id);
         }}
-        // A click selects and raises the action bar; a double-click is the shortcut for operators who
-        // want the facts and know it (#1182). Both routes open the same modal.
+        // A click only selects, raising the action bar. A double-click is the shortcut past it for
+        // operators who came for the facts and know where they are (#1182); it opens the same modal
+        // the action bar's Details button does.
         onNodeDoubleClick={(_e, node) => onOpenDetail?.(node.id)}
         onEdgeClick={(_e, edge) => setSelectedEdgeId(edge.id)}
         onPaneClick={() => {
