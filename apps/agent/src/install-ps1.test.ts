@@ -577,14 +577,52 @@ const ENGINE = POWERSHELL ? `real PowerShell (${POWERSHELL})` : "the model (no p
  * Memoised, and resolved INSIDE a test rather than in the describe body on purpose: an extraction
  * that throws while the block is being registered reports zero tests instead of a failure, which is
  * the "reads like coverage" trap this file's header argues against.
+ *
+ * WHO PAYS FOR THE RESOLUTION IS PART OF THE DESIGN (#1186). On a machine with PowerShell — which
+ * includes every `ubuntu-latest` runner, where `pwsh` is preinstalled — the first caller pays a real
+ * process spawn, and PowerShell Core's cold start on a loaded shared runner comfortably exceeds
+ * Bun's default 5000 ms per-test budget. Charging that to whichever case test happened to run first
+ * red-lit CI at random (run 30781764638: `a PATH without it gets it appended [5013.87ms]`, 312 pass /
+ * 1 fail, green on a plain re-run). The lazy resolution stays — it is load-bearing — but the cost is
+ * charged deliberately, to the warm-up test below, which carries a budget sized for a spawn. Every
+ * case test then reads the memo in microseconds and keeps the default timeout, so a genuinely slow
+ * assertion is still caught. Raising the GLOBAL timeout was rejected: it would hide exactly that.
+ *
+ * `chargedTo` records who paid, so the arrangement is asserted rather than assumed — a future edit
+ * that reorders the block or drops the warm-up fails loudly here instead of going back to flaking on
+ * CI once a fortnight.
  */
 let memoised: Record<string, PathAnswer> | undefined;
-function answers(): Record<string, PathAnswer> {
-  memoised ??= POWERSHELL ? answersFromPowerShell(POWERSHELL) : answersFromModel();
+let chargedTo: string | undefined;
+const WARM_UP = "the corpus warm-up";
+function answers(charge: string): Record<string, PathAnswer> {
+  if (memoised === undefined) {
+    chargedTo = charge;
+    memoised = POWERSHELL ? answersFromPowerShell(POWERSHELL) : answersFromModel();
+  }
   return memoised;
 }
 
+/**
+ * A budget sized for what this actually does: start a PowerShell interpreter on a shared CI runner
+ * that may be paging. It is generous on purpose — the point is not to bound the spawn, it is to stop
+ * the spawn being billed to an assertion that should take microseconds.
+ */
+const WARM_UP_TIMEOUT_MS = 60_000;
+
 describe("the install directory lands on the machine PATH, once (#1167)", () => {
+  // FIRST in the block, so it is the caller that resolves the corpus. `bun test` runs the tests of a
+  // describe in declaration order, which is what makes this deterministic rather than lucky.
+  test(
+    WARM_UP,
+    () => {
+      // Still a real assertion, not a bare warm-up: an engine that answers a partial table would
+      // otherwise surface as N confusing per-case failures instead of one honest "the corpus is
+      // incomplete".
+      expect(Object.keys(answers(WARM_UP)).sort()).toEqual(Object.keys(PATH_CASES).sort());
+    },
+    WARM_UP_TIMEOUT_MS,
+  );
 
   test("both halves of the edit are PURE functions, so they can be run off Windows", () => {
     // If either stops taking the raw value as a parameter, the corpus below stops testing the
@@ -601,7 +639,7 @@ describe("the install directory lands on the machine PATH, once (#1167)", () => 
 
   for (const [name, expected] of Object.entries(PATH_CASES)) {
     test(name, () => {
-      const answer = answers()[name];
+      const answer = answers(name)[name];
       expect(answer, `${name}: ${ENGINE} answered nothing`).toBeDefined();
       expect({ ...answer }, `${name}, answered by ${ENGINE}`).toEqual({
         dropped: expected.dropped,
@@ -610,6 +648,13 @@ describe("the install directory lands on the machine PATH, once (#1167)", () => 
       });
     });
   }
+
+  // LAST, because it can only be true once at least one case test has run off the memo. Before
+  // #1186 this named whichever case ran first, which is precisely the bug: a `pwsh` cold start was
+  // being charged to a 5000 ms per-test budget that was never sized for a process spawn.
+  test("no CASE test paid for the pwsh spawn — the corpus was warm before they ran (#1186)", () => {
+    expect(chargedTo).toBe(WARM_UP);
+  });
 });
 
 /**
