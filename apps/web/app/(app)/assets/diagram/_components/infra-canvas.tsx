@@ -590,9 +590,9 @@ function CanvasBoard({
   const hoveredNode = hovered
     ? infraNodes.find((n) => n.id === hovered)
     : undefined;
-  // The action bar anchors to the selected node, so it only exists while that node is on the board —
-  // a node removed from the map (or filtered away) takes its toolbar with it rather than stranding
-  // one over empty canvas.
+  // The action bar anchors to the selected node, so it is looked up in the board's own list rather
+  // than trusted from the prop: a `?node=` deep-link can name an id this board does not hold, and a
+  // node removed from the map takes its toolbar with it instead of stranding one over empty canvas.
   const selectedNode = selectedId
     ? infraNodes.find((n) => n.id === selectedId)
     : undefined;
@@ -751,7 +751,7 @@ function CanvasBoard({
                     Only while impact mode is on, and only for a node actually inside it. */}
                 {inImpactMode && affectedDepth?.has(hoveredNode.id) ? (
                   <Fact
-                    label={t("panel.impactTitle")}
+                    label={t("facts.impact")}
                     value={t("panel.impactDepth", {
                       depth: affectedDepth.get(hoveredNode.id) ?? 1,
                     })}
