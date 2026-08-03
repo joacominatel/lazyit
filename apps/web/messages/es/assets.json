@@ -257,7 +257,7 @@
       "expand": "Ver paquetes",
       "collapse": "Ocultar paquetes",
       "searchPlaceholder": "Buscar paquetes…",
-      "noSoftware": "El agente reportó una lista de paquetes vacía. Un colector que no puede leer paquetes no reporta lista alguna, así que esto es una respuesta y no un faltante.",
+      "noSoftware": "El agente reportó una lista de paquetes vacía: esto es lo que envió, no una lista que lazyit no haya podido guardar. Un reporte que avisa que no pudo recolectarla conserva la lista que lazyit ya tiene.",
       "noMatches": "Ningún paquete coincide con \"{query}\".",
       "containerTitle": "Contenedor",
       "containerName": "Nombre",
