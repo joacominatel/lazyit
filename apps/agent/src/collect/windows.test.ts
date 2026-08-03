@@ -265,6 +265,42 @@ describe("buildWindowsHost", () => {
     expect(notes).toHaveLength(3);
   });
 
+  test("a non-string CIM string field is skipped, never fatal (#1188)", () => {
+    // The same latent pattern as the Uninstall hive, on the CIM side: the document is parsed from a
+    // host, so no field is guaranteed the type the class declares. Each poisoned field costs ITSELF
+    // — the rest of the host block still ships.
+    const base = facts();
+    const { host } = buildWindowsHost(
+      facts({
+        os: { ...base.os, Caption: ["Microsoft", "Windows"] },
+        cs: { ...base.cs, DNSHostName: 42, Manufacturer: { odd: true } },
+        bios: { SerialNumber: 12345 },
+        adapters: [
+          { Index: 3, NetConnectionID: 7, MACAddress: "AA:BB:CC:DD:EE:09", PhysicalAdapter: true },
+          ...(base.adapters as unknown[]),
+        ],
+        machineGuid: 99,
+      }),
+      undefined,
+      AGENT_POLICY_DEFAULT,
+      () => {},
+    );
+    // The numeric DNSHostName is not the hostname — the OS fallback is.
+    expect(host.hostname).not.toBe("42");
+    expect(host.hostname.length).toBeGreaterThan(0);
+    // Caption was an array: `name` is omitted, the sibling fields survive.
+    expect(host.os).toEqual({ family: "windows", version: "10.0.26100", build: "26100" });
+    // Manufacturer (object) and serial (number) are dropped; model still reports.
+    expect(host.hardware).toEqual({ model: "Latitude 7440" });
+    // The adapter whose NetConnectionID is a number is skipped; the well-formed ones survive.
+    expect(host.nics?.map((n) => n.name)).toEqual(["Ethernet", "vEthernet (WSL)"]);
+    // A numeric MachineGuid is no identifier at all, not a stringified one.
+    const kinds = (host.identifiers ?? []).map((i) => i.kind);
+    expect(kinds).not.toContain("windows-machine-guid");
+    expect(kinds).not.toContain("serial");
+    expect(kinds).toContain("smbios-uuid");
+  });
+
   test("junk SMBIOS identity is dropped, not shipped consistently spelled", () => {
     const { host } = buildWindowsHost(
       facts({
@@ -464,6 +500,52 @@ describe("parseWindowsSoftware", () => {
       { name: "Only App", source: "registry" },
     ]);
     expect(parseWindowsSoftware(undefined)).toEqual([]);
+  });
+
+  // Issue #1188. The Uninstall hive is written by arbitrary third-party installers and its values
+  // are NOT guaranteed strings: a DisplayVersion written as REG_DWORD arrives through ConvertTo-Json
+  // as a number, a REG_MULTI_SZ DisplayName as an array. One such entry used to throw out of
+  // `.trim()` and reject the WHOLE report — every tick, until that software was uninstalled.
+  describe("a non-string registry value never fails the report (#1188)", () => {
+    test("a REG_DWORD DisplayVersion (a number) is coerced — a number IS a meaningful version", () => {
+      expect(
+        parseWindowsSoftware([
+          { DisplayName: "Vendor Runtime", DisplayVersion: 5 },
+          { DisplayName: "Real App", DisplayVersion: "1.2.3" },
+        ]),
+      ).toEqual([
+        { name: "Vendor Runtime", version: "5", source: "registry" },
+        { name: "Real App", version: "1.2.3", source: "registry" },
+      ]);
+    });
+
+    test("a REG_MULTI_SZ DisplayName (an array) costs THAT entry, with a warning — the rest ship", () => {
+      const { warn, notes } = sink();
+      const pkgs = parseWindowsSoftware(
+        [
+          { DisplayName: ["Broken", "Installer"], DisplayVersion: "9.9" },
+          { DisplayName: "Real App", DisplayVersion: "1.0" },
+        ],
+        warn,
+      );
+      expect(pkgs).toEqual([{ name: "Real App", version: "1.0", source: "registry" }]);
+      // The skip is EXPLAINED (#1138): an entry an operator can see in Programs and Features that
+      // never reaches the inventory must leave a trace in diagnostics.warnings.
+      expect(notes.some((n) => n.startsWith("software:") && n.includes("DisplayName"))).toBe(true);
+      expect(notes).toHaveLength(1);
+    });
+
+    test("a missing or blank DisplayName still skips SILENTLY — fragments are normal, not junk", () => {
+      const { warn, notes } = sink();
+      parseWindowsSoftware([{ DisplayVersion: "1.0" }, { DisplayName: "   " }], warn);
+      expect(notes).toEqual([]);
+    });
+
+    test("a DisplayVersion that is neither string nor number costs the FIELD, not the entry", () => {
+      expect(parseWindowsSoftware([{ DisplayName: "Odd App", DisplayVersion: ["1", "0"] }])).toEqual([
+        { name: "Odd App", source: "registry" },
+      ]);
+    });
   });
 });
 
