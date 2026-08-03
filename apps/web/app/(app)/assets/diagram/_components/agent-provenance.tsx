@@ -15,8 +15,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * Provenance affordances for AGENT-sourced nodes (ADR-0074 §3) — shared by the Servers table row and
- * the drill-in panel so both surfaces read identically. The reporting agent self-populates inventory;
- * these mark which nodes are machine-reported and how fresh that report is.
+ * the detail modal's header so both surfaces read identically. The reporting agent self-populates
+ * inventory; these mark which nodes are machine-reported and how fresh that report is.
  *
  * ponytail: relative time reuses the shared `useFormatters().relative` (next-intl, locale-aware) — no
  * bespoke `Intl.RelativeTimeFormat`. Staleness is conveyed in muted TEXT (never small coloured text),
