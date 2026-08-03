@@ -59,6 +59,7 @@ import {
   statusTone,
 } from "@/lib/infra/canvas";
 import { cn } from "@/lib/utils";
+import { impactSummaryTone } from "./impact-summary-tone";
 import { InfraEdge as InfraEdgeRenderer, type InfraEdgeData } from "./infra-edge";
 import { InfraEmptyState } from "./infra-empty-state";
 import { InfraNodeCard, type InfraNodeData } from "./infra-node-card";
@@ -94,7 +95,8 @@ export interface InfraCanvasApi {
  * graph's edges (fanned out per-node), styled by status/kind. Nodes are draggable; a settled drag
  * trailing-debounces a `PATCH /infra/nodes/:id/position`. Pan/zoom + fit-view on load come from
  * React Flow. Hover shows quick facts AND spotlights the node's neighbourhood; click selects a node
- * and bubbles up via `onSelectNode` — the SEAM for #742's drill-in panel.
+ * and bubbles up via `onSelectNode` — the SEAM for #742's drill-in, which since #1182 is the tabbed
+ * detail modal the action bar's **Details** button opens.
  *
  * Edges are a *system* (issue #767): a custom edge type encodes each kind by colour + line-style +
  * marker + (DEPENDS_ON only) animated flow, with an on-edge kind label on hover/selection. A "Tidy"
@@ -721,7 +723,8 @@ function CanvasBoard({
         ) : null}
 
         {/* Hover quick-facts (ADR-0070 §6). NodeToolbar auto-positions above the hovered node; a
-            lightweight card, no extra dep. The rich drill-in (owner/KB/secrets) is the panel. */}
+            lightweight card, no extra dep. The rich drill-in (owner/KB/secrets) is the detail
+            modal, one **Details** click away. */}
         {hoveredNode ? (
           <NodeToolbar
             nodeId={hoveredNode.id}
@@ -815,6 +818,11 @@ function CanvasBoard({
  * a floating list over the map would cover the very thing it is describing. An empty radius is good
  * news — "safe to take down" — so it wears the success tone and never reads as a failed query
  * (ADR-0070 §7).
+ *
+ * The tone comes from {@link impactSummaryTone}, which keeps the status hue OFF the readable text:
+ * on this canvas a `text-success` / `text-destructive` sentence over a `/10` tint of its own hue
+ * measures 3.72:1 and 3.93:1 in the light theme, under the 4.5:1 floor. Tint, border and icon carry
+ * the distinction instead — the same trade `Callout` makes app-wide (ADR-0049, issue #812).
  */
 function ImpactSummary({
   count,
@@ -825,20 +833,22 @@ function ImpactSummary({
 }) {
   const t = useTranslations("infra");
   const safe = count === 0;
+  const tone = impactSummaryTone(safe);
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-lg border px-3 py-2 text-sm shadow-md backdrop-blur-sm",
-        safe
-          ? "border-success/40 bg-success/10 text-success"
-          : "border-destructive/40 bg-destructive/10 text-destructive",
+        "flex items-center gap-3 rounded-lg border px-3 py-2 text-sm text-foreground shadow-md backdrop-blur-sm",
+        tone.surface,
       )}
       role="status"
     >
       {safe ? (
-        <ShieldCheckIcon className="size-4 shrink-0" aria-hidden />
+        <ShieldCheckIcon
+          className={cn("size-4 shrink-0", tone.icon)}
+          aria-hidden
+        />
       ) : (
-        <BoltIcon className="size-4 shrink-0" aria-hidden />
+        <BoltIcon className={cn("size-4 shrink-0", tone.icon)} aria-hidden />
       )}
       <span className="font-medium">
         {safe ? t("panel.impactSafe") : t("panel.impactCount", { count })}
