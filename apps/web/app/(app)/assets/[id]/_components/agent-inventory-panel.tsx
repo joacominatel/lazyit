@@ -110,8 +110,21 @@ function formatBytes(bytes: number | undefined): string {
  * A structured, read-only render of ADR-0074 agent inventory carried in `Asset.specs` — the Host facts
  * panel plus a searchable/collapsible Software list. Replaces the raw-JSON custom-fields dump for
  * agent-reported assets; humans don't edit these facts (the agent owns them).
+ *
+ * `showSoftware` exists for the topology node-detail modal (#1182), which gives the package list a tab
+ * of its own — it is the largest single block a host reports, and it was the biggest contributor to
+ * the one-scroll rail this modal replaced. That caller renders the host facts with `showSoftware={false}`
+ * and mounts {@link AgentSoftwarePanel} on its own tab. The Asset detail page passes nothing and keeps
+ * the combined render it has always had: on a page that scrolls, the two belong together.
  */
-export function AgentInventoryPanel({ inventory }: { inventory: AgentInventory }) {
+export function AgentInventoryPanel({
+  inventory,
+  showSoftware = true,
+}: {
+  inventory: AgentInventory;
+  /** Render the installed-software list under the host facts. Default on. */
+  showSoftware?: boolean;
+}) {
   const t = useTranslations("assets.detail.inventory");
   const tc = useTranslations("common");
   const tf = useTranslations("assets.detail");
@@ -241,15 +254,30 @@ export function AgentInventoryPanel({ inventory }: { inventory: AgentInventory }
         )}
       </DetailPanel>
 
-      {software !== undefined && <SoftwarePanel software={software} />}
+      {showSoftware && software !== undefined && (
+        <AgentSoftwarePanel software={software} />
+      )}
     </>
   );
 }
 
-/** Searchable + collapsible installed-package list — a count, a filter and expand-on-demand rows. */
-function SoftwarePanel({ software }: { software: AgentSoftware }) {
+/**
+ * Searchable + collapsible installed-package list — a count, a filter and expand-on-demand rows.
+ *
+ * `defaultExpanded` is for a surface where the list IS the surface: the node-detail modal's Software
+ * tab (#1182) opens it already expanded, because an operator who clicked a tab named "Software" has
+ * already asked the question the collapse was there to defer. On the Asset detail page it stays
+ * collapsed — the list can run to hundreds of rows and it sits between other panels there.
+ */
+export function AgentSoftwarePanel({
+  software,
+  defaultExpanded = false,
+}: {
+  software: AgentSoftware;
+  defaultExpanded?: boolean;
+}) {
   const t = useTranslations("assets.detail.inventory");
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {

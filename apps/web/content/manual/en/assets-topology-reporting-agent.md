@@ -22,11 +22,12 @@ install it on more servers.
 
 ## Create your first agent
 
-On the **Servers** view (the Table view of **Assets › Topology**), when you have no agents yet, a
-**Create your first agent** card sits at the top. Once you have agents, it collapses to a quiet
-**Add agent** button. (You need the manage-settings permission to use it, because it mints a token.)
+On **Assets › Topology** the page header carries an **Add** button, in both the Map and the Table
+view; pick **Install a reporting agent**. On the **Servers** (Table) view, while you have no agents
+yet, a **Create your first agent** card also sits at the top explaining what an agent is. (You need
+the manage-settings permission either way, because this mints a token.)
 
-The button opens a short, guided wizard with three steps:
+Either one opens a short, guided wizard with three steps:
 
 1. **Name & generate.** Give the agent a name you'll recognise later (for example the server's name,
    like `web-prod-01`) and click **Generate credentials**. lazyit creates a service account scoped to
@@ -533,9 +534,10 @@ A few things worth knowing:
 Once confirmed, a host keeps receiving fresh facts from the agent, but your edits — its name, kind,
 position, IP and connections — are yours and the agent never overwrites them. The reported inventory —
 operating system, CPU, memory, disks, network interfaces, serial and installed software — shows as a
-read-only **Reported facts** panel right on the node (open a node on the diagram or Servers list), and
-the same facts appear on the corresponding asset. Both stay fresh: each new report updates them
-without touching anything you own (the asset's name, serial and model are never changed by a report).
+read-only **Reported facts** tab right on the node (open a node on the diagram or Servers list; the
+installed package list gets a **Software** tab of its own), and the same facts appear on the
+corresponding asset. Both stay fresh: each new report updates them without touching anything you own
+(the asset's name, serial and model are never changed by a report).
 This now includes **containers**: a container you confirmed as an asset keeps its image, digest, state
 and published ports up to date on its asset page, where previously they stayed as they were the day
 you confirmed it.
@@ -545,7 +547,7 @@ you confirmed it.
 > stored inventory when something in it actually changed — a server whose software and hardware have
 > been stable for a fortnight keeps a fortnight-old collection stamp while reporting perfectly well
 > every few minutes. To ask *"is this host still checking in?"*, look at the server's **last reported**
-> time on the Servers list or the node panel; that one advances on every single report.
+> time on the Servers list or in the node's details window; that one advances on every single report.
 
 ## When two servers claim to be the same machine
 
@@ -659,10 +661,14 @@ the scheduled task (Windows), and expect nothing from it on container guests.
   instance), it **keeps the list it has** and asks the agent for a full one on its next report, rather
   than emptying the panel over a doubt. A server you **discarded** and that was then rediscovered is a
   different case, and worth knowing: it comes back as a brand-new record with no package list at all,
-  so its Software panel is genuinely empty until the full list arrives with the next report — up to
-  one reporting interval (15 minutes by default). Turning software collection **off** in the agent
-  settings is different again, and deliberate: the stored list is cleared, so you are never left
-  reading package versions nobody is collecting any more.
+  so it has **no Software tab at all** — nor a Software panel on its asset page — until the full list
+  arrives with the next report, up to one reporting interval (15 minutes by default). A host holding
+  no list is never shown an empty one; the surface is simply absent. Turning software collection
+  **off** in the agent settings is different again, and deliberate: the stored list is cleared, so the
+  tab goes away too and you are never left reading package versions nobody is collecting any more.
+  You *do* see an empty Software tab in the opposite case: the agent sent a list, and the list was
+  empty — nothing it reads was installed, or its exclusions and its cap left nothing to send. The tab
+  says as much in so many words, so an empty list is never mistaken for a missing one.
 - **What it couldn't collect** — each report also says whether it ran with root (Administrator on
   Windows) and names anything it had to skip or that timed out. On Windows the whole sweep is one
   PowerShell call that keeps going past a failure rather than aborting the report, so it also names
@@ -690,9 +696,9 @@ which Microsoft removed in Windows 11 24H2 and Server 2025.
 Every panel above shows a machine **as it is now**. The **Changes** tab on a node shows the moments it
 **moved** — the answer to *"someone upgraded OpenSSL on db-01 last Tuesday and broke the app"*.
 
-Open a machine on the infrastructure diagram and switch from **Overview** to **Changes**. Each entry
-names what changed, its value before and after, and when lazyit recorded it. Newest first, with a
-button at the bottom to load older entries.
+Open a machine on the infrastructure diagram — select it and click **Details** — then switch to the
+**Changes** tab. Each entry names what changed, its value before and after, and when lazyit recorded
+it. Newest first, with a button at the bottom to load older entries.
 
 **Only real changes are recorded.** A host that checks in every five minutes and never changes adds
 nothing at all — the list stays empty, however long it has been reporting. An entry appears when:
@@ -814,10 +820,10 @@ at "proposals you discard" rather than "someone else's code running as root on e
 **Did it take?** Each host reports back which version of the policy it is running, so you can tell
 "configured" from "actually applied". The version lazyit is currently serving sits next to the
 section's title (**Policy v8**). To see whether a given host has picked it up, open that server on the
-[infrastructure diagram](/help/assets-topology-diagram) and its panel shows **Policy v7 · applied** or
-**Policy v8 · pending** — pending simply means that host has not checked in since your change. A
-server discovered by an agent older than this release shows neither, because it never reports a policy
-version at all.
+[infrastructure diagram](/help/assets-topology-diagram) and its details window shows **Policy v7 ·
+applied** or **Policy v8 · pending** — pending simply means that host has not checked in since your
+change. A server discovered by an agent older than this release shows neither, because it never
+reports a policy version at all.
 
 ## Security
 
@@ -872,7 +878,7 @@ version at all.
 ## Keeping the agent current
 
 Each agent stamps its own version into every check-in. When an agent falls a **major version** behind
-your server, its row (and its detail panel) shows a small **Agent outdated** badge — a hint to
+your server, its row (and its details window) shows a small **Agent outdated** badge — a hint to
 re-run the install command and pick up the latest binary. It's only a nudge: an outdated agent keeps
 reporting normally, nothing is blocked, and minor updates don't raise it. Agents built from source (or
 before versioning was added) report as `dev` and never show the badge.

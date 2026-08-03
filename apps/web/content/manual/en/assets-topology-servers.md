@@ -10,7 +10,7 @@ order: 2
 The **Table** view is the scannable, table form of your topology — the same nodes as the
 [Map](/help/assets-topology-diagram), but as a plain list you can search and filter instead of a
 free-move map. It is not a separate sidebar entry: you reach it from **Assets › Topology**, then flip
-the **Map ⇄ Table** toggle in the top-right (next to **Add node**). The Table is also available
+the **Map ⇄ Table** toggle in the top-right (next to **Add**). The Table is also available
 directly at `/assets/diagram?view=table`.
 
 It's handy when you want to *find* a machine rather than *see* how it connects: scan a column, filter
@@ -37,7 +37,7 @@ Each row is one node:
 - **Asset** — the linked inventory asset's name when the node is asset-backed, or **Graph-only**
   when it isn't. (A name is hidden if the linked asset was archived.)
 - **Owner** — the asset's current owner(s). With more than one, the first is shown plus a "+N more"
-  hint; the full list is in the details panel. Someone who has left the company shows struck-through.
+  hint; the full list is in the details window. Someone who has left the company shows struck-through.
 - **IP** — the node's primary IP address, when set.
 
 ## Searching and filtering
@@ -61,17 +61,19 @@ report came from and how fresh it is, with two actions: **Confirm** to add it to
 
 ## Add a server
 
-The **Add a server** button (top of this view, for people who can manage settings) generates the
-one-time install command for the reporting agent — for a **Linux or a Windows** host, whichever you
-pick — so a new server can start reporting itself.
-See [Reporting agent](/help/assets-topology-reporting-agent).
+Use **Add › Install a reporting agent** in the page header (visible to people who can manage
+settings, in either view) to generate the one-time install command for the reporting agent — for a
+**Linux or a Windows** host, whichever you pick — so a new server can start reporting itself. Until
+you have your first agent, this view also leads with a **Create your first agent** card explaining
+what one is. See [Reporting agent](/help/assets-topology-reporting-agent).
 
 ## Opening a server
 
-Clicking a row switches to the Map and opens the node in its details panel — the full picture: owner,
-linked knowledge-base articles, secret references (handles only), shortcuts, connections and the
-impact/blast-radius toggle. See [Infrastructure diagram](/help/assets-topology-diagram) for what the
-panel covers.
+Clicking a row switches to the Map and opens the node's details window — the full picture: owner,
+linked knowledge-base articles, secret references (handles only), shortcuts, connections, the
+reported hardware and software, and the change history. See
+[Infrastructure diagram](/help/assets-topology-diagram) for what each tab covers. The
+impact/blast-radius toggle is on the map itself, on the selected node's action bar.
 
 ## What's next
 

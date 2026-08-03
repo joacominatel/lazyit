@@ -343,6 +343,52 @@ list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (c
 > one allowed exception). The pure helpers (`edgeStyle`/`layoutNodes`/`placementOffset`) are
 > unit-tested in `apps/web/lib/infra/canvas.test.ts`.
 
+> **Amendment (2026-08-02, #1181 + #1182) — the drill-in is a tabbed modal, click no longer opens it,
+> and the Map can reach the agent.** Three sentences above are now wrong about the shipped screen.
+>
+> **"Click = a drill-in panel"** is no longer true, and the reason is §7. The panel became a right-hand
+> `Sheet` carrying, in one scroll, identity + provenance badges, the editable fields, the blast-radius
+> action, the whole ADR-0074 reported-facts block (a container's published-ports table was clipped
+> horizontally in normal use), the installed-software list and the #1143 Changes tab. It was not merely
+> cramped: everything on it carried equal weight, so an operator read all of it to find one thing. It is
+> now a **large tabbed modal** (`node-detail-modal.tsx`) — General · Reported facts · Software ·
+> Connections · Changes — whose tab set ADAPTS per node, derived from the two `specs` projections rather
+> than from `source`, so a container never opens onto the host renderer and an agent node with no
+> reported block gets no empty facts tab (the #1139 no-raw-JSON-fallthrough rule, restated as a tab
+> rule and unit-tested in `node-detail-tabs.test.ts`). Because a modal covers the board, **clicking a
+> node now only SELECTS it**: an on-canvas action bar appears under the selected card, and the modal
+> opens from its **Details** button, a double-click, or the `?node=` deep-link (which still opens it, so
+> the Table→Map round-trip is unchanged). That round-trip needed a fix to be true at all: the param was
+> read once, in a `useState` initializer, and an in-app row click is a client-side navigation to the
+> same route — the view never remounted, so the link flipped to the Map and selected nothing. `?node=`
+> is now applied whenever it changes (`node-deep-link.ts`), which is also what makes it correct to say
+> a row lands on the node it named.
+>
+> **§7's blast radius moved onto the canvas.** Its entire output is drawn on the graph, so requiring an
+> operator to open a panel, scroll, click and then look back at the map was three steps too many for an
+> answer already on screen. The toggle is on the selected node's action bar; a bottom-centre summary
+> gives the count (or the reassuring "safe to take down"), and the per-node hop depth rides in the hover
+> quick-facts card. The affected LIST moved with it rather than being dropped: the summary enumerates
+> the affected nodes — label, kind, hop depth, shallowest first — behind a disclosure that is open by
+> default and scrolls inside itself. Highlighting answers *roughly how bad* and the count answers *how
+> many*; neither answers **which ones** in a form an operator can scan, count or copy, and a host with
+> a dozen dependents is otherwise a cluster of glowing cards to be read off the canvas by eye. The
+> summary also carries the two states a bare count cannot: the query still in flight (a board that has
+> not changed yet reads as "the button didn't work") and the query that FAILED — which must never
+> render as the reassuring empty radius, the way an errored query did in the rail.
+>
+> **The payoff panel is still the payoff** — the claim that this beats a Draw.io diagram holds; what
+> changed is the container it ships in.
+>
+> **The Map can now reach the reporting agent (#1181).** The header's "Add node" button was the Map's
+> only add path, and the ADR-0074 wizard that mints the agent's Service Account lived exclusively in the
+> Table view. One control now carries both, agent first, deliberately inverting the default: an
+> agent-reported node self-populates, stays current and goes OFFLINE on its own, while a hand-drawn one
+> is accurate for as long as someone remembers to edit it. Manual is the fallback for what cannot run an
+> agent. The two paths carry different permissions (`settings:manage` vs `infra:manage`) and the control
+> renders only what the caller holds; with one path it collapses to a plain button. Nothing about the
+> wizard itself changed — it is reached, not rebuilt.
+
 ### 7. Impact / blast-radius — the query that justifies a graph
 
 A graph beats a picture only if you can ask **"if this node goes down, what is affected?"** v1 ships

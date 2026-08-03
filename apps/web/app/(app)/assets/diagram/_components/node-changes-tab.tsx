@@ -18,7 +18,7 @@ import { useInfraNodeChanges } from "@/lib/api/hooks/use-infra-nodes";
  * and always is: only the reporting agent's ingest path appends to this table, and the table is
  * append-only, so there is nothing here for an operator to edit or delete.
  *
- * `active` is the panel's open tab, forwarded to the query's `enabled`: opening the node panel fetches
+ * `active` is the detail modal's open tab, forwarded to the query's `enabled`: opening a node fetches
  * nothing until the operator asks for this tab. It is passed explicitly rather than inferred from the
  * tab primitive unmounting its inactive content, so the gate is this file's guarantee and not a
  * library default a later `forceMount` could quietly remove.

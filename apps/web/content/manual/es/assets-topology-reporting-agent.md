@@ -22,12 +22,13 @@ más servidores, lo instalás en más servidores.
 
 ## Creá tu primer agente
 
-En la vista **Servidores** (la vista Tabla de **Activos › Topología**), cuando todavía no tenés
-agentes, aparece arriba una tarjeta **Creá tu primer agente**. Una vez que tenés agentes, se reduce a
-un botón discreto **Agregar agente**. (Necesitás el permiso de gestión de configuración para usarlo,
-porque crea un token.)
+En **Activos › Topología** el encabezado de la página lleva un botón **Agregar**, en la vista Mapa y
+en la Tabla; elegí **Instalar un agente de reporte**. En la vista **Servidores** (la Tabla), mientras
+todavía no tenés agentes, aparece además arriba una tarjeta **Creá tu primer agente** que explica qué
+es un agente. (Necesitás el permiso de gestión de configuración en cualquiera de los dos casos,
+porque esto crea un token.)
 
-El botón abre un asistente guiado y breve, de tres pasos:
+Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
 
 1. **Nombre y generación.** Poné un nombre que reconozcas más adelante (por ejemplo el nombre del
    servidor, como `web-prod-01`) y hacé clic en **Generar credenciales**. lazyit crea una cuenta de
@@ -567,8 +568,9 @@ Algunas cosas que conviene saber:
 Una vez confirmado, un host sigue recibiendo datos frescos del agente, pero tus ediciones — su
 nombre, tipo, posición, IP y conexiones — son tuyas y el agente nunca las sobrescribe. El inventario
 reportado — sistema operativo, CPU, memoria, discos, interfaces de red, número de serie y software
-instalado — se muestra como un panel de solo lectura **Datos reportados** en el propio nodo (abrí un
-nodo en el diagrama o en la lista de Servidores), y los mismos datos aparecen en el activo
+instalado — se muestra como una pestaña de solo lectura **Datos reportados** en el propio nodo (abrí
+un nodo en el diagrama o en la lista de Servidores; la lista de paquetes instalados tiene su propia
+pestaña **Software**), y los mismos datos aparecen en el activo
 correspondiente. Ambos se mantienen frescos: cada reporte los actualiza sin tocar nada que sea tuyo
 (el nombre, el número de serie y el modelo del activo nunca cambian por un reporte). Esto ahora
 incluye los **contenedores**: un contenedor que confirmaste como activo mantiene su imagen, su digest,
@@ -580,7 +582,7 @@ estaban el día en que lo confirmaste.
 > inventario almacenado cuando algo cambió de verdad: un servidor cuyo software y hardware llevan dos
 > semanas estables conserva una marca de recolección de hace dos semanas mientras reporta perfectamente
 > cada pocos minutos. Para saber *si el host sigue reportando*, mirá su hora de **último reporte** en la
-> lista de Servidores o en el panel del nodo; esa avanza en cada reporte.
+> lista de Servidores o en la ventana de detalle del nodo; esa avanza en cada reporte.
 
 ## Cuando dos servidores dicen ser la misma máquina
 
@@ -699,11 +701,16 @@ desde la tarea programada (en Windows), y no esperes nada de él en guests de co
   coincidir con la huella (después de restaurar un respaldo, por ejemplo), **conserva la lista que ya
   tiene** y le pide al agente una completa en el siguiente reporte, en lugar de vaciar el panel ante
   una duda. Un servidor que **descartaste** y que luego volvió a descubrirse es un caso distinto, y
-  conviene saberlo: vuelve como un registro nuevo, sin ninguna lista de paquetes, así que su panel de
-  Software está realmente vacío hasta que la lista completa llegue con el siguiente reporte — como
-  máximo un intervalo de reporte (15 minutos por defecto). Desactivar la recolección de software en la
-  configuración del agente es otra cosa distinta, y deliberada: la lista guardada se borra, para que
-  nunca quedes leyendo versiones de paquetes que ya nadie está recolectando.
+  conviene saberlo: vuelve como un registro nuevo, sin ninguna lista de paquetes, así que **no tiene
+  pestaña Software** —ni panel de Software en su página de activo— hasta que la lista completa llegue
+  con el siguiente reporte, como máximo un intervalo de reporte (15 minutos por defecto). A un host
+  que no tiene lista nunca se le muestra una vacía: la superficie simplemente no aparece. Desactivar
+  la recolección de software en la configuración del agente es otra cosa distinta, y deliberada: la
+  lista guardada se borra, así que la pestaña también desaparece y nunca quedás leyendo versiones de
+  paquetes que ya nadie está recolectando. Sí ves una pestaña Software vacía en el caso opuesto: el
+  agente envió una lista y esa lista vino vacía —no había instalado nada de lo que lee, o sus
+  exclusiones y su tope no dejaron nada para enviar—. La pestaña lo dice con todas las letras, así que
+  una lista vacía nunca se confunde con una lista ausente.
 - **Qué no pudo recopilar** — cada reporte también indica si corrió como root (Administrador en
   Windows) y nombra lo que tuvo que omitir o lo que agotó su tiempo. En Windows todo el barrido es una
   sola llamada de PowerShell que sigue adelante ante una falla en lugar de abortar el reporte, así que
@@ -734,9 +741,9 @@ Todos los paneles anteriores muestran una máquina **tal como está ahora**. La 
 un nodo muestra los momentos en que **se movió**: la respuesta a *"alguien actualizó OpenSSL en db-01
 el martes pasado y rompió la aplicación"*.
 
-Abrí una máquina en el diagrama de infraestructura y pasá de **Resumen** a **Cambios**. Cada entrada
-indica qué cambió, su valor antes y después, y cuándo lo registró lazyit. Las más recientes primero,
-con un botón al final para cargar las anteriores.
+Abrí una máquina en el diagrama de infraestructura —seleccionala y hacé clic en **Detalles**— y pasá
+a la pestaña **Cambios**. Cada entrada indica qué cambió, su valor antes y después, y cuándo lo
+registró lazyit. Las más recientes primero, con un botón al final para cargar las anteriores.
 
 **Solo se registran los cambios reales.** Un host que reporta cada cinco minutos y nunca cambia no
 agrega nada: la lista queda vacía por más tiempo que lleve reportando. Aparece una entrada cuando:
@@ -868,8 +875,8 @@ como root en todos tus servidores".
 **¿Se aplicó?** Cada host informa qué versión de la política está ejecutando, así podés distinguir
 "configurado" de "efectivamente aplicado". La versión que lazyit está sirviendo aparece al lado del
 título de la sección (**Política v8**). Para ver si un host determinado ya la tomó, abrí ese servidor
-en el [diagrama de infraestructura](/help/assets-topology-diagram): su panel muestra **Política v7 ·
-aplicada** o **Política v8 · pendiente** — pendiente significa simplemente que ese host no reportó
+en el [diagrama de infraestructura](/help/assets-topology-diagram): su ventana de detalle muestra
+**Política v7 · aplicada** o **Política v8 · pendiente** — pendiente significa simplemente que ese host no reportó
 desde tu cambio. Un servidor descubierto por un agente anterior a esta versión no muestra ninguna de
 las dos, porque nunca informa una versión de política.
 
@@ -931,7 +938,7 @@ las dos, porque nunca informa una versión de política.
 ## Mantener el agente al día
 
 Cada agente estampa su propia versión en cada reporte. Cuando un agente queda una **versión mayor**
-por detrás de tu servidor, su fila (y su panel de detalle) muestra una pequeña insignia **Agente
+por detrás de tu servidor, su fila (y su ventana de detalle) muestra una pequeña insignia **Agente
 desactualizado** — un aviso para volver a ejecutar el comando de instalación y obtener el último
 binario. Es solo un empujón: un agente desactualizado sigue reportando con normalidad, no se bloquea
 nada, y las actualizaciones menores no la activan. Los agentes compilados desde el código fuente (o

@@ -11,15 +11,15 @@ La vista **Tabla** es la forma de tabla, escaneable, de tu topología — los mi
 [Mapa](/help/assets-topology-diagram), pero como una lista plana que puedes buscar y filtrar en lugar
 de un mapa de movimiento libre. No es una entrada aparte en la barra lateral: la abres desde
 **Activos › Topología** y luego cambias con el interruptor **Mapa ⇄ Tabla** arriba a la derecha
-(junto a **Agregar nodo**). La Tabla también está disponible directamente en
+(junto a **Agregar**). La Tabla también está disponible directamente en
 `/assets/diagram?view=table`.
 
 Es útil cuando quieres *encontrar* una máquina en vez de *ver* cómo se conecta: recorre una columna,
 filtra por un tipo o busca por nombre.
 
 > La lista muestra las mismas cosas a todos los que pueden ver la topología. Crear, editar y conectar
-> nodos sucede en el [Mapa](/help/assets-topology-diagram); la vista de Servidores agrega dos cosas
-> propias — la bandeja de **Revisión pendiente** y el botón **Agregar un servidor** (ambos abajo).
+> nodos sucede en el [Mapa](/help/assets-topology-diagram); la vista de Servidores agrega lo suyo:
+> la bandeja de **Revisión pendiente** (abajo).
 
 ## Cambiar entre Mapa y Tabla
 
@@ -38,7 +38,8 @@ Cada fila es un nodo:
 - **Activo** — el nombre del activo de inventario vinculado cuando el nodo está respaldado por un
   activo, o **Solo de grafo** cuando no lo está. (El nombre se oculta si el activo vinculado se archivó.)
 - **Responsable** — el o los responsables actuales del activo. Si hay más de uno, se muestra el
-  primero más una pista "+N más"; la lista completa está en el panel de detalle. Quien dejó la empresa
+  primero más una pista "+N más"; la lista completa está en la ventana de detalle. Quien dejó la
+  empresa
   aparece tachado.
 - **IP** — la dirección IP principal del nodo, cuando está definida.
 
@@ -65,17 +66,21 @@ propuesta. Ver [Agente de reporte](/help/assets-topology-reporting-agent) para e
 
 ## Agregar un servidor
 
-El botón **Agregar un servidor** (arriba de esta vista, para quienes pueden gestionar la
-configuración) genera el comando de instalación de un solo uso del agente de reporte —para un host
-**Linux o Windows**, el que elijas— para que un servidor nuevo empiece a reportarse. Ver
+Usá **Agregar › Instalar un agente de reporte** en el encabezado de la página (visible en ambas
+vistas para quienes pueden gestionar la configuración) para generar el comando de instalación de un
+solo uso del agente de reporte —para un host **Linux o Windows**, el que elijas— para que un servidor
+nuevo empiece a reportarse. Hasta que tengas tu primer agente, esta vista además encabeza con una
+tarjeta **Creá tu primer agente** que explica qué es uno. Ver
 [Agente de reporte](/help/assets-topology-reporting-agent).
 
 ## Abrir un servidor
 
-Al hacer clic en una fila se pasa al Mapa y se abre el nodo en su panel de detalle — la imagen
+Al hacer clic en una fila se pasa al Mapa y se abre la ventana de detalle del nodo — la imagen
 completa: responsable, artículos de la base de conocimiento vinculados, referencias de secretos (solo
-identificadores), accesos directos, conexiones y el interruptor de impacto/radio de afectación. Ver
-[Diagrama de infraestructura](/help/assets-topology-diagram) para lo que cubre el panel.
+identificadores), accesos directos, conexiones, el hardware y el software reportados, y el historial
+de cambios. Ver [Diagrama de infraestructura](/help/assets-topology-diagram) para lo que cubre cada
+pestaña. El interruptor de impacto/radio de afectación vive en el mapa mismo, en la barra de acciones
+del nodo seleccionado.
 
 ## Qué sigue
 
