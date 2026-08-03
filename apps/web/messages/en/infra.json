@@ -14,7 +14,8 @@
     "kind": "Kind",
     "status": "Status",
     "ip": "IP",
-    "noIp": "—"
+    "noIp": "—",
+    "impact": "Blast radius"
   },
   "kind": {
     "PHYSICAL_HOST": "Physical host",

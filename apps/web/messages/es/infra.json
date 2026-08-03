@@ -14,7 +14,8 @@
     "kind": "Tipo",
     "status": "Estado",
     "ip": "IP",
-    "noIp": "—"
+    "noIp": "—",
+    "impact": "Radio de afectación"
   },
   "kind": {
     "PHYSICAL_HOST": "Host físico",
