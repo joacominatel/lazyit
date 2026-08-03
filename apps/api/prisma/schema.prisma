@@ -2881,7 +2881,8 @@ model InfraAutoConfirmRule {
 
   // The human who authored the rule. SetNull, never cascade: an operator leaving the company must not
   // silently retire instance policy — the rule stays, visibly unattributed, until an admin revisits it.
-  createdById String?
+  // @db.Uuid to match User.id.
+  createdById String? @db.Uuid
   createdBy   User?   @relation("InfraAutoConfirmRuleAuthor", fields: [createdById], references: [id], onDelete: SetNull)
 
   // Server-owned observability. A rule that confirms hosts with no human present has to be legible,
