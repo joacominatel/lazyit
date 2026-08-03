@@ -175,7 +175,7 @@ forma definitiva estos datos.
 
 ## La ventana de detalle
 
-Selecciona un nodo y hacé clic en **Detalles** (o doble clic sobre el nodo) para abrir su ventana de
+Seleccioná un nodo y hacé clic en **Detalles** (o doble clic sobre el nodo) para abrir su ventana de
 detalle — la razón por la que esto supera a un dibujo estático. Es una ventana grande con pestañas,
 porque una máquina reportada por un agente lleva muchísimo más de lo que jamás llevó una tarjeta
 dibujada a mano, y ponerlo todo en una sola columna obligaba a pasar de largo por todo para llegar a
@@ -240,12 +240,21 @@ ventana, así puedes saltar de la tabla a la imagen completa de una máquina con
 ## Impacto / radio de afectación
 
 La pregunta estrella que un mapa puede responder y un dibujo no: **"si este nodo se cae, ¿qué se ve
-afectado?"** Selecciona el nodo y hacé clic en **Mostrar radio de afectación** en su barra de
+afectado?"** Seleccioná el nodo y hacé clic en **Mostrar radio de afectación** en su barra de
 acciones: el control vive en el mapa, porque la respuesta se dibuja en el mapa. Se resalta cada nodo
 que corre sobre, depende de, o es miembro de este (directa o transitivamente); por eso, dar de baja
 un clúster o grupo también muestra sus miembros. El lienzo atenúa todo lo que queda fuera del radio
-para que la región afectada destaque, un pequeño cartel abajo te dice cuántos nodos quedan afectados,
-y al pasar el cursor por cualquier nodo resaltado ves a cuántos saltos de distancia está.
+para que la región afectada destaque, y al pasar el cursor por cualquier nodo resaltado ves a cuántos
+saltos de distancia está.
+
+Un pequeño cartel abajo trae el resto de la respuesta: **cuántos** nodos quedan afectados y **cuáles**
+—debajo del número se listan los nodos afectados, cada uno con su tipo y a cuántos saltos está, los
+más cercanos primero—. La lista viene abierta y tiene su propio desplazamiento; **Ocultar la lista**
+la pliega cuando preferís ver todo el tablero, y **Ocultar radio de afectación** apaga todo. El
+resaltado te dice de un vistazo qué tan grave es; la lista es lo que se puede recorrer, contar o
+copiar. Mientras el radio se está calculando el cartel lo dice, y si la consulta falla también lo
+dice, con un botón **Reintentar**: una consulta que falló nunca se muestra como "nada depende de este
+nodo".
 
 El impacto es una **estimación derivada de las aristas**, no una garantía verificada a mano — sigue
 las aristas que dibujaste, así que un miembro podría sobrevivir si el grupo pierde un solo nodo. Los

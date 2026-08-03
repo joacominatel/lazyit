@@ -224,9 +224,16 @@ The headline question a map can answer that a drawing can't: **"if this node goe
 affected?"** Select the node and click **Show blast radius** on its action bar — the control lives on
 the map, because the answer is drawn on the map. Every node that runs on, depends on, or is a member
 of this one (directly or transitively) lights up; taking down a cluster or group therefore surfaces
-its members. The canvas dims everything outside the radius so the affected region stands out, a small
-banner at the bottom tells you how many nodes are affected, and hovering any highlighted node shows
-how many hops away it is.
+its members. The canvas dims everything outside the radius so the affected region stands out, and
+hovering any highlighted node shows how many hops away it is.
+
+A small banner at the bottom carries the rest of the answer: **how many** nodes are affected, and
+**which ones** — the affected nodes are listed under the count, each with its kind and how many hops
+away it is, closest first. The list is open by default and scrolls inside itself; **Hide the list**
+folds it away when you'd rather see the whole board, and **Hide blast radius** turns the whole thing
+off. The highlight tells you roughly how bad it is at a glance; the list is what you scan, count or
+copy. While the radius is still being worked out the banner says so, and if the query fails it says
+that too, with a **Retry** — a failed query is never shown as "nothing depends on this node".
 
 Impact is an **edge-derived estimate**, not a hand-verified guarantee — it follows the edges you've
 drawn, so a member might survive a group losing one node. Backup-target and network-only links are
