@@ -323,6 +323,11 @@
     "impactSafe": "Nada depende de este nodo: se puede dar de baja sin riesgo.",
     "impactCount": "{count, plural, one {# nodo afectado si este se cae} other {# nodos afectados si este se cae}}",
     "impactDepth": "{depth, plural, one {# salto} other {# saltos}}",
+    "impactLoading": "Calculando el radio de afectación…",
+    "impactError": "No se pudo calcular el radio de afectación.",
+    "impactListShow": "Ver la lista",
+    "impactListHide": "Ocultar la lista",
+    "impactListLabel": "Nodos afectados",
     "deleteAction": "Quitar del mapa",
     "loading": "Cargando nodo…",
     "tabs": {
