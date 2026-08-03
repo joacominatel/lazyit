@@ -88,8 +88,9 @@ const LOADING_MOBILE_CHILDREN = <></>;
 export function ServersTableView() {
   const t = useTranslations("infra");
   const tServers = useTranslations("infra.servers");
-  // Minting the reporting-agent Service Account needs settings:manage (ADR-0074 §6 / ADR-0048), so the
-  // "Add a server" affordance is gated on it — separate from the infra:read that gates the list itself.
+  // Minting the reporting-agent Service Account needs settings:manage — the gate on every
+  // /service-accounts route (ADR-0048) — so the "Add a server" affordance is gated on it, separate
+  // from the infra:read that gates the list itself.
   const canMintServer = useCan("settings:manage");
   const [wizardOpen, setWizardOpen] = useState(false);
 
@@ -448,11 +449,12 @@ export function ServersTableView() {
 }
 
 /**
- * Row-open (ADR-0070 §6): deep-link into the Map view, seeding its drill-in panel with this node via
+ * Row-open (ADR-0070 §6): deep-link into the Map view, seeding its drill-in with this node via
  * `?node=<id>` (honoured by `DiagramView`) while flipping `?view` to `map`. ponytail: reuses the
- * existing panel — the whole asset-backed payoff (owner, KB, secrets, connections) — instead of
- * building a parallel detail route. Carrying `view=map` makes a Table row click land on the canvas
- * with that node selected (the state-preserving deep-link, #760).
+ * existing detail modal — the whole asset-backed payoff (owner, KB, secrets, connections, reported
+ * facts) — instead of building a parallel detail route. Carrying `view=map` makes a Table row click
+ * land on the canvas with that node selected AND its detail open: `?node=` seeds both, which is why
+ * the click-only-selects rule of #1182 does not reach a row (the state-preserving deep-link, #760).
  */
 function diagramHref(nodeId: string): string {
   return `/assets/diagram?view=map&node=${nodeId}`;
@@ -491,9 +493,10 @@ function AssetCell({
 /**
  * The Owner column: the active owners of the node's linked Asset (asset-centric — ADR-0004/0019).
  * ponytail: render the FIRST owner's name + a "+N more" hint for multi-owner so the row never bloats;
- * the full list lives in the drill-in panel one click away. A departed owner (their User soft-deleted
- * but the assignment never released) renders muted with line-through — the same affordance the panel
- * uses (`OwnersSection`), so the two surfaces read consistently. Em-dash when unowned / graph-only.
+ * the full list lives in the detail modal's General tab one click away. A departed owner (their User
+ * soft-deleted but the assignment never released) renders muted with line-through — the same
+ * affordance that tab uses (`OwnersSection`), so the two surfaces read consistently. Em-dash when
+ * unowned / graph-only.
  */
 function OwnersCell({ owners }: { owners: InfraNodeOwner[] }) {
   const tServers = useTranslations("infra.servers");
