@@ -957,9 +957,12 @@ function ImpactSummary({
         </Button>
       </div>
 
-      {plan.state === "affected" && listOpen ? (
+      {/* Hidden rather than unmounted while collapsed, so the disclosure's `aria-controls` always
+          points at an element that exists. */}
+      {plan.state === "affected" ? (
         <ul
           id={IMPACT_LIST_ID}
+          hidden={!listOpen}
           className="max-h-44 space-y-1.5 overflow-y-auto border-t border-border/60 px-3 py-2 text-sm"
           aria-label={t("panel.impactListLabel")}
         >
