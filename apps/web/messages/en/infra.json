@@ -323,6 +323,11 @@
     "impactSafe": "Nothing depends on this node — safe to take down.",
     "impactCount": "{count, plural, one {# node affected if this goes down} other {# nodes affected if this goes down}}",
     "impactDepth": "{depth, plural, one {# hop} other {# hops}}",
+    "impactLoading": "Working out the blast radius…",
+    "impactError": "Couldn't work out the blast radius.",
+    "impactListShow": "List them",
+    "impactListHide": "Hide the list",
+    "impactListLabel": "Affected nodes",
     "deleteAction": "Remove from map",
     "loading": "Loading node…",
     "tabs": {
