@@ -12,8 +12,10 @@
  * only the fallback.
  *
  * The two paths carry different permissions and neither implies the other: minting the agent's
- * Service Account needs `settings:manage` (ADR-0074 §6 / ADR-0048), putting a node on the map needs
- * `infra:manage`. The caller renders exactly what comes back — an option that is not returned is not
+ * Service Account needs `settings:manage` — every `/service-accounts` route is gated on it
+ * (ADR-0048) — while putting a node on the map needs `infra:manage`. ADR-0074 §5 is about the
+ * permission the minted account HOLDS (`infra:report`, and only that); it says nothing about who may
+ * mint one. The caller renders exactly what comes back — an option that is not returned is not
  * shown disabled, because a menu entry an operator cannot use teaches them nothing the API would not
  * have told them anyway.
  */
