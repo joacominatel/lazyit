@@ -317,7 +317,6 @@
     "shortcutRemove": "Quitar acceso directo",
     "shortcutInvalid": "Cada acceso directo necesita una etiqueta y una URL válida.",
     "shortcutsSavedToast": "Accesos directos actualizados.",
-    "impactTitle": "Impacto / radio de afectación",
     "impactShow": "Mostrar radio de afectación",
     "impactHide": "Ocultar radio de afectación",
     "impactDescription": "Si este nodo se cae, ¿qué se detiene con él? Resalta los nodos afectados en el mapa.",
