@@ -138,6 +138,8 @@
       "label": "Next tag",
       "disabledLabel": "Tag shape (auto-assign is off)",
       "loading": "Checking…",
+      "error": "Couldn't check the next tag",
+      "digits": "{count, plural, =0 {a number} one {# digit} other {# digits}}",
       "exhausted": "Sequence exhausted",
       "skipped": "Skipped {count, plural, one {# number that is already in use} other {# numbers that are already in use}}, starting at {from}."
     },

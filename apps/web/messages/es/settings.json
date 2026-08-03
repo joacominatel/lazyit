@@ -138,6 +138,8 @@
       "label": "Próxima etiqueta",
       "disabledLabel": "Forma de la etiqueta (la asignación automática está desactivada)",
       "loading": "Comprobando…",
+      "error": "No se pudo comprobar la próxima etiqueta",
+      "digits": "{count, plural, =0 {un número} one {# dígito} other {# dígitos}}",
       "exhausted": "Secuencia agotada",
       "skipped": "Se {count, plural, one {omitió # número que ya está en uso} other {omitieron # números que ya están en uso}}, a partir de {from}."
     },
