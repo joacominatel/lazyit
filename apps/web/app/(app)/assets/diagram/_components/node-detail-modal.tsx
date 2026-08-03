@@ -355,8 +355,8 @@ function ModalBody({
  * The editable configuration sits at the top left, where an operator expects it (issue #764); the
  * asset-backed payoff the drill-in exists for (owners, KB, secret handles, shortcuts) fills the rest.
  * Two columns from `lg` up: the modal is wide enough that a single column would leave half the
- * surface empty and still make the reader scroll. Removing the node from the map closes the tab,
- * because lifecycle belongs with identity and nowhere else.
+ * surface empty and still make the reader scroll. Removing the node from the map closes the whole
+ * modal — there is nothing left to read — and lifecycle belongs with identity and nowhere else.
  */
 function GeneralTab({
   node,
