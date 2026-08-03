@@ -20,14 +20,18 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
+  ArrowsPointingOutIcon,
+  BoltIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   ExclamationTriangleIcon,
+  ShieldCheckIcon,
   Squares2X2Icon,
 } from "@heroicons/react/24/outline";
 import type {
   InfraEdge,
   InfraEdgeKind,
+  InfraImpactResponse,
   InfraNode,
   InfraNodeListItem,
 } from "@lazyit/shared";
@@ -97,24 +101,50 @@ export interface InfraCanvasApi {
  * button runs a dagre layered layout (#766); fresh creates land at the viewport centre, fanned so
  * they don't stack (#761); and a `focusNode(id)` primitive (#765) drives the deep-link/“view in
  * topology” landing. `ReactFlowProvider` wraps the board so the canvas hooks can read the instance.
+ *
+ * Since #1182 selecting a node also raises an ON-CANVAS action bar under it, carrying **blast
+ * radius** and **Details**. Blast radius belongs here and not in a modal: its entire output is drawn
+ * on this graph, so asking an operator to open a panel, scroll, click and then look back at the map
+ * was three steps too many for an answer already on screen. Clicking a node therefore SELECTS it and
+ * nothing more — the detail modal is one deliberate click (or a double-click) away, so the map is
+ * never covered by a surface the operator did not ask for.
  */
 export function InfraCanvas({
   onSelectNode,
+  selectedId = null,
+  onOpenDetail,
   impactRootId = null,
-  affectedIds,
+  impact,
+  impactOn = false,
+  onToggleImpact,
   onApiReady,
+  emptyAction,
 }: {
-  /** Called with the selected node id (or null when cleared). The seam for #742's drill-in panel. */
+  /** Called with the selected node id (or null when cleared). The seam for #742's drill-in. */
   onSelectNode?: (nodeId: string | null) => void;
+  /** The currently selected node — drives the on-canvas action bar (#1182). */
+  selectedId?: string | null;
+  /** Open the node-detail modal for a node (the action bar's Details button, and double-click). */
+  onOpenDetail?: (nodeId: string) => void;
   /**
    * The blast-radius root (ADR-0070 §7, issue #755) — the selected node when impact mode is ON, else
-   * null. When set, this node renders as the origin and `affectedIds` highlight; everything else dims.
+   * null. When set, this node renders as the origin and the affected set highlights; the rest dims.
    */
   impactRootId?: string | null;
-  /** The downstream affected set (ids). Empty/undefined when impact mode is off or nothing depends. */
-  affectedIds?: Set<string>;
+  /**
+   * The resolved blast radius, or undefined while it is still in flight / impact mode is off. The
+   * canvas derives BOTH the highlight set and the on-canvas summary from it, so the two can never
+   * disagree about how many nodes are affected.
+   */
+  impact?: InfraImpactResponse;
+  /** Whether blast-radius mode is on for the selected node. */
+  impactOn?: boolean;
+  /** Toggle blast-radius mode for the selected node. */
+  onToggleImpact?: () => void;
   /** Receives the canvas's imperative API once mounted (issue #765 — diagram-view's `?focus=1`). */
   onApiReady?: (api: InfraCanvasApi) => void;
+  /** Rendered inside the "no nodes yet" state — the Topology screen's add affordance (#1181). */
+  emptyAction?: React.ReactNode;
 }) {
   const t = useTranslations("infra");
   // Poll so live nodes show fresh status/lastReportedAt/IP on the map without a manual reload (#1081).
@@ -144,7 +174,7 @@ export function InfraCanvas({
   }
 
   const nodes = rawNodes ?? [];
-  if (nodes.length === 0) return <InfraEmptyState />;
+  if (nodes.length === 0) return <InfraEmptyState action={emptyAction} />;
 
   return (
     <ReactFlowProvider>
@@ -154,8 +184,12 @@ export function InfraCanvas({
         edgesError={edgesError}
         onRetryEdges={refetchEdges}
         onSelectNode={onSelectNode}
+        selectedId={selectedId}
+        onOpenDetail={onOpenDetail}
         impactRootId={impactRootId}
-        affectedIds={affectedIds}
+        impact={impact}
+        impactOn={impactOn}
+        onToggleImpact={onToggleImpact}
         onApiReady={onApiReady}
       />
     </ReactFlowProvider>
@@ -169,8 +203,12 @@ function CanvasBoard({
   edgesError,
   onRetryEdges,
   onSelectNode,
+  selectedId,
+  onOpenDetail,
   impactRootId,
-  affectedIds,
+  impact,
+  impactOn,
+  onToggleImpact,
   onApiReady,
 }: {
   // The list row, NOT the full `InfraNode` (#1135): `GET /infra/nodes` no longer ships `specs`, and
@@ -182,8 +220,12 @@ function CanvasBoard({
   /** Re-run the per-node edge fetches; on success the inline notice auto-clears. */
   onRetryEdges: () => void;
   onSelectNode?: (nodeId: string | null) => void;
+  selectedId: string | null;
+  onOpenDetail?: (nodeId: string) => void;
   impactRootId: string | null;
-  affectedIds?: Set<string>;
+  impact?: InfraImpactResponse;
+  impactOn: boolean;
+  onToggleImpact?: () => void;
   onApiReady?: (api: InfraCanvasApi) => void;
 }) {
   const t = useTranslations("infra");
@@ -214,6 +256,23 @@ function CanvasBoard({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   // The node currently playing a one-shot focus pulse (issue #765); cleared by a timeout.
   const [focusPulseId, setFocusPulseId] = useState<string | null>(null);
+
+  // The blast radius, unpacked once (issue #1182). `affectedIds` is what the highlight needs;
+  // `affectedDepth` is what the hover card needs to say how far away a node is. Deriving both from
+  // the one response is what keeps the count on the summary banner and the set of lit-up cards from
+  // ever telling the operator two different numbers. Both stay `undefined` until the query resolves,
+  // which is exactly the signal `inImpactMode` reads below.
+  const affectedIds = useMemo(
+    () => (impact ? new Set(impact.affected.map((node) => node.id)) : undefined),
+    [impact],
+  );
+  const affectedDepth = useMemo(
+    () =>
+      impact
+        ? new Map(impact.affected.map((node) => [node.id, node.depth]))
+        : undefined,
+    [impact],
+  );
 
   // Impact mode is on when a root is set AND its radius has resolved (ADR-0070 §7, issue #755). The
   // blast radius is derived state: each node carries three flags so the (i18n-free) card just toggles
@@ -531,6 +590,12 @@ function CanvasBoard({
   const hoveredNode = hovered
     ? infraNodes.find((n) => n.id === hovered)
     : undefined;
+  // The action bar anchors to the selected node, so it only exists while that node is on the board —
+  // a node removed from the map (or filtered away) takes its toolbar with it rather than stranding
+  // one over empty canvas.
+  const selectedNode = selectedId
+    ? infraNodes.find((n) => n.id === selectedId)
+    : undefined;
 
   return (
     <div
@@ -551,6 +616,9 @@ function CanvasBoard({
           setSelectedEdgeId(null);
           onSelectNode?.(node.id);
         }}
+        // A click selects and raises the action bar; a double-click is the shortcut for operators who
+        // want the facts and know it (#1182). Both routes open the same modal.
+        onNodeDoubleClick={(_e, node) => onOpenDetail?.(node.id)}
         onEdgeClick={(_e, edge) => setSelectedEdgeId(edge.id)}
         onPaneClick={() => {
           setSelectedEdgeId(null);
@@ -638,6 +706,19 @@ function CanvasBoard({
           <EdgeLegend />
         </Panel>
 
+        {/* The blast-radius summary (issue #1182). The graph already answers WHICH nodes — they are
+            the ones lit up — so this only answers HOW MANY, and reads as reassurance when the answer
+            is none (ADR-0070 §7: an empty radius is the good news, never a scary empty state). It
+            sits bottom-centre, clear of the legend and of the edge-error banner up top. */}
+        {inImpactMode ? (
+          <Panel position="bottom-center">
+            <ImpactSummary
+              count={affectedIds?.size ?? 0}
+              onHide={() => onToggleImpact?.()}
+            />
+          </Panel>
+        ) : null}
+
         {/* Hover quick-facts (ADR-0070 §6). NodeToolbar auto-positions above the hovered node; a
             lightweight card, no extra dep. The rich drill-in (owner/KB/secrets) is the panel. */}
         {hoveredNode ? (
@@ -666,11 +747,104 @@ function CanvasBoard({
                   value={hoveredNode.ipAddress ?? t("facts.noIp")}
                   mono={Boolean(hoveredNode.ipAddress)}
                 />
+                {/* How far down the radius this node sits — the one thing the highlight cannot draw.
+                    Only while impact mode is on, and only for a node actually inside it. */}
+                {inImpactMode && affectedDepth?.has(hoveredNode.id) ? (
+                  <Fact
+                    label={t("panel.impactTitle")}
+                    value={t("panel.impactDepth", {
+                      depth: affectedDepth.get(hoveredNode.id) ?? 1,
+                    })}
+                  />
+                ) : null}
               </dl>
             </div>
           </NodeToolbar>
         ) : null}
+
+        {/* The selected node's action bar (issue #1182) — anchored under the card it acts on, so the
+            two blast-radius steps that used to live behind the drill-in panel (open it, scroll to
+            the toggle) are now one click on the map whose answer the map then draws. `Details` is
+            the deliberate second click that opens the modal; without it a plain click would cover
+            the board every time an operator selected something. */}
+        {selectedNode ? (
+          <NodeToolbar
+            nodeId={selectedNode.id}
+            isVisible
+            position={Position.Bottom}
+            offset={12}
+          >
+            <div
+              className="flex items-center gap-1 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md"
+              role="group"
+              aria-label={t("canvas.nodeActions", { label: selectedNode.label })}
+            >
+              <Button
+                type="button"
+                size="sm"
+                variant={impactOn ? "default" : "ghost"}
+                aria-pressed={impactOn}
+                title={t("panel.impactDescription")}
+                onClick={() => onToggleImpact?.()}
+              >
+                <BoltIcon />
+                {impactOn ? t("panel.impactHide") : t("panel.impactShow")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => onOpenDetail?.(selectedNode.id)}
+              >
+                <ArrowsPointingOutIcon />
+                {t("canvas.openDetails")}
+              </Button>
+            </div>
+          </NodeToolbar>
+        ) : null}
       </ReactFlow>
+    </div>
+  );
+}
+
+/**
+ * The blast-radius summary that rides on the canvas (issue #1182).
+ *
+ * It deliberately does NOT list the affected nodes: they are highlighted on the graph behind it, and
+ * a floating list over the map would cover the very thing it is describing. An empty radius is good
+ * news — "safe to take down" — so it wears the success tone and never reads as a failed query
+ * (ADR-0070 §7).
+ */
+function ImpactSummary({
+  count,
+  onHide,
+}: {
+  count: number;
+  onHide: () => void;
+}) {
+  const t = useTranslations("infra");
+  const safe = count === 0;
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-lg border px-3 py-2 text-sm shadow-md backdrop-blur-sm",
+        safe
+          ? "border-success/40 bg-success/10 text-success"
+          : "border-destructive/40 bg-destructive/10 text-destructive",
+      )}
+      role="status"
+    >
+      {safe ? (
+        <ShieldCheckIcon className="size-4 shrink-0" aria-hidden />
+      ) : (
+        <BoltIcon className="size-4 shrink-0" aria-hidden />
+      )}
+      <span className="font-medium">
+        {safe ? t("panel.impactSafe") : t("panel.impactCount", { count })}
+      </span>
+      <Button type="button" variant="ghost" size="sm" onClick={onHide}>
+        {t("panel.impactHide")}
+      </Button>
     </div>
   );
 }
