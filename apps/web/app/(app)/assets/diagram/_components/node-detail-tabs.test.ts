@@ -68,7 +68,10 @@ describe("planNodeDetailTabs", () => {
   });
 
   test("an agent host that reported no software list gets no software tab", () => {
-    // An absent list is not an empty one: the collector could not read packages on this host.
+    // An absent list is not an empty one. Several different stories land here — a host that has
+    // never reported packages, a `softwareState: 'disabled'` policy that cleared the stored list,
+    // a pre-#1142 agent whose omitted key the server reads as a clear — and the tab cannot tell
+    // them apart from the blob alone. What they share is the only thing it needs: no list to open.
     const plan = planNodeDetailTabs({
       source: "AGENT",
       specs: { host: HOST_SPECS.host, reportedAt: HOST_SPECS.reportedAt },
