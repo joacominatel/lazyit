@@ -20,7 +20,8 @@ es una lista plana y filtrable de los mismos nodos — ver
 
 > Cualquiera que pueda ver la topología ve el mapa y el detalle de solo lectura de cada nodo.
 > Agregar nodos, dibujar conexiones, cambiar un estado o quitar un nodo del mapa requiere el permiso
-> de gestión; sin él los controles simplemente no aparecen.
+> de gestión de topología; instalar un agente de reporte requiere además el de gestión de
+> configuración, porque genera un token. Sin un permiso, sus controles simplemente no aparecen.
 
 ## El lienzo
 
@@ -46,13 +47,35 @@ Cada nodo es una tarjeta compacta que muestra:
 - su **dirección IP**, cuando está definida.
 
 Al pasar el cursor por una tarjeta aparece un pequeño tooltip con datos rápidos (tipo, estado, IP).
-Al hacer clic en una tarjeta se abre el **panel de detalle** a la derecha — el verdadero valor (lo
-vemos abajo).
+**Al hacer clic en una tarjeta se selecciona** y aparece una pequeña barra de acciones debajo con dos
+botones: **Mostrar radio de afectación** (lo vemos abajo; dibuja su respuesta sobre el mapa mismo) y
+**Detalles**, que abre la ventana de detalle del nodo. Un doble clic sobre la tarjeta abre la ventana
+de detalle directamente. El clic selecciona en lugar de abrir para que el mapa siga visible: la
+ventana de detalle es grande, y taparlo en cada clic escondería justo lo que viniste a mirar.
 
-## Crear un nodo
+## Agregar al mapa
 
-Con el permiso de gestión verás un botón **Agregar nodo** en el encabezado de la página. El
-formulario pide lo justo para poner una cosa en el mapa:
+Con los permisos correspondientes verás un botón **Agregar** en el encabezado de la página, con dos
+caminos:
+
+- **Instalar un agente de reporte** — el recomendado para un servidor. Obtienes un asistente guiado
+  que crea las credenciales y te entrega un comando de instalación listo para pegar; a partir de ahí
+  ese servidor completa por sí solo su hardware, su software y su estado, y se marca fuera de línea
+  cuando deja de reportar. Ver [Agente de reporte](/help/assets-topology-reporting-agent). Requiere el
+  permiso de gestión de configuración, porque genera un token.
+- **Agregar un nodo a mano** — para lo que no puede ejecutar un agente (un switch, un firewall, un
+  NAS), o para una máquina que simplemente quieres en el mapa ahora. Un nodo dibujado a mano lo
+  mantienes actualizado tú. Requiere el permiso de gestión de topología.
+
+Si solo tienes uno de los dos permisos, el botón es directamente ese camino. Si no tienes ninguno, no
+hay botón: el mapa se lee igual, simplemente no es editable.
+
+El botón **Agregar** también se repite en el centro de un mapa vacío, que es justo cuando lo
+necesitas.
+
+### Agregar un nodo a mano
+
+El formulario pide lo justo para poner una cosa en el mapa:
 
 - **Etiqueta** — obligatoria. El nombre mostrado en el lienzo (por ejemplo `pve1`, `NAS-01`,
   `switch-core`).
@@ -81,16 +104,18 @@ activo se desactiva (nunca queda en el inventario sin dueño); si habías vincul
 preexistente, queda intacto y simplemente se desvincula.
 
 La **etiqueta del nodo siempre manda para mostrarse** en el lienzo; el nombre del activo vinculado
-aparece en el panel de detalle como un *nombre de inventario* secundario, así que ambos nunca se
-desfasan en silencio. Ese nombre de inventario es un **enlace de vuelta al activo** —hacé clic para
-abrir su registro completo—. La propia página de detalle del activo cierra el círculo en sentido
-contrario: muestra una insignia **En la topología** y un botón **Ver en la topología** que vuela el
-mapa hasta este nodo (ver [Conceptos básicos de activos](/help/assets-asset-basics)).
+aparece en el encabezado de la ventana de detalle como un *nombre de inventario* secundario, así que
+ambos nunca se desfasan en silencio. Ese nombre de inventario es un **enlace de vuelta al activo**
+—hacé clic para abrir su registro completo—. La propia página de detalle del activo cierra el
+círculo en sentido contrario: muestra una insignia **En la topología** y un botón **Ver en la
+topología** que vuela el mapa hasta este nodo (ver
+[Conceptos básicos de activos](/help/assets-asset-basics)).
 
 ## Relaciones (conexiones)
 
-Dos nodos se unen mediante una **conexión tipada y direccional**. Agregas y gestionas conexiones
-desde el panel de detalle de un nodo (ver abajo). Los tipos de relación son:
+Dos nodos se unen mediante una **conexión tipada y direccional**. Agregas y gestionas conexiones en
+la pestaña **Conexiones** de la ventana de detalle de un nodo (ver abajo). Los tipos de relación
+son:
 
 - **Corre sobre** — este nodo es alojado o ejecutado por otro (una VM *corre sobre* un host). Un
   nodo tiene **un host activo a la vez**: si lo conectas a un nuevo host, lazyit cierra
@@ -103,7 +128,7 @@ desde el panel de detalle de un nodo (ver abajo). Los tipos de relación son:
   que conectar B con A, y lazyit la guarda una sola vez en cualquier caso.
 
 Cuando agregas una conexión, este nodo siempre es el *origen* y eliges el otro nodo como destino; el
-panel te recuerda la dirección. lazyit avisa con suavidad si una combinación parece inusual (por
+formulario te recuerda la dirección. lazyit avisa con suavidad si una combinación parece inusual (por
 ejemplo un contenedor que *corre sobre* un dispositivo de red) pero no la bloquea — el modelo se
 mantiene genérico. Si una conexión rompiera la regla de "un host activo" (o duplicara un vínculo
 existente), recibirás un mensaje claro que explica por qué.
@@ -123,13 +148,14 @@ atenúa para que veas de un vistazo con qué está conectado ese nodo.
 ## Estado
 
 Cada nodo lleva un estado, mostrado como una píldora de color en su tarjeta y como insignia en el
-panel:
+encabezado de la ventana de detalle:
 
 - **En línea** — activo y alcanzable.
 - **Fuera de línea** — caído.
 - **Desconocido** — no establecido (el valor por defecto de un nodo nuevo).
 
-Con el permiso de gestión defines el estado desde el panel de detalle. Los nodos reportados por el
+Con el permiso de gestión defines el estado en la pestaña **General** de la ventana de detalle. Los
+nodos reportados por el
 [agente de reporte](/help/assets-topology-reporting-agent) llevan su estado (y una insignia
 *Reportado por agente* con una frescura "reportado hace …") automáticamente; igual podés fijarlo a
 mano para los nodos que gestionás vos.
@@ -142,62 +168,80 @@ mano para los nodos que gestionás vos.
 ## Quitar un nodo del mapa
 
 Quitar un nodo es un **borrado suave**: sale del mapa pero su historial se conserva. Usa **Quitar
-del mapa** en el panel de detalle y confirma. Nada se destruye — el nodo (y el activo detrás de él,
-si lo hay) puede recuperarse más tarde. lazyit nunca borra de forma definitiva estos datos.
+del mapa**, al final de la pestaña **General** de la ventana de detalle, y confirma. Nada se destruye
+— el nodo (y el activo detrás de él, si lo hay) puede recuperarse más tarde. lazyit nunca borra de
+forma definitiva estos datos.
 
-## El panel de detalle
+## La ventana de detalle
 
-Al hacer clic en un nodo se abre un panel a la derecha — la razón por la que esto supera a un dibujo
-estático. Reúne, en un solo lugar:
+Selecciona un nodo y hacé clic en **Detalles** (o doble clic sobre el nodo) para abrir su ventana de
+detalle — la razón por la que esto supera a un dibujo estático. Es una ventana grande con pestañas,
+porque una máquina reportada por un agente lleva muchísimo más de lo que jamás llevó una tarjeta
+dibujada a mano, y ponerlo todo en una sola columna obligaba a pasar de largo por todo para llegar a
+una sola cosa.
 
-> **Editar desde el panel.** Con el permiso de gestión, la sección **Detalles** del panel (cerca de
-> arriba) se edita ahí mismo — sin una página aparte. Hacé clic en el **título** para renombrar el
-> nodo; cambiá su **tipo** o su **dirección IP** directamente; y el **estado** y los **accesos
-> directos** también son editables (ver abajo). Los cambios se guardan a medida que los hacés y la
+**Las pestañas se adaptan al nodo.** Solo ves las que tienen algo que decir:
+
+- **General** *(siempre)* — qué es este nodo y quién es responsable de él: tipo, dirección IP, fecha
+  de agregado, estado, responsable(s), artículos de la base de conocimiento, referencias de secretos
+  y accesos directos, además de **Quitar del mapa**.
+- **Datos reportados** *(solo nodos reportados por agente)* — lo que la máquina dice que es. Para un
+  servidor: sistema operativo, kernel, CPU, memoria, fabricante/modelo/número de serie, y los discos
+  e interfaces de red que encontró. Para un contenedor: su nombre, imagen, digest de la imagen, estado
+  del runtime, id del contenedor y sus puertos publicados, en una tabla con espacio para leerla.
+- **Software** *(solo servidores que reportan)* — la lista de paquetes instalados, con búsqueda y
+  espacio propio. Los contenedores no reportan una, así que no tienen esta pestaña.
+- **Conexiones** *(siempre)* — con qué está enlazado este nodo: **Se ejecuta acá** (los nodos
+  alojados en él) y sus relaciones activas (que se pueden cerrar) más su historial cerrado, con la
+  acción **Agregar conexión**.
+- **Cambios** *(siempre)* — qué se movió en este nodo a lo largo del tiempo. Ver
+  [Agente de reporte](/help/assets-topology-reporting-agent).
+
+> **Editar ahí mismo.** Con el permiso de gestión, el bloque **Detalles** de la pestaña **General**
+> se edita ahí mismo — sin una página aparte. Hacé clic en el **título** del encabezado para
+> renombrar el nodo; cambiá su **tipo**, su **dirección IP** o su **estado** directamente; y los
+> **accesos directos** también son editables. Los cambios se guardan a medida que los hacés y la
 > tarjeta del nodo en el lienzo se actualiza al instante. Quien solo puede ver lo encuentra como
 > texto plano, sin controles de edición. La **dirección IP** se valida al guardarla: debe ser una
 > dirección IPv4 o IPv6 válida, y una entrada inválida se rechaza con un mensaje claro en lugar de
 > guardarse.
 
-- **Responsable(s)** — quién es responsable, tomado de las asignaciones del activo vinculado. Un
-  responsable que dejó la empresa pero cuya asignación nunca se liberó sigue mostrándose, marcado
-  como tal.
-- **Artículos de la base de conocimiento** — artículos publicados vinculados al activo del nodo,
-  cada uno a un clic.
-- **Referencias de secretos** — *el panel guarda solo identificadores, nunca los valores de los
+Algunas cosas de la pestaña **General** que vale la pena señalar:
+
+- **Responsable(s)** — tomado de las asignaciones del activo vinculado. Un responsable que dejó la
+  empresa pero cuya asignación nunca se liberó sigue mostrándose, marcado como tal.
+- **Referencias de secretos** — *esta superficie guarda solo identificadores, nunca los valores de los
   secretos.* Una referencia muestra una etiqueta y un control de **revelar (el ojito)**. Si sos miembro
   de la bóveda del secreto podés revelar el valor acá mismo —igual que un chip de secreto de la KB—:
   hacés clic en el ojito, desbloqueás si te lo pide, y el valor se descifra **en tu navegador** (los
   servidores de lazyit nunca lo ven) y se vuelve a ocultar solo a los pocos segundos. Si **no** sos
-  miembro ves un chip bloqueado y no se expone nada. Con el permiso de gestión vinculás una referencia desde el selector
-  **Vincular un secreto** — lista solo los secretos **a los que tenés acceso** (las bóvedas de las
-  que sos miembro) y elegís uno por su identificador; la **×** junto a una referencia la quita. Las
-  referencias se guardan por identificador y se resuelven en vivo, así que la etiqueta siempre refleja
-  el secreto actual; y si el secreto se elimina (o su identificador cambia) la referencia simplemente
-  desaparece de la lista.
+  miembro ves un chip bloqueado y no se expone nada. Con el permiso de gestión vinculás una
+  referencia desde el selector **Vincular un secreto** — lista solo los secretos **a los que tenés
+  acceso** (las bóvedas de las que sos miembro) y elegís uno por su identificador; la **×** junto a
+  una referencia la quita. Las referencias se guardan por identificador y se resuelven en vivo, así
+  que la etiqueta siempre refleja el secreto actual; y si el secreto se elimina (o su identificador
+  cambia) la referencia simplemente desaparece de la lista.
 - **Accesos directos** — enlaces rápidos (SSH, interfaz web, consola) que se abren en una pestaña
   nueva. Con el permiso de gestión los editás ahí mismo: cada acceso directo es un par etiqueta + URL
   que podés cambiar, agregar o quitar, y luego **Guardás** la lista (lazyit verifica que cada URL sea
   válida antes de guardar).
-- **Dirección IP** y fecha de **agregado**. Si otro nodo del mapa ya tiene la *misma* IP exacta, el
-  panel muestra un **aviso de IP duplicada no bloqueante** que lista el/los otro(s) nodo(s) — es un
-  aviso, no un bloqueo: la dirección se guarda igual (lazyit no impone unicidad en las IP), y cada
-  nodo listado está a un clic para que puedas saltar a él y resolverlo.
-- **Hijos** — los nodos alojados en este (sus relaciones *corre sobre* activas).
-- **Conexiones** — las relaciones activas de este nodo (que se pueden cerrar) y su historial cerrado
-  (una migración de *corre sobre* aparece aquí), además de la acción **Agregar conexión**.
+- **IP duplicada** — si otro nodo del mapa ya tiene la *misma* IP exacta, un **aviso no bloqueante**
+  lista el/los otro(s) nodo(s) — es un aviso, no un bloqueo: la dirección se guarda igual (lazyit no
+  impone unicidad en las IP), y cada nodo listado está a un clic para que puedas saltar a él y
+  resolverlo.
 
-Una fila de la [Lista de servidores](/help/assets-topology-servers) enlaza directamente a este
-panel, así puedes saltar de la tabla a la imagen completa de una máquina con un clic.
+Una fila de la [Lista de servidores](/help/assets-topology-servers) enlaza directamente a esta
+ventana, así puedes saltar de la tabla a la imagen completa de una máquina con un clic.
 
 ## Impacto / radio de afectación
 
 La pregunta estrella que un mapa puede responder y un dibujo no: **"si este nodo se cae, ¿qué se ve
-afectado?"** En el panel de detalle, activa **Mostrar impacto** para resaltar el conjunto aguas
-abajo — cada nodo que corre sobre, depende de, o es miembro de este (directa o transitivamente). Por
-eso, dar de baja un clúster o grupo también muestra sus miembros. El lienzo atenúa todo lo que queda
-fuera del radio para que la región afectada destaque, y el panel lista cada nodo afectado con a
-cuántos saltos de distancia está.
+afectado?"** Selecciona el nodo y hacé clic en **Mostrar radio de afectación** en su barra de
+acciones: el control vive en el mapa, porque la respuesta se dibuja en el mapa. Se resalta cada nodo
+que corre sobre, depende de, o es miembro de este (directa o transitivamente); por eso, dar de baja
+un clúster o grupo también muestra sus miembros. El lienzo atenúa todo lo que queda fuera del radio
+para que la región afectada destaque, un pequeño cartel abajo te dice cuántos nodos quedan afectados,
+y al pasar el cursor por cualquier nodo resaltado ves a cuántos saltos de distancia está.
 
 El impacto es una **estimación derivada de las aristas**, no una garantía verificada a mano — sigue
 las aristas que dibujaste, así que un miembro podría sobrevivir si el grupo pierde un solo nodo. Los
@@ -212,4 +256,5 @@ darlo de baja. lazyit lo muestra como tranquilidad, no como un error.
 - [Lista de servidores](/help/assets-topology-servers) — el mismo parque como tabla filtrable.
 - [Agente de reporte](/help/assets-topology-reporting-agent) — completá el mapa desde tus servidores.
 - [Conceptos de activos](/help/assets-asset-basics) — el registro de inventario detrás de un nodo respaldado por un activo.
-- [Asignaciones e historial](/help/assets-assignments-history) — cómo funciona la propiedad (el responsable del panel).
+- [Asignaciones e historial](/help/assets-assignments-history) — cómo funciona la propiedad (el
+  responsable de la pestaña General).

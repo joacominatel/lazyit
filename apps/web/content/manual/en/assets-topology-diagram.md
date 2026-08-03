@@ -16,9 +16,10 @@ You reach it from the sidebar under **Assets › Topology**. The same screen has
 toggle in the top-right: the **Map** is this free-move board, and the **Table** is a plain,
 filterable list of the same nodes — see [Servers list](/help/assets-topology-servers).
 
-> Anyone who can view the topology sees the map and the read-only detail of each node. Adding
-> nodes, drawing connections, changing a status or taking a node off the map needs the manage
-> permission; without it the controls simply don't appear.
+> Anyone who can view the topology sees the map and the read-only detail of each node. Adding nodes,
+> drawing connections, changing a status or taking a node off the map needs the manage-topology
+> permission; installing a reporting agent needs manage-settings on top of that, because it mints a
+> token. Without a permission its controls simply don't appear.
 
 ## The canvas
 
@@ -41,13 +42,35 @@ Each node is a compact card showing:
 - a **status pill** (see *Status* below), and
 - its **IP address**, when set.
 
-Hovering a card pops a small quick-facts tooltip (kind, status, IP). Clicking a card opens the
-**details panel** on the right — the real payoff (covered below).
+Hovering a card pops a small quick-facts tooltip (kind, status, IP). **Clicking a card selects it**
+and raises a small action bar under it with two buttons: **Show blast radius** (covered below, and it
+draws its answer on the map itself) and **Details**, which opens the node's details window. A
+double-click on the card opens the details window straight away. Clicking selects rather than opening
+so the map stays visible — the details window is large, and covering the board on every click would
+hide the thing you came to look at.
 
-## Creating a node
+## Adding to the map
 
-With the manage permission you'll see an **Add node** button in the page header. The form asks for
-just enough to put a thing on the map:
+With the right permissions you'll see an **Add** button in the page header, offering two paths:
+
+- **Install a reporting agent** — the recommended one for a server. You get a guided wizard that
+  creates the credentials and hands you a ready-to-paste install command; from then on that server
+  fills in its own hardware, software and status, and marks itself offline when it stops reporting.
+  See [Reporting agent](/help/assets-topology-reporting-agent). This needs the manage-settings
+  permission, because it mints a token.
+- **Add a node by hand** — for anything that can't run an agent (a switch, a firewall, a NAS), or for
+  a machine you just want on the map now. You keep a hand-drawn node up to date yourself. This needs
+  the manage topology permission.
+
+If you only hold one of the two permissions, the button is simply that one path. If you hold neither,
+there's no button — the map stays fully readable, it just isn't editable.
+
+The **Add** button is also repeated in the middle of an empty map, since that's exactly the moment
+you need it.
+
+### Adding a node by hand
+
+The form asks for just enough to put a thing on the map:
 
 - **Label** — required. The name shown on the canvas (for example `pve1`, `NAS-01`, `core-switch`).
 - **Kind** — required. Pick the closest generic kind. The model is deliberately platform-agnostic:
@@ -74,15 +97,16 @@ deactivated (it never lingers in inventory owned by nobody); if you had linked a
 asset, it stays untouched and is simply unlinked.
 
 The node's **label always wins for display** on the canvas; the linked asset's name shows in the
-details panel as a secondary *inventory name*, so the two never silently drift. That inventory name
-is a **link back to the asset** — click it to open the asset's full record. The asset's own detail
-page closes the loop the other way: it shows an **On topology** badge and a **View in topology**
-button that flies the map to this node (see [Asset basics](/help/assets-asset-basics)).
+details window's header as a secondary *inventory name*, so the two never silently drift. That
+inventory name is a **link back to the asset** — click it to open the asset's full record. The
+asset's own detail page closes the loop the other way: it shows an **On topology** badge and a
+**View in topology** button that flies the map to this node (see
+[Asset basics](/help/assets-asset-basics)).
 
 ## Relationships (connections)
 
-Two nodes are joined by a **typed, directional connection**. You add and manage connections from a
-node's details panel (see below). The relationship kinds are:
+Two nodes are joined by a **typed, directional connection**. You add and manage connections on the
+**Connections** tab of a node's details window (see below). The relationship kinds are:
 
 - **Runs on** — this node is hosted or executed by another (a VM *runs on* a host). A node has
   **one active host at a time**: if you connect it to a new host, lazyit automatically closes the
@@ -94,7 +118,7 @@ node's details panel (see below). The relationship kinds are:
   same as connecting B to A, and lazyit stores it once either way.
 
 When you add a connection, this node is always the *source* and you pick the other node as the
-target; the panel reminds you of the direction. lazyit gently warns if a pairing looks unusual (for
+target; the form reminds you of the direction. lazyit gently warns if a pairing looks unusual (for
 example a container said to *run on* a network device) but doesn't block it — the model stays
 generic. If a connection would break the "one active host" rule (or duplicate an existing link),
 you'll get a clear message explaining why.
@@ -112,16 +136,17 @@ the map dims so you can see at a glance what that node is connected to.
 
 ## Status
 
-Every node carries a status, shown as a colored pill on its card and badge in the panel:
+Every node carries a status, shown as a colored pill on its card and as a badge in the details
+window's header:
 
 - **Online** — up and reachable.
 - **Offline** — down.
 - **Unknown** — not established (the default for a new node).
 
-With the manage permission you set the status from the details panel. Nodes reported by the
-[reporting agent](/help/assets-topology-reporting-agent) carry their status (and an *Agent-reported*
-badge with a "reported … ago" freshness) automatically; you can still set it by hand for nodes you
-manage yourself.
+With the manage permission you set the status on the details window's **General** tab. Nodes
+reported by the [reporting agent](/help/assets-topology-reporting-agent) carry their status (and an
+*Agent-reported* badge with a "reported … ago" freshness) automatically; you can still set it by hand
+for nodes you manage yourself.
 
 > **Auto-discovered nodes.** Servers reported by the [reporting agent](/help/assets-topology-reporting-agent)
 > don't appear on the map straight away — they wait in the **Pending review** tray on the
@@ -130,26 +155,46 @@ manage yourself.
 ## Taking a node off the map
 
 Removing a node is a **soft delete**: it comes off the map but its history is kept. Use **Remove
-from map** in the details panel and confirm. Nothing is destroyed — the node (and the asset behind
-it, if any) can be brought back later. lazyit never hard-deletes this data.
+from map** at the bottom of the details window's **General** tab and confirm. Nothing is destroyed —
+the node (and the asset behind it, if any) can be brought back later. lazyit never hard-deletes this
+data.
 
-## The details panel
+## The details window
 
-Clicking a node opens a right-hand panel — the reason this beats a static drawing. It gathers, in
-one place:
+Select a node and click **Details** (or double-click the node) to open its details window — the
+reason this beats a static drawing. It's a large window with tabs, because a machine reported by an
+agent carries far more than a hand-drawn card ever did, and putting it all in one column meant
+scrolling past everything to reach one thing.
 
-> **Editing from the panel.** With the manage permission the panel's **Details** section (near the
-> top) is editable in place — no separate page. Click the **title** to rename the node; change its
-> **kind** or **IP address** right there; and the **status** and **shortcuts** are editable too
-> (see below). Edits save as you go and the node's card on the canvas updates immediately. Read-only
-> viewers see the same facts as plain text, with no edit controls. The **IP address** is checked
-> when you save it: it must be a valid IPv4 or IPv6 address, and an invalid entry is rejected with a
-> clear message rather than saved.
+**The tabs adapt to the node.** You only ever see the ones that have something to say:
 
-- **Owner(s)** — who is responsible, pulled from the linked asset's assignments. An owner who has
-  left the company but was never released is still shown, marked as such.
-- **Knowledge-base articles** — published articles linked to the node's asset, each a click away.
-- **Secret references** — *the panel stores handles only, never the secret values themselves.* A
+- **General** *(always)* — what this node is and who is responsible for it: kind, IP address,
+  added-on date, status, owner(s), knowledge-base articles, secret references and shortcuts, plus
+  **Remove from map**.
+- **Reported facts** *(agent-reported nodes only)* — what the machine says it is made of. For a
+  server: operating system, kernel, CPU, memory, manufacturer/model/serial, and the disks and network
+  interfaces it found. For a container: its name, image, image digest, runtime state, container id
+  and its published ports, in a table with room to read it.
+- **Software** *(reporting servers only)* — the installed-package list, searchable, with its own room.
+  Containers don't report one, so they don't get this tab.
+- **Connections** *(always)* — what this node is wired to: **Runs here** (the nodes hosted on it) and
+  its active relationships (closable) plus its closed history, with the **Add connection** action.
+- **Changes** *(always)* — what has moved on this node over time. See
+  [Reporting agent](/help/assets-topology-reporting-agent).
+
+> **Editing in place.** With the manage permission the **General** tab's **Details** block is
+> editable — no separate page. Click the **title** in the window's header to rename the node; change
+> its **kind**, **IP address** or **status** right there; and the **shortcuts** are editable too.
+> Edits save as you go and the node's card on the canvas updates immediately. Read-only viewers see
+> the same facts as plain text, with no edit controls. The **IP address** is checked when you save
+> it: it must be a valid IPv4 or IPv6 address, and an invalid entry is rejected with a clear message
+> rather than saved.
+
+A few things on the **General** tab worth calling out:
+
+- **Owner(s)** — pulled from the linked asset's assignments. An owner who has left the company but
+  was never released is still shown, marked as such.
+- **Secret references** — *this surface stores handles only, never the secret values themselves.* A
   reference shows a label and a **reveal (eye)** control. If you're a member of the secret's vault you
   can reveal the value right here — the same as a KB secret chip: click the eye, unlock if prompted,
   and the value is decrypted **in your browser** (lazyit's servers never see it) and auto-hides after
@@ -162,24 +207,23 @@ one place:
 - **Shortcuts** — quick links (SSH, web UI, console) that open in a new tab. With the manage
   permission you edit them inline: each shortcut is a label + URL pair you can change, add or remove,
   then **Save** the list (lazyit checks each URL is valid before saving).
-- **IP address** and **added-on** date. If another node on the map already carries the *exact same*
-  IP, the panel shows a **non-blocking duplicate-IP warning** listing the other node(s) — a heads-up,
-  not a block: the address is still saved (lazyit enforces no uniqueness on IPs), and each listed
-  node is a click away so you can jump over and reconcile.
-- **Children** — the nodes hosted on this one (its active *runs on* relationships).
-- **Connections** — this node's active relationships (closable) and its closed history (a *runs on*
-  migration shows here), plus the **Add connection** action.
+- **Duplicate IP** — if another node on the map already carries the *exact same* IP, a **non-blocking
+  warning** lists the other node(s) — a heads-up, not a block: the address is still saved (lazyit
+  enforces no uniqueness on IPs), and each listed node is a click away so you can jump over and
+  reconcile.
 
-A row in the [Servers list](/help/assets-topology-servers) deep-links straight into this panel, so
+A row in the [Servers list](/help/assets-topology-servers) deep-links straight into this window, so
 you can jump from the table to a machine's full picture in one click.
 
 ## Impact / blast radius
 
 The headline question a map can answer that a drawing can't: **"if this node goes down, what is
-affected?"** In the details panel, toggle **Show impact** to highlight the downstream set — every
-node that runs on, depends on, or is a member of this one (directly or transitively). Taking down a
-cluster or group therefore surfaces its members. The canvas dims everything outside the radius so the
-affected region stands out, and the panel lists each affected node with how many hops away it is.
+affected?"** Select the node and click **Show blast radius** on its action bar — the control lives on
+the map, because the answer is drawn on the map. Every node that runs on, depends on, or is a member
+of this one (directly or transitively) lights up; taking down a cluster or group therefore surfaces
+its members. The canvas dims everything outside the radius so the affected region stands out, a small
+banner at the bottom tells you how many nodes are affected, and hovering any highlighted node shows
+how many hops away it is.
 
 Impact is an **edge-derived estimate**, not a hand-verified guarantee — it follows the edges you've
 drawn, so a member might survive a group losing one node. Backup-target and network-only links are
@@ -194,4 +238,4 @@ down. lazyit shows that as reassurance, not as an error.
 - [Servers list](/help/assets-topology-servers) — the same estate as a filterable table.
 - [Reporting agent](/help/assets-topology-reporting-agent) — auto-populate the map from your servers.
 - [Asset basics](/help/assets-asset-basics) — the inventory record behind an asset-backed node.
-- [Assignments & history](/help/assets-assignments-history) — how ownership (the panel's owner) works.
+- [Assignments & history](/help/assets-assignments-history) — how ownership (the General tab's owner) works.
