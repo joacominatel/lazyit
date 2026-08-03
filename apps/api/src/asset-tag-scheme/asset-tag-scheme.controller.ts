@@ -14,12 +14,15 @@ import {
   AssetTagBackfillPreviewQuerySchema,
   AssetTagBackfillPreviewSchema,
   AssetTagBackfillResultSchema,
+  AssetTagNextPreviewQuerySchema,
+  AssetTagNextPreviewSchema,
   AssetTagSchemeSchema,
   AssetTagSeedSuggestionQuerySchema,
   AssetTagSeedSuggestionSchema,
   UpdateAssetTagSchemeSchema,
   type AssetTagBackfillPreview,
   type AssetTagBackfillResult,
+  type AssetTagNextPreview,
   type AssetTagScheme,
   type AssetTagSeedSuggestion,
 } from '@lazyit/shared';
@@ -42,6 +45,10 @@ class AssetTagSeedSuggestionQueryDto extends createZodDto(
 class AssetTagSeedSuggestionDto extends createZodDto(
   AssetTagSeedSuggestionSchema,
 ) {}
+class AssetTagNextPreviewQueryDto extends createZodDto(
+  AssetTagNextPreviewQuerySchema,
+) {}
+class AssetTagNextPreviewDto extends createZodDto(AssetTagNextPreviewSchema) {}
 class AssetTagBackfillPreviewQueryDto extends createZodDto(
   AssetTagBackfillPreviewQuerySchema,
 ) {}
@@ -108,7 +115,8 @@ export class AssetTagSchemeController {
   @UseGuards(ServicePrincipalForbiddenGuard)
   @Get('seed-suggestion')
   @ApiOperation({
-    summary: 'Suggest a seed startNumber for the IN-PROGRESS affixes (ADMIN — settings:manage)',
+    summary:
+      'Suggest a seed startNumber for the IN-PROGRESS affixes (ADMIN — settings:manage)',
     description:
       'Parses the numeric body out of LIVE asset tags matching the supplied (in-progress, ' +
       'not-yet-saved) `prefix … suffix` and returns `max + 1` as the suggested `startNumber`, so the ' +
@@ -124,9 +132,33 @@ export class AssetTagSchemeController {
 
   @RequirePermission('settings:manage')
   @UseGuards(ServicePrincipalForbiddenGuard)
+  @Get('next-tag')
+  @ApiOperation({
+    summary:
+      'Preview the next tag the scheme would allocate (ADMIN — settings:manage)',
+    description:
+      'Runs the SAME skip-existing selection the allocator runs (ADR-0068 §1) over the live estate ' +
+      'and renders it with the same formula, so a preview and an allocation cannot disagree for the ' +
+      'same pattern (#1180). Affixes are taken VERBATIM from the query (absent = no affix) so the ' +
+      'settings editor can preview an UNSAVED pattern; `from` defaults to the stored `nextNumber`. ' +
+      'READ-ONLY — it consumes nothing and never advances the counter, so the result is the number ' +
+      'that would be allocated at this instant, not a reservation. `skippedCount` reports how many ' +
+      'already-taken numbers were stepped over. Past the int4 ceiling it returns `exhausted: true` ' +
+      "with a null number/tag rather than the allocator's 400.",
+  })
+  @ApiOkResponse({ type: AssetTagNextPreviewDto })
+  previewNextTag(
+    @Query() query: AssetTagNextPreviewQueryDto,
+  ): Promise<AssetTagNextPreview> {
+    return this.service.previewNextTag(query);
+  }
+
+  @RequirePermission('settings:manage')
+  @UseGuards(ServicePrincipalForbiddenGuard)
   @Get('backfill/preview')
   @ApiOperation({
-    summary: 'Preview the assets a backfill would retag (ADMIN — settings:manage)',
+    summary:
+      'Preview the assets a backfill would retag (ADMIN — settings:manage)',
     description:
       'Read-only, paginated projection of exactly the live assets the given mode/scope would retag — ' +
       'WRITES NOTHING (the counter is not consumed; `proposedTag` is an indicative what-if). Modes: ' +
@@ -144,7 +176,8 @@ export class AssetTagSchemeController {
   @UseGuards(ServicePrincipalForbiddenGuard)
   @Post('backfill/apply')
   @ApiOperation({
-    summary: 'Apply a backfill — allocate-and-set tags for real (ADMIN — settings:manage)',
+    summary:
+      'Apply a backfill — allocate-and-set tags for real (ADMIN — settings:manage)',
     description:
       'The deliberate, audited bulk retag: each affected live asset (matching mode/scope minus ' +
       '`excludeIds`) gets the next FREE tag under the skip-existing invariant, written with an ' +
