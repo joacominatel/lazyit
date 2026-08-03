@@ -707,9 +707,10 @@ desde la tarea programada (en Windows), y no esperes nada de él en guests de co
   que no tiene lista nunca se le muestra una vacía: la superficie simplemente no aparece. Desactivar
   la recolección de software en la configuración del agente es otra cosa distinta, y deliberada: la
   lista guardada se borra, así que la pestaña también desaparece y nunca quedás leyendo versiones de
-  paquetes que ya nadie está recolectando. La única vez que sí ves una pestaña Software vacía es el
-  caso opuesto: el agente buscó, y sus exclusiones o su tope no dejaron nada para reportar. La pestaña
-  lo dice con todas las letras.
+  paquetes que ya nadie está recolectando. Sí ves una pestaña Software vacía en el caso opuesto: el
+  agente envió una lista y esa lista vino vacía —no había instalado nada de lo que lee, o sus
+  exclusiones y su tope no dejaron nada para enviar—. La pestaña lo dice con todas las letras, así que
+  una lista vacía nunca se confunde con una lista ausente.
 - **Qué no pudo recopilar** — cada reporte también indica si corrió como root (Administrador en
   Windows) y nombra lo que tuvo que omitir o lo que agotó su tiempo. En Windows todo el barrido es una
   sola llamada de PowerShell que sigue adelante ante una falla en lugar de abortar el reporte, así que

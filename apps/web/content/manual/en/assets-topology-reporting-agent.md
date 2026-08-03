@@ -666,8 +666,9 @@ the scheduled task (Windows), and expect nothing from it on container guests.
   no list is never shown an empty one; the surface is simply absent. Turning software collection
   **off** in the agent settings is different again, and deliberate: the stored list is cleared, so the
   tab goes away too and you are never left reading package versions nobody is collecting any more.
-  The one time you *do* see an empty Software tab is the opposite case — the agent looked, and its
-  exclusions or its cap left nothing to report. The tab says as much in so many words.
+  You *do* see an empty Software tab in the opposite case: the agent sent a list, and the list was
+  empty — nothing it reads was installed, or its exclusions and its cap left nothing to send. The tab
+  says as much in so many words, so an empty list is never mistaken for a missing one.
 - **What it couldn't collect** — each report also says whether it ran with root (Administrator on
   Windows) and names anything it had to skip or that timed out. On Windows the whole sweep is one
   PowerShell call that keeps going past a failure rather than aborting the report, so it also names
