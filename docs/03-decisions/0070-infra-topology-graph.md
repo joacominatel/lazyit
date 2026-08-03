@@ -358,13 +358,24 @@ list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (c
 > rule and unit-tested in `node-detail-tabs.test.ts`). Because a modal covers the board, **clicking a
 > node now only SELECTS it**: an on-canvas action bar appears under the selected card, and the modal
 > opens from its **Details** button, a double-click, or the `?node=` deep-link (which still opens it, so
-> the Table→Map round-trip is unchanged).
+> the Table→Map round-trip is unchanged). That round-trip needed a fix to be true at all: the param was
+> read once, in a `useState` initializer, and an in-app row click is a client-side navigation to the
+> same route — the view never remounted, so the link flipped to the Map and selected nothing. `?node=`
+> is now applied whenever it changes (`node-deep-link.ts`), which is also what makes it correct to say
+> a row lands on the node it named.
 >
 > **§7's blast radius moved onto the canvas.** Its entire output is drawn on the graph, so requiring an
 > operator to open a panel, scroll, click and then look back at the map was three steps too many for an
 > answer already on screen. The toggle is on the selected node's action bar; a bottom-centre summary
 > gives the count (or the reassuring "safe to take down"), and the per-node hop depth rides in the hover
-> quick-facts card. The affected LIST is gone from the UI: the highlighted cards are the list.
+> quick-facts card. The affected LIST moved with it rather than being dropped: the summary enumerates
+> the affected nodes — label, kind, hop depth, shallowest first — behind a disclosure that is open by
+> default and scrolls inside itself. Highlighting answers *roughly how bad* and the count answers *how
+> many*; neither answers **which ones** in a form an operator can scan, count or copy, and a host with
+> a dozen dependents is otherwise a cluster of glowing cards to be read off the canvas by eye. The
+> summary also carries the two states a bare count cannot: the query still in flight (a board that has
+> not changed yet reads as "the button didn't work") and the query that FAILED — which must never
+> render as the reassuring empty radius, the way an errored query did in the rail.
 >
 > **The payoff panel is still the payoff** — the claim that this beats a Draw.io diagram holds; what
 > changed is the container it ships in.
