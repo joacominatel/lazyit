@@ -74,9 +74,16 @@ export function planNodeDetailTabs(node: {
 
   const tabs: NodeDetailTabId[] = ["general"];
   if (factsArm) tabs.push("facts");
-  // Only a host reports packages, and only when the collector could read them — `software` is
-  // optional in the contract, and an absent list is not an empty one (ADR-0074 §2). An EMPTY list
-  // still earns the tab: "reports packages, currently reads none" is a fact worth a surface.
+  // Only a host reports packages, and the tab keys on whether this node HOLDS a list rather than on
+  // why it might not — the tab can only show what was stored. `software` is optional in the
+  // contract (ADR-0074 §2) and absent here covers several different stories: a host that has never
+  // reported one, a `softwareState: 'disabled'` policy that cleared it, and a pre-#1142 agent whose
+  // omitted key reads as a clear. None of them has a list to open a tab onto.
+  //
+  // An EMPTY list is a different answer and does earn the tab: `applySoftwarePolicy` returns `[]`
+  // when the collector ran and the policy excluded every package, which the server stores as "no
+  // packages" precisely so it stays distinguishable from "we could not look" (ADR-0074 §2/§3
+  // amendment, #1142). The panel then says so in words.
   if (inventory?.software !== undefined) tabs.push("software");
   tabs.push("connections", "changes");
 
