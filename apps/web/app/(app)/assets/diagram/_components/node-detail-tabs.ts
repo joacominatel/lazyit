@@ -49,9 +49,11 @@ export interface NodeDetailTabPlan {
  *
  * `source` is checked first because reported facts are the AGENT's: the tab is labelled as a
  * check-in, and a hand-authored `specs` blob that happens to carry a `host` key is a custom field,
- * not a report. Within an agent node the host arm is tried first — the same order the old panel
- * used — which is a readability choice rather than a precedence one, because the arms cannot both
- * match.
+ * not a report. Within an agent node the host arm is tried first, the same order the old panel used.
+ * That order is not load-bearing on any blob the agent actually writes — a host report carries no
+ * `container` key and a child report carries no `host` key — but it is a real tie-break rather than
+ * a comment: a blob carrying both would resolve to `host`, deterministically, instead of depending
+ * on which check happened to run.
  */
 export function planNodeDetailTabs(node: {
   source: InfraNodeSource;
