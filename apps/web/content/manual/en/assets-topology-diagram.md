@@ -177,7 +177,9 @@ scrolling past everything to reach one thing.
   interfaces it found. For a container: its name, image, image digest, runtime state, container id
   and its published ports, in a table with room to read it.
 - **Software** *(reporting servers only)* — the installed-package list, searchable, with its own room.
-  Containers don't report one, so they don't get this tab.
+  Containers don't report one, so they don't get this tab; neither does a server lazyit holds no list
+  for — see [Reporting agent](/help/assets-topology-reporting-agent) for the difference between "no
+  list" and "an empty one".
 - **Connections** *(always)* — what this node is wired to: **Runs here** (the nodes hosted on it) and
   its active relationships (closable) plus its closed history, with the **Add connection** action.
 - **Changes** *(always)* — what has moved on this node over time. See

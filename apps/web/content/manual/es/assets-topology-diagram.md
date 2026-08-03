@@ -191,7 +191,10 @@ una sola cosa.
   e interfaces de red que encontró. Para un contenedor: su nombre, imagen, digest de la imagen, estado
   del runtime, id del contenedor y sus puertos publicados, en una tabla con espacio para leerla.
 - **Software** *(solo servidores que reportan)* — la lista de paquetes instalados, con búsqueda y
-  espacio propio. Los contenedores no reportan una, así que no tienen esta pestaña.
+  espacio propio. Los contenedores no reportan una, así que no tienen esta pestaña; tampoco la tiene
+  un servidor del que lazyit no guarda ninguna lista — ver
+  [Agente de reporte](/help/assets-topology-reporting-agent) para la diferencia entre "sin lista" y
+  "una lista vacía".
 - **Conexiones** *(siempre)* — con qué está enlazado este nodo: **Se ejecuta acá** (los nodos
   alojados en él) y sus relaciones activas (que se pueden cerrar) más su historial cerrado, con la
   acción **Agregar conexión**.

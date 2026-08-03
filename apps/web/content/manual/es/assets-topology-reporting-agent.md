@@ -701,11 +701,15 @@ desde la tarea programada (en Windows), y no esperes nada de él en guests de co
   coincidir con la huella (después de restaurar un respaldo, por ejemplo), **conserva la lista que ya
   tiene** y le pide al agente una completa en el siguiente reporte, en lugar de vaciar el panel ante
   una duda. Un servidor que **descartaste** y que luego volvió a descubrirse es un caso distinto, y
-  conviene saberlo: vuelve como un registro nuevo, sin ninguna lista de paquetes, así que su panel de
-  Software está realmente vacío hasta que la lista completa llegue con el siguiente reporte — como
-  máximo un intervalo de reporte (15 minutos por defecto). Desactivar la recolección de software en la
-  configuración del agente es otra cosa distinta, y deliberada: la lista guardada se borra, para que
-  nunca quedes leyendo versiones de paquetes que ya nadie está recolectando.
+  conviene saberlo: vuelve como un registro nuevo, sin ninguna lista de paquetes, así que **no tiene
+  pestaña Software** —ni panel de Software en su página de activo— hasta que la lista completa llegue
+  con el siguiente reporte, como máximo un intervalo de reporte (15 minutos por defecto). A un host
+  que no tiene lista nunca se le muestra una vacía: la superficie simplemente no aparece. Desactivar
+  la recolección de software en la configuración del agente es otra cosa distinta, y deliberada: la
+  lista guardada se borra, así que la pestaña también desaparece y nunca quedás leyendo versiones de
+  paquetes que ya nadie está recolectando. La única vez que sí ves una pestaña Software vacía es el
+  caso opuesto: el agente buscó, y sus exclusiones o su tope no dejaron nada para reportar. La pestaña
+  lo dice con todas las letras.
 - **Qué no pudo recopilar** — cada reporte también indica si corrió como root (Administrador en
   Windows) y nombra lo que tuvo que omitir o lo que agotó su tiempo. En Windows todo el barrido es una
   sola llamada de PowerShell que sigue adelante ante una falla en lugar de abortar el reporte, así que

@@ -661,10 +661,13 @@ the scheduled task (Windows), and expect nothing from it on container guests.
   instance), it **keeps the list it has** and asks the agent for a full one on its next report, rather
   than emptying the panel over a doubt. A server you **discarded** and that was then rediscovered is a
   different case, and worth knowing: it comes back as a brand-new record with no package list at all,
-  so its Software panel is genuinely empty until the full list arrives with the next report — up to
-  one reporting interval (15 minutes by default). Turning software collection **off** in the agent
-  settings is different again, and deliberate: the stored list is cleared, so you are never left
-  reading package versions nobody is collecting any more.
+  so it has **no Software tab at all** — nor a Software panel on its asset page — until the full list
+  arrives with the next report, up to one reporting interval (15 minutes by default). A host holding
+  no list is never shown an empty one; the surface is simply absent. Turning software collection
+  **off** in the agent settings is different again, and deliberate: the stored list is cleared, so the
+  tab goes away too and you are never left reading package versions nobody is collecting any more.
+  The one time you *do* see an empty Software tab is the opposite case — the agent looked, and its
+  exclusions or its cap left nothing to report. The tab says as much in so many words.
 - **What it couldn't collect** — each report also says whether it ran with root (Administrator on
   Windows) and names anything it had to skip or that timed out. On Windows the whole sweep is one
   PowerShell call that keeps going past a failure rather than aborting the report, so it also names
