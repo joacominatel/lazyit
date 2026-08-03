@@ -17,6 +17,7 @@ describe('AssetTagSchemeController', () => {
     getScheme: jest.Mock;
     updateScheme: jest.Mock;
     seedSuggestion: jest.Mock;
+    previewNextTag: jest.Mock;
     backfillPreview: jest.Mock;
     backfillApply: jest.Mock;
   };
@@ -39,6 +40,13 @@ describe('AssetTagSchemeController', () => {
         suggestedStartNumber: 1006,
         matchedCount: 3,
         maxExistingNumber: 1005,
+      }),
+      previewNextTag: jest.fn().mockResolvedValue({
+        fromNumber: 1000,
+        number: 1001,
+        tag: 'IT#1001',
+        skippedCount: 1,
+        exhausted: false,
       }),
       backfillPreview: jest.fn().mockResolvedValue({
         items: [],
@@ -74,6 +82,19 @@ describe('AssetTagSchemeController', () => {
     expect(service.seedSuggestion).toHaveBeenCalledWith(query);
   });
 
+  it('GET next-tag delegates the in-progress pattern and returns the skip-existing preview', async () => {
+    const query = {
+      prefix: 'IT#',
+      suffix: undefined,
+      width: undefined,
+      from: 1000,
+    };
+    const result = await controller.previewNextTag(query);
+    expect(result.tag).toBe('IT#1001');
+    expect(result.skippedCount).toBe(1);
+    expect(service.previewNextTag).toHaveBeenCalledWith(query);
+  });
+
   it('GET backfill/preview delegates the query', async () => {
     const query = { mode: 'untagged-only' as const, page: 1, pageSize: 25 };
     await controller.backfillPreview(query);
@@ -81,7 +102,10 @@ describe('AssetTagSchemeController', () => {
   });
 
   it('POST backfill/apply delegates the body + principal', async () => {
-    const body = { mode: 'normalize-non-conforming' as const, excludeIds: ['a2'] };
+    const body = {
+      mode: 'normalize-non-conforming' as const,
+      excludeIds: ['a2'],
+    };
     const principal = { kind: 'human', user: { id: 'u1' } } as never;
     await expect(controller.backfillApply(body, principal)).resolves.toEqual({
       tagged: 2,
