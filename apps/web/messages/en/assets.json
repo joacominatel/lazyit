@@ -257,7 +257,7 @@
       "expand": "Show packages",
       "collapse": "Hide packages",
       "searchPlaceholder": "Search packages…",
-      "noSoftware": "The agent reported an empty package list. A collector that can't read packages reports no list at all, so this is an answer rather than a gap.",
+      "noSoftware": "The agent reported an empty package list — this is what it sent, not a list lazyit failed to store. A report that says it couldn't collect one keeps the list lazyit already has.",
       "noMatches": "No packages match \"{query}\".",
       "containerTitle": "Container",
       "containerName": "Name",
