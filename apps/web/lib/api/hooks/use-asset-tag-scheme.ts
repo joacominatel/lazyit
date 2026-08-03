@@ -13,6 +13,7 @@ import {
   type AssetTagBackfillApplyBody,
   applyAssetTagBackfill,
   getAssetTagBackfillPreview,
+  getAssetTagNextPreview,
   getAssetTagScheme,
   getAssetTagSeedSuggestion,
   updateAssetTagScheme,
@@ -22,13 +23,18 @@ import { assetTagSchemeKeys } from "../query-keys";
 /**
  * Read the org-wide asset-tag scheme (`GET /config/asset-tag-scheme`, ADR-0063 — ADR-0020 data layer).
  * Used by:
- *   - the settings editor (Settings → Instance), to seed the form + render the live preview;
- *   - the asset CREATE form, to hint the next auto-tag when the scheme is enabled.
+ *   - the settings editor (Settings → Instance), to seed the form fields;
+ *   - the asset CREATE form, to learn WHETHER the scheme is on and with which affixes.
+ *
+ * It is NOT the source of the next tag — `nextNumber` is the raw counter, which the allocator may skip
+ * past when that number's tag is already taken (ADR-0068 §1). Rendering it as "the next tag" is the
+ * #1180 defect; use {@link useAssetTagNextPreview} for that.
  *
  * The API never 404s for "unset" — it returns an explicit `enabled: false` default — so `data` is a
- * concrete scheme shape whenever the query resolves. `staleTime` is short so a freshly-saved scheme (or
- * a counter advanced by another create) is reflected without a hard reload; the API is the real gate, so
- * a stale read never authorizes anything.
+ * concrete scheme shape whenever the query resolves. It is gated `settings:manage`, so for a non-admin
+ * the query 403s and `data` stays undefined; every consumer must degrade gracefully rather than block.
+ * `staleTime` is short so a freshly-saved scheme is reflected without a hard reload; the API is the real
+ * gate, so a stale read never authorizes anything.
  */
 export function useAssetTagScheme() {
   return useQuery({
@@ -83,6 +89,48 @@ export function useAssetTagSeedSuggestion({
   return useQuery({
     queryKey: assetTagSchemeKeys.seedSuggestion(params),
     queryFn: ({ signal }) => getAssetTagSeedSuggestion(params, signal),
+    enabled,
+    staleTime: 10 * 1000,
+  });
+}
+
+/** The pattern whose next tag to preview, plus the gate that keeps it off the network when idle. */
+interface NextPreviewInput {
+  prefix?: string;
+  suffix?: string;
+  width?: number;
+  /** Counter floor; omit to let the server use the stored `nextNumber`. */
+  from?: number;
+  /** Only fetch when a preview is meaningful (the scheme is on / the form is creating). */
+  enabled: boolean;
+}
+
+/**
+ * Read the tag the scheme would allocate next for a pattern (#1180) — the ONLY correct source for
+ * "the next tag", and the reason this is a server read rather than a local `renderAssetTag` call.
+ *
+ * The allocator does not hand out the raw counter: it skips forward past any number whose rendered
+ * tag is already on a live asset (ADR-0068 §1). That lookup is bounded server-side
+ * (`OCCUPIED_SCAN_LIMIT`) and needs the live estate, so it cannot be reproduced in the browser —
+ * rendering `nextNumber` locally is exactly the lie this replaces. Read-only: the counter never
+ * advances, so it is safe to refetch as the operator types.
+ *
+ * Deliberately NO `keepPreviousData`, unlike the backfill preview next to it. Holding the previous
+ * pattern's tag while a new pattern resolves would put a real-looking tag under the wrong pattern —
+ * a smaller version of the exact defect this fixes. Callers render their own pending state instead;
+ * the caller debounces, so the gap is not per-keystroke.
+ */
+export function useAssetTagNextPreview({
+  prefix,
+  suffix,
+  width,
+  from,
+  enabled,
+}: NextPreviewInput) {
+  const params = { prefix, suffix, width, from };
+  return useQuery({
+    queryKey: assetTagSchemeKeys.nextPreview(params),
+    queryFn: ({ signal }) => getAssetTagNextPreview(params, signal),
     enabled,
     staleTime: 10 * 1000,
   });

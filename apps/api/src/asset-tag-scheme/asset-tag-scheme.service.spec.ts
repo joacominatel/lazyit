@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
+import { INT4_MAX } from '@lazyit/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Mock the generated Prisma client (no DB). `isUniqueTagCollision` does a real instanceof against
@@ -139,7 +140,10 @@ describe('AssetTagSchemeService', () => {
       return Promise.resolve([]);
     });
     assetTagScheme.updateMany.mockImplementation(
-      (args: { where: { nextNumber: { lt: number } }; data: { nextNumber: number } }) => {
+      (args: {
+        where: { nextNumber: { lt: number } };
+        data: { nextNumber: number };
+      }) => {
         if (counter < args.data.nextNumber) counter = args.data.nextNumber;
         return Promise.resolve({ count: 1 });
       },
@@ -371,6 +375,108 @@ describe('AssetTagSchemeService', () => {
     expect([a, b].sort()).toEqual(['IT-1000', 'IT-1001']);
   });
 
+  // --- next-tag preview (#1180) -------------------------------------------
+
+  it('previewNextTag AGREES with allocateTag on the CEO estate (1000 taken → both say IT-1001)', async () => {
+    // The exact defect from #1180: with IT-1000 already on a live asset and the counter at 1000, the
+    // old client-side preview rendered the RAW counter (IT-1000) while the allocator skipped to
+    // IT-1001. Execute BOTH against the same estate and compare the strings — a preview that renders
+    // the raw counter fails here, because the two values are actually produced, not pattern-matched.
+    wireCounter(['IT-1000']);
+
+    const preview = await service.previewNextTag({ prefix: 'IT-' });
+    const allocated = await service.allocateTag(undefined);
+
+    expect(preview.tag).toBe('IT-1001');
+    expect(preview.tag).toBe(allocated);
+    expect(preview.number).toBe(1001);
+    expect(preview.fromNumber).toBe(1000);
+    expect(preview.skippedCount).toBe(1);
+    expect(preview.exhausted).toBe(false);
+  });
+
+  it('previewNextTag AGREES with allocateTag across a contiguous occupied block', async () => {
+    // 1000..1009 occupied → the first free slot is 1010. Same assertion shape: both sides computed.
+    wireCounter(Array.from({ length: 10 }, (_, i) => `IT-${1000 + i}`));
+
+    const preview = await service.previewNextTag({ prefix: 'IT-' });
+    const allocated = await service.allocateTag(undefined);
+
+    expect(preview.tag).toBe(allocated);
+    expect(preview.tag).toBe('IT-1010');
+    expect(preview.skippedCount).toBe(10);
+  });
+
+  it('previewNextTag NEVER advances the counter — no write of any kind, repeatable', async () => {
+    // The hard constraint from #1180: a preview that consumes a number is worse than one that is
+    // wrong. Assert BOTH the absence of every write path AND that the value is stable across calls
+    // (a preview that consumed would return 1001 the second time).
+    wireCounter(['IT-1000']);
+
+    const first = await service.previewNextTag({ prefix: 'IT-' });
+    const second = await service.previewNextTag({ prefix: 'IT-' });
+
+    expect(first.tag).toBe('IT-1001');
+    expect(second.tag).toBe('IT-1001');
+    expect(counter).toBe(1000);
+    expect(assetTagScheme.update).not.toHaveBeenCalled();
+    expect(assetTagScheme.updateMany).not.toHaveBeenCalled();
+    expect(assetTagScheme.upsert).not.toHaveBeenCalled();
+    expect(asset.update).not.toHaveBeenCalled();
+  });
+
+  it('previewNextTag walks from an explicit `from` (the unsaved startNumber the editor is typing)', async () => {
+    // The editor previews an IN-PROGRESS re-seed: startNumber 2000 with IT-2000/IT-2001 already live.
+    // The stored counter (1000) must be ignored entirely in favour of the supplied floor.
+    wireCounter(['IT-2000', 'IT-2001']);
+
+    const preview = await service.previewNextTag({ prefix: 'IT-', from: 2000 });
+
+    expect(preview.fromNumber).toBe(2000);
+    expect(preview.tag).toBe('IT-2002');
+    expect(preview.skippedCount).toBe(2);
+  });
+
+  it('previewNextTag previews the IN-PROGRESS affixes verbatim, not the saved ones', async () => {
+    // Saved scheme is `IT-`; the operator is typing `LAB#` with width 4. Only LAB#-tags may count as
+    // occupied — the saved prefix must not leak into the preview.
+    wireCounter(['IT-1000', 'LAB#1000']);
+
+    const preview = await service.previewNextTag({ prefix: 'LAB#', width: 4 });
+
+    expect(preview.tag).toBe('LAB#1001');
+    expect(preview.skippedCount).toBe(1);
+  });
+
+  it('previewNextTag uses the stored counter when `from` is omitted and no scheme row exists', async () => {
+    assetTagScheme.findFirst.mockResolvedValue(null);
+    asset.findMany.mockResolvedValue([]);
+
+    const preview = await service.previewNextTag({});
+
+    expect(preview.fromNumber).toBe(1);
+    expect(preview.number).toBe(1);
+    expect(preview.tag).toBe('1');
+  });
+
+  it('previewNextTag reports EXHAUSTED (null number/tag) instead of throwing at the int4 ceiling', async () => {
+    // The allocator freezes with a 400 past INT4_MAX. The preview must mirror that state as data —
+    // a typing operator should see "exhausted", not a red error toast on every keystroke.
+    wireCounter([`IT-${INT4_MAX}`], schemeRow({ nextNumber: INT4_MAX }));
+    counter = INT4_MAX;
+
+    const preview = await service.previewNextTag({ prefix: 'IT-' });
+
+    expect(preview.exhausted).toBe(true);
+    expect(preview.number).toBeNull();
+    expect(preview.tag).toBeNull();
+    expect(preview.fromNumber).toBe(INT4_MAX);
+    // And the allocator it mirrors really does refuse that same estate.
+    await expect(service.allocateTag(undefined)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
   // --- seed suggestion (ADR-0068 §2) --------------------------------------
 
   it('seedSuggestion returns max(existing matching) + 1 and the matched count', async () => {
@@ -394,7 +500,10 @@ describe('AssetTagSchemeService', () => {
   });
 
   it('seedSuggestion suggests 1 when nothing matches the affixes', async () => {
-    asset.findMany.mockResolvedValue([{ assetTag: 'LAB-7' }, { assetTag: 'OTHER' }]);
+    asset.findMany.mockResolvedValue([
+      { assetTag: 'LAB-7' },
+      { assetTag: 'OTHER' },
+    ]);
 
     const result = await service.seedSuggestion({ prefix: 'IT-' });
 
@@ -411,21 +520,37 @@ describe('AssetTagSchemeService', () => {
     const scheme = schemeRow({ nextNumber: 1000 });
     // The affected-set read: two untagged live assets (selection done in SQL for this mode).
     const affected = [
-      { id: 'a1', name: 'SRV-1', serial: null, assetTag: null, modelId: null, model: null },
-      { id: 'a2', name: 'SRV-2', serial: null, assetTag: null, modelId: null, model: null },
+      {
+        id: 'a1',
+        name: 'SRV-1',
+        serial: null,
+        assetTag: null,
+        modelId: null,
+        model: null,
+      },
+      {
+        id: 'a2',
+        name: 'SRV-2',
+        serial: null,
+        assetTag: null,
+        modelId: null,
+        model: null,
+      },
     ];
     let findManyCall = 0;
     assetTagScheme.findFirst.mockImplementation(() =>
       Promise.resolve({ ...scheme, nextNumber: counter }),
     );
-    asset.findMany.mockImplementation((args: { select?: Record<string, unknown> }) => {
-      const sel = args.select;
-      if (sel && Object.keys(sel).length === 1 && 'assetTag' in sel) {
-        return Promise.resolve([]); // occupied scan — estate has no conforming tags yet.
-      }
-      findManyCall += 1;
-      return Promise.resolve(affected); // the affected-set read.
-    });
+    asset.findMany.mockImplementation(
+      (args: { select?: Record<string, unknown> }) => {
+        const sel = args.select;
+        if (sel && Object.keys(sel).length === 1 && 'assetTag' in sel) {
+          return Promise.resolve([]); // occupied scan — estate has no conforming tags yet.
+        }
+        findManyCall += 1;
+        return Promise.resolve(affected); // the affected-set read.
+      },
+    );
     assetTagScheme.updateMany.mockImplementation(
       (a: { data: { nextNumber: number } }) => {
         if (counter < a.data.nextNumber) counter = a.data.nextNumber;
@@ -468,18 +593,34 @@ describe('AssetTagSchemeService', () => {
 
   it('backfillApply (untagged-only) honours excludeIds (per-row deselect)', async () => {
     const affected = [
-      { id: 'a1', name: null, serial: null, assetTag: null, modelId: null, model: null },
-      { id: 'a2', name: null, serial: null, assetTag: null, modelId: null, model: null },
+      {
+        id: 'a1',
+        name: null,
+        serial: null,
+        assetTag: null,
+        modelId: null,
+        model: null,
+      },
+      {
+        id: 'a2',
+        name: null,
+        serial: null,
+        assetTag: null,
+        modelId: null,
+        model: null,
+      },
     ];
     assetTagScheme.findFirst.mockImplementation(() =>
       Promise.resolve({ ...schemeRow(), nextNumber: counter }),
     );
-    asset.findMany.mockImplementation((args: { select?: Record<string, unknown> }) => {
-      const sel = args.select;
-      if (sel && Object.keys(sel).length === 1 && 'assetTag' in sel)
-        return Promise.resolve([]);
-      return Promise.resolve(affected);
-    });
+    asset.findMany.mockImplementation(
+      (args: { select?: Record<string, unknown> }) => {
+        const sel = args.select;
+        if (sel && Object.keys(sel).length === 1 && 'assetTag' in sel)
+          return Promise.resolve([]);
+        return Promise.resolve(affected);
+      },
+    );
     assetTagScheme.updateMany.mockResolvedValue({ count: 1 });
     assetTagScheme.update.mockImplementation(() => {
       counter += 1;
@@ -504,21 +645,44 @@ describe('AssetTagSchemeService', () => {
     // The affected-set read returns ALL live assets (untagged + tagged); the JS conformance filter
     // must keep the untagged + the non-conforming ones and DROP the already-conforming IT-1000.
     const all = [
-      { id: 'a1', name: null, serial: null, assetTag: null, modelId: null, model: null }, // untagged
-      { id: 'a2', name: null, serial: null, assetTag: 'LEGACY-9', modelId: null, model: null }, // non-conforming
-      { id: 'a3', name: null, serial: null, assetTag: 'IT-1000', modelId: null, model: null }, // CONFORMING — skip
+      {
+        id: 'a1',
+        name: null,
+        serial: null,
+        assetTag: null,
+        modelId: null,
+        model: null,
+      }, // untagged
+      {
+        id: 'a2',
+        name: null,
+        serial: null,
+        assetTag: 'LEGACY-9',
+        modelId: null,
+        model: null,
+      }, // non-conforming
+      {
+        id: 'a3',
+        name: null,
+        serial: null,
+        assetTag: 'IT-1000',
+        modelId: null,
+        model: null,
+      }, // CONFORMING — skip
     ];
     assetTagScheme.findFirst.mockImplementation(() =>
       Promise.resolve({ ...schemeRow(), nextNumber: counter }),
     );
-    asset.findMany.mockImplementation((args: { select?: Record<string, unknown> }) => {
-      const sel = args.select;
-      if (sel && Object.keys(sel).length === 1 && 'assetTag' in sel) {
-        // Occupied scan sees the one conforming tag so the walk skips 1000.
-        return Promise.resolve([{ assetTag: 'IT-1000' }]);
-      }
-      return Promise.resolve(all);
-    });
+    asset.findMany.mockImplementation(
+      (args: { select?: Record<string, unknown> }) => {
+        const sel = args.select;
+        if (sel && Object.keys(sel).length === 1 && 'assetTag' in sel) {
+          // Occupied scan sees the one conforming tag so the walk skips 1000.
+          return Promise.resolve([{ assetTag: 'IT-1000' }]);
+        }
+        return Promise.resolve(all);
+      },
+    );
     assetTagScheme.updateMany.mockImplementation(
       (a: { data: { nextNumber: number } }) => {
         if (counter < a.data.nextNumber) counter = a.data.nextNumber;
@@ -538,17 +702,24 @@ describe('AssetTagSchemeService', () => {
 
     // a1 + a2 retagged; a3 (conforming) untouched and NOT counted as skipped (it was never selected).
     expect(result).toEqual({ tagged: 2, skipped: 0 });
-    const updatedIds = asset.update.mock.calls.map((c) => (c[0] as { where: { id: string } }).where.id);
+    // `jest.Mock`'s untyped `calls` is `any[][]`; narrow it to `unknown[][]` so the per-call casts
+    // below are checked rather than riding on `any` (no-unsafe-member-access).
+    const updateCalls = asset.update.mock.calls as unknown[][];
+    const updatedIds = updateCalls.map(
+      (c) => (c[0] as { where: { id: string } }).where.id,
+    );
     expect(updatedIds).toEqual(['a1', 'a2']);
     // The IT-1000 slot is occupied, so the walk hands out 1001, 1002 — never re-issuing IT-1000.
-    const updatedTags = asset.update.mock.calls.map(
+    const updatedTags = updateCalls.map(
       (c) => (c[0] as { data: { assetTag: string } }).data.assetTag,
     );
     expect(updatedTags).toEqual(['IT-1001', 'IT-1002']);
   });
 
   it('backfillApply throws a clean 400 when the scheme is DISABLED', async () => {
-    assetTagScheme.findFirst.mockResolvedValue({ ...schemeRow({ enabled: false }) });
+    assetTagScheme.findFirst.mockResolvedValue({
+      ...schemeRow({ enabled: false }),
+    });
 
     await expect(
       service.backfillApply({ mode: 'untagged-only', excludeIds: [] }),
@@ -560,16 +731,35 @@ describe('AssetTagSchemeService', () => {
 
   it('backfillPreview projects proposed tags WITHOUT consuming the counter (no jump/consume writes)', async () => {
     const affected = [
-      { id: 'a1', name: 'SRV-1', serial: null, assetTag: null, modelId: 'm1', model: { name: 'Dell' } },
-      { id: 'a2', name: 'SRV-2', serial: null, assetTag: null, modelId: 'm1', model: { name: 'Dell' } },
+      {
+        id: 'a1',
+        name: 'SRV-1',
+        serial: null,
+        assetTag: null,
+        modelId: 'm1',
+        model: { name: 'Dell' },
+      },
+      {
+        id: 'a2',
+        name: 'SRV-2',
+        serial: null,
+        assetTag: null,
+        modelId: 'm1',
+        model: { name: 'Dell' },
+      },
     ];
-    assetTagScheme.findFirst.mockResolvedValue({ ...schemeRow(), nextNumber: 1000 });
-    asset.findMany.mockImplementation((args: { select?: Record<string, unknown> }) => {
-      const sel = args.select;
-      if (sel && Object.keys(sel).length === 1 && 'assetTag' in sel)
-        return Promise.resolve([]); // nothing occupied at/above the counter.
-      return Promise.resolve(affected);
+    assetTagScheme.findFirst.mockResolvedValue({
+      ...schemeRow(),
+      nextNumber: 1000,
     });
+    asset.findMany.mockImplementation(
+      (args: { select?: Record<string, unknown> }) => {
+        const sel = args.select;
+        if (sel && Object.keys(sel).length === 1 && 'assetTag' in sel)
+          return Promise.resolve([]); // nothing occupied at/above the counter.
+        return Promise.resolve(affected);
+      },
+    );
 
     const preview = await service.backfillPreview({
       mode: 'untagged-only',
@@ -578,7 +768,10 @@ describe('AssetTagSchemeService', () => {
     });
 
     expect(preview.total).toBe(2);
-    expect(preview.items.map((i) => i.proposedTag)).toEqual(['IT-1000', 'IT-1001']);
+    expect(preview.items.map((i) => i.proposedTag)).toEqual([
+      'IT-1000',
+      'IT-1001',
+    ]);
     expect(preview.items[0]).toMatchObject({
       id: 'a1',
       name: 'SRV-1',

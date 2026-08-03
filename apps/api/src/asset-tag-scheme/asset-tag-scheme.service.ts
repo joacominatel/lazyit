@@ -6,16 +6,14 @@ import type {
   AssetTagBackfillPreview,
   AssetTagBackfillPreviewQuery,
   AssetTagBackfillResult,
+  AssetTagNextPreview,
+  AssetTagNextPreviewQuery,
   AssetTagScheme,
   AssetTagSeedSuggestion,
   AssetTagSeedSuggestionQuery,
   UpdateAssetTagScheme,
 } from '@lazyit/shared';
-import {
-  INT4_MAX,
-  parseAssetTagNumber,
-  renderAssetTag,
-} from '@lazyit/shared';
+import { INT4_MAX, parseAssetTagNumber, renderAssetTag } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -170,7 +168,10 @@ export class AssetTagSchemeService {
     // create hot path. The atomic increment inside still re-bases against the live row, so a concurrent
     // racer that advanced the counter between this read and the consume is handled (the increment wins,
     // and the jump's `nextNumber < target` guard never moves it back).
-    const allocated = await this.consumeNextFreeNumber(affixes, scheme.nextNumber);
+    const allocated = await this.consumeNextFreeNumber(
+      affixes,
+      scheme.nextNumber,
+    );
     return renderAssetTag(affixes, allocated);
   }
 
@@ -217,8 +218,7 @@ export class AssetTagSchemeService {
       });
       from = current?.nextNumber ?? 1;
     }
-    const occupied = await this.occupiedNumbersFrom(affixes, from);
-    const target = nextFreeNumber(occupied, from);
+    const target = await this.findNextFreeNumber(affixes, from);
     if (target > INT4_MAX) {
       // The free slot is past the int4 ceiling — freeze with a clean 400 (ADR-0063 edge case).
       throw new BadRequestException(
@@ -231,7 +231,10 @@ export class AssetTagSchemeService {
     // moves forward, never back under a concurrent racer that already advanced further.
     if (target > from) {
       await this.prisma.assetTagScheme.updateMany({
-        where: { id: AssetTagSchemeService.SINGLETON_ID, nextNumber: { lt: target } },
+        where: {
+          id: AssetTagSchemeService.SINGLETON_ID,
+          nextNumber: { lt: target },
+        },
         data: { nextNumber: target },
       });
     }
@@ -241,6 +244,94 @@ export class AssetTagSchemeService {
       data: { nextNumber: { increment: 1 } },
     });
     return updated.nextNumber - 1;
+  }
+
+  /**
+   * The SKIP-EXISTING SELECTION, on its own: the smallest `n >= from` whose rendered tag is not on a
+   * LIVE asset. Purely a READ — it builds the occupied set (bounded by {@link OCCUPIED_SCAN_LIMIT})
+   * and walks; it touches no counter and writes nothing.
+   *
+   * SINGLE-ALLOCATION callers go through here and nowhere else: {@link consumeNextFreeNumber} calls it
+   * and then durably consumes, {@link previewNextTag} calls it and stops. Because both share this one
+   * function over the same live estate, the preview and the allocation cannot select differently for
+   * the same pattern and floor — the agreement is structural, not a comment (#1180).
+   *
+   * {@link backfillPreview} is the deliberate exception: it projects a WHOLE SEQUENCE of allocations,
+   * so it drives {@link nextFreeNumber} itself over an occupied set it accumulates per projected row.
+   * Same walk, different arity — it cannot reuse a helper that re-reads the estate for every step.
+   *
+   * The returned number may exceed `INT4_MAX` (every slot up to the ceiling occupied); each caller
+   * decides what that means — allocation freezes with a 400, the preview reports `exhausted`.
+   */
+  private async findNextFreeNumber(
+    affixes: { prefix: string | null; suffix: string | null },
+    from: number,
+  ): Promise<number> {
+    const occupied = await this.occupiedNumbersFrom(affixes, from);
+    return nextFreeNumber(occupied, from);
+  }
+
+  /**
+   * Preview the next tag WITHOUT allocating it (#1180) — the read-only twin of {@link allocateTag}.
+   *
+   * Runs the SAME {@link findNextFreeNumber} selection the allocator runs, over the same live estate,
+   * then renders with the SAME {@link renderAssetTag}. So for a given pattern and floor the preview
+   * reports the number the allocator would pick at that instant — the settings card can no longer
+   * claim `IT-1000` while the server hands out `IT-1001`.
+   *
+   * It is a PREVIEW, not a reservation: nothing is consumed and no counter moves (no `update`,
+   * `updateMany` or `upsert` on this path), so a create that lands first still takes the slot and the
+   * next preview simply moves on. That is the intended trade — a preview that consumed a number would
+   * burn a tag on every keystroke.
+   *
+   * Affixes come from the query VERBATIM (absent = no affix), because the settings editor previews an
+   * IN-PROGRESS pattern that is not saved yet. `from` defaults to the stored `nextNumber` — the same
+   * counter {@link allocateTag} reads — or to 1 when no scheme row exists, matching the unset default
+   * {@link getScheme} reports. Note the preview answers for ANY pattern, saved or not, and does not
+   * check `enabled`: with the scheme off nothing is allocated at all, so it is the CALLER's job to
+   * label a disabled-scheme answer as a shape rather than a promise.
+   *
+   * Past the int4 ceiling it does NOT throw the allocator's 400: it returns `exhausted: true` with a
+   * null number/tag, so an operator typing in the editor sees a state rather than an error per
+   * keystroke. The allocator's freeze is unchanged.
+   */
+  async previewNextTag(
+    query: AssetTagNextPreviewQuery,
+  ): Promise<AssetTagNextPreview> {
+    const affixes = {
+      prefix: query.prefix ?? null,
+      suffix: query.suffix ?? null,
+      width: query.width ?? null,
+    };
+    let fromNumber: number;
+    if (query.from !== undefined) {
+      fromNumber = query.from;
+    } else {
+      const current = await this.prisma.assetTagScheme.findFirst({
+        where: { id: AssetTagSchemeService.SINGLETON_ID },
+        select: { nextNumber: true },
+      });
+      fromNumber = current?.nextNumber ?? 1;
+    }
+    const target = await this.findNextFreeNumber(affixes, fromNumber);
+    // Everything in [fromNumber, target) was occupied — that difference IS the skip count.
+    const skippedCount = target - fromNumber;
+    if (target > INT4_MAX) {
+      return {
+        fromNumber,
+        number: null,
+        tag: null,
+        skippedCount,
+        exhausted: true,
+      };
+    }
+    return {
+      fromNumber,
+      number: target,
+      tag: renderAssetTag(affixes, target),
+      skippedCount,
+      exhausted: false,
+    };
   }
 
   /**
@@ -331,7 +422,11 @@ export class AssetTagSchemeService {
 
     // The PRECISE affected set, in the stable walk order (createdAt, then id). Computed in JS so the
     // numeric-body conformance test (which SQL can't express) is exact for normalize-non-conforming.
-    const affected = await this.affectedRows(query.mode, affixes, query.modelId);
+    const affected = await this.affectedRows(
+      query.mode,
+      affixes,
+      query.modelId,
+    );
     const total = affected.length;
 
     // Replay the skip-existing walk from the CURRENT counter over the WHOLE affected set, WITHOUT
@@ -417,7 +512,11 @@ export class AssetTagSchemeService {
   private async retagOne(
     assetId: string,
     fromTag: string | null,
-    affixes: { prefix: string | null; suffix: string | null; width: number | null },
+    affixes: {
+      prefix: string | null;
+      suffix: string | null;
+      width: number | null;
+    },
     actor: RecordAssetEvent['actor'],
   ): Promise<boolean> {
     for (

@@ -3,7 +3,7 @@ title: AssetTagScheme
 tags: [domain, entity]
 status: accepted
 created: 2026-06-20
-updated: 2026-06-20
+updated: 2026-08-02
 ---
 
 # AssetTagScheme
@@ -100,6 +100,12 @@ are forbidden to service principals.
 - `PUT /config/asset-tag-scheme` — upsert the scheme; body `{ enabled, prefix?, suffix?, width?, startNumber? }`.
 - `GET /config/asset-tag-scheme/seed-suggestion?prefix=&suffix=&width=` — suggest a seed `startNumber`
   from the in-progress affixes (read-only).
+- `GET /config/asset-tag-scheme/next-tag?prefix=&suffix=&width=&from=` — the tag the scheme WOULD
+  allocate for that pattern, via the same skip-existing selection the allocator runs (#1180). Affixes
+  are read verbatim (absent = no affix) so an unsaved pattern can be previewed; `from` defaults to the
+  stored `nextNumber`. Read-only — the counter is never advanced, so it is a preview, not a
+  reservation. Returns `{ fromNumber, number, tag, skippedCount, exhausted }`; past the int4 ceiling
+  it reports `exhausted: true` with a null number/tag instead of the allocator's 400.
 - `GET /config/asset-tag-scheme/backfill/preview?mode=&page=&pageSize=&modelId=` — paginated
   read-only projection of assets the backfill would retag (counter not consumed).
 - `POST /config/asset-tag-scheme/backfill/apply` — deliberate bulk retag; body

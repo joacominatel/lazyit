@@ -14,8 +14,15 @@ prioridad. Se configura en **Configuración → Instancia** (solo administradore
 
 ## Diseñar el esquema
 
-El editor tiene cuatro campos y una **vista previa en vivo** que muestra exactamente cómo se verá la
-siguiente etiqueta a medida que escribes:
+El editor tiene cuatro campos y una **vista previa en vivo** que muestra la etiqueta que realmente
+recibiría el próximo activo a medida que escribes: ya trae aplicada la regla de saltar las existentes
+que se explica más abajo, así que si el número del contador está ocupado, la vista previa muestra el
+libre que se usaría en su lugar e indica cuántos omitió. Nunca reserva ese número, de modo que refleja
+el estado actual del parque en vez de prometer una etiqueta. Con el esquema desactivado, la tarjeta se
+titula **Forma de la etiqueta** y no muestra ningún número: solo tu prefijo y tu sufijo alrededor de
+una ranura descrita (`IT-` y luego *4 dígitos*), porque no se asigna nada y cualquier número impreso
+ahí sería uno que el asignador nunca va a entregar. Si la consulta falla, la tarjeta lo dice y ofrece
+**Reintentar** en vez de esperar en silencio.
 
 - **Prefijo** — texto antes del número (p. ej. `IT-`). Opcional.
 - **Sufijo** — texto después del número (p. ej. `-HW`). Opcional.
