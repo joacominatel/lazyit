@@ -281,12 +281,13 @@ export function AssetTagSchemeEditor() {
                     // Affixes verbatim, the number as a DESCRIBED slot ("4 digits") — deliberately
                     // not monospace and not a digit, so the shape cannot be read as a tag.
                     <span className="flex items-center gap-0.5 rounded bg-background px-2 py-1 font-mono text-sm font-semibold">
-                      {shapeParts.map((part) =>
+                      {/* Keyed by position: a prefix and a suffix may be the same string. */}
+                      {shapeParts.map((part, index) =>
                         part.kind === "literal" ? (
-                          <span key={`literal-${part.text}`}>{part.text}</span>
+                          <span key={`literal-${index}`}>{part.text}</span>
                         ) : (
                           <span
-                            key="number-slot"
+                            key={`number-${index}`}
                             className="rounded bg-muted px-1.5 font-sans text-xs font-medium text-muted-foreground"
                           >
                             {t("preview.digits", { count: part.width })}
