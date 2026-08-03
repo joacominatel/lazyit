@@ -11,14 +11,16 @@ import { Button } from "@/components/ui/button";
  *  - **No agents yet** (`hasAgents === false`): a prominent, friendly hero card explaining what a
  *    reporting agent is, with the primary **"Create your first agent"** CTA. This is the empty-state
  *    that gets a non-technical operator to their first agent without reading docs.
- *  - **Agents exist** (`hasAgents === true`): collapse to a quiet, right-aligned secondary **"Add
- *    agent"** button — once onboarded, don't shout. (The Pending review tray renders separately.)
+ *  - **Agents exist** (`hasAgents === true`): render nothing. It used to collapse to a quiet "Add
+ *    agent" button here, which #1181 made redundant: the Topology page header now carries an add
+ *    affordance that leads with the agent and is visible in BOTH views, so an onboarded estate would
+ *    have shown the same action twice on the same screen. (The Pending review tray is separate and
+ *    still renders.)
  *  - **While the estate's agent-status is still loading** (`hasAgents === undefined`): render nothing,
  *    so the hero never flashes in then collapses.
  *
  * `canMint` gates the create CTA on `settings:manage` (minting the agent's Service Account needs it —
- * §6 / ADR-0048). Without it, the hero shows a muted hint instead of a dead button, and the compact
- * state renders nothing (there's no action to offer).
+ * §6 / ADR-0048). Without it the hero shows a muted hint instead of a dead button.
  */
 export function AgentOnboarding({
   canMint,
@@ -34,18 +36,9 @@ export function AgentOnboarding({
   // Still resolving whether any agent exists — render nothing rather than flash the hero.
   if (hasAgents === undefined) return null;
 
-  // Onboarded: a quiet secondary affordance (or nothing, when the viewer can't mint).
-  if (hasAgents) {
-    if (!canMint) return null;
-    return (
-      <div className="flex justify-end">
-        <Button variant="outline" onClick={onCreate}>
-          <PlusIcon />
-          {t("addAgent")}
-        </Button>
-      </div>
-    );
-  }
+  // Onboarded: nothing here. The page header's add affordance (#1181) is the one place to reach the
+  // wizard from, in either view.
+  if (hasAgents) return null;
 
   // Empty estate: the hero.
   return (
