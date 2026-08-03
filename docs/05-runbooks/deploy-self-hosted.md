@@ -113,7 +113,10 @@ reconfigure needed.** Reach it at `http://<this-host>:8080`.
   regardless (its passphrase never reaches the server — INV-10), so a sniffed session grants no vault
   access. For anything less than a physically-trusted LAN, use Option B (HTTPS) or a real domain.
 - The reporting agent installs against the **plain-HTTP** origin (`--url http://<this-host>:8080`); no CA
-  trust step is needed (there is no TLS).
+  trust step is needed (there is no TLS). Since #1190 the installers **refuse a plain-http `--url` unless
+  you pass `--allow-insecure-http`** (`-AllowInsecureHttp` on Windows) — the flag is the written
+  acknowledgement that the agent binary (root/SYSTEM) and the SA token cross the LAN in cleartext, the
+  token on every report. On a `lan`-mode deploy that is the same trade the login session already makes.
 
 To change the port or switch modes later (or after an IP change on a **hostname**-pinned deploy), re-run:
 

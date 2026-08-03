@@ -90,6 +90,16 @@ Either one opens a short, guided wizard with three steps:
    > which would have been a much larger change to the machine than "one inventory agent talks to one
    > server". Trusting it system-wide still works if that's already how your fleet is built.
 
+   > **Plain `http://`, no TLS at all?** The installers refuse it unless you opt in explicitly —
+   > **`--allow-insecure-http`** on Linux, **`-AllowInsecureHttp`** on Windows — because the cost is
+   > real and permanent, and you should accept it knowingly rather than by default. On a cleartext
+   > channel, anyone on the network path can replace the agent program itself (which then runs as
+   > root, or as SYSTEM on Windows) — and the token is saved with that address, so it crosses the
+   > network unencrypted again on **every report that host ever sends**, not just during the
+   > install. On a physically trusted LAN that can be an acceptable trade — that is why the flag
+   > exists — but the honest fix costs one file: an internal certificate authority plus `--ca-file`
+   > (above) removes both exposures.
+
    > **Behind an egress proxy?** Pass nothing at install time; add `HTTPS_PROXY` (and `NO_PROXY` if
    > your instance is internal) to `/etc/lazyit-agent/config` afterwards. It has to go **there**, not
    > in `/etc/environment` or a shell profile: the agent runs from a systemd timer, and a timer does
@@ -247,7 +257,9 @@ Run from an **elevated PowerShell** (right-click PowerShell → *Run as administ
 1. checks it is elevated, and that the machine is x64;
 2. downloads the executable from **your** instance with your token, and refuses anything that isn't a
    real Windows executable — the same guard the Linux installer applies to its own binary;
-3. compares the **fingerprint** your instance publishes for that executable and refuses a mismatch;
+3. compares the **fingerprint** your instance publishes for that executable and refuses a mismatch —
+   and refuses to continue at all if the fingerprint can't be fetched, rather than shrugging and
+   installing anyway (see [Security](#security) for the escape hatch);
 4. **runs it once** (`--help`) before registering anything — if the machine can't start it, you get
    one clear sentence, nothing is installed and no task is registered;
 5. adds `C:\Program Files\lazyit-agent` to the **machine PATH**, so the diagnostic commands work by
@@ -847,11 +859,22 @@ reports a policy version at all.
   `/etc/systemd/system/lazyit-agent.service` and read it; it is short, and it is written to be read.
   It also runs at the **lowest CPU and disk priority the system has**, so listing three thousand
   packages on a busy database server never competes with what that server is for.
-- **The download is checksummed.** Your instance publishes a fingerprint of the agent binary next to
-  the binary itself, and the installer refuses to install one that doesn't match. This is an
-  integrity check, not a cryptographic signature — it catches a corrupted or stale download, and a
-  tampered file where only one of the two was changed. Pass `--require-checksum` (or `-RequireChecksum` on Windows) to
-  make a *missing* fingerprint fatal too.
+- **The download is checksummed, and the check cannot be skipped.** Your instance publishes a
+  fingerprint of the agent binary next to the binary itself, and the installer refuses to install
+  one that doesn't match — or one it **couldn't verify**: a fingerprint that can't be fetched now
+  stops the install instead of degrading to a warning, because a check that fails open is a check
+  an attacker can strip just by making it fail. If your instance is older than the installer and
+  publishes no fingerprint, pass the digest yourself — `--sha256 <hex>` on Linux, `-Sha256` on
+  Windows — obtained from a channel other than the download itself, or upgrade the instance. This
+  is an integrity check, not a cryptographic signature — it catches a corrupted or stale download,
+  and a tampered file where only one of the two was changed. (`--require-checksum` and
+  `-RequireChecksum` are still accepted so existing automation keeps working; they simply describe
+  the default now.)
+- **Cleartext HTTP is an explicit opt-in.** An `http://` instance address is refused by both
+  installers unless you pass `--allow-insecure-http` (`-AllowInsecureHttp` on Windows), and the
+  refusal spells out what the channel exposes: the program that will run as root or SYSTEM, and the
+  token — re-sent in cleartext on every report from then on. See the install step above for the
+  trade-off, and prefer `--ca-file` with an internal CA when you can.
 - **It can use your CA, not the machine's.** `--ca-file` (or `LAZYIT_CA_FILE` in the config) points
   the agent at a certificate bundle it alone trusts, so an internal certificate authority never has
   to be installed machine-wide just so one inventory agent can report.

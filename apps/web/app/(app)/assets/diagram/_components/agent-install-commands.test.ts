@@ -118,6 +118,53 @@ describe("agentInstallCommand — the token and origin are never placeholders", 
   });
 });
 
+describe("a plain-http origin carries the explicit opt-in the installers now demand (#1190)", () => {
+  // Since #1190 both installers REFUSE a cleartext http URL unless the operator opts in. The wizard
+  // fills the origin in from the instance the operator is already browsing — so on a LAN (`lan`
+  // mode) instance served over http, a command without the opt-in would hard-stop on paste, at the
+  // moment the operator is holding a once-only token. The flag rides only the origin the operator
+  // is USING: an https instance never sees it, so the loud warning stays tied to a real exposure.
+  const HTTP_ORIGIN = "http://192.168.100.75:8080";
+
+  test("the Linux one-liner appends --allow-insecure-http, and only on http", () => {
+    expect(agentInstallCommand("linux", HTTP_ORIGIN, TOKEN)).toBe(
+      `curl -fsSL ${HTTP_ORIGIN}/install.sh | sudo sh -s -- --url ${HTTP_ORIGIN} --token ${TOKEN} --allow-insecure-http`,
+    );
+    expect(agentInstallCommand("linux", ORIGIN, TOKEN)).not.toContain("--allow-insecure-http");
+  });
+
+  test("the Windows one-liner appends -AllowInsecureHttp, and only on http", () => {
+    expect(agentInstallCommand("windows", HTTP_ORIGIN, TOKEN)).toBe(
+      `& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Url ${HTTP_ORIGIN} -Token ${TOKEN} -AllowInsecureHttp`,
+    );
+    expect(agentInstallCommand("windows", ORIGIN, TOKEN)).not.toContain("-AllowInsecureHttp");
+  });
+
+  test("the Windows inspect-first RUN step carries it too — it runs the same installer", () => {
+    const steps = agentManualInstallSteps("windows", HTTP_ORIGIN, TOKEN);
+    expect(steps[1]?.command).toContain(" -AllowInsecureHttp");
+    expect(agentManualInstallSteps("windows", ORIGIN, TOKEN)[1]?.command).not.toContain(
+      "-AllowInsecureHttp",
+    );
+  });
+
+  test("the emitted flags are the ones the installers' own parsers declare", async () => {
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--allow-insecure-http)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toMatch(/\[switch\] \$AllowInsecureHttp/);
+  });
+
+  test("the Linux by-hand steps stay flagless — they never run install.sh", () => {
+    // That path downloads the binary and writes the config itself, so there is no gate to satisfy.
+    // Asserted so an edit that starts running the installer there fails here, not on a LAN host.
+    for (const step of agentManualInstallSteps("linux", HTTP_ORIGIN, TOKEN)) {
+      expect(step.command).not.toContain("install.sh");
+      expect(step.command).not.toContain("--allow-insecure-http");
+    }
+  });
+});
+
 describe("agentManualInstallSteps — label and command travel together", () => {
   // The invariant this file exists to hold. The labels live in the message catalogs and the
   // commands live here; while they were two positionally-indexed arrays, an edit could add a step
