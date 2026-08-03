@@ -43,6 +43,19 @@ const WINDOWS_AGENT_EXE = '"$env:ProgramFiles\\lazyit-agent\\lazyit-agent.exe"';
  */
 const WINDOWS_INSTALLER_COPY = '"$env:TEMP\\lazyit-install.ps1"';
 
+/**
+ * `true` for a plain-http origin. Since #1190 both installers REFUSE a cleartext http URL unless
+ * the operator opts in explicitly (`--allow-insecure-http` / `-AllowInsecureHttp`) — the exposure
+ * is real: the binary that will run as root or SYSTEM, and the SA token on every later report. The
+ * wizard fills the origin in from the instance the operator is ALREADY browsing over that same
+ * channel, so the decision was made when the instance was deployed on http (`lan` mode) — a pasted
+ * command that hard-stops there would be a broken promise, not a second chance to decide. The flag
+ * therefore rides every command built for an http origin, and never one built for https.
+ */
+function insecureHttp(origin: string): boolean {
+  return /^http:\/\//i.test(origin);
+}
+
 /** A step of the inspect-first path: its `infra.wizard` message key, and the command it labels. */
 export type AgentManualStep = {
   /**
@@ -74,9 +87,11 @@ export function agentInstallCommand(
   token: string,
 ): string {
   if (platform === "windows") {
-    return `& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Url ${origin} -Token ${token}`;
+    const optIn = insecureHttp(origin) ? " -AllowInsecureHttp" : "";
+    return `& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Url ${origin} -Token ${token}${optIn}`;
   }
-  return `curl -fsSL ${origin}/install.sh | sudo sh -s -- --url ${origin} --token ${token}`;
+  const optIn = insecureHttp(origin) ? " --allow-insecure-http" : "";
+  return `curl -fsSL ${origin}/install.sh | sudo sh -s -- --url ${origin} --token ${token}${optIn}`;
 }
 
 /**
@@ -108,7 +123,9 @@ export function agentManualInstallSteps(
       },
       {
         labelKey: "manual.windows.step2",
-        command: `& ([scriptblock]::Create((Get-Content -Raw ${WINDOWS_INSTALLER_COPY}))) -Url ${origin} -Token ${token}`,
+        // The saved copy is still install.ps1, so an http origin needs the same opt-in here. The
+        // Linux by-hand path below never runs install.sh — it has no gate to satisfy.
+        command: `& ([scriptblock]::Create((Get-Content -Raw ${WINDOWS_INSTALLER_COPY}))) -Url ${origin} -Token ${token}${insecureHttp(origin) ? " -AllowInsecureHttp" : ""}`,
       },
     ];
   }
