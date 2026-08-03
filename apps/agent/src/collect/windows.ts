@@ -102,10 +102,25 @@ const POWERSHELL = "powershell.exe";
  * while every Linux probe warns. `$Error` is CLEARED first so nothing from before the sweep can be
  * attributed to it, and `errors` is the LAST key because a hashtable literal is evaluated in written
  * order — which is the only reason it sees what the earlier keys raised.
+ *
+ * THE STDOUT OF THIS SCRIPT IS UTF-8, BY DECLARATION, NOT BY LUCK (#1191). Windows PowerShell 5.1
+ * writes redirected stdout in the OEM CODE PAGE by default, while `run()` (shared.ts) decodes UTF-8.
+ * The only reason that ever worked is that 5.1's `ConvertTo-Json` escapes every non-ASCII character
+ * to `\uXXXX` — an undocumented dependency that a switch to `pwsh`, or ONE fact emitted as a raw
+ * string, would turn into mojibake on every localized adapter name, a broken `LAZYIT_EXCLUDE_NICS`
+ * glob, and a `softwareHash` that churns on every report. So the script sets
+ * `[Console]::OutputEncoding` to BOM-LESS UTF-8 itself, first thing: the invariant is "this
+ * boundary speaks UTF-8", stated where the bytes are produced. No BOM, because the decoder must
+ * never depend on stripping one; in a try/catch (BEFORE `$Error.Clear()`, so a refusal cannot leak
+ * into `errors[]`), because a host without a console handle can throw on the setter and the sweep
+ * must degrade to today's escaped-ASCII behaviour rather than die.
  */
 export const WINDOWS_FACTS_SCRIPT = [
   "$ErrorActionPreference='SilentlyContinue'",
   "$ProgressPreference='SilentlyContinue'",
+  // The UTF-8 boundary declaration — see the header note (#1191). Deliberately before
+  // `$Error.Clear()` and inside try/catch: a refused setter is a degradation, not an error line.
+  "try{[Console]::OutputEncoding=New-Object Text.UTF8Encoding $false}catch{}",
   "$Error.Clear()",
   "$os=Get-CimInstance -ClassName Win32_OperatingSystem",
   "$cs=Get-CimInstance -ClassName Win32_ComputerSystem",
@@ -871,7 +886,15 @@ export function buildWindowsHost(
 ): HostFacts {
   const cs = facts?.cs ?? undefined;
   const dnsHostName = str(cs?.DNSHostName);
-  const host: Host = { hostname: dnsHostName || osHostname() || "unknown" };
+  // ONE canonical hostname, LOWERCASE, from the SWEEP-INDEPENDENT source (#1191). The first cut
+  // preferred the sweep's DNSHostName and fell back to `os.hostname()` (NetBIOS-style, typically
+  // uppercase) only when the CIM sweep degraded — so a transient WMI failure flipped the reported
+  // name/case between consecutive reports of the SAME node, and `fqdn` (lowercased below) could
+  // disagree with `hostname` in case inside one report. `os.hostname()` answers on every run,
+  // healthy or degraded, which is what makes it the stable source; DNS names are case-insensitive,
+  // so folding to lowercase — the case `fqdn` already ships, and the case Linux hostnames
+  // conventionally carry — loses nothing and makes the value constant.
+  const host: Host = { hostname: (osHostname() || dnsHostName || "unknown").toLowerCase() };
 
   host.os = {
     family: "windows",
@@ -898,10 +921,16 @@ export function buildWindowsHost(
   }
 
   const cpus = asArray<WindowsCpu>(facts?.cpu);
-  // PHYSICAL cores, summed across sockets — the same fact `/proc/cpuinfo`'s processor count does NOT
-  // report on Linux (that one counts logical CPUs). The two collectors therefore disagree about SMT,
-  // which is stated here rather than discovered: `cores` on Windows excludes hyper-threads.
-  const cores = cpus.reduce((n, c) => n + (Number(c?.NumberOfCores) || 0), 0);
+  // LOGICAL CPUs, summed across sockets (#1191) — the ONE wire semantic `host.cpu.cores` has, and
+  // the one Linux has always shipped (`/proc/cpuinfo`'s `processor :` lines count hyper-threads).
+  // The first cut summed physical `NumberOfCores` instead, so the same 8c/16t machine reported 8 or
+  // 16 depending on OS and fleet-wide capacity comparisons were silently 2x off. A (very old) SKU
+  // that omits `NumberOfLogicalProcessors` falls back to its physical count per entry — fewer than
+  // the truth beats reporting nothing.
+  const cores = cpus.reduce(
+    (n, c) => n + (Number(c?.NumberOfLogicalProcessors) || Number(c?.NumberOfCores) || 0),
+    0,
+  );
   const cpu = clean({ model: str(cpus[0]?.Name), cores: cores || undefined });
   if (cpu) host.cpu = cpu;
 
