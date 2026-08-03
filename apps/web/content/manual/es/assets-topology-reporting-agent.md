@@ -835,12 +835,16 @@ Lo que podés configurar ahí, en tres grupos:
   queda marcado fuera de línea entre dos de sus propios reportes — el editor no te deja guardar un
   valor que provoque eso, y lo aclara debajo del campo en lugar de después de que presiones Guardar.
 - **Qué recolectan los agentes** — hardware, discos, interfaces de red, software instalado y
-  contenedores, más un tope estricto de cuántos paquetes puede informar un host. **En Linux** un
-  recolector desactivado directamente no se ejecuta: el agente no reúne los datos para después
-  descartarlos. **En Windows** eso solo vale para los contenedores — hardware, discos, interfaces de
-  red y la lista de software salen todos de una única llamada de PowerShell que se ejecuta diga lo que
-  diga la política, así que apagar uno ahí mantiene el dato fuera del reporte pero no le ahorra al host
-  el trabajo de recolectarlo. En los dos casos, un recolector apagado nunca llega a lazyit.
+  contenedores, más un tope estricto de cuántos paquetes puede informar un host. **Un recolector
+  desactivado no se ejecuta**, en ninguna de las dos plataformas: el agente no reúne los datos para
+  después descartarlos. En Windows eso antes valía solo para los contenedores, porque todo lo demás
+  salía de una única llamada de PowerShell que se ejecutaba dijera lo que dijera la política; desde
+  la v1.10 esa llamada se arma con los recolectores que la política realmente pide, así que apagar
+  uno le ahorra al host el trabajo además de mantener el dato fuera del reporte. Una excepción que
+  conviene conocer en Windows: apagar **hardware** evita que el agente lea el número de serie del
+  BIOS, y sigue dejando fabricante y modelo fuera del reporte — pero esos dos vienen junto con datos
+  que lazyit necesita igual (memoria, pertenencia al dominio), así que esa lectura puntual no se le
+  ahorra al host.
 - **Exclusiones** — patrones de nombre para interfaces de red (`veth*`, `docker*`), puntos de montaje
   (`/var/lib/docker/*`, `/snap/*`) y paquetes (`linux-image-*`). `*` coincide con cualquier texto y `?`
   con un solo carácter; no se aceptan expresiones regulares, y cada lista admite como máximo 32

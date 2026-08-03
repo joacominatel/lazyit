@@ -4,10 +4,11 @@ import { rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGENT_CONTAINERS_MAX } from "@lazyit/shared";
+import { AGENT_CONTAINERS_MAX, AGENT_POLICY_DEFAULT } from "@lazyit/shared";
 import {
   buildDiagnostics,
   buildIdentifiers,
+  buildWindowsHost,
   chassisFor,
   COLLECT_TIMEOUT_MS,
   collectContainers,
@@ -264,6 +265,87 @@ describe("parseNics — IPv6 with enough context to pick a STABLE address (#1138
     expect(parseNics(null)).toBeUndefined();
     expect(parseNics("not json")).toBeUndefined();
     expect(parseNics("[]")).toBeUndefined();
+  });
+});
+
+/**
+ * Issue #1169 — `nics[].mac` had no canonical spelling, so the SAME physical address reached the
+ * wire two ways depending on who read it: WMI hands Windows an upper-case `AA:BB:CC:DD:EE:01`,
+ * `ip -j addr` hands Linux a lower-case one. Nothing compared the field yet, which is exactly why it
+ * was cheap to settle now — the campaign already paid this lesson once on `identifiers[].value`
+ * (#1138/#1141), where three spellings of one fact would have made cross-OS reconciliation
+ * impossible.
+ *
+ * These tests are deliberately in the DISPATCHER's test file rather than either collector's: the
+ * property being pinned is that the two collectors AGREE, and a property about two files cannot be
+ * asserted from inside one of them.
+ */
+describe("nics[].mac is ONE canonical wire form on both collectors (#1169)", () => {
+  /** The Linux collector's answer for an interface WMI would have spelled in upper case. */
+  const linuxNic = (address: string) =>
+    parseNics(JSON.stringify([{ ifname: "eth0", address, addr_info: [] }]))?.[0];
+
+  /** The Windows collector's answer for the same adapter. */
+  const windowsNic = (address: string) =>
+    buildWindowsHost(
+      {
+        adapters: [
+          { Index: 7, NetConnectionID: "Ethernet", MACAddress: address, PhysicalAdapter: true },
+        ],
+      },
+      undefined,
+      AGENT_POLICY_DEFAULT,
+      () => {},
+    ).host.nics?.[0];
+
+  test("the canonical form is lower-case, colon-separated — the spelling Linux already shipped", () => {
+    expect(linuxNic("aa:bb:cc:dd:ee:01")?.mac).toBe("aa:bb:cc:dd:ee:01");
+    // WMI's own casing. Before this, it reached the wire verbatim.
+    expect(windowsNic("AA:BB:CC:DD:EE:01")?.mac).toBe("aa:bb:cc:dd:ee:01");
+  });
+
+  test("BOTH collectors answer the SAME string for the same physical address", () => {
+    // The whole issue in one assertion: one address, two readers, one value.
+    expect(windowsNic("AA:BB:CC:DD:EE:01")?.mac).toBe(linuxNic("aa:bb:cc:dd:ee:01")?.mac);
+  });
+
+  test("a spelling neither OS produces is canonicalised too, not merely lower-cased", () => {
+    // Dashed is the form `getmac` and most Windows UI prints; bare hex is what some drivers report.
+    expect(windowsNic("AA-BB-CC-DD-EE-01")?.mac).toBe("aa:bb:cc:dd:ee:01");
+    expect(linuxNic("AABBCCDDEE01")?.mac).toBe("aa:bb:cc:dd:ee:01");
+    // EUI-64 (InfiniBand, some 802.15.4 links) regroups on the same rule.
+    expect(linuxNic("AA-BB-CC-DD-EE-01-02-03")?.mac).toBe("aa:bb:cc:dd:ee:01:02:03");
+  });
+
+  test("something that is not a MAC is PASSED THROUGH, never mangled or dropped", () => {
+    // Degrade-never-reject: a NIC whose address the host spells in a shape this does not recognise
+    // still reports the interface, and reports what it was told rather than a regrouped fiction.
+    expect(linuxNic("not-a-mac")?.mac).toBe("not-a-mac");
+    expect(windowsNic("not-a-mac")?.mac).toBe("not-a-mac");
+  });
+
+  test("an absent or blank address omits the field rather than shipping an empty string", () => {
+    expect(parseNics(JSON.stringify([{ ifname: "eth0", addr_info: [] }]))?.[0]?.mac).toBeUndefined();
+    expect(windowsNic("   ")?.mac).toBeUndefined();
+  });
+
+  test("the NIC fact and the mac IDENTIFIER agree within one report — the reported symptom", () => {
+    // `lazyit-agent show` on a real Windows host printed `30:24:32:7D:27:10` under `nics` and
+    // `30:24:32:7d:27:10` under `identifiers`, because only the second went through the contract's
+    // sanitiser. One fact, one spelling, in one document.
+    const { host } = buildWindowsHost(
+      {
+        adapters: [
+          { Index: 3, NetConnectionID: "Wi-Fi", MACAddress: "30:24:32:7D:27:10", PhysicalAdapter: true },
+        ],
+      },
+      undefined,
+      AGENT_POLICY_DEFAULT,
+      () => {},
+    );
+    const identifier = host.identifiers?.find((one) => one.kind === "mac")?.value;
+    expect(identifier).toBe("30:24:32:7d:27:10");
+    expect(host.nics?.[0]?.mac).toBe(identifier);
   });
 });
 

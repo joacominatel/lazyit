@@ -18,6 +18,7 @@ import {
   AGENT_WARNING_LENGTH_MAX,
   AGENT_WARNINGS_MAX,
   matchesAnyGlob,
+  normalizeIdentifierValue,
   sanitizeIdentifierValue,
   type AgentChassis,
   type AgentPolicy,
@@ -294,6 +295,38 @@ export function buildIdentifiers(facts: IdentifierFacts): Identifiers | undefine
     if (value) identifiers.push({ kind, value });
   }
   return identifiers.length ? identifiers : undefined;
+}
+
+/**
+ * ONE canonical wire spelling for a NIC's hardware address (#1169): **lower-case, colon-separated**.
+ *
+ * WHY IT LIVES HERE AND NOT IN EITHER COLLECTOR. `nics[].mac` used to carry whatever its reader
+ * produced — WMI hands Windows `AA:BB:CC:DD:EE:01`, `ip -j addr` hands Linux `aa:bb:cc:dd:ee:01` —
+ * so one physical address reached the server spelled two ways depending on the reporting OS, and any
+ * future consumer that GROUPS by it (a fleet view, a "which host owns this address?" lookup, a
+ * fact-change diff) would get a false negative on every Windows row. Two copies of the rule would be
+ * two chances to drift; one helper both collectors call is what makes the agreement structural.
+ *
+ * The rule is NOT re-invented here either: it is the contract's own
+ * {@link normalizeIdentifierValue}, which has canonicalised `identifiers[].value` since #1138 — so
+ * the NIC fact and the `mac` identifier derived from it cannot disagree inside one report, which is
+ * precisely the inconsistency #1169 was filed for.
+ *
+ * SANITIZATION IS DELIBERATELY NOT APPLIED. `sanitizeIdentifierValue` additionally DROPS junk (an
+ * all-zero address, an OEM placeholder), and that is right for EVIDENCE — two unrelated boards
+ * reporting `00:00:00:00:00:00` must never corroborate into one host. It is wrong for a FACT: an
+ * interface really does have that address, and an operator reading the NIC list should see what the
+ * host reports. The identity path keeps its own guard (`selectPrimaryMac` skips the zero MAC), so
+ * nothing is loosened by reporting it here.
+ *
+ * Tolerant, per the best-effort contract: a value that is not a recognisable MAC comes back
+ * lower-cased but otherwise untouched rather than regrouped into a fiction, and a blank one is
+ * `undefined` so the caller OMITS the key instead of shipping an empty string.
+ */
+export function canonicalMac(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return normalizeIdentifierValue("mac", trimmed) || undefined;
 }
 
 /**
