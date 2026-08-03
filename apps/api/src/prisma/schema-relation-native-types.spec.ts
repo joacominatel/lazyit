@@ -16,6 +16,11 @@ import { join } from 'node:path';
  * The check is symmetric and target-agnostic: it compares the `@db.*` native type of each FK
  * scalar against the field it references, whichever models those are, so a future relation to
  * any uuid-keyed model is covered without touching this file.
+ *
+ * A guard is only worth its green tick if it cannot quietly look away, so the parser never
+ * skips a line it does not understand: inside a model block it classifies blank lines,
+ * comments, block attributes and fields, and records anything else in `unclassified` for the
+ * suite to fail on. A field it failed to read is a relation it never checked.
  */
 
 const SCHEMA_PATH = join(__dirname, '..', '..', 'prisma', 'schema.prisma');
@@ -40,6 +45,11 @@ interface ParsedSchema {
   readonly relations: readonly RelationField[];
   /** `@relation`s carrying `fields:` that the line parser could not read — never silently ignored. */
   readonly unparsed: readonly string[];
+  /**
+   * Lines inside a `model` block matching none of the shapes the parser knows. A skipped line is
+   * an unchecked field, so the parser reports what it could not classify instead of dropping it.
+   */
+  readonly unclassified: readonly string[];
 }
 
 /** Extracts the `@db.X` native-type attribute from a field line, e.g. `@db.Uuid` -> `Uuid`. */
@@ -51,6 +61,7 @@ function parseSchema(source: string): ParsedSchema {
   const models = new Map<string, Map<string, SchemaField>>();
   const relations: RelationField[] = [];
   const unparsed: string[] = [];
+  const unclassified: string[] = [];
 
   let currentModel: string | null = null;
   let currentFields: Map<string, SchemaField> | null = null;
@@ -67,16 +78,27 @@ function parseSchema(source: string): ParsedSchema {
       models.set(currentModel, currentFields);
       continue;
     }
-    if (/^\}/.test(line)) {
+    if (/^\s*\}\s*$/.test(line)) {
       currentModel = null;
       currentFields = null;
       continue;
     }
     if (!currentModel || !currentFields) continue;
 
-    // `  name  Type[]?  @attrs...` — block attributes (`@@index`) and comments fall through.
-    const field = /^\s+(\w+)\s+(\w+)(\[\])?(\?)?\s*(.*)$/.exec(line);
-    if (!field) continue;
+    // Everything inside a model block is one of these four shapes. Skipping a line silently
+    // would mean skipping a field, and an unchecked field is exactly the blind spot this suite
+    // exists to close — so anything else is recorded rather than dropped.
+    const isBlank = line.trim() === '';
+    const isComment = /^\s*\/\//.test(line);
+    const isBlockAttribute = /^\s*@@/.test(line);
+    if (isBlank || isComment || isBlockAttribute) continue;
+
+    // `name  Type[]?  @attrs...`, at any indentation including none.
+    const field = /^\s*(\w+)\s+(\w+)(\[\])?(\?)?\s*(.*)$/.exec(line);
+    if (!field) {
+      unclassified.push(`line ${lineNumber}: ${line.trim()}`);
+      continue;
+    }
     const name = field[1];
     const fieldType = field[2];
     const isList = field[3] !== undefined;
@@ -112,11 +134,58 @@ function parseSchema(source: string): ParsedSchema {
     });
   }
 
-  return { models, relations, unparsed };
+  return { models, relations, unparsed, unclassified };
 }
 
+describe('parseSchema line classification', () => {
+  it('reads a field written without leading indentation', () => {
+    const parsed = parseSchema('model Thing {\nid String @id @db.Uuid\n}\n');
+
+    expect(parsed.models.get('Thing')?.get('id')?.nativeType).toBe('Uuid');
+  });
+
+  it('reports a line it cannot classify instead of skipping it', () => {
+    const parsed = parseSchema(
+      'model Thing {\n  id String @id\n  <not a field>\n}\n',
+    );
+
+    expect(parsed.unclassified).toEqual(['line 3: <not a field>']);
+  });
+
+  it('classifies blank lines, comments and block attributes without complaint', () => {
+    const parsed = parseSchema(
+      [
+        'model Thing {',
+        '  id String @id',
+        '',
+        '  /// a doc comment',
+        '  // a plain comment',
+        '  @@index([id])',
+        '  @@map("things")',
+        '}',
+        '',
+      ].join('\n'),
+    );
+
+    expect(parsed.unclassified).toEqual([]);
+    expect([...(parsed.models.get('Thing')?.keys() ?? [])]).toEqual(['id']);
+  });
+
+  it('closes a model block whose brace is indented', () => {
+    const parsed = parseSchema(
+      'model Thing {\n  id String @id\n  }\n\nenum Colour {\n  RED\n}\n',
+    );
+
+    expect(parsed.unclassified).toEqual([]);
+    expect([...parsed.models.keys()]).toEqual(['Thing']);
+    // Without the indented brace closing the block, the enum's lines leak in as Thing's fields.
+    expect([...(parsed.models.get('Thing')?.keys() ?? [])]).toEqual(['id']);
+  });
+});
+
 describe('prisma/schema.prisma relation native types', () => {
-  const parsed = parseSchema(readFileSync(SCHEMA_PATH, 'utf8'));
+  const source = readFileSync(SCHEMA_PATH, 'utf8');
+  const parsed = parseSchema(source);
 
   // The parser is the test. If it silently reads nothing, every assertion below passes
   // vacuously — so pin the facts that prove it actually understood the schema.
@@ -125,12 +194,21 @@ describe('prisma/schema.prisma relation native types', () => {
       expect(parsed.models.get('User')?.get('id')?.nativeType).toBe('Uuid');
     });
 
-    it('reads a meaningful number of relations with foreign-key scalars', () => {
-      expect(parsed.relations.length).toBeGreaterThan(100);
+    it('parses every @relation the file declares with foreign-key scalars', () => {
+      // Counted off the raw text rather than pinned to a literal: the expectation moves with the
+      // schema, so it stays exact as models come and go instead of decaying into a stale floor.
+      const declared = source.match(/@relation\([^)]*fields:/g)?.length ?? 0;
+
+      expect(declared).toBeGreaterThan(0);
+      expect(parsed.relations.length).toBe(declared);
     });
 
     it('leaves no @relation with fields: unparsed', () => {
       expect(parsed.unparsed).toEqual([]);
+    });
+
+    it('classifies every line inside a model block', () => {
+      expect(parsed.unclassified).toEqual([]);
     });
 
     it('resolves every relation target model and referenced field', () => {
