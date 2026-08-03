@@ -453,8 +453,13 @@ export function ServersTableView() {
  * `?node=<id>` (honoured by `DiagramView`) while flipping `?view` to `map`. ponytail: reuses the
  * existing detail modal — the whole asset-backed payoff (owner, KB, secrets, connections, reported
  * facts) — instead of building a parallel detail route. Carrying `view=map` makes a Table row click
- * land on the canvas with that node selected AND its detail open: `?node=` seeds both, which is why
- * the click-only-selects rule of #1182 does not reach a row (the state-preserving deep-link, #760).
+ * land on the canvas with that node selected AND its detail open, so the click-only-selects rule of
+ * #1182 does not reach a row (the state-preserving deep-link, #760).
+ *
+ * That last sentence is only true because `DiagramView` applies `?node=` whenever the param CHANGES.
+ * A row click is a client-side navigation to the SAME route, so the view never remounts: while the
+ * id was read once in a `useState` initializer, this link flipped to the Map and selected nothing —
+ * the promise was kept only for a pasted URL or a hard reload. See `node-deep-link.ts`.
  */
 function diagramHref(nodeId: string): string {
   return `/assets/diagram?view=map&node=${nodeId}`;
