@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { hostname as osHostname } from "node:os";
 import { AGENT_POLICY_DEFAULT, type AgentPolicy } from "@lazyit/shared";
 import {
   buildWindowsHost,
@@ -140,12 +141,65 @@ describe("buildWindowsHost", () => {
 
   test("cpu, memory, domain, fqdn and bootedAt come off the same blob", () => {
     const { host, privileged } = buildWindowsHost(facts(), undefined, AGENT_POLICY_DEFAULT, () => {});
-    expect(host.cpu).toEqual({ model: "13th Gen Intel(R) Core(TM) i7-1365U", cores: 10 });
+    // 12, not 10: `cores` is LOGICAL CPUs (#1191) — the fixture machine is 10c/12t.
+    expect(host.cpu).toEqual({ model: "13th Gen Intel(R) Core(TM) i7-1365U", cores: 12 });
     expect(host.memoryBytes).toBe(34_058_919_936);
     expect(host.domain).toEqual({ name: "corp.example.com", joined: true });
     expect(host.fqdn).toBe("lt-0042.corp.example.com");
     expect(host.bootedAt).toBe("2026-07-30T06:12:00.000Z");
     expect(privileged).toBe(true);
+  });
+
+  // THE 2x FLEET SKEW THIS PINS (#1191). `host.cpu.cores` has exactly ONE wire semantic — LOGICAL
+  // CPUs, which is what Linux has always shipped (`/proc/cpuinfo`'s `processor :` lines count
+  // hyper-threads). The first Windows cut summed physical NumberOfCores instead, so the same 8c/16t
+  // machine reported 8 or 16 depending on OS and every fleet-wide capacity comparison was silently
+  // 2x off. Same class as #1169, different fact.
+  test("cores are LOGICAL CPUs — the one wire semantic, the one Linux has always shipped (#1191)", () => {
+    const { host } = buildWindowsHost(
+      facts({
+        cpu: [
+          { Name: "Intel(R) Xeon(R) Silver 4210", NumberOfCores: 10, NumberOfLogicalProcessors: 20 },
+          { Name: "Intel(R) Xeon(R) Silver 4210", NumberOfCores: 10, NumberOfLogicalProcessors: 20 },
+        ],
+      }),
+      undefined,
+      AGENT_POLICY_DEFAULT,
+      () => {},
+    );
+    // Summed across sockets, like the Linux count is.
+    expect(host.cpu?.cores).toBe(40);
+  });
+
+  test("a CPU entry without NumberOfLogicalProcessors falls back to its physical count", () => {
+    // Very old SKUs can omit the logical count; fewer-than-the-truth beats reporting nothing.
+    const { host } = buildWindowsHost(
+      facts({ cpu: [{ Name: "Old Xeon", NumberOfCores: 4 }] }),
+      undefined,
+      AGENT_POLICY_DEFAULT,
+      () => {},
+    );
+    expect(host.cpu?.cores).toBe(4);
+  });
+
+  // THE IDENTITY FLIP THIS PINS (#1191). The hostname used to prefer the sweep's DNSHostName and
+  // fall back to os.hostname() (NetBIOS-style, typically uppercase) only when the sweep degraded —
+  // so a transient WMI failure changed the reported name/case between consecutive reports of the
+  // SAME node, and `fqdn` (lowercased) disagreed with `hostname` (verbatim) inside one report.
+  describe("the hostname is one canonical lowercase value from the sweep-independent source (#1191)", () => {
+    test("healthy sweep and degraded sweep answer the SAME hostname", () => {
+      const healthy = buildWindowsHost(facts(), undefined, AGENT_POLICY_DEFAULT, () => {}).host;
+      const degraded = buildWindowsHost(null, undefined, AGENT_POLICY_DEFAULT, () => {}).host;
+      expect(healthy.hostname).toBe(degraded.hostname);
+      // The stable source is the OS's own answer, canonicalised once.
+      expect(healthy.hostname).toBe(osHostname().toLowerCase());
+    });
+
+    test("hostname and fqdn cannot disagree in case within one report", () => {
+      const { host } = buildWindowsHost(facts(), undefined, AGENT_POLICY_DEFAULT, () => {});
+      expect(host.hostname).toBe(host.hostname.toLowerCase());
+      expect(host.fqdn).toBe(host.fqdn?.toLowerCase());
+    });
   });
 
   test("a workgroup machine reports NO domain — Win32_ComputerSystem.Domain is the workgroup name there", () => {
@@ -817,5 +871,28 @@ describe("WINDOWS_FACTS_SCRIPT", () => {
     // A double quote anywhere would put the whole collector at the mercy of the command-line
     // re-quoting round trip. Re-asserted here because the error-reporting addition writes strings too.
     expect(WINDOWS_FACTS_SCRIPT).not.toContain('"');
+  });
+
+  // THE LATENT MOJIBAKE THIS PINS (#1191). Windows PowerShell 5.1 writes redirected stdout in the
+  // OEM code page while `run()` decodes UTF-8. That was safe only because 5.1's ConvertTo-Json
+  // escapes non-ASCII to \uXXXX — an undocumented dependency: a switch to pwsh or one raw string
+  // fact would mojibake every localized name, break LAZYIT_EXCLUDE_NICS globs and churn
+  // softwareHash. The script states the boundary's encoding itself instead of leaning on that.
+  test("stdout is declared UTF-8 (no BOM) at the top, before anything is emitted (#1191)", () => {
+    const encoding = "try{[Console]::OutputEncoding=New-Object Text.UTF8Encoding $false}catch{}";
+    expect(WINDOWS_FACTS_SCRIPT).toContain(encoding);
+    // BEFORE `$Error.Clear()`, so a host that refuses the setter (no console handle) cannot leak
+    // that caught error into the report's errors[] — and long before the one emit at the end.
+    expect(WINDOWS_FACTS_SCRIPT.indexOf(encoding)).toBeLessThan(
+      WINDOWS_FACTS_SCRIPT.indexOf("$Error.Clear()"),
+    );
+  });
+
+  test("the script itself stays pure ASCII — it travels as one command-line argument", () => {
+    // The same rule installers-encoding.test.ts holds over the public installers, held here over the
+    // one PowerShell string this binary carries: a non-ASCII byte would be at the mercy of the
+    // child's ANSI/OEM decode exactly like a BOM-less .ps1 (#1166).
+    const offenders = [...WINDOWS_FACTS_SCRIPT].filter((c) => (c.codePointAt(0) ?? 0) > 0x7f);
+    expect(offenders).toEqual([]);
   });
 });
