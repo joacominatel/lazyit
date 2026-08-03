@@ -36,8 +36,12 @@ lugar e indica cuántos omitió.
 > otra persona crea un activo antes, se queda con esa etiqueta y tu próxima vista previa avanza.
 
 Con **Asignar etiquetas automáticamente** desactivado, esa misma tarjeta se titula **Forma de la
-etiqueta** y muestra cómo se verían tu prefijo, ancho y sufijo: una forma, no un valor, porque no se
-está asignando nada.
+etiqueta** y no muestra ningún número: solo tu prefijo y tu sufijo alrededor de una ranura descrita
+—`IT-` y luego *4 dígitos*—. Con el esquema desactivado no se asigna nada, así que no hay próxima
+etiqueta que mostrar, e imprimir una igual sería un valor que el asignador nunca va a entregar.
+
+Si la vista previa no puede consultar al servidor, lo dice y ofrece **Reintentar**, de modo que una
+consulta fallida nunca parezca una consulta lenta.
 
 ## Encenderlo
 

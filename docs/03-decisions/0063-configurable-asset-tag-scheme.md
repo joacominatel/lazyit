@@ -34,6 +34,13 @@ deciders: [Joaquín Minatel]
 > be allocated at that instant, not a reservation. `renderAssetTag` remains the single rendering formula
 > for both sides; only the choice of NUMBER moved server-side.
 >
+> **Product call on the scheme-OFF state (2026-08-02, #1180):** with the scheme off, NEITHER surface
+> shows a number. The settings card renders the pattern's SHAPE — the affixes around a described digit
+> slot ("4 digits"), never a digit — and the create form shows only its labelled example. Relabelling a
+> rendered counter "Tag shape" was tried first and rejected: nothing is allocated with the scheme off, so
+> any number there is a plausible value the allocator will never hand out — the same defect this ADR is
+> correcting, moved somewhere quieter. `renderAssetTag` is therefore NOT used for a disabled scheme.
+>
 > **Refinement of §3 (deliberate, documented):** the shipped allocation commits the counter increment
 > **independently of** the asset-create `$transaction` — NOT inside it, as §3's original wording said.
 > The concurrency guarantee (no duplicate live tags) is preserved by the **atomic single-row increment**

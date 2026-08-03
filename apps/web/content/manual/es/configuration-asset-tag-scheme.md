@@ -19,8 +19,10 @@ recibiría el próximo activo a medida que escribes: ya trae aplicada la regla d
 que se explica más abajo, así que si el número del contador está ocupado, la vista previa muestra el
 libre que se usaría en su lugar e indica cuántos omitió. Nunca reserva ese número, de modo que refleja
 el estado actual del parque en vez de prometer una etiqueta. Con el esquema desactivado, la tarjeta se
-titula **Forma de la etiqueta**: tus campos no tienen un próximo valor que mostrar porque no se asigna
-nada, así que solo se representa la forma.
+titula **Forma de la etiqueta** y no muestra ningún número: solo tu prefijo y tu sufijo alrededor de
+una ranura descrita (`IT-` y luego *4 dígitos*), porque no se asigna nada y cualquier número impreso
+ahí sería uno que el asignador nunca va a entregar. Si la consulta falla, la tarjeta lo dice y ofrece
+**Reintentar** en vez de esperar en silencio.
 
 - **Prefijo** — texto antes del número (p. ej. `IT-`). Opcional.
 - **Sufijo** — texto después del número (p. ej. `-HW`). Opcional.

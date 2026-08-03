@@ -31,8 +31,13 @@ preview shows the free one that would be assigned instead, and tells you how man
 > Because the preview never reserves a number, it is a read of *right now*, not a promise. If someone
 > else creates an asset first, they take that tag and your next preview moves on.
 
-With **Auto-assign asset tags** switched off, the same card is labelled **Tag shape** and shows what
-your prefix, width and suffix would render — a shape, not a value, because nothing is being assigned.
+With **Auto-assign asset tags** switched off, the same card is labelled **Tag shape** and carries no
+number at all: it shows your prefix and suffix around a described slot — `IT-` then *4 digits*. With
+the scheme off nothing is assigned, so there is no next tag to show, and printing one anyway would be
+a value the allocator will never hand out.
+
+If the preview can't reach the server it says so and offers a **Retry**, so a failed check never
+looks like a slow one.
 
 ## Turning it on
 
