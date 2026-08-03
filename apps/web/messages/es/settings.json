@@ -135,7 +135,11 @@
     "save": "Guardar esquema",
     "disabledHint": "El esquema está desactivado. Los activos nuevos conservan su etiqueta manual (o ninguna) — actívalo para asignarla automáticamente.",
     "preview": {
-      "label": "Próxima etiqueta"
+      "label": "Próxima etiqueta",
+      "disabledLabel": "Forma de la etiqueta (la asignación automática está desactivada)",
+      "loading": "Comprobando…",
+      "exhausted": "Secuencia agotada",
+      "skipped": "Se {count, plural, one {omitió # número que ya está en uso} other {omitieron # números que ya están en uso}}, a partir de {from}."
     },
     "fields": {
       "enabled": {
