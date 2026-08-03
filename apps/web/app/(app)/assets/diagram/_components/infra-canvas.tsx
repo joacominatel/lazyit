@@ -59,6 +59,7 @@ import {
   statusTone,
 } from "@/lib/infra/canvas";
 import { cn } from "@/lib/utils";
+import { type ImpactSummaryPlan, planImpactSummary } from "./impact-summary-plan";
 import { impactSummaryTone } from "./impact-summary-tone";
 import { InfraEdge as InfraEdgeRenderer, type InfraEdgeData } from "./infra-edge";
 import { InfraEmptyState } from "./infra-empty-state";
@@ -72,6 +73,8 @@ const FOCUS_DURATION_MS = 400;
 const TIDY_DURATION_MS = 220;
 /** How long the one-shot focus pulse plays before it auto-clears (matches the CSS keyframe). */
 const FOCUS_PULSE_MS = 600;
+/** The affected-node list's element id — `aria-controls` for its disclosure. One banner at a time. */
+const IMPACT_LIST_ID = "impact-affected-nodes";
 
 const nodeTypes = { infra: InfraNodeCard };
 const edgeTypes = { infra: InfraEdgeRenderer };
@@ -107,7 +110,9 @@ export interface InfraCanvasApi {
  * Since #1182 selecting a node also raises an ON-CANVAS action bar under it, carrying **blast
  * radius** and **Details**. Blast radius belongs here and not in a modal: its entire output is drawn
  * on this graph, so asking an operator to open a panel, scroll, click and then look back at the map
- * was three steps too many for an answer already on screen. Clicking a node therefore SELECTS it and
+ * was three steps too many for an answer already on screen. The highlight did not replace the
+ * affected LIST, though — {@link ImpactSummary} carries both, because "roughly how bad" and "which
+ * ones" are different questions. Clicking a node therefore SELECTS it and
  * nothing more — the detail modal is one deliberate click (or a double-click) away, so the map is
  * never covered by a surface the operator did not ask for.
  */
@@ -117,8 +122,10 @@ export function InfraCanvas({
   onOpenDetail,
   impactRootId = null,
   impact,
+  impactFailed = false,
   impactOn = false,
   onToggleImpact,
+  onRetryImpact,
   onApiReady,
   emptyAction,
 }: {
@@ -139,10 +146,18 @@ export function InfraCanvas({
    * disagree about how many nodes are affected.
    */
   impact?: InfraImpactResponse;
+  /**
+   * The impact query errored and has nothing to show. Kept apart from "still in flight" so the
+   * summary can say so instead of spinning forever — and, above all, so a query that never ran to
+   * completion is never rendered as the reassuring "nothing depends on this node".
+   */
+  impactFailed?: boolean;
   /** Whether blast-radius mode is on for the selected node. */
   impactOn?: boolean;
   /** Toggle blast-radius mode for the selected node. */
   onToggleImpact?: () => void;
+  /** Re-run the blast-radius query after it failed (the summary's Retry). */
+  onRetryImpact?: () => void;
   /** Receives the canvas's imperative API once mounted (issue #765 — diagram-view's `?focus=1`). */
   onApiReady?: (api: InfraCanvasApi) => void;
   /** Rendered inside the "no nodes yet" state — the Topology screen's add affordance (#1181). */
@@ -190,8 +205,10 @@ export function InfraCanvas({
         onOpenDetail={onOpenDetail}
         impactRootId={impactRootId}
         impact={impact}
+        impactFailed={impactFailed}
         impactOn={impactOn}
         onToggleImpact={onToggleImpact}
+        onRetryImpact={onRetryImpact}
         onApiReady={onApiReady}
       />
     </ReactFlowProvider>
@@ -209,8 +226,10 @@ function CanvasBoard({
   onOpenDetail,
   impactRootId,
   impact,
+  impactFailed,
   impactOn,
   onToggleImpact,
+  onRetryImpact,
   onApiReady,
 }: {
   // The list row, NOT the full `InfraNode` (#1135): `GET /infra/nodes` no longer ships `specs`, and
@@ -226,8 +245,10 @@ function CanvasBoard({
   onOpenDetail?: (nodeId: string) => void;
   impactRootId: string | null;
   impact?: InfraImpactResponse;
+  impactFailed?: boolean;
   impactOn: boolean;
   onToggleImpact?: () => void;
+  onRetryImpact?: () => void;
   onApiReady?: (api: InfraCanvasApi) => void;
 }) {
   const t = useTranslations("infra");
@@ -260,8 +281,9 @@ function CanvasBoard({
   const [focusPulseId, setFocusPulseId] = useState<string | null>(null);
 
   // The blast radius, unpacked once (issue #1182). `affectedIds` is what the highlight needs;
-  // `affectedDepth` is what the hover card needs to say how far away a node is. Deriving both from
-  // the one response is what keeps the count on the summary banner and the set of lit-up cards from
+  // `affectedDepth` is what the hover card needs to say how far away a node is; the summary banner's
+  // count and its enumerated list come off the SAME response via `planImpactSummary`. Deriving all
+  // of them from the one object is what keeps the banner, the list and the set of lit-up cards from
   // ever telling the operator two different numbers. Both stay `undefined` until the query resolves,
   // which is exactly the signal `inImpactMode` reads below.
   const affectedIds = useMemo(
@@ -709,15 +731,17 @@ function CanvasBoard({
           <EdgeLegend />
         </Panel>
 
-        {/* The blast-radius summary (issue #1182). The graph already answers WHICH nodes — they are
-            the ones lit up — so this only answers HOW MANY, and reads as reassurance when the answer
-            is none (ADR-0070 §7: an empty radius is the good news, never a scary empty state). It
-            sits bottom-centre, clear of the legend and of the edge-error banner up top. */}
-        {inImpactMode ? (
+        {/* The blast-radius summary (issue #1182) — count, enumerated list, and the in-flight state
+            in between. Gated on the radius being REQUESTED (not resolved), because the whole point
+            of the loading arm is to answer the click before the answer exists; the board's dimming
+            still waits for `inImpactMode` (#775). It sits bottom-centre, clear of the legend and of
+            the edge-error banner up top. */}
+        {impactRootId !== null ? (
           <Panel position="bottom-center">
             <ImpactSummary
-              count={affectedIds?.size ?? 0}
+              plan={planImpactSummary(impact, impactFailed)}
               onHide={() => onToggleImpact?.()}
+              onRetry={() => onRetryImpact?.()}
             />
           </Panel>
         ) : null}
@@ -812,50 +836,153 @@ function CanvasBoard({
 }
 
 /**
- * The blast-radius summary that rides on the canvas (issue #1182).
+ * The blast-radius summary that rides on the canvas (issue #1182) — the four things the operator can
+ * be owed after pressing the toggle, in one banner: still working, it failed, nothing depends on
+ * this, or here is what does.
  *
- * It deliberately does NOT list the affected nodes: they are highlighted on the graph behind it, and
- * a floating list over the map would cover the very thing it is describing. An empty radius is good
- * news — "safe to take down" — so it wears the success tone and never reads as a failed query
- * (ADR-0070 §7).
+ * **The list is part of the answer, not a duplicate of it.** The highlight answers *roughly how
+ * bad*; the count answers *how many*; only an enumeration answers **which ones** — a host with a
+ * dozen dependents is otherwise a cluster of glowing cards an operator has to read off the canvas by
+ * eye, with no way to scan, count or copy them. So the affected nodes are listed here, beside the
+ * count and behind a disclosure (open by default, capped in height and scrolling inside itself) so
+ * the map it describes is never buried under it.
  *
- * The tone comes from {@link impactSummaryTone}, which keeps the status hue OFF the readable text:
- * on this canvas a `text-success` / `text-destructive` sentence over a `/10` tint of its own hue
- * measures 3.72:1 and 3.93:1 in the light theme, under the 4.5:1 floor. Tint, border and icon carry
- * the distinction instead — the same trade `Callout` makes app-wide (ADR-0049, issue #812).
+ * The **in-flight** arm is the one the rail had and the first cut of this banner lost: on a large
+ * graph a board that has not changed yet reads as "the button didn't work", which is how a toggle
+ * gets clicked three times. The **failed** arm exists because the rail resolved an errored query to
+ * an empty list and told the operator the node was "safe to take down" — a reassurance nobody had
+ * computed.
+ *
+ * The status tone comes from {@link impactSummaryTone}, which keeps the status hue OFF the readable
+ * text: on this canvas a `text-success` / `text-destructive` sentence over a `/10` tint of its own
+ * hue measures 3.72:1 and 3.93:1 in the light theme, under the 4.5:1 floor. Tint, border and icon
+ * carry the distinction instead — the same trade `Callout` makes app-wide (ADR-0049, issue #812).
+ * The two neutral arms (loading, failed) take no status tint at all, so the same rule holds there by
+ * construction; every arm keeps its words on `text-foreground`.
  */
 function ImpactSummary({
-  count,
+  plan,
   onHide,
+  onRetry,
 }: {
-  count: number;
+  plan: ImpactSummaryPlan;
   onHide: () => void;
+  onRetry: () => void;
 }) {
   const t = useTranslations("infra");
-  const safe = count === 0;
-  const tone = impactSummaryTone(safe);
+  // The Retry label is the app-wide one (`common.retry`), not `infra.edges.retry`: that key belongs
+  // to the edge-fetch banner and borrowing it would tie two unrelated surfaces to one string.
+  const tCommon = useTranslations("common");
+  // Open by default: the enumeration IS the answer to "which ones", and an answer behind a click the
+  // operator has to discover is the panel-and-scroll problem this move was meant to end. Local to
+  // this component, which unmounts with impact mode, so each new radius opens fresh.
+  const [listOpen, setListOpen] = useState(true);
+  const toned = plan.state === "safe" || plan.state === "affected";
+  const tone = impactSummaryTone(plan.state === "safe");
+
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-lg border px-3 py-2 text-sm text-foreground shadow-md backdrop-blur-sm",
-        tone.surface,
+        "w-[min(30rem,calc(100vw-3rem))] rounded-lg border text-sm text-foreground shadow-md backdrop-blur-sm",
+        toned ? tone.surface : "border-border bg-popover",
       )}
-      role="status"
     >
-      {safe ? (
-        <ShieldCheckIcon
-          className={cn("size-4 shrink-0", tone.icon)}
-          aria-hidden
-        />
-      ) : (
-        <BoltIcon className={cn("size-4 shrink-0", tone.icon)} aria-hidden />
-      )}
-      <span className="font-medium">
-        {safe ? t("panel.impactSafe") : t("panel.impactCount", { count })}
-      </span>
-      <Button type="button" variant="ghost" size="sm" onClick={onHide}>
-        {t("panel.impactHide")}
-      </Button>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+        {plan.state === "loading" ? (
+          <Skeleton className="size-4 shrink-0 rounded-full" />
+        ) : plan.state === "failed" ? (
+          <ExclamationTriangleIcon
+            // `text-warning-text`, not the raw `text-warning`: the AA-safe token (#812), because
+            // this arm's surface is the neutral popover rather than a tint of its own hue.
+            className="size-4 shrink-0 text-warning-text"
+            aria-hidden
+          />
+        ) : plan.state === "safe" ? (
+          <ShieldCheckIcon
+            className={cn("size-4 shrink-0", tone.icon)}
+            aria-hidden
+          />
+        ) : (
+          <BoltIcon className={cn("size-4 shrink-0", tone.icon)} aria-hidden />
+        )}
+
+        {/* Only the sentence is the live region: the list below is normal content the operator
+            reads at their own pace, not something to have read out on every toggle. */}
+        <span
+          role="status"
+          className={cn(
+            "min-w-0 flex-1 font-medium",
+            plan.state === "loading" && "text-muted-foreground",
+          )}
+        >
+          {plan.state === "loading"
+            ? t("panel.impactLoading")
+            : plan.state === "failed"
+              ? t("panel.impactError")
+              : plan.state === "safe"
+                ? t("panel.impactSafe")
+                : t("panel.impactCount", { count: plan.count })}
+        </span>
+
+        {plan.state === "failed" ? (
+          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+            {tCommon("retry")}
+          </Button>
+        ) : null}
+        {plan.state === "affected" ? (
+          // Icon-only: the row already carries the count and the Hide-blast-radius action, and a
+          // third worded button pushes the Spanish strings onto a second line. The label lives on
+          // `aria-label`/`title`, and the list it controls is open by default — so the affordance
+          // is "fold this away", not "find the answer".
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-expanded={listOpen}
+            aria-controls={IMPACT_LIST_ID}
+            aria-label={
+              listOpen ? t("panel.impactListHide") : t("panel.impactListShow")
+            }
+            title={
+              listOpen ? t("panel.impactListHide") : t("panel.impactListShow")
+            }
+            onClick={() => setListOpen((open) => !open)}
+          >
+            {/* The list renders BELOW this row, so the chevron follows the standard disclosure
+                direction: expanded points up (collapse), collapsed points down (#775). */}
+            {listOpen ? (
+              <ChevronUpIcon aria-hidden />
+            ) : (
+              <ChevronDownIcon aria-hidden />
+            )}
+          </Button>
+        ) : null}
+        <Button type="button" variant="ghost" size="sm" onClick={onHide}>
+          {t("panel.impactHide")}
+        </Button>
+      </div>
+
+      {plan.state === "affected" && listOpen ? (
+        <ul
+          id={IMPACT_LIST_ID}
+          className="max-h-44 space-y-1.5 overflow-y-auto border-t border-border/60 px-3 py-2 text-sm"
+          aria-label={t("panel.impactListLabel")}
+        >
+          {plan.affected.map((node) => (
+            <li key={node.id} className="flex items-center gap-2">
+              <span className="truncate font-medium" title={node.label}>
+                {node.label}
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {t(`kind.${node.kind}`)}
+              </span>
+              <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+                {t("panel.impactDepth", { depth: node.depth })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
