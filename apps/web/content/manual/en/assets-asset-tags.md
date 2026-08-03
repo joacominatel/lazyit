@@ -24,7 +24,15 @@ A tag is built from three parts:
 - a **suffix** (optional, for example `-HW`).
 
 So a prefix of `IT-` with width 4 produces `IT-0001`, `IT-0002`, and so on. The editor shows a live
-**Next tag** preview as you type, so you can see exactly what the next asset will get.
+**Next tag** preview as you type. The preview is the tag the next asset would really get: it applies
+the same skip-existing rule as the allocator, so if the counter's number is already in use the
+preview shows the free one that would be assigned instead, and tells you how many it stepped over.
+
+> Because the preview never reserves a number, it is a read of *right now*, not a promise. If someone
+> else creates an asset first, they take that tag and your next preview moves on.
+
+With **Auto-assign asset tags** switched off, the same card is labelled **Tag shape** and shows what
+your prefix, width and suffix would render — a shape, not a value, because nothing is being assigned.
 
 ## Turning it on
 
@@ -33,8 +41,15 @@ prefix, suffix and number width you want, optionally a **Start at** number to se
 **Save scheme**. Configuring the scheme requires the *manage settings* permission.
 
 From then on, when you create an asset and leave the **Asset tag** field blank, lazyit fills in the
-next tag automatically — the create form even hints the next value in the field. If you **do** type a
-tag, your explicit value always wins; the scheme only fills the gap.
+next tag automatically. If you **do** type a tag, your explicit value always wins; the scheme only
+fills the gap.
+
+The create form tells you which tag that would be, in a line **below** the field: *"Leave blank and
+this asset gets IT-1001."* That line only appears when the scheme is on, and it is the real
+next-available tag, not the raw counter. The greyed-out text **inside** the field is a different
+thing: it is only a formatting example (`e.g. LZ-0001`), and it never means "this is the tag you will
+get". If you can't see the hint line at all, you don't have the *manage settings* permission — the
+tag is still assigned for you on save.
 
 ## The skip-existing rule
 

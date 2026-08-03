@@ -3,7 +3,7 @@ title: "ADR-0068: Asset Tag Scheme — existing-estate awareness (skip-existing 
 tags: [adr, asset, config, backend, frontend, settings]
 status: accepted
 created: 2026-06-16
-updated: 2026-06-16
+updated: 2026-08-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -53,6 +53,15 @@ is unconditional — *"es lógica del asset tag y SIEMPRE debe funcionar así."*
   it must **never** surface a false 409 in a dense-occupancy estate. The seed in §2 plus a pre-skip step
   (advance the counter past contiguous-occupied numbers in one shot rather than one P2002 at a time) make
   the cap effectively unreachable; the unique-index retry stays as the concurrency backstop only.
+- **The invariant must be VISIBLE, not just true** (added 2026-08-02, #1180). The operator's only way to
+  check their configuration is the settings preview and the create-form hint, and both originally rendered
+  the raw counter client-side — so the surfaces that exist to explain this rule were the two places that
+  contradicted it (`LZ-1000` shown, `LZ-1001` allocated), and the scheme read as broken precisely because
+  it was working. A read-only `GET /config/asset-tag-scheme/next-tag` now runs the same selection this
+  section defines and both surfaces read it. Two constraints on that endpoint follow from this section:
+  it reuses the `OCCUPIED_SCAN_LIMIT`-bounded occupancy scan (no unbounded query behind a keystroke), and
+  it **never consumes the counter** — it is a preview, not a reservation, so the "gaps accepted" rule is
+  not quietly turned into "gaps created by looking".
 - The counter stays **monotonic with gaps accepted** ([[0063-configurable-asset-tag-scheme]] §3). Interior
   gaps may be filled as the walk passes free slots (e.g. existing `1000, 1002, 1005` → allocations
   `1001, 1003, 1004, 1006…`), which is exactly the CEO's example.

@@ -3,7 +3,7 @@ title: "ADR-0063: Configurable Asset Tag Scheme — instance config + monotonic 
 tags: [adr, asset, config, backend, frontend, settings]
 status: accepted
 created: 2026-06-14
-updated: 2026-06-14
+updated: 2026-08-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -19,10 +19,20 @@ deciders: [Joaquín Minatel]
 >
 > **Implemented (frontend, 2026-06-16, #363):** the configuration surface lives in **Settings → Instance**
 > (`app/(app)/settings/instance`) — a `settings:manage`-gated editor (`enabled` toggle, `prefix`/`suffix`/
-> `width`/`startNumber`) with a **live preview** of the next tag rendered via the shared `renderAssetTag`,
-> backed by `useAssetTagScheme` / `useUpdateAssetTagScheme` (ADR-0020 data layer). The asset CREATE form
-> hints the next auto-tag as the `assetTag` placeholder when the scheme is enabled (the field stays
-> optional; an explicit value still wins). A setup-wizard step is intentionally OUT OF SCOPE (§4).
+> `width`/`startNumber`) with a **live preview** of the next tag, backed by `useAssetTagScheme` /
+> `useUpdateAssetTagScheme` (ADR-0020 data layer). The asset CREATE form surfaces the next auto-tag when
+> the scheme is enabled (the field stays optional; an explicit value still wins). A setup-wizard step is
+> intentionally OUT OF SCOPE (§4).
+>
+> **Correction (2026-08-02, #1180):** both surfaces originally rendered `renderAssetTag(scheme, nextNumber)`
+> in the browser. That was WRONG once [[0068-asset-tag-existing-estate-awareness]] §1 landed: the allocator
+> does not hand out the raw counter, it skips forward past numbers whose rendered tag is already on a live
+> asset — so with `LZ-1000` taken the card said `LZ-1000` while the server allocated `LZ-1001`. Both now
+> read `GET /config/asset-tag-scheme/next-tag`, which runs the SAME selection server-side (it needs the live
+> estate, and the scan is bounded by `OCCUPIED_SCAN_LIMIT`, so the browser cannot reproduce it). The
+> endpoint is read-only — it consumes nothing and never advances the counter, so its answer is what would
+> be allocated at that instant, not a reservation. `renderAssetTag` remains the single rendering formula
+> for both sides; only the choice of NUMBER moved server-side.
 >
 > **Refinement of §3 (deliberate, documented):** the shipped allocation commits the counter increment
 > **independently of** the asset-create `$transaction` — NOT inside it, as §3's original wording said.

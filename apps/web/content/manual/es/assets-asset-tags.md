@@ -27,8 +27,17 @@ Una etiqueta se arma con tres partes:
 - un **sufijo** (opcional, por ejemplo `-HW`).
 
 Así, un prefijo `IT-` con ancho 4 produce `IT-0001`, `IT-0002`, y así sucesivamente. El editor muestra
-una vista previa en vivo de la **Próxima etiqueta** a medida que escribes, para que veas exactamente
-qué recibirá el próximo activo.
+una vista previa en vivo de la **Próxima etiqueta** a medida que escribes. La vista previa es la
+etiqueta que realmente recibiría el próximo activo: aplica la misma regla de saltar las existentes que
+el asignador, así que si el número del contador ya está en uso, muestra el libre que se asignaría en su
+lugar e indica cuántos omitió.
+
+> Como la vista previa nunca reserva un número, es una lectura de *este momento*, no una promesa. Si
+> otra persona crea un activo antes, se queda con esa etiqueta y tu próxima vista previa avanza.
+
+Con **Asignar etiquetas automáticamente** desactivado, esa misma tarjeta se titula **Forma de la
+etiqueta** y muestra cómo se verían tu prefijo, ancho y sufijo: una forma, no un valor, porque no se
+está asignando nada.
 
 ## Encenderlo
 
@@ -38,9 +47,15 @@ en **Empezar en** para sembrar el contador, y luego **Guardar esquema**. Configu
 el permiso de *gestionar configuración*.
 
 A partir de ahí, cuando creas un activo y dejas vacío el campo **Etiqueta de activo**, lazyit completa
-la próxima etiqueta automáticamente — el formulario de creación incluso sugiere el próximo valor en el
-campo. Si **escribes** una etiqueta, tu valor explícito siempre prevalece; el esquema solo cubre el
-hueco.
+la próxima etiqueta automáticamente. Si **escribes** una etiqueta, tu valor explícito siempre prevalece;
+el esquema solo cubre el hueco.
+
+El formulario de creación te dice cuál sería esa etiqueta, en una línea **debajo** del campo: *"Si la
+dejas vacía, este activo recibirá IT-1001."* Esa línea solo aparece con el esquema activado, y es la
+próxima etiqueta realmente disponible, no el contador en bruto. El texto gris **dentro** del campo es
+otra cosa: es solo un ejemplo de formato (`ej. LZ-0001`) y nunca significa "esta es la etiqueta que vas
+a recibir". Si no ves la línea de ayuda, no tienes el permiso de *gestionar configuración* — la
+etiqueta se asigna igual al guardar.
 
 ## La regla de saltar las existentes
 
