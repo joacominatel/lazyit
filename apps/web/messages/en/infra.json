@@ -113,8 +113,18 @@
     "title": "Track servers automatically",
     "description": "Install a lightweight agent on a Linux or Windows server and it reports its hardware & software to lazyit by itself — it can only report, nothing else.",
     "cta": "Create your first agent",
-    "addAgent": "Add agent",
     "noPermissionHint": "Ask an administrator to add a reporting agent — it needs the manage-settings permission."
+  },
+  "add": {
+    "action": "Add",
+    "agentLabel": "Install a reporting agent",
+    "agentDescription": "Best for a server: it fills in its own hardware, software and status, and goes offline on its own when it stops checking in.",
+    "manualLabel": "Add a node by hand",
+    "manualDescription": "For anything that can't run an agent — a switch, a firewall, a NAS. You keep it up to date yourself."
+  },
+  "canvas": {
+    "openDetails": "Details",
+    "nodeActions": "Actions for {label}"
   },
   "wizard": {
     "title": "Create a reporting agent",
@@ -288,7 +298,6 @@
     "statusUpdatedToast": "Status updated.",
     "statusError": "Couldn't update the status.",
     "detailsTitle": "Details",
-    "reportedFactsTitle": "Reported facts",
     "labelLabel": "Name",
     "labelEditHint": "Click the title to rename",
     "labelEmpty": "A name is required.",
@@ -310,14 +319,17 @@
     "impactTitle": "Impact / blast radius",
     "impactShow": "Show blast radius",
     "impactHide": "Hide blast radius",
-    "impactDescription": "If this node goes down, what stops with it? Highlights the downstream nodes on the map.",
+    "impactDescription": "If this node goes down, what stops with it? Highlights the affected nodes on the map.",
     "impactSafe": "Nothing depends on this node — safe to take down.",
     "impactCount": "{count, plural, one {# node affected if this goes down} other {# nodes affected if this goes down}}",
     "impactDepth": "{depth, plural, one {# hop} other {# hops}}",
     "deleteAction": "Remove from map",
     "loading": "Loading node…",
     "tabs": {
-      "overview": "Overview",
+      "general": "General",
+      "facts": "Reported facts",
+      "software": "Software",
+      "connections": "Connections",
       "changes": "Changes"
     }
   },
