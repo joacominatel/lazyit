@@ -1,10 +1,17 @@
 /**
- * The exact commands the "Add a server" wizard hands an operator, per platform (issue #1168).
+ * The exact commands lazyit hands an operator for a host, per platform (issues #1168 and #1207).
  *
- * Pure and separate from the component for the same reason `tray-selection.ts` is: what the wizard
+ * Pure and separate from the component for the same reason `tray-selection.ts` is: what the UI
  * prints is a promise about two installers it does not contain, and a promise is not something a
- * component can be held to. `agent-install-commands.test.ts` asserts these strings against
+ * component can be held to. `install-commands.test.ts` asserts these strings against
  * `apps/web/public/install.sh` and `apps/web/public/install.ps1` as they are actually served.
+ *
+ * IT LIVES IN `lib/` AND NOT IN `@lazyit/shared` (ADR-0094 §5). It was route-private under the
+ * topology wizard's `_components/` until the agent fleet view needed the same strings; two callers
+ * make it web-internal shared code, and there is exactly ONE builder so the fleet view can never
+ * drift from the wizard on the flags that are hardest to test (the plain-http opt-in below). It does
+ * not go further out to the shared package because its test — the thing that makes it trustworthy —
+ * reads the two installer files THIS app serves off disk, and that test belongs where they ship.
  *
  * The wizard used to emit the Linux one-liner and nothing else. The agent has been cross-platform
  * since ADR-0074's Windows amendment (#1144) and the Manual has documented the PowerShell form since
@@ -64,7 +71,7 @@ export type AgentManualStep = {
    * The label and the command are ONE object on purpose. They used to be two positionally-indexed
    * arrays — the labels read out of the catalog in the component, the commands built here — and
    * nothing held index N of one to index N of the other, so an edit could add a step to one side
-   * only and every test still passed. `agent-install-commands.test.ts` now asserts these keys
+   * only and every test still passed. `install-commands.test.ts` now asserts these keys
    * against the `stepN` keys BOTH locale catalogs actually ship, in order.
    */
   labelKey:
@@ -92,6 +99,55 @@ export function agentInstallCommand(
   }
   const optIn = insecureHttp(origin) ? " --allow-insecure-http" : "";
   return `curl -fsSL ${origin}/install.sh | sudo sh -s -- --url ${origin} --token ${token}${optIn}`;
+}
+
+/**
+ * How the token is NAMED, per platform — the spelling each installer reads it under.
+ *
+ * `install.sh:204` falls back to `LAZYIT_TOKEN` and `install.ps1:328` falls back to
+ * `$env:LAZYIT_TOKEN` when no token was passed. The update command (below) carries neither a value
+ * nor a switch, so this is the one thing the operator has to have in place before they run it — and
+ * it is a string the UI states rather than implies, so nobody hunts for a missing flag.
+ */
+export function agentTokenEnvVar(platform: AgentPlatform): string {
+  return platform === "windows" ? "$env:LAZYIT_TOKEN" : "LAZYIT_TOKEN";
+}
+
+/**
+ * The command that brings ONE ALREADY-INSTALLED host up to the instance's build (ADR-0094 §5/§6).
+ *
+ * It is `agentInstallCommand` minus the token, and that subtraction is the decision: **the server
+ * cannot re-emit an installed host's secret.** Only `tokenHash`/`tokenPrefix` are stored, so the
+ * honest options were minting a fresh service account per host — 245 tokens for one update — or
+ * letting the credential come from where the operator already keeps it. Both installers already
+ * read {@link agentTokenEnvVar}, and that is also the form config management wants: Ansible has a
+ * vault, GPO/Intune have their own credential store, and a generated artifact with a live
+ * root-capable credential baked into it would be the wrong artifact regardless of ergonomics.
+ *
+ * `sudo -E` on Linux, and it is load-bearing. `sudo` resets the environment by default, so a plain
+ * `sudo sh` would drop the very variable this command depends on and the installer would stop asking
+ * for a token — while the operator is looking at a command that does not mention one. `-E` carries
+ * it across. Anything already running as root (which is every config-management run) can drop the
+ * `sudo -E` entirely. On Windows nothing equivalent is needed: the elevated PowerShell the operator
+ * is typing in IS the process that holds `$env:LAZYIT_TOKEN`.
+ *
+ * Everything else about re-running is already true and is why this is safe to hand to a machine
+ * (ADR-0094 §7): the checksum is re-verified on every run and a mismatch is fatal (#1190), the
+ * installer runs `lazyit-agent --help` before arming anything and leaves the host as it found it on
+ * failure, it MERGES the existing config rather than replacing it (so a host owner's
+ * `LAZYIT_COLLECT_*=false` veto survives), and the node keeps its identity because identity is
+ * `(reportingSource, externalId)` and not the binary. Re-running on a current host is a no-op.
+ */
+export function agentUpdateCommand(
+  platform: AgentPlatform,
+  origin: string,
+): string {
+  if (platform === "windows") {
+    const optIn = insecureHttp(origin) ? " -AllowInsecureHttp" : "";
+    return `& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Url ${origin}${optIn}`;
+  }
+  const optIn = insecureHttp(origin) ? " --allow-insecure-http" : "";
+  return `curl -fsSL ${origin}/install.sh | sudo -E sh -s -- --url ${origin}${optIn}`;
 }
 
 /**
