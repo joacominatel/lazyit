@@ -1040,6 +1040,13 @@ binario. Es solo un empujón: un agente desactualizado sigue reportando con norm
 nada, y las actualizaciones menores no la activan. Los agentes compilados desde el código fuente (o
 anteriores al versionado) reportan como `dev` y nunca muestran la insignia.
 
+**¿Todos los agentes reportan `dev`?** Hasta esta versión, los binarios que servía una instancia se
+compilaban sin el estampado de versión, así que todos los agentes instalados reportaban `dev` y la
+insignia nunca podía aparecer. Una vez que la instancia se actualiza y se reconstruye, los binarios
+que sirve llevan su versión — pero los agentes ya instalados siguen reportando `dev` hasta que se
+vuelve a ejecutar el comando de instalación en esos hosts. Nada más cambia: `dev` sigue siendo un
+valor legítimo y sigue sin generar ningún aviso.
+
 **Algunas mejoras solo llegan cuando volvés a ejecutar el comando de instalación.** El agente son dos
 cosas: un programa, y el servicio y el timer de systemd que lo ejecutan. Todo lo que está en el
 *programa* — los diagnósticos de más arriba, el soporte de proxy y de autoridad certificadora — llega
