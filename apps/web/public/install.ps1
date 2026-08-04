@@ -47,6 +47,23 @@
 .PARAMETER TokenFile
   Read the token from a file instead. Mutually exclusive with -Token.
 
+.PARAMETER KeepToken
+  Re-run over an existing install, authenticating with the token already in
+  C:\ProgramData\lazyit-agent\config - so an upgrade needs no secret on the command line (#1208).
+  This installer wrote that file itself, with an ACL restricted to SYSTEM + Administrators, and this
+  script runs elevated: reading back what it wrote is not a new exposure, and lazyit cannot hand the
+  token back to you (it stores only a hash and a prefix of it).
+
+  AN EXPLICIT SWITCH, NOT AN IMPLICIT DEFAULT FOR A RE-RUN, and that is the whole decision. Implicit
+  is friendlier by one word and wrong in the case that matters: `-Token $t` with the variable
+  misspelled, or a wrapper that stopped setting $env:LAZYIT_TOKEN, would stop being a loud "a token
+  is required" and become a silent install with the OLD credential - so a host keeps reporting with a
+  token somebody believes they replaced, and nobody finds out. Where the credential for a SYSTEM
+  install came from is not a thing to infer from the state of the disk.
+
+  Mutually exclusive with -Token, -TokenFile and $env:LAZYIT_TOKEN - a hard error, never a silent
+  precedence rule. It has no meaning with -Uninstall, where the token never survives.
+
 .PARAMETER CaFile
   A PEM bundle to trust instead of trusting your internal CA machine-wide. Used for THIS script's
   downloads and written into the agent's config so the agent uses it too.
@@ -77,6 +94,10 @@
   .\install.ps1 -Url https://lazyit.example.com
 
 .EXAMPLE
+  # Upgrading a host that is already installed: no token anywhere on the command line.
+  .\install.ps1 -Url https://lazyit.example.com -KeepToken
+
+.EXAMPLE
   .\install.ps1 -Uninstall
 #>
 [CmdletBinding()]
@@ -92,7 +113,10 @@ param(
   [switch] $Baseline,
   [switch] $RequireChecksum,
   [switch] $Uninstall,
-  [switch] $KeepConfig
+  [switch] $KeepConfig,
+  # Authenticate this run with the token already in the config file (#1208). See .PARAMETER KeepToken
+  # above for why it is a switch and not the implicit default for a re-run.
+  [switch] $KeepToken
 )
 
 $ErrorActionPreference = 'Stop'
@@ -124,6 +148,42 @@ function Die([string] $Message) {
 
 function Say([string] $Message) {
   Write-Host "lazyit-agent install: $Message"
+}
+
+# The token carried by the config lines handed in, or '' when they carry none (#1208).
+#
+# PURE ON PURPOSE: lines in, one word out, no path of its own and no registry. That is what lets the
+# contract test in apps/agent run THIS function through real PowerShell on a Linux CI runner over a
+# corpus of real config files, rather than a copy of it - the same reason the two PATH functions
+# below take their input as parameters.
+#
+# IT HAS TO AGREE WITH THE AGENT'S OWN PARSER (`readConfigFile` in apps/agent/src/config.ts) on every
+# point where a hand-edited file can differ from the one this script writes, because the whole
+# promise of -KeepToken is "the credential this host is ALREADY using": the LAST assignment wins (the
+# agent assigns key by key as it reads), the value is trimmed, and one matching pair of surrounding
+# quotes is stripped. Reading a different token than the agent reads would install cleanly, report
+# once with the wrong credential, and then fail on every tick.
+#
+# -cmatch AND NOT -match, which is the one place PowerShell's defaults would quietly diverge from the
+# agent: `-match` is case-insensitive, so it would read `lazyit_token=` as a credential when the
+# agent does not read that key at all. Trimming also drops the carriage return Get-Content leaves on
+# every line of a CRLF file - and a trailing CR inside a bearer token is a 401 with nothing in the
+# message to explain it.
+function Get-LazyitConfigToken([string[]] $Lines) {
+  if (-not $Lines) { return '' }
+  $found = ''
+  foreach ($line in $Lines) {
+    # Only the FIRST '=' separates the key from the value - a token is opaque and may contain one.
+    if ($line -cmatch '^\s*LAZYIT_TOKEN=(.*)$') { $found = $Matches[1] }
+  }
+  $found = $found.Trim()
+  if ($found.Length -ge 2) {
+    $quote = $found.Substring(0, 1)
+    if (($quote -eq '"' -or $quote -eq "'") -and $found.EndsWith($quote)) {
+      $found = $found.Substring(1, $found.Length - 2)
+    }
+  }
+  return $found
 }
 
 # --- the machine PATH ------------------------------------------------------
@@ -242,6 +302,11 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 # "I will not deploy something I can't cleanly remove" is a reasonable position. Everything below is
 # idempotent and never fails on a partial install.
 if ($Uninstall) {
+  # REFUSED RATHER THAN IGNORED (#1208). -KeepConfig keeps this host's own limits through an
+  # uninstall; nothing keeps the TOKEN, and that is the point of the block further down. Accepting
+  # -KeepToken here - even as a harmless no-op - would let an operator finish an uninstall believing
+  # a live credential survived on a host they are decommissioning, or that it did not.
+  if ($KeepToken) { Die '-KeepToken has no meaning with -Uninstall: the token NEVER survives an uninstall. -KeepConfig keeps this host''s own limits, never the credential.' }
   # Disarm FIRST. Deleting the executable out from under a registered task does not stop the task; it
   # turns every tick into a failed run and an event-log entry, on a host somebody believes is clean.
   try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop | Out-Null }
@@ -289,6 +354,43 @@ if ($Uninstall) {
 if ($KeepConfig) { Die '-KeepConfig only means something with -Uninstall' }
 
 # --- token -----------------------------------------------------------------
+# THE RE-RUN FORM (#1208), resolved FIRST so that a second token source is refused before anything
+# else is read - `-KeepToken -TokenFile C:\gone` must name the contradiction, not the missing file.
+#
+# A HARD ERROR FOR EVERY OTHER SOURCE, INCLUDING THE ENVIRONMENT, and no precedence rule anywhere.
+# Two token sources on one SYSTEM install is an operator who believes something about this run that
+# is not true, and quietly picking one is how a host ends up authenticating with the credential that
+# was just rotated away - the failure this switch exists to prevent, arriving through the switch
+# itself. $env:LAZYIT_TOKEN is included even though it is ambient rather than typed: it is the form
+# the docs recommend for keeping a token out of the session history, so it is exactly the one that
+# would be left set in an elevated console from the install before this one.
+#
+# This runs AFTER the elevation check above, on purpose. The config file's ACL is SYSTEM +
+# Administrators, so a non-elevated run must be told THAT rather than that its own host has no
+# install on it.
+if ($KeepToken) {
+  if ($Token)     { Die '-KeepToken and -Token are mutually exclusive - pass one. -KeepToken means "authenticate with the token this host already has"; passing another one says the opposite.' }
+  if ($TokenFile) { Die '-KeepToken and -TokenFile are mutually exclusive - pass one. -KeepToken means "authenticate with the token this host already has"; passing a file says the opposite.' }
+  if ($env:LAZYIT_TOKEN) { Die '-KeepToken and LAZYIT_TOKEN in the environment both supply a token - pass one. Clear $env:LAZYIT_TOKEN to re-use what is on this host, or drop -KeepToken to install with the one in the environment.' }
+  # NEVER A SILENT UNAUTHENTICATED INSTALL: no readable config is fatal here, and the message names
+  # the first install as the other way to arrive at it - which by definition has no token to re-use.
+  if (-not (Test-Path -LiteralPath $ConfigFile)) {
+    Die "-KeepToken authenticates with the token this host already has, and there is no $ConfigFile. This is a first install and there is nothing to re-use: pass -Token, -TokenFile, or set the LAZYIT_TOKEN environment variable."
+  }
+  $existing = @()
+  try { $existing = @(Get-Content -LiteralPath $ConfigFile -ErrorAction Stop) }
+  catch { Die "-KeepToken cannot read $ConfigFile - $($_.Exception.Message)" }
+  $Token = Get-LazyitConfigToken ($existing)
+  if (-not $Token) {
+    Die "$ConfigFile has no LAZYIT_TOKEN line, so there is no token on this host to re-use. Pass -Token, -TokenFile, or set the LAZYIT_TOKEN environment variable. Note that lazyit cannot show you an existing token a second time (it stores only a hash and a prefix), so this may need a fresh one from Settings -> Instance -> Reporting agents."
+  }
+  # The same guard -TokenFile applies, one source over: a Service Account token is one opaque word,
+  # and a hand-edited config that split it across a space would otherwise be sent as a bearer token
+  # and come back 401 with nothing to say which of the two files was wrong.
+  if ($Token -match '\s') { Die "the LAZYIT_TOKEN line in $ConfigFile is not a token (it contains whitespace). Fix that file, or pass -Token / -TokenFile for this run." }
+  Say "authenticating with the token already in $ConfigFile (-KeepToken); nothing was passed on the command line."
+}
+
 if ($TokenFile) {
   if ($Token) { Die '-Token and -TokenFile are mutually exclusive - pass one' }
   if (-not (Test-Path -LiteralPath $TokenFile)) { Die "cannot read the token file: $TokenFile" }
@@ -303,7 +405,7 @@ if (-not $Token) { $Token = $env:LAZYIT_TOKEN }
 if (-not $Url)   { $Url   = $env:LAZYIT_URL }
 
 if (-not $Url)   { Die '-Url is required (your lazyit instance, e.g. https://lazyit.example.com)' }
-if (-not $Token) { Die 'a token is required - pass -Token, -TokenFile, or set $env:LAZYIT_TOKEN (needs infra:report)' }
+if (-not $Token) { Die 'a token is required - pass -Token, -TokenFile, -KeepToken (a re-run over an existing install), or set $env:LAZYIT_TOKEN (needs infra:report)' }
 $Url = $Url.TrimEnd('/')
 
 # --- -Url IS THE INSTANCE BASE URL, NOT THE ADDRESS OF THIS SCRIPT (#1166) ---
@@ -531,6 +633,11 @@ Set-Acl -LiteralPath $ConfigDir -AclObject $acl
 # The pattern is deliberately wider than LAZYIT_*: HTTPS_PROXY, HTTP_PROXY and NO_PROXY live here too,
 # under the names every other tool uses, and BOTH CASES, because the agent reads both - a pattern that
 # matched only the uppercase half would silently delete a working proxy on the upgrade path.
+#
+# -KeepToken (#1208) CHANGES NOTHING HERE, deliberately. It changes where $Token came from, not who
+# owns the key: the old LAZYIT_TOKEN line is still dropped from the kept set and written back once
+# below, so a re-run cannot leave two of them and hand the parser the choice - and the host owner's
+# veto crosses the upgrade exactly as it did before.
 $owned = if ($CaFile) { '^\s*(LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)|lazyit_ca_file)=' } else { '^\s*LAZYIT_(URL|TOKEN|INTERVAL)=' }
 $preserved = @()
 if (Test-Path -LiteralPath $ConfigFile) {
