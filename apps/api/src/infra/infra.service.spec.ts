@@ -19,6 +19,7 @@ import { AgentPolicyService } from './agent-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { ArticlesService } from '../articles/articles.service';
 import { SecretManagerService } from '../secret-manager/secret-manager.service';
@@ -116,6 +117,10 @@ describe('InfraService', () => {
   let service: InfraService;
   let prisma: PrismaMock;
   let assets: { create: Mock; remove: Mock; assertExists: Mock };
+  // The append-only asset trail (ADR-0033). InfraService writes exactly ONE event through it: the
+  // AGENT_LINKED an adoption emits at the moment of the link (ADR-0093 §4). Mocking it is also how
+  // these tests assert the SILENCE — no event on a mint, and none per report.
+  let assetHistory: { record: Mock };
   let assignments: { findAll: Mock };
   let articles: { findArticlesForAsset: Mock };
   // The node→secret linkage helpers (ADR-0073, #801): metadata-only resolve + attach authz.
@@ -192,6 +197,7 @@ describe('InfraService', () => {
       remove: jest.fn(),
       assertExists: jest.fn().mockResolvedValue(undefined),
     };
+    assetHistory = { record: jest.fn().mockResolvedValue(undefined) };
     assignments = { findAll: jest.fn().mockResolvedValue([]) };
     articles = {
       findArticlesForAsset: jest.fn().mockResolvedValue({ items: [] }),
@@ -226,6 +232,7 @@ describe('InfraService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ActorService, useValue: new ActorService() },
         { provide: AssetsService, useValue: assets },
+        { provide: AssetHistoryService, useValue: assetHistory },
         { provide: AssetAssignmentsService, useValue: assignments },
         { provide: ArticlesService, useValue: articles },
         { provide: SecretManagerService, useValue: secrets },
@@ -4777,6 +4784,9 @@ describe('InfraService', () => {
         // `virtualization: kvm` ⇒ the server proposed VM (#1139); the rule matches what it proposed,
         // never a value the agent chose.
         kind: 'VM',
+        // The report carried no `host.chassis`, and absent evidence is stated as null rather than
+        // omitted — a rule that states a chassis must never match on a fact nobody reported.
+        chassis: null,
         isContainerChild: false,
       });
     });
@@ -4977,6 +4987,10 @@ describe('InfraService', () => {
 
       expect(autoConfirm.resolve).toHaveBeenCalledWith({
         hostname: 'redis',
+        // A container child's blob is `{ container, reportedAt }` — no `host` key at all (#1139) — so
+        // it has no form factor, and offering its HOST's would let a chassis rule confirm containers
+        // on the strength of the box they run on (ADR-0093 §6).
+        chassis: null,
         // A container child has no IP of its own on the node (the host owns the address).
         ipAddress: null,
         kind: 'CONTAINER',
@@ -6019,6 +6033,555 @@ describe('InfraService', () => {
         ).rejects.toBeInstanceOf(NotFoundException);
         expect(prisma.infraNodeFactChange.findMany).not.toHaveBeenCalled();
       });
+    });
+  });
+  // ── Chassis routing + adoption by corroborated serial (ADR-0093, #1198) ─────
+
+  describe('the agent-owned chassis column (ADR-0093 §2)', () => {
+    const laptopReport = (chassis?: string) =>
+      AgentReportSchema.parse({
+        agentVersion: '2.0.0',
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+        reportedAt: '2026-08-03T12:00:00.000Z',
+        host: {
+          hostname: 'jm-laptop',
+          os: { family: 'linux', name: 'Fedora', version: '42' },
+          ...(chassis !== undefined ? { chassis } : {}),
+        },
+      });
+
+    it('writes the reported form factor on the CREATE branch — routable on day one', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-1',
+        state: 'PENDING',
+      });
+
+      await service.ingestReport(laptopReport('laptop'), AGENT_SA);
+
+      const arg = firstArg<{ data: { chassis?: string } }>(
+        prisma.infraNode.create,
+      );
+      expect(arg.data.chassis).toBe('laptop');
+    });
+
+    it('refreshes it on EVERY report — a re-image or a board swap changes the truth', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'jm-laptop',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(laptopReport('server'), AGENT_SA);
+
+      const arg = firstArg<{ data: { chassis?: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.chassis).toBe('server');
+    });
+
+    it('`unknown` IS a reported value and DOES write — it retires a stale `laptop`', async () => {
+      // "The probe did not run" is a fact the host reported about itself, and it is a DIFFERENT fact
+      // from `laptop`. Refusing to write it would leave a re-imaged box hidden from the canvas on the
+      // strength of a chassis nobody has confirmed since.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'jm-laptop',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(laptopReport('unknown'), AGENT_SA);
+
+      const arg = firstArg<{ data: { chassis?: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.chassis).toBe('unknown');
+    });
+
+    it('an ABSENT chassis never clears a stored one — a downgraded agent must not un-heal the estate', async () => {
+      // A pre-v2 agent (or a rolled-back collector) sends no chassis at all. Treating that silence as
+      // `null` would wipe a good value on every report from a host whose agent was downgraded, and the
+      // §8 upgrade promise is that the column FILLS lazily, never that it empties lazily.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'jm-laptop',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(laptopReport(), AGENT_SA);
+
+      const arg = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data).not.toHaveProperty('chassis');
+    });
+
+    it('a CONTAINER child never carries one — its blob has no `host` key at all (#1139)', async () => {
+      const dockerHost = AgentReportSchema.parse({
+        agentVersion: '2.0.0',
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+        reportedAt: '2026-08-03T12:00:00.000Z',
+        host: {
+          hostname: 'docker-01',
+          os: { family: 'linux', name: 'Debian', version: '13' },
+          chassis: 'server',
+          containers: [{ name: 'redis', id: 'aaaaaaaaaaaa', state: 'running' }],
+        },
+      });
+      // The HOST resolves (create), then the child lookup finds nothing and creates the child.
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-host', state: 'PENDING' })
+        .mockResolvedValue({ id: 'node-child' });
+
+      await service.ingestReport(dockerHost, AGENT_SA);
+
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      const hostCreate = calls[0][0] as { data: { chassis?: string } };
+      const childCreate = calls[1][0] as { data: Record<string, unknown> };
+      expect(hostCreate.data.chassis).toBe('server');
+      expect(childCreate.data).not.toHaveProperty('chassis');
+    });
+  });
+
+  describe('confirmNode — adoption by corroborated serial (ADR-0093 §3/§3a/§4)', () => {
+    /** A PENDING node whose stored blob corroborates its serial: the serial IS in the evidence, plus a MAC. */
+    function pendingCorroborated(
+      overrides: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'PENDING',
+        assetId: null,
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+        specs: {
+          host: {
+            hostname: 'jm-laptop',
+            hardware: { serial: 'SN-REAL-123' },
+            identifiers: [
+              { kind: 'serial', value: 'SN-REAL-123' },
+              { kind: 'mac', value: '00:15:5d:01:02:03' },
+            ],
+          },
+        },
+        ...overrides,
+      };
+    }
+
+    /** confirmNode reads the node first (PENDING), then re-reads it CONFIRMED for the detail. */
+    function confirmReads(node: Record<string, unknown>): void {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(node)
+        .mockResolvedValue({ ...node, state: 'CONFIRMED' });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+    }
+
+    it('ADOPTS the live Asset carrying the corroborated serial instead of minting a duplicate', async () => {
+      confirmReads(pendingCorroborated());
+      // The one indexed probe answers with the operator's curated row.
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      // No Asset is created — the whole point.
+      expect(assets.create).not.toHaveBeenCalled();
+      const arg = firstArg<{ data: { state: string; assetId?: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.state).toBe('CONFIRMED');
+      expect(arg.data.assetId).toBe('asset-curated');
+    });
+
+    it('probes the INDEXED serial lookup, and never `findIdentityMatches`', async () => {
+      // `findIdentityMatches` asks "which other NODES look like this node?" over an un-indexed jsonb
+      // containment scan — a different question on the wrong side of the join. Adoption asks "which
+      // ASSET carries this serial?", which `assets_serial_active_key` answers as an index lookup, and
+      // this path runs INSIDE the report request when an auto-confirm rule is saved (#1145).
+      const identityMatches = jest.spyOn(service, 'findIdentityMatches');
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(identityMatches).not.toHaveBeenCalled();
+      const probe = firstArg<{ where: Record<string, unknown> }>(
+        prisma.asset.findFirst,
+      );
+      expect(probe.where).toEqual({ serial: 'SN-REAL-123' });
+    });
+
+    it('does NOT stamp the auto-created marker on an adopted Asset — the load-bearing safety rule', async () => {
+      // `detachAsset` soft-deletes an asset carrying `_infraAutoCreated`. Stamping it here would mean
+      // a later detach silently deleted the operator's curated inventory row.
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      // Nothing wrote to the adopted asset at all: no create, no specs update, no serial write-back.
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(prisma.asset.update).not.toHaveBeenCalled();
+    });
+
+    it('and so DETACHING an adopted Asset leaves it intact — exactly what #1117 promises', async () => {
+      // The end-to-end consequence of the rule above, asserted where an operator would feel it.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-curated',
+      });
+      // The adopted asset carries no marker — because adoption never wrote one.
+      prisma.asset.findFirst.mockResolvedValue({
+        specs: { host: { hostname: 'jm-laptop' } },
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+
+      await service.updateNode('node-1', { assetId: null }, HUMAN);
+
+      expect(assets.remove).not.toHaveBeenCalled();
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBe(null);
+    });
+
+    it('emits AGENT_LINKED ONCE, at the link, naming the node that started writing', async () => {
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(assetHistory.record).toHaveBeenCalledTimes(1);
+      const event = (assetHistory.record.mock.calls as unknown[][])[0][1] as {
+        assetId: string;
+        eventType: string;
+        payload: Record<string, unknown>;
+      };
+      expect(event.assetId).toBe('asset-curated');
+      expect(event.eventType).toBe('AGENT_LINKED');
+      expect(event.payload).toEqual({
+        nodeId: 'node-1',
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+      });
+    });
+
+    it('emits NO AssetHistory event when it MINTS — CREATED is the assets service`s to write', async () => {
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue(null); // no live asset carries the serial
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(assetHistory.record).not.toHaveBeenCalled();
+    });
+
+    it('mints WITH the serial when no live Asset carries it — unchanged #1081 behaviour', async () => {
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue(null);
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      const createArg = firstArg<{
+        serial?: string;
+        modelId?: string;
+        specs: Record<string, unknown>;
+      }>(assets.create);
+      expect(createArg.serial).toBe('SN-REAL-123');
+      // `modelId` stays null on the mint branch: no AssetModel auto-create (#1081), and category
+      // lives on AssetModel, so the agent has no path to one by construction.
+      expect(createArg).not.toHaveProperty('modelId');
+      // The marker IS stamped here — this is the row lazyit invented, so a detach may clean it up.
+      expect(createArg.specs._infraAutoCreated).toBe(true);
+    });
+
+    it('a serial with NO corroborating MAC mints — one fact is not corroboration', async () => {
+      confirmReads(
+        pendingCorroborated({
+          specs: {
+            host: {
+              hostname: 'jm-laptop',
+              hardware: { serial: 'SN-REAL-123' },
+              identifiers: [{ kind: 'serial', value: 'SN-REAL-123' }],
+            },
+          },
+        }),
+      );
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      // The gate short-circuits BEFORE the probe: no query, and a brand-new Asset.
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+      expect(assets.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('FAILS CLOSED on a flagged identity collision — a machine-id under suspicion never adopts', async () => {
+      // Minting is recoverable by hand; attaching the wrong machine to a curated row is not.
+      const node = pendingCorroborated();
+      const specs = node.specs as Record<string, unknown>;
+      confirmReads({
+        ...node,
+        specs: { ...specs, identityConflict: { peerNodeId: 'node-2' } },
+      });
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+      expect(assets.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('a junk (placeholder) serial never adopts — there is nothing to key on', async () => {
+      confirmReads(
+        pendingCorroborated({
+          specs: {
+            host: {
+              hostname: 'jm-laptop',
+              hardware: { serial: 'To be filled by O.E.M.' },
+              identifiers: [{ kind: 'mac', value: '00:15:5d:01:02:03' }],
+            },
+          },
+        }),
+      );
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+      const createArg = firstArg<{ serial?: string }>(assets.create);
+      expect(createArg).not.toHaveProperty('serial');
+    });
+
+    it('trackAsAsset:false still adopts nothing and mints nothing (graph-only is untouched)', async () => {
+      confirmReads(pendingCorroborated());
+
+      await service.confirmNode('node-1', { trackAsAsset: false }, HUMAN);
+
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(assetHistory.record).not.toHaveBeenCalled();
+    });
+
+    it('the #1081 collision retry survives as a RACE BACKSTOP, not the designed path', async () => {
+      // Under §3 a serial that would collide is a serial that corroborates, and a corroborating serial
+      // adopts — so this catch is only reachable when two confirms land at once. Retrying without the
+      // serial still beats failing an operator`s confirm.
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue(null); // nothing to adopt at probe time…
+      assets.create
+        .mockRejectedValueOnce(
+          new KnownError('P2002', { target: 'assets_serial_active_key' }),
+        )
+        .mockResolvedValueOnce({ id: 'asset-new' }); // …but a racing confirm minted it in between
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(assets.create).toHaveBeenCalledTimes(2);
+      const retry = (assets.create.mock.calls as unknown[][])[1][0] as {
+        serial?: string;
+      };
+      expect(retry).not.toHaveProperty('serial');
+    });
+  });
+
+  describe('getNodeDetail — the ADR-0093 display-only hints', () => {
+    const CORROBORATED_SPECS = {
+      host: {
+        hostname: 'jm-laptop',
+        hardware: { serial: 'SN-REAL-123' },
+        identifiers: [
+          { kind: 'serial', value: 'SN-REAL-123' },
+          { kind: 'mac', value: '00:15:5d:01:02:03' },
+        ],
+      },
+    };
+
+    it('`assetCandidate` names the Asset a confirm WOULD adopt', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'PENDING',
+        assetId: null,
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetCandidate).toEqual({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+      // Mutually exclusive with the duplicate hint by construction.
+      expect(detail.duplicateAssetSuspicion).toBe(null);
+    });
+
+    it('is null when the confirm would MINT — the tray must never promise a link it will not make', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'PENDING',
+        assetId: null,
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue(null);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetCandidate).toBe(null);
+    });
+
+    it('is null on a node that is already CONFIRMED — its confirm is an idempotent no-op', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'CONFIRMED',
+        assetId: null,
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetCandidate).toBe(null);
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('`duplicateAssetSuspicion` names the curated row an OLD collision retry duplicated (§8.5)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst
+        // getNodeDetail`s own assetName read…
+        .mockResolvedValueOnce({ name: 'jm-laptop' })
+        // …then the suspicion check: the linked row is auto-created AND serial-less…
+        .mockResolvedValueOnce({
+          serial: null,
+          specs: { _infraAutoCreated: true },
+        })
+        // …and this node`s serial belongs to a DIFFERENT live asset.
+        .mockResolvedValueOnce({
+          id: 'asset-curated',
+          name: 'Dell XPS 7490',
+          serial: 'SN-REAL-123',
+        });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.duplicateAssetSuspicion).toEqual({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+      expect(detail.assetCandidate).toBe(null);
+    });
+
+    it('a linked Asset that CARRIES a serial is not suspicious — nothing was dropped', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst
+        .mockResolvedValueOnce({ name: 'jm-laptop' })
+        .mockResolvedValueOnce({
+          serial: 'SN-REAL-123',
+          specs: { _infraAutoCreated: true },
+        });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.duplicateAssetSuspicion).toBe(null);
+    });
+
+    it('a HUMAN-created linked Asset is never suspected — the marker is the whole signal', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'CONFIRMED',
+        assetId: 'asset-human',
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst
+        .mockResolvedValueOnce({ name: 'jm-laptop' })
+        .mockResolvedValueOnce({ serial: null, specs: {} });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.duplicateAssetSuspicion).toBe(null);
     });
   });
 });

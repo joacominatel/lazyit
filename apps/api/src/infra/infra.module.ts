@@ -7,6 +7,7 @@ import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { AgentPolicyService } from './agent-policy.service';
 import { AssetsModule } from '../assets/assets.module';
+import { AssetHistoryModule } from '../asset-history/asset-history.module';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
 import { ArticlesModule } from '../articles/articles.module';
 import { SecretManagerModule } from '../secret-manager/secret-manager.module';
@@ -20,8 +21,12 @@ import { NotificationsModule } from '../notifications/notifications.module';
   //   - SecretManagerModule → SecretManagerService: METADATA-ONLY node→secret linkage (ADR-0073, §6,
   //     #801). The drill-in resolves secret HANDLES; attach is gated by live vault membership. INV-10:
   //     handles/labels only, the server never touches a value.
+  //   - AssetHistoryModule → AssetHistoryService: the ONE `AGENT_LINKED` event an adoption emits at
+  //     the moment a node links an existing asset (ADR-0093 §4, #1198). Nothing else on this path
+  //     writes asset history — the recurring specs refresh is deliberately silent.
   imports: [
     AssetsModule,
+    AssetHistoryModule,
     AssetAssignmentsModule,
     ArticlesModule,
     SecretManagerModule,

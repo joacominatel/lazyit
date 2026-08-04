@@ -26,6 +26,9 @@ const RULE_SELECT = {
   hostnamePattern: true,
   subnetCidr: true,
   reportedKind: true,
+  // The ADR-0093 §6 condition. Stored as `String?` (one vocabulary, one storage shape); the matcher
+  // reads this row DIRECTLY, so nothing is reshaped or cast on the way in.
+  chassis: true,
   confirmAsKind: true,
   trackAsAsset: true,
   createdById: true,
@@ -114,6 +117,7 @@ export class InfraAutoConfirmService {
         hostnamePattern: dto.hostnamePattern ?? null,
         subnetCidr: dto.subnetCidr ?? null,
         reportedKind: dto.reportedKind ?? null,
+        chassis: dto.chassis ?? null,
         confirmAsKind: dto.confirmAsKind ?? null,
         trackAsAsset:
           dto.trackAsAsset ?? defaultTrackAsAsset(appliesTo !== 'HOST'),
@@ -148,10 +152,11 @@ export class InfraAutoConfirmService {
       subnetCidr: 'subnetCidr' in dto ? dto.subnetCidr : existing.subnetCidr,
       reportedKind:
         'reportedKind' in dto ? dto.reportedKind : existing.reportedKind,
+      chassis: 'chassis' in dto ? dto.chassis : existing.chassis,
     };
     if (!statesAutoConfirmCondition(merged)) {
       throw new BadRequestException(
-        'This patch would leave the rule with no condition that can rule a proposal OUT, and ADR-0074 §1 rejected rules that state no condition — a rule whose conditions cannot exclude anything is blanket auto-confirm. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern made only of wildcards does not count: most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them conservatively. Dropping one condition while another survives is fine.',
+        'This patch would leave the rule with no condition that can rule a proposal OUT, and ADR-0074 §1 rejected rules that state no condition — a rule whose conditions cannot exclude anything is blanket auto-confirm. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, a reported kind, or a reported chassis. A pattern made only of wildcards does not count: most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them conservatively. Dropping one condition while another survives is fine.',
       );
     }
 

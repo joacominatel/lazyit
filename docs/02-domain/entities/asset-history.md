@@ -43,7 +43,9 @@ the "what changed, when, by whom?" trail that auditing requires ([[problem-space
 a bulk import that matches a live asset by serial UPDATEs it, and when no tracked dimension changed this
 marker is written so the re-import still leaves one audit row; [[0069-migrator-import]] #1061) ·
 `ACKNOWLEDGED` (emitted by `POST /asset-assignments/:id/acknowledge` when the assignee confirms receipt —
-ADR-0089 Part B, #1029).
+ADR-0089 Part B, #1029) · `AGENT_LINKED` (an agent-reported [[infra-node]] **adopted** this asset at its
+confirm gate — [[0093-chassis-routing-and-asset-adoption]] §4, #1198; payload
+`{ nodeId, reportingSource, externalId }`).
 
 ## Emission
 
@@ -55,6 +57,13 @@ ADR-0089 Part B, #1029).
   change event fired, so a no-delta re-import still audits; [[0069-migrator-import]] #1061).
 - [[asset-assignment]] service — `ASSIGNED` (open), `RELEASED` (release) and `ACKNOWLEDGED`
   (self-service acknowledgement of receipt; payload `{ userId }` = the acknowledging owner — #1029).
+- [[infra-node]] service — `AGENT_LINKED`, and **only** that one. Emitted **exactly once**, at the moment
+  a confirm adopts an existing asset instead of minting one ([[0093-chassis-routing-and-asset-adoption]]
+  §3/§4, #1198). The recurring path is deliberately **silent**: `syncAssetSpecs` refreshes an adopted
+  asset's `specs` on every check-in with **no** `SPECS_CHANGED`, because an event per report at a
+  five-minute cadence would bury every human edit the row ever received. What *moved* is audited on the
+  node instead ([[infra-node-fact-change]], #1143), one join away. Best-effort: a failed write logs and
+  never fails the confirm (on the auto-confirm path it would fail a *report*).
 
 ## Endpoint
 
