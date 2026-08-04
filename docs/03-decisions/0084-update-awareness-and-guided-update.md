@@ -3,7 +3,7 @@ title: "ADR-0084: Update awareness & guided update — check, weekly email, upda
 tags: [adr, updates, versioning, deployment, infra, notifications, settings]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-08-04
 deciders: [Joaquín Minatel]
 ---
 
@@ -233,6 +233,9 @@ explicitly **NEVER a Docker socket in a network-reachable container**:
 - **Never mount `/var/run/docker.sock` into `web`, `api`, or any network-reachable container.** No
   `--privileged`, no Docker-in-the-app, no exceptions for convenience.
 - **No auto-apply, ever.** No scheduled or unattended update path exists, in any configuration.
+  *(Scoped, not relaxed — #1209, 2026-08-04: this line rules **the server's own update**, the subject
+  of this ADR. The reporting agent's update axis is governed by [[0094-assisted-agent-update]], which
+  declines agent self-update on its own stricter grounds. See the amendment below.)*
 - **The updater never writes, rotates, or regenerates `.env.prod`** or the DR linchpins
   (`ZITADEL_MASTERKEY`, `WORKFLOW_SECRET_KEY`, the DB password), **and never runs `down -v`**.
   `start.sh`'s non-destructive guarantee extends to `update.sh` verbatim.
@@ -276,3 +279,38 @@ and surfaced on `GET /instance/update-status` as `securityRelevant`.
   `lastEmailedSecurity` de-dupes that transition so the security nudge never becomes a weekly re-nag; the
   email raises severity to `warning`, prefixes the subject with "Security update:", and gains a
   `:security` dedupeKey suffix so it is a distinct notification row from any prior routine one.
+
+## Amendment — the no-auto-apply red line is scoped to the server's own update (issue #1209, 2026-08-04)
+
+**Scope only. Nothing is relaxed, and no update path is opened on any axis.** The sentence is left
+standing verbatim above; this amendment says which axis it rules.
+
+*"No auto-apply, ever. No scheduled or unattended update path exists, in any configuration."* was
+written about **the server's own update** — the subject of this entire ADR: a git checkout, a
+forward-only Prisma migration, `.env.prod`, and the two databases whose pre-update dumps are the only
+true rollback (§Context 1–3, §3). Its own stated reasoning names that scenario and nothing else — *"a
+bad migration would run with nobody watching"*, *"it updated itself at 3am and broke"*. But it is
+phrased unqualified, in the section operators are pointed at, so it reads as a rule over every update
+axis the product has. Over the axis it was written for it holds in full force, unchanged: every
+update of a lazyit server is an explicit human action, and no scheduled or unattended path to one
+exists.
+
+**The agent axis is governed by [[0094-assisted-agent-update]], and it is stricter, not laxer.** The
+[[0074-server-reporting-agent]] agent has no checkout, no migrations and no `.env.prod` linchpin, so
+this ADR's specific reasoning does not transfer to it verbatim — and ADR-0094 declined agent
+self-update anyway, on grounds this ADR does not own: **shape A** (full self-update) rejected on its
+shape, and **shape C** (human-triggered, agent-executed) rejected for now against
+[[0074-server-reporting-agent]] §7's *"No server-pushed commands, scripts, paths or file reads.
+Ever."*, plus two platform-level blockers (`ProtectSystem=full` exists precisely so the Linux agent
+cannot rewrite its own binary; the Windows `.exe` is loader-locked) and the absence of any rollback
+target on either platform — the very thing §3.10 above makes mandatory for the *lesser* server
+update. C reopens only when **all four** conditions in ADR-0094 §Considered options hold, and only
+via a new ADR that amends [[0074-server-reporting-agent]] §7 explicitly. The shape that was chosen,
+**B, applies nothing at all**: the server names which agents are behind and renders a command to a
+logged-in admin, who decides whether anything runs.
+
+**So this amendment opens no door.** Read as "auto-apply is fine as long as it isn't the server", it
+is being read against both the sentence it scopes and ADR-0094, which reached the stricter conclusion
+on the agent axis independently. Nothing currently depends on this scoping — ADR-0094 §1 quotes the
+line, reads it at face value, and stays inside it either way. It is recorded so the next proposal in
+this area finds the answer instead of re-deriving it.
