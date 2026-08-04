@@ -1,4 +1,5 @@
 import type {
+  AgentFleetView,
   AgentPolicyOverride,
   AgentPolicySettings,
   AttachInfraSecret,
@@ -361,6 +362,22 @@ export function detachInfraNodeSecret(
     method: "DELETE",
     body,
   });
+}
+
+/**
+ * The agent fleet read (`GET /infra/agents/fleet`, ADR-0094 §4 / #1206) — *"how many agents do I
+ * have, on what versions, who has not checked in, and who is degraded?"* in ONE request.
+ *
+ * Read-only and derived: every field comes from data the server already stores, and nothing here
+ * pushes anything toward a host. The response carries the instance's own `serverVersion` alongside
+ * the rows, so the table can never render a distribution against a version it did not come from.
+ *
+ * NOT polled like `getInfraNodes` is. This is a page an operator navigates to and reads, not a live
+ * board — and the read is heavier (it projects `specs.host.os.family` and `specs.diagnostics` per
+ * row), which is exactly why #1135 kept `specs` off the list projection in the first place.
+ */
+export function getAgentFleet(signal?: AbortSignal): Promise<AgentFleetView> {
+  return apiFetch<AgentFleetView>(`${BASE}/agents/fleet`, { signal });
 }
 
 /**

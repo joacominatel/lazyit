@@ -10,8 +10,8 @@ order: 2
 La vista **Tabla** es la forma de tabla, escaneable, de tu topología — los mismos nodos que el
 [Mapa](/help/assets-topology-diagram), pero como una lista plana que puedes buscar y filtrar en lugar
 de un mapa de movimiento libre. No es una entrada aparte en la barra lateral: la abres desde
-**Activos › Topología** y luego cambias con el interruptor **Mapa ⇄ Tabla** arriba a la derecha
-(junto a **Agregar**). La Tabla también está disponible directamente en
+**Activos › Topología** y luego cambias con el interruptor **Mapa · Tabla · Agentes** arriba a la
+derecha (junto a **Agregar**). La Tabla también está disponible directamente en
 `/assets/diagram?view=table`.
 
 Es útil cuando quieres *encontrar* una máquina en vez de *ver* cómo se conecta: recorre una columna,
@@ -21,12 +21,17 @@ filtra por un tipo o busca por nombre.
 > nodos sucede en el [Mapa](/help/assets-topology-diagram); la vista de Servidores agrega lo suyo:
 > la bandeja de **Revisión pendiente** (abajo).
 
-## Cambiar entre Mapa y Tabla
+## Cambiar entre Mapa, Tabla y Agentes
 
-El interruptor **Mapa ⇄ Tabla** está en el encabezado de Topología. Al cambiar de vista se conserva
-tu contexto: la búsqueda y los filtros de la tabla (Tipo, Estado, Estado de ciclo) y cualquier nodo
-que tengas seleccionado se mantienen, así que al pasar al Mapa ves el mismo parque — y al hacer clic
-en una fila de la Tabla ese nodo se abre directamente en el Mapa.
+El interruptor **Mapa · Tabla · Agentes** está en el encabezado de Topología. Al cambiar de vista se
+conserva tu contexto: la búsqueda y los filtros de la tabla (Tipo, Estado, Estado de ciclo) y
+cualquier nodo que tengas seleccionado se mantienen, así que al pasar al Mapa ves el mismo parque — y
+al hacer clic en una fila de la Tabla ese nodo se abre directamente en el Mapa.
+
+La tercera vista, **Agentes**, no habla del grafo sino de las máquinas que se reportan solas: qué
+versiones de agente estás corriendo, quién dejó de reportar y el comando que actualiza un host que
+quedó atrasado. Ver
+[la vista Agentes](/help/assets-topology-reporting-agent#la-vista-agentes).
 
 ## Columnas
 

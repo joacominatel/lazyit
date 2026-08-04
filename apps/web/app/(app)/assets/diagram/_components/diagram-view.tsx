@@ -1,6 +1,6 @@
 "use client";
 
-import { ShareIcon, TableCellsIcon } from "@heroicons/react/24/outline";
+import { CpuChipIcon, ShareIcon, TableCellsIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -14,8 +14,15 @@ import {
   SHOW_ENDPOINTS_VALUE,
   showEndpointsFromParam,
 } from "@/lib/infra/endpoints";
+import {
+  TOPOLOGY_VIEWS,
+  type TopologyView,
+  topologyViewFromParam,
+  topologyViewParam,
+} from "@/lib/infra/topology-view";
 import { cn } from "@/lib/utils";
 import { AddNodeMenu } from "./add-node-menu";
+import { AgentFleetView } from "./agent-fleet-view";
 import { CreateAgentWizard } from "./create-agent-wizard";
 import { CreateNodeDialog } from "./create-node-dialog";
 import { InfraCanvas, type InfraCanvasApi } from "./infra-canvas";
@@ -24,16 +31,19 @@ import { NodeDetailModal } from "./node-detail-modal";
 import { ServersTableView } from "./servers-table-view";
 
 /**
- * The Assets › Topology screen (ADR-0070 §6): the page header + a Map/Table view toggle, then either
+ * The Assets › Topology screen (ADR-0070 §6): the page header + a Map/Table/Agents view toggle, then
  * the React Flow board + drill-in payoff (the Map, issue #742) or the filterable node list (the
  * Table, issue #743 — formerly the standalone `/assets/servers` route).
  *
- * One destination, two views (#760). A `?view=map|table` search param picks the view; the segmented
- * control in the header's actions slot flips it. ponytail: `view` is read from the URL (no local
- * mirror) and written with the shared `buildNextUrl` patch helper, so a Map↔Table switch PRESERVES
- * every other param — the Table's filters (`kind`/`status`/`state`/`q`, all URL-backed via
- * `useListParams`) and a `?node=` selection survive the switch untouched. Any value other than
- * `table` degrades to the Map (a tampered `?view` never errors).
+ * One destination, THREE views (#760, third from ADR-0094 §4): the Map, the Table, and Agents — the
+ * fleet view that answers *how many agents, on what versions, who has not checked in, who is
+ * degraded*, and hands over the command for each host that is behind. A `?view=map|table|agents`
+ * search param picks the view; the segmented control in the header's actions slot flips it.
+ * ponytail: `view` is read from the URL (no local mirror) and written with the shared `buildNextUrl`
+ * patch helper, so switching PRESERVES every other param — the Table's filters
+ * (`kind`/`status`/`state`/`q`), the Agents view's `agents` filter, and a `?node=` selection all
+ * survive untouched. {@link topologyViewFromParam} degrades anything it does not know to the Map, so
+ * a tampered or stale `?view` never errors and never shows an empty screen.
  *
  * Client-only on purpose — React Flow renders in the browser, so there is NO SSR prefetch (the
  * canvas's data is fetched client-side via TanStack Query, per #741). In the Map view the board fills
@@ -88,7 +98,7 @@ export function DiagramView() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const view = searchParams.get("view") === "table" ? "table" : "map";
+  const view = topologyViewFromParam(searchParams.get("view"));
   // The `?node=` the URL carries right now. Read on every render (not once): it is what both the
   // initial state below and the deep-link effect further down are driven by.
   const nodeParam = searchParams.get("node");
@@ -200,6 +210,8 @@ export function DiagramView() {
 
       {view === "table" ? (
         <ServersTableView />
+      ) : view === "agents" ? (
+        <AgentFleetView />
       ) : (
         <>
           <div className="min-h-0 flex-1">
@@ -244,15 +256,27 @@ export function DiagramView() {
   );
 }
 
+/** The glyph each view wears in the toggle. Heroicons only (ADR-0045). */
+const VIEW_ICON = {
+  map: ShareIcon,
+  table: TableCellsIcon,
+  agents: CpuChipIcon,
+} as const;
+
 /**
- * The Map ⇄ Table segmented control (#760). A compact two-tab `Tabs` (the shadcn primitive the
- * Reports screen already uses — NO new dependency) sitting in the header actions slot, left of the
- * add affordance. It drives `?view` directly: switching writes the param with `buildNextUrl` so every
- * OTHER param (the Table filters + a `?node=` selection) is preserved across the switch, then `router
- * .replace(..., { scroll: false })` keeps the URL shareable/Back-navigable without a scroll jump.
- * `inventory` pillar tint on the active underline so the toggle wears the Topology hue (ADR-0049).
+ * The Map ⇄ Table ⇄ Agents segmented control (#760, third tab from ADR-0094 §4). A compact `Tabs`
+ * (the shadcn primitive the Reports screen already uses — NO new dependency) sitting in the header
+ * actions slot, left of the add affordance. It drives `?view` directly: switching writes the param
+ * with `buildNextUrl` so every OTHER param (the Table filters, the Agents filter, a `?node=`
+ * selection) is preserved across the switch, then `router.replace(..., { scroll: false })` keeps the
+ * URL shareable/Back-navigable without a scroll jump. `inventory` pillar tint on the active underline
+ * so the toggle wears the Topology hue (ADR-0049).
+ *
+ * The Agents tab is a plain tab and NOT a badge, a count or a dot. ADR-0094 §8: the fleet view is a
+ * place the admin navigates to, and the one signal allowed to be loud stays the MAJOR-behind badge
+ * #907 already ships on the rows themselves.
  */
-function ViewToggle({ view }: { view: "map" | "table" }) {
+function ViewToggle({ view }: { view: TopologyView }) {
   const t = useTranslations("infra.view");
   const router = useRouter();
   const pathname = usePathname();
@@ -265,27 +289,26 @@ function ViewToggle({ view }: { view: "map" | "table" }) {
         router.replace(
           buildNextUrl(searchParams.toString(), pathname, {
             // Drop the param on the default view to keep URLs clean (mirrors useListParams).
-            view: next === "map" ? undefined : next,
+            view: topologyViewParam(topologyViewFromParam(next)),
           }),
           { scroll: false },
         )
       }
     >
       <TabsList className="w-auto">
-        <TabsTrigger
-          value="map"
-          indicatorClassName="data-[state=active]:border-pillar-inventory"
-        >
-          <ShareIcon aria-hidden />
-          {t("map")}
-        </TabsTrigger>
-        <TabsTrigger
-          value="table"
-          indicatorClassName="data-[state=active]:border-pillar-inventory"
-        >
-          <TableCellsIcon aria-hidden />
-          {t("table")}
-        </TabsTrigger>
+        {TOPOLOGY_VIEWS.map((candidate) => {
+          const Icon = VIEW_ICON[candidate];
+          return (
+            <TabsTrigger
+              key={candidate}
+              value={candidate}
+              indicatorClassName="data-[state=active]:border-pillar-inventory"
+            >
+              <Icon aria-hidden />
+              {t(candidate)}
+            </TabsTrigger>
+          );
+        })}
       </TabsList>
     </Tabs>
   );

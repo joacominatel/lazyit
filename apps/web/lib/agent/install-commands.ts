@@ -1,10 +1,17 @@
 /**
- * The exact commands the "Add a server" wizard hands an operator, per platform (issue #1168).
+ * The exact commands lazyit hands an operator for a host, per platform (issues #1168 and #1207).
  *
- * Pure and separate from the component for the same reason `tray-selection.ts` is: what the wizard
+ * Pure and separate from the component for the same reason `tray-selection.ts` is: what the UI
  * prints is a promise about two installers it does not contain, and a promise is not something a
- * component can be held to. `agent-install-commands.test.ts` asserts these strings against
+ * component can be held to. `install-commands.test.ts` asserts these strings against
  * `apps/web/public/install.sh` and `apps/web/public/install.ps1` as they are actually served.
+ *
+ * IT LIVES IN `lib/` AND NOT IN `@lazyit/shared` (ADR-0094 §5). It was route-private under the
+ * topology wizard's `_components/` until the agent fleet view needed the same strings; two callers
+ * make it web-internal shared code, and there is exactly ONE builder so the fleet view can never
+ * drift from the wizard on the flags that are hardest to test (the plain-http opt-in below). It does
+ * not go further out to the shared package because its test — the thing that makes it trustworthy —
+ * reads the two installer files THIS app serves off disk, and that test belongs where they ship.
  *
  * The wizard used to emit the Linux one-liner and nothing else. The agent has been cross-platform
  * since ADR-0074's Windows amendment (#1144) and the Manual has documented the PowerShell form since
@@ -64,7 +71,7 @@ export type AgentManualStep = {
    * The label and the command are ONE object on purpose. They used to be two positionally-indexed
    * arrays — the labels read out of the catalog in the component, the commands built here — and
    * nothing held index N of one to index N of the other, so an edit could add a step to one side
-   * only and every test still passed. `agent-install-commands.test.ts` now asserts these keys
+   * only and every test still passed. `install-commands.test.ts` now asserts these keys
    * against the `stepN` keys BOTH locale catalogs actually ship, in order.
    */
   labelKey:
@@ -92,6 +99,71 @@ export function agentInstallCommand(
   }
   const optIn = insecureHttp(origin) ? " --allow-insecure-http" : "";
   return `curl -fsSL ${origin}/install.sh | sudo sh -s -- --url ${origin} --token ${token}${optIn}`;
+}
+
+/**
+ * The command that brings ONE ALREADY-INSTALLED host up to the instance's build (ADR-0094 §5/§6).
+ *
+ * It is `--upgrade` / `-Upgrade` and NOTHING ELSE (#1208), and every argument that is absent is
+ * absent on purpose.
+ *
+ * **WHY IT CARRIES NO `--url`.** It used to. `LAZYIT_URL` is a key the installer OWNS and REWRITES
+ * on every run, and the origin in a generated command is whatever host header the admin's browser
+ * happened to reach this instance on. In the `lan` deployment mode of ADR-0087 the instance answers
+ * on every address it is reached by, so one paste across forty hosts silently re-pinned the whole
+ * estate at one admin's URL — and it contradicted the Manual's own promise that a host's
+ * configuration is *merged, not replaced*. `--upgrade` reads `LAZYIT_URL` back off
+ * `/etc/lazyit-agent/config` instead, so the command cannot repoint anything. The origin below
+ * survives only as WHERE THE SCRIPT IS FETCHED FROM; it is never written to the host.
+ *
+ * **WHY IT CARRIES NO TOKEN, AND WHY NAMING `LAZYIT_TOKEN` HERE WOULD NOW BE A BUG.** The server
+ * structurally cannot re-emit an installed host's secret — only `tokenHash`/`tokenPrefix` are stored
+ * (ADR-0094 §6). This used to be answered by telling the operator to export `LAZYIT_TOKEN` and
+ * carrying `sudo -E` to get it past sudo's environment reset. `--upgrade` authenticates with the
+ * token already in the host's own config file, which the installer wrote there itself at `0600`. It
+ * also inherits `--keep-token`'s refusal to share a run with any other credential source, so
+ * `LAZYIT_TOKEN` set in the environment is now a HARD ERROR rather than a fallback: the old advice
+ * would break the very command it accompanied. `sudo -E` goes with it — there is no longer an
+ * environment variable worth preserving across sudo.
+ *
+ * **WHY IT CARRIES NO `--ca-file`.** Same reason as the URL: `LAZYIT_CA_FILE` comes back off the
+ * host's config. One caveat is real and pre-existing, and the UI and the Manual both state it — the
+ * `curl`/`irm` that fetches THIS SCRIPT runs before any of that, so a host behind an internal CA
+ * still needs that CA in its system trust store for the first hop. That was true of the install
+ * command too; `--upgrade` neither fixes nor worsens it.
+ *
+ * The result is one string per platform, IDENTICAL ON EVERY HOST, which is what makes the bulk
+ * handoff of ADR-0094 §7 a two-line artifact rather than a generated per-host inventory.
+ *
+ * Everything else about re-running is already true and is why this is safe to hand to a machine:
+ * the checksum is re-verified on every run and a mismatch is fatal (#1190), the installer runs
+ * `lazyit-agent --help` before arming anything and leaves the host as it found it on failure, it
+ * MERGES the existing config rather than replacing it (so a host owner's `LAZYIT_COLLECT_*=false`
+ * veto survives), and the node keeps its identity because identity is `(reportingSource, externalId)`
+ * and not the binary. Re-running on a current host is a no-op.
+ */
+export function agentUpdateCommand(
+  platform: AgentPlatform,
+  origin: string,
+): string {
+  // The plain-http opt-in still rides, and it is NOT a re-pin: it is a per-run decision, not a
+  // config key, so it is the same string on every host. It keys off the browser origin because that
+  // is the only signal available — and on an ADR-0087 `lan` instance, the origin the admin is
+  // browsing and the URL the host has on disk are the same plain-http address. Where they are not,
+  // the run stops with the installer's own message rather than proceeding over cleartext.
+  //
+  // IT IS REQUIRED HERE, NOT OPTIONAL. #1208's final resolution made the opt-in NON-INHERITABLE: a
+  // host installed over cleartext carries `LAZYIT_URL=http://…`, `--upgrade` re-uses it, and the
+  // installers' plain-http gate bites on the RESOLVED url whatever supplied it — so an upgrade over
+  // such a config is REFUSED unless the opt-in is passed again. Emitting the command without it
+  // would hard-stop on paste on every `lan` instance. `install-commands.test.ts` pins both the
+  // emitted string and the installers' non-inheritance comment.
+  if (platform === "windows") {
+    const optIn = insecureHttp(origin) ? " -AllowInsecureHttp" : "";
+    return `& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Upgrade${optIn}`;
+  }
+  const optIn = insecureHttp(origin) ? " --allow-insecure-http" : "";
+  return `curl -fsSL ${origin}/install.sh | sudo sh -s -- --upgrade${optIn}`;
 }
 
 /**

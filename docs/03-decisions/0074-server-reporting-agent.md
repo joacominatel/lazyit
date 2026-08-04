@@ -1918,7 +1918,7 @@ and had to leave for `/help` to find out what to type.
 Step 2 now takes a **platform choice** (Linux default) and switches four things with it: the
 requirements line, the emitted install command, the inspect-first path, and the post-install check.
 Each is worth stating because each is a promise about code this component does not contain, and
-`agent-install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}` as served
+`lib/agent/install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}` as served
 and against both locale catalogs as shipped:
 
 - **The requirements line states the real constraint, not a friendly one.** Windows 10/11 or Server

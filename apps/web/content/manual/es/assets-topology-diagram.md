@@ -14,9 +14,11 @@ relacionan tus cosas*: qué máquina corre sobre qué host, qué pertenece a un 
 dónde, qué depende de qué.
 
 Lo abres desde la barra lateral en **Activos › Topología**. La misma pantalla tiene un interruptor
-**Mapa ⇄ Tabla** arriba a la derecha: el **Mapa** es este tablero de movimiento libre, y la **Tabla**
-es una lista plana y filtrable de los mismos nodos — ver
-[Lista de servidores](/help/assets-topology-servers).
+**Mapa · Tabla · Agentes** arriba a la derecha: el **Mapa** es este tablero de movimiento libre, la
+**Tabla** es una lista plana y filtrable de los mismos nodos — ver
+[Lista de servidores](/help/assets-topology-servers) — y **Agentes** es la vista de flota de las
+máquinas que se reportan solas, con el comando que actualiza las que quedaron atrasadas
+([Agente de reporte](/help/assets-topology-reporting-agent#la-vista-agentes)).
 
 > Cualquiera que pueda ver la topología ve el mapa y el detalle de solo lectura de cada nodo.
 > Agregar nodos, dibujar conexiones, cambiar un estado o quitar un nodo del mapa requiere el permiso

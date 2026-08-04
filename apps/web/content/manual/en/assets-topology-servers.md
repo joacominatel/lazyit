@@ -10,7 +10,7 @@ order: 2
 The **Table** view is the scannable, table form of your topology — the same nodes as the
 [Map](/help/assets-topology-diagram), but as a plain list you can search and filter instead of a
 free-move map. It is not a separate sidebar entry: you reach it from **Assets › Topology**, then flip
-the **Map ⇄ Table** toggle in the top-right (next to **Add**). The Table is also available
+the **Map · Table · Agents** toggle in the top-right (next to **Add**). The Table is also available
 directly at `/assets/diagram?view=table`.
 
 It's handy when you want to *find* a machine rather than *see* how it connects: scan a column, filter
@@ -20,12 +20,17 @@ to one kind, or search by name.
 > connecting nodes all happen on the [Map](/help/assets-topology-diagram); the Servers view adds two
 > things of its own — the **Pending review** tray and the **Add a server** button (both below).
 
-## Switching between Map and Table
+## Switching between Map, Table and Agents
 
-The **Map ⇄ Table** toggle lives in the Topology header. Switching views keeps your context: the
-table's search and filters (Kind, Status, State) and any node you have selected all carry across, so
-flipping to the Map shows the same estate — and clicking a row in the Table opens that node straight
-on the Map.
+The **Map · Table · Agents** toggle lives in the Topology header. Switching views keeps your context:
+the table's search and filters (Kind, Status, State) and any node you have selected all carry across,
+so flipping to the Map shows the same estate — and clicking a row in the Table opens that node
+straight on the Map.
+
+The third view, **Agents**, is about the machines that report themselves rather than about the graph:
+which agent versions you are running, who has stopped checking in, and the command that updates a
+host that has fallen behind. See
+[the Agents view](/help/assets-topology-reporting-agent#the-agents-view).
 
 ## Columns
 

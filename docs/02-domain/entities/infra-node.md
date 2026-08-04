@@ -251,6 +251,30 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
 
 See [[infra-auto-confirm-rule]] for the saved-rule half of the same amendment.
 
+### The agent fleet read (ADR-0094 §4 / #1206, consumed by #1207)
+
+- `GET /infra/agents/fleet` — the whole fleet view in one read (`infra:read`): the instance's own
+  `serverVersion`, the `summary` distribution, one row per agent-bearing host, and the live
+  `infra:report` service accounts (never-used first, capped). **Read-only and derived** — it computes
+  from data already stored and pushes nothing toward a host. Container children are excluded (they
+  inherit their host's `agentVersion`, so counting them would inflate every bucket), and `osFamily` is
+  projected out of `specs` per read rather than added as a column. Deliberately **not** on the 5–40s
+  poll the node list is on: it is a page an operator opens, and it is the heavier read (#1135).
+
+The web consumes it at **Assets › Topology › Agents** (`?view=agents`, #1207): the distribution, the
+liveness and degraded flags, and — only on a host that is genuinely behind — the exact update command,
+built for that host's reported `AgentOsFamily` by `apps/web/lib/agent/install-commands.ts`, the same
+builder the "Add a server" wizard uses. That command is `--upgrade` / `-Upgrade` and **nothing else**
+(#1208): no token (only `tokenHash`/`tokenPrefix` exist, so the server cannot re-emit one), and
+deliberately **no `--url` and no `--ca-file`** — those are keys the installer owns and rewrites, so
+emitting them would re-pin every host the command was pasted on. `--upgrade` reads all three back off
+the host's own config, which makes the string identical on every host. See ADR-0094 §6 amendment.
+
+The credential block (`identities` + `identitiesNeverUsed`) rides a **second `settings:manage` gate**
+and is **omitted, not emptied**, for a caller without it (#1206) — an empty array would read as "no
+agent tokens exist", a different and false claim. The web hides the whole card on absence
+(`agentFleetCredentialBlock` in `apps/web/lib/agent/fleet.ts`) rather than rendering a zero state.
+
 ### Server-driven agent policy (ADR-0074 §7 amendment / #1140)
 
 - `GET /infra/agent-policy` — the **instance default** layer plus the instance-wide `revision`
@@ -293,8 +317,8 @@ this build, which that section now states on screen rather than implying only on
   search / the Servers table stay unfiltered), surfaces chassis in the review tray, adds it as an
   `InfraAutoConfirmRule` condition, and makes a confirm **adopt** a corroborated live [[asset]] instead
   of minting a duplicate.
-- **Assisted agent update + the fleet view** — *the SERVER READ shipped; the web view has not*
-  ([[0094-assisted-agent-update]], #1204/#1206). `agentVersion` had been a first-class column since #907
+- ~~**Assisted agent update + the fleet view**~~ **Shipped**
+  ([[0094-assisted-agent-update]], #1204/#1206/#1207). `agentVersion` had been a first-class column since #907
   that nothing aggregated. `GET /infra/agents/fleet` (`infra:read`) now answers *how many agents, on what
   versions, who has not checked in, who is degraded*: every agent-bearing host — container children
   excluded, since they carry their host's `agentVersion` — bucketed **exclusively** into `majorBehind` /
@@ -314,9 +338,12 @@ this build, which that section now states on screen rather than implying only on
   stays true past the identity cap instead of clamping to it. **No migration, no agent change, no
   `agentUpdate` on the ack, no
   server-pushed execution** — full self-update and human-triggered/agent-executed update were both
-  declined, with reopening criteria recorded. Still **inert until #1203**: every Docker-served binary
-  reports `agentVersion: "dev"` today, so an estate honestly reads as entirely "version unknown" and fills
-  in as hosts are re-installed. The remaining work is the web surface (the table and the per-host command).
+  declined, with reopening criteria recorded. The web surface is the third view of the Topology screen
+  (`?view=agents`, #1207): the distribution, the liveness/degraded flags, the never-used credentials, and
+  the per-host command — rendered **only** where something is genuinely behind, which is ADR-0084 §5's
+  posture and not a styling choice. Still **inert until #1203**: every Docker-served binary reports
+  `agentVersion: "dev"` today, so an estate honestly reads as entirely "version unknown" and fills in as
+  hosts are re-installed — the view says exactly that rather than implying those agents are fine.
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
   per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]].
   → [[0070-infra-topology-graph]] "Future".

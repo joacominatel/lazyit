@@ -983,6 +983,172 @@ Once your instance is updated and rebuilt, the binaries it serves carry its vers
 already installed keep reporting `dev` until the install command is re-run on those hosts. Nothing
 else changes: `dev` is still a legitimate value, and it is still never nagged.
 
+The badge answers *"is this one host behind?"*. The **Agents** view answers the fleet-sized version of
+the same question, and hands you the command.
+
+### The Agents view
+
+**Assets › Topology › Agents** (the third tab in the header toggle, beside Map and Table) is the fleet
+view: every machine that runs the reporting agent, on one screen, with
+
+- **the version distribution across the top** — how many agents you have, how many are a *major*
+  behind, how many are behind by less, how many report a version lazyit can't compare, and how many
+  are up to date. Every count is also a filter: click **behind** and the table below shows exactly
+  those hosts.
+- **who has stopped checking in** — a host the staleness sweep marked **Not reporting**, or one that
+  has never reported at all.
+- **who is reporting incompletely** — the *Incomplete report* flag, for a host whose last collection
+  came back short (usually because the agent ran without root or SYSTEM, so it couldn't read the
+  serial or model).
+- **agent tokens that were never used** — a token you created for a host that never checked in. There
+  is no node to show for it, so without this line the most common install failure — the install that
+  was never run, or that failed — is invisible. **This one is admin-only:** it needs the same
+  permission as managing settings, and for anyone else the card is simply not there. It is left out
+  rather than shown empty, because an empty list would read as "no agent tokens are unused" — a claim
+  about credentials that viewer was never shown.
+- **the update command, per host** — but only on a host that is genuinely behind.
+
+That last point is deliberate. There is no update button on a host that is already current, no banner
+on your dashboard, and no email per host: this is a page you come to, not one that interrupts you. The
+full distribution sits in a table because a table you navigated to isn't nagging you; the only thing
+that ever raises a colour is the *major version behind* tier, exactly as the badge does.
+
+The view is read-only in the strongest sense: **lazyit never sends anything to a host.** It tells you
+what it knows and gives you a command to run yourself.
+
+### The update command
+
+Click **Update** on a row that is behind and lazyit shows the exact command for that machine, built
+for the system that host actually reported — the Linux one-liner or the PowerShell script-block form,
+never a guess. If a host has never told lazyit which system it runs, **both** commands are shown with
+a note, because handing a PowerShell line to a Debian box is worse than asking you to pick.
+
+The command is the same installer you used the first time, so everything it already does comes along:
+the download is checksum-verified, the binary is tested before anything is armed, and a plain-`http`
+instance gets the explicit `--allow-insecure-http` / `-AllowInsecureHttp` opt-in it needs — the one
+decision `--upgrade` will *not* carry over for you, described a few paragraphs down.
+
+**There is nothing in it to fill in.** On an `https` instance the update command is `--upgrade` and
+nothing else — the one thing that can ever join it is the plain-`http` opt-in, below:
+
+```sh
+curl -fsSL https://your-instance/install.sh | sudo sh -s -- --upgrade
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Upgrade
+```
+
+`--upgrade` re-runs the host using the token, instance URL and certificate authority **already in
+that host's own config file** — the one the installer wrote there itself, readable only by root
+(Linux) or SYSTEM and Administrators (Windows). So the same two lines work unchanged on every machine
+you have, which is what makes the bulk copy below a two-line artifact rather than a generated list
+with a different command per host.
+
+That URL matters more than it looks. lazyit deliberately does **not** put `--url` in the update
+command, because `LAZYIT_URL` is a key the installer *owns and rewrites* — and the URL in a generated
+command is whichever address your browser happened to reach this instance on. If your instance answers
+on several addresses (the plain-`http` LAN setup does exactly this), a command carrying `--url` would
+silently re-point every host you pasted it on at your address. `--upgrade` cannot: it reads each
+host's URL back off that host. Anything you *do* pass still wins, though —
+`--upgrade --url https://new-address` moves a machine deliberately, which is a different thing from
+moving it by accident.
+
+**It carries no token, and it can't.** lazyit only ever stores a *hash* of each host's token — it is
+not able to print one back, not for you and not for anyone who gets into the database. It doesn't need
+to: the host has its own.
+
+> **Don't set `LAZYIT_TOKEN` for this command.** `--upgrade` *refuses* to run alongside a token from
+> any other source — `--token`, `--token-file`, or `LAZYIT_TOKEN` in the environment — on purpose, so
+> that a token left over in your shell can never quietly overrule the one a host is actually using. If
+> you need to give a host a *different* token, that's the ordinary install form (`--url … --token …`),
+> typed deliberately. And on a machine that has no agent yet — or one whose config file has no token
+> in it, which is what `--keep-config` leaves behind — `--upgrade` stops and says so: there is nothing
+> to re-use, and a first install still needs an address and a token.
+
+**One thing `--upgrade` deliberately does not carry over: the plain-`http` opt-in.** If the machine
+was installed against a plain-`http` address, re-using that address is fine — but *accepting* what
+cleartext costs is a decision, not a setting, so you say it again. That is why the command lazyit
+generates for a plain-`http` instance already ends in `--allow-insecure-http`
+(`-AllowInsecureHttp` on Windows): pasting it is the decision. Run `--upgrade` on such a host without
+it and the installer refuses, naming the *configuration file* as where the `http` address came from,
+so it is clear you are not being asked about an address you typed. Everything else is unchanged: the
+checksum is verified on an upgrade exactly as on a first install, and a mismatch stops it.
+
+**Don't have that host's token any more? You don't need it.** The host still has it, and that is
+exactly what `--upgrade` uses — so a lost token is not a reason to touch Service accounts at all.
+
+Only a host with **no readable config left** — one you're rebuilding, or where the config was removed
+— needs a new credential. For that one, mint a token under
+[Service accounts](/help/users-permissions-service-accounts) and install it the first-time way, with
+`--url` and `--token`.
+
+> **Rotating is not the same as minting, and it is not undoable.** Rotating a service account
+> **invalidates the secret currently in use**. If your hosts share one `infra:report` account — which
+> is the normal setup — rotating it stops *every other agent on that account* from reporting, all at
+> once. Rotate when you mean to retire a credential, never as a way to "get a copy" of one.
+
+**Behind an internal certificate authority?** `--upgrade` re-uses the CA already configured on the
+host for the agent's own traffic, so you never have to remember the path to that machine's `.pem`.
+The `curl` / `irm` on the front of the command is a separate, earlier step — it runs before any config
+is read — so that CA still has to be in the host's system trust store, exactly as it did when you
+first installed. This hasn't changed; it's just the one thing the command can't carry for you.
+
+### Handing it to Ansible, GPO or Intune
+
+**The command is the whole integration.** lazyit does not generate playbooks, GPO startup scripts or
+Intune packages, and won't: those are promises about systems it can't test, and they rot silently. The
+Agents view instead gives you a **Copy all** of the behind set — one command per platform, annotated
+with which hosts each one is for — for you to feed to whatever already runs commands on those hosts.
+
+That copy follows whatever you have filtered. Narrow the table to *a major behind* and the bulk card
+gives you the commands for exactly those hosts, counted the same way as the summary above it.
+
+Because `--upgrade` carries no credential and no URL, there is nothing to template per host and no
+secret to put into your automation for this: each machine authenticates with the token it already
+holds. You don't have to hand your fleet's `infra:report` token to Ansible or Intune just to keep
+agents current.
+
+### Why re-running the installer is safe
+
+The reason handing that command to a machine is reasonable is that re-running the installer is
+**idempotent and non-destructive**, and has been the documented upgrade path on both platforms all
+along:
+
+- **The download is checksum-verified every time**, and a mismatch is always fatal.
+- **The binary is run once (`--help`) before anything is armed.** If it can't start on that host, the
+  installer removes it and leaves the machine as it found it — so a bad artifact fails at install
+  instead of becoming a host that looks installed and silently never reports.
+- **Your configuration is merged, not replaced.** Every `LAZYIT_*` setting already on the host is
+  carried forward — which is what preserves a host owner's own `LAZYIT_COLLECT_*=false` decisions,
+  and this host's own report limits and proxy settings with them. A fleet update must never quietly
+  switch a collector back on that someone turned off, and it doesn't. The only lines it rewrites are
+  the ones it owns — the instance URL and the token (plus the obsolete `LAZYIT_INTERVAL`, and the CA
+  file whenever there is one) — which is precisely why the update command uses `--upgrade` and passes
+  none of them: they get written back as the values that host already had.
+- **The host keeps its identity in lazyit.** A node is identified by where it reports from and its
+  machine identity, not by the binary, so one host stays one node across an update — no duplicate, no
+  re-review.
+- **Running it on a host that's already current is a no-op re-install**, not an error.
+
+### The first update is the one lazyit can't help you with
+
+Being honest about the state you'll actually find this view in: **most estates open it on "version
+unknown"**, and that is the truth rather than a bug.
+
+It is the `dev` story from the top of this section, seen at fleet size: every agent installed before
+version stamping — which is every agent an instance served until this release — reports `dev`, and
+`dev` cannot be compared to a real version. So those agents are never counted as behind, never
+flagged and never nudged. They sit in the *version unknown* bucket, and the view says so instead of
+quietly implying that they're fine.
+
+They fill in one host at a time: each host that runs the update command once gets a stamped version
+and moves into a real bucket. There is no backfill and no maintenance window — but there is also no
+way for lazyit to tell you which of those hosts needed it. **That first pass is the one you do
+without help.** After it, the fleet view is accurate and the update commands are exact.
+
+### Re-running the installer by hand
+
 **Some improvements only arrive when you re-run the install command.** The agent is two things: a
 program, and the systemd service and timer that run it. Anything in the *program* — the diagnostics
 above, proxy and certificate-authority support — comes with a new binary. Anything in the *service
@@ -1019,42 +1185,15 @@ not one to resolve quietly. And on a machine with no agent — or one whose conf
 token in it, which is what `--keep-config` leaves behind — it stops and tells you, rather than
 installing something that cannot report. That case needs a fresh token from the wizard.
 
-**`--upgrade` goes one step further: it needs no arguments at all.** Where `--keep-token` re-uses the
-credential, **`--upgrade`** (Linux) / **`-Upgrade`** (Windows) re-uses the whole configuration — the
-token, the instance address and the certificate authority the machine was installed with:
+**And `--upgrade` needs no arguments at all.** Where `--keep-token` re-uses the credential,
+**`--upgrade`** (Linux) / **`-Upgrade`** (Windows) re-uses the whole configuration — the token, the
+instance address and the certificate authority the machine was installed with — so the entire command
+is `sh install.sh --upgrade`. That is exactly the command the Agents view hands you, and
+[The update command](#the-update-command) above describes it in full: why it carries no `--url` and no
+token, what it refuses to run alongside, and the one decision it will not carry over for you (the
+plain-`http` opt-in).
 
-```sh
-curl -fsSL https://your-instance/install.sh | sudo sh -s -- --upgrade
-```
-
-```powershell
-& ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Upgrade
-```
-
-That is the same command on every machine in the estate, which is the point. An update command that
-carries `--url` carries whatever address the browser that generated it was on — and on a LAN instance
-reachable by several addresses, running it across a fleet quietly re-points every machine at that one.
-`--upgrade` leaves each machine on the address it already had. It also re-uses that machine's
-certificate authority file, so hosts behind an internal CA upgrade without you having to remember the
-path to the `.pem`.
-
-Anything you do pass still wins: `--upgrade --url https://new-address` moves a machine deliberately,
-which is a different thing from moving it by accident. The credential is the exception, and follows
-`--keep-token`'s rule exactly — `--upgrade` refuses to run alongside `--token`, `--token-file` or
-`LAZYIT_TOKEN`. To give a machine a **new** token, install it the ordinary way, with `--url` and
-`--token`. And on a machine that has no agent yet, `--upgrade` stops and says so: there is nothing to
-re-use, and a first install still needs an address and a token.
-
-**One thing `--upgrade` deliberately does not carry over: `--allow-insecure-http`.** If the machine
-was installed against a plain-`http` address, re-using that address is fine — but *accepting* what
-cleartext costs is a decision, not a setting, so you say it again:
-`… | sudo sh -s -- --upgrade --allow-insecure-http`. The refusal names the configuration file as
-where the `http` address came from, so it is clear you are not being asked about an address you
-typed. Everything else is unchanged: the checksum is verified on an upgrade exactly as on a first
-install, and a mismatch stops it.
-
-Everything else about a re-run is unchanged: this host's own limits, its proxy and its certificate
-authority all cross the upgrade exactly as they always did.
+### Instance upgrades and agent versions
 
 **Upgrading your instance never breaks the agents already installed.** You do not have to re-install
 anything: an older agent keeps reporting exactly as it did, and every fact it sends lands exactly where
