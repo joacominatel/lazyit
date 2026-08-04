@@ -151,6 +151,13 @@ export function agentUpdateCommand(
   // is the only signal available — and on an ADR-0087 `lan` instance, the origin the admin is
   // browsing and the URL the host has on disk are the same plain-http address. Where they are not,
   // the run stops with the installer's own message rather than proceeding over cleartext.
+  //
+  // IT IS REQUIRED HERE, NOT OPTIONAL. #1208's final resolution made the opt-in NON-INHERITABLE: a
+  // host installed over cleartext carries `LAZYIT_URL=http://…`, `--upgrade` re-uses it, and the
+  // installers' plain-http gate bites on the RESOLVED url whatever supplied it — so an upgrade over
+  // such a config is REFUSED unless the opt-in is passed again. Emitting the command without it
+  // would hard-stop on paste on every `lan` instance. `install-commands.test.ts` pins both the
+  // emitted string and the installers' non-inheritance comment.
   if (platform === "windows") {
     const optIn = insecureHttp(origin) ? " -AllowInsecureHttp" : "";
     return `& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Upgrade${optIn}`;
