@@ -46,6 +46,7 @@ import { useListParams } from "@/lib/hooks/use-list-params";
 import {
   AGENT_FLEET_FILTERS,
   type AgentFleetFilter,
+  agentFleetCredentialBlock,
   agentFleetFilterFromParam,
   agentFleetUpdateGroups,
   agentFleetUpdateScript,
@@ -128,7 +129,12 @@ export function AgentFleetView() {
   if (isError || !data) {
     return <ErrorState title={t("loadError")} onRetry={() => refetch()} error={error} />;
   }
-  if (nodes.length === 0 && data.identities.length === 0) {
+
+  // ABSENT, not empty (#1206): a caller without `settings:manage` is not shown the credential
+  // inventory at all, so there is nothing here to fall back to a length on.
+  const credentials = agentFleetCredentialBlock(data);
+
+  if (nodes.length === 0 && (credentials?.identities.length ?? 0) === 0) {
     return (
       <EmptyState
         icon={CpuChipIcon}
@@ -155,22 +161,27 @@ export function AgentFleetView() {
         refreshing={isFetching}
       />
 
-      {/* Only-when-actionable (ADR-0084 §5): nothing behind ⇒ no update affordance at all. */}
-      {data.summary.behindTotal > 0 ? (
-        <BulkUpdateCard
-          nodes={rows}
-          fallbackNodes={nodes}
-          origin={origin}
-          serverVersion={data.serverVersion}
-        />
+      {/*
+        Only-when-actionable (ADR-0084 §5): nothing behind ⇒ no update affordance at all.
+
+        Gated on the FILTERED tally, not the fleet-wide one, so the card's existence and its contents
+        describe the same set as the summary immediately above it. It used to be gated on
+        `data.summary.behindTotal` and silently swap its payload to the whole fleet when the filter
+        left nothing behind — a card headed "3 hosts can be updated" sitting under a summary that had
+        just re-tallied to zero, offering commands for hosts the operator had filtered away.
+      */}
+      {shown.behindTotal > 0 ? (
+        <BulkUpdateCard nodes={rows} origin={origin} serverVersion={data.serverVersion} />
       ) : null}
 
       <UnknownNote unknown={data.summary.unknown} serverVersion={data.serverVersion} />
 
-      <NeverUsedIdentities
-        identities={data.identities}
-        neverUsed={data.identitiesNeverUsed}
-      />
+      {credentials ? (
+        <NeverUsedIdentities
+          identities={credentials.identities}
+          neverUsed={credentials.neverUsed}
+        />
+      ) : null}
 
       <FleetTable
         rows={rows}
@@ -278,27 +289,26 @@ function FleetSummary({
  * The config-management handoff (ADR-0094 §7) — one command per platform, annotated with which hosts
  * it is for, and a single copy that takes the whole behind-set.
  *
- * Rendered only when something is genuinely behind, and it follows the FILTER: an operator who
- * narrowed to "a MAJOR behind" copies the commands for exactly those hosts. When the filter has
- * narrowed the table down to nothing behind, it falls back to the whole fleet rather than showing an
- * empty card that contradicts the summary above it.
+ * Rendered only when something in the CURRENT FILTER is genuinely behind, and its contents are
+ * exactly that set — ADR-0094 §7's *"a bulk copy of the generated commands for the current filter"*.
+ * An operator who narrowed to "a MAJOR behind" copies the commands for exactly those hosts.
+ *
+ * There is deliberately no fall back to the whole fleet. It used to have one, and it made the card
+ * lie about its own scope: a filter that left nothing updatable swapped the payload to every behind
+ * host in the estate, under a summary that had just re-tallied to zero and under a heading counting
+ * hosts the table below was not showing. One set, named once, or no card.
  */
 function BulkUpdateCard({
   nodes,
-  fallbackNodes,
   origin,
   serverVersion,
 }: {
   nodes: readonly AgentFleetNode[];
-  fallbackNodes: readonly AgentFleetNode[];
   origin: string;
   serverVersion: string;
 }) {
   const t = useTranslations("infra.fleet");
-  const groups = useMemo(() => {
-    const filtered = agentFleetUpdateGroups(nodes, origin);
-    return filtered.length > 0 ? filtered : agentFleetUpdateGroups(fallbackNodes, origin);
-  }, [nodes, fallbackNodes, origin]);
+  const groups = useMemo(() => agentFleetUpdateGroups(nodes, origin), [nodes, origin]);
 
   if (groups.length === 0) return null;
 
@@ -308,7 +318,7 @@ function BulkUpdateCard({
 
   const script = agentFleetUpdateScript(groups, {
     headline: t("bulk.scriptHeadline", { count: hostCount, version: serverVersion }),
-    tokenNote: t("bulk.scriptTokenNote"),
+    credentialNote: t("bulk.scriptCredentialNote"),
     hostsLine: (group) =>
       t("bulk.scriptHosts", {
         platform: group.platform,
@@ -395,6 +405,10 @@ function UnknownNote({
  *
  * There is deliberately no claim about WHICH host each credential was for: the schema carries no
  * ServiceAccount→InfraNode link and this ADR adds no column, so this stays a fleet-level list.
+ *
+ * ADMIN-ONLY, and the caller decides. The credential block rides a second `settings:manage` gate
+ * (#1206) and is OMITTED for anyone else, so this component is never rendered without one — see
+ * {@link agentFleetCredentialBlock} for why absence is not rendered as an empty list.
  */
 function NeverUsedIdentities({
   identities,
