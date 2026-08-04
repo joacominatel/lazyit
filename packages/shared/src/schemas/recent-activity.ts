@@ -130,6 +130,11 @@ export const RECENT_ACTIVITY_ACTIONS = [
   // the recent_activity view surfaces once acknowledgement rows exist. Keeps the distinct-actions query
   // (GET /dashboard/activity/filters) validating against this closed allowlist.
   "acknowledged",
+  // An agent-reported node adopted an existing asset at its confirm gate (ADR-0093 §4, #1198) — the
+  // lowercased AGENT_LINKED AssetHistory event. Listed for the same reason `acknowledged` is: the view
+  // lowercases the enum generically, so a verb missing from this allowlist is silently dropped from the
+  // distinct-actions menu (GET /dashboard/activity/filters) and rejected as an `action` filter.
+  "agent_linked",
   "granted",
   "revoked",
   "stock_in",
