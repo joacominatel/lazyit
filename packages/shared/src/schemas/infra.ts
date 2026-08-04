@@ -2096,6 +2096,7 @@ export type InfraNodeChild = z.infer<typeof InfraNodeChildSchema>;
 export type InfraSecretRef = z.infer<typeof InfraSecretRefSchema>;
 export type AttachInfraSecret = z.infer<typeof AttachInfraSecretSchema>;
 export type InfraNodeDetail = z.infer<typeof InfraNodeDetailSchema>;
+export type InfraAssetCandidate = z.infer<typeof InfraAssetCandidateSchema>;
 // Agent report contract v2 (#1138).
 export type AgentOsFamily = z.infer<typeof AgentOsFamilySchema>;
 export type AgentChassis = z.infer<typeof AgentChassisSchema>;
