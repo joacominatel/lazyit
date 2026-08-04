@@ -972,6 +972,112 @@ re-run the install command and pick up the latest binary. It's only a nudge: an 
 reporting normally, nothing is blocked, and minor updates don't raise it. Agents built from source (or
 before versioning was added) report as `dev` and never show the badge.
 
+The badge answers *"is this one host behind?"*. The **Agents** view answers the fleet-sized version of
+the same question, and hands you the command.
+
+### The Agents view
+
+**Assets › Topology › Agents** (the third tab in the header toggle, beside Map and Table) is the fleet
+view: every machine that runs the reporting agent, on one screen, with
+
+- **the version distribution across the top** — how many agents you have, how many are a *major*
+  behind, how many are behind by less, how many report a version lazyit can't compare, and how many
+  are up to date. Every count is also a filter: click **behind** and the table below shows exactly
+  those hosts.
+- **who has stopped checking in** — a host the staleness sweep marked **Not reporting**, or one that
+  has never reported at all.
+- **who is reporting incompletely** — the *Incomplete report* flag, for a host whose last collection
+  came back short (usually because the agent ran without root or SYSTEM, so it couldn't read the
+  serial or model).
+- **agent tokens that were never used** — a token you created for a host that never checked in. There
+  is no node to show for it, so without this line the most common install failure — the install that
+  was never run, or that failed — is invisible.
+- **the update command, per host** — but only on a host that is genuinely behind.
+
+That last point is deliberate. There is no update button on a host that is already current, no banner
+on your dashboard, and no email per host: this is a page you come to, not one that interrupts you. The
+full distribution sits in a table because a table you navigated to isn't nagging you; the only thing
+that ever raises a colour is the *major version behind* tier, exactly as the badge does.
+
+The view is read-only in the strongest sense: **lazyit never sends anything to a host.** It tells you
+what it knows and gives you a command to run yourself.
+
+### The update command
+
+Click **Update** on a row that is behind and lazyit shows the exact command for that machine, built
+for the system that host actually reported — the Linux one-liner or the PowerShell script-block form,
+never a guess. If a host has never told lazyit which system it runs, **both** commands are shown with
+a note, because handing a PowerShell line to a Debian box is worse than asking you to pick.
+
+The command is the same installer you used the first time, so everything it already does comes along:
+the download is checksum-verified, a plain-`http` instance gets the explicit
+`--allow-insecure-http` / `-AllowInsecureHttp` opt-in it needs, and the binary is tested before
+anything is armed.
+
+**It carries no token, and it can't.** lazyit only ever stores a *hash* of each host's token — it is
+not able to print one back, not for you and not for anyone who gets into the database. So the command
+names the environment variable both installers already read, and you supply the token:
+
+```sh
+export LAZYIT_TOKEN=lzit_sa_…
+curl -fsSL https://your-instance/install.sh | sudo -E sh -s -- --url https://your-instance
+```
+
+```powershell
+$env:LAZYIT_TOKEN = 'lzit_sa_…'
+& ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Url https://your-instance
+```
+
+The `-E` on `sudo` is not decoration: without it `sudo` clears your environment and the installer
+never sees the token. If you're already root — which is the normal case under configuration
+management — drop the `sudo -E` entirely.
+
+Don't have that host's token any more? Don't hunt for it. Mint or rotate one under
+[Service accounts](/help/users-permissions-service-accounts) — it's shown once, exactly as it was when
+you first installed the agent.
+
+### Handing it to Ansible, GPO or Intune
+
+**The command is the whole integration.** lazyit does not generate playbooks, GPO startup scripts or
+Intune packages, and won't: those are promises about systems it can't test, and they rot silently. The
+Agents view instead gives you a **Copy all** of the behind set — one command per platform, annotated
+with which hosts each one is for — for you to feed to whatever already runs commands on those hosts.
+Your credential stays where you already keep it: an Ansible vault, or the credential store your
+endpoint management already uses.
+
+### Why re-running the installer is safe
+
+The reason handing that command to a machine is reasonable is that re-running the installer is
+**idempotent and non-destructive**, and has been the documented upgrade path on both platforms all
+along:
+
+- **The download is checksum-verified every time**, and a mismatch is always fatal.
+- **The binary is run once (`--help`) before anything is armed.** If it can't start on that host, the
+  installer removes it and leaves the machine as it found it — so a bad artifact fails at install
+  instead of becoming a host that looks installed and silently never reports.
+- **Your configuration is merged, not replaced.** Every `LAZYIT_*` key already on the host is carried
+  forward — which is what preserves a host owner's own `LAZYIT_COLLECT_*=false` decisions. A fleet
+  update must never quietly switch a collector back on that someone turned off, and it doesn't.
+- **The host keeps its identity in lazyit.** A node is identified by where it reports from and its
+  machine identity, not by the binary, so one host stays one node across an update — no duplicate, no
+  re-review.
+- **Running it on a host that's already current is a no-op re-install**, not an error.
+
+### The first update is the one lazyit can't help you with
+
+Being honest about the state you'll actually find this view in: **most estates open it on "version
+unknown"**, and that is the truth rather than a bug.
+
+Agents installed before version stamping — which includes every agent installed from a Docker-served
+build until this release — report their version as `dev`. `dev` cannot be compared to a real version,
+so those agents are never counted as behind, never flagged and never nudged. They sit in the *version
+unknown* bucket, and the view says so instead of quietly implying that they're fine.
+
+They fill in one host at a time: each host that runs the install command once gets a stamped version
+and moves into a real bucket. There is no backfill and no maintenance window — but there is also no
+way for lazyit to tell you which of those hosts needed it. **That first pass is the one you do
+without help.** After it, the fleet view is accurate and the update commands are exact.
+
 **Some improvements only arrive when you re-run the install command.** The agent is two things: a
 program, and the systemd service and timer that run it. Anything in the *program* — the diagnostics
 above, proxy and certificate-authority support — comes with a new binary. Anything in the *service

@@ -1040,6 +1040,116 @@ binario. Es solo un empujón: un agente desactualizado sigue reportando con norm
 nada, y las actualizaciones menores no la activan. Los agentes compilados desde el código fuente (o
 anteriores al versionado) reportan como `dev` y nunca muestran la insignia.
 
+La insignia responde *«¿este host está atrasado?»*. La vista **Agentes** responde la misma pregunta a
+escala de toda la flota, y te entrega el comando.
+
+### La vista Agentes
+
+**Activos › Topología › Agentes** (la tercera solapa del interruptor del encabezado, junto a Mapa y
+Tabla) es la vista de flota: todas las máquinas que corren el agente de reporte, en una sola pantalla,
+con
+
+- **la distribución de versiones arriba** — cuántos agentes tenés, cuántos están una versión *mayor*
+  por detrás, cuántos están atrasados por menos, cuántos reportan una versión que lazyit no puede
+  comparar y cuántos están al día. Cada número es además un filtro: hacé clic en **atrasados** y la
+  tabla de abajo muestra exactamente esos hosts.
+- **quién dejó de reportar** — un host que el barrido de obsolescencia marcó **Sin reportar**, o uno
+  que nunca reportó.
+- **quién reporta incompleto** — la marca *Reporte incompleto*, para un host cuya última recolección
+  llegó corta (normalmente porque el agente corrió sin root ni SYSTEM y no pudo leer el número de
+  serie ni el modelo).
+- **tokens de agente que nunca se usaron** — un token que creaste para un host que nunca reportó. No
+  hay ningún nodo que mostrar por él, así que sin esta línea la falla de instalación más común — la
+  instalación que nunca se ejecutó, o que falló — es invisible.
+- **el comando de actualización, por host** — pero solo en un host que está realmente atrasado.
+
+Eso último es deliberado. No hay botón de actualizar en un host que ya está al día, no hay cartel en
+tu panel y no hay un mail por host: esta es una página a la que venís, no una que te interrumpe. La
+distribución completa vive en una tabla porque una tabla que abriste vos no te está molestando; lo
+único que alguna vez toma color es el nivel de *una versión mayor por detrás*, igual que la insignia.
+
+La vista es de solo lectura en el sentido más fuerte: **lazyit nunca le envía nada a un host.** Te
+dice lo que sabe y te da un comando para que lo ejecutes vos.
+
+### El comando de actualización
+
+Hacé clic en **Actualizar** en una fila atrasada y lazyit muestra el comando exacto para esa máquina,
+armado para el sistema que ese host efectivamente reportó — la línea de Linux o la forma de bloque de
+script de PowerShell, nunca una suposición. Si un host nunca le dijo a lazyit qué sistema ejecuta, se
+muestran **los dos** comandos con una nota, porque entregarle una línea de PowerShell a una máquina
+Debian es peor que pedirte que elijas.
+
+El comando es el mismo instalador que usaste la primera vez, así que todo lo que ya hace viene
+incluido: la descarga se verifica por checksum, una instancia en `http` plano recibe la opción
+explícita `--allow-insecure-http` / `-AllowInsecureHttp` que necesita, y el binario se prueba antes de
+activar nada.
+
+**No lleva token, y no puede llevarlo.** lazyit solo guarda un *hash* del token de cada host — no está
+en condiciones de volver a mostrarlo, ni para vos ni para quien entre a la base de datos. Por eso el
+comando nombra la variable de entorno que los dos instaladores ya leen, y el token lo ponés vos:
+
+```sh
+export LAZYIT_TOKEN=lzit_sa_…
+curl -fsSL https://tu-instancia/install.sh | sudo -E sh -s -- --url https://tu-instancia
+```
+
+```powershell
+$env:LAZYIT_TOKEN = 'lzit_sa_…'
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia
+```
+
+El `-E` de `sudo` no es decoración: sin él `sudo` limpia tu entorno y el instalador nunca ve el token.
+Si ya estás como root — que es el caso normal bajo gestión de configuración — sacá el `sudo -E`
+directamente.
+
+¿Ya no tenés el token de ese host? No lo busques. Creá o rotá uno en
+[Cuentas de servicio](/help/users-permissions-service-accounts) — se muestra una sola vez, igual que
+cuando instalaste el agente por primera vez.
+
+### Entregárselo a Ansible, GPO o Intune
+
+**El comando es toda la integración.** lazyit no genera playbooks, ni scripts de inicio por GPO, ni
+paquetes de Intune, y no lo va a hacer: son promesas sobre sistemas que no puede probar, y se pudren
+en silencio. En cambio, la vista Agentes te da un **Copiar todo** del conjunto atrasado — un comando
+por plataforma, anotado con los hosts a los que corresponde cada uno — para que se lo entregues a lo
+que ya ejecuta comandos en esas máquinas. Tu credencial se queda donde ya la guardás: un vault de
+Ansible, o el almacén de credenciales que ya usa tu gestión de endpoints.
+
+### Por qué es seguro volver a ejecutar el instalador
+
+La razón por la que entregarle ese comando a una máquina es razonable es que volver a ejecutar el
+instalador es **idempotente y no destructivo**, y viene siendo el camino de actualización documentado
+en las dos plataformas desde siempre:
+
+- **La descarga se verifica por checksum en cada ejecución**, y una diferencia siempre es fatal.
+- **El binario se ejecuta una vez (`--help`) antes de activar nada.** Si no puede arrancar en ese
+  host, el instalador lo borra y deja la máquina como la encontró — así un artefacto defectuoso falla
+  en la instalación en vez de convertirse en un host que parece instalado y nunca reporta.
+- **Tu configuración se combina, no se reemplaza.** Cada clave `LAZYIT_*` que ya está en el host se
+  conserva — que es lo que preserva las decisiones propias del dueño del host, sus
+  `LAZYIT_COLLECT_*=false`. Una actualización de flota nunca debe volver a encender en silencio un
+  recolector que alguien apagó, y no lo hace.
+- **El host conserva su identidad en lazyit.** Un nodo se identifica por desde dónde reporta y por su
+  identidad de máquina, no por el binario, así que un host sigue siendo un nodo a través de la
+  actualización — sin duplicados y sin volver a revisarlo.
+- **Ejecutarlo en un host que ya está al día es una reinstalación sin efecto**, no un error.
+
+### La primera actualización es la única en la que lazyit no puede ayudarte
+
+Siendo honestos sobre el estado en el que vas a encontrar esta vista: **la mayoría de los parques la
+abren en «versión desconocida»**, y eso es la verdad, no un error.
+
+Los agentes instalados antes del sellado de versión — que incluye a todos los agentes instalados desde
+una build servida por Docker hasta esta release — reportan su versión como `dev`. `dev` no se puede
+comparar con una versión real, así que esos agentes nunca se cuentan como atrasados, nunca se marcan y
+nunca reciben un empujón. Quedan en el grupo *versión desconocida*, y la vista lo dice en vez de
+insinuar por lo bajo que están bien.
+
+Se van completando de a un host: cada host que ejecuta el comando de instalación una vez obtiene una
+versión sellada y pasa a un grupo real. No hay backfill ni ventana de mantenimiento — pero tampoco hay
+forma de que lazyit te diga cuáles de esos hosts lo necesitaban. **Esa primera pasada es la que hacés
+sin ayuda.** Después de eso, la vista de flota es exacta y los comandos de actualización también.
+
 **Algunas mejoras solo llegan cuando volvés a ejecutar el comando de instalación.** El agente son dos
 cosas: un programa, y el servicio y el timer de systemd que lo ejecutan. Todo lo que está en el
 *programa* — los diagnósticos de más arriba, el soporte de proxy y de autoridad certificadora — llega
