@@ -409,8 +409,12 @@ elimina *de ese host* — si ninguna otra máquina lo usa, revocá la cuenta de 
 ## Revisión pendiente
 
 Los hosts descubiertos no entran directo a tu inventario: te esperan en la bandeja de **Revisión
-pendiente** arriba de la vista de Servidores, cada uno mostrando su nombre de host, su tipo, de dónde
-vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés tres opciones:
+pendiente** arriba de la vista de Servidores, cada uno mostrando su nombre de host, su tipo, su
+**formato** cuando la máquina reportó uno (*notebook*, *equipo de escritorio*, *servidor*, *máquina
+virtual*, *contenedor*), de dónde vino el reporte y hace cuánto reportó por última vez. El formato
+está ahí para que puedas ver de un vistazo cuáles de cuarenta propuestas son el puesto de trabajo de
+alguien y cuáles son infraestructura del parque, sin abrir cada una. Para cada propuesta tenés tres
+opciones:
 
 - **Confirmar** — suma el host a tu topología activa. Un diálogo breve te permite renombrarlo y
   cambiar su tipo antes, y ofrece un interruptor **Registrar como activo de inventario** (**activado**
@@ -420,6 +424,29 @@ vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés tr
   hardware real, ese pasa a ser el serie del activo automáticamente (un texto de relleno como
   *"To be filled by O.E.M."*, o un serie que ya usa otro activo, se descarta). Desactivá el
   interruptor para dejar el nodo solo en el grafo.
+
+  **Si la máquina ya está en tu inventario, confirmar la vincula: no crea una segunda.** Cuando el
+  serie que reporta el host coincide con un activo que ya tenés, el diálogo de confirmación lo dice
+  antes de que hagas clic, nombrando ese activo y el serie por el que coincidió: *"Esta máquina ya
+  está en tu inventario. Al confirmar se la vincula a ese activo en lugar de crear un segundo."* Es el
+  caso habitual de un parque de puestos de trabajo que curaste a mano mucho antes de instalar ningún
+  agente: las máquinas ya están registradas y, de ahora en más, empiezan a mantener al día sus propios
+  datos de hardware y software sobre los registros que hiciste **vos**, en lugar de aparecer al lado
+  como duplicados.
+
+  Vale la pena ser preciso sobre qué recibe ese activo adoptado y qué nunca recibe. El agente escribe
+  en él los **datos reportados** —hardware, sistema operativo, software instalado— y los refresca en
+  cada reporte, así que su panel de inventario se empieza a completar. **Nunca** toca su nombre, su
+  número de serie, su modelo, su estado, su ubicación ni sus asignaciones. Todo lo que curaste sigue
+  siendo tuyo; solo se mantiene por vos la mitad que reporta la máquina. Y si después desvinculás el
+  nodo, un activo que ya existía simplemente se **desvincula y queda intacto**: solo se archiva un
+  activo que creó el propio lazyit.
+
+  La coincidencia es deliberadamente cautelosa. lazyit adopta un activo existente solo cuando el
+  reporte respalda su serie también con una dirección de placa de red, y nunca cuando ese host ya está
+  marcado como posible clon de otro. Cualquier cosa menos certera crea un activo nuevo, como antes: un
+  duplicado se ve y se corrige, mientras que una máquina vinculada al registro de inventario
+  equivocado no es ninguna de las dos cosas.
 - **Unificar con…** — este host ya lo tenés. Elegí el servidor existente que realmente es y su clave
   de reporte se muda ahí: los próximos reportes llegan a ese servidor y esta propuesta se archiva.
   Usalo cuando una máquina fue **reinstalada** (un sistema operativo nuevo le da un machine ID nuevo,
@@ -499,9 +526,18 @@ gestión es una máquina virtual y lo quiero registrado"* — podés escribirlo 
 
 Una regla tiene un **nombre**, a qué **se aplica** (servidores, contenedores o ambos) y al menos una
 condición: un **patrón de nombre** (`*` para cualquier secuencia de caracteres, `?` para exactamente
-uno; tiene que coincidir el nombre completo), una **subred** en formato CIDR, o el **tipo que el
-reporte del agente hizo que lazyit propusiera**. Después indica qué hacer: con qué tipo confirmarlo y
-si registrarlo como activo de inventario.
+uno; tiene que coincidir el nombre completo), una **subred** en formato CIDR, el **tipo que el
+reporte del agente hizo que lazyit propusiera**, o el **formato que reportó la máquina**. Después
+indica qué hacer: con qué tipo confirmarlo y si registrarlo como activo de inventario.
+
+**El formato es una condición por derecho propio**, lo que convierte a *"autoconfirmar los servidores
+y revisar las notebooks"* en una regla que podés escribir sin declarar nada más — posiblemente la
+regla más útil que existe en un parque mixto. Lee el firmware de la propia máquina, no su nombre de
+host, así que no depende de que alguien haya nombrado las cosas de manera consistente. Prestá
+atención a la dirección en la que falla: **un host que no reporta formato nunca coincide con una regla
+que nombra uno.** Un agente más viejo, una máquina cuyo hardware no lo dice, o una que todavía no
+reportó, siguen esperándote en la bandeja — que es el lado seguro para una compuerta que confirma sin
+que haya nadie presente.
 
 **Tené claro qué estás activando.** Un host que coincide con una regla se confirma en el momento en
 que reporta: esa fila nunca pasa por la bandeja, y si la regla indica registrarlo, también se crea su
@@ -515,7 +551,8 @@ Lo demás que conviene saber antes de escribir una:
 - **Una regla se aplica solo a partir del próximo reporte.** Nada de lo que ya está esperando en tu
   bandeja se confirma por su cuenta: eso lo seguís revisando vos, de a uno o en conjunto. Guardar una
   regla nunca toca una propuesta que ya podés ver.
-- **Una regla necesita una condición que pueda descartar algo.** Un patrón de nombre tiene que llevar
+- **Una regla necesita una condición que pueda descartar algo.** Un tipo reportado y un formato
+  reportado valen cada uno por sí solo. Un patrón de nombre tiene que llevar
   al menos un carácter literal, y una subred tiene que ser más acotada que `/0`. La mayoría de los
   patrones hechos solo de comodines (`*`, `**`, `*?*`) coinciden con todos los hosts que existan, igual
   que `0.0.0.0/0` son todas las direcciones que existen: lazyit no guarda ninguna de las dos, ni por
@@ -661,6 +698,37 @@ recolección ahora nombran la fuente que volvió vacía y el error detrás, tant
 (ver *Qué recopila el agente*, más abajo; todavía nada muestra esas notas en la interfaz). Si la
 detección de clones te importa, corré el agente como root (en Linux, con `dmidecode` instalado) o
 desde la tarea programada (en Windows), y no esperes nada de él en guests de contenedor.
+
+## Máquinas ya registradas dos veces
+
+Esto es sobre el pasado, y solo afecta a instalaciones que ya venían confirmando hosts reportados por
+agente antes de que lazyit supiera vincular un activo existente.
+
+En aquel momento, confirmar un host con **Registrar como activo de inventario** activado siempre
+creaba un activo *nuevo*. Si el serie que reportaba ese host ya lo usaba un activo que habías curado,
+lazyit no podía guardarlo dos veces, así que creaba el activo nuevo **sin número de serie** en lugar
+de hacer fallar tu confirmación. El resultado eran dos registros activos para una misma máquina
+física: el que curaste vos y uno sin serie sobre el que el agente viene escribiendo desde entonces.
+
+**Eso ya no puede pasar** — una confirmación ahora vincula el activo que ya tenés (ver *Revisión
+pendiente* más arriba). Para los que ya están en tu base de datos, lazyit los señala en lugar de
+arreglarlos:
+
+- Abrí la ventana de detalle del nodo. En la pestaña **General** vas a ver **Posible duplicado en el
+  inventario**, nombrando el otro activo y enlazándolo.
+- Verificalo. La señal es fuerte —un activo creado automáticamente y sin serie, cuya máquina reporta
+  un serie que pertenece a otro activo activo— pero vos sos quien sabe si esas dos filas realmente son
+  la misma caja.
+- **lazyit no los va a fusionar por vos, nunca.** Dos registros de inventario son dos conjuntos de
+  asignaciones, historial, etiquetas y documentos adjuntos, y decidir qué pasa con cada uno es tu
+  criterio. No se cambia nada mientras no estás mirando.
+
+Para reconciliar un par a mano, desvinculá del nodo el activo creado automáticamente —lazyit lo
+archiva, porque lo creó él— y después vinculá el registro que curaste. De ahí en más la máquina
+reporta sobre el registro que conservaste, y el panel de inventario de la ventana de detalle se
+empieza a completar ahí.
+
+Si no tenés ninguno de estos casos, nunca vas a ver este aviso. Es deliberadamente silencioso.
 
 ## Qué recopila el agente
 

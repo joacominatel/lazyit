@@ -22,12 +22,52 @@ filterable list of the same nodes — see [Servers list](/help/assets-topology-s
 > one, not an addition — because it mints a token. Without a permission its controls simply don't
 > appear.
 
+## Laptops and desktops are kept off the map
+
+**If your map has got smaller, nothing has been deleted.** lazyit keeps reported **laptops and
+desktops** off the diagram by default. When there are any, a button sits in the board's top-right
+corner saying exactly how many — *Show 142 endpoints*. Click it and they all appear; click *Hide 142
+endpoints* and they go away again. The choice is kept in the page address, so it survives a reload,
+the browser Back button, and a switch to the Table and back.
+
+**Why.** A typical estate is a couple of dozen servers and a couple of *hundred* workstations. Drawing
+all of them turns the map into a wall of boxes with the infrastructure buried somewhere inside it —
+and the estate topology is the thing you came here to read. Every machine still belongs in lazyit;
+it just doesn't belong on this particular picture by default.
+
+**Nothing has left your inventory.** A hidden machine is exactly as present as it was before:
+
+- it is on the [Servers list](/help/assets-topology-servers), which **shows everything, always** —
+  this hiding is the map's alone,
+- it is in search, in your asset inventory and in every report,
+- it still counts in a [blast radius](#impact--blast-radius): if a server goes down and a hidden
+  laptop depends on it, that laptop is still in the answer,
+- its own details window opens as it always did.
+
+Hiding is a **drawing** decision about one screen, and it is the only thing it is.
+
+**Only a machine that says it is one gets hidden.** Each reporting agent tells lazyit the host's
+**form factor**, read from the machine's own firmware — *laptop*, *desktop*, *server*, *virtual
+machine*, *container*. Only the first two come off the map. Anything else stays, and so does anything
+that hasn't said: a node you drew by hand, a server running an older agent, a machine whose hardware
+doesn't report a form factor, or one that simply hasn't checked in since you upgraded. **lazyit never
+hides a machine on a guess** — a host that vanished from every screen would be far worse than a busy
+map. You can see the form factor of any node on its details window's **General** tab.
+
+**It happens gradually, not all at once.** The moment you upgrade, the map is identical: no machine
+has reported a form factor yet. Each one fills it in on its next check-in, so over the following few
+minutes the workstations fade off the board while the servers stay. There is nothing to run and
+nothing to configure.
+
 ## The canvas
 
 The board is a panning, zooming surface with a dotted background and a small minimap. Drag a node
 to reposition it — the new position is saved automatically after the drag settles, so the layout
 you arrange is the layout everyone sees next time. Use the controls in the corner (or your
 trackpad/scroll) to zoom and fit the view.
+
+The board's top-right corner is where its controls live: the **Show/Hide endpoints** button described
+above (everyone sees it), and — with the manage permission — **Tidy**.
 
 With the manage permission, a **Tidy** button sits in the board's top-right corner. Click it to
 auto-arrange the whole map into a clean top-down layout — hosts above the machines that run on them,
@@ -170,6 +210,7 @@ scrolling past everything to reach one thing.
 **The tabs adapt to the node.** You only ever see the ones that have something to say:
 
 - **General** *(always)* — what this node is and who is responsible for it: kind, IP address,
+  **form factor** (for agent-reported hosts — what decides whether it's drawn on the map by default),
   added-on date, status, owner(s), knowledge-base articles, secret references and shortcuts, plus
   **Remove from map**.
 - **Reported facts** *(agent-reported nodes only)* — what the machine says it is made of. For a
@@ -210,10 +251,25 @@ A few things on the **General** tab worth calling out:
 - **Shortcuts** — quick links (SSH, web UI, console) that open in a new tab. With the manage
   permission you edit them inline: each shortcut is a label + URL pair you can change, add or remove,
   then **Save** the list (lazyit checks each URL is valid before saving).
+- **Form factor** — for a node reported by an agent, what the machine says it physically is, read
+  from its firmware: *laptop*, *desktop*, *server*, *virtual machine* or *container*. It's shown, not
+  editable — the agent rewrites it on every check-in, so a machine that's re-imaged or gets a new
+  board keeps it honest by itself. It's also what decides whether the node is drawn on the map by
+  default (see *Laptops and desktops are kept off the map* above). A hand-drawn node has none, and a
+  machine that hasn't reported one simply doesn't show this field.
 - **Duplicate IP** — if another node on the map already carries the *exact same* IP, a **non-blocking
   warning** lists the other node(s) — a heads-up, not a block: the address is still saved (lazyit
   enforces no uniqueness on IPs), and each listed node is a click away so you can jump over and
   reconcile.
+- **Possible duplicate in inventory** — a second non-blocking warning, for machines that were recorded
+  twice by older versions of lazyit. If this node's asset was created automatically and has no serial
+  number, while the serial the machine reports belongs to a *different* asset, lazyit says so and
+  links the other asset so you can go and look. **It is a heads-up and nothing else: lazyit never
+  merges the two for you.** Combining two inventory records means deciding what happens to two sets of
+  assignments, history, tags and attached documents, and that's a judgement call, not something an
+  upgrade should make while you're not watching. See
+  [Reporting agent](/help/assets-topology-reporting-agent) for how this situation came about and what
+  stops it happening again.
 
 A row in the [Servers list](/help/assets-topology-servers) deep-links straight into this window, so
 you can jump from the table to a machine's full picture in one click.

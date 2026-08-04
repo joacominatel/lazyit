@@ -388,8 +388,11 @@ it is: discard it from the Servers view if you want it off the map. And the toke
 ## Pending review
 
 Discovered hosts don't go straight into your inventory — they wait for you in the **Pending review**
-tray at the top of the Servers view, each showing its hostname, kind, where the report came from and
-how long ago it last reported. For each one you have three choices:
+tray at the top of the Servers view, each showing its hostname, kind, its **form factor** when the
+machine reported one (*laptop*, *desktop*, *server*, *virtual machine*, *container*), where the report
+came from and how long ago it last reported. The form factor is there so you can tell at a glance
+which of forty proposals are somebody's workstation and which are estate infrastructure, without
+opening each one. For each proposal you have three choices:
 
 - **Confirm** — adds the host to your live topology. A short dialog lets you rename it and change its
   kind first, and offers a **Track as an inventory asset** toggle (**on** by default): left on,
@@ -398,6 +401,27 @@ how long ago it last reported. For each one you have three choices:
   hardware **serial number**, it becomes that asset's serial automatically (a placeholder like
   *"To be filled by O.E.M."*, or a serial already used by another asset, is skipped). Turn the toggle
   off to keep the node graph-only.
+
+  **If the machine is already in your inventory, confirming links it — it doesn't create a second
+  one.** When the serial the host reports matches an asset you already have, the Confirm dialog says
+  so before you click, naming that asset and the serial it matched on: *"This machine is already in
+  your inventory. Confirming links it to that asset instead of creating a second one."* This is the
+  common case for a workstation estate you curated by hand long before you installed any agents — the
+  machines are already recorded, and from now on they start keeping their own hardware and software
+  details up to date on the records **you** made, rather than appearing beside them as duplicates.
+
+  What that adopted asset gets, and what it never gets, is worth being precise about. The agent writes
+  the **reported facts** onto it — hardware, operating system, installed software — and refreshes them
+  on every check-in, so its inventory panel starts filling in. It **never** touches its name, its
+  serial, its model, its status, its location or its assignments. Everything you curated stays yours;
+  only the machine-reported half is maintained for you. And if you later unlink the node, an asset
+  that already existed is simply **unlinked and left intact** — only an asset lazyit created itself is
+  archived.
+
+  Matching is deliberately cautious. lazyit adopts an existing asset only when the report backs its
+  serial up with a network-card address as well, and never when that host is already flagged as a
+  possible clone of another. Anything less certain creates a new asset, as before — a duplicate is
+  visible and fixable, whereas a machine attached to the wrong inventory record is neither.
 - **Merge into…** — this host is one you already have. Pick the existing server it really is, and its
   reporting key moves there: future check-ins land on that server, and this proposal is archived. Use
   it when a machine was **reinstalled** (a fresh OS gives it a new machine ID, so it comes back looking
@@ -471,8 +495,17 @@ the tray.
 
 A rule has a **name**, what it **applies to** (servers, containers, or both), and at least one
 condition: a **name pattern** (`*` for any run of characters, `?` for exactly one — the whole name has
-to match), a **subnet** in CIDR form, or the **kind the agent's report made lazyit propose**. It then
-says what to do: which kind to confirm it as, and whether to track it as an inventory asset.
+to match), a **subnet** in CIDR form, the **kind the agent's report made lazyit propose**, or the
+**form factor the machine reported**. It then says what to do: which kind to confirm it as, and
+whether to track it as an inventory asset.
+
+**Form factor is a condition in its own right**, which makes *"auto-confirm the servers, review the
+laptops"* a rule you can write with nothing else stated — arguably the most useful rule there is on a
+mixed estate. It reads the machine's own firmware, not its hostname, so it doesn't depend on anyone
+having named things consistently. Note the direction it fails in: **a host that reports no form
+factor never matches a rule that names one.** An older agent, a machine whose hardware doesn't say,
+or one that hasn't checked in yet, all keep waiting in the tray for you — which is the safe way round
+for a gate that confirms without anyone present.
 
 **Be clear about what you're turning on.** A host a rule matches is confirmed the moment it reports —
 you never see that row in the tray, and if the rule says to track it, its asset is created too. You
@@ -486,7 +519,8 @@ What else you should know before writing one:
 - **A rule only applies from the next report onwards.** Nothing already waiting in your tray is
   confirmed behind you — those are still yours to review, one at a time or in bulk. Saving a rule
   never touches a proposal you can already see.
-- **A rule needs a condition that can actually rule something out.** A name pattern has to carry at
+- **A rule needs a condition that can actually rule something out.** A reported kind and a reported
+  form factor each count on their own. A name pattern has to carry at
   least one literal character, and a subnet has to be narrower than `/0`. Most patterns made only of
   wildcards (`*`, `**`, `*?*`) match every host there is, just as `0.0.0.0/0` is every address there
   is, so lazyit refuses to save either — alone or together — because a rule that excludes nothing is
@@ -625,6 +659,35 @@ collection notes now name the source that came back empty and the error behind i
 as on Linux (see *What the agent collects* below; nothing displays those notes in the interface yet).
 If clone detection matters to you, run the agent as root (Linux, with `dmidecode` installed) or from
 the scheduled task (Windows), and expect nothing from it on container guests.
+
+## Machines already recorded twice
+
+This one is about the past, and it only affects installs that were confirming agent-reported hosts
+before lazyit knew how to link an existing asset.
+
+Back then, confirming a host with **Track as an inventory asset** on always created a *new* asset. If
+the serial that host reported was already in use by an asset you had curated, lazyit couldn't store
+it twice — so it created the new asset **without a serial** rather than failing your confirm. The
+result was two live records for one physical machine: the one you curated, and a serial-less one the
+agent has been writing to ever since.
+
+**That can't happen any more** — a confirm now links the asset you already have (see *Pending review*
+above). For the ones already in your database, lazyit points them out rather than fixing them:
+
+- Open the node's details window. On the **General** tab you'll see **Possible duplicate in
+  inventory**, naming the other asset and linking to it.
+- Check it. The signal is a strong one — an auto-created asset with no serial, whose machine reports
+  a serial belonging to a different live asset — but you are the one who knows whether those two rows
+  really are the same box.
+- **lazyit will not merge them for you, ever.** Two inventory records mean two sets of assignments,
+  history, tags and attached documents, and deciding what happens to each of those is your call.
+  Nothing is changed while you're not looking.
+
+To reconcile a pair by hand, unlink the auto-created asset from the node — lazyit archives it, because
+it created it — and then link the record you curated. From then on the machine reports into the record
+you kept, and the details window's inventory panel starts filling in there.
+
+If you have none of these, you'll never see this warning. It is deliberately quiet.
 
 ## What the agent collects
 
