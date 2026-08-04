@@ -267,11 +267,11 @@
     "commandCopied": "Command copied",
     "bulk": {
       "title": "{count, plural, one {# host can be updated} other {# hosts can be updated}}",
-      "subtitle": "One command per platform — hand it to whatever already runs commands on those hosts (Ansible, a GPO startup script, Intune). Re-running the installer is safe: it re-verifies the download, keeps each host's own settings, and the host keeps its identity in lazyit.",
+      "subtitle": "One command per platform, identical on every host — nothing in it is per-machine, because each host re-runs from the config it already has. Hand it to whatever already runs commands on those hosts (Ansible, a GPO startup script, Intune). Re-running the installer is safe: it re-verifies the download, keeps each host's own settings, and the host keeps its identity in lazyit.",
       "groupHosts": "{platform} · {count, plural, one {# host} other {# hosts}}",
       "copyAll": "Or copy the whole set, annotated with which hosts each command is for:",
       "scriptHeadline": "lazyit agent update — {count, plural, one {# host} other {# hosts}} behind (instance {version})",
-      "scriptTokenNote": "No token here: both installers read it from LAZYIT_TOKEN. Export it first.",
+      "scriptCredentialNote": "No token and no URL to fill in: --upgrade re-runs each host from the config it already has. Do NOT set LAZYIT_TOKEN — it is refused alongside --upgrade.",
       "scriptHosts": "{platform} · {count, plural, one {# host} other {# hosts}}: {hosts}"
     },
     "unknownNote": {
@@ -290,8 +290,9 @@
     "command": {
       "title": "Update {host}",
       "subtitle": "This host reports agent {agentVersion}; this instance runs {serverVersion}. Run the command on the host — nothing is sent to it from here.",
-      "tokenNote": "This command carries no token, and cannot: lazyit only stores a hash of each host's token, so it can never print one back. Both installers read the token from {variables} instead — set it in the shell you run this in.",
-      "tokenLost": "No longer have this host's token? Rotate or mint one in <link>Service accounts</link> — it is shown once, exactly as when you first installed the agent.",
+      "credentialNote": "This command carries no token and no URL — it needs neither. `--upgrade` re-runs this host with the token, instance URL and certificate authority already in its own config, so the same line works unchanged on every host and nothing about this host is re-pointed. Do not export `LAZYIT_TOKEN` for it: it is refused alongside `--upgrade`, so a token left over in your shell can never quietly override the one this host is using.",
+      "tokenLost": "No longer have this host's token? You don't need it — the host still has it, which is what `--upgrade` uses. Only if a host has no readable config left do you need a new one from <link>Service accounts</link>: mint a token there, then install with `--url` and `--token` as you first did. Rotating is not the same thing — it invalidates the current secret, so every other host using that service account stops reporting.",
+      "internalCa": "Behind an internal certificate authority? `--upgrade` re-uses this host's own CA setting, but the `curl`/`irm` that downloads the script above runs before that is read — so that CA still has to be in the host's system trust store, exactly as when you first installed.",
       "unknownOs": "This host has not reported which system it runs, so both commands are shown. Run the one that matches the host — lazyit will not guess for you.",
       "windowsElevated": "Run from an elevated PowerShell.",
       "verify": "Afterwards, check the host without waiting for a report:",
