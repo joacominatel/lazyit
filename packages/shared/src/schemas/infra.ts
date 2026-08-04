@@ -99,6 +99,50 @@ export const IpAddressSchema = z
   .trim()
   .pipe(z.union([z.ipv4(), z.ipv6()]));
 
+// ── Host form factor (ADR-0074 §2 contract v2, #1138; routed on by ADR-0093) ──────────────────────
+
+/**
+ * What the host physically IS — the hint `kind` inference (#1139) reads to stop landing every
+ * reported host as `PHYSICAL_HOST`. `vm`/`container` come from the virtualization probe, the rest
+ * from SMBIOS chassis type (or its per-OS equivalent).
+ *
+ * Declared here rather than with the rest of the contract-v2 vocabularies below because ADR-0093 §2
+ * makes it a persisted `InfraNode` column, and {@link InfraNodeSchema} is evaluated before them.
+ */
+export const AgentChassisSchema = z.enum([
+  "server",
+  "desktop",
+  "laptop",
+  "vm",
+  "container",
+  "unknown",
+]);
+
+/**
+ * The chassis values that make a reported host an ENDPOINT rather than estate topology (ADR-0093 §5,
+ * decision 1 of 2026-08-03). A workstation is somebody's desk, not infrastructure: on a representative
+ * estate it is ~180 of the ~245 boxes the agent reports, and drawing all of them is what makes the
+ * canvas unusable. `server`, `vm` and `container` are emphatically NOT endpoints.
+ */
+export const ENDPOINT_CHASSIS: readonly AgentChassis[] = ["laptop", "desktop"];
+
+/**
+ * Is this node an endpoint — a laptop or a desktop (ADR-0093 §5)?
+ *
+ * The pure mapper the canvas's default "hide endpoints" treatment reads, and the reason §1 could leave
+ * `inferNodeKind` untouched: form factor is an ORTHOGONAL fact, not a second answer to the "virtual or
+ * physical?" question `kind` already answers. A laptop *is* a `PHYSICAL_HOST`; it is also an endpoint.
+ *
+ * **NO SIGNAL IS NOT AN ENDPOINT.** `null`/`undefined` (a manual node, a pre-v2 agent, a report that
+ * predates the column and has not re-reported yet) and the explicit `unknown` (the probe did not run —
+ * a container reading `/sys/class/dmi` sees the HOST's board, so the Linux collector forces it) both
+ * answer `false`. Routing may only ever remove noise a POSITIVE fact identified; it must never hide a
+ * host on a guess, because a host that silently vanishes from every surface is worse than a noisy map.
+ */
+export function isEndpointChassis(chassis: string | null | undefined): boolean {
+  return chassis != null && (ENDPOINT_CHASSIS as readonly string[]).includes(chassis);
+}
+
 // ── InfraNode wire shape + DTOs (ADR-0070 §1) ─────────────────────────────────────────────────────
 
 /** The full persisted InfraNode (API representation of the `infra_nodes` row). */
@@ -127,6 +171,24 @@ export const InfraNodeSchema = z.object({
   // for manual nodes + pre-stamp agents; the UI compares it to `GET /instance/version` to show an
   // "agent outdated" hint when the agent is a MAJOR behind the server (display-only, never a gate).
   agentVersion: z.string().nullable(),
+  /**
+   * What the host physically IS (ADR-0093 §2) — the agent-owned form factor, written from
+   * `host.chassis` on EVERY report, create and refresh alike. Chassis is a FACT (the `ipAddress`
+   * class), not curation (the `kind` class): a re-image or a board swap changes the truth and the
+   * column follows it. There is deliberately no `chassisSource` and no `MANUAL` counterpart, because
+   * chassis is never on the create/update DTOs — a human cannot edit it, so there is no human write to
+   * protect. A hand-drawn node has `chassis: null` and is always on the canvas.
+   *
+   * `.nullish().catch(null)` is the read-tolerance this needs and the `.catch(undefined)` on the wire
+   * schema promises: a value a future collector invents must degrade to "no signal" on READ, exactly
+   * as it degrades on the write boundary — never fail a whole node payload. Null on every row that
+   * predates the column (which self-heals on that host's next report), on every manual node, and on
+   * every CONTAINER child, whose blob carries no `host` key at all (#1139).
+   *
+   * Small enough to sit on the LIST row — unlike `specs`, which `InfraNodeListItemSchema` omits
+   * (#1135) — which is what lets the canvas filter endpoints client-side with no second request.
+   */
+  chassis: AgentChassisSchema.nullish().catch(null),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -254,6 +316,19 @@ export const InfraSecretRefSchema = z.object({
 });
 
 /**
+ * A lean, DISPLAY-ONLY reference to a live Asset, surfaced on the node drill-in (ADR-0093 §7/§8) — just
+ * enough for a human to recognise the row before they act on it. Three fields, deliberately: the `id`
+ * for a click-through, the `name` the operator curated, and the `serial` that is the whole basis on
+ * which the server matched it. NOT the Asset shape — a full Asset on a node read is a second inventory
+ * API nobody asked for, and this must stay cheap enough to compute on every drill-in.
+ */
+export const InfraAssetCandidateSchema = z.object({
+  id: z.cuid(),
+  name: z.string(),
+  serial: z.string().nullable(),
+});
+
+/**
  * `GET /infra/nodes/:id` — the enriched drill-in (ADR-0070 §6). The whole reason to build this over a
  * Draw.io diagram: the node PLUS its asset-backed payoff (owner, KB links, secret handles, shortcuts,
  * IP) and its children (active inverse RUNS_ON). `label` is the canvas display name and always wins;
@@ -298,6 +373,39 @@ export const InfraNodeDetailSchema = InfraNodeSchema.extend({
    * declaring the override here would advertise a drill-in surface this build does not have.
    */
   policyAppliedAt: z.iso.datetime().nullish(),
+  /**
+   * FORESIGHT at the confirm gate (ADR-0093 §7): the live Asset a confirm would ADOPT rather than
+   * mint, so the tray can say *"Confirm will link **Dell-XPS-7490** (existing)"* instead of *"will
+   * create"*. `null` means a confirm mints a brand-new Asset — today's behaviour.
+   *
+   * Computed per read, DISPLAY-ONLY, and NEVER a gate: the confirm re-derives its own answer from the
+   * node as it stands at that moment, so a stale or absent candidate can only ever mislead a human,
+   * never mis-link a machine. `trackAsAsset` stays a boolean on a `strictObject` precisely because
+   * what the operator needed was this, not a new input — adoption is HOW `true` is satisfied, chosen
+   * by the server from evidence, not a third thing the caller asks for.
+   *
+   * Populated only for a node that is **PENDING and carries no Asset** — the one state in which a
+   * confirm can still adopt — and only when the ADR-0093 §3a corroboration gate is satisfied, so a
+   * populated field is a promise the confirm will keep rather than an optimistic guess.
+   * `.nullish()` for read tolerance, the [[0090-ipam-validated-ip]] `ipConflict` mold: an older API
+   * omits it and web reads that as "will create".
+   */
+  assetCandidate: InfraAssetCandidateSchema.nullish(),
+  /**
+   * DUPLICATE SUSPICION (ADR-0093 §8.5) — for the installs that already minted duplicates before
+   * adoption existed. The #1081 collision retry answered *"this serial already exists"* with *"then
+   * make a second Asset without one"*, and its outcome is cheaply recognisable: this node's linked
+   * Asset was auto-created (`_infraAutoCreated`), carries a **null** serial, and the node's reported
+   * `specs.host.hardware.serial` sanitizes to a value a DIFFERENT live Asset holds. That other Asset
+   * is what this field names.
+   *
+   * A HINT, never a gate, and never an automatic merge. Machine-merging two inventory rows —
+   * assignments, history, tags, attachments — is not something an upgrade does while nobody is
+   * looking. The remedy is the existing deliberate two-step (§7): `assetId: null` to detach (the
+   * auto-created Asset carries the marker, so it is soft-deleted), then a second patch carrying the
+   * curated id. `null` in the overwhelmingly normal case.
+   */
+  duplicateAssetSuspicion: InfraAssetCandidateSchema.nullish(),
 });
 
 /**
@@ -365,19 +473,9 @@ export const AttachInfraSecretSchema = z.strictObject({
  */
 export const AgentOsFamilySchema = z.enum(["linux", "windows", "darwin", "bsd", "other"]);
 
-/**
- * What the host physically IS — the hint `kind` inference (#1139) will read to stop landing every
- * reported host as `PHYSICAL_HOST`. `vm`/`container` come from the virtualization probe, the rest
- * from SMBIOS chassis type (or its per-OS equivalent).
- */
-export const AgentChassisSchema = z.enum([
-  "server",
-  "desktop",
-  "laptop",
-  "vm",
-  "container",
-  "unknown",
-]);
+// `AgentChassisSchema` — the host form-factor vocabulary — is declared EARLY, above the InfraNode wire
+// shape, because `InfraNodeSchema.chassis` (ADR-0093 §2) persists it as a column and a `const` cannot
+// be referenced before it is evaluated. It belongs to this contract-v2 vocabulary block conceptually.
 
 /**
  * The virtualization technology the host runs UNDER (`none` = bare metal). `other` is deliberate and
@@ -1582,6 +1680,45 @@ export function isClonedMachineId(
   if (!stored.serials.length || !incoming.serials.length) return false;
   if (!stored.macs.length || !incoming.macs.length) return false;
   return isDisjoint(stored.serials, incoming.serials) && isDisjoint(stored.macs, incoming.macs);
+}
+
+/**
+ * ADOPTION CORROBORATION (ADR-0093 §3a) — may a confirm LINK this node's report to the live Asset that
+ * already carries `serial`, instead of minting a second one for the same physical machine?
+ *
+ * `specs` is the node's whole stored blob (`{ host, reportedAt, identityConflict?, … }`); `serial` is
+ * the value {@link sanitizeSerial} already produced from `specs.host` — passed in rather than
+ * re-derived so the ADOPT probe and the MINT promotion can never disagree about which serial this
+ * machine has.
+ *
+ * WHY NOT A BARE SERIAL MATCH. {@link sanitizeSerial} exists because vendors ship placeholder serials
+ * by the rack, and {@link isClonedMachineId} exists because burned-in identity DOES collide in the
+ * field. Matching on a value the codebase already distrusts would silently attach the wrong machine to
+ * a row a human curated — and a mis-link is far worse than the duplicate it replaces, because a
+ * duplicate is VISIBLE and a mis-link is not. All three conditions must hold:
+ *
+ *  1. the sanitized serial appears in the host's own identity evidence — the same value, canonicalised
+ *     the one way {@link sanitizeIdentifierValue} canonicalises serials;
+ *  2. the host offers at least one surviving MAC, i.e. {@link identityDiscriminator} is derivable. A
+ *     report whose ONLY identity fact is a serial is one fact, not corroboration;
+ *  3. the node is not under an active #1141 identity collision (`specs.identityConflict`). A machine-id
+ *     under suspicion never adopts.
+ *
+ * FAILS CLOSED, and that is why the gate can afford to be strict: not corroborated means MINT, which
+ * is the pre-ADR behaviour and is recoverable by hand. Adopting wrongly is not.
+ *
+ * Reads `unknown` defensively for the same reason {@link hostIdentityEvidence} does: this runs over a
+ * Prisma `JsonValue` that may have been hand-edited or written by an older build, and a malformed blob
+ * must degrade to "no corroboration", never throw.
+ */
+export function corroboratesAdoption(specs: unknown, serial: string): boolean {
+  if (!isPlainObject(specs)) return false;
+  // Fail closed on a flagged collision — `undefined` is "never flagged", `null` a cleared flag.
+  if (specs.identityConflict !== undefined && specs.identityConflict !== null) return false;
+  const evidence = hostIdentityEvidence(specs.host);
+  if (evidence.macs.length === 0) return false;
+  const canonical = sanitizeIdentifierValue("serial", serial);
+  return canonical !== undefined && evidence.serials.includes(canonical);
 }
 
 /** Cap on the discriminator half of a disambiguated key — long enough for any real serial or MAC. */
