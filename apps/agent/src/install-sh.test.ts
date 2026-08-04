@@ -513,15 +513,17 @@ describe("the token reaches curl on stdin, never on a command line (#1208 review
 
   test("a real curl sends the header from stdin, and `ps` never shows the token", async () => {
     const token = "lzit_sa_argv_probe_4f19c7";
-    let seen: string | null = null;
+    // A box rather than a bare `let`: the assignment happens inside the server's handler, which TS
+    // cannot see, so a `string | null` local would narrow to `null` at the assertion.
+    const request: { authorization: string | null } = { authorization: null };
     let release = (): void => {};
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
     const server = Bun.serve({
       port: 0,
-      async fetch(request) {
-        seen = request.headers.get("authorization");
+      async fetch(incoming) {
+        request.authorization = incoming.headers.get("authorization");
         // Hold the response open so there is a live curl for `ps` to look at.
         await held;
         return new Response("ok");
@@ -561,7 +563,7 @@ describe("the token reaches curl on stdin, never on a command line (#1208 review
       const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
       expect(stderr).toBe("");
       expect(code).toBe(0);
-      expect(seen).toBe(`Bearer ${token}`);
+      expect(request.authorization).toBe(`Bearer ${token}`);
     } finally {
       release();
       await server.stop(true);
