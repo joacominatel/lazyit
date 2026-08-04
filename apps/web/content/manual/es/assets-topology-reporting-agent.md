@@ -1100,7 +1100,9 @@ instancia en `http` plano recibe la opción explícita `--allow-insecure-http` /
 que necesita — la única decisión que `--upgrade` *no* arrastra por vos, descrita unos párrafos más
 abajo.
 
-**No hay nada que completar en él.** El comando de actualización es `--upgrade` y nada más:
+**No hay nada que completar en él.** En una instancia `https` el comando de actualización es
+`--upgrade` y nada más — lo único que alguna vez se le suma es la opción explícita de `http` plano,
+más abajo:
 
 ```sh
 curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --upgrade

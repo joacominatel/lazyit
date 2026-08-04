@@ -1028,7 +1028,8 @@ the download is checksum-verified, the binary is tested before anything is armed
 instance gets the explicit `--allow-insecure-http` / `-AllowInsecureHttp` opt-in it needs — the one
 decision `--upgrade` will *not* carry over for you, described a few paragraphs down.
 
-**There is nothing in it to fill in.** The update command is `--upgrade` and nothing else:
+**There is nothing in it to fill in.** On an `https` instance the update command is `--upgrade` and
+nothing else — the one thing that can ever join it is the plain-`http` opt-in, below:
 
 ```sh
 curl -fsSL https://your-instance/install.sh | sudo sh -s -- --upgrade
