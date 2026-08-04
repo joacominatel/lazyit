@@ -306,7 +306,13 @@ this build, which that section now states on screen rather than implying only on
   computed-read-field mold, since `specs` is deliberately off list rows (#1135); no column, no migration,
   and a `null` family means the caller shows **both** install commands rather than guessing. Live service
   accounts holding `infra:report` ride along, never-used first, because a token minted for a host that
-  never checked in leaves no node behind. **No migration, no agent change, no `agentUpdate` on the ack, no
+  never checked in leaves no node behind — but **on a second gate**: that block is the service-account
+  credential inventory, which every other surface reads under `settings:manage`, and `infra:read` reaches
+  MEMBER *and* VIEWER by default. A caller without `settings:manage` gets the table with the block
+  **omitted** (not emptied, and not a 403 on the whole read) — the same in-code second gate the folder
+  `accessRules` read uses (INV-9 / #554). The never-used figure is a separate unbounded `count`, so it
+  stays true past the identity cap instead of clamping to it. **No migration, no agent change, no
+  `agentUpdate` on the ack, no
   server-pushed execution** — full self-update and human-triggered/agent-executed update were both
   declined, with reopening criteria recorded. Still **inert until #1203**: every Docker-served binary
   reports `agentVersion: "dev"` today, so an estate honestly reads as entirely "version unknown" and fills
