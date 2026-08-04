@@ -6,6 +6,7 @@ import { InfraAgentStalenessSweeper } from './infra-agent-staleness.sweeper';
 import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { AgentPolicyService } from './agent-policy.service';
+import { AgentFleetService } from './agent-fleet.service';
 import { AssetsModule } from '../assets/assets.module';
 import { AssetHistoryModule } from '../asset-history/asset-history.module';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
@@ -49,6 +50,9 @@ import { NotificationsModule } from '../notifications/notifications.module';
   // AgentPolicyService: the #1140 server-driven policy — resolution on the report path, and the three
   // human-only write scopes (instance default, service account, node). Stateless, so scope is not
   // load-bearing here the way it is for the two limiters above.
+  // AgentFleetService: the ADR-0094 §4 assisted-update READ — the fleet view and its version buckets
+  // (#1206). Read-only and stateless; exported so InstanceModule can put the ONE aggregate
+  // "N agents are a MAJOR behind" line on the existing `update.available` email (§Decisions resolved).
   providers: [
     InfraService,
     InfraAutoConfirmService,
@@ -56,7 +60,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     InfraReportRateLimitGuard,
     InfraNodeEnrollmentLimiter,
     AgentPolicyService,
+    AgentFleetService,
   ],
-  exports: [InfraService],
+  exports: [InfraService, AgentFleetService],
 })
 export class InfraModule {}
