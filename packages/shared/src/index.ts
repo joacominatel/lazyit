@@ -57,6 +57,9 @@ export * from "./schemas/dashboard";
 export * from "./schemas/folder";
 export * from "./schemas/import";
 export * from "./schemas/agent-policy";
+// The agent fleet read surface + the version buckets (ADR-0094 §3/§4, #1206). A read and a pure
+// classifier over `utils/semver` — no second notion of "behind", no schema change.
+export * from "./schemas/agent-fleet";
 export * from "./schemas/infra";
 export * from "./schemas/infra-fact-change";
 export * from "./schemas/infra-review";
