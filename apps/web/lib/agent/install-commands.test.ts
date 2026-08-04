@@ -1,15 +1,17 @@
 /**
- * The commands the "Add a server" wizard hands an operator, held to the two installers they are
- * supposed to drive (issue #1168).
+ * The commands the "Add a server" wizard and the agent fleet view hand an operator, held to the two
+ * installers they are supposed to drive (issues #1168 and #1207).
  *
  * The wizard emitted a `curl … | sh` one-liner and nothing else, so an operator standing at a Windows
  * host was given a command that cannot run there — at the exact moment they were holding a fresh,
  * once-only token. The Manual had carried the PowerShell form since #1144; the UI had not learned it.
  *
  * These are pure string builders, so this file can do the one thing prose could not: assert that what
- * the wizard prints is the same thing `install.sh` and `install.ps1` actually accept. Two tests read
+ * the UI prints is the same thing `install.sh` and `install.ps1` actually accept. Several tests read
  * the installers off disk and check the emitted switches against their real argument parsers, which
- * is what keeps this from becoming a sixth claim nobody re-checked.
+ * is what keeps this from becoming a sixth claim nobody re-checked. It is also why ADR-0094 §5 keeps
+ * this module in `apps/web` rather than promoting it to `@lazyit/shared`: the assertions below are
+ * against `apps/web/public/install.{sh,ps1}` **as this app serves them**.
  */
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
@@ -18,14 +20,16 @@ import {
   agentDiagnosticsCommand,
   agentInstallCommand,
   agentManualInstallSteps,
-} from "./agent-install-commands";
+  agentTokenEnvVar,
+  agentUpdateCommand,
+} from "./install-commands";
 
 const ORIGIN = "https://lazyit.example.com";
 const TOKEN = "lzit_sa_xxx";
 
 /** `apps/web/public/<name>` — the installers this instance actually serves. */
 function installerPath(name: string): string {
-  return path.join(import.meta.dir, "..", "..", "..", "..", "..", "public", name);
+  return path.join(import.meta.dir, "..", "..", "public", name);
 }
 
 /** The slice of `infra.wizard` these tests hold both locales to. */
@@ -39,9 +43,6 @@ type WizardMessages = {
 async function wizardMessages(locale: string): Promise<WizardMessages> {
   const file = path.join(
     import.meta.dir,
-    "..",
-    "..",
-    "..",
     "..",
     "..",
     "messages",
@@ -118,6 +119,52 @@ describe("agentInstallCommand — the token and origin are never placeholders", 
   });
 });
 
+describe("agentUpdateCommand — the update of an already-installed host (ADR-0094 §5/§6)", () => {
+  test("Linux re-runs the installer with no token and preserves the environment", () => {
+    // `sudo -E` is the whole difference from the install one-liner and it is not decoration: sudo
+    // resets the environment by default, so a plain `sudo sh` would drop LAZYIT_TOKEN and the
+    // installer would stop asking for a token the command does not mention.
+    expect(agentUpdateCommand("linux", ORIGIN)).toBe(
+      `curl -fsSL ${ORIGIN}/install.sh | sudo -E sh -s -- --url ${ORIGIN}`,
+    );
+  });
+
+  test("Windows re-runs the installer with no token, in the same script-block form", () => {
+    expect(agentUpdateCommand("windows", ORIGIN)).toBe(
+      `& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Url ${ORIGIN}`,
+    );
+  });
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: NO token, no switch, no placeholder standing in for one",
+    (platform) => {
+      // The server structurally cannot re-emit an installed host's secret — only `tokenHash` and
+      // `tokenPrefix` are stored (ADR-0094 §6). A command that LOOKED like it carried one, or that
+      // shipped a `<token>` placeholder, would send the operator hunting for a flag that cannot
+      // exist. It names the environment variable instead, and the UI says so.
+      const command = agentUpdateCommand(platform, ORIGIN);
+      expect(command).not.toContain(TOKEN);
+      expect(command).not.toContain("lzit_sa_");
+      expect(command).not.toContain("<token>");
+      expect(command).not.toMatch(/-{1,2}[Tt]oken/);
+      expect(command).toContain(ORIGIN);
+    },
+  );
+
+  test("each platform names the token variable its own installer falls back to", async () => {
+    expect(agentTokenEnvVar("linux")).toBe("LAZYIT_TOKEN");
+    expect(agentTokenEnvVar("windows")).toBe("$env:LAZYIT_TOKEN");
+    // The fallbacks themselves, asserted against the installers rather than remembered: install.sh
+    // reads `${LAZYIT_TOKEN:-}` and install.ps1 reads `$env:LAZYIT_TOKEN` when no token was passed.
+    // If either ever stops doing that, the update command silently becomes unrunnable.
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("LAZYIT_TOKEN");
+    expect(sh).toMatch(/TOKEN="\$\{TOKEN:-\$\{LAZYIT_TOKEN:-\}\}"/);
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toContain("if (-not $Token) { $Token = $env:LAZYIT_TOKEN }");
+  });
+});
+
 describe("a plain-http origin carries the explicit opt-in the installers now demand (#1190)", () => {
   // Since #1190 both installers REFUSE a cleartext http URL unless the operator opts in. The wizard
   // fills the origin in from the instance the operator is already browsing — so on a LAN (`lan`
@@ -138,6 +185,20 @@ describe("a plain-http origin carries the explicit opt-in the installers now dem
       `& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Url ${HTTP_ORIGIN} -Token ${TOKEN} -AllowInsecureHttp`,
     );
     expect(agentInstallCommand("windows", ORIGIN, TOKEN)).not.toContain("-AllowInsecureHttp");
+  });
+
+  test("the UPDATE command carries it too, on both platforms — it runs the same installers", () => {
+    // ADR-0094 §5: the fleet view reuses this module precisely so the flags ride for free. A
+    // hand-rolled second builder would get exactly this wrong, silently, on the LAN installs that
+    // are hardest to test — and the fleet view is the surface an operator uses at scale.
+    expect(agentUpdateCommand("linux", HTTP_ORIGIN)).toBe(
+      `curl -fsSL ${HTTP_ORIGIN}/install.sh | sudo -E sh -s -- --url ${HTTP_ORIGIN} --allow-insecure-http`,
+    );
+    expect(agentUpdateCommand("windows", HTTP_ORIGIN)).toBe(
+      `& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Url ${HTTP_ORIGIN} -AllowInsecureHttp`,
+    );
+    expect(agentUpdateCommand("linux", ORIGIN)).not.toContain("--allow-insecure-http");
+    expect(agentUpdateCommand("windows", ORIGIN)).not.toContain("-AllowInsecureHttp");
   });
 
   test("the Windows inspect-first RUN step carries it too — it runs the same installer", () => {
