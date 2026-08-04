@@ -1972,6 +1972,56 @@ operator who meets it with no warning of their own reasonably concludes the down
 stops. Frontend and message catalogs only: no contract, schema, migration or installer change, and no
 existing agent is affected.
 
+**Amendment (2026-08-04, #1208) — a re-run can authenticate with the token already on the host.**
+§7 above lists three ways to hand the installer a token and all three assume you *have* one. On the
+**upgrade** path you frequently do not: re-running the installer is the documented way to pick up a
+new binary and a new unit file, and lazyit **cannot** hand the token back — `ServiceAccount` stores
+only `tokenHash` and `tokenPrefix`, and the plaintext is revealed exactly once at mint or rotate
+([[0048-service-accounts]]). So "re-run this command" was copy-paste *plus* go and find a
+secret, on every host in the estate.
+
+The host already holds it. The installer wrote it there itself — `/etc/lazyit-agent/config` at
+`chmod 600`, `C:\ProgramData\lazyit-agent\config` with an ACL of SYSTEM + Administrators — and both
+installers run as root/SYSTEM. Reading back what it wrote is not a new exposure: anyone who can run
+the installer can read that file directly.
+
+`--keep-token` / `-KeepToken` therefore authenticates a run with the token in that file, and four
+things about it are deliberate:
+
+- **An explicit flag, not the implicit default for a re-run.** Implicit is friendlier by one word and
+  wrong in the case that matters: a misspelled `$TOKEN` variable, or a wrapper that stopped exporting
+  `LAZYIT_TOKEN`, would stop being a loud *"a token is required"* and become a silent install with
+  the **old** credential — a host reporting with a token somebody believes they replaced, and no
+  signal anywhere. Where the credential for a root install came from is not a thing to infer from the
+  state of the disk. It is also what makes the decision greppable in an audit: a run either says
+  `--keep-token`, or it carries a token.
+- **No readable config is fatal, never a silent unauthenticated install.** The message names root
+  first (the file is `0600`, and "I forgot sudo" is the likelier of the two ways to get there) and
+  the first-install forms second. A config that exists but carries no `LAZYIT_TOKEN` line — the shape
+  `--uninstall --keep-config` leaves behind — is fatal with its own message, which says lazyit cannot
+  show an existing token again and this may need a fresh one.
+- **A hard error against every other token source, including the environment.** `--token`,
+  `--token-file` and `LAZYIT_TOKEN` each refuse to share a run with it, in the same posture as the
+  existing `--token`/`--token-file` pair. Two sources on one root install is an operator who believes
+  something untrue about the run, and quietly picking one is how a host ends up authenticating with
+  the credential that was just rotated away.
+- **The config merge is untouched.** `--keep-token` changes where the token *comes from*, not who
+  owns the key: `LAZYIT_TOKEN` is still dropped from the preserved set and written back once, so the
+  host owner's `LAZYIT_COLLECT_*=false` veto, its proxy and its CA cross the upgrade exactly as they
+  did before (#1140/#1137/#1160) and no re-run can leave two token lines for the parser to choose
+  between.
+
+The extraction agrees with the agent's own `readConfigFile` on every point where a hand-edited file
+can differ from the one the installer writes — last assignment wins, value trimmed, one matching pair
+of surrounding quotes stripped, `CR` dropped — because "the credential this host is already using" is
+the whole promise. Reading a different token than the agent reads would install cleanly and then fail
+on every tick.
+
+**Nothing about stored credentials changes**: the server still never holds a plaintext token, and
+`--uninstall` still destroys the one on the host unconditionally (`--keep-token` is *refused* there
+rather than ignored, so no operator can finish an uninstall believing a live credential survived).
+Purely additive: every existing invocation keeps working unchanged, and an older instance serving an
+older installer is unaffected — this arrives only where the new script is fetched and run.
 
 ### §8 — Security model
 
@@ -2165,6 +2215,9 @@ would be a separate ADR and arguably a separate product).
 - Server-driven agent policy (the ack as the config channel, the fixed-tick interval inversion, the
   local veto, the three scopes): §7 Amendment (2026-08-01), issue #1140 — the consumer of contract
   v2's reserved `policyRevision`, with a §4 amendment making the staleness threshold per node.
+- A re-run authenticates with the token already on the host (`--keep-token` / `-KeepToken`, an
+  explicit flag and a hard error against every other token source): §7 Amendment (2026-08-04), issue
+  #1208 — the upgrade path stops needing a secret lazyit structurally cannot re-issue.
 - Software delta + the unchanged-write skip + the container child's Asset sync: §2/§3 Amendment
   (2026-08-01), issues #1142, #1153 and #1157 — one change, because giving an absent `software` key
   the meaning *unchanged* is only safe once the wire can also say *disabled*. It reconciles #1147's

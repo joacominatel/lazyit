@@ -387,7 +387,9 @@ Si estás reimaginando una máquina que va a volver a tener el agente, agregá *
 conserva los límites propios de ese host y su configuración de proxy (lo que eligió el dueño de la
 máquina, que es molesto de reconstruir) y de todos modos quita el token y la dirección de la
 instancia. No hay ninguna opción que deje el token: una credencial que funciona contra tu instancia no
-debería sobrevivir en una máquina que acabás de dar de baja.
+debería sobrevivir en una máquina que acabás de dar de baja. (`--keep-token`, más abajo, es la
+operación opuesta y pertenece a una *instalación*: combinarla con `--uninstall` se rechaza en vez de
+ignorarse, para que nadie termine una desinstalación creyendo que la credencial sobrevivió.)
 
 Dos cosas que desinstalar **no** hace, deliberadamente. La entrada del servidor en lazyit queda tal
 como está: descartala desde la vista de Servidores si querés sacarla del mapa. Y el token solo se
@@ -953,6 +955,36 @@ segundo después de una ventana de mantenimiento — se escribe cuando corre el 
 existente conserva la unidad que le tocó originalmente hasta que lo vuelvas a ejecutar. Volver a
 ejecutarlo es seguro y conserva la configuración propia de ese host, así que en una flota que ya
 tenés, vale la pena hacerlo una vez.
+
+**Volver a ejecutarlo no necesita el token de nuevo.** Agregá **`--keep-token`** (Linux) o
+**`-KeepToken`** (Windows) y el instalador se autentica con el token que ya está en esa máquina — el
+que él mismo escribió en el archivo de configuración, legible solo por root (Linux) o por SYSTEM y
+Administradores (Windows). Así una actualización es un solo comando, sin ningún secreto adentro:
+
+```sh
+sudo sh install.sh --url https://tu-instancia --keep-token
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia -KeepToken
+```
+
+Esto importa más de lo que parece: lazyit **no puede** volver a mostrarte un token existente. Guarda
+solo una huella de él, y el token en sí se muestra una única vez, cuando creás o rotás la cuenta de
+servicio. Antes de esta opción, "volvé a ejecutar el comando de instalación" quería decir, en
+silencio, "primero andá a buscar el token", en cada máquina.
+
+Es una opción que hay que pedir, no algo que ocurra solo al volver a ejecutar: así, un comando que
+*debía* llevar un token y lo perdió (una variable mal escrita, un script que dejó de definir
+`LAZYIT_TOKEN`) sigue deteniéndose con *"a token is required"* en vez de instalar en silencio con el
+token viejo. Por la misma razón se niega a convivir con `--token`, `--token-file` o un `LAZYIT_TOKEN`
+en el entorno: dos respuestas a la misma pregunta son un error que conviene frenar, no uno que
+convenga resolver por lo bajo. Y en una máquina sin agente — o cuyo archivo de configuración no tiene
+token, que es lo que deja `--keep-config` — se detiene y te lo dice, en vez de instalar algo que no va
+a poder reportar. Ese caso necesita un token nuevo desde el asistente.
+
+Todo lo demás de una re-ejecución sigue igual: los límites propios de ese host, su proxy y su
+autoridad certificadora cruzan la actualización exactamente como siempre.
 
 **Actualizar tu instancia nunca rompe los agentes ya instalados.** No hace falta reinstalar nada: un
 agente más viejo sigue reportando igual que antes, y cada dato que envía aterriza exactamente donde

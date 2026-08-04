@@ -366,7 +366,9 @@ If you're re-imaging a machine that will get the agent back, add **`--keep-confi
 **`-KeepConfig`** (Windows): it keeps that host's own limits and its proxy settings (the things the machine's owner chose, which are annoying to
 reconstruct) and still strips the token and the instance address. There is no option that leaves the
 token behind — a working credential for your instance should not survive on a machine you just
-decommissioned.
+decommissioned. (`--keep-token`, further down, is the opposite operation and belongs to an *install*:
+combining it with `--uninstall` is refused rather than ignored, so nobody finishes an uninstall
+believing the credential survived.)
 
 Two things uninstalling does **not** do, deliberately. The server's entry in lazyit stays exactly as
 it is: discard it from the Servers view if you want it off the map. And the token is only removed
@@ -891,6 +893,36 @@ that stops a whole estate reporting in the same second after a maintenance windo
 the installer runs, and an existing host keeps the unit it was originally given until you re-run it.
 Re-running is safe and keeps that host's own settings, so on a fleet you already have, this is worth
 doing once.
+
+**Re-running does not need the token again.** Add **`--keep-token`** (Linux) or **`-KeepToken`**
+(Windows) and the installer authenticates with the token already on that machine — the one it wrote
+into the configuration file itself, readable only by root (Linux) or SYSTEM and Administrators
+(Windows). So an upgrade is one command with no secret in it:
+
+```sh
+sudo sh install.sh --url https://your-instance --keep-token
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Url https://your-instance -KeepToken
+```
+
+This matters more than it looks: lazyit **cannot** show you an existing token a second time. It
+stores only a fingerprint of it, and the token itself is displayed once, when you create or rotate
+the service account. Before this option, "re-run the install command" quietly meant "find the token
+first", on every machine.
+
+It is a flag you have to ask for, not something that happens by itself on a re-run — that way a
+command that was *meant* to carry a token and lost it (a mistyped variable, a script that stopped
+setting `LAZYIT_TOKEN`) still stops with *"a token is required"* instead of silently installing with
+the old one. For the same reason it refuses to run alongside `--token`, `--token-file` or a
+`LAZYIT_TOKEN` in the environment: two answers to the same question is a mistake worth stopping for,
+not one to resolve quietly. And on a machine with no agent — or one whose configuration file has no
+token in it, which is what `--keep-config` leaves behind — it stops and tells you, rather than
+installing something that cannot report. That case needs a fresh token from the wizard.
+
+Everything else about a re-run is unchanged: this host's own limits, its proxy and its certificate
+authority all cross the upgrade exactly as they always did.
 
 **Upgrading your instance never breaks the agents already installed.** You do not have to re-install
 anything: an older agent keeps reporting exactly as it did, and every fact it sends lands exactly where
