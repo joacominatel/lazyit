@@ -27,6 +27,14 @@
     "APPLIANCE": "Appliance",
     "OTHER": "Otro"
   },
+  "chassis": {
+    "server": "Servidor",
+    "desktop": "Equipo de escritorio",
+    "laptop": "Notebook",
+    "vm": "Máquina virtual",
+    "container": "Contenedor",
+    "unknown": "Sin reportar"
+  },
   "status": {
     "ONLINE": "En línea",
     "OFFLINE": "Fuera de línea",
@@ -106,6 +114,8 @@
     "kindLabel": "Tipo",
     "trackAsAssetLabel": "Registrar como activo de inventario",
     "trackAsAssetDescription": "Activado por defecto: también crea un activo registrado (con los datos reportados del host) para que este servidor pueda tener responsable, artículos de la base de conocimiento y secretos. Desactivalo para dejarlo solo en el grafo.",
+    "adoptExisting": "Esta máquina ya está en tu inventario. Al confirmar se la vincula a ese activo en lugar de crear un segundo:",
+    "adoptSerial": "Coincide por número de serie",
     "submit": "Confirmar servidor",
     "confirmedToast": "Servidor confirmado.",
     "error": "No se pudo confirmar el servidor."
@@ -195,6 +205,12 @@
   },
   "tidy": {
     "action": "Ordenar"
+  },
+  "endpoints": {
+    "show": "{count, plural, one {Mostrar # equipo de usuario} other {Mostrar # equipos de usuario}}",
+    "showHint": "Las notebooks y los equipos de escritorio se mantienen fuera del mapa para que el parque siga siendo legible. Siguen en tu inventario, en la lista de servidores y en la búsqueda: esto solo cambia lo que el mapa dibuja.",
+    "hide": "{count, plural, one {Ocultar # equipo de usuario} other {Ocultar # equipos de usuario}}",
+    "hideHint": "Volvé a sacar del mapa las notebooks y los equipos de escritorio. No se elimina nada: siguen en tu inventario, en la lista de servidores y en la búsqueda."
   },
   "legend": {
     "title": "Referencia de conexiones"
@@ -307,6 +323,10 @@
     "ipPlaceholder": "ej. 10.0.0.12",
     "ipClear": "Borrar",
     "ipConflictWarning": "{count, plural, one {Esta IP también la usa # nodo más} other {Esta IP también la usan # nodos más}}",
+    "chassisLabel": "Formato",
+    "duplicateAssetWarning": "Puede que esta máquina ya esté dos veces en tu inventario",
+    "duplicateAssetHint": "El activo vinculado a este nodo se creó automáticamente y no tiene número de serie, mientras que el serie que reporta esta máquina pertenece a otro activo. Suele significar que la máquina se registró dos veces, antes de que lazyit supiera vincular un registro existente. No se cambió nada y no se va a fusionar nada por vos: abrí el otro activo para verificar si realmente es la misma máquina y después reconciliá los dos vos mismo.",
+    "duplicateAssetSerial": "Número de serie",
     "editSave": "Guardar",
     "editCancel": "Cancelar",
     "editedToast": "Nodo actualizado.",
@@ -441,11 +461,14 @@
     "reportedKindLabel": "Reportado como",
     "reportedKindDescription": "Lo que el reporte del agente hizo que lazyit propusiera para este host, no lo que querés que sea.",
     "anyKind": "Cualquier tipo",
+    "chassisLabel": "Formato reportado",
+    "chassisDescription": "Lo que la máquina dice que es físicamente, leído de su firmware y no de su nombre. Alcanza como condición por sí solo, así que «autoconfirmar los servidores y revisar las notebooks» es una regla que podés escribir. Un host que no reporta formato nunca coincide con una regla que nombra uno.",
+    "anyChassis": "Cualquier formato",
     "confirmAsKindLabel": "Confirmarlo como",
     "keepProposedKind": "Mantener el tipo reportado",
     "trackAsAssetLabel": "Registrar como activo de inventario",
     "trackAsAssetDescription": "Activado por defecto en una regla solo para servidores, y desactivado en cualquier regla que también pueda alcanzar contenedores, con el mismo criterio que al confirmar a mano. Activalo si esos contenedores realmente son algo que registrás.",
-    "needsCondition": "Una regla necesita al menos una condición que pueda descartar un host: un patrón de nombre con algo más que * y ?, una subred más acotada que 0.0.0.0/0, o un tipo reportado. La mayoría de los patrones hechos solo de comodines coinciden con todos los hosts, así que confirmarían todo lo que encuentre el agente; ? por sí solo coincide únicamente con nombres de un carácter, y se rechaza junto con ellos para que la regla siga siendo simple de verificar.",
+    "needsCondition": "Una regla necesita al menos una condición que pueda descartar un host: un patrón de nombre con algo más que * y ?, una subred más acotada que 0.0.0.0/0, un tipo reportado o un formato reportado. La mayoría de los patrones hechos solo de comodines coinciden con todos los hosts, así que confirmarían todo lo que encuentre el agente; ? por sí solo coincide únicamente con nombres de un carácter, y se rechaza junto con ellos para que la regla siga siendo simple de verificar.",
     "saveSubmit": "Guardar regla",
     "savedToast": "Regla guardada. Se aplica a partir del próximo reporte.",
     "saveError": "No se pudo guardar la regla.",
@@ -457,6 +480,7 @@
     "conditionHostname": "Nombre {pattern}",
     "conditionSubnet": "Desde {cidr}",
     "conditionKind": "Reportado como {kind}",
+    "conditionChassis": "Formato {chassis}",
     "author": "Escrita por {name}",
     "authorUnknown": "Autor ya no está en el directorio",
     "lastMatched": "{count, plural, one {Usada # vez} other {Usada # veces}}, la última el {when}",
