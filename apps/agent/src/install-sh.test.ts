@@ -546,13 +546,23 @@ describe("the token reaches curl on stdin, never on a command line (#1208 review
         },
       );
 
-      // -ww asks both procps and BSD ps for untruncated arguments; without it a long command line
-      // comes back cut at the terminal width and the assertion would pass by not seeing anything.
+      // EVERY `ps` THIS MIGHT RUN UNDER, concatenated. The suite runs on BSD ps (macOS) and procps
+      // (the Linux CI image), which disagree about how to ask for untruncated arguments - and a
+      // truncated snapshot would make the assertion below pass by not seeing anything. Whichever
+      // forms this host accepts all contribute; the `--config -` assertion is what proves at least
+      // one of them actually looked at a live curl.
       let snapshot = "";
       for (let attempt = 0; attempt < 100 && !snapshot.includes("--config -"); attempt += 1) {
         await Bun.sleep(30);
-        const ps = Bun.spawnSync(["ps", "-A", "-ww", "-o", "args="]);
-        snapshot = new TextDecoder().decode(ps.stdout);
+        snapshot = "";
+        for (const form of [
+          ["ps", "-A", "-ww", "-o", "args="],
+          ["ps", "-A", "-o", "args="],
+          ["ps", "axww", "-o", "args="],
+        ]) {
+          const ps = Bun.spawnSync(form, { stderr: "ignore" });
+          if (ps.exitCode === 0) snapshot += new TextDecoder().decode(ps.stdout);
+        }
       }
       expect(snapshot, "no live curl was ever visible to ps - this case proved nothing").toContain(
         "--config -",
