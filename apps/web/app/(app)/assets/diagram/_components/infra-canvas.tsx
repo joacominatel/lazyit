@@ -24,7 +24,9 @@ import {
   BoltIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  ComputerDesktopIcon,
   ExclamationTriangleIcon,
+  EyeSlashIcon,
   ShieldCheckIcon,
   Squares2X2Icon,
 } from "@heroicons/react/24/outline";
@@ -58,6 +60,7 @@ import {
   placementOffset,
   statusTone,
 } from "@/lib/infra/canvas";
+import { edgesBetweenVisible, partitionEndpoints } from "@/lib/infra/endpoints";
 import { cn } from "@/lib/utils";
 import { type ImpactSummaryPlan, planImpactSummary } from "./impact-summary-plan";
 import { impactSummaryTone } from "./impact-summary-tone";
@@ -115,6 +118,14 @@ export interface InfraCanvasApi {
  * ones" are different questions. Clicking a node therefore SELECTS it and
  * nothing more — the detail modal is one deliberate click (or a double-click) away, so the map is
  * never covered by a surface the operator did not ask for.
+ *
+ * **Endpoints are off the board by default** (ADR-0093 §5). A representative estate is ~180 reported
+ * laptops and desktops against ~65 servers, and drawing all 245 is what made this canvas unusable —
+ * so a node whose agent reports `chassis: laptop|desktop` is not drawn unless the toolbar's toggle
+ * says otherwise. It is a treatment of THIS SURFACE and nothing else: the node is still in the CMDB,
+ * still on the Servers table, still reachable by search, still counted by a blast radius. The filter
+ * lives in `lib/infra/endpoints.ts`, the queries above are untouched, and the count of what is
+ * missing is on the board rather than left to be inferred.
  */
 export function InfraCanvas({
   onSelectNode,
@@ -126,6 +137,8 @@ export function InfraCanvas({
   impactOn = false,
   onToggleImpact,
   onRetryImpact,
+  showEndpoints = false,
+  onToggleEndpoints,
   onApiReady,
   emptyAction,
 }: {
@@ -158,6 +171,15 @@ export function InfraCanvas({
   onToggleImpact?: () => void;
   /** Re-run the blast-radius query after it failed (the summary's Retry). */
   onRetryImpact?: () => void;
+  /**
+   * Draw reported laptops and desktops too (ADR-0093 §5). OFF by default — that default IS the
+   * feature, because a representative estate is ~180 endpoints against ~65 servers and drawing all
+   * of them is what makes the board unusable. Owned by `diagram-view` as `?endpoints=1` so the
+   * choice is URL-backed and survives a reload.
+   */
+  showEndpoints?: boolean;
+  /** Flip {@link showEndpoints} — the toolbar's one-click undo of the default. */
+  onToggleEndpoints?: () => void;
   /** Receives the canvas's imperative API once mounted (issue #765 — diagram-view's `?focus=1`). */
   onApiReady?: (api: InfraCanvasApi) => void;
   /** Rendered inside the "no nodes yet" state — the Topology screen's add affordance (#1181). */
@@ -176,6 +198,23 @@ export function InfraCanvas({
     refetch: refetchEdges,
   } = useInfraEdges(nodeIds);
 
+  // Endpoint routing (ADR-0093 §5) — the ONE place the canvas narrows what it draws.
+  //
+  // Client-side over the rows already fetched: `chassis` rides the list row, so the toggle costs no
+  // request and is instant. The queries above are deliberately left alone — `useInfraNodes({})` still
+  // asks for every node and `useInfraEdges(nodeIds)` still fans out over every one of them — so the
+  // graph the API serves never learns that a surface is hiding something, and toggling back on
+  // redraws from cache. That is what "the canvas filters; the graph does not" means in code.
+  const { visible: visibleNodes, endpointCount } = useMemo(
+    () => partitionEndpoints(rawNodes ?? [], showEndpoints),
+    [rawNodes, showEndpoints],
+  );
+  const visibleEdges = useMemo(
+    () =>
+      edgesBetweenVisible(rawEdges, new Set(visibleNodes.map((n) => n.id))),
+    [rawEdges, visibleNodes],
+  );
+
   if (isLoading) return <CanvasSkeleton label={t("loading")} />;
   if (isError) {
     return (
@@ -190,14 +229,21 @@ export function InfraCanvas({
     );
   }
 
-  const nodes = rawNodes ?? [];
-  if (nodes.length === 0) return <InfraEmptyState action={emptyAction} />;
+  // The onboarding hero belongs to a genuinely EMPTY estate, so it is gated on the raw rows. A board
+  // whose every node is a hidden endpoint renders as an empty canvas carrying the "N endpoints
+  // hidden" control instead — "you have nothing yet" would be a lie, and the wrong lie: it would read
+  // as the data loss ADR-0093 §8.3 is at pains to say this is not.
+  if ((rawNodes ?? []).length === 0)
+    return <InfraEmptyState action={emptyAction} />;
 
   return (
     <ReactFlowProvider>
       <CanvasBoard
-        nodes={nodes}
-        edges={rawEdges}
+        nodes={visibleNodes}
+        edges={visibleEdges}
+        endpointCount={endpointCount}
+        showEndpoints={showEndpoints}
+        onToggleEndpoints={onToggleEndpoints}
         edgesError={edgesError}
         onRetryEdges={refetchEdges}
         onSelectNode={onSelectNode}
@@ -219,6 +265,9 @@ export function InfraCanvas({
 function CanvasBoard({
   nodes: infraNodes,
   edges: infraEdges,
+  endpointCount,
+  showEndpoints,
+  onToggleEndpoints,
   edgesError,
   onRetryEdges,
   onSelectNode,
@@ -236,6 +285,10 @@ function CanvasBoard({
   // the board never wanted it — it renders label/kind/status/IP and positions from x/y.
   nodes: InfraNodeListItem[];
   edges: InfraEdge[];
+  /** How many endpoints the estate reports, drawn or not — the toolbar states the number (§5). */
+  endpointCount: number;
+  showEndpoints: boolean;
+  onToggleEndpoints?: () => void;
   /** At least one per-node edge fetch failed — some relationships are missing from the graph (#778). */
   edgesError: boolean;
   /** Re-run the per-node edge fetches; on success the inline notice auto-clears. */
@@ -684,19 +737,48 @@ function CanvasBoard({
           nodeColor="var(--muted-foreground)"
         />
 
-        {/* Tidy / auto-arrange (issue #766) — manager-only; viewers can't persist a layout. */}
-        {canManage ? (
-          <Panel position="top-right">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onTidy}
-              className="shadow-sm"
-            >
-              <Squares2X2Icon />
-              {t("tidy.action")}
-            </Button>
+        {/* The board toolbar. Two controls with different audiences, so the panel renders whenever
+            EITHER has something to offer. */}
+        {canManage || endpointCount > 0 ? (
+          <Panel position="top-right" className="flex items-center gap-2">
+            {/* Show / hide endpoints (ADR-0093 §5). Shown to EVERY reader, not just managers: hiding
+                is a rendering preference, not a mutation, and a viewer looking at a map that is
+                quietly missing 142 machines needs the undo more than anyone. The count is on the
+                control rather than implied, because "the map got smaller" must never be something an
+                operator has to infer. Rendered only when the estate actually reports endpoints —
+                explaining a filter that removes nothing is just noise on the board. */}
+            {endpointCount > 0 && onToggleEndpoints ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-pressed={showEndpoints}
+                title={
+                  showEndpoints ? t("endpoints.hideHint") : t("endpoints.showHint")
+                }
+                onClick={onToggleEndpoints}
+                className="shadow-sm"
+              >
+                {showEndpoints ? <EyeSlashIcon /> : <ComputerDesktopIcon />}
+                {showEndpoints
+                  ? t("endpoints.hide", { count: endpointCount })
+                  : t("endpoints.show", { count: endpointCount })}
+              </Button>
+            ) : null}
+
+            {/* Tidy / auto-arrange (issue #766) — manager-only; viewers can't persist a layout. */}
+            {canManage ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onTidy}
+                className="shadow-sm"
+              >
+                <Squares2X2Icon />
+                {t("tidy.action")}
+              </Button>
+            ) : null}
           </Panel>
         ) : null}
 

@@ -13,6 +13,7 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import type {
+  InfraAssetCandidate,
   InfraNodeChild,
   InfraNodeDetail,
   InfraNodeKind,
@@ -67,6 +68,7 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { statusTone } from "@/lib/infra/canvas";
+import { displayChassis } from "@/lib/infra/chassis";
 import {
   AgentContainerPanel,
   getAgentContainerFacts,
@@ -372,6 +374,7 @@ function GeneralTab({
   const t = useTranslations("infra");
   const { date } = useFormatters();
   const deleteNode = useDeleteInfraNode();
+  const chassis = displayChassis(node.chassis);
 
   return (
     <>
@@ -399,6 +402,18 @@ function GeneralTab({
                 </dt>
                 <dd>{date(node.createdAt)}</dd>
               </div>
+              {/* The reported form factor, for the reader too (ADR-0093 §6) — it is the fact that
+                  explains why a machine is or is not drawn on the map, so hiding it from viewers
+                  would leave exactly the people who cannot change anything unable to understand
+                  what they are looking at. */}
+              {chassis ? (
+                <div className="min-w-0">
+                  <dt className="text-xs text-muted-foreground">
+                    {t("panel.chassisLabel")}
+                  </dt>
+                  <dd>{t(`chassis.${chassis}`)}</dd>
+                </div>
+              ) : null}
             </dl>
           )}
 
@@ -411,6 +426,17 @@ function GeneralTab({
               peers={node.ipConflict ?? []}
               onSelectNode={onSelectNode}
             />
+          ) : null}
+
+          {/* Duplicate-inventory suspicion (ADR-0093 §8.5) — for installs that already minted a
+              second, serial-less Asset for a machine that was in inventory all along, back when a
+              serial collision was answered by dropping the serial. Display-only, like the IP notice
+              above it: it NAMES the other row and stops there. There is deliberately no merge action
+              and no one-click anything in v1, because machine-merging two inventory rows — their
+              assignments, history, tags and attachments — is not something an upgrade does while
+              nobody is looking. `?? null` for the read tolerance an older API needs. */}
+          {node.duplicateAssetSuspicion ? (
+            <DuplicateAssetNotice asset={node.duplicateAssetSuspicion} />
           ) : null}
 
           {/* Status toggle (write — gated). */}
@@ -615,6 +641,7 @@ function DetailsSection({ node }: { node: InfraNodeDetail }) {
   const t = useTranslations("infra");
   const { date } = useFormatters();
   const updateNode = useUpdateInfraNode();
+  const chassis = displayChassis(node.chassis);
 
   function handleKindChange(next: string) {
     updateNode.mutate(
@@ -659,6 +686,21 @@ function DetailsSection({ node }: { node: InfraNodeDetail }) {
           nodeId={node.id}
           ipAddress={node.ipAddress}
         />
+
+        {/* The reported form factor (ADR-0093 §2/§6) — READ-ONLY on purpose, and sitting among the
+            editable fields precisely so the difference is visible. Chassis is a fact the agent owns
+            and rewrites on every report; there is no `chassisSource` and no manual counterpart,
+            because a human never writes it and so there is no human write to protect. It is also
+            the fact that decides whether this node is drawn on the map by default, which is the one
+            question an operator will arrive at this panel asking. */}
+        {chassis ? (
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">
+              {t("panel.chassisLabel")}
+            </p>
+            <p className="text-sm">{t(`chassis.${chassis}`)}</p>
+          </div>
+        ) : null}
 
         <div className="space-y-1">
           <p className="text-xs text-muted-foreground">
@@ -826,6 +868,63 @@ function IpConflictNotice({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Duplicate-inventory suspicion (ADR-0093 §8.5) — *"this machine looks like it is already in your
+ * inventory, twice"*.
+ *
+ * The server recognises the shape the old collision retry left behind: this node's linked Asset was
+ * auto-created and carries **no** serial, while the serial the machine reports belongs to a different
+ * live Asset. That other Asset is what this names.
+ *
+ * **A hint, and only ever a hint.** No merge button, no "fix this for me", nothing that acts — v1
+ * surfaces the collision and hands the judgement back, because reconciling two inventory rows means
+ * deciding what happens to two sets of assignments, history, tags and attachments, and no upgrade
+ * gets to make that call unattended. The remedy stays the deliberate detach-then-link two-step
+ * (ADR-0093 §7), which this notice deliberately does NOT shortcut or even route to: the drill-in
+ * carries no asset attach/detach control today, so pointing at one would be a promise the UI cannot
+ * keep. The single link here is a READ — it opens the other Asset so the operator can confirm it
+ * really is the same machine before touching anything.
+ *
+ * `warning` tone rather than `destructive`: nothing is broken, and both rows are intact. It is a
+ * tidy-up waiting for someone with the context to do it right.
+ */
+function DuplicateAssetNotice({ asset }: { asset: InfraAssetCandidate }) {
+  const t = useTranslations("infra");
+  return (
+    <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+      <div className="flex items-start gap-2 text-sm font-medium text-warning-text">
+        <ExclamationTriangleIcon
+          className="mt-0.5 size-4 shrink-0"
+          aria-hidden
+        />
+        <span>{t("panel.duplicateAssetWarning")}</span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t("panel.duplicateAssetHint")}
+      </p>
+      <div className="space-y-1 text-sm">
+        <Link
+          href={`/assets/${asset.id}`}
+          className="flex items-center gap-2 font-medium hover:underline"
+        >
+          <CubeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="truncate">{asset.name}</span>
+          <ArrowTopRightOnSquareIcon
+            className="size-3.5 shrink-0 text-muted-foreground"
+            aria-hidden
+          />
+        </Link>
+        {asset.serial ? (
+          <p className="text-xs text-muted-foreground">
+            {t("panel.duplicateAssetSerial")}{" "}
+            <span className="font-mono">{asset.serial}</span>
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
