@@ -201,7 +201,103 @@
   },
   "view": {
     "map": "Map",
-    "table": "Table"
+    "table": "Table",
+    "agents": "Agents"
+  },
+  "fleet": {
+    "loadError": "Couldn't load the agent fleet.",
+    "empty": {
+      "title": "No reporting agents yet",
+      "description": "Install the reporting agent on a server and it will appear here with its version, its last check-in and — when it falls behind — the command that updates it."
+    },
+    "summary": {
+      "aria": "Agent version distribution",
+      "total": "{count, plural, =0 {No agents} one {# agent} other {# agents}}",
+      "ofTotal": "of {total}",
+      "comparedTo": "Compared against this instance, running {version}.",
+      "refresh": "Refresh"
+    },
+    "filter": {
+      "ALL": "All agents",
+      "majorBehind": "a major behind",
+      "behind": "behind",
+      "unknown": "version unknown",
+      "current": "up to date",
+      "notReporting": "not reporting",
+      "degraded": "reporting incompletely"
+    },
+    "columns": {
+      "host": "Host",
+      "version": "Agent version",
+      "os": "System",
+      "reported": "Last report",
+      "state": "State",
+      "actions": "Actions"
+    },
+    "searchLabel": "Search agents",
+    "searchPlaceholder": "Search by host, asset, IP or version…",
+    "chipSearch": "Search: {query}",
+    "chipFilter": "Showing: {filter}",
+    "filteredEmpty": "No agents match these filters.",
+    "updateAction": "Update",
+    "versionUnknownShort": "unknown",
+    "osUnknown": "Not reported",
+    "os": {
+      "linux": "Linux",
+      "windows": "Windows",
+      "darwin": "macOS",
+      "bsd": "BSD",
+      "other": "Other"
+    },
+    "platform": {
+      "linux": "Linux",
+      "windows": "Windows"
+    },
+    "reported": "reported {time}",
+    "reportedStale": "reported {time} · stale",
+    "neverReported": "Never reported",
+    "flags": {
+      "pending": "Pending review",
+      "notReporting": "Not reporting",
+      "degraded": "Incomplete report",
+      "degradedWarnings": "The last report came back incomplete: {warnings}",
+      "degradedUnprivileged": "The collector ran without root or SYSTEM, so some facts (serial, model) could not be read."
+    },
+    "copyCommandAria": "Copy command",
+    "commandCopied": "Command copied",
+    "bulk": {
+      "title": "{count, plural, one {# host can be updated} other {# hosts can be updated}}",
+      "subtitle": "One command per platform — hand it to whatever already runs commands on those hosts (Ansible, a GPO startup script, Intune). Re-running the installer is safe: it re-verifies the download, keeps each host's own settings, and the host keeps its identity in lazyit.",
+      "groupHosts": "{platform} · {count, plural, one {# host} other {# hosts}}",
+      "copyAll": "Or copy the whole set, annotated with which hosts each command is for:",
+      "scriptHeadline": "lazyit agent update — {count, plural, one {# host} other {# hosts}} behind (instance {version})",
+      "scriptTokenNote": "No token here: both installers read it from LAZYIT_TOKEN. Export it first.",
+      "scriptHosts": "{platform} · {count, plural, one {# host} other {# hosts}}: {hosts}"
+    },
+    "unknownNote": {
+      "body": "{count, plural, one {# agent reports a version lazyit cannot compare} other {# agents report a version lazyit cannot compare}} — agents installed before version stamping report `dev`. They are never treated as behind, and each one moves into a real bucket the first time you re-run its install command. That first update is the one lazyit cannot help you with.",
+      "devServer": "This instance reports its own version as `dev`, so no agent can be compared against it and {count, plural, one {# agent stays} other {# agents stay}} in \"version unknown\". Run a released build to get a real distribution.",
+      "help": "<link>How the reporting agent stays current</link> explains what re-running the installer does and does not change."
+    },
+    "identities": {
+      "title": "{count, plural, one {# agent token has never been used} other {# agent tokens have never been used}}",
+      "body": "A token was created for a host that never checked in — the install probably failed, or was never run. There is no node to show for it, which is why it is named here.",
+      "created": "created {date}",
+      "disabled": "Disabled",
+      "more": "…and {count} more.",
+      "manage": "Manage service accounts"
+    },
+    "command": {
+      "title": "Update {host}",
+      "subtitle": "This host reports agent {agentVersion}; this instance runs {serverVersion}. Run the command on the host — nothing is sent to it from here.",
+      "tokenNote": "This command carries no token, and cannot: lazyit only stores a hash of each host's token, so it can never print one back. Both installers read the token from {variables} instead — set it in the shell you run this in.",
+      "tokenLost": "No longer have this host's token? Rotate or mint one in <link>Service accounts</link> — it is shown once, exactly as when you first installed the agent.",
+      "unknownOs": "This host has not reported which system it runs, so both commands are shown. Run the one that matches the host — lazyit will not guess for you.",
+      "windowsElevated": "Run from an elevated PowerShell.",
+      "verify": "Afterwards, check the host without waiting for a report:",
+      "rerunSafe": "Re-running the installer is safe on a host that already has the agent: the download is checksum-verified, the binary is tested before anything is armed, your existing settings are merged rather than replaced, and the host keeps its identity in lazyit. On a host that is already current it does nothing.",
+      "close": "Close"
+    }
   },
   "tidy": {
     "action": "Tidy"
