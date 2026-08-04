@@ -972,6 +972,12 @@ re-run the install command and pick up the latest binary. It's only a nudge: an 
 reporting normally, nothing is blocked, and minor updates don't raise it. Agents built from source (or
 before versioning was added) report as `dev` and never show the badge.
 
+**Is every agent reporting `dev`?** Until this version, the binaries an instance served were compiled
+without the version stamp, so every installed agent reported `dev` and the badge could never appear.
+Once your instance is updated and rebuilt, the binaries it serves carry its version — but the agents
+already installed keep reporting `dev` until the install command is re-run on those hosts. Nothing
+else changes: `dev` is still a legitimate value, and it is still never nagged.
+
 **Some improvements only arrive when you re-run the install command.** The agent is two things: a
 program, and the systemd service and timer that run it. Anything in the *program* — the diagnostics
 above, proxy and certificate-authority support — comes with a new binary. Anything in the *service
