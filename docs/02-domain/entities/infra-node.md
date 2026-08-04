@@ -293,16 +293,30 @@ this build, which that section now states on screen rather than implying only on
   search / the Servers table stay unfiltered), surfaces chassis in the review tray, adds it as an
   `InfraAutoConfirmRule` condition, and makes a confirm **adopt** a corroborated live [[asset]] instead
   of minting a duplicate.
-- **Assisted agent update + the fleet view** — *proposed, not built*
-  ([[0094-assisted-agent-update]], #1204). `agentVersion` is a first-class column (#907) that nothing
-  aggregates: no surface answers *how many agents, on what versions, who has not checked in*. The
-  proposal adds a **read-only** fleet view bucketing every node by `isNewerVersion` / `isMajorBehind`
-  (plus an explicit **version-unknown** bucket) and hands the operator the **exact install command**
-  per host, built from the reported `AgentOsFamily` by the same module the "Add a server" wizard uses.
-  **No migration, no agent change, no `agentUpdate` on the ack, no server-pushed execution** — full
-  self-update and human-triggered/agent-executed update were both declined, with reopening criteria
-  recorded. **Blocked on #1203**: every Docker-served binary reports `agentVersion: "dev"` today, so
-  "who is behind" is currently unknowable and the shipped #907 badge can never fire.
+- **Assisted agent update + the fleet view** — *the SERVER READ shipped; the web view has not*
+  ([[0094-assisted-agent-update]], #1204/#1206). `agentVersion` had been a first-class column since #907
+  that nothing aggregated. `GET /infra/agents/fleet` (`infra:read`) now answers *how many agents, on what
+  versions, who has not checked in, who is degraded*: every agent-bearing host — container children
+  excluded, since they carry their host's `agentVersion` — bucketed **exclusively** into `majorBehind` /
+  `behind` / `unknown` / `current` by `agentVersionBucket` in `@lazyit/shared`, a pure re-expression of
+  `isNewerVersion` + `isMajorBehind` that adds **no second notion of "behind"** and keeps their fail-soft
+  posture verbatim. The change §3 actually makes is that **"version unknown" is a visible bucket** instead
+  of silence. The row also carries `lastReportedAt`/`status` liveness, the collector `diagnostics` block,
+  and **`osFamily` projected out of `specs` per read** — the [[0090-ipam-validated-ip]] display-only
+  computed-read-field mold, since `specs` is deliberately off list rows (#1135); no column, no migration,
+  and a `null` family means the caller shows **both** install commands rather than guessing. Live service
+  accounts holding `infra:report` ride along, never-used first, because a token minted for a host that
+  never checked in leaves no node behind — but **on a second gate**: that block is the service-account
+  credential inventory, which every other surface reads under `settings:manage`, and `infra:read` reaches
+  MEMBER *and* VIEWER by default. A caller without `settings:manage` gets the table with the block
+  **omitted** (not emptied, and not a 403 on the whole read) — the same in-code second gate the folder
+  `accessRules` read uses (INV-9 / #554). The never-used figure is a separate unbounded `count`, so it
+  stays true past the identity cap instead of clamping to it. **No migration, no agent change, no
+  `agentUpdate` on the ack, no
+  server-pushed execution** — full self-update and human-triggered/agent-executed update were both
+  declined, with reopening criteria recorded. Still **inert until #1203**: every Docker-served binary
+  reports `agentVersion: "dev"` today, so an estate honestly reads as entirely "version unknown" and fills
+  in as hosts are re-installed. The remaining work is the web surface (the table and the per-host command).
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
   per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]].
   → [[0070-infra-topology-graph]] "Future".
