@@ -14,12 +14,23 @@ import {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { isServicePrincipal, type Principal } from '../auth/principal';
 
 /**
  * The permission an agent's service account holds (ADR-0074 §8). Used here ONLY to recognise which
  * credentials are agent identities — this service grants nothing and authorises nothing.
  */
 const AGENT_REPORT_PERMISSION = 'infra:report';
+
+/**
+ * Which live service accounts ARE the agent identities. One predicate, shared by the capped list and
+ * the unbounded never-used count, so the two can never end up asking about different populations.
+ * Soft-deleted (revoked) accounts are excluded by the read extension, which also scopes `count`.
+ */
+const AGENT_IDENTITY_WHERE = {
+  permissions: { some: { permission: AGENT_REPORT_PERMISSION } },
+} satisfies Prisma.ServiceAccountWhereInput;
 
 /**
  * AgentFleetService — the assisted-update READ (ADR-0094 §4, issue #1206). It absorbs epic #1146
@@ -55,12 +66,18 @@ export class AgentFleetService {
    */
   private readonly serverVersion = process.env.APP_VERSION || 'dev';
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // The DB-first permission resolver (ADR-0046). Used for ONE decision: whether this caller may see
+    // the service-account credential inventory, which is `settings:manage` and not the `infra:read`
+    // the route itself carries. Comes from the @Global AuthModule — no module wiring needed.
+    private readonly permissions: PermissionResolverService,
+  ) {}
 
   /**
    * The whole fleet view in one read (`GET /infra/agents/fleet`).
    *
-   * Two queries plus one credential read, deliberately:
+   * Two queries plus — for a `settings:manage` caller only — the credential read, deliberately:
    *
    *  1. An explicit `select` of the scalar columns the wire shape promises — `specs` stays out, as it
    *     does on every list projection (#1135).
@@ -74,8 +91,15 @@ export class AgentFleetService {
    *
    * Read-tolerant end to end: a node with no `agentVersion`, no `specs`, no `specs.host.os.family`, a
    * hand-edited scalar blob, or no report in months all resolve to a row rather than an error.
+   *
+   * TWO GATES (INV-9's `accessRules` mold, #554). The route is `infra:read` — which the default seed
+   * grants to MEMBER *and* VIEWER — and the TABLE is what that permission buys. The credential
+   * inventory is not: it is the same service-account data `/service-accounts` returns, and that whole
+   * controller is `settings:manage`. So the block is gated a second time in app code and OMITTED for a
+   * caller without it — a partial view, never a 403 on the whole read, because the fleet table itself
+   * is legitimately `infra:read` material. See {@link canSeeAgentIdentities}.
    */
-  async getFleet(): Promise<AgentFleetView> {
+  async getFleet(principal?: Principal): Promise<AgentFleetView> {
     const rows = await this.prisma.infraNode.findMany({
       where: {
         // An agent-bearing HOST: discovered by the agent, and not one of its container children.
@@ -128,16 +152,39 @@ export class AgentFleetService {
       };
     });
 
-    const identities = await this.listAgentIdentities();
-
-    return {
+    const view: AgentFleetView = {
       serverVersion: this.serverVersion,
       summary: summarizeAgentFleet(nodes),
       nodes,
-      identities,
-      identitiesNeverUsed: identities.filter((i) => i.lastUsedAt === null)
-        .length,
     };
+
+    // The credential inventory rides along ONLY for a `settings:manage` caller. Short-circuit before
+    // the queries, not after: an ungated caller's request must never touch the ServiceAccount table at
+    // all, the same way the folder read never even fetches `accessRules` (#554).
+    if (!(await this.canSeeAgentIdentities(principal))) return view;
+
+    const [identities, identitiesNeverUsed] = await Promise.all([
+      this.listAgentIdentities(),
+      this.countAgentIdentitiesNeverUsed(),
+    ]);
+    return { ...view, identities, identitiesNeverUsed };
+  }
+
+  /**
+   * May this caller see the agent CREDENTIAL inventory — i.e. does it hold `settings:manage`, the SAME
+   * gate every route on `/service-accounts` carries (ADR-0048)?
+   *
+   * Resolved DB-first, never from a token (INV-1 / INV-8): a human's role → the RolePermission matrix
+   * (ADMIN always full); a service account → its direct grants. Anonymous / no principal → false, fail
+   * closed. Identical in shape to `ArticleCategoriesService.canSeeAccessRules` (#554) because it is the
+   * same problem: a default-open read whose payload contains one authorization-management slice.
+   */
+  private async canSeeAgentIdentities(principal?: Principal): Promise<boolean> {
+    if (principal === undefined) return false;
+    if (isServicePrincipal(principal)) {
+      return principal.permissions.has('settings:manage');
+    }
+    return this.permissions.hasAll(principal.user.role, ['settings:manage']);
   }
 
   /**
@@ -229,10 +276,13 @@ export class AgentFleetService {
    * soft-DISABLED ones are kept and flagged, because "the install fails because someone disabled its
    * token" is exactly the answer an operator is looking for. Nothing here carries a token, a hash or
    * even the display prefix.
+   *
+   * A capped INLINE PREVIEW, and only that. The number above it comes from
+   * {@link countAgentIdentitiesNeverUsed}, never from this array.
    */
   private async listAgentIdentities(): Promise<AgentFleetIdentity[]> {
     const rows = await this.prisma.serviceAccount.findMany({
-      where: { permissions: { some: { permission: AGENT_REPORT_PERMISSION } } },
+      where: AGENT_IDENTITY_WHERE,
       orderBy: [
         { lastUsedAt: { sort: 'asc', nulls: 'first' } },
         { createdAt: 'asc' },
@@ -253,6 +303,22 @@ export class AgentFleetService {
       lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
     }));
+  }
+
+  /**
+   * How many live agent credentials have NEVER authenticated — an UNBOUNDED count over the same
+   * predicate {@link listAgentIdentities} lists, not a tally of the array it returned.
+   *
+   * The distinction is the whole point. `listAgentIdentities` takes {@link AGENT_FLEET_IDENTITY_LIMIT}
+   * rows; counting never-used ones inside that slice silently clamps the answer to the cap, so an
+   * estate with 512 dead tokens would report exactly 200 — and the surface renders this as an absolute
+   * ("N agent tokens have never been used"), which is precisely the shape a truncated number lies in.
+   * One extra `count` on a page an admin navigates to is a cheap price for a figure that is true.
+   */
+  private countAgentIdentitiesNeverUsed(): Promise<number> {
+    return this.prisma.serviceAccount.count({
+      where: { ...AGENT_IDENTITY_WHERE, lastUsedAt: null },
+    });
   }
 }
 

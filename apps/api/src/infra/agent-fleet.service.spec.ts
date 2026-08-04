@@ -1,6 +1,8 @@
 import { Test } from '@nestjs/testing';
+import { AGENT_FLEET_IDENTITY_LIMIT } from '@lazyit/shared';
 import { AgentFleetService } from './agent-fleet.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // The service touches two models and one raw projection; the generated client is stubbed down to the
 // two symbols the module graph needs at import time (`Prisma.sql` is used to build the projection).
@@ -36,11 +38,27 @@ function row(over: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * Principal fixtures for the credential-inventory gate. Only the `settings:manage` RESOLUTION drives
+ * it for a human (mocked via `hasAll`), so the role here is illustrative; a service account is
+ * authorized straight off its direct grants, so its set is the real input.
+ */
+const ADMIN_PRINCIPAL = { kind: 'human', user: { role: 'ADMIN' } } as never;
+const VIEWER_PRINCIPAL = { kind: 'human', user: { role: 'VIEWER' } } as never;
+const servicePrincipal = (...permissions: string[]) =>
+  ({
+    kind: 'service',
+    serviceAccount: { id: 'sa-caller' },
+    permissions: new Set(permissions),
+  }) as never;
+
 describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
   let service: AgentFleetService;
   let nodeFindMany: Mock;
   let saFindMany: Mock;
+  let saCount: Mock;
   let queryRaw: Mock;
+  let hasAll: Mock;
 
   const ORIGINAL_APP_VERSION = process.env.APP_VERSION;
 
@@ -53,10 +71,13 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
           provide: PrismaService,
           useValue: {
             infraNode: { findMany: nodeFindMany },
-            serviceAccount: { findMany: saFindMany },
+            serviceAccount: { findMany: saFindMany, count: saCount },
             $queryRaw: queryRaw,
           },
         },
+        // The DB-first resolver (ADR-0046), mocked. It answers exactly one question here: does the
+        // caller hold `settings:manage`? Default false — the ungated case is the one that matters.
+        { provide: PermissionResolverService, useValue: { hasAll } },
       ],
     }).compile();
     return moduleRef.get(AgentFleetService);
@@ -65,7 +86,9 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
   beforeEach(() => {
     nodeFindMany = jest.fn().mockResolvedValue([]);
     saFindMany = jest.fn().mockResolvedValue([]);
+    saCount = jest.fn().mockResolvedValue(0);
     queryRaw = jest.fn().mockResolvedValue([]);
+    hasAll = jest.fn().mockResolvedValue(false);
   });
 
   afterAll(() => {
@@ -83,6 +106,10 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
     (nodeFindMany.mock.calls[0] as unknown[])[0] as FindManyArgs;
   const saArgs = (): FindManyArgs =>
     (saFindMany.mock.calls[0] as unknown[])[0] as FindManyArgs;
+  const saCountArgs = (): { where: Record<string, unknown> } =>
+    (saCount.mock.calls[0] as unknown[])[0] as {
+      where: Record<string, unknown>;
+    };
   const rawArgs = (): { values: unknown[] } =>
     (queryRaw.mock.calls[0] as unknown[])[0] as { values: unknown[] };
 
@@ -371,26 +398,31 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
   // ── the agent credentials (ADR-0094 §4 liveness, the other half) ───────────
 
   describe('agent identities', () => {
+    /** Two live credentials — one never used, one that has authenticated. */
+    const TWO_IDENTITIES = [
+      {
+        id: 'sa-1',
+        name: 'agent-db-07',
+        isActive: true,
+        lastUsedAt: null,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      },
+      {
+        id: 'sa-2',
+        name: 'agent-web-01',
+        isActive: true,
+        lastUsedAt: new Date('2026-08-04T09:00:00.000Z'),
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+      },
+    ];
+
     it('lists live service accounts holding infra:report, never-used first', async () => {
-      saFindMany.mockResolvedValue([
-        {
-          id: 'sa-1',
-          name: 'agent-db-07',
-          isActive: true,
-          lastUsedAt: null,
-          createdAt: new Date('2026-07-01T00:00:00.000Z'),
-        },
-        {
-          id: 'sa-2',
-          name: 'agent-web-01',
-          isActive: true,
-          lastUsedAt: new Date('2026-08-04T09:00:00.000Z'),
-          createdAt: new Date('2026-06-01T00:00:00.000Z'),
-        },
-      ]);
+      saFindMany.mockResolvedValue(TWO_IDENTITIES);
+      saCount.mockResolvedValue(1);
+      hasAll.mockResolvedValue(true);
       service = await build();
 
-      const view = await service.getFleet();
+      const view = await service.getFleet(ADMIN_PRINCIPAL);
 
       const args = saArgs();
       expect(args.where).toMatchObject({
@@ -420,9 +452,134 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
           createdAt: '2026-06-01T00:00:00.000Z',
         },
       ]);
+    });
+
+    // ── the never-used count is not derived from the capped list ─────────────
+
+    it('counts never-used credentials with an unbounded count over the SAME predicate', async () => {
+      saFindMany.mockResolvedValue(TWO_IDENTITIES);
+      saCount.mockResolvedValue(1);
+      hasAll.mockResolvedValue(true);
+      service = await build();
+
+      const view = await service.getFleet(ADMIN_PRINCIPAL);
+
+      // Same population as the list, narrowed to the never-used ones — one predicate, two queries.
+      expect(saCountArgs().where).toEqual({
+        permissions: { some: { permission: 'infra:report' } },
+        lastUsedAt: null,
+      });
       // The actionable count: a token minted for a host that never checked in leaves no node behind,
       // so this is the only place that failure is visible.
       expect(view.identitiesNeverUsed).toBe(1);
+    });
+
+    it('reports the TRUTH past the identity cap, not the cap itself', async () => {
+      // The list is capped, and the surface renders the count as an absolute ("N agent tokens have
+      // never been used"). Tallying the truncated array would clamp 512 down to 200 and read as fact.
+      saFindMany.mockResolvedValue(
+        Array.from({ length: AGENT_FLEET_IDENTITY_LIMIT }, (_, i) => ({
+          id: `sa-${i}`,
+          name: `agent-${i}`,
+          isActive: true,
+          lastUsedAt: null,
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        })),
+      );
+      saCount.mockResolvedValue(512);
+      hasAll.mockResolvedValue(true);
+      service = await build();
+
+      const view = await service.getFleet(ADMIN_PRINCIPAL);
+
+      expect(view.identities).toHaveLength(AGENT_FLEET_IDENTITY_LIMIT);
+      expect(view.identitiesNeverUsed).toBe(512);
+    });
+  });
+
+  // ── the credential inventory is gated a SECOND time (settings:manage) ──────
+  //
+  // `infra:read` — the route's gate — reaches MEMBER *and* VIEWER in the default seed, while every
+  // other surface that reads service accounts is `settings:manage` (ADR-0048). So the block is gated
+  // again in app code, and its absence is a partial view, never a 403 on the whole read.
+
+  describe('the credential inventory gate', () => {
+    beforeEach(() => {
+      saFindMany.mockResolvedValue([
+        {
+          id: 'sa-1',
+          name: 'agent-db-07',
+          isActive: true,
+          lastUsedAt: null,
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        },
+      ]);
+      saCount.mockResolvedValue(1);
+      nodeFindMany.mockResolvedValue([row({ id: 'n-1' })]);
+    });
+
+    /** No identity data at all — not the keys, and not a single value from the credential table. */
+    function expectNoIdentityData(view: unknown): void {
+      expect(view).not.toHaveProperty('identities');
+      expect(view).not.toHaveProperty('identitiesNeverUsed');
+      // Belt and braces: nothing from the credential row may appear ANYWHERE in the payload.
+      expect(JSON.stringify(view)).not.toContain('agent-db-07');
+      expect(JSON.stringify(view)).not.toContain('sa-1');
+      // And the table was never even read for it (the #554 "never fetched" posture).
+      expect(saFindMany).not.toHaveBeenCalled();
+      expect(saCount).not.toHaveBeenCalled();
+    }
+
+    it('omits it entirely for a human WITHOUT settings:manage, and still returns the fleet', async () => {
+      hasAll.mockResolvedValue(false);
+      service = await build();
+
+      const view = await service.getFleet(VIEWER_PRINCIPAL);
+
+      expect(hasAll).toHaveBeenCalledWith('VIEWER', ['settings:manage']);
+      expectNoIdentityData(view);
+      // The point of omitting rather than 403-ing: the table itself IS `infra:read` material.
+      expect(view.nodes).toHaveLength(1);
+      expect(view.summary.total).toBe(1);
+    });
+
+    it('includes it for a human WITH settings:manage', async () => {
+      hasAll.mockResolvedValue(true);
+      service = await build();
+
+      const view = await service.getFleet(ADMIN_PRINCIPAL);
+
+      expect(hasAll).toHaveBeenCalledWith('ADMIN', ['settings:manage']);
+      expect(view.identities).toHaveLength(1);
+      expect(view.identitiesNeverUsed).toBe(1);
+    });
+
+    it('omits it for a service account that only holds infra:read', async () => {
+      service = await build();
+
+      const view = await service.getFleet(servicePrincipal('infra:read'));
+
+      // A service account is authorized off its DIRECT grants, never a role — the resolver is not
+      // consulted for it at all (INV-SA-3: it is never ADMIN-equivalent).
+      expect(hasAll).not.toHaveBeenCalled();
+      expectNoIdentityData(view);
+    });
+
+    it('includes it for a service account that directly holds settings:manage', async () => {
+      service = await build();
+
+      const view = await service.getFleet(
+        servicePrincipal('infra:read', 'settings:manage'),
+      );
+
+      expect(view.identities).toHaveLength(1);
+    });
+
+    it('omits it with NO principal at all — fail closed', async () => {
+      service = await build();
+
+      expectNoIdentityData(await service.getFleet());
+      expect(hasAll).not.toHaveBeenCalled();
     });
   });
 
@@ -459,6 +616,7 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
       expect(nodeArgs().select).toEqual({ agentVersion: true });
       expect(queryRaw).not.toHaveBeenCalled();
       expect(saFindMany).not.toHaveBeenCalled();
+      expect(saCount).not.toHaveBeenCalled();
     });
   });
 });

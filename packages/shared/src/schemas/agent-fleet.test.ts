@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AGENT_FLEET_IDENTITY_LIMIT,
   AgentFleetViewSchema,
   agentVersionBucket,
   isAgentDegraded,
@@ -204,5 +205,31 @@ describe("AgentFleetViewSchema", () => {
       identitiesNeverUsed: 0,
     });
     expect(parsed.nodes[0]?.osFamily).toBeNull();
+  });
+
+  test("parses a view with NO credential block — the shape a caller without settings:manage gets", () => {
+    // The fleet view is `infra:read` (MEMBER and VIEWER hold it by default); the service-account
+    // credential inventory is `settings:manage` on top. A caller without it gets the whole table and
+    // no identity data at all — so the two fields must be optional, not merely emptied.
+    const parsed = AgentFleetViewSchema.parse({
+      serverVersion: "v1.10.0",
+      summary: summarizeAgentFleet([node()]),
+      nodes: [node()],
+    });
+    expect(parsed.identities).toBeUndefined();
+    expect(parsed.identitiesNeverUsed).toBeUndefined();
+  });
+
+  test("never-used may exceed the listed identities — the count is not derived from the capped list", () => {
+    // Past AGENT_FLEET_IDENTITY_LIMIT the preview truncates but the count must not: it is rendered as
+    // an absolute, so a count clamped to the cap would silently under-report a large estate.
+    const parsed = AgentFleetViewSchema.parse({
+      serverVersion: "v1.10.0",
+      summary: summarizeAgentFleet([]),
+      nodes: [],
+      identities: [],
+      identitiesNeverUsed: AGENT_FLEET_IDENTITY_LIMIT + 312,
+    });
+    expect(parsed.identitiesNeverUsed).toBe(AGENT_FLEET_IDENTITY_LIMIT + 312);
   });
 });

@@ -223,6 +223,13 @@ export function summarizeAgentFleet(
  * There is deliberately no join to a node: the schema carries no ServiceAccount→InfraNode link and
  * ADR-0094 adds no column, so this stays a fleet-level list rather than a per-host claim the data
  * cannot support. Never carries a token, a hash or a prefix.
+ *
+ * SEPARATELY GATED. This is the service-account CREDENTIAL INVENTORY, and every other surface that
+ * reads it (`/service-accounts`, all of it) is `settings:manage` — ADMIN-only. The fleet VIEW is
+ * `infra:read`, which the default seed grants to MEMBER *and* VIEWER, so shipping the inventory on
+ * that gate would silently widen who can enumerate agent credentials on an operator's next upgrade.
+ * The server therefore omits this block entirely for a caller without `settings:manage` (INV-9's
+ * `accessRules` mold), which is why it is OPTIONAL on the view below rather than required.
  */
 export const AgentFleetIdentitySchema = z.object({
   id: z.cuid(),
@@ -252,14 +259,31 @@ export const AGENT_FLEET_IDENTITY_LIMIT = 200;
  * `GET /instance/version` so the table can never render a distribution against a version it did not
  * come from, and so a `"dev"` server (which makes every bucket `unknown`) is legible on the surface
  * instead of mysterious.
+ *
+ * TWO GATES, one response. The view itself is `infra:read`; the credential block
+ * (`identities` + `identitiesNeverUsed`) is `settings:manage` on top, and is OMITTED — not emptied —
+ * for a caller who lacks it. An empty array would read as "no agent tokens exist", which is a
+ * different and false claim; absence is the honest one. A consumer MUST therefore treat both fields
+ * as possibly-absent (they are also absent from an older server that predates the gate's addition,
+ * and were absent again from a pre-#1206 server that had no fleet route at all).
  */
 export const AgentFleetViewSchema = z.object({
   serverVersion: z.string().min(1),
   summary: AgentFleetSummarySchema,
   nodes: z.array(AgentFleetNodeSchema),
-  /** Live agent credentials, never-used first, capped at {@link AGENT_FLEET_IDENTITY_LIMIT}. */
-  identities: z.array(AgentFleetIdentitySchema),
-  /** How many of `identities` have never authenticated — the count worth a line above the list. */
-  identitiesNeverUsed: z.number().int().nonnegative(),
+  /**
+   * Live agent credentials, never-used first, capped at {@link AGENT_FLEET_IDENTITY_LIMIT} — an
+   * INLINE PREVIEW, not the register (that is the Service accounts page). ABSENT unless the caller
+   * holds `settings:manage` (see {@link AgentFleetIdentitySchema}).
+   */
+  identities: z.array(AgentFleetIdentitySchema).optional(),
+  /**
+   * How many live agent credentials have NEVER authenticated — the count worth a line above the
+   * list. Counted over the WHOLE set, not over the capped `identities` preview: past the cap the two
+   * diverge, and this is rendered as an absolute ("3 agent tokens have never been used"), so
+   * deriving it from the truncated array would under-report a large estate down to the cap. ABSENT
+   * on the same `settings:manage` gate as `identities` — the two always travel together.
+   */
+  identitiesNeverUsed: z.number().int().nonnegative().optional(),
 });
 export type AgentFleetView = z.infer<typeof AgentFleetViewSchema>;
