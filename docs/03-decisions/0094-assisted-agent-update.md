@@ -11,7 +11,7 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-08-04 (issue #1204, split out of epic #1146 item 3, "Opt-in self-update"). Design
+**accepted** — 2026-08-04 (issue #1204, split out of epic #1146 item 3, "Opt-in self-update"). Design
 only: no code, no migration and no Manual page ship with this record. It **extends**
 [[0074-server-reporting-agent]] (§6 distribution, §7 the agent) and the #907 amendment of
 [[0083-versioning-and-releases]], and it is the **agent-side sibling of**
@@ -494,24 +494,25 @@ What an operator sees change, in order:
     the alternative is a per-host email channel on a 245-host estate, and the aggregate-line fork
     (§8) is the cheap middle if the CEO wants one.
 
-## Decisions needed from the CEO
+## Decisions resolved — 2026-08-04
 
-Recorded rather than assumed. None of these blocks writing the implementation issue; each changes one
-bounded thing.
+All three questions were put to the CEO and **approved as recommended**. They are settled; changing
+any of them supersedes this record rather than amending it in passing.
 
-1. **Should the existing `update.available` email carry one aggregate agent line** ("…and 12 agents are
-   a MAJOR behind")? §8 recommends **yes** — it is one line, no new type, no new schedule, and it
-   reaches the admin while they are already reading about a version gap. Declining keeps v1 strictly
-   in-app.
-2. **`--keep-token` / reuse-the-installed-config on both installers** (§6) — should the update command
-   become fully self-contained by letting a re-run authenticate with the token already on disk? It is
-   an installer change, not an agent or protocol change, and it materially improves the
-   config-management path. Recommended as a **follow-up issue**, not folded into this ADR.
-3. **Should [[0084-update-awareness-and-guided-update]]'s "No auto-apply, ever" sentence be scoped
-   explicitly** to the server's own update, with a pointer to this ADR for the agent axis? §1 reads it
-   at face value and stays inside it either way, so nothing here depends on the answer — but the next
-   proposal that touches this area will ask the same question, and answering it once is cheaper than
-   answering it every time. A one-line amendment to ADR-0084, if the CEO wants it.
+1. **The existing `update.available` email carries one aggregate agent line** ("…and 12 agents are a
+   MAJOR behind"). One line, no new notification type, no new schedule, no per-host mail — it reaches
+   the admin while they are already reading about a version gap. §8's in-app-only posture is amended
+   by exactly this one line and nothing else; the per-host notification anti-pattern epic item 8
+   names stays rejected.
+2. **`--keep-token` / reuse-the-installed-config ships as a follow-up issue**, not folded in here. It
+   is what makes the generated command genuinely copy-paste rather than copy-paste-plus-find-the-token,
+   because the server structurally cannot re-emit an installed host's secret (only `tokenHash` and
+   `tokenPrefix` are stored). It is an installer change touching credential handling in a file that
+   runs as root, so it gets its own issue, its own review and its own tests.
+3. **ADR-0084's "No auto-apply, ever" sentence is scoped explicitly** to the server's own update, with
+   a pointer to this record for the agent axis. A one-line amendment to that ADR, in its own change.
+   Nothing in this record depends on it — §1 reads the sentence at face value and stays inside it
+   either way — but the next proposal in this area would otherwise ask the same question again.
 
 ## Links
 
