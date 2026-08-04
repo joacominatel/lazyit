@@ -11,7 +11,7 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-08-03 (issue #1196, split out of epic #1146 item 7). Design only: no code, no
+**accepted** — 2026-08-03 (issue #1196, split out of epic #1146 item 7). Design only: no code, no
 migration and no Manual page ship with this record. It **extends** [[0074-server-reporting-agent]]
 (§1/§3) and [[0070-infra-topology-graph]] (§5, the asset-link contract), and **supersedes one
 behaviour** named in the §3 amendment of [[0074-server-reporting-agent]] (#1081): the serial-collision
@@ -354,16 +354,21 @@ An operator upgrading into this release sees, in order:
   - **The map shrinking on upgrade will surprise someone** even documented. It is the intended value
     and it is one click to undo.
 
-## Decisions needed from the CEO before this moves to `accepted`
+## Decisions resolved — 2026-08-03
 
-1. **The hidden set is `{ laptop, desktop }`.** `desktop` is included on the reading that a
-   workstation is an endpoint, not estate topology. Confirm, or restrict the default to `laptop`.
-2. **No per-node "pin to map" override in v1** (§5). Confirm the class toggle is enough.
-3. **No opt-out from adoption in v1** (§7) — a corroborating serial always adopts. Confirm, or accept
-   an explicit escape hatch on the confirm DTO.
-4. **The `AGENT_LINKED` `AssetHistoryEventType` member** (§4) — additive and safe, but it is a new
-   member of a domain enum and therefore a product call.
-5. **Endpoint hiding is canvas-only; the Servers *table* keeps showing everything** (§5). Confirm.
+All five open questions were put to the CEO and **confirmed as drafted**. They are settled, not
+defaults awaiting a later objection; a change to any of them supersedes this record rather than
+amending it in passing.
+
+1. **The hidden set is `{ laptop, desktop }`.** A workstation is an endpoint, not estate topology.
+2. **No per-node "pin to map" override in v1** (§5). The class toggle is enough; a per-node override
+   is added only if an operator asks for one.
+3. **No opt-out from adoption in v1** (§7) — a corroborating serial always adopts. An escape hatch on
+   the confirm DTO was declined deliberately: it would be used before it was understood.
+4. **`AssetHistoryEventType.AGENT_LINKED` is approved** (§4) — additive (`ADD VALUE`, no rewrite), and
+   it answers the one question a human reading a curated Asset's history will ask.
+5. **Endpoint hiding is canvas-only**; the Servers *table* keeps showing everything (§5). The map is
+   the surface that drowns at ~200 endpoints; the table is not.
 
 ## Links
 
