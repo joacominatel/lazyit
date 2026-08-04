@@ -1,15 +1,17 @@
 /**
- * The commands the "Add a server" wizard hands an operator, held to the two installers they are
- * supposed to drive (issue #1168).
+ * The commands the "Add a server" wizard and the agent fleet view hand an operator, held to the two
+ * installers they are supposed to drive (issues #1168 and #1207).
  *
  * The wizard emitted a `curl … | sh` one-liner and nothing else, so an operator standing at a Windows
  * host was given a command that cannot run there — at the exact moment they were holding a fresh,
  * once-only token. The Manual had carried the PowerShell form since #1144; the UI had not learned it.
  *
  * These are pure string builders, so this file can do the one thing prose could not: assert that what
- * the wizard prints is the same thing `install.sh` and `install.ps1` actually accept. Two tests read
+ * the UI prints is the same thing `install.sh` and `install.ps1` actually accept. Several tests read
  * the installers off disk and check the emitted switches against their real argument parsers, which
- * is what keeps this from becoming a sixth claim nobody re-checked.
+ * is what keeps this from becoming a sixth claim nobody re-checked. It is also why ADR-0094 §5 keeps
+ * this module in `apps/web` rather than promoting it to `@lazyit/shared`: the assertions below are
+ * against `apps/web/public/install.{sh,ps1}` **as this app serves them**.
  */
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
@@ -18,14 +20,15 @@ import {
   agentDiagnosticsCommand,
   agentInstallCommand,
   agentManualInstallSteps,
-} from "./agent-install-commands";
+  agentUpdateCommand,
+} from "./install-commands";
 
 const ORIGIN = "https://lazyit.example.com";
 const TOKEN = "lzit_sa_xxx";
 
 /** `apps/web/public/<name>` — the installers this instance actually serves. */
 function installerPath(name: string): string {
-  return path.join(import.meta.dir, "..", "..", "..", "..", "..", "public", name);
+  return path.join(import.meta.dir, "..", "..", "public", name);
 }
 
 /** The slice of `infra.wizard` these tests hold both locales to. */
@@ -39,9 +42,6 @@ type WizardMessages = {
 async function wizardMessages(locale: string): Promise<WizardMessages> {
   const file = path.join(
     import.meta.dir,
-    "..",
-    "..",
-    "..",
     "..",
     "..",
     "messages",
@@ -118,6 +118,84 @@ describe("agentInstallCommand — the token and origin are never placeholders", 
   });
 });
 
+describe("agentUpdateCommand — the update of an already-installed host (ADR-0094 §5/§6, #1208)", () => {
+  test("Linux is `--upgrade` and nothing else", () => {
+    expect(agentUpdateCommand("linux", ORIGIN)).toBe(
+      `curl -fsSL ${ORIGIN}/install.sh | sudo sh -s -- --upgrade`,
+    );
+  });
+
+  test("Windows is `-Upgrade` and nothing else, in the same script-block form", () => {
+    expect(agentUpdateCommand("windows", ORIGIN)).toBe(
+      `& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Upgrade`,
+    );
+  });
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: NO token, no switch, no placeholder standing in for one",
+    (platform) => {
+      // The server structurally cannot re-emit an installed host's secret — only `tokenHash` and
+      // `tokenPrefix` are stored (ADR-0094 §6). A command that LOOKED like it carried one, or that
+      // shipped a `<token>` placeholder, would send the operator hunting for a flag that cannot
+      // exist. `--upgrade` reads the one the host already has instead.
+      const command = agentUpdateCommand(platform, ORIGIN);
+      expect(command).not.toContain(TOKEN);
+      expect(command).not.toContain("lzit_sa_");
+      expect(command).not.toContain("<token>");
+      expect(command).not.toMatch(/-{1,2}[Tt]oken/);
+    },
+  );
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: the origin appears ONLY as where the script is fetched from — never as --url",
+    (platform) => {
+      // THE MERGE-BLOCKING BUG THIS REPLACED. The command used to carry `--url <browser origin>`,
+      // and `LAZYIT_URL` is a key the installer OWNS and REWRITES. On an ADR-0087 `lan` instance —
+      // which answers on every address it is reached by — pasting that on forty hosts re-pinned the
+      // whole estate at whichever origin one admin's browser happened to be on, silently, while the
+      // Manual promised that a host's configuration is merged rather than replaced.
+      //
+      // The origin still appears, because the script has to be downloaded from somewhere. What must
+      // never appear again is an origin being ASSIGNED to the host.
+      const command = agentUpdateCommand(platform, ORIGIN);
+      expect(command).toContain(`${ORIGIN}/install.`);
+      expect(command).not.toMatch(/--url\b/);
+      expect(command).not.toMatch(/-Url\b/);
+      expect(command).not.toMatch(/--ca-file\b/);
+      expect(command).not.toMatch(/-CaFile\b/);
+    },
+  );
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: identical on every host — the string depends on nothing but the origin",
+    (platform) => {
+      // This is what makes ADR-0094 §7's bulk handoff a two-line artifact instead of a generated
+      // per-host inventory, and it is only true because nothing host-specific is in the command.
+      expect(agentUpdateCommand(platform, ORIGIN)).toBe(agentUpdateCommand(platform, ORIGIN));
+    },
+  );
+
+  test("the switch it emits is one the SHIPPED installers actually declare", async () => {
+    // The strings above were written against an installer that did not have `--upgrade` yet — it
+    // landed separately (#1208's installer half). A generated command naming a flag the served
+    // script rejects is the exact failure this file exists to prevent, and it fails on an
+    // operator's host rather than in CI. So the switch is read back off the two files
+    // `apps/web/public/` serves, the same way the plain-http opt-in is below.
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--upgrade)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toMatch(/\[switch\] \$Upgrade/);
+  });
+
+  test("Linux drops `sudo -E`, which existed only to carry LAZYIT_TOKEN across sudo", () => {
+    // `-E` preserves the environment. It was load-bearing while the command depended on an exported
+    // LAZYIT_TOKEN. `--upgrade` REFUSES to share a run with LAZYIT_TOKEN (#1208), so preserving the
+    // environment now only widens the chance of hitting that refusal with a stale leftover token.
+    expect(agentUpdateCommand("linux", ORIGIN)).not.toContain("sudo -E");
+    expect(agentUpdateCommand("linux", ORIGIN)).toContain("sudo sh -s --");
+  });
+});
+
 describe("a plain-http origin carries the explicit opt-in the installers now demand (#1190)", () => {
   // Since #1190 both installers REFUSE a cleartext http URL unless the operator opts in. The wizard
   // fills the origin in from the instance the operator is already browsing — so on a LAN (`lan`
@@ -140,6 +218,24 @@ describe("a plain-http origin carries the explicit opt-in the installers now dem
     expect(agentInstallCommand("windows", ORIGIN, TOKEN)).not.toContain("-AllowInsecureHttp");
   });
 
+  test("the UPDATE command carries it too, on both platforms — it runs the same installers", () => {
+    // ADR-0094 §5: the fleet view reuses this module precisely so the flags ride for free. A
+    // hand-rolled second builder would get exactly this wrong, silently, on the LAN installs that
+    // are hardest to test — and the fleet view is the surface an operator uses at scale.
+    //
+    // The opt-in is NOT a re-pin and does not reintroduce the `--url` defect: it is a per-run
+    // decision rather than a config key the installer writes, so it is still the same string on
+    // every host for a given origin.
+    expect(agentUpdateCommand("linux", HTTP_ORIGIN)).toBe(
+      `curl -fsSL ${HTTP_ORIGIN}/install.sh | sudo sh -s -- --upgrade --allow-insecure-http`,
+    );
+    expect(agentUpdateCommand("windows", HTTP_ORIGIN)).toBe(
+      `& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Upgrade -AllowInsecureHttp`,
+    );
+    expect(agentUpdateCommand("linux", ORIGIN)).not.toContain("--allow-insecure-http");
+    expect(agentUpdateCommand("windows", ORIGIN)).not.toContain("-AllowInsecureHttp");
+  });
+
   test("the Windows inspect-first RUN step carries it too — it runs the same installer", () => {
     const steps = agentManualInstallSteps("windows", HTTP_ORIGIN, TOKEN);
     expect(steps[1]?.command).toContain(" -AllowInsecureHttp");
@@ -153,6 +249,24 @@ describe("a plain-http origin carries the explicit opt-in the installers now dem
     expect(sh).toContain("--allow-insecure-http)");
     const ps1 = await Bun.file(installerPath("install.ps1")).text();
     expect(ps1).toMatch(/\[switch\] \$AllowInsecureHttp/);
+  });
+
+  test("the opt-in is NOT inherited across --upgrade, which is why the update command must carry it", async () => {
+    // #1208's final resolution, and the reason `insecureHttp()` has to key the UPDATE command too.
+    // A host installed over cleartext carries `LAZYIT_URL=http://…` in its config; `--upgrade`
+    // re-uses that URL, arrives at the same gate, and is REFUSED unless the opt-in is passed again
+    // — accepting exposure is a per-run decision, not a config key the file can answer on the
+    // operator's behalf. If a future edit made the flag inheritable, dropping it from the generated
+    // command would become correct; while these lines stand, dropping it hands every LAN operator a
+    // command that hard-stops on paste.
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--upgrade` DOES NOT INHERIT THE DECISION");
+    // The gate bites on the RESOLVED url and names where it came from, so the refusal on an upgrade
+    // points at the config file rather than a `--url` the operator never passed.
+    expect(sh).toContain("(re-used by --upgrade)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toContain("-Upgrade DOES NOT INHERIT THE DECISION");
+    expect(ps1).toContain("(re-used by -Upgrade)");
   });
 
   test("the Linux by-hand steps stay flagless — they never run install.sh", () => {

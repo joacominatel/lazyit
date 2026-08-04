@@ -41,12 +41,16 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     // The append-only fact history (#1143). A READ, and the ONLY route this table has: nothing but
     // the report ingest ever appends to it, so there is deliberately no write permission to gate.
     expect(permsOf('listNodeChanges')).toEqual(['infra:read']);
+    // The agent fleet view (ADR-0094 §4, #1206). A READ and only a read — it computes version
+    // buckets and projects one string out of `specs`; it writes nothing and pushes nothing to a host.
+    expect(permsOf('getAgentFleet')).toEqual(['infra:read']);
   });
 
   describe('the Changes page params (#1143)', () => {
     // `limit` reaches a `take` and `cursor` a keyset `WHERE id <`. A silently coerced NaN would page
     // unpredictably, so both are REFUSED rather than defaulted — which the entity note promises.
     const controller = new InfraController(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -69,7 +73,12 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
 
     it('passes a valid pair straight through, and omits what was not sent', () => {
       const infra = { listNodeFactChanges: jest.fn() };
-      const ok = new InfraController(infra as never, {} as never, {} as never);
+      const ok = new InfraController(
+        infra as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
 
       void ok.listNodeChanges('n-1', '25', '900');
       expect(infra.listNodeFactChanges).toHaveBeenCalledWith('n-1', {
@@ -189,6 +198,7 @@ describe('InfraController — forward-compatible report body (#1138)', () => {
     const controller = new InfraController(
       infra as never,
       autoConfirm as never,
+      {} as never,
       {} as never,
     );
     const raw = {

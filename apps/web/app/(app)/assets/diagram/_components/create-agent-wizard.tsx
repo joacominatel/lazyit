@@ -40,7 +40,7 @@ import {
   agentDiagnosticsCommand,
   agentInstallCommand,
   agentManualInstallSteps,
-} from "./agent-install-commands";
+} from "@/lib/agent/install-commands";
 import { ConfirmNodeDialog } from "./confirm-node-dialog";
 
 /**
@@ -375,7 +375,7 @@ function PlatformInstall({
   // ONE structure, label key and command together. These used to be two positionally-indexed arrays
   // — the labels listed here, the commands built in the module — and nothing tied index N of one to
   // index N of the other, so an edit could add a step to one side only and no test would notice.
-  // `agent-install-commands.test.ts` holds every `labelKey` below to the `stepN` keys both locale
+  // `lib/agent/install-commands.test.ts` holds every `labelKey` below to the `stepN` keys both locale
   // catalogs actually ship.
   const manualSteps = agentManualInstallSteps(platform, origin, token);
 

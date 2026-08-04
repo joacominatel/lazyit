@@ -1918,7 +1918,7 @@ and had to leave for `/help` to find out what to type.
 Step 2 now takes a **platform choice** (Linux default) and switches four things with it: the
 requirements line, the emitted install command, the inspect-first path, and the post-install check.
 Each is worth stating because each is a promise about code this component does not contain, and
-`agent-install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}` as served
+`lib/agent/install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}` as served
 and against both locale catalogs as shipped:
 
 - **The requirements line states the real constraint, not a friendly one.** Windows 10/11 or Server
@@ -1977,6 +1977,136 @@ operator who meets it with no warning of their own reasonably concludes the down
 stops. Frontend and message catalogs only: no contract, schema, migration or installer change, and no
 existing agent is affected.
 
+**Amendment (2026-08-04, #1208) — a re-run can authenticate with the token already on the host.**
+§7 above lists three ways to hand the installer a token and all three assume you *have* one. On the
+**upgrade** path you frequently do not: re-running the installer is the documented way to pick up a
+new binary and a new unit file, and lazyit **cannot** hand the token back — `ServiceAccount` stores
+only `tokenHash` and `tokenPrefix`, and the plaintext is revealed exactly once at mint or rotate
+([[0048-service-accounts]]). So "re-run this command" was copy-paste *plus* go and find a
+secret, on every host in the estate.
+
+The host already holds it. The installer wrote it there itself — `/etc/lazyit-agent/config` at
+`chmod 600`, `C:\ProgramData\lazyit-agent\config` with an ACL of SYSTEM + Administrators — and both
+installers run as root/SYSTEM. Reading back what it wrote is not a new exposure: anyone who can run
+the installer can read that file directly.
+
+`--keep-token` / `-KeepToken` therefore authenticates a run with the token in that file, and four
+things about it are deliberate:
+
+- **An explicit flag, not the implicit default for a re-run.** Implicit is friendlier by one word and
+  wrong in the case that matters: a misspelled `$TOKEN` variable, or a wrapper that stopped exporting
+  `LAZYIT_TOKEN`, would stop being a loud *"a token is required"* and become a silent install with
+  the **old** credential — a host reporting with a token somebody believes they replaced, and no
+  signal anywhere. Where the credential for a root install came from is not a thing to infer from the
+  state of the disk. It is also what makes the decision greppable in an audit: a run either says
+  `--keep-token`, or it carries a token.
+- **No readable config is fatal, never a silent unauthenticated install.** The message names root
+  first (the file is `0600`, and "I forgot sudo" is the likelier of the two ways to get there) and
+  the first-install forms second. A config that exists but carries no `LAZYIT_TOKEN` line — the shape
+  `--uninstall --keep-config` leaves behind — is fatal with its own message, which says lazyit cannot
+  show an existing token again and this may need a fresh one.
+- **A hard error against every other token source, including the environment.** `--token`,
+  `--token-file` and `LAZYIT_TOKEN` each refuse to share a run with it, in the same posture as the
+  existing `--token`/`--token-file` pair. Two sources on one root install is an operator who believes
+  something untrue about the run, and quietly picking one is how a host ends up authenticating with
+  the credential that was just rotated away.
+- **The config merge is untouched.** `--keep-token` changes where the token *comes from*, not who
+  owns the key: `LAZYIT_TOKEN` is still dropped from the preserved set and written back once, so the
+  host owner's `LAZYIT_COLLECT_*=false` veto, its proxy and its CA cross the upgrade exactly as they
+  did before (#1140/#1137/#1160) and no re-run can leave two token lines for the parser to choose
+  between.
+
+The extraction agrees with the agent's own `readConfigFile` on every point where a hand-edited file
+can differ from the one the installer writes — last assignment wins, value trimmed, one matching pair
+of surrounding quotes stripped, `CR` dropped — because "the credential this host is already using" is
+the whole promise. Reading a different token than the agent reads would install cleanly and then fail
+on every tick.
+
+**Nothing about stored credentials changes**: the server still never holds a plaintext token, and
+`--uninstall` still destroys the one on the host unconditionally (`--keep-token` is *refused* there
+rather than ignored, so no operator can finish an uninstall believing a live credential survived).
+Purely additive: every existing invocation keeps working unchanged, and an older instance serving an
+older installer is unaffected — this arrives only where the new script is fetched and run.
+
+**Amendment (2026-08-04, #1208 review) — the token leaves `curl`'s argv, and a re-run keeps the whole
+configuration.** Adversarial review of the above found two defects and one gap, and all three are
+about the same thing: what an *upgrade command* has to carry.
+
+*The credential was on a command line the whole time.* §7 lists three token forms whose entire
+purpose is keeping the secret out of `ps`, and `install.sh` then passed it to both downloads as
+`-H "Authorization: Bearer $TOKEN"`. `/proc/<pid>/cmdline` is world-readable on Linux, so an
+unprivileged user polling it during an install — or during an upgrade, the run that gets repeated on
+every host in the estate — collected a live `infra:report` token. The help text directly above it
+claimed *"No secret on the command line"*. The header now goes in on `curl`'s **stdin**
+(`curl --config -`), built by a pure `auth_config` function that escapes the two characters `curl`
+gives a meaning to inside a quoted value; the pipe is `curl`'s stdin, not the script's, so
+`--token-file -` is unaffected. The remaining shape — a newline ending the header line and letting
+what follows be read as another `curl` option — is closed by refusing a token containing any
+whitespace, **whatever source produced it**. `install.ps1` never had this defect (`Invoke-WebRequest`
+takes a headers hashtable in-process); that is now pinned by a test so a later move to `curl.exe`
+cannot import it. Both claims in the help text are rewritten to describe what the code does.
+
+*A padded key is still that key.* `readConfigFile` **trims** the key before comparing, so
+`LAZYIT_TOKEN =lzit_sa_…` — a hand edit, or a config-management template that pads its assignments —
+authenticates on every tick, while the installers' extractors demanded `=` immediately after the key
+and reported *"this host has no token"* on a host that was reporting happily. Both extractors now
+allow whitespace around the key, and so do **both halves of the config merge and the `--keep-config`
+strip** — which have to move together: a padded veto the keep-pattern misses is the erasure of #1160
+in a different shape, and a padded `LAZYIT_TOKEN =` the *owned* pattern misses survives into the kept
+block **below** the fresh one, where last-assignment-wins hands the agent the stale credential. The
+per-key extractor is now one `config_value` / `Get-LazyitConfigValue` serving all three keys a re-run
+reads back, so they cannot drift apart in how they read a hand-edited file.
+
+*`--upgrade` / `-Upgrade`, because `--url` in a generated command is a defect of its own.* An update
+command is produced in a browser, so the `--url` in it is whatever **origin that browser was on**. Run
+across a fleet in the `lan` deployment mode of [[0087-plain-http-lan-deployment-axis]] — where an
+instance is reachable by several addresses — it silently re-pins every host it touches at one admin's
+address. It also carries no `--ca-file`, so a host installed against an internal CA fails the download
+on the very run meant to be the easy one; and the `sudo -E` that made a token in the environment work
+preserves the whole interactive environment into a root process to move one variable. `--upgrade` is
+`--keep-token` **plus** the settings: `LAZYIT_URL` and `LAZYIT_CA_FILE` come off the host when they
+are not passed, so the generated command is `curl -fsSL <origin>/install.sh | sudo sh -s -- --upgrade`
+— identical on every machine, with no origin, no secret and no `-E`.
+
+Four things about it are deliberate, in the same spirit as `--keep-token` above:
+
+- **Its own flag, not a wider `--keep-token`.** The name has to be true where it is read a year from
+  now: `--keep-token` says *token*, and a host reading its own URL back off disk is not that.
+  `--keep-config` was the other candidate and already means "keep the file when removing the agent"
+  under `--uninstall`; one word for two different things in two different modes is what gets misread.
+  `--upgrade` says what the run **is**, which is also why it can be the whole command.
+- **Settings take precedence; a credential does not.** `LAZYIT_URL` and `LAZYIT_CA_FILE` follow the
+  ordinary flag-over-environment-over-file order the agent's own config resolution uses, so
+  `--upgrade --url https://moved.example.com` retargets a host that really did move — *typed*, rather
+  than inherited from whoever generated the command. The token keeps `--keep-token`'s hard refusal of
+  every other source, for the reason given above, and the refusal names the rotation form
+  (`--url … --token <new>`).
+- **A fresh install is still a fresh install.** No readable config is the same actionable refusal
+  `--keep-token` gives, and a config carrying a token but no `LAZYIT_URL` is refused **by name**
+  rather than falling through to a generic *"--url is required"*. There is no path where a missing
+  config yields an unconfigured or unauthenticated install, and `--upgrade` is refused with
+  `--uninstall` exactly as `--keep-token` is.
+- **The re-used set is exactly the installer-owned set.** The merge owns `LAZYIT_URL`,
+  `LAZYIT_TOKEN`, `LAZYIT_INTERVAL` and `LAZYIT_CA_FILE`; `INTERVAL` is accepted and *ignored* since
+  #1140, so re-using the other three re-uses everything a re-run would otherwise have to be told
+  again — everything else already crosses an upgrade through the preserved block. That equality is a
+  test, not a claim. The **lowercase** `lazyit_ca_file` is read first, because `networkFrom` prefers
+  it when a host carries both; reading the other one would download over one trust anchor and report
+  over another.
+
+**Where this meets the #1189/#1190/#1191 hardening, because the two landed on branches cut from the
+same `dev`.** A re-run is an install, so it clears the same bars: the checksum is verified on the
+fail-closed path with no `--upgrade` branch anywhere near it, and plain http still needs
+`--allow-insecure-http`. That second one is a decision, not a setting. A host installed with the
+opt-in carries `LAZYIT_URL=http://…`, so `--upgrade` alone reaches the gate with a cleartext URL
+nobody typed — and letting the *file* answer *"yes, cleartext is acceptable"* on the operator's
+behalf is the same fail-open #1190 closed, one input over. The gate therefore reads the **resolved**
+URL whatever supplied it, and the refusal names the config file as the source rather than a `--url`
+the operator never passed (`$URL_SOURCE` / `$urlSource`, the same shape `$CA_SOURCE` already had).
+Settings are re-used; an acceptance of exposure is re-stated. Both compositions are tested.
+
+Upgrade behaviour is unchanged from the amendment above: purely additive, no flag changed meaning,
+no default moved, and the config format an older installer wrote is read as-is.
 
 ### §8 — Security model
 
@@ -2174,6 +2304,13 @@ would be a separate ADR and arguably a separate product).
 - Server-driven agent policy (the ack as the config channel, the fixed-tick interval inversion, the
   local veto, the three scopes): §7 Amendment (2026-08-01), issue #1140 — the consumer of contract
   v2's reserved `policyRevision`, with a §4 amendment making the staleness threshold per node.
+- A re-run authenticates with the token already on the host (`--keep-token` / `-KeepToken`, an
+  explicit flag and a hard error against every other token source): §7 Amendment (2026-08-04), issue
+  #1208 — the upgrade path stops needing a secret lazyit structurally cannot re-issue.
+- The token leaves `curl`'s argv, a padded config key is read as the agent reads it, and `--upgrade` /
+  `-Upgrade` re-runs a host from its own `LAZYIT_URL` and `LAZYIT_CA_FILE`: §7 Amendment (2026-08-04,
+  review of #1208) — an upgrade command that carries an origin re-pins a fleet, and one that carries
+  a header argument publishes the credential.
 - Software delta + the unchanged-write skip + the container child's Asset sync: §2/§3 Amendment
   (2026-08-01), issues #1142, #1153 and #1157 — one change, because giving an absent `software` key
   the meaning *unchanged* is only safe once the wire can also say *disabled*. It reconciles #1147's

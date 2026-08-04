@@ -201,7 +201,104 @@
   },
   "view": {
     "map": "Mapa",
-    "table": "Tabla"
+    "table": "Tabla",
+    "agents": "Agentes"
+  },
+  "fleet": {
+    "loadError": "No se pudo cargar la flota de agentes.",
+    "empty": {
+      "title": "Todavía no hay agentes reportando",
+      "description": "Instalá el agente de reporte en un servidor y aparecerá acá con su versión, su último reporte y — cuando quede atrasado — el comando que lo actualiza."
+    },
+    "summary": {
+      "aria": "Distribución de versiones de los agentes",
+      "total": "{count, plural, =0 {Sin agentes} one {# agente} other {# agentes}}",
+      "ofTotal": "de {total}",
+      "comparedTo": "Comparado con esta instancia, que corre {version}.",
+      "refresh": "Actualizar"
+    },
+    "filter": {
+      "ALL": "Todos los agentes",
+      "majorBehind": "una versión mayor por detrás",
+      "behind": "atrasados",
+      "unknown": "versión desconocida",
+      "current": "al día",
+      "notReporting": "sin reportar",
+      "degraded": "reportando incompleto"
+    },
+    "columns": {
+      "host": "Host",
+      "version": "Versión del agente",
+      "os": "Sistema",
+      "reported": "Último reporte",
+      "state": "Estado",
+      "actions": "Acciones"
+    },
+    "searchLabel": "Buscar agentes",
+    "searchPlaceholder": "Buscar por host, activo, IP o versión…",
+    "chipSearch": "Búsqueda: {query}",
+    "chipFilter": "Mostrando: {filter}",
+    "filteredEmpty": "Ningún agente coincide con estos filtros.",
+    "updateAction": "Actualizar",
+    "versionUnknownShort": "desconocida",
+    "osUnknown": "No reportado",
+    "os": {
+      "linux": "Linux",
+      "windows": "Windows",
+      "darwin": "macOS",
+      "bsd": "BSD",
+      "other": "Otro"
+    },
+    "platform": {
+      "linux": "Linux",
+      "windows": "Windows"
+    },
+    "reported": "reportó {time}",
+    "reportedStale": "reportó {time} · desactualizado",
+    "neverReported": "Nunca reportó",
+    "flags": {
+      "pending": "Revisión pendiente",
+      "notReporting": "Sin reportar",
+      "degraded": "Reporte incompleto",
+      "degradedWarnings": "El último reporte llegó incompleto: {warnings}",
+      "degradedUnprivileged": "El recolector corrió sin root ni SYSTEM, así que no pudo leer algunos datos (número de serie, modelo)."
+    },
+    "copyCommandAria": "Copiar comando",
+    "commandCopied": "Comando copiado",
+    "bulk": {
+      "title": "{count, plural, one {Se puede actualizar # host} other {Se pueden actualizar # hosts}}",
+      "subtitle": "Un comando por plataforma, idéntico en todos los hosts — no hay nada por máquina, porque cada host vuelve a ejecutarse con la config que ya tiene. Entregalo a lo que ya ejecuta comandos en esos hosts (Ansible, un script de inicio por GPO, Intune). Volver a ejecutar el instalador es seguro: verifica de nuevo la descarga, conserva la configuración propia de cada host y el host mantiene su identidad en lazyit.",
+      "groupHosts": "{platform} · {count, plural, one {# host} other {# hosts}}",
+      "copyAll": "O copiá el conjunto completo, anotado con los hosts a los que corresponde cada comando:",
+      "scriptHeadline": "actualización de agentes lazyit — {count, plural, one {# host atrasado} other {# hosts atrasados}} (instancia {version})",
+      "scriptCredentialNote": "Sin token ni URL para completar: --upgrade vuelve a ejecutar cada host con la config que ya tiene. NO definas LAZYIT_TOKEN — se rechaza junto con --upgrade.",
+      "scriptHosts": "{platform} · {count, plural, one {# host} other {# hosts}}: {hosts}"
+    },
+    "unknownNote": {
+      "body": "{count, plural, one {# agente reporta una versión que lazyit no puede comparar} other {# agentes reportan una versión que lazyit no puede comparar}} — los agentes instalados antes del sellado de versión reportan `dev`. Nunca se los trata como atrasados, y cada uno pasa a un grupo real la primera vez que volvés a ejecutar su comando de instalación. Esa primera actualización es la única con la que lazyit no puede ayudarte.",
+      "devServer": "Esta instancia reporta su propia versión como `dev`, así que ningún agente puede compararse contra ella y {count, plural, one {# agente queda} other {# agentes quedan}} en «versión desconocida». Ejecutá una build publicada para obtener una distribución real.",
+      "help": "<link>Mantener el agente al día</link> explica qué cambia y qué no cuando volvés a ejecutar el instalador."
+    },
+    "identities": {
+      "title": "{count, plural, one {# token de agente nunca se usó} other {# tokens de agente nunca se usaron}}",
+      "body": "Se creó un token para un host que nunca reportó — probablemente la instalación falló, o nunca se ejecutó. No hay ningún nodo que mostrar por él, y por eso se lo nombra acá.",
+      "created": "creado el {date}",
+      "disabled": "Deshabilitado",
+      "more": "…y {count} más.",
+      "manage": "Gestionar cuentas de servicio"
+    },
+    "command": {
+      "title": "Actualizar {host}",
+      "subtitle": "Este host reporta el agente {agentVersion}; esta instancia corre {serverVersion}. Ejecutá el comando en el host — desde acá no se le envía nada.",
+      "credentialNote": "Este comando no lleva token ni URL — no los necesita. `--upgrade` vuelve a ejecutar este host con el token, la URL de la instancia y la autoridad certificante que ya están en su propia config, así que la misma línea funciona igual en todos los hosts y no se repunta nada de este host. No exportes `LAZYIT_TOKEN` para esto: se rechaza junto con `--upgrade`, para que un token olvidado en tu shell no pueda pisar en silencio al que este host está usando.",
+      "tokenLost": "¿Ya no tenés el token de este host? No hace falta — lo sigue teniendo el host, y es el que usa `--upgrade`. Solo si un host se quedó sin config legible necesitás uno nuevo desde <link>Cuentas de servicio</link>: creá un token ahí y después instalá con `--url` y `--token`, como la primera vez. Rotar no es lo mismo: invalida el secreto actual, así que todos los demás hosts que usan esa cuenta de servicio dejan de reportar.",
+      "internalCa": "¿Detrás de una autoridad certificante interna? `--upgrade` reutiliza la CA configurada en este host, pero el `curl`/`irm` que descarga el script de arriba corre antes de que eso se lea — así que esa CA tiene que seguir estando en el almacén de confianza del sistema, igual que cuando instalaste la primera vez.",
+      "unknownOs": "Este host no reportó qué sistema ejecuta, así que se muestran los dos comandos. Ejecutá el que corresponda al host — lazyit no lo adivina por vos.",
+      "windowsElevated": "Ejecutalo desde una PowerShell con privilegios elevados.",
+      "verify": "Después, revisá el host sin esperar a que reporte:",
+      "rerunSafe": "Volver a ejecutar el instalador es seguro en un host que ya tiene el agente: la descarga se verifica por checksum, el binario se prueba antes de activar nada, tu configuración existente se combina en vez de reemplazarse, y el host mantiene su identidad en lazyit. En un host que ya está al día, no hace nada.",
+      "close": "Cerrar"
+    }
   },
   "tidy": {
     "action": "Ordenar"

@@ -79,6 +79,14 @@ Cuando se ve por primera vez una versión más nueva, los administradores recibe
 respecto (y un correo, si SMTP está configurado — consulta la tarjeta SMTP de esta página). Se te avisa
 **una vez por cada versión nueva**, no cada semana, para que el aviso siga siendo significativo.
 
+**Los agentes de reporte reciben una línea, no un correo propio.** Los agentes instalados se quedan
+atrás precisamente *porque* la instancia avanzó, así que cuando alguno está una versión MAYOR completa
+por detrás de la instancia en ejecución, esa misma notificación añade una frase — *"12 agentes de
+reporte están una versión MAYOR por detrás"*. Eso es todo, deliberadamente: **no hay un correo aparte
+para los agentes, ni una programación propia, ni nunca un mensaje por host**. Si ningún agente está una
+MAYOR por detrás — o si lazyit no puede determinar qué versión ejecutan — la línea sencillamente no
+aparece, y la notificación es exactamente la que siempre fue.
+
 **Las versiones de seguridad destacan.** Cuando una versión del intervalo es una corrección de seguridad,
 la insignia de estado se vuelve roja (*N versiones por detrás — seguridad*), aparece un aviso distintivo
 **Actualización de seguridad disponible** y el correo se marca como actualización de seguridad en el

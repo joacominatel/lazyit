@@ -24,6 +24,7 @@ import {
 import { createZodDto } from 'nestjs-zod';
 import type { Request } from 'express';
 import {
+  AgentFleetViewSchema,
   AgentPolicyOverrideSchema,
   AgentPolicySettingsSchema,
   AgentReportAckSchema,
@@ -62,8 +63,10 @@ import type { Principal } from '../auth/principal';
 import { HumanOnlyGuard } from '../secret-manager/human-only.guard';
 import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 import { AgentPolicyService } from './agent-policy.service';
+import { AgentFleetService } from './agent-fleet.service';
 
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
+class AgentFleetViewDto extends createZodDto(AgentFleetViewSchema) {}
 class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
 class InfraNodeDetailDto extends createZodDto(InfraNodeDetailSchema) {}
 class InfraImpactResponseDto extends createZodDto(InfraImpactResponseSchema) {}
@@ -124,7 +127,39 @@ export class InfraController {
     // the report create branches — the routes below never touch a node.
     private readonly autoConfirm: InfraAutoConfirmService,
     private readonly agentPolicy: AgentPolicyService,
+    // The ADR-0094 assisted-update READ (#1206). Read-only: it computes the version buckets and
+    // projects `specs.host.os.family`; it writes nothing and sends nothing toward a host.
+    private readonly agentFleet: AgentFleetService,
   ) {}
+
+  // ── The agent fleet view (ADR-0094 §4, #1206 — absorbs epic #1146 item 1) ───
+
+  @Get('agents/fleet')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      'The agent fleet: every agent-bearing host bucketed by version against the running instance, plus liveness, collector diagnostics and the agent credentials that have never been used (ADR-0094 §4).',
+    description:
+      'A READ — no write, no migration, nothing pushed to any host (ADR-0094 shape B). Each row carries ' +
+      'its `versionBucket`: `majorBehind` (the #907 nag tier), `behind` (a MINOR/PATCH gap — the table, ' +
+      'never a nag), `unknown` (a side did not parse — `dev`, unstamped, an odd tag) or `current` ' +
+      '(up to date, or ahead mid-upgrade). FAIL-SOFT is unchanged from `isNewerVersion`/`isMajorBehind`: ' +
+      'an unparseable version is NEVER "behind" — what ADR-0094 §3 changes is only that "unknown" is a ' +
+      'visible bucket instead of silence. Until #1203 every Docker-served binary reports `dev`, so an ' +
+      'estate honestly reads as entirely "version unknown". `osFamily` is projected out of the stored ' +
+      '`specs` blob per read (the ADR-0090 display-only computed-read-field mold — no column, no ' +
+      'migration) so the caller can build the correctly-flagged per-platform install command; a null ' +
+      'family means show BOTH commands, never guess. CONTAINER children are excluded: they inherit ' +
+      "their host's `agentVersion` and would inflate every bucket. TWO GATES: the table is " +
+      '`infra:read`, but the agent CREDENTIAL inventory (`identities` + `identitiesNeverUsed`) is the ' +
+      'same service-account data `/service-accounts` returns, so it additionally requires ' +
+      '`settings:manage` and is OMITTED — not emptied — for a caller without it. `infra:read` reaches ' +
+      'MEMBER and VIEWER by default; enumerating agent credentials must not.',
+  })
+  @ApiOkResponse({ type: AgentFleetViewDto })
+  getAgentFleet(@CurrentPrincipal() principal?: Principal) {
+    return this.agentFleet.getFleet(principal);
+  }
 
   // ── Server-driven agent policy (ADR-0074 §7 amendment, #1140) ────────────────
   //
