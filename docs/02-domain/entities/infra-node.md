@@ -293,12 +293,22 @@ this build, which that section now states on screen rather than implying only on
   search / the Servers table stay unfiltered), surfaces chassis in the review tray, adds it as an
   `InfraAutoConfirmRule` condition, and makes a confirm **adopt** a corroborated live [[asset]] instead
   of minting a duplicate.
+- **Assisted agent update + the fleet view** — *proposed, not built*
+  ([[0094-assisted-agent-update]], #1204). `agentVersion` is a first-class column (#907) that nothing
+  aggregates: no surface answers *how many agents, on what versions, who has not checked in*. The
+  proposal adds a **read-only** fleet view bucketing every node by `isNewerVersion` / `isMajorBehind`
+  (plus an explicit **version-unknown** bucket) and hands the operator the **exact install command**
+  per host, built from the reported `AgentOsFamily` by the same module the "Add a server" wizard uses.
+  **No migration, no agent change, no `agentUpdate` on the ack, no server-pushed execution** — full
+  self-update and human-triggered/agent-executed update were both declined, with reopening criteria
+  recorded. **Blocked on #1203**: every Docker-served binary reports `agentVersion: "dev"` today, so
+  "who is behind" is currently unknowable and the shipped #907 badge can never fire.
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
   per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]].
   → [[0070-infra-topology-graph]] "Future".
 
 Related: [[infra-edge]] · [[infra-node-fact-change]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
-[[0093-chassis-routing-and-asset-adoption]] ·
+[[0093-chassis-routing-and-asset-adoption]] · [[0094-assisted-agent-update]] ·
 [[0070-infra-topology-graph]] · [[0074-server-reporting-agent]] · [[0019-asset-assignment-integrity]] ·
 [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] · [[0046-roles-permissions-v2]] ·
 [[0061-secret-manager-zero-knowledge]] · [[0048-service-accounts]]
