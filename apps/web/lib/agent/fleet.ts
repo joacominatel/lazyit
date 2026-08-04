@@ -1,4 +1,9 @@
-import type { AgentFleetNode, AgentOsFamily } from "@lazyit/shared";
+import type {
+  AgentFleetIdentity,
+  AgentFleetNode,
+  AgentFleetView,
+  AgentOsFamily,
+} from "@lazyit/shared";
 import { AGENT_PLATFORMS, type AgentPlatform, agentUpdateCommand } from "./install-commands";
 
 /**
@@ -130,6 +135,40 @@ export function filterAgentFleetNodes(
   });
 }
 
+// ── The credential block's second gate (ADR-0094 §4, #1206) ──────────────────────────────────────
+
+/** The credential inventory, once it is known to be present. */
+export interface AgentFleetCredentialBlock {
+  identities: readonly AgentFleetIdentity[];
+  /** Counted over the WHOLE set server-side, not over the capped `identities` preview. */
+  neverUsed: number;
+}
+
+/**
+ * The agent CREDENTIAL inventory, or `null` when this caller was not given one.
+ *
+ * `GET /infra/agents/fleet` carries TWO gates in one response (#1206): the view itself is
+ * `infra:read`, and `identities` + `identitiesNeverUsed` need `settings:manage` on top. For a caller
+ * without it the server OMITS both fields rather than emptying them, and that distinction is the
+ * whole reason this function exists.
+ *
+ * **Absent is not zero, and rendering it as zero would be a lie.** An empty list would render as
+ * *"no agent tokens have never been used"* — a positive claim about credentials this viewer was
+ * deliberately not shown. A MEMBER or VIEWER would read a clean bill of health for an inventory they
+ * cannot see. So the whole card disappears instead: no empty state, no "0", no placeholder.
+ *
+ * Total over a partial response by construction. The two fields always travel together server-side,
+ * but this treats EITHER one being absent as "no block" rather than trusting that — an older server,
+ * a proxy that strips fields, or a future partial projection all land on the safe answer instead of
+ * on `undefined.length`.
+ */
+export function agentFleetCredentialBlock(
+  view: Pick<AgentFleetView, "identities" | "identitiesNeverUsed">,
+): AgentFleetCredentialBlock | null {
+  if (!view.identities || view.identitiesNeverUsed === undefined) return null;
+  return { identities: view.identities, neverUsed: view.identitiesNeverUsed };
+}
+
 // ── The actionable set, and the bulk handoff (ADR-0094 §7) ────────────────────────────────────────
 
 /**
@@ -207,8 +246,15 @@ function oneLine(label: string): string {
 export interface AgentFleetUpdateScriptCopy {
   /** What this is, e.g. *"lazyit agent update — 12 hosts behind (server 1.10.0)"*. */
   headline: string;
-  /** That the command reads its credential from the environment and carries no token. */
-  tokenNote: string;
+  /**
+   * That the command needs no credential, no URL and no per-host substitution, because `--upgrade`
+   * re-runs each host from the configuration it already holds (#1208).
+   *
+   * It used to say the opposite — *"export LAZYIT_TOKEN first"* — which is now not merely stale but
+   * harmful: `--upgrade` refuses to share a run with `LAZYIT_TOKEN`, so an operator who followed the
+   * old annotation would have every host in the artifact fail.
+   */
+  credentialNote: string;
   /** Which hosts this group's command is for, e.g. *"linux · 9 hosts: web-01, web-02, …"*. */
   hostsLine: (group: AgentFleetUpdateGroup) => string;
 }
@@ -235,7 +281,7 @@ export function agentFleetUpdateScript(
   );
   return [
     `# ${oneLine(copy.headline)}`,
-    `# ${oneLine(copy.tokenNote)}`,
+    `# ${oneLine(copy.credentialNote)}`,
     "",
     blocks.join("\n\n"),
   ].join("\n");
