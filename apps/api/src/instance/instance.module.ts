@@ -4,6 +4,7 @@ import { UpdateController } from './update.controller';
 import { UpdateService } from './update.service';
 import { UpdateCheckSweeper } from './update-check.sweeper';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { InfraModule } from '../infra/infra.module';
 
 /**
  * Instance module — the running build's identity (ADR-0083) PLUS update awareness & the guided update
@@ -17,9 +18,14 @@ import { NotificationsModule } from '../notifications/notifications.module';
  * {@link UpdateCheckSweeper} runs the opt-in weekly GitHub check on the sweep mold. NotificationsModule
  * is imported for the `update.available` weekly email (via NotificationsService.emit → ADR-0079 SMTP).
  * PrismaService/PermissionResolverService come from the global PrismaModule/AuthModule.
+ *
+ * ADR-0094 (#1206): InfraModule is imported for {@link AgentFleetService} alone — the ONE aggregate
+ * "N agents are a MAJOR version behind" line the CEO approved on the EXISTING `update.available`
+ * email. No new notification type, no new schedule, no per-host mail. A read, on a path that already
+ * sends.
  */
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, InfraModule],
   controllers: [InstanceController, UpdateController],
   providers: [UpdateService, UpdateCheckSweeper],
 })
