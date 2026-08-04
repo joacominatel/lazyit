@@ -32,7 +32,7 @@ function node(overrides: Partial<AgentFleetNode> = {}): AgentFleetNode {
   return {
     id: "cuid0000000000000000000",
     label: "host",
-    kind: "SERVER",
+    kind: "PHYSICAL_HOST",
     status: "ONLINE",
     pending: false,
     assetName: null,
@@ -283,5 +283,49 @@ describe("agentFleetUpdateScript — what lands on the clipboard", () => {
     const script = agentFleetUpdateScript(nasty, copy);
     expect(script.split("\n").filter((line) => line.includes("rm -rf /"))).toHaveLength(1);
     expect(script).toContain("# linux: web 01 rm -rf /");
+  });
+});
+
+describe("the estate this view actually opens on — no version, no system, no report", () => {
+  // The upgrade-day state (ADR-0094 §2/§10): agents that predate version stamping report `dev`, so
+  // the row carries a null agentVersion, the OS family may never have been projected, and a host
+  // that stopped reporting has no timestamp at all. Asserted as one block because "renders when
+  // everything is absent" is a requirement of this feature, not a degenerate case of it.
+  const blank = [
+    node({ id: "1" }),
+    node({ id: "2", status: "OFFLINE", lastReportedAt: null }),
+    node({ id: "3", lastReportedAt: null }),
+  ];
+
+  test("nothing throws, nothing is hidden, and nothing is offered as actionable", () => {
+    expect(filterAgentFleetNodes(blank, { q: "", filter: "ALL" })).toHaveLength(3);
+    expect(filterAgentFleetNodes(blank, { q: "", filter: "unknown" })).toHaveLength(3);
+    expect(filterAgentFleetNodes(blank, { q: "web", filter: "ALL" })).toEqual([]);
+    // One is OFFLINE and one has never reported; the third is checking in fine and is NOT counted
+    // as silent just because its version cannot be compared. Those are two different facts.
+    expect(
+      filterAgentFleetNodes(blank, { q: "", filter: "notReporting" }).map((n) => n.id),
+    ).toEqual(["2", "3"]);
+    expect(summarizeAgentFleet(blank)).toMatchObject({
+      total: 3,
+      unknown: 3,
+      behindTotal: 0,
+      notReporting: 2,
+      degraded: 0,
+    });
+    // The whole update surface stays silent: no group, no script, no button on any row.
+    expect(blank.some(isAgentUpdatable)).toBe(false);
+    expect(agentFleetUpdateGroups(blank, ORIGIN)).toEqual([]);
+  });
+
+  test("a host that IS behind with everything else absent still gets both commands", () => {
+    const groups = agentFleetUpdateGroups(
+      [node({ label: "mystery", versionBucket: "behind", lastReportedAt: null })],
+      ORIGIN,
+    );
+    expect(groups.map((group) => group.platform)).toEqual(["linux", "windows"]);
+    for (const group of groups) {
+      expect(group.hosts).toEqual([{ label: "mystery", osKnown: false }]);
+    }
   });
 });
