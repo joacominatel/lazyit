@@ -150,11 +150,15 @@ export class InfraController {
       '`specs` blob per read (the ADR-0090 display-only computed-read-field mold — no column, no ' +
       'migration) so the caller can build the correctly-flagged per-platform install command; a null ' +
       'family means show BOTH commands, never guess. CONTAINER children are excluded: they inherit ' +
-      "their host's `agentVersion` and would inflate every bucket.",
+      "their host's `agentVersion` and would inflate every bucket. TWO GATES: the table is " +
+      '`infra:read`, but the agent CREDENTIAL inventory (`identities` + `identitiesNeverUsed`) is the ' +
+      'same service-account data `/service-accounts` returns, so it additionally requires ' +
+      '`settings:manage` and is OMITTED — not emptied — for a caller without it. `infra:read` reaches ' +
+      'MEMBER and VIEWER by default; enumerating agent credentials must not.',
   })
   @ApiOkResponse({ type: AgentFleetViewDto })
-  getAgentFleet() {
-    return this.agentFleet.getFleet();
+  getAgentFleet(@CurrentPrincipal() principal?: Principal) {
+    return this.agentFleet.getFleet(principal);
   }
 
   // ── Server-driven agent policy (ADR-0074 §7 amendment, #1140) ────────────────
