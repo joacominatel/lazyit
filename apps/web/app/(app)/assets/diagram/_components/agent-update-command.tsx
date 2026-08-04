@@ -18,9 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   agentDiagnosticsCommand,
-  agentTokenEnvVar,
   agentUpdateCommand,
-  type AgentPlatform,
 } from "@/lib/agent/install-commands";
 import {
   agentPlatformIsAmbiguous,
@@ -35,19 +33,26 @@ import {
  * ADR-0084 §5's only-when-actionable posture. There is no disabled "Update" on a current host and no
  * "you're up to date, but here's the command anyway".
  *
- * The two things stated rather than implied:
+ * The things stated rather than implied:
  *
- *  - **No token.** The server cannot re-emit an installed host's secret; only `tokenHash` and
- *    `tokenPrefix` are stored. The command names the environment variable both installers already
- *    read, so an operator who scans the line for a `--token` and does not find one is told why in
- *    the same breath — and pointed at the service-account screen if they no longer hold it.
+ *  - **No token, no URL, nothing to fill in.** `--upgrade` re-runs the host from the configuration
+ *    it already holds (#1208), so an operator who scans the line for a `--token` and does not find
+ *    one is told why in the same breath. This is also the SAFE form: the earlier command pinned
+ *    `--url` to the admin's browser origin, which on an ADR-0087 `lan` instance re-pointed every
+ *    host it was pasted on.
+ *  - **Do not export `LAZYIT_TOKEN` for it.** That was the old advice and it is now a hard error:
+ *    `--upgrade` refuses to share a run with any other credential source, on purpose, so that a
+ *    stale exported token can never quietly win over the one the host is actually using.
+ *  - **The internal-CA caveat.** `--upgrade` re-uses this host's `LAZYIT_CA_FILE`, but the
+ *    `curl`/`irm` that fetches the script runs first and is not covered by it. Pre-existing and
+ *    unchanged — the install command had the same first hop — and stated rather than discovered.
  *  - **Both commands when the platform is unknown.** A node whose reported OS family is absent, or
  *    is one lazyit builds no agent for, gets both with a note. Handing a PowerShell line to a Debian
  *    box is the wizard bug #1168 already fixed once, and guessing costs the operator a failed paste
  *    on a host they are already logged into.
  */
 
-/** Where an operator mints or rotates a token when they no longer hold this host's. */
+/** Where an operator mints a token for a host that has no readable config left. */
 const SERVICE_ACCOUNTS_HREF = "/settings/service-accounts";
 
 /** A copyable command — the `font-mono` block + the shared copy affordance, as the wizard prints it. */
@@ -76,19 +81,21 @@ export function AgentCommandBlock({
 }
 
 /**
- * The token line — the whole of ADR-0094 §6, in the place an operator would otherwise go looking for
- * a flag that does not exist. Names the variable in the spelling the platform's own installer reads
- * it under, and links to where a lost token is replaced rather than reimplementing that flow.
+ * The credential line — ADR-0094 §6 as #1208 resolved it, in the place an operator would otherwise
+ * go looking for a flag that does not exist.
+ *
+ * The lost-token route is the load-bearing part. It used to send an operator who no longer holds a
+ * host's token straight to *"mint or rotate one"* — and `rotate` INVALIDATES the existing secret, so
+ * on the fleet this very view is designed for (one shared `infra:report` account across the estate)
+ * that one click silently stops every other host reporting. The host already holds a working
+ * credential, so `--upgrade` is the answer, and minting is named only for the case that genuinely
+ * has no readable config — with the blast radius of rotating said out loud.
  */
-function TokenNote({ platforms }: { platforms: readonly AgentPlatform[] }) {
+function CredentialNote() {
   const t = useTranslations("infra.fleet");
   return (
     <Callout tone="info" icon={<KeyIcon />}>
-      <p>
-        {t("command.tokenNote", {
-          variables: platforms.map((platform) => agentTokenEnvVar(platform)).join(" / "),
-        })}
-      </p>
+      <p>{t("command.credentialNote")}</p>
       <p className="mt-1">
         {t.rich("command.tokenLost", {
           link: (chunks) => (
@@ -120,7 +127,7 @@ export function AgentUpdateCommands({
 
   return (
     <div className="space-y-4">
-      <TokenNote platforms={platforms} />
+      <CredentialNote />
 
       {ambiguous ? (
         <Callout tone="warning" icon={<QuestionMarkCircleIcon />}>
@@ -147,6 +154,12 @@ export function AgentUpdateCommands({
       ))}
 
       <p className="text-xs text-muted-foreground">{t("command.rerunSafe")}</p>
+      {/*
+        Pre-existing and unchanged, but now the only argument the command does NOT carry that a host
+        might still need: `--upgrade` re-uses this host's LAZYIT_CA_FILE for the agent's own traffic,
+        while the curl/irm above fetches the script before any config is read.
+      */}
+      <p className="text-xs text-muted-foreground">{t("command.internalCa")}</p>
     </div>
   );
 }
