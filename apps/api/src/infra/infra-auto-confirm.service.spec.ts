@@ -45,6 +45,7 @@ function row(overrides: Record<string, unknown> = {}) {
     hostnamePattern: 'srv-*',
     subnetCidr: null,
     reportedKind: null,
+    chassis: null,
     confirmAsKind: null,
     trackAsAsset: true,
     createdById: 'u-1',
@@ -172,6 +173,33 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
       ).toBe(false);
     });
 
+    it('persists a chassis condition (ADR-0093 §6) — "review the laptops" is one rule', async () => {
+      prisma.infraAutoConfirmRule.create.mockResolvedValue(row());
+
+      await service.create({ name: 'Servers only', chassis: 'server' }, HUMAN);
+
+      const arg = nthArg<{ data: { chassis: string | null } }>(
+        prisma.infraAutoConfirmRule.create,
+        0,
+      );
+      expect(arg.data.chassis).toBe('server');
+    });
+
+    it('defaults the chassis condition to null — an existing rule tests no form factor', async () => {
+      prisma.infraAutoConfirmRule.create.mockResolvedValue(row());
+
+      await service.create(
+        { name: 'Prod servers', hostnamePattern: 'srv-*' },
+        HUMAN,
+      );
+
+      const arg = nthArg<{ data: { chassis: string | null } }>(
+        prisma.infraAutoConfirmRule.create,
+        0,
+      );
+      expect(arg.data.chassis).toBe(null);
+    });
+
     it('honours an explicit trackAsAsset over the per-scope default', async () => {
       prisma.infraAutoConfirmRule.create.mockResolvedValue(row());
 
@@ -225,6 +253,32 @@ describe('InfraAutoConfirmService (ADR-0074 §1 amendment, #1145)', () => {
           hostnamePattern: '*',
           subnetCidr: '0.0.0.0/0',
         }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.infraAutoConfirmRule.update).not.toHaveBeenCalled();
+    });
+
+    it('ACCEPTS clearing the hostname pattern when a stored CHASSIS condition survives the merge', async () => {
+      // The merged re-check is the only layer that can read the stored row, so chassis has to be part
+      // of what it merges — otherwise adding the condition would leave it unable to keep a rule alive.
+      prisma.infraAutoConfirmRule.findFirst.mockResolvedValue(
+        row({ chassis: 'server' }),
+      );
+      prisma.infraAutoConfirmRule.update.mockResolvedValue(
+        row({ hostnamePattern: null, chassis: 'server' }),
+      );
+
+      await expect(
+        service.update('rule-1', { hostnamePattern: null }),
+      ).resolves.toBeDefined();
+    });
+
+    it('REFUSES a patch that clears a CHASSIS-only rule`s last condition', async () => {
+      prisma.infraAutoConfirmRule.findFirst.mockResolvedValue(
+        row({ hostnamePattern: null, chassis: 'server' }),
+      );
+
+      await expect(
+        service.update('rule-1', { chassis: null }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.infraAutoConfirmRule.update).not.toHaveBeenCalled();
     });
