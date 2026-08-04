@@ -1060,7 +1060,10 @@ con
   serie ni el modelo).
 - **tokens de agente que nunca se usaron** — un token que creaste para un host que nunca reportó. No
   hay ningún nodo que mostrar por él, así que sin esta línea la falla de instalación más común — la
-  instalación que nunca se ejecutó, o que falló — es invisible.
+  instalación que nunca se ejecutó, o que falló — es invisible. **Esto es solo para administradores:**
+  requiere el mismo permiso que gestionar la configuración, y para el resto la tarjeta directamente no
+  aparece. Se omite en vez de mostrarse vacía, porque una lista vacía se leería como «no hay tokens de
+  agente sin usar» — una afirmación sobre credenciales que esa persona nunca vio.
 - **el comando de actualización, por host** — pero solo en un host que está realmente atrasado.
 
 Eso último es deliberado. No hay botón de actualizar en un host que ya está al día, no hay cartel en
@@ -1084,27 +1087,56 @@ incluido: la descarga se verifica por checksum, una instancia en `http` plano re
 explícita `--allow-insecure-http` / `-AllowInsecureHttp` que necesita, y el binario se prueba antes de
 activar nada.
 
-**No lleva token, y no puede llevarlo.** lazyit solo guarda un *hash* del token de cada host — no está
-en condiciones de volver a mostrarlo, ni para vos ni para quien entre a la base de datos. Por eso el
-comando nombra la variable de entorno que los dos instaladores ya leen, y el token lo ponés vos:
+**No hay nada que completar en él.** El comando de actualización es `--upgrade` y nada más:
 
 ```sh
-export LAZYIT_TOKEN=lzit_sa_…
-curl -fsSL https://tu-instancia/install.sh | sudo -E sh -s -- --url https://tu-instancia
+curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --upgrade
 ```
 
 ```powershell
-$env:LAZYIT_TOKEN = 'lzit_sa_…'
-& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Upgrade
 ```
 
-El `-E` de `sudo` no es decoración: sin él `sudo` limpia tu entorno y el instalador nunca ve el token.
-Si ya estás como root — que es el caso normal bajo gestión de configuración — sacá el `sudo -E`
-directamente.
+`--upgrade` vuelve a ejecutar el host usando el token, la URL de la instancia y la autoridad
+certificante **que ya están en el archivo de configuración de ese host** — el que el instalador
+escribió ahí mismo. Así que esas dos líneas funcionan igual en todas tus máquinas, que es lo que hace
+que el «Copiar todo» de más abajo sea un artefacto de dos líneas y no una lista con un comando
+distinto por host.
 
-¿Ya no tenés el token de ese host? No lo busques. Creá o rotá uno en
-[Cuentas de servicio](/help/users-permissions-service-accounts) — se muestra una sola vez, igual que
-cuando instalaste el agente por primera vez.
+Esa URL importa más de lo que parece. lazyit deliberadamente **no** pone `--url` en el comando de
+actualización, porque `LAZYIT_URL` es una clave que el instalador *posee y reescribe* — y la URL de un
+comando generado es la dirección por la que tu navegador llegó a esta instancia. Si tu instancia
+responde en varias direcciones (la configuración LAN en `http` plano hace exactamente eso), un comando
+con `--url` re-apuntaría en silencio a tu dirección todos los hosts donde lo pegaras. `--upgrade` no
+puede: lee la URL de cada host desde ese mismo host.
+
+**No lleva token, y no puede llevarlo.** lazyit solo guarda un *hash* del token de cada host — no está
+en condiciones de volver a mostrarlo, ni para vos ni para quien entre a la base de datos. Y no le hace
+falta: el host tiene el suyo.
+
+> **No definas `LAZYIT_TOKEN` para este comando.** `--upgrade` *se niega* a ejecutarse junto con un
+> token de cualquier otra fuente, a propósito — para que un token olvidado en tu shell no pueda pisar
+> en silencio al que un host está usando de verdad. Si querés darle a un host un token *distinto*, eso
+> es la forma de instalación normal (`--url … --token …`), escrita a conciencia.
+
+**¿Ya no tenés el token de ese host? No lo necesitás.** El host lo sigue teniendo, y es justamente el
+que usa `--upgrade` — así que un token perdido no es motivo para tocar Cuentas de servicio.
+
+Solo un host **sin configuración legible** — uno que estás rehaciendo, o donde se borró la config —
+necesita una credencial nueva. Para ese, creá un token en
+[Cuentas de servicio](/help/users-permissions-service-accounts) e instalalo como la primera vez, con
+`--url` y `--token`.
+
+> **Rotar no es lo mismo que crear, y no se deshace.** Rotar una cuenta de servicio **invalida el
+> secreto que está en uso**. Si tus hosts comparten una sola cuenta `infra:report` — que es lo
+> habitual — rotarla hace que *todos los demás agentes de esa cuenta* dejen de reportar, de golpe.
+> Rotá cuando quieras retirar una credencial, nunca para «conseguir una copia» de una.
+
+**¿Detrás de una autoridad certificante interna?** `--upgrade` reutiliza la CA ya configurada en el
+host para el tráfico propio del agente. El `curl` / `irm` del principio del comando es un paso
+anterior y aparte — corre antes de que se lea ninguna config — así que esa CA tiene que seguir estando
+en el almacén de confianza del sistema, igual que cuando instalaste la primera vez. Esto no cambió; es
+lo único que el comando no puede resolver por vos.
 
 ### Entregárselo a Ansible, GPO o Intune
 
@@ -1112,8 +1144,16 @@ cuando instalaste el agente por primera vez.
 paquetes de Intune, y no lo va a hacer: son promesas sobre sistemas que no puede probar, y se pudren
 en silencio. En cambio, la vista Agentes te da un **Copiar todo** del conjunto atrasado — un comando
 por plataforma, anotado con los hosts a los que corresponde cada uno — para que se lo entregues a lo
-que ya ejecuta comandos en esas máquinas. Tu credencial se queda donde ya la guardás: un vault de
-Ansible, o el almacén de credenciales que ya usa tu gestión de endpoints.
+que ya ejecuta comandos en esas máquinas.
+
+Esa copia sigue lo que tengas filtrado. Achicá la tabla a *una versión mayor por detrás* y la tarjeta
+de actualización masiva te da los comandos de exactamente esos hosts, contados igual que el resumen de
+arriba.
+
+Como `--upgrade` no lleva credencial ni URL, no hay nada que plantillar por host ni ningún secreto que
+meter en tu automatización para esto: cada máquina se autentica con el token que ya tiene. No tenés
+que entregarle a Ansible ni a Intune el token `infra:report` de tu flota solo para mantener los
+agentes al día.
 
 ### Por qué es seguro volver a ejecutar el instalador
 
@@ -1125,10 +1165,12 @@ en las dos plataformas desde siempre:
 - **El binario se ejecuta una vez (`--help`) antes de activar nada.** Si no puede arrancar en ese
   host, el instalador lo borra y deja la máquina como la encontró — así un artefacto defectuoso falla
   en la instalación en vez de convertirse en un host que parece instalado y nunca reporta.
-- **Tu configuración se combina, no se reemplaza.** Cada clave `LAZYIT_*` que ya está en el host se
+- **Tu configuración se combina, no se reemplaza.** Cada ajuste `LAZYIT_*` que ya está en el host se
   conserva — que es lo que preserva las decisiones propias del dueño del host, sus
   `LAZYIT_COLLECT_*=false`. Una actualización de flota nunca debe volver a encender en silencio un
-  recolector que alguien apagó, y no lo hace.
+  recolector que alguien apagó, y no lo hace. El instalador sí posee y reescribe tres claves propias
+  — la URL de la instancia, el token y el archivo de CA — y justamente por eso el comando de
+  actualización usa `--upgrade` y no pasa ninguna: se reescriben con los valores que ese host ya tenía.
 - **El host conserva su identidad en lazyit.** Un nodo se identifica por desde dónde reporta y por su
   identidad de máquina, no por el binario, así que un host sigue siendo un nodo a través de la
   actualización — sin duplicados y sin volver a revisarlo.
