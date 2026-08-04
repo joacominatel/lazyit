@@ -700,6 +700,213 @@ describe("uninstall", () => {
   });
 });
 
+/**
+ * `-KeepToken`: A RE-RUN AUTHENTICATES WITH THE TOKEN THIS HOST ALREADY HAS (#1208).
+ *
+ * Re-running the installer is the documented upgrade path, and until now it demanded the Service
+ * Account token on every run - which the server structurally cannot re-issue, because it stores only
+ * a hash and a prefix. So "run this command again" was copy-paste PLUS go and find a secret. The
+ * host already holds the token: this installer wrote it, into a file whose ACL is SYSTEM +
+ * Administrators, and the script runs elevated. Reading back what it wrote is not a new exposure.
+ *
+ * HOW THIS IS TESTED. The extraction is a PURE function - config lines in, the token out, no path
+ * and no registry - for exactly the reason `Split-LazyitPath` is: that is what lets the corpus below
+ * run through real PowerShell on a Linux CI runner, against the function read OUT OF the shipped
+ * script. The refusals around it cannot be executed off Windows and are pinned as text, like every
+ * other branch in this file.
+ */
+type TokenCase = { lines: string[]; token: string };
+
+const TOKEN_CASES: Record<string, TokenCase> = {
+  "a config that carries a token supplies it": {
+    lines: ["LAZYIT_URL=https://lazyit.example.com", "LAZYIT_TOKEN=lzit_sa_abc"],
+    token: "lzit_sa_abc",
+  },
+  // Get-Content splits on the newline and leaves the CR when the file has CRLF endings - which is
+  // every file a Windows editor has touched. A trailing CR inside a bearer token is a 401 nobody can
+  // explain from the message.
+  "a trailing carriage return is not part of the token": {
+    lines: ["LAZYIT_TOKEN=lzit_sa_abc\r"],
+    token: "lzit_sa_abc",
+  },
+  "surrounding whitespace is not part of the token": {
+    lines: ["  LAZYIT_TOKEN=  lzit_sa_abc  "],
+    token: "lzit_sa_abc",
+  },
+  // The AGENT's own parser strips a matching pair of quotes, so a config it reads happily must not
+  // be one this refuses - it would send the quotes as part of the credential.
+  "a quoted value is unquoted, in either quote": {
+    lines: ['LAZYIT_TOKEN="lzit_sa_abc"'],
+    token: "lzit_sa_abc",
+  },
+  "a single-quoted value is unquoted too": {
+    lines: ["LAZYIT_TOKEN='lzit_sa_abc'"],
+    token: "lzit_sa_abc",
+  },
+  // The agent assigns key by key as it reads, so the LAST line is the one live on this host. An
+  // installer that took the first would authenticate with a token the agent does not use.
+  "the LAST token line wins, exactly as the agent's own parser resolves it": {
+    lines: ["LAZYIT_TOKEN=lzit_sa_old", "LAZYIT_TOKEN=lzit_sa_new"],
+    token: "lzit_sa_new",
+  },
+  "a token with '=' inside it survives - only the first '=' is the separator": {
+    lines: ["LAZYIT_TOKEN=lzit_sa_a=b=c"],
+    token: "lzit_sa_a=b=c",
+  },
+  "a config with no token line supplies nothing at all": {
+    lines: ["LAZYIT_URL=https://lazyit.example.com", "LAZYIT_COLLECT_NICS=false"],
+    token: "",
+  },
+  "a commented-out token is not a token": {
+    lines: ["#LAZYIT_TOKEN=lzit_sa_abc"],
+    token: "",
+  },
+  "an empty file supplies nothing, rather than throwing under StrictMode": {
+    lines: [],
+    token: "",
+  },
+  "LAZYIT_TOKEN_FILE is a different key and is not read as one": {
+    lines: ["LAZYIT_TOKEN_FILE=C:\\ProgramData\\lazyit-agent\\agent.token"],
+    token: "",
+  },
+};
+
+/** The shipped `Get-LazyitConfigToken`, run by real PowerShell over the corpus. */
+function tokenAnswersFromPowerShell(shell: string): Record<string, string> {
+  const dir = mkdtempSync(join(tmpdir(), "lazyit-install-ps1-token-"));
+  const casesFile = join(dir, "cases.json");
+  const driver = join(dir, "driver.ps1");
+  writeFileSync(
+    casesFile,
+    JSON.stringify(Object.entries(TOKEN_CASES).map(([name, one]) => ({ name, lines: one.lines }))),
+  );
+  writeFileSync(
+    driver,
+    [
+      "Set-StrictMode -Version Latest",
+      "$ErrorActionPreference = 'Stop'",
+      powershellFunction("Get-LazyitConfigToken"),
+      "foreach ($case in (Get-Content -LiteralPath $args[0] -Raw | ConvertFrom-Json)) {",
+      "  [pscustomobject]@{",
+      "    name = $case.name",
+      "    token = [string](Get-LazyitConfigToken ([string[]] $case.lines))",
+      "  } | ConvertTo-Json -Compress",
+      "}",
+      "",
+    ].join("\n"),
+  );
+
+  const run = Bun.spawnSync([shell, "-NoProfile", "-File", driver, casesFile]);
+  const stdout = new TextDecoder().decode(run.stdout);
+  expect(
+    run.exitCode,
+    `${shell} could not run the shipped Get-LazyitConfigToken:\n${new TextDecoder().decode(run.stderr)}`,
+  ).toBe(0);
+
+  const answers: Record<string, string> = {};
+  for (const line of stdout.split("\n").filter((one) => one.trim() !== "")) {
+    const parsed = JSON.parse(line) as { name: string; token: string | null };
+    answers[parsed.name] = parsed.token ?? "";
+  }
+  return answers;
+}
+
+/** The same function, modelled - used only where there is no PowerShell to ask. */
+function tokenAnswersFromModel(): Record<string, string> {
+  const answers: Record<string, string> = {};
+  for (const [name, one] of Object.entries(TOKEN_CASES)) {
+    let found = "";
+    for (const line of one.lines) {
+      const match = /^\s*LAZYIT_TOKEN=(.*)$/.exec(line);
+      if (match) found = match[1] ?? "";
+    }
+    found = found.trim();
+    if (
+      found.length >= 2 &&
+      ((found.startsWith('"') && found.endsWith('"')) || (found.startsWith("'") && found.endsWith("'")))
+    ) {
+      found = found.slice(1, -1);
+    }
+    answers[name] = found;
+  }
+  return answers;
+}
+
+let memoisedTokens: Record<string, string> | undefined;
+function tokenAnswers(): Record<string, string> {
+  memoisedTokens ??= POWERSHELL ? tokenAnswersFromPowerShell(POWERSHELL) : tokenAnswersFromModel();
+  return memoisedTokens;
+}
+
+describe("-KeepToken authenticates a re-run with the token already on disk (#1208)", () => {
+  test("the extraction is a PURE function, so it can be run off Windows", () => {
+    const body = powershellFunction("Get-LazyitConfigToken");
+    expect(body).toContain("function Get-LazyitConfigToken([string[]] $Lines)");
+    // If it ever reaches for $ConfigFile itself, the corpus below stops testing the shipped logic.
+    expect(body).not.toContain("$ConfigFile");
+    // The operations the model mirrors, so the fallback engine is not asserting against a fantasy.
+    expect(body).toContain("^\\s*LAZYIT_TOKEN=(.*)$");
+    expect(body).toContain("Trim()");
+  });
+
+  for (const [name, expected] of Object.entries(TOKEN_CASES)) {
+    test(name, () => {
+      const answer = tokenAnswers()[name];
+      expect(answer, `${name}: ${ENGINE} answered nothing`).toBeDefined();
+      expect(answer, `${name}, answered by ${ENGINE}`).toBe(expected.token);
+    });
+  }
+
+  test("-KeepToken is a switch on the parameter block, and it is documented", () => {
+    expect(script).toContain("[switch] $KeepToken");
+    expect(script).toContain(".PARAMETER KeepToken");
+  });
+
+  // A HARD ERROR, never a precedence rule - the same posture as the existing -Token / -TokenFile
+  // pair. Two token sources on one command line is an operator who believes something about this run
+  // that is not true, and picking one silently is how a host ends up authenticating with the
+  // credential that was just rotated away.
+  test("it refuses to share the run with any other token source", () => {
+    expect(script).toContain("-KeepToken and -Token are mutually exclusive");
+    expect(script).toContain("-KeepToken and -TokenFile are mutually exclusive");
+    // Including the environment form, which is ambient rather than typed and is therefore the one a
+    // silent precedence rule would hide behind.
+    expect(script).toMatch(/-KeepToken[^\n]*LAZYIT_TOKEN/);
+  });
+
+  // -KeepConfig keeps this host's limits through an uninstall; the TOKEN never survives one.
+  // Accepting -KeepToken there - even as a no-op - would let an operator believe otherwise about a
+  // live credential on a host they are decommissioning.
+  test("-Uninstall -KeepToken is refused rather than quietly ignored", () => {
+    const uninstall = script.slice(script.indexOf("if ($Uninstall) {"), script.indexOf("if ($KeepConfig)"));
+    expect(uninstall).toContain("if ($KeepToken) { Die ");
+    expect(uninstall).toMatch(/never survives an uninstall/i);
+  });
+
+  test("a config with no token in it STOPS the install - never a silent unauthenticated one", () => {
+    expect(script).toContain("no LAZYIT_TOKEN");
+    // The first-install forms are named, because that is the other way to arrive here.
+    expect(script).toMatch(/-Token[^\n]*-TokenFile/);
+  });
+
+  test("the read happens only after elevation has been checked", () => {
+    // The config's ACL is SYSTEM + Administrators, so a non-elevated run must be told THAT rather
+    // than that its own instance has no install on it.
+    const elevation = script.indexOf("WindowsBuiltInRole]::Administrator");
+    const read = script.indexOf("Get-LazyitConfigToken (");
+    expect(read).toBeGreaterThan(-1);
+    expect(read).toBeGreaterThan(elevation);
+  });
+
+  test("the token still lands in the file the installer owns, written exactly once", () => {
+    // -KeepToken changes where the token COMES FROM and nothing about who owns which key: the old
+    // LAZYIT_TOKEN line is still dropped from the preserved set and written back once at the top, so
+    // a re-run cannot leave two of them and hand the parser the choice.
+    expect(script).toContain("^\\s*LAZYIT_(URL|TOKEN|INTERVAL)=");
+    expect(script.split('$lines.Add("LAZYIT_TOKEN=$Token")').length - 1).toBe(1);
+  });
+});
+
 describe("the unsigned-binary state is stated, not hidden", () => {
   test("the script says so where an operator will read it", () => {
     // An OV/EV code-signing certificate is an explicit GATE before any third party installs this.
