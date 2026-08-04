@@ -356,7 +356,28 @@ describe("the config file holds a live credential and is protected like one", ()
     // turned off, or cut a proxied host off the network, with nothing on screen to say so.
     expect(script).toContain("LAZYIT_[A-Z0-9_]+|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy|lazyit_ca_file");
     // …except the three keys the installer owns, which the parameters supply fresh.
-    expect(script).toContain("^\\s*LAZYIT_(URL|TOKEN|INTERVAL)=");
+    expect(script).toContain("^\\s*LAZYIT_(URL|TOKEN|INTERVAL)\\s*=");
+  });
+
+  // A KEY WITH SPACE AROUND IT IS STILL THAT KEY, because `readConfigFile` in the agent trims the
+  // key before it compares. Both halves have to widen together: a padded `LAZYIT_COLLECT_*=false`
+  // that the keep-pattern misses is a host owner's veto DELETED on the upgrade path, and a padded
+  // `LAZYIT_TOKEN =` that the owned pattern misses survives into the kept block BELOW the fresh
+  // one — where the agent's last-assignment-wins parser would pick the stale credential.
+  test("padded keys are recognised on both sides of the merge, or neither is safe", () => {
+    const keep = script.match(/Where-Object \{ \$_ -match '([^']+)' \}/)?.[1];
+    const owned = [...script.matchAll(/'(\^\\s\*\(?LAZYIT_[^']+)'/g)].map((one) => one[1] as string);
+    expect(keep, "install.ps1 no longer filters the previous config this way").toBeTruthy();
+    expect(keep).toContain("\\s*=");
+    expect(owned.length).toBeGreaterThan(0);
+    for (const pattern of owned) expect(pattern, pattern).toContain("\\s*=");
+  });
+
+  // The one promise this installer cannot bend: the token NEVER survives an uninstall. A padded
+  // `LAZYIT_TOKEN =` the strip-pattern did not recognise would be left on a decommissioned host, as
+  // a working credential, in a file the operator was told keeps only their own limits.
+  test("-KeepConfig strips a padded token line too", () => {
+    expect(script).toContain("-notmatch '^\\s*LAZYIT_(TOKEN|URL)\\s*='");
   });
 
   test("-Interval is accepted and ignored — cadence is a server-side setting since #1140", () => {
@@ -709,13 +730,14 @@ describe("uninstall", () => {
  * host already holds the token: this installer wrote it, into a file whose ACL is SYSTEM +
  * Administrators, and the script runs elevated. Reading back what it wrote is not a new exposure.
  *
- * HOW THIS IS TESTED. The extraction is a PURE function - config lines in, the token out, no path
- * and no registry - for exactly the reason `Split-LazyitPath` is: that is what lets the corpus below
- * run through real PowerShell on a Linux CI runner, against the function read OUT OF the shipped
- * script. The refusals around it cannot be executed off Windows and are pinned as text, like every
- * other branch in this file.
+ * HOW THIS IS TESTED. The extraction is a PURE function - config lines and a key in, the value out,
+ * no path and no registry - for exactly the reason `Split-LazyitPath` is: that is what lets the
+ * corpus below run through real PowerShell on a Linux CI runner, against the function read OUT OF
+ * the shipped script. ONE extractor serves the token, the URL and the CA bundle, so the three
+ * cannot drift apart in how they read a hand-edited file. The refusals around it cannot be executed
+ * off Windows and are pinned as text, like every other branch in this file.
  */
-type TokenCase = { lines: string[]; token: string };
+type TokenCase = { lines: string[]; key?: string; token: string };
 
 const TOKEN_CASES: Record<string, TokenCase> = {
   "a config that carries a token supplies it": {
@@ -769,27 +791,64 @@ const TOKEN_CASES: Record<string, TokenCase> = {
     lines: ["LAZYIT_TOKEN_FILE=C:\\ProgramData\\lazyit-agent\\agent.token"],
     token: "",
   },
+  // THE LINE THE AGENT ACCEPTS AND THE INSTALLER COULD NOT SEE. `readConfigFile` trims the key
+  // before it compares, so `LAZYIT_TOKEN =lzit_sa_abc` authenticates every tick - while an
+  // extractor that demanded `=` immediately after the key answered "this host has no token" and
+  // refused the upgrade on a host that was reporting happily.
+  "space between the key and the '=' does not hide it": {
+    lines: ["LAZYIT_TOKEN =lzit_sa_abc"],
+    token: "lzit_sa_abc",
+  },
+  "a tab between the key and the '=' does not hide it either": {
+    lines: ["  LAZYIT_TOKEN\t=  lzit_sa_abc\r"],
+    token: "lzit_sa_abc",
+  },
+  // The widening must not turn a neighbouring key into this one. `_` is not whitespace, so it does
+  // not - and this is the case that says so out loud.
+  "a padded LAZYIT_TOKEN_FILE is still not a token": {
+    lines: ["LAZYIT_TOKEN_FILE =C:\\ProgramData\\lazyit-agent\\agent.token"],
+    token: "",
+  },
+  // The URL and the CA bundle go through the SAME function, which is the point of generalising it.
+  "the same extractor answers for the URL a re-run re-uses": {
+    lines: ["LAZYIT_URL = https://lazyit.example.com", "LAZYIT_TOKEN=lzit_sa_abc"],
+    key: "LAZYIT_URL",
+    token: "https://lazyit.example.com",
+  },
+  // -cmatch, not -match: the agent reads `lazyit_ca_file` and `LAZYIT_CA_FILE` as two keys and
+  // prefers the lowercase one, so this must not answer the wrong file for either spelling.
+  "the CA bundle is read case-sensitively, in the spelling asked for": {
+    lines: ["LAZYIT_CA_FILE=C:\\ProgramData\\lazyit-agent\\upper.pem"],
+    key: "lazyit_ca_file",
+    token: "",
+  },
 };
 
-/** The shipped `Get-LazyitConfigToken`, run by real PowerShell over the corpus. */
+/** The shipped `Get-LazyitConfigValue`, run by real PowerShell over the corpus. */
 function tokenAnswersFromPowerShell(shell: string): Record<string, string> {
   const dir = mkdtempSync(join(tmpdir(), "lazyit-install-ps1-token-"));
   const casesFile = join(dir, "cases.json");
   const driver = join(dir, "driver.ps1");
   writeFileSync(
     casesFile,
-    JSON.stringify(Object.entries(TOKEN_CASES).map(([name, one]) => ({ name, lines: one.lines }))),
+    JSON.stringify(
+      Object.entries(TOKEN_CASES).map(([name, one]) => ({
+        name,
+        lines: one.lines,
+        key: one.key ?? "LAZYIT_TOKEN",
+      })),
+    ),
   );
   writeFileSync(
     driver,
     [
       "Set-StrictMode -Version Latest",
       "$ErrorActionPreference = 'Stop'",
-      powershellFunction("Get-LazyitConfigToken"),
+      powershellFunction("Get-LazyitConfigValue"),
       "foreach ($case in (Get-Content -LiteralPath $args[0] -Raw | ConvertFrom-Json)) {",
       "  [pscustomobject]@{",
       "    name = $case.name",
-      "    token = [string](Get-LazyitConfigToken ([string[]] $case.lines))",
+      "    token = [string](Get-LazyitConfigValue ([string[]] $case.lines) ([string] $case.key))",
       "  } | ConvertTo-Json -Compress",
       "}",
       "",
@@ -800,7 +859,7 @@ function tokenAnswersFromPowerShell(shell: string): Record<string, string> {
   const stdout = new TextDecoder().decode(run.stdout);
   expect(
     run.exitCode,
-    `${shell} could not run the shipped Get-LazyitConfigToken:\n${new TextDecoder().decode(run.stderr)}`,
+    `${shell} could not run the shipped Get-LazyitConfigValue:\n${new TextDecoder().decode(run.stderr)}`,
   ).toBe(0);
 
   const answers: Record<string, string> = {};
@@ -816,8 +875,9 @@ function tokenAnswersFromModel(): Record<string, string> {
   const answers: Record<string, string> = {};
   for (const [name, one] of Object.entries(TOKEN_CASES)) {
     let found = "";
+    const pattern = new RegExp(`^\\s*${one.key ?? "LAZYIT_TOKEN"}\\s*=(.*)$`);
     for (const line of one.lines) {
-      const match = /^\s*LAZYIT_TOKEN=(.*)$/.exec(line);
+      const match = pattern.exec(line);
       if (match) found = match[1] ?? "";
     }
     found = found.trim();
@@ -840,13 +900,16 @@ function tokenAnswers(): Record<string, string> {
 
 describe("-KeepToken authenticates a re-run with the token already on disk (#1208)", () => {
   test("the extraction is a PURE function, so it can be run off Windows", () => {
-    const body = powershellFunction("Get-LazyitConfigToken");
-    expect(body).toContain("function Get-LazyitConfigToken([string[]] $Lines)");
+    const body = powershellFunction("Get-LazyitConfigValue");
+    expect(body).toContain("function Get-LazyitConfigValue([string[]] $Lines, [string] $Key)");
     // If it ever reaches for $ConfigFile itself, the corpus below stops testing the shipped logic.
     expect(body).not.toContain("$ConfigFile");
     // The operations the model mirrors, so the fallback engine is not asserting against a fantasy.
-    expect(body).toContain("^\\s*LAZYIT_TOKEN=(.*)$");
+    expect(body).toContain("^\\s*$Key\\s*=(.*)$");
     expect(body).toContain("Trim()");
+    // -cmatch and not -match, which is the one place PowerShell's defaults would diverge from the
+    // agent: `-match` is case-insensitive and would read a `lazyit_token=` the agent never reads.
+    expect(body).toContain("-cmatch");
   });
 
   for (const [name, expected] of Object.entries(TOKEN_CASES)) {
@@ -867,11 +930,14 @@ describe("-KeepToken authenticates a re-run with the token already on disk (#120
   // that is not true, and picking one silently is how a host ends up authenticating with the
   // credential that was just rotated away.
   test("it refuses to share the run with any other token source", () => {
-    expect(script).toContain("-KeepToken and -Token are mutually exclusive");
-    expect(script).toContain("-KeepToken and -TokenFile are mutually exclusive");
+    // The switch NAMES ITSELF in the message, so an operator who typed -Upgrade is not told about a
+    // switch they did not pass. `$rerun` is that name, resolved once where the two forms meet.
+    expect(script).toContain("$rerun and -Token are mutually exclusive");
+    expect(script).toContain("$rerun and -TokenFile are mutually exclusive");
+    expect(script).toMatch(/\$rerun = if \(\$Upgrade\) \{ '-Upgrade' \} else \{ '-KeepToken' \}/);
     // Including the environment form, which is ambient rather than typed and is therefore the one a
     // silent precedence rule would hide behind.
-    expect(script).toMatch(/-KeepToken[^\n]*LAZYIT_TOKEN/);
+    expect(script).toMatch(/\$rerun[^\n]*LAZYIT_TOKEN/);
   });
 
   // -KeepConfig keeps this host's limits through an uninstall; the TOKEN never survives one.
@@ -893,7 +959,7 @@ describe("-KeepToken authenticates a re-run with the token already on disk (#120
     // The config's ACL is SYSTEM + Administrators, so a non-elevated run must be told THAT rather
     // than that its own instance has no install on it.
     const elevation = script.indexOf("WindowsBuiltInRole]::Administrator");
-    const read = script.indexOf("Get-LazyitConfigToken (");
+    const read = script.indexOf("Get-LazyitConfigValue ");
     expect(read).toBeGreaterThan(-1);
     expect(read).toBeGreaterThan(elevation);
   });
@@ -902,8 +968,84 @@ describe("-KeepToken authenticates a re-run with the token already on disk (#120
     // -KeepToken changes where the token COMES FROM and nothing about who owns which key: the old
     // LAZYIT_TOKEN line is still dropped from the preserved set and written back once at the top, so
     // a re-run cannot leave two of them and hand the parser the choice.
-    expect(script).toContain("^\\s*LAZYIT_(URL|TOKEN|INTERVAL)=");
+    expect(script).toContain("^\\s*LAZYIT_(URL|TOKEN|INTERVAL)\\s*=");
     expect(script.split('$lines.Add("LAZYIT_TOKEN=$Token")').length - 1).toBe(1);
+  });
+
+  /*
+   * THE ARGV EXPOSURE THIS PLATFORM NEVER HAD. install.sh spelled its downloads as
+   * `-H "Authorization: Bearer $TOKEN"` on curl's command line, where `/proc/<pid>/cmdline` made a
+   * live credential world-readable for the length of every install; it now pipes a curl config on
+   * stdin instead. This installer was already clear: `Invoke-WebRequest` takes a HEADERS HASHTABLE
+   * inside the same process, so the token never becomes an argument of anything. Pinning it means a
+   * later "simplify" to `curl.exe` - which Windows 10 1803 and later do ship - cannot import the
+   * defect that was just fixed on the other side.
+   */
+  test("the token is never an argument to anything - it goes in a headers hashtable", () => {
+    expect(script).toContain("$headers = @{ Authorization = \"Bearer $Token\" }");
+    expect(script).toContain("Headers         = $headers");
+    expect(script).not.toMatch(/-H\s+["']?Authorization/);
+    expect(script).not.toContain("curl.exe");
+  });
+});
+
+/**
+ * `-Upgrade`: A RE-RUN KEEPS THIS HOST'S WHOLE CONFIGURATION, NOT ONLY ITS TOKEN (#1208).
+ *
+ * The Windows half of the same form, and the same reasoning: a generated update command that has to
+ * carry `-Url` re-pins every host to whatever origin the admin's browser was on - which under the
+ * `lan` mode of ADR-0087 silently repoints a fleet - and carries no `-CaFile`. `-Upgrade` takes both
+ * from `C:\ProgramData\lazyit-agent\config`, so the command needs neither.
+ *
+ * WHAT -CaFile DOES HERE, STATED RATHER THAN GLOSSED, because it differs from Linux and the
+ * difference is already documented one screen up: `Invoke-WebRequest` offers no per-request CA
+ * bundle, so re-using the host's bundle affects the AGENT's config and not this script's own
+ * download. The switch is symmetric anyway - one flag, one meaning, both platforms - and the half
+ * that bites a fleet, the URL, works identically.
+ */
+describe("-Upgrade re-runs a host from its own configuration (#1208)", () => {
+  test("-Upgrade is a switch on the parameter block, and it is documented", () => {
+    expect(script).toContain("[switch] $Upgrade");
+    expect(script).toContain(".PARAMETER Upgrade");
+    expect(script).toMatch(/\.EXAMPLE[\s\S]{0,400}-Upgrade\b/);
+  });
+
+  test("it contains -KeepToken rather than competing with it", () => {
+    expect(script).toContain("if ($Upgrade) { $KeepToken = $true }");
+  });
+
+  // The re-pinning defect. The explicit parameter still wins, because retargeting a host at a moved
+  // instance is a real thing to want - it just has to be TYPED rather than inherited from whoever
+  // generated the command.
+  test("the URL comes from the config when -Url was not passed, and never overrides it", () => {
+    expect(script).toMatch(/if \(-not \$Url\)\s*\{\s*\$Url\s*=\s*Get-LazyitConfigValue/);
+  });
+
+  test("the CA bundle comes from the config too, lowercase first as the agent resolves it", () => {
+    const read = script.indexOf("'lazyit_ca_file'");
+    const fallback = script.indexOf("'LAZYIT_CA_FILE'");
+    expect(read).toBeGreaterThan(-1);
+    expect(fallback).toBeGreaterThan(read);
+  });
+
+  // NEVER A SILENT UNCONFIGURED INSTALL: a first install has nothing to re-use by definition, and a
+  // config that carries no URL is refused by name rather than left to a confusing default.
+  test("a config with no URL in it stops the run and names the key", () => {
+    expect(script).toContain("no LAZYIT_URL");
+    expect(script).toMatch(/no LAZYIT_URL[^\n]*-Url/);
+  });
+
+  test("a CA bundle that has moved since the install is named, not left to fail inside the download", () => {
+    expect(script).toMatch(/LAZYIT_CA_FILE[^\n]*cannot be read|cannot be read[^\n]*LAZYIT_CA_FILE/);
+  });
+
+  test("-Uninstall -Upgrade is refused rather than quietly ignored", () => {
+    const uninstall = script.slice(
+      script.indexOf("if ($Uninstall) {"),
+      script.indexOf("if ($KeepConfig)"),
+    );
+    expect(uninstall).toContain("if ($Upgrade) { Die ");
+    expect(uninstall).toMatch(/never survives an uninstall/i);
   });
 });
 
