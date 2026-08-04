@@ -137,6 +137,9 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       "restored",
       // Check-out acknowledgement (ADR-0089 Part B, #1029) — the lowercased ACKNOWLEDGED verb.
       "acknowledged",
+      // ADR-0093 §4 (#1198) — the lowercased AGENT_LINKED verb, emitted once when an agent-reported
+      // node adopts an existing asset at its confirm gate.
+      "agent_linked",
       "granted",
       "revoked",
       "stock_in",
