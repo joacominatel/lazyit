@@ -26,6 +26,16 @@ export const AssetHistoryEventTypeSchema = z.enum([
   // Check-out acknowledgement — the assignee confirmed they hold the asset (ADR-0089 Part B, #1029).
   // Emitted by POST /asset-assignments/:id/acknowledge; payload { userId } = the acknowledging owner.
   "ACKNOWLEDGED",
+  // An agent-reported InfraNode ADOPTED this asset at its confirm gate (ADR-0093 §4, #1198): a machine
+  // started writing to a row a human curated. Payload `{ nodeId, reportingSource, externalId }`.
+  //
+  // EXACTLY ONE PER LINK, and that bound is the whole design. The recurring path (`syncAssetSpecs`)
+  // deliberately emits NO per-report event — an agent checks in every five minutes, and an event per
+  // report would bury every human edit this asset ever received under thousands of machine rows. What
+  // MOVED is audited on the node instead (InfraNodeFactChange, #1143), one join away. This event
+  // answers the one question a human reading a curated asset's history actually asks: *when did a
+  // machine start writing to this row, and which one?*
+  "AGENT_LINKED",
 ]);
 
 /** Contextual data attached to an event (e.g. `{ from, to }`, `{ userId }`). Unvalidated jsonb. */
