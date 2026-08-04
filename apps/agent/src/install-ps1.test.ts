@@ -701,7 +701,7 @@ describe("uninstall", () => {
   test("the token never survives it, even with -KeepConfig", () => {
     // -KeepConfig is for re-imaging a host that will get the agent back: it keeps the LOCAL VETO,
     // which is the host owner's setting, while still stripping the token and the URL.
-    expect(script).toContain("^\\s*LAZYIT_(TOKEN|URL)=");
+    expect(script).toContain("^\\s*LAZYIT_(TOKEN|URL)\\s*=");
     expect(script).toContain("Remove-Item -LiteralPath $StateDir");
   });
 
