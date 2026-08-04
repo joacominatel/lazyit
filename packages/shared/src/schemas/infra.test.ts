@@ -21,8 +21,12 @@ import {
   AgentReportSchema,
   containerExternalId,
   containerNodeStatus,
+  corroboratesAdoption,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
+  ENDPOINT_CHASSIS,
+  InfraAssetCandidateSchema,
+  isEndpointChassis,
   InfraNodeDetailSchema,
   InfraNodeListItemSchema,
   InfraNodeSchema,
@@ -1403,5 +1407,176 @@ describe("AgentReportAckSchema — the capability handshake (#1142)", () => {
 
   test("a server that understands `softwareState` says so — the evidence that unlocks the omission", () => {
     expect(AgentReportAckSchema.parse({ ...ack, softwareDelta: true }).softwareDelta).toBe(true);
+  });
+});
+
+// ── Chassis routing + adoption (ADR-0093, issue #1198) ─────────────────────────────────────────────
+
+describe("isEndpointChassis (ADR-0093 §5)", () => {
+  test("a laptop and a desktop are endpoints — a workstation is somebody's desk, not topology", () => {
+    expect(isEndpointChassis("laptop")).toBe(true);
+    expect(isEndpointChassis("desktop")).toBe(true);
+    expect([...ENDPOINT_CHASSIS]).toEqual(["laptop", "desktop"]);
+  });
+
+  test("a server, a guest and a container are NOT endpoints — they stay on the canvas", () => {
+    expect(isEndpointChassis("server")).toBe(false);
+    expect(isEndpointChassis("vm")).toBe(false);
+    expect(isEndpointChassis("container")).toBe(false);
+  });
+
+  test("NO SIGNAL is never an endpoint — routing may only remove noise a POSITIVE fact identified", () => {
+    // `unknown` means the probe did not run (a container reading /sys/class/dmi sees the HOST's
+    // board), null is a manual node or one that predates the column, undefined is an older API. All
+    // three must behave exactly as lazyit did before this ADR: on the canvas. A host that silently
+    // vanishes from every surface is worse than a noisy map.
+    expect(isEndpointChassis("unknown")).toBe(false);
+    expect(isEndpointChassis(null)).toBe(false);
+    expect(isEndpointChassis(undefined)).toBe(false);
+    expect(isEndpointChassis("toaster")).toBe(false);
+  });
+});
+
+describe("InfraNodeSchema.chassis (ADR-0093 §2)", () => {
+  /** The lean persisted node, as the API returns it. */
+  const node = {
+    id: CUID,
+    kind: "PHYSICAL_HOST" as const,
+    label: "web-01",
+    status: "ONLINE" as const,
+    assetId: null,
+    ipAddress: "10.0.0.5",
+    ipAddressSource: "AGENT" as const,
+    shortcuts: null,
+    specs: null,
+    x: null,
+    y: null,
+    source: "AGENT" as const,
+    state: "CONFIRMED" as const,
+    reportingSource: "agent:web-01",
+    externalId: "9f8d7c",
+    lastReportedAt: "2026-08-03T12:00:00.000Z",
+    agentVersion: "2.0.0",
+    createdAt: "2026-08-03T12:00:00.000Z",
+    updatedAt: "2026-08-03T12:00:00.000Z",
+    deletedAt: null,
+  };
+
+  test("carries the reported form factor", () => {
+    expect(InfraNodeSchema.parse({ ...node, chassis: "laptop" }).chassis).toBe("laptop");
+  });
+
+  test("READ-TOLERANT: a row that predates the column, or a value a future collector invents, is `null`", () => {
+    // The upgrade promise (§8.1): every existing row has `chassis = null` the second after
+    // `prisma migrate deploy`, which is no signal, which is today's behaviour. And the write boundary
+    // `.catch(undefined)`s an unrecognised value precisely so a report never 400s — the read must
+    // degrade the same way or the tolerance stops one hop short of the surface that renders it.
+    // Absent (an API that predates the column) stays `undefined`; a stored null stays null; a value
+    // outside the vocabulary is CAUGHT to null rather than failing the payload. All three are "no
+    // signal" to `isEndpointChassis`, which is the only thing that reads it.
+    expect(InfraNodeSchema.parse(node).chassis).toBeUndefined();
+    expect(InfraNodeSchema.parse({ ...node, chassis: null }).chassis).toBe(null);
+    expect(InfraNodeSchema.parse({ ...node, chassis: "toaster" }).chassis).toBe(null);
+    expect(isEndpointChassis(InfraNodeSchema.parse(node).chassis)).toBe(false);
+  });
+
+  test("sits on the LIST row — that is what lets the canvas filter with no second request", () => {
+    // `specs` is the only thing the lean projection drops (#1135); chassis is a scalar, so it rides
+    // along and the endpoint toggle is instant.
+    expect(Object.keys(InfraNodeListItemSchema.shape)).toContain("chassis");
+  });
+});
+
+describe("corroboratesAdoption (ADR-0093 §3a)", () => {
+  /** A stored node blob whose host offers a serial AND a MAC — the corroborated shape. */
+  const specs = (identifiers: unknown[], extra: Record<string, unknown> = {}) => ({
+    host: { hostname: "web-01", hardware: { serial: "SN-REAL-123" }, identifiers },
+    reportedAt: "2026-08-03T12:00:00.000Z",
+    ...extra,
+  });
+  const CORROBORATED = [
+    { kind: "serial", value: "SN-REAL-123" },
+    { kind: "mac", value: "00:15:5d:01:02:03" },
+  ];
+
+  test("a serial the host's own evidence carries, plus a MAC, corroborates", () => {
+    expect(corroboratesAdoption(specs(CORROBORATED), "SN-REAL-123")).toBe(true);
+  });
+
+  test("a serial with NO MAC is one fact, not corroboration", () => {
+    // `identityDiscriminator` must be derivable from more than the serial itself: a report whose only
+    // identity fact is the very value being matched on corroborates nothing.
+    expect(corroboratesAdoption(specs([{ kind: "serial", value: "SN-REAL-123" }]), "SN-REAL-123")).toBe(
+      false,
+    );
+  });
+
+  test("a serial the evidence does not carry never adopts", () => {
+    expect(corroboratesAdoption(specs(CORROBORATED), "SN-SOMETHING-ELSE")).toBe(false);
+  });
+
+  test("a MAC that does not survive sanitizing is not a MAC", () => {
+    // `00:00:00:00:00:00` is a placeholder, dropped by `sanitizeIdentifierValue` — so this host offers
+    // its serial and nothing else, which is the case above wearing a disguise.
+    expect(
+      corroboratesAdoption(
+        specs([
+          { kind: "serial", value: "SN-REAL-123" },
+          { kind: "mac", value: "00:00:00:00:00:00" },
+        ]),
+        "SN-REAL-123",
+      ),
+    ).toBe(false);
+  });
+
+  test("FAILS CLOSED on an identity collision — a machine-id under suspicion never adopts", () => {
+    // The #1141 marker means two hosts are reporting one identity. Minting is recoverable by hand;
+    // attaching the wrong machine to a row a human curated is not.
+    expect(
+      corroboratesAdoption(specs(CORROBORATED, { identityConflict: { peerNodeId: "x" } }), "SN-REAL-123"),
+    ).toBe(false);
+    // A cleared flag is not a flag.
+    expect(corroboratesAdoption(specs(CORROBORATED, { identityConflict: null }), "SN-REAL-123")).toBe(
+      true,
+    );
+  });
+
+  test("matches on the CANONICAL serial, so padding cannot split one machine into two answers", () => {
+    // `sanitizeSerial` trims; `sanitizeIdentifierValue` also collapses internal whitespace runs (WMI
+    // and dmidecode disagree about padding). Comparing the raw form against the canonical set would
+    // silently refuse to adopt a machine whose serial has a double space in it.
+    expect(
+      corroboratesAdoption(
+        specs([
+          { kind: "serial", value: "SN  REAL  123" },
+          { kind: "mac", value: "00:15:5d:01:02:03" },
+        ]),
+        "SN  REAL  123",
+      ),
+    ).toBe(true);
+  });
+
+  test("a malformed or absent blob degrades to `false`, never throws", () => {
+    // This runs over a Prisma JsonValue that may have been hand-edited or written by an older build.
+    expect(corroboratesAdoption(null, "SN-REAL-123")).toBe(false);
+    expect(corroboratesAdoption("nonsense", "SN-REAL-123")).toBe(false);
+    expect(corroboratesAdoption({}, "SN-REAL-123")).toBe(false);
+    expect(corroboratesAdoption({ host: 42 }, "SN-REAL-123")).toBe(false);
+  });
+});
+
+describe("InfraNodeDetailSchema — the ADR-0093 display-only read fields", () => {
+  test("`assetCandidate` names the Asset a confirm would ADOPT, and is nullable", () => {
+    const candidate = { id: CUID, name: "Dell XPS 7490", serial: "SN-REAL-123" };
+    expect(InfraAssetCandidateSchema.parse(candidate)).toEqual(candidate);
+    expect(InfraAssetCandidateSchema.parse({ ...candidate, serial: null }).serial).toBe(null);
+  });
+
+  test("both read fields are `.nullish()` — an older API omits them and web reads that as 'no hint'", () => {
+    // The ADR-0090 `ipConflict` mold: computed per read, display-only, never a gate.
+    expect(InfraNodeDetailSchema.shape.assetCandidate.safeParse(undefined).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.assetCandidate.safeParse(null).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.duplicateAssetSuspicion.safeParse(undefined).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.duplicateAssetSuspicion.safeParse(null).success).toBe(true);
   });
 });
