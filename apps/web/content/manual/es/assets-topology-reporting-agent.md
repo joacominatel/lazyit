@@ -88,7 +88,10 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    > lo evitan: poner el token en el entorno (`LAZYIT_TOKEN=… sh install.sh --url …`), o en un archivo
    > y pasar `--token-file /root/agent.token`. Para cualquiera de las dos hay que descargar el script
    > primero. (`--token-file -` lo lee de una tubería, y por eso no puede combinarse con
-   > `curl … | sh`: la tubería ya es la entrada del script.)
+   > `curl … | sh`: la tubería ya es la entrada del script.) Cualquiera de las dos formas ahora
+   > mantiene el token fuera de `ps` durante *toda* la instalación: el instalador se lo pasa a `curl`
+   > por una tubería y no como argumento, así que ya no vuelve a aparecer en la lista de procesos
+   > camino a tu instancia.
 
    > **¿Despliegue en LAN (sin dominio público)?** Si tu instancia solo es alcanzable por una IP o
    > nombre de host de LAN con un certificado autofirmado, copiá el `.pem` de esa autoridad
@@ -982,6 +985,32 @@ en el entorno: dos respuestas a la misma pregunta son un error que conviene fren
 convenga resolver por lo bajo. Y en una máquina sin agente — o cuyo archivo de configuración no tiene
 token, que es lo que deja `--keep-config` — se detiene y te lo dice, en vez de instalar algo que no va
 a poder reportar. Ese caso necesita un token nuevo desde el asistente.
+
+**`--upgrade` va un paso más allá: no necesita ningún argumento.** Donde `--keep-token` reutiliza la
+credencial, **`--upgrade`** (Linux) / **`-Upgrade`** (Windows) reutiliza toda la configuración: el
+token, la dirección de la instancia y la autoridad certificadora con la que se instaló esa máquina:
+
+```sh
+curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --upgrade
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Upgrade
+```
+
+Es el mismo comando en todas las máquinas de la flota, y ahí está la gracia. Un comando de
+actualización que lleva `--url` lleva la dirección en la que estaba el navegador que lo generó — y en
+una instancia de LAN, alcanzable por varias direcciones, ejecutarlo en toda la flota reapunta en
+silencio cada máquina a esa. `--upgrade` deja cada máquina en la dirección que ya tenía. También
+reutiliza el archivo de autoridad certificadora de esa máquina, así que los hosts detrás de una CA
+interna se actualizan sin que tengas que acordarte de la ruta del `.pem`.
+
+Lo que sí pasés sigue ganando: `--upgrade --url https://nueva-direccion` mueve una máquina a
+propósito, que es otra cosa que moverla sin querer. La credencial es la excepción y sigue exactamente
+la regla de `--keep-token`: `--upgrade` se niega a convivir con `--token`, `--token-file` o
+`LAZYIT_TOKEN`. Para darle un token **nuevo** a una máquina, instalala de la forma habitual, con
+`--url` y `--token`. Y en una máquina que todavía no tiene agente, `--upgrade` se detiene y te lo
+dice: no hay nada que reutilizar, y una primera instalación sigue necesitando dirección y token.
 
 Todo lo demás de una re-ejecución sigue igual: los límites propios de ese host, su proxy y su
 autoridad certificadora cruzan la actualización exactamente como siempre.
