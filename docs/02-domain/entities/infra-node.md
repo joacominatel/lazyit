@@ -283,11 +283,21 @@ this build, which that section now states on screen rather than implying only on
   §3 amendment, #1143) — narrower than the name implied, and deliberately so: it records the tracked
   FACTS that moved (packages, OS/kernel/memory/disk/serial, a container's image digest), not every
   edit to every column. Curation changes (label, kind, position, asset linkage) are still not logged.
+- **Chassis routing** — *proposed, not built* ([[0093-chassis-routing-and-asset-adoption]], #1196).
+  `host.chassis` is collected on **both** platforms and acted on by essentially nothing: `inferNodeKind`
+  reads it only as the fallback branch, so a report carrying `host.virtualization` (the normal case on
+  both collectors) never reaches it. The proposal adds an agent-owned nullable **`chassis`** column,
+  hides `laptop`/`desktop` nodes from the topology **canvas** by default behind a "Show endpoints"
+  toggle (a view-level treatment — **no new `InfraNodeState`/`InfraNodeKind` member**, and impact /
+  search / the Servers table stay unfiltered), surfaces chassis in the review tray, adds it as an
+  `InfraAutoConfirmRule` condition, and makes a confirm **adopt** a corroborated live [[asset]] instead
+  of minting a duplicate.
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
   per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]].
   → [[0070-infra-topology-graph]] "Future".
 
 Related: [[infra-edge]] · [[infra-node-fact-change]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
+[[0093-chassis-routing-and-asset-adoption]] ·
 [[0070-infra-topology-graph]] · [[0074-server-reporting-agent]] · [[0019-asset-assignment-integrity]] ·
 [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] · [[0046-roles-permissions-v2]] ·
 [[0061-secret-manager-zero-knowledge]] · [[0048-service-accounts]]
