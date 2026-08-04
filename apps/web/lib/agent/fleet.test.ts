@@ -15,6 +15,7 @@ import type { AgentFleetNode, AgentOsFamily } from "@lazyit/shared";
 import { AgentOsFamilySchema, summarizeAgentFleet } from "@lazyit/shared";
 import {
   AGENT_FLEET_FILTERS,
+  agentFleetCredentialBlock,
   agentFleetFilterFromParam,
   agentFleetUpdateGroups,
   agentFleetUpdateScript,
@@ -189,6 +190,46 @@ describe("isAgentUpdatable — the only gate on the update affordance (ADR-0094 
   });
 });
 
+describe("agentFleetCredentialBlock — the second gate on the credential inventory (#1206)", () => {
+  const identity = {
+    id: "cuid1111111111111111111",
+    name: "agent-fleet",
+    tokenPrefix: "lzit_sa_ab",
+    isActive: true,
+    createdAt: "2026-08-01T10:00:00.000Z",
+    lastUsedAt: null,
+  };
+
+  test("a caller WITH settings:manage gets the block, count and all", () => {
+    expect(
+      agentFleetCredentialBlock({ identities: [identity], identitiesNeverUsed: 1 }),
+    ).toEqual({ identities: [identity], neverUsed: 1 });
+  });
+
+  test("an empty-but-present block is still a block — zero is a real answer here", () => {
+    // An admin whose estate genuinely has no never-used token is being told something true. That is
+    // a different claim from the one below, and the two must not collapse into each other.
+    expect(agentFleetCredentialBlock({ identities: [], identitiesNeverUsed: 0 })).toEqual({
+      identities: [],
+      neverUsed: 0,
+    });
+  });
+
+  test("a caller WITHOUT settings:manage gets null — never an empty list", () => {
+    // The whole point of the server OMITTING rather than emptying (#1206). A MEMBER or VIEWER
+    // rendering "0 agent tokens have never been used" would be reading a clean bill of health for
+    // an inventory they were deliberately not shown. The card disappears instead.
+    expect(agentFleetCredentialBlock({})).toBeNull();
+  });
+
+  test("either field missing on its own is still no block, not a crash", () => {
+    // They always travel together server-side. This does not TRUST that: a partial response used to
+    // reach `data.identities.length` and throw a TypeError on the render path.
+    expect(agentFleetCredentialBlock({ identities: [identity] })).toBeNull();
+    expect(agentFleetCredentialBlock({ identitiesNeverUsed: 3 })).toBeNull();
+  });
+});
+
 describe("agentFleetUpdateGroups — the bulk handoff (ADR-0094 §7)", () => {
   const rows = [
     node({ label: "web-01", versionBucket: "behind", osFamily: "linux" }),
@@ -248,7 +289,7 @@ describe("agentFleetUpdateScript — what lands on the clipboard", () => {
   );
   const copy = {
     headline: "lazyit agent update — 2 hosts behind (server 1.10.0)",
-    tokenNote: "No token: both installers read it from LAZYIT_TOKEN.",
+    credentialNote: "No token and no URL: --upgrade re-runs each host from its own config.",
     hostsLine: (group: { platform: string; hosts: { label: string }[] }) =>
       `${group.platform}: ${group.hosts.map((h) => h.label).join(", ")}`,
   };
@@ -270,6 +311,20 @@ describe("agentFleetUpdateScript — what lands on the clipboard", () => {
     expect(script).not.toContain("lzit_sa_");
     expect(script).not.toMatch(/-{1,2}[Tt]oken\b/);
     expect(script).not.toContain("<token>");
+  });
+
+  test("no command line in the artifact re-points a host at this admin's origin", () => {
+    // The bulk copy is the version of this that scales: one paste, forty hosts. It is therefore the
+    // exact place where a `--url <browser origin>` did the most damage — an ADR-0087 `lan` estate
+    // silently re-pinned in one action. The commands must fetch FROM the origin and assign nothing.
+    const script = agentFleetUpdateScript(groups, copy);
+    const commands = script.split("\n").filter((line) => line !== "" && !line.startsWith("# "));
+    expect(commands).toHaveLength(2);
+    for (const command of commands) {
+      expect(command).not.toMatch(/--url\b/);
+      expect(command).not.toMatch(/-Url\b/);
+      expect(command).toMatch(/--upgrade\b|-Upgrade\b/);
+    }
   });
 
   test("a multi-line host label cannot break out of its comment", () => {
