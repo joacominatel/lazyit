@@ -7,9 +7,11 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import {
+  AgentChassisSchema,
   defaultTrackAsAsset,
   InfraNodeKindSchema,
   statesAutoConfirmCondition,
+  type AgentChassis,
   type CreateInfraAutoConfirmRule,
   type InfraAutoConfirmScope,
   type InfraNodeKind,
@@ -51,6 +53,12 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 
 const NO_KIND = "NONE";
+/**
+ * "Any form factor" — the sentinel for the chassis condition being unstated (ADR-0093 §6). Its own
+ * constant rather than a shared one with {@link NO_KIND}: they live in different `Select`s over
+ * different vocabularies, and Radix cannot hold `""` for either.
+ */
+const NO_CHASSIS = "NONE";
 
 interface AutoConfirmRulesDialogProps {
   open: boolean;
@@ -77,6 +85,13 @@ interface AutoConfirmRulesDialogProps {
  *     conservatively so the rule stays "the pattern has to carry a literal character". The form uses
  *     the very same `statesAutoConfirmCondition` the contract does, so it says so before the 400 does.
  *
+ * Since ADR-0093 §6 the **reported form factor** is a fourth condition, and a full one — it can rule a
+ * proposal out by itself, so *"auto-confirm the servers, review the laptops"* saves with nothing else
+ * stated. It inherits the existing semantics wholesale: conditions still AND, the first matching rule
+ * in the listed order still wins, and *a stated condition never matches on missing evidence* — so a
+ * host reporting no chassis (or `unknown`) never matches a rule that names one, which is exactly the
+ * conservative direction for a gate that confirms without a human present.
+ *
  * It lives here, on the tray, rather than in Settings: this is where an operator feels the cost that
  * makes a rule worth writing, and a rule written anywhere else is a setting nobody finds.
  */
@@ -100,6 +115,7 @@ export function AutoConfirmRulesDialog({
   const [hostnamePattern, setHostnamePattern] = useState("");
   const [subnetCidr, setSubnetCidr] = useState("");
   const [reportedKind, setReportedKind] = useState<InfraNodeKind | typeof NO_KIND>(NO_KIND);
+  const [chassis, setChassis] = useState<AgentChassis | typeof NO_CHASSIS>(NO_CHASSIS);
   const [confirmAsKind, setConfirmAsKind] = useState<InfraNodeKind | typeof NO_KIND>(NO_KIND);
   const [trackAsAsset, setTrackAsAsset] = useState(defaultTrackAsAsset(false));
 
@@ -110,6 +126,7 @@ export function AutoConfirmRulesDialog({
     setHostnamePattern("");
     setSubnetCidr("");
     setReportedKind(NO_KIND);
+    setChassis(NO_CHASSIS);
     setConfirmAsKind(NO_KIND);
     setTrackAsAsset(defaultTrackAsAsset(false));
   }
@@ -128,10 +145,13 @@ export function AutoConfirmRulesDialog({
   // API would: a wildcard-only pattern or `0.0.0.0/0` is not a condition. Most wildcard-only patterns
   // (`*`, `**`, `*?*`) exclude nothing at all; `?` alone does narrow — to one-character names — and is
   // refused with them conservatively, because "carries a literal" is the line an operator can see.
+  // Chassis counts on exactly the footing `reportedKind` does (ADR-0093 §6), so *"auto-confirm the
+  // servers, review the laptops"* is a rule that saves with nothing else stated.
   const hasCondition = statesAutoConfirmCondition({
     hostnamePattern: hostnamePattern.trim() || null,
     subnetCidr: subnetCidr.trim() || null,
     reportedKind: reportedKind === NO_KIND ? null : reportedKind,
+    chassis: chassis === NO_CHASSIS ? null : chassis,
   });
 
   function handleSave() {
@@ -142,6 +162,7 @@ export function AutoConfirmRulesDialog({
       ...(hostnamePattern.trim() ? { hostnamePattern: hostnamePattern.trim() } : {}),
       ...(subnetCidr.trim() ? { subnetCidr: subnetCidr.trim() } : {}),
       ...(reportedKind !== NO_KIND ? { reportedKind } : {}),
+      ...(chassis !== NO_CHASSIS ? { chassis } : {}),
       ...(confirmAsKind !== NO_KIND ? { confirmAsKind } : {}),
     };
     createRule.mutate(body, {
@@ -204,6 +225,14 @@ export function AutoConfirmRulesDialog({
                       : null,
                     rule.reportedKind
                       ? t("conditionKind", { kind: tInfra(`kind.${rule.reportedKind}`) })
+                      : null,
+                    // Printed exactly as stored, `unknown` included: unlike a node's own chassis
+                    // badge, a stated condition is the operator's own words and hiding one would
+                    // make a rule that never fires look like a rule with no condition at all.
+                    rule.chassis
+                      ? t("conditionChassis", {
+                          chassis: tInfra(`chassis.${rule.chassis}`),
+                        })
                       : null,
                   ]
                     .filter(Boolean)
@@ -331,6 +360,34 @@ export function AutoConfirmRulesDialog({
                 </SelectContent>
               </Select>
               <FieldDescription>{t("reportedKindDescription")}</FieldDescription>
+            </Field>
+
+            {/* The reported form factor (ADR-0093 §6) — the condition that makes *"auto-confirm the
+                servers, review the laptops"* writable, and a first-class one: it can rule a proposal
+                OUT on its own, so a rule may state nothing else. Sits directly under "Reported as"
+                because both describe what the AGENT said, as opposed to what the operator wants the
+                host to become. */}
+            <Field>
+              <FieldLabel htmlFor="rule-chassis">{t("chassisLabel")}</FieldLabel>
+              <Select
+                value={chassis}
+                onValueChange={(value) =>
+                  setChassis(value as AgentChassis | typeof NO_CHASSIS)
+                }
+              >
+                <SelectTrigger id="rule-chassis" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CHASSIS}>{t("anyChassis")}</SelectItem>
+                  {AgentChassisSchema.options.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {tInfra(`chassis.${option}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldDescription>{t("chassisDescription")}</FieldDescription>
             </Field>
 
             <Field>
