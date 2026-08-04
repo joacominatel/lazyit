@@ -18,6 +18,22 @@
 # `--token-file -` reads the token from STDIN - which means it cannot be combined with the
 # `curl ... | sh` pipe, because the pipe already IS this script's stdin. Download the script first.
 #
+# UPGRADING A HOST THAT IS ALREADY INSTALLED: `--keep-token` (#1208). Re-running this script is the
+# documented upgrade path, and it used to demand the token on every run - which lazyit cannot hand
+# back, because it stores only a hash and a prefix of it (ADR-0048). So an upgrade was copy-paste
+# PLUS go and find a secret. `--keep-token` authenticates the run with the token in
+# /etc/lazyit-agent/config, which this script wrote there itself, chmod 600, root-only:
+#
+#   sh install.sh --url https://lazyit.example.com --keep-token
+#
+# AN EXPLICIT FLAG, NOT AN IMPLICIT DEFAULT FOR A RE-RUN, and that is the whole decision. Implicit is
+# friendlier by one word and wrong in the case that matters: `sh install.sh --url ... $TOKEN_VAR`
+# with the variable misspelled, or a wrapper that stopped exporting LAZYIT_TOKEN, would stop being a
+# loud "a token is required" and become a silent install with the OLD credential - so a host keeps
+# reporting with a token somebody believes they replaced, and nobody finds out. Where the credential
+# for a root install came from is not a thing to infer from the state of the disk. It is also what
+# makes this greppable in an audit: a run either says --keep-token or it carries a token.
+#
 # REMOVING IT AGAIN: `sh install.sh --uninstall`. Add `--keep-config` to keep this host's own limits
 # for a later re-install; the SA token is destroyed either way.
 #
@@ -52,6 +68,9 @@ JITTER="60s"
 LEGACY_INTERVAL=""
 UNINSTALL=0
 KEEP_CONFIG=0
+# Authenticate this run with the token already in the config file (#1208). See the header for why it
+# is a flag and not the implicit default for a re-run.
+KEEP_TOKEN=0
 REQUIRE_CHECKSUM=0
 FORCE_BASELINE=0
 
@@ -65,6 +84,37 @@ TIMER="/etc/systemd/system/lazyit-agent.timer"
 die() {
   echo "lazyit-agent install: $1" >&2
   exit 1
+}
+
+# The token carried by the config file on STDIN, or nothing at all when it carries none (#1208).
+#
+# PURE ON PURPOSE: stdin in, one word out, no path of its own and no root. That is what lets the
+# contract test in apps/agent run THIS function over a corpus of real config files instead of a copy
+# of it - the same reason install.ps1's two PATH functions take their input as parameters.
+#
+# IT HAS TO AGREE WITH THE AGENT'S OWN PARSER (`readConfigFile` in apps/agent/src/config.ts) on every
+# point where a hand-edited file can differ from the one this script writes, because the whole
+# promise of --keep-token is "the credential this host is ALREADY using": the LAST assignment wins
+# (the agent assigns key by key as it reads), the value is trimmed, and one matching pair of
+# surrounding quotes is stripped. Reading a different token than the agent reads would install
+# cleanly, report once with the wrong credential, and then fail on every tick.
+#
+# CR is dropped because a config that has been through a Windows editor comes back with CRLF, and a
+# trailing carriage return inside a bearer token is a 401 with nothing in the message to explain it.
+# `CT_` prefixed globals rather than locals: POSIX sh has no `local`.
+config_token() {
+  CT_LINE="$(grep -E '^[[:space:]]*LAZYIT_TOKEN=' | tail -n 1 || true)"
+  [ -n "$CT_LINE" ] || return 0
+  # Only the FIRST '=' separates the key from the value - a token is opaque and may contain one.
+  CT_VALUE="${CT_LINE#*=}"
+  CT_VALUE="$(printf '%s' "$CT_VALUE" | tr -d '\r')"
+  CT_VALUE="${CT_VALUE#"${CT_VALUE%%[![:space:]]*}"}"
+  CT_VALUE="${CT_VALUE%"${CT_VALUE##*[![:space:]]}"}"
+  case "$CT_VALUE" in
+    \"*\") CT_VALUE="${CT_VALUE#\"}"; CT_VALUE="${CT_VALUE%\"}" ;;
+    \'*\') CT_VALUE="${CT_VALUE#\'}"; CT_VALUE="${CT_VALUE%\'}" ;;
+  esac
+  printf '%s' "$CT_VALUE"
 }
 
 # --- args ------------------------------------------------------------------
@@ -84,14 +134,18 @@ while [ $# -gt 0 ]; do
     --require-checksum) REQUIRE_CHECKSUM=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --keep-config) KEEP_CONFIG=1; shift ;;
+    --keep-token) KEEP_TOKEN=1; shift ;;
     -h|--help)
-      echo "Usage: install.sh --url <base-url> (--token <token> | --token-file <path>)"
+      echo "Usage: install.sh --url <base-url> (--token <token> | --token-file <path> | --keep-token)"
       echo "       install.sh --uninstall [--keep-config]"
       echo "  --url <base-url>     your lazyit instance, scheme + host + port and nothing else:"
       echo "                       e.g. https://lazyit.example.com  (NOT .../install.sh - this"
       echo "                       script appends /api/agent/download to whatever you pass)"
       echo "  --token-file <path>  read the token from a file ('-' = stdin; not usable with curl | sh)"
       echo "                       LAZYIT_TOKEN in the environment works too, and keeps it out of ps."
+      echo "  --keep-token         re-run over an existing install, authenticating with the token"
+      echo "                       already in $CONFIG_FILE. No secret on the command line;"
+      echo "                       refuses to run alongside --token/--token-file/LAZYIT_TOKEN."
       echo "  --ca-file <path>     PEM bundle to trust, instead of trusting your CA system-wide;"
       echo "                       used for this download AND written into the agent's config"
       echo "  --baseline           force the pre-AVX2 x86-64 build (auto-detected otherwise)"
@@ -112,6 +166,11 @@ done
 # partial install: a host that only got as far as the binary uninstalls just as cleanly as one that
 # has been reporting for a year.
 if [ "$UNINSTALL" = "1" ]; then
+  # REFUSED RATHER THAN IGNORED (#1208). `--keep-config` keeps this host's own limits through an
+  # uninstall; nothing keeps the TOKEN, and that is the point of the block further down. Accepting
+  # `--keep-token` here - even as a harmless no-op - would let an operator finish an uninstall
+  # believing a live credential survived on a host they are decommissioning, or that it did not.
+  [ "$KEEP_TOKEN" = "0" ] || die "--keep-token has no meaning with --uninstall: the token NEVER survives an uninstall. --keep-config keeps this host's own limits, never the credential."
   [ "$(id -u)" = "0" ] || die "--uninstall must run as root (removes /usr/local/bin, /etc and systemd units)"
 
   # Disarm FIRST. Deleting the binary out from under an armed timer does not stop the timer; it just
@@ -158,6 +217,36 @@ fi
 [ "$KEEP_CONFIG" = "0" ] || die "--keep-config only means something with --uninstall"
 
 # --- token -----------------------------------------------------------------
+# THE RE-RUN FORM (#1208), resolved FIRST so that a second token source is refused before anything
+# else is read - `--keep-token --token-file /gone` must name the contradiction, not the missing file.
+#
+# A HARD ERROR FOR EVERY OTHER SOURCE, INCLUDING THE ENVIRONMENT, and no precedence rule anywhere.
+# Two token sources on one root install is an operator who believes something about this run that is
+# not true, and quietly picking one is how a host ends up authenticating with the credential that was
+# just rotated away - the failure this flag exists to prevent, arriving through the flag itself.
+# LAZYIT_TOKEN is included even though it is ambient rather than typed: it is the form the docs
+# recommend for keeping a token out of `ps`, so it is exactly the one that would be left set in a
+# root shell from the install before this one.
+if [ "$KEEP_TOKEN" = "1" ]; then
+  [ -z "$TOKEN" ] || die "--keep-token and --token are mutually exclusive - pass one. --keep-token means 'authenticate with the token this host already has'; passing another one says the opposite."
+  [ -z "$TOKEN_FILE" ] || die "--keep-token and --token-file are mutually exclusive - pass one. --keep-token means 'authenticate with the token this host already has'; passing a file says the opposite."
+  [ -z "${LAZYIT_TOKEN:-}" ] || die "--keep-token and LAZYIT_TOKEN in the environment both supply a token - pass one. Unset LAZYIT_TOKEN to re-use what is on this host, or drop --keep-token to install with the one in the environment."
+  # NEVER A SILENT UNAUTHENTICATED INSTALL: no readable config is fatal here, and the message names
+  # root FIRST because the file is chmod 600 and "I forgot sudo" is the likelier of the two ways to
+  # arrive at it - the other being a first install, which has no token to re-use by definition.
+  [ -r "$CONFIG_FILE" ] || die "--keep-token authenticates with the token this host already has, and $CONFIG_FILE cannot be read. If the agent IS installed here, re-run this as root - that file is chmod 600. If it is not, this is a first install and there is nothing to re-use: pass --token, --token-file, or set LAZYIT_TOKEN."
+  TOKEN="$(config_token < "$CONFIG_FILE")"
+  [ -n "$TOKEN" ] || die "$CONFIG_FILE has no LAZYIT_TOKEN line, so there is no token on this host to re-use. Pass --token, --token-file, or set LAZYIT_TOKEN. Note that lazyit cannot show you an existing token a second time (it stores only a hash and a prefix), so this may need a fresh one from Settings -> Instance -> Reporting agents."
+  # The same guard --token-file applies, one source over: a Service Account token is one opaque word,
+  # and a hand-edited config that split it across a space would otherwise be sent as a bearer token
+  # and come back 401 with nothing to say which of the two files was wrong.
+  case "$TOKEN" in
+    *[[:space:]]*)
+      die "the LAZYIT_TOKEN line in $CONFIG_FILE is not a token (it contains whitespace). Fix that file, or pass --token / --token-file for this run." ;;
+  esac
+  echo "lazyit-agent install: authenticating with the token already in $CONFIG_FILE (--keep-token); nothing was passed on the command line."
+fi
+
 if [ -n "$TOKEN_FILE" ]; then
   [ -z "$TOKEN" ] || die "--token and --token-file are mutually exclusive - pass one"
   if [ "$TOKEN_FILE" = "-" ]; then
@@ -188,7 +277,7 @@ TOKEN="${TOKEN:-${LAZYIT_TOKEN:-}}"
 URL="${URL:-${LAZYIT_URL:-}}"
 
 [ -n "$URL" ] || die "--url is required (your lazyit instance, e.g. https://lazyit.example.com)"
-[ -n "$TOKEN" ] || die "a token is required - pass --token, --token-file, or set LAZYIT_TOKEN (needs infra:report)"
+[ -n "$TOKEN" ] || die "a token is required - pass --token, --token-file, --keep-token (a re-run over an existing install), or set LAZYIT_TOKEN (needs infra:report)"
 URL="${URL%/}" # strip a trailing slash
 
 # --- --url IS THE INSTANCE BASE URL, NOT THE ADDRESS OF THIS SCRIPT (#1166) ---
@@ -400,6 +489,11 @@ fi
 # on the upgrade path, with nothing on screen to say so, and on a self-hosted product that owner is
 # frequently not the person running the upgrade. So: everything is carried over EXCEPT the three keys
 # the installer owns (URL, TOKEN, and the ignored legacy INTERVAL), which the flags supply fresh.
+#
+# `--keep-token` (#1208) CHANGES NOTHING HERE, deliberately. It changes where TOKEN came from, not
+# who owns the key: the old LAZYIT_TOKEN line is still dropped from the kept set and written back
+# once at the top of the file below, so a re-run cannot leave two of them and hand the parser the
+# choice - and the host owner's veto crosses the upgrade exactly as it did before.
 #
 # Merging rather than moving the veto to a file the installer never touches, because this file is
 # where every existing host already keeps it - the template below has invited exactly that since
