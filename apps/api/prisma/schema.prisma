@@ -1024,6 +1024,12 @@ enum AssetHistoryEventType {
   // Check-out acknowledgement — the assignee confirmed they hold the asset (ADR-0089 Part B, #1029).
   // Emitted by POST /asset-assignments/:id/acknowledge, payload { userId } (the acknowledging owner).
   ACKNOWLEDGED
+  // An agent-reported InfraNode ADOPTED this asset at its confirm gate (ADR-0093 §4, #1198) — payload
+  // { nodeId, reportingSource, externalId }. Emitted EXACTLY ONCE, at the moment of the link, and
+  // never per report: `syncAssetSpecs` refreshes an adopted asset's specs every check-in, and an event
+  // per refresh at a 5-minute cadence would bury every human edit the row ever received. What MOVED is
+  // audited on the node (InfraNodeFactChange, #1143) instead.
+  AGENT_LINKED
 }
 
 /// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's
@@ -2675,6 +2681,23 @@ model InfraNode {
   lastReportedAt  DateTime? // agent liveness; stale => OFFLINE
   agentVersion    String? // reporting agent's own build version at last check-in (#907; null = manual/pre-stamp)
 
+  // ── Host form factor (ADR-0093 §2, #1198) ────────────────────────────────────────────────────────
+  // What the host physically IS — `laptop` / `desktop` / `server` / `vm` / `container` / `unknown`,
+  // written from `host.chassis` on EVERY agent report (create AND refresh). AGENT-OWNED: chassis is a
+  // FACT (the `ipAddress` class), not curation (the `kind` class), so a re-image or a board swap
+  // changes the truth and the column follows. There is deliberately NO `chassisSource` and no MANUAL
+  // counterpart — chassis is never on the create/update DTOs, so there is no human write to protect.
+  //
+  // `String?`, NOT a Prisma enum, deliberately: `AgentChassisSchema` is `.catch(undefined)` precisely
+  // so an unrecognised value degrades instead of failing a report, and a DB enum would turn that same
+  // value into a write ERROR on the hot report path. Validation lives in shared zod at the write
+  // boundary; the read is tolerant (`AgentChassisSchema.nullish().catch(null)` on `InfraNodeSchema`).
+  //
+  // Nullable with NO backfill: every pre-#1198 row reads null (= no signal = today's behaviour) and
+  // self-heals on that host's next report. Null forever for a manual node and for a CONTAINER child,
+  // whose blob is `{ container, reportedAt }` and carries no `host` key at all (#1139).
+  chassis         String?
+
   // ── Server-driven agent policy (ADR-0074 §7 amendment, #1140) ────────────────────────────────────
   // The NARROWEST scope of the three-level resolution (instance default < service account < node).
   // A partial `AgentPolicyOverride` (zod in @lazyit/shared), jsonb per the ADR-0007 posture — null =
@@ -2875,6 +2898,11 @@ model InfraAutoConfirmRule {
   hostnamePattern String? // glob: `*` any run, `?` exactly one; anchored, case-insensitive
   subnetCidr      String? // IPv4 or IPv6 CIDR matched against the node's promoted primary IP
   reportedKind    InfraNodeKind?
+  // The reported form factor (ADR-0093 §6, #1198) — "auto-confirm the servers, review the laptops".
+  // `String?` for the same reason `InfraNode.chassis` is: one vocabulary, one storage shape, validated
+  // by shared zod on write. A report with `chassis: unknown` or no chassis NEVER matches a rule that
+  // states one, so this can rule a proposal OUT on the same footing `reportedKind` does.
+  chassis         String?
 
   confirmAsKind InfraNodeKind?
   trackAsAsset  Boolean        @default(true) // the single confirm's default; the API defaults a CONTAINER rule to false
