@@ -88,7 +88,10 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    > lo evitan: poner el token en el entorno (`LAZYIT_TOKEN=… sh install.sh --url …`), o en un archivo
    > y pasar `--token-file /root/agent.token`. Para cualquiera de las dos hay que descargar el script
    > primero. (`--token-file -` lo lee de una tubería, y por eso no puede combinarse con
-   > `curl … | sh`: la tubería ya es la entrada del script.)
+   > `curl … | sh`: la tubería ya es la entrada del script.) Cualquiera de las dos formas ahora
+   > mantiene el token fuera de `ps` durante *toda* la instalación: el instalador se lo pasa a `curl`
+   > por una tubería y no como argumento, así que ya no vuelve a aparecer en la lista de procesos
+   > camino a tu instancia.
 
    > **¿Despliegue en LAN (sin dominio público)?** Si tu instancia solo es alcanzable por una IP o
    > nombre de host de LAN con un certificado autofirmado, copiá el `.pem` de esa autoridad
@@ -399,7 +402,9 @@ Si estás reimaginando una máquina que va a volver a tener el agente, agregá *
 conserva los límites propios de ese host y su configuración de proxy (lo que eligió el dueño de la
 máquina, que es molesto de reconstruir) y de todos modos quita el token y la dirección de la
 instancia. No hay ninguna opción que deje el token: una credencial que funciona contra tu instancia no
-debería sobrevivir en una máquina que acabás de dar de baja.
+debería sobrevivir en una máquina que acabás de dar de baja. (`--keep-token`, más abajo, es la
+operación opuesta y pertenece a una *instalación*: combinarla con `--uninstall` se rechaza en vez de
+ignorarse, para que nadie termine una desinstalación creyendo que la credencial sobrevivió.)
 
 Dos cosas que desinstalar **no** hace, deliberadamente. La entrada del servidor en lazyit queda tal
 como está: descartala desde la vista de Servidores si querés sacarla del mapa. Y el token solo se
@@ -1040,6 +1045,13 @@ binario. Es solo un empujón: un agente desactualizado sigue reportando con norm
 nada, y las actualizaciones menores no la activan. Los agentes compilados desde el código fuente (o
 anteriores al versionado) reportan como `dev` y nunca muestran la insignia.
 
+**¿Todos los agentes reportan `dev`?** Hasta esta versión, los binarios que servía una instancia se
+compilaban sin el estampado de versión, así que todos los agentes instalados reportaban `dev` y la
+insignia nunca podía aparecer. Una vez que la instancia se actualiza y se reconstruye, los binarios
+que sirve llevan su versión — pero los agentes ya instalados siguen reportando `dev` hasta que se
+vuelve a ejecutar el comando de instalación en esos hosts. Nada más cambia: `dev` sigue siendo un
+valor legítimo y sigue sin generar ningún aviso.
+
 La insignia responde *«¿este host está atrasado?»*. La vista **Agentes** responde la misma pregunta a
 escala de toda la flota, y te entrega el comando.
 
@@ -1083,9 +1095,10 @@ muestran **los dos** comandos con una nota, porque entregarle una línea de Powe
 Debian es peor que pedirte que elijas.
 
 El comando es el mismo instalador que usaste la primera vez, así que todo lo que ya hace viene
-incluido: la descarga se verifica por checksum, una instancia en `http` plano recibe la opción
-explícita `--allow-insecure-http` / `-AllowInsecureHttp` que necesita, y el binario se prueba antes de
-activar nada.
+incluido: la descarga se verifica por checksum, el binario se prueba antes de activar nada, y una
+instancia en `http` plano recibe la opción explícita `--allow-insecure-http` / `-AllowInsecureHttp`
+que necesita — la única decisión que `--upgrade` *no* arrastra por vos, descrita unos párrafos más
+abajo.
 
 **No hay nada que completar en él.** El comando de actualización es `--upgrade` y nada más:
 
@@ -1099,25 +1112,41 @@ curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --upgrade
 
 `--upgrade` vuelve a ejecutar el host usando el token, la URL de la instancia y la autoridad
 certificante **que ya están en el archivo de configuración de ese host** — el que el instalador
-escribió ahí mismo. Así que esas dos líneas funcionan igual en todas tus máquinas, que es lo que hace
-que el «Copiar todo» de más abajo sea un artefacto de dos líneas y no una lista con un comando
-distinto por host.
+escribió ahí mismo, legible solo por root (Linux) o por SYSTEM y Administradores (Windows). Así que
+esas dos líneas funcionan igual en todas tus máquinas, que es lo que hace que el «Copiar todo» de más
+abajo sea un artefacto de dos líneas y no una lista con un comando distinto por host.
 
 Esa URL importa más de lo que parece. lazyit deliberadamente **no** pone `--url` en el comando de
 actualización, porque `LAZYIT_URL` es una clave que el instalador *posee y reescribe* — y la URL de un
 comando generado es la dirección por la que tu navegador llegó a esta instancia. Si tu instancia
 responde en varias direcciones (la configuración LAN en `http` plano hace exactamente eso), un comando
 con `--url` re-apuntaría en silencio a tu dirección todos los hosts donde lo pegaras. `--upgrade` no
-puede: lee la URL de cada host desde ese mismo host.
+puede: lee la URL de cada host desde ese mismo host. Igual, lo que sí pasés sigue ganando:
+`--upgrade --url https://nueva-direccion` mueve una máquina a propósito, que es otra cosa que moverla
+sin querer.
 
 **No lleva token, y no puede llevarlo.** lazyit solo guarda un *hash* del token de cada host — no está
 en condiciones de volver a mostrarlo, ni para vos ni para quien entre a la base de datos. Y no le hace
 falta: el host tiene el suyo.
 
 > **No definas `LAZYIT_TOKEN` para este comando.** `--upgrade` *se niega* a ejecutarse junto con un
-> token de cualquier otra fuente, a propósito — para que un token olvidado en tu shell no pueda pisar
-> en silencio al que un host está usando de verdad. Si querés darle a un host un token *distinto*, eso
-> es la forma de instalación normal (`--url … --token …`), escrita a conciencia.
+> token de cualquier otra fuente — `--token`, `--token-file` o `LAZYIT_TOKEN` en el entorno — a
+> propósito, para que un token olvidado en tu shell no pueda pisar en silencio al que un host está
+> usando de verdad. Si querés darle a un host un token *distinto*, eso es la forma de instalación
+> normal (`--url … --token …`), escrita a conciencia. Y en una máquina que todavía no tiene agente —
+> o cuyo archivo de configuración no tiene token, que es lo que deja `--keep-config` — `--upgrade` se
+> detiene y te lo dice: no hay nada que reutilizar, y una primera instalación sigue necesitando
+> dirección y token.
+
+**Algo que `--upgrade` deliberadamente no arrastra: la opción explícita de `http` plano.** Si la
+máquina se instaló contra una dirección `http` plana, reutilizar esa dirección está bien — pero
+*aceptar* lo que cuesta el texto plano es una decisión, no una configuración, así que se vuelve a
+decir. Por eso el comando que lazyit genera para una instancia en `http` plano ya termina en
+`--allow-insecure-http` (`-AllowInsecureHttp` en Windows): pegarlo *es* la decisión. Ejecutá
+`--upgrade` en un host así sin esa opción y el instalador lo rechaza, nombrando al *archivo de
+configuración* como origen de esa dirección `http`, para que quede claro que no te están preguntando
+por una dirección que hayas escrito vos. Todo lo demás sigue igual: en una actualización el checksum
+se verifica exactamente como en una primera instalación, y una diferencia la detiene.
 
 **¿Ya no tenés el token de ese host? No lo necesitás.** El host lo sigue teniendo, y es justamente el
 que usa `--upgrade` — así que un token perdido no es motivo para tocar Cuentas de servicio.
@@ -1133,7 +1162,8 @@ necesita una credencial nueva. Para ese, creá un token en
 > Rotá cuando quieras retirar una credencial, nunca para «conseguir una copia» de una.
 
 **¿Detrás de una autoridad certificante interna?** `--upgrade` reutiliza la CA ya configurada en el
-host para el tráfico propio del agente. El `curl` / `irm` del principio del comando es un paso
+host para el tráfico propio del agente, así que no tenés que acordarte de la ruta del `.pem` de esa
+máquina. El `curl` / `irm` del principio del comando es un paso
 anterior y aparte — corre antes de que se lea ninguna config — así que esa CA tiene que seguir estando
 en el almacén de confianza del sistema, igual que cuando instalaste la primera vez. Esto no cambió; es
 lo único que el comando no puede resolver por vos.
@@ -1167,10 +1197,12 @@ en las dos plataformas desde siempre:
   en la instalación en vez de convertirse en un host que parece instalado y nunca reporta.
 - **Tu configuración se combina, no se reemplaza.** Cada ajuste `LAZYIT_*` que ya está en el host se
   conserva — que es lo que preserva las decisiones propias del dueño del host, sus
-  `LAZYIT_COLLECT_*=false`. Una actualización de flota nunca debe volver a encender en silencio un
-  recolector que alguien apagó, y no lo hace. El instalador sí posee y reescribe tres claves propias
-  — la URL de la instancia, el token y el archivo de CA — y justamente por eso el comando de
-  actualización usa `--upgrade` y no pasa ninguna: se reescriben con los valores que ese host ya tenía.
+  `LAZYIT_COLLECT_*=false`, y con ellas los límites propios de ese host y su configuración de proxy.
+  Una actualización de flota nunca debe volver a encender en silencio un recolector que alguien
+  apagó, y no lo hace. Las únicas líneas que reescribe son las que le pertenecen — la URL de la
+  instancia y el token (más el obsoleto `LAZYIT_INTERVAL`, y el archivo de CA cuando hay uno) — y
+  justamente por eso el comando de actualización usa `--upgrade` y no pasa ninguna: se reescriben con
+  los valores que ese host ya tenía.
 - **El host conserva su identidad en lazyit.** Un nodo se identifica por desde dónde reporta y por su
   identidad de máquina, no por el binario, así que un host sigue siendo un nodo a través de la
   actualización — sin duplicados y sin volver a revisarlo.
@@ -1181,16 +1213,18 @@ en las dos plataformas desde siempre:
 Siendo honestos sobre el estado en el que vas a encontrar esta vista: **la mayoría de los parques la
 abren en «versión desconocida»**, y eso es la verdad, no un error.
 
-Los agentes instalados antes del sellado de versión — que incluye a todos los agentes instalados desde
-una build servida por Docker hasta esta release — reportan su versión como `dev`. `dev` no se puede
-comparar con una versión real, así que esos agentes nunca se cuentan como atrasados, nunca se marcan y
-nunca reciben un empujón. Quedan en el grupo *versión desconocida*, y la vista lo dice en vez de
-insinuar por lo bajo que están bien.
+Es la historia de `dev` del principio de esta sección, vista a escala de flota: todos los agentes
+instalados antes del sellado de versión — que es todo agente que una instancia sirvió hasta esta
+release — reportan `dev`, y `dev` no se puede comparar con una versión real. Así que esos agentes
+nunca se cuentan como atrasados, nunca se marcan y nunca reciben un empujón. Quedan en el grupo
+*versión desconocida*, y la vista lo dice en vez de insinuar por lo bajo que están bien.
 
-Se van completando de a un host: cada host que ejecuta el comando de instalación una vez obtiene una
+Se van completando de a un host: cada host que ejecuta el comando de actualización una vez obtiene una
 versión sellada y pasa a un grupo real. No hay backfill ni ventana de mantenimiento — pero tampoco hay
 forma de que lazyit te diga cuáles de esos hosts lo necesitaban. **Esa primera pasada es la que hacés
 sin ayuda.** Después de eso, la vista de flota es exacta y los comandos de actualización también.
+
+### Volver a ejecutar el instalador a mano
 
 **Algunas mejoras solo llegan cuando volvés a ejecutar el comando de instalación.** El agente son dos
 cosas: un programa, y el servicio y el timer de systemd que lo ejecutan. Todo lo que está en el
@@ -1201,6 +1235,43 @@ segundo después de una ventana de mantenimiento — se escribe cuando corre el 
 existente conserva la unidad que le tocó originalmente hasta que lo vuelvas a ejecutar. Volver a
 ejecutarlo es seguro y conserva la configuración propia de ese host, así que en una flota que ya
 tenés, vale la pena hacerlo una vez.
+
+**Volver a ejecutarlo no necesita el token de nuevo.** Agregá **`--keep-token`** (Linux) o
+**`-KeepToken`** (Windows) y el instalador se autentica con el token que ya está en esa máquina — el
+que él mismo escribió en el archivo de configuración, legible solo por root (Linux) o por SYSTEM y
+Administradores (Windows). Así una actualización es un solo comando, sin ningún secreto adentro:
+
+```sh
+sudo sh install.sh --url https://tu-instancia --keep-token
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia -KeepToken
+```
+
+Esto importa más de lo que parece: lazyit **no puede** volver a mostrarte un token existente. Guarda
+solo una huella de él, y el token en sí se muestra una única vez, cuando creás o rotás la cuenta de
+servicio. Antes de esta opción, "volvé a ejecutar el comando de instalación" quería decir, en
+silencio, "primero andá a buscar el token", en cada máquina.
+
+Es una opción que hay que pedir, no algo que ocurra solo al volver a ejecutar: así, un comando que
+*debía* llevar un token y lo perdió (una variable mal escrita, un script que dejó de definir
+`LAZYIT_TOKEN`) sigue deteniéndose con *"a token is required"* en vez de instalar en silencio con el
+token viejo. Por la misma razón se niega a convivir con `--token`, `--token-file` o un `LAZYIT_TOKEN`
+en el entorno: dos respuestas a la misma pregunta son un error que conviene frenar, no uno que
+convenga resolver por lo bajo. Y en una máquina sin agente — o cuyo archivo de configuración no tiene
+token, que es lo que deja `--keep-config` — se detiene y te lo dice, en vez de instalar algo que no va
+a poder reportar. Ese caso necesita un token nuevo desde el asistente.
+
+**Y `--upgrade` no necesita ningún argumento.** Donde `--keep-token` reutiliza la credencial,
+**`--upgrade`** (Linux) / **`-Upgrade`** (Windows) reutiliza toda la configuración — el token, la
+dirección de la instancia y la autoridad certificadora con la que se instaló esa máquina — así que el
+comando entero es `sh install.sh --upgrade`. Es exactamente el comando que te entrega la vista
+Agentes, y [El comando de actualización](#el-comando-de-actualización) de más arriba lo describe
+completo: por qué no lleva `--url` ni token, con qué se niega a convivir, y la única decisión que no
+arrastra por vos (la opción explícita de `http` plano).
+
+### Versiones de la instancia y de los agentes
 
 **Actualizar tu instancia nunca rompe los agentes ya instalados.** No hace falta reinstalar nada: un
 agente más viejo sigue reportando igual que antes, y cada dato que envía aterriza exactamente donde

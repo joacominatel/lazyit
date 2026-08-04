@@ -18,6 +18,58 @@
 # `--token-file -` reads the token from STDIN - which means it cannot be combined with the
 # `curl ... | sh` pipe, because the pipe already IS this script's stdin. Download the script first.
 #
+# AND OUT OF CURL'S `ps` LINE TOO, which for a long time this script only claimed. Both downloads
+# below used to spell the credential as `-H "Authorization: Bearer $TOKEN"`, so every one of the
+# three safe forms above handed it straight back: /proc/<pid>/cmdline is world-readable on Linux, and
+# any unprivileged user polling it during an install - or during an upgrade, which is the run that
+# gets repeated on every host in the estate - collected a live infra:report token. The header now
+# goes in on curl's STDIN (`--config -`, see `auth_config` below), which is in neither `ps` nor
+# /proc. That pipe is CURL's stdin, not this script's, so it does not collide with `--token-file -`.
+#
+# UPGRADING A HOST THAT IS ALREADY INSTALLED: `--keep-token` (#1208). Re-running this script is the
+# documented upgrade path, and it used to demand the token on every run - which lazyit cannot hand
+# back, because it stores only a hash and a prefix of it (ADR-0048). So an upgrade was copy-paste
+# PLUS go and find a secret. `--keep-token` authenticates the run with the token in
+# /etc/lazyit-agent/config, which this script wrote there itself, chmod 600, root-only:
+#
+#   sh install.sh --url https://lazyit.example.com --keep-token
+#
+# AN EXPLICIT FLAG, NOT AN IMPLICIT DEFAULT FOR A RE-RUN, and that is the whole decision. Implicit is
+# friendlier by one word and wrong in the case that matters: `sh install.sh --url ... $TOKEN_VAR`
+# with the variable misspelled, or a wrapper that stopped exporting LAZYIT_TOKEN, would stop being a
+# loud "a token is required" and become a silent install with the OLD credential - so a host keeps
+# reporting with a token somebody believes they replaced, and nobody finds out. Where the credential
+# for a root install came from is not a thing to infer from the state of the disk. It is also what
+# makes this greppable in an audit: a run either says --keep-token or it carries a token.
+#
+# UPGRADING WITHOUT REPEATING ANYTHING AT ALL: `--upgrade` (#1208). `--keep-token` closed the
+# credential half and left the rest of the command to be supplied again - and the update command an
+# admin is handed comes out of a browser, so `--url` in it is whatever ORIGIN that browser was on.
+# On a fleet in the `lan` deployment mode of ADR-0087 that silently repoints every host it touches at
+# one admin's address, and it carries no `--ca-file`, so a host installed against an internal CA
+# fails its download on the very run that was supposed to be the easy one.
+#
+#   sh install.sh --upgrade
+#
+# `--upgrade` is `--keep-token` PLUS the rest: LAZYIT_URL and LAZYIT_CA_FILE come from
+# /etc/lazyit-agent/config when they are not passed. Anything explicit still wins, so
+# `--upgrade --url https://moved.example.com` retargets a host that really did move - the difference
+# being that the retarget was TYPED rather than inherited from whoever generated the command.
+#
+# WHY A SECOND FLAG AND NOT A WIDER `--keep-token`. The name has to be true at the call site a year
+# from now. `--keep-token` says token, and a host reading its own URL back off disk is not that.
+# `--keep-config` was the other candidate and is already taken by --uninstall, where it means "keep
+# the file when removing the agent"; one word for two different things in two different modes is the
+# thing an operator misreads. `--upgrade` says what the run IS, which is also why it can be the whole
+# command: no origin, no secret, nothing that differs between one host and the next.
+#
+# IT INHERITS --keep-token's POSTURE ON CREDENTIALS WHOLE - a hard error against --token,
+# --token-file and LAZYIT_TOKEN, and no precedence rule. The URL and the CA are settings and take the
+# ordinary flag-over-environment-over-file precedence; a credential is not, for the reason written
+# above: quietly choosing between two of them is how a host ends up authenticating with the one that
+# was just rotated away. Rotating a token on a host is therefore still the ordinary install form,
+# `--url ... --token <new>`, and the refusal says so.
+#
 # REMOVING IT AGAIN: `sh install.sh --uninstall`. Add `--keep-config` to keep this host's own limits
 # for a later re-install; the SA token is destroyed either way.
 #
@@ -52,6 +104,18 @@ JITTER="60s"
 LEGACY_INTERVAL=""
 UNINSTALL=0
 KEEP_CONFIG=0
+# Authenticate this run with the token already in the config file (#1208). See the header for why it
+# is a flag and not the implicit default for a re-run.
+KEEP_TOKEN=0
+# Re-run this host from its own configuration: --keep-token, plus LAZYIT_URL and LAZYIT_CA_FILE off
+# the disk when they are not passed (#1208). See the header for why it is its own flag.
+UPGRADE=0
+# What the two values above were taken from, so a failure names the file rather than a flag the
+# operator never typed.
+UPGRADE_URL=""
+UPGRADE_CA=""
+CA_SOURCE="--ca-file"
+URL_SOURCE="--url"
 # Accepted for compatibility and IGNORED: checksum verification is required by default since #1190.
 # Kept so existing automation that passes --require-checksum keeps working unchanged.
 REQUIRE_CHECKSUM=0
@@ -74,6 +138,68 @@ die() {
   exit 1
 }
 
+# The value the config file on STDIN assigns to $1, or nothing at all when it assigns none (#1208).
+#
+# PURE ON PURPOSE: stdin and a key in, one word out, no path of its own and no root. That is what
+# lets the contract test in apps/agent run THIS function over a corpus of real config files instead
+# of a copy of it - the same reason install.ps1's two PATH functions take their input as parameters.
+#
+# ONE EXTRACTOR FOR ALL THREE KEYS the re-run forms read back (TOKEN, URL, CA_FILE). Three copies
+# with the same intent are three chances to disagree about a file a host actually has, and the one
+# that disagreed would be found the way the padded key below was found: on a host that had been
+# reporting for months.
+#
+# IT HAS TO AGREE WITH THE AGENT'S OWN PARSER (`readConfigFile` in apps/agent/src/config.ts) on every
+# point where a hand-edited file can differ from the one this script writes, because the whole
+# promise of --keep-token is "the credential this host is ALREADY using": the LAST assignment wins
+# (the agent assigns key by key as it reads), the value is trimmed, and one matching pair of
+# surrounding quotes is stripped. Reading a different token than the agent reads would install
+# cleanly, report once with the wrong credential, and then fail on every tick.
+#
+# WHITESPACE IS ALLOWED AROUND THE KEY for the same reason, and it is not hypothetical: the agent
+# trims the key before it compares (`line.slice(0, eq).trim()`), so `LAZYIT_TOKEN =lzit_sa_...` -
+# a hand edit, or a config-management template that pads its assignments - authenticates every tick,
+# while a pattern demanding `=` immediately after the key answered "this host has no token" and
+# refused the upgrade. `_` is not whitespace, so LAZYIT_TOKEN_FILE is still a different key.
+#
+# CR is dropped because a config that has been through a Windows editor comes back with CRLF, and a
+# trailing carriage return inside a bearer token is a 401 with nothing in the message to explain it.
+# `CV_` prefixed globals rather than locals: POSIX sh has no `local`.
+config_value() {
+  CV_KEY="$1"
+  CV_LINE="$(grep -E "^[[:space:]]*$CV_KEY[[:space:]]*=" | tail -n 1 || true)"
+  [ -n "$CV_LINE" ] || return 0
+  # Only the FIRST '=' separates the key from the value - a token is opaque and may contain one.
+  CV_VALUE="${CV_LINE#*=}"
+  CV_VALUE="$(printf '%s' "$CV_VALUE" | tr -d '\r')"
+  CV_VALUE="${CV_VALUE#"${CV_VALUE%%[![:space:]]*}"}"
+  CV_VALUE="${CV_VALUE%"${CV_VALUE##*[![:space:]]}"}"
+  case "$CV_VALUE" in
+    \"*\") CV_VALUE="${CV_VALUE#\"}"; CV_VALUE="${CV_VALUE%\"}" ;;
+    \'*\') CV_VALUE="${CV_VALUE#\'}"; CV_VALUE="${CV_VALUE%\'}" ;;
+  esac
+  printf '%s' "$CV_VALUE"
+}
+
+# The Authorization header for $1, as a curl config file on STDOUT (#1208 review).
+#
+# WHY THIS EXISTS AT ALL. `-H "Authorization: Bearer $TOKEN"` is an ARGUMENT, and arguments are
+# public: /proc/<pid>/cmdline is world-readable on Linux, so the credential was legible to every user
+# on the box for the length of both downloads. `curl --config -` reads the same options from stdin,
+# which is not. See the header for the whole argument.
+#
+# PURE, and for the usual reason: the token comes in as a parameter, one config line goes out, so the
+# contract test can run THIS function over a corpus rather than a copy of it.
+#
+# THE ESCAPING IS NOT DECORATION. curl gives `\` and `"` a meaning inside a quoted config value, so a
+# token carrying either would be sent mangled or truncated - a 401 with nothing in it to explain why.
+# The remaining shape, a newline ending the line and letting whatever follows be read as another curl
+# option, is closed one layer up: a token containing ANY whitespace is refused outright.
+auth_config() {
+  printf 'header = "Authorization: Bearer %s"\n' \
+    "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+}
+
 # --- args ------------------------------------------------------------------
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -94,14 +220,23 @@ while [ $# -gt 0 ]; do
     --require-checksum) REQUIRE_CHECKSUM=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --keep-config) KEEP_CONFIG=1; shift ;;
+    --keep-token) KEEP_TOKEN=1; shift ;;
+    --upgrade) UPGRADE=1; shift ;;
     -h|--help)
-      echo "Usage: install.sh --url <base-url> (--token <token> | --token-file <path>)"
+      echo "Usage: install.sh --url <base-url> (--token <token> | --token-file <path> | --keep-token)"
+      echo "       install.sh --upgrade          (re-run an installed host from its own config)"
       echo "       install.sh --uninstall [--keep-config]"
       echo "  --url <base-url>     your lazyit instance, scheme + host + port and nothing else:"
       echo "                       e.g. https://lazyit.example.com  (NOT .../install.sh - this"
       echo "                       script appends /api/agent/download to whatever you pass)"
       echo "  --token-file <path>  read the token from a file ('-' = stdin; not usable with curl | sh)"
-      echo "                       LAZYIT_TOKEN in the environment works too, and keeps it out of ps."
+      echo "                       LAZYIT_TOKEN in the environment works too. Both keep the token out"
+      echo "                       of ps and of root's history; --token keeps it out of neither."
+      echo "  --keep-token         re-run over an existing install, authenticating with the token"
+      echo "                       already in $CONFIG_FILE - nothing is typed and nothing"
+      echo "                       reaches ps. Refuses --token/--token-file/LAZYIT_TOKEN alongside it."
+      echo "  --upgrade            a re-run that needs no arguments at all: --keep-token, plus this"
+      echo "                       host's own LAZYIT_URL and LAZYIT_CA_FILE when they are not passed."
       echo "  --ca-file <path>     PEM bundle to trust, instead of trusting your CA system-wide;"
       echo "                       used for this download AND written into the agent's config"
       echo "  --baseline           force the pre-AVX2 x86-64 build (auto-detected otherwise)"
@@ -129,6 +264,12 @@ done
 # partial install: a host that only got as far as the binary uninstalls just as cleanly as one that
 # has been reporting for a year.
 if [ "$UNINSTALL" = "1" ]; then
+  # REFUSED RATHER THAN IGNORED (#1208). `--keep-config` keeps this host's own limits through an
+  # uninstall; nothing keeps the TOKEN, and that is the point of the block further down. Accepting
+  # `--keep-token` here - even as a harmless no-op - would let an operator finish an uninstall
+  # believing a live credential survived on a host they are decommissioning, or that it did not.
+  [ "$UPGRADE" = "0" ] || die "--upgrade has no meaning with --uninstall: there is nothing to re-run and nothing to carry forward. --keep-config keeps this host's own limits; the token NEVER survives an uninstall."
+  [ "$KEEP_TOKEN" = "0" ] || die "--keep-token has no meaning with --uninstall: the token NEVER survives an uninstall. --keep-config keeps this host's own limits, never the credential."
   [ "$(id -u)" = "0" ] || die "--uninstall must run as root (removes /usr/local/bin, /etc and systemd units)"
 
   # Disarm FIRST. Deleting the binary out from under an armed timer does not stop the timer; it just
@@ -155,8 +296,12 @@ if [ "$UNINSTALL" = "1" ]; then
   # `--keep-config` is for the operator re-imaging a host that will get the agent back: it keeps the
   # LOCAL VETO (`LAZYIT_COLLECT_*=false`, `LAZYIT_MIN_INTERVAL`, ...), which is the host owner's
   # setting and is genuinely painful to lose, while still stripping the token and the URL.
+  #
+  # The key may carry whitespace before its `=`, because the AGENT accepts that spelling and so a
+  # host can really have one. A pattern that missed `LAZYIT_TOKEN =` would leave a working credential
+  # on a decommissioned host, inside the file the operator was told keeps only their own limits.
   if [ "$KEEP_CONFIG" = "1" ] && [ -f "$CONFIG_FILE" ]; then
-    KEPT="$(grep -Ev '^[[:space:]]*LAZYIT_(TOKEN|URL)=' "$CONFIG_FILE" || true)"
+    KEPT="$(grep -Ev '^[[:space:]]*LAZYIT_(TOKEN|URL)[[:space:]]*=' "$CONFIG_FILE" || true)"
     umask 077
     printf '%s\n' "$KEPT" > "$CONFIG_FILE"
     chmod 600 "$CONFIG_FILE"
@@ -175,6 +320,63 @@ fi
 [ "$KEEP_CONFIG" = "0" ] || die "--keep-config only means something with --uninstall"
 
 # --- token -----------------------------------------------------------------
+# THE RE-RUN FORM (#1208), resolved FIRST so that a second token source is refused before anything
+# else is read - `--keep-token --token-file /gone` must name the contradiction, not the missing file.
+#
+# A HARD ERROR FOR EVERY OTHER SOURCE, INCLUDING THE ENVIRONMENT, and no precedence rule anywhere.
+# Two token sources on one root install is an operator who believes something about this run that is
+# not true, and quietly picking one is how a host ends up authenticating with the credential that was
+# just rotated away - the failure this flag exists to prevent, arriving through the flag itself.
+# LAZYIT_TOKEN is included even though it is ambient rather than typed: it is the form the docs
+# recommend for keeping a token out of `ps`, so it is exactly the one that would be left set in a
+# root shell from the install before this one.
+#
+# `--upgrade` CONTAINS `--keep-token` rather than competing with it: it is the same read of the same
+# file, plus the settings. Everything below therefore has one name for whichever flag the operator
+# actually typed, so a run that said --upgrade is never answered about a flag it did not pass.
+if [ "$UPGRADE" = "1" ]; then
+  KEEP_TOKEN=1
+  RERUN_FLAG="--upgrade"
+else
+  RERUN_FLAG="--keep-token"
+fi
+
+if [ "$KEEP_TOKEN" = "1" ]; then
+  [ -z "$TOKEN" ] || die "$RERUN_FLAG and --token are mutually exclusive - pass one. $RERUN_FLAG means 'authenticate with the token this host already has'; passing another one says the opposite. To ROTATE the credential on a host, install it the ordinary way: --url <base-url> --token <new>."
+  [ -z "$TOKEN_FILE" ] || die "$RERUN_FLAG and --token-file are mutually exclusive - pass one. $RERUN_FLAG means 'authenticate with the token this host already has'; passing a file says the opposite."
+  [ -z "${LAZYIT_TOKEN:-}" ] || die "$RERUN_FLAG and LAZYIT_TOKEN in the environment both supply a token - pass one. Unset LAZYIT_TOKEN to re-use what is on this host, or drop $RERUN_FLAG to install with the one in the environment."
+  # NEVER A SILENT UNAUTHENTICATED OR UNCONFIGURED INSTALL: no readable config is fatal here, and the
+  # message names root FIRST because the file is chmod 600 and "I forgot sudo" is the likelier of the
+  # two ways to arrive at it - the other being a first install, which has nothing to re-use by
+  # definition and needs --url and a token of its own.
+  [ -r "$CONFIG_FILE" ] || die "$RERUN_FLAG re-runs this host from the settings it already has, and $CONFIG_FILE cannot be read. If the agent IS installed here, re-run this as root - that file is chmod 600. If it is not, this is a first install and there is nothing to re-use: pass --url plus --token, --token-file, or LAZYIT_TOKEN."
+  TOKEN="$(config_value LAZYIT_TOKEN < "$CONFIG_FILE")"
+  [ -n "$TOKEN" ] || die "$CONFIG_FILE has no LAZYIT_TOKEN line, so there is no token on this host to re-use. Pass --token, --token-file, or set LAZYIT_TOKEN. Note that lazyit cannot show you an existing token a second time (it stores only a hash and a prefix), so this may need a fresh one from Settings -> Instance -> Reporting agents."
+  # The same guard --token-file applies, one source over: a Service Account token is one opaque word,
+  # and a hand-edited config that split it across a space would otherwise be sent as a bearer token
+  # and come back 401 with nothing to say which of the two files was wrong.
+  case "$TOKEN" in
+    *[[:space:]]*)
+      die "the LAZYIT_TOKEN line in $CONFIG_FILE is not a token (it contains whitespace). Fix that file, or pass --token / --token-file for this run." ;;
+  esac
+  echo "lazyit-agent install: authenticating with the token already in $CONFIG_FILE ($RERUN_FLAG); nothing was passed on the command line."
+
+  # THE SETTINGS HALF, and only under --upgrade. Read here, applied further down, so the precedence
+  # stays the one every other setting in this script has: an explicit flag, then the environment,
+  # then this file.
+  #
+  # THE LOWERCASE CA SPELLING IS TRIED FIRST because that is how the AGENT resolves it - `networkFrom`
+  # in apps/agent/src/net.ts prefers `lazyit_ca_file` over `LAZYIT_CA_FILE` when a host carries both,
+  # measured against curl and Bun rather than recalled. Reading the other one here would have this
+  # script download over one trust anchor and the agent report over another, which is a failure that
+  # only shows up on the next tick, on somebody else's shift.
+  if [ "$UPGRADE" = "1" ]; then
+    UPGRADE_URL="$(config_value LAZYIT_URL < "$CONFIG_FILE")"
+    UPGRADE_CA="$(config_value lazyit_ca_file < "$CONFIG_FILE")"
+    [ -n "$UPGRADE_CA" ] || UPGRADE_CA="$(config_value LAZYIT_CA_FILE < "$CONFIG_FILE")"
+  fi
+fi
+
 if [ -n "$TOKEN_FILE" ]; then
   [ -z "$TOKEN" ] || die "--token and --token-file are mutually exclusive - pass one"
   if [ "$TOKEN_FILE" = "-" ]; then
@@ -204,8 +406,45 @@ fi
 TOKEN="${TOKEN:-${LAZYIT_TOKEN:-}}"
 URL="${URL:-${LAZYIT_URL:-}}"
 
+# THE SETTINGS THE HOST ALREADY HAS, LAST (#1208). Flag, then environment, then the file - the same
+# order the agent's own config resolution uses, so "the explicit one wins" needs no exception here.
+# Nothing is re-used silently: what came off the disk is printed, by key, before anything is
+# downloaded or written.
+if [ "$UPGRADE" = "1" ]; then
+  UPGRADE_KEPT=""
+  if [ -z "$URL" ]; then
+    URL="$UPGRADE_URL"
+    if [ -n "$URL" ]; then
+      UPGRADE_KEPT="LAZYIT_URL=$URL"
+      URL_SOURCE="LAZYIT_URL in $CONFIG_FILE (re-used by --upgrade)"
+    fi
+  fi
+  if [ -z "$CA_FILE" ] && [ -n "$UPGRADE_CA" ]; then
+    CA_FILE="$UPGRADE_CA"
+    CA_SOURCE="LAZYIT_CA_FILE in $CONFIG_FILE (re-used by --upgrade)"
+    UPGRADE_KEPT="${UPGRADE_KEPT:+$UPGRADE_KEPT, }LAZYIT_CA_FILE=$CA_FILE"
+    # Named HERE rather than left to curl, because "certificate verify failed" on an upgrade sends an
+    # operator looking at their instance's certificate, and the answer is a file that moved on this
+    # host. Checked before the root test below for the same reason the --url guard is: an argument
+    # this script can see is wrong should be named before a privilege it cannot see is missing.
+    [ -r "$CA_FILE" ] || die "$CA_SOURCE names a PEM bundle that cannot be read: $CA_FILE. Restore it, or pass --ca-file with the path it moved to."
+  fi
+  [ -z "$UPGRADE_KEPT" ] || echo "lazyit-agent install: --upgrade re-used this host's own $UPGRADE_KEPT from $CONFIG_FILE."
+  # A config with a token but no URL. Refused by name: the generic "--url is required" below would be
+  # true and useless, because the operator did not think they were supplying one.
+  [ -n "$URL" ] || die "--upgrade re-runs this host on the URL it already has, and $CONFIG_FILE has no LAZYIT_URL line. Pass --url <base-url> for this run (the agent has been unable to report without one)."
+fi
+
 [ -n "$URL" ] || die "--url is required (your lazyit instance, e.g. https://lazyit.example.com)"
-[ -n "$TOKEN" ] || die "a token is required - pass --token, --token-file, or set LAZYIT_TOKEN (needs infra:report)"
+[ -n "$TOKEN" ] || die "a token is required - pass --token, --token-file, --keep-token or --upgrade (a re-run over an existing install), or set LAZYIT_TOKEN (needs infra:report)"
+# ONE GUARD FOR EVERY SOURCE, and it is not only about a 401. The token is handed to curl as a config
+# file (`auth_config` above), where a newline would end the header line and let whatever followed it
+# be read as another curl option. --token-file and the config file each check their own shape and say
+# which file was wrong; this is the backstop that also covers --token and LAZYIT_TOKEN.
+case "$TOKEN" in
+  *[[:space:]]*)
+    die "the token contains whitespace, so it is not a Service Account token - a token is one opaque word. Check what --token or LAZYIT_TOKEN was given." ;;
+esac
 URL="${URL%/}" # strip a trailing slash
 
 # --- --url IS THE INSTANCE BASE URL, NOT THE ADDRESS OF THIS SCRIPT (#1166) ---
@@ -278,9 +517,17 @@ fi
 # somewhere else if you can), and the Service Account token, which is persisted into the config WITH
 # this URL and therefore crosses the network in cleartext again on every report this host ever
 # sends. The scheme was lowercased above, so HTTP:// lands here exactly like http://.
+#
+# AND `--upgrade` DOES NOT INHERIT THE DECISION (#1208 review). A host installed with
+# --allow-insecure-http carries `LAZYIT_URL=http://...` in its config, so a re-run that re-used it
+# would arrive here with a cleartext URL nobody typed - and letting the file answer "yes, cleartext
+# is acceptable" on the operator's behalf is exactly the fail-open #1190 closed, one input over. The
+# gate bites on the RESOLVED url whatever supplied it; `$URL_SOURCE` names which that was, so the
+# refusal does not tell an operator about a `--url` they did not pass. Settings are re-used; an
+# acceptance of exposure is not a setting.
 if [ "$URL_SCHEME" = "http" ]; then
   if [ "$ALLOW_INSECURE_HTTP" != "1" ]; then
-    die "--url uses plain http, and everything on this channel crosses the network in CLEARTEXT: an on-path attacker can replace the binary this host will run as root, and the Service Account token is saved with this URL, so it is exposed again on every report this host ever sends. Use https (see --ca-file for an internal CA), or pass --allow-insecure-http if you accept BOTH exposures on this network."
+    die "$URL_SOURCE uses plain http, and everything on this channel crosses the network in CLEARTEXT: an on-path attacker can replace the binary this host will run as root, and the Service Account token is saved with this URL, so it is exposed again on every report this host ever sends. Use https (see --ca-file for an internal CA), or pass --allow-insecure-http if you accept BOTH exposures on this network."
   fi
   echo "lazyit-agent install: WARNING - --allow-insecure-http: installing over plain http. The binary this host will run as root and the Service Account token BOTH cross the network in cleartext, the token on every report from now on, not only today. Anyone on the network path can take root on this host. Move to https when you can." >&2
 fi
@@ -291,11 +538,13 @@ command -v curl >/dev/null 2>&1 || die "curl is required"
 
 # The private CA, if there is one. Unquoted below on purpose - this is how POSIX sh passes two
 # arguments from one variable - so the path must not contain spaces.
+# `$CA_SOURCE` is "--ca-file" for a flag and names the config file when --upgrade re-used one, so a
+# host whose bundle moved is told about the file it has rather than about a flag nobody typed.
 CURL_CA=""
 if [ -n "$CA_FILE" ]; then
-  [ -r "$CA_FILE" ] || die "cannot read --ca-file: $CA_FILE"
+  [ -r "$CA_FILE" ] || die "cannot read $CA_SOURCE: $CA_FILE"
   case "$CA_FILE" in
-    *" "*) die "--ca-file must not contain spaces: $CA_FILE" ;;
+    *" "*) die "$CA_SOURCE must not contain spaces: $CA_FILE" ;;
   esac
   CURL_CA="--cacert $CA_FILE"
 fi
@@ -328,7 +577,10 @@ trap 'rm -f "$TMP_BIN"' EXIT
 # --max-redirs 0 makes a 3xx a hard curl failure instead of a followed redirect (issue #980): if
 # --url points at an origin with no /api routing (e.g. the raw web port :3000, no Caddy in front),
 # the unauthenticated request 302s to /login - curl must not silently download that HTML.
-if ! curl -fsSL --max-redirs 0 $CURL_CA -H "Authorization: Bearer $TOKEN" \
+#
+# The credential goes in on curl's STDIN, never in its arguments - see `auth_config` above and the
+# header. The pipe is CURL's stdin and not this script's, so `--token-file -` is unaffected.
+if ! auth_config "$TOKEN" | curl -fsSL --max-redirs 0 $CURL_CA --config - \
   "$URL/api/agent/download?arch=$ARCH" -o "$TMP_BIN"; then
   if [ "$ARCH" = "x64-baseline" ]; then
     # Deliberately NOT falling back to the ordinary x64 build. The baseline build was chosen because
@@ -372,7 +624,10 @@ if [ -n "$SHA256" ]; then
   [ "${#EXPECTED}" = "64" ] || die "--sha256 must be the binary's sha256 as 64 hex characters. Got: $SHA256"
   echo "lazyit-agent install: verifying against the sha256 passed with --sha256 (out of band)."
 else
-  if ! EXPECTED="$(curl -fsSL --max-redirs 0 $CURL_CA -H "Authorization: Bearer $TOKEN" \
+  # The credential goes in on curl's STDIN here too (#1208 review). This fetch is REQUIRED, so it is
+  # the one that runs on every install and every upgrade - which makes it the one whose argv an
+  # unprivileged user polling /proc/<pid>/cmdline was most reliably able to catch.
+  if ! EXPECTED="$(auth_config "$TOKEN" | curl -fsSL --max-redirs 0 $CURL_CA --config - \
     "$URL/api/agent/checksum?arch=$ARCH" 2>/dev/null)"; then
     die "could not fetch the sha256 this instance publishes for $ARCH, and checksum verification is REQUIRED - a fetch that fails open is a check an attacker strips by failing it. Nothing installed. An instance older than this installer publishes no digest: upgrade lazyit, or pass --sha256 <digest> obtained OUT OF BAND."
   fi
@@ -444,6 +699,13 @@ fi
 # frequently not the person running the upgrade. So: everything is carried over EXCEPT the three keys
 # the installer owns (URL, TOKEN, and the ignored legacy INTERVAL), which the flags supply fresh.
 #
+# `--keep-token` AND `--upgrade` (#1208) CHANGE NOTHING HERE, deliberately. They change where TOKEN,
+# URL and CA_FILE came FROM, not who owns those keys: the old lines are still dropped from the kept
+# set and written back once at the top of the file below, so a re-run cannot leave two of them and
+# hand the parser the choice - and the host owner's veto crosses the upgrade exactly as it did
+# before. A re-used value being written back where a passed one would go is the whole point: the file
+# comes out of an upgrade in one canonical shape, whoever supplied what.
+#
 # Merging rather than moving the veto to a file the installer never touches, because this file is
 # where every existing host already keeps it - the template below has invited exactly that since
 # #1140 - and a second file would orphan those settings on the very upgrade this is protecting.
@@ -457,21 +719,30 @@ fi
 # half would silently DELETE a working proxy on the upgrade path. Same erasure as the local veto in
 # #1160, one key over.
 #
-# `LAZYIT_CA_FILE` joins the owned set ONLY when --ca-file was passed. Passing it means "this is the
-# CA now", so keeping the old line as well would write the key twice and leave which one wins to the
-# parser; not passing it leaves whatever the host already had, like every other kept setting. The
-# lowercase spelling is owned alongside it for the same reason it is kept alongside it: the agent
-# reads it, so leaving it behind would make an unrelated file the winner.
-OWNED='LAZYIT_(URL|TOKEN|INTERVAL)='
+# `LAZYIT_CA_FILE` joins the owned set ONLY when there is a CA in play - passed with --ca-file, or
+# re-used off this host by --upgrade. Either way it means "this is the CA now", so keeping the old
+# line as well would write the key twice and leave which one wins to the parser; with no CA at all
+# the host keeps whatever it had, like every other kept setting. The lowercase spelling is owned
+# alongside it for the same reason it is kept alongside it: the agent reads it, so leaving it behind
+# would make an unrelated line the winner - which for a value --upgrade just READ off that same
+# lowercase line would be a loop with no exit.
+#
+# BOTH PATTERNS ALLOW WHITESPACE BEFORE THE `=`, and they have to move together. The agent trims the
+# key before it compares, so `LAZYIT_COLLECT_SOFTWARE =false` is a live veto on that host - a keep
+# pattern that missed it would DELETE the host owner's setting on the upgrade path, which is the
+# erasure of #1160 in a different shape. And an owned pattern that missed `LAZYIT_TOKEN =` would let
+# a stale credential through into the kept block BELOW the fresh one, where last-assignment-wins
+# hands the agent the old token. Either half alone is a bug; the pair is the fix.
+OWNED='LAZYIT_(URL|TOKEN|INTERVAL)[[:space:]]*='
 CA_NOTE=""
 if [ -n "$CA_FILE" ]; then
-  OWNED='(LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)|lazyit_ca_file)='
+  OWNED='(LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)|lazyit_ca_file)[[:space:]]*='
   CA_NOTE="LAZYIT_CA_FILE=$CA_FILE"
 fi
 
 PRESERVED=""
 if [ -f "$CONFIG_FILE" ]; then
-  KEPT="$(grep -E '^[[:space:]]*(LAZYIT_[A-Z0-9_]+|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy|lazyit_ca_file)=' "$CONFIG_FILE" 2>/dev/null \
+  KEPT="$(grep -E '^[[:space:]]*(LAZYIT_[A-Z0-9_]+|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy|lazyit_ca_file)[[:space:]]*=' "$CONFIG_FILE" 2>/dev/null \
     | grep -Ev "^[[:space:]]*$OWNED" || true)"
   if [ -n "$KEPT" ]; then
     PRESERVED="# --- kept from this host's previous config (its own limits - the installer does not own these) ---
