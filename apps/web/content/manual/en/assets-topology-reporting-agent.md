@@ -81,7 +81,10 @@ Either one opens a short, guided wizard with three steps:
    > If that matters where you work, two equivalent forms avoid it: put the token in the environment
    > (`LAZYIT_TOKEN=… sh install.sh --url …`), or in a file and pass `--token-file /root/agent.token`.
    > Download the script first for either. (`--token-file -` reads it from a pipe, which is why it
-   > can't be combined with `curl … | sh` — the pipe is already the script's input.)
+   > can't be combined with `curl … | sh` — the pipe is already the script's input.) Either form now
+   > keeps the token out of `ps` for the *whole* install: the installer hands it to `curl` through a
+   > pipe rather than as an argument, so it no longer reappears in the process list on its way to
+   > your instance.
 
    > **LAN deployment (no public domain)?** If your instance is reachable only by a LAN IP or hostname
    > with a self-signed certificate, copy that certificate authority's `.pem` onto the agent host and
@@ -378,7 +381,9 @@ If you're re-imaging a machine that will get the agent back, add **`--keep-confi
 **`-KeepConfig`** (Windows): it keeps that host's own limits and its proxy settings (the things the machine's owner chose, which are annoying to
 reconstruct) and still strips the token and the instance address. There is no option that leaves the
 token behind — a working credential for your instance should not survive on a machine you just
-decommissioned.
+decommissioned. (`--keep-token`, further down, is the opposite operation and belongs to an *install*:
+combining it with `--uninstall` is refused rather than ignored, so nobody finishes an uninstall
+believing the credential survived.)
 
 Two things uninstalling does **not** do, deliberately. The server's entry in lazyit stays exactly as
 it is: discard it from the Servers view if you want it off the map. And the token is only removed
@@ -986,6 +991,70 @@ that stops a whole estate reporting in the same second after a maintenance windo
 the installer runs, and an existing host keeps the unit it was originally given until you re-run it.
 Re-running is safe and keeps that host's own settings, so on a fleet you already have, this is worth
 doing once.
+
+**Re-running does not need the token again.** Add **`--keep-token`** (Linux) or **`-KeepToken`**
+(Windows) and the installer authenticates with the token already on that machine — the one it wrote
+into the configuration file itself, readable only by root (Linux) or SYSTEM and Administrators
+(Windows). So an upgrade is one command with no secret in it:
+
+```sh
+sudo sh install.sh --url https://your-instance --keep-token
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Url https://your-instance -KeepToken
+```
+
+This matters more than it looks: lazyit **cannot** show you an existing token a second time. It
+stores only a fingerprint of it, and the token itself is displayed once, when you create or rotate
+the service account. Before this option, "re-run the install command" quietly meant "find the token
+first", on every machine.
+
+It is a flag you have to ask for, not something that happens by itself on a re-run — that way a
+command that was *meant* to carry a token and lost it (a mistyped variable, a script that stopped
+setting `LAZYIT_TOKEN`) still stops with *"a token is required"* instead of silently installing with
+the old one. For the same reason it refuses to run alongside `--token`, `--token-file` or a
+`LAZYIT_TOKEN` in the environment: two answers to the same question is a mistake worth stopping for,
+not one to resolve quietly. And on a machine with no agent — or one whose configuration file has no
+token in it, which is what `--keep-config` leaves behind — it stops and tells you, rather than
+installing something that cannot report. That case needs a fresh token from the wizard.
+
+**`--upgrade` goes one step further: it needs no arguments at all.** Where `--keep-token` re-uses the
+credential, **`--upgrade`** (Linux) / **`-Upgrade`** (Windows) re-uses the whole configuration — the
+token, the instance address and the certificate authority the machine was installed with:
+
+```sh
+curl -fsSL https://your-instance/install.sh | sudo sh -s -- --upgrade
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Upgrade
+```
+
+That is the same command on every machine in the estate, which is the point. An update command that
+carries `--url` carries whatever address the browser that generated it was on — and on a LAN instance
+reachable by several addresses, running it across a fleet quietly re-points every machine at that one.
+`--upgrade` leaves each machine on the address it already had. It also re-uses that machine's
+certificate authority file, so hosts behind an internal CA upgrade without you having to remember the
+path to the `.pem`.
+
+Anything you do pass still wins: `--upgrade --url https://new-address` moves a machine deliberately,
+which is a different thing from moving it by accident. The credential is the exception, and follows
+`--keep-token`'s rule exactly — `--upgrade` refuses to run alongside `--token`, `--token-file` or
+`LAZYIT_TOKEN`. To give a machine a **new** token, install it the ordinary way, with `--url` and
+`--token`. And on a machine that has no agent yet, `--upgrade` stops and says so: there is nothing to
+re-use, and a first install still needs an address and a token.
+
+**One thing `--upgrade` deliberately does not carry over: `--allow-insecure-http`.** If the machine
+was installed against a plain-`http` address, re-using that address is fine — but *accepting* what
+cleartext costs is a decision, not a setting, so you say it again:
+`… | sudo sh -s -- --upgrade --allow-insecure-http`. The refusal names the configuration file as
+where the `http` address came from, so it is clear you are not being asked about an address you
+typed. Everything else is unchanged: the checksum is verified on an upgrade exactly as on a first
+install, and a mismatch stops it.
+
+Everything else about a re-run is unchanged: this host's own limits, its proxy and its certificate
+authority all cross the upgrade exactly as they always did.
 
 **Upgrading your instance never breaks the agents already installed.** You do not have to re-install
 anything: an older agent keeps reporting exactly as it did, and every fact it sends lands exactly where

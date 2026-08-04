@@ -88,7 +88,10 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    > lo evitan: poner el token en el entorno (`LAZYIT_TOKEN=… sh install.sh --url …`), o en un archivo
    > y pasar `--token-file /root/agent.token`. Para cualquiera de las dos hay que descargar el script
    > primero. (`--token-file -` lo lee de una tubería, y por eso no puede combinarse con
-   > `curl … | sh`: la tubería ya es la entrada del script.)
+   > `curl … | sh`: la tubería ya es la entrada del script.) Cualquiera de las dos formas ahora
+   > mantiene el token fuera de `ps` durante *toda* la instalación: el instalador se lo pasa a `curl`
+   > por una tubería y no como argumento, así que ya no vuelve a aparecer en la lista de procesos
+   > camino a tu instancia.
 
    > **¿Despliegue en LAN (sin dominio público)?** Si tu instancia solo es alcanzable por una IP o
    > nombre de host de LAN con un certificado autofirmado, copiá el `.pem` de esa autoridad
@@ -399,7 +402,9 @@ Si estás reimaginando una máquina que va a volver a tener el agente, agregá *
 conserva los límites propios de ese host y su configuración de proxy (lo que eligió el dueño de la
 máquina, que es molesto de reconstruir) y de todos modos quita el token y la dirección de la
 instancia. No hay ninguna opción que deje el token: una credencial que funciona contra tu instancia no
-debería sobrevivir en una máquina que acabás de dar de baja.
+debería sobrevivir en una máquina que acabás de dar de baja. (`--keep-token`, más abajo, es la
+operación opuesta y pertenece a una *instalación*: combinarla con `--uninstall` se rechaza en vez de
+ignorarse, para que nadie termine una desinstalación creyendo que la credencial sobrevivió.)
 
 Dos cosas que desinstalar **no** hace, deliberadamente. La entrada del servidor en lazyit queda tal
 como está: descartala desde la vista de Servidores si querés sacarla del mapa. Y el token solo se
@@ -1056,6 +1061,70 @@ segundo después de una ventana de mantenimiento — se escribe cuando corre el 
 existente conserva la unidad que le tocó originalmente hasta que lo vuelvas a ejecutar. Volver a
 ejecutarlo es seguro y conserva la configuración propia de ese host, así que en una flota que ya
 tenés, vale la pena hacerlo una vez.
+
+**Volver a ejecutarlo no necesita el token de nuevo.** Agregá **`--keep-token`** (Linux) o
+**`-KeepToken`** (Windows) y el instalador se autentica con el token que ya está en esa máquina — el
+que él mismo escribió en el archivo de configuración, legible solo por root (Linux) o por SYSTEM y
+Administradores (Windows). Así una actualización es un solo comando, sin ningún secreto adentro:
+
+```sh
+sudo sh install.sh --url https://tu-instancia --keep-token
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia -KeepToken
+```
+
+Esto importa más de lo que parece: lazyit **no puede** volver a mostrarte un token existente. Guarda
+solo una huella de él, y el token en sí se muestra una única vez, cuando creás o rotás la cuenta de
+servicio. Antes de esta opción, "volvé a ejecutar el comando de instalación" quería decir, en
+silencio, "primero andá a buscar el token", en cada máquina.
+
+Es una opción que hay que pedir, no algo que ocurra solo al volver a ejecutar: así, un comando que
+*debía* llevar un token y lo perdió (una variable mal escrita, un script que dejó de definir
+`LAZYIT_TOKEN`) sigue deteniéndose con *"a token is required"* en vez de instalar en silencio con el
+token viejo. Por la misma razón se niega a convivir con `--token`, `--token-file` o un `LAZYIT_TOKEN`
+en el entorno: dos respuestas a la misma pregunta son un error que conviene frenar, no uno que
+convenga resolver por lo bajo. Y en una máquina sin agente — o cuyo archivo de configuración no tiene
+token, que es lo que deja `--keep-config` — se detiene y te lo dice, en vez de instalar algo que no va
+a poder reportar. Ese caso necesita un token nuevo desde el asistente.
+
+**`--upgrade` va un paso más allá: no necesita ningún argumento.** Donde `--keep-token` reutiliza la
+credencial, **`--upgrade`** (Linux) / **`-Upgrade`** (Windows) reutiliza toda la configuración: el
+token, la dirección de la instancia y la autoridad certificadora con la que se instaló esa máquina:
+
+```sh
+curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --upgrade
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Upgrade
+```
+
+Es el mismo comando en todas las máquinas de la flota, y ahí está la gracia. Un comando de
+actualización que lleva `--url` lleva la dirección en la que estaba el navegador que lo generó — y en
+una instancia de LAN, alcanzable por varias direcciones, ejecutarlo en toda la flota reapunta en
+silencio cada máquina a esa. `--upgrade` deja cada máquina en la dirección que ya tenía. También
+reutiliza el archivo de autoridad certificadora de esa máquina, así que los hosts detrás de una CA
+interna se actualizan sin que tengas que acordarte de la ruta del `.pem`.
+
+Lo que sí pasés sigue ganando: `--upgrade --url https://nueva-direccion` mueve una máquina a
+propósito, que es otra cosa que moverla sin querer. La credencial es la excepción y sigue exactamente
+la regla de `--keep-token`: `--upgrade` se niega a convivir con `--token`, `--token-file` o
+`LAZYIT_TOKEN`. Para darle un token **nuevo** a una máquina, instalala de la forma habitual, con
+`--url` y `--token`. Y en una máquina que todavía no tiene agente, `--upgrade` se detiene y te lo
+dice: no hay nada que reutilizar, y una primera instalación sigue necesitando dirección y token.
+
+**Algo que `--upgrade` deliberadamente no arrastra: `--allow-insecure-http`.** Si la máquina se
+instaló contra una dirección `http` plana, reutilizar esa dirección está bien — pero *aceptar* lo que
+cuesta el texto plano es una decisión, no una configuración, así que se vuelve a decir:
+`… | sudo sh -s -- --upgrade --allow-insecure-http`. El rechazo nombra al archivo de configuración
+como origen de esa dirección `http`, para que quede claro que no te están preguntando por una
+dirección que hayas escrito vos. Todo lo demás sigue igual: en una actualización el checksum se
+verifica exactamente como en una primera instalación, y una diferencia la detiene.
+
+Todo lo demás de una re-ejecución sigue igual: los límites propios de ese host, su proxy y su
+autoridad certificadora cruzan la actualización exactamente como siempre.
 
 **Actualizar tu instancia nunca rompe los agentes ya instalados.** No hace falta reinstalar nada: un
 agente más viejo sigue reportando igual que antes, y cada dato que envía aterriza exactamente donde
