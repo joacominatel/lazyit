@@ -449,13 +449,23 @@ describe("the token stays out of argv where it can", () => {
  * path end to end: that needs root, and the suite deliberately shims `id` so it never gets there.
  */
 describe("the token reaches curl on stdin, never on a command line (#1208 review)", () => {
+  /**
+   * The script with its comment lines dropped. Both assertions below COUNT things, and the header
+   * quotes the shape it replaced at length - prose explaining a defect is not the defect, but it
+   * does otherwise make the counting meaningless.
+   */
+  const code = script
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+
   test("no Authorization header is spelled on any command line in the script", () => {
-    expect(script).not.toMatch(/-H\s+["']?Authorization/);
+    expect(code).not.toMatch(/-H\s+["']?Authorization/);
   });
 
   test("both downloads pipe the credential into curl's stdin instead", () => {
-    expect(script.match(/auth_config "\$TOKEN" \| curl /g) ?? []).toHaveLength(2);
-    expect(script.match(/--config -/g) ?? []).toHaveLength(2);
+    expect(code.match(/auth_config "\$TOKEN" \| curl /g) ?? []).toHaveLength(2);
+    expect(code.match(/--config -/g) ?? []).toHaveLength(2);
   });
 
   test("auth_config is PURE - the token in as a parameter, one config line out", () => {
