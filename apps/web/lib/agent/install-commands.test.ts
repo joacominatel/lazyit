@@ -175,6 +175,18 @@ describe("agentUpdateCommand — the update of an already-installed host (ADR-00
     },
   );
 
+  test("the switch it emits is one the SHIPPED installers actually declare", async () => {
+    // The strings above were written against an installer that did not have `--upgrade` yet — it
+    // landed separately (#1208's installer half). A generated command naming a flag the served
+    // script rejects is the exact failure this file exists to prevent, and it fails on an
+    // operator's host rather than in CI. So the switch is read back off the two files
+    // `apps/web/public/` serves, the same way the plain-http opt-in is below.
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--upgrade)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toMatch(/\[switch\] \$Upgrade/);
+  });
+
   test("Linux drops `sudo -E`, which existed only to carry LAZYIT_TOKEN across sudo", () => {
     // `-E` preserves the environment. It was load-bearing while the command depended on an exported
     // LAZYIT_TOKEN. `--upgrade` REFUSES to share a run with LAZYIT_TOKEN (#1208), so preserving the
@@ -237,6 +249,24 @@ describe("a plain-http origin carries the explicit opt-in the installers now dem
     expect(sh).toContain("--allow-insecure-http)");
     const ps1 = await Bun.file(installerPath("install.ps1")).text();
     expect(ps1).toMatch(/\[switch\] \$AllowInsecureHttp/);
+  });
+
+  test("the opt-in is NOT inherited across --upgrade, which is why the update command must carry it", async () => {
+    // #1208's final resolution, and the reason `insecureHttp()` has to key the UPDATE command too.
+    // A host installed over cleartext carries `LAZYIT_URL=http://…` in its config; `--upgrade`
+    // re-uses that URL, arrives at the same gate, and is REFUSED unless the opt-in is passed again
+    // — accepting exposure is a per-run decision, not a config key the file can answer on the
+    // operator's behalf. If a future edit made the flag inheritable, dropping it from the generated
+    // command would become correct; while these lines stand, dropping it hands every LAN operator a
+    // command that hard-stops on paste.
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--upgrade` DOES NOT INHERIT THE DECISION");
+    // The gate bites on the RESOLVED url and names where it came from, so the refusal on an upgrade
+    // points at the config file rather than a `--url` the operator never passed.
+    expect(sh).toContain("(re-used by --upgrade)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toContain("-Upgrade DOES NOT INHERIT THE DECISION");
+    expect(ps1).toContain("(re-used by -Upgrade)");
   });
 
   test("the Linux by-hand steps stay flagless — they never run install.sh", () => {
