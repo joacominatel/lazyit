@@ -342,8 +342,7 @@ credential come from where the operator already keeps it. This ADR chooses the l
   **not decided here**: it changes credential handling in the file that runs as root, which deserves
   its own issue and a CEO ruling (§Decisions needed).
 
-#### §6 amendment (2026-08-04, #1208 / #1207) — the deferred installer mode landed, and it replaced
-the whole of the above
+#### §6 amendment (2026-08-04, #1208 / #1207) — the deferred installer mode landed and replaced the above
 
 The third bullet's deferred mode shipped as `--upgrade` / `-Upgrade`, and it does not merely improve
 the ergonomics of the emitted command — **it removes a defect the first two bullets contained.**
@@ -375,9 +374,19 @@ curl -fsSL <origin>/install.sh | sudo sh -s -- --upgrade
 & ([scriptblock]::Create((irm <origin>/install.ps1))) -Upgrade
 ```
 
-The `--allow-insecure-http` / `-AllowInsecureHttp` opt-in still rides on a plain-http origin (#1190).
-It is **not** a re-pin: it is a per-run decision rather than a config key the installer writes, so the
-string stays identical across hosts for a given origin.
+The `--allow-insecure-http` / `-AllowInsecureHttp` opt-in still rides on a plain-http origin (#1190),
+and #1208's final resolution made that **load-bearing rather than merely harmless**: the opt-in is
+explicitly **not inherited** across an upgrade. A host installed over cleartext carries
+`LAZYIT_URL=http://…` in its config, `--upgrade` re-uses that URL, and the plain-http gate bites on
+the *resolved* URL whatever supplied it — so the run is refused unless the opt-in is passed again,
+with `$URL_SOURCE` naming the config file so the refusal never mentions a `--url` the operator did not
+pass. Letting the file answer "cleartext is acceptable" on the operator's behalf would be the same
+fail-open #1190 closed, one input over. Dropping the flag from the generated update command would
+therefore hand every `lan` operator a command that hard-stops on paste; `insecureHttp(origin)` keys
+the update command for exactly that reason, and `install-commands.test.ts` asserts both halves.
+
+It is still **not** a re-pin: it is a per-run decision rather than a config key the installer writes,
+so the string stays identical across hosts for a given origin.
 
 **The one caveat, pre-existing and unchanged:** `--upgrade` re-uses the host's `LAZYIT_CA_FILE` for the
 agent's own traffic, but the `curl`/`irm` that fetches the script runs before any config is read — so a
