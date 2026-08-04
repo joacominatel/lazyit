@@ -20,7 +20,6 @@ import {
   agentDiagnosticsCommand,
   agentInstallCommand,
   agentManualInstallSteps,
-  agentTokenEnvVar,
   agentUpdateCommand,
 } from "./install-commands";
 
@@ -119,19 +118,16 @@ describe("agentInstallCommand — the token and origin are never placeholders", 
   });
 });
 
-describe("agentUpdateCommand — the update of an already-installed host (ADR-0094 §5/§6)", () => {
-  test("Linux re-runs the installer with no token and preserves the environment", () => {
-    // `sudo -E` is the whole difference from the install one-liner and it is not decoration: sudo
-    // resets the environment by default, so a plain `sudo sh` would drop LAZYIT_TOKEN and the
-    // installer would stop asking for a token the command does not mention.
+describe("agentUpdateCommand — the update of an already-installed host (ADR-0094 §5/§6, #1208)", () => {
+  test("Linux is `--upgrade` and nothing else", () => {
     expect(agentUpdateCommand("linux", ORIGIN)).toBe(
-      `curl -fsSL ${ORIGIN}/install.sh | sudo -E sh -s -- --url ${ORIGIN}`,
+      `curl -fsSL ${ORIGIN}/install.sh | sudo sh -s -- --upgrade`,
     );
   });
 
-  test("Windows re-runs the installer with no token, in the same script-block form", () => {
+  test("Windows is `-Upgrade` and nothing else, in the same script-block form", () => {
     expect(agentUpdateCommand("windows", ORIGIN)).toBe(
-      `& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Url ${ORIGIN}`,
+      `& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Upgrade`,
     );
   });
 
@@ -141,27 +137,50 @@ describe("agentUpdateCommand — the update of an already-installed host (ADR-00
       // The server structurally cannot re-emit an installed host's secret — only `tokenHash` and
       // `tokenPrefix` are stored (ADR-0094 §6). A command that LOOKED like it carried one, or that
       // shipped a `<token>` placeholder, would send the operator hunting for a flag that cannot
-      // exist. It names the environment variable instead, and the UI says so.
+      // exist. `--upgrade` reads the one the host already has instead.
       const command = agentUpdateCommand(platform, ORIGIN);
       expect(command).not.toContain(TOKEN);
       expect(command).not.toContain("lzit_sa_");
       expect(command).not.toContain("<token>");
       expect(command).not.toMatch(/-{1,2}[Tt]oken/);
-      expect(command).toContain(ORIGIN);
     },
   );
 
-  test("each platform names the token variable its own installer falls back to", async () => {
-    expect(agentTokenEnvVar("linux")).toBe("LAZYIT_TOKEN");
-    expect(agentTokenEnvVar("windows")).toBe("$env:LAZYIT_TOKEN");
-    // The fallbacks themselves, asserted against the installers rather than remembered: install.sh
-    // reads `${LAZYIT_TOKEN:-}` and install.ps1 reads `$env:LAZYIT_TOKEN` when no token was passed.
-    // If either ever stops doing that, the update command silently becomes unrunnable.
-    const sh = await Bun.file(installerPath("install.sh")).text();
-    expect(sh).toContain("LAZYIT_TOKEN");
-    expect(sh).toMatch(/TOKEN="\$\{TOKEN:-\$\{LAZYIT_TOKEN:-\}\}"/);
-    const ps1 = await Bun.file(installerPath("install.ps1")).text();
-    expect(ps1).toContain("if (-not $Token) { $Token = $env:LAZYIT_TOKEN }");
+  test.each([...AGENT_PLATFORMS])(
+    "%s: the origin appears ONLY as where the script is fetched from — never as --url",
+    (platform) => {
+      // THE MERGE-BLOCKING BUG THIS REPLACED. The command used to carry `--url <browser origin>`,
+      // and `LAZYIT_URL` is a key the installer OWNS and REWRITES. On an ADR-0087 `lan` instance —
+      // which answers on every address it is reached by — pasting that on forty hosts re-pinned the
+      // whole estate at whichever origin one admin's browser happened to be on, silently, while the
+      // Manual promised that a host's configuration is merged rather than replaced.
+      //
+      // The origin still appears, because the script has to be downloaded from somewhere. What must
+      // never appear again is an origin being ASSIGNED to the host.
+      const command = agentUpdateCommand(platform, ORIGIN);
+      expect(command).toContain(`${ORIGIN}/install.`);
+      expect(command).not.toMatch(/--url\b/);
+      expect(command).not.toMatch(/-Url\b/);
+      expect(command).not.toMatch(/--ca-file\b/);
+      expect(command).not.toMatch(/-CaFile\b/);
+    },
+  );
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: identical on every host — the string depends on nothing but the origin",
+    (platform) => {
+      // This is what makes ADR-0094 §7's bulk handoff a two-line artifact instead of a generated
+      // per-host inventory, and it is only true because nothing host-specific is in the command.
+      expect(agentUpdateCommand(platform, ORIGIN)).toBe(agentUpdateCommand(platform, ORIGIN));
+    },
+  );
+
+  test("Linux drops `sudo -E`, which existed only to carry LAZYIT_TOKEN across sudo", () => {
+    // `-E` preserves the environment. It was load-bearing while the command depended on an exported
+    // LAZYIT_TOKEN. `--upgrade` REFUSES to share a run with LAZYIT_TOKEN (#1208), so preserving the
+    // environment now only widens the chance of hitting that refusal with a stale leftover token.
+    expect(agentUpdateCommand("linux", ORIGIN)).not.toContain("sudo -E");
+    expect(agentUpdateCommand("linux", ORIGIN)).toContain("sudo sh -s --");
   });
 });
 
@@ -191,11 +210,15 @@ describe("a plain-http origin carries the explicit opt-in the installers now dem
     // ADR-0094 §5: the fleet view reuses this module precisely so the flags ride for free. A
     // hand-rolled second builder would get exactly this wrong, silently, on the LAN installs that
     // are hardest to test — and the fleet view is the surface an operator uses at scale.
+    //
+    // The opt-in is NOT a re-pin and does not reintroduce the `--url` defect: it is a per-run
+    // decision rather than a config key the installer writes, so it is still the same string on
+    // every host for a given origin.
     expect(agentUpdateCommand("linux", HTTP_ORIGIN)).toBe(
-      `curl -fsSL ${HTTP_ORIGIN}/install.sh | sudo -E sh -s -- --url ${HTTP_ORIGIN} --allow-insecure-http`,
+      `curl -fsSL ${HTTP_ORIGIN}/install.sh | sudo sh -s -- --upgrade --allow-insecure-http`,
     );
     expect(agentUpdateCommand("windows", HTTP_ORIGIN)).toBe(
-      `& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Url ${HTTP_ORIGIN} -AllowInsecureHttp`,
+      `& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Upgrade -AllowInsecureHttp`,
     );
     expect(agentUpdateCommand("linux", ORIGIN)).not.toContain("--allow-insecure-http");
     expect(agentUpdateCommand("windows", ORIGIN)).not.toContain("-AllowInsecureHttp");
