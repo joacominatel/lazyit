@@ -102,52 +102,61 @@ export function agentInstallCommand(
 }
 
 /**
- * How the token is NAMED, per platform — the spelling each installer reads it under.
- *
- * `install.sh:204` falls back to `LAZYIT_TOKEN` and `install.ps1:328` falls back to
- * `$env:LAZYIT_TOKEN` when no token was passed. The update command (below) carries neither a value
- * nor a switch, so this is the one thing the operator has to have in place before they run it — and
- * it is a string the UI states rather than implies, so nobody hunts for a missing flag.
- */
-export function agentTokenEnvVar(platform: AgentPlatform): string {
-  return platform === "windows" ? "$env:LAZYIT_TOKEN" : "LAZYIT_TOKEN";
-}
-
-/**
  * The command that brings ONE ALREADY-INSTALLED host up to the instance's build (ADR-0094 §5/§6).
  *
- * It is `agentInstallCommand` minus the token, and that subtraction is the decision: **the server
- * cannot re-emit an installed host's secret.** Only `tokenHash`/`tokenPrefix` are stored, so the
- * honest options were minting a fresh service account per host — 245 tokens for one update — or
- * letting the credential come from where the operator already keeps it. Both installers already
- * read {@link agentTokenEnvVar}, and that is also the form config management wants: Ansible has a
- * vault, GPO/Intune have their own credential store, and a generated artifact with a live
- * root-capable credential baked into it would be the wrong artifact regardless of ergonomics.
+ * It is `--upgrade` / `-Upgrade` and NOTHING ELSE (#1208), and every argument that is absent is
+ * absent on purpose.
  *
- * `sudo -E` on Linux, and it is load-bearing. `sudo` resets the environment by default, so a plain
- * `sudo sh` would drop the very variable this command depends on and the installer would stop asking
- * for a token — while the operator is looking at a command that does not mention one. `-E` carries
- * it across. Anything already running as root (which is every config-management run) can drop the
- * `sudo -E` entirely. On Windows nothing equivalent is needed: the elevated PowerShell the operator
- * is typing in IS the process that holds `$env:LAZYIT_TOKEN`.
+ * **WHY IT CARRIES NO `--url`.** It used to. `LAZYIT_URL` is a key the installer OWNS and REWRITES
+ * on every run, and the origin in a generated command is whatever host header the admin's browser
+ * happened to reach this instance on. In the `lan` deployment mode of ADR-0087 the instance answers
+ * on every address it is reached by, so one paste across forty hosts silently re-pinned the whole
+ * estate at one admin's URL — and it contradicted the Manual's own promise that a host's
+ * configuration is *merged, not replaced*. `--upgrade` reads `LAZYIT_URL` back off
+ * `/etc/lazyit-agent/config` instead, so the command cannot repoint anything. The origin below
+ * survives only as WHERE THE SCRIPT IS FETCHED FROM; it is never written to the host.
  *
- * Everything else about re-running is already true and is why this is safe to hand to a machine
- * (ADR-0094 §7): the checksum is re-verified on every run and a mismatch is fatal (#1190), the
- * installer runs `lazyit-agent --help` before arming anything and leaves the host as it found it on
- * failure, it MERGES the existing config rather than replacing it (so a host owner's
- * `LAZYIT_COLLECT_*=false` veto survives), and the node keeps its identity because identity is
- * `(reportingSource, externalId)` and not the binary. Re-running on a current host is a no-op.
+ * **WHY IT CARRIES NO TOKEN, AND WHY NAMING `LAZYIT_TOKEN` HERE WOULD NOW BE A BUG.** The server
+ * structurally cannot re-emit an installed host's secret — only `tokenHash`/`tokenPrefix` are stored
+ * (ADR-0094 §6). This used to be answered by telling the operator to export `LAZYIT_TOKEN` and
+ * carrying `sudo -E` to get it past sudo's environment reset. `--upgrade` authenticates with the
+ * token already in the host's own config file, which the installer wrote there itself at `0600`. It
+ * also inherits `--keep-token`'s refusal to share a run with any other credential source, so
+ * `LAZYIT_TOKEN` set in the environment is now a HARD ERROR rather than a fallback: the old advice
+ * would break the very command it accompanied. `sudo -E` goes with it — there is no longer an
+ * environment variable worth preserving across sudo.
+ *
+ * **WHY IT CARRIES NO `--ca-file`.** Same reason as the URL: `LAZYIT_CA_FILE` comes back off the
+ * host's config. One caveat is real and pre-existing, and the UI and the Manual both state it — the
+ * `curl`/`irm` that fetches THIS SCRIPT runs before any of that, so a host behind an internal CA
+ * still needs that CA in its system trust store for the first hop. That was true of the install
+ * command too; `--upgrade` neither fixes nor worsens it.
+ *
+ * The result is one string per platform, IDENTICAL ON EVERY HOST, which is what makes the bulk
+ * handoff of ADR-0094 §7 a two-line artifact rather than a generated per-host inventory.
+ *
+ * Everything else about re-running is already true and is why this is safe to hand to a machine:
+ * the checksum is re-verified on every run and a mismatch is fatal (#1190), the installer runs
+ * `lazyit-agent --help` before arming anything and leaves the host as it found it on failure, it
+ * MERGES the existing config rather than replacing it (so a host owner's `LAZYIT_COLLECT_*=false`
+ * veto survives), and the node keeps its identity because identity is `(reportingSource, externalId)`
+ * and not the binary. Re-running on a current host is a no-op.
  */
 export function agentUpdateCommand(
   platform: AgentPlatform,
   origin: string,
 ): string {
+  // The plain-http opt-in still rides, and it is NOT a re-pin: it is a per-run decision, not a
+  // config key, so it is the same string on every host. It keys off the browser origin because that
+  // is the only signal available — and on an ADR-0087 `lan` instance, the origin the admin is
+  // browsing and the URL the host has on disk are the same plain-http address. Where they are not,
+  // the run stops with the installer's own message rather than proceeding over cleartext.
   if (platform === "windows") {
     const optIn = insecureHttp(origin) ? " -AllowInsecureHttp" : "";
-    return `& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Url ${origin}${optIn}`;
+    return `& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Upgrade${optIn}`;
   }
   const optIn = insecureHttp(origin) ? " --allow-insecure-http" : "";
-  return `curl -fsSL ${origin}/install.sh | sudo -E sh -s -- --url ${origin}${optIn}`;
+  return `curl -fsSL ${origin}/install.sh | sudo sh -s -- --upgrade${optIn}`;
 }
 
 /**
