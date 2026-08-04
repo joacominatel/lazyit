@@ -342,6 +342,51 @@ credential come from where the operator already keeps it. This ADR chooses the l
   **not decided here**: it changes credential handling in the file that runs as root, which deserves
   its own issue and a CEO ruling (§Decisions needed).
 
+#### §6 amendment (2026-08-04, #1208 / #1207) — the deferred installer mode landed, and it replaced
+the whole of the above
+
+The third bullet's deferred mode shipped as `--upgrade` / `-Upgrade`, and it does not merely improve
+the ergonomics of the emitted command — **it removes a defect the first two bullets contained.**
+
+- **`--url` was a fleet-wide re-pin, not a convenience.** The command carried `--url <browser origin>`,
+  and `LAZYIT_URL` is a key the installer **owns and rewrites**. In the `lan` mode of
+  [[0087-plain-http-lan-deployment-axis]] the instance answers on every Host it is reached by, so one
+  paste across an estate silently repointed every host at whichever address one admin's browser was
+  on — while the Manual promised that a host's configuration is *merged, not replaced*. `--upgrade`
+  reads `LAZYIT_URL` and `LAZYIT_CA_FILE` back off `/etc/lazyit-agent/config`, so the command cannot
+  repoint anything. The origin survives only as **where the script is fetched from**.
+- **Naming `LAZYIT_TOKEN` is now wrong, not merely unnecessary.** `--upgrade` inherits `--keep-token`'s
+  refusal to share a run with any other credential source, so an exported `LAZYIT_TOKEN` is a **hard
+  error**. The old advice would break the command it accompanied. `sudo -E` goes with it: it existed
+  only to carry that variable across sudo's environment reset.
+- **The lost-token route was dangerous.** *"Rotate or mint one"* — `ServiceAccounts.rotate()`
+  **invalidates the existing secret**, so on a fleet sharing one `infra:report` account (the shape this
+  ADR's own §7 reasoning assumes) it silently stops every other host reporting. The host already holds
+  a working credential, so `--upgrade` is the answer; mint is named only for a host with **no readable
+  config**, with rotation's blast radius stated explicitly.
+
+**The emitted commands are therefore, verbatim and identical on every host:**
+
+```sh
+curl -fsSL <origin>/install.sh | sudo sh -s -- --upgrade
+```
+
+```powershell
+& ([scriptblock]::Create((irm <origin>/install.ps1))) -Upgrade
+```
+
+The `--allow-insecure-http` / `-AllowInsecureHttp` opt-in still rides on a plain-http origin (#1190).
+It is **not** a re-pin: it is a per-run decision rather than a config key the installer writes, so the
+string stays identical across hosts for a given origin.
+
+**The one caveat, pre-existing and unchanged:** `--upgrade` re-uses the host's `LAZYIT_CA_FILE` for the
+agent's own traffic, but the `curl`/`irm` that fetches the script runs before any config is read — so a
+host behind an internal CA still needs that CA in its system trust store. The install command had the
+same first hop. Stated in the dialog and in the Manual rather than left to be discovered.
+
+**The install (first-time) command is unchanged** — it still carries `--url` and a token, because there
+is no config on the host to read.
+
 ### §7 — Config-management handoff: the command is the interface
 
 **The generated command is the whole integration surface.** lazyit does not generate Ansible

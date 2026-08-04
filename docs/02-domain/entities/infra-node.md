@@ -264,8 +264,16 @@ See [[infra-auto-confirm-rule]] for the saved-rule half of the same amendment.
 The web consumes it at **Assets › Topology › Agents** (`?view=agents`, #1207): the distribution, the
 liveness and degraded flags, and — only on a host that is genuinely behind — the exact update command,
 built for that host's reported `AgentOsFamily` by `apps/web/lib/agent/install-commands.ts`, the same
-builder the "Add a server" wizard uses. That command **carries no token by construction** (only
-`tokenHash`/`tokenPrefix` exist) and names `LAZYIT_TOKEN` instead.
+builder the "Add a server" wizard uses. That command is `--upgrade` / `-Upgrade` and **nothing else**
+(#1208): no token (only `tokenHash`/`tokenPrefix` exist, so the server cannot re-emit one), and
+deliberately **no `--url` and no `--ca-file`** — those are keys the installer owns and rewrites, so
+emitting them would re-pin every host the command was pasted on. `--upgrade` reads all three back off
+the host's own config, which makes the string identical on every host. See ADR-0094 §6 amendment.
+
+The credential block (`identities` + `identitiesNeverUsed`) rides a **second `settings:manage` gate**
+and is **omitted, not emptied**, for a caller without it (#1206) — an empty array would read as "no
+agent tokens exist", a different and false claim. The web hides the whole card on absence
+(`agentFleetCredentialBlock` in `apps/web/lib/agent/fleet.ts`) rather than rendering a zero state.
 
 ### Server-driven agent policy (ADR-0074 §7 amendment / #1140)
 
