@@ -52,6 +52,18 @@ WORKDIR /app
 # CI's "Build api image" job validates this stage.
 FROM builder AS agent-builder
 WORKDIR /app
+
+# Version identity for the SHIPPED BINARIES (ADR-0083 §version handshake, #1203). The compile script
+# bakes `process.env.APP_VERSION` into each artifact via `bun build --define`, reading the APP_VERSION
+# env var and falling back to `git describe --tags --always || echo dev`. This stage must therefore be
+# given the SAME build arg the runtime stage gets: a build arg is scoped to the stage that declares it,
+# and `.dockerignore` excludes `.git`, so without this ARG every image-built agent stamped itself `dev`
+# — which made the "Agent outdated" badge (#907) permanently fail-soft-silent and `agentSkew.agentAhead`
+# permanently false. ENV (not just the ARG) so the value is unmistakably in the compile's environment.
+# `dev` stays the honest default for a plain `docker build` with no args, exactly as in `runtime`.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 COPY apps/agent/ apps/agent/
 # -> apps/agent/dist/lazyit-agent-linux-{x64,x64-baseline,arm64} and
 #    apps/agent/dist/lazyit-agent-windows-{x64,x64-baseline}.exe, each with a .sha256 beside it

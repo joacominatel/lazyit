@@ -41,11 +41,16 @@ describe("nothing is installed until the host has been checked", () => {
     expect(script).toContain("0x5A");
   });
 
-  test("the published sha256 is compared, and -RequireChecksum makes its absence fatal", () => {
+  test("the published sha256 is compared, and the check is REQUIRED — it cannot fail open (#1190)", () => {
     expect(script).toContain("Get-FileHash");
     expect(script).toContain("^[0-9a-f]{64}$");
     expect(script).toContain("checksum mismatch");
-    expect(script).toContain("-RequireChecksum was passed but this instance published no sha256");
+    // THE FAIL-OPEN SHAPE THIS REPLACES. Any error fetching the digest silently degraded the check
+    // to a warning unless -RequireChecksum was passed — so an attacker who could 404 one route
+    // stripped the verification entirely. A check the party being checked can strip is not a check.
+    expect(script).not.toContain("catch { $expected = '' }");
+    expect(script).not.toContain("Pass -RequireChecksum to make this fatal");
+    expect(script).toContain("checksum verification is REQUIRED");
   });
 
   test("a redirect is a hard failure, not a followed hop (#980)", () => {
@@ -593,14 +598,52 @@ const ENGINE = POWERSHELL ? `real PowerShell (${POWERSHELL})` : "the model (no p
  * Memoised, and resolved INSIDE a test rather than in the describe body on purpose: an extraction
  * that throws while the block is being registered reports zero tests instead of a failure, which is
  * the "reads like coverage" trap this file's header argues against.
+ *
+ * WHO PAYS FOR THE RESOLUTION IS PART OF THE DESIGN (#1186). On a machine with PowerShell — which
+ * includes every `ubuntu-latest` runner, where `pwsh` is preinstalled — the first caller pays a real
+ * process spawn, and PowerShell Core's cold start on a loaded shared runner comfortably exceeds
+ * Bun's default 5000 ms per-test budget. Charging that to whichever case test happened to run first
+ * red-lit CI at random (run 30781764638: `a PATH without it gets it appended [5013.87ms]`, 312 pass /
+ * 1 fail, green on a plain re-run). The lazy resolution stays — it is load-bearing — but the cost is
+ * charged deliberately, to the warm-up test below, which carries a budget sized for a spawn. Every
+ * case test then reads the memo in microseconds and keeps the default timeout, so a genuinely slow
+ * assertion is still caught. Raising the GLOBAL timeout was rejected: it would hide exactly that.
+ *
+ * `chargedTo` records who paid, so the arrangement is asserted rather than assumed — a future edit
+ * that reorders the block or drops the warm-up fails loudly here instead of going back to flaking on
+ * CI once a fortnight.
  */
 let memoised: Record<string, PathAnswer> | undefined;
-function answers(): Record<string, PathAnswer> {
-  memoised ??= POWERSHELL ? answersFromPowerShell(POWERSHELL) : answersFromModel();
+let chargedTo: string | undefined;
+const WARM_UP = "the corpus warm-up";
+function answers(charge: string): Record<string, PathAnswer> {
+  if (memoised === undefined) {
+    chargedTo = charge;
+    memoised = POWERSHELL ? answersFromPowerShell(POWERSHELL) : answersFromModel();
+  }
   return memoised;
 }
 
+/**
+ * A budget sized for what this actually does: start a PowerShell interpreter on a shared CI runner
+ * that may be paging. It is generous on purpose — the point is not to bound the spawn, it is to stop
+ * the spawn being billed to an assertion that should take microseconds.
+ */
+const WARM_UP_TIMEOUT_MS = 60_000;
+
 describe("the install directory lands on the machine PATH, once (#1167)", () => {
+  // FIRST in the block, so it is the caller that resolves the corpus. `bun test` runs the tests of a
+  // describe in declaration order, which is what makes this deterministic rather than lucky.
+  test(
+    WARM_UP,
+    () => {
+      // Still a real assertion, not a bare warm-up: an engine that answers a partial table would
+      // otherwise surface as N confusing per-case failures instead of one honest "the corpus is
+      // incomplete".
+      expect(Object.keys(answers(WARM_UP)).sort()).toEqual(Object.keys(PATH_CASES).sort());
+    },
+    WARM_UP_TIMEOUT_MS,
+  );
 
   test("both halves of the edit are PURE functions, so they can be run off Windows", () => {
     // If either stops taking the raw value as a parameter, the corpus below stops testing the
@@ -617,7 +660,7 @@ describe("the install directory lands on the machine PATH, once (#1167)", () => 
 
   for (const [name, expected] of Object.entries(PATH_CASES)) {
     test(name, () => {
-      const answer = answers()[name];
+      const answer = answers(name)[name];
       expect(answer, `${name}: ${ENGINE} answered nothing`).toBeDefined();
       expect({ ...answer }, `${name}, answered by ${ENGINE}`).toEqual({
         dropped: expected.dropped,
@@ -626,6 +669,13 @@ describe("the install directory lands on the machine PATH, once (#1167)", () => 
       });
     });
   }
+
+  // LAST, because it can only be true once at least one case test has run off the memo. Before
+  // #1186 this named whichever case ran first, which is precisely the bug: a `pwsh` cold start was
+  // being charged to a 5000 ms per-test budget that was never sized for a process spawn.
+  test("no CASE test paid for the pwsh spawn — the corpus was warm before they ran (#1186)", () => {
+    expect(chargedTo).toBe(WARM_UP);
+  });
 });
 
 /**
@@ -1047,6 +1097,69 @@ describe("-Upgrade re-runs a host from its own configuration (#1208)", () => {
     expect(uninstall).toContain("if ($Upgrade) { Die ");
     expect(uninstall).toMatch(/never survives an uninstall/i);
   });
+
+  /*
+   * WHERE THIS WAVE MEETS THE HARDENING WAVE (#1190). An upgrade is an install, so it clears the
+   * same two bars: the checksum is required and fail-closed, and plain http needs the explicit
+   * opt-in. The http half is executed one describe down, on the gate's own block; this is the
+   * checksum half, and it is structural because the integrity block cannot be reached off Windows.
+   */
+  test("an upgrade verifies the checksum on the same fail-closed path as a first install", () => {
+    const upgradeBlock = script.indexOf("if ($Upgrade) {");
+    const integrity = script.indexOf("# --- integrity: the digest, REQUIRED (#1190)");
+    expect(upgradeBlock).toBeGreaterThan(-1);
+    expect(integrity).toBeGreaterThan(upgradeBlock);
+    // No branch in the integrity block is conditional on how this run got its settings.
+    const block = script.slice(integrity, script.indexOf("# --- the scheduled task"));
+    expect(block).not.toContain("$Upgrade");
+    expect(block).not.toContain("$KeepToken");
+    expect(block).toMatch(/Die "could not fetch the sha256/);
+    expect(block).toMatch(/Die "checksum mismatch/);
+  });
+});
+
+/**
+ * A FAILURE MUST BE CHECKABLE BY A SCRIPT (#1191). The script runs under
+ * `$ErrorActionPreference='Stop'`, which makes `Write-Error` ITSELF a terminating error — so the old
+ * `Write-Error` + `exit 1` pair never reached its exit: every Die stopped on an unhandled error
+ * record, and a fleet script checking `$LASTEXITCODE` saw a raw record instead of a clean code.
+ * `throw` is the deliberate replacement: `powershell -File` and `-Command` both turn an uncaught
+ * throw into process exit code 1, and — the reason it wins over `Write-Host` + `exit` — the
+ * `& ([scriptblock]::Create((irm ...)))` form the Manual documents keeps an INTERACTIVE operator's
+ * elevated console open on a mistyped token instead of slamming it shut.
+ */
+describe("Die produces a clean, script-checkable failure (#1191)", () => {
+  test("it throws — Write-Error under 'Stop' never reaches an exit line", () => {
+    const die = powershellFunction("Die");
+    expect(die).toContain('throw "lazyit-agent install: $Message"');
+    expect(die).not.toContain("Write-Error");
+    expect(die).not.toContain("exit 1");
+  });
+
+  // EXECUTED where the harness allows (#1193 convention), same engine rule as the PATH corpus:
+  // real PowerShell when the machine has one, and the text assertion above is the whole check when
+  // it does not — never a test that silently does nothing.
+  test(`an uncaught Die exits the interpreter with code 1 (checked by ${ENGINE})`, () => {
+    if (!POWERSHELL) return; // the throw-shape test above is the model half
+    const dir = mkdtempSync(join(tmpdir(), "lazyit-install-ps1-die-"));
+    const driver = join(dir, "die.ps1");
+    writeFileSync(
+      driver,
+      [
+        // The same preferences the installer itself runs under — the exact combination that made
+        // the old Write-Error shape unreachable.
+        "$ErrorActionPreference = 'Stop'",
+        "Set-StrictMode -Version Latest",
+        powershellFunction("Die"),
+        "Die 'the token is required'",
+        "",
+      ].join("\n"),
+    );
+    const run = Bun.spawnSync([POWERSHELL, "-NoProfile", "-File", driver]);
+    expect(run.exitCode, "an uncaught throw must reach the caller as exit code 1").toBe(1);
+    const stderr = new TextDecoder().decode(run.stderr);
+    expect(stderr).toContain("lazyit-agent install: the token is required");
+  });
 });
 
 describe("the unsigned-binary state is stated, not hidden", () => {
@@ -1068,10 +1181,186 @@ describe("there is no windows/arm64 build, and the installer says so rather than
     expect(script).toContain("there is no ARM64 target");
   });
 
+  // THE WOW64 MISDETECT THIS PINS (#1191). Inside a 32-bit PowerShell on x64 Windows —
+  // exactly what RMM/deployment tools commonly spawn, the fleet-install vector — the variable
+  // PROCESSOR_ARCHITECTURE answers 'x86': the PROCESS architecture, not the machine's. The first
+  // cut gated on it alone, so a perfectly supported x64 host died with "unsupported architecture".
+  test("the gate decides on the MACHINE architecture — PROCESSOR_ARCHITEW6432 is consulted (#1191)", () => {
+    // PROCESSOR_ARCHITEW6432 exists only inside a WOW64 process and holds the real architecture;
+    // Is64BitOperatingSystem is the belt for a host that exports neither.
+    const w6432 = script.indexOf("PROCESSOR_ARCHITEW6432");
+    const gate = script.indexOf("-ne 'AMD64'");
+    expect(w6432).toBeGreaterThan(-1);
+    expect(w6432).toBeLessThan(gate);
+    expect(script).toContain("[Environment]::Is64BitOperatingSystem");
+  });
+
+  test("a 32-bit shell on x64 Windows is INSTRUCTED to relaunch, never refused as unsupported (#1191)", () => {
+    // Proceeding from the WOW64 shell would install under the wrong Program Files (%ProgramFiles%
+    // answers 'Program Files (x86)' there), so the shell is named as the problem and the exact
+    // 64-bit interpreter to relaunch from is given: SysNative is how a 32-bit process reaches the
+    // real System32.
+    expect(script).toContain("[Environment]::Is64BitProcess");
+    expect(script).toContain("SysNative\\WindowsPowerShell\\v1.0\\powershell.exe");
+    // The instruction lives on its own branch, after the machine has been established as AMD64 —
+    // an ARM64 host still gets the honest unsupported-architecture refusal.
+    const wow64Branch = script.indexOf("[Environment]::Is64BitProcess");
+    const unsupported = script.indexOf("unsupported architecture");
+    expect(unsupported).toBeGreaterThan(-1);
+    expect(wow64Branch).toBeGreaterThan(unsupported);
+  });
+
   test("-Baseline is explicit because Windows has no /proc/cpuinfo to auto-detect from", () => {
     expect(script).toContain("$arch = if ($Baseline) { 'x64-baseline' } else { 'x64' }");
     // And it never silently substitutes the AVX2 build for the baseline one, which would trade a
     // clear install error for an illegal-instruction crash weeks later.
     expect(script).toContain("will not substitute the ordinary x64 build");
+  });
+});
+
+/**
+ * PLAIN HTTP IS AN EXPLICIT DECISION, NOT A DEFAULT (#1190).
+ *
+ * Three behaviours compounded: an http -Url was accepted silently, the executable AND its sha256
+ * travelled over that same cleartext channel (so an on-path attacker serves a malicious PE with a
+ * matching digest), and the http URL was persisted into the config — putting the SA token on the
+ * wire in cleartext on every later report, indefinitely. ADR-0087's LAN reality means http stays
+ * POSSIBLE, but behind an opt-in whose warning names what it costs.
+ */
+describe("plain http needs -AllowInsecureHttp, and the cost is named (#1190)", () => {
+  /** The gate's block, located by its own heading comment. */
+  const gate = () => {
+    const block = script.slice(
+      script.indexOf("# --- plain http is an explicit decision"),
+      script.indexOf("[Net.ServicePointManager]"),
+    );
+    expect(block.length).toBeGreaterThan(0);
+    return block;
+  };
+
+  test("-AllowInsecureHttp is a declared parameter", () => {
+    expect(script).toMatch(/\[switch\] \$AllowInsecureHttp/);
+  });
+
+  test("http without the flag is a hard stop that names BOTH exposures", () => {
+    const block = gate();
+    // The refusal must say what cleartext costs: the executable that will run as SYSTEM, and the
+    // token that is persisted with this URL and re-exposed on every report the host ever sends.
+    //
+    // IT NAMES WHERE THE URL CAME FROM rather than always saying "-Url" (#1208 review). Since
+    // -Upgrade can take the URL off the host's own config, a refusal hard-coded to "-Url uses plain
+    // http" would send an operator looking for a parameter they never passed. `$urlSource` is that
+    // name, and it defaults to '-Url'.
+    expect(block).toContain('Die "$urlSource uses plain http');
+    expect(script).toContain("$urlSource = '-Url'");
+    expect(block).toContain("SYSTEM");
+    expect(block).toContain("token");
+    expect(block).toContain("every report");
+    expect(block).toContain("-AllowInsecureHttp");
+  });
+
+  /*
+   * -Upgrade DOES NOT INHERIT THE OPT-IN, which is new surface neither wave tested. A host installed
+   * with -AllowInsecureHttp carries `LAZYIT_URL=http://…` in its config, so a re-run that re-used it
+   * would arrive at this gate with a cleartext URL nobody typed. Letting the file answer "yes,
+   * cleartext is acceptable" on the operator's behalf is the same fail-open #1190 closed, one input
+   * over — so the gate reads the RESOLVED url, which the -Upgrade block assigns strictly before it.
+   */
+  test("the gate reads the resolved url, so a re-used http URL still has to be opted into", () => {
+    const upgradeAssigns = script.indexOf("$Url = Get-LazyitConfigValue");
+    const gateAt = script.indexOf("# --- plain http is an explicit decision");
+    expect(upgradeAssigns).toBeGreaterThan(-1);
+    expect(upgradeAssigns).toBeLessThan(gateAt);
+    // …and the gate tests $Url itself, not the parameter as it was bound.
+    expect(gate()).toContain("if ($Url -match '^http://')");
+  });
+
+  test("with the flag, a loud warning still names both exposures", () => {
+    const block = gate();
+    expect(block).toContain("Write-Warning");
+    expect(block).toContain("cleartext");
+  });
+
+  test("the gate sits before anything is downloaded", () => {
+    const gateAt = script.indexOf("# --- plain http is an explicit decision");
+    const download = script.indexOf('Invoke-LazyitDownload "/api/agent/download');
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeLessThan(download);
+  });
+});
+
+describe("the out-of-band digest escape hatch (#1190)", () => {
+  /** The integrity block, from its heading to the install of the verified file. */
+  const integrity = () => {
+    const block = script.slice(
+      script.indexOf("# --- integrity:"),
+      script.indexOf("New-Item -ItemType Directory -Path $InstallDir"),
+    );
+    expect(block.length).toBeGreaterThan(0);
+    return block;
+  };
+
+  test("-Sha256 is a declared parameter, validated as 64 hex characters", () => {
+    expect(script).toMatch(/\[string\] \$Sha256/);
+    expect(integrity()).toContain("^[0-9a-fA-F]{64}$");
+  });
+
+  test("when passed, it replaces the fetch — the digest arrives on a channel the server does not control", () => {
+    const block = integrity();
+    expect(block).toContain("if ($Sha256)");
+    expect(block).toContain("ToLowerInvariant()");
+  });
+
+  test("a failed or invalid digest fetch names -Sha256 as the way out, and removes the download", () => {
+    const block = integrity();
+    expect(block).toContain("pass -Sha256");
+    // Every hard stop in the block cleans up the temp download first: the invalid -Sha256, the
+    // failed fetch, the non-digest answer, and the mismatch.
+    expect(block.split("Remove-Item -LiteralPath $tmpBin").length - 1).toBeGreaterThanOrEqual(4);
+  });
+
+  test("-RequireChecksum stays accepted for existing automation — it is simply the default now", () => {
+    expect(script).toMatch(/\[switch\] \$RequireChecksum/);
+  });
+});
+
+/**
+ * THE INSTALLED BINARY MUST NOT KEEP THE USER-TEMP DACL (#1189).
+ *
+ * The exe is downloaded to %TEMP% — whose ACL grants the installing user's SID FullControl — and
+ * moved into %ProgramFiles%. On the same volume a move is a rename and KEEPS the source DACL, so
+ * the binary the Scheduled Task runs as SYSTEM every tick stayed writable by that user's
+ * medium-integrity (non-elevated) processes: overwrite the file, get SYSTEM within one tick. The
+ * config dir's ACL was carefully hardened; the binary's never was.
+ *
+ * Like the rest of this file, this asserts the SCRIPT's logic and ordering — Linux CI has no
+ * Windows ACLs to execute, so the reset itself is proven by `icacls /reset`'s documented contract
+ * ("replaces ACLs with default inherited ACLs"), not by observation here.
+ */
+describe("the installed binary carries the Program Files ACL, not the user-temp one (#1189)", () => {
+  test("the ACL is reset to inherited-only right after the move, before anything is run or registered", () => {
+    const move = script.indexOf("Move-Item -LiteralPath $tmpBin");
+    const reset = script.indexOf("icacls.exe");
+    const runCheck = script.indexOf("& $BinPath --help");
+    expect(move).toBeGreaterThan(-1);
+    expect(reset).toBeGreaterThan(move);
+    expect(reset).toBeLessThan(runCheck);
+    expect(script).toContain("/reset");
+  });
+
+  test("a failed reset is fatal and removes the binary — a SYSTEM exe writable by a user is not an install", () => {
+    const block = script.slice(script.indexOf("icacls.exe"), script.indexOf("& $BinPath --help"));
+    expect(block).toContain("Die ");
+    expect(block).toContain("Remove-Item -LiteralPath $BinPath");
+  });
+
+  test("re-running the installer heals an existing binary's ACL — the reset is unconditional (upgrade path)", () => {
+    // The move replaces the binary on every run and the reset always follows it, so re-running the
+    // installer — the documented upgrade path — repairs a host installed by the Move-Item era.
+    const block = script.slice(
+      script.indexOf("Move-Item -LiteralPath $tmpBin"),
+      script.indexOf("& $BinPath --help"),
+    );
+    expect(block).not.toContain("if (Test-Path");
   });
 });

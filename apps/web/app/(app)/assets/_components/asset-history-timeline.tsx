@@ -25,6 +25,8 @@ const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
   MODEL_CHANGED: "modelChanged",
   SPECS_CHANGED: "specsChanged",
   ACKNOWLEDGED: "acknowledged",
+  // AGENT_LINKED — an agent-reported node ADOPTED this asset at its confirm gate (ADR-0093 §4, #1198).
+  AGENT_LINKED: "agentLinked",
   DELETED: "deleted",
   RESTORED: "restored",
 };
@@ -61,6 +63,11 @@ const EVENT_BADGE: Record<AssetHistoryEventType, EventBadgeSpec> = {
   // Receipt acknowledgement (ADR-0089 Part B, #1029) — not a state change, so a neutral pill with the
   // inventory-family chart-4 dot rather than a solid status tone.
   ACKNOWLEDGED: { kind: "categorical", dot: "bg-chart-4" },
+  // Agent adoption (ADR-0093 §4, #1198) — a LINK, not a state change: nothing about the asset itself
+  // moved, a machine simply started reporting into it. So the same neutral pill as ACKNOWLEDGED rather
+  // than a solid status tone, on chart-5 — the next unused hue in the sequence, which keeps every
+  // categorical event visually distinct in the margin.
+  AGENT_LINKED: { kind: "categorical", dot: "bg-chart-5" },
 };
 
 /** The rail tick colour (ADR-0077): a semantic event lights its tick with its status tone;
@@ -171,6 +178,13 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
         return t("details.specsChanged");
       case "ACKNOWLEDGED":
         return t("details.acknowledged");
+      case "AGENT_LINKED":
+        // A STATIC line, like every other non-interpolating case. The payload carries
+        // `{ nodeId, reportingSource, externalId }`, but none of those is a thing a human recognises:
+        // a cuid and a machine-id-derived key would read as noise beside "to Ada Lovelace". Naming the
+        // node would need its label, i.e. a fetch this timeline does not make. The event's job is to
+        // answer WHEN a machine started writing to this row; the deep link is wave 2's call.
+        return t("details.agentLinked");
       case "DELETED":
         return t("details.deleted");
       case "RESTORED":

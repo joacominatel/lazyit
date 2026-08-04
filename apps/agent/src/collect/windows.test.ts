@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { hostname as osHostname } from "node:os";
 import { AGENT_POLICY_DEFAULT, type AgentPolicy } from "@lazyit/shared";
 import {
+  buildWindowsFactsScript,
   buildWindowsHost,
   collectContainers,
+  collectHost,
   DEFAULT_PATHEXT,
   parseDockerCliContainers,
   parseWindowsBlob,
@@ -140,12 +143,65 @@ describe("buildWindowsHost", () => {
 
   test("cpu, memory, domain, fqdn and bootedAt come off the same blob", () => {
     const { host, privileged } = buildWindowsHost(facts(), undefined, AGENT_POLICY_DEFAULT, () => {});
-    expect(host.cpu).toEqual({ model: "13th Gen Intel(R) Core(TM) i7-1365U", cores: 10 });
+    // 12, not 10: `cores` is LOGICAL CPUs (#1191) — the fixture machine is 10c/12t.
+    expect(host.cpu).toEqual({ model: "13th Gen Intel(R) Core(TM) i7-1365U", cores: 12 });
     expect(host.memoryBytes).toBe(34_058_919_936);
     expect(host.domain).toEqual({ name: "corp.example.com", joined: true });
     expect(host.fqdn).toBe("lt-0042.corp.example.com");
     expect(host.bootedAt).toBe("2026-07-30T06:12:00.000Z");
     expect(privileged).toBe(true);
+  });
+
+  // THE 2x FLEET SKEW THIS PINS (#1191). `host.cpu.cores` has exactly ONE wire semantic — LOGICAL
+  // CPUs, which is what Linux has always shipped (`/proc/cpuinfo`'s `processor :` lines count
+  // hyper-threads). The first Windows cut summed physical NumberOfCores instead, so the same 8c/16t
+  // machine reported 8 or 16 depending on OS and every fleet-wide capacity comparison was silently
+  // 2x off. Same class as #1169, different fact.
+  test("cores are LOGICAL CPUs — the one wire semantic, the one Linux has always shipped (#1191)", () => {
+    const { host } = buildWindowsHost(
+      facts({
+        cpu: [
+          { Name: "Intel(R) Xeon(R) Silver 4210", NumberOfCores: 10, NumberOfLogicalProcessors: 20 },
+          { Name: "Intel(R) Xeon(R) Silver 4210", NumberOfCores: 10, NumberOfLogicalProcessors: 20 },
+        ],
+      }),
+      undefined,
+      AGENT_POLICY_DEFAULT,
+      () => {},
+    );
+    // Summed across sockets, like the Linux count is.
+    expect(host.cpu?.cores).toBe(40);
+  });
+
+  test("a CPU entry without NumberOfLogicalProcessors falls back to its physical count", () => {
+    // Very old SKUs can omit the logical count; fewer-than-the-truth beats reporting nothing.
+    const { host } = buildWindowsHost(
+      facts({ cpu: [{ Name: "Old Xeon", NumberOfCores: 4 }] }),
+      undefined,
+      AGENT_POLICY_DEFAULT,
+      () => {},
+    );
+    expect(host.cpu?.cores).toBe(4);
+  });
+
+  // THE IDENTITY FLIP THIS PINS (#1191). The hostname used to prefer the sweep's DNSHostName and
+  // fall back to os.hostname() (NetBIOS-style, typically uppercase) only when the sweep degraded —
+  // so a transient WMI failure changed the reported name/case between consecutive reports of the
+  // SAME node, and `fqdn` (lowercased) disagreed with `hostname` (verbatim) inside one report.
+  describe("the hostname is one canonical lowercase value from the sweep-independent source (#1191)", () => {
+    test("healthy sweep and degraded sweep answer the SAME hostname", () => {
+      const healthy = buildWindowsHost(facts(), undefined, AGENT_POLICY_DEFAULT, () => {}).host;
+      const degraded = buildWindowsHost(null, undefined, AGENT_POLICY_DEFAULT, () => {}).host;
+      expect(healthy.hostname).toBe(degraded.hostname);
+      // The stable source is the OS's own answer, canonicalised once.
+      expect(healthy.hostname).toBe(osHostname().toLowerCase());
+    });
+
+    test("hostname and fqdn cannot disagree in case within one report", () => {
+      const { host } = buildWindowsHost(facts(), undefined, AGENT_POLICY_DEFAULT, () => {});
+      expect(host.hostname).toBe(host.hostname.toLowerCase());
+      expect(host.fqdn).toBe(host.fqdn?.toLowerCase());
+    });
   });
 
   test("a workgroup machine reports NO domain — Win32_ComputerSystem.Domain is the workgroup name there", () => {
@@ -181,10 +237,13 @@ describe("buildWindowsHost", () => {
 
   test("NICs join adapter to configuration by Index, carrying v4 AND v6 with a derived scope", () => {
     const { host } = buildWindowsHost(facts(), undefined, AGENT_POLICY_DEFAULT, () => {});
+    // The MACs are LOWER-CASE here while the fixture (like WMI itself) spells them upper (#1169):
+    // the wire form is one canonical spelling on both collectors. See collect.test.ts for the
+    // cross-collector property this is the Windows half of.
     expect(host.nics).toEqual([
       {
         name: "Ethernet",
-        mac: "AA:BB:CC:DD:EE:01",
+        mac: "aa:bb:cc:dd:ee:01",
         isVirtual: false,
         ipv4: ["10.20.30.40"],
         ipv6: [
@@ -194,7 +253,7 @@ describe("buildWindowsHost", () => {
       },
       {
         name: "vEthernet (WSL)",
-        mac: "AA:BB:CC:DD:EE:02",
+        mac: "aa:bb:cc:dd:ee:02",
         isVirtual: true,
         ipv4: ["172.28.0.1"],
       },
@@ -263,6 +322,42 @@ describe("buildWindowsHost", () => {
     // per platform.
     expect(host.identifiers?.some((i) => i.kind === "serial")).toBe(false);
     expect(notes).toHaveLength(3);
+  });
+
+  test("a non-string CIM string field is skipped, never fatal (#1188)", () => {
+    // The same latent pattern as the Uninstall hive, on the CIM side: the document is parsed from a
+    // host, so no field is guaranteed the type the class declares. Each poisoned field costs ITSELF
+    // — the rest of the host block still ships.
+    const base = facts();
+    const { host } = buildWindowsHost(
+      facts({
+        os: { ...base.os, Caption: ["Microsoft", "Windows"] },
+        cs: { ...base.cs, DNSHostName: 42, Manufacturer: { odd: true } },
+        bios: { SerialNumber: 12345 },
+        adapters: [
+          { Index: 3, NetConnectionID: 7, MACAddress: "AA:BB:CC:DD:EE:09", PhysicalAdapter: true },
+          ...(base.adapters as unknown[]),
+        ],
+        machineGuid: 99,
+      }),
+      undefined,
+      AGENT_POLICY_DEFAULT,
+      () => {},
+    );
+    // The numeric DNSHostName is not the hostname — the OS fallback is.
+    expect(host.hostname).not.toBe("42");
+    expect(host.hostname.length).toBeGreaterThan(0);
+    // Caption was an array: `name` is omitted, the sibling fields survive.
+    expect(host.os).toEqual({ family: "windows", version: "10.0.26100", build: "26100" });
+    // Manufacturer (object) and serial (number) are dropped; model still reports.
+    expect(host.hardware).toEqual({ model: "Latitude 7440" });
+    // The adapter whose NetConnectionID is a number is skipped; the well-formed ones survive.
+    expect(host.nics?.map((n) => n.name)).toEqual(["Ethernet", "vEthernet (WSL)"]);
+    // A numeric MachineGuid is no identifier at all, not a stringified one.
+    const kinds = (host.identifiers ?? []).map((i) => i.kind);
+    expect(kinds).not.toContain("windows-machine-guid");
+    expect(kinds).not.toContain("serial");
+    expect(kinds).toContain("smbios-uuid");
   });
 
   test("junk SMBIOS identity is dropped, not shipped consistently spelled", () => {
@@ -464,6 +559,52 @@ describe("parseWindowsSoftware", () => {
       { name: "Only App", source: "registry" },
     ]);
     expect(parseWindowsSoftware(undefined)).toEqual([]);
+  });
+
+  // Issue #1188. The Uninstall hive is written by arbitrary third-party installers and its values
+  // are NOT guaranteed strings: a DisplayVersion written as REG_DWORD arrives through ConvertTo-Json
+  // as a number, a REG_MULTI_SZ DisplayName as an array. One such entry used to throw out of
+  // `.trim()` and reject the WHOLE report — every tick, until that software was uninstalled.
+  describe("a non-string registry value never fails the report (#1188)", () => {
+    test("a REG_DWORD DisplayVersion (a number) is coerced — a number IS a meaningful version", () => {
+      expect(
+        parseWindowsSoftware([
+          { DisplayName: "Vendor Runtime", DisplayVersion: 5 },
+          { DisplayName: "Real App", DisplayVersion: "1.2.3" },
+        ]),
+      ).toEqual([
+        { name: "Vendor Runtime", version: "5", source: "registry" },
+        { name: "Real App", version: "1.2.3", source: "registry" },
+      ]);
+    });
+
+    test("a REG_MULTI_SZ DisplayName (an array) costs THAT entry, with a warning — the rest ship", () => {
+      const { warn, notes } = sink();
+      const pkgs = parseWindowsSoftware(
+        [
+          { DisplayName: ["Broken", "Installer"], DisplayVersion: "9.9" },
+          { DisplayName: "Real App", DisplayVersion: "1.0" },
+        ],
+        warn,
+      );
+      expect(pkgs).toEqual([{ name: "Real App", version: "1.0", source: "registry" }]);
+      // The skip is EXPLAINED (#1138): an entry an operator can see in Programs and Features that
+      // never reaches the inventory must leave a trace in diagnostics.warnings.
+      expect(notes.some((n) => n.startsWith("software:") && n.includes("DisplayName"))).toBe(true);
+      expect(notes).toHaveLength(1);
+    });
+
+    test("a missing or blank DisplayName still skips SILENTLY — fragments are normal, not junk", () => {
+      const { warn, notes } = sink();
+      parseWindowsSoftware([{ DisplayVersion: "1.0" }, { DisplayName: "   " }], warn);
+      expect(notes).toEqual([]);
+    });
+
+    test("a DisplayVersion that is neither string nor number costs the FIELD, not the entry", () => {
+      expect(parseWindowsSoftware([{ DisplayName: "Odd App", DisplayVersion: ["1", "0"] }])).toEqual([
+        { name: "Odd App", source: "registry" },
+      ]);
+    });
   });
 });
 
@@ -674,6 +815,176 @@ describe("readMachineGuid", () => {
   });
 });
 
+/**
+ * Issue #1177 — a collector switched OFF in policy still RAN on Windows. The single fixed PowerShell
+ * blob queried `Win32_DiskDrive`, `MSFT_PhysicalDisk`, `Win32_NetworkAdapter`,
+ * `Win32_NetworkAdapterConfiguration`, `Win32_BIOS` and both Uninstall hives unconditionally, and the
+ * policy filters then declined to COPY the results into the report. Linux has always genuinely
+ * skipped the work (`policy.collect.hardware ? collectHardware(warn) : undefined` — `dmidecode` is
+ * never spawned), so the same toggle meant two different things per platform:
+ *
+ *  - "do not REPORT this to lazyit" — worked on both;
+ *  - "do not READ this on my host" — worked on Linux, silently failed on Windows.
+ *
+ * The second is the one a security-minded operator is exercising, and it is what ADR-0074 §7's
+ * `local may VETO, never widen` posture is built on. The fix composes the script from the collectors
+ * the policy actually wants, which keeps the one-interpreter-start design (#1144) intact — it is a
+ * string-building change, not an architectural one.
+ */
+describe("a collector the policy turns OFF is never RUN, not merely filtered (#1177)", () => {
+  /** The policy with exactly one collector switched off. */
+  const off = (key: keyof AgentPolicy["collect"]): AgentPolicy =>
+    policy({ collect: { ...AGENT_POLICY_DEFAULT.collect, [key]: false } });
+
+  /** Every collector off — the operator who wants the agent to read as little as possible. */
+  const ALL_OFF = policy({
+    collect: {
+      hardware: false,
+      disks: false,
+      nics: false,
+      software: false,
+      containers: false,
+    },
+  });
+
+  test("collect.disks=false: neither disk class is in the script the host would run", () => {
+    const script = buildWindowsFactsScript(off("disks"));
+    expect(script).not.toContain("Win32_DiskDrive");
+    expect(script).not.toContain("MSFT_PhysicalDisk");
+    // …and the default still asks for them, so this is a policy effect and not a deletion.
+    expect(buildWindowsFactsScript(AGENT_POLICY_DEFAULT)).toContain("Win32_DiskDrive");
+  });
+
+  test("collect.nics=false: neither adapter class is queried", () => {
+    const script = buildWindowsFactsScript(off("nics"));
+    expect(script).not.toContain("Win32_NetworkAdapter");
+    expect(script).not.toContain("Win32_NetworkAdapterConfiguration");
+    expect(buildWindowsFactsScript(AGENT_POLICY_DEFAULT)).toContain("Win32_NetworkAdapter");
+  });
+
+  test("collect.hardware=false: the BIOS serial is never READ, not read and then dropped", () => {
+    // The sharpest case in the issue: an operator who turns hardware off believing the agent never
+    // asks for the BIOS serial was wrong — it asked, held the value in memory, and discarded it.
+    const script = buildWindowsFactsScript(off("hardware"));
+    expect(script).not.toContain("Win32_BIOS");
+    expect(buildWindowsFactsScript(AGENT_POLICY_DEFAULT)).toContain("Win32_BIOS");
+  });
+
+  test("collect.software=false: neither Uninstall hive is walked", () => {
+    const script = buildWindowsFactsScript(off("software"));
+    expect(script).not.toContain("Uninstall");
+    expect(buildWindowsFactsScript(AGENT_POLICY_DEFAULT)).toContain("Uninstall");
+  });
+
+  test("what the report still needs survives every veto — this is a veto, not an off switch", () => {
+    // `Win32_ComputerSystem` is NOT gated by `hardware`: memory, domain membership and the
+    // virtualization signature all come off it, and none of those is the hardware collector's fact.
+    // Identity (MachineGuid, the SMBIOS UUID) and the chassis code are likewise not policy-gated —
+    // no policy flag names them, and inventing one here would be widening the toggle's meaning.
+    const script = buildWindowsFactsScript(ALL_OFF);
+    for (const kept of [
+      "Win32_OperatingSystem",
+      "Win32_ComputerSystem",
+      "Win32_Processor",
+      "Win32_ComputerSystemProduct",
+      "Win32_SystemEnclosure",
+      "MachineGuid",
+    ]) {
+      expect(script).toContain(kept);
+    }
+  });
+
+  test("the argv the collector SPAWNS carries no query for a disabled collector", async () => {
+    // The property the issue is actually about, asserted where it is true or false: not "the field is
+    // absent from the report" (it always was) but "the work never reached the host".
+    resetWindowsCollectorMemos();
+    const spawned: string[][] = [];
+    const exec = async (args: string[]) => {
+      spawned.push(args);
+      return null;
+    };
+    await collectHost(() => {}, ALL_OFF, exec);
+    // ONE spawn: the fact sweep. No docker probe, because containers are off too.
+    expect(spawned).toHaveLength(1);
+    const commandLine = spawned[0]!.join(" ");
+    for (const cls of [
+      "Win32_DiskDrive",
+      "MSFT_PhysicalDisk",
+      "Win32_NetworkAdapter",
+      "Win32_BIOS",
+      "Uninstall",
+    ]) {
+      expect(commandLine).not.toContain(cls);
+    }
+    resetWindowsCollectorMemos();
+  });
+
+  test("a document with those sections MISSING still produces a valid report, and says why", () => {
+    // Degrade-never-reject: an omitted section must read as "not collected", never as an error or an
+    // empty host. Each veto still files its ONE note, so the empty column is answerable — which is
+    // the property that makes a disabled collector read identically on both platforms.
+    const { warn, notes } = sink();
+    const { host } = buildWindowsHost(
+      // What the composed script emits when every optional section is vetoed.
+      {
+        os: { Caption: "Microsoft Windows Server 2022 Standard", Version: "10.0.20348" },
+        cs: { TotalPhysicalMemory: 68_719_476_736, Manufacturer: "Dell Inc.", Model: "PowerEdge R650", PartOfDomain: false },
+        cpu: [{ Name: "Intel(R) Xeon(R) Silver 4310", NumberOfLogicalProcessors: 24 }],
+        csp: { UUID: "4c4c4544-0051-4b10-8034-b4c04f524d33" },
+        enclosure: { ChassisTypes: [23] },
+        machineGuid: "f3b1a2c4-5d6e-4f70-8192-a3b4c5d6e7f8",
+        elevated: true,
+      },
+      undefined,
+      ALL_OFF,
+      warn,
+    );
+    expect(host.os?.family).toBe("windows");
+    expect(host.memoryBytes).toBe(68_719_476_736);
+    expect(host.chassis).toBe("server");
+    expect(host.nics).toBeUndefined();
+    expect(host.disks).toBeUndefined();
+    expect(host.hardware).toBeUndefined();
+    // Identity is intact: the veto costs facts, never the host's ability to be recognised.
+    expect(host.identifiers?.map((one) => one.kind)).toEqual(["windows-machine-guid", "smbios-uuid"]);
+    const said = notes.join("\n");
+    // `containers` is not among these: its veto is filed by `collectHost`, which is where the probe
+    // it stops actually lives.
+    for (const fact of ["hardware", "nics", "disks"]) {
+      expect(said).toContain(`${fact}: disabled by agent policy`);
+    }
+    // …and no note claims a class "returned nothing" when nothing was asked for.
+    expect(said).not.toContain("returned nothing");
+    expect(said).not.toContain("enumerated nothing");
+  });
+
+  test("every policy variant keeps the script's own invariants — quoting, ASCII, errors LAST", () => {
+    // The properties #1144/#1191 pinned over the fixed string have to hold over every string the
+    // composer can produce, or the composition would be a new way to break them.
+    const variants: AgentPolicy[] = [
+      AGENT_POLICY_DEFAULT,
+      ALL_OFF,
+      off("hardware"),
+      off("disks"),
+      off("nics"),
+      off("software"),
+    ];
+    for (const variant of variants) {
+      const script = buildWindowsFactsScript(variant);
+      expect(script).not.toContain('"');
+      expect([...script].filter((c) => (c.codePointAt(0) ?? 0) > 0x7f)).toEqual([]);
+      expect(script).toContain("elevated=$el;errors=@($Error|");
+      // `errors` is the LAST key however many sections were dropped — a hashtable literal is
+      // evaluated in written order, which is the only reason it sees what the earlier keys raised.
+      expect(script.indexOf("errors=@($Error|")).toBeGreaterThan(script.indexOf("machineGuid=$mg"));
+      expect(script.endsWith("}|ConvertTo-Json -Compress -Depth 4")).toBe(true);
+      // No empty key and no doubled separator, whichever sections the policy removed.
+      expect(script).not.toContain(";;");
+      expect(script).not.toContain("@{;");
+    }
+  });
+});
+
 describe("WINDOWS_FACTS_SCRIPT", () => {
   test("never touches Win32_Product — enumerating it reconfigures every installed MSI", () => {
     expect(WINDOWS_FACTS_SCRIPT).not.toContain("Win32_Product");
@@ -735,5 +1046,28 @@ describe("WINDOWS_FACTS_SCRIPT", () => {
     // A double quote anywhere would put the whole collector at the mercy of the command-line
     // re-quoting round trip. Re-asserted here because the error-reporting addition writes strings too.
     expect(WINDOWS_FACTS_SCRIPT).not.toContain('"');
+  });
+
+  // THE LATENT MOJIBAKE THIS PINS (#1191). Windows PowerShell 5.1 writes redirected stdout in the
+  // OEM code page while `run()` decodes UTF-8. That was safe only because 5.1's ConvertTo-Json
+  // escapes non-ASCII to \uXXXX — an undocumented dependency: a switch to pwsh or one raw string
+  // fact would mojibake every localized name, break LAZYIT_EXCLUDE_NICS globs and churn
+  // softwareHash. The script states the boundary's encoding itself instead of leaning on that.
+  test("stdout is declared UTF-8 (no BOM) at the top, before anything is emitted (#1191)", () => {
+    const encoding = "try{[Console]::OutputEncoding=New-Object Text.UTF8Encoding $false}catch{}";
+    expect(WINDOWS_FACTS_SCRIPT).toContain(encoding);
+    // BEFORE `$Error.Clear()`, so a host that refuses the setter (no console handle) cannot leak
+    // that caught error into the report's errors[] — and long before the one emit at the end.
+    expect(WINDOWS_FACTS_SCRIPT.indexOf(encoding)).toBeLessThan(
+      WINDOWS_FACTS_SCRIPT.indexOf("$Error.Clear()"),
+    );
+  });
+
+  test("the script itself stays pure ASCII — it travels as one command-line argument", () => {
+    // The same rule installers-encoding.test.ts holds over the public installers, held here over the
+    // one PowerShell string this binary carries: a non-ASCII byte would be at the mercy of the
+    // child's ANSI/OEM decode exactly like a BOM-less .ps1 (#1166).
+    const offenders = [...WINDOWS_FACTS_SCRIPT].filter((c) => (c.codePointAt(0) ?? 0) > 0x7f);
+    expect(offenders).toEqual([]);
   });
 });

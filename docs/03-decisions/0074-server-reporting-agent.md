@@ -287,7 +287,7 @@ Added, all **additive and optional** except `os.family`:
 | Field | What it answers |
 | --- | --- |
 | `os.family` (`linux`\|`windows`\|`darwin`\|`bsd`\|`other`) + `os.build` | the discriminator every consumer branches on; `build` is the identifier Windows/macOS keep distinct from `version`. |
-| `host.chassis` (`server`\|`desktop`\|`laptop`\|`vm`\|`container`\|`unknown`) | what the host *is* — the hint #1139's `kind` inference **will** read instead of landing every host as `PHYSICAL_HOST`. Stored on the node's blob today; nothing reads or displays it yet. |
+| `host.chassis` (`server`\|`desktop`\|`laptop`\|`vm`\|`container`\|`unknown`) | what the host *is* — the hint #1139's `kind` inference **will** read instead of landing every host as `PHYSICAL_HOST`. ~~Stored on the node's blob today; nothing reads or displays it yet.~~ — **corrected 2026-08-03 (#1196):** `inferNodeKind` has read it since #1139, but only as the **fallback** branch, so on a report carrying `host.virtualization` (which both collectors send whenever the probe succeeds) it is still read by nothing. [[0093-chassis-routing-and-asset-adoption]] proposes reading it directly, orthogonally to `kind`. |
 | `host.virtualization` (`{ type, host? }`) | what it runs *under*. `{ type: 'none' }` is a **positive** bare-metal finding, not "unknown". |
 | `host.fqdn`, `host.domain` (`{ name?, joined? }`) | the Windows/macOS facts `host` had nowhere to put. `hostname` stays the SHORT name; without these a Windows collector would have to overload it or wait for a v3, and §3 says there is no v3 identity migration. Unpopulated on Linux today, which costs nothing. |
 | `host.identifiers[]` (`{ kind, namespace?, value }`) | the **corroborating** identity set #1141 will consume. `externalId` stays the primary dedup key; these are evidence beside it, never a second key. `value` is **canonicalised and sanitized per kind** (below); `namespace` labels an identifier whose `kind` this build does not recognise. Stored on the node's blob; nothing compares or displays it yet. |
@@ -1316,10 +1316,15 @@ Stated honestly, and it is worth stating because the temptation is to oversell i
 checksum, not a signature.** Anyone who can write both files in the API container defeats it, and it
 is not meant to survive that — cosign stays deferred below. What it buys is a corrupted layer, a
 half-written volume, a caching proxy serving a stale artifact, and a tamper that changed one file and
-not the other, all stopping at the installer instead of nowhere. A build that publishes no digest
+not the other, all stopping at the installer instead of nowhere. ~~A build that publishes no digest
 (any instance older than this) makes the installer **warn and continue**, because web and API ship
 from the same image and failing closed there would brick every install during a rollback;
-`--require-checksum` makes it fatal for an operator who wants that.
+`--require-checksum` makes it fatal for an operator who wants that.~~ — **superseded (2026-08-03,
+#1190): verification is required by default and cannot fail open — a check the party being checked
+can strip by failing one fetch is not a check. A build that publishes no digest is now FATAL; the one
+escape is `--sha256`/`-Sha256`, a digest obtained out of band, and `--require-checksum`/
+`-RequireChecksum` stays accepted and means nothing. Plain-`http` URLs moved behind the explicit
+`--allow-insecure-http`/`-AllowInsecureHttp` opt-in at the same time ([[0087-plain-http-lan-deployment-axis]]).**
 
 **Amendment (2026-08-02, #1166) — the installers are ASCII, and `--url` is checked before anything is
 downloaded.** Two defects found on the **first real Windows host**, during first-run validation.
@@ -2089,6 +2094,17 @@ Four things about it are deliberate, in the same spirit as `--keep-token` above:
   it when a host carries both; reading the other one would download over one trust anchor and report
   over another.
 
+**Where this meets the #1189/#1190/#1191 hardening, because the two landed on branches cut from the
+same `dev`.** A re-run is an install, so it clears the same bars: the checksum is verified on the
+fail-closed path with no `--upgrade` branch anywhere near it, and plain http still needs
+`--allow-insecure-http`. That second one is a decision, not a setting. A host installed with the
+opt-in carries `LAZYIT_URL=http://…`, so `--upgrade` alone reaches the gate with a cleartext URL
+nobody typed — and letting the *file* answer *"yes, cleartext is acceptable"* on the operator's
+behalf is the same fail-open #1190 closed, one input over. The gate therefore reads the **resolved**
+URL whatever supplied it, and the refusal names the config file as the source rather than a `--url`
+the operator never passed (`$URL_SOURCE` / `$urlSource`, the same shape `$CA_SOURCE` already had).
+Settings are re-used; an acceptance of exposure is re-stated. Both compositions are tested.
+
 Upgrade behaviour is unchanged from the amendment above: purely additive, no flag changed meaning,
 no default moved, and the config format an older installer wrote is read as-is.
 
@@ -2104,7 +2120,11 @@ no default moved, and the config format an older installer wrote is read as-is.
 - **`curl | sh` posture.** The installer is served by the operator's own TLS-fronted instance
   (same-origin, no third party). The token is the operator's, scoped to one permission, revocable from
   the UI. A "download, inspect, then run" path is available for the cautious; the one-liner is the
-  default.
+  default. **Amended (2026-08-03, #1190):** the served executable is verified against its published
+  sha256 **by default, fail-closed** (`--sha256`/`-Sha256` is the out-of-band escape for an instance
+  that publishes none), and "TLS-fronted" is the default rather than a guarantee — a plain-`http`
+  instance installs only behind the explicit `--allow-insecure-http`/`-AllowInsecureHttp` opt-in,
+  which names both cleartext exposures ([[0087-plain-http-lan-deployment-axis]]).
 
 **Amendment (2026-07-31, #1134) — throttling `POST /infra/report`.** The bullets above reason about
 **authorization** and are right: one permission, a human gate, no secret reach, and a leaked token buys

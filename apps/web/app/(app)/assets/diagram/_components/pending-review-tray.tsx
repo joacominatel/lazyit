@@ -38,6 +38,7 @@ import {
   useInfraNodes,
 } from "@/lib/api/hooks/use-infra-nodes";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { displayChassis } from "@/lib/infra/chassis";
 import { AgentBadge, AgentFreshness } from "./agent-provenance";
 import { AutoConfirmRulesDialog } from "./auto-confirm-rules-dialog";
 import { BulkConfirmDialog, BulkDiscardDialog } from "./bulk-review-dialogs";
@@ -440,6 +441,11 @@ export function PendingReviewTray() {
               <ul className="divide-y">
                 {(group.host ? [group.host] : []).concat(group.children).map((node) => {
                   const isChild = isContainerChildExternalId(node.externalId);
+                  // The reported form factor (ADR-0093 §6), so a human working through forty
+                  // proposals can tell a server from somebody's laptop without opening each one —
+                  // and can act on the difference, since it is also a rule condition now. Null for
+                  // every node that reported no signal, which is every node until its next report.
+                  const chassis = displayChassis(node.chassis);
                   return (
                     <li
                       key={node.id}
@@ -464,6 +470,11 @@ export function PendingReviewTray() {
                             ) : null}
                             <span className="truncate text-sm font-medium">{node.label}</span>
                             <Badge variant="outline">{tInfra(`kind.${node.kind}`)}</Badge>
+                            {chassis ? (
+                              <Badge variant="secondary">
+                                {tInfra(`chassis.${chassis}`)}
+                              </Badge>
+                            ) : null}
                             <AgentBadge />
                             {node.ipAddress ? (
                               <span className="font-mono text-xs text-muted-foreground">

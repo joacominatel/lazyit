@@ -19,6 +19,7 @@ import {
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AgentFleetService } from '../infra/agent-fleet.service';
 import type { Principal } from '../auth/principal';
 import { isHumanPrincipal } from '../auth/principal';
 
@@ -83,6 +84,9 @@ export class UpdateService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    // ADR-0094's ONE aggregate line on the `update.available` email (#1206). Read-only, and the only
+    // reason this module knows about the fleet at all — see {@link agentsMajorBehindLine}.
+    private readonly agentFleet: AgentFleetService,
   ) {}
 
   /**
@@ -485,6 +489,7 @@ export class UpdateService implements OnModuleInit {
       behindBy === 1
         ? `You are running ${this.currentVersion} — one newer release is out. Review it in Settings → Instance.`
         : `You are running ${this.currentVersion} — ${behindBy} newer releases are out. Review them in Settings → Instance.`;
+    const agents = await this.agentsMajorBehindLine();
     await this.notifications.emit({
       type: 'update.available',
       dedupeKey: securityRelevant
@@ -495,16 +500,58 @@ export class UpdateService implements OnModuleInit {
         ? `Security update: lazyit ${latestVersion} is available`
         : `lazyit ${latestVersion} is available`,
       summary: securityRelevant
-        ? `This update addresses security-relevant issues — updating promptly is recommended. ${body}`
-        : body,
+        ? `This update addresses security-relevant issues — updating promptly is recommended. ${body}${agents.sentence}`
+        : `${body}${agents.sentence}`,
       metadata: {
         current: this.currentVersion,
         latest: latestVersion,
         behindBy,
         securityRelevant,
+        ...(agents.count > 0 ? { agentsMajorBehind: agents.count } : {}),
         ...(htmlUrl ? { htmlUrl } : {}),
       },
     });
+  }
+
+  /**
+   * The ONE aggregate agent line on the existing `update.available` email (ADR-0094 §Decisions
+   * resolved, decision 1 — the CEO's call of 2026-08-04).
+   *
+   * ONE SENTENCE, appended to the summary of an email that already exists. Deliberately NOT a new
+   * notification type, NOT a new schedule, and NOT per-host mail — that last one is the anti-pattern
+   * epic #1146 item 8 already records ("a bell nobody trusts is worse than no bell"), and it stays
+   * rejected. ADR-0094 §8's in-app-only posture is amended by exactly this line and nothing else.
+   *
+   * It reaches the admin at the moment they are already reading about a version gap, which is the
+   * whole argument for it: agents fall behind precisely *because* the instance moved forward.
+   *
+   * MAJOR-only, per ADR-0083/#907 — an email is an interruption, and MINOR/PATCH drift is not worth
+   * one. Zero ⇒ empty string, so a fleet that is current (or, per ADR-0094 §2, one that is entirely
+   * "version unknown" because it predates #1203) simply gets the email it always got. Fail-soft: any
+   * error counts as no agents rather than losing the update email that was the point of the send.
+   */
+  private async agentsMajorBehindLine(): Promise<{
+    count: number;
+    sentence: string;
+  }> {
+    try {
+      const count = await this.agentFleet.countAgentsMajorBehind();
+      if (count <= 0) return { count: 0, sentence: '' };
+      return {
+        count,
+        sentence:
+          count === 1
+            ? ' One reporting agent is a MAJOR version behind — see Assets → Topology.'
+            : ` ${count} reporting agents are a MAJOR version behind — see Assets → Topology.`,
+      };
+    } catch (err) {
+      // The agent line is a courtesy; the update email is the obligation. Never let the former sink
+      // the latter.
+      this.logger.warn(
+        `Agent fleet count failed (update email sent without the agent line): ${errText(err)}`,
+      );
+      return { count: 0, sentence: '' };
+    }
   }
 
   // ── mapping ────────────────────────────────────────────────────────────────

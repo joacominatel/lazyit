@@ -9,6 +9,11 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useInfraImpact } from "@/lib/api/hooks/use-infra-nodes";
 import { buildNextUrl } from "@/lib/hooks/list-params-url";
 import { useCan } from "@/lib/hooks/use-permissions";
+import {
+  SHOW_ENDPOINTS_PARAM,
+  SHOW_ENDPOINTS_VALUE,
+  showEndpointsFromParam,
+} from "@/lib/infra/endpoints";
 import { cn } from "@/lib/utils";
 import { AddNodeMenu } from "./add-node-menu";
 import { CreateAgentWizard } from "./create-agent-wizard";
@@ -66,6 +71,12 @@ import { ServersTableView } from "./servers-table-view";
  * The header's add affordance (#1181) leads with the reporting agent and keeps the hand-drawn node
  * one click behind it; see {@link AddNodeMenu}. The two paths carry different permissions, so each is
  * gated on its own and the control renders only what this operator can actually do.
+ *
+ * `?endpoints=1` (ADR-0093 §5) is the third param this view owns: the canvas hides reported laptops
+ * and desktops by default, and this is the toggle that brings them back. It lives here rather than in
+ * the canvas for the same reason `?view` does — the URL is the source of truth, so the choice survives
+ * a reload, a Back navigation and a Map↔Table switch. It is a RENDERING preference and nothing more:
+ * the Table view, blast radius, search and the API are all untouched by it.
  */
 export function DiagramView() {
   const t = useTranslations("infra");
@@ -74,11 +85,33 @@ export function DiagramView() {
   // /service-accounts route (ADR-0048) — a different permission from the infra:manage that gates
   // putting a node on the map by hand.
   const canMintAgent = useCan("settings:manage");
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const view = searchParams.get("view") === "table" ? "table" : "map";
   // The `?node=` the URL carries right now. Read on every render (not once): it is what both the
   // initial state below and the deep-link effect further down are driven by.
   const nodeParam = searchParams.get("node");
+  // "Show endpoints" (ADR-0093 §5). URL-backed like `?view`, and for the same reason: the canvas
+  // hides laptops and desktops by DEFAULT, so the one click that brings them back has to survive a
+  // reload and a Map↔Table switch — a hidden-by-default treatment an operator cannot keep undone is
+  // one they have to undo every single time. The param is dropped on the default (hidden) to keep
+  // URLs clean, and `buildNextUrl` preserves every other param across the write.
+  const showEndpoints = showEndpointsFromParam(
+    searchParams.get(SHOW_ENDPOINTS_PARAM),
+  );
+  const toggleEndpoints = useCallback(() => {
+    router.replace(
+      buildNextUrl(searchParams.toString(), pathname, {
+        [SHOW_ENDPOINTS_PARAM]: showEndpointsFromParam(
+          searchParams.get(SHOW_ENDPOINTS_PARAM),
+        )
+          ? undefined
+          : SHOW_ENDPOINTS_VALUE,
+      }),
+      { scroll: false },
+    );
+  }, [router, pathname, searchParams]);
   const [selectedId, setSelectedId] = useState<string | null>(nodeParam);
   const [detailId, setDetailId] = useState<string | null>(nodeParam);
   const [impactOn, setImpactOn] = useState(false);
@@ -186,6 +219,8 @@ export function DiagramView() {
               impactOn={impactOn}
               onToggleImpact={() => setImpactOn((on) => !on)}
               onRetryImpact={() => void refetchImpact()}
+              showEndpoints={showEndpoints}
+              onToggleEndpoints={toggleEndpoints}
               onApiReady={onCanvasReady}
               emptyAction={addAffordance}
             />

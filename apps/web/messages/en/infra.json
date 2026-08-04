@@ -27,6 +27,14 @@
     "APPLIANCE": "Appliance",
     "OTHER": "Other"
   },
+  "chassis": {
+    "server": "Server",
+    "desktop": "Desktop",
+    "laptop": "Laptop",
+    "vm": "Virtual machine",
+    "container": "Container",
+    "unknown": "Not reported"
+  },
   "status": {
     "ONLINE": "Online",
     "OFFLINE": "Offline",
@@ -106,6 +114,8 @@
     "kindLabel": "Kind",
     "trackAsAssetLabel": "Track as an inventory asset",
     "trackAsAssetDescription": "On by default — also create a tracked Asset (with the reported host facts) so this server can carry an owner, KB links and secrets. Turn off to keep it graph-only.",
+    "adoptExisting": "This machine is already in your inventory. Confirming links it to that asset instead of creating a second one:",
+    "adoptSerial": "Matched on serial",
     "submit": "Confirm server",
     "confirmedToast": "Server confirmed.",
     "error": "Couldn't confirm the server."
@@ -195,6 +205,12 @@
   },
   "tidy": {
     "action": "Tidy"
+  },
+  "endpoints": {
+    "show": "{count, plural, one {Show # endpoint} other {Show # endpoints}}",
+    "showHint": "Laptops and desktops are kept off the map so the estate stays readable. They are still in your inventory, on the Servers list and in search — this only changes what the map draws.",
+    "hide": "{count, plural, one {Hide # endpoint} other {Hide # endpoints}}",
+    "hideHint": "Take laptops and desktops back off the map. Nothing is removed — they stay in your inventory, on the Servers list and in search."
   },
   "legend": {
     "title": "Edge legend"
@@ -307,6 +323,10 @@
     "ipPlaceholder": "e.g. 10.0.0.12",
     "ipClear": "Clear",
     "ipConflictWarning": "{count, plural, one {This IP is also used by # other node} other {This IP is also used by # other nodes}}",
+    "chassisLabel": "Form factor",
+    "duplicateAssetWarning": "This machine may already be in your inventory twice",
+    "duplicateAssetHint": "The asset linked to this node was created automatically and carries no serial, while the serial this machine reports belongs to a different asset. That usually means the machine was recorded twice, before lazyit knew how to link an existing record. Nothing has been changed and nothing will be merged for you — open the other asset to check whether it really is the same machine, then reconcile the two yourself.",
+    "duplicateAssetSerial": "Serial",
     "editSave": "Save",
     "editCancel": "Cancel",
     "editedToast": "Node updated.",
@@ -441,11 +461,14 @@
     "reportedKindLabel": "Reported as",
     "reportedKindDescription": "What the agent's report made lazyit propose for this host — not what you want it to become.",
     "anyKind": "Any kind",
+    "chassisLabel": "Reported form factor",
+    "chassisDescription": "What the machine says it physically is — read from its firmware, not from its name. This is enough of a condition on its own, so \"auto-confirm the servers, review the laptops\" is a rule you can write. A host that reports no form factor never matches a rule that names one.",
+    "anyChassis": "Any form factor",
     "confirmAsKindLabel": "Confirm it as",
     "keepProposedKind": "Keep the reported kind",
     "trackAsAssetLabel": "Track as an inventory asset",
     "trackAsAssetDescription": "On by default for a servers-only rule, off for any rule that can also match containers — the same reasoning as confirming by hand. Turn it on if these containers really are things you track.",
-    "needsCondition": "A rule needs at least one condition that can rule a host out: a name pattern with something other than * and ?, a subnet narrower than 0.0.0.0/0, or a reported kind. Most wildcard-only patterns match every host there is, so they would confirm everything the agent finds; ? on its own matches only one-character names, and is refused along with them to keep the rule one you can check by looking.",
+    "needsCondition": "A rule needs at least one condition that can rule a host out: a name pattern with something other than * and ?, a subnet narrower than 0.0.0.0/0, a reported kind, or a reported form factor. Most wildcard-only patterns match every host there is, so they would confirm everything the agent finds; ? on its own matches only one-character names, and is refused along with them to keep the rule one you can check by looking.",
     "saveSubmit": "Save rule",
     "savedToast": "Rule saved. It applies from the next report onwards.",
     "saveError": "Couldn't save the rule.",
@@ -457,6 +480,7 @@
     "conditionHostname": "Name {pattern}",
     "conditionSubnet": "From {cidr}",
     "conditionKind": "Reported as {kind}",
+    "conditionChassis": "Form factor {chassis}",
     "author": "Written by {name}",
     "authorUnknown": "Author no longer in the directory",
     "lastMatched": "{count, plural, one {Used # time} other {Used # times}}, last on {when}",

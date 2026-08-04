@@ -115,7 +115,15 @@ UPGRADE=0
 UPGRADE_URL=""
 UPGRADE_CA=""
 CA_SOURCE="--ca-file"
+URL_SOURCE="--url"
+# Accepted for compatibility and IGNORED: checksum verification is required by default since #1190.
+# Kept so existing automation that passes --require-checksum keeps working unchanged.
 REQUIRE_CHECKSUM=0
+# The binary's sha256, obtained OUT OF BAND (#1190) - the escape hatch for an instance that
+# publishes no digest, never a way to skip verification. See the integrity block below.
+SHA256=""
+# Plain http is an explicit decision, not a default (#1190) - see the gate below.
+ALLOW_INSECURE_HTTP=0
 FORCE_BASELINE=0
 
 BIN_PATH="/usr/local/bin/lazyit-agent"
@@ -206,6 +214,9 @@ while [ $# -gt 0 ]; do
     --interval) LEGACY_INTERVAL="${2:-}"; shift 2 ;;
     --interval=*) LEGACY_INTERVAL="${1#*=}"; shift ;;
     --baseline) FORCE_BASELINE=1; shift ;;
+    --sha256) SHA256="${2:-}"; shift 2 ;;
+    --sha256=*) SHA256="${1#*=}"; shift ;;
+    --allow-insecure-http) ALLOW_INSECURE_HTTP=1; shift ;;
     --require-checksum) REQUIRE_CHECKSUM=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --keep-config) KEEP_CONFIG=1; shift ;;
@@ -229,7 +240,14 @@ while [ $# -gt 0 ]; do
       echo "  --ca-file <path>     PEM bundle to trust, instead of trusting your CA system-wide;"
       echo "                       used for this download AND written into the agent's config"
       echo "  --baseline           force the pre-AVX2 x86-64 build (auto-detected otherwise)"
-      echo "  --require-checksum   fail if this instance publishes no sha256 for the binary"
+      echo "  --sha256 <hex>       the binary's sha256, obtained OUT OF BAND - the escape hatch when"
+      echo "                       an older instance publishes no digest. Verification itself is"
+      echo "                       required by default and a mismatch is always fatal."
+      echo "  --allow-insecure-http  allow a plain-http --url. CLEARTEXT: the binary (which will run"
+      echo "                       as root) and the SA token are both exposed to anyone on the"
+      echo "                       network path - the token on every report, not only today."
+      echo "  --require-checksum   accepted for compatibility and IGNORED - checksum verification"
+      echo "                       is required by default now."
       echo "  --uninstall          stop and remove the agent, its units, its state and its token"
       echo "  --keep-config        with --uninstall: keep this host's own limits (never the token)"
       echo "  --interval <dur>     accepted for compatibility and IGNORED - the reporting cadence"
@@ -396,7 +414,10 @@ if [ "$UPGRADE" = "1" ]; then
   UPGRADE_KEPT=""
   if [ -z "$URL" ]; then
     URL="$UPGRADE_URL"
-    [ -z "$URL" ] || UPGRADE_KEPT="LAZYIT_URL=$URL"
+    if [ -n "$URL" ]; then
+      UPGRADE_KEPT="LAZYIT_URL=$URL"
+      URL_SOURCE="LAZYIT_URL in $CONFIG_FILE (re-used by --upgrade)"
+    fi
   fi
   if [ -z "$CA_FILE" ] && [ -n "$UPGRADE_CA" ]; then
     CA_FILE="$UPGRADE_CA"
@@ -488,6 +509,29 @@ if [ -n "$URL_PATH" ]; then
   echo "lazyit-agent install: --url carries a path ($URL_PATH) and lazyit is served from the root of its origin, so this is usually a mistake - pass just the scheme, host and port. Continuing, in case your reverse proxy really does mount lazyit under that path." >&2
 fi
 
+# --- plain http is an explicit decision, not a default (#1190) --------------
+# ADR-0087 accepts that a self-hosted LAN instance may have no TLS at all, so http stays POSSIBLE -
+# but never silent. Everything on a cleartext channel is readable and replaceable by anyone on the
+# network path: the binary this script installs to run as root, its sha256 (fetched over the SAME
+# channel, so a matching digest proves nothing against an on-path attacker - pass --sha256 from
+# somewhere else if you can), and the Service Account token, which is persisted into the config WITH
+# this URL and therefore crosses the network in cleartext again on every report this host ever
+# sends. The scheme was lowercased above, so HTTP:// lands here exactly like http://.
+#
+# AND `--upgrade` DOES NOT INHERIT THE DECISION (#1208 review). A host installed with
+# --allow-insecure-http carries `LAZYIT_URL=http://...` in its config, so a re-run that re-used it
+# would arrive here with a cleartext URL nobody typed - and letting the file answer "yes, cleartext
+# is acceptable" on the operator's behalf is exactly the fail-open #1190 closed, one input over. The
+# gate bites on the RESOLVED url whatever supplied it; `$URL_SOURCE` names which that was, so the
+# refusal does not tell an operator about a `--url` they did not pass. Settings are re-used; an
+# acceptance of exposure is not a setting.
+if [ "$URL_SCHEME" = "http" ]; then
+  if [ "$ALLOW_INSECURE_HTTP" != "1" ]; then
+    die "$URL_SOURCE uses plain http, and everything on this channel crosses the network in CLEARTEXT: an on-path attacker can replace the binary this host will run as root, and the Service Account token is saved with this URL, so it is exposed again on every report this host ever sends. Use https (see --ca-file for an internal CA), or pass --allow-insecure-http if you accept BOTH exposures on this network."
+  fi
+  echo "lazyit-agent install: WARNING - --allow-insecure-http: installing over plain http. The binary this host will run as root and the Service Account token BOTH cross the network in cleartext, the token on every report from now on, not only today. Anyone on the network path can take root on this host. Move to https when you can." >&2
+fi
+
 [ "$(id -u)" = "0" ] || die "must run as root (installs to /usr/local/bin, /etc and systemd)"
 command -v systemctl >/dev/null 2>&1 || die "systemd (systemctl) is required"
 command -v curl >/dev/null 2>&1 || die "curl is required"
@@ -565,19 +609,41 @@ MAGIC="$(od -An -tx1 -N4 "$TMP_BIN" | tr -d ' \n')"
 # and it is not meant to survive that. ADR-0074 defers cosign as an enterprise ask; this is the part
 # that costs nothing and catches the ordinary cases - a corrupted layer, a half-written volume, a
 # caching proxy serving a stale artifact, and a tamper that missed one of the two files.
-EXPECTED=""
-if EXPECTED="$(auth_config "$TOKEN" | curl -fsSL --max-redirs 0 $CURL_CA --config - \
-  "$URL/api/agent/checksum?arch=$ARCH" 2>/dev/null)"; then
-  EXPECTED="$(printf '%s' "$EXPECTED" | tr -d '[:space:]')"
+#
+# REQUIRED BY DEFAULT, AND IT CANNOT FAIL OPEN (#1190). The first shape of this check degraded ANY
+# error fetching the digest to a note unless --require-checksum was passed - so an attacker who
+# could 404 one route stripped the verification entirely. A check the party being checked can switch
+# off is not a check. The one escape hatch is --sha256: a digest obtained OUT OF BAND, for an
+# instance older than this installer, which publishes none. --require-checksum stays accepted and
+# now means nothing.
+if [ -n "$SHA256" ]; then
+  EXPECTED="$(printf '%s' "$SHA256" | tr '[:upper:]' '[:lower:]')"
+  case "$EXPECTED" in
+    *[!0-9a-f]*) die "--sha256 must be the binary's sha256 as 64 hex characters. Got: $SHA256" ;;
+  esac
+  [ "${#EXPECTED}" = "64" ] || die "--sha256 must be the binary's sha256 as 64 hex characters. Got: $SHA256"
+  echo "lazyit-agent install: verifying against the sha256 passed with --sha256 (out of band)."
 else
-  EXPECTED=""
+  # The credential goes in on curl's STDIN here too (#1208 review). This fetch is REQUIRED, so it is
+  # the one that runs on every install and every upgrade - which makes it the one whose argv an
+  # unprivileged user polling /proc/<pid>/cmdline was most reliably able to catch.
+  if ! EXPECTED="$(auth_config "$TOKEN" | curl -fsSL --max-redirs 0 $CURL_CA --config - \
+    "$URL/api/agent/checksum?arch=$ARCH" 2>/dev/null)"; then
+    die "could not fetch the sha256 this instance publishes for $ARCH, and checksum verification is REQUIRED - a fetch that fails open is a check an attacker strips by failing it. Nothing installed. An instance older than this installer publishes no digest: upgrade lazyit, or pass --sha256 <digest> obtained OUT OF BAND."
+  fi
+  EXPECTED="$(printf '%s' "$EXPECTED" | tr -d '[:space:]')"
+  # Anything that is not exactly 64 lowercase hex characters is not a digest - an error page that
+  # arrived as a 200 must never become an expectation to compare against, and since #1190 it must
+  # never quietly become "no digest published" either.
+  VALID=1
+  case "$EXPECTED" in
+    *[!0-9a-f]*) VALID=0 ;;
+  esac
+  [ "${#EXPECTED}" = "64" ] || VALID=0
+  if [ "$VALID" != "1" ]; then
+    die "what this instance answered for $ARCH is not a sha256 digest, and checksum verification is REQUIRED. Nothing installed. Upgrade lazyit, or pass --sha256 <digest> obtained out of band."
+  fi
 fi
-# Anything that is not exactly 64 lowercase hex characters is not a digest - an error page that
-# arrived as a 200 must read as "no digest published", never as an expectation to compare against.
-case "$EXPECTED" in
-  *[!0-9a-f]*) EXPECTED="" ;;
-esac
-[ "${#EXPECTED}" = "64" ] || EXPECTED=""
 
 SUM_TOOL=""
 if command -v sha256sum >/dev/null 2>&1; then
@@ -585,23 +651,15 @@ if command -v sha256sum >/dev/null 2>&1; then
 elif command -v shasum >/dev/null 2>&1; then
   SUM_TOOL="shasum -a 256"
 fi
-
-if [ -n "$EXPECTED" ] && [ -n "$SUM_TOOL" ]; then
-  ACTUAL="$($SUM_TOOL "$TMP_BIN" | cut -d' ' -f1)"
-  [ "$EXPECTED" = "$ACTUAL" ] || die "checksum mismatch - the binary this instance served is not the one it published a digest for (expected $EXPECTED, got $ACTUAL). Nothing installed. Re-run; if it persists, treat the instance as suspect."
-  echo "lazyit-agent install: sha256 verified."
-elif [ "$REQUIRE_CHECKSUM" = "1" ]; then
-  if [ -z "$SUM_TOOL" ]; then
-    die "--require-checksum was passed but this host has neither sha256sum nor shasum"
-  fi
-  die "--require-checksum was passed but this instance published no sha256 for $ARCH (an instance older than this installer does not)"
-else
-  if [ -z "$EXPECTED" ]; then
-    echo "lazyit-agent install: note - this instance published no sha256 for the binary, so TLS and the ELF check are the only integrity check. Pass --require-checksum to make this fatal." >&2
-  else
-    echo "lazyit-agent install: note - no sha256sum/shasum on this host, so the published digest could not be checked." >&2
-  fi
+# A host that cannot hash cannot verify, and "cannot verify" is a hard stop now - lacking a tool
+# must not reopen the fail-open path the paragraph above closed.
+if [ -z "$SUM_TOOL" ]; then
+  die "checksum verification is required and this host has neither sha256sum nor shasum - install one (coreutils, or perl's shasum) and re-run"
 fi
+
+ACTUAL="$($SUM_TOOL "$TMP_BIN" | cut -d' ' -f1)"
+[ "$EXPECTED" = "$ACTUAL" ] || die "checksum mismatch - the binary this instance served is not the one it published a digest for (expected $EXPECTED, got $ACTUAL). Nothing installed. Re-run; if it persists, treat the instance as suspect."
+echo "lazyit-agent install: sha256 verified."
 
 install -m 755 "$TMP_BIN" "$BIN_PATH"
 

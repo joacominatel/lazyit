@@ -32,7 +32,8 @@
 
 .PARAMETER Url
   Your lazyit instance BASE URL - scheme, host and port, nothing else. For example
-  https://lazyit.example.com, or http://192.168.100.75:8080 on a LAN instance.
+  https://lazyit.example.com - or, WITH -AllowInsecureHttp, http://192.168.100.75:8080 on a LAN
+  instance you accept running in cleartext.
 
   NOT the address of this script. Every request this installer makes is built by appending a path to
   what you pass here, so -Url https://lazyit.example.com/install.ps1 asks the server for
@@ -101,8 +102,20 @@
   unlike install.sh this cannot be auto-detected - pass it for a pre-Haswell host, or for a cluster
   whose EVC/processor-compatibility baseline masks AVX2 and may live-migrate onto older silicon.
 
+.PARAMETER Sha256
+  The executable's sha256 as 64 hex characters, obtained OUT OF BAND - from the release notes, or
+  from the instance admin over a channel that is not this download. Used INSTEAD of the digest the
+  instance publishes: the escape hatch for an instance older than this installer, which publishes
+  none. Verification itself is required either way, and a mismatch is always fatal.
+
+.PARAMETER AllowInsecureHttp
+  Allow a plain-http -Url. CLEARTEXT: an on-path attacker can replace the executable this host will
+  run as SYSTEM, and the Service Account token - persisted with this URL - crosses the network
+  unencrypted on every report the agent ever sends. For a physically trusted LAN (ADR-0087). Prefer
+  https, with -CaFile for an internal CA.
+
 .PARAMETER RequireChecksum
-  Fail if this instance publishes no sha256 for the executable.
+  Accepted for compatibility and IGNORED - checksum verification is required by default (#1190).
 
 .PARAMETER Uninstall
   Stop and remove the agent, its task, its state, its PATH entry and its token.
@@ -143,6 +156,13 @@ param(
   # can see what happened to it.
   [string] $Interval,
   [switch] $Baseline,
+  # The executable's sha256, obtained OUT OF BAND - the escape hatch for an instance that publishes
+  # no digest, never a way to skip verification. See the integrity block below (#1190).
+  [string] $Sha256,
+  # Plain http is an explicit decision, not a default - see the gate below (#1190).
+  [switch] $AllowInsecureHttp,
+  # Accepted for compatibility and IGNORED: checksum verification is required by default since
+  # #1190. Recorded here so existing automation that passes it keeps working unchanged.
   [switch] $RequireChecksum,
   [switch] $Uninstall,
   [switch] $KeepConfig,
@@ -156,6 +176,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+# Where the resolved -Url came from, so the plain-http gate can name it. -Upgrade rewrites this when
+# it takes the URL off the host (#1208); under StrictMode it has to exist before anything reads it.
+$urlSource = '-Url'
 
 # The FIXED tick, matching AGENT_POLICY_TICK_SECONDS. Deliberately not configurable: the whole point
 # of #1140 is that the schedule is one unchanging thing on every platform while the cadence is a
@@ -176,9 +200,15 @@ $ConfigDir  = Join-Path $env:ProgramData 'lazyit-agent'
 $ConfigFile = Join-Path $ConfigDir 'config'
 $StateDir   = Join-Path $ConfigDir 'state'
 
+# A FAILURE MUST BE CHECKABLE BY A SCRIPT (#1191). Under $ErrorActionPreference='Stop' a Write-Error
+# is ITSELF a terminating error, so the old Write-Error + exit pair never reached its exit line -
+# every failure stopped on an unhandled error record instead of a clean code. `throw` is deliberate:
+# powershell -File and -Command both turn an uncaught throw into process exit code 1, which is what a
+# fleet script checks - and, unlike Write-Host + exit, the & ([scriptblock]::Create((irm ...))) form
+# the Manual documents keeps an INTERACTIVE operator's elevated console open on a mistyped token
+# instead of closing it.
 function Die([string] $Message) {
-  Write-Error "lazyit-agent install: $Message"
-  exit 1
+  throw "lazyit-agent install: $Message"
 }
 
 function Say([string] $Message) {
@@ -457,16 +487,20 @@ if ($KeepToken) {
   # measured against curl and Bun rather than recalled. Reading the other one here would carry a
   # different bundle into the config than the one the agent had been using.
   if ($Upgrade) {
-    $kept = @()
+    $reused = @()
     if (-not $Url) {
       $Url = Get-LazyitConfigValue ($existing) 'LAZYIT_URL'
-      if ($Url) { $kept += "LAZYIT_URL=$Url" }
+      if ($Url) {
+        $reused += "LAZYIT_URL=$Url"
+        # So the plain-http gate further down names the file rather than a -Url nobody passed.
+        $urlSource = "LAZYIT_URL in $ConfigFile (re-used by -Upgrade)"
+      }
     }
     if (-not $CaFile) {
       $CaFile = Get-LazyitConfigValue ($existing) 'lazyit_ca_file'
       if (-not $CaFile) { $CaFile = Get-LazyitConfigValue ($existing) 'LAZYIT_CA_FILE' }
       if ($CaFile) {
-        $kept += "LAZYIT_CA_FILE=$CaFile"
+        $reused += "LAZYIT_CA_FILE=$CaFile"
         # Named HERE rather than left to the download, because a certificate failure on an upgrade
         # sends an operator looking at their instance's certificate when the answer is a file that
         # moved on this host.
@@ -475,7 +509,7 @@ if ($KeepToken) {
         }
       }
     }
-    if ($kept.Count -gt 0) { Say "-Upgrade re-used this host's own $($kept -join ', ') from $ConfigFile." }
+    if ($reused.Count -gt 0) { Say "-Upgrade re-used this host's own $($reused -join ', ') from $ConfigFile." }
     # A config with a token but no URL. Refused by name: the generic "-Url is required" below would be
     # true and useless, because the operator did not think they were supplying one.
     if (-not $Url) {
@@ -546,6 +580,28 @@ if ($UrlPath) {
   Write-Warning "lazyit-agent install: -Url carries a path ($UrlPath) and lazyit is served from the root of its origin, so this is usually a mistake - pass just the scheme, host and port. Continuing, in case your reverse proxy really does mount lazyit under that path."
 }
 
+# --- plain http is an explicit decision, not a default (#1190) --------------
+# ADR-0087 accepts that a self-hosted LAN instance may have no TLS at all, so http stays POSSIBLE -
+# but never silent. Everything on a cleartext channel is readable and replaceable by anyone on the
+# network path: the executable this script installs to run as SYSTEM, its sha256 (fetched over the
+# SAME channel, so a matching digest proves nothing against an on-path attacker - pass -Sha256 from
+# somewhere else if you can), and the Service Account token, which is persisted into the config WITH
+# this URL and therefore crosses the network in cleartext again on every report this host ever
+# sends. `-match` is case-insensitive, so HTTP:// lands here exactly like http://.
+#
+# AND -Upgrade DOES NOT INHERIT THE DECISION (#1208 review). A host installed with -AllowInsecureHttp
+# carries `LAZYIT_URL=http://...` in its config, so a re-run that re-used it would arrive here with a
+# cleartext URL nobody typed - and letting the file answer "yes, cleartext is acceptable" on the
+# operator's behalf is exactly the fail-open #1190 closed, one input over. The gate bites on the
+# RESOLVED url whatever supplied it; `$urlSource` names which that was. Settings are re-used; an
+# acceptance of exposure is not a setting.
+if ($Url -match '^http://') {
+  if (-not $AllowInsecureHttp) {
+    Die "$urlSource uses plain http, and everything on this channel crosses the network in CLEARTEXT: an on-path attacker can replace the executable this host will run as SYSTEM, and the Service Account token is saved with this URL, so it is exposed again on every report this host ever sends. Use https (see -CaFile for an internal CA), or pass -AllowInsecureHttp if you accept BOTH exposures on this network."
+  }
+  Write-Warning 'lazyit-agent install: -AllowInsecureHttp - installing over plain http. The executable this host will run as SYSTEM and the Service Account token BOTH cross the network in cleartext, the token on every report from now on, not only today. Anyone on the network path can take SYSTEM on this host. Move to https when you can.'
+}
+
 # TLS 1.2 explicitly. Windows PowerShell 5.1 defaults its ServicePointManager to SSL3/TLS1.0 on
 # older builds, which a modern Caddy front refuses - the symptom is an opaque "underlying connection
 # was closed" that reads like a certificate problem and is not.
@@ -560,9 +616,25 @@ if ($CaFile) {
 # --- arch ------------------------------------------------------------------
 # There is no bun-windows-arm64 target, so an ARM64 host has no artifact and saying so plainly beats
 # downloading an x64 executable that WOW64 might or might not emulate acceptably.
+#
+# THE GATE DECIDES ON THE MACHINE, NOT THE PROCESS (#1191). Inside a 32-BIT PowerShell on x64
+# Windows - which is exactly what RMM and deployment tools commonly spawn, the fleet-install vector -
+# PROCESSOR_ARCHITECTURE answers 'x86': the architecture of the PROCESS asking, not of the machine.
+# PROCESSOR_ARCHITEW6432 exists only inside a WOW64 process and holds the real one; the
+# Is64BitOperatingSystem check is the belt for a host that exports neither. Without this, a perfectly
+# supported x64 host was refused as "unsupported architecture".
 $machine = $env:PROCESSOR_ARCHITECTURE
+if ($env:PROCESSOR_ARCHITEW6432) { $machine = $env:PROCESSOR_ARCHITEW6432 }
+elseif ($machine -eq 'x86' -and [Environment]::Is64BitOperatingSystem) { $machine = 'AMD64' }
 if ($machine -ne 'AMD64') {
   Die "unsupported architecture: $machine (only x64 Windows is built; there is no ARM64 target)"
+}
+# The machine is x64 - but a 32-bit shell must still not RUN the install: %ProgramFiles% answers
+# 'Program Files (x86)' under WOW64, so proceeding would install beside (not over) a 64-bit install
+# and put the agent under the wrong directory. INSTRUCT rather than refuse blind: SysNative is the
+# alias a 32-bit process uses to reach the real System32, so the command below works from THIS shell.
+if (-not [Environment]::Is64BitProcess) {
+  Die "this shell is a 32-bit PowerShell on 64-bit Windows (WOW64), and installing from it would land the agent under the wrong Program Files. Re-run this installer from a 64-bit PowerShell - from this very shell you can start one with: & $env:SystemRoot\SysNative\WindowsPowerShell\v1.0\powershell.exe"
 }
 $arch = if ($Baseline) { 'x64-baseline' } else { 'x64' }
 
@@ -624,37 +696,78 @@ if ($magic[0] -ne 0x4D -or $magic[1] -ne 0x5A) {
   Die 'downloaded file is not a Windows executable (no MZ header) - is -Url your lazyit HTTPS origin (the reverse proxy), not the raw web port :3000?'
 }
 
-# --- integrity: the digest the instance published --------------------------
+# --- integrity: the digest, REQUIRED (#1190) --------------------------------
 # TLS plus two bytes of PE magic answers "did the bytes arrive intact from the origin I dialled". It
 # does not answer "are these the bytes the build produced" - and this file becomes SYSTEM on every
 # host in the estate. STATED HONESTLY: this is a checksum, not a signature. Anyone who can write both
 # files in the API container defeats it, and it is not meant to survive that.
-$expected = ''
-try {
-  $response = Invoke-LazyitDownload "/api/agent/checksum?os=windows&arch=$arch" $null
-  $expected = ($response.Content | Out-String).Trim()
-}
-catch { $expected = '' }
-if ($expected -notmatch '^[0-9a-f]{64}$') { $expected = '' }
-
-if ($expected) {
-  $actual = (Get-FileHash -LiteralPath $tmpBin -Algorithm SHA256).Hash.ToLowerInvariant()
-  if ($actual -ne $expected) {
+#
+# REQUIRED BY DEFAULT, AND IT CANNOT FAIL OPEN. The first shape of this check degraded ANY error
+# fetching the digest to a warning unless -RequireChecksum was passed - so an attacker who could 404
+# one route stripped the verification entirely. A check the party being checked can switch off is
+# not a check. The one escape hatch is -Sha256: a digest obtained OUT OF BAND, for an instance older
+# than this installer, which publishes none. -RequireChecksum stays accepted and now means nothing.
+if ($Sha256) {
+  if ($Sha256 -notmatch '^[0-9a-fA-F]{64}$') {
     Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
-    Die "checksum mismatch - the executable this instance served is not the one it published a digest for (expected $expected, got $actual). Nothing installed. Re-run; if it persists, treat the instance as suspect."
+    Die "-Sha256 must be the executable's sha256 as 64 hex characters. Got: $Sha256"
   }
-  Say 'sha256 verified.'
-}
-elseif ($RequireChecksum) {
-  Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
-  Die "-RequireChecksum was passed but this instance published no sha256 for windows/$arch (an instance older than this installer does not)"
+  $expected = $Sha256.ToLowerInvariant()
+  Say 'verifying against the sha256 passed with -Sha256 (out of band).'
 }
 else {
-  Write-Warning "lazyit-agent install: this instance published no sha256 for the executable, so TLS and the MZ check are the only integrity check. Pass -RequireChecksum to make this fatal."
+  $expected = ''
+  try {
+    $response = Invoke-LazyitDownload "/api/agent/checksum?os=windows&arch=$arch" $null
+    $expected = ($response.Content | Out-String).Trim().ToLowerInvariant()
+  }
+  catch {
+    Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
+    Die "could not fetch the sha256 this instance publishes for windows/$arch, and checksum verification is REQUIRED - a fetch that fails open is a check an attacker strips by failing it. Nothing installed. An instance older than this installer publishes no digest: upgrade lazyit, or pass -Sha256 <digest> obtained OUT OF BAND. $($_.Exception.Message)"
+  }
+  if ($expected -notmatch '^[0-9a-f]{64}$') {
+    Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
+    Die "what this instance answered for windows/$arch is not a sha256 digest, and checksum verification is REQUIRED. Nothing installed. Upgrade lazyit, or pass -Sha256 <digest> obtained out of band."
+  }
 }
 
+$actual = (Get-FileHash -LiteralPath $tmpBin -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) {
+  Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
+  Die "checksum mismatch - the executable this instance served is not the one it published a digest for (expected $expected, got $actual). Nothing installed. Re-run; if it persists, treat the instance as suspect."
+}
+Say 'sha256 verified.'
+
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+# A MOVE, not a copy, on purpose: on an upgrade the scheduled task from the previous install is
+# still armed, and a rename is atomic where a ~100 MB copy leaves a window in which that task could
+# execute a half-written file.
 Move-Item -LiteralPath $tmpBin -Destination $BinPath -Force
+
+# --- the binary's ACL: inherited from Program Files, nothing else (#1189) ---
+# On the same volume that move is a rename and KEEPS the source DACL - the user-temp one, which
+# grants the installing user's SID FullControl. Left alone, the executable the task runs as SYSTEM
+# every tick stays writable by that user's MEDIUM-INTEGRITY (non-elevated) processes: any malware in
+# their session overwrites the file and is SYSTEM within one tick, on every host installed this way,
+# persistently. The config dir's ACL below is carefully rebuilt; this is the same care for the
+# binary. `icacls /reset` is the documented primitive for exactly this repair - it "replaces ACLs
+# with default inherited ACLs": every explicit ACE goes, including the stale ones the rename carried
+# over, and inheritance from %ProgramFiles% (administrator-only write) is what remains. Chosen over
+# a Get-Acl/Set-Acl round trip because the rename leaves the carried ACEs flagged as inherited,
+# which that API cannot remove without a two-pass protect-then-unprotect dance and a moment with an
+# empty DACL. It runs UNCONDITIONALLY on every install, so re-running this script - the documented
+# upgrade path - also heals the ACL of a binary installed by an earlier version of it.
+# Failure is FATAL and removes the binary: a SYSTEM executable a user can rewrite is not an install.
+$aclReset = $false
+try {
+  & "$env:SystemRoot\System32\icacls.exe" $BinPath /reset /q | Out-Null
+  $aclReset = ($LASTEXITCODE -eq 0)
+}
+catch { $aclReset = $false }
+if (-not $aclReset) {
+  Remove-Item -LiteralPath $BinPath -Force -ErrorAction SilentlyContinue
+  Die "could not reset the ACL on $BinPath (icacls /reset failed), so the executable could have kept the permissive ACL of the temp directory it was downloaded into - and it runs as SYSTEM. Nothing has been installed and no task was registered."
+}
 
 # --- can this host actually RUN it? ----------------------------------------
 # `--help` prints and exits: no network, no config, no state. It fails exactly when the host cannot

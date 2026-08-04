@@ -150,6 +150,7 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `externalId` | `string?` | the reconciliation key. A reported HOST: its `/etc/machine-id` on Linux, `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` on Windows (#1144; macOS platform UUID is reserved, no collector ships) — **except** on a host whose machine-id collided with one already in use (a cloned VM template), where it is the derived `<machine-id>#<serial-or-MAC>` (ADR-0074 §3 / #1141) and the value the host actually claims is kept in `specs.identityConflict.reportedExternalId`. A reported CONTAINER child: `<host externalId>/container/<name>` (#1139) — name-keyed so a recreate is not a duplicate, host-scoped so two hosts' `redis` stay two nodes. The separator cannot occur in a host key, so the two spaces never collide on the shared partial unique index. |
 | `lastReportedAt` | `datetime?` | agent liveness (stale → OFFLINE). Advances for a host on every check-in and for a container child on every report that still lists it. |
 | `agentVersion` | `string?` | the reporting agent's build at its last check-in (#907); null for manual/pre-stamp nodes. |
+| `chassis` | `string?` | what the host physically **is** — `laptop` / `desktop` / `server` / `vm` / `container` / `unknown`, written from `host.chassis` on **every** agent report, create and refresh alike ([[0093-chassis-routing-and-asset-adoption]] §2 / #1198). **Agent-owned**: chassis is a *fact* (the `ipAddress` class), not curation (the `kind` class), so a re-image or a board swap changes the truth and the column follows — there is deliberately **no `chassisSource`** and no `MANUAL` counterpart, because chassis is never on the create/update DTOs and so there is no human write to protect. `String?` rather than a Prisma enum on purpose: the wire vocabulary `.catch()`es an unrecognised value so a report is never rejected for one, and a DB enum would turn that same value into a write error on the hot report path; validation lives in shared zod at the write boundary and the read is tolerant (`AgentChassisSchema.nullish().catch(null)`). An **absent** chassis never clears a stored one (a downgraded agent must not un-heal the estate); an explicit `unknown` does write, because "the probe did not run" is a different fact from any form factor. Null for a manual node, for a CONTAINER child (whose blob carries no `host` key at all — #1139) and for every row predating #1198, which self-heals on that host's next report — no backfill. Read by the canvas, which hides `laptop`/`desktop` by default (§5), and usable as an auto-confirm rule condition (§6). |
 | `agentPolicy` | `jsonb?` | this node's own agent-policy override — the NARROWEST of the three #1140 scopes (instance default < service account < node). A partial `AgentPolicyOverride` (zod in `@lazyit/shared`): a closed set of booleans, integers and **glob** strings, never a command/script/path/regex. Null = "adds no override", which is every pre-#1140 row. Read-TOLERANT — an unparseable blob resolves as no override rather than failing a report. Written only by `PUT /infra/nodes/:id/agent-policy` (human-only); **no editor ships in this build** — the UI edits the instance default. |
 | `policyRevision` | `int?` | the policy generation the agent last **echoed** (#1140) — the acknowledgement half. Equal to the instance revision (`GET /infra/agent-policy`) = *applied*; lower = *pending* until the next check-in. Null for a manual node and for any agent predating the policy channel, which must render as "not reporting a policy", never as "pending". |
 | `policyAppliedAt` | `datetime?` | when the echoed revision last **changed** — i.e. when this host actually picked a new policy up. Deliberately not advanced on every report, or it would just be a second `lastReportedAt`. |
@@ -283,11 +284,45 @@ this build, which that section now states on screen rather than implying only on
   §3 amendment, #1143) — narrower than the name implied, and deliberately so: it records the tracked
   FACTS that moved (packages, OS/kernel/memory/disk/serial, a container's image digest), not every
   edit to every column. Curation changes (label, kind, position, asset linkage) are still not logged.
+- **Chassis routing** — *proposed, not built* ([[0093-chassis-routing-and-asset-adoption]], #1196).
+  `host.chassis` is collected on **both** platforms and acted on by essentially nothing: `inferNodeKind`
+  reads it only as the fallback branch, so a report carrying `host.virtualization` (the normal case on
+  both collectors) never reaches it. The proposal adds an agent-owned nullable **`chassis`** column,
+  hides `laptop`/`desktop` nodes from the topology **canvas** by default behind a "Show endpoints"
+  toggle (a view-level treatment — **no new `InfraNodeState`/`InfraNodeKind` member**, and impact /
+  search / the Servers table stay unfiltered), surfaces chassis in the review tray, adds it as an
+  `InfraAutoConfirmRule` condition, and makes a confirm **adopt** a corroborated live [[asset]] instead
+  of minting a duplicate.
+- **Assisted agent update + the fleet view** — *the SERVER READ shipped; the web view has not*
+  ([[0094-assisted-agent-update]], #1204/#1206). `agentVersion` had been a first-class column since #907
+  that nothing aggregated. `GET /infra/agents/fleet` (`infra:read`) now answers *how many agents, on what
+  versions, who has not checked in, who is degraded*: every agent-bearing host — container children
+  excluded, since they carry their host's `agentVersion` — bucketed **exclusively** into `majorBehind` /
+  `behind` / `unknown` / `current` by `agentVersionBucket` in `@lazyit/shared`, a pure re-expression of
+  `isNewerVersion` + `isMajorBehind` that adds **no second notion of "behind"** and keeps their fail-soft
+  posture verbatim. The change §3 actually makes is that **"version unknown" is a visible bucket** instead
+  of silence. The row also carries `lastReportedAt`/`status` liveness, the collector `diagnostics` block,
+  and **`osFamily` projected out of `specs` per read** — the [[0090-ipam-validated-ip]] display-only
+  computed-read-field mold, since `specs` is deliberately off list rows (#1135); no column, no migration,
+  and a `null` family means the caller shows **both** install commands rather than guessing. Live service
+  accounts holding `infra:report` ride along, never-used first, because a token minted for a host that
+  never checked in leaves no node behind — but **on a second gate**: that block is the service-account
+  credential inventory, which every other surface reads under `settings:manage`, and `infra:read` reaches
+  MEMBER *and* VIEWER by default. A caller without `settings:manage` gets the table with the block
+  **omitted** (not emptied, and not a 403 on the whole read) — the same in-code second gate the folder
+  `accessRules` read uses (INV-9 / #554). The never-used figure is a separate unbounded `count`, so it
+  stays true past the identity cap instead of clamping to it. **No migration, no agent change, no
+  `agentUpdate` on the ack, no
+  server-pushed execution** — full self-update and human-triggered/agent-executed update were both
+  declined, with reopening criteria recorded. Still **inert until #1203**: every Docker-served binary
+  reports `agentVersion: "dev"` today, so an estate honestly reads as entirely "version unknown" and fills
+  in as hosts are re-installed. The remaining work is the web surface (the table and the per-host command).
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
   per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]].
   → [[0070-infra-topology-graph]] "Future".
 
 Related: [[infra-edge]] · [[infra-node-fact-change]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
+[[0093-chassis-routing-and-asset-adoption]] · [[0094-assisted-agent-update]] ·
 [[0070-infra-topology-graph]] · [[0074-server-reporting-agent]] · [[0019-asset-assignment-integrity]] ·
 [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] · [[0046-roles-permissions-v2]] ·
 [[0061-secret-manager-zero-knowledge]] · [[0048-service-accounts]]

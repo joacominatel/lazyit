@@ -32,6 +32,7 @@ import {
   applyNicPolicy,
   applySoftwarePolicy,
   buildIdentifiers,
+  canonicalMac,
   clean,
   COLLECT_TIMEOUT_MS,
   NO_WARN,
@@ -113,6 +114,9 @@ export function collectOs(osRelease: string | null, kernel: string | null): Host
 function collectCpu(cpuinfo: string | null): Host["cpu"] {
   if (!cpuinfo) return undefined;
   const model = cpuinfo.match(/^model name\s*:\s*(.+)$/m)?.[1]?.trim();
+  // LOGICAL CPUs — each `processor :` line is a hyper-thread. This IS the wire semantic of
+  // `host.cpu.cores` on every platform (#1191): the fleet was measured against this count first, so
+  // the Windows collector aligned to it rather than the other way round.
   const cores = cpuinfo.match(/^processor\s*:/gm)?.length;
   return clean({ model, cores });
 }
@@ -332,7 +336,11 @@ export function parseNics(out: string | null): Nics | undefined {
       .map(toNicIpv6)
       .filter((a): a is AgentNicIpv6 => a !== undefined);
     const nic: Nics[number] = { name };
-    if (n.address) nic.mac = n.address;
+    // CANONICALISED, not passed through (#1169). `ip -j addr` already answers in the canonical
+    // spelling, so this changes nothing on a healthy host — it is here so the RULE, not the reader's
+    // habit, is what the wire carries, and so Linux and Windows cannot drift apart again.
+    const mac = canonicalMac(n.address);
+    if (mac) nic.mac = mac;
     if (ipv4.length) nic.ipv4 = ipv4.slice(0, 64);
     if (ipv6.length) nic.ipv6 = ipv6.slice(0, 64);
     nics.push(nic);

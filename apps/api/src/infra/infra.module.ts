@@ -6,7 +6,9 @@ import { InfraAgentStalenessSweeper } from './infra-agent-staleness.sweeper';
 import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { AgentPolicyService } from './agent-policy.service';
+import { AgentFleetService } from './agent-fleet.service';
 import { AssetsModule } from '../assets/assets.module';
+import { AssetHistoryModule } from '../asset-history/asset-history.module';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
 import { ArticlesModule } from '../articles/articles.module';
 import { SecretManagerModule } from '../secret-manager/secret-manager.module';
@@ -20,8 +22,12 @@ import { NotificationsModule } from '../notifications/notifications.module';
   //   - SecretManagerModule → SecretManagerService: METADATA-ONLY node→secret linkage (ADR-0073, §6,
   //     #801). The drill-in resolves secret HANDLES; attach is gated by live vault membership. INV-10:
   //     handles/labels only, the server never touches a value.
+  //   - AssetHistoryModule → AssetHistoryService: the ONE `AGENT_LINKED` event an adoption emits at
+  //     the moment a node links an existing asset (ADR-0093 §4, #1198). Nothing else on this path
+  //     writes asset history — the recurring specs refresh is deliberately silent.
   imports: [
     AssetsModule,
+    AssetHistoryModule,
     AssetAssignmentsModule,
     ArticlesModule,
     SecretManagerModule,
@@ -44,6 +50,9 @@ import { NotificationsModule } from '../notifications/notifications.module';
   // AgentPolicyService: the #1140 server-driven policy — resolution on the report path, and the three
   // human-only write scopes (instance default, service account, node). Stateless, so scope is not
   // load-bearing here the way it is for the two limiters above.
+  // AgentFleetService: the ADR-0094 §4 assisted-update READ — the fleet view and its version buckets
+  // (#1206). Read-only and stateless; exported so InstanceModule can put the ONE aggregate
+  // "N agents are a MAJOR behind" line on the existing `update.available` email (§Decisions resolved).
   providers: [
     InfraService,
     InfraAutoConfirmService,
@@ -51,7 +60,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     InfraReportRateLimitGuard,
     InfraNodeEnrollmentLimiter,
     AgentPolicyService,
+    AgentFleetService,
   ],
-  exports: [InfraService],
+  exports: [InfraService, AgentFleetService],
 })
 export class InfraModule {}

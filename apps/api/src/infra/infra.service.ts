@@ -10,6 +10,7 @@ import {
   containerExternalId,
   containerExternalIdPrefix,
   containerNodeStatus,
+  corroboratesAdoption,
   diffContainerFacts,
   diffHostFacts,
   diffSoftwareFacts,
@@ -47,6 +48,7 @@ import {
   type InfraImpactResponse,
   type InfraNodeChild,
   type InfraNodeKind,
+  type InfraAssetCandidate,
   type InfraAutoConfirmCandidate,
   type InfraNodeFactChangeList,
   type InfraNodeState,
@@ -62,6 +64,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { ArticlesService } from '../articles/articles.service';
 import { SecretManagerService } from '../secret-manager/secret-manager.service';
@@ -472,6 +475,10 @@ export class InfraService {
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
     private readonly assets: AssetsService,
+    // The append-only asset trail (ADR-0033). Injected for exactly ONE event: the AGENT_LINKED an
+    // adoption emits at the moment of the link (ADR-0093 §4). The recurring specs refresh stays
+    // silent on purpose — see {@link syncAssetSpecs}.
+    private readonly assetHistory: AssetHistoryService,
     private readonly assignments: AssetAssignmentsService,
     private readonly articles: ArticlesService,
     private readonly secrets: SecretManagerService,
@@ -781,6 +788,11 @@ export class InfraService {
           ...(primaryIpAddress !== undefined
             ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
             : {}),
+          // The reported form factor (ADR-0093 §2) — written on the create branch as well as the
+          // refresh, so a host that enrols today is routable today rather than one cadence from now.
+          ...(report.host.chassis !== undefined
+            ? { chassis: report.host.chassis }
+            : {}),
           // A brand-new node has no stored revision, so an agent that already echoes one is recorded
           // as having applied it from its very first report (#1140) — a re-installed host whose cache
           // survived must not read as "pending" forever.
@@ -799,6 +811,10 @@ export class InfraService {
           hostname: report.host.hostname,
           ipAddress: primaryIpAddress ?? null,
           kind: proposedKind,
+          // The reported form factor (ADR-0093 §6) — the fact that makes "auto-confirm the servers,
+          // review the laptops" a rule an operator can write. `null` when the report carried none,
+          // which never matches a rule that states one.
+          chassis: report.host.chassis ?? null,
           isContainerChild: false,
         },
         {
@@ -1145,6 +1161,17 @@ export class InfraService {
     // the report actually carries one (never clear a good IP on a partial report). CEO policy #1081.
     if (node.ipAddressSource !== 'MANUAL' && primaryIpAddress !== undefined) {
       data.ipAddress = primaryIpAddress;
+    }
+    // The host form factor (ADR-0093 §2), refreshed on every report — a re-image or a board swap
+    // changes the truth and the column follows it. There is no MANUAL counterpart to protect: chassis
+    // is not on any DTO, so nothing a human owns can be clobbered here.
+    //
+    // WRITTEN ONLY WHEN THE REPORT CARRIES ONE, on the same rule as the IP above. `unknown` IS a
+    // reported value and does write (the probe ran and said so, which correctly retires a stale
+    // `laptop`); an ABSENT key is a pre-v2 agent or a downgraded collector, and letting that clear a
+    // good value would make the estate un-heal itself on a rollback.
+    if (args.blob.host.chassis !== undefined) {
+      data.chassis = args.blob.host.chassis;
     }
     const updated = await this.prisma.infraNode.update({
       where: { id: node.id },
@@ -1740,6 +1767,10 @@ export class InfraService {
           ...(primaryIpAddress !== undefined
             ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
             : {}),
+          // A colliding clone is still a reporting host, and its form factor is still its own fact.
+          ...(report.host.chassis !== undefined
+            ? { chassis: report.host.chassis }
+            : {}),
           ...this.policyWriteFields(report, null, policy, now),
           // Same rule as the ordinary create branch (#1142): a row that does not exist yet holds no
           // package list, so this one carries whatever the report actually sent and nothing more.
@@ -2101,6 +2132,10 @@ export class InfraService {
           hostname: container.name,
           ipAddress: null,
           kind: 'CONTAINER',
+          // A child's blob is `{ container, reportedAt }` — no `host` key at all (#1139) — so it has
+          // no form factor of its own, and offering its HOST's would let a chassis rule confirm
+          // containers on the strength of the box they happen to run on. Stated, not omitted.
+          chassis: null,
           isContainerChild: true,
         },
         // The CHILD's own key — a container the operator discarded is as durable a decision as a
@@ -2403,41 +2438,30 @@ export class InfraService {
       // rather than fail the confirm. `modelId` is deliberately left null (no AssetModel auto-create).
       const host = (hostSpecs.host ?? {}) as AgentReportHost;
       const serial = sanitizeSerial(host);
-      const assetSpecs: Record<string, unknown> = {
-        ...hostSpecs,
-        [INFRA_AUTO_ASSET_MARKER]: true,
-      };
-      // Same rule as the repeat-report refresh (#1138/#1142): the report diagnostics and the software
-      // fingerprint stay on the node. This is the path that mints the Asset, so without the strip the
-      // very first thing a confirmed host's inventory snapshot carries is a diagnostic about a report
-      // the server half-understood — and unlike the node's blob, an Asset's specs are MERGED, so it
-      // would never clear itself.
-      for (const key of NODE_ONLY_SPECS_KEYS) delete assetSpecs[key];
-      let created: { id: string };
-      try {
-        created = await this.assets.create(
-          {
-            name: label,
-            status: 'UNKNOWN',
-            ...(serial !== undefined ? { serial } : {}),
-            specs: assetSpecs,
-          },
+
+      // ADOPTION (ADR-0093 §3), BEFORE minting anything: if this report's serial corroborates a live
+      // Asset, LINK that Asset instead of manufacturing a second row for one physical machine.
+      const adopted = await this.adoptableAsset(hostSpecs, serial);
+      if (adopted) {
+        // No Asset is created, `modelId` is untouched (an adopted row may already carry a human's),
+        // and `Asset.serial` is NOT written — adoption is KEYED on the serial, so the row provably
+        // already carries it. The node's label/kind/state transitions below are unchanged.
+        //
+        // AND THE PROVENANCE MARKER IS NOT STAMPED. That is the load-bearing safety rule of this
+        // whole feature: `detachAsset` SOFT-DELETES an asset carrying `_infraAutoCreated`, so
+        // stamping it here would mean a later detach silently deleted the operator's curated
+        // inventory row — the opposite of what the #1117 error message promises ("a pre-existing one
+        // is left intact and merely un-linked"). See {@link detachAsset}.
+        await this.recordAgentLink(adopted.id, node, principal);
+        assetId = adopted.id;
+      } else {
+        assetId = await this.mintBackingAsset(
+          hostSpecs,
+          serial,
+          label,
           principal,
         );
-      } catch (err) {
-        // A discovered serial that collides with an existing LIVE asset's serial (P2002 on
-        // `assets_serial_active_key`) must NOT fail the confirm — retry without it (the serial stays
-        // in specs). Any other error propagates unchanged.
-        if (serial !== undefined && isSerialUniqueCollision(err)) {
-          created = await this.assets.create(
-            { name: label, status: 'UNKNOWN', specs: assetSpecs },
-            principal,
-          );
-        } else {
-          throw err;
-        }
       }
-      assetId = created.id;
     }
 
     const updated = await this.prisma.infraNode.update({
@@ -2452,6 +2476,131 @@ export class InfraService {
     // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
     void this.syncNodeToSearch(updated.id);
     return this.getNodeDetail(id, principal);
+  }
+
+  /**
+   * The live Asset a confirm should ADOPT for this node (ADR-0093 §3), or `null` to mint as before.
+   *
+   * ONE INDEXED LOOKUP, and `findIdentityMatches` is deliberately NOT called. That helper asks *"which
+   * other NODES look like this node?"* over an un-indexed jsonb containment scan — a different question
+   * on the wrong side of the join, whose sequential scan is tolerable only because it is a per-UI-read
+   * cost. Adoption asks *"which ASSET carries this serial?"*, which the `assets_serial_active_key`
+   * partial unique index answers as an index lookup. The soft-delete extension scopes `findFirst`, so
+   * the `deletedAt IS NULL` half of that index is enforced for free and an archived asset is never
+   * adopted. Everything before the lookup is a pure, query-free computation over the blob in memory.
+   *
+   * This matters because with an auto-confirm rule saved (#1145) `confirmNode` runs INSIDE the report
+   * request — but only ever once per node, since confirm is a one-way transition.
+   *
+   * Two guards, both fail-closed toward MINTING, which is recoverable by hand where a mis-link is not:
+   * no sanitized serial at all (absent, or an OEM placeholder), and the §3a corroboration gate.
+   */
+  private async adoptableAsset(
+    hostSpecs: Record<string, unknown>,
+    serial: string | undefined,
+  ): Promise<{ id: string } | null> {
+    if (serial === undefined) return null;
+    if (!corroboratesAdoption(hostSpecs, serial)) return null;
+    return this.prisma.asset.findFirst({
+      where: { serial },
+      select: { id: true },
+    });
+  }
+
+  /**
+   * Mint a brand-new backing Asset for a confirmed node — the pre-ADR-0093 path, now reached only when
+   * adoption found nothing to adopt. Returns the new asset's id.
+   *
+   * The serial promotion (#1081) and its collision retry both survive, but the retry's ROLE has
+   * changed: under §3 a serial that would collide is a serial that corroborates, and a corroborating
+   * serial adopts, so this catch is no longer the designed path — it is a RACE BACKSTOP for two
+   * confirms landing at once. Retrying without the serial remains strictly better than failing an
+   * operator's confirm, and the raw value still survives in `specs.host.hardware.serial`.
+   */
+  private async mintBackingAsset(
+    hostSpecs: Record<string, unknown>,
+    serial: string | undefined,
+    label: string,
+    principal?: Principal,
+  ): Promise<string> {
+    const assetSpecs: Record<string, unknown> = {
+      ...hostSpecs,
+      // The provenance marker, on the MINT branch ONLY (ADR-0093 §4). It is what makes a later detach
+      // soft-delete a row lazyit invented, and what must never be written onto a row it merely adopted.
+      [INFRA_AUTO_ASSET_MARKER]: true,
+    };
+    // Same rule as the repeat-report refresh (#1138/#1142): the report diagnostics and the software
+    // fingerprint stay on the node. This is the path that mints the Asset, so without the strip the
+    // very first thing a confirmed host's inventory snapshot carries is a diagnostic about a report
+    // the server half-understood — and unlike the node's blob, an Asset's specs are MERGED, so it
+    // would never clear itself.
+    for (const key of NODE_ONLY_SPECS_KEYS) delete assetSpecs[key];
+    let created: { id: string };
+    try {
+      created = await this.assets.create(
+        {
+          name: label,
+          status: 'UNKNOWN',
+          ...(serial !== undefined ? { serial } : {}),
+          specs: assetSpecs,
+        },
+        principal,
+      );
+    } catch (err) {
+      // A discovered serial that collides with an existing LIVE asset's serial (P2002 on
+      // `assets_serial_active_key`) must NOT fail the confirm — retry without it (the serial stays
+      // in specs). Any other error propagates unchanged.
+      if (serial !== undefined && isSerialUniqueCollision(err)) {
+        created = await this.assets.create(
+          { name: label, status: 'UNKNOWN', specs: assetSpecs },
+          principal,
+        );
+      } else {
+        throw err;
+      }
+    }
+    return created.id;
+  }
+
+  /**
+   * The ONE `AssetHistory` event an adoption emits (ADR-0093 §4) — `AGENT_LINKED`, at the moment of the
+   * link and never again.
+   *
+   * It answers the only question a human reading a curated Asset's history will actually ask: *when did
+   * a machine start writing to this row, and which one?* The recurring path stays silent by design —
+   * `syncAssetSpecs` writes `specs` on every check-in with no `SPECS_CHANGED`, because an event per
+   * report at a five-minute cadence would drown every human edit this row ever received. What MOVED is
+   * audited on the NODE instead ([[infra-node-fact-change]], #1143), one join away.
+   *
+   * BEST-EFFORT, never fatal. The link itself is the operator's action and it has already been decided
+   * by the time this runs; losing the audit row would be a real loss, but failing the confirm over it
+   * would be a worse one — and on the auto-confirm path (#1145) it would fail a REPORT.
+   */
+  private async recordAgentLink(
+    assetId: string,
+    node: {
+      id: string;
+      reportingSource: string | null;
+      externalId: string | null;
+    },
+    principal?: Principal,
+  ): Promise<void> {
+    try {
+      await this.assetHistory.record(this.prisma, {
+        assetId,
+        eventType: 'AGENT_LINKED',
+        payload: {
+          nodeId: node.id,
+          reportingSource: node.reportingSource,
+          externalId: node.externalId,
+        },
+        actor: this.actor.resolveActor(principal),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Could not record the AGENT_LINKED event for asset ${assetId} — node ${node.id} was still linked to it. ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**
@@ -2635,6 +2784,10 @@ export class InfraService {
         externalId: true,
         lastReportedAt: true,
         agentVersion: true,
+        // A scalar, unlike `specs` — so it rides on the list row (ADR-0093 §2/§5) and the canvas can
+        // hide endpoints client-side over the rows it already fetched: no second request, no second
+        // cache entry, an instant toggle.
+        chassis: true,
         createdAt: true,
         updatedAt: true,
         deletedAt: true,
@@ -2741,6 +2894,15 @@ export class InfraService {
     // (no DB uniqueness). Empty when the node has no IP or no peer shares it.
     const ipConflict = await this.resolveIpConflict(node.id, node.ipAddress);
 
+    // The two ADR-0093 display-only hints, on the same ADR-0090 `ipConflict` mold: computed per read,
+    // never a gate. They are MUTUALLY EXCLUSIVE by construction — `assetCandidate` asks what a confirm
+    // WOULD link (so it needs a node with no asset), `duplicateAssetSuspicion` asks whether an already
+    // -linked auto-created asset duplicates a curated one — so a drill-in costs at most ONE extra
+    // indexed `assets_serial_active_key` lookup, never two.
+    const assetCandidate = await this.resolveAssetCandidate(node);
+    const duplicateAssetSuspicion =
+      await this.resolveDuplicateAssetSuspicion(node);
+
     return {
       ...node,
       assetName,
@@ -2749,7 +2911,82 @@ export class InfraService {
       secretRefs,
       children,
       ipConflict,
+      assetCandidate,
+      duplicateAssetSuspicion,
     };
+  }
+
+  /**
+   * FORESIGHT for the confirm gate (ADR-0093 §7): the live Asset a confirm would ADOPT rather than
+   * mint, so the tray can say *"Confirm will link **Dell-XPS-7490** (existing)"* instead of *"will
+   * create"*. `null` means a confirm mints.
+   *
+   * Answered ONLY for a node that is PENDING and carries no Asset — the one state in which a confirm
+   * can still adopt. A CONFIRMED graph-only node (`trackAsAsset: false`) also has no Asset, but its
+   * confirm is an idempotent no-op, so naming a candidate there would promise something no button
+   * does. It runs the SAME {@link adoptableAsset} the confirm runs, so the hint and the action cannot
+   * drift; the confirm still re-derives its own answer, which is why a stale hint can only mislead a
+   * human, never mis-link a machine.
+   */
+  private async resolveAssetCandidate(node: {
+    assetId: string | null;
+    state: string;
+    specs: Prisma.JsonValue | null;
+  }): Promise<InfraAssetCandidate | null> {
+    if (node.assetId || node.state !== 'PENDING') return null;
+    const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
+    const host = (hostSpecs.host ?? {}) as AgentReportHost;
+    const adopted = await this.adoptableAsset(hostSpecs, sanitizeSerial(host));
+    if (!adopted) return null;
+    const asset = await this.prisma.asset.findFirst({
+      where: { id: adopted.id },
+      select: { id: true, name: true, serial: true },
+    });
+    return asset ?? null;
+  }
+
+  /**
+   * DUPLICATE SUSPICION (ADR-0093 §8.5) — the remediation hint for installs that already duplicated
+   * before adoption existed.
+   *
+   * The #1081 collision retry answered *"this serial already exists"* with *"then make a second Asset
+   * without one"*, and its outcome is recognisable by construction: this node's linked Asset was
+   * auto-created (`_infraAutoCreated`), carries a NULL serial, and the node's reported serial belongs
+   * to a DIFFERENT live Asset. That other Asset is what this returns.
+   *
+   * A HINT, NEVER A MERGE. Machine-merging two inventory rows — assignments, history, tags,
+   * attachments — is not something an upgrade does while nobody is looking, and this ADR does not
+   * retroactively re-link anything. The remedy is the deliberate two-step (§7) the operator performs:
+   * `assetId: null` (the auto-created row carries the marker, so it is soft-deleted) then a second
+   * patch carrying the curated id. The #1117 re-point 400 is untouched.
+   *
+   * Deliberately NOT gated on corroboration. This is not deciding to link anything — it is asking a
+   * human to look at two rows — and the very estate it serves is one where the evidence may predate
+   * contract v2 and so carry no `identifiers[]` at all.
+   */
+  private async resolveDuplicateAssetSuspicion(node: {
+    assetId: string | null;
+    specs: Prisma.JsonValue | null;
+  }): Promise<InfraAssetCandidate | null> {
+    if (!node.assetId) return null;
+    const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
+    const host = (hostSpecs.host ?? {}) as AgentReportHost;
+    const serial = sanitizeSerial(host);
+    if (serial === undefined) return null;
+    const linked = await this.prisma.asset.findFirst({
+      where: { id: node.assetId },
+      select: { serial: true, specs: true },
+    });
+    // Only the collision-retry shape is suspicious. A linked asset that carries a serial is either the
+    // one this node's serial minted or one a human attached; either way there is nothing to suspect.
+    if (!linked || linked.serial !== null) return null;
+    const specs = (linked.specs ?? {}) as Record<string, unknown>;
+    if (specs[INFRA_AUTO_ASSET_MARKER] !== true) return null;
+    const peer = await this.prisma.asset.findFirst({
+      where: { serial },
+      select: { id: true, name: true, serial: true },
+    });
+    return peer && peer.id !== node.assetId ? peer : null;
   }
 
   /**

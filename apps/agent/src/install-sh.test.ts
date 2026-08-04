@@ -197,8 +197,8 @@ afterAll(async () => {
 
 /**
  * Runs a script with the given arguments under the `id` shim, and answers everything it said before
- * it stopped. `path` is the shipped installer everywhere except the `--keep-token` block below,
- * which needs its config file somewhere a test can write.
+ * it stopped. `path` is the shipped installer everywhere except the `--keep-token` and `--upgrade`
+ * blocks below, which need their config file somewhere a test can write.
  */
 async function runInstaller(
   path: string,
@@ -224,9 +224,21 @@ async function runInstaller(
   return { code, stdout, stderr };
 }
 
-/** Runs the installer with `--url <url>` and returns everything it said before it stopped. */
-async function guard(url: string): Promise<{ code: number; stderr: string }> {
-  return runInstaller(INSTALL_SH, ["--url", url, "--token", "lzit_sa_not_a_real_token"]);
+/**
+ * Runs the installer with `--url <url>` and returns everything it said before it stopped.
+ * `extraArgs` is what the #1190 http gate needs to say "and now with the opt-in".
+ */
+async function guard(
+  url: string,
+  extraArgs: string[] = [],
+): Promise<{ code: number; stderr: string }> {
+  return runInstaller(INSTALL_SH, [
+    "--url",
+    url,
+    "--token",
+    "lzit_sa_not_a_real_token",
+    ...extraArgs,
+  ]);
 }
 
 /** The message the script prints when a URL got PAST the guard: the very next check is `id -u`. */
@@ -305,11 +317,14 @@ describe("the --url guard, executed against the shipped install.sh (#1166)", () 
   // on Windows and was refused here. RFC 3986 section 3.1 makes the scheme case-insensitive and curl
   // agrees, so the two installers are aligned on accepting it — see install.ps1 for the same note.
   test("an uppercase scheme is accepted, exactly as install.ps1 accepts it", async () => {
-    for (const url of ["HTTPS://lazyit.example.com", "Http://lazyit.example.com:8080"]) {
-      const { stderr } = await guard(url);
-      expect(stderr, url).not.toContain("starting with http:// or https://");
-      expect(stderr, url).toContain(PAST_THE_GUARD);
-    }
+    const https = await guard("HTTPS://lazyit.example.com");
+    expect(https.stderr).not.toContain("starting with http:// or https://");
+    expect(https.stderr).toContain(PAST_THE_GUARD);
+    // `Http://` is still recognised as a scheme rather than refused as schemeless — and recognised
+    // as PLAIN HTTP, so since #1190 it needs the explicit opt-in to get past the cleartext gate.
+    const http = await guard("Http://lazyit.example.com:8080", ["--allow-insecure-http"]);
+    expect(http.stderr).not.toContain("starting with http:// or https://");
+    expect(http.stderr).toContain(PAST_THE_GUARD);
   });
 
   test("an uppercase scheme is still split into origin and path, so the guard keeps biting", async () => {
@@ -342,6 +357,44 @@ describe("the --url guard, executed against the shipped install.sh (#1166)", () 
   });
 });
 
+/**
+ * PLAIN HTTP IS AN EXPLICIT DECISION, NOT A DEFAULT (#1190), executed like the URL guard above.
+ *
+ * An http --url used to be accepted silently — with the binary AND its sha256 travelling over the
+ * same cleartext channel, and the URL then persisted so the SA token crossed the LAN in cleartext
+ * on every later report. ADR-0087's LAN reality means http stays POSSIBLE, but behind an opt-in
+ * whose refusal and warning both name what it costs. The gate sits with the other URL checks,
+ * before the root check, which is what makes it observable here the same way.
+ */
+describe("plain http needs --allow-insecure-http, and the cost is named (#1190)", () => {
+  test("http without the flag is a hard stop naming BOTH exposures, before anything else happens", async () => {
+    const { code, stderr } = await guard("http://192.168.100.75:8080");
+    expect(code).toBe(1);
+    expect(stderr).toContain("plain http");
+    // The two things cleartext costs: the binary that will run as root, and the token that is
+    // persisted with this URL and re-exposed on every report the host ever sends.
+    expect(stderr).toContain("root");
+    expect(stderr).toContain("token");
+    expect(stderr).toContain("every report");
+    expect(stderr).toContain("--allow-insecure-http");
+    // It stopped inside the URL gate — it never even reached the root check.
+    expect(stderr).not.toContain(PAST_THE_GUARD);
+  });
+
+  test("with the flag it proceeds, and the warning still names the exposure", async () => {
+    const { stderr } = await guard("http://192.168.100.75:8080", ["--allow-insecure-http"]);
+    expect(stderr).toContain("WARNING");
+    expect(stderr).toContain("cleartext");
+    expect(stderr).toContain(PAST_THE_GUARD);
+  });
+
+  test("https never triggers the gate", async () => {
+    const { stderr } = await guard("https://lazyit.example.com");
+    expect(stderr).not.toContain("plain http");
+    expect(stderr).toContain(PAST_THE_GUARD);
+  });
+});
+
 describe("artifact selection — a SIGILL months after a vMotion is not an acceptable failure", () => {
   test("a host without AVX2 gets the baseline build", () => {
     expect(script).toContain("x64-baseline");
@@ -368,7 +421,7 @@ describe("artifact selection — a SIGILL months after a vMotion is not an accep
   });
 });
 
-describe("integrity — TLS and four bytes of ELF magic were the whole check", () => {
+describe("integrity — the sha256 is REQUIRED and cannot fail open (#1190)", () => {
   test("the installer fetches a published digest and compares it", () => {
     expect(script).toContain("/api/agent/checksum");
     expect(script).toMatch(/sha256/i);
@@ -378,8 +431,26 @@ describe("integrity — TLS and four bytes of ELF magic were the whole check", (
     expect(script).toMatch(/die "checksum mismatch/);
   });
 
-  test("--require-checksum exists for an operator who wants a missing digest to be fatal too", () => {
-    expect(script).toContain("--require-checksum");
+  test("a digest that cannot be fetched, or is not a digest, is fatal too — the fail-open branch is gone", () => {
+    // The old shape: any fetch error silently degraded to a note unless --require-checksum was
+    // passed — so an attacker who could 404 one route stripped the check entirely.
+    expect(script).not.toContain("Pass --require-checksum to make this fatal");
+    expect(script).toContain('die "could not fetch the sha256');
+    expect(script).toMatch(/checksum verification is REQUIRED/);
+  });
+
+  test("--sha256 is the out-of-band escape hatch, in both argument spellings", () => {
+    expect(script).toContain("--sha256)");
+    expect(script).toContain("--sha256=*)");
+    expect(script).toContain("--sha256 <hex>");
+  });
+
+  test("a host with no sha256 tool cannot skip the check by lacking one", () => {
+    expect(script).toMatch(/die "checksum verification is required and this host has neither sha256sum nor shasum/);
+  });
+
+  test("--require-checksum stays accepted for existing automation — it is simply the default now", () => {
+    expect(script).toContain("--require-checksum)");
   });
 });
 
@@ -1234,6 +1305,63 @@ describe("--upgrade re-runs a host from its own configuration (#1208)", () => {
    * so there is nothing to re-use. Re-using the other three therefore re-uses everything a re-run
    * would otherwise have had to be told again.
    */
+  /*
+   * WHERE THIS WAVE MEETS THE HARDENING WAVE. #1190 made the checksum required and fail-closed, and
+   * put plain http behind an explicit opt-in; --upgrade arrived on a branch cut before either. The
+   * composition is new surface that neither side tested, and it has exactly one correct answer: a
+   * re-run is an install, so it clears the same two bars.
+   *
+   * THE HTTP ONE IS THE INTERESTING HALF. A host installed with --allow-insecure-http carries
+   * `LAZYIT_URL=http://…` in its config, so `--upgrade` alone arrives at the gate with a cleartext
+   * URL nobody typed. Re-using it silently would let the FILE answer "yes, cleartext is acceptable"
+   * on the operator's behalf — the same fail-open #1190 closed, one input over. Settings are
+   * re-used; an acceptance of exposure is not a setting, and has to be said again.
+   */
+  test("an upgrade over a re-used plain-http URL still needs --allow-insecure-http", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      await writeFile(
+        join(dir, "config"),
+        ["LAZYIT_URL=http://192.168.100.75:8080", "LAZYIT_TOKEN=lzit_sa_already_here", ""].join("\n"),
+      );
+      const installer = await installerWithConfigIn(dir);
+      const refused = await runInstaller(installer, ["--upgrade"]);
+      expect(refused.code).toBe(1);
+      expect(refused.stderr).toContain("plain http");
+      expect(refused.stderr).toContain("--allow-insecure-http");
+      // It names the CONFIG as where that URL came from, not a --url the operator never passed.
+      expect(refused.stderr).toContain("LAZYIT_URL in");
+      expect(refused.stderr).not.toContain(PAST_THE_GUARD);
+
+      // …and with the opt-in said out loud, the same re-run proceeds.
+      const allowed = await runInstaller(installer, ["--upgrade", "--allow-insecure-http"]);
+      expect(allowed.stderr).toContain("WARNING");
+      expect(allowed.stderr).toContain("cleartext");
+      expect(allowed.stderr).toContain(PAST_THE_GUARD);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The checksum half, asserted structurally: an upgrade takes the SAME path to the integrity block
+  // as a first install, so there is no --upgrade branch that could skip it. The one escape hatch
+  // stays --sha256, which is a digest obtained out of band and never a way to skip verification.
+  test("an upgrade verifies the checksum on the same fail-closed path as a first install", () => {
+    // The integrity block is downstream of every re-run branch, and nothing between them re-enters
+    // the argument handling: --upgrade resolves the URL and the token and then falls through.
+    const upgradeBlock = script.indexOf('if [ "$UPGRADE" = "1" ]; then');
+    const integrity = script.indexOf("# --- integrity: the digest the instance published");
+    expect(upgradeBlock).toBeGreaterThan(-1);
+    expect(integrity).toBeGreaterThan(upgradeBlock);
+    // Neither the required-checksum branch nor its hard stops are conditional on how this run got
+    // its settings: no branch in the integrity block mentions the re-run flags at all.
+    const block = script.slice(integrity, script.indexOf('install -m 755 "$TMP_BIN"'));
+    expect(block).not.toContain("UPGRADE");
+    expect(block).not.toContain("KEEP_TOKEN");
+    expect(block).toMatch(/die "could not fetch the sha256/);
+    expect(block).toMatch(/die "checksum mismatch/);
+  });
+
   test("it re-uses exactly the keys the installer owns, the ignored INTERVAL aside", () => {
     const widest = [...script.matchAll(/^[ \t]*OWNED='([^']+)'$/gm)]
       .map((match) => match[1] as string)

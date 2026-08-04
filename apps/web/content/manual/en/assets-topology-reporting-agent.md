@@ -93,6 +93,16 @@ Either one opens a short, guided wizard with three steps:
    > which would have been a much larger change to the machine than "one inventory agent talks to one
    > server". Trusting it system-wide still works if that's already how your fleet is built.
 
+   > **Plain `http://`, no TLS at all?** The installers refuse it unless you opt in explicitly —
+   > **`--allow-insecure-http`** on Linux, **`-AllowInsecureHttp`** on Windows — because the cost is
+   > real and permanent, and you should accept it knowingly rather than by default. On a cleartext
+   > channel, anyone on the network path can replace the agent program itself (which then runs as
+   > root, or as SYSTEM on Windows) — and the token is saved with that address, so it crosses the
+   > network unencrypted again on **every report that host ever sends**, not just during the
+   > install. On a physically trusted LAN that can be an acceptable trade — that is why the flag
+   > exists — but the honest fix costs one file: an internal certificate authority plus `--ca-file`
+   > (above) removes both exposures.
+
    > **Behind an egress proxy?** Pass nothing at install time; add `HTTPS_PROXY` (and `NO_PROXY` if
    > your instance is internal) to `/etc/lazyit-agent/config` afterwards. It has to go **there**, not
    > in `/etc/environment` or a shell profile: the agent runs from a systemd timer, and a timer does
@@ -250,7 +260,9 @@ Run from an **elevated PowerShell** (right-click PowerShell → *Run as administ
 1. checks it is elevated, and that the machine is x64;
 2. downloads the executable from **your** instance with your token, and refuses anything that isn't a
    real Windows executable — the same guard the Linux installer applies to its own binary;
-3. compares the **fingerprint** your instance publishes for that executable and refuses a mismatch;
+3. compares the **fingerprint** your instance publishes for that executable and refuses a mismatch —
+   and refuses to continue at all if the fingerprint can't be fetched, rather than shrugging and
+   installing anyway (see [Security](#security) for the escape hatch);
 4. **runs it once** (`--help`) before registering anything — if the machine can't start it, you get
    one clear sentence, nothing is installed and no task is registered;
 5. adds `C:\Program Files\lazyit-agent` to the **machine PATH**, so the diagnostic commands work by
@@ -381,8 +393,11 @@ it is: discard it from the Servers view if you want it off the map. And the toke
 ## Pending review
 
 Discovered hosts don't go straight into your inventory — they wait for you in the **Pending review**
-tray at the top of the Servers view, each showing its hostname, kind, where the report came from and
-how long ago it last reported. For each one you have three choices:
+tray at the top of the Servers view, each showing its hostname, kind, its **form factor** when the
+machine reported one (*laptop*, *desktop*, *server*, *virtual machine*, *container*), where the report
+came from and how long ago it last reported. The form factor is there so you can tell at a glance
+which of forty proposals are somebody's workstation and which are estate infrastructure, without
+opening each one. For each proposal you have three choices:
 
 - **Confirm** — adds the host to your live topology. A short dialog lets you rename it and change its
   kind first, and offers a **Track as an inventory asset** toggle (**on** by default): left on,
@@ -391,6 +406,27 @@ how long ago it last reported. For each one you have three choices:
   hardware **serial number**, it becomes that asset's serial automatically (a placeholder like
   *"To be filled by O.E.M."*, or a serial already used by another asset, is skipped). Turn the toggle
   off to keep the node graph-only.
+
+  **If the machine is already in your inventory, confirming links it — it doesn't create a second
+  one.** When the serial the host reports matches an asset you already have, the Confirm dialog says
+  so before you click, naming that asset and the serial it matched on: *"This machine is already in
+  your inventory. Confirming links it to that asset instead of creating a second one."* This is the
+  common case for a workstation estate you curated by hand long before you installed any agents — the
+  machines are already recorded, and from now on they start keeping their own hardware and software
+  details up to date on the records **you** made, rather than appearing beside them as duplicates.
+
+  What that adopted asset gets, and what it never gets, is worth being precise about. The agent writes
+  the **reported facts** onto it — hardware, operating system, installed software — and refreshes them
+  on every check-in, so its inventory panel starts filling in. It **never** touches its name, its
+  serial, its model, its status, its location or its assignments. Everything you curated stays yours;
+  only the machine-reported half is maintained for you. And if you later unlink the node, an asset
+  that already existed is simply **unlinked and left intact** — only an asset lazyit created itself is
+  archived.
+
+  Matching is deliberately cautious. lazyit adopts an existing asset only when the report backs its
+  serial up with a network-card address as well, and never when that host is already flagged as a
+  possible clone of another. Anything less certain creates a new asset, as before — a duplicate is
+  visible and fixable, whereas a machine attached to the wrong inventory record is neither.
 - **Merge into…** — this host is one you already have. Pick the existing server it really is, and its
   reporting key moves there: future check-ins land on that server, and this proposal is archived. Use
   it when a machine was **reinstalled** (a fresh OS gives it a new machine ID, so it comes back looking
@@ -464,8 +500,17 @@ the tray.
 
 A rule has a **name**, what it **applies to** (servers, containers, or both), and at least one
 condition: a **name pattern** (`*` for any run of characters, `?` for exactly one — the whole name has
-to match), a **subnet** in CIDR form, or the **kind the agent's report made lazyit propose**. It then
-says what to do: which kind to confirm it as, and whether to track it as an inventory asset.
+to match), a **subnet** in CIDR form, the **kind the agent's report made lazyit propose**, or the
+**form factor the machine reported**. It then says what to do: which kind to confirm it as, and
+whether to track it as an inventory asset.
+
+**Form factor is a condition in its own right**, which makes *"auto-confirm the servers, review the
+laptops"* a rule you can write with nothing else stated — arguably the most useful rule there is on a
+mixed estate. It reads the machine's own firmware, not its hostname, so it doesn't depend on anyone
+having named things consistently. Note the direction it fails in: **a host that reports no form
+factor never matches a rule that names one.** An older agent, a machine whose hardware doesn't say,
+or one that hasn't checked in yet, all keep waiting in the tray for you — which is the safe way round
+for a gate that confirms without anyone present.
 
 **Be clear about what you're turning on.** A host a rule matches is confirmed the moment it reports —
 you never see that row in the tray, and if the rule says to track it, its asset is created too. You
@@ -479,7 +524,8 @@ What else you should know before writing one:
 - **A rule only applies from the next report onwards.** Nothing already waiting in your tray is
   confirmed behind you — those are still yours to review, one at a time or in bulk. Saving a rule
   never touches a proposal you can already see.
-- **A rule needs a condition that can actually rule something out.** A name pattern has to carry at
+- **A rule needs a condition that can actually rule something out.** A reported kind and a reported
+  form factor each count on their own. A name pattern has to carry at
   least one literal character, and a subnet has to be narrower than `/0`. Most patterns made only of
   wildcards (`*`, `**`, `*?*`) match every host there is, just as `0.0.0.0/0` is every address there
   is, so lazyit refuses to save either — alone or together — because a rule that excludes nothing is
@@ -618,6 +664,35 @@ collection notes now name the source that came back empty and the error behind i
 as on Linux (see *What the agent collects* below; nothing displays those notes in the interface yet).
 If clone detection matters to you, run the agent as root (Linux, with `dmidecode` installed) or from
 the scheduled task (Windows), and expect nothing from it on container guests.
+
+## Machines already recorded twice
+
+This one is about the past, and it only affects installs that were confirming agent-reported hosts
+before lazyit knew how to link an existing asset.
+
+Back then, confirming a host with **Track as an inventory asset** on always created a *new* asset. If
+the serial that host reported was already in use by an asset you had curated, lazyit couldn't store
+it twice — so it created the new asset **without a serial** rather than failing your confirm. The
+result was two live records for one physical machine: the one you curated, and a serial-less one the
+agent has been writing to ever since.
+
+**That can't happen any more** — a confirm now links the asset you already have (see *Pending review*
+above). For the ones already in your database, lazyit points them out rather than fixing them:
+
+- Open the node's details window. On the **General** tab you'll see **Possible duplicate in
+  inventory**, naming the other asset and linking to it.
+- Check it. The signal is a strong one — an auto-created asset with no serial, whose machine reports
+  a serial belonging to a different live asset — but you are the one who knows whether those two rows
+  really are the same box.
+- **lazyit will not merge them for you, ever.** Two inventory records mean two sets of assignments,
+  history, tags and attached documents, and deciding what happens to each of those is your call.
+  Nothing is changed while you're not looking.
+
+To reconcile a pair by hand, unlink the auto-created asset from the node — lazyit archives it, because
+it created it — and then link the record you curated. From then on the machine reports into the record
+you kept, and the details window's inventory panel starts filling in there.
+
+If you have none of these, you'll never see this warning. It is deliberately quiet.
 
 ## What the agent collects
 
@@ -777,12 +852,15 @@ What you can set there, in three groups:
   between two of its own reports — the editor will not let you save a value that would do that, and it
   says so under the field rather than after you press Save.
 - **What agents collect** — hardware, disks, network interfaces, installed software, containers, plus
-  a hard cap on how many packages a host may report. **On Linux** a collector that is off is never run
-  at all: the agent does not gather the facts and then throw them away. **On Windows** only containers
-  works that way — hardware, disks, network interfaces and the installed list all come out of a single
-  PowerShell call that runs whatever the policy says, so switching one off there keeps the fact out of
-  the report but does not save the host the work of collecting it. Either way, a switched-off
-  collector never reaches lazyit.
+  a hard cap on how many packages a host may report. **A collector that is off is never run**, on
+  either platform: the agent does not gather the facts and then throw them away. On Windows that
+  used to be true only of containers, because everything else came out of one PowerShell call that
+  ran whatever the policy said; since v1.10 that call is built from the collectors the policy
+  actually wants, so switching one off stops the host doing the work as well as keeping the fact out
+  of the report. One exception worth knowing on Windows: turning **hardware** off stops the agent
+  reading the BIOS serial, and still keeps the manufacturer and model out of the report — but those
+  two ride along with facts lazyit needs anyway (memory, domain membership), so the host is not
+  spared that particular read.
 - **Exclusions** — name patterns for network interfaces (`veth*`, `docker*`), mountpoints
   (`/var/lib/docker/*`, `/snap/*`) and packages (`linux-image-*`). `*` matches anything and `?`
   matches a single character; regular expressions are not accepted, and each list holds at most 32
@@ -852,11 +930,22 @@ reports a policy version at all.
   `/etc/systemd/system/lazyit-agent.service` and read it; it is short, and it is written to be read.
   It also runs at the **lowest CPU and disk priority the system has**, so listing three thousand
   packages on a busy database server never competes with what that server is for.
-- **The download is checksummed.** Your instance publishes a fingerprint of the agent binary next to
-  the binary itself, and the installer refuses to install one that doesn't match. This is an
-  integrity check, not a cryptographic signature — it catches a corrupted or stale download, and a
-  tampered file where only one of the two was changed. Pass `--require-checksum` (or `-RequireChecksum` on Windows) to
-  make a *missing* fingerprint fatal too.
+- **The download is checksummed, and the check cannot be skipped.** Your instance publishes a
+  fingerprint of the agent binary next to the binary itself, and the installer refuses to install
+  one that doesn't match — or one it **couldn't verify**: a fingerprint that can't be fetched now
+  stops the install instead of degrading to a warning, because a check that fails open is a check
+  an attacker can strip just by making it fail. If your instance is older than the installer and
+  publishes no fingerprint, pass the digest yourself — `--sha256 <hex>` on Linux, `-Sha256` on
+  Windows — obtained from a channel other than the download itself, or upgrade the instance. This
+  is an integrity check, not a cryptographic signature — it catches a corrupted or stale download,
+  and a tampered file where only one of the two was changed. (`--require-checksum` and
+  `-RequireChecksum` are still accepted so existing automation keeps working; they simply describe
+  the default now.)
+- **Cleartext HTTP is an explicit opt-in.** An `http://` instance address is refused by both
+  installers unless you pass `--allow-insecure-http` (`-AllowInsecureHttp` on Windows), and the
+  refusal spells out what the channel exposes: the program that will run as root or SYSTEM, and the
+  token — re-sent in cleartext on every report from then on. See the install step above for the
+  trade-off, and prefer `--ca-file` with an internal CA when you can.
 - **It can use your CA, not the machine's.** `--ca-file` (or `LAZYIT_CA_FILE` in the config) points
   the agent at a certificate bundle it alone trusts, so an internal certificate authority never has
   to be installed machine-wide just so one inventory agent can report.
@@ -887,6 +976,12 @@ your server, its row (and its details window) shows a small **Agent outdated** b
 re-run the install command and pick up the latest binary. It's only a nudge: an outdated agent keeps
 reporting normally, nothing is blocked, and minor updates don't raise it. Agents built from source (or
 before versioning was added) report as `dev` and never show the badge.
+
+**Is every agent reporting `dev`?** Until this version, the binaries an instance served were compiled
+without the version stamp, so every installed agent reported `dev` and the badge could never appear.
+Once your instance is updated and rebuilt, the binaries it serves carry its version — but the agents
+already installed keep reporting `dev` until the install command is re-run on those hosts. Nothing
+else changes: `dev` is still a legitimate value, and it is still never nagged.
 
 **Some improvements only arrive when you re-run the install command.** The agent is two things: a
 program, and the systemd service and timer that run it. Anything in the *program* — the diagnostics
@@ -949,6 +1044,14 @@ which is a different thing from moving it by accident. The credential is the exc
 `LAZYIT_TOKEN`. To give a machine a **new** token, install it the ordinary way, with `--url` and
 `--token`. And on a machine that has no agent yet, `--upgrade` stops and says so: there is nothing to
 re-use, and a first install still needs an address and a token.
+
+**One thing `--upgrade` deliberately does not carry over: `--allow-insecure-http`.** If the machine
+was installed against a plain-`http` address, re-using that address is fine — but *accepting* what
+cleartext costs is a decision, not a setting, so you say it again:
+`… | sudo sh -s -- --upgrade --allow-insecure-http`. The refusal names the configuration file as
+where the `http` address came from, so it is clear you are not being asked about an address you
+typed. Everything else is unchanged: the checksum is verified on an upgrade exactly as on a first
+install, and a mismatch stops it.
 
 Everything else about a re-run is unchanged: this host's own limits, its proxy and its certificate
 authority all cross the upgrade exactly as they always did.

@@ -27,6 +27,7 @@ function rule(overrides: Partial<InfraAutoConfirmRule> = {}): InfraAutoConfirmRu
     hostnamePattern: null,
     subnetCidr: null,
     reportedKind: null,
+    chassis: null,
     confirmAsKind: null,
     trackAsAsset: true,
     createdById: null,
@@ -228,6 +229,49 @@ describe("matchesAutoConfirmRule (#1145)", () => {
     expect(matchesAutoConfirmRule(r, { ...host, kind: "VM" })).toBe(true);
     expect(matchesAutoConfirmRule(r, host)).toBe(false);
   });
+
+  // ── Chassis as a condition (ADR-0093 §6, #1198) ───────────────────────────────────────────────
+
+  test("a stated chassis is AND-ed with the other conditions, never OR-ed", () => {
+    const r = rule({ hostnamePattern: "srv-*", chassis: "server" });
+    expect(matchesAutoConfirmRule(r, { ...host, chassis: "server" })).toBe(true);
+    // Hostname matches, chassis does not — a laptop named `srv-…` is still a laptop.
+    expect(matchesAutoConfirmRule(r, { ...host, chassis: "laptop" })).toBe(false);
+    // Chassis matches, hostname does not.
+    expect(matchesAutoConfirmRule(r, { ...host, hostname: "db-01", chassis: "server" })).toBe(false);
+  });
+
+  test("a stated chassis NEVER matches missing evidence — absent, null, or `unknown`", () => {
+    // `unknown` means the probe did not run (a container reading /sys/class/dmi sees the HOST's board),
+    // which is a different fact from any form factor. "We do not know what this box is" is not "it is
+    // the kind of box you described", and the cost of not matching is that the proposal waits in the
+    // tray — where it was going anyway. Same conservatism the subnet condition already applies.
+    const r = rule({ chassis: "server" });
+    expect(matchesAutoConfirmRule(r, { ...host, chassis: "server" })).toBe(true);
+    expect(matchesAutoConfirmRule(r, { ...host, chassis: "unknown" })).toBe(false);
+    expect(matchesAutoConfirmRule(r, { ...host, chassis: null })).toBe(false);
+    expect(matchesAutoConfirmRule(r, host)).toBe(false);
+  });
+
+  test("a rule stating ONLY chassis acts — the same footing reportedKind has", () => {
+    expect(matchesAutoConfirmRule(rule({ chassis: "server" }), { ...host, chassis: "server" })).toBe(
+      true,
+    );
+  });
+
+  test("a CONTAINER child carries no chassis, so a chassis rule can never confirm one", () => {
+    // A child's blob is `{ container, reportedAt }` — no `host` key at all (#1139), so it has no form
+    // factor to compare and even an ANY-scoped chassis rule must not reach it.
+    const child = {
+      ...host,
+      hostname: "srv-redis",
+      kind: "CONTAINER" as const,
+      isContainerChild: true,
+    };
+    expect(matchesAutoConfirmRule(rule({ appliesTo: "ANY", chassis: "container" }), child)).toBe(
+      false,
+    );
+  });
 });
 
 describe("a wildcard-only condition is not a condition (#1145 blanket auto-confirm)", () => {
@@ -334,6 +378,7 @@ describe("a wildcard-only condition is not a condition (#1145 blanket auto-confi
         hostnamePattern: "*",
         subnetCidr: null,
         reportedKind: null,
+        chassis: null,
       }).success,
     ).toBe(false);
     expect(
@@ -429,6 +474,7 @@ describe("UpdateInfraAutoConfirmRuleSchema (#1145)", () => {
         hostnamePattern: null,
         subnetCidr: null,
         reportedKind: null,
+        chassis: null,
       }).success,
     ).toBe(false);
   });
@@ -440,10 +486,11 @@ describe("UpdateInfraAutoConfirmRuleSchema (#1145)", () => {
     expect(UpdateInfraAutoConfirmRuleSchema.safeParse({ subnetCidr: null }).success).toBe(true);
     expect(UpdateInfraAutoConfirmRuleSchema.safeParse({ hostnamePattern: null }).success).toBe(true);
     expect(UpdateInfraAutoConfirmRuleSchema.safeParse({ reportedKind: null }).success).toBe(true);
+    expect(UpdateInfraAutoConfirmRuleSchema.safeParse({ chassis: null }).success).toBe(true);
   });
 
   test("a patch that RESTATES every condition and narrows with none is refused", () => {
-    // This is the one case the patch alone settles: when it fixes all three condition fields, the
+    // This is the one case the patch alone settles: when it fixes all four condition fields, the
     // stored row contributes nothing to the merged rule, so the patch IS the merged rule's conditions
     // and its emptiness is knowable here rather than only at the API's merged re-check.
     expect(
@@ -451,7 +498,25 @@ describe("UpdateInfraAutoConfirmRuleSchema (#1145)", () => {
         hostnamePattern: "*",
         subnetCidr: "0.0.0.0/0",
         reportedKind: null,
+        chassis: null,
       }).success,
+    ).toBe(false);
+  });
+
+  test("chassis alone is a condition that can rule a proposal OUT (ADR-0093 §6)", () => {
+    // "Auto-confirm the servers, review the laptops" is the bounded operator judgement ADR-0093 makes
+    // writable, and it needs no second condition to be legitimate — the same footing `reportedKind` has.
+    expect(
+      CreateInfraAutoConfirmRuleSchema.safeParse({ name: "servers", chassis: "server" }).success,
+    ).toBe(true);
+    expect(statesAutoConfirmCondition({ chassis: "laptop" })).toBe(true);
+    expect(statesAutoConfirmCondition({ chassis: null })).toBe(false);
+    expect(statesAutoConfirmCondition({})).toBe(false);
+  });
+
+  test("a chassis outside the vocabulary is a clean 400, not a rule that never fires", () => {
+    expect(
+      CreateInfraAutoConfirmRuleSchema.safeParse({ name: "typo", chassis: "labtop" }).success,
     ).toBe(false);
   });
 });
