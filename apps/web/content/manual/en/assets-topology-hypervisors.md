@@ -135,7 +135,9 @@ Guest inventory follows the same three controls as every other collector, and th
 wins over the on one:
 
 - **At install time** — add `--no-hypervisor` to the Linux install command, or `-NoHypervisor` on
-  Windows. This writes the veto below into the host's config for you.
+  Windows. This writes the veto below into the host's config for you. The create-agent wizard
+  carries the same veto as a checkbox: **Advanced options → Don't inventory this host's guests**
+  appends the right flag to the command it generates.
 - **On the host** — set `LAZYIT_COLLECT_HYPERVISOR=false` in the agent's own config file
   (`/etc/lazyit-agent/config` on Linux, `C:\ProgramData\lazyit-agent\config` on Windows). As with
   every local setting, this **wins over anything set in lazyit** and survives agent upgrades.

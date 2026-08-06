@@ -145,7 +145,9 @@ El inventario de invitados sigue los mismos tres controles que cualquier otro re
 apagado siempre le gana al encendido:
 
 - **Al instalar** — agrega `--no-hypervisor` al comando de instalación de Linux, o `-NoHypervisor` en
-  Windows. Esto escribe por ti el veto de abajo en la configuración del host.
+  Windows. Esto escribe por ti el veto de abajo en la configuración del host. El asistente de
+  creación de agentes trae el mismo veto como casilla: **Opciones avanzadas → No inventariar los
+  invitados de este host** agrega la opción correcta al comando que genera.
 - **En el host** — establece `LAZYIT_COLLECT_HYPERVISOR=false` en el archivo de configuración del
   propio agente (`/etc/lazyit-agent/config` en Linux, `C:\ProgramData\lazyit-agent\config` en
   Windows). Como todo ajuste local, esto **prevalece sobre cualquier cosa configurada en lazyit** y

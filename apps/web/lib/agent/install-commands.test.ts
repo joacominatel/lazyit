@@ -66,30 +66,61 @@ describe("the platform set", () => {
 describe("agentInstallCommand — Linux", () => {
   const command = agentInstallCommand("linux", ORIGIN, TOKEN);
 
-  test("is the unchanged curl one-liner, with the real origin and the real token", () => {
+  test("is the env-prefixed two-liner: export the token, pipe the script through `sudo -E sh` (#1225)", () => {
+    // The token used to ride argv (`--token <secret>`), which is world-readable in /proc/<pid>/cmdline
+    // for the seconds the install runs and lands in shell history besides. install.sh's own header
+    // (#1137) names `LAZYIT_TOKEN` as the safe channel, and the retired update command already proved
+    // the pipe form of it: `export` + `sudo -E`. The `-E` is load-bearing — sudo resets the
+    // environment, so without it the installer sees no token at all. A prefix assignment
+    // (`LAZYIT_TOKEN=x curl … | sudo …`) would NOT work: it scopes the variable to `curl` alone.
     expect(command).toBe(
-      `curl -fsSL ${ORIGIN}/install.sh | sudo sh -s -- --url ${ORIGIN} --token ${TOKEN}`,
+      `export LAZYIT_TOKEN='${TOKEN}'\ncurl -fsSL ${ORIGIN}/install.sh | sudo -E sh -s -- --url ${ORIGIN}`,
     );
+  });
+
+  test("carries no --token switch — the argv channel is what #1225 retired", () => {
+    expect(command).not.toMatch(/--token\b/);
+    // The secret appears exactly once: in the shell assignment, never in the installer's argv.
+    expect(command.split(TOKEN).length - 1).toBe(1);
+    expect(command.split("\n")[0]).toContain(TOKEN);
   });
 
   test("carries no PowerShell", () => {
     expect(command).not.toContain("powershell");
     expect(command).not.toContain("scriptblock");
   });
+
+  test("names the exact env var install.sh reads, and keeps -E on the sudo that must pass it through", async () => {
+    const script = await Bun.file(installerPath("install.sh")).text();
+    // The installer's own fallback chain: `TOKEN="${TOKEN:-${LAZYIT_TOKEN:-}}"`. If this line ever
+    // leaves install.sh, the emitted command hands the token to nobody.
+    expect(script).toContain('TOKEN="${TOKEN:-${LAZYIT_TOKEN:-}}"');
+    expect(command).toContain("export LAZYIT_TOKEN=");
+    expect(command).toContain("sudo -E sh -s --");
+  });
 });
 
 describe("agentInstallCommand — Windows", () => {
   const command = agentInstallCommand("windows", ORIGIN, TOKEN);
 
-  test("is the script-block form, because the `irm | iex` pipe cannot take parameters", () => {
-    // This is the whole reason the Windows one-liner does not read like its Linux sibling. `irm … |
-    // iex` runs the script with NO arguments, so -Url and -Token never arrive and the installer dies
-    // asking for them. install.ps1's own .EXAMPLE says so; so does the Manual.
+  test("sets $env:LAZYIT_TOKEN first, then runs the script-block form with -Url only (#1225)", () => {
+    // The script-block form stays — `irm … | iex` runs the installer with NO arguments, so -Url
+    // would never arrive (install.ps1's own .EXAMPLE says so). What changed is the token channel:
+    // install.ps1's header documents `$env:LAZYIT_TOKEN` as the form that keeps the secret out of
+    // the session history, and the installer falls back to it when -Token is absent. No sudo hop on
+    // Windows — the wizard already requires an elevated PowerShell, so the same session that sets
+    // the variable runs the installer.
     expect(command).toBe(
-      `& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Url ${ORIGIN} -Token ${TOKEN}`,
+      `$env:LAZYIT_TOKEN = '${TOKEN}'\n& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Url ${ORIGIN}`,
     );
     expect(command).not.toContain("| iex");
     expect(command).not.toContain("Invoke-Expression");
+  });
+
+  test("carries no -Token switch, and the secret appears exactly once — in the assignment", () => {
+    expect(command).not.toMatch(/-Token\b/);
+    expect(command.split(TOKEN).length - 1).toBe(1);
+    expect(command.split("\n")[0]).toContain(TOKEN);
   });
 
   test("carries no sudo and no curl — neither exists on the host it is pasted into", () => {
@@ -97,14 +128,46 @@ describe("agentInstallCommand — Windows", () => {
     expect(command).not.toContain("curl");
   });
 
-  test("names switches install.ps1's own param() block declares", async () => {
+  test("names a switch install.ps1 declares, and the env var it actually falls back to", async () => {
     const script = await Bun.file(installerPath("install.ps1")).text();
     const paramBlock = script.slice(script.indexOf("param("), script.indexOf("$ErrorActionPreference"));
-    for (const switchName of ["-Url", "-Token"]) {
-      expect(command).toContain(`${switchName} `);
-      // `[string] $Url,` — the declaration the emitted switch binds to.
-      expect(paramBlock).toContain(`$${switchName.slice(1)}`);
-    }
+    expect(command).toContain("-Url ");
+    expect(paramBlock).toContain("$Url");
+    // The installer's own fallback: `if (-not $Token) { $Token = $env:LAZYIT_TOKEN }`. If that line
+    // ever leaves install.ps1, the assignment above hands the token to nobody.
+    expect(script).toContain("$Token = $env:LAZYIT_TOKEN");
+    expect(command).toContain("$env:LAZYIT_TOKEN = ");
+  });
+});
+
+describe("agentInstallCommand — the --no-hypervisor veto (#1225, ADR-0095 §8)", () => {
+  test("Linux appends --no-hypervisor when asked, after the url", () => {
+    expect(agentInstallCommand("linux", ORIGIN, TOKEN, { noHypervisor: true })).toBe(
+      `export LAZYIT_TOKEN='${TOKEN}'\ncurl -fsSL ${ORIGIN}/install.sh | sudo -E sh -s -- --url ${ORIGIN} --no-hypervisor`,
+    );
+  });
+
+  test("Windows appends -NoHypervisor when asked", () => {
+    expect(agentInstallCommand("windows", ORIGIN, TOKEN, { noHypervisor: true })).toBe(
+      `$env:LAZYIT_TOKEN = '${TOKEN}'\n& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Url ${ORIGIN} -NoHypervisor`,
+    );
+  });
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: absent by default — the wizard's checkbox starts unchecked because collection is the default",
+    (platform) => {
+      const command = agentInstallCommand(platform, ORIGIN, TOKEN);
+      expect(command).not.toMatch(/-{1,2}[Nn]o-?[Hh]ypervisor/);
+    },
+  );
+
+  test("the veto flag it emits is one the SHIPPED installers actually declare", async () => {
+    // Same discipline as --upgrade below: a generated command naming a flag the served script
+    // rejects fails on an operator's host, not in CI — unless this test exists.
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--no-hypervisor)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toMatch(/\[switch\] \$NoHypervisor/);
   });
 });
 
@@ -204,18 +267,27 @@ describe("a plain-http origin carries the explicit opt-in the installers now dem
   // is USING: an https instance never sees it, so the loud warning stays tied to a real exposure.
   const HTTP_ORIGIN = "http://192.168.100.75:8080";
 
-  test("the Linux one-liner appends --allow-insecure-http, and only on http", () => {
+  test("the Linux install appends --allow-insecure-http, and only on http", () => {
     expect(agentInstallCommand("linux", HTTP_ORIGIN, TOKEN)).toBe(
-      `curl -fsSL ${HTTP_ORIGIN}/install.sh | sudo sh -s -- --url ${HTTP_ORIGIN} --token ${TOKEN} --allow-insecure-http`,
+      `export LAZYIT_TOKEN='${TOKEN}'\ncurl -fsSL ${HTTP_ORIGIN}/install.sh | sudo -E sh -s -- --url ${HTTP_ORIGIN} --allow-insecure-http`,
     );
     expect(agentInstallCommand("linux", ORIGIN, TOKEN)).not.toContain("--allow-insecure-http");
   });
 
-  test("the Windows one-liner appends -AllowInsecureHttp, and only on http", () => {
+  test("the Windows install appends -AllowInsecureHttp, and only on http", () => {
     expect(agentInstallCommand("windows", HTTP_ORIGIN, TOKEN)).toBe(
-      `& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Url ${HTTP_ORIGIN} -Token ${TOKEN} -AllowInsecureHttp`,
+      `$env:LAZYIT_TOKEN = '${TOKEN}'\n& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Url ${HTTP_ORIGIN} -AllowInsecureHttp`,
     );
     expect(agentInstallCommand("windows", ORIGIN, TOKEN)).not.toContain("-AllowInsecureHttp");
+  });
+
+  test("both riders compose: the http opt-in rides before the hypervisor veto, both after the url", () => {
+    expect(agentInstallCommand("linux", HTTP_ORIGIN, TOKEN, { noHypervisor: true })).toContain(
+      `--url ${HTTP_ORIGIN} --allow-insecure-http --no-hypervisor`,
+    );
+    expect(agentInstallCommand("windows", HTTP_ORIGIN, TOKEN, { noHypervisor: true })).toContain(
+      `-Url ${HTTP_ORIGIN} -AllowInsecureHttp -NoHypervisor`,
+    );
   });
 
   test("the UPDATE command carries it too, on both platforms — it runs the same installers", () => {
