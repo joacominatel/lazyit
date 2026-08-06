@@ -83,31 +83,41 @@ A guest with **no** agent of its own is simply represented by the host's view: a
 trackable node that goes offline when the guest does. Install an agent inside it later and the two
 converge the same way.
 
-### When a Windows VM stays as two rows
+### When a guest stays as two rows
 
-There is one case where the automatic merge **cannot** happen, and lazyit now tells you instead of
-staying quiet about it. Some virtual machines present their firmware in a way **Windows cannot
-read** — Windows reports no SMBIOS UUID at all, so there is no firmware identity to match against
-the hypervisor's. This is common on **Proxmox VE**, and only for **Windows** guests: Proxmox freezes
-a Windows VM's virtual hardware version at the moment you create it, so a VM created on PVE 8.1 or
-8.2 keeps that hardware forever, while the Linux VMs beside it are unaffected and converge normally.
+Sometimes the automatic merge **cannot** happen, and lazyit now tells you instead of staying quiet
+about it. The automatic merge needs the guest's **firmware UUID**, reported by the agent *inside*
+the guest. When that agent reports no firmware UUID, lazyit falls back to matching the **network
+card** — and a network card alone is a hint, never a merge. You will see a **possible duplicate**
+notification saying a network card matches but there is no UUID to confirm it.
 
-When that happens you will see a **possible duplicate** notification saying a network card matches
-but there is no UUID to confirm it. lazyit deliberately does **not** merge on a network card alone —
-one fact is a hint, never a merge. Two things you can do:
+The notification tells you **which of the three causes** you are looking at, because the fix is
+different for each:
 
-- **Merge them once, from the tray.** **Merge into…** folds the hypervisor's row into the VM's own
-  node, keeping everything you set. This is the quick answer and it sticks.
-- **Or repair the VM, and it fixes itself.** In Proxmox, raise the VM's **Machine** version (VM →
-  Hardware → Machine) to a current one, or add `-machine smbios-entry-point-type=32` to its `args`,
-  then reboot the guest. Windows can read the firmware again and the two rows converge on their own
-  from the next report onwards — no merge needed.
+- **A container (LXC).** Containers have no firmware UUID of their own — there is nothing to read,
+  at any privilege level. This pair can only be closed **by hand**, and that is fine: merge once and
+  it stays merged.
+- **An agent running unprivileged.** On Linux the firmware UUID is readable only by `root`, so an
+  agent running as an ordinary user simply omits it. **Run the agent as root** (or Administrator on
+  Windows) and the two rows converge on their own from the next report — no merge needed.
+- **A VM whose firmware Windows cannot read.** Some virtual machines present their firmware in a
+  form **Windows cannot locate**, so Windows reports no SMBIOS UUID at all. This is common on
+  **Proxmox VE** and only for **Windows** guests: Proxmox freezes a Windows VM's virtual hardware
+  version when you create it, so a VM created on PVE 8.1 or 8.2 keeps that hardware forever while
+  the Linux VMs beside it are unaffected. Raise the VM's **Machine** version (VM → Hardware →
+  Machine) to a current one, or add `-machine smbios-entry-point-type=32` to its `args`, then reboot
+  the guest — the two rows converge on their own from the next report onwards.
 
-**Upgrading to this version?** The first report from each affected host will raise these
-notifications for pairs that were already silently split — you are seeing existing duplicates
-surface, not new ones being created. Rows that already forked **do not merge themselves**: use one
-of the two options above. You get one notification per (guest, network card), not one per report, so
-a host full of affected VMs rings once each and then stays quiet.
+In every case you can also just **merge them once, from the tray**: **Merge into…** folds the
+hypervisor's row into the guest's own node, keeping everything you set.
+
+**Upgrading to this version?** The first report from each host will raise these notifications for
+pairs that were already silently split — you are seeing existing duplicates surface, not new ones
+being created. Rows that already forked **do not merge themselves**. You get one notification per
+(guest, network card), not one per report, so each pair rings once and then stays quiet — but if
+your estate runs **many LXC containers with their own agents**, or **many unprivileged agents**,
+expect that first wave to be large, because every one of those pairs is genuinely un-mergeable
+automatically.
 
 ## Cluster migrations
 
