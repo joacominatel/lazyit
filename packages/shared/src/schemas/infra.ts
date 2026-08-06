@@ -1041,7 +1041,8 @@ export type AgentHypervisor = z.infer<typeof AgentHypervisorObjectSchema>;
  * `smbiosUuid` and `macs` are corroborating identity EVIDENCE (#1141), never keys: they are what
  * lets a future agent installed INSIDE the guest be recognised as the same machine. Both arrive
  * canonicalised the one way the identifier contract canonicalises them ({@link
- * sanitizeIdentifierValue}), so the two sides can never disagree about the spelling of one fact.
+ * sanitizeIdentifierValue}), so the two sides can never disagree about the spelling of one fact —
+ * a guarantee this JSDoc claimed before `smbiosUuid` actually honoured it (#1227).
  * Every other field degrades to absent on a nonsense value.
  */
 const AgentGuestObjectSchema = z
@@ -1072,12 +1073,30 @@ const AgentGuestObjectSchema = z
           ? undefined
           : (AgentGuestStateSchema.safeParse(v.trim().toLowerCase()).data ?? "other"),
       ),
-    /** The guest's SMBIOS UUID as the hypervisor assigns it — normalized to trimmed lower-case. */
+    /**
+     * The guest's SMBIOS UUID as the hypervisor assigns it — canonicalised through the SAME
+     * {@link sanitizeIdentifierValue} the report side's `smbios-uuid` identifier goes through, which
+     * is what makes the two comparable BY CONSTRUCTION rather than by luck (#1227).
+     *
+     * It used to be a bare `trim().toLowerCase()`, and that silently spelled one fact two ways: the
+     * report side strips `{}` and re-hyphenates undashed hex, this side did neither. Proxmox dodged
+     * it (PVE writes bare dashed lower-case) and Hyper-V dodged it (its collector strips the braces
+     * itself), so the §6 join worked by collector accident on exactly the two platforms shipped —
+     * and VMware's raw `bios_uuid`, which ADR-0095 §1 promises slots in with no contract change,
+     * would have walked straight into it. Junk (all-zero, the OEM-baked placeholder runs) is now
+     * DROPPED here too, matching the sibling `macs` rule: evidence that cannot corroborate must
+     * never be stored as if it could.
+     *
+     * READ-TOLERANT BY CONSTRUCTION: the sanitiser is idempotent over the already-canonical values
+     * every stored blob carries, so nothing needs a backfill and nothing re-proposes.
+     */
     smbiosUuid: z
       .string()
       .optional()
       .catch(undefined)
-      .transform((v) => v?.trim().toLowerCase().slice(0, 64) || undefined),
+      .transform((v) =>
+        v === undefined ? undefined : sanitizeIdentifierValue("smbios-uuid", v)?.slice(0, 64),
+      ),
     macs: z
       .array(z.string().catch(""))
       .optional()
