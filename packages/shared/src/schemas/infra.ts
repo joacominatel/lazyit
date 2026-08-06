@@ -1089,13 +1089,22 @@ const AgentGuestObjectSchema = z
      *
      * READ-TOLERANT BY CONSTRUCTION: the sanitiser is idempotent over the already-canonical values
      * every stored blob carries, so nothing needs a backfill and nothing re-proposes.
+     *
+     * THE TRUNCATION IS PART OF THE SYMMETRY, not an afterthought. `normalizeUuidValue` re-renders
+     * anything UUID-shaped and returns everything else unchanged, so a long non-UUID value survives
+     * both sides and is then CUT — and cutting it at 64 here while the report side cuts at
+     * {@link AGENT_IDENTIFIER_VALUE_MAX} would make those two operands unequal for every value
+     * between the two lengths, however perfectly normalised. Same `trim().slice(MAX)`-then-sanitize
+     * order as {@link AgentIdentifierObjectSchema}, so the two really are one rule applied twice.
      */
     smbiosUuid: z
       .string()
       .optional()
       .catch(undefined)
       .transform((v) =>
-        v === undefined ? undefined : sanitizeIdentifierValue("smbios-uuid", v)?.slice(0, 64),
+        v === undefined
+          ? undefined
+          : sanitizeIdentifierValue("smbios-uuid", v.trim().slice(0, AGENT_IDENTIFIER_VALUE_MAX)),
       ),
     macs: z
       .array(z.string().catch(""))
