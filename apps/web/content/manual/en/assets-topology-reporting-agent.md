@@ -111,6 +111,15 @@ Either one opens a short, guided wizard with three steps:
    > wins if you write both, the same way `curl` reads them. What you put in that file is the agent's
    > **whole** answer: a `NO_PROXY` there does stop a proxy the machine set elsewhere, rather than
    > losing to it. Re-running the installer keeps these lines, in either spelling.
+
+   > **Installing on a hypervisor host?** Nothing to add: the same agent detects for itself that the
+   > machine runs Proxmox VE, Hyper-V or libvirt/KVM and inventories its guests too — the installer
+   > prints what it detected, and detection is re-checked on every run, so a host that becomes a
+   > hypervisor later simply starts reporting its guests. If you *don't* want that host's guests
+   > reported, add **`--no-hypervisor`** (**`-NoHypervisor`** on Windows): it writes
+   > `LAZYIT_COLLECT_HYPERVISOR=false` into the host's config file — a local veto, so like every
+   > local setting it wins over anything set in lazyit and survives upgrades. The full story is on
+   > [Hypervisor hosts](/help/assets-topology-hypervisors).
 3. **Wait.** The wizard then waits for the server to report. As soon as the agent checks in — usually
    within a couple of minutes — it shows a success message and an inline **Confirm** button. You can
    confirm right there, or close the wizard and confirm later from the Pending review tray.
@@ -711,6 +720,14 @@ If you have none of these, you'll never see this warning. It is deliberately qui
   its socket. Each one becomes its own node linked to the host, with those facts on a **Container**
   panel on the node (see Pending review above). This is still the local machine describing itself: the
   agent asks the runtime on that host what *it* is running — it never scans your network.
+- **The guests it hosts** — on a machine that *is* a hypervisor (a Proxmox VE node, a Hyper-V
+  server, a libvirt/KVM host), the virtual machines and containers it is running, automatically: the
+  agent detects the platform for itself on every run and reads the guest list locally from the
+  host's own hypervisor, with no API token and nothing to enable. Each guest becomes its own node
+  connected to the host by a **runs-on** link, exactly as containers do — and this too is the local
+  machine describing itself, never a remote hypervisor API and never a network scan. The full story —
+  what appears where, how a guest running its own agent converges onto one node, and how to turn it
+  off — is on [Hypervisor hosts](/help/assets-topology-hypervisors).
 - **When it last booted** — a single timestamp, refreshed on each report, with no history kept: it's
   an inventory fact ("did this box actually reboot after the patch window?"), not uptime monitoring.
   Stored with the host's other reported facts and, like the machine type, not shown on any screen yet.
