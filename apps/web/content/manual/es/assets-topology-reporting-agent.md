@@ -38,16 +38,21 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    **Linux**:
 
    ```sh
-   curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --url https://tu-instancia --token <token>
+   export LAZYIT_TOKEN='<token>'
+   curl -fsSL https://tu-instancia/install.sh | sudo -E sh -s -- --url https://tu-instancia
    ```
 
    En **Windows**, la misma instalación con el mismo token, desde una PowerShell **elevada**:
 
    ```powershell
-   & ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia -Token <token>
+   $env:LAZYIT_TOKEN = '<token>'
+   & ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia
    ```
 
-   (La forma con bloque de script no es adorno: el pipe `irm … | iex` no puede pasar parámetros.)
+   (Las dos formas son deliberadas. La primera línea entrega el token **por el entorno** en lugar de
+   como argumento — la nota sobre el token, más abajo, explica qué gana con eso. En Linux la `-E`
+   importa: `sudo` limpia el entorno, y sin ella el instalador nunca ve el token. Y la forma con
+   bloque de script no es adorno: el pipe `irm … | iex` no puede pasar parámetros.)
    Ver **[Hosts Windows](#hosts-windows)** más abajo para qué hace esa instalación y qué necesita.
 
    La elección cambia todo lo que el asistente muestra alrededor: qué necesita el host, la vía para
@@ -82,16 +87,17 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    prueba); en Windows, **Descargar y leer el instalador primero** guarda `install.ps1` en tu carpeta
    temporal para que lo leas y después ejecuta la copia que leíste.
 
-   > **Mantené el token fuera de la shell.** Tal como está escrito arriba, el token queda visible en
-   > `ps` para cualquier usuario de esa máquina durante los pocos segundos que dura la instalación, y
-   > queda en el historial de la shell de root. Si eso importa donde trabajás, dos formas equivalentes
-   > lo evitan: poner el token en el entorno (`LAZYIT_TOKEN=… sh install.sh --url …`), o en un archivo
-   > y pasar `--token-file /root/agent.token`. Para cualquiera de las dos hay que descargar el script
-   > primero. (`--token-file -` lo lee de una tubería, y por eso no puede combinarse con
-   > `curl … | sh`: la tubería ya es la entrada del script.) Cualquiera de las dos formas ahora
-   > mantiene el token fuera de `ps` durante *toda* la instalación: el instalador se lo pasa a `curl`
-   > por una tubería y no como argumento, así que ya no vuelve a aparecer en la lista de procesos
-   > camino a tu instancia.
+   > **El token viaja por el entorno, no por la línea de comandos.** La primera línea de cada
+   > comando de arriba define `LAZYIT_TOKEN`, la variable que ambos instaladores leen. La forma con
+   > argumento (`--token <token>` / `-Token <token>`) sigue funcionando, pero un argumento queda
+   > visible en `ps` para cualquier usuario de esa máquina durante los pocos segundos que dura la
+   > instalación — por eso el asistente dejó de mostrarla. La línea pegada igual queda en el
+   > historial de tu shell, token incluido; si *eso* importa donde trabajás, poné el token en un
+   > archivo y pasá `--token-file /root/agent.token` (descargando el script primero —
+   > `--token-file -` lo lee de una tubería, y por eso no puede combinarse con `curl … | sh`: la
+   > tubería ya es la entrada del script). Todas las formas mantienen el token fuera de `ps` durante
+   > *toda* la instalación: el instalador se lo pasa a `curl` por una tubería y no como argumento,
+   > así que nunca vuelve a aparecer en la lista de procesos camino a tu instancia.
 
    > **¿Despliegue en LAN (sin dominio público)?** Si tu instancia solo es alcanzable por una IP o
    > nombre de host de LAN con un certificado autofirmado, copiá el `.pem` de esa autoridad
@@ -129,12 +135,15 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    > **`--no-hypervisor`** (**`-NoHypervisor`** en Windows): escribe
    > `LAZYIT_COLLECT_HYPERVISOR=false` en el archivo de configuración del host — un veto local, así
    > que como todo ajuste local gana sobre cualquier cosa configurada en lazyit y sobrevive a las
-   > actualizaciones. La historia completa está en
-   > [Hosts hipervisores](/help/assets-topology-hypervisors).
+   > actualizaciones. El asistente también trae este veto: en **Opciones avanzadas**, la casilla
+   > **No inventariar los invitados de este host** agrega la opción al comando por vos. La historia
+   > completa está en [Hosts hipervisores](/help/assets-topology-hypervisors).
 3. **Espera.** El asistente entonces espera a que el servidor reporte. Apenas el agente reporta —
    normalmente en un par de minutos — muestra un mensaje de éxito y un botón **Confirmar** en línea.
    Podés confirmar ahí mismo, o cerrar el asistente y confirmarlo más tarde desde la bandeja de
-   Revisión pendiente.
+   Revisión pendiente. Si el host resultó ser un **hipervisor**, el asistente lo dice en esa misma
+   pantalla: la plataforma que detectó (con su versión cuando el host la reportó) y cuántos
+   invitados entraron a Revisión pendiente, con un atajo para revisarlos.
 
 ### Instalar manualmente (paso a paso)
 

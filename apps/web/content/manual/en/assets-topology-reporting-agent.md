@@ -36,16 +36,21 @@ Either one opens a short, guided wizard with three steps:
    ready-to-paste **install command** for it, with the token already filled in. On **Linux**:
 
    ```sh
-   curl -fsSL https://your-instance/install.sh | sudo sh -s -- --url https://your-instance --token <token>
+   export LAZYIT_TOKEN='<token>'
+   curl -fsSL https://your-instance/install.sh | sudo -E sh -s -- --url https://your-instance
    ```
 
    On **Windows**, the same install with the same token, from an **elevated PowerShell**:
 
    ```powershell
-   & ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Url https://your-instance -Token <token>
+   $env:LAZYIT_TOKEN = '<token>'
+   & ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Url https://your-instance
    ```
 
-   (The script-block form is not decoration: the plain `irm … | iex` pipe cannot pass parameters.)
+   (Both shapes are deliberate. The first line hands the token over **through the environment**
+   rather than as an argument — see the token note below for what that buys. On Linux the `-E`
+   matters: `sudo` clears the environment, and without it the installer never sees the token. And
+   the script-block form is not decoration: the plain `irm … | iex` pipe cannot pass parameters.)
    See **[Windows hosts](#windows-hosts)** below for what that install does and what it needs.
 
    The choice changes everything the wizard prints alongside it: what the host needs, the
@@ -76,15 +81,16 @@ Either one opens a short, guided wizard with three steps:
    send a test report); on Windows, **Download and read the installer first** saves `install.ps1` to
    your temp folder so you can read it, then runs the copy you read.
 
-   > **Keep the token out of the shell.** As written above, the token is visible in `ps` to every
-   > user on that machine for the few seconds the install runs, and it lands in root's shell history.
-   > If that matters where you work, two equivalent forms avoid it: put the token in the environment
-   > (`LAZYIT_TOKEN=… sh install.sh --url …`), or in a file and pass `--token-file /root/agent.token`.
-   > Download the script first for either. (`--token-file -` reads it from a pipe, which is why it
-   > can't be combined with `curl … | sh` — the pipe is already the script's input.) Either form now
-   > keeps the token out of `ps` for the *whole* install: the installer hands it to `curl` through a
-   > pipe rather than as an argument, so it no longer reappears in the process list on its way to
-   > your instance.
+   > **The token rides the environment, not the command line.** The first line of each command above
+   > sets `LAZYIT_TOKEN`, the variable both installers read. The older argument form
+   > (`--token <token>` / `-Token <token>`) still works, but an argument is visible in `ps` to every
+   > user on that machine for the few seconds the install runs — which is why the wizard stopped
+   > printing it. The pasted line still lands in your shell history, token and all; if *that* matters
+   > where you work, put the token in a file and pass `--token-file /root/agent.token` instead
+   > (download the script first — `--token-file -` reads it from a pipe, which is why it can't be
+   > combined with `curl … | sh`: the pipe is already the script's input). Every form keeps the token
+   > out of `ps` for the *whole* install: the installer hands it to `curl` through a pipe rather than
+   > as an argument, so it never reappears in the process list on its way to your instance.
 
    > **LAN deployment (no public domain)?** If your instance is reachable only by a LAN IP or hostname
    > with a self-signed certificate, copy that certificate authority's `.pem` onto the agent host and
@@ -118,11 +124,16 @@ Either one opens a short, guided wizard with three steps:
    > hypervisor later simply starts reporting its guests. If you *don't* want that host's guests
    > reported, add **`--no-hypervisor`** (**`-NoHypervisor`** on Windows): it writes
    > `LAZYIT_COLLECT_HYPERVISOR=false` into the host's config file — a local veto, so like every
-   > local setting it wins over anything set in lazyit and survives upgrades. The full story is on
+   > local setting it wins over anything set in lazyit and survives upgrades. The wizard carries
+   > this veto too: under **Advanced options**, the **Don't inventory this host's guests** checkbox
+   > appends the flag to the command for you. The full story is on
    > [Hypervisor hosts](/help/assets-topology-hypervisors).
 3. **Wait.** The wizard then waits for the server to report. As soon as the agent checks in — usually
    within a couple of minutes — it shows a success message and an inline **Confirm** button. You can
-   confirm right there, or close the wizard and confirm later from the Pending review tray.
+   confirm right there, or close the wizard and confirm later from the Pending review tray. If the
+   host turned out to be a **hypervisor**, the wizard says so on the same screen — the platform it
+   detected (with its version when the host reported one) and how many guests entered Pending
+   review, with a shortcut to review them.
 
 ### Install manually (step by step)
 
