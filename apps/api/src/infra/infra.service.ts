@@ -2647,6 +2647,15 @@ export class InfraService {
    * `infra.identity_conflict` bell nudge #1141 uses, deduped per (child, uuid) — and leaves the
    * operator the call. A candidate flagged with an identity conflict, or a reporting node carrying
    * one, is never merged at all.
+   *
+   * AND NO SMBIOS UUID IS NOT A NO-OP — IT IS A FINDING (#1227). This used to be a bare `return`,
+   * and in the field that produced two permanent nodes and total silence: a Windows 11 guest on
+   * Proxmox whose `Win32_ComputerSystemProduct` returns no instance at all (QEMU 8.1 defaulted
+   * `pc-*` to the 64-bit SMBIOS 3.0 entry point, which Windows cannot locate; Proxmox pins the
+   * machine version at creation for Windows guests only, so the Linux VMs beside it converged).
+   * There is no in-guest source to fall back to — but the hypervisor-assigned MAC is on BOTH sides,
+   * matching, and nothing was looking at it. So the gate now falls through to
+   * {@link nudgeGuestChildrenMatchingMac}, which is HINT-ONLY by construction.
    */
   private async absorbCorroboratedGuestChildren(
     nodeId: string,
@@ -2654,7 +2663,10 @@ export class InfraService {
     now: Date,
   ): Promise<void> {
     const uuids = smbiosUuidsOf(report.host);
-    if (uuids.length === 0) return;
+    if (uuids.length === 0) {
+      await this.nudgeGuestChildrenMatchingMac(nodeId, report);
+      return;
+    }
     const candidates = await this.prisma.$queryRaw<
       Array<{
         id: string;
@@ -2745,6 +2757,112 @@ export class InfraService {
         nodeId,
         now,
       );
+    }
+  }
+
+  /**
+   * The #1227 fallback: this report carries NO `smbios-uuid`, so the §6 join has no key to run on —
+   * surface any `/guest/` child the reported MACs match, and let the operator decide.
+   *
+   * HINT-ONLY, ALWAYS. It emits the existing `infra.identity_conflict` nudge and NOTHING else: no
+   * transaction, no absorb, no write of any kind. ADR-0095 §6's rule is that one fact is never a
+   * merge, and a MAC is one fact — weaker than a UUID, not stronger. Wrong merges are expensive and
+   * irreversible in practice; a nudge with a one-click merge behind it is cheap. The operator gets
+   * one bell and one click instead of two permanent nodes and no explanation.
+   *
+   * THE COST BOUND, which is the real risk here and is why this is not simply "also query by MAC".
+   * The UUID query is safe partly because most reports carry no `smbios-uuid` and it self-extinguishes
+   * once the child is absorbed. Almost every report DOES carry a `mac`, so an unguarded MAC lookup
+   * would turn a rare scan into a per-report one across the whole fleet. Three things hold it:
+   *
+   *  1. It runs ONLY when the report has no `smbios-uuid` at all — the UUID path did not merely
+   *     return zero candidates, it never ran. That is strictly the population #1227 is about
+   *     (guests that cannot read their own firmware) plus pre-0095 agents, not the fleet.
+   *  2. Same narrowing as its sibling: `/guest/` keys only, `ORDER BY "id"`, capped at
+   *     {@link GUEST_ABSORB_CANDIDATES_MAX}.
+   *  3. It is not self-extinguishing (nothing is merged), so the `dedupeKey` carries the child AND
+   *     the MAC — a 20-guest host rings once per pair, not twenty times per tick.
+   *
+   * The same GIN-index escalation recorded on the UUID query applies if a fleet ever makes this the
+   * slow part. The reporting node's own conflict marker is deliberately NOT read here: that read
+   * exists to disqualify a MERGE, and this path cannot merge — paying a query per report to suppress
+   * a hint would cost more than the hint.
+   */
+  private async nudgeGuestChildrenMatchingMac(
+    nodeId: string,
+    report: AgentReport,
+  ): Promise<void> {
+    const macs = hostIdentityEvidence(report.host).macs;
+    if (macs.length === 0) return;
+    this.logger.warn(
+      `"${report.host.hostname}" reports no SMBIOS UUID, so the guest identity join has no key to run on — falling back to its ${macs.length} reported MAC(s) as a HINT. On a VM this usually means the hypervisor exposes only the 64-bit SMBIOS entry point, which Windows cannot read (Proxmox/QEMU machine types pc-*-8.1 and pc-*-8.2).`,
+    );
+    const candidates = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        externalId: string | null;
+        label: string | null;
+        specs: unknown;
+      }>
+    >(
+      // The CASE is what makes this safe on ANY blob: `jsonb_array_elements_text` throws on a
+      // non-array, and Postgres is free to reorder a bare `jsonb_typeof(...) = 'array' AND …` guard.
+      // `lower()` mirrors the sibling query's read-tolerance for a hand-edited or pre-sanitize blob;
+      // `guestChildMacs` below is the authority, this predicate is only the prefilter.
+      Prisma.sql`SELECT "id", "externalId", "label", "specs"
+                   FROM "infra_nodes"
+                  WHERE "deletedAt" IS NULL
+                    AND "id" <> ${nodeId}
+                    AND "externalId" LIKE ${`%${guestExternalIdPrefix('')}%`}
+                    AND EXISTS (
+                          SELECT 1
+                            FROM jsonb_array_elements_text(
+                                   CASE WHEN jsonb_typeof("specs"->'guest'->'macs') = 'array'
+                                        THEN "specs"->'guest'->'macs'
+                                        ELSE '[]'::jsonb END) AS m(mac)
+                           WHERE lower(m.mac) IN (${Prisma.join(macs)}))
+                  ORDER BY "id"
+                  LIMIT ${GUEST_ABSORB_CANDIDATES_MAX}`,
+    );
+    for (const candidate of candidates) {
+      // The same defensive re-checks the UUID path makes over a jsonb the query matched.
+      if (!isGuestChildExternalId(candidate.externalId)) continue;
+      const candidateSpecs = (candidate.specs ?? {}) as Record<string, unknown>;
+      if (
+        candidateSpecs.identityConflict !== undefined &&
+        candidateSpecs.identityConflict !== null
+      ) {
+        continue;
+      }
+      const matched = guestChildMacs(candidateSpecs.guest).find((mac) =>
+        macs.includes(mac),
+      );
+      if (!matched) continue;
+      const label = candidate.label ?? candidate.externalId;
+      this.logger.warn(
+        `"${report.host.hostname}" shares network card ${matched} with guest child "${label}" (${candidate.id}) but reports no SMBIOS UUID to corroborate it — nothing was merged. If these are one machine, merge them from the tray.`,
+      );
+      await this.notifications.emit({
+        type: 'infra.identity_conflict',
+        dedupeKey: `infra.guest_mac_suspicion:${candidate.id}:${matched}`,
+        severity: 'warning',
+        title: `Is "${report.host.hostname}" guest "${label}"? A network card matches, no UUID to confirm`,
+        summary:
+          `Review before merging — "${report.host.hostname}" uses network card ${matched}, which the ` +
+          `hypervisor-proposed guest "${label}" also reports, but its agent could not read the machine's ` +
+          `SMBIOS UUID, so lazyit has only one fact and did NOT merge them. On a virtual machine that ` +
+          `usually means the hypervisor exposes only the 64-bit SMBIOS entry point, which Windows cannot ` +
+          `read (Proxmox/QEMU machine types pc-*-8.1 and pc-*-8.2 do this): setting the VM's machine ` +
+          `version newer, or -machine smbios-entry-point-type=32, makes them converge on their own. ` +
+          `If they are one machine, merge the guest into the reporting node from the topology view.`,
+        metadata: {
+          nodeId,
+          hostname: report.host.hostname,
+          guestNodeId: candidate.id,
+          guestLabel: candidate.label,
+          mac: matched,
+        },
+      });
     }
   }
 
