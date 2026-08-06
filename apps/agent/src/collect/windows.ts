@@ -1163,9 +1163,25 @@ function warnEmptyWindowsFacts(
       "identity: HKLM\\SOFTWARE\\Microsoft\\Cryptography\\MachineGuid was unreadable — the primary Windows identifier is omitted",
     );
   }
+  // NAMING THE CAUSE IS THE WHOLE POINT (#1227). On a VM this is almost never a WMI fault: QEMU 8.1
+  // defaulted `pc-*` machine types to the 64-bit SMBIOS 3.0 entry point, which Windows cannot locate
+  // (QEMU issue #2008) — and Proxmox PINS the machine version at creation for Windows guests only,
+  // so an affected VM stays affected across every PVE upgrade while the Linux VMs beside it are fine.
+  // There is no in-guest fallback to reach for: GetSystemFirmwareTable('RSMB') and the
+  // ComputerHardwareId registry path fail for the same reason. The repair is on the HOST, so the
+  // warning has to say so or the operator is left staring at a blank field with no next step.
+  //
+  // BUDGET: this string is sliced to AGENT_WARNING_LENGTH_MAX (300) by `buildDiagnostics` and AGAIN
+  // by `AgentReportSchema` on the server. The first version of it was 347 chars and reached the
+  // operator ending mid-token at "…-machine smbios-", losing the whole actionable half — so the
+  // repair instruction is deliberately at the END of a string that FITS, and the test asserts it
+  // through `buildDiagnostics` rather than at the `warn` sink, which is upstream of both caps.
   if (!kinds.has("smbios-uuid")) {
     warn(
-      "identity: Win32_ComputerSystemProduct reported no usable UUID — the SMBIOS identifier is omitted",
+      "identity: Win32_ComputerSystemProduct reported no usable UUID — the SMBIOS identifier is " +
+        "omitted. On a VM the host usually exposes only the 64-bit SMBIOS entry point, which " +
+        "Windows cannot read: fix it host-side (Proxmox/QEMU: raise the machine version or " +
+        "-machine smbios-entry-point-type=32).",
     );
   }
 }

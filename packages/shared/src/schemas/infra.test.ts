@@ -1161,6 +1161,56 @@ describe("host.guests[] — additive, optional, degrade-never-reject (ADR-0095)"
     ).toBe("abc-def");
   });
 
+  // #1227. The blob and the report are the TWO SIDES of the §6 identity join, and the join is an
+  // equality test — so the one thing they must never do is spell one fact two ways. The JSDoc above
+  // this field promised `sanitizeIdentifierValue` on both sides; the field itself did a bare
+  // `trim().toLowerCase()`, which leaves braces braced and undashed hex undashed while the report
+  // side strips and re-hyphenates. Proxmox happened to dodge it (PVE writes bare dashed lower-case)
+  // and Hyper-V happened to dodge it (its collector strips `{}` itself) — the contract was being
+  // upheld by collector accident, and VMware's `bios_uuid` would have walked straight into it.
+  test("smbiosUuid canonicalises EXACTLY like the identifier contract — both sides or neither (#1227)", () => {
+    for (const raw of [
+      "{4C4C4544-0031-3910-8047-B7C04F375A32}", // the braced form Windows/Hyper-V surfaces
+      "4C4C4544003139108047B7C04F375A32", // undashed, as a raw firmware table renders it
+      " 4C4C4544-0031-3910-8047-B7C04F375A32 ", // already canonical modulo whitespace
+    ]) {
+      expect(
+        withGuests([{ ref: "1", name: "a", kind: "qemu", smbiosUuid: raw }])?.[0]?.smbiosUuid,
+      ).toBe(sanitizeIdentifierValue("smbios-uuid", raw));
+    }
+  });
+
+  test("the two operands are cut at the SAME length, or the join can never fire (#1227)", () => {
+    // The last asymmetry. `normalizeUuidValue` re-renders anything shaped like a UUID and returns
+    // everything else UNCHANGED — so a long non-UUID value (a vendor string, a hand-edited blob)
+    // survives both sides intact and is then TRUNCATED. The blob side used to cut at 64 and the
+    // report side at AGENT_IDENTIFIER_VALUE_MAX (200): for any value between the two, the operands
+    // could never compare equal no matter how correct the normalisation above it was. Irrelevant to
+    // a real 36-char UUID and exactly the kind of edge the join is not allowed to have.
+    const long = `x${"a".repeat(80)}`; // 81 chars: past 64, inside 200, and not UUID-shaped
+    const viaReport = AgentReportSchema.parse({
+      ...V1_REPORT,
+      host: {
+        ...V1_REPORT.host,
+        identifiers: [{ kind: "smbios-uuid", namespace: "", value: long }],
+      },
+    }).host.identifiers?.find((i) => i.kind === "smbios-uuid")?.value;
+
+    expect(
+      withGuests([{ ref: "1", name: "a", kind: "qemu", smbiosUuid: long }])?.[0]?.smbiosUuid,
+    ).toBe(viaReport);
+  });
+
+  test("a placeholder SMBIOS UUID is dropped from the blob, exactly as it is from `macs` (#1227)", () => {
+    // Evidence that cannot corroborate must never be STORED as if it could — the sibling rule the
+    // `macs` field has enforced since #1138. A whole production run of consumer boards ships this.
+    expect(
+      withGuests([
+        { ref: "1", name: "a", kind: "qemu", smbiosUuid: "03000200-0400-0500-0006-000700080009" },
+      ])?.[0]?.smbiosUuid,
+    ).toBeUndefined();
+  });
+
   test("guest MACs are canonicalised, junk-dropped and capped", () => {
     const macs = [
       "AA-BB-CC-DD-EE-01",

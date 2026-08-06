@@ -200,9 +200,18 @@ ramp-in on first install is the cheap side of that trade.
 The two-nodes-for-one-machine problem is resolved with ADR-0093's discipline — **one notion of
 "same machine", corroborated, never a single-signal auto-merge**:
 
-- A `/guest/` child stores its `smbiosUuid` (normalized: lowercased; VMware's raw-VMX byte
-  order — first three fields byte-swapped vs. the guest's pretty-print — is normalized at the
-  edge the day that collector lands) and `macs` in its specs blob.
+- A `/guest/` child stores its `smbiosUuid` and `macs` in its specs blob, **both canonicalised
+  by `sanitizeIdentifierValue` — the same function the report side's `host.identifiers[]` goes
+  through**. That is the whole reason the join's equality test is meaningful: one fact, one
+  spelling, on both operands, by construction. (Amended by #1227: `smbiosUuid` originally did a
+  bare `trim().toLowerCase()`, which left `{braces}` braced and undashed hex undashed while the
+  report side stripped and re-hyphenated. Proxmox and Hyper-V dodged it by accident of how their
+  collectors happen to spell the value; VMware's raw `bios_uuid` would not have.) VMware's
+  raw-VMX byte order — first three fields byte-swapped vs. the guest's pretty-print — is
+  normalized at that same edge the day that collector lands. **QEMU/Proxmox is not a byte-order
+  case**: `smbios_encode_uuid()` writes the SMBIOS 2.6 wire form and both Linux sysfs and
+  Windows WMI decode it back, so PVE's `smbios1: uuid=`, a Linux guest's `product_uuid` and
+  `Win32_ComputerSystemProduct.UUID` all render the same string.
 - When a report's own `host.identifiers[]` carries an `smbios-uuid` matching a live `/guest/`
   child **and** at least one MAC corroborates (`canonicalMac` both sides), the in-guest node and
   the host-proposed child are the same machine. **The guest's own agent-reported node is
@@ -218,6 +227,54 @@ The two-nodes-for-one-machine problem is resolved with ADR-0093's discipline —
   duplicate-suspects for a one-click operator merge. **v1 does not auto-merge migrations** —
   same reasoning as ADR-0093's no-retroactive-re-linking: wrong merges are expensive, hints are
   cheap.
+- **A report with no `smbios-uuid` is a FINDING, not a no-op** (amended by #1227). The gate was
+  originally a bare `return`: no query, no log, no nudge. In the field that produced two
+  permanent nodes for one Windows 11 VM on Proxmox and said nothing about it — its
+  `Win32_ComputerSystemProduct` returns *no instance at all*, because QEMU 8.1 defaulted `pc-*`
+  machine types to the 64-bit SMBIOS 3.0 entry point that Windows cannot locate (QEMU issue
+  #2008), and Proxmox pins the machine version at creation **for Windows guests only** — so the
+  Linux VMs on the same host converged and this one could not. There is no in-guest fallback
+  (`GetSystemFirmwareTable("RSMB")` and the `ComputerHardwareId` registry path fail for the same
+  reason), so the fix is server-side: when the report carries no `smbios-uuid` but does carry
+  MACs, a **second, MAC-keyed lookup over `/guest/` children** runs and surfaces any match
+  through the same `infra.identity_conflict` nudge, deduped per (child, MAC).
+  - **HINT-ONLY, always.** A MAC alone is one fact, and is *weaker* than a UUID, not stronger —
+    it emits a notification and performs no write of any kind. The "never a single-signal
+    auto-merge" rule is unchanged and now covers both signals explicitly.
+  - **Who this actually fires on — stated honestly, because the advice depends on it.** The gate
+    is "no `smbios-uuid` **and** has MACs", and that population is **not** dominated by #1227's
+    Windows-on-QEMU case. Two larger groups live inside it permanently:
+    1. **Unprivileged Linux agents.** `/sys/class/dmi/id/product_uuid` is mode `0400`, so an
+       unprivileged run omits the identifier — and unprivileged is a first-class documented
+       posture (ADR-0074), not a misconfiguration.
+    2. **Every PVE LXC container running its own agent.** `parsePveConfig` reads `smbios1`,
+       which an LXC config does not have, so **every** LXC `/guest/` child carries `macs` and no
+       `smbiosUuid`, while the in-container agent reports a MAC and no `smbios-uuid`. On an LXC
+       estate that is a guaranteed, permanent match: every container, every report, forever.
+
+    So the nudge **branches its cause and its repair** on facts already in hand — the child's
+    `kind` and the report's `diagnostics.privileged`. A container has no SMBIOS at any privilege
+    level, so "raise the machine version" would be advice that cannot help; the QEMU sentence is
+    reserved for a privileged agent on a `qemu` child, which is exactly #1227's case.
+  - **The cost bound is part of the decision — and it is a real bound, not a small population.**
+    Almost every report carries a `mac`, so this lookup runs **only when the report has no
+    `smbios-uuid` at all** — the UUID path did not merely return zero candidates, it never ran.
+    That keeps it off the ordinary fleet, but on an estate of unprivileged agents or LXC
+    containers it runs **on every report of theirs, forever**, and never self-extinguishes
+    (nothing is merged). Same `/guest/` narrowing, same `ORDER BY "id"`, same
+    `GUEST_ABSORB_CANDIDATES_MAX` cap; the recorded GIN-index escalation is the answer if it ever
+    becomes the slow part. Because it is not self-extinguishing the dedupe key carries the child
+    **and** the MAC — and for the same reason the **log speaks only when a candidate came back**:
+    a WARN on every report of every unprivileged host is not a signal, it is a wall.
+  - **A node under an active #1141 identity collision still receives hints.** The reporting
+    node's own conflict marker is deliberately *not* read on this path — that read exists to
+    disqualify a **merge**, and this path cannot merge, so paying a query per report to suppress
+    a hint would cost more than the hint. (The *candidate's* marker is still honoured, matching
+    the UUID path.)
+  - The bound the spec used to encode as *"no smbios-uuid → no candidate query at all"* is
+    therefore **narrowed, not deleted**, to *"no smbios-uuid **and** no MAC → no query at all"*.
+    That test is the load-bearing record of this decision — a future reader restoring the wider
+    gate re-opens #1227.
 
 ### 7. Policy flag and the rollout order it forces
 
@@ -284,6 +341,23 @@ change, no backfill. Existing container children, edges, confirmed nodes: untouc
 operator who updates the server first sees nothing change until an agent updates — and the
 fleet view from ADR-0094 names exactly which hosts those are.
 
+**The #1227 amendment is additive too**: no migration, no column, no stored-shape change. The
+`smbiosUuid` canonicaliser is idempotent over every value already in a blob (all of which were
+written by the two collectors that spell it canonically anyway), so nothing needs a backfill and
+nothing re-proposes. The MAC fallback only reads and notifies. The one **behaviour change an
+operator will notice**: on the first report after upgrade, every pair that was already silently
+forked surfaces at once — one nudge per (guest, MAC). That is the intended surfacing of
+pre-existing damage, and pre-existing forks **do not converge on their own**: the operator merges
+them once from the tray, or repairs the VM host-side and lets the ordinary UUID join take over.
+
+**How big that burst is depends on the estate, and it is bigger than #1227's own case.** An
+estate of **LXC containers running their own agents**, or of **unprivileged Linux agents**, is
+inside the fallback's gate permanently (see §6), so each such pair nudges once and stays deduped
+— but every one of them nudges. Those nudges are *correct* (the pair really is un-joinable
+automatically) and their copy says so plainly instead of handing out QEMU advice, but an operator
+on such an estate should expect a one-time wave of duplicate-suspicion notifications rather than
+a handful.
+
 ## Known limitations (recorded, not hidden)
 
 - `ingestCollidingHost` returns before child reconciliation (`infra.service.ts:1674/1711`) — a
@@ -293,6 +367,15 @@ fleet view from ADR-0094 names exactly which hosts those are.
   `/etc/xensource-inventory`) is recorded in #1217 for when demand exists.
 - PVE cross-node migration produces an OFFLINE/new child pair pending operator merge (§6) —
   unless the guest runs its own agent, in which case the canonical node just re-points.
+- A guest whose firmware the OS cannot read (§6, #1227) never auto-converges: the MAC fallback
+  surfaces the pair and an operator merges it in one click. Repairing the VM host-side
+  (`-machine smbios-entry-point-type=32`, or a newer machine version) restores the automatic
+  join on the next report; lazyit will not — and cannot — do that for the operator.
+- **LXC containers can never auto-converge at all** (§6): an LXC config has no `smbios1` and a
+  container has no SMBIOS UUID of its own, so a container running its own agent is permanently a
+  MAC-only hint. The nudge says exactly that; the merge is a one-click operator action and stays
+  one. Same for an **unprivileged** Linux agent, except that one has a real remedy — run it as
+  root and the ordinary UUID join takes over.
 
 ## Consequences
 

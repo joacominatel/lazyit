@@ -7275,8 +7275,13 @@ describe('InfraService', () => {
   describe('ingestReport — guest identity join (ADR-0095 §6)', () => {
     const UUID = '4c4c4544-0031-3910-8047-b7c04f375a32';
 
-    /** The in-guest agent's own report — the report that closes the two-nodes fork. */
-    const vmReport = (identifiers?: unknown[]) =>
+    /**
+     * The in-guest agent's own report — the report that closes the two-nodes fork. `diagnostics` is
+     * a parameter because #1227's fallback branches its advice on `privileged`: an agent that could
+     * not read the firmware because it is not root gets a different instruction than one whose
+     * firmware is genuinely unreadable.
+     */
+    const vmReport = (identifiers?: unknown[], privileged?: boolean) =>
       AgentReportSchema.parse({
         agentVersion: '1.11.0',
         reportingSource: 'agent:vm',
@@ -7286,6 +7291,9 @@ describe('InfraService', () => {
           hostname: 'db-vm',
           ...(identifiers !== undefined ? { identifiers } : {}),
         },
+        ...(privileged !== undefined
+          ? { diagnostics: { privileged, durationMs: 12 } }
+          : {}),
       });
 
     const CORROBORATING = [
@@ -7425,15 +7433,14 @@ describe('InfraService', () => {
       expect(txNode.update).not.toHaveBeenCalled();
     });
 
-    it('NO smbios-uuid in the report → NO candidate query at all — the join is gated, not filtered', async () => {
-      // The bound the ADR demands: every pre-0095 agent and every unprivileged collector reports no
-      // smbios-uuid, and for them the join costs literally zero queries.
+    it('NO smbios-uuid AND NO mac in the report → NO candidate query at all — the join is gated, not filtered', async () => {
+      // The bound the ADR demands, NARROWED by #1227 rather than removed: a report carrying no
+      // identity evidence whatsoever still costs literally zero queries. What changed is that
+      // "no smbios-uuid" alone is no longer the gate — see the MAC-fallback block below for why
+      // a bare `return` there was the field bug, and why the fallback can still never merge.
       vmIsNew();
 
-      await service.ingestReport(
-        vmReport([{ kind: 'mac', value: 'AA:BB:CC:DD:EE:01' }]),
-        AGENT_SA,
-      );
+      await service.ingestReport(vmReport([]), AGENT_SA);
 
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
@@ -7487,6 +7494,271 @@ describe('InfraService', () => {
         ),
       ).toBe(true);
       expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    // ── #1227: the guest that cannot read its own SMBIOS UUID ────────────────
+    //
+    // THE FIELD BUG. A Windows 11 VM on Proxmox produced two permanent nodes and said nothing.
+    // `Win32_ComputerSystemProduct` returns NO INSTANCE when the QEMU machine type exposes only the
+    // 64-bit SMBIOS 3.0 entry point (QEMU issue #2008), and Proxmox pins the machine version at
+    // creation for WINDOWS guests only — so the Linux VMs on the same host converged and this one
+    // did not. The report then carried no `smbios-uuid`, the join hit a bare `return`, and the
+    // matching MAC — sitting right there on both sides — was never looked at.
+    //
+    // The fallback is HINT-ONLY. A MAC alone must never merge, exactly as a UUID alone never does.
+
+    /** Real Proxmox VE 8.x values for one Windows 11 guest — PVE's own `BC:24:11:` OUI. */
+    const PVE_MAC = 'bc:24:11:2e:9a:0f';
+    const PVE_UUID = '9d6f4b1a-3c2e-4f57-9a80-5e1c7b2d4e63';
+
+    /** What the in-guest Windows agent actually sends on an affected VM: a MAC, and nothing else. */
+    const WINDOWS_ON_PVE = [{ kind: 'mac', value: 'BC:24:11:2E:9A:0F' }]; // WMI answers upper-case
+
+    /** The child the PVE host proposed for that same machine — it DOES know the UUID. */
+    const pveGuestChild = (macs: string[]) => ({
+      id: 'node-guest',
+      externalId: 'machine-id-pve1/guest/101',
+      label: 'WIN11-DC01',
+      reportingSource: 'agent:pve',
+      specs: {
+        guest: {
+          ref: '101',
+          name: 'WIN11-DC01',
+          kind: 'qemu',
+          smbiosUuid: PVE_UUID,
+          macs,
+        },
+      },
+    });
+
+    /** Route the MAC-keyed fallback lookup; everything else answers empty. */
+    function rawQueriesByMac(candidates: unknown[]): void {
+      prisma.$queryRaw.mockImplementation((query: { strings?: string[] }) => {
+        const sql = (query?.strings ?? []).join(' ');
+        if (sql.includes("'macs'")) return Promise.resolve(candidates);
+        return Promise.resolve([]);
+      });
+    }
+
+    function macQuery(): { sql: string; values: unknown[] } {
+      const call = (prisma.$queryRaw.mock.calls as unknown[][]).find((c) =>
+        ((c[0] as { strings?: string[] })?.strings ?? [])
+          .join(' ')
+          .includes("'macs'"),
+      );
+      const arg = call?.[0] as
+        | { strings?: string[]; values?: unknown[] }
+        | undefined;
+      return {
+        sql: (arg?.strings ?? []).join(' '),
+        values: arg?.values ?? [],
+      };
+    }
+
+    it('a guest whose own agent cannot read its SMBIOS UUID still SURFACES — the MAC corroborates', async () => {
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      // (a) The lookup runs at all — today it does not, which is the whole bug.
+      const { sql, values } = macQuery();
+      expect(sql).toContain("'macs'");
+      // Same bounds as the UUID query: /guest/ children only, deterministic, capped — and the
+      // reported MAC is bound lower-cased, so it can meet the stored (schema-canonical) spelling.
+      expect(values).toContain('%/guest/%');
+      // The reported MAC is BOUND (through Prisma.join, hence the nesting) already lower-cased, so
+      // it can meet the stored, schema-canonical spelling without the query doing any work.
+      expect(JSON.stringify(values)).toContain(PVE_MAC);
+      expect(sql).toContain('ORDER BY "id"');
+      expect(sql).toContain('LIMIT');
+
+      // (b) The operator gets ONE nudge, deduped per (child, mac) so a 20-VM host does not ring 20
+      // times per tick for the same pair.
+      const emitted = firstArg<{
+        type: string;
+        dedupeKey: string;
+        summary: string;
+      }>(notifications.emit);
+      expect(emitted.type).toBe('infra.identity_conflict');
+      expect(emitted.dedupeKey).toBe(
+        `infra.guest_mac_suspicion:node-guest:${PVE_MAC}`,
+      );
+      // The copy names the CAUSE — an operator who cannot act on a nudge is being pinged, not told.
+      expect(emitted.summary).toContain('SMBIOS');
+
+      // (c) A MAC ALONE NEVER MERGES. ADR-0095 §6's rule, unweakened.
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(txNode.update).not.toHaveBeenCalled();
+    });
+
+    it('a child whose MACs do NOT actually match is dropped by the read-side re-check — no nudge', async () => {
+      // The negative twin. The jsonb prefilter is not the authority; `guestChildMacs` is, exactly as
+      // on the UUID path — a hand-edited or pre-sanitize blob must not become a false suspicion.
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild(['bc:24:11:2e:9a:99'])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      expect(notifications.emit).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('no matching child at all → no nudge, and still no merge', async () => {
+      vmIsNew();
+      rawQueriesByMac([]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      expect(notifications.emit).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a child under an identity conflict is not even nudged about — suspicion disqualifies both directions', async () => {
+      vmIsNew();
+      rawQueriesByMac([
+        {
+          ...pveGuestChild([PVE_MAC]),
+          specs: {
+            ...pveGuestChild([PVE_MAC]).specs,
+            identityConflict: { peerNodeId: 'node-x', detectedAt: 'whenever' },
+          },
+        },
+      ]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      expect(notifications.emit).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a non-/guest/ row that slipped the LIKE is re-checked and skipped', async () => {
+      vmIsNew();
+      rawQueriesByMac([
+        { ...pveGuestChild([PVE_MAC]), externalId: 'machine-id-pve1' },
+      ]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('a report that DOES carry an smbios-uuid never runs the MAC query — the fleet-wide cost bound', async () => {
+      // THE REGRESSION RISK OF THIS FIX. Almost every report carries a `mac`, so an unguarded second
+      // lookup would turn a rare scan into a per-report one across the whole fleet. The fallback is
+      // for reports that have NOTHING ELSE — the UUID path is untouched and remains the only channel
+      // that can merge.
+      vmIsNew();
+      rawQueries([guestChild(['aa:bb:cc:dd:ee:99'])]);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(macQuery().sql).toBe('');
+    });
+
+    // ── Who this path ACTUALLY fires on, and what it is allowed to say to them ───
+    //
+    // The gate is "no smbios-uuid + has MACs", and that population is NOT dominated by #1227's
+    // Windows-on-QEMU case. Two much larger groups sit inside it, permanently:
+    //
+    //  (a) UNPRIVILEGED LINUX AGENTS — `/sys/class/dmi/id/product_uuid` is mode 0400, so an
+    //      unprivileged run simply omits the identifier. Unprivileged is a FIRST-CLASS documented
+    //      posture (ADR-0074), not a misconfiguration.
+    //  (b) EVERY PVE LXC CONTAINER RUNNING ITS OWN AGENT — `parsePveConfig` reads `smbios1`, which
+    //      an LXC config does not have, so every LXC `/guest/` child carries macs and no
+    //      smbiosUuid; the in-container agent reports a MAC and no smbios-uuid. That is a
+    //      guaranteed, permanent match on every LXC estate, every report, forever.
+    //
+    // Telling either of those "raise your QEMU machine version" is telling them to do something
+    // that cannot possibly help — a container has no SMBIOS at all. Both facts needed to say the
+    // right thing are already in hand, so the copy branches on them.
+
+    /** The same pair, but the child is a CONTAINER — no SMBIOS UUID exists to be read. */
+    const lxcGuestChild = () => ({
+      id: 'node-ct',
+      externalId: 'machine-id-pve1/guest/205',
+      label: 'ct-web',
+      reportingSource: 'agent:pve',
+      specs: {
+        guest: { ref: '205', name: 'ct-web', kind: 'lxc', macs: [PVE_MAC] },
+      },
+    });
+
+    const emittedSummary = (): string =>
+      firstArg<{ summary: string }>(notifications.emit).summary;
+
+    const spyOnWarn = () =>
+      jest
+        .spyOn(
+          (service as unknown as { logger: { warn: (msg: string) => void } })
+            .logger,
+          'warn',
+        )
+        .mockImplementation(() => undefined);
+
+    it('an LXC child is told the truth: a container has no SMBIOS UUID, so only a hand merge can close it', async () => {
+      vmIsNew();
+      rawQueriesByMac([lxcGuestChild()]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, true), AGENT_SA);
+
+      const summary = emittedSummary();
+      expect(summary).toContain('Containers');
+      // The QEMU advice is FALSE here and must not appear — there is no firmware to fix.
+      expect(summary).not.toContain('smbios-entry-point-type');
+      expect(summary).not.toContain('machine version');
+    });
+
+    it('an UNPRIVILEGED agent is told to run as root, not to reconfigure its hypervisor', async () => {
+      // ADR-0074's documented posture. The firmware UUID is readable; this process just is not
+      // allowed to read it. "Raise your machine version" would be a wild-goose chase.
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, false), AGENT_SA);
+
+      const summary = emittedSummary();
+      expect(summary).toContain('unprivileged');
+      expect(summary).not.toContain('smbios-entry-point-type');
+    });
+
+    it('a PRIVILEGED agent on a qemu guest still gets the #1227 QEMU repair — the case this shipped for', async () => {
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, true), AGENT_SA);
+
+      expect(emittedSummary()).toContain('smbios-entry-point-type=32');
+    });
+
+    it('the fallback LOG is silent when nothing matched — one WARN per report per host, forever, is not a log', async () => {
+      // With the real population above, an unconditional pre-query WARN is ~9,600 lines/day on a
+      // 100-host estate that will never match anything. A log that always fires says nothing.
+      vmIsNew();
+      rawQueriesByMac([]);
+      const warn = spyOnWarn();
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, false), AGENT_SA);
+
+      expect(
+        warn.mock.calls.filter(
+          (c) => typeof c[0] === 'string' && c[0].includes('no SMBIOS UUID'),
+        ),
+      ).toEqual([]);
+    });
+
+    it('…and speaks the moment there IS something to say', async () => {
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+      const warn = spyOnWarn();
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, true), AGENT_SA);
+
+      expect(
+        warn.mock.calls.some(
+          (c) => typeof c[0] === 'string' && c[0].includes('no SMBIOS UUID'),
+        ),
+      ).toBe(true);
     });
   });
 
