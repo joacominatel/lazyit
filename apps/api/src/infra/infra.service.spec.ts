@@ -7275,8 +7275,13 @@ describe('InfraService', () => {
   describe('ingestReport — guest identity join (ADR-0095 §6)', () => {
     const UUID = '4c4c4544-0031-3910-8047-b7c04f375a32';
 
-    /** The in-guest agent's own report — the report that closes the two-nodes fork. */
-    const vmReport = (identifiers?: unknown[]) =>
+    /**
+     * The in-guest agent's own report — the report that closes the two-nodes fork. `diagnostics` is
+     * a parameter because #1227's fallback branches its advice on `privileged`: an agent that could
+     * not read the firmware because it is not root gets a different instruction than one whose
+     * firmware is genuinely unreadable.
+     */
+    const vmReport = (identifiers?: unknown[], privileged?: boolean) =>
       AgentReportSchema.parse({
         agentVersion: '1.11.0',
         reportingSource: 'agent:vm',
@@ -7286,6 +7291,9 @@ describe('InfraService', () => {
           hostname: 'db-vm',
           ...(identifiers !== undefined ? { identifiers } : {}),
         },
+        ...(privileged !== undefined
+          ? { diagnostics: { privileged, durationMs: 12 } }
+          : {}),
       });
 
     const CORROBORATING = [
@@ -7646,6 +7654,111 @@ describe('InfraService', () => {
       await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
 
       expect(macQuery().sql).toBe('');
+    });
+
+    // ── Who this path ACTUALLY fires on, and what it is allowed to say to them ───
+    //
+    // The gate is "no smbios-uuid + has MACs", and that population is NOT dominated by #1227's
+    // Windows-on-QEMU case. Two much larger groups sit inside it, permanently:
+    //
+    //  (a) UNPRIVILEGED LINUX AGENTS — `/sys/class/dmi/id/product_uuid` is mode 0400, so an
+    //      unprivileged run simply omits the identifier. Unprivileged is a FIRST-CLASS documented
+    //      posture (ADR-0074), not a misconfiguration.
+    //  (b) EVERY PVE LXC CONTAINER RUNNING ITS OWN AGENT — `parsePveConfig` reads `smbios1`, which
+    //      an LXC config does not have, so every LXC `/guest/` child carries macs and no
+    //      smbiosUuid; the in-container agent reports a MAC and no smbios-uuid. That is a
+    //      guaranteed, permanent match on every LXC estate, every report, forever.
+    //
+    // Telling either of those "raise your QEMU machine version" is telling them to do something
+    // that cannot possibly help — a container has no SMBIOS at all. Both facts needed to say the
+    // right thing are already in hand, so the copy branches on them.
+
+    /** The same pair, but the child is a CONTAINER — no SMBIOS UUID exists to be read. */
+    const lxcGuestChild = () => ({
+      id: 'node-ct',
+      externalId: 'machine-id-pve1/guest/205',
+      label: 'ct-web',
+      reportingSource: 'agent:pve',
+      specs: {
+        guest: { ref: '205', name: 'ct-web', kind: 'lxc', macs: [PVE_MAC] },
+      },
+    });
+
+    const emittedSummary = (): string =>
+      firstArg<{ summary: string }>(notifications.emit).summary;
+
+    const spyOnWarn = () =>
+      jest
+        .spyOn(
+          (service as unknown as { logger: { warn: (msg: string) => void } })
+            .logger,
+          'warn',
+        )
+        .mockImplementation(() => undefined);
+
+    it('an LXC child is told the truth: a container has no SMBIOS UUID, so only a hand merge can close it', async () => {
+      vmIsNew();
+      rawQueriesByMac([lxcGuestChild()]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, true), AGENT_SA);
+
+      const summary = emittedSummary();
+      expect(summary).toContain('Containers');
+      // The QEMU advice is FALSE here and must not appear — there is no firmware to fix.
+      expect(summary).not.toContain('smbios-entry-point-type');
+      expect(summary).not.toContain('machine version');
+    });
+
+    it('an UNPRIVILEGED agent is told to run as root, not to reconfigure its hypervisor', async () => {
+      // ADR-0074's documented posture. The firmware UUID is readable; this process just is not
+      // allowed to read it. "Raise your machine version" would be a wild-goose chase.
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, false), AGENT_SA);
+
+      const summary = emittedSummary();
+      expect(summary).toContain('unprivileged');
+      expect(summary).not.toContain('smbios-entry-point-type');
+    });
+
+    it('a PRIVILEGED agent on a qemu guest still gets the #1227 QEMU repair — the case this shipped for', async () => {
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, true), AGENT_SA);
+
+      expect(emittedSummary()).toContain('smbios-entry-point-type=32');
+    });
+
+    it('the fallback LOG is silent when nothing matched — one WARN per report per host, forever, is not a log', async () => {
+      // With the real population above, an unconditional pre-query WARN is ~9,600 lines/day on a
+      // 100-host estate that will never match anything. A log that always fires says nothing.
+      vmIsNew();
+      rawQueriesByMac([]);
+      const warn = spyOnWarn();
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, false), AGENT_SA);
+
+      expect(
+        warn.mock.calls.filter(
+          (c) => typeof c[0] === 'string' && c[0].includes('no SMBIOS UUID'),
+        ),
+      ).toEqual([]);
+    });
+
+    it('…and speaks the moment there IS something to say', async () => {
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+      const warn = spyOnWarn();
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, true), AGENT_SA);
+
+      expect(
+        warn.mock.calls.some(
+          (c) => typeof c[0] === 'string' && c[0].includes('no SMBIOS UUID'),
+        ),
+      ).toBe(true);
     });
   });
 
