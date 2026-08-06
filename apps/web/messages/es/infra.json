@@ -165,8 +165,14 @@
     },
     "installTitle": "Ejecutá esto en tu servidor",
     "installHint": {
-      "linux": "Copiá el comando y ejecutalo en el servidor Linux como root. El token se muestra una sola vez: capturalo antes de cerrar.",
-      "windows": "Copiá el comando y ejecutalo desde una PowerShell elevada. La forma con bloque de script es deliberada: un pipe irm | iex no puede pasar la URL ni el token. El token se muestra una sola vez: capturalo antes de cerrar."
+      "linux": "Copiá el comando y ejecutalo en el servidor Linux como root. La primera línea pasa el token por el entorno, así nunca aparece en la lista de procesos. El token se muestra una sola vez: capturalo antes de cerrar.",
+      "windows": "Copiá el comando y ejecutalo desde una PowerShell elevada. La primera línea pasa el token por el entorno, así queda fuera de la línea de comandos; la forma con bloque de script es deliberada: un pipe irm | iex no puede pasar la URL. El token se muestra una sola vez: capturalo antes de cerrar."
+    },
+    "hypervisorNote": "¿Instalás en un host hipervisor (Proxmox VE, Hyper-V, libvirt/KVM)? No hay nada extra que hacer: este mismo comando detecta la plataforma e inventaría sus guests automáticamente. <link>Cómo funciona</link>",
+    "advanced": {
+      "toggle": "Opciones avanzadas",
+      "noHypervisor": "No inventariar los guests de este host",
+      "noHypervisorHint": "Agrega {flag} al comando de arriba: el host guarda un veto local (LAZYIT_COLLECT_HYPERVISOR=false en su archivo de configuración) que gana sobre cualquier configuración de lazyit y sobrevive a las actualizaciones."
     },
     "unsigned": "El ejecutable de Windows todavía no está firmado, así que SmartScreen va a advertir sobre él y algunos antivirus pueden ponerlo en cuarentena. Es un estado deliberado para validación interna, no una señal de que la descarga esté mal.",
     "copyCommandAria": "Copiar el comando",
@@ -196,6 +202,11 @@
     "waitDescription": "Ejecutá el comando de instalación en tu servidor. Apenas el agente reporte, aparecerá acá, normalmente en un par de minutos.",
     "successTitle": "¡{name} reportó!",
     "successDescription": "Tu servidor reportó. Confirmalo para sumarlo a tu inventario.",
+    "detected": {
+      "summary": "Este host es un hipervisor ({platform}): {count, plural, =0 {todavía no hay guests esperando revisión} one {# guest entró a Revisión pendiente} other {# guests entraron a Revisión pendiente}}.",
+      "summaryNoPlatform": "Este host es un hipervisor: {count, plural, =0 {todavía no hay guests esperando revisión} one {# guest entró a Revisión pendiente} other {# guests entraron a Revisión pendiente}}.",
+      "review": "Revisalos"
+    },
     "confirmAction": "Confirmar servidor",
     "checkLater": "Reviso después"
   },
