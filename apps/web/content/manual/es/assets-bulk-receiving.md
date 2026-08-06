@@ -19,7 +19,8 @@ para crear activos). Se abre un formulario breve.
 
 - **Modelo** (obligatorio) — el único modelo a partir del cual se crea cada unidad. Su nombre inicializa
   el nombre por defecto de cada unidad, y su categoría y especificaciones por defecto se incluyen igual
-  que en el formulario de un solo activo.
+  que en el formulario de un solo activo. Si el modelo todavía no existe, créalo desde aquí mismo —
+  ver más abajo.
 - **Cantidad** (obligatorio) — cuántas unidades crear, desde 1 hasta el máximo por solicitud.
 - **Estado** — el estado en el que arranca cada unidad (por ejemplo *Operativo* o *En almacén*).
 - **Ubicación**, **Empresa**, **Fecha de compra**, **Costo de compra**, **Notas** — datos compartidos
@@ -32,6 +33,27 @@ para crear activos). Se abre un formulario breve.
 Las etiquetas de activo automáticas siguen aplicando: si tu instancia usa un
 [esquema de etiquetas](/help/configuration-asset-tag-scheme), cada unidad se etiqueta automáticamente a
 medida que se crea.
+
+## Crear el modelo sin salir del formulario
+
+La mayoría de los envíos llegan *porque* se compró algo nuevo, así que muchas veces el modelo que
+necesitas todavía no existe. Usa el **+** que está junto al selector de modelo: abre un diálogo
+**Nuevo modelo** encima del formulario.
+
+- Solo aparece si tienes permiso para gestionar modelos. Sin ese permiso, elige entre los modelos
+  existentes.
+- Un modelo necesita **nombre** y **fabricante**. Si ya habías escrito un término de búsqueda en el
+  selector, el nombre viene precargado con él — así no creas un casi-duplicado de un modelo que
+  simplemente estaba escrito distinto.
+- La **categoría es opcional** y solo puedes elegir una que ya exista. Crear una categoría aquí no se
+  ofrece a propósito: un error de tipeo dejaría una categoría fantasma. Agrega categorías desde
+  [modelos y categorías](/help/assets-models-categories) cuando necesites una nueva.
+- Al pulsar **Crear**, el diálogo se cierra, el modelo nuevo queda seleccionado y **todo lo que ya
+  habías escrito — cantidad, estado, ubicación, números de serie — sigue ahí.** Cancelar o presionar
+  Escape cierra únicamente ese diálogo y no cambia nada del formulario.
+
+El modelo es un registro por derecho propio: una vez creado queda en tu catálogo y es reutilizable,
+incluso si después cancelas la recepción o la recepción falla.
 
 ## El éxito parcial es normal
 
@@ -55,7 +77,8 @@ Desde el resultado puedes ir directamente a los nuevos activos (el inventario fi
 
 ## Cuándo usar la importación en su lugar
 
-Recibir stock es para unidades **nuevas** de un modelo que ya tienes. Para cargar un inventario
+Recibir stock es para unidades **nuevas** de un **único** modelo — uno que ya tienes, o uno que creas
+en el momento desde el propio formulario. Para cargar un inventario
 **existente** desde una planilla o una herramienta previa — muchos modelos distintos, con sus propios
 números de serie y responsables — usa el [importador masivo](/help/assets-bulk-import) en su lugar.
 
