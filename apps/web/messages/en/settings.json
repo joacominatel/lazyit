@@ -260,13 +260,14 @@
     },
     "collect": {
       "title": "What agents collect",
-      "description": "On Linux a collector that is off is never run — the agent does not gather the facts and then discard them. On Windows only containers works that way: hardware, disks, network interfaces and installed software all ride one PowerShell call that runs either way, so switching one off there keeps the fact out of the report but does not save the host the work.",
+      "description": "On Linux a collector that is off is never run — the agent does not gather the facts and then discard them. On Windows only containers and hypervisor guests work that way: hardware, disks, network interfaces and installed software all ride one PowerShell call that runs either way, so switching one off there keeps the fact out of the report but does not save the host the work.",
       "veto": "A host can always refuse. Turning a collector off in that host's own agent config — /etc/lazyit-agent/config on Linux, C:\\ProgramData\\lazyit-agent\\config on Windows — wins over this setting, and nothing here can switch it back on.",
       "hardware": "Manufacturer, model and serial",
       "disks": "Disks and mountpoints",
       "nics": "Network interfaces",
       "software": "Installed software",
-      "containers": "Containers"
+      "containers": "Containers",
+      "hypervisor": "Hypervisor guests"
     },
     "exclude": {
       "title": "Exclusions",
