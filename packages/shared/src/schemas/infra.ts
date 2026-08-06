@@ -540,6 +540,43 @@ export const AgentContainerStateSchema = z.enum([
 export const AgentContainerPortProtocolSchema = z.enum(["tcp", "udp", "sctp"]);
 
 /**
+ * The hypervisor PLATFORM an agent found itself running on (ADR-0095) — the vocabulary the guest
+ * inventory branches on (which CLI/API the collector used, which `ref` format the guests carry).
+ * `other` is deliberate and load-bearing on the same degrade-never-reject rule as every vocabulary
+ * here: the hypervisor world keeps producing platforms we did not enumerate, and rejecting one would
+ * cost the operator a whole HOST — the value folds to `other` and the guests still land.
+ */
+export const AgentHypervisorPlatformSchema = z.enum([
+  "proxmox",
+  "hyperv",
+  "libvirt",
+  "xcpng",
+  "other",
+]);
+
+/**
+ * What KIND of guest the hypervisor runs (ADR-0095) — the fact {@link guestNodeKind} projects into
+ * the child node's `kind` (`lxc` is a CONTAINER, everything else a VM). Named after the technology
+ * rather than the platform because Proxmox alone spans two of them (`qemu` VMs + `lxc` containers).
+ * An unknown value folds to `other`, never a 400.
+ */
+export const AgentGuestKindSchema = z.enum(["qemu", "lxc", "hyperv", "libvirt", "other"]);
+
+/**
+ * The lifecycle state the hypervisor reports for a guest (ADR-0095) — the container-state analogue
+ * one level up ({@link AgentContainerStateSchema}), collapsed to the states every platform agrees
+ * on. `other` is the landing spot for anything else: a platform that invents a state must cost the
+ * operator a FACT, never the guest.
+ */
+export const AgentGuestStateSchema = z.enum([
+  "running",
+  "stopped",
+  "paused",
+  "suspended",
+  "other",
+]);
+
+/**
  * What a report says about the installed-software list (#1142) — **FOUR answers, not two.**
  *
  * Before this field the wire had exactly two: a `software` array, or nothing. The server read
@@ -636,6 +673,18 @@ export const AGENT_CONTAINERS_MAX = 100;
 
 /** Cap on the published-port list of ONE container — an inventory fact, not a port scan. */
 export const AGENT_CONTAINER_PORTS_MAX = 32;
+
+/**
+ * Cap on `host.guests` (ADR-0095) — TRUNCATED past it, never rejected, same rule as
+ * {@link AGENT_CONTAINERS_MAX}. Deliberately larger than the container cap: one hypervisor NODE
+ * legitimately runs hundreds of guests (a Proxmox host in a homelab-to-SMB estate commonly carries
+ * 50–200), and every element past the cap would be a child node the #1134 enrollment throttle
+ * charges — 500 bounds what ONE report can ask the server to enrol while losing nobody real.
+ */
+export const AGENT_GUESTS_MAX = 500;
+
+/** Cap on ONE guest's reported MAC list — corroborating evidence (#1141), not a NIC inventory. */
+export const AGENT_GUEST_MACS_MAX = 16;
 
 /**
  * The CANONICAL form of an identifier value for its kind (#1138) — the rule #1141 reconciles across
@@ -936,6 +985,144 @@ export const AgentContainerSchema = z.preprocess(
 export type AgentContainer = z.infer<typeof AgentContainerSchema>;
 
 /**
+ * The hypervisor a reporting host RUNS (ADR-0095) — a fact about the host itself, unlike
+ * {@link AgentVirtualizationTypeSchema}, which says what the host runs UNDER. `platform` is the only
+ * key with weight (the discriminator every consumer branches on) and it FOLDS rather than rejects:
+ * an unenumerated platform degrades to `other` and the guest list still lands. The optional facts
+ * are display context (`clusterName`/`nodeName` are how a Proxmox operator names the box), trimmed
+ * and capped like every sibling string.
+ */
+const AgentHypervisorObjectSchema = z
+  .object({
+    platform: z
+      .string()
+      .catch("")
+      .transform(
+        (v) => AgentHypervisorPlatformSchema.safeParse(v.trim().toLowerCase()).data ?? "other",
+      ),
+    version: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().slice(0, 120) || undefined),
+    clusterName: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().slice(0, 200) || undefined),
+    nodeName: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().slice(0, 200) || undefined),
+  })
+  // Emit only what was reported — same rule as the container element (never stored explicit
+  // `undefined`s that read as "we looked and found nothing").
+  .transform((raw) => ({
+    platform: raw.platform,
+    ...(raw.version !== undefined ? { version: raw.version } : {}),
+    ...(raw.clusterName !== undefined ? { clusterName: raw.clusterName } : {}),
+    ...(raw.nodeName !== undefined ? { nodeName: raw.nodeName } : {}),
+  }));
+export type AgentHypervisor = z.infer<typeof AgentHypervisorObjectSchema>;
+
+/**
+ * One guest the hypervisor runs (ADR-0095) — the container child contract (#1139) one level up: a
+ * child node the server mints, with an active `RUNS_ON` edge back to the reporting host.
+ *
+ * `ref` is the IDENTITY KEY (see {@link guestExternalId}), and identity keys in this contract are
+ * permanent (ADR-0074 §3 — one thing = one node, forever). It is the platform's own STABLE guest
+ * identifier — the Proxmox VMID, the Hyper-V VM GUID, the libvirt domain UUID — chosen over `name`
+ * (guests get renamed without being re-created, the exact inverse of the container tradeoff, where
+ * the NAME is the stable half) and over the runtime instance id (regenerated per boot on some
+ * platforms). `name` is the label the operator knows the guest by; an element left with no usable
+ * ref OR name is dropped by the array rather than 400-ing the whole host.
+ *
+ * `smbiosUuid` and `macs` are corroborating identity EVIDENCE (#1141), never keys: they are what
+ * lets a future agent installed INSIDE the guest be recognised as the same machine. Both arrive
+ * canonicalised the one way the identifier contract canonicalises them ({@link
+ * sanitizeIdentifierValue}), so the two sides can never disagree about the spelling of one fact.
+ * Every other field degrades to absent on a nonsense value.
+ */
+const AgentGuestObjectSchema = z
+  .object({
+    ref: z
+      .string()
+      .catch("")
+      .transform((v) => v.trim().slice(0, 200)),
+    name: z
+      .string()
+      .catch("")
+      .transform((v) => v.trim().slice(0, 200)),
+    kind: z
+      .string()
+      .catch("")
+      .transform((v) => AgentGuestKindSchema.safeParse(v.trim().toLowerCase()).data ?? "other"),
+    /**
+     * ABSENT and `other` are different answers and both are kept, exactly as the container element
+     * keeps absent apart from `unknown`: absent means the platform reported no state at all, `other`
+     * that it reported one this build does not enumerate — the skew signal #1138 preserves.
+     */
+    state: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) =>
+        v === undefined
+          ? undefined
+          : (AgentGuestStateSchema.safeParse(v.trim().toLowerCase()).data ?? "other"),
+      ),
+    /** The guest's SMBIOS UUID as the hypervisor assigns it — normalized to trimmed lower-case. */
+    smbiosUuid: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().toLowerCase().slice(0, 64) || undefined),
+    macs: z
+      .array(z.string().catch(""))
+      .optional()
+      .catch(undefined)
+      .transform((list) => {
+        if (!list) return undefined;
+        const kept: string[] = [];
+        for (const raw of list) {
+          // The one canonical MAC spelling (#1138), with junk (all-zero placeholders) dropped —
+          // evidence that cannot corroborate must never be stored as if it could.
+          const mac = sanitizeIdentifierValue("mac", raw);
+          if (mac && !kept.includes(mac)) kept.push(mac);
+          if (kept.length >= AGENT_GUEST_MACS_MAX) break;
+        }
+        return kept.length ? kept : undefined;
+      }),
+    cores: z.number().int().positive().optional().catch(undefined),
+    memoryBytes: z.number().int().nonnegative().optional().catch(undefined),
+    /** What the hypervisor believes the guest runs (`ostype`, a template hint) — a hint, never a fact. */
+    osHint: z
+      .string()
+      .optional()
+      .catch(undefined)
+      .transform((v) => v?.trim().slice(0, 200) || undefined),
+  })
+  .transform((raw) => ({
+    ref: raw.ref,
+    name: raw.name,
+    kind: raw.kind,
+    ...(raw.state !== undefined ? { state: raw.state } : {}),
+    ...(raw.smbiosUuid !== undefined ? { smbiosUuid: raw.smbiosUuid } : {}),
+    ...(raw.macs !== undefined ? { macs: raw.macs } : {}),
+    ...(raw.cores !== undefined ? { cores: raw.cores } : {}),
+    ...(raw.memoryBytes !== undefined ? { memoryBytes: raw.memoryBytes } : {}),
+    ...(raw.osHint !== undefined ? { osHint: raw.osHint } : {}),
+  }));
+
+/** The wire form of {@link AgentGuestObjectSchema}, tolerant of a non-object element. */
+export const AgentGuestSchema = z.preprocess(
+  (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {}),
+  AgentGuestObjectSchema,
+);
+export type AgentGuest = z.infer<typeof AgentGuestSchema>;
+
+/**
  * One IPv6 address as the OS reports it (#1138). A bare `string[]` was not enough to choose a node's
  * displayed address: without scope and the RFC 4941 flags, "the first non-`fe80:` entry" can be a
  * TEMPORARY privacy address (regenerated on a timer) or a DEPRECATED one (past its preferred
@@ -1084,6 +1271,34 @@ export const AgentReportSchema = z.object({
     containers: z
       .array(AgentContainerSchema)
       .transform((list) => list.filter((c) => c.name.length > 0).slice(0, AGENT_CONTAINERS_MAX))
+      .optional(),
+    /**
+     * The hypervisor this host RUNS (ADR-0095) — present only when the collector positively found
+     * one (a readable Proxmox/Hyper-V/libvirt/XCP-ng control surface). ABSENT means "no hypervisor
+     * probe ran or none found", never "no hypervisor" — the same absent-≠-empty posture as
+     * `containers`. A malformed block degrades to absent, never a 400 on the whole host.
+     */
+    hypervisor: AgentHypervisorObjectSchema.optional().catch(undefined),
+    /**
+     * The guests this hypervisor runs (ADR-0095) — the container child contract (#1139) one level
+     * up: each element becomes a child NODE with a `RUNS_ON` edge back to the reporting host, keyed
+     * by {@link guestExternalId}.
+     *
+     * ABSENT and EMPTY are DIFFERENT answers and the server acts on the difference, exactly as it
+     * does for `containers`. Absent = the collector never probed (an older agent, no hypervisor, a
+     * policy that turned `collect.hypervisor` off), so the server must touch nothing — a host that
+     * stops reporting guests because its agent was downgraded must not retire the children it
+     * already has. `[]` = the probe RAN and found none, a positive finding that retires them.
+     *
+     * TRUNCATED past {@link AGENT_GUESTS_MAX}; elements with no usable `ref`/`name` — absent,
+     * empty, or a malformed non-object — are dropped, never 400-ed, and the drop is recorded in
+     * `agentSkew`.
+     */
+    guests: z
+      .array(AgentGuestSchema)
+      .transform((list) =>
+        list.filter((g) => g.ref.length > 0 && g.name.length > 0).slice(0, AGENT_GUESTS_MAX),
+      )
       .optional(),
     /**
      * When the host last booted (ISO-8601). ONE scalar, deliberately: it answers "did this box reboot
@@ -1869,6 +2084,87 @@ export function containerNodeStatus(state: AgentContainerState | undefined): Inf
   return state === undefined || state === "unknown" ? "UNKNOWN" : "OFFLINE";
 }
 
+// ── Hypervisor guest child nodes (ADR-0095, #1217) — the /guest/ namespace beside /container/ ─────
+
+/**
+ * The separator that scopes a guest's ref to its hypervisor host (ADR-0095). A distinct namespace
+ * from {@link CONTAINER_ID_SEPARATOR} on purpose: a Proxmox host runs BOTH kinds of children, and
+ * one namespace would let a Docker container named `101` and LXC guest 101 collide on one key. Like
+ * the container separator, it cannot appear in a host `externalId` (a machine-id is hex, a Windows
+ * MachineGuid and a macOS platform UUID are hex-and-dashes).
+ */
+const GUEST_ID_SEPARATOR = "/guest/";
+
+/**
+ * The dedup `externalId` of a guest child node (ADR-0095) — the host's own `externalId`, the
+ * separator, and the guest's platform ref, mirroring {@link containerExternalId} clause for clause.
+ *
+ * Keyed on the platform's stable REF (VMID/GUID/domain UUID) because a guest's runtime instance id
+ * is regenerated per boot on some platforms and its NAME is freely renamed — either would mint a
+ * fresh PENDING proposal for a guest the operator already confirmed. And SCOPED to the host because
+ * refs are only unique per hypervisor: two Proxmox nodes both running VMID 101 are two guests, and
+ * a host-less key would silently fuse them into one node whose `RUNS_ON` edge flapped. The host
+ * half is bounded by the report schema's own `.max(AGENT_EXTERNAL_ID_MAX)` and the ref by the guest
+ * schema's cap, exactly as the container key is bounded — never re-truncated here.
+ */
+export function guestExternalId(hostExternalId: string, ref: string): string {
+  return `${hostExternalId}${GUEST_ID_SEPARATOR}${ref}`;
+}
+
+/** Does this `externalId` belong to a guest child of the given host? (the retire-sweep filter) */
+export function guestExternalIdPrefix(hostExternalId: string): string {
+  return `${hostExternalId}${GUEST_ID_SEPARATOR}`;
+}
+
+/**
+ * Is this node a reported GUEST CHILD rather than a reporting host? (ADR-0095)
+ *
+ * The key's own rule, exported so a consumer never re-derives it from the separator string — the
+ * same reason {@link isContainerChildExternalId} exists. Deliberately false for a container child:
+ * the two child namespaces never bleed into each other.
+ */
+export function isGuestChildExternalId(externalId: string | null | undefined): boolean {
+  return externalId !== null && externalId !== undefined && externalId.includes(GUEST_ID_SEPARATOR);
+}
+
+/**
+ * The HOST key a guest child was scoped to (ADR-0095), or `undefined` when this is not a guest key.
+ *
+ * Splits on the FIRST separator, never the last, for the same reason
+ * {@link hostExternalIdOfContainerChild} does: a reported ref containing the separator must never
+ * decide which host key it resolves to — the host half is written first and is the trustworthy one.
+ */
+export function hostExternalIdOfGuestChild(
+  externalId: string | null | undefined,
+): string | undefined {
+  if (externalId === null || externalId === undefined) return undefined;
+  const at = externalId.indexOf(GUEST_ID_SEPARATOR);
+  return at > 0 ? externalId.slice(0, at) : undefined;
+}
+
+/**
+ * A guest's reported kind → the child node's `kind` (ADR-0095). An LXC guest is a CONTAINER —
+ * the same thing the host-side probe already calls it ({@link inferNodeKind} maps `lxc`
+ * virtualization to CONTAINER, so a guest that later runs the agent itself lands on the same
+ * answer); everything else, `other` included, is a VM — the honest default for a machine a
+ * hypervisor runs.
+ */
+export function guestNodeKind(kind: AgentGuestKind): InfraNodeKind {
+  return kind === "lxc" ? "CONTAINER" : "VM";
+}
+
+/**
+ * A guest's reported state → the child node's `status` (ADR-0095) — {@link containerNodeStatus}
+ * one level up, same semantics: a LIVENESS FACT the agent owns, never curation. Only `running` is
+ * ONLINE (`paused`/`suspended` are deliberately grouped with `stopped`: the map asks "is this thing
+ * serving?", and none of them are). An unreported or unrecognised state is UNKNOWN rather than a
+ * guess in either direction.
+ */
+export function guestNodeStatus(state: AgentGuestState | undefined): InfraNodeStatus {
+  if (state === "running") return "ONLINE";
+  return state === undefined || state === "other" ? "UNKNOWN" : "OFFLINE";
+}
+
 /**
  * The ack the report endpoint returns (ADR-0074 §3). It confirms the node id, its lifecycle `state`
  * (PENDING for a freshly-discovered host, CONFIRMED once a human has approved it) and that the report
@@ -2106,4 +2402,8 @@ export type AgentSoftwareSource = z.infer<typeof AgentSoftwareSourceSchema>;
 export type AgentIpv6Scope = z.infer<typeof AgentIpv6ScopeSchema>;
 // Auto-kind + container child nodes (#1139).
 export type AgentContainerState = z.infer<typeof AgentContainerStateSchema>;
+// Hypervisor guest inventory (ADR-0095, #1217).
+export type AgentHypervisorPlatform = z.infer<typeof AgentHypervisorPlatformSchema>;
+export type AgentGuestKind = z.infer<typeof AgentGuestKindSchema>;
+export type AgentGuestState = z.infer<typeof AgentGuestStateSchema>;
 export type AgentContainerPortProtocol = z.infer<typeof AgentContainerPortProtocolSchema>;
