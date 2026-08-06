@@ -1470,6 +1470,90 @@ describe('InfraService', () => {
         });
       });
 
+      it('a racing child create (P2002) falls through to the refresh — later children still reconcile', async () => {
+        // Two reports from one host racing (the install's report vs the freshly-armed timer) can
+        // both reach the child create. The loser must refresh the row the winner inserted and KEEP
+        // GOING: a throw here starved every child after it of its heartbeat and RUNS_ON self-heal,
+        // and skipped the vanished sweep — a false outage a few hours later, every report.
+        // Keyed on the QUERY SHAPE rather than call order: the fire-and-forget search sync also
+        // reads through findFirst, so a positional Once-chain would hand the raced row to the
+        // wrong caller. Only the raced child's exact dedup lookup answers with the row.
+        prisma.infraNode.findFirst.mockImplementation(
+          (args: { where?: Record<string, unknown> }) =>
+            Promise.resolve(
+              args?.where?.externalId === 'machine-id-xyz/container/api' &&
+                !('deletedAt' in (args?.where ?? {}))
+                ? { id: 'node-c1', specs: {}, assetId: null }
+                : null,
+            ),
+        );
+        prisma.infraNode.create
+          .mockResolvedValueOnce({ id: 'node-host', state: 'PENDING' })
+          .mockRejectedValueOnce(new KnownError('P2002'))
+          .mockResolvedValueOnce({ id: 'node-w' });
+        prisma.infraNode.findMany.mockResolvedValue([]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+
+        const ack = await service.ingestReport(
+          reportWithContainers([
+            { name: 'api', state: 'running' },
+            { name: 'web', state: 'running' },
+          ]),
+          AGENT_SA,
+        );
+
+        expect(ack.accepted).toBe(true);
+        // The raced child was REFRESHED, not abandoned…
+        const racedUpdate = (
+          prisma.infraNode.update.mock.calls as unknown[][]
+        ).find(
+          (c) => (c[0] as { where: { id: string } }).where.id === 'node-c1',
+        )?.[0] as { data: Record<string, unknown> } | undefined;
+        expect(racedUpdate?.data.status).toBe('ONLINE');
+        // …the child listed AFTER the race still enrolled…
+        expect(prisma.infraNode.create).toHaveBeenCalledTimes(3);
+        // …and BOTH children got their RUNS_ON self-heal.
+        expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+          data: { sourceId: 'node-c1', targetId: 'node-host', kind: 'RUNS_ON' },
+        });
+        expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+          data: { sourceId: 'node-w', targetId: 'node-host', kind: 'RUNS_ON' },
+        });
+      });
+
+      it('escapes LIKE metacharacters in the child-lookup prefix (defense-in-depth)', async () => {
+        // Prisma emits `startsWith` into a raw LIKE pattern, so `%`/`_` inside a reported
+        // externalId would widen the prefix match. Contained today by the reportingSource
+        // equality on the same query — the escape makes that containment structural.
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-host',
+          state: 'PENDING',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+
+        await service.ingestReport(
+          AgentReportSchema.parse({
+            agentVersion: '1.0.0',
+            reportingSource: 'agent:weird',
+            externalId: 'machine_50%',
+            reportedAt: '2026-06-27T12:00:00.000Z',
+            host: { hostname: 'weird-01', containers: [{ name: 'redis' }] },
+          }),
+          AGENT_SA,
+        );
+
+        expect(
+          firstArg<{ where: Record<string, unknown> }>(
+            prisma.infraNode.findMany,
+          ).where,
+        ).toEqual({
+          reportingSource: 'agent:weird',
+          externalId: { startsWith: 'machine\\_50\\%/container/' },
+        });
+      });
+
       // ── The confirmed child's linked Asset (#1157) ──────────────────────────
 
       describe("a confirmed container child's linked Asset (#1157)", () => {
@@ -6987,6 +7071,114 @@ describe('InfraService', () => {
       expect(ack.nodeId).toBe('node-hv');
     });
 
+    it('DUPLICATE refs in one report: first occurrence wins, the rest never reach a create', async () => {
+      // A buggy or hostile collector listing one ref twice must not poison the reconcile: without
+      // the dedupe the second create hits the unique index and the throw abandoned every guest
+      // after it — no heartbeat, no edge self-heal, no vanished sweep, on every report forever.
+      hostIsNew();
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-g1' })
+        .mockResolvedValueOnce({ id: 'node-g2' });
+
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'first', kind: 'qemu', state: 'running' },
+          { ref: '101', name: 'dup', kind: 'qemu', state: 'stopped' },
+          { ref: '102', name: 'after', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      // The host + exactly TWO children — the duplicate never reached a create…
+      expect(prisma.infraNode.create).toHaveBeenCalledTimes(3);
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      expect((calls[1][0] as { data: { label: string } }).data.label).toBe(
+        'first',
+      ); // first occurrence wins
+      expect((calls[2][0] as { data: { label: string } }).data.label).toBe(
+        'after',
+      ); // the guest AFTER the duplicate still enrolled
+      // …and both real children got their RUNS_ON edge.
+      expect(prisma.infraEdge.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('a racing guest create (P2002) falls through to the refresh — later guests still reconcile', async () => {
+      // Keyed on the QUERY SHAPE rather than call order: the fire-and-forget search sync also
+      // reads through findFirst, so a positional Once-chain would hand the raced row to the
+      // wrong caller. Only the raced child's exact dedup lookup answers with the row.
+      prisma.infraNode.findFirst.mockImplementation(
+        (args: { where?: Record<string, unknown> }) =>
+          Promise.resolve(
+            args?.where?.externalId === 'machine-id-pve1/guest/101' &&
+              !('deletedAt' in (args?.where ?? {}))
+              ? { id: 'node-g1', specs: {}, assetId: null }
+              : null,
+          ),
+      );
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockRejectedValueOnce(new KnownError('P2002'))
+        .mockResolvedValueOnce({ id: 'node-g2' });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      const ack = await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'raced', kind: 'qemu', state: 'running' },
+          { ref: '102', name: 'after', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      expect(ack.accepted).toBe(true);
+      // The raced child was refreshed, not abandoned…
+      const racedUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-g1',
+      )?.[0] as { data: Record<string, unknown> } | undefined;
+      expect(racedUpdate?.data.status).toBe('ONLINE');
+      // …the guest listed AFTER the race still enrolled, and both got their edge.
+      expect(prisma.infraNode.create).toHaveBeenCalledTimes(3);
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-g1', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-g2', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
+    });
+
+    it('escapes LIKE metacharacters in the guest-lookup prefix (defense-in-depth)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-hv',
+        state: 'PENDING',
+      });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.ingestReport(
+        AgentReportSchema.parse({
+          ...clone(HV_REPORT),
+          externalId: 'machine_50%',
+          host: {
+            ...clone(HV_REPORT.host),
+            guests: [{ ref: '101', name: 'db-vm', kind: 'qemu' }],
+          },
+        }),
+        AGENT_SA,
+      );
+
+      const arg = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where).toEqual({
+        reportingSource: 'agent:pve',
+        externalId: { startsWith: 'machine\\_50\\%/guest/' },
+      });
+    });
+
     it('an ABSORBED guest is never re-proposed — its ref resolves to the canonical node', async () => {
       // The §6 join archived this child with the merge marker AND its reporting key. The next host
       // report must not mint a fresh PENDING duplicate; it only self-heals the canonical RUNS_ON.
@@ -7031,7 +7223,12 @@ describe('InfraService', () => {
       });
     });
 
-    it('an absorbed guest whose canonical node was DISCARDED gets nothing — not even an edge', async () => {
+    it('an absorbed guest whose canonical node was DISCARDED is RE-PROPOSED as a fresh PENDING child', async () => {
+      // The file's own discard semantics, applied consistently: a discarded HOST that keeps
+      // reporting re-proposes PENDING, and a discarded marker-less guest child re-proposes too.
+      // Skipping the ref forever would make the guest permanently unrepresentable with no signal —
+      // the operator uninstalled the in-guest agent and discarded its node, but the hypervisor
+      // still runs the VM every tick, and the tray is where that fact belongs.
       hostIsKnown();
       prisma.infraNode.findMany
         .mockResolvedValueOnce([
@@ -7047,14 +7244,25 @@ describe('InfraService', () => {
           },
         ])
         .mockResolvedValueOnce([]); // the canonical node is off the map
+      prisma.infraNode.create.mockResolvedValueOnce({ id: 'node-g2' });
 
       await service.ingestReport(
-        reportWithGuests([{ ref: '101', name: 'db-vm', kind: 'qemu' }]),
+        reportWithGuests([
+          { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+        ]),
         AGENT_SA,
       );
 
-      expect(prisma.infraNode.create).not.toHaveBeenCalled();
-      expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+      // The ref is treated as UNKNOWN again: a fresh PENDING proposal, budget charged, edge opened.
+      expect(enrollment.tryCharge).toHaveBeenCalledTimes(1);
+      const created = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.create,
+      );
+      expect(created.data.state).toBe('PENDING');
+      expect(created.data.externalId).toBe('machine-id-pve1/guest/101');
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-g2', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
     });
   });
 
@@ -7228,6 +7436,57 @@ describe('InfraService', () => {
       );
 
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('the candidate query is deterministic: ORDER BY id under the LIMIT', async () => {
+      // Without an ORDER BY, which 8 rows the LIMIT keeps is planner-dependent — two replicas could
+      // absorb different children from the same estate.
+      vmIsNew();
+      rawQueries([]);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      const candidateCall = (prisma.$queryRaw.mock.calls as unknown[][]).find(
+        (c) =>
+          ((c[0] as { strings?: string[] })?.strings ?? [])
+            .join(' ')
+            .includes('smbiosUuid'),
+      );
+      const sql = (
+        (candidateCall?.[0] as { strings?: string[] })?.strings ?? []
+      ).join(' ');
+      expect(sql).toContain('ORDER BY "id"');
+      expect(sql).toContain('LIMIT');
+    });
+
+    it('warns when the candidate set hits the cap — the true child may be outside it', async () => {
+      // A clone farm sharing one baked UUID can fill the LIMIT with impostors and push the real
+      // child out of the set; the absorb then silently never fires. The warning is the signal.
+      vmIsNew();
+      const impostor = (n: number) => ({
+        id: `node-x${n}`,
+        externalId: `not-a-guest-key-${n}`, // skipped by the guest-key re-check — no merge, no nudge
+        label: `x${n}`,
+        reportingSource: 'agent:x',
+        specs: {},
+      });
+      rawQueries([1, 2, 3, 4, 5, 6, 7, 8].map(impostor));
+      const warn = jest
+        .spyOn(
+          (service as unknown as { logger: { warn: (msg: string) => void } })
+            .logger,
+          'warn',
+        )
+        .mockImplementation(() => undefined);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(
+        warn.mock.calls.some(
+          (c) => typeof c[0] === 'string' && c[0].includes('candidate cap'),
+        ),
+      ).toBe(true);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 
