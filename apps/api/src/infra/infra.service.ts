@@ -2770,23 +2770,43 @@ export class InfraService {
    * irreversible in practice; a nudge with a one-click merge behind it is cheap. The operator gets
    * one bell and one click instead of two permanent nodes and no explanation.
    *
+   * WHO THIS ACTUALLY FIRES ON — stated honestly, because the copy depends on it. The gate is "no
+   * `smbios-uuid` + has MACs", and that population is NOT dominated by #1227's Windows-on-QEMU case.
+   * Two much larger groups live inside it permanently:
+   *
+   *  (a) UNPRIVILEGED LINUX AGENTS. `/sys/class/dmi/id/product_uuid` is mode 0400, so an
+   *      unprivileged run omits the identifier — and unprivileged is a first-class documented
+   *      posture (ADR-0074), not a misconfiguration.
+   *  (b) EVERY PVE LXC CONTAINER RUNNING ITS OWN AGENT. `parsePveConfig` reads `smbios1`, which an
+   *      LXC config does not have, so every LXC `/guest/` child carries macs and no `smbiosUuid`,
+   *      and the in-container agent reports a MAC and no `smbios-uuid`. On an LXC estate that is a
+   *      guaranteed, permanent match — every container, every report, forever.
+   *
+   * So the nudge BRANCHES its cause and its repair on the two facts already in hand (the child's
+   * `kind`, the report's `diagnostics.privileged`). Telling a container operator to raise a QEMU
+   * machine version is telling them to do something that cannot help: a container has no SMBIOS.
+   *
    * THE COST BOUND, which is the real risk here and is why this is not simply "also query by MAC".
    * The UUID query is safe partly because most reports carry no `smbios-uuid` and it self-extinguishes
    * once the child is absorbed. Almost every report DOES carry a `mac`, so an unguarded MAC lookup
    * would turn a rare scan into a per-report one across the whole fleet. Three things hold it:
    *
    *  1. It runs ONLY when the report has no `smbios-uuid` at all — the UUID path did not merely
-   *     return zero candidates, it never ran. That is strictly the population #1227 is about
-   *     (guests that cannot read their own firmware) plus pre-0095 agents, not the fleet.
+   *     return zero candidates, it never ran. That is a REAL bound but not a small population: on an
+   *     estate of unprivileged agents or LXC containers this query runs on every report of theirs,
+   *     forever, and never self-extinguishes. The GIN-index escalation below is the answer if it
+   *     ever becomes the slow part; the cap and the narrowing are what hold it until then.
    *  2. Same narrowing as its sibling: `/guest/` keys only, `ORDER BY "id"`, capped at
    *     {@link GUEST_ABSORB_CANDIDATES_MAX}.
    *  3. It is not self-extinguishing (nothing is merged), so the `dedupeKey` carries the child AND
-   *     the MAC — a 20-guest host rings once per pair, not twenty times per tick.
+   *     the MAC — a 20-guest host rings once per pair, not twenty times per tick. For the same
+   *     reason the LOG speaks only when a candidate actually came back: a WARN on every report of
+   *     every unprivileged host says nothing, and a log that always fires is not a signal.
    *
-   * The same GIN-index escalation recorded on the UUID query applies if a fleet ever makes this the
-   * slow part. The reporting node's own conflict marker is deliberately NOT read here: that read
-   * exists to disqualify a MERGE, and this path cannot merge — paying a query per report to suppress
-   * a hint would cost more than the hint.
+   * The reporting node's own conflict marker is deliberately NOT read here: that read exists to
+   * disqualify a MERGE, and this path cannot merge — paying a query per report to suppress a hint
+   * would cost more than the hint. A node under an active #1141 collision therefore still receives
+   * hints, which is safe precisely because a hint writes nothing.
    */
   private async nudgeGuestChildrenMatchingMac(
     nodeId: string,
@@ -2794,9 +2814,6 @@ export class InfraService {
   ): Promise<void> {
     const macs = hostIdentityEvidence(report.host).macs;
     if (macs.length === 0) return;
-    this.logger.warn(
-      `"${report.host.hostname}" reports no SMBIOS UUID, so the guest identity join has no key to run on — falling back to its ${macs.length} reported MAC(s) as a HINT. On a VM this usually means the hypervisor exposes only the 64-bit SMBIOS entry point, which Windows cannot read (Proxmox/QEMU machine types pc-*-8.1 and pc-*-8.2).`,
-    );
     const candidates = await this.prisma.$queryRaw<
       Array<{
         id: string;
@@ -2807,8 +2824,10 @@ export class InfraService {
     >(
       // The CASE is what makes this safe on ANY blob: `jsonb_array_elements_text` throws on a
       // non-array, and Postgres is free to reorder a bare `jsonb_typeof(...) = 'array' AND …` guard.
-      // `lower()` mirrors the sibling query's read-tolerance for a hand-edited or pre-sanitize blob;
-      // `guestChildMacs` below is the authority, this predicate is only the prefilter.
+      // `lower()` tolerates CASE skew only, in a hand-edited or pre-sanitize blob — NOT separator
+      // skew (`AA-BB-…`, `aabb.ccdd…`), which `guestChildMacs` below does tolerate. This predicate
+      // is deliberately the narrower of the two: it is only a prefilter, `guestChildMacs` is the
+      // authority, and a prefilter that misses a hand-mangled blob costs a hint, not a merge.
       Prisma.sql`SELECT "id", "externalId", "label", "specs"
                    FROM "infra_nodes"
                   WHERE "deletedAt" IS NULL
@@ -2823,6 +2842,12 @@ export class InfraService {
                            WHERE lower(m.mac) IN (${Prisma.join(macs)}))
                   ORDER BY "id"
                   LIMIT ${GUEST_ABSORB_CANDIDATES_MAX}`,
+    );
+    if (candidates.length === 0) return;
+    // BELOW the empty check on purpose (see 3. above): this used to fire before the query, on every
+    // report of every unprivileged host and every LXC container, and never matched anything.
+    this.logger.warn(
+      `"${report.host.hostname}" reports no SMBIOS UUID, so the guest identity join has no key to run on — falling back to its ${macs.length} reported MAC(s) as a HINT over ${candidates.length} candidate guest child(ren).`,
     );
     for (const candidate of candidates) {
       // The same defensive re-checks the UUID path makes over a jsonb the query matched.
@@ -2839,6 +2864,23 @@ export class InfraService {
       );
       if (!matched) continue;
       const label = candidate.label ?? candidate.externalId;
+      // The cause and the repair, chosen from what is already known rather than assumed. Order
+      // matters: a container has no firmware to read, so `root` would not help it either.
+      const cause =
+        guestChildKind(candidateSpecs.guest) === 'lxc'
+          ? `Containers do not have an SMBIOS UUID of their own, so lazyit can never confirm this ` +
+            `pair automatically. If they are one machine, merge the guest into the reporting node ` +
+            `from the topology view.`
+          : report.diagnostics?.privileged === false
+            ? `That agent is running unprivileged, and the firmware UUID is root-only ` +
+              `(/sys/class/dmi/id/product_uuid is mode 0400): run it as root or Administrator and ` +
+              `the two converge on their own from the next report. Otherwise, if they are one ` +
+              `machine, merge the guest into the reporting node from the topology view.`
+            : `On a virtual machine that usually means the hypervisor exposes only the 64-bit ` +
+              `SMBIOS entry point, which Windows cannot read (Proxmox/QEMU machine types ` +
+              `pc-*-8.1 and pc-*-8.2 do this): setting the VM's machine version newer, or ` +
+              `-machine smbios-entry-point-type=32, makes them converge on their own. If they are ` +
+              `one machine, merge the guest into the reporting node from the topology view.`;
       this.logger.warn(
         `"${report.host.hostname}" shares network card ${matched} with guest child "${label}" (${candidate.id}) but reports no SMBIOS UUID to corroborate it — nothing was merged. If these are one machine, merge them from the tray.`,
       );
@@ -2849,12 +2891,8 @@ export class InfraService {
         title: `Is "${report.host.hostname}" guest "${label}"? A network card matches, no UUID to confirm`,
         summary:
           `Review before merging — "${report.host.hostname}" uses network card ${matched}, which the ` +
-          `hypervisor-proposed guest "${label}" also reports, but its agent could not read the machine's ` +
-          `SMBIOS UUID, so lazyit has only one fact and did NOT merge them. On a virtual machine that ` +
-          `usually means the hypervisor exposes only the 64-bit SMBIOS entry point, which Windows cannot ` +
-          `read (Proxmox/QEMU machine types pc-*-8.1 and pc-*-8.2 do this): setting the VM's machine ` +
-          `version newer, or -machine smbios-entry-point-type=32, makes them converge on their own. ` +
-          `If they are one machine, merge the guest into the reporting node from the topology view.`,
+          `hypervisor-proposed guest "${label}" also reports, but its agent reported no SMBIOS UUID ` +
+          `to corroborate it, so lazyit has only one fact and did NOT merge them. ${cause}`,
         metadata: {
           nodeId,
           hostname: report.host.hostname,
@@ -4602,6 +4640,21 @@ function smbiosUuidsOf(host: AgentReportHost): string[] {
  * may predate a sanitize rule or have been hand-edited, and junk that cannot corroborate must never
  * be compared as if it could. Degrades to an empty set on any malformed shape, never throws.
  */
+/**
+ * The `kind` a guest child's blob records (`qemu` | `lxc` | `hyperv` | `other` | …), read defensively
+ * (#1227). It is the difference between advice an operator can act on and advice that cannot help:
+ * an LXC container has no SMBIOS UUID to read at ANY privilege level, so telling its operator to
+ * raise a machine version or run as root would be a wild-goose chase. Unknown shape → `undefined`,
+ * which lands on the general advice rather than inventing a platform.
+ */
+function guestChildKind(guest: unknown): string | undefined {
+  if (typeof guest !== 'object' || guest === null || Array.isArray(guest)) {
+    return undefined;
+  }
+  const kind = (guest as Record<string, unknown>).kind;
+  return typeof kind === 'string' ? kind : undefined;
+}
+
 function guestChildMacs(guest: unknown): string[] {
   if (typeof guest !== 'object' || guest === null || Array.isArray(guest)) {
     return [];
