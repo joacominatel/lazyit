@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { AGENT_POLICY_DEFAULT, AgentReportSchema, type AgentPolicy } from "@lazyit/shared";
 import {
   collectHypervisorLinux,
+  GUEST_ENRICHMENT_BUDGET_MS,
   isPveFuseMounted,
   LIBVIRT_SOCKETS,
   parsePveClusterName,
@@ -296,21 +297,29 @@ describe("parseVirshDomainXml", () => {
 
 // ── The orchestrator, with injected probes ────────────────────────────────────────────────────────
 
-/** Scripted deps: file contents by path, exec answers by joined argv, and a call log. */
+/**
+ * Scripted deps: file contents by path, exec answers by joined argv, and a call log. `advanceMs`
+ * moves a FAKE clock forward on every exec call, which is how the aggregate-budget tests make time
+ * pass without sleeping.
+ */
 function fakeDeps(fixture: {
   files?: Record<string, string>;
   paths?: string[];
   binaries?: string[];
   exec?: Record<string, string>;
+  advanceMs?: number;
 }): LinuxHypervisorDeps & { calls: string[][] } {
   const calls: string[][] = [];
+  let clock = 0;
   return {
     calls,
+    now: () => clock,
     readText: async (path) => fixture.files?.[path] ?? null,
     pathExists: async (path) => fixture.paths?.includes(path) ?? false,
     which: (name) => (fixture.binaries?.includes(name) ? `/usr/bin/${name}` : null),
     exec: async (args) => {
       calls.push(args);
+      clock += fixture.advanceMs ?? 0;
       return fixture.exec?.[args.join(" ")] ?? null;
     },
   };
@@ -426,6 +435,55 @@ describe("collectHypervisorLinux — Proxmox", () => {
     expect(notes.join(" ")).toContain("config");
   });
 
+  test("config enrichment respects an AGGREGATE budget — remaining guests ship from their list rows", async () => {
+    // 35s pass on every exec call, so the third config fetch would start past the 60s budget. The
+    // failure this bounds is real: N sequential 10s-budget reads against a wedged pmxcfs outlive
+    // systemd's RuntimeMaxSec=120 and kill the WHOLE report — the exact darkness `run()`'s own
+    // per-command budget exists to prevent, one level up. The list already answered truthfully,
+    // so the un-enriched guests still ship — config facts are enrichment, never existence.
+    const { warn, notes } = sink();
+    const out = await collectHypervisorLinux(
+      warn,
+      AGENT_POLICY_DEFAULT,
+      fakeDeps({ files: { "/proc/mounts": PVE_MOUNTS }, exec: PVE_EXEC, advanceMs: 35_000 }),
+    );
+    expect(out?.guests?.map((g) => g.ref)).toEqual(["101", "102", "200"]);
+    // The first two config fetches fit the budget; the third guest ships list-facts only.
+    expect(out?.guests?.[0]?.smbiosUuid).toBe("d0f2c3a4-1b2c-4d5e-8f90-112233445566");
+    expect(out?.guests?.[2]).toEqual({
+      ref: "200",
+      name: "ct-dns",
+      kind: "lxc",
+      state: "running",
+      memoryBytes: 536870912,
+    });
+    expect(notes.join(" ")).toContain("budget");
+  });
+
+  test("more guests than the cap ships exactly the cap — and SAYS SO", async () => {
+    const rows = Array.from({ length: 501 }, (_, i) => ({
+      vmid: i + 1,
+      name: `g${i + 1}`,
+      status: "running",
+    }));
+    const { warn, notes } = sink();
+    const out = await collectHypervisorLinux(
+      warn,
+      AGENT_POLICY_DEFAULT,
+      fakeDeps({
+        files: { "/proc/mounts": PVE_MOUNTS },
+        exec: {
+          ...PVE_EXEC,
+          "pvesh get /nodes/pve1/qemu --output-format json": JSON.stringify(rows),
+          "pvesh get /nodes/pve1/lxc --output-format json": "[]",
+        },
+      }),
+    );
+    expect(out?.guests).toHaveLength(500);
+    // Silent truncation would positively retire guest #501's child node — the cut must be visible.
+    expect(notes.join(" ")).toContain("truncated");
+  });
+
   test("Proxmox WINS over libvirt signals on the same box — virsh is never invoked", async () => {
     // A PVE node is also Debian with /dev/kvm, and virsh there sees NOTHING (Proxmox does not use
     // libvirt) — most-specific-wins is what keeps the real guest list from being shadowed by an
@@ -478,12 +536,13 @@ describe("collectHypervisorLinux — XCP-ng (detected, not collected)", () => {
 
 describe("collectHypervisorLinux — libvirt", () => {
   const LIBVIRT_FILES = { "/proc/mounts": PLAIN_MOUNTS };
+  // `--domain`, explicitly: a domain name starting with `-` would otherwise be option-parsed.
   const LIBVIRT_EXEC = {
     "virsh -c qemu:///system list --all --name": "vm-a\nvm-b\n\n",
     "virsh -c qemu:///system list --name --state-running": "vm-a\n",
     "virsh -c qemu:///system list --name --state-paused": "",
-    "virsh -c qemu:///system dumpxml vm-a": DOMAIN_XML_A,
-    "virsh -c qemu:///system dumpxml vm-b": DOMAIN_XML_B,
+    "virsh -c qemu:///system dumpxml --domain vm-a": DOMAIN_XML_A,
+    "virsh -c qemu:///system dumpxml --domain vm-b": DOMAIN_XML_B,
   };
 
   test("the happy path: domain uuid is both ref and smbiosUuid; state from the filtered lists", async () => {
@@ -523,7 +582,8 @@ describe("collectHypervisorLinux — libvirt", () => {
     expect(notes).toEqual([]);
   });
 
-  test("a malformed dumpxml drops THAT domain, not the collection", async () => {
+  test("a dumpxml that ANSWERED with no uuid drops THAT domain, not the collection", async () => {
+    // The permanent case: virsh replied, the reply just carries no identity worth a child node.
     const { warn, notes } = sink();
     const out = await collectHypervisorLinux(
       warn,
@@ -532,11 +592,80 @@ describe("collectHypervisorLinux — libvirt", () => {
         files: LIBVIRT_FILES,
         paths: ["/dev/kvm", LIBVIRT_SOCKETS[0] as string],
         binaries: ["virsh"],
-        exec: { ...LIBVIRT_EXEC, "virsh -c qemu:///system dumpxml vm-b": "error: Domain not found" },
+        exec: { ...LIBVIRT_EXEC, "virsh -c qemu:///system dumpxml --domain vm-b": "<domain><name>vm-b</name></domain>" },
       }),
     );
     expect(out?.guests?.map((g) => g.name)).toEqual(["vm-a"]);
     expect(notes.join(" ")).toContain("1");
+  });
+
+  test("a dumpxml that DID NOT ANSWER (exec null) degrades the WHOLE guests key", async () => {
+    // The transient case: a timeout or a busy libvirtd. Shipping the other domains as a positive
+    // list would tell the server "vm-b vanished" and retire a living guest — absent ≠ empty.
+    const { warn, notes } = sink();
+    const exec = { ...LIBVIRT_EXEC };
+    delete (exec as Record<string, string>)["virsh -c qemu:///system dumpxml --domain vm-b"];
+    const out = await collectHypervisorLinux(
+      warn,
+      AGENT_POLICY_DEFAULT,
+      fakeDeps({
+        files: LIBVIRT_FILES,
+        paths: ["/dev/kvm", LIBVIRT_SOCKETS[0] as string],
+        binaries: ["virsh"],
+        exec,
+      }),
+    );
+    expect(out?.hypervisor).toEqual({ platform: "libvirt" });
+    expect(out?.guests).toBeUndefined();
+    expect(notes.join(" ")).toContain("omitted");
+  });
+
+  test("the enrichment budget expiring degrades the WHOLE guests key — refs live in the XML", async () => {
+    // 65s pass on every exec call, so the deadline is already spent when the second dumpxml would
+    // run. Unlike Proxmox there is no truthful partial answer to fall back on: the ref IS the
+    // domain uuid, which only dumpxml provides, so a deadline hit ships no list at all.
+    const { warn, notes } = sink();
+    const out = await collectHypervisorLinux(
+      warn,
+      AGENT_POLICY_DEFAULT,
+      fakeDeps({
+        files: LIBVIRT_FILES,
+        paths: ["/dev/kvm", LIBVIRT_SOCKETS[0] as string],
+        binaries: ["virsh"],
+        exec: LIBVIRT_EXEC,
+        advanceMs: GUEST_ENRICHMENT_BUDGET_MS + 5_000,
+      }),
+    );
+    expect(out?.hypervisor).toEqual({ platform: "libvirt" });
+    expect(out?.guests).toBeUndefined();
+    expect(notes.join(" ")).toContain("budget");
+  });
+
+  test("more domains than the cap ships exactly the cap — and SAYS SO", async () => {
+    const names = Array.from({ length: 501 }, (_, i) => `d${i + 1}`);
+    const exec: Record<string, string> = {
+      "virsh -c qemu:///system list --all --name": `${names.join("\n")}\n`,
+      "virsh -c qemu:///system list --name --state-running": "",
+      "virsh -c qemu:///system list --name --state-paused": "",
+    };
+    for (const [i, name] of names.entries()) {
+      exec[`virsh -c qemu:///system dumpxml --domain ${name}`] =
+        `<domain><uuid>${String(i + 1).padStart(8, "0")}-0000-4000-8000-000000000000</uuid></domain>`;
+    }
+    const { warn, notes } = sink();
+    const out = await collectHypervisorLinux(
+      warn,
+      AGENT_POLICY_DEFAULT,
+      fakeDeps({
+        files: LIBVIRT_FILES,
+        paths: ["/dev/kvm", LIBVIRT_SOCKETS[0] as string],
+        binaries: ["virsh"],
+        exec,
+      }),
+    );
+    expect(out?.guests).toHaveLength(500);
+    // Silent truncation would positively retire guest #501's child node — the cut must be visible.
+    expect(notes.join(" ")).toContain("truncated");
   });
 
   test("a failed domain enumeration keeps the facet, omits guests, and warns", async () => {
