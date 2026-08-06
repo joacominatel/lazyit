@@ -120,6 +120,17 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    > en ese archivo es la respuesta **completa** del agente: un `NO_PROXY` ahí sí frena un proxy que la
    > máquina haya definido en otro lado, en vez de perder contra él. Reinstalar conserva esas líneas,
    > en cualquiera de las dos formas.
+
+   > **¿Instalando sobre un host hipervisor?** No hay nada que agregar: el mismo agente detecta por
+   > sí solo que la máquina corre Proxmox VE, Hyper-V o libvirt/KVM y también inventaría sus
+   > invitados — el instalador imprime lo que detectó, y la detección se repite en cada ejecución,
+   > así que un host que se convierte en hipervisor más tarde simplemente empieza a reportar sus
+   > invitados. Si *no* querés que los invitados de ese host se reporten, agregá
+   > **`--no-hypervisor`** (**`-NoHypervisor`** en Windows): escribe
+   > `LAZYIT_COLLECT_HYPERVISOR=false` en el archivo de configuración del host — un veto local, así
+   > que como todo ajuste local gana sobre cualquier cosa configurada en lazyit y sobrevive a las
+   > actualizaciones. La historia completa está en
+   > [Hosts hipervisores](/help/assets-topology-hypervisors).
 3. **Espera.** El asistente entonces espera a que el servidor reporte. Apenas el agente reporta —
    normalmente en un par de minutos — muestra un mensaje de éxito y un botón **Confirmar** en línea.
    Podés confirmar ahí mismo, o cerrar el asistente y confirmarlo más tarde desde la bandeja de
@@ -755,6 +766,15 @@ Si no tenés ninguno de estos casos, nunca vas a ver este aviso. Es deliberadame
   datos en un panel **Contenedor** sobre el nodo (ver Revisión pendiente, más arriba). Sigue siendo la
   máquina local describiéndose a sí misma: el agente le pregunta al runtime de ese host qué está
   corriendo *él* — nunca escanea tu red.
+- **Los invitados que aloja** — en una máquina que *es* un hipervisor (un nodo Proxmox VE, un
+  servidor Hyper-V, un host libvirt/KVM), las máquinas virtuales y contenedores que está
+  ejecutando, automáticamente: el agente detecta la plataforma por sí solo en cada ejecución y lee
+  la lista de invitados localmente del propio hipervisor del host, sin token de API y sin nada que
+  activar. Cada invitado se convierte en un nodo propio conectado al host por un enlace **runs-on**,
+  exactamente igual que los contenedores — y esto también es la máquina local describiéndose a sí
+  misma, nunca una API de hipervisor remota y nunca un escaneo de red. La historia completa — qué
+  aparece y dónde, cómo un invitado que corre su propio agente converge en un solo nodo, y cómo
+  apagarlo — está en [Hosts hipervisores](/help/assets-topology-hypervisors).
 - **Cuándo arrancó por última vez** — una sola marca de tiempo, actualizada en cada reporte y sin
   histórico: es un dato de inventario ("¿este equipo realmente se reinició después de la ventana de
   parches?"), no monitoreo de uptime. Se guarda junto a los demás datos reportados del host y, igual
