@@ -200,9 +200,18 @@ ramp-in on first install is the cheap side of that trade.
 The two-nodes-for-one-machine problem is resolved with ADR-0093's discipline — **one notion of
 "same machine", corroborated, never a single-signal auto-merge**:
 
-- A `/guest/` child stores its `smbiosUuid` (normalized: lowercased; VMware's raw-VMX byte
-  order — first three fields byte-swapped vs. the guest's pretty-print — is normalized at the
-  edge the day that collector lands) and `macs` in its specs blob.
+- A `/guest/` child stores its `smbiosUuid` and `macs` in its specs blob, **both canonicalised
+  by `sanitizeIdentifierValue` — the same function the report side's `host.identifiers[]` goes
+  through**. That is the whole reason the join's equality test is meaningful: one fact, one
+  spelling, on both operands, by construction. (Amended by #1227: `smbiosUuid` originally did a
+  bare `trim().toLowerCase()`, which left `{braces}` braced and undashed hex undashed while the
+  report side stripped and re-hyphenated. Proxmox and Hyper-V dodged it by accident of how their
+  collectors happen to spell the value; VMware's raw `bios_uuid` would not have.) VMware's
+  raw-VMX byte order — first three fields byte-swapped vs. the guest's pretty-print — is
+  normalized at that same edge the day that collector lands. **QEMU/Proxmox is not a byte-order
+  case**: `smbios_encode_uuid()` writes the SMBIOS 2.6 wire form and both Linux sysfs and
+  Windows WMI decode it back, so PVE's `smbios1: uuid=`, a Linux guest's `product_uuid` and
+  `Win32_ComputerSystemProduct.UUID` all render the same string.
 - When a report's own `host.identifiers[]` carries an `smbios-uuid` matching a live `/guest/`
   child **and** at least one MAC corroborates (`canonicalMac` both sides), the in-guest node and
   the host-proposed child are the same machine. **The guest's own agent-reported node is
@@ -218,6 +227,30 @@ The two-nodes-for-one-machine problem is resolved with ADR-0093's discipline —
   duplicate-suspects for a one-click operator merge. **v1 does not auto-merge migrations** —
   same reasoning as ADR-0093's no-retroactive-re-linking: wrong merges are expensive, hints are
   cheap.
+- **A report with no `smbios-uuid` is a FINDING, not a no-op** (amended by #1227). The gate was
+  originally a bare `return`: no query, no log, no nudge. In the field that produced two
+  permanent nodes for one Windows 11 VM on Proxmox and said nothing about it — its
+  `Win32_ComputerSystemProduct` returns *no instance at all*, because QEMU 8.1 defaulted `pc-*`
+  machine types to the 64-bit SMBIOS 3.0 entry point that Windows cannot locate (QEMU issue
+  #2008), and Proxmox pins the machine version at creation **for Windows guests only** — so the
+  Linux VMs on the same host converged and this one could not. There is no in-guest fallback
+  (`GetSystemFirmwareTable("RSMB")` and the `ComputerHardwareId` registry path fail for the same
+  reason), so the fix is server-side: when the report carries no `smbios-uuid` but does carry
+  MACs, a **second, MAC-keyed lookup over `/guest/` children** runs and surfaces any match
+  through the same `infra.identity_conflict` nudge, deduped per (child, MAC).
+  - **HINT-ONLY, always.** A MAC alone is one fact, and is *weaker* than a UUID, not stronger —
+    it emits a notification and performs no write of any kind. The "never a single-signal
+    auto-merge" rule is unchanged and now covers both signals explicitly.
+  - **The cost bound is part of the decision.** Almost every report carries a `mac`, so this
+    lookup runs **only when the report has no `smbios-uuid` at all** — the UUID path did not
+    merely return zero candidates, it never ran. Same `/guest/` narrowing, same `ORDER BY "id"`,
+    same `GUEST_ABSORB_CANDIDATES_MAX` cap, same recorded GIN-index escalation. It is *not*
+    self-extinguishing (nothing is merged), which is exactly why the dedupe key carries the
+    child **and** the MAC.
+  - The bound the spec used to encode as *"no smbios-uuid → no candidate query at all"* is
+    therefore **narrowed, not deleted**, to *"no smbios-uuid **and** no MAC → no query at all"*.
+    That test is the load-bearing record of this decision — a future reader restoring the wider
+    gate re-opens #1227.
 
 ### 7. Policy flag and the rollout order it forces
 
@@ -284,6 +317,16 @@ change, no backfill. Existing container children, edges, confirmed nodes: untouc
 operator who updates the server first sees nothing change until an agent updates — and the
 fleet view from ADR-0094 names exactly which hosts those are.
 
+**The #1227 amendment is additive too**: no migration, no column, no stored-shape change. The
+`smbiosUuid` canonicaliser is idempotent over every value already in a blob (all of which were
+written by the two collectors that spell it canonically anyway), so nothing needs a backfill and
+nothing re-proposes. The MAC fallback only reads and notifies. The one **behaviour change an
+operator will notice**: on an affected instance, the first report after upgrade surfaces the
+duplicate pairs that were already silently forked — a burst of one nudge per (guest, MAC). That
+is the intended surfacing of pre-existing damage, and pre-existing forks **do not converge on
+their own**: the operator merges them once from the tray, or repairs the VM host-side and lets
+the ordinary UUID join take over.
+
 ## Known limitations (recorded, not hidden)
 
 - `ingestCollidingHost` returns before child reconciliation (`infra.service.ts:1674/1711`) — a
@@ -293,6 +336,10 @@ fleet view from ADR-0094 names exactly which hosts those are.
   `/etc/xensource-inventory`) is recorded in #1217 for when demand exists.
 - PVE cross-node migration produces an OFFLINE/new child pair pending operator merge (§6) —
   unless the guest runs its own agent, in which case the canonical node just re-points.
+- A guest whose firmware the OS cannot read (§6, #1227) never auto-converges: the MAC fallback
+  surfaces the pair and an operator merges it in one click. Repairing the VM host-side
+  (`-machine smbios-entry-point-type=32`, or a newer machine version) restores the automatic
+  join on the next report; lazyit will not — and cannot — do that for the operator.
 
 ## Consequences
 

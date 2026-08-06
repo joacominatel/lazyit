@@ -89,6 +89,34 @@ Un invitado **sin** agente propio queda representado simplemente por la vista de
 confirmable, registrable como activo, que pasa a offline cuando el invitado lo hace. Si más adelante
 instalas un agente dentro, los dos convergen de la misma manera.
 
+### Cuando una VM Windows se queda como dos filas
+
+Hay un caso en el que la fusión automática **no puede** ocurrir, y ahora lazyit te lo dice en vez de
+quedarse callado. Algunas máquinas virtuales presentan su firmware de una forma que **Windows no
+puede leer** — Windows no reporta ningún UUID SMBIOS, así que no hay identidad de firmware que
+comparar con la del hipervisor. Es habitual en **Proxmox VE**, y solo con invitados **Windows**:
+Proxmox congela la versión del hardware virtual de una VM Windows en el momento en que la creas, así
+que una VM creada en PVE 8.1 u 8.2 conserva ese hardware para siempre, mientras las VMs Linux de al
+lado no se ven afectadas y convergen con normalidad.
+
+Cuando pasa, verás una notificación de **posible duplicado** diciendo que una tarjeta de red coincide
+pero no hay UUID que lo confirme. lazyit deliberadamente **no** fusiona por una tarjeta de red sola —
+un solo hecho es una sugerencia, nunca una fusión. Dos cosas que puedes hacer:
+
+- **Fusionarlas una vez, desde la bandeja.** **Fusionar en…** pliega la fila del hipervisor dentro
+  del nodo propio de la VM, conservando todo lo que configuraste. Es la respuesta rápida y queda
+  resuelto.
+- **O reparar la VM, y se arregla sola.** En Proxmox, sube la versión de **Machine** de la VM (VM →
+  Hardware → Machine) a una actual, o agrega `-machine smbios-entry-point-type=32` a sus `args`, y
+  reinicia el invitado. Windows vuelve a leer el firmware y las dos filas convergen por su cuenta a
+  partir del siguiente informe — sin fusionar nada.
+
+**¿Actualizando a esta versión?** El primer informe de cada host afectado levantará estas
+notificaciones para pares que ya estaban divididos en silencio — estás viendo aflorar duplicados
+existentes, no creándose nuevos. Las filas que ya se bifurcaron **no se fusionan solas**: usa una de
+las dos opciones de arriba. Recibes una notificación por (invitado, tarjeta de red), no una por
+informe, así que un host lleno de VMs afectadas suena una vez por cada una y luego se queda callado.
+
 ## Migraciones en el clúster
 
 Cuando una VM **migra entre nodos de un clúster Proxmox**, el nodo A deja de reportarla y el nodo B
