@@ -1180,6 +1180,27 @@ describe("host.guests[] — additive, optional, degrade-never-reject (ADR-0095)"
     }
   });
 
+  test("the two operands are cut at the SAME length, or the join can never fire (#1227)", () => {
+    // The last asymmetry. `normalizeUuidValue` re-renders anything shaped like a UUID and returns
+    // everything else UNCHANGED — so a long non-UUID value (a vendor string, a hand-edited blob)
+    // survives both sides intact and is then TRUNCATED. The blob side used to cut at 64 and the
+    // report side at AGENT_IDENTIFIER_VALUE_MAX (200): for any value between the two, the operands
+    // could never compare equal no matter how correct the normalisation above it was. Irrelevant to
+    // a real 36-char UUID and exactly the kind of edge the join is not allowed to have.
+    const long = `x${"a".repeat(80)}`; // 81 chars: past 64, inside 200, and not UUID-shaped
+    const viaReport = AgentReportSchema.parse({
+      ...V1_REPORT,
+      host: {
+        ...V1_REPORT.host,
+        identifiers: [{ kind: "smbios-uuid", namespace: "", value: long }],
+      },
+    }).host.identifiers?.find((i) => i.kind === "smbios-uuid")?.value;
+
+    expect(
+      withGuests([{ ref: "1", name: "a", kind: "qemu", smbiosUuid: long }])?.[0]?.smbiosUuid,
+    ).toBe(viaReport);
+  });
+
   test("a placeholder SMBIOS UUID is dropped from the blob, exactly as it is from `macs` (#1227)", () => {
     // Evidence that cannot corroborate must never be STORED as if it could — the sibling rule the
     // `macs` field has enforced since #1138. A whole production run of consumer boards ships this.
