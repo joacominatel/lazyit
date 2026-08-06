@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { hostname as osHostname } from "node:os";
-import { AGENT_POLICY_DEFAULT, type AgentPolicy } from "@lazyit/shared";
+import {
+  AGENT_POLICY_DEFAULT,
+  type AgentPolicy,
+  type AgentReport,
+  AgentReportSchema,
+} from "@lazyit/shared";
+import { parsePveConfig } from "./hypervisor-linux";
 import {
   buildWindowsFactsScript,
   buildWindowsHost,
@@ -1070,5 +1076,150 @@ describe("WINDOWS_FACTS_SCRIPT", () => {
     // child's ANSI/OEM decode exactly like a BOM-less .ps1 (#1166).
     const offenders = [...WINDOWS_FACTS_SCRIPT].filter((c) => (c.codePointAt(0) ?? 0) > 0x7f);
     expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * Issue #1227 — the ONE test that would have caught the field bug, and the reason it shipped: every
+ * synthetic fixture in this repo already passed. Here the two halves of the ADR-0095 §6 identity join
+ * meet at their REAL wire formats, produced by the REAL parsers, for one machine:
+ *
+ *  - the PVE side, `pvesh get /nodes/<n>/qemu/<vmid>/config --output-format json`, through
+ *    {@link parsePveConfig} — a Windows 11 guest as Proxmox VE 8.x actually writes it (uppercase
+ *    `BC:24:11:` MAC, lower-case dashed `smbios1: uuid=`, and the `machine: pc-q35-8.1` pin that is
+ *    the whole trigger: Proxmox pins the machine version at creation for WINDOWS guests only, and
+ *    QEMU 8.1/8.2 defaults `pc-*` to the 64-bit SMBIOS 3.0 entry point, which Windows cannot locate);
+ *  - the Windows side, the WMI/CIM document, through {@link buildWindowsHost} (uppercase colon MAC
+ *    from `Win32_NetworkAdapter`, uppercase dashed UUID from `Win32_ComputerSystemProduct`).
+ *
+ * Both then cross the schema boundary, because that is where the join's two operands are actually
+ * spelled. No byte-swap is applied on either side and none is needed: QEMU's `smbios_encode_uuid()`
+ * writes the SMBIOS 2.6 wire form and BOTH readers decode it back, so Proxmox is not the VMware
+ * `.vmx uuid.bios` case ADR-0095 §1/§6 documents.
+ */
+describe("ADR-0095 §6: a REAL Windows-on-Proxmox pair compares equal end-to-end (#1227)", () => {
+  /** As `pvesh` prints it for a Windows 11 VM created on PVE 8.1 — verbatim shape, keys and all. */
+  const PVE_QEMU_CONFIG = JSON.stringify({
+    bios: "ovmf",
+    cores: 4,
+    cpu: "x86-64-v2-AES",
+    efidisk0: "local-lvm:vm-101-disk-0,efitype=4m,pre-enrolled-keys=1,size=4M",
+    machine: "pc-q35-8.1",
+    memory: 8192,
+    name: "WIN11-DC01",
+    net0: "virtio=BC:24:11:2E:9A:0F,bridge=vmbr0,firewall=1",
+    numa: 0,
+    ostype: "win11",
+    scsi0: "local-lvm:vm-101-disk-1,iothread=1,size=64G",
+    scsihw: "virtio-scsi-single",
+    smbios1: "uuid=9d6f4b1a-3c2e-4f57-9a80-5e1c7b2d4e63",
+    sockets: 1,
+    tpmstate0: "local-lvm:vm-101-disk-2,size=4M,version=v2.0",
+  });
+
+  /** The same machine seen from INSIDE, by its own Windows agent. WMI answers in upper case. */
+  const windowsGuestFacts = (patch: Partial<WindowsFacts> = {}): WindowsFacts =>
+    facts({
+      cs: {
+        TotalPhysicalMemory: 8_589_934_592,
+        Manufacturer: "QEMU",
+        Model: "Standard PC (Q35 + ICH9, 2009)",
+        Domain: "corp.example.com",
+        PartOfDomain: true,
+        DNSHostName: "WIN11-DC01",
+      },
+      csp: { UUID: "9D6F4B1A-3C2E-4F57-9A80-5E1C7B2D4E63" },
+      bios: { SerialNumber: null }, // QEMU ships no board serial to the guest
+      adapters: [
+        {
+          Index: 3,
+          NetConnectionID: "Ethernet",
+          MACAddress: "BC:24:11:2E:9A:0F",
+          PhysicalAdapter: true,
+        },
+      ],
+      adapterConfigs: [
+        { Index: 3, MACAddress: "BC:24:11:2E:9A:0F", IPAddress: ["10.20.30.41"], IPSubnet: ["24"] },
+      ],
+      ...patch,
+    });
+
+  /** Cross the schema boundary — where the join's operands are actually spelled. */
+  function joinOperands(hostFacts: WindowsFacts): {
+    guest: NonNullable<NonNullable<AgentReport["host"]["guests"]>[number]>;
+    reportedUuid: string | undefined;
+    reportedMacs: string[];
+  } {
+    const pve = parsePveConfig(PVE_QEMU_CONFIG);
+    const { host } = buildWindowsHost(hostFacts, undefined, AGENT_POLICY_DEFAULT, () => {});
+    const parsed = AgentReportSchema.parse({
+      agentVersion: "1.11.0",
+      reportingSource: "agent:test",
+      externalId: "machine-id-win11-dc01",
+      reportedAt: "2026-08-06T10:00:00.000Z",
+      host: {
+        ...host,
+        // The host side of the pair, as the PVE agent would ship it on the SAME report contract.
+        guests: [
+          {
+            ref: "101",
+            name: "WIN11-DC01",
+            kind: "qemu",
+            smbiosUuid: pve?.smbiosUuid,
+            macs: pve?.macs,
+          },
+        ],
+      },
+    });
+    const guest = parsed.host.guests?.[0];
+    if (!guest) throw new Error("the guest half of the pair did not survive the schema");
+    return {
+      guest,
+      reportedUuid: parsed.host.identifiers?.find((i) => i.kind === "smbios-uuid")?.value,
+      reportedMacs: (parsed.host.identifiers ?? [])
+        .filter((i) => i.kind === "mac")
+        .map((i) => i.value),
+    };
+  }
+
+  test("a HEALTHY guest: the UUID and the MAC both compare equal, so the join fires", () => {
+    const { guest, reportedUuid, reportedMacs } = joinOperands(windowsGuestFacts());
+
+    // Byte order, case, braces and hyphenation all agree — one fact, one spelling.
+    expect(guest.smbiosUuid).toBe("9d6f4b1a-3c2e-4f57-9a80-5e1c7b2d4e63");
+    expect(reportedUuid).toBe(guest.smbiosUuid);
+    // And the corroborating MAC agrees too: PVE's `virtio=BC:24:11:…` vs WMI's `BC:24:11:…`.
+    expect(guest.macs).toEqual(["bc:24:11:2e:9a:0f"]);
+    expect(reportedMacs).toContain("bc:24:11:2e:9a:0f");
+  });
+
+  test("THE FIELD BUG: the guest cannot read its own SMBIOS UUID — the MAC is all that is left", () => {
+    // `Win32_ComputerSystemProduct` returns NO INSTANCE on a Windows guest whose QEMU machine type
+    // exposes only the 64-bit SMBIOS 3.0 entry point (QEMU issue #2008). Not an empty string, not a
+    // zero UUID — nothing. There is no in-guest fallback: `GetSystemFirmwareTable('RSMB')` and the
+    // `ComputerHardwareId` registry path fail for the same reason, which is why the fix is server-side.
+    const { guest, reportedUuid, reportedMacs } = joinOperands(windowsGuestFacts({ csp: null }));
+
+    expect(reportedUuid).toBeUndefined();
+    // The hypervisor still knows the UUID; the guest simply cannot see it. Nothing to compare.
+    expect(guest.smbiosUuid).toBe("9d6f4b1a-3c2e-4f57-9a80-5e1c7b2d4e63");
+    // But the MAC is sitting right there, on both sides, matching. That is the surviving axis.
+    expect(reportedMacs).toContain("bc:24:11:2e:9a:0f");
+    expect(guest.macs).toContain("bc:24:11:2e:9a:0f");
+  });
+
+  test("the warning an operator greps for names the CAUSE, not just the gap", () => {
+    // The field-confirmable artifact: `specs->'diagnostics'->'warnings'` on the Windows node. Pinned
+    // verbatim because "the SMBIOS identifier is omitted" alone leaves the operator with no next step.
+    const { warn, notes } = sink();
+    buildWindowsHost(windowsGuestFacts({ csp: null }), undefined, AGENT_POLICY_DEFAULT, warn);
+
+    const note = notes.find((n) => n.startsWith("identity: Win32_ComputerSystemProduct"));
+    expect(note).toBe(
+      "identity: Win32_ComputerSystemProduct reported no usable UUID — the SMBIOS identifier is " +
+        "omitted. On a VM this is usually the hypervisor exposing only the 64-bit SMBIOS entry " +
+        "point, which Windows cannot read (Proxmox/QEMU machine types pc-*-8.1 and pc-*-8.2): fix " +
+        "it on the host with -machine smbios-entry-point-type=32 or a newer machine version.",
+    );
   });
 });
