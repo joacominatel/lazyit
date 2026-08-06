@@ -26,6 +26,7 @@
  * caches and applies it, and web renders it — one definition, three consumers.
  */
 import { z } from "zod";
+import { compareSemver, parseSemver } from "../utils/semver";
 
 // ── Bounds ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -140,7 +141,7 @@ export function matchesAnyGlob(globs: readonly string[], value: string): boolean
 // ── The policy itself ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Which collectors run. Five booleans and nothing else — the closed set. A collector turned off here
+ * Which collectors run. Six booleans and nothing else — the closed set. A collector turned off here
  * simply omits its facts, which is the SAME degraded shape `AgentReportSchema` has accepted since v1
  * (a partial report is valid, never a 400), so turning one off needs no server-side special case.
  */
@@ -152,6 +153,17 @@ export const AgentPolicyCollectSchema = z.strictObject({
   /** The installed-package list — by far the largest part of a report, and the usual thing to cut. */
   software: z.boolean(),
   containers: z.boolean(),
+  /**
+   * The hypervisor guest inventory (ADR-0095) — and the ONE defaulted key in a strict schema, which
+   * is load-bearing, not style. A NEW agent against an OLD server receives the 5-key pre-0095
+   * `collect`, and the agent parses the whole policy with a strict `safeParse` that keeps its CACHED
+   * policy on ANY failure: without the default, upgrading one agent binary would freeze that host's
+   * configuration forever. `.default(true)` makes the 5-key shape parse and turns the collector on —
+   * the same "an absent policy is the pre-feature behaviour" posture as {@link AGENT_POLICY_DEFAULT}.
+   * Strictness against UNKNOWN keys is untouched; the mirror-image direction (an OLD agent receiving
+   * a 6-key policy) is the server's job at ack time — see {@link projectAgentPolicy}.
+   */
+  hypervisor: z.boolean().default(true),
 });
 export type AgentPolicyCollect = z.infer<typeof AgentPolicyCollectSchema>;
 
@@ -261,6 +273,7 @@ export const AGENT_POLICY_DEFAULT: AgentPolicy = {
     nics: true,
     software: true,
     containers: true,
+    hypervisor: true,
   },
   softwareSources: [],
   exclude: { nicNames: [], mountpoints: [], softwareNames: [] },
@@ -277,7 +290,10 @@ export const AGENT_POLICY_DEFAULT: AgentPolicy = {
 export const AgentPolicyOverrideSchema = z.strictObject({
   intervalSeconds: AgentPolicySchema.shape.intervalSeconds.optional(),
   staleAfterSeconds: AgentPolicySchema.shape.staleAfterSeconds.optional(),
-  collect: AgentPolicyCollectSchema.partial().optional(),
+  // `hypervisor` is re-declared WITHOUT its `.default(true)` before the `.partial()`: an override
+  // is a layer that states only what it changes, and a defaulted key would materialise
+  // `hypervisor: true` into every stored partial layer that never mentioned it.
+  collect: AgentPolicyCollectSchema.extend({ hypervisor: z.boolean() }).partial().optional(),
   softwareSources: AgentPolicySchema.shape.softwareSources.optional(),
   exclude: AgentPolicyExcludeSchema.partial().optional(),
   softwareMax: AgentPolicySchema.shape.softwareMax.optional(),
@@ -346,6 +362,54 @@ export function resolveAgentPolicy(
     }
   }
   return resolved;
+}
+
+// ── The per-agent version projection (ADR-0095) ───────────────────────────────────────────────────
+
+/**
+ * The first agent version whose policy parser knows `collect.hypervisor`. The floor
+ * {@link projectAgentPolicy} projects against, named so the server and the docs can never disagree
+ * about where the line is.
+ */
+export const AGENT_POLICY_HYPERVISOR_MIN_VERSION = "1.11.0";
+
+/**
+ * The policy as the ACK may carry it: {@link AgentPolicySchema}'s INPUT shape, where the defaulted
+ * `collect.hypervisor` is legitimately absent. What {@link projectAgentPolicy} returns — a resolved
+ * {@link AgentPolicy} is always assignable to it.
+ */
+export type AgentPolicyWire = z.input<typeof AgentPolicySchema>;
+
+/**
+ * Project a resolved policy onto what THIS agent's build can parse (ADR-0095): the policy with
+ * `collect.hypervisor` REMOVED when `agentVersion` predates {@link AGENT_POLICY_HYPERVISOR_MIN_VERSION},
+ * and UNCHANGED from the minimum on. Pure; the server calls it at ack time with the `agentVersion`
+ * the report itself carried.
+ *
+ * WHY THE SERVER MUST PROJECT. The policy schema is `z.strictObject` at every depth — deliberately,
+ * see this module's header — and the AGENT enforces that strictness too: it `safeParse`s the ack's
+ * policy and on ANY failure keeps its cached one. So an unknown key is rejected WHOLESALE, and a
+ * server that sent the 6-key shape to a pre-0095 agent would freeze that host's configuration at
+ * whatever revision it last understood — cadence, exclusions and all — with nothing on screen saying
+ * why. Loosening the agent's parse instead would open the exact server→root-process door the strict
+ * schema exists to keep shut. The REMOVAL must be genuine key absence, never an `undefined` value:
+ * the agent-side strict parse rejects an unknown key whatever its value.
+ *
+ * FAIL-SOFT: an `agentVersion` that is missing or unparseable (`"dev"`, an unstamped build) projects
+ * to the 5-key shape. Sending the smaller shape to an agent that understands the larger one costs
+ * one collector defaulting to `true` on that agent ({@link AgentPolicyCollectSchema}'s own
+ * `.default`); sending the larger shape to an agent that does not costs the whole policy channel —
+ * when in doubt, send what every build parses.
+ */
+export function projectAgentPolicy(
+  policy: AgentPolicy,
+  agentVersion: string | null | undefined,
+): AgentPolicyWire {
+  const version = parseSemver(agentVersion);
+  const min = parseSemver(AGENT_POLICY_HYPERVISOR_MIN_VERSION);
+  if (version && min && compareSemver(version, min) >= 0) return policy;
+  const { hypervisor: _hypervisor, ...collect } = policy.collect;
+  return { ...policy, collect };
 }
 
 // ── The local veto (hard rule 1) ──────────────────────────────────────────────────────────────────
