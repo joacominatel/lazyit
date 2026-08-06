@@ -43,6 +43,9 @@ jest.mock('../../generated/prisma/client', () => ({
       strings,
       values,
     }),
+    // `Prisma.join` builds the IN-list fragment of the ADR-0095 §6 candidate query. The real helper
+    // returns a Sql instance; the test only needs the call not to throw and the values to survive.
+    join: (values: unknown[]) => ({ values }),
     PrismaClientKnownRequestError: class extends Error {
       constructor(
         public code: string,
@@ -112,6 +115,22 @@ const AGENT_SA = {
   serviceAccount: { id: 'sa-agent' },
   permissions: new Set(['infra:report']),
 } as never;
+
+/**
+ * The policy WIRE shape a pre-1.11 agent receives (ADR-0095 §7): the resolved default with
+ * `collect.hypervisor` REMOVED — genuine key absence, because the agent-side strict `safeParse`
+ * rejects an unknown key whatever its value and would keep its cached policy forever. Built by hand
+ * rather than through `projectAgentPolicy`, so these tests assert the shape the wire carries instead
+ * of comparing the helper against itself. The stored/resolved policy is untouched — projection is
+ * wire-only, which is why the node-column assertions elsewhere still see the six-key resolution.
+ */
+const LEGACY_POLICY_DEFAULT = (() => {
+  const collect: Partial<typeof AGENT_POLICY_DEFAULT.collect> = {
+    ...AGENT_POLICY_DEFAULT.collect,
+  };
+  delete collect.hypervisor;
+  return { ...AGENT_POLICY_DEFAULT, collect };
+})();
 
 describe('InfraService', () => {
   let service: InfraService;
@@ -394,7 +413,7 @@ describe('InfraService', () => {
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-        policy: AGENT_POLICY_DEFAULT,
+        policy: LEGACY_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
         softwareDelta: true,
@@ -440,7 +459,7 @@ describe('InfraService', () => {
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-        policy: AGENT_POLICY_DEFAULT,
+        policy: LEGACY_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
         softwareDelta: true,
@@ -478,7 +497,7 @@ describe('InfraService', () => {
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-        policy: AGENT_POLICY_DEFAULT,
+        policy: LEGACY_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
         softwareDelta: true,
@@ -518,7 +537,7 @@ describe('InfraService', () => {
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-        policy: AGENT_POLICY_DEFAULT,
+        policy: LEGACY_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
         softwareDelta: true,
@@ -1350,7 +1369,7 @@ describe('InfraService', () => {
           accepted: true,
           // #1140: the ack is the policy channel, so an accepted report carries the resolved
           // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-          policy: AGENT_POLICY_DEFAULT,
+          policy: LEGACY_POLICY_DEFAULT,
           // #1142: and every ack states that this build understands `softwareState` — the evidence
           // the agent needs before it may omit an unchanged package list.
           softwareDelta: true,
@@ -2277,7 +2296,7 @@ describe('InfraService', () => {
           accepted: true,
           // #1140: the ack is the policy channel, so an accepted report carries the resolved
           // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-          policy: AGENT_POLICY_DEFAULT,
+          policy: LEGACY_POLICY_DEFAULT,
           // #1142: and every ack states that this build understands `softwareState` — the evidence
           // the agent needs before it may omit an unchanged package list.
           softwareDelta: true,
@@ -3750,7 +3769,8 @@ describe('InfraService', () => {
         state: 'CONFIRMED',
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
-        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        // policy. This fixture reports agentVersion 2.0.0 — past the ADR-0095 §7 floor — so the
+        // projection is the identity and the SIX-key default rides out unchanged.
         policy: AGENT_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
@@ -3851,7 +3871,8 @@ describe('InfraService', () => {
         state: 'PENDING',
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
-        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        // policy. This fixture reports agentVersion 2.0.0 — past the ADR-0095 §7 floor — so the
+        // projection is the identity and the SIX-key default rides out unchanged.
         policy: AGENT_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
@@ -4143,7 +4164,8 @@ describe('InfraService', () => {
         state: 'PENDING',
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
-        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        // policy. This fixture reports agentVersion 2.0.0 — past the ADR-0095 §7 floor — so the
+        // projection is the identity and the SIX-key default rides out unchanged.
         policy: AGENT_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
@@ -6582,6 +6604,704 @@ describe('InfraService', () => {
       const detail = await service.getNodeDetail('node-1', HUMAN);
 
       expect(detail.duplicateAssetSuspicion).toBe(null);
+    });
+  });
+
+  // ── Hypervisor guest children (ADR-0095 §5, #1217) ──────────────────────────
+  //
+  // The container machinery one level up, MIRRORED: reported-set diff, skip-when-unchanged,
+  // enrollment charged per new child with skip-don't-break, vanished→OFFLINE never deleted,
+  // self-healing RUNS_ON — plus the two things only guests have: a kind derived from the guest's own
+  // nature, and the absorbed-child resolution the §6 identity join leaves behind.
+
+  describe('ingestReport — hypervisor guest children (ADR-0095 §5)', () => {
+    const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+    /** A Proxmox host's report — `guests` ABSENT unless a test supplies it. */
+    const HV_REPORT = {
+      agentVersion: '1.11.0',
+      reportingSource: 'agent:pve',
+      externalId: 'machine-id-pve1',
+      reportedAt: '2026-08-05T12:00:00.000Z',
+      host: {
+        hostname: 'pve-01',
+        hypervisor: { platform: 'proxmox', version: '8.4', nodeName: 'pve1' },
+      },
+    };
+    const reportWithGuests = (guests?: unknown[]) =>
+      AgentReportSchema.parse({
+        ...clone(HV_REPORT),
+        host: {
+          ...clone(HV_REPORT.host),
+          ...(guests !== undefined ? { guests } : {}),
+        },
+      });
+
+    /** Land the host on the CREATE branch, with no guest children known yet. */
+    function hostIsNew(): void {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-hv',
+        state: 'PENDING',
+      });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+    }
+
+    /** Land the host on the KNOWN-key refresh branch. */
+    function hostIsKnown(): void {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-hv',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'pve-01',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-hv',
+        state: 'CONFIRMED',
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+    }
+
+    it('an ABSENT guests key touches nothing — a downgraded agent never retires children', async () => {
+      // Absent = the collector never probed (older agent, no hypervisor, `collect.hypervisor` off).
+      hostIsNew();
+      await service.ingestReport(reportWithGuests(), AGENT_SA);
+      expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+      expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+      expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+    });
+
+    it("the host's hypervisor facet lands inside specs.host — the existing blob, no new column", async () => {
+      hostIsNew();
+      await service.ingestReport(reportWithGuests(), AGENT_SA);
+      const createArg = firstArg<{
+        data: { specs: { host: { hypervisor?: unknown } } };
+      }>(prisma.infraNode.create);
+      expect(createArg.data.specs.host.hypervisor).toEqual({
+        platform: 'proxmox',
+        version: '8.4',
+        nodeName: 'pve1',
+      });
+    });
+
+    it('mints a PENDING VM child (qemu) with an ACTIVE RUNS_ON edge and NO chassis', async () => {
+      hostIsNew();
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-g1' });
+
+      await service.ingestReport(
+        reportWithGuests([
+          {
+            ref: '101',
+            name: 'db-vm',
+            kind: 'qemu',
+            state: 'running',
+            smbiosUuid: '4C4C4544-0031-3910-8047-B7C04F375A32',
+            macs: ['AA:BB:CC:DD:EE:01'],
+            cores: 4,
+            memoryBytes: 8589934592,
+          },
+        ]),
+        AGENT_SA,
+      );
+
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      const child = (calls[1][0] as { data: Record<string, unknown> }).data;
+      expect(child.kind).toBe('VM');
+      expect(child.label).toBe('db-vm');
+      // The human gate is untouched: a guest is a PROPOSAL, exactly like a container child.
+      expect(child.state).toBe('PENDING');
+      expect(child.source).toBe('AGENT');
+      expect(child.status).toBe('ONLINE');
+      // Keyed on the platform's STABLE ref, scoped to the host — never the name, freely renamed.
+      expect(child.externalId).toBe('machine-id-pve1/guest/101');
+      expect(child.reportingSource).toBe('agent:pve');
+      // Chassis is NEVER written for a child (ADR-0093 §2) — it arrives with the guest's own agent.
+      expect(child).not.toHaveProperty('chassis');
+      // The blob mirrors the container child's shape: `{ guest, reportedAt }`, no `host` key.
+      const specs = child.specs as Record<string, unknown>;
+      expect(specs).not.toHaveProperty('host');
+      expect(specs.reportedAt).toBe('2026-08-05T12:00:00.000Z');
+      expect(specs.guest).toMatchObject({
+        ref: '101',
+        name: 'db-vm',
+        kind: 'qemu',
+        // Normalized by the shared schema — lower-cased UUID, canonical MACs.
+        smbiosUuid: '4c4c4544-0031-3910-8047-b7c04f375a32',
+        macs: ['aa:bb:cc:dd:ee:01'],
+      });
+
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-g1', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
+      // NO auto-confirm offer for a guest child: the #1145 rule vocabulary is HOST/CONTAINER, and a
+      // hypervisor-proposed guest is honestly neither. Only the HOST itself was offered.
+      expect(autoConfirm.resolve).toHaveBeenCalledTimes(1);
+      expect(firstArg<{ hostname: string }>(autoConfirm.resolve).hostname).toBe(
+        'pve-01',
+      );
+    });
+
+    it('an LXC guest is a CONTAINER — the kind derives from the guest, never a hardcode', async () => {
+      hostIsNew();
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-ct' });
+
+      await service.ingestReport(
+        reportWithGuests([{ ref: '200', name: 'ct-cache', kind: 'lxc' }]),
+        AGENT_SA,
+      );
+
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      const child = (calls[1][0] as { data: Record<string, unknown> }).data;
+      expect(child.kind).toBe('CONTAINER');
+      // No reported state → UNKNOWN, never a guess in either direction.
+      expect(child.status).toBe('UNKNOWN');
+    });
+
+    it('maps guest state to node status: running→ONLINE, stopped→OFFLINE', async () => {
+      hostIsNew();
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-g1' })
+        .mockResolvedValueOnce({ id: 'node-g2' });
+
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'up', kind: 'qemu', state: 'running' },
+          { ref: '102', name: 'down', kind: 'qemu', state: 'stopped' },
+        ]),
+        AGENT_SA,
+      );
+
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      expect((calls[1][0] as { data: { status: string } }).data.status).toBe(
+        'ONLINE',
+      );
+      expect((calls[2][0] as { data: { status: string } }).data.status).toBe(
+        'OFFLINE',
+      );
+    });
+
+    it('scopes the child lookup to THIS host and reads past the soft-delete filter', async () => {
+      // The prefix keeps two PVE nodes both running VMID 101 as two guests; `includeSoftDeleted` is
+      // how an ABSORBED guest's archived row keeps resolving its ref to the canonical node.
+      hostIsNew();
+      await service.ingestReport(
+        reportWithGuests([{ ref: '101', name: 'db-vm', kind: 'qemu' }]),
+        AGENT_SA,
+      );
+      const arg = firstArg<{
+        where: Record<string, unknown>;
+        includeSoftDeleted?: boolean;
+      }>(prisma.infraNode.findMany);
+      expect(arg.where).toEqual({
+        reportingSource: 'agent:pve',
+        externalId: { startsWith: 'machine-id-pve1/guest/' },
+      });
+      expect(arg.includeSoftDeleted).toBe(true);
+    });
+
+    it('a KNOWN guest is refreshed, never duplicated — and the unchanged blob is not rewritten', async () => {
+      hostIsKnown();
+      // The stored blob is EXACTLY what this report would write, minus the volatile reportedAt —
+      // parsing the same wire element guarantees the two sides agree byte for byte (#1153).
+      const parsed = reportWithGuests([
+        { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+      ]);
+      const storedGuest = clone(parsed.host.guests![0]);
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-g1',
+          externalId: 'machine-id-pve1/guest/101',
+          specs: { guest: storedGuest, reportedAt: '2026-08-01T00:00:00.000Z' },
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+      prisma.infraEdge.findMany.mockResolvedValue([
+        { id: 'edge-1', sourceId: 'node-g1', target: { deletedAt: null } },
+      ]);
+
+      await service.ingestReport(parsed, AGENT_SA);
+
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      expect(enrollment.tryCharge).not.toHaveBeenCalled();
+      const childUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-g1',
+      )?.[0] as { data: Record<string, unknown> };
+      // Heartbeat scalars always; the jsonb blob only when the facts moved — they did not.
+      expect(childUpdate.data.status).toBe('ONLINE');
+      expect(childUpdate.data.lastReportedAt).toBeInstanceOf(Date);
+      expect(childUpdate.data).not.toHaveProperty('specs');
+      // Curation stays the human's.
+      expect(childUpdate.data).not.toHaveProperty('kind');
+      expect(childUpdate.data).not.toHaveProperty('label');
+      expect(childUpdate.data).not.toHaveProperty('state');
+      // The edge is already active — re-opening would trip the one-active-RUNS_ON index.
+      expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+    });
+
+    it('a guest whose facts MOVED gets its blob rewritten wholesale', async () => {
+      hostIsKnown();
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-g1',
+          externalId: 'machine-id-pve1/guest/101',
+          specs: {
+            guest: {
+              ref: '101',
+              name: 'db-vm',
+              kind: 'qemu',
+              state: 'stopped',
+            },
+            reportedAt: '2026-08-01T00:00:00.000Z',
+          },
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+      prisma.infraEdge.findMany.mockResolvedValue([
+        { id: 'edge-1', sourceId: 'node-g1', target: { deletedAt: null } },
+      ]);
+
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      const childUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-g1',
+      )?.[0] as { data: Record<string, unknown> };
+      expect(childUpdate.data.specs).toMatchObject({
+        guest: { ref: '101', state: 'running' },
+        reportedAt: '2026-08-05T12:00:00.000Z',
+      });
+      expect(childUpdate.data.status).toBe('ONLINE');
+    });
+
+    it('a VANISHED guest goes OFFLINE — never soft-deleted behind the operator', async () => {
+      hostIsKnown();
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-gone',
+          externalId: 'machine-id-pve1/guest/999',
+          specs: {},
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+
+      // `[]` is a POSITIVE finding: the probe ran and this hypervisor runs no guests.
+      await service.ingestReport(reportWithGuests([]), AGENT_SA);
+
+      expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['node-gone'] } },
+        data: { status: 'OFFLINE' },
+      });
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+    });
+
+    it('a spent enrollment budget SKIPS new guests without breaking the rest — no false outage', async () => {
+      hostIsKnown();
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-keep',
+          externalId: 'machine-id-pve1/guest/101',
+          specs: {},
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+      prisma.infraEdge.findMany.mockResolvedValue([
+        { id: 'edge-keep', sourceId: 'node-keep', target: { deletedAt: null } },
+      ]);
+      enrollment.tryCharge.mockReturnValue(false);
+
+      // `900` exhausts the budget; `101` is listed AFTER it and is already known + running.
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '900', name: 'brand-new', kind: 'qemu', state: 'running' },
+          { ref: '101', name: 'keep', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      // The refusal never becomes a retirement…
+      expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      // …and the known guest is still refreshed, so the staleness sweeper stays quiet too.
+      const keepUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-keep',
+      )?.[0] as { data: Record<string, unknown> } | undefined;
+      expect(keepUpdate?.data.status).toBe('ONLINE');
+      expect(keepUpdate?.data.lastReportedAt).toBeInstanceOf(Date);
+    });
+
+    it('still retires a guest the hypervisor genuinely stopped listing, budget or no budget', async () => {
+      hostIsKnown();
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-gone',
+          externalId: 'machine-id-pve1/guest/999',
+          specs: {},
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+      enrollment.tryCharge.mockReturnValue(false);
+
+      await service.ingestReport(
+        reportWithGuests([{ ref: '900', name: 'brand-new', kind: 'qemu' }]),
+        AGENT_SA,
+      );
+
+      expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['node-gone'] } },
+        data: { status: 'OFFLINE' },
+      });
+    });
+
+    it('a guest reconcile failure NEVER fails the host report', async () => {
+      hostIsNew();
+      prisma.infraNode.findMany.mockRejectedValue(new Error('db hiccup'));
+
+      const ack = await service.ingestReport(
+        reportWithGuests([{ ref: '101', name: 'db-vm', kind: 'qemu' }]),
+        AGENT_SA,
+      );
+      expect(ack.accepted).toBe(true);
+      expect(ack.nodeId).toBe('node-hv');
+    });
+
+    it('an ABSORBED guest is never re-proposed — its ref resolves to the canonical node', async () => {
+      // The §6 join archived this child with the merge marker AND its reporting key. The next host
+      // report must not mint a fresh PENDING duplicate; it only self-heals the canonical RUNS_ON.
+      hostIsKnown();
+      prisma.infraNode.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'node-g1',
+            externalId: 'machine-id-pve1/guest/101',
+            specs: {
+              guest: { ref: '101', name: 'db-vm', kind: 'qemu' },
+              _infraMergedInto: {
+                nodeId: 'node-canonical',
+                at: '2026-08-04T00:00:00.000Z',
+              },
+            },
+            assetId: null,
+            deletedAt: new Date('2026-08-04T00:00:00.000Z'),
+          },
+        ])
+        // The canonical-liveness check: the node the marker points at is still on the map.
+        .mockResolvedValueOnce([{ id: 'node-canonical' }]);
+
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      // No new child, no enrollment charge, no OFFLINE sweep against the archived row…
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      expect(enrollment.tryCharge).not.toHaveBeenCalled();
+      expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+      // …and the RUNS_ON self-heal wires the CANONICAL node to the reporting host.
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: {
+          sourceId: 'node-canonical',
+          targetId: 'node-hv',
+          kind: 'RUNS_ON',
+        },
+      });
+    });
+
+    it('an absorbed guest whose canonical node was DISCARDED gets nothing — not even an edge', async () => {
+      hostIsKnown();
+      prisma.infraNode.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'node-g1',
+            externalId: 'machine-id-pve1/guest/101',
+            specs: {
+              guest: { ref: '101', name: 'db-vm', kind: 'qemu' },
+              _infraMergedInto: { nodeId: 'node-canonical' },
+            },
+            assetId: null,
+            deletedAt: new Date('2026-08-04T00:00:00.000Z'),
+          },
+        ])
+        .mockResolvedValueOnce([]); // the canonical node is off the map
+
+      await service.ingestReport(
+        reportWithGuests([{ ref: '101', name: 'db-vm', kind: 'qemu' }]),
+        AGENT_SA,
+      );
+
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── The guest identity join (ADR-0095 §6, #1217) ────────────────────────────
+  //
+  // Corroborated SMBIOS UUID + MAC absorbs the host-proposed /guest/ child into the in-guest
+  // agent's own node — ADR-0093's discipline: one notion of "same machine", corroborated, never a
+  // single-signal auto-merge.
+
+  describe('ingestReport — guest identity join (ADR-0095 §6)', () => {
+    const UUID = '4c4c4544-0031-3910-8047-b7c04f375a32';
+
+    /** The in-guest agent's own report — the report that closes the two-nodes fork. */
+    const vmReport = (identifiers?: unknown[]) =>
+      AgentReportSchema.parse({
+        agentVersion: '1.11.0',
+        reportingSource: 'agent:vm',
+        externalId: 'machine-id-vm1',
+        reportedAt: '2026-08-05T12:00:00.000Z',
+        host: {
+          hostname: 'db-vm',
+          ...(identifiers !== undefined ? { identifiers } : {}),
+        },
+      });
+
+    const CORROBORATING = [
+      { kind: 'smbios-uuid', value: UUID.toUpperCase() },
+      { kind: 'mac', value: 'AA:BB:CC:DD:EE:01' },
+    ];
+
+    /** The live /guest/ child the hypervisor proposed for this same machine. */
+    const guestChild = (macs: string[]) => ({
+      id: 'node-guest',
+      externalId: 'machine-id-pve1/guest/101',
+      label: 'db-vm',
+      reportingSource: 'agent:pve',
+      specs: {
+        guest: {
+          ref: '101',
+          name: 'db-vm',
+          kind: 'qemu',
+          smbiosUuid: UUID,
+          macs,
+        },
+        reportedAt: '2026-08-05T11:00:00.000Z',
+      },
+    });
+
+    /**
+     * Route the raw queries by shape: the join's candidate lookup (matches on the smbiosUuid
+     * predicate) and the identity-conflict marker read. Everything else answers empty.
+     */
+    function rawQueries(
+      candidates: unknown[],
+      conflictDetectedAt: string | null = null,
+    ): void {
+      prisma.$queryRaw.mockImplementation((query: { strings?: string[] }) => {
+        const sql = (query?.strings ?? []).join(' ');
+        if (sql.includes('smbiosUuid')) return Promise.resolve(candidates);
+        if (sql.includes('identityConflict')) {
+          return Promise.resolve([{ detectedAt: conflictDetectedAt }]);
+        }
+        return Promise.resolve([]);
+      });
+    }
+
+    /** The VM lands as a NEW node — the branch a fresh in-guest agent install takes. */
+    function vmIsNew(): void {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-vm',
+        state: 'PENDING',
+      });
+    }
+
+    it('CORROBORATED (UUID + MAC): absorbs the child into the canonical node, edge re-pointed', async () => {
+      vmIsNew();
+      rawQueries([guestChild(['aa:bb:cc:dd:ee:01'])]);
+      // The child's active RUNS_ON names the hypervisor host; the canonical node has none yet.
+      prisma.infraEdge.findFirst
+        .mockResolvedValueOnce({ id: 'edge-child', targetId: 'node-hv' })
+        .mockResolvedValueOnce(null);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      // One transaction: archive the child (marker stamped, reporting key KEPT — the guest reconcile
+      // reads it back so the hypervisor can never re-propose an absorbed guest)…
+      const archived = firstArg<{
+        where: { id: string };
+        data: Record<string, unknown>;
+      }>(txNode.update);
+      expect(archived.where).toEqual({ id: 'node-guest' });
+      expect(archived.data.deletedAt).toBeInstanceOf(Date);
+      expect(archived.data).not.toHaveProperty('reportingSource');
+      expect(archived.data).not.toHaveProperty('externalId');
+      expect(archived.data.specs).toMatchObject({
+        _infraMergedInto: { nodeId: 'node-vm' },
+      });
+      // …the child's edge is CLOSED (close-before-open, one-active-RUNS_ON-per-source)…
+      expect(txEdge.updateMany).toHaveBeenCalledWith({
+        where: { id: 'edge-child' },
+        data: { endedAt: expect.any(Date) as Date },
+      });
+      // …and the RUNS_ON lands on the canonical node, pointing at the same hypervisor host.
+      expect(txEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-vm', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
+      // The duplicate is off the map and off the index; no suspicion nudge for a resolved join.
+      expect(search.remove).toHaveBeenCalledWith('infra', 'node-guest');
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('UUID WITHOUT a corroborating MAC never merges — it surfaces the suspicion once', async () => {
+      // Clones demonstrably duplicate BIOS UUIDs (VMware KB 321451). One fact is a hint, not a merge.
+      vmIsNew();
+      rawQueries([guestChild(['aa:bb:cc:dd:ee:99'])]); // a different NIC — no corroboration
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(txNode.update).not.toHaveBeenCalled();
+      const emitted = firstArg<{ type: string; dedupeKey: string }>(
+        notifications.emit,
+      );
+      expect(emitted.type).toBe('infra.identity_conflict');
+      // Deduped per (child, uuid): a VM checking in every 15 minutes nudges the operator ONCE.
+      expect(emitted.dedupeKey).toBe(
+        `infra.guest_uuid_suspicion:node-guest:${UUID}`,
+      );
+    });
+
+    it('a child flagged with an identity conflict is NEVER merged — and not even nudged', async () => {
+      vmIsNew();
+      rawQueries([
+        {
+          ...guestChild(['aa:bb:cc:dd:ee:01']),
+          specs: {
+            ...guestChild(['aa:bb:cc:dd:ee:01']).specs,
+            identityConflict: { peerNodeId: 'node-x', detectedAt: 'whenever' },
+          },
+        },
+      ]);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('a reporting node carrying its own conflict marker absorbs nothing', async () => {
+      vmIsNew();
+      rawQueries(
+        [guestChild(['aa:bb:cc:dd:ee:01'])],
+        '2026-08-01T00:00:00.000Z', // the node is under an active #1141 collision marker
+      );
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(txNode.update).not.toHaveBeenCalled();
+    });
+
+    it('NO smbios-uuid in the report → NO candidate query at all — the join is gated, not filtered', async () => {
+      // The bound the ADR demands: every pre-0095 agent and every unprivileged collector reports no
+      // smbios-uuid, and for them the join costs literally zero queries.
+      vmIsNew();
+
+      await service.ingestReport(
+        vmReport([{ kind: 'mac', value: 'AA:BB:CC:DD:EE:01' }]),
+        AGENT_SA,
+      );
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Ack-time policy projection (ADR-0095 §7, #1217) ─────────────────────────
+
+  describe('ingestReport — ack policy projection (ADR-0095 §7)', () => {
+    const reportAt = (agentVersion: string) =>
+      AgentReportSchema.parse({
+        agentVersion,
+        reportingSource: 'agent:proj',
+        externalId: 'machine-id-proj',
+        reportedAt: '2026-08-05T12:00:00.000Z',
+        host: { hostname: 'web-77' },
+      });
+
+    beforeEach(() => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-proj',
+        state: 'PENDING',
+      });
+    });
+
+    it("a pre-1.11 agent ('1.10.3') receives the FIVE-key collect — the shape its strict parse accepts", async () => {
+      const ack = await service.ingestReport(reportAt('1.10.3'), AGENT_SA);
+      expect(ack.policy?.collect).not.toHaveProperty('hypervisor');
+      // The five pre-0095 keys all survive the projection untouched.
+      expect(Object.keys(ack.policy?.collect ?? {}).sort()).toEqual([
+        'containers',
+        'disks',
+        'hardware',
+        'nics',
+        'software',
+      ]);
+    });
+
+    it("an unparseable agentVersion ('dev') projects to the five-key shape — fail-soft", async () => {
+      const ack = await service.ingestReport(reportAt('dev'), AGENT_SA);
+      expect(ack.policy?.collect).not.toHaveProperty('hypervisor');
+    });
+
+    it('a 1.11.0 agent keeps collect.hypervisor — the projection is the identity from the floor on', async () => {
+      const ack = await service.ingestReport(reportAt('1.11.0'), AGENT_SA);
+      expect(ack.policy?.collect.hypervisor).toBe(true);
+    });
+
+    it('projection is WIRE-ONLY: the stored policy columns still see the un-projected resolution', async () => {
+      // A pre-1.11 agent that echoes a revision still has its node stamped with the RESOLVED
+      // staleness — the projection changes what rides the ack, never what the server holds.
+      agentPolicy.resolveForReport.mockResolvedValue({
+        ...AGENT_POLICY_DEFAULT,
+        revision: 9,
+        staleAfterSeconds: 5400,
+      });
+
+      const ack = await service.ingestReport(
+        AgentReportSchema.parse({
+          agentVersion: '1.10.3',
+          reportingSource: 'agent:proj',
+          externalId: 'machine-id-proj',
+          reportedAt: '2026-08-05T12:00:00.000Z',
+          host: { hostname: 'web-77' },
+          policyRevision: 9,
+        }),
+        AGENT_SA,
+      );
+
+      const createArg = firstArg<{
+        data: { policyStaleAfterSeconds?: number };
+      }>(prisma.infraNode.create);
+      expect(createArg.data.policyStaleAfterSeconds).toBe(5400);
+      // The wire still got the projected shape.
+      expect(ack.policy?.collect).not.toHaveProperty('hypervisor');
+      expect(ack.policy?.revision).toBe(9);
     });
   });
 });
