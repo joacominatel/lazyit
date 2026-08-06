@@ -87,6 +87,7 @@ import {
 import { DeleteNodeDialog } from "./delete-node-dialog";
 import { NodeChangesTab } from "./node-changes-tab";
 import { NodeEdgesManager } from "./node-edges-manager";
+import { nodeSectionKey } from "./node-detail-keys";
 import { planNodeDetailTabs, type NodeDetailTabId } from "./node-detail-tabs";
 
 const STATUS_OPTIONS = InfraNodeStatusSchema.options;
@@ -454,7 +455,7 @@ function GeneralTab({
       <div className="grid gap-6 lg:grid-cols-2">
         {canManage ? (
           <SecretsEditor
-            key={`${node.id}:${JSON.stringify(node.secretRefs ?? [])}`}
+            key={nodeSectionKey("secrets", node.id, node.secretRefs)}
             nodeId={node.id}
             secretRefs={node.secretRefs}
           />
@@ -463,7 +464,7 @@ function GeneralTab({
         )}
         {canManage ? (
           <ShortcutsEditor
-            key={`${node.id}:${JSON.stringify(node.shortcuts ?? [])}`}
+            key={nodeSectionKey("shortcuts", node.id, node.shortcuts)}
             nodeId={node.id}
             shortcuts={node.shortcuts}
           />
