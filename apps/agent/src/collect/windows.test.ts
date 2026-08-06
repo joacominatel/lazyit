@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { hostname as osHostname } from "node:os";
 import {
   AGENT_POLICY_DEFAULT,
+  AGENT_WARNING_LENGTH_MAX,
   type AgentPolicy,
   type AgentReport,
   AgentReportSchema,
 } from "@lazyit/shared";
 import { parsePveConfig } from "./hypervisor-linux";
+import { buildDiagnostics } from "./shared";
 import {
   buildWindowsFactsScript,
   buildWindowsHost,
@@ -1208,18 +1210,37 @@ describe("ADR-0095 §6: a REAL Windows-on-Proxmox pair compares equal end-to-end
     expect(guest.macs).toContain("bc:24:11:2e:9a:0f");
   });
 
-  test("the warning an operator greps for names the CAUSE, not just the gap", () => {
-    // The field-confirmable artifact: `specs->'diagnostics'->'warnings'` on the Windows node. Pinned
-    // verbatim because "the SMBIOS identifier is omitted" alone leaves the operator with no next step.
+  test("the warning an operator greps for names the CAUSE, and SURVIVES the 300-char cap", () => {
+    // ASSERTED THROUGH `buildDiagnostics`, NOT AT THE `warn` SINK — that is the point of this test.
+    // The sink is upstream of BOTH truncations the string has to survive: `buildDiagnostics` slices
+    // every warning to AGENT_WARNING_LENGTH_MAX, and `AgentReportSchema` slices again on the server.
+    // A test pinned at the sink is green against an artifact that ships cut in half, which is exactly
+    // what happened here: the first version of this warning was 347 chars and reached the operator
+    // ending mid-token at "…-machine smbios-", losing the entire actionable half.
     const { warn, notes } = sink();
     buildWindowsHost(windowsGuestFacts({ csp: null }), undefined, AGENT_POLICY_DEFAULT, warn);
+    const shipped = buildDiagnostics(notes, true, 100).warnings ?? [];
 
-    const note = notes.find((n) => n.startsWith("identity: Win32_ComputerSystemProduct"));
+    const note = shipped.find((n) => n.startsWith("identity: Win32_ComputerSystemProduct"));
     expect(note).toBe(
       "identity: Win32_ComputerSystemProduct reported no usable UUID — the SMBIOS identifier is " +
-        "omitted. On a VM this is usually the hypervisor exposing only the 64-bit SMBIOS entry " +
-        "point, which Windows cannot read (Proxmox/QEMU machine types pc-*-8.1 and pc-*-8.2): fix " +
-        "it on the host with -machine smbios-entry-point-type=32 or a newer machine version.",
+        "omitted. On a VM the host usually exposes only the 64-bit SMBIOS entry point, which " +
+        "Windows cannot read: fix it host-side (Proxmox/QEMU: raise the machine version or " +
+        "-machine smbios-entry-point-type=32).",
     );
+    // The repair instruction is what an operator acts on, so it has to be INSIDE the cap, not near it.
+    expect(note?.length).toBeLessThanOrEqual(AGENT_WARNING_LENGTH_MAX);
+    expect(note).toContain("smbios-entry-point-type=32");
+
+    // And the server's own cap does not cut it either — the contract slices a second time.
+    const parsed = AgentReportSchema.parse({
+      agentVersion: "1.11.0",
+      reportingSource: "agent:test",
+      externalId: "machine-id-win11-dc01",
+      reportedAt: "2026-08-06T10:00:00.000Z",
+      host: { hostname: "WIN11-DC01" },
+      diagnostics: buildDiagnostics(notes, true, 100),
+    });
+    expect(parsed.diagnostics?.warnings).toContain(note);
   });
 });
