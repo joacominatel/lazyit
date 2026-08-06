@@ -18,6 +18,7 @@ to create assets). It opens a short form.
 
 - **Model** (required) — the one model every unit is created from. Its name seeds each unit's default
   name, and its category and default specs come along just as they would on the single-asset form.
+  If the model doesn't exist yet, create it right here — see below.
 - **Quantity** (required) — how many units to create, from 1 up to the per-request maximum.
 - **Status** — the state every unit starts in (for example *Operational* or *In storage*).
 - **Location**, **Company**, **Purchase date**, **Purchase cost**, **Notes** — optional shared
@@ -29,6 +30,25 @@ to create assets). It opens a short form.
 
 Auto asset tags still apply: if your instance uses an [asset-tag scheme](/help/configuration-asset-tag-scheme),
 each unit is tagged automatically as it is created.
+
+## Creating the model without leaving the form
+
+Most shipments arrive *because* something new was bought, so the model you need often doesn't exist
+yet. Use the **+** next to the model picker: it opens a small **New model** dialog on top of the form.
+
+- It appears only if you have permission to manage models. Without it, pick from the existing models.
+- A model needs a **name** and a **manufacturer**. If you had already typed a search term in the
+  picker, the name starts pre-filled with it — so you don't create a near-duplicate of a model that
+  was simply spelled differently.
+- **Category is optional**, and you can only choose one that already exists. Creating a category here
+  is deliberately not offered: a typo would otherwise leave a ghost category behind. Add categories
+  under [models & categories](/help/assets-models-categories) when you need a new one.
+- On **Create**, the dialog closes, the new model is selected, and **everything you already typed —
+  quantity, status, location, serials — is still there.** Cancelling or pressing Escape closes only
+  that dialog and changes nothing on the form.
+
+The model is a record in its own right: once created it stays in your catalogue and is reusable, even
+if you then cancel the receive or the receive fails.
 
 ## Partial success is normal
 
@@ -50,7 +70,8 @@ From the result you can jump straight to the new assets (the inventory filtered 
 
 ## When to use import instead
 
-Receiving stock is for **new** units of a model you already have. To load an **existing** estate from
+Receiving stock is for **new** units of a **single** model — one you already have, or one you create
+on the spot from the form. To load an **existing** estate from
 a spreadsheet or a legacy tool — many different models, with their own serials and owners — use the
 [bulk importer](/help/assets-bulk-import) instead.
 

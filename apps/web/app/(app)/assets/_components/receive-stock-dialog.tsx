@@ -19,6 +19,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { AssetModelCombobox } from "@/components/asset-model-combobox";
 import { Callout } from "@/components/callout";
+import { CreatableField } from "@/components/creatable-field";
+import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,16 +50,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
 import { useReceiveAssets } from "@/lib/api/hooks/use-asset-receive";
 import { notifyError } from "@/lib/api/notify-error";
-import { majorToMinor } from "@/lib/utils/money";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useAssetStatusLabel } from "./asset-status-badge";
-
-/** Split the serials textarea into trimmed, non-empty lines (one serial per unit). */
-function parseSerials(raw: string): string[] {
-  return raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
+import { buildReceivePayload } from "./receive-stock-payload";
 
 type FieldErrors = Partial<
   Record<"form" | "modelId" | "quantity" | "serials", string>
@@ -69,6 +64,13 @@ type FieldErrors = Partial<
  * dialog. Gate it with `asset:write` at the call site (like the New-asset button). The form fields are
  * the shared context applied to EVERY minted unit; the optional serials paste assigns one serial per
  * unit (empty, or exactly `quantity` lines — enforced by the shared schema before any write).
+ *
+ * The model picker carries the house inline-create affordance (issue #1229): receiving stock is most
+ * often exactly when a NEW model arrives, so the "+" opens {@link CreateAssetModelDialog} and selects
+ * what it creates — without disturbing anything already typed. That last part is structural, not
+ * incidental: the form resets on OPEN, never on close, so no nested-dialog dismiss can ever cascade
+ * into wiping the intake. The "+" is gated on `assetModel:write` (the dialog itself only needs
+ * `asset:write`) so a hand-tuned role never types a model just to eat a 403.
  *
  * The endpoint is a PARTIAL-SUCCESS one (a per-unit create loop): it returns `{ created, failed }` and
  * a partial (or total) failure is NOT a request error. So the dialog switches to a RESULT view that
@@ -82,6 +84,8 @@ export function ReceiveStockButton() {
   const statusLabel = useAssetStatusLabel();
   const receive = useReceiveAssets();
   const { data: companies } = useAssetCompanies();
+  // Creating a model is its own permission — the "+" only renders when the operator actually has it.
+  const canCreateModel = useCan("assetModel:write");
 
   const [open, setOpen] = useState(false);
 
@@ -98,6 +102,12 @@ export function ReceiveStockButton() {
   const [serials, setSerials] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
 
+  // The last NON-EMPTY term typed in the model picker. The picker clears its own query when its
+  // popover closes, so we keep the last one to seed the inline create dialog: the operator who
+  // searched "Latitude 5520", found nothing and hit "+" should not retype it (and should not end up
+  // with a near-duplicate model, which nothing in the schema prevents).
+  const [modelSearch, setModelSearch] = useState("");
+
   // The partial-success envelope from the last successful call — drives the RESULT view.
   const [result, setResult] = useState<ReceiveAssetsResult | null>(null);
 
@@ -111,34 +121,36 @@ export function ReceiveStockButton() {
     setPurchaseCost("");
     setNotes("");
     setSerials("");
+    setModelSearch("");
     setErrors({});
     setResult(null);
   }
 
   function handleOpenChange(next: boolean) {
+    // Reset on OPEN, never on close (issue #1229). Same guarantee — a reused dialog never shows a
+    // stale result/form — but it makes the intake structurally immune to data loss: the inline
+    // "create model" dialog nests inside this one, and if a dismiss of the inner layer ever reached
+    // this handler, a close-time reset would silently wipe everything the operator had typed.
+    if (next) resetForm();
     setOpen(next);
-    // Reset on close so a reused dialog never shows a stale result/form.
-    if (!next) resetForm();
   }
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const serialLines = parseSerials(serials);
-    // Build the payload and let the shared schema validate it (single source of truth): quantity
-    // bounds, the serials-count refinement, and the field shapes all live there. Omit the optional
-    // id/date fields when blank (an empty string fails `cuid()`/`datetime()`); free-text fields
-    // tolerate "" via `optionalText`.
-    const candidate = {
+    // The form→wire mapping (blank-field omission, major→minor money, serials split) lives in the
+    // pure `buildReceivePayload`; the shared schema stays the single validator: quantity bounds, the
+    // serials-count refinement, and the field shapes all live there.
+    const candidate = buildReceivePayload({
       modelId,
-      quantity: Number(quantity),
+      quantity,
       status,
-      ...(locationId ? { locationId } : {}),
-      ...(company.trim() ? { company: company.trim() } : {}),
-      ...(purchaseDate ? { purchaseDate: `${purchaseDate}T00:00:00.000Z` } : {}),
-      purchaseCost: majorToMinor(purchaseCost),
-      ...(notes.trim() ? { notes: notes.trim() } : {}),
-      ...(serialLines.length > 0 ? { serials: serialLines } : {}),
-    };
+      locationId,
+      company,
+      purchaseDate,
+      purchaseCost,
+      notes,
+      serials,
+    });
 
     const parsed = ReceiveAssetsSchema.safeParse(candidate);
     if (!parsed.success) {
@@ -171,15 +183,33 @@ export function ReceiveStockButton() {
     });
   }
 
+  // The picker itself — rendered bare, or wrapped in the "+ New" affordance when the operator may
+  // create models. Declared once so both arms stay identical.
+  const modelPicker = (
+    <AssetModelCombobox
+      id="receive-model"
+      value={modelId}
+      onValueChange={(value) => setModelId(value)}
+      onSearchChange={(query) => {
+        const term = query.trim();
+        if (term) setModelSearch(term);
+      }}
+      ariaInvalid={Boolean(errors.modelId)}
+      placeholder={t("modelPlaceholder")}
+      searchPlaceholder={t("searchModel")}
+      emptyText={t("noModels")}
+    />
+  );
+
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
+      <Button variant="outline" onClick={() => handleOpenChange(true)}>
         <InboxArrowDownIcon />
         {t("button")}
       </Button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t("title")}</DialogTitle>
             <DialogDescription>{t("description")}</DialogDescription>
@@ -198,7 +228,7 @@ export function ReceiveStockButton() {
                 id="receive-stock-form"
                 onSubmit={handleSubmit}
                 noValidate
-                className="max-h-[60vh] overflow-y-auto pr-1"
+                className="min-h-0 flex-1 overflow-y-auto pr-1"
               >
                 <FieldGroup>
                   {errors.form ? (
@@ -210,15 +240,31 @@ export function ReceiveStockButton() {
                     <FieldLabel htmlFor="receive-model" required>
                       {t("model")}
                     </FieldLabel>
-                    <AssetModelCombobox
-                      id="receive-model"
-                      value={modelId}
-                      onValueChange={(value) => setModelId(value)}
-                      ariaInvalid={Boolean(errors.modelId)}
-                      placeholder={t("modelPlaceholder")}
-                      searchPlaceholder={t("searchModel")}
-                      emptyText={t("noModels")}
-                    />
+                    {canCreateModel ? (
+                      <CreatableField
+                        entityKey="model"
+                        renderDialog={(dialog) => (
+                          <CreateAssetModelDialog
+                            open={dialog.open}
+                            onOpenChange={dialog.onOpenChange}
+                            // Seed the name with the fruitless search, but only when no model is
+                            // picked yet — otherwise an old term would leak into an unrelated create.
+                            defaultName={modelId ? undefined : modelSearch}
+                            onCreated={(model) => {
+                              setModelId(model.id);
+                              setErrors((prev) => ({
+                                ...prev,
+                                modelId: undefined,
+                              }));
+                            }}
+                          />
+                        )}
+                      >
+                        {modelPicker}
+                      </CreatableField>
+                    ) : (
+                      modelPicker
+                    )}
                     <FieldDescription>{t("modelHelp")}</FieldDescription>
                     {errors.modelId ? (
                       <FieldError errors={[{ message: errors.modelId }]} />
@@ -416,48 +462,52 @@ function ReceiveResult({
   const created = result.created.length;
   const failed = result.failed;
 
+  // Flex column inside the (now flex, overflow-hidden) DialogContent: the summary + failure list
+  // scroll, the footer stays pinned — same contract the form body gets.
   return (
-    <div className="space-y-4">
-      {created > 0 ? (
-        <Callout tone="success" icon={<CheckCircleIcon />}>
-          <p className="text-sm font-medium">
-            {t("result.createdSummary", { count: created })}
-          </p>
-          {failed.length > 0 ? (
-            <p className="mt-0.5 text-sm">
-              {t("result.someFailed", {
-                failed: failed.length,
-                total: created + failed.length,
-              })}
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+        {created > 0 ? (
+          <Callout tone="success" icon={<CheckCircleIcon />}>
+            <p className="text-sm font-medium">
+              {t("result.createdSummary", { count: created })}
             </p>
-          ) : null}
-        </Callout>
-      ) : (
-        <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
-          <p className="text-sm font-medium">{t("result.allFailed")}</p>
-        </Callout>
-      )}
+            {failed.length > 0 ? (
+              <p className="mt-0.5 text-sm">
+                {t("result.someFailed", {
+                  failed: failed.length,
+                  total: created + failed.length,
+                })}
+              </p>
+            ) : null}
+          </Callout>
+        ) : (
+          <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
+            <p className="text-sm font-medium">{t("result.allFailed")}</p>
+          </Callout>
+        )}
 
-      {failed.length > 0 ? (
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-muted-foreground">
-            {t("result.failedTitle")}
-          </p>
-          <ul className="max-h-48 divide-y divide-border overflow-y-auto rounded-md border border-border text-sm">
-            {failed.map((item) => (
-              <li
-                key={item.index}
-                className="flex items-baseline gap-2 px-3 py-2"
-              >
-                <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-                  {t("result.unit", { index: item.index + 1 })}
-                </span>
-                <span className="break-words">{item.error}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+        {failed.length > 0 ? (
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground">
+              {t("result.failedTitle")}
+            </p>
+            <ul className="max-h-48 divide-y divide-border overflow-y-auto rounded-md border border-border text-sm">
+              {failed.map((item) => (
+                <li
+                  key={item.index}
+                  className="flex items-baseline gap-2 px-3 py-2"
+                >
+                  <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                    {t("result.unit", { index: item.index + 1 })}
+                  </span>
+                  <span className="break-words">{item.error}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
 
       <DialogFooter>
         {created > 0 ? (
