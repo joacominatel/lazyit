@@ -165,8 +165,14 @@
     },
     "installTitle": "Run this on your server",
     "installHint": {
-      "linux": "Copy the command and run it on the Linux server as root. The token is shown only once — capture it before closing.",
-      "windows": "Copy the command and run it from an elevated PowerShell. The script-block form is deliberate: a plain irm | iex pipe can't pass the URL and the token. The token is shown only once — capture it before closing."
+      "linux": "Copy the command and run it on the Linux server as root. The first line hands the token over through the environment, so it never appears in the process list. The token is shown only once — capture it before closing.",
+      "windows": "Copy the command and run it from an elevated PowerShell. The first line hands the token over through the environment, so it stays off the command line; the script-block form is deliberate: a plain irm | iex pipe can't pass the URL. The token is shown only once — capture it before closing."
+    },
+    "hypervisorNote": "Installing on a hypervisor host (Proxmox VE, Hyper-V, libvirt/KVM)? There's nothing extra to do: this exact same command detects the platform and inventories its guests automatically. <link>How it works</link>",
+    "advanced": {
+      "toggle": "Advanced options",
+      "noHypervisor": "Don't inventory this host's guests",
+      "noHypervisorHint": "Adds {flag} to the command above: the host keeps a local veto (LAZYIT_COLLECT_HYPERVISOR=false in its config file) that wins over anything set in lazyit and survives upgrades."
     },
     "unsigned": "The Windows executable isn't code-signed yet, so SmartScreen will warn about it and some antivirus products may quarantine it. That's a deliberate state for internal validation, not a sign the download is wrong.",
     "copyCommandAria": "Copy the command",
@@ -196,6 +202,11 @@
     "waitDescription": "Run the install command on your server. As soon as the agent checks in, it'll show up here — usually within a couple of minutes.",
     "successTitle": "{name} reported!",
     "successDescription": "Your server checked in. Confirm it to add it to your inventory.",
+    "detected": {
+      "summary": "This host is a hypervisor ({platform}): {count, plural, =0 {no guests are awaiting review yet} one {# guest entered Pending review} other {# guests entered Pending review}}.",
+      "summaryNoPlatform": "This host is a hypervisor: {count, plural, =0 {no guests are awaiting review yet} one {# guest entered Pending review} other {# guests entered Pending review}}.",
+      "review": "Review them"
+    },
     "confirmAction": "Confirm server",
     "checkLater": "I'll check later"
   },
