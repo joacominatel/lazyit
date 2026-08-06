@@ -51,6 +51,8 @@ export interface LinuxHypervisorDeps {
   pathExists(path: string): Promise<boolean>;
   which(name: string): string | null;
   exec: Exec;
+  /** The clock the aggregate budget below reads — injectable so tests can pass time, not spend it. */
+  now(): number;
 }
 
 const DEFAULT_DEPS: LinuxHypervisorDeps = {
@@ -71,7 +73,22 @@ const DEFAULT_DEPS: LinuxHypervisorDeps = {
   },
   which: (name) => Bun.which(name),
   exec: run,
+  now: () => Date.now(),
 };
+
+/**
+ * The AGGREGATE budget for the per-guest enrichment loop, measured from the loop's start. `run()`'s
+ * 10s bound protects against ONE wedged command, but this collector is the only one that runs O(N)
+ * sequential commands: a dozen 10s reads against a wedged pmxcfs — or ~80 healthy-but-slow pvesh
+ * cold starts — outlive systemd's `RuntimeMaxSec=120`, and systemd then kills the unit BEFORE the
+ * report assembles, taking the whole host dark. 60s keeps the loop plus every other collector
+ * comfortably inside that outer layer. What expiry means differs per platform, deliberately: on
+ * Proxmox the list calls already produced a complete truthful guest list, so the remaining guests
+ * ship un-enriched (config facts are ENRICHMENT, never existence); on libvirt the ref itself lives
+ * in the per-domain XML, so a deadline hit degrades the whole `guests` key to absent — a partial
+ * list would falsely retire every domain the loop never reached.
+ */
+export const GUEST_ENRICHMENT_BUDGET_MS = 60_000;
 
 /** Where pmxcfs mounts the cluster filesystem — the Proxmox detection anchor. */
 export const PVE_DIR = "/etc/pve";
@@ -404,7 +421,15 @@ async function collectProxmox(warn: Warn, deps: LinuxHypervisorDeps): Promise<Hy
     return { hypervisor };
   }
 
-  // Cap BEFORE the config fetches, so a pathological host never pays for reads the schema drops.
+  // Cap BEFORE the config fetches, so a pathological host never pays for reads the schema drops —
+  // and never silently: every element past the cap is a child node the server would RETIRE as
+  // vanished, so the cut has to be visible on the node (the applySoftwarePolicy cap rule).
+  const enumerated = qemu.length + lxc.length;
+  if (enumerated > AGENT_GUESTS_MAX) {
+    warn(
+      `hypervisor: guest list truncated to the contract cap of ${AGENT_GUESTS_MAX} (${enumerated} guests enumerated)`,
+    );
+  }
   const rows: (PveListRow & { kind: "qemu" | "lxc" })[] = [
     ...qemu.map((row) => ({ ...row, kind: "qemu" as const })),
     ...lxc.map((row) => ({ ...row, kind: "lxc" as const })),
@@ -412,13 +437,23 @@ async function collectProxmox(warn: Warn, deps: LinuxHypervisorDeps): Promise<Hy
 
   const guests: Guests = [];
   let configMisses = 0;
+  let unenriched = 0;
   // SEQUENTIAL on purpose: N bounded reads inside the tick's budget beat N concurrent pvesh
-  // processes hammering pmxcfs on the host least able to spare it.
+  // processes hammering pmxcfs on the host least able to spare it — and the sequence carries an
+  // AGGREGATE deadline (see GUEST_ENRICHMENT_BUDGET_MS): past it, the remaining guests ship from
+  // their list rows alone. The list already answered truthfully; a config read buys identity
+  // evidence, and evidence is never worth the whole host going dark under RuntimeMaxSec.
+  const enrichmentStart = deps.now();
   for (const row of rows) {
-    const config = parsePveConfig(
-      await pvesh(deps, warn, `/nodes/${node}/${row.kind}/${row.vmid}/config`),
-    );
-    if (config === undefined) configMisses += 1;
+    let config: PveConfigFacts | undefined;
+    if (deps.now() - enrichmentStart <= GUEST_ENRICHMENT_BUDGET_MS) {
+      config = parsePveConfig(
+        await pvesh(deps, warn, `/nodes/${node}/${row.kind}/${row.vmid}/config`),
+      );
+      if (config === undefined) configMisses += 1;
+    } else {
+      unenriched += 1;
+    }
     guests.push({
       ref: row.vmid,
       name: row.name,
@@ -434,6 +469,11 @@ async function collectProxmox(warn: Warn, deps: LinuxHypervisorDeps): Promise<Hy
   if (configMisses) {
     warn(
       `hypervisor: ${configMisses} guest config${configMisses === 1 ? "" : "s"} could not be read — identity evidence omitted for ${configMisses === 1 ? "that guest" : "those guests"}`,
+    );
+  }
+  if (unenriched) {
+    warn(
+      `hypervisor: guest config enrichment exceeded its ${GUEST_ENRICHMENT_BUDGET_MS / 1000}s budget — ${unenriched} guest${unenriched === 1 ? "" : "s"} shipped without identity evidence`,
     );
   }
   return { hypervisor, guests };
@@ -471,12 +511,44 @@ async function collectLibvirt(warn: Warn, deps: LinuxHypervisorDeps): Promise<Hy
   const runningSet = new Set(running ?? []);
   const pausedSet = new Set(paused ?? []);
 
+  if (names.length > AGENT_GUESTS_MAX) {
+    // Every element past the cap is a child node the server would retire as vanished — the cut
+    // must be visible on the node, never silent.
+    warn(
+      `hypervisor: guest list truncated to the contract cap of ${AGENT_GUESTS_MAX} (${names.length} domains enumerated)`,
+    );
+  }
+
   const guests: Guests = [];
   let dropped = 0;
+  // The per-domain loop carries the AGGREGATE deadline (see GUEST_ENRICHMENT_BUDGET_MS). Unlike
+  // Proxmox there is no truthful partial fallback: the ref IS the domain uuid and only dumpxml
+  // has it, so a deadline hit degrades the WHOLE key to absent rather than shipping a positive
+  // list that would retire every domain the loop never reached.
+  const enrichmentStart = deps.now();
   for (const name of names.slice(0, AGENT_GUESTS_MAX)) {
-    const facts = parseVirshDomainXml(await exec(["dumpxml", name]));
+    if (deps.now() - enrichmentStart > GUEST_ENRICHMENT_BUDGET_MS) {
+      warn(
+        `hypervisor: libvirt enumeration exceeded its ${GUEST_ENRICHMENT_BUDGET_MS / 1000}s budget — guest list omitted (a partial list would falsely retire the rest)`,
+      );
+      return { hypervisor };
+    }
+    // `--domain`, explicitly: a domain name starting with `-` would otherwise be option-parsed —
+    // and the failure that follows would wear the transient shape below, degrading the whole key.
+    const xml = await exec(["dumpxml", "--domain", name]);
+    if (xml === null) {
+      // TRANSIENT: virsh itself did not answer (timeout, busy libvirtd, a vanished domain). This
+      // domain may well be alive, so shipping the others as a positive list would falsely retire
+      // it — the whole key degrades to absent instead.
+      warn(
+        `hypervisor: virsh dumpxml did not answer for a domain — guest list omitted (a partial list would falsely retire the rest)`,
+      );
+      return { hypervisor };
+    }
+    const facts = parseVirshDomainXml(xml);
     if (!facts) {
-      // Malformed or unreadable XML costs THAT domain, never the collection.
+      // PERMANENT: virsh answered and the answer carries no <uuid> — there is no identity worth a
+      // child node, so dropping THIS domain (visibly, below) is the honest outcome.
       dropped += 1;
       continue;
     }
