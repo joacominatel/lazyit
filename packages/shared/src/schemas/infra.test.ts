@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   AGENT_CONTAINERS_MAX,
   AGENT_EXTERNAL_ID_MAX,
+  AGENT_GUEST_MACS_MAX,
+  AGENT_GUESTS_MAX,
   AGENT_IDENTIFIERS_MAX,
   AGENT_SKEW_PATHS_MAX,
   AGENT_SOFTWARE_HASH_MAX,
@@ -22,6 +24,12 @@ import {
   containerExternalId,
   containerNodeStatus,
   corroboratesAdoption,
+  guestExternalId,
+  guestExternalIdPrefix,
+  guestNodeKind,
+  guestNodeStatus,
+  hostExternalIdOfGuestChild,
+  isGuestChildExternalId,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
   ENDPOINT_CHASSIS,
@@ -1058,6 +1066,220 @@ describe("host.containers[] — additive, optional, degrade-never-reject (#1139)
     const raw = { ...V1_REPORT, host: { ...V1_REPORT.host, containers: [{ name: "" }] } };
     const { coercedPaths, droppedPaths } = agentReportSkewPaths(raw, AgentReportSchema.parse(raw));
     expect([...coercedPaths, ...droppedPaths].join(" ")).toContain("host.containers");
+  });
+});
+
+/**
+ * Hypervisor guest inventory (ADR-0095, #1217) — the host's own hypervisor block plus the guests it
+ * runs, mirroring the container child contract (#1139): additive, optional, degrade-never-reject,
+ * absent ≠ empty, and a `/guest/`-scoped child key as permanent as the host one.
+ */
+describe("host.hypervisor — additive, optional, degrade-never-reject (ADR-0095)", () => {
+  const withHypervisor = (hypervisor: unknown) =>
+    AgentReportSchema.parse({
+      ...V1_REPORT,
+      host: { ...V1_REPORT.host, hypervisor },
+    }).host.hypervisor;
+
+  test("a pre-0095 report carries neither key — nothing is invented", () => {
+    const parsed = AgentReportSchema.parse(V1_REPORT);
+    expect(parsed.host.hypervisor).toBeUndefined();
+    expect(parsed.host.guests).toBeUndefined();
+  });
+
+  test("carries the platform and the optional facts, trimmed", () => {
+    expect(
+      withHypervisor({
+        platform: "proxmox",
+        version: " 8.2.4 ",
+        clusterName: "pve-main",
+        nodeName: "pve-01",
+      }),
+    ).toEqual({ platform: "proxmox", version: "8.2.4", clusterName: "pve-main", nodeName: "pve-01" });
+  });
+
+  test("an unknown platform folds to `other` — never a 400 on the whole host", () => {
+    expect(withHypervisor({ platform: "esxi" })).toEqual({ platform: "other" });
+  });
+
+  test("a malformed non-object block degrades to ABSENT, not to an invented platform", () => {
+    expect(withHypervisor("proxmox")).toBeUndefined();
+    expect(withHypervisor(7)).toBeUndefined();
+  });
+});
+
+describe("host.guests[] — additive, optional, degrade-never-reject (ADR-0095)", () => {
+  const withGuests = (guests: unknown) =>
+    AgentReportSchema.parse({
+      ...V1_REPORT,
+      host: { ...V1_REPORT.host, guests },
+    }).host.guests;
+
+  test("carries the identity, the kind, the state and the hardware facts", () => {
+    expect(
+      withGuests([
+        {
+          ref: "101",
+          name: "dc-01",
+          kind: "qemu",
+          state: "running",
+          smbiosUuid: " 4C4C4544-0042-4A10-8052-B2C04F4E3232 ",
+          macs: ["AA-BB-CC-DD-EE-FF"],
+          cores: 4,
+          memoryBytes: 8_589_934_592,
+          osHint: "win11",
+        },
+      ]),
+    ).toEqual([
+      {
+        ref: "101",
+        name: "dc-01",
+        kind: "qemu",
+        state: "running",
+        smbiosUuid: "4c4c4544-0042-4a10-8052-b2c04f4e3232",
+        macs: ["aa:bb:cc:dd:ee:ff"],
+        cores: 4,
+        memoryBytes: 8_589_934_592,
+        osHint: "win11",
+      },
+    ]);
+  });
+
+  test("an unknown kind or state folds to `other` — never a 400 on the whole host", () => {
+    const guest = withGuests([{ ref: "vm-9", name: "edge", kind: "vz", state: "hibernating" }])?.[0];
+    expect(guest?.kind).toBe("other");
+    expect(guest?.state).toBe("other");
+  });
+
+  test("an ABSENT state stays absent — a hypervisor that said nothing is not one that said `other`", () => {
+    expect(withGuests([{ ref: "1", name: "a", kind: "qemu" }])?.[0]?.state).toBeUndefined();
+  });
+
+  test("smbiosUuid is normalized (trim + lowercase) so #1141 evidence compares across readers", () => {
+    expect(
+      withGuests([{ ref: "1", name: "a", kind: "qemu", smbiosUuid: "  ABC-DEF  " }])?.[0]?.smbiosUuid,
+    ).toBe("abc-def");
+  });
+
+  test("guest MACs are canonicalised, junk-dropped and capped", () => {
+    const macs = [
+      "AA-BB-CC-DD-EE-01",
+      "00:00:00:00:00:00", // all-zero: a placeholder, never identity evidence
+      ...Array.from(
+        { length: AGENT_GUEST_MACS_MAX + 10 },
+        (_, i) => `aa:bb:cc:dd:ee:${(i + 2).toString(16).padStart(2, "0")}`,
+      ),
+    ];
+    const kept = withGuests([{ ref: "1", name: "a", kind: "qemu", macs }])?.[0]?.macs;
+    expect(kept?.[0]).toBe("aa:bb:cc:dd:ee:01");
+    expect(kept).not.toContain("00:00:00:00:00:00");
+    expect(kept).toHaveLength(AGENT_GUEST_MACS_MAX);
+  });
+
+  test("cores/memoryBytes degrade to absent on a nonsense value, never a 400", () => {
+    const guest = withGuests([
+      { ref: "1", name: "a", kind: "qemu", cores: 0, memoryBytes: -5 },
+    ])?.[0];
+    expect(guest?.cores).toBeUndefined();
+    expect(guest?.memoryBytes).toBeUndefined();
+  });
+
+  test("a ref-less, nameless or malformed element is DROPPED, the rest of the host still lands", () => {
+    expect(
+      withGuests([
+        { ref: "100", name: "keep", kind: "qemu" },
+        { ref: "  ", name: "no-ref", kind: "qemu" },
+        { ref: "7", name: "  ", kind: "qemu" },
+        "not-an-object",
+        7,
+        null,
+      ]),
+    ).toEqual([{ ref: "100", name: "keep", kind: "qemu" }]);
+  });
+
+  test("the set is TRUNCATED past the cap, never rejected", () => {
+    const many = Array.from({ length: AGENT_GUESTS_MAX + 40 }, (_, i) => ({
+      ref: `${i}`,
+      name: `g${i}`,
+      kind: "qemu",
+    }));
+    expect(withGuests(many)).toHaveLength(AGENT_GUESTS_MAX);
+  });
+
+  test("an EMPTY list is a POSITIVE finding — `this host runs no guests` (not `omitted`)", () => {
+    // Same load-bearing distinction as containers: ABSENT means the probe never ran and the server
+    // must touch nothing; `[]` means it ran and found none, which retires the child nodes.
+    expect(withGuests([])).toEqual([]);
+    expect(AgentReportSchema.parse(V1_REPORT).host.guests).toBeUndefined();
+  });
+});
+
+describe("guestExternalId — the /guest/ child key, mirroring the container one (ADR-0095)", () => {
+  test("scopes the guest's REF to its host's externalId", () => {
+    expect(guestExternalId("9f8d7c6b", "101")).toBe("9f8d7c6b/guest/101");
+  });
+
+  test("the same ref on the same host is the SAME key; on ANOTHER host a DIFFERENT one", () => {
+    expect(guestExternalId("m1", "101")).toBe(guestExternalId("m1", "101"));
+    expect(guestExternalId("m1", "101")).not.toBe(guestExternalId("m2", "101"));
+  });
+
+  test("roundtrips: the host half comes back exactly, split on the FIRST separator", () => {
+    expect(hostExternalIdOfGuestChild(guestExternalId("m1", "101"))).toBe("m1");
+    // A guest ref containing the separator can never re-parent the child onto another host.
+    expect(hostExternalIdOfGuestChild(guestExternalId("m1", "a/guest/b"))).toBe("m1");
+  });
+
+  test("the prefix selects exactly this host's guest children", () => {
+    expect(guestExternalId("m1", "101").startsWith(guestExternalIdPrefix("m1"))).toBe(true);
+    expect(guestExternalId("m2", "101").startsWith(guestExternalIdPrefix("m1"))).toBe(false);
+  });
+
+  test("isGuestChildExternalId tells a guest child from a host AND from a container child", () => {
+    expect(isGuestChildExternalId(guestExternalId("m1", "101"))).toBe(true);
+    expect(isGuestChildExternalId("9f8d7c6b5a4e3f2a")).toBe(false);
+    expect(isGuestChildExternalId(null)).toBe(false);
+    expect(isGuestChildExternalId(undefined)).toBe(false);
+    // The two child namespaces never bleed into each other.
+    expect(isGuestChildExternalId(containerExternalId("m1", "web"))).toBe(false);
+    expect(isContainerChildExternalId(guestExternalId("m1", "101"))).toBe(false);
+  });
+
+  test("hostExternalIdOfGuestChild is undefined for a non-child key", () => {
+    expect(hostExternalIdOfGuestChild("plainhost")).toBeUndefined();
+    expect(hostExternalIdOfGuestChild(null)).toBeUndefined();
+    expect(hostExternalIdOfGuestChild(undefined)).toBeUndefined();
+  });
+
+  test("a max-length host key survives composition intact — never re-truncated", () => {
+    // The host half is bounded by the report schema's own `.max(AGENT_EXTERNAL_ID_MAX)`, exactly as
+    // it is for container children; the composition must never mangle the trustworthy half.
+    const host = "h".repeat(AGENT_EXTERNAL_ID_MAX);
+    expect(hostExternalIdOfGuestChild(guestExternalId(host, "101"))).toBe(host);
+  });
+});
+
+describe("guestNodeKind / guestNodeStatus — a guest's node projection (ADR-0095)", () => {
+  test("an LXC guest is a CONTAINER, every other kind a VM", () => {
+    expect(guestNodeKind("lxc")).toBe("CONTAINER");
+    for (const kind of ["qemu", "hyperv", "libvirt", "other"] as const) {
+      expect(guestNodeKind(kind)).toBe("VM");
+    }
+  });
+
+  test("a running guest is ONLINE", () => {
+    expect(guestNodeStatus("running")).toBe("ONLINE");
+  });
+
+  test("anything the hypervisor says is not running is OFFLINE", () => {
+    for (const state of ["stopped", "paused", "suspended"] as const) {
+      expect(guestNodeStatus(state)).toBe("OFFLINE");
+    }
+  });
+
+  test("an unreported or unrecognised state is UNKNOWN, never a guess", () => {
+    expect(guestNodeStatus("other")).toBe("UNKNOWN");
+    expect(guestNodeStatus(undefined)).toBe("UNKNOWN");
   });
 });
 
