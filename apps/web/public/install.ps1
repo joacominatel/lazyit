@@ -124,6 +124,14 @@
   With -Uninstall: keep this host's own limits for a later re-install. The token is destroyed either
   way.
 
+.PARAMETER NoHypervisor
+  Write LAZYIT_COLLECT_HYPERVISOR=false into the agent's config: this host never reports its
+  hypervisor guests, whatever lazyit's policy says (ADR-0095). Without the switch nothing is
+  configured - the AGENT detects the Hyper-V role itself, on every run, so a host that gains or
+  loses the role starts or stops reporting guests with no re-install, and the "Detected: Hyper-V"
+  banner this script prints is informational only. The veto is a host-owner setting the server can
+  never widen, and re-running this installer preserves it like every other local setting.
+
 .EXAMPLE
   # Run from an ELEVATED PowerShell. The pipe form of `irm | iex` cannot take parameters, so the
   # script block form is the one that works:
@@ -171,7 +179,11 @@ param(
   [switch] $KeepToken,
   # -KeepToken plus this host's own URL and CA bundle (#1208). See .PARAMETER Upgrade above for why
   # it is its own switch rather than a wider -KeepToken.
-  [switch] $Upgrade
+  [switch] $Upgrade,
+  # Write the ADR-0095 hypervisor veto (LAZYIT_COLLECT_HYPERVISOR=false) into the config. See
+  # .PARAMETER NoHypervisor above; detection and collection are otherwise automatic, re-evaluated
+  # by the agent on every run.
+  [switch] $NoHypervisor
 )
 
 $ErrorActionPreference = 'Stop'
@@ -261,6 +273,22 @@ function Get-LazyitConfigValue([string[]] $Lines, [string] $Key) {
     }
   }
   return $found
+}
+
+# Whether this host is a Hyper-V host, best-effort, for the banner below (ADR-0095): the `vmms`
+# service (Hyper-V Virtual Machine Management) exists exactly on hosts with the role enabled.
+#
+# GUARDED TWICE AND NEVER FATAL by construction: -ErrorAction SilentlyContinue answers $null for a
+# service that does not exist, and the try/catch absorbs a platform with no service manager at all -
+# which is what lets the contract test in apps/agent run THIS function through real PowerShell on a
+# Linux CI runner and prove the answer is $false rather than a throw, which under
+# $ErrorActionPreference='Stop' would have stopped an install over one informational line. The
+# AGENT's own per-run detection is the authority; this only feeds the banner.
+function Test-LazyitHyperVHost() {
+  try {
+    return ($null -ne (Get-Service -Name 'vmms' -ErrorAction SilentlyContinue))
+  }
+  catch { return $false }
 }
 
 # --- the machine PATH ------------------------------------------------------
@@ -638,6 +666,20 @@ if (-not [Environment]::Is64BitProcess) {
 }
 $arch = if ($Baseline) { 'x64-baseline' } else { 'x64' }
 
+# --- hypervisor detection banner (ADR-0095) ---------------------------------
+# INFORMATIONAL ONLY. The AGENT re-detects the Hyper-V role on every run, so this banner can never
+# become stale authority - it exists so the operator learns, at the one moment they are looking,
+# that this host's guests are about to be inventoried and how to say no. Best-effort and never
+# fatal: the probe answers $false anywhere it cannot ask, and a false answer prints nothing.
+if (Test-LazyitHyperVHost) {
+  if ($NoHypervisor) {
+    Say 'Detected: Hyper-V - hypervisor guest collection is disabled by -NoHypervisor (the config gets LAZYIT_COLLECT_HYPERVISOR=false).'
+  }
+  else {
+    Say "Detected: Hyper-V - this host's guests (virtual machines) will be inventoried. Disable with -NoHypervisor."
+  }
+}
+
 # --- download the executable (token-gated) ---------------------------------
 Say "downloading agent (windows/$arch) from $Url ..."
 $tmpBin = Join-Path ([IO.Path]::GetTempPath()) ("lazyit-agent-" + [guid]::NewGuid().ToString('N') + '.exe')
@@ -886,6 +928,13 @@ $lines.Add('#LAZYIT_COLLECT_DISKS=false')
 $lines.Add('#LAZYIT_COLLECT_NICS=false')
 $lines.Add('#LAZYIT_COLLECT_SOFTWARE=false')
 $lines.Add('#LAZYIT_COLLECT_CONTAINERS=false')
+# The ADR-0095 hypervisor veto: the commented invitation every other collector gets, or the ACTIVE
+# veto when -NoHypervisor said so. Below the kept block either way, so on a re-run WITH the switch
+# it beats whatever an older config carried (the agent reads the LAST assignment) - while without
+# the switch the commented form assigns nothing and a kept veto stays the live one. The key is
+# deliberately not in $owned above: the merge must never clobber a host owner's existing veto with
+# this template on the upgrade path.
+if ($NoHypervisor) { $lines.Add('LAZYIT_COLLECT_HYPERVISOR=false') } else { $lines.Add('#LAZYIT_COLLECT_HYPERVISOR=false') }
 $lines.Add('#LAZYIT_MIN_INTERVAL=3600')
 $lines.Add('#LAZYIT_SOFTWARE_MAX=500')
 $lines.Add('#LAZYIT_EXCLUDE_NICS=vEthernet*,Loopback*')
