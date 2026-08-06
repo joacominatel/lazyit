@@ -86,7 +86,7 @@ Options:
   -h, --help         Show this help
 
 Local limits (${DEFAULT_CONFIG_FILE}) — these VETO the server's policy, never widen it:
-  LAZYIT_COLLECT_HARDWARE|DISKS|NICS|SOFTWARE|CONTAINERS=false
+  LAZYIT_COLLECT_HARDWARE|DISKS|NICS|SOFTWARE|CONTAINERS|HYPERVISOR=false
   LAZYIT_MIN_INTERVAL=<seconds>     never report more often than this
   LAZYIT_SOFTWARE_MAX=<n>           never report more packages than this
   LAZYIT_EXCLUDE_NICS|MOUNTPOINTS|SOFTWARE=<comma-separated globs>
