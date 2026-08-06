@@ -260,13 +260,14 @@
     },
     "collect": {
       "title": "Qué recolectan los agentes",
-      "description": "En Linux, un recolector desactivado no se ejecuta — el agente no reúne los datos para después descartarlos. En Windows eso solo vale para los contenedores: hardware, discos, interfaces de red y software instalado viajan todos en una única llamada de PowerShell que se ejecuta igual, así que apagar uno ahí mantiene el dato fuera del informe pero no le ahorra el trabajo al host.",
+      "description": "En Linux, un recolector desactivado no se ejecuta — el agente no reúne los datos para después descartarlos. En Windows eso solo vale para los contenedores y los invitados del hipervisor: hardware, discos, interfaces de red y software instalado viajan todos en una única llamada de PowerShell que se ejecuta igual, así que apagar uno ahí mantiene el dato fuera del informe pero no le ahorra el trabajo al host.",
       "veto": "Un host siempre puede negarse. Desactivar un recolector en la configuración del propio agente de ese host — /etc/lazyit-agent/config en Linux, C:\\ProgramData\\lazyit-agent\\config en Windows — prevalece sobre esta opción, y nada de aquí puede volver a activarlo.",
       "hardware": "Fabricante, modelo y número de serie",
       "disks": "Discos y puntos de montaje",
       "nics": "Interfaces de red",
       "software": "Software instalado",
-      "containers": "Contenedores"
+      "containers": "Contenedores",
+      "hypervisor": "Invitados del hipervisor"
     },
     "exclude": {
       "title": "Exclusiones",
