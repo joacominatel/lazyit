@@ -62,12 +62,17 @@ export const HYPERV_GUESTS_SCRIPT = [
   // leak into errors[].
   "try{[Console]::OutputEncoding=New-Object Text.UTF8Encoding $false}catch{}",
   "$Error.Clear()",
+  // The enumeration SENTINEL: does Get-VM even exist here? Server Core with the Hyper-V role but
+  // without -IncludeManagementTools has vmms and the WMI namespace (so detection fires) and NO
+  // Get-VM cmdlet — under SilentlyContinue `$vms` would still serialize as `[]`, and the mapper
+  // must be able to tell that artifact from a real empty enumeration (absent ≠ empty).
+  "$gv=$false;try{$gv=[bool](Get-Command Get-VM -ErrorAction Ignore)}catch{}",
   "$vms=@(Get-VM|ForEach-Object{[pscustomobject]@{Id=[string]$_.VMId;Name=[string]$_.Name;State=[string]$_.State;Cores=$_.ProcessorCount;MemoryBytes=$_.MemoryAssigned}})",
   "$nics=@(Get-VMNetworkAdapter -VMName * -ErrorAction Ignore|ForEach-Object{[pscustomobject]@{Id=[string]$_.VMId;Mac=[string]$_.MacAddress}})",
   "$bios=@(Get-CimInstance -Namespace 'root\\virtualization\\v2' -ClassName Msvm_VirtualSystemSettingData -Filter 'VirtualSystemType=''Microsoft:Hyper-V:System:Realized'''|ForEach-Object{[pscustomobject]@{Id=[string]$_.ConfigurationID;BiosGuid=[string]$_.BIOSGUID}})",
   // `errors` LAST — a hashtable literal evaluates in written order, which is the only reason it
   // sees what the earlier keys raised (the windows.ts rule, kept).
-  "[pscustomobject]@{vms=$vms;nics=$nics;bios=$bios;errors=@($Error|Select-Object -First 10|ForEach-Object{('{0}: {1}' -f $_.CategoryInfo.Activity,$_.Exception.Message)})}|ConvertTo-Json -Compress -Depth 4",
+  "[pscustomobject]@{vms=$vms;nics=$nics;bios=$bios;getvm=$gv;errors=@($Error|Select-Object -First 10|ForEach-Object{('{0}: {1}' -f $_.CategoryInfo.Activity,$_.Exception.Message)})}|ConvertTo-Json -Compress -Depth 4",
 ].join(";");
 
 /** One `$vms` element, as the host hands it over — every field untrusted (#1188). */
@@ -96,6 +101,11 @@ export interface HypervGuestsBlob {
   vms?: unknown;
   nics?: unknown;
   bios?: unknown;
+  /**
+   * The enumeration sentinel: `true` only when `Get-Command Get-VM` found the cmdlet. Anything
+   * else means `vms` is a SilentlyContinue artifact, not an answer — guests must be ABSENT.
+   */
+  getvm?: unknown;
   errors?: unknown;
 }
 
@@ -175,9 +185,37 @@ export function buildHypervGuests(
   if (!blob) return undefined;
 
   // The sweep's own swallowed error text first — the "why" behind any empty column below.
+  const errorLines: string[] = [];
   for (const line of asArray<unknown>(blob.errors)) {
     const text = typeof line === "string" ? line.trim() : "";
-    if (text) warn(`hypervisor: ${text}`);
+    if (text) {
+      errorLines.push(text);
+      warn(`hypervisor: ${text}`);
+    }
+  }
+
+  // The sentinel gate: without Get-VM, `vms` is a SilentlyContinue artifact, not an enumeration —
+  // and an empty artifact read as a positive `[]` would retire every living guest on the host
+  // (the Server Core without -IncludeManagementTools case). A literal `true`, nothing else.
+  if (blob.getvm !== true) {
+    warn(
+      "hypervisor: Get-VM is unavailable (Hyper-V management tools not installed?) — guest list omitted",
+    );
+    return undefined;
+  }
+  const vms = asArray<HypervVmRow>(blob.vms);
+  // Zero VMs WITH sweep errors is not a demonstrably successful enumeration either — a transient
+  // VMMS/WMI failure leaves exactly this shape. The error text above already says why; the empty
+  // list must not additionally masquerade as a positive finding.
+  if (vms.length === 0 && errorLines.length > 0) {
+    warn("hypervisor: the guest sweep reported errors and no VMs — guest list omitted");
+    return undefined;
+  }
+  if (vms.length > AGENT_GUESTS_MAX) {
+    // Every element past the cap is a child node the server would retire as vanished — visible cut.
+    warn(
+      `hypervisor: guest list truncated to the contract cap of ${AGENT_GUESTS_MAX} (${vms.length} VMs enumerated)`,
+    );
   }
 
   const macsByVm = new Map<string, string[]>();
@@ -199,7 +237,7 @@ export function buildHypervGuests(
 
   const guests: Guests = [];
   let dropped = 0;
-  for (const vm of asArray<HypervVmRow>(blob.vms)) {
+  for (const vm of vms) {
     if (guests.length >= AGENT_GUESTS_MAX) break;
     const ref = hypervGuid(vm?.Id);
     if (!ref) {
@@ -269,5 +307,8 @@ export async function collectHypervisorWindows(
     warn("hypervisor: Hyper-V detected but the guest sweep did not answer — guest list omitted");
     return { hypervisor };
   }
-  return { hypervisor, guests: buildHypervGuests(blob, warn) };
+  // `buildHypervGuests` may itself answer "could not enumerate" (sentinel false, errors with no
+  // VMs) — that is the same ABSENT, and the key is omitted rather than carried as undefined.
+  const guests = buildHypervGuests(blob, warn);
+  return { hypervisor, ...(guests !== undefined ? { guests } : {}) };
 }
