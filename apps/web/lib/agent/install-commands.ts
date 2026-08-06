@@ -80,25 +80,58 @@ export type AgentManualStep = {
   command: string;
 };
 
+/** The per-command choices the wizard's step 2 exposes (#1225). */
+export type AgentInstallOptions = {
+  /**
+   * ADR-0095 §8's host-owner veto: this host never reports its guests. Appends `--no-hypervisor`
+   * (Linux) / `-NoHypervisor` (Windows), which writes `LAZYIT_COLLECT_HYPERVISOR=false` into the
+   * host's own config — a local setting the server's policy can never widen, preserved across
+   * re-runs like every other `LAZYIT_COLLECT_*` key. Default absent: collection is the default,
+   * and detection is the agent's own re-evaluated-every-tick behavior, never the installer's.
+   */
+  noHypervisor?: boolean;
+};
+
 /**
- * The one command to paste, with the real instance origin and the real token already in it.
+ * The command to paste, with the real instance origin and the real token already in it.
  *
- * Linux is `curl … | sudo sh`, unchanged. Windows is the SCRIPT-BLOCK form and not `irm … | iex`,
- * because the pipe form runs the installer with no arguments at all: `-Url` and `-Token` never reach
- * it and it dies asking for them. install.ps1's `.EXAMPLE` and the Manual both say this; the wizard
- * now says it too.
+ * TWO LINES SINCE #1225, because the token left argv. `--token <secret>` sat in
+ * `/proc/<pid>/cmdline` — world-readable on Linux — for the whole install, and in shell history
+ * after it; install.sh's own header (#1137) has always named `LAZYIT_TOKEN` as the safe channel,
+ * and the wizard was the last surface still printing the argv form. So the first line hands the
+ * secret to the environment and the second runs the installer without it:
+ *
+ *  - **Linux** is `export LAZYIT_TOKEN=…` + `curl … | sudo -E sh`. The `-E` is load-bearing: sudo
+ *    resets the environment, so without it the exported token never reaches the installer
+ *    (`TOKEN="${TOKEN:-${LAZYIT_TOKEN:-}}"` — asserted against the served script by the test). It
+ *    cannot be a one-line prefix assignment: `LAZYIT_TOKEN=x curl … | sudo -E sh` scopes the
+ *    variable to `curl` alone, and the installer would die asking for a token. This exact
+ *    export + `sudo -E` pipe is the form the Manual taught for the pre-#1208 update command — a
+ *    documented channel, not a new invention.
+ *  - **Windows** is `$env:LAZYIT_TOKEN = '…'` + the SCRIPT-BLOCK form, still not `irm … | iex`,
+ *    because the pipe form runs the installer with no arguments at all: `-Url` never reaches it and
+ *    it dies asking for it. install.ps1's own `.EXAMPLE` documents the `$env:` form, and the
+ *    installer falls back to it when `-Token` is absent. No sudo hop exists here — the elevated
+ *    PowerShell the wizard already requires is the same session that runs the script block.
+ *
+ * The token still lands in the pasted line and therefore in shell history — only `--token-file`
+ * avoids that, and the Manual says so. What this form removes is the `ps` window: an unprivileged
+ * user polling the process list during the install no longer collects a live `infra:report` token.
  */
 export function agentInstallCommand(
   platform: AgentPlatform,
   origin: string,
   token: string,
+  options: AgentInstallOptions = {},
 ): string {
   if (platform === "windows") {
     const optIn = insecureHttp(origin) ? " -AllowInsecureHttp" : "";
-    return `& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Url ${origin} -Token ${token}${optIn}`;
+    const veto = options.noHypervisor ? " -NoHypervisor" : "";
+    return `$env:LAZYIT_TOKEN = '${token}'\n& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Url ${origin}${optIn}${veto}`;
   }
   const optIn = insecureHttp(origin) ? " --allow-insecure-http" : "";
-  return `curl -fsSL ${origin}/install.sh | sudo sh -s -- --url ${origin} --token ${token}${optIn}`;
+  const veto = options.noHypervisor ? " --no-hypervisor" : "";
+  return `export LAZYIT_TOKEN='${token}'\ncurl -fsSL ${origin}/install.sh | sudo -E sh -s -- --url ${origin}${optIn}${veto}`;
 }
 
 /**
