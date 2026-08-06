@@ -69,7 +69,7 @@ Constraints that shaped the decision:
 | Axis | Decision | Rejected |
 | --- | --- | --- |
 | **What it reports** | **Inventory only** — host identity, hardware facts, installed software. | Health snapshots; time-series metrics + alerting (a different product). |
-| **What it discovers** | **Self only** — the host the agent runs on. "Expand" = install it on more hosts. | Network scanning / agentless discovery (security surface, false positives, LAN noise). |
+| **What it discovers** | **Self only** — the host the agent runs on. "Expand" = install it on more hosts. **Qualified 2026-08-06 (#1217): a hypervisor host's own guest list, read locally (`pvesh`/WMI/`virsh`), is inside "self only" by the same §3 #1139 defence — the local runtime's own list of what it is executing. Governed by [[0095-hypervisor-guest-inventory]]; remote hypervisor APIs stay on the rejected side.** | Network scanning / agentless discovery (security surface, false positives, LAN noise). |
 | **OS targets** | **Linux only** — `x64` + `arm64`. | Windows (WMI service), macOS (launchd) — deferred, contract is OS-neutral so they can be added. |
 | **Trust** | **Review tray** — new hosts arrive `state=PENDING`, `source=AGENT`; a human confirms. **Qualified by the 2026-08-01 amendment below: with an operator-authored auto-confirm rule saved, a proposal that rule matches is confirmed by the machine.** | ~~Auto-confirm~~ → **blanket** auto-confirm, i.e. with no operator-authored rule (any agent noise dirties the official inventory with no containment). |
 
@@ -548,7 +548,9 @@ rather than the data-entry path.
 an active `RUNS_ON` edge to the reporting host. `PLAUSIBLE_EDGE_TARGETS.RUNS_ON` has anticipated
 `CONTAINER -> PHYSICAL_HOST` since [[0070-infra-topology-graph]] shipped, so nothing in the
 plausibility model changed. This stays inside §1's **self only** scope: it is the local runtime's own
-list of what it is executing, read over a local socket — not a network scan. **Running** containers
+list of what it is executing, read over a local socket — not a network scan. // The same defence
+covers a hypervisor host's own guest list since [[0095-hypervisor-guest-inventory]] (2026-08-06,
+#1217). **Running** containers
 only; a `RUNS_ON` edge describes what *executes*, and an exited one-shot job from six months ago has
 no relationship worth drawing. The collector decides whether to try the socket by **stat**ing it:
 `Bun.file(path).exists()` is a regular-file check that answers `false` for a unix socket, and gating
