@@ -1364,3 +1364,110 @@ describe("the installed binary carries the Program Files ACL, not the user-temp 
     expect(block).not.toContain("if (Test-Path");
   });
 });
+
+/**
+ * HYPERVISOR HOSTS: THE BANNER AND THE `-NoHypervisor` VETO (ADR-0095, #1217).
+ *
+ * The Windows half of the same operator surface install.sh grew: a Hyper-V host reports its guests
+ * automatically - the AGENT re-detects the role on every run, so the installer configures NOTHING
+ * for the ordinary case - and what the installer adds is one best-effort banner (informational
+ * only, never fatal) plus `-NoHypervisor`, which writes the host-owner veto
+ * `LAZYIT_COLLECT_HYPERVISOR=false` into the config. The veto rides the same merge every other
+ * `LAZYIT_*` key rides, so it survives `-Upgrade`.
+ */
+describe("hypervisor hosts: the banner and -NoHypervisor (ADR-0095)", () => {
+  test("-NoHypervisor is a switch on the parameter block, and it is documented", () => {
+    expect(script).toContain("[switch] $NoHypervisor");
+    expect(script).toContain(".PARAMETER NoHypervisor");
+  });
+
+  test("the switch writes the ACTIVE veto; without it only the commented invitation is written", () => {
+    expect(script).toContain(
+      "if ($NoHypervisor) { $lines.Add('LAZYIT_COLLECT_HYPERVISOR=false') } else { $lines.Add('#LAZYIT_COLLECT_HYPERVISOR=false') }",
+    );
+  });
+
+  // The line lands BELOW the kept block on purpose: the agent reads the LAST assignment, so a
+  // re-run WITH the switch beats whatever an older config carried - while without the switch the
+  // commented form assigns nothing and a kept veto stays the live one.
+  test("the veto line lands below the kept block, so the switch wins over a stale kept value", () => {
+    const preservedAt = script.indexOf("foreach ($line in $preserved) { $lines.Add($line) }");
+    const vetoAt = script.indexOf("$lines.Add('LAZYIT_COLLECT_HYPERVISOR=false')");
+    expect(preservedAt).toBeGreaterThan(-1);
+    expect(vetoAt).toBeGreaterThan(preservedAt);
+  });
+
+  // THE UPGRADE REGRESSION THAT MATTERS, decided by the shipped patterns (the same JS/.NET
+  // engine-equivalence argument the -Url guard block makes): the keep pattern recognises an ACTIVE
+  // veto - padded or not, exactly as the agent reads it - and NO owned pattern claims it, so the
+  // merge carries it across a re-run instead of clobbering it with the commented template.
+  test("an existing active veto survives the merge - kept, and owned by nobody (ADR-0095)", () => {
+    const keep = script.match(/Where-Object \{ \$_ -match '([^']+)' \}/)?.[1];
+    expect(keep, "install.ps1 no longer filters the previous config this way").toBeTruthy();
+    // Every ^\s*…LAZYIT_… pattern in the script EXCEPT the keep pattern itself, whose wildcard
+    // key class ([A-Z0-9_]+) is what recognises the veto on purpose: the two owned spellings of
+    // the config merge, and the -KeepConfig strip pattern of the uninstall path.
+    const owned = [...script.matchAll(/'(\^\\s\*\(?LAZYIT_[^']+)'/g)]
+      .map((one) => one[1] as string)
+      .filter((one) => !one.includes("[A-Z0-9_]"));
+    expect(owned.length).toBeGreaterThan(0);
+    for (const line of ["LAZYIT_COLLECT_HYPERVISOR=false", "LAZYIT_COLLECT_HYPERVISOR =false"]) {
+      expect(new RegExp(keep as string).test(line), `the keep pattern must match: ${line}`).toBe(true);
+      for (const pattern of owned) {
+        expect(new RegExp(pattern).test(line), `${pattern} must not claim: ${line}`).toBe(false);
+      }
+    }
+  });
+
+  test("the detection is a guarded function asking for the vmms service, and it cannot throw", () => {
+    const body = powershellFunction("Test-LazyitHyperVHost");
+    expect(body).toContain("Get-Service");
+    expect(body).toContain("'vmms'");
+    // Twice guarded: SilentlyContinue answers $null for a missing service, and the catch absorbs a
+    // platform with no service manager at all - a banner probe must never stop an install.
+    expect(body).toContain("SilentlyContinue");
+    expect(body).toContain("catch { return $false }");
+  });
+
+  // EXECUTED where the harness allows (#1193 convention), same engine rule as the PATH corpus: on
+  // the Linux/macOS machines this suite runs on there is no vmms service to ask, and the honest
+  // answer is $false - never a throw, which under $ErrorActionPreference='Stop' would have been
+  // fatal in the installer.
+  test(`the detection answers false rather than throwing where there is no vmms (${ENGINE})`, () => {
+    if (!POWERSHELL) return; // the shape test above is the whole check without an interpreter
+    const dir = mkdtempSync(join(tmpdir(), "lazyit-install-ps1-hyperv-"));
+    const driver = join(dir, "hyperv.ps1");
+    writeFileSync(
+      driver,
+      [
+        // The same preferences the installer itself runs under.
+        "Set-StrictMode -Version Latest",
+        "$ErrorActionPreference = 'Stop'",
+        powershellFunction("Test-LazyitHyperVHost"),
+        "[pscustomobject]@{ hyperv = [bool](Test-LazyitHyperVHost) } | ConvertTo-Json -Compress",
+        "",
+      ].join("\n"),
+    );
+    const run = Bun.spawnSync([POWERSHELL, "-NoProfile", "-File", driver]);
+    expect(run.exitCode, new TextDecoder().decode(run.stderr)).toBe(0);
+    const parsed = JSON.parse(new TextDecoder().decode(run.stdout)) as { hyperv: boolean };
+    if (process.platform !== "win32") expect(parsed.hyperv).toBe(false);
+  }, 60_000);
+
+  test("the banner sits before anything is downloaded, and it cannot stop the install", () => {
+    const start = script.indexOf("# --- hypervisor detection banner");
+    const download = script.indexOf('Say "downloading agent');
+    expect(start).toBeGreaterThan(-1);
+    expect(download).toBeGreaterThan(-1);
+    expect(start).toBeLessThan(download);
+    const block = script.slice(start, download);
+    expect(block).toContain("Test-LazyitHyperVHost");
+    expect(block).not.toContain("Die ");
+  });
+
+  test("the wording names Hyper-V, the guests and the way out - and the switch flips it", () => {
+    expect(script).toContain("Detected: Hyper-V");
+    expect(script).toContain("Disable with -NoHypervisor");
+    expect(script).toContain("disabled by -NoHypervisor");
+  });
+});

@@ -856,6 +856,29 @@ describe("a re-install must not delete a setting the agent actually reads", () =
     const out = await new Response(proc.stdout).text();
     expect(out.split("\n").filter((one) => one.length > 0)).toEqual(["LAZYIT_COLLECT_NICS=false"]);
   });
+
+  /*
+   * ADR-0095. The installer now writes a template line for LAZYIT_COLLECT_HYPERVISOR itself
+   * (`--no-hypervisor` activates it), so the regression that matters is the merge clobbering an
+   * ACTIVE veto with that template on the upgrade path. It cannot: the key is deliberately NOT in
+   * either OWNED spelling, so an existing veto rides the kept block like every other host-owner
+   * setting - and the template the installer writes below it is a COMMENT, which assigns nothing.
+   */
+  test("an active hypervisor veto survives the merge, padded or not (ADR-0095)", async () => {
+    const kept = await preserved(
+      ["LAZYIT_COLLECT_HYPERVISOR=false", "LAZYIT_COLLECT_HYPERVISOR =false"].join("\n"),
+      ownedPatterns[0] as string,
+    );
+    expect(kept).toEqual(["LAZYIT_COLLECT_HYPERVISOR=false", "LAZYIT_COLLECT_HYPERVISOR =false"]);
+  });
+
+  test("the --ca-file widening of OWNED does not swallow the hypervisor veto either", async () => {
+    const kept = await preserved(
+      ["LAZYIT_COLLECT_HYPERVISOR=false", "lazyit_ca_file=/old/lower.pem"].join("\n"),
+      ownedPatterns[1] as string,
+    );
+    expect(kept).toEqual(["LAZYIT_COLLECT_HYPERVISOR=false"]);
+  });
 });
 
 /**
@@ -1383,5 +1406,143 @@ describe("--upgrade re-runs a host from its own configuration (#1208)", () => {
       ),
     );
     expect(reused).toEqual(new Set(["LAZYIT_URL", "LAZYIT_TOKEN", "LAZYIT_CA_FILE"]));
+  });
+});
+
+/**
+ * HYPERVISOR HOSTS: THE BANNER AND THE `--no-hypervisor` VETO (ADR-0095, #1217).
+ *
+ * A Proxmox VE or libvirt/KVM host reports its guests automatically, and the installer configures
+ * NOTHING for that: the AGENT re-detects the role on every run, so the banner this script prints
+ * can never become stale authority - it is one informational line, best-effort and never fatal,
+ * telling the operator what is about to be inventoried and how to say no. The one knob is negative:
+ * `--no-hypervisor` writes the host-owner veto `LAZYIT_COLLECT_HYPERVISOR=false` into the config,
+ * where it rides the same preservation every other `LAZYIT_*` key rides across `--upgrade`.
+ */
+describe("hypervisor hosts: the banner and --no-hypervisor (ADR-0095)", () => {
+  test("--no-hypervisor is an accepted argument and the usage text names the veto it writes", () => {
+    expect(script).toContain("--no-hypervisor)");
+    expect(script).toMatch(/--no-hypervisor\s+[\s\S]{0,200}LAZYIT_COLLECT_HYPERVISOR=false/);
+  });
+
+  test("a run with --no-hypervisor parses and proceeds - the flag breaks nothing", async () => {
+    const { stderr } = await guard("https://lazyit.example.com", ["--no-hypervisor"]);
+    expect(stderr).not.toContain("unknown argument");
+    expect(stderr).toContain(PAST_THE_GUARD);
+  });
+
+  test("without the flag the config carries ONLY the commented invitation", () => {
+    expect(script).toContain('HYPERVISOR_LINE="#LAZYIT_COLLECT_HYPERVISOR=false"');
+    // …and the ACTIVE form exists only behind the flag: the assignment sits inside the
+    // NO_HYPERVISOR branch, after the commented default.
+    const active = script.indexOf('HYPERVISOR_LINE="LAZYIT_COLLECT_HYPERVISOR=false"');
+    const flagGuard = script.indexOf('if [ "$NO_HYPERVISOR" = "1" ]');
+    expect(active).toBeGreaterThan(-1);
+    expect(flagGuard).toBeGreaterThan(-1);
+    expect(active).toBeGreaterThan(flagGuard);
+  });
+
+  // The line lands BELOW the kept block on purpose: the agent reads the LAST assignment, so a
+  // re-run WITH the flag beats whatever an older config carried - while without the flag the
+  // commented form assigns nothing and a kept veto stays the live one.
+  test("the veto line sits below the kept block in the file the installer writes", () => {
+    const config = heredocFor("CONFIG_FILE");
+    expect(config).toContain("$HYPERVISOR_LINE");
+    expect(config.indexOf("$PRESERVED")).toBeGreaterThan(-1);
+    expect(config.indexOf("$PRESERVED")).toBeLessThan(config.indexOf("$HYPERVISOR_LINE"));
+  });
+
+  test("the banner sits before the root check and cannot stop the install", () => {
+    const start = script.indexOf("# --- hypervisor detection banner");
+    const rootCheck = script.indexOf('die "must run as root (installs');
+    expect(start).toBeGreaterThan(-1);
+    expect(rootCheck).toBeGreaterThan(-1);
+    expect(start).toBeLessThan(rootCheck);
+    const block = script.slice(start, rootCheck);
+    expect(block).not.toContain("die ");
+  });
+
+  test("the wording names the platform, the guests and the way out - and the flag flips it", () => {
+    expect(script).toContain("Detected: Proxmox VE");
+    expect(script).toContain("QEMU VMs, LXC containers");
+    expect(script).toContain("Disable with --no-hypervisor");
+    expect(script).toContain("Detected: libvirt/KVM");
+    expect(script).toContain("disabled by --no-hypervisor");
+  });
+
+  test("the header documents the flag and that detection is the agent's, per run", () => {
+    expect(script).toMatch(/ADR-0095/);
+    expect(script).toMatch(/--no-hypervisor/);
+    expect(script).toMatch(/every run/i);
+  });
+});
+
+/**
+ * The detection itself, executed over fixtures - the same trick `config_value` and `auth_config`
+ * play: the function is PURE (the mounts table on stdin, the two probes as parameters), so the
+ * corpus runs the SHIPPED logic rather than a copy of it.
+ */
+describe("hypervisor_kind, executed over fixtures (ADR-0095)", () => {
+  /** The shipped `hypervisor_kind`, run by a real shell over one mounts fixture. */
+  async function hypervisorKind(mounts: string, kvm: "0" | "1", virsh: "0" | "1"): Promise<string> {
+    const proc = Bun.spawn(
+      ["sh", "-c", `set -eu\n${shellFunction("hypervisor_kind")}\nhypervisor_kind "$1" "$2"`, "sh", kvm, virsh],
+      {
+        stdin: new TextEncoder().encode(mounts),
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    expect(stderr, "hypervisor_kind wrote to stderr").toBe("");
+    expect(code, "hypervisor_kind exited non-zero").toBe(0);
+    return stdout;
+  }
+
+  /** A real PVE node's mounts table, abridged: pmxcfs is /etc/pve on a fuse filesystem. */
+  const PVE_MOUNTS = [
+    "sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0",
+    "/dev/mapper/pve-root / ext4 rw,relatime,errors=remount-ro 0 0",
+    "/dev/fuse /etc/pve fuse rw,nosuid,nodev,relatime,user_id=0,group_id=0,default_permissions,allow_other 0 0",
+  ].join("\n");
+
+  test("hypervisor_kind is PURE - mounts on stdin, probes as parameters, no path of its own", () => {
+    const body = shellFunction("hypervisor_kind");
+    expect(body).not.toContain("/proc/mounts");
+    expect(body).not.toContain("/dev/kvm");
+  });
+
+  test("a mounted /etc/pve fuse filesystem is Proxmox VE", async () => {
+    expect(await hypervisorKind(PVE_MOUNTS, "0", "0")).toBe("proxmox");
+  });
+
+  // A PVE node HAS /dev/kvm and commonly virsh too; the more specific answer must win, because the
+  // banner names what the agent will actually collect there: QEMU VMs and LXC containers.
+  test("Proxmox wins when the libvirt probes would also answer", async () => {
+    expect(await hypervisorKind(PVE_MOUNTS, "1", "1")).toBe("proxmox");
+  });
+
+  // /dev/kvm alone is any machine with virtualization exposed (most laptops); virsh alone is a
+  // client package. Only the pair says "this host runs guests through libvirt".
+  test("/dev/kvm plus virsh is libvirt - either alone is not", async () => {
+    expect(await hypervisorKind("", "1", "1")).toBe("libvirt");
+    expect(await hypervisorKind("", "1", "0")).toBe("");
+    expect(await hypervisorKind("", "0", "1")).toBe("");
+  });
+
+  test("an empty mounts table and no probes answer nothing at all, silently", async () => {
+    expect(await hypervisorKind("", "0", "0")).toBe("");
+  });
+
+  test("/etc/pve on an ordinary filesystem is NOT Proxmox - the check demands the fuse mount", async () => {
+    expect(await hypervisorKind("/dev/sda1 /etc/pve ext4 rw,relatime 0 0", "0", "0")).toBe("");
+  });
+
+  test("a mountpoint that merely starts with /etc/pve is not it", async () => {
+    expect(await hypervisorKind("/dev/fuse /etc/pve2 fuse rw,relatime 0 0", "0", "0")).toBe("");
   });
 });

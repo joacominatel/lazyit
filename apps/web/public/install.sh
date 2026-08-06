@@ -70,6 +70,15 @@
 # was just rotated away. Rotating a token on a host is therefore still the ordinary install form,
 # `--url ... --token <new>`, and the refusal says so.
 #
+# HYPERVISOR HOSTS REPORT THEIR GUESTS, AND THE INSTALLER CONFIGURES NOTHING FOR IT (ADR-0095). On
+# a Proxmox VE or libvirt/KVM host the agent inventories the guests running there (QEMU VMs, LXC
+# containers) alongside the host's own facts. Detection lives in the AGENT and runs on every tick -
+# so a host promoted to a hypervisor next month starts reporting guests with no re-install, and the
+# banner this script prints ("Detected: Proxmox VE ...") is informational only, never stale
+# authority. The one knob is negative: `--no-hypervisor` writes LAZYIT_COLLECT_HYPERVISOR=false
+# into the config - a host-owner VETO the server's policy can never widen, exactly like every other
+# LAZYIT_COLLECT_* key - and re-running this installer preserves it like every other local setting.
+#
 # REMOVING IT AGAIN: `sh install.sh --uninstall`. Add `--keep-config` to keep this host's own limits
 # for a later re-install; the SA token is destroyed either way.
 #
@@ -125,6 +134,10 @@ SHA256=""
 # Plain http is an explicit decision, not a default (#1190) - see the gate below.
 ALLOW_INSECURE_HTTP=0
 FORCE_BASELINE=0
+# Write the ADR-0095 hypervisor veto (LAZYIT_COLLECT_HYPERVISOR=false) into the config: this host
+# never reports its guests, whatever lazyit's policy says. Without the flag nothing is configured -
+# detection and collection are automatic, re-evaluated by the agent on every run.
+NO_HYPERVISOR=0
 
 BIN_PATH="/usr/local/bin/lazyit-agent"
 CONFIG_DIR="/etc/lazyit-agent"
@@ -200,6 +213,29 @@ auth_config() {
     "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 }
 
+# What hypervisor this host is, for the banner below (ADR-0095): "proxmox", "libvirt", or nothing.
+#
+# PURE ON PURPOSE, like its two siblings above: the mounts table comes in on stdin and the two
+# probes ("does /dev/kvm exist", "is virsh on PATH") come in as parameters, so the contract test in
+# apps/agent runs THIS function over fixtures instead of a copy of it.
+#
+# Proxmox is recognised by the pmxcfs cluster filesystem: /etc/pve mounted with a fuse type, which
+# every PVE node has whether or not it is clustered. A directory merely CALLED /etc/pve on an
+# ordinary filesystem is not it, and neither is a mountpoint that only starts with the name - the
+# pattern demands the whole path segment and the fuse type after it. libvirt needs BOTH probes:
+# /dev/kvm alone is any machine with virtualization exposed (most laptops), and virsh alone is a
+# client package. Best-effort by design: the AGENT's own per-run detection is the authority, this
+# only feeds one informational line, and every caller tolerates an empty answer.
+hypervisor_kind() {
+  HK_KVM="${1:-0}"
+  HK_VIRSH="${2:-0}"
+  if grep -q '^[^ ][^ ]* /etc/pve fuse' 2>/dev/null; then
+    printf 'proxmox'
+  elif [ "$HK_KVM" = "1" ] && [ "$HK_VIRSH" = "1" ]; then
+    printf 'libvirt'
+  fi
+}
+
 # --- args ------------------------------------------------------------------
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -214,6 +250,7 @@ while [ $# -gt 0 ]; do
     --interval) LEGACY_INTERVAL="${2:-}"; shift 2 ;;
     --interval=*) LEGACY_INTERVAL="${1#*=}"; shift ;;
     --baseline) FORCE_BASELINE=1; shift ;;
+    --no-hypervisor) NO_HYPERVISOR=1; shift ;;
     --sha256) SHA256="${2:-}"; shift 2 ;;
     --sha256=*) SHA256="${1#*=}"; shift ;;
     --allow-insecure-http) ALLOW_INSECURE_HTTP=1; shift ;;
@@ -240,6 +277,10 @@ while [ $# -gt 0 ]; do
       echo "  --ca-file <path>     PEM bundle to trust, instead of trusting your CA system-wide;"
       echo "                       used for this download AND written into the agent's config"
       echo "  --baseline           force the pre-AVX2 x86-64 build (auto-detected otherwise)"
+      echo "  --no-hypervisor      write LAZYIT_COLLECT_HYPERVISOR=false into the config: this host"
+      echo "                       never reports its hypervisor guests (Proxmox VE / libvirt), whatever"
+      echo "                       lazyit's policy says. Without it nothing is configured - the agent"
+      echo "                       detects the role itself, on every run (ADR-0095)."
       echo "  --sha256 <hex>       the binary's sha256, obtained OUT OF BAND - the escape hatch when"
       echo "                       an older instance publishes no digest. Verification itself is"
       echo "                       required by default and a mismatch is always fatal."
@@ -532,6 +573,31 @@ if [ "$URL_SCHEME" = "http" ]; then
   echo "lazyit-agent install: WARNING - --allow-insecure-http: installing over plain http. The binary this host will run as root and the Service Account token BOTH cross the network in cleartext, the token on every report from now on, not only today. Anyone on the network path can take root on this host. Move to https when you can." >&2
 fi
 
+# --- hypervisor detection banner (ADR-0095) ---------------------------------
+# INFORMATIONAL ONLY. The AGENT re-detects the hypervisor role on every run, so this banner can
+# never become stale authority - it exists so the operator learns, at the one moment they are
+# looking, that this host's guests are about to be inventoried and how to say no. Best-effort and
+# never fatal by construction: every probe tolerates its own absence (no /proc/mounts on this
+# kernel, no /dev/kvm, no virsh on PATH), and an empty answer prints nothing at all.
+HV_KVM=0
+if [ -e /dev/kvm ]; then HV_KVM=1; fi
+HV_VIRSH=0
+if command -v virsh >/dev/null 2>&1; then HV_VIRSH=1; fi
+HV_KIND="$(cat /proc/mounts 2>/dev/null | hypervisor_kind "$HV_KVM" "$HV_VIRSH")" || HV_KIND=""
+if [ "$HV_KIND" = "proxmox" ]; then
+  if [ "$NO_HYPERVISOR" = "1" ]; then
+    echo "lazyit-agent install: Detected: Proxmox VE - hypervisor guest collection is disabled by --no-hypervisor (the config gets LAZYIT_COLLECT_HYPERVISOR=false)."
+  else
+    echo "lazyit-agent install: Detected: Proxmox VE - this host's guests (QEMU VMs, LXC containers) will be inventoried. Disable with --no-hypervisor."
+  fi
+elif [ "$HV_KIND" = "libvirt" ]; then
+  if [ "$NO_HYPERVISOR" = "1" ]; then
+    echo "lazyit-agent install: Detected: libvirt/KVM - hypervisor guest collection is disabled by --no-hypervisor (the config gets LAZYIT_COLLECT_HYPERVISOR=false)."
+  else
+    echo "lazyit-agent install: Detected: libvirt/KVM - this host's guests (QEMU/KVM virtual machines) will be inventoried. Disable with --no-hypervisor."
+  fi
+fi
+
 [ "$(id -u)" = "0" ] || die "must run as root (installs to /usr/local/bin, /etc and systemd)"
 command -v systemctl >/dev/null 2>&1 || die "systemd (systemctl) is required"
 command -v curl >/dev/null 2>&1 || die "curl is required"
@@ -740,6 +806,17 @@ if [ -n "$CA_FILE" ]; then
   CA_NOTE="LAZYIT_CA_FILE=$CA_FILE"
 fi
 
+# The ADR-0095 hypervisor veto line: the commented invitation every other collector gets, or the
+# ACTIVE veto when --no-hypervisor said so. Either way it is written BELOW the kept block, so on a
+# re-run WITH the flag it beats whatever an older config carried - the agent reads the LAST
+# assignment - while without the flag the commented form assigns nothing and a kept veto stays the
+# live one. The key is deliberately NOT in OWNED above: the merge must never clobber a host owner's
+# existing LAZYIT_COLLECT_HYPERVISOR=false with this template on the upgrade path.
+HYPERVISOR_LINE="#LAZYIT_COLLECT_HYPERVISOR=false"
+if [ "$NO_HYPERVISOR" = "1" ]; then
+  HYPERVISOR_LINE="LAZYIT_COLLECT_HYPERVISOR=false"
+fi
+
 PRESERVED=""
 if [ -f "$CONFIG_FILE" ]; then
   KEPT="$(grep -E '^[[:space:]]*(LAZYIT_[A-Z0-9_]+|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy|lazyit_ca_file)[[:space:]]*=' "$CONFIG_FILE" 2>/dev/null \
@@ -767,6 +844,7 @@ $PRESERVED
 #LAZYIT_COLLECT_NICS=false
 #LAZYIT_COLLECT_SOFTWARE=false
 #LAZYIT_COLLECT_CONTAINERS=false
+$HYPERVISOR_LINE
 #LAZYIT_MIN_INTERVAL=3600
 #LAZYIT_SOFTWARE_MAX=500
 #LAZYIT_EXCLUDE_NICS=veth*,docker*
