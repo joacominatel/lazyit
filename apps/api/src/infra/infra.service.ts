@@ -2048,7 +2048,9 @@ export class InfraService {
         where: {
           reportingSource: report.reportingSource,
           externalId: {
-            startsWith: containerExternalIdPrefix(report.externalId),
+            startsWith: escapeLikePrefix(
+              containerExternalIdPrefix(report.externalId),
+            ),
           },
         },
         select: { id: true, externalId: true, specs: true, assetId: true },
@@ -2089,62 +2091,15 @@ export class InfraService {
 
       const child = knownByExternalId.get(externalId);
       if (child !== undefined) {
-        // Facts + liveness only. `kind`/`label`/`state`/position stay the human's, on the same rule
-        // `refreshKnownNode` applies to hosts — and, since #1153, on the same write rule too: the
-        // `specs` column is touched only when the container's facts actually changed, while the
-        // heartbeat columns are written on every report because that is what a check-in is.
-        const storedSpecs = (child.specs ?? {}) as Record<string, unknown>;
-        const unchanged = isDeepStrictEqual(
-          withoutVolatileReportFacts(storedSpecs),
-          withoutVolatileReportFacts(specs),
+        await this.refreshContainerChild(
+          child,
+          specs,
+          status,
+          report,
+          now,
+          samePolicyGeneration,
+          childPolicyFields,
         );
-        // What the child HOLDS after this report — the stored collection time when the write was
-        // skipped, so the node and its Asset never disagree about when these facts were gathered.
-        const effective: ContainerSpecsBlob = unchanged
-          ? {
-              container: specs.container,
-              ...(typeof storedSpecs.reportedAt === 'string'
-                ? { reportedAt: storedSpecs.reportedAt }
-                : { reportedAt: specs.reportedAt }),
-            }
-          : specs;
-        // WHAT MOVED on this container (#1143), read off the SAME comparison the write rule above
-        // already made — computed before the update, for the same reason the host path computes it
-        // there: `storedSpecs` is about to be replaced. A container whose image digest moved under an
-        // unchanged `:latest` tag is the deploy nobody remembers doing, and it is exactly the kind of
-        // change this table exists for. Runtime `state` is deliberately NOT recorded — it is liveness,
-        // it already drives this node's `status`, and a nightly restart would write two rows a day
-        // forever. See {@link diffContainerFacts}.
-        const childChanges = unchanged
-          ? []
-          : diffContainerFacts(storedSpecs.container, specs.container, {
-              samePolicyGeneration,
-            });
-        await this.prisma.infraNode.update({
-          where: { id: child.id },
-          data: {
-            ...(unchanged
-              ? {}
-              : { specs: specs as unknown as Prisma.InputJsonValue }),
-            status,
-            lastReportedAt: now,
-            agentVersion: report.agentVersion,
-            ...childPolicyFields,
-          },
-        });
-        await this.recordFactChanges(child.id, childChanges);
-        // #1157: the host path has synced its linked Asset since #1081 and this one never did, so a
-        // container confirmed with `trackAsAsset` froze its Asset panel at the instant it was
-        // confirmed — image tag, digest, runtime state and published ports all drifting silently while
-        // the node panel stayed fresh. Same discipline as the host: a direct write (no SPECS_CHANGED
-        // event per report), human-owned columns untouched, a soft-deleted asset skipped, only the
-        // agent-owned keys replaced — and no write at all when nothing moved.
-        if (child.assetId) {
-          await this.syncAssetSpecs(child.assetId, { ...effective }, [
-            'container',
-            'reportedAt',
-          ]);
-        }
         childIds.push(child.id);
         void this.syncNodeToSearch(child.id);
         continue;
@@ -2164,22 +2119,56 @@ export class InfraService {
         budgetSpent = true;
         continue;
       }
-      const created = await this.prisma.infraNode.create({
-        data: {
-          kind: 'CONTAINER',
-          label: container.name,
-          status,
-          source: 'AGENT',
-          state: 'PENDING',
-          reportingSource: report.reportingSource,
-          externalId,
-          lastReportedAt: now,
-          agentVersion: report.agentVersion,
-          ...childPolicyFields,
-          specs: specs as unknown as Prisma.InputJsonValue,
-        },
-        select: { id: true },
-      });
+      let created: { id: string };
+      try {
+        created = await this.prisma.infraNode.create({
+          data: {
+            kind: 'CONTAINER',
+            label: container.name,
+            status,
+            source: 'AGENT',
+            state: 'PENDING',
+            reportingSource: report.reportingSource,
+            externalId,
+            lastReportedAt: now,
+            agentVersion: report.agentVersion,
+            ...childPolicyFields,
+            specs: specs as unknown as Prisma.InputJsonValue,
+          },
+          select: { id: true },
+        });
+      } catch (err) {
+        // The same concurrent-report race the host path has handled since #1012, one level down: a
+        // second report from this host inserted the child between our prefix read and this create.
+        // The loser must fall through to the refresh and KEEP GOING — a throw here would abandon
+        // every child after this one (no heartbeat, no edge self-heal) and skip the vanished sweep,
+        // and it would do so on every report for as long as the collision repeats.
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          const raced = await this.prisma.infraNode.findFirst({
+            where: { reportingSource: report.reportingSource, externalId },
+            select: { id: true, specs: true, assetId: true },
+          });
+          if (raced) {
+            // No auto-confirm offer: the report that WON the race made it for this child already.
+            await this.refreshContainerChild(
+              raced,
+              specs,
+              status,
+              report,
+              now,
+              samePolicyGeneration,
+              childPolicyFields,
+            );
+            childIds.push(raced.id);
+            void this.syncNodeToSearch(raced.id);
+            continue;
+          }
+        }
+        throw err;
+      }
       childIds.push(created.id);
       void this.syncNodeToSearch(created.id);
       // The child half of #1145. A container child is offered to the matcher under its CONTAINER
@@ -2232,6 +2221,68 @@ export class InfraService {
   }
 
   /**
+   * The known-container refresh — facts + liveness only, exactly the rule `refreshKnownNode`
+   * applies to hosts, and since #1153 the same write rule too: the `specs` column is touched only
+   * when the container's facts actually changed, while the heartbeat columns are written on every
+   * report because that is what a check-in is. Extracted so the ordinary known-child branch and the
+   * per-child P2002 race fallback are ONE code path — two copies of this block would drift.
+   *
+   * `kind`/`label`/`state`/position stay the human's. The fact-change rows (#1143) are computed off
+   * the SAME comparison the write rule makes, before the update, because `storedSpecs` is about to
+   * be replaced; runtime `state` is deliberately not recorded (it is liveness, it already drives
+   * `status`, and a nightly restart would write two rows a day forever). The linked-Asset sync
+   * (#1157) follows the host discipline: agent-owned keys replaced, human-owned columns untouched,
+   * a soft-deleted asset skipped, and no write at all when nothing moved — `effective` is the
+   * stored collection time when the write was skipped, so the node and its Asset never disagree
+   * about when these facts were gathered.
+   */
+  private async refreshContainerChild(
+    child: { id: string; specs: Prisma.JsonValue; assetId: string | null },
+    specs: ContainerSpecsBlob,
+    status: InfraNodeStatus,
+    report: AgentReport,
+    now: Date,
+    samePolicyGeneration: boolean,
+    childPolicyFields: { policyStaleAfterSeconds?: number },
+  ): Promise<void> {
+    const storedSpecs = (child.specs ?? {}) as Record<string, unknown>;
+    const unchanged = isDeepStrictEqual(
+      withoutVolatileReportFacts(storedSpecs),
+      withoutVolatileReportFacts(specs),
+    );
+    const effective: ContainerSpecsBlob = unchanged
+      ? {
+          container: specs.container,
+          ...(typeof storedSpecs.reportedAt === 'string'
+            ? { reportedAt: storedSpecs.reportedAt }
+            : { reportedAt: specs.reportedAt }),
+        }
+      : specs;
+    const childChanges = unchanged
+      ? []
+      : diffContainerFacts(storedSpecs.container, specs.container, {
+          samePolicyGeneration,
+        });
+    await this.prisma.infraNode.update({
+      where: { id: child.id },
+      data: {
+        ...(unchanged ? {} : { specs: specs }),
+        status,
+        lastReportedAt: now,
+        agentVersion: report.agentVersion,
+        ...childPolicyFields,
+      },
+    });
+    await this.recordFactChanges(child.id, childChanges);
+    if (child.assetId) {
+      await this.syncAssetSpecs(child.assetId, { ...effective }, [
+        'container',
+        'reportedAt',
+      ]);
+    }
+  }
+
+  /**
    * The hypervisor-guest reconcile (ADR-0095 §5) — {@link applyContainerTopology} one level up, a
    * deliberate MIRROR rather than a parameterization of it. The two loops share their hard-won
    * properties (reported-set diff computed before anything is written, skip-when-unchanged,
@@ -2262,9 +2313,11 @@ export class InfraService {
    * THE ABSORBED CASE (ADR-0095 §6). A guest whose child was absorbed into its own in-guest agent's
    * node leaves an ARCHIVED row carrying the merge marker AND its reporting key (see
    * {@link absorbGuestChild} for why the key stays, unlike a human merge). This method reads those
-   * rows back (the one `includeSoftDeleted` read) so an absorbed guest is NEVER re-proposed — it
-   * resolves to its canonical node, which only rides the edge self-heal: its facts, status and
-   * liveness belong to its own agent.
+   * rows back (the one `includeSoftDeleted` read) so an absorbed guest is not re-proposed — it
+   * resolves to its LIVE canonical node, which only rides the edge self-heal: its facts, status and
+   * liveness belong to its own agent. When that canonical node has itself been DISCARDED, the ref
+   * falls back to unknown and is re-proposed PENDING — the same rule every other discarded reporting
+   * key follows, because a VM the hypervisor still runs must never become silently unrepresentable.
    */
   private async applyGuestTopology(
     hostNodeId: string,
@@ -2281,6 +2334,34 @@ export class InfraService {
       policy !== undefined && report.policyRevision !== undefined
         ? { policyStaleAfterSeconds: policy.staleAfterSeconds }
         : {};
+    // DEDUPE BY KEY, FIRST OCCURRENCE WINS. The shared schema does not dedupe refs, and two list
+    // elements sharing one ref would race the same unique key inside one report: the second create
+    // throws P2002, and although the report survives, the throw would abandon everything after it —
+    // heartbeats, edge self-heals, the vanished sweep — on EVERY report for as long as the
+    // duplicate repeats. The P2002 guard below still covers the cross-report race; this removes the
+    // in-report one at the source.
+    const seenKeys = new Set<string>();
+    const uniqueGuests: AgentGuest[] = [];
+    const duplicateRefs: string[] = [];
+    for (const guest of guests) {
+      const key = guestExternalId(report.externalId, guest.ref);
+      if (seenKeys.has(key)) {
+        duplicateRefs.push(guest.ref);
+        continue;
+      }
+      seenKeys.add(key);
+      uniqueGuests.push(guest);
+    }
+    if (duplicateRefs.length) {
+      // One bounded warning, not one per duplicate: the list is attacker-influenced.
+      this.logger.warn(
+        `${report.host.hostname} listed ${duplicateRefs.length} duplicate guest ref(s) (${duplicateRefs
+          .slice(0, 5)
+          .join(
+            ', ',
+          )}${duplicateRefs.length > 5 ? ', …' : ''}) — the first occurrence of each won; the rest were ignored.`,
+      );
+    }
     // Every guest child this reporter has for THIS host — INCLUDING archived rows, which is the one
     // read the container path does not make: an absorbed child is soft-deleted but must keep
     // resolving its ref to the canonical node, or the hypervisor would re-propose the same guest
@@ -2292,7 +2373,9 @@ export class InfraService {
         where: {
           reportingSource: report.reportingSource,
           externalId: {
-            startsWith: guestExternalIdPrefix(report.externalId),
+            startsWith: escapeLikePrefix(
+              guestExternalIdPrefix(report.externalId),
+            ),
           },
         },
         select: {
@@ -2338,17 +2421,15 @@ export class InfraService {
       // guest under a discarded key is re-proposed PENDING, exactly as a discarded container is.
     }
 
-    // WHAT THE AGENT REPORTED — the whole list, before anything is written, so the retire sweep can
-    // never read "the budget refused this one" as "this one vanished" (#1139's hard-won rule).
-    const reported = new Set(
-      guests.map((g) => guestExternalId(report.externalId, g.ref)),
-    );
+    // WHAT THE AGENT REPORTED — the whole (deduped) list, before anything is written, so the retire
+    // sweep can never read "the budget refused this one" as "this one vanished" (#1139's rule).
+    const reported = seenKeys;
     // A canonical node an absorbed guest resolves to must be LIVE before the edge self-heal may wire
     // it: creating a RUNS_ON from a node the operator discarded would put an archived row back on the
     // map. One soft-delete-scoped read, only when an absorbed ref is actually still being reported.
     const absorbedReported = [
       ...new Set(
-        guests
+        uniqueGuests
           .map((g) =>
             absorbedInto.get(guestExternalId(report.externalId, g.ref)),
           )
@@ -2368,7 +2449,7 @@ export class InfraService {
 
     const childIds: string[] = [];
     let budgetSpent = false;
-    for (const guest of guests) {
+    for (const guest of uniqueGuests) {
       const externalId = guestExternalId(report.externalId, guest.ref);
       // The child's whole inventory blob — `{ guest, reportedAt }`, mirroring the container blob
       // shape clause for clause: no `host` key, because a guest is not the reporting host, and
@@ -2381,54 +2462,32 @@ export class InfraService {
 
       const child = liveByExternalId.get(externalId);
       if (child !== undefined) {
-        // Facts + liveness only, on the host path's rule: curation stays the human's, and the specs
-        // column is touched only when the guest's facts actually moved (#1153).
-        const storedSpecs = (child.specs ?? {}) as Record<string, unknown>;
-        const unchanged = isDeepStrictEqual(
-          withoutVolatileReportFacts(storedSpecs),
-          withoutVolatileReportFacts(specs),
+        await this.refreshGuestChild(
+          child,
+          specs,
+          status,
+          report,
+          now,
+          childPolicyFields,
         );
-        const effective: GuestSpecsBlob = unchanged
-          ? {
-              guest: specs.guest,
-              ...(typeof storedSpecs.reportedAt === 'string'
-                ? { reportedAt: storedSpecs.reportedAt }
-                : { reportedAt: specs.reportedAt }),
-            }
-          : specs;
-        await this.prisma.infraNode.update({
-          where: { id: child.id },
-          data: {
-            ...(unchanged
-              ? {}
-              : { specs: specs as unknown as Prisma.InputJsonValue }),
-            status,
-            lastReportedAt: now,
-            agentVersion: report.agentVersion,
-            ...childPolicyFields,
-          },
-        });
-        // Same discipline as the container child's Asset sync (#1157): agent-owned keys replaced,
-        // human-owned columns untouched, soft-deleted asset skipped, no write when nothing moved.
-        if (child.assetId) {
-          await this.syncAssetSpecs(child.assetId, { ...effective }, [
-            'guest',
-            'reportedAt',
-          ]);
-        }
         childIds.push(child.id);
         void this.syncNodeToSearch(child.id);
         continue;
       }
 
       const canonicalId = absorbedInto.get(externalId);
-      if (canonicalId !== undefined) {
+      if (canonicalId !== undefined && liveCanonicalIds.has(canonicalId)) {
         // Absorbed (§6): the guest IS the canonical node now. Only the RUNS_ON self-heal below may
         // touch it — its status, facts and liveness belong to its own reporting agent, and writing
         // any of them from the hypervisor's view would have two agents fighting over one row.
-        if (liveCanonicalIds.has(canonicalId)) childIds.push(canonicalId);
+        childIds.push(canonicalId);
         continue;
       }
+      // An absorbed ref whose canonical node was DISCARDED falls through and is RE-PROPOSED: the
+      // file's own discard semantics, applied consistently (a discarded host that keeps reporting
+      // re-proposes PENDING, and a discarded marker-less guest child does too). Skipping it forever
+      // would make a VM the hypervisor still runs permanently unrepresentable, with no signal — the
+      // tray is where "the operator discarded its agent's node but the machine still exists" belongs.
 
       // A child row costs the same enrollment slot a host does (#1134), and a spent budget SKIPS
       // WITHOUT BREAKING: refusal must never invent a false outage, so the rest of the list keeps
@@ -2438,25 +2497,55 @@ export class InfraService {
         budgetSpent = true;
         continue;
       }
-      const created = await this.prisma.infraNode.create({
-        data: {
-          // The guest's own nature, never a hardcode: qemu/hyperv/libvirt/other → VM, lxc → CONTAINER
-          // — the same answer the in-guest probe would give (ADR-0095 §5).
-          kind: guestNodeKind(guest.kind),
-          label: guest.name,
-          status,
-          source: 'AGENT',
-          state: 'PENDING',
-          reportingSource: report.reportingSource,
-          externalId,
-          lastReportedAt: now,
-          agentVersion: report.agentVersion,
-          ...childPolicyFields,
-          // NO `chassis` (ADR-0093 §2) and no auto-confirm offer — see the method JSDoc.
-          specs: specs as unknown as Prisma.InputJsonValue,
-        },
-        select: { id: true },
-      });
+      let created: { id: string };
+      try {
+        created = await this.prisma.infraNode.create({
+          data: {
+            // The guest's own nature, never a hardcode: qemu/hyperv/libvirt/other → VM, lxc →
+            // CONTAINER — the same answer the in-guest probe would give (ADR-0095 §5).
+            kind: guestNodeKind(guest.kind),
+            label: guest.name,
+            status,
+            source: 'AGENT',
+            state: 'PENDING',
+            reportingSource: report.reportingSource,
+            externalId,
+            lastReportedAt: now,
+            agentVersion: report.agentVersion,
+            ...childPolicyFields,
+            // NO `chassis` (ADR-0093 §2) and no auto-confirm offer — see the method JSDoc.
+            specs: specs as unknown as Prisma.InputJsonValue,
+          },
+          select: { id: true },
+        });
+      } catch (err) {
+        // The concurrent-report race, one level down from the host's #1012 handling: the loser must
+        // fall through to the refresh and KEEP GOING — a throw here would abandon every guest after
+        // this one and skip the vanished sweep, on every report the race repeats.
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          const raced = await this.prisma.infraNode.findFirst({
+            where: { reportingSource: report.reportingSource, externalId },
+            select: { id: true, specs: true, assetId: true },
+          });
+          if (raced) {
+            await this.refreshGuestChild(
+              raced,
+              specs,
+              status,
+              report,
+              now,
+              childPolicyFields,
+            );
+            childIds.push(raced.id);
+            void this.syncNodeToSearch(raced.id);
+            continue;
+          }
+        }
+        throw err;
+      }
       childIds.push(created.id);
       void this.syncNodeToSearch(created.id);
     }
@@ -2481,6 +2570,54 @@ export class InfraService {
         data: { status: 'OFFLINE' },
       });
       for (const id of vanished) void this.syncNodeToSearch(id);
+    }
+  }
+
+  /**
+   * The known-guest refresh — {@link refreshContainerChild}'s guest twin, extracted for the same
+   * reason: the ordinary known-child branch and the per-child P2002 race fallback must be ONE code
+   * path. Facts + liveness only (curation stays the human's), the specs column touched only when
+   * the guest's facts actually moved (#1153), and the linked-Asset sync on the #1157 discipline —
+   * `effective` keeps the stored collection time on a skipped write so the node and its Asset never
+   * disagree. No fact-change rows: there is no `diffGuestFacts` in the shared contract yet (see
+   * {@link applyGuestTopology}).
+   */
+  private async refreshGuestChild(
+    child: { id: string; specs: Prisma.JsonValue; assetId: string | null },
+    specs: GuestSpecsBlob,
+    status: InfraNodeStatus,
+    report: AgentReport,
+    now: Date,
+    childPolicyFields: { policyStaleAfterSeconds?: number },
+  ): Promise<void> {
+    const storedSpecs = (child.specs ?? {}) as Record<string, unknown>;
+    const unchanged = isDeepStrictEqual(
+      withoutVolatileReportFacts(storedSpecs),
+      withoutVolatileReportFacts(specs),
+    );
+    const effective: GuestSpecsBlob = unchanged
+      ? {
+          guest: specs.guest,
+          ...(typeof storedSpecs.reportedAt === 'string'
+            ? { reportedAt: storedSpecs.reportedAt }
+            : { reportedAt: specs.reportedAt }),
+        }
+      : specs;
+    await this.prisma.infraNode.update({
+      where: { id: child.id },
+      data: {
+        ...(unchanged ? {} : { specs: specs }),
+        status,
+        lastReportedAt: now,
+        agentVersion: report.agentVersion,
+        ...childPolicyFields,
+      },
+    });
+    if (child.assetId) {
+      await this.syncAssetSpecs(child.assetId, { ...effective }, [
+        'guest',
+        'reportedAt',
+      ]);
     }
   }
 
@@ -2533,9 +2670,18 @@ export class InfraService {
                     AND "id" <> ${nodeId}
                     AND "externalId" LIKE ${`%${guestExternalIdPrefix('')}%`}
                     AND lower("specs"->'guest'->>'smbiosUuid') IN (${Prisma.join(uuids)})
+                  ORDER BY "id"
                   LIMIT ${GUEST_ABSORB_CANDIDATES_MAX}`,
     );
     if (candidates.length === 0) return;
+    if (candidates.length >= GUEST_ABSORB_CANDIDATES_MAX) {
+      // A clone farm sharing one baked UUID can fill the LIMIT with impostors and push the true
+      // child outside the set — the absorb then silently never fires. The ORDER BY above makes the
+      // kept set deterministic across replicas; this line makes the truncation visible.
+      this.logger.warn(
+        `The guest identity join for ${report.host.hostname} hit the candidate cap (${GUEST_ABSORB_CANDIDATES_MAX} children share this SMBIOS UUID) — the matching child may be outside the set and the absorb may not fire this report. This estate is likely running cloned templates with duplicated BIOS UUIDs.`,
+      );
+    }
     const reportedMacs = hostIdentityEvidence(report.host).macs;
     // Resolved lazily, once, and only because a candidate matched: a node under an active #1141
     // collision (or still carrying its marker) never absorbs anything — suspicion disqualifies both
@@ -4295,6 +4441,18 @@ type GuestSpecsBlob = {
   guest: AgentGuest;
   reportedAt: string;
 };
+
+/**
+ * Escape the LIKE metacharacters (`\`, `%`, `_`) in a child-key prefix before it reaches a Prisma
+ * `startsWith` — Prisma emits the value into a raw LIKE pattern (verified empirically), so a
+ * wildcard inside a host's reported `externalId` would widen the prefix match to other hosts'
+ * children. Contained today by the `reportingSource` equality on the same query; the escape makes
+ * that containment structural rather than incidental. Postgres's default LIKE escape character is
+ * the backslash, so `\\` before each metacharacter is the whole rule.
+ */
+function escapeLikePrefix(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
 
 /**
  * How many `/guest/` children one report's identity join may even consider (ADR-0095 §6). A report
