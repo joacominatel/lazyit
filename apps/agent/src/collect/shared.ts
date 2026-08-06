@@ -33,6 +33,21 @@ export type Nics = NonNullable<Host["nics"]>;
 export type Identifiers = NonNullable<Host["identifiers"]>;
 export type Containers = NonNullable<Host["containers"]>;
 export type Disks = NonNullable<Host["disks"]>;
+export type Hypervisor = NonNullable<Host["hypervisor"]>;
+export type Guests = NonNullable<Host["guests"]>;
+
+/**
+ * What a hypervisor collector answers with (ADR-0095, #1217): the host FACET and the guest
+ * inventory, travelling together because they degrade together. `hypervisor` present with `guests`
+ * ABSENT is a real and load-bearing state — detection fired but enumeration failed — and it is
+ * different from `guests: []` (enumeration ran and found none), which is what lets the server
+ * retire vanished children only on positive evidence. The shape is OS-neutral; each collector
+ * (`hypervisor-linux.ts`, `hypervisor-windows.ts`) fills it from its own platform.
+ */
+export interface HypervisorFacts {
+  hypervisor?: Hypervisor;
+  guests?: Guests;
+}
 
 /**
  * Where a degraded collector reports itself (#1138). A sink rather than a return value because a
@@ -226,6 +241,13 @@ export async function run(
     clearTimeout(timer);
   }
 }
+
+/**
+ * How a collector spawns. Injectable so tests can drive the impure boundary without the platform's
+ * tooling — the pattern `windows.ts` established (#1144) and the hypervisor collectors reuse.
+ * The production value is always {@link run}.
+ */
+export type Exec = typeof run;
 
 /** Drop undefined/null/empty-string values; return undefined if nothing survives (omit the key). */
 export function clean<T extends Record<string, unknown>>(obj: T): T | undefined {

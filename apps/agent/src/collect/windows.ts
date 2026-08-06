@@ -48,6 +48,7 @@ import {
   type AgentVirtualizationType,
 } from "@lazyit/shared";
 import type { SoftwareCollection } from "../software-delta";
+import { collectHypervisorWindows } from "./hypervisor-windows";
 import {
   applyDiskPolicy,
   applyNicPolicy,
@@ -64,6 +65,7 @@ import {
   SOFTWARE_CAP,
   type Containers,
   type Disks,
+  type Exec,
   type Host,
   type HostFacts,
   type Nics,
@@ -187,6 +189,15 @@ export function buildWindowsFactsScript(policy: AgentPolicy = AGENT_POLICY_DEFAU
       "software=@(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'|Select-Object DisplayName,DisplayVersion,SystemComponent)",
     );
   }
+  // Hyper-V host detection (ADR-0095 §2): the vmms service exists AND the virtualization namespace
+  // is reachable — the management stack itself, never CPUID or the SMBIOS vendor strings, because
+  // the host's OWN root partition advertises "Microsoft Hv" too (the classic false positive). It
+  // rides THIS sweep so a non-Hyper-V host pays zero extra interpreter starts; only a `true` here
+  // makes `collectHost` pay for the second document (`HYPERV_GUESTS_SCRIPT`). Gated like every
+  // other section: a policy that turns the collector off must stop the PROBE, not just the fact.
+  if (policy.collect.hypervisor) {
+    keys.push("hyperv=$hv");
+  }
   keys.push(
     "machineGuid=$mg",
     "elevated=$el",
@@ -216,6 +227,15 @@ export function buildWindowsFactsScript(policy: AgentPolicy = AGENT_POLICY_DEFAU
     // SYSTEM is a member of the Administrators role, so the scheduled run reports `true` and a
     // hand-run under an ordinary account reports `false` — which is exactly what `privileged` means.
     "$el=$false;try{$el=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}catch{}",
+    // `-ErrorAction Ignore`, not the ambient SilentlyContinue: a missing service or namespace is
+    // the NORMAL answer on most of the estate, and recording it in $Error would put a line in
+    // every non-Hyper-V host's warnings. `Get-CimClass` reads class metadata without enumerating
+    // instances, which is what keeps the probe cheap on a host running hundreds of VMs.
+    ...(policy.collect.hypervisor
+      ? [
+          "$hv=$false;try{if((Get-Service -Name vmms -ErrorAction Ignore) -and (Get-CimClass -Namespace 'root\\virtualization\\v2' -ClassName Msvm_ComputerSystem -ErrorAction Ignore)){$hv=$true}}catch{}",
+        ]
+      : []),
     `[pscustomobject]@{${keys.join(";")}}|ConvertTo-Json -Compress -Depth 4`,
   ].join(";");
 }
@@ -288,6 +308,12 @@ export interface WindowsFacts {
   adapters?: unknown;
   adapterConfigs?: unknown;
   software?: unknown;
+  /**
+   * Hyper-V host detection (ADR-0095): `true` when the vmms service exists AND the
+   * `root\virtualization\v2` namespace is reachable. Only a literal `true` triggers the second
+   * (guest sweep) document; absent, null or mangled all read as "not a hypervisor host".
+   */
+  hyperv?: unknown;
   machineGuid?: unknown;
   elevated?: boolean | null;
   /**
@@ -362,10 +388,12 @@ export function parseWindowsBlob(raw: string | null): WindowsFacts | null {
 }
 
 /**
- * How this module spawns. Injectable so the tests can drive the two impure boundaries — the PowerShell
- * calls and `docker ps` — without a Windows host; the production default is always {@link run}.
+ * How this module spawns — the shared {@link Exec} alias, re-exported here because this file is
+ * where the injectable-boundary pattern was established (#1144) and its tests import it by this
+ * path. Injectable so the tests can drive the impure boundaries — the PowerShell calls and
+ * `docker ps` — without a Windows host; the production default is always {@link run}.
  */
-export type Exec = typeof run;
+export type { Exec } from "./shared";
 
 /** The memoized dedup-key read. See {@link readMachineGuid}. */
 let machineGuidRun: Promise<string | null> | undefined;
@@ -1183,5 +1211,21 @@ export async function collectHost(
       "windows: the PowerShell fact collector returned nothing usable — OS, hardware, NICs, disks and identifiers omitted",
     );
   }
-  return buildWindowsHost(facts, containers, policy, warn);
+  // The hypervisor collector (ADR-0095) runs AFTER the sweep because the sweep IS its detection:
+  // only a document that answered `hyperv: true` makes a host pay for the second PowerShell start,
+  // which is what keeps the non-Hyper-V majority of the estate at one interpreter per tick. The
+  // policy gate (and its one disabled-collector warning) lives inside the collector itself.
+  const hypervisorFacts = await collectHypervisorWindows(
+    warn,
+    policy,
+    facts?.hyperv === true,
+    str(facts?.os?.Version),
+    exec,
+  );
+  const hostFacts = buildWindowsHost(facts, containers, policy, warn);
+  if (hypervisorFacts?.hypervisor) hostFacts.host.hypervisor = hypervisorFacts.hypervisor;
+  // ABSENT (the sweep could not answer) and `[]` (it ran and found none) are different answers the
+  // server acts on differently — the same rule `containers` rides (#1139).
+  if (hypervisorFacts?.guests !== undefined) hostFacts.host.guests = hypervisorFacts.guests;
+  return hostFacts;
 }

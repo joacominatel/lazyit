@@ -27,6 +27,7 @@ import {
   type AgentVirtualizationType,
 } from "@lazyit/shared";
 import type { SoftwareCollection } from "../software-delta";
+import { collectHypervisorLinux } from "./hypervisor-linux";
 import {
   applyDiskPolicy,
   applyNicPolicy,
@@ -566,14 +567,18 @@ export async function collectHost(
       // Root-readable only (mode 0400) — unprivileged runs simply omit this identifier.
       readText("/sys/class/dmi/id/product_uuid"),
     ]);
-  const [rawDisks, rawNics, hardware, virtualization, machineId, containers] = await Promise.all([
-    policy.collect.disks ? collectDisks(warn) : undefined,
-    policy.collect.nics ? collectNics(warn) : undefined,
-    policy.collect.hardware ? collectHardware(warn) : undefined,
-    collectVirtualization(warn),
-    readMachineId(),
-    policy.collect.containers ? collectContainers(warn) : undefined,
-  ]);
+  const [rawDisks, rawNics, hardware, virtualization, machineId, containers, hypervisorFacts] =
+    await Promise.all([
+      policy.collect.disks ? collectDisks(warn) : undefined,
+      policy.collect.nics ? collectNics(warn) : undefined,
+      policy.collect.hardware ? collectHardware(warn) : undefined,
+      collectVirtualization(warn),
+      readMachineId(),
+      policy.collect.containers ? collectContainers(warn) : undefined,
+      // No ternary: the policy gate (and its one disabled-collector warning) lives inside the
+      // collector, which is also where the per-platform detection re-runs every tick (ADR-0095).
+      collectHypervisorLinux(warn, policy),
+    ]);
   if (!policy.collect.hardware) {
     warn("hardware: disabled by agent policy — manufacturer/model/serial omitted");
   }
@@ -609,6 +614,11 @@ export async function collectHost(
   // ABSENT (the probe could not run) and `[]` (it ran and found none) are different answers the
   // server acts on differently, so an empty list is REPORTED rather than omitted (#1139).
   if (containers !== undefined) host.containers = containers;
+  // The hypervisor facet only exists on a positive detection; `guests` rides the same
+  // absent-vs-empty rule as `containers` — enumeration that failed after detection fired ships
+  // the facet WITH a warning and NO guests key (ADR-0095 §2/§3).
+  if (hypervisorFacts?.hypervisor) host.hypervisor = hypervisorFacts.hypervisor;
+  if (hypervisorFacts?.guests !== undefined) host.guests = hypervisorFacts.guests;
   if (bootedAt !== undefined) host.bootedAt = bootedAt;
   if (cpu) host.cpu = cpu;
   if (memoryBytes !== undefined) host.memoryBytes = memoryBytes;
