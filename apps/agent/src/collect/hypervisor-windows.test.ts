@@ -57,6 +57,8 @@ function blob(patch: Partial<HypervGuestsBlob> = {}): HypervGuestsBlob {
       { Id: "{9F86D081-1234-4B10-8034-B4C04F524D33}", BiosGuid: "{11112222-3333-4444-5555-666677778888}" },
       { Id: "{0A1B2C3D-5678-4E5F-9012-ABCDEF012345}", BiosGuid: "{AAAA1111-BBBB-4CCC-8DDD-EEEEFFFF0000}" },
     ],
+    // The enumeration sentinel: Get-Command found Get-VM, so `vms` is a real answer.
+    getvm: true,
     errors: [],
     ...patch,
   };
@@ -111,6 +113,18 @@ describe("HYPERV_GUESTS_SCRIPT", () => {
   test("never touches Win32_Product and never shells out to wmic", () => {
     expect(HYPERV_GUESTS_SCRIPT).not.toContain("Win32_Product");
     expect(HYPERV_GUESTS_SCRIPT.toLowerCase()).not.toContain("wmic");
+  });
+
+  test("ships the enumeration sentinel — whether Get-VM even EXISTS on this host", () => {
+    // Server Core with the Hyper-V role but without -IncludeManagementTools has vmms and the WMI
+    // namespace (detection fires) yet NO Get-VM cmdlet: under SilentlyContinue `$vms` would still
+    // be `[]`, and an empty list is a positive finding that retires every living guest. The
+    // sentinel is what lets the mapper tell "enumerated none" from "could not enumerate".
+    expect(HYPERV_GUESTS_SCRIPT).toContain("Get-Command Get-VM");
+    expect(HYPERV_GUESTS_SCRIPT).toContain("getvm=$gv");
+    expect(HYPERV_GUESTS_SCRIPT.indexOf("errors=@($Error|")).toBeGreaterThan(
+      HYPERV_GUESTS_SCRIPT.indexOf("getvm=$gv"),
+    );
   });
 });
 
@@ -179,6 +193,7 @@ describe("buildHypervGuests", () => {
         vms: { Id: "9F86D081-1234-4B10-8034-B4C04F524D33", Name: "solo", State: "Running" },
         nics: { Id: "9F86D081-1234-4B10-8034-B4C04F524D33", Mac: "00155D0A2B01" },
         bios: { Id: "9F86D081-1234-4B10-8034-B4C04F524D33", BiosGuid: "{11112222-3333-4444-5555-666677778888}" },
+        getvm: true,
       },
       sink().warn,
     );
@@ -221,6 +236,38 @@ describe("buildHypervGuests", () => {
 
   test("a null document is undefined — 'could not look' must not retire the server's children", () => {
     expect(buildHypervGuests(null, sink().warn)).toBeUndefined();
+  });
+
+  test("Get-VM missing (sentinel false or absent): guests are ABSENT, never an empty positive", () => {
+    // The Server Core hole: role installed, management tools not. `vms: []` here is an artifact of
+    // SilentlyContinue, not an enumeration — reading it as empty would retire every living guest.
+    const { warn, notes } = sink();
+    expect(buildHypervGuests(blob({ vms: [], getvm: false }), warn)).toBeUndefined();
+    expect(buildHypervGuests(blob({ vms: [], getvm: undefined }), sink().warn)).toBeUndefined();
+    expect(notes.join(" ")).toContain("Get-VM");
+  });
+
+  test("zero VMs WITH sweep errors: guests are ABSENT — empty is only legal when enumeration demonstrably succeeded", () => {
+    // A transient VMMS/WMI failure leaves `vms` empty and an error behind. The error text already
+    // rides out as a warning; the empty list must not additionally masquerade as a positive one.
+    const { warn, notes } = sink();
+    expect(
+      buildHypervGuests(blob({ vms: [], nics: [], bios: [], errors: ["Get-VM: The operation failed."] }), warn),
+    ).toBeUndefined();
+    expect(notes.join(" ")).toContain("Get-VM: The operation failed.");
+  });
+
+  test("more VMs than the cap ships exactly the cap — and SAYS SO", () => {
+    const vms = Array.from({ length: 501 }, (_, i) => ({
+      Id: `${String(i + 1).padStart(8, "0")}-0000-4000-8000-000000000000`,
+      Name: `vm${i + 1}`,
+      State: "Running",
+    }));
+    const { warn, notes } = sink();
+    const guests = buildHypervGuests(blob({ vms, nics: [], bios: [] }), warn);
+    expect(guests).toHaveLength(500);
+    // Silent truncation would positively retire guest #501's child node — the cut must be visible.
+    expect(notes.join(" ")).toContain("truncated");
   });
 
   test("the script's own swallowed errors surface as warnings", () => {
@@ -289,6 +336,20 @@ describe("collectHypervisorWindows", () => {
     expect(out?.hypervisor).toEqual({ platform: "hyperv" });
     expect(out?.guests).toBeUndefined();
     expect(notes.length).toBeGreaterThan(0);
+  });
+
+  test("a document whose sentinel says Get-VM is missing keeps the facet and omits guests", async () => {
+    const { warn, notes } = sink();
+    const out = await collectHypervisorWindows(
+      warn,
+      AGENT_POLICY_DEFAULT,
+      true,
+      "10.0.20348",
+      async () => JSON.stringify(blob({ vms: [], getvm: false })),
+    );
+    expect(out?.hypervisor).toEqual({ platform: "hyperv", version: "10.0.20348" });
+    expect(out?.guests).toBeUndefined();
+    expect(notes.join(" ")).toContain("Get-VM");
   });
 });
 
