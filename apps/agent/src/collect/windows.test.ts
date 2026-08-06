@@ -844,6 +844,7 @@ describe("a collector the policy turns OFF is never RUN, not merely filtered (#1
       nics: false,
       software: false,
       containers: false,
+      hypervisor: false,
     },
   });
 
