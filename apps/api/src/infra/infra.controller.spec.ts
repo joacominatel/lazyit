@@ -126,6 +126,20 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       },
     );
 
+    it.each(['ids', 'assetIds'] as const)(
+      'rejects an over-cap %s batch with a 400 (bounded like GET /users?ids=)',
+      (param) => {
+        // Without a cap the page fix would trade one unbounded read for an unbounded IN list a
+        // client can post in a query string. 201 cuids, one over MAX_PAGE_LIMIT.
+        const over = Array.from(
+          { length: 201 },
+          (_, i) => `c${String(i).padStart(24, 'x')}`,
+        ).join(',');
+
+        expect(() => list({ [param]: over })).toThrow(BadRequestException);
+      },
+    );
+
     it('passes `q` and `source` through as filters the DATABASE applies', () => {
       // Both exist because the page made client-side scanning wrong: an in-memory search over one
       // window is a false "no results", and "does any agent node exist?" cannot be answered by
