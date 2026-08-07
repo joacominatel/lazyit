@@ -3704,12 +3704,26 @@ export class InfraService {
     let assetName: string | null = null;
     let owners: Awaited<ReturnType<typeof this.resolveOwners>> = [];
     let articleLinks: Awaited<ReturnType<typeof this.resolveArticleLinks>> = [];
+    // WHICH detach a `PATCH { assetId: null }` would run (#1202) — the §5/ADR-0093 §4 marker, as a
+    // boolean. The drill-in has to say "this archives the asset" or "this only un-links it" BEFORE
+    // the operator commits, and those two sentences are not interchangeable: one soft-deletes a real
+    // inventory row. Read off the SAME row the inventory name already fetches (`specs` widens the
+    // existing select — no extra query), and left NULL when there is no link or the row is gone, so
+    // an unknown provenance degrades to the cautious wording client-side rather than to a false
+    // "nothing will be deleted". Display-only: `detachAsset` re-derives its own answer when it runs.
+    let assetAutoCreated: boolean | null = null;
     if (node.assetId) {
       const asset = await this.prisma.asset.findFirst({
         where: { id: node.assetId },
-        select: { name: true },
+        select: { name: true, specs: true },
       });
       assetName = asset?.name ?? null;
+      if (asset) {
+        const assetSpecs = (asset.specs ?? {}) as Record<string, unknown>;
+        // `=== true` exactly as `detachAsset` tests it — a looser check here would let the dialog
+        // promise an outcome the detach does not perform.
+        assetAutoCreated = assetSpecs[INFRA_AUTO_ASSET_MARKER] === true;
+      }
       owners = await this.resolveOwners(node.assetId);
       articleLinks = await this.resolveArticleLinks(node.assetId, principal);
     }
@@ -3736,6 +3750,7 @@ export class InfraService {
     return {
       ...node,
       assetName,
+      assetAutoCreated,
       owners,
       articleLinks,
       secretRefs,
