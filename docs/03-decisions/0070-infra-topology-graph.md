@@ -3,7 +3,7 @@ title: "ADR-0070: Infra topology graph — a generic visual CMDB of the server e
 tags: [adr, infra, topology, graph, cmdb, asset, agent, backend, frontend, shared]
 status: accepted
 created: 2026-06-23
-updated: 2026-06-23
+updated: 2026-08-07
 deciders: [Joaquín Minatel]
 ---
 
@@ -35,8 +35,9 @@ This is a **new major** for lazyit. The ADR fixes the **data model and the phasi
 > the impact/blast-radius query **and its UI** (§7), and the Meilisearch `infra` index; the frontend —
 > the React Flow **Diagram** canvas (drag/persist, status/kind styling, hover quick-facts), the
 > **drill-in panel** (owner / KB links / secret HANDLES / shortcuts / IP / children — the §6 payoff),
-> the **Servers** list (kind/status/state filters + client-side label/IP search), and the
-> impact highlight on the canvas. Nav: **Assets › Servers** + **Assets › Diagram**.
+> the **Servers** list (kind/status/state filters + ~~client-side label/IP search~~ — **corrected
+> 2026-08-07, #1152:** search, sort and paging are all SERVER-side now, see the §6 amendment below),
+> and the impact highlight on the canvas. Nav: **Assets › Servers** + **Assets › Diagram**.
 >
 > **DEFERRED:** the **v2 reporting agent** (its provenance/lifecycle columns — `source`, `state`,
 > `reportingSource`, `externalId`, `lastReportedAt` — exist nullable now, but no agent code, no review
@@ -388,6 +389,38 @@ list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (c
 > agent. The two paths carry different permissions (`settings:manage` vs `infra:manage`) and the control
 > renders only what the caller holds; with one path it collapses to a plain button. Nothing about the
 > wizard itself changed — it is reached, not rebuilt.
+
+> **Amendment (2026-08-07, #1152) — the Table pages, and the canvas got a read of its own.**
+> Two sentences elsewhere in this ADR were true only while the estate stayed small. They aren't
+> any more, and the reason is [[0095-hypervisor-guest-inventory]]: one hypervisor report can enrol up
+> to `AGENT_GUESTS_MAX` = **500** guests in a single write, and one Docker host adds a node per
+> container ([[0074-server-reporting-agent]] §3). "The estate is small by design" was a premise, and
+> it expired.
+>
+> **`GET /infra/nodes` is now the house `Page<T>`** — `{ items, total, limit, offset }`, default 50,
+> hard max 200, over-max rejected with 400 ([[0030-list-pagination-contract]] §9). It used to return a
+> bare `InfraNodeListItem[]` with no window at all; that wire shape is **gone**, and API + shared +
+> web moved in one change. The Servers Table consequently gets the ordinary house treatment: a
+> `Pagination` footer over `total`, `SortableHeader` on `label`/`kind`/`status`/`ipAddress`, and a
+> **server-side** `q` that now matches over the whole estate — label, IP, the linked asset's name and
+> each active owner's name and email — instead of re-filtering the rows already on screen. `asset` and
+> `owner` stay unsortable: they are joined relations, off the API's sort allowlist. Every sort carries
+> a unique `id` tiebreaker, because under a window a partial order duplicates a row onto one page and
+> drops it from another with nothing to signal the loss.
+>
+> **The canvas no longer reads that list.** §6 above describes a board that draws every node; a paged
+> list cannot feed it, because a map missing a node is not a shorter map — the node takes its edges
+> with it, so the board loses a *relationship* and §7's blast radius quietly returns a smaller answer
+> than the truth. So the board got **`GET /infra/graph/nodes`** (same `infra:read` gate): every live
+> node, projected to exactly what the board draws — `id`, `label`, `kind`, `status`, `ipAddress`,
+> `chassis` (for the ADR-0093 endpoint partition) and `x`/`y` — with the `owners`/`assetName` joins
+> and `shortcuts` dropped, so the complete read is strictly **cheaper** than the paged one it
+> replaced. It is bounded at `INFRA_GRAPH_NODES_MAX` = 2000 and **says so on the wire** via a required
+> `truncated` flag, which the canvas renders as a persistent banner naming both numbers. Pointing the
+> board at `?limit=200` was rejected: 200 sits *below* the 500-guest ceiling above, so one ordinary
+> hypervisor host would have pushed nodes off the map on the day it was enrolled. The general rule
+> this instantiates — bounded-but-complete instead of paged, whenever a partial answer would be
+> *wrong* rather than merely short — is recorded as [[0030-list-pagination-contract]] §12.
 
 ### 7. Impact / blast-radius — the query that justifies a graph
 

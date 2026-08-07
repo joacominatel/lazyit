@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-08-05
+updated: 2026-08-07
 ---
 
 # InfraNode
@@ -206,20 +206,50 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
 
 `apps/api/src/infra/` (`InfraModule`), all gated server-side (`infra:read` / `infra:manage`):
 
-- `GET /infra/nodes?kind=&status=&state=` — list (plain `InfraNodeListItem[]`, **no page envelope** —
-  the estate is small by design; excludes soft-deleted, newest first). Each row is the node PLUS the
-  linked Asset's inventory `assetName` and its active `owners`, joined in ONE query and flattened
-  (#750) — a soft-deleted asset never leaks its name. **Minus `specs`** (#1135): a lean `select`
-  projection omits the blob, because on an agent-reported host it is the whole inventory
-  (installed-software list included) and this endpoint is polled — every 40s by the PENDING review
-  tray, every 5s by the create-agent wizard. Nothing renders `specs` from a list row; read it from
-  the drill-in below. Ordering is a **total** order — `createdAt desc` then the unique `id` desc
-  (#1152). `createdAt` is not unique and ADR-0095 makes ties routine (one hypervisor report enrols up
-  to `AGENT_GUESTS_MAX` = 500 guest children in a single write, sharing a millisecond), so without the
-  tiebreaker tied rows reorder between two polls with no data change — and any future page window
-  would silently duplicate/drop them across pages. A `take`/pagination pass is still a tracked
-  follow-up: it needs a decision on whether to break this response shape to the house `Page<T>` and
-  whether the topology canvas gets its own bounded read (see #1152).
+- `GET /infra/nodes?kind=&status=&state=&source=&ids=&assetIds=&q=&limit=&offset=&page=&sort=&dir=` —
+  the **paged** list. Since #1152 it is the house `Page<T>` envelope
+  ([[0030-list-pagination-contract]] §9): `{ items, total, limit, offset }`, `limit` default 50 and
+  hard-capped at 200 (an over-max `limit` is a **400**, never a clamp), `total` counted over the
+  **same `where`** as `items` — so it is the count of what the filters asked for, which is what the
+  PENDING tray renders as its badge. **This replaced a bare `InfraNodeListItem[]`** — a breaking wire
+  change that landed front+back in lockstep, the second one this contract has taken (the first was
+  the reverse KB lookups, #220). Excludes soft-deleted.
+  - **Row shape.** Each row is the node PLUS the linked Asset's inventory `assetName` and its active
+    `owners`, joined in ONE query and flattened (#750) — a soft-deleted asset never leaks its name.
+    **Minus `specs`** (#1135): a lean `select` projection omits the blob, because on an agent-reported
+    host it is the whole inventory (installed-software list included) and this endpoint is polled —
+    every 40s by the PENDING review tray, every 5s by the create-agent wizard. Nothing renders `specs`
+    from a list row; read it from the drill-in below.
+  - **Filters.** `kind` / `status` / `state` / `source` (`MANUAL` | `AGENT`) are single-value enums,
+    unknown → 400. `ids` and `assetIds` are comma-encoded cuid batches (nodes by id, and the nodes
+    backing those Assets) — the batch-resolver shape `GET /users?ids=` set (ADR-0030 §6, #961), each
+    capped at **200** with over-cap a 400 rather than a silent trim; an unknown id matches nothing.
+    `q` is a **server-side**, case-insensitive substring over `label` / `ipAddress` / the linked
+    Asset's `name` / each active owner's `firstName`, `lastName` and `email`.
+  - **Sort allowlist:** `label`, `kind`, `status`, `state`, `ipAddress`, `lastReportedAt`,
+    `createdAt`, `updatedAt`; anything else → 400. `assetName` and `owners` are **not** sortable —
+    joined relations, deliberately off the allowlist.
+  - **Ordering is always a TOTAL order** — the default is `createdAt desc`, and the unique `id desc`
+    is appended to **every** sort, allowlisted or default. `createdAt` is not unique and
+    [[0095-hypervisor-guest-inventory]] makes ties routine (one hypervisor report enrols up to
+    `AGENT_GUESTS_MAX` = 500 guest children in a single write, sharing a millisecond); `label` is not
+    unique either. Without the tiebreaker tied rows reorder between two polls with no data change —
+    and under a `LIMIT`/`OFFSET` window a partial order duplicates a row onto one page while dropping
+    it from another, silently.
+  - **No `deleted` slice.** The ADR-0030 §7 "Show archived" param is deliberately **not accepted**
+    here: there is no archived-nodes view, so the slice would be contract surface nothing reads. It
+    lands with the view that needs it ([[0030-list-pagination-contract]] §11).
+- `GET /infra/graph/nodes` — **the topology canvas's own read** (#1152, same `infra:read` gate).
+  Returns `{ items, total, limit, truncated }` — **not** a `Page<T>`, and deliberately so: there is no
+  `offset`, because a map missing a node is a *wrong* map rather than a shorter one (the node takes
+  its edges with it, and the blast radius read off it comes back smaller than the truth). Each item is
+  projected to exactly `{ id, label, kind, status, ipAddress, chassis, x, y }` — the `owners` /
+  `assetName` relation joins and the `shortcuts` blob are dropped, because the board never drew them,
+  so this complete read is strictly **cheaper** than the paged list read it replaced. Bounded at
+  `INFRA_GRAPH_NODES_MAX` = **2000**, with `truncated` **REQUIRED** on the wire (`total >
+  items.length`, so an estate landing exactly on the cap reads as complete) — a client must never be
+  able to read *absent* as *fine*, and the canvas renders a persistent banner naming both numbers.
+  The general rule is [[0030-list-pagination-contract]] §12.
 - `GET /infra/nodes/:id` — the enriched **drill-in** (`InfraNodeDetail`): the node plus its
   asset-backed payoff — `assetName`, active `owners`, published `articleLinks`, `secretRefs`
   (HANDLES only, never values — INV-10, [[0061-secret-manager-zero-knowledge]]; resolved from the
@@ -283,12 +313,15 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   the `<host>/container/<name>` key), so confirming a host with its containers is one selection. Its
   filters (name glob or substring, subnet CIDR, reported kind, host-vs-container) and sorts are
   **client-side over the lean list row** — nothing was added back to the projection #1135 slimmed;
-  the subnet filter reuses the same `ipInCidr` the auto-confirm rules use. Paging `GET /infra/nodes`
-  is a separate concern (#1152) — and a live constraint on the tray: because its filters, sort,
-  grouping and bulk selection all run over the **loaded array**, a page window smaller than the
-  estate would silently narrow all four to the loaded slice while still presenting itself as the
-  whole tray. Whatever bounds this list must surface a `total` and a truncation cue, never a quiet
-  partial view.
+  the subnet filter reuses the same `ipInCidr` the auto-confirm rules use. Those four still run over
+  the **loaded array** — but since #1152 that array is **one batch, not the queue**: the tray requests
+  the maximum page (200) of `state=PENDING` in the list's `createdAt desc` order, so the newest
+  proposals are always in the window. The constraint that bounding this list must surface a `total`
+  and a truncation cue — never a quiet partial view — is therefore met explicitly: the header badge
+  counts **`total`** (never `items.length`), and whenever the two differ the tray says so in plain
+  language, *"Showing 200 of 431 pending nodes, most recently discovered first"*. That is a routine
+  state rather than a theoretical one, because one [[0095-hypervisor-guest-inventory]] report can
+  enrol 500 guests at once. Confirming or discarding a batch reveals the next.
 
 See [[infra-auto-confirm-rule]] for the saved-rule half of the same amendment.
 
