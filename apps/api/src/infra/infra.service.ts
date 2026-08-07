@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -81,6 +82,8 @@ import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
 import { appVersion } from '../common/export-provenance';
 import type { Principal } from '../auth/principal';
+import { isServicePrincipal } from '../auth/principal';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
@@ -97,6 +100,17 @@ import { AgentPolicyService } from './agent-policy.service';
  */
 export const INFRA_NODE_ASSET_REPOINT_ERROR =
   'This node already carries an asset, and a patch cannot swap it for another in one step: the current link would be dropped without the detach that cleans up after it, orphaning that asset if lazyit auto-created it — it would be left in inventory owned by nobody. Send `assetId: null` first to detach (an auto-created asset is soft-deleted, a pre-existing one is left intact and merely un-linked), then a second patch carrying the new `assetId`. Attaching an asset to a node that carries none is allowed directly. ADR-0070 §5.';
+
+/**
+ * The 403 an ARCHIVING detach gets without `asset:delete` (issue #1202). Written as a POLICY ANSWER,
+ * not a bug report: it names the permission that is missing, what the caller's `infra:manage` still
+ * buys them (every other edit on this node, including detaching an asset a human curated), and who
+ * can change the situation — so the operator reads a rule rather than a malfunction.
+ *
+ * Exported so the spec asserts the message the caller actually receives, not a copy of it.
+ */
+export const INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR =
+  'Detaching this node would ARCHIVE the asset lazyit auto-created for it — a soft delete, with its assignments and its place in inventory and search — and archiving an asset requires the `asset:delete` permission, here exactly as it does on `DELETE /assets/:id`. Your `infra:manage` still covers every other edit to this node, including detaching an asset a human curated (that only removes the link and leaves the row untouched). Ask an admin to grant `asset:delete` to your role, or have someone who holds it run this detach. ADR-0070 §5.';
 
 /**
  * The policy-related columns one report writes (#1140) — spread into the node `data` on every branch.
@@ -500,6 +514,11 @@ export class InfraService {
     private readonly autoConfirm: InfraAutoConfirmService,
     // The #1140 policy channel — resolution only; every WRITE to a policy scope is a human route.
     private readonly agentPolicy: AgentPolicyService,
+    // The RolePermission matrix (ADR-0046). Injected for exactly ONE decision: whether the caller may
+    // ARCHIVE the auto-created Asset a detach would soft-delete (#1202). It answers a question the
+    // `@RequirePermission` decorator cannot, because the answer depends on a stored row — see
+    // {@link detachAsset}. AuthModule is @Global, so no module wiring is needed.
+    private readonly permissions: PermissionResolverService,
   ) {}
 
   /**
@@ -3716,12 +3735,26 @@ export class InfraService {
     let assetName: string | null = null;
     let owners: Awaited<ReturnType<typeof this.resolveOwners>> = [];
     let articleLinks: Awaited<ReturnType<typeof this.resolveArticleLinks>> = [];
+    // WHICH detach a `PATCH { assetId: null }` would run (#1202) — the §5/ADR-0093 §4 marker, as a
+    // boolean. The drill-in has to say "this archives the asset" or "this only un-links it" BEFORE
+    // the operator commits, and those two sentences are not interchangeable: one soft-deletes a real
+    // inventory row. Read off the SAME row the inventory name already fetches (`specs` widens the
+    // existing select — no extra query), and left NULL when there is no link or the row is gone, so
+    // an unknown provenance degrades to the cautious wording client-side rather than to a false
+    // "nothing will be deleted". Display-only: `detachAsset` re-derives its own answer when it runs.
+    let assetAutoCreated: boolean | null = null;
     if (node.assetId) {
       const asset = await this.prisma.asset.findFirst({
         where: { id: node.assetId },
-        select: { name: true },
+        select: { name: true, specs: true },
       });
       assetName = asset?.name ?? null;
+      if (asset) {
+        const assetSpecs = (asset.specs ?? {}) as Record<string, unknown>;
+        // `=== true` exactly as `detachAsset` tests it — a looser check here would let the dialog
+        // promise an outcome the detach does not perform.
+        assetAutoCreated = assetSpecs[INFRA_AUTO_ASSET_MARKER] === true;
+      }
       owners = await this.resolveOwners(node.assetId);
       articleLinks = await this.resolveArticleLinks(node.assetId, principal);
     }
@@ -3748,6 +3781,7 @@ export class InfraService {
     return {
       ...node,
       assetName,
+      assetAutoCreated,
       owners,
       articleLinks,
       secretRefs,
@@ -4032,6 +4066,27 @@ export class InfraService {
    * Detach an asset from a node (ADR-0070 §5). Soft-delete it IFF it was auto-created by a node (the
    * provenance marker in `specs`); otherwise leave it intact (the node update nulls `assetId`). Reuses
    * AssetsService.remove so the soft-delete emits its DELETED history event + drops from search.
+   *
+   * **The archiving branch ALSO costs `asset:delete` (issue #1202).** The route is
+   * `@RequirePermission('infra:manage')`, and its siblings that merely create or link an Asset already
+   * AND-check `asset:write` at the decorator (`POST /nodes`, `POST /nodes/:id/confirm`). This branch
+   * does something strictly heavier — it archives an inventory row, which every other route in the app
+   * charges `asset:delete` for (`DELETE /assets/:id`), and whose undo (`POST /assets/:id/restore`) is
+   * gated the same way. Leaving it on `infra:manage` alone made the map a cheaper door to the same
+   * destructive operation.
+   *
+   * **Why the check is here and not on the decorator.** `@RequirePermission` is static metadata read
+   * before the handler runs, so it cannot see the one fact that decides whether anything is destroyed:
+   * the provenance marker on the CURRENTLY linked Asset. AND-checking `asset:delete` at the decorator
+   * would tax the un-link branch too — detaching a curated Asset destroys nothing, and charging a
+   * delete permission for dropping a column would be a regression dressed as caution. So the check
+   * fires from the exact branch that calls `AssetsService.remove`, which makes it impossible for the
+   * archive to happen without it, and impossible for it to fire when nothing is archived. This mirrors
+   * `WorkflowConnectionsService.assertMaySetCredentialBinding` — the house pattern for a permission
+   * whose applicability depends on row state.
+   *
+   * It throws BEFORE any write: the node's `assetId` is still set when the 403 lands, so a retry after
+   * the grant starts from the state the operator was looking at rather than from a half-done detach.
    */
   private async detachAsset(assetId: string, principal?: Principal) {
     const asset = await this.prisma.asset.findFirst({
@@ -4041,8 +4096,30 @@ export class InfraService {
     if (!asset) return; // already gone — nothing to detach (the node update still nulls assetId).
     const specs = (asset.specs ?? {}) as Record<string, unknown>;
     if (specs[INFRA_AUTO_ASSET_MARKER] === true) {
+      if (!(await this.principalHoldsAssetDelete(principal))) {
+        throw new ForbiddenException(INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR);
+      }
       await this.assets.remove(assetId, principal);
     }
+  }
+
+  /**
+   * Whether the caller holds `asset:delete`, for BOTH principal kinds (ADR-0048): a human resolves via
+   * the RolePermission matrix (DB-first, ADMIN is full), a service account via its direct grants — it
+   * has no Role, so asking the matrix would be a category error. A missing principal holds nothing →
+   * false (fail-closed): treating "no principal" as "not gated" would make the check bypassable by the
+   * one caller least entitled to bypass it.
+   */
+  private async principalHoldsAssetDelete(
+    principal?: Principal,
+  ): Promise<boolean> {
+    if (!principal) {
+      return false;
+    }
+    if (isServicePrincipal(principal)) {
+      return principal.permissions.has('asset:delete');
+    }
+    return this.permissions.hasAll(principal.user.role, ['asset:delete']);
   }
 
   /** PATCH a node's canvas position (x/y). Cheap + debounce-friendly (ADR-0070 MVP). 404 if missing. */

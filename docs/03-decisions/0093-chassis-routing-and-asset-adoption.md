@@ -277,6 +277,35 @@ state. The decision:
   answer is the existing **two-step**: `assetId: null` (the auto-created Asset is soft-deleted, since
   it carries the marker) then `assetId: <the curated one>`. The UI may sequence those two existing
   calls behind one button; the API keeps its rule and its error message intact.
+
+  **Taken up in #1202 — the UI now sequences it.** The permission the §7 sentence granted was unused
+  for as long as the drill-in carried no attach/detach control at all, which is what left the §8.5
+  notice pointing at a remediation with no path in the product. The duplicate notice now carries a
+  *"Point this node at the record you curated"* button that issues exactly those two PATCHes, and the
+  drill-in carries a general **Inventory link** control (attach when the node has none, detach when it
+  has one). No merge endpoint and no amended re-point rule — the API's §7 rule and its error message
+  are untouched. Two things the implementation had to add, both display-only:
+
+  - `InfraNodeDetail.assetAutoCreated` — the linked Asset's marker, projected as a `.nullish()`
+    boolean off the row `getNodeDetail` already reads for the inventory name. Without it the client
+    could not tell the two detach outcomes apart, and *"are you sure?"* over "archives an inventory
+    row" and "removes a link" is not a confirmation. Null/absent must render the **destructive** copy:
+    an unknown provenance is exactly when a dialog must not promise a survivor.
+  - The sequence is **resumable, never restartable.** `resolveDuplicateAssetSuspicion` returns null
+    for a node with no `assetId`, so step 1 erases the hint that named the curated Asset — the peer id
+    is captured before step 1, and a step-2 failure keeps the dialog open on a resume. Replaying the
+    detach after step 2 had landed would archive the curated row the operator was rescuing.
+
+  **Amended in the same issue (#1202 round 2): the archiving detach now costs `asset:delete` too.**
+  Building the button is what made the gap worth closing — until then step 1 was only reachable by a
+  hand-crafted request. `PATCH /infra/nodes/:id` is `infra:manage`, and its detach branch soft-deletes
+  an Asset, which every other route in the app charges `asset:delete` for and whose undo
+  (`POST /assets/:id/restore`) is gated the same way. It is now AND-checked — **conditionally**, in
+  `InfraService.detachAsset`, because only the stored marker distinguishes the archive from the
+  un-link and `@RequirePermission` cannot read a row. The §7 remediation therefore needs
+  `infra:manage` + `asset:delete`, since **this notice only ever renders for a marked Asset** — its
+  step 1 is always the archiving branch. Detaching a curated Asset stays `infra:manage` alone. See
+  [[0070-infra-topology-graph]] §8.
 - **`modelId` stays null on the mint branch, and untouched on the adopt branch.** Auto-creating an
   `AssetModel` is a human product call ([[0074-server-reporting-agent]] §3 amendment, #1081) and
   adoption strengthens that: an adopted Asset may already carry a human's `modelId`, and category

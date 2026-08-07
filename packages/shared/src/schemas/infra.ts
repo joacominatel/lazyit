@@ -338,6 +338,25 @@ export const InfraAssetCandidateSchema = z.object({
 export const InfraNodeDetailSchema = InfraNodeSchema.extend({
   /** The linked Asset's `name` (the secondary "inventory name"); null when the node is graph-only. */
   assetName: z.string().nullable(),
+  /**
+   * WHICH DETACH this node's link would run (#1202) — the linked Asset's `_infraAutoCreated`
+   * provenance marker, projected as a boolean.
+   *
+   * `PATCH { assetId: null }` has two materially different outcomes and the client could not tell
+   * them apart until this field existed: `true` means lazyit minted the Asset, so a detach
+   * **soft-deletes** it (`AssetsService.remove` — a DELETED history event, dropped from search);
+   * `false` means a human curated it, so a detach **only un-links** and the row is untouched. That
+   * is the ADR-0093 §4 marker rule, and it is deliberately never stamped on the adopt branch.
+   *
+   * Display-only, computed per read, and NEVER a gate — the `ipConflict`/`assetCandidate` mold. The
+   * detach re-derives its own answer from `specs` at the moment it runs, so a stale value can only
+   * mis-word a dialog, never mis-delete a row.
+   *
+   * `.nullish()` for read tolerance (CLAUDE.md #8): an older API omits it entirely, and a graph-only
+   * node has no link to describe. **A consumer must treat null/absent as the DESTRUCTIVE branch** —
+   * unknown provenance is exactly when a confirmation must not promise "nothing will be deleted".
+   */
+  assetAutoCreated: z.boolean().nullish(),
   /** Active owners via the linked Asset's `AssetAssignment`s; `[]` when graph-only or unowned. */
   owners: z.array(InfraNodeOwnerSchema),
   /** PUBLISHED KB articles linked to the node's Asset (folder-scoped); `[]` when graph-only. */
