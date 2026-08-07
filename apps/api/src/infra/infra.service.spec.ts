@@ -3498,6 +3498,46 @@ describe('InfraService', () => {
     });
   });
 
+  // ── Edge list ordering (#1152) ──────────────────────────────────────────────
+
+  describe('listEdgesForNode', () => {
+    // The SAME defect as the node list above, one method away and on the same screens. `startedAt`
+    // is `@default(now())` with no unique tiebreaker, and a hypervisor report creates its guests'
+    // `RUNS_ON` edges back to back inside one write — so same-millisecond ties are the normal case
+    // here too, not a freak coincidence.
+    //
+    // Why it is worse on this endpoint than on the node list: the Connections drill-in
+    // (`node-edges-manager.tsx`) renders this array in SERVER order (it only filters on `endedAt`,
+    // it never sorts), and every infra mutation invalidates `infraKeys.all`, so it re-fetches
+    // constantly. The operator opens Connections to close one stale edge on a 40-guest host; any
+    // invalidation re-orders the tied rows and the row under the cursor is now a DIFFERENT edge.
+    // Closing an edge is a write, so the mis-click lands. Appending the unique `id` makes the order
+    // total and the rows stable between reads.
+    it('orders by startedAt desc with a UNIQUE `id` tiebreaker (a total order)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'host-1' });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listEdgesForNode('host-1');
+
+      const arg = firstArg<{ orderBy: unknown }>(prisma.infraEdge.findMany);
+      expect(arg.orderBy).toEqual([{ startedAt: 'desc' }, { id: 'desc' }]);
+    });
+
+    it('breaks a same-millisecond tie deterministically (guests enrolled in one hypervisor report)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'host-1' });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listEdgesForNode('host-1', false);
+
+      const arg = firstArg<{ orderBy: Array<Record<string, unknown>> }>(
+        prisma.infraEdge.findMany,
+      );
+      // The LAST orderBy term must be unique per row, or the order stays partial and ties can move.
+      const tiebreaker = arg.orderBy[arg.orderBy.length - 1];
+      expect(Object.keys(tiebreaker)).toEqual(['id']);
+    });
+  });
+
   // ── Edge close (ADR-0019 lifecycle marker) ──────────────────────────────────
 
   describe('closeEdge', () => {
