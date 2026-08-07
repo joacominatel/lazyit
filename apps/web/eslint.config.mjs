@@ -70,9 +70,9 @@ const eslintConfig = defineConfig([
   {
     name: "lazyit/no-secure-context-only-crypto",
     files: ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.ts"],
-    // `totp.ts` is the one KNOWN remaining offender (TOTP codes are dead on plain HTTP) — tracked
-    // as #1126, which swaps `crypto.subtle` for @noble/hashes. Drop this ignore when it lands.
-    ignores: ["components/ui/**", "lib/secret-manager/totp.ts"],
+    // No `lib/**` exemptions remain: #1126 swapped the last `crypto.subtle` offender
+    // (`lib/secret-manager/totp.ts`) to @noble/hashes, so the guard now covers every file it matches.
+    ignores: ["components/ui/**"],
     rules: {
       // `no-restricted-properties`, NOT `no-restricted-syntax`: flat config REPLACES a rule's
       // options per matching file, so a second `no-restricted-syntax` block would silently
