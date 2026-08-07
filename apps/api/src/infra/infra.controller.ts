@@ -314,6 +314,12 @@ export class InfraController {
       'MANUAL (hand-drawn) or AGENT (reported). Pair with limit=1 to ask "does this estate have any agent node yet?" without reading the list.',
   })
   @ApiQuery({
+    name: 'ids',
+    required: false,
+    description:
+      'Comma-encoded cuids: restrict to these node ids. For a caller that already knows which nodes it needs and only wants their labels (the drill-in edge panel).',
+  })
+  @ApiQuery({
     name: 'assetIds',
     required: false,
     description:
@@ -347,6 +353,7 @@ export class InfraController {
     @Query('status') status?: string,
     @Query('state') state?: string,
     @Query('source') source?: string,
+    @Query('ids') ids?: string | string[],
     @Query('assetIds') assetIds?: string | string[],
     @Query('q') q?: string,
     @Query('limit') limit?: string,
@@ -364,6 +371,7 @@ export class InfraController {
         status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
         state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
         source: this.parseEnum(source, InfraNodeSourceSchema, 'source'),
+        ids: parseCuidArrayQuery(ids, 'ids'),
         assetIds: parseCuidArrayQuery(assetIds, 'assetIds'),
         q,
       },
