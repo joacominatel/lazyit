@@ -157,14 +157,21 @@ while the rest of the vault worked. #1126 converted it to `hmac` + `sha1`/`sha25
 **Rules for anyone extending the vault:**
 
 1. **Never reach for `crypto.subtle`**, even when it is the obvious tool. `lazyit/no-secure-context-only-crypto`
-   in `apps/web/eslint.config.mjs` blocks it at `error` severity with no `lib/**` exemptions.
+   in `apps/web/eslint.config.mjs` blocks it at `error` severity with no `lib/**` exemptions. The ban is
+   keyed on the **property alone**, not on a `crypto` object — an `object`-scoped restriction only
+   matches a bare identifier, so it would have caught `crypto.subtle` while waving through
+   `window.crypto.subtle`, `globalThis.crypto.subtle`, `self.crypto.subtle` and any local alias. Coverage
+   of those forms is pinned by `apps/web/eslint.config.test.ts`, which lints fixture snippets through the
+   real config; extend that matrix rather than trusting the rule by inspection.
 2. **Never add a "use `crypto.subtle` when available, fall back otherwise" path.** Two branches where
    development only ever exercises the secure one is precisely how this bug class survives review. One
    tested path.
 3. **Test the insecure context explicitly.** `crypto.subtle` is a *non-configurable* property of the
    real `crypto` object, so it cannot be deleted in place — swap the whole `globalThis.crypto` for a
    `getRandomValues`-only shim and restore it afterwards. `apps/web/lib/secret-manager/totp.test.ts`
-   has the working pattern.
+   has the working pattern. Assert the absence with `"subtle" in globalThis.crypto`, not a
+   `globalThis.crypto.subtle` member access: the property-keyed lint ban above applies to test files
+   too, and a guard that needs a disable comment in the very test that proves the bug is not a guard.
 4. **Watch for guarantees you silently lose.** Pure-JS HMAC accepts a zero-length key where
    `crypto.subtle.importKey` rejected it with `DataError`; without an explicit check, a malformed seed
    would produce a plausible but meaningless code instead of a visible error. Keep such failures loud.

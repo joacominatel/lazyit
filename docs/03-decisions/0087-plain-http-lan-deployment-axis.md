@@ -151,6 +151,14 @@ so a whole family of browser APIs is simply `undefined` there. `localhost` **is*
 `crypto.getRandomValues()` is **fine** — it is available in insecure contexts, which is why the
 zero-knowledge vault (`@noble/*` + `getRandomValues`) keeps working in `lan` mode as claimed above.
 
+The ban is keyed on the **property name alone**, so it catches the prefixed and aliased spellings
+(`window.crypto.subtle`, `globalThis.crypto.subtle`, `self.crypto.subtle`, `const c = crypto; c.subtle`)
+as well as the bare one — an `object: "crypto"` restriction would not, because ESLint only matches that
+key against a bare identifier. What the lint block does **not** see is a dynamic reach
+(`crypto[name]`, `Reflect.get`) or a re-export through another module; those stay a review concern.
+The coverage is pinned by `apps/web/eslint.config.test.ts`, which lints fixture snippets through the
+real config, so a future edit that narrows the rule fails a test instead of silently reopening the class.
+
 Known history of this class: #813 (clipboard silently no-ops — a Copy that looked like it saved the
 recovery key but didn't), #1125 (`crypto.randomUUID` crashed the workflow step editor on mount, making
 the builder unusable), #1126 (`crypto.subtle` — TOTP secret items rendered a permanent "check the seed
