@@ -6691,6 +6691,156 @@ describe('InfraService', () => {
     });
   });
 
+  // ── The detach-outcome read field (#1202) ───────────────────────────────────
+  //
+  // `PATCH { assetId: null }` has two materially different outcomes — soft-delete the linked Asset
+  // (it carries `_infraAutoCreated`) or merely un-link it — and until this field the client could
+  // not tell which one a click would run, because `getNodeDetail` selected only the Asset's `name`.
+  // A confirmation that cannot name its own outcome is the #1202 bug; this is what makes it nameable.
+
+  describe('getNodeDetail — `assetAutoCreated`, which detach a click would run (#1202)', () => {
+    it('is TRUE when the linked Asset carries the auto-created marker — a detach ARCHIVES it', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'web-01',
+        specs: { _infraAutoCreated: true },
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(true);
+    });
+
+    it('is FALSE for a curated Asset — a detach only UN-LINKS it (ADR-0093 §4)', async () => {
+      // The marker is never stamped on the adopt branch, so an adopted/hand-linked row lands here.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-curated',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'Dell XPS 7490',
+        specs: { warranty: 'until 2027' },
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(false);
+    });
+
+    it('is FALSE when the linked Asset has NO specs at all — an absent blob is not a marker', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-curated',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({ name: 'srv-01', specs: null });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(false);
+    });
+
+    it('is FALSE when the marker is present but not exactly `true` — strict, like detachAsset', async () => {
+      // `detachAsset` tests `=== true`. This projection must agree with it EXACTLY, or the dialog
+      // would promise an archive the detach does not perform (or worse, the reverse).
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-1',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'srv-01',
+        specs: { _infraAutoCreated: 'true' },
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(false);
+    });
+
+    it('is NULL on a graph-only node — there is no link, so there is no detach to describe', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: null,
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(null);
+    });
+
+    it('is NULL when the linked Asset row is GONE — unknown provenance is never a false "safe"', async () => {
+      // The client renders null as the DESTRUCTIVE copy, so a missing row degrades to the cautious
+      // wording rather than to "nothing will be deleted".
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-gone',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue(null);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(null);
+      expect(detail.assetName).toBe(null);
+    });
+
+    it('costs NO extra query — it rides the Asset read the inventory name already makes', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: null, // no reported serial → the duplicate-suspicion probe short-circuits
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'web-01',
+        specs: { _infraAutoCreated: true },
+      });
+
+      await service.getNodeDetail('node-1', HUMAN);
+
+      // ONE asset read for the whole drill-in: the name + the marker come out of the same row.
+      expect(prisma.asset.findFirst).toHaveBeenCalledTimes(1);
+      expect(prisma.asset.findFirst).toHaveBeenCalledWith({
+        where: { id: 'asset-auto' },
+        select: { name: true, specs: true },
+      });
+    });
+  });
+
   // ── Hypervisor guest children (ADR-0095 §5, #1217) ──────────────────────────
   //
   // The container machinery one level up, MIRRORED: reported-set diff, skip-when-unchanged,
