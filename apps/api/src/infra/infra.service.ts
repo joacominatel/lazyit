@@ -3562,7 +3562,10 @@ export class InfraService {
   }
 
   /**
-   * A page-less list of nodes, newest first, filtered; soft-deleted nodes excluded by the extension.
+   * A page-less list of nodes, newest first (with a deterministic `id` tiebreaker — see the
+   * `orderBy` note), filtered; soft-deleted nodes excluded by the extension. The page WINDOW is
+   * still open (#1152): bounding this list means either breaking the wire shape to the house
+   * `Page<T>` or giving the topology canvas its own read, and that call is not made here.
    * Each row carries the Servers-list payoff (ADR-0070 §6, issue #750): the linked Asset's inventory
    * `assetName` and its active `owners` — joined in ONE query (a single relation join, NOT an
    * N+1 per-row detail fetch), then flattened to the lean `InfraNodeListItem` wire shape. Mirrors the
@@ -3596,7 +3599,16 @@ export class InfraService {
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.state ? { state: filters.state } : {}),
       },
-      orderBy: { createdAt: 'desc' },
+      // TOTAL order, not just newest-first (#1152). `createdAt` is NOT unique, and ADR-0095 makes
+      // ties the normal case: one hypervisor report enrols up to AGENT_GUESTS_MAX (500) PENDING
+      // guest children in a single write, so hundreds of rows share a millisecond. Postgres may
+      // return tied rows in any order and does reorder them between reads, so `createdAt desc`
+      // alone lets rows visibly jump between two polls of this endpoint (every 40s from the tray,
+      // every 5s from the wizard) with no data change. Appending the unique `id` primary key makes
+      // the order deterministic. This is also the precondition for the page window this endpoint
+      // still needs: under LIMIT/OFFSET an unstable sort silently DUPLICATES a row onto one page
+      // and DROPS it from another, with nothing to signal the loss.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: {
         id: true,
         kind: true,
@@ -4403,7 +4415,8 @@ export class InfraService {
   /**
    * List a node's edges (ADR-0070 v1 edge history). `activeOnly` (default) returns only open edges
    * (endedAt null); pass false for the full history including closed ones (migrations). Covers edges
-   * where the node is EITHER endpoint (source or target), newest first.
+   * where the node is EITHER endpoint (source or target), newest first with a deterministic
+   * tiebreaker (see the `orderBy` note).
    */
   async listEdgesForNode(nodeId: string, activeOnly = true) {
     await this.getNode(nodeId);
@@ -4412,7 +4425,16 @@ export class InfraService {
         OR: [{ sourceId: nodeId }, { targetId: nodeId }],
         ...(activeOnly ? { endedAt: null } : {}),
       },
-      orderBy: { startedAt: 'desc' },
+      // TOTAL order, not just newest-first (#1152) — the same reasoning as `listNodes`. `startedAt`
+      // is `@default(now())` with no unique tiebreaker, and a hypervisor report writes its guests'
+      // RUNS_ON edges back to back in one report, so same-millisecond ties are routine, not rare.
+      // It matters MORE here than on the node list: the Connections drill-in
+      // (`node-edges-manager.tsx`) renders this array in SERVER order — it filters on `endedAt` and
+      // never sorts — and every infra mutation invalidates `infraKeys.all`, so it re-fetches often.
+      // With a partial order, an invalidation mid-review swaps two tied rows and the operator's
+      // click lands on a DIFFERENT edge than the one they read. Closing an edge is a write, so that
+      // mis-click is a real state change, not a display glitch. The unique `id` makes it stable.
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
     });
   }
 

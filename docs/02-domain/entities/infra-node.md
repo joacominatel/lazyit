@@ -213,7 +213,13 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   projection omits the blob, because on an agent-reported host it is the whole inventory
   (installed-software list included) and this endpoint is polled — every 40s by the PENDING review
   tray, every 5s by the create-agent wizard. Nothing renders `specs` from a list row; read it from
-  the drill-in below. A `take`/pagination pass is still a tracked follow-up.
+  the drill-in below. Ordering is a **total** order — `createdAt desc` then the unique `id` desc
+  (#1152). `createdAt` is not unique and ADR-0095 makes ties routine (one hypervisor report enrols up
+  to `AGENT_GUESTS_MAX` = 500 guest children in a single write, sharing a millisecond), so without the
+  tiebreaker tied rows reorder between two polls with no data change — and any future page window
+  would silently duplicate/drop them across pages. A `take`/pagination pass is still a tracked
+  follow-up: it needs a decision on whether to break this response shape to the house `Page<T>` and
+  whether the topology canvas gets its own bounded read (see #1152).
 - `GET /infra/nodes/:id` — the enriched **drill-in** (`InfraNodeDetail`): the node plus its
   asset-backed payoff — `assetName`, active `owners`, published `articleLinks`, `secretRefs`
   (HANDLES only, never values — INV-10, [[0061-secret-manager-zero-knowledge]]; resolved from the
@@ -278,7 +284,11 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   filters (name glob or substring, subnet CIDR, reported kind, host-vs-container) and sorts are
   **client-side over the lean list row** — nothing was added back to the projection #1135 slimmed;
   the subnet filter reuses the same `ipInCidr` the auto-confirm rules use. Paging `GET /infra/nodes`
-  is a separate concern (#1152).
+  is a separate concern (#1152) — and a live constraint on the tray: because its filters, sort,
+  grouping and bulk selection all run over the **loaded array**, a page window smaller than the
+  estate would silently narrow all four to the loaded slice while still presenting itself as the
+  whole tray. Whatever bounds this list must surface a `total` and a truncation cue, never a quiet
+  partial view.
 
 See [[infra-auto-confirm-rule]] for the saved-rule half of the same amendment.
 
