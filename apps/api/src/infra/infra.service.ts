@@ -3562,7 +3562,10 @@ export class InfraService {
   }
 
   /**
-   * A page-less list of nodes, newest first, filtered; soft-deleted nodes excluded by the extension.
+   * A page-less list of nodes, newest first (with a deterministic `id` tiebreaker — see the
+   * `orderBy` note), filtered; soft-deleted nodes excluded by the extension. The page WINDOW is
+   * still open (#1152): bounding this list means either breaking the wire shape to the house
+   * `Page<T>` or giving the topology canvas its own read, and that call is not made here.
    * Each row carries the Servers-list payoff (ADR-0070 §6, issue #750): the linked Asset's inventory
    * `assetName` and its active `owners` — joined in ONE query (a single relation join, NOT an
    * N+1 per-row detail fetch), then flattened to the lean `InfraNodeListItem` wire shape. Mirrors the
@@ -3596,7 +3599,16 @@ export class InfraService {
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.state ? { state: filters.state } : {}),
       },
-      orderBy: { createdAt: 'desc' },
+      // TOTAL order, not just newest-first (#1152). `createdAt` is NOT unique, and ADR-0095 makes
+      // ties the normal case: one hypervisor report enrols up to AGENT_GUESTS_MAX (500) PENDING
+      // guest children in a single write, so hundreds of rows share a millisecond. Postgres may
+      // return tied rows in any order and does reorder them between reads, so `createdAt desc`
+      // alone lets rows visibly jump between two polls of this endpoint (every 40s from the tray,
+      // every 5s from the wizard) with no data change. Appending the unique `id` primary key makes
+      // the order deterministic. This is also the precondition for the page window this endpoint
+      // still needs: under LIMIT/OFFSET an unstable sort silently DUPLICATES a row onto one page
+      // and DROPS it from another, with nothing to signal the loss.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: {
         id: true,
         kind: true,
