@@ -395,6 +395,11 @@ function GeneralTab({
   const { date } = useFormatters();
   const deleteNode = useDeleteInfraNode();
   const chassis = displayChassis(node.chassis);
+  // The #1202 second gate. Read here rather than threaded from the modal root because it is a LOCAL
+  // concern of two controls in this tab — the asset link and the duplicate remediation — and both of
+  // them are on the same branch: the one that ARCHIVES an auto-created Asset, which the API now
+  // AND-checks `asset:delete` for. `infra:manage` still buys everything else on this screen.
+  const canArchiveAssets = useCan("asset:delete");
 
   return (
     <>
@@ -460,14 +465,18 @@ function GeneralTab({
               nodeId={node.id}
               asset={node.duplicateAssetSuspicion}
               canManage={canManage}
+              canArchiveAssets={canArchiveAssets}
             />
           ) : null}
 
           {/* The inventory LINK itself (#1202) — attach when the node carries none, detach when it
               does, with the confirmation naming which of the two detach outcomes is about to run.
-              Gated on `infra:manage`, which is exactly how `PATCH /infra/nodes/:id` gates itself, so
-              a reader never sees a button that would 403 on them. It sits right under the identity
-              block because the link IS identity: it is what makes the node asset-backed. */}
+              Gated on `infra:manage`, which is how `PATCH /infra/nodes/:id` gates itself, plus
+              `asset:delete` on the archiving arm ONLY — the AND-check the API added in #1202 for the
+              detach that soft-deletes an auto-created row. Gating the whole control on both would
+              take the un-link away from a role that can still perform it, so the second permission
+              travels in as a prop and is applied per arm. It sits right under the identity block
+              because the link IS identity: it is what makes the node asset-backed. */}
           {canManage ? (
             <Section title={t("panel.assetLink.title")}>
               <NodeAssetControl
@@ -475,6 +484,7 @@ function GeneralTab({
                 assetId={node.assetId}
                 assetName={node.assetName}
                 assetAutoCreated={node.assetAutoCreated}
+                canArchiveAssets={canArchiveAssets}
               />
             </Section>
           ) : null}
@@ -940,10 +950,18 @@ function DuplicateAssetNotice({
   nodeId,
   asset,
   canManage,
+  canArchiveAssets,
 }: {
   nodeId: string;
   asset: InfraAssetCandidate;
   canManage: boolean;
+  /**
+   * Whether the caller holds `asset:delete` (#1202). Load-bearing here in a way it is not for the
+   * asset-link control: this notice only ever renders for a node whose Asset carries the auto-created
+   * marker (`resolveDuplicateAssetSuspicion` returns null otherwise), so its remediation ALWAYS opens
+   * with the archiving detach. There is no un-archiving arm to fall back to.
+   */
+  canArchiveAssets: boolean;
 }) {
   const t = useTranslations("infra");
   return (
@@ -977,8 +995,19 @@ function DuplicateAssetNotice({
           </p>
         ) : null}
       </div>
-      {/* Gated exactly like every other write here: `infra:manage`, which is what the PATCH requires. */}
-      {canManage ? <RelinkToCuratedControl nodeId={nodeId} peer={asset} /> : null}
+      {/* `infra:manage` to see an action at all, plus `asset:delete` to run it: step 1 of the §7
+          sequence archives the auto-created stand-in, which the API AND-checks since #1202. Without
+          the permission the notice keeps its whole point — it still NAMES the curated row and links
+          to it — and says what is missing, rather than offering a button whose first call 403s. */}
+      {canManage ? (
+        canArchiveAssets ? (
+          <RelinkToCuratedControl nodeId={nodeId} peer={asset} />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t("panel.duplicateAssetRelinkBlocked")}
+          </p>
+        )
+      ) : null}
     </div>
   );
 }
