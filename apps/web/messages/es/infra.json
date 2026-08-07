@@ -58,6 +58,7 @@
   "pending": {
     "title": "Revisión pendiente",
     "description": "Hosts que descubrió el agente de reporte. Confirmá para sumarlos a tu inventario, o descartalos.",
+    "batch": "Se muestran {shown} de {total} nodos pendientes, los descubiertos más recientemente primero. Confirmá o descartá estos para que aparezcan los demás.",
     "confirmAction": "Confirmar",
     "mergeAction": "Unificar con…",
     "discardAction": "Descartar",
@@ -102,6 +103,8 @@
     },
     "targetLabel": "Unificar con",
     "targetPlaceholder": "Elegí un servidor",
+    "targetSearch": "Buscá servidores por nombre…",
+    "targetEmpty": "Ningún servidor coincide con esa búsqueda.",
     "targetDescription": "El servidor que elijas conserva su nombre, tipo, posición, responsable y activo vinculado. Todo lo que pertenece al agente se mueve con la clave de reporte: los datos reportados de hardware y software, el estado, el último reporte y la versión del agente — y también la IP, salvo que esa IP se haya cargado a mano. Si ya reporta con un agente propio, esa clave se reemplaza: un host que siga usándola volverá como un servidor pendiente nuevo.",
     "submit": "Unificar",
     "mergedToast": "Servidor unificado.",
@@ -319,6 +322,10 @@
     "showHint": "Las notebooks y los equipos de escritorio se mantienen fuera del mapa para que el parque siga siendo legible. Siguen en tu inventario, en la lista de servidores y en la búsqueda: esto solo cambia lo que el mapa dibuja.",
     "hide": "{count, plural, one {Ocultar # equipo de usuario} other {Ocultar # equipos de usuario}}",
     "hideHint": "Volvé a sacar del mapa las notebooks y los equipos de escritorio. No se elimina nada: siguen en tu inventario, en la lista de servidores y en la búsqueda."
+  },
+  "graph": {
+    "truncated": "Se muestran {shown} de {total} nodos: este mapa está incompleto.",
+    "truncatedHint": "El mapa dibuja como máximo {shown} nodos. Los que quedaron afuera siguen en tu inventario, en la lista de servidores y en la búsqueda, pero sus conexiones no se dibujan acá: tenelo en cuenta al leer un radio de impacto."
   },
   "legend": {
     "title": "Referencia de conexiones"
@@ -540,8 +547,8 @@
     "kindPlaceholder": "Elegí una relación",
     "targetLabel": "Otro nodo",
     "targetPlaceholder": "Elegí un nodo",
-    "targetSearch": "Buscar nodos…",
-    "targetEmpty": "No hay otros nodos.",
+    "targetSearch": "Buscá nodos por nombre…",
+    "targetEmpty": "Ningún nodo coincide con esa búsqueda.",
     "directionNote": "Este nodo es el origen; la relación apunta al otro nodo.",
     "submit": "Conectar",
     "createdToast": "Conexión agregada.",

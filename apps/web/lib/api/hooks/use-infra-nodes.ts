@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQueries,
@@ -6,6 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import type {
   AttachInfraSecret,
   BulkConfirmInfraNodes,
@@ -17,10 +19,11 @@ import type {
   UpdateInfraAutoConfirmRule,
   CreateInfraEdge,
   InfraEdge,
+  InfraGraph,
   InfraImpactResponse,
   InfraNode,
   InfraNodeDetail,
-  InfraNodeListItem,
+  InfraNodeListPage,
   UpdateInfraNode,
 } from "@lazyit/shared";
 import {
@@ -45,7 +48,8 @@ import {
   getInfraNodeIdentityMatches,
   getInfraNodeImpact,
   getInfraNodes,
-  type InfraNodeFilters,
+  getInfraGraphNodes,
+  type InfraNodeListParams,
   mergeInfraNodeInto,
   restoreInfraNode,
   updateInfraNode,
@@ -56,11 +60,14 @@ import {
  * Query keys + read/write hooks for the infra topology canvas + drill-in panel (ADR-0070, issues
  * #741 + #742).
  *
- * Hand-written (not `createQueryKeys`) for the canvas's bespoke shapes: a filtered node list, a
- * PER-NODE edge list (the API has no global edges endpoint), the enriched per-node `detail`, and a
- * per-node edge `history` (active + closed). Every mutation invalidates `infraKeys.all`, which
- * prefix-matches all `["infra", …]` keys — so a create/edit/delete/edge write refreshes the canvas
- * node list, the open panel's detail, and its edge lists in one call (TanStack Query v5 prefix match).
+ * Hand-written (not `createQueryKeys`) for the canvas's bespoke shapes: a PAGED node list, the
+ * canvas's own whole-graph read, an exact asset→node batch resolve, a PER-NODE edge list (the API has
+ * no global edges endpoint), the enriched per-node `detail`, and a per-node edge `history` (active +
+ * closed). Every mutation invalidates `infraKeys.all`, which prefix-matches all `["infra", …]` keys —
+ * so a create/edit/delete/edge write refreshes every node page, the graph, the open panel's detail
+ * and its edge lists in one call (TanStack Query v5 prefix match). That prefix match is why
+ * `infraKeys.graph()` and `infraKeys.assetNodes()` are built from `infraKeys.all` rather than being
+ * standalone keys: a write must never leave one node surface stale beside a refreshed one.
  */
 /**
  * Modest background poll (issue #1081) for the live node surfaces — the pending tray, the Servers
@@ -72,8 +79,24 @@ export const INFRA_LIVE_POLL_MS = 40_000;
 
 export const infraKeys = {
   all: ["infra"] as const,
-  nodes: (filters: InfraNodeFilters) =>
-    [...infraKeys.all, "nodes", filters] as const,
+  nodes: (params: InfraNodeListParams) =>
+    [...infraKeys.all, "nodes", params] as const,
+  /**
+   * The topology canvas's own read (`GET /infra/graph/nodes`, #1152). A SIBLING of `nodes`, not a
+   * variant of it: it is a different endpoint with a different shape, and giving it its own key is
+   * what keeps a page write from being mistaken for a graph write. It still sits under
+   * `infraKeys.all`, so every mutation's `invalidateQueries({ queryKey: infraKeys.all })` prefix-
+   * matches it and the board refreshes with everything else.
+   */
+  graph: () => [...infraKeys.all, "graph"] as const,
+  /**
+   * The exact asset→node resolve behind the Assets screen's "On topology" affordances (#765/#1152).
+   * Its OWN key, never the canvas's: these are `?assetIds=` batch reads whose result set is a handful
+   * of rows, and sharing a cache entry with a surface that means "the whole board" is how a lookup
+   * ends up quietly answering from a window.
+   */
+  assetNodes: (assetIds: string[]) =>
+    [...infraKeys.all, "assetNodes", assetIds] as const,
   edges: (nodeId: string) => [...infraKeys.all, "edges", nodeId] as const,
   detail: (nodeId: string) => [...infraKeys.all, "detail", nodeId] as const,
   edgeHistory: (nodeId: string) =>
@@ -85,61 +108,113 @@ export const infraKeys = {
   autoConfirmRules: () => [...infraKeys.all, "autoConfirmRules"] as const,
 };
 
-/** List topology nodes, optionally filtered. The canvas keeps the fetch client-side (React Flow is
- * client-only — no SSR prefetch, per #741).
+/**
+ * A PAGE of topology nodes (`GET /infra/nodes`, ADR-0030 / #1152). The canvas keeps the fetch
+ * client-side (React Flow is client-only — no SSR prefetch, per #741).
  *
- * `options` exposes just the two react-query knobs the agent-onboarding live-wait needs (ADR-0074
- * §3 / #831): `enabled` to fire the poll only while the wizard's "waiting" step is open, and
- * `refetchInterval` to poll the PENDING list every few seconds until the freshly-installed host
- * checks in. Per-observer, so it never forces a refetch interval on the table/tray that share the key. */
+ * Returns the `{ items, total, limit, offset }` envelope, NOT a bare array. Every caller reads
+ * `.items` for rows and `.total` for any count it shows — those two are different numbers the moment
+ * the estate outgrows one page, and conflating them is how a tray of 431 proposals renders as 200.
+ *
+ * `placeholderData: keepPreviousData` holds the current page while the next one resolves, so paging
+ * and searching never flash the skeleton — the same treatment every other paginated list hook gets.
+ *
+ * `options` exposes the two react-query knobs the live surfaces need (ADR-0074 §3 / #831): `enabled`
+ * to fire a poll only while the wizard's "waiting" step is open, and `refetchInterval` to poll until
+ * a freshly-installed host checks in. Per-observer, so it never forces an interval on another
+ * consumer that happens to share the key.
+ */
 export function useInfraNodes(
-  filters: InfraNodeFilters = {},
+  params: InfraNodeListParams = {},
   options?: { enabled?: boolean; refetchInterval?: number | false },
 ) {
   return useQuery({
-    queryKey: infraKeys.nodes(filters),
-    queryFn: ({ signal }) => getInfraNodes(filters, signal),
+    queryKey: infraKeys.nodes(params),
+    queryFn: ({ signal }) => getInfraNodes(params, signal),
+    placeholderData: keepPreviousData,
     ...options,
   });
 }
 
 /**
- * Resolve the topology node backing an asset, for the Assets screen's "On topology" badge + "View in
- * topology" deep-link (issue #765). ponytail: rather than a bespoke `?assetId=` endpoint, reuse the
- * already-cached node list (`useInfraNodes`) and find the match client-side — the estate is small by
- * design (ADR-0070), so the whole list is cheap to hold and scan. `enabled` gates the fetch on
- * `infra:read` so a viewer without topology access never fires a 403 (the badge simply won't show).
+ * The whole topology graph for the canvas (`GET /infra/graph/nodes`, #1152) — the narrow projection
+ * the board draws, complete by default and bounded at `INFRA_GRAPH_NODES_MAX`.
  *
- * Returns the matched node id (or null when the asset doesn't back one), so callers build the link
- * from a bare id without re-deriving the lookup.
+ * Its own endpoint rather than `useInfraNodes({ limit: 200 })` because 200 sits BELOW the ADR-0095
+ * per-host guest ceiling of 500: one ordinary Proxmox host would have pushed nodes off the map with
+ * nothing on screen saying so. The caller MUST render `truncated` — see `node-page-state.ts`.
+ */
+export function useInfraGraphNodes(options?: {
+  enabled?: boolean;
+  refetchInterval?: number | false;
+}) {
+  return useQuery({
+    queryKey: infraKeys.graph(),
+    queryFn: ({ signal }) => getInfraGraphNodes(signal),
+    ...options,
+  });
+}
+
+/**
+ * Resolve the topology node backing ONE asset, for the Assets detail screen's "View in topology"
+ * deep-link (issue #765). EXACT since #1152: a one-row `?assetIds=<id>&limit=1` ask, answered by the
+ * database, instead of the old whole-list fetch scanned in memory on the claim that "the estate is
+ * small by design". That claim was already false for a Proxmox estate, and the failure mode it hid
+ * was the quiet one — the button simply not appearing for an asset past the window.
+ *
+ * `enabled` gates the fetch on `infra:read` so a viewer without topology access never fires a 403
+ * (the affordance simply won't show). Returns the matched node id, or null when the asset doesn't
+ * back one, so callers build the link from a bare id without re-deriving the lookup.
  */
 export function useAssetInfraNodeId(
   assetId: string,
   enabled: boolean,
 ): string | null {
+  const assetIds = useMemo(() => [assetId], [assetId]);
   const { data } = useQuery({
-    queryKey: infraKeys.nodes({}),
-    queryFn: ({ signal }) => getInfraNodes({}, signal),
-    enabled,
+    queryKey: infraKeys.assetNodes(assetIds),
+    queryFn: ({ signal }) => getInfraNodes({ assetIds, limit: 1 }, signal),
+    enabled: enabled && Boolean(assetId),
   });
-  return data?.find((node) => node.assetId === assetId)?.id ?? null;
+  return data?.items[0]?.id ?? null;
 }
 
+/** Stable empty result so a gated-off / still-loading caller's `has()` is a no-op with a fixed identity. */
+const EMPTY_ASSET_IDS: ReadonlySet<string> = new Set();
+
 /**
- * The set of asset ids that back a topology node — for the Assets LIST glyph (issue #765). Shares the
- * exact same cached node list as {@link useAssetInfraNodeId} (one `["infra","nodes",{}]` query), so a
- * list → detail navigation reuses the fetch. `enabled` gates it on `infra:read`. Returns an empty Set
- * while loading / when gated off, so the caller's `has()` check is a safe no-op.
+ * Which of THESE assets back a topology node — the "On topology" glyph on the Assets list (#765),
+ * made exact in #1152.
+ *
+ * It used to fetch the entire node list and scan it. That is the pattern ADR-0030 §6 / #961 removed
+ * from `useUserNames`, for the same reason: a whole-directory read materializes one window and then
+ * degrades SILENTLY for everything past it — the glyph would just stop appearing, and no operator
+ * would ever know a row was mislabelled rather than unlinked. So this is now a bounded BATCH RESOLVE
+ * over the VISIBLE page: the caller passes the asset ids it is actually rendering, and the API
+ * answers for exactly those (`?assetIds=a,b,c`, the `GET /users?ids=` precedent). A page never
+ * exceeds `MAX_PAGE_LIMIT` rows, so one page of results always covers one page of assets.
+ *
+ * The ids are de-duplicated and SORTED into the query key so re-render order can't churn the key.
+ * `enabled` gates it on `infra:read` AND on there being anything to resolve.
  */
-export function useAssetsOnTopology(enabled: boolean): ReadonlySet<string> {
+export function useAssetsOnTopology(
+  assetIds: string[],
+  enabled: boolean,
+): ReadonlySet<string> {
+  const uniqueIds = useMemo(
+    () => [...new Set(assetIds)].sort().slice(0, MAX_PAGE_LIMIT),
+    [assetIds],
+  );
   const { data } = useQuery({
-    queryKey: infraKeys.nodes({}),
-    queryFn: ({ signal }) => getInfraNodes({}, signal),
-    enabled,
+    queryKey: infraKeys.assetNodes(uniqueIds),
+    queryFn: ({ signal }) =>
+      getInfraNodes({ assetIds: uniqueIds, limit: MAX_PAGE_LIMIT }, signal),
+    enabled: enabled && uniqueIds.length > 0,
   });
   return useMemo(() => {
+    if (!data) return EMPTY_ASSET_IDS;
     const ids = new Set<string>();
-    for (const node of data ?? []) if (node.assetId) ids.add(node.assetId);
+    for (const node of data.items) if (node.assetId) ids.add(node.assetId);
     return ids;
   }, [data]);
 }
@@ -203,13 +278,34 @@ export function useUpdateInfraNodePosition() {
     mutationFn: ({ id, x, y }: { id: string; x: number; y: number }) =>
       updateInfraNodePosition(id, x, y),
     onSuccess: (node: InfraNode) => {
-      // Patch every cached node-list page that holds this node, so a later remount reads the saved
-      // position without a round-trip. The list cache holds enriched `InfraNodeListItem`s (assetName
-      // + owners); the spread preserves them — only x/y change. Cheap: the lists are small.
-      queryClient.setQueriesData<InfraNodeListItem[]>(
+      // Write through to BOTH cached shapes (#1152) — they are two different endpoints now, and the
+      // one the operator is looking at while dragging is the GRAPH.
+      //
+      // Missing the graph entry is not a stale-cache nicety: the canvas re-syncs React Flow from this
+      // query, so a dropped node would snap back to its old position until the next 40s poll landed —
+      // the drag visibly undoing itself.
+      //
+      // Both writers preserve the envelope and map over `items`; the spread keeps every other field
+      // (the page rows carry `assetName` + `owners`, the graph rows carry `chassis`) so only x/y move.
+      queryClient.setQueriesData<InfraNodeListPage>(
         { queryKey: [...infraKeys.all, "nodes"] },
         (prev) =>
-          prev?.map((n) => (n.id === node.id ? { ...n, x: node.x, y: node.y } : n)),
+          prev && {
+            ...prev,
+            items: prev.items.map((n) =>
+              n.id === node.id ? { ...n, x: node.x, y: node.y } : n,
+            ),
+          },
+      );
+      queryClient.setQueriesData<InfraGraph>(
+        { queryKey: infraKeys.graph() },
+        (prev) =>
+          prev && {
+            ...prev,
+            items: prev.items.map((n) =>
+              n.id === node.id ? { ...n, x: node.x, y: node.y } : n,
+            ),
+          },
       );
     },
   });

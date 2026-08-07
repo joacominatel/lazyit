@@ -60,13 +60,18 @@ import {
   type InfraAssetCandidate,
   type InfraAutoConfirmCandidate,
   type InfraNodeFactChangeList,
+  type InfraNodeSource,
   type InfraNodeState,
   type InfraNodeStatus,
   type InfraSecretRef,
+  type PageQuery,
   type UpdateInfraNode,
   INFRA_FACT_CHANGE_FACT_MAX,
   INFRA_FACT_CHANGE_PAGE_SIZE,
   INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
+  INFRA_GRAPH_NODES_MAX,
+  offsetOf,
+  pageOf,
 } from '@lazyit/shared';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma } from '../../generated/prisma/client';
@@ -80,6 +85,7 @@ import { SecretManagerService } from '../secret-manager/secret-manager.service';
 import { SearchService } from '../search/search.service';
 import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
+import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { appVersion } from '../common/export-provenance';
 import type { Principal } from '../auth/principal';
 import { isServicePrincipal } from '../auth/principal';
@@ -426,7 +432,142 @@ export interface InfraNodeFilters {
   status?: InfraNodeStatus;
   /** CONFIRMED (live map) | PENDING (v2 review tray). */
   state?: InfraNodeState;
+  /**
+   * MANUAL (hand-drawn) | AGENT (reported). Added with the page (#1152) for the one question the
+   * Servers screen used to answer by scanning the whole list: "does this estate have ANY agent node
+   * yet?" — which drives the ADR-0074 §6 onboarding hero. Under a page that scan is a lie; with this
+   * filter it is `?source=AGENT&limit=1` and a look at `total`.
+   */
+  source?: InfraNodeSource;
+  /**
+   * Restrict to the nodes backing these Asset ids. The batch-resolver shape ADR-0030 §6 (#961) set
+   * for `GET /users?ids=` : the Assets list shows an "on topology" glyph per row, and under a page it
+   * must ask about the ~50 rows it is actually rendering rather than materialize every node and hope
+   * the window covered them. Bounded by the caller's page limit; an unknown id simply matches nothing.
+   */
+  assetIds?: string[];
+  /**
+   * Restrict to these node ids. The same batch-resolver shape as `assetIds`, for the surfaces that
+   * already KNOW which nodes they need and only lack their labels — the drill-in's edge panel holds
+   * `sourceId`/`targetId` and wants the name on the other end. Before the page it scanned the whole
+   * list for that; asking for exactly the ids it has is both bounded and exact, so the panel never
+   * degrades to printing a raw cuid at an operator.
+   */
+  ids?: string[];
+  /**
+   * Case-insensitive search over the row's visible text — label, IP, the linked Asset's inventory
+   * name, and each ACTIVE owner's name/email. It has to run in the DATABASE: the Servers table used
+   * to filter the loaded array in memory, which under a page becomes a false "no results" for
+   * anything outside the window (the exact bug ADR-0030 §2 fixed for four other lists).
+   */
+  q?: string;
 }
+
+/**
+ * Sortable fields for `GET /infra/nodes` (ADR-0030 §1) — public `?sort=` key → Prisma column. An
+ * unknown key is a 400, never a silent no-op, so a sort always means what it says.
+ *
+ * Bounded to real columns on the node itself. The Servers table's `asset` and `owner` columns are
+ * joined relations, so they are deliberately NOT sortable — the same call every other list makes
+ * (model/owners/category are not sortable on Assets either).
+ */
+export const INFRA_NODE_SORT_ALLOWLIST = {
+  label: 'label',
+  kind: 'kind',
+  status: 'status',
+  state: 'state',
+  ipAddress: 'ipAddress',
+  lastReportedAt: 'lastReportedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+} as const;
+
+/**
+ * The TOTAL order every node read shares (#1152, shipped in PR #1234 and now load-bearing).
+ *
+ * `createdAt` is not unique and ADR-0095 makes ties the NORMAL case — one hypervisor report enrols
+ * up to `AGENT_GUESTS_MAX` (500) PENDING guests in a single write, so hundreds of rows share a
+ * millisecond. Postgres may return tied rows in any order and does reorder them between reads. Under
+ * a LIMIT/OFFSET window that is not cosmetic: a row can appear on two pages and on neither, and
+ * nothing surfaces the loss. The unique `id` primary key closes it.
+ */
+const INFRA_NODE_TIEBREAKER = { id: 'desc' } as const;
+const INFRA_NODE_DEFAULT_ORDER = [
+  { createdAt: 'desc' },
+  INFRA_NODE_TIEBREAKER,
+] satisfies Prisma.InfraNodeOrderByWithRelationInput[];
+
+/**
+ * The `GET /infra/nodes` row projection (#1135) — an explicit `select`, never `include`.
+ *
+ * `specs` is the ONE column left out, and that is the whole point: on an agent-reported host it is
+ * the entire inventory blob (~1500 software entries on a real Linux box), and a bare `include`
+ * returns every scalar. Keep this in step with `InfraNodeListItemSchema` — a field added there but
+ * not here silently disappears from the list (the spec asserts the two agree).
+ */
+const INFRA_NODE_LIST_SELECT = {
+  id: true,
+  kind: true,
+  label: true,
+  status: true,
+  assetId: true,
+  ipAddress: true,
+  ipAddressSource: true,
+  shortcuts: true, // bounded by INFRA_SHORTCUTS_MAX — unlike `specs`, safe to carry per row
+  x: true,
+  y: true,
+  source: true,
+  state: true,
+  reportingSource: true,
+  externalId: true,
+  lastReportedAt: true,
+  agentVersion: true,
+  chassis: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+  // NOTE: `specs` is deliberately absent (#1135) — see listNodes' doc comment.
+  asset: {
+    // `deletedAt` is selected (not filterable on a to-one relation) so the flatten can gate the
+    // name — a soft-deleted asset must NOT leak its name through the list.
+    select: {
+      name: true,
+      deletedAt: true,
+      assignments: {
+        where: { releasedAt: null },
+        orderBy: { assignedAt: 'desc' },
+        select: {
+          id: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              deletedAt: true,
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.InfraNodeSelect;
+
+/**
+ * The `GET /infra/graph/nodes` projection (#1152) — exactly what the React Flow board draws, and
+ * nothing that costs a join. Mirrors `InfraGraphNodeSchema`; the spec asserts the two agree, so the
+ * canvas contract cannot drift away from the query that feeds it.
+ */
+const INFRA_GRAPH_NODE_SELECT = {
+  id: true,
+  label: true,
+  kind: true,
+  status: true,
+  ipAddress: true,
+  chassis: true,
+  x: true,
+  y: true,
+} satisfies Prisma.InfraNodeSelect;
 
 /**
  * Provenance marker stamped into an AUTO-CREATED backing Asset's `specs` (ADR-0070 §5). It is how the
@@ -3581,10 +3722,23 @@ export class InfraService {
   }
 
   /**
-   * A page-less list of nodes, newest first (with a deterministic `id` tiebreaker — see the
-   * `orderBy` note), filtered; soft-deleted nodes excluded by the extension. The page WINDOW is
-   * still open (#1152): bounding this list means either breaking the wire shape to the house
-   * `Page<T>` or giving the topology canvas its own read, and that call is not made here.
+   * `GET /infra/nodes` — a PAGED list of nodes (#1152), on the house ADR-0030 `Page<T>` contract:
+   * `{ items, total, limit, offset }`, default page 50, hard max 200, an over-max `limit` rejected
+   * rather than clamped. Soft-deleted nodes are excluded by the extension.
+   *
+   * This is a BREAKING wire-shape change — the endpoint used to return a bare array — following the
+   * precedent ADR-0030 §4 set for `GET /assets/:id/articles` (#220). It closes the last unbounded
+   * poll on this module: the PENDING tray hits this every 40s and the create-agent wizard every 5s,
+   * and an ADR-0095 hypervisor host can enrol 500 guest nodes in one report, so "the estate is small
+   * by design" stopped being true the moment hypervisor ingest shipped.
+   *
+   * `total` is a `count` over the SAME `where` as `items`, both inside ONE `$transaction`, so the
+   * number a caller displays can never describe a different set than the rows beside it.
+   *
+   * There is deliberately no `deleted` slice here (ADR-0030 §7). The web has no archived-nodes view,
+   * so the param would be contract surface nothing consumes; the controller does not accept it, so
+   * nothing is silently ignored either. Add it with the view that needs it.
+   *
    * Each row carries the Servers-list payoff (ADR-0070 §6, issue #750): the linked Asset's inventory
    * `assetName` and its active `owners` — joined in ONE query (a single relation join, NOT an
    * N+1 per-row detail fetch), then flattened to the lean `InfraNodeListItem` wire shape. Mirrors the
@@ -3611,76 +3765,34 @@ export class InfraService {
    * with the owner user inlined — a departed (soft-deleted) USER still surfaces with its `deletedAt`
    * set, so the UI renders the same "left the company" affordance (history kept, ADR-0019).
    */
-  async listNodes(filters: InfraNodeFilters = {}) {
-    const rows = await this.prisma.infraNode.findMany({
-      where: {
-        ...(filters.kind ? { kind: filters.kind } : {}),
-        ...(filters.status ? { status: filters.status } : {}),
-        ...(filters.state ? { state: filters.state } : {}),
-      },
-      // TOTAL order, not just newest-first (#1152). `createdAt` is NOT unique, and ADR-0095 makes
-      // ties the normal case: one hypervisor report enrols up to AGENT_GUESTS_MAX (500) PENDING
-      // guest children in a single write, so hundreds of rows share a millisecond. Postgres may
-      // return tied rows in any order and does reorder them between reads, so `createdAt desc`
-      // alone lets rows visibly jump between two polls of this endpoint (every 40s from the tray,
-      // every 5s from the wizard) with no data change. Appending the unique `id` primary key makes
-      // the order deterministic. This is also the precondition for the page window this endpoint
-      // still needs: under LIMIT/OFFSET an unstable sort silently DUPLICATES a row onto one page
-      // and DROPS it from another, with nothing to signal the loss.
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      select: {
-        id: true,
-        kind: true,
-        label: true,
-        status: true,
-        assetId: true,
-        ipAddress: true,
-        ipAddressSource: true,
-        shortcuts: true, // bounded by INFRA_SHORTCUTS_MAX — unlike `specs`, safe to carry per row
-        x: true,
-        y: true,
-        source: true,
-        state: true,
-        reportingSource: true,
-        externalId: true,
-        lastReportedAt: true,
-        agentVersion: true,
-        // A scalar, unlike `specs` — so it rides on the list row (ADR-0093 §2/§5) and the canvas can
-        // hide endpoints client-side over the rows it already fetched: no second request, no second
-        // cache entry, an instant toggle.
-        chassis: true,
-        createdAt: true,
-        updatedAt: true,
-        deletedAt: true,
-        // NOTE: `specs` is deliberately absent (#1135) — see the doc comment.
-        asset: {
-          // `deletedAt` is selected (not filterable on a to-one relation) so the flatten can gate the
-          // name — a soft-deleted asset must NOT leak its name through the list.
-          select: {
-            name: true,
-            deletedAt: true,
-            assignments: {
-              where: { releasedAt: null },
-              orderBy: { assignedAt: 'desc' },
-              select: {
-                id: true,
-                user: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    deletedAt: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
+  async listNodes(filters: InfraNodeFilters, page: PageQuery) {
+    const where = this.buildNodeListWhere(filters);
+    const { take, skip } = offsetOf(page);
+    // An allowlisted sort still gets the unique `id` appended. Sorting by `label` re-opens exactly
+    // the tie the default order closed — two hosts can share a label — and under a window a partial
+    // order is silent row loss, not a cosmetic wobble. So the tiebreaker is unconditional.
+    const sorted = resolveSortOrBadRequest<Prisma.InfraNodeOrderByWithRelationInput>(
+      page,
+      INFRA_NODE_SORT_ALLOWLIST,
+    );
+    const orderBy = sorted
+      ? [sorted, INFRA_NODE_TIEBREAKER]
+      : INFRA_NODE_DEFAULT_ORDER;
 
-    return rows.map(({ asset, ...node }) => ({
+    // findMany + count over ONE `where`, in ONE transaction — the ADR-0030 shape every other list
+    // uses, and the only way `total` cannot drift from the rows it is describing.
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.infraNode.findMany({
+        where,
+        orderBy,
+        take,
+        skip,
+        select: INFRA_NODE_LIST_SELECT,
+      }),
+      this.prisma.infraNode.count({ where }),
+    ]);
+
+    const items = rows.map(({ asset, ...node }) => ({
       ...node,
       // Gate the name on the asset being live (the to-one relation can't be where-filtered).
       assetName: asset && asset.deletedAt === null ? asset.name : null,
@@ -3693,6 +3805,119 @@ export class InfraService {
         deletedAt: a.user.deletedAt,
       })),
     }));
+    return pageOf(items, total, page);
+  }
+
+  /**
+   * The ONE `where` behind both halves of the page — the rows and the `count`. Sharing it is not
+   * tidiness: a `total` computed over a different predicate than `items` is a number that lies, and
+   * the PENDING tray renders that number as its badge.
+   */
+  private buildNodeListWhere(
+    filters: InfraNodeFilters,
+  ): Prisma.InfraNodeWhereInput {
+    const q = filters.q?.trim();
+    return {
+      ...(filters.kind ? { kind: filters.kind } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.state ? { state: filters.state } : {}),
+      ...(filters.source ? { source: filters.source } : {}),
+      ...(filters.ids?.length ? { id: { in: filters.ids } } : {}),
+      ...(filters.assetIds?.length ? { assetId: { in: filters.assetIds } } : {}),
+      ...(q
+        ? {
+            OR: [
+              { label: { contains: q, mode: 'insensitive' as const } },
+              { ipAddress: { contains: q, mode: 'insensitive' as const } },
+              // The two JOINED facts the Servers row displays. They were searchable client-side
+              // before the page (#750); dropping them here would quietly shrink what the search box
+              // matches, which is a worse regression than the truncation the page fixes.
+              {
+                asset: {
+                  is: { name: { contains: q, mode: 'insensitive' as const } },
+                },
+              },
+              {
+                asset: {
+                  is: {
+                    assignments: {
+                      some: {
+                        releasedAt: null,
+                        user: {
+                          OR: [
+                            {
+                              firstName: {
+                                contains: q,
+                                mode: 'insensitive' as const,
+                              },
+                            },
+                            {
+                              lastName: {
+                                contains: q,
+                                mode: 'insensitive' as const,
+                              },
+                            },
+                            {
+                              email: {
+                                contains: q,
+                                mode: 'insensitive' as const,
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * `GET /infra/graph/nodes` — the topology canvas's own read (#1152).
+   *
+   * The canvas is the one surface that must stay COMPLETE. A node missing from a page is a shorter
+   * list an operator can page through; a node missing from the map takes its edges with it and reads
+   * as "nothing runs on this host" — a wrong answer with no cue that it is wrong. That is why the
+   * canvas was NOT simply pointed at `?limit=200`: one ADR-0095 hypervisor host can enrol 500 guests,
+   * so the house page cap sits below what a single ordinary host produces.
+   *
+   * Bounded anyway, at `INFRA_GRAPH_NODES_MAX`, and HONEST about it: the envelope carries `truncated`
+   * so the last unpaginated surface has a ceiling the operator can see rather than one that shows up
+   * as a missing box. `total` is what exists, so the UI can name the gap.
+   *
+   * PROJECTED, and this is where it gets cheaper than the list read it replaced: the board draws
+   * `id`/`label`/`kind`/`status`/`ipAddress`/`x`/`y` and filters endpoints on `chassis` — that is
+   * all. The `owners` + `assetName` enrichment costs an Asset → active AssetAssignment → User join
+   * PER ROW and the canvas has never rendered either; `shortcuts` is drill-in-only. Dropping them
+   * means the unpaginated read is now the LIGHTEST of the three, not the heaviest.
+   *
+   * The return type is inferred rather than pinned to `InfraGraphSchema`, exactly as `listNodes` is:
+   * Prisma types `chassis` as a bare `String?` while the wire schema narrows it to a vocabulary with
+   * `.catch(null)` read-tolerance (ADR-0093), so pinning here would fight a degradation the contract
+   * is deliberately built to absorb. The spec asserts `select` ≡ `InfraGraphNodeSchema` instead,
+   * which is the drift that would actually hurt.
+   */
+  async listGraphNodes() {
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.infraNode.findMany({
+        orderBy: INFRA_NODE_DEFAULT_ORDER,
+        take: INFRA_GRAPH_NODES_MAX,
+        select: INFRA_GRAPH_NODE_SELECT,
+      }),
+      this.prisma.infraNode.count({}),
+    ]);
+    return {
+      items,
+      total,
+      limit: INFRA_GRAPH_NODES_MAX,
+      // `total > items.length`, not `items.length === MAX`: an estate whose node count lands exactly
+      // on the cap is COMPLETE, and flagging it would be a permanent false alarm.
+      truncated: total > items.length,
+    };
   }
 
   /** A single live node by id (the lean row); 404 if missing or soft-deleted. */

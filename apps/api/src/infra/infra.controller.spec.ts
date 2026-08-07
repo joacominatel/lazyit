@@ -44,6 +44,113 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     // The agent fleet view (ADR-0094 §4, #1206). A READ and only a read — it computes version
     // buckets and projects one string out of `specs`; it writes nothing and pushes nothing to a host.
     expect(permsOf('getAgentFleet')).toEqual(['infra:read']);
+    // The canvas's own bounded graph read (#1152). It is the SAME data the node list exposes, just
+    // projected — so it must carry the SAME gate. A cheaper gate here would be a way to read the
+    // estate's topology without infra:read.
+    expect(permsOf('listGraphNodes')).toEqual(['infra:read']);
+  });
+
+  describe('the node list page params (#1152)', () => {
+    // A real (stubbed) service, so a params failure can only ever be a 400 from the parsing — never a
+    // "not a function" from an empty stand-in that would pass the assertion for the wrong reason.
+    const listNodes = jest.fn().mockReturnValue('page');
+    const controller = new InfraController(
+      { listNodes } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    /** Named call-through, so adding a filter param never silently re-points these positionals. */
+    function list(params: {
+      state?: string;
+      source?: string;
+      ids?: string;
+      assetIds?: string;
+      q?: string;
+      limit?: string;
+      sort?: string;
+    }) {
+      return controller.listNodes(
+        undefined,
+        undefined,
+        params.state,
+        params.source,
+        params.ids,
+        params.assetIds,
+        params.q,
+        params.limit,
+        undefined,
+        undefined,
+        params.sort,
+        undefined,
+      );
+    }
+
+    beforeEach(() => listNodes.mockClear());
+
+    // ADR-0030: an over-max `limit` is REJECTED, never clamped — so a client can never believe it
+    // asked for more than it got. A clamp is the failure mode this contract exists to forbid.
+    it.each(['201', '0', '-1', 'abc', '1.5'])(
+      'rejects limit=%p with a 400 rather than clamping it',
+      (limit) => {
+        expect(() => list({ limit })).toThrow(BadRequestException);
+        expect(listNodes).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts the hard maximum page size (200) — the PENDING tray asks for exactly this', () => {
+      list({ state: 'PENDING', limit: '200' });
+
+      expect(listNodes).toHaveBeenCalledWith(
+        expect.objectContaining({ state: 'PENDING' }),
+        expect.objectContaining({ limit: 200, offset: 0 }),
+      );
+    });
+
+    it('defaults to the house page size when no window is asked for', () => {
+      list({});
+
+      expect(listNodes).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ limit: 50, offset: 0 }),
+      );
+    });
+
+    it.each(['ids', 'assetIds'] as const)(
+      'rejects a malformed %s element with a 400 (never a silently empty filter)',
+      (param) => {
+        expect(() => list({ [param]: 'not-a-cuid' })).toThrow(
+          BadRequestException,
+        );
+      },
+    );
+
+    it.each(['ids', 'assetIds'] as const)(
+      'rejects an over-cap %s batch with a 400 (bounded like GET /users?ids=)',
+      (param) => {
+        // Without a cap the page fix would trade one unbounded read for an unbounded IN list a
+        // client can post in a query string. 201 cuids, one over MAX_PAGE_LIMIT.
+        const over = Array.from(
+          { length: 201 },
+          (_, i) => `c${String(i).padStart(24, 'x')}`,
+        ).join(',');
+
+        expect(() => list({ [param]: over })).toThrow(BadRequestException);
+      },
+    );
+
+    it('passes `q` and `source` through as filters the DATABASE applies', () => {
+      // Both exist because the page made client-side scanning wrong: an in-memory search over one
+      // window is a false "no results", and "does any agent node exist?" cannot be answered by
+      // looking at 50 rows.
+      list({ q: 'web-01', source: 'AGENT', limit: '1' });
+
+      expect(listNodes).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'web-01', source: 'AGENT' }),
+        expect.objectContaining({ limit: 1 }),
+      );
+    });
   });
 
   describe('the Changes page params (#1143)', () => {

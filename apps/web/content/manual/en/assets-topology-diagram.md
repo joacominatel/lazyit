@@ -95,6 +95,26 @@ double-click on the card opens the details window straight away. Clicking select
 so the map stays visible — the details window is large, and covering the board on every click would
 hide the thing you came to look at.
 
+### If the map says it is incomplete
+
+The map draws your estate in full — up to a ceiling of **2000 nodes**. Above that, a banner sits at
+the top of the board and stays there:
+
+> Showing 2000 of 2431 nodes — this map is incomplete.
+
+It is not an error and there is nothing to retry: it means your estate has grown past what one board
+can usefully draw. There is **no setting to raise the ceiling**.
+
+What matters is what it does *not* mean. The nodes left out are **still in lazyit** — they are in your
+inventory, on the [Servers list](/help/assets-topology-servers) and in search, exactly as before.
+What is missing is only their picture: they are not drawn, and neither are the connections that run
+through them.
+
+That last part is the reason the banner never goes away on its own. A node that isn't drawn takes its
+lines with it, so **a blast radius read off a truncated map is incomplete** — the highlighted set and
+the count are the answer for the part of the estate the board is showing, not for all of it. Treat it
+as a floor, not a total, and check the affected servers on the Servers list when the answer matters.
+
 ## Adding to the map
 
 With the right permissions you'll see an **Add** button in the page header, offering two paths:
@@ -328,6 +348,11 @@ connection has no failure direction.
 
 An **empty result is good news** — it means nothing depends on this node, so it's safe to take
 down. lazyit shows that as reassurance, not as an error.
+
+> [!IMPORTANT]
+> If the board is showing the *"this map is incomplete"* banner, the blast radius is answered over
+> what is drawn, so it can be smaller than the truth. See
+> [If the map says it is incomplete](#if-the-map-says-it-is-incomplete).
 
 ## What's next
 

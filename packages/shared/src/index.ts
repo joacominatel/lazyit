@@ -62,6 +62,7 @@ export * from "./schemas/agent-policy";
 export * from "./schemas/agent-fleet";
 export * from "./schemas/infra";
 export * from "./schemas/infra-fact-change";
+export * from "./schemas/infra-list";
 export * from "./schemas/infra-review";
 export * from "./schemas/instance";
 export * from "./schemas/location";
