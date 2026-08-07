@@ -4,7 +4,7 @@ import { ArrowPathIcon, PlusIcon } from "@heroicons/react/24/outline";
 import {
   type InfraEdge,
   InfraEdgeKindSchema,
-  type InfraNodeListItem,
+  MAX_PAGE_LIMIT,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
@@ -62,16 +62,42 @@ export function NodeEdgesManager({
   const { date } = useFormatters();
   const [addOpen, setAddOpen] = useState(false);
   const { data: edges, isLoading, isError } = useInfraNodeEdgesHistory(nodeId);
-  const { data: nodes } = useInfraNodes();
   const closeEdge = useCloseInfraEdge();
   const [closingId, setClosingId] = useState<string | null>(null);
 
-  // Resolve the other endpoint's label for an edge (the node that ISN'T this one).
+  // The ids this list actually has to NAME: the other endpoint of every edge (active or closed).
+  // Sorted + de-duplicated so the query key is stable across re-renders.
+  //
+  // CAPPED at the page limit, because `?ids=` is capped there too (an over-cap batch is a 400, the
+  // `GET /users?ids=` rule). One ADR-0095 hypervisor host really can carry 500 RUNS_ON edges, so this
+  // is a live case, not a hypothetical. Past the cap a label falls back to the raw id — which reads as
+  // a name that failed to resolve, not as a missing relationship — and that is deliberately the
+  // failure we take: a 400 would blank the whole panel instead.
+  const otherIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const edge of edges ?? []) {
+      ids.add(edge.sourceId === nodeId ? edge.targetId : edge.sourceId);
+    }
+    ids.delete(nodeId);
+    return [...ids].sort().slice(0, MAX_PAGE_LIMIT);
+  }, [edges, nodeId]);
+
+  // Resolve exactly those (#1152, the `?ids=` batch-resolve precedent of ADR-0030 §6 / #961) instead
+  // of fetching the whole node list and scanning it. Strictly better than what it replaced on a paged
+  // endpoint: a scan of one window would print a raw cuid at the operator the moment an endpoint sat
+  // outside it, and an edge is exactly the place where "which machine?" is the entire question. A
+  // node this one has no edge to is not fetched at all.
+  const { data: endpointPage } = useInfraNodes(
+    { ids: otherIds, limit: MAX_PAGE_LIMIT },
+    { enabled: otherIds.length > 0 },
+  );
+
+  /** The other endpoint's label for an edge (the node that ISN'T this one). */
   const labelById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const node of nodes ?? []) map.set(node.id, node.label);
+    for (const node of endpointPage?.items ?? []) map.set(node.id, node.label);
     return map;
-  }, [nodes]);
+  }, [endpointPage?.items]);
 
   const active = (edges ?? []).filter((e) => e.endedAt === null);
   const closed = (edges ?? []).filter((e) => e.endedAt !== null);
@@ -190,13 +216,15 @@ export function NodeEdgesManager({
         </>
       )}
 
-      {canManage ? (
+      {/* Mounted only while open (the `MergeNodeDialog` mold), so every open starts from a clean
+          picker — search box, chosen target and remembered label all fresh — without an effect
+          writing state back into React on mount. */}
+      {canManage && addOpen ? (
         <AddEdgeDialog
-          open={addOpen}
+          open
           onOpenChange={setAddOpen}
           sourceId={nodeId}
           sourceLabel={nodeLabel}
-          nodes={nodes ?? []}
         />
       ) : null}
     </div>
@@ -207,25 +235,33 @@ type AddEdgeFormValues = { kind: string; targetId: string };
 
 const ADD_EDGE_FORM_ID = "add-infra-edge-form";
 
-/** The "connect this node" dialog — pick a relationship kind + the other node (source = this node). */
+/**
+ * The "connect this node" dialog — pick a relationship kind + the other node (source = this node).
+ *
+ * The target picker is a SERVER-SEARCH {@link Combobox} (#1152): the typed query is debounced by the
+ * picker and fed to a `q`-driven page of nodes, so any node in the estate is reachable by name. It
+ * used to be handed the caller's whole node list, which on a paged endpoint would have made every
+ * node past the first window simply unconnectable — the same ceiling ADR-0030 §8 (#199/#218) removed
+ * from the KB asset picker, and the same fix.
+ */
 function AddEdgeDialog({
   open,
   onOpenChange,
   sourceId,
   sourceLabel,
-  nodes,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sourceId: string;
   sourceLabel: string;
-  // The `useInfraNodes` list row, NOT the full `InfraNode` (#1135): the list projection dropped
-  // `specs`, and the picker only ever read id/label plus the quick-view basics below.
-  nodes: InfraNodeListItem[];
 }) {
   const t = useTranslations("infra");
   const tc = useTranslations("common");
   const create = useCreateInfraEdge();
+  const [query, setQuery] = useState("");
+  // The chosen target's label, remembered at pick time: the picker's page changes as the operator
+  // keeps typing, and the trigger must keep naming what they chose rather than falling back to a cuid.
+  const [targetLabel, setTargetLabel] = useState<string>("");
 
   const form = useForm<AddEdgeFormValues>({
     mode: "onTouched",
@@ -236,6 +272,13 @@ function AddEdgeDialog({
     if (open) form.reset({ kind: "", targetId: "" });
   }, [open, form]);
 
+  // Only fetched while the dialog is open — a closed picker should cost nothing.
+  const { data: page, isFetching } = useInfraNodes(
+    { q: query || undefined, limit: 50 },
+    { enabled: open },
+  );
+  const nodes = useMemo(() => page?.items ?? [], [page?.items]);
+
   // Every node except this one is a valid target (a self-loop is rejected by the API and the schema).
   const targetItems = useMemo(
     () =>
@@ -245,8 +288,8 @@ function AddEdgeDialog({
     [nodes, sourceId],
   );
 
-  // Quick View (epic #788): the already-loaded `nodes` are a rich-enough preview source — no fetch.
-  // So the target picker's eye previews kind/status/IP straight from the row before you connect it.
+  // Quick View (epic #788): the page rows already in hand are a rich-enough preview source — no extra
+  // fetch. So the target picker's eye previews kind/status/IP straight from the row before you connect it.
   const nodeById = useMemo(
     () => new Map(nodes.map((node) => [node.id, node])),
     [nodes],
@@ -343,11 +386,21 @@ function AddEdgeDialog({
                   <Combobox
                     id="edge-target"
                     value={field.value}
-                    onValueChange={field.onChange}
+                    onValueChange={(value) => {
+                      setTargetLabel(
+                        targetItems.find((item) => item.value === value)?.label ??
+                          "",
+                      );
+                      field.onChange(value);
+                    }}
                     items={targetItems}
+                    onSearchChange={setQuery}
+                    loading={isFetching}
+                    selectedLabel={targetLabel || undefined}
                     placeholder={t("edges.targetPlaceholder")}
                     searchPlaceholder={t("edges.targetSearch")}
                     emptyText={t("edges.targetEmpty")}
+                    loadingText={tc("searching")}
                     quickView={targetQuickView}
                   />
                   <FieldDescription>
