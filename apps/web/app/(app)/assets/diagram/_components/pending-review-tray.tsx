@@ -16,6 +16,7 @@ import {
   ipInCidr,
   isContainerChildExternalId,
   matchesHostnamePattern,
+  MAX_PAGE_LIMIT,
   type InfraNodeKind,
   type InfraNodeListItem,
 } from "@lazyit/shared";
@@ -45,9 +46,15 @@ import { BulkConfirmDialog, BulkDiscardDialog } from "./bulk-review-dialogs";
 import { ConfirmNodeDialog } from "./confirm-node-dialog";
 import { DeleteNodeDialog } from "./delete-node-dialog";
 import { MergeNodeDialog } from "./merge-node-dialog";
+import { pendingBatchNotice } from "./node-page-state";
 import { exceedsBulkReviewCap, visibleSelection } from "./tray-selection";
 
-/** Sort orders the tray offers. Every one is a total order over the loaded rows (no server paging). */
+/**
+ * Sort orders the tray offers. Every one is a total order over the rows IN THIS BATCH — since #1152
+ * the tray reads one page of the most recently discovered proposals, and these reorder that page
+ * rather than the queue.
+ * The batch notice beside the header count is what keeps that from reading as the whole thing.
+ */
 type SortKey = "firstSeenDesc" | "firstSeenAsc" | "labelAsc" | "labelDesc";
 
 /** One reporting host and the container children it enrolled — the unit the tray reviews. */
@@ -86,9 +93,12 @@ interface TrayGroup {
  *    a row a filter hides is out of the action and out of the count — and a selection over
  *    `INFRA_BULK_REVIEW_MAX` disables the two actions with the reason shown, rather than letting the
  *    contract reject the whole batch after the operator has done all of the selecting.
- *  - **Filter + sort**, entirely client-side over the already-loaded lean list (#1135 removed `specs`
- *    from it, and nothing here re-fattens it — a checkbox row reads `label`, `kind`, `ipAddress`,
- *    `createdAt` and `externalId`, all of which the list projection already carries).
+ *  - **Filter + sort**, client-side over the already-loaded lean list (#1135 removed `specs` from it,
+ *    and nothing here re-fattens it — a checkbox row reads `label`, `kind`, `ipAddress`, `createdAt`
+ *    and `externalId`, all of which the list projection already carries). Since #1152 that list is
+ *    ONE BATCH of the newest proposals rather than every one of them, so the header shows the queue's
+ *    `total` and a line beside it names both numbers when they differ — confirming everything on
+ *    screen reveals the next batch, and at no point does a short tray read as a finished one.
  *  - **Saved auto-confirm rules** ({@link AutoConfirmRulesDialog}) — the judgement expressed once
  *    instead of per host. Never retroactive: rules apply only to reports that arrive afterwards, and
  *    the dialog says so.
@@ -104,16 +114,25 @@ export function PendingReviewTray() {
   const tInfra = useTranslations("infra");
   const canManage = useCan("infra:manage");
   const canRead = useCan("infra:read");
-  // Poll so a freshly-discovered host appears in the tray without a manual reload (#1081).
+  // One BATCH of proposals — the newest `MAX_PAGE_LIMIT` (#1152; the list default order is
+  // `createdAt desc`, so a host that just checked in is always in the window, which is what an
+  // onboarding operator is waiting for). Poll so a freshly-discovered host
+  // appears without a manual reload (#1081). `total` is what the header badge counts; `items` is what
+  // this pass can act on, and the notice below says so out loud whenever the two differ.
   const { data, isLoading } = useInfraNodes(
-    { state: "PENDING" },
+    { state: "PENDING", limit: MAX_PAGE_LIMIT },
     { refetchInterval: INFRA_LIVE_POLL_MS },
   );
-  // The unfiltered list, ALREADY cached and shared on this screen (the Servers table reads it for its
-  // onboarding hero, the canvas for the board). It is used for exactly one thing: naming the host of a
-  // container child whose host is no longer pending — otherwise that group would be headed by a raw
-  // machine-id. No extra round-trip, and nothing here reads `specs` (the list projection has none).
-  const { data: allNodes } = useInfraNodes({}, { enabled: canRead });
+  // Host labels, for naming the host of a container child whose host is no longer pending — otherwise
+  // that group would be headed by a raw machine-id. Sorted by `lastReportedAt desc` (#1152) so this
+  // 200-row window is the RIGHT 200: a child arriving now belongs to a host that reported recently, so
+  // the hosts most likely to be looked up are precisely the ones in the window. A host outside it
+  // degrades through the `hostLabels.get(key) ?? childHostKey` fallback below — a NAME that fails to
+  // resolve, never a row that disappears, which is the only degradation this tray may have.
+  const { data: allNodes } = useInfraNodes(
+    { limit: MAX_PAGE_LIMIT, sort: "lastReportedAt", dir: "desc" },
+    { enabled: canRead },
+  );
   const deleteNode = useDeleteInfraNode();
 
   const [confirmTarget, setConfirmTarget] = useState<InfraNodeListItem | null>(null);
@@ -132,12 +151,20 @@ export function PendingReviewTray() {
   const [sort, setSort] = useState<SortKey>("firstSeenDesc");
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
-  const pending = useMemo(() => data ?? [], [data]);
+  const pending = useMemo(() => data?.items ?? [], [data?.items]);
+  /** Proposals awaiting review IN TOTAL — the badge's number, and never `pending.length`. */
+  const pendingTotal = data?.total ?? 0;
+  /**
+   * Set when this batch is smaller than the queue (#1152). An ADR-0095 hypervisor can enrol up to 500
+   * guests in one report, so a 200-row batch is a routine outcome here — and an operator who clears
+   * the screen and sees the tray empty must not be able to conclude "done" while 231 are still queued.
+   */
+  const batch = pendingBatchNotice({ total: pendingTotal, shown: pending.length });
 
   /** Host labels by `<reportingSource>::<externalId>`, for a child whose host is already confirmed. */
   const hostLabels = useMemo(() => {
     const byKey = new Map<string, string>();
-    for (const node of allNodes ?? []) {
+    for (const node of allNodes?.items ?? []) {
       if (!node.externalId || isContainerChildExternalId(node.externalId)) continue;
       byKey.set(`${node.reportingSource ?? ""}::${node.externalId}`, node.label);
     }
@@ -276,9 +303,19 @@ export function PendingReviewTray() {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-sm font-semibold">{t("title")}</h2>
-            <Badge variant="secondary">{pending.length}</Badge>
+            {/* `total`, never `pending.length`: a 500-guest hypervisor enrolment has to read as
+                visibly batched, not as quietly halved. */}
+            <Badge variant="secondary">{pendingTotal}</Badge>
           </div>
           <p className="text-xs text-muted-foreground">{t("description")}</p>
+          {/* Plain language, next to the count it qualifies, and always visible while it is true —
+              the operator's mental model has to be "there is more behind this" before they start
+              working, not after the tray fails to empty. */}
+          {batch ? (
+            <p className="mt-1 text-xs font-medium text-warning-text">
+              {t("batch", { shown: batch.shown, total: batch.total })}
+            </p>
+          ) : null}
         </div>
         <Button size="sm" variant="outline" onClick={() => setRulesOpen(true)}>
           <AdjustmentsHorizontalIcon />
@@ -286,7 +323,8 @@ export function PendingReviewTray() {
         </Button>
       </div>
 
-      {/* Filter + sort bar. Client-side over the loaded list — the tray is unpaged by design. */}
+      {/* Filter + sort bar. Client-side over the loaded BATCH (#1152) — these narrow and reorder the
+          rows in hand, they do not query the queue. The notice above is what states the difference. */}
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={query}
