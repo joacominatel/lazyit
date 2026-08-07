@@ -1,18 +1,37 @@
 /**
- * RFC 6238 TOTP generator (ADR-0075) — pure, dependency-free, client-side. Uses Web Crypto
- * (`crypto.subtle` HMAC), which exists in the browser AND in Bun, so this runs unchanged in the UI and
- * under `bun test`. No npm dependency: a TOTP is a ~40-line HMAC-of-a-counter, not a library.
+ * RFC 6238 TOTP generator (ADR-0075) — pure, client-side, context-independent.
+ *
+ * WHY NOT `crypto.subtle` (#1126): SubtleCrypto is a **secure-context-only** API. A self-hosted lazyit
+ * reached over plain HTTP on a LAN IP is a first-class deployment shape (ADR-0087 `lan` mode), and there
+ * `crypto.subtle` is simply `undefined` — every TOTP item rendered a permanent error blaming the user's
+ * seed for a deployment-mode limitation. `localhost` IS a secure context, so development never
+ * reproduces it. This module therefore uses the pure-JS `@noble/hashes` HMAC, which is already a direct
+ * `apps/web` dependency and already the crypto vocabulary of the whole zero-knowledge envelope
+ * (`docs/04-development/secret-manager-crypto-design.md` ratified "one audited noble vocabulary"; this
+ * file was the lone WebCrypto holdout). ADR-0087's remediation table prescribes exactly this swap.
+ *
+ * There is deliberately **no** `crypto.subtle`-when-available fast path. Two code paths where dev only
+ * ever exercises one is precisely how this bug shipped; one tested path is the point.
+ *
+ * The algorithm is unchanged: identical HMAC-SHA1/256/512, identical RFC 6238 construction, identical
+ * output. `sha1` comes from noble's `legacy.js` module — that label is about **collision** resistance,
+ * which HMAC-SHA1 does not rely on. HMAC-SHA1 is unbroken, is what RFC 6238 mandates, and is what every
+ * authenticator app uses; do not "upgrade" the default or every existing TOTP item breaks.
  *
  * SECURITY (INV-10): the seed is a SECRET like any other — it is decrypted from the vault envelope only
  * in browser memory, generated here transiently, and never persisted/logged/sent. This module computes a
- * code from a seed it is handed; it does not store the seed.
+ * code from a seed it is handed; it does not store the seed. The computation stays 100% client-side.
  */
 
-/** Supported HMAC hashes (RFC 6238 §1.2) mapped to the SubtleCrypto algorithm names. */
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha1 } from "@noble/hashes/legacy.js";
+import { sha256, sha512 } from "@noble/hashes/sha2.js";
+
+/** Supported HMAC hashes (RFC 6238 §1.2) mapped to the pure-JS noble hash functions. */
 const HASHES = {
-  SHA1: "SHA-1",
-  SHA256: "SHA-256",
-  SHA512: "SHA-512",
+  SHA1: sha1,
+  SHA256: sha256,
+  SHA512: sha512,
 } as const;
 
 export type TotpAlgorithm = keyof typeof HASHES;
@@ -70,7 +89,11 @@ function counterToBytes(counter: number): Uint8Array {
 
 /**
  * Compute the RFC 6238 TOTP code for `now` (ms since epoch; defaults to the current time). Returns the
- * code plus the seconds left in the current step. Pure async — the only effect is the WebCrypto HMAC.
+ * code plus the seconds left in the current step.
+ *
+ * The body is synchronous now that the HMAC is pure JS, but the `Promise<TotpCode>` signature is kept
+ * deliberately: `typed-secret-reveal.tsx` awaits it inside a 1s ticking effect, and narrowing the
+ * signature would ripple into that caller for no benefit.
  */
 export async function generateTotp(
   params: TotpParams,
@@ -81,31 +104,26 @@ export async function generateTotp(
   const algorithm = params.algorithm ?? "SHA1";
 
   const keyBytes = base32Decode(params.secret);
+  // A seed that decodes to nothing is a genuinely malformed seed and must stay a LOUD failure.
+  // `crypto.subtle.importKey` used to reject a zero-length HMAC key with `DataError`; pure-JS HMAC
+  // accepts one and would return a plausible but meaningless code — silently useless for 2FA.
+  if (keyBytes.length === 0) {
+    throw new Error("TOTP seed is empty or not valid base32");
+  }
+
   const seconds = Math.floor(now / 1000);
   const counter = Math.floor(seconds / period);
 
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    keyBytes as BufferSource,
-    { name: "HMAC", hash: HASHES[algorithm] },
-    false,
-    ["sign"],
-  );
-  const hmac = new Uint8Array(
-    await crypto.subtle.sign(
-      "HMAC",
-      cryptoKey,
-      counterToBytes(counter) as BufferSource,
-    ),
-  );
+  // noble argument order is `hmac(hashFn, key, message)` — key first, then the counter block.
+  const mac = hmac(HASHES[algorithm], keyBytes, counterToBytes(counter));
 
   // Dynamic truncation (RFC 4226 §5.3): low nibble of the last byte selects a 4-byte window.
-  const offset = hmac[hmac.length - 1]! & 0x0f;
+  const offset = mac[mac.length - 1]! & 0x0f;
   const binary =
-    ((hmac[offset]! & 0x7f) << 24) |
-    ((hmac[offset + 1]! & 0xff) << 16) |
-    ((hmac[offset + 2]! & 0xff) << 8) |
-    (hmac[offset + 3]! & 0xff);
+    ((mac[offset]! & 0x7f) << 24) |
+    ((mac[offset + 1]! & 0xff) << 16) |
+    ((mac[offset + 2]! & 0xff) << 8) |
+    (mac[offset + 3]! & 0xff);
 
   const code = (binary % 10 ** digits).toString().padStart(digits, "0");
   const secondsRemaining = period - (seconds % period);
