@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { notifyError } from "@/lib/api/notify-error";
 import { useInvalidateAssets } from "@/lib/api/hooks/use-assets";
 import { useUpdateInfraNode } from "@/lib/api/hooks/use-infra-nodes";
-import { detachOutcome } from "./detach-outcome";
+import { detachOutcome, detachPermitted } from "./detach-outcome";
 
 /**
  * The node↔asset link control in the drill-in (issue #1202) — the affordance the Manual has promised
@@ -44,9 +44,13 @@ import { detachOutcome } from "./detach-outcome";
  * names who can undo it, and says the link is not restored with it — rather than implying an undo the
  * operator standing there may not have.
  *
- * Rendered behind `infra:manage` by the caller, which is exactly how the API gates this route today
- * (`@RequirePermission('infra:manage')`, no `asset:write`/`asset:delete` AND-check) — so a viewer sees
- * the facts without an affordance that would 403 on them.
+ * Rendered behind `infra:manage` by the caller, which is how the API gates this route. Since #1202 the
+ * ARCHIVING arm costs one permission more — the server AND-checks `asset:delete` when the current link
+ * carries the auto-created marker, because that detach soft-deletes an inventory row and every other
+ * route in the app charges `asset:delete` for that. So this control takes a SECOND gate, and applies it
+ * per arm rather than to the whole control: a role holding `infra:manage` alone must still be able to
+ * detach an asset a human curated (that only removes the link), and must not be handed an enabled
+ * button for the archive it cannot perform. The decision itself is {@link detachPermitted}.
  *
  * The re-point rule is deliberately NOT re-implemented client-side: the attach arm only ever renders
  * for a node carrying no asset, and if a race lands one anyway the server's 400 surfaces verbatim
@@ -57,6 +61,7 @@ export function NodeAssetControl({
   assetId,
   assetName,
   assetAutoCreated,
+  canArchiveAssets,
 }: {
   nodeId: string;
   /** The currently linked Asset, or null for a graph-only node. */
@@ -65,6 +70,12 @@ export function NodeAssetControl({
   assetName: string | null;
   /** `InfraNodeDetail.assetAutoCreated` — which detach this link would run. */
   assetAutoCreated: boolean | null | undefined;
+  /**
+   * Whether the caller holds `asset:delete` (#1202). Only the ARCHIVING detach consults it; attaching
+   * and un-linking are unaffected, which is why it is a prop on the control rather than a gate around
+   * it. Passed down instead of read here so this file stays free of permission plumbing.
+   */
+  canArchiveAssets: boolean;
 }) {
   const t = useTranslations("infra");
   return assetId ? (
@@ -72,6 +83,7 @@ export function NodeAssetControl({
       nodeId={nodeId}
       assetName={assetName ?? t("panel.assetLink.unnamedAsset")}
       assetAutoCreated={assetAutoCreated}
+      canArchiveAssets={canArchiveAssets}
     />
   ) : (
     <AttachControl nodeId={nodeId} />
@@ -83,10 +95,12 @@ function DetachControl({
   nodeId,
   assetName,
   assetAutoCreated,
+  canArchiveAssets,
 }: {
   nodeId: string;
   assetName: string;
   assetAutoCreated: boolean | null | undefined;
+  canArchiveAssets: boolean;
 }) {
   const t = useTranslations("infra");
   const tc = useTranslations("common");
@@ -99,6 +113,10 @@ function DetachControl({
   // vanished Asset row reports null; neither is a licence to promise that nothing will be deleted.
   const outcome = detachOutcome(assetAutoCreated);
   const archives = outcome === "archives";
+  // The #1202 second gate, applied to the ARCHIVING arm only. `false` here is the exact request the
+  // server now answers with a 403, so the button is disabled rather than left to fail on click — and
+  // the un-link arm is untouched, so `infra:manage` alone still detaches a curated asset.
+  const permitted = detachPermitted(outcome, canArchiveAssets);
 
   async function handleDetach() {
     setIsPending(true);
@@ -125,15 +143,25 @@ function DetachControl({
   return (
     <>
       <div className="space-y-1.5">
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setOpen(true)}
+          disabled={!permitted}
+        >
           <LinkSlashIcon />
           {t("panel.assetLink.detachAction")}
         </Button>
-        {/* The outcome is stated BEFORE the dialog too, so the button is never a blind click. */}
+        {/* The outcome is stated BEFORE the dialog too, so the button is never a blind click — and
+            when the archive is out of reach, the reason replaces the hint rather than sitting next to
+            a dead button. Disabled + explained, not hidden: the operator needs to know the link
+            exists and what it would take to break it, so they can ask for the right permission. */}
         <p className="text-xs text-muted-foreground">
-          {archives
-            ? t("panel.assetLink.detachHintArchives")
-            : t("panel.assetLink.detachHintUnlinks")}
+          {!permitted
+            ? t("panel.assetLink.detachBlockedArchives")
+            : archives
+              ? t("panel.assetLink.detachHintArchives")
+              : t("panel.assetLink.detachHintUnlinks")}
         </p>
       </div>
 
