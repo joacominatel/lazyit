@@ -3459,6 +3459,43 @@ describe('InfraService', () => {
       );
       expect(missing).toEqual([]);
     });
+
+    // ── Deterministic ordering (#1152) ──────────────────────────────────────
+    // `createdAt desc` alone is NOT a total order: `createdAt` is not unique. ADR-0095 makes ties
+    // the NORMAL case rather than a freak coincidence — one hypervisor report enrols up to
+    // AGENT_GUESTS_MAX (500) PENDING guest children in a single write, so hundreds of rows share a
+    // `createdAt` down to the millisecond. Postgres is free to return tied rows in any order, and
+    // it does change between reads (heap order shifts as rows are updated by the 40s poll's
+    // confirm/discard traffic). Two consequences, both live today:
+    //   1. The Servers table and the PENDING tray re-shuffle tied rows between polls with no data
+    //      change — rows visibly jump under the operator's cursor mid-review.
+    //   2. It is the precondition for the paging this issue exists to add: an unstable sort under
+    //      LIMIT/OFFSET silently DUPLICATES rows onto one page and DROPS them from another, which
+    //      no error surfaces. Appending the unique `id` makes the order total, so the tiebreaker
+    //      must land before (or with) any page window — it is correct under every paging option.
+    it('orders by createdAt desc with a UNIQUE `id` tiebreaker (a total order, not just newest-first)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodes();
+
+      const arg = firstArg<{ orderBy: unknown }>(prisma.infraNode.findMany);
+      expect(arg.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
+    });
+
+    it('breaks a same-millisecond tie deterministically (the 500-guest bulk-enrolment case)', async () => {
+      // A hypervisor report writing its guest children in one transaction: identical `createdAt`.
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodes();
+
+      const arg = firstArg<{ orderBy: Array<Record<string, unknown>> }>(
+        prisma.infraNode.findMany,
+      );
+      // The LAST orderBy term must be a column that is unique per row — otherwise the order stays
+      // partial and ties remain free to move. `id` is the cuid primary key.
+      const tiebreaker = arg.orderBy[arg.orderBy.length - 1];
+      expect(Object.keys(tiebreaker)).toEqual(['id']);
+    });
   });
 
   // ── Edge close (ADR-0019 lifecycle marker) ──────────────────────────────────
