@@ -19,10 +19,12 @@ import { EmptyState } from "@/components/empty-state";
 import {
   ErrorState,
   LinkableRow,
+  Pagination,
   ResourceCard,
   ResourceCardMeta,
   type ResourceColumn,
   ResourceTable,
+  SortableHeader,
 } from "@/components/resource-table";
 import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
@@ -62,24 +64,40 @@ import { PendingReviewTray } from "./pending-review-tray";
  * under it without a duplicate heading (#760). The `?view` toggle lives one level up; this view never
  * reads or writes it.
  *
- * Data: reuses `useInfraNodes({ kind, status, state })` (#741), which now returns the ENRICHED
- * `InfraNodeListItem[]` — each row carries the linked Asset's `assetName` + active `owners`
- * (joined server-side in one query, ADR-0070 §6 / #750). kind/status/state are SERVER-side filters
- * (the API supports them); `q` is a CLIENT-side text filter. All of these live in the URL via
- * `useListParams`, so they SURVIVE a Map↔Table switch (the switch only flips `?view`, leaving the
- * filter params untouched) — and a row click deep-links `?node=<id>` which the Map view honours when
- * you flip back (#760).
+ * Data: `useInfraNodes({ kind, status, state, q, sort, dir, limit, offset })` (#741, paged in #1152),
+ * whose rows are the ENRICHED `InfraNodeListItem` — each carries the linked Asset's `assetName` +
+ * active `owners` (joined server-side in one query, ADR-0070 §6 / #750). Every one of those params
+ * lives in the URL via `useListParams`, so they SURVIVE a Map↔Table switch (the switch only flips
+ * `?view`, leaving the rest untouched) — and a row click deep-links `?node=<id>` which the Map view
+ * honours when you flip back (#760).
  *
- * ponytail — search & paging are client-side, not server-driven:
- *  - The infra node list is UNPAGED by design (ADR-0070: the estate is small) — `getInfraNodes`
- *    returns a plain `InfraNodeListItem[]`, no `{ items, total }` envelope, no sort allowlist. So
- *    this list has no Pagination / SortableHeader and filters the loaded array in memory (the
- *    Locations precedent: "type is filtered client-side over the page"). No new endpoint, no Meili.
- *  - Search matches label + ipAddress + the linked asset name + each owner's name/email (#750). The
- *    enriched list payload is what makes the asset-name/owner match possible without an N+1 detail
- *    fetch per row or coupling to the Meili `/search` index.
+ * ponytail — search, sort and paging are SERVER-side now (#1152):
+ *  - `GET /infra/nodes` is the house `Page<T>` (ADR-0030): `{ items, total, limit, offset }`, a sort
+ *    allowlist, and server-side `q` over label / ipAddress / linked asset name / active owner
+ *    name+email. So this table gets the ordinary house treatment — `SortableHeader` on the allowlisted
+ *    columns, a `Pagination` footer over `total` — exactly as Consumables and Assets do it.
+ *  - The in-memory `q` filter this file used to run is GONE, and its removal is the point rather than
+ *    a tidy-up. Filtering a page in the browser double-filters (the API already applied `q`) and, far
+ *    worse, keeps implying the search covered the estate when it only ever covered one window. The
+ *    old reasoning — "the list is unpaged by design, the estate is small (ADR-0070)" — stopped being
+ *    true the day one hypervisor could enrol 500 guests (ADR-0095) and one Docker host one node per
+ *    container (#1139).
+ *  - `asset` and `owner` stay UNSORTABLE: they are joined relations the API does not allowlist, so a
+ *    header that looked clickable would be a 400. Assets treats model/owners the same way.
  */
 const FILTER_DEFAULTS = { kind: "ALL", status: "ALL", state: "ALL" } as const;
+
+/**
+ * The wire sort key behind each sortable column. `ip` is the column key the table has always used;
+ * `ipAddress` is what the API's allowlist calls it, and mapping the two here keeps the column ids
+ * stable while sending the server a key it accepts.
+ */
+const SORT_KEYS = {
+  label: "label",
+  kind: "kind",
+  status: "status",
+  ip: "ipAddress",
+} as const;
 
 /** Stable empty placeholder for the loading skeleton's mobile children slot. */
 const LOADING_MOBILE_CHILDREN = <></>;
@@ -95,19 +113,25 @@ export function ServersTableView() {
   const [wizardOpen, setWizardOpen] = useState(false);
 
   // Whether the estate already has ANY agent-sourced node (across every state) — drives the onboarding
-  // hero vs. the compact "Add agent" affordance (ADR-0074 §6). Reads the unfiltered node list, which is
-  // already cached/shared by the topology canvas and the Assets "On topology" badge (#765), so this is
-  // a cache hit, not an extra round-trip. `undefined` while loading → the hero stays hidden (no flash).
-  const { data: allNodes } = useInfraNodes({});
-  const hasAgents = allNodes
-    ? allNodes.some((node) => node.source === "AGENT")
-    : undefined;
+  // hero vs. the compact "Add agent" affordance (ADR-0074 §6). A COUNT question, so it asks for a count
+  // (#1152): a one-row `source=AGENT` page whose `total` answers it exactly. It used to scan the whole
+  // node list with `.some(...)`, which on a paged endpoint would have inspected one window and shown a
+  // "get started" hero to an estate whose only agents sat on page two. `undefined` while loading → the
+  // hero stays hidden (no flash).
+  const { data: agentProbe } = useInfraNodes({ source: "AGENT", limit: 1 });
+  const hasAgents = agentProbe ? agentProbe.total > 0 : undefined;
 
   const {
     q,
+    sort,
+    dir,
+    offset,
+    limit,
     filters,
     setQ,
+    toggleSort,
     setFilter,
+    setOffset,
     clearFilters,
     filtersActive,
   } = useListParams({ filters: FILTER_DEFAULTS });
@@ -116,10 +140,11 @@ export function ServersTableView() {
   const statusFilter = filters.status as InfraNodeStatus | "ALL";
   const stateFilter = filters.state as InfraNodeState | "ALL";
 
-  // Forward only the server-supported filters; `q` filters client-side over the result below.
+  // Every param goes to the server, `q` included (#1152) — there is no in-memory pass after this.
   const {
-    data: nodes,
+    data: page,
     isLoading,
+    isFetching,
     isError,
     error,
     refetch,
@@ -128,67 +153,88 @@ export function ServersTableView() {
       kind: kindFilter === "ALL" ? undefined : kindFilter,
       status: statusFilter === "ALL" ? undefined : statusFilter,
       state: stateFilter === "ALL" ? undefined : stateFilter,
+      q: q || undefined,
+      sort,
+      dir,
+      limit,
+      offset,
     },
     // Poll so live nodes show fresh lastReportedAt/status/IP without a manual reload (#1081).
     { refetchInterval: INFRA_LIVE_POLL_MS },
   );
 
-  // Client-side text search over label + IP + linked asset name + each owner's name/email (#750).
-  // The list is unpaged (see the file header), so we filter the loaded array in memory.
-  const rows = useMemo(() => {
-    const items = nodes ?? [];
-    const needle = q.trim().toLowerCase();
-    if (!needle) return items;
-    return items.filter(
-      (node) =>
-        node.label.toLowerCase().includes(needle) ||
-        (node.ipAddress?.toLowerCase().includes(needle) ?? false) ||
-        (node.assetName?.toLowerCase().includes(needle) ?? false) ||
-        node.owners.some((owner) =>
-          `${owner.firstName} ${owner.lastName} ${owner.email}`
-            .toLowerCase()
-            .includes(needle),
-        ),
-    );
-  }, [nodes, q]);
+  // The page is already scoped server-side, so rows are its items verbatim — no client-side re-filter.
+  const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   const columns = useMemo<ResourceColumn[]>(
     () => [
       {
         key: "label",
-        header: tServers("columns.label"),
+        header: (
+          <SortableHeader
+            label={tServers("columns.label")}
+            active={sort === SORT_KEYS.label}
+            direction={dir}
+            onToggle={() => toggleSort(SORT_KEYS.label)}
+          />
+        ),
         skeleton: <Skeleton className="h-4 w-40" />,
       },
       {
         key: "kind",
-        header: tServers("columns.kind"),
+        header: (
+          <SortableHeader
+            label={tServers("columns.kind")}
+            active={sort === SORT_KEYS.kind}
+            direction={dir}
+            onToggle={() => toggleSort(SORT_KEYS.kind)}
+          />
+        ),
         skeleton: <Skeleton className="h-5 w-20 rounded-full" />,
       },
       {
         key: "status",
-        header: tServers("columns.status"),
+        header: (
+          <SortableHeader
+            label={tServers("columns.status")}
+            active={sort === SORT_KEYS.status}
+            direction={dir}
+            onToggle={() => toggleSort(SORT_KEYS.status)}
+          />
+        ),
         skeleton: <Skeleton className="h-5 w-16 rounded-full" />,
       },
       {
+        // Not sortable: `assetName` is a joined relation, off the API's sort allowlist (an unknown
+        // key 400s). Assets leaves its model column plain for the same reason.
         key: "asset",
         header: tServers("columns.asset"),
         skeleton: <Skeleton className="h-5 w-24 rounded-full" />,
       },
       {
+        // Not sortable either — `owners` is a many-hop join (Asset → active AssetAssignment → User).
         key: "owner",
         header: tServers("columns.owner"),
         skeleton: <Skeleton className="h-4 w-28" />,
       },
       {
         key: "ip",
-        header: tServers("columns.ip"),
+        header: (
+          <SortableHeader
+            label={tServers("columns.ip")}
+            active={sort === SORT_KEYS.ip}
+            direction={dir}
+            onToggle={() => toggleSort(SORT_KEYS.ip)}
+          />
+        ),
         skeleton: <Skeleton className="h-4 w-28" />,
       },
     ],
-    [tServers],
+    [tServers, sort, dir, toggleSort],
   );
 
-  const isEmpty = (nodes?.length ?? 0) === 0;
+  const total = page?.total ?? 0;
+  const isEmpty = total === 0;
 
   const chips = [
     ...(q
@@ -425,6 +471,18 @@ export function ServersTableView() {
           </LinkableRow>
         ))}
       </ResourceTable>
+
+      {/* The window is over `total` — the count of what the FILTERS asked for, not of the table — so
+          "1–50 of 431" is a true statement about this query. Without it a server-paged list is the
+          exact failure #1152 exists to stop: fifty rows that look like all of them. */}
+      <Pagination
+        total={total}
+        limit={page?.limit ?? limit}
+        offset={page?.offset ?? offset}
+        itemCount={page?.items.length ?? 0}
+        onOffsetChange={setOffset}
+        isFetching={isFetching}
+      />
     </div>
     );
   }
