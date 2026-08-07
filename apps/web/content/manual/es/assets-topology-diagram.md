@@ -100,6 +100,27 @@ botones: **Mostrar radio de afectación** (lo vemos abajo; dibuja su respuesta s
 de detalle directamente. El clic selecciona en lugar de abrir para que el mapa siga visible: la
 ventana de detalle es grande, y taparlo en cada clic escondería justo lo que viniste a mirar.
 
+### Si el mapa avisa que está incompleto
+
+El mapa dibuja tu parque entero, hasta un techo de **2000 nodos**. Por encima de eso aparece un aviso
+arriba del tablero, y se queda ahí:
+
+> Se muestran 2000 de 2431 nodos: este mapa está incompleto.
+
+No es un error y no hay nada que reintentar: significa que tu parque creció más allá de lo que un
+tablero puede dibujar de forma útil. **No hay ninguna opción para subir ese techo.**
+
+Lo importante es lo que *no* significa. Los nodos que quedaron afuera **siguen en lazyit**: están en
+tu inventario, en la [lista de servidores](/help/assets-topology-servers) y en la búsqueda, igual que
+antes. Lo único que falta es su dibujo: no se los dibuja a ellos, ni a las conexiones que pasan por
+ellos.
+
+Esa última parte es la razón por la que el aviso no se va solo. Un nodo que no está dibujado se lleva
+sus líneas, así que **un radio de afectación leído sobre un mapa truncado está incompleto**: el
+conjunto resaltado y el número son la respuesta para la parte del parque que el tablero está
+mostrando, no para todo. Tomalo como un piso, no como un total, y verificá los servidores afectados en
+la lista de servidores cuando la respuesta importe.
+
 ## Agregar al mapa
 
 Con los permisos correspondientes verás un botón **Agregar** en el encabezado de la página, con dos
@@ -327,6 +348,11 @@ respaldo no tumba al primario, y una conexión de red simple no tiene dirección
 
 Un **resultado vacío es buena noticia** — significa que nada depende de este nodo, así que es seguro
 darlo de baja. lazyit lo muestra como tranquilidad, no como un error.
+
+> [!IMPORTANT]
+> Si el tablero muestra el aviso de *"este mapa está incompleto"*, el radio de afectación se calcula
+> sobre lo que está dibujado, así que puede ser más chico que la realidad. Ver
+> [Si el mapa avisa que está incompleto](#si-el-mapa-avisa-que-está-incompleto).
 
 ## Qué sigue
 
