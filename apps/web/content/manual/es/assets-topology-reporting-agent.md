@@ -464,8 +464,9 @@ opciones:
   cada reporte, así que su panel de inventario se empieza a completar. **Nunca** toca su nombre, su
   número de serie, su modelo, su estado, su ubicación ni sus asignaciones. Todo lo que curaste sigue
   siendo tuyo; solo se mantiene por vos la mitad que reporta la máquina. Y si después desvinculás el
-  nodo, un activo que ya existía simplemente se **desvincula y queda intacto**: solo se archiva un
-  activo que creó el propio lazyit.
+  nodo —desde **Vínculo de inventario**, en la pestaña **General** de la ventana de detalle— un activo
+  que ya existía simplemente se **desvincula y queda intacto**. Solo se archiva un activo que creó el
+  propio lazyit, y la confirmación te dice cuál de los dos estás por hacer.
 
   La coincidencia es deliberadamente cautelosa. lazyit adopta un activo existente solo cuando el
   reporte respalda su serie también con una dirección de placa de red, y nunca cuando ese host ya está
@@ -748,10 +749,20 @@ arreglarlos:
   asignaciones, historial, etiquetas y documentos adjuntos, y decidir qué pasa con cada uno es tu
   criterio. No se cambia nada mientras no estás mirando.
 
-Para reconciliar un par a mano, desvinculá del nodo el activo creado automáticamente —lazyit lo
-archiva, porque lo creó él— y después vinculá el registro que curaste. De ahí en más la máquina
-reporta sobre el registro que conservaste, y el panel de inventario de la ventana de detalle se
-empieza a completar ahí.
+Cuando ya lo verificaste y estás seguro de que las dos filas son la misma caja, el aviso trae un
+botón: **Apuntar este nodo al registro que curaste**. Ejecuta los dos pasos que si no harías a mano
+—el suplente creado automáticamente se archiva (lo creó lazyit, así que se va con el vínculo) y
+después el nodo se vincula al registro que conservaste—. De ahí en más la máquina reporta sobre tu
+registro, y el panel de inventario de la ventana de detalle se empieza a completar ahí.
+
+Esto sigue sin ser una fusión, y nunca lo va a ser: no se mueve nada de un registro al otro. Todo lo
+que lleva el suplente —asignaciones, historial, etiquetas, documentos adjuntos— se queda en el
+suplente, y el suplente se archiva. Si tiene algo que quieras en el registro que vas a conservar,
+copialo antes de apretar el botón: este es el momento, no después.
+
+Si el segundo paso falla (porque el registro que curaste se archivó mientras tanto, por ejemplo), el
+diálogo queda abierto y te lo dice: el suplente ya está archivado y solo falta hacer el vínculo.
+Reintentar retoma desde ahí en vez de empezar de cero.
 
 Si no tenés ninguno de estos casos, nunca vas a ver este aviso. Es deliberadamente silencioso.
 

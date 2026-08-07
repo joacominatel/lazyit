@@ -145,10 +145,30 @@ activo**:
   inventarías (un contenedor de vida corta, por ejemplo). Aparece en el mapa pero no tiene registro
   de inventario detrás.
 
-Puedes cambiar de opinión después. Desvincular el activo de un nodo respaldado deja el nodo en el
-mapa pero quita el vínculo de inventario: si lazyit había creado el activo automáticamente, ese
-activo se desactiva (nunca queda en el inventario sin dueño); si habías vinculado un activo
-preexistente, queda intacto y simplemente se desvincula.
+Puedes cambiar de opinión después. Abrí la ventana de detalle del nodo y buscá **Vínculo de
+inventario** en la pestaña **General**: ahí es donde desvinculás el activo de un nodo respaldado, o
+vinculás uno a un nodo que no tiene. Ambas acciones requieren el permiso de **gestionar topología**;
+quien solo puede leer ve el nombre de inventario pero ningún control.
+
+Desvincular siempre deja el nodo en el mapa. Lo que pasa con el *activo* depende de quién lo creó, y
+los dos resultados no son lo mismo — así que la confirmación te dice cuál estás por ejecutar, antes
+de que confirmes:
+
+- **lazyit creó el activo** (armó un registro mínimo cuando agregaste o confirmaste el nodo) — al
+  desvincular, ese activo se **archiva**. Sale de tus listas de inventario y de la búsqueda —**y lo
+  hace incluso si alguien lo tiene asignado en este momento**; lazyit no se detiene a preguntar.
+  lazyit creó el registro, así que lo retira en vez de dejar un registro que ya nadie mantiene.
+  Recuperar un activo archivado requiere el permiso de **dar de baja activos** y la vista de
+  archivados, que es solo de administradores, y restaurarlo **no** vuelve a vincular el nodo — así que
+  tomalo como una decisión, no como un deshacer con el que puedas contar.
+- **Vinculaste un activo que ya existía** — al desvincular **solo se quita el vínculo**. El activo
+  queda tal cual estaba: mismos dueños, mismo historial, mismos documentos. No se archiva nada.
+
+lazyit sabe en cuál de los dos casos estás porque marca los registros que crea él mismo, y nunca le
+pone esa marca a un registro que curaste vos. Si un nodo está desvinculado, ese mismo panel ofrece un
+buscador para vincular cualquier activo de tu inventario. No se puede cambiar de un solo paso el
+activo de un nodo que ya tiene uno: primero desvinculás y después vinculás el nuevo, para que el
+registro saliente se resuelva de forma deliberada y no se descarte en silencio.
 
 La **etiqueta del nodo siempre manda para mostrarse** en el lienzo; el nombre del activo vinculado
 aparece en el encabezado de la ventana de detalle como un *nombre de inventario* secundario, así que
