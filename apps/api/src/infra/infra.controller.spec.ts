@@ -51,67 +51,91 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
   });
 
   describe('the node list page params (#1152)', () => {
+    // A real (stubbed) service, so a params failure can only ever be a 400 from the parsing — never a
+    // "not a function" from an empty stand-in that would pass the assertion for the wrong reason.
+    const listNodes = jest.fn().mockReturnValue('page');
     const controller = new InfraController(
-      {} as never,
+      { listNodes } as never,
       {} as never,
       {} as never,
       {} as never,
     );
 
+    /** Named call-through, so adding a filter param never silently re-points these positionals. */
+    function list(params: {
+      state?: string;
+      source?: string;
+      ids?: string;
+      assetIds?: string;
+      q?: string;
+      limit?: string;
+      sort?: string;
+    }) {
+      return controller.listNodes(
+        undefined,
+        undefined,
+        params.state,
+        params.source,
+        params.ids,
+        params.assetIds,
+        params.q,
+        params.limit,
+        undefined,
+        undefined,
+        params.sort,
+        undefined,
+      );
+    }
+
+    beforeEach(() => listNodes.mockClear());
+
     // ADR-0030: an over-max `limit` is REJECTED, never clamped — so a client can never believe it
-    // asked for more than it got. Same for a malformed window or an unknown sort direction.
+    // asked for more than it got. A clamp is the failure mode this contract exists to forbid.
     it.each(['201', '0', '-1', 'abc', '1.5'])(
       'rejects limit=%p with a 400 rather than clamping it',
       (limit) => {
-        expect(() =>
-          controller.listNodes(
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            limit,
-          ),
-        ).toThrow(BadRequestException);
+        expect(() => list({ limit })).toThrow(BadRequestException);
+        expect(listNodes).not.toHaveBeenCalled();
       },
     );
 
-    it('accepts the hard maximum page size (200) — the tray asks for exactly this', () => {
-      const infra = { listNodes: jest.fn().mockReturnValue('ok') };
-      const c = new InfraController(
-        infra as never,
-        {} as never,
-        {} as never,
-        {} as never,
-      );
+    it('accepts the hard maximum page size (200) — the PENDING tray asks for exactly this', () => {
+      list({ state: 'PENDING', limit: '200' });
 
-      c.listNodes(
-        undefined,
-        undefined,
-        'PENDING',
-        undefined,
-        undefined,
-        undefined,
-        '200',
-      );
-
-      expect(infra.listNodes).toHaveBeenCalledWith(
+      expect(listNodes).toHaveBeenCalledWith(
         expect.objectContaining({ state: 'PENDING' }),
         expect.objectContaining({ limit: 200, offset: 0 }),
       );
     });
 
-    it('rejects a malformed assetIds element with a 400 (never a silently empty filter)', () => {
-      expect(() =>
-        controller.listNodes(
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          'not-a-cuid',
-        ),
-      ).toThrow(BadRequestException);
+    it('defaults to the house page size when no window is asked for', () => {
+      list({});
+
+      expect(listNodes).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ limit: 50, offset: 0 }),
+      );
+    });
+
+    it.each(['ids', 'assetIds'] as const)(
+      'rejects a malformed %s element with a 400 (never a silently empty filter)',
+      (param) => {
+        expect(() => list({ [param]: 'not-a-cuid' })).toThrow(
+          BadRequestException,
+        );
+      },
+    );
+
+    it('passes `q` and `source` through as filters the DATABASE applies', () => {
+      // Both exist because the page made client-side scanning wrong: an in-memory search over one
+      // window is a false "no results", and "does any agent node exist?" cannot be answered by
+      // looking at 50 rows.
+      list({ q: 'web-01', source: 'AGENT', limit: '1' });
+
+      expect(listNodes).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'web-01', source: 'AGENT' }),
+        expect.objectContaining({ limit: 1 }),
+      );
     });
   });
 

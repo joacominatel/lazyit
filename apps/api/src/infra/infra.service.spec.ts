@@ -3612,6 +3612,17 @@ describe('InfraService', () => {
       expect(arg.take).toBe(1);
     });
 
+    it('filters by `ids`, so a label lookup asks for exactly the nodes it needs', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodes({ ids: ['n-1', 'n-2'] }, FIRST_PAGE);
+
+      const arg = firstArg<{ where: { id?: { in: string[] } } }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where.id).toEqual({ in: ['n-1', 'n-2'] });
+    });
+
     it('filters by `assetIds`, so the Assets list can ask only about the rows it is showing', async () => {
       prisma.infraNode.findMany.mockResolvedValue([]);
 
