@@ -12,6 +12,7 @@ import {
 import {
   isContainerChildExternalId,
   isGuestChildExternalId,
+  MAX_PAGE_LIMIT,
   type CreateServiceAccount,
   type InfraNodeListItem,
 } from "@lazyit/shared";
@@ -582,10 +583,16 @@ function StepWait({
   doneLabel: string;
 }) {
   const t = useTranslations("infra.wizard");
-  const { data: pending } = useInfraNodes(
-    { state: "PENDING" },
+  // One batch of PENDING proposals, polled fast while this step is open (#1152 added the explicit
+  // bound). The default order is `createdAt desc` — newest first — so the host that just checked in
+  // is always inside this window, whatever the size of the review backlog behind it. That is the
+  // whole requirement here: this step's only job is to notice ONE new arrival, not to enumerate the
+  // queue (the tray does that, and says so when it is showing a batch).
+  const { data: pendingPage } = useInfraNodes(
+    { state: "PENDING", limit: MAX_PAGE_LIMIT },
     { enabled: true, refetchInterval: 5000 },
   );
+  const pending = pendingPage?.items;
   const baselineRef = useRef<Set<string> | null>(null);
   const [found, setFound] = useState<InfraNodeListItem | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
