@@ -91,7 +91,14 @@ partial unique indexes above (one-active-host for RUNS_ON; canonical-pair for CO
 
 - `GET /infra/nodes/:id/edges?active=` — read a node's edges (active-only by default; `active=false`
   includes closed history). The canvas fans this out per node (active-only) to assemble the graph; the
-  drill-in panel reads the full history.
+  drill-in panel reads the full history. Ordering is a **total** order — `startedAt desc` then the
+  unique `id` desc (#1152), matching [[infra-node]]'s list. `startedAt` is `@default(now())` with no
+  unique tiebreaker and a hypervisor report writes a host's guest `RUNS_ON` edges back to back, so
+  same-millisecond ties are routine. The tiebreaker matters more here than on the node list: the
+  Connections drill-in renders this response in **server order** (it filters on `endedAt`, it never
+  sorts) and every infra mutation invalidates the whole infra query key, so it re-fetches often —
+  with a partial order an invalidation mid-review reorders tied rows and the operator's "close"
+  click lands on a different edge than the one they read.
 - `POST /infra/edges` — open an edge. The API canonicalizes symmetric CONNECTS_TO, **migrates**
   RUNS_ON (closes the source's active host, opens the new), warns on implausible kind pairs, and
   returns a friendly `409` on a one-active-host / duplicate-pair conflict.
