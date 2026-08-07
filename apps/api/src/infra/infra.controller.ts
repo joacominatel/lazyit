@@ -41,11 +41,14 @@ import {
   InfraEdgeSchema,
   InfraIdentityMatchSchema,
   InfraImpactResponseSchema,
+  InfraGraphSchema,
   InfraNodeDetailSchema,
   InfraNodeFactChangeListSchema,
   InfraNodeKindSchema,
   InfraNodeListItemSchema,
+  InfraNodeListPageSchema,
   InfraNodeSchema,
+  InfraNodeSourceSchema,
   InfraNodeStateSchema,
   InfraNodeStatusSchema,
   InfraSecretRefSchema,
@@ -54,9 +57,11 @@ import {
   UpdateInfraNodeSchema,
 } from '@lazyit/shared';
 import { z } from 'zod';
-import { InfraService } from './infra.service';
+import { INFRA_NODE_SORT_ALLOWLIST, InfraService } from './infra.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
+import { parsePageQuery } from '../common/parse-page-query';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
@@ -68,6 +73,8 @@ import { AgentFleetService } from './agent-fleet.service';
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class AgentFleetViewDto extends createZodDto(AgentFleetViewSchema) {}
 class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
+class InfraNodeListPageDto extends createZodDto(InfraNodeListPageSchema) {}
+class InfraGraphDto extends createZodDto(InfraGraphSchema) {}
 class InfraNodeDetailDto extends createZodDto(InfraNodeDetailSchema) {}
 class InfraImpactResponseDto extends createZodDto(InfraImpactResponseSchema) {}
 class InfraNodeFactChangeListDto extends createZodDto(
@@ -282,7 +289,7 @@ export class InfraController {
   @RequirePermission('infra:read')
   @ApiOperation({
     summary:
-      'List topology nodes (filter by kind/status/state; excludes archived/soft-deleted). Newest first.',
+      'List topology nodes, PAGED on the house Page<T> contract (ADR-0030): { items, total, limit, offset }, default 50, hard max 200 (an over-max limit is a 400, never clamped). Filter by kind/status/state/source/assetIds, search with q (label / IP / linked asset name / owner name+email), sort on the allowlist. `total` counts the FILTERED set. Excludes archived/soft-deleted. Default order: newest first with a unique id tiebreaker. BREAKING (#1152): this returned a bare array before — the topology canvas moved to GET /infra/graph/nodes.',
   })
   @ApiQuery({
     name: 'kind',
@@ -299,17 +306,80 @@ export class InfraController {
     required: false,
     enum: [...InfraNodeStateSchema.options],
   })
-  @ApiOkResponse({ type: [InfraNodeListItemDto] })
+  @ApiQuery({
+    name: 'source',
+    required: false,
+    enum: [...InfraNodeSourceSchema.options],
+    description:
+      'MANUAL (hand-drawn) or AGENT (reported). Pair with limit=1 to ask "does this estate have any agent node yet?" without reading the list.',
+  })
+  @ApiQuery({
+    name: 'assetIds',
+    required: false,
+    description:
+      'Comma-encoded cuids: restrict to the nodes backing these Assets. Bounded by the page limit; an unknown id matches nothing. Powers the Assets list "on topology" glyph over the rows it is showing.',
+  })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description:
+      "Case-insensitive substring over label / ipAddress / the linked Asset's name / each active owner's name+email.",
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: Object.keys(INFRA_NODE_SORT_ALLOWLIST),
+    description:
+      'Server-side sort field. Unknown field → 400. Default: createdAt desc (with a unique id tiebreaker, which is appended to every sort).',
+  })
+  @ApiQuery({
+    name: 'dir',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default asc when sort is set).',
+  })
+  @ApiOkResponse({ type: InfraNodeListPageDto })
   listNodes(
     @Query('kind') kind?: string,
     @Query('status') status?: string,
     @Query('state') state?: string,
+    @Query('source') source?: string,
+    @Query('assetIds') assetIds?: string | string[],
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
   ) {
-    return this.infra.listNodes({
-      kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
-      status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
-      state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
-    });
+    // `deleted` is deliberately NOT forwarded (ADR-0030 §7): the web has no archived-nodes view, so
+    // the slice would be contract surface nothing consumes. Not accepting the param is also why
+    // nothing is silently ignored — a caller cannot ask for a slice this endpoint doesn't serve.
+    return this.infra.listNodes(
+      {
+        kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
+        status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
+        state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
+        source: this.parseEnum(source, InfraNodeSourceSchema, 'source'),
+        assetIds: parseCuidArrayQuery(assetIds, 'assetIds'),
+        q,
+      },
+      parsePageQuery({ limit, offset, page, sort, dir }),
+    );
+  }
+
+  @Get('graph/nodes')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      "The topology canvas's own read (#1152): every live node, PROJECTED to just what the board draws (id/label/kind/status/ipAddress/x/y + chassis for the endpoint filter) — no owners/assetName join, no shortcuts, no specs. Deliberately NOT paged, because a map missing a node is a wrong map, not a shorter one. Bounded at INFRA_GRAPH_NODES_MAX and honest about it: the envelope carries `truncated` plus the real `total`, so a ceiling that bites is visible rather than silent. Same infra:read gate as the node list.",
+  })
+  @ApiOkResponse({ type: InfraGraphDto })
+  listGraphNodes() {
+    return this.infra.listGraphNodes();
   }
 
   @Get('nodes/:id')
