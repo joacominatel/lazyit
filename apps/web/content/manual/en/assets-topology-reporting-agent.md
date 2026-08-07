@@ -724,6 +724,11 @@ If the second step fails (the record you curated was archived meanwhile, say), t
 and says so: the stand-in is already archived, and only the link is left to make. Trying again resumes
 from there rather than starting over.
 
+Because the first of those two steps archives the stand-in, this button needs the **delete assets**
+permission on top of manage-topology. Without it the notice still appears and still names the record
+you curated — the part you need in order to go and check — but the button is replaced by a line
+saying which permission is missing.
+
 If you have none of these, you'll never see this warning. It is deliberately quiet.
 
 ## What the agent collects

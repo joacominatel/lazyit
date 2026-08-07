@@ -23,8 +23,10 @@ máquinas que se reportan solas, con el comando que actualiza las que quedaron a
 > Cualquiera que pueda ver la topología ve el mapa y el detalle de solo lectura de cada nodo.
 > Agregar nodos, dibujar conexiones, cambiar un estado o quitar un nodo del mapa requiere el permiso
 > de gestión de topología; instalar un agente de reporte requiere en cambio el de gestión de
-> configuración —un permiso aparte, no un agregado—, porque genera un token. Sin un permiso, sus
-> controles simplemente no aparecen.
+> configuración —un permiso aparte, no un agregado—, porque genera un token. La única acción de acá
+> que requiere un *segundo* permiso es desvincular un activo que creó lazyit: eso archiva el registro,
+> así que también requiere **dar de baja activos** ([más abajo](#rastrear-como-activo)). Sin un
+> permiso, sus controles simplemente no aparecen.
 
 ## Las notebooks y los equipos de escritorio se mantienen fuera del mapa
 
@@ -148,7 +150,9 @@ activo**:
 Puedes cambiar de opinión después. Abrí la ventana de detalle del nodo y buscá **Vínculo de
 inventario** en la pestaña **General**: ahí es donde desvinculás el activo de un nodo respaldado, o
 vinculás uno a un nodo que no tiene. Ambas acciones requieren el permiso de **gestionar topología**;
-quien solo puede leer ve el nombre de inventario pero ningún control.
+quien solo puede leer ve el nombre de inventario pero ningún control. Desvincular un activo que
+**creó lazyit** requiere un permiso más — **dar de baja activos** — porque esa desvinculación archiva
+el registro; mirá los dos resultados acá abajo.
 
 Desvincular siempre deja el nodo en el mapa. Lo que pasa con el *activo* depende de quién lo creó, y
 los dos resultados no son lo mismo — así que la confirmación te dice cuál estás por ejecutar, antes
@@ -160,9 +164,13 @@ de que confirmes:
   lazyit creó el registro, así que lo retira en vez de dejar un registro que ya nadie mantiene.
   Recuperar un activo archivado requiere el permiso de **dar de baja activos** y la vista de
   archivados, que es solo de administradores, y restaurarlo **no** vuelve a vincular el nodo — así que
-  tomalo como una decisión, no como un deshacer con el que puedas contar.
+  tomalo como una decisión, no como un deshacer con el que puedas contar. **Esta desvinculación
+  también requiere el permiso de dar de baja activos**, además del de gestionar topología: archivar un
+  activo cuesta acá el mismo permiso que en cualquier otra parte de lazyit. Sin él, el botón de
+  desvincular queda deshabilitado y lo explica, y la API rechaza el pedido con la misma explicación.
 - **Vinculaste un activo que ya existía** — al desvincular **solo se quita el vínculo**. El activo
   queda tal cual estaba: mismos dueños, mismo historial, mismos documentos. No se archiva nada.
+  **Esta solo requiere gestionar topología**: no se borra nada, así que no se cobra nada extra.
 
 lazyit sabe en cuál de los dos casos estás porque marca los registros que crea él mismo, y nunca le
 pone esa marca a un registro que curaste vos. Si un nodo está desvinculado, ese mismo panel ofrece un

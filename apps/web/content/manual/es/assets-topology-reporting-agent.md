@@ -764,6 +764,11 @@ Si el segundo paso falla (porque el registro que curaste se archivó mientras ta
 diálogo queda abierto y te lo dice: el suplente ya está archivado y solo falta hacer el vínculo.
 Reintentar retoma desde ahí en vez de empezar de cero.
 
+Como el primero de esos dos pasos archiva el suplente, este botón requiere el permiso de **dar de
+baja activos** además del de gestionar topología. Sin él, el aviso igual aparece y sigue nombrando el
+registro que curaste — que es lo que necesitás para ir a verificar —, pero en lugar del botón hay una
+línea que dice qué permiso falta.
+
 Si no tenés ninguno de estos casos, nunca vas a ver este aviso. Es deliberadamente silencioso.
 
 ## Qué recopila el agente
