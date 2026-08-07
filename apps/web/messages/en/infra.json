@@ -58,6 +58,7 @@
   "pending": {
     "title": "Pending review",
     "description": "Hosts the reporting agent discovered. Confirm to add them to your inventory, or discard.",
+    "batch": "Showing {shown} of {total} pending nodes, most recently discovered first. Confirm or discard these to reveal the rest.",
     "confirmAction": "Confirm",
     "mergeAction": "Merge into…",
     "discardAction": "Discard",
@@ -102,6 +103,8 @@
     },
     "targetLabel": "Merge into",
     "targetPlaceholder": "Pick a server",
+    "targetSearch": "Search servers by name…",
+    "targetEmpty": "No servers match that search.",
     "targetDescription": "The server you pick keeps its own name, kind, position, owner and asset link. Everything the agent owns moves onto it with the reporting key: the reported hardware and software facts, the status, the last check-in and the agent version — and the IP too, unless that IP was set by hand. If it already reports through an agent of its own, that key is replaced: a host still checking in with it will come back as a new pending server.",
     "submit": "Merge",
     "mergedToast": "Server merged.",
@@ -320,6 +323,10 @@
     "hide": "{count, plural, one {Hide # endpoint} other {Hide # endpoints}}",
     "hideHint": "Take laptops and desktops back off the map. Nothing is removed — they stay in your inventory, on the Servers list and in search."
   },
+  "graph": {
+    "truncated": "Showing {shown} of {total} nodes — this map is incomplete.",
+    "truncatedHint": "The map draws at most {shown} nodes. The ones left out are still in your inventory, on the Servers list and in search, but their connections are not drawn here — read a blast radius with that in mind."
+  },
   "legend": {
     "title": "Edge legend"
   },
@@ -508,8 +515,8 @@
     "kindPlaceholder": "Pick a relationship",
     "targetLabel": "Other node",
     "targetPlaceholder": "Pick a node",
-    "targetSearch": "Search nodes…",
-    "targetEmpty": "No other nodes.",
+    "targetSearch": "Search nodes by name…",
+    "targetEmpty": "No nodes match that search.",
     "directionNote": "This node is the source; the relationship points to the other node.",
     "submit": "Connect",
     "createdToast": "Connection added.",
