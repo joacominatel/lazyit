@@ -52,6 +52,7 @@ import {
   InfraNodeStateSchema,
   InfraNodeStatusSchema,
   InfraSecretRefSchema,
+  MAX_PAGE_LIMIT,
   MergeInfraNodeSchema,
   UpdateInfraAutoConfirmRuleSchema,
   UpdateInfraNodeSchema,
@@ -371,8 +372,8 @@ export class InfraController {
         status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
         state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
         source: this.parseEnum(source, InfraNodeSourceSchema, 'source'),
-        ids: parseCuidArrayQuery(ids, 'ids'),
-        assetIds: parseCuidArrayQuery(assetIds, 'assetIds'),
+        ids: this.parseIdBatch(ids, 'ids'),
+        assetIds: this.parseIdBatch(assetIds, 'assetIds'),
         q,
       },
       parsePageQuery({ limit, offset, page, sort, dir }),
@@ -701,6 +702,29 @@ export class InfraController {
   @ApiOkResponse({ type: InfraEdgeDto })
   closeEdge(@Param('id') id: string) {
     return this.infra.closeEdge(id);
+  }
+
+  /**
+   * Parse a comma-encoded id batch (`?ids=` / `?assetIds=`) and CAP it at the page limit — the same
+   * bound `GET /users?ids=` carries (`MAX_RESOLVE_USER_IDS`, ADR-0030 §6 / #961).
+   *
+   * The cap is the point. These filters exist so a caller can resolve exactly the rows it is showing
+   * instead of scanning the estate, and without a bound the fix trades one unbounded read for an
+   * unbounded `IN` list a client can post in a query string. Over-cap is a clean 400 rather than a
+   * silent trim, for the same reason an over-max `limit` is: a caller must never believe it asked
+   * about more ids than it got answers for.
+   */
+  private parseIdBatch(
+    raw: string | string[] | undefined,
+    name: string,
+  ): string[] | undefined {
+    const ids = parseCuidArrayQuery(raw, name);
+    if (ids && ids.length > MAX_PAGE_LIMIT) {
+      throw new BadRequestException(
+        `Invalid ${name}: expected up to ${MAX_PAGE_LIMIT} comma-separated cuids`,
+      );
+    }
+    return ids;
   }
 
   /** Parse an optional `@Query` enum against its allowlist; unknown value → 400 (ADR-0030). */
