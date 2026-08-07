@@ -4415,7 +4415,8 @@ export class InfraService {
   /**
    * List a node's edges (ADR-0070 v1 edge history). `activeOnly` (default) returns only open edges
    * (endedAt null); pass false for the full history including closed ones (migrations). Covers edges
-   * where the node is EITHER endpoint (source or target), newest first.
+   * where the node is EITHER endpoint (source or target), newest first with a deterministic
+   * tiebreaker (see the `orderBy` note).
    */
   async listEdgesForNode(nodeId: string, activeOnly = true) {
     await this.getNode(nodeId);
@@ -4424,7 +4425,16 @@ export class InfraService {
         OR: [{ sourceId: nodeId }, { targetId: nodeId }],
         ...(activeOnly ? { endedAt: null } : {}),
       },
-      orderBy: { startedAt: 'desc' },
+      // TOTAL order, not just newest-first (#1152) — the same reasoning as `listNodes`. `startedAt`
+      // is `@default(now())` with no unique tiebreaker, and a hypervisor report writes its guests'
+      // RUNS_ON edges back to back in one report, so same-millisecond ties are routine, not rare.
+      // It matters MORE here than on the node list: the Connections drill-in
+      // (`node-edges-manager.tsx`) renders this array in SERVER order — it filters on `endedAt` and
+      // never sorts — and every infra mutation invalidates `infraKeys.all`, so it re-fetches often.
+      // With a partial order, an invalidation mid-review swaps two tied rows and the operator's
+      // click lands on a DIFFERENT edge than the one they read. Closing an edge is a write, so that
+      // mis-click is a real state change, not a display glitch. The unique `id` makes it stable.
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
     });
   }
 
