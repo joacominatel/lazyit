@@ -128,7 +128,12 @@ afterEach(() => {
 
 test("derives codes in an INSECURE CONTEXT (no crypto.subtle) — #1126", async () => {
   withoutSubtle();
-  expect(globalThis.crypto.subtle).toBeUndefined();
+  // `in`, not `globalThis.crypto.subtle === undefined`: this asserts the property is ABSENT
+  // (what an insecure context actually gives you) rather than merely undefined, and it keeps the
+  // ESLint secure-context guard exemption-free — the guard matches `.subtle` on ANY object, so a
+  // member access here would need a disable comment, and a guard with a hole in the very file
+  // that proves the bug is a guard nobody can trust.
+  expect("subtle" in globalThis.crypto).toBe(false);
 
   for (const algorithm of ["SHA1", "SHA256", "SHA512"] as const) {
     const { seed, codes } = VECTORS[algorithm];
