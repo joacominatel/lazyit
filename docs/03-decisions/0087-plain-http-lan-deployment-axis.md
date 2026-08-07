@@ -145,7 +145,7 @@ so a whole family of browser APIs is simply `undefined` there. `localhost` **is*
 | API | Use instead |
 | --- | --- |
 | `crypto.randomUUID()` | `nextListKey()` from `@/lib/list-key` for React list keys — keys need sibling-uniqueness, not entropy. For a real domain id, let the API mint it (`cuid()`). |
-| `crypto.subtle.*` | The already-installed pure-JS `@noble/hashes` / `@noble/ciphers` primitives. |
+| `crypto.subtle.*` | The already-installed pure-JS `@noble/hashes` / `@noble/ciphers` primitives. No `apps/web` file is exempt any more — the last holdout, `lib/secret-manager/totp.ts`, was converted in #1126, so the lint block carries no `lib/**` ignore. Do **not** add a `crypto.subtle`-when-available fast path: only one of the two branches is ever exercised in development, which is how this class keeps shipping. |
 | `navigator.clipboard.writeText()` | `copyText()` from `@/lib/secret-manager/clipboard` — it returns a boolean so the UI can offer a manual-copy fallback instead of a silent no-op (#813). |
 
 `crypto.getRandomValues()` is **fine** — it is available in insecure contexts, which is why the
@@ -153,7 +153,14 @@ zero-knowledge vault (`@noble/*` + `getRandomValues`) keeps working in `lan` mod
 
 Known history of this class: #813 (clipboard silently no-ops — a Copy that looked like it saved the
 recovery key but didn't), #1125 (`crypto.randomUUID` crashed the workflow step editor on mount, making
-the builder unusable), #1126 (`crypto.subtle` — TOTP secret items still dead in `lan` mode, open).
+the builder unusable), #1126 (`crypto.subtle` — TOTP secret items rendered a permanent "check the seed
+format" error in `lan` mode, blaming the operator's seed for a deployment-mode limitation;
+**resolved** — `totp.ts` now derives codes with the pure-JS `@noble/hashes` HMAC, so the promise made
+above holds for the *whole* Secret Manager, TOTP included).
+
+Still open in this class, tracked separately: the QR asset scanner (`app/(app)/assets/scan/`) uses
+`getUserMedia`, which is also secure-context-only. It already degrades with a clear message rather than
+failing blank, so it is a `lan` **limitation**, not a defect — but a `lan` operator cannot scan.
 
 ### Infra
 
