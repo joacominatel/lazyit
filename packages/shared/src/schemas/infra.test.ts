@@ -1852,3 +1852,58 @@ describe("InfraNodeDetailSchema — the ADR-0093 display-only read fields", () =
     expect(InfraNodeDetailSchema.shape.duplicateAssetSuspicion.safeParse(null).success).toBe(true);
   });
 });
+
+describe("InfraNodeDetailSchema — `assetAutoCreated`, the detach-outcome read field (#1202)", () => {
+  test("accepts `true` / `false` — the two detach outcomes the drill-in must name apart", () => {
+    // `true`  → a detach runs `AssetsService.remove` on the linked Asset (ADR-0093 §4).
+    // `false` → a detach only nulls `InfraNode.assetId`; the curated row is untouched.
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(true).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(false).success).toBe(true);
+  });
+
+  test("is `.nullish()` — an older API omits it, and a graph-only node has no answer", () => {
+    // The read-tolerance contract (CLAUDE.md #8): web must parse a pre-#1202 payload. It is also
+    // genuinely absent for a node carrying no Asset, where there is no detach to describe.
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(null).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(undefined).success).toBe(true);
+  });
+
+  test("a whole detail payload MISSING the key still parses", () => {
+    // The field-level check above passes even if the key were required on the object, so assert the
+    // object contract itself: an older API's response must survive `InfraNodeDetailSchema.parse`.
+    const legacy = {
+      id: CUID,
+      kind: "PHYSICAL_HOST",
+      label: "web-01",
+      status: "ONLINE",
+      assetId: null,
+      ipAddress: null,
+      shortcuts: null,
+      specs: null,
+      x: 0,
+      y: 0,
+      source: "MANUAL",
+      state: "CONFIRMED",
+      reportingSource: null,
+      externalId: null,
+      lastReportedAt: null,
+      agentVersion: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      deletedAt: null,
+      assetName: null,
+      owners: [],
+      articleLinks: [],
+      secretRefs: [],
+      children: [],
+    };
+    const parsed = InfraNodeDetailSchema.safeParse(legacy);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success ? (parsed.data.assetAutoCreated ?? null) : "did not parse").toBe(null);
+  });
+
+  test("rejects a non-boolean — it is a provenance FACT, never a free-form string", () => {
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse("true").success).toBe(false);
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(1).success).toBe(false);
+  });
+});
