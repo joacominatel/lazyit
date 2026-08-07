@@ -122,6 +122,60 @@ guarding a private key. So Argon2id must come from a library:
 > client-side; verify it is **not** pulled into a Server Component / RSC graph and that the bundler
 > emits the wasm correctly (a Phase-2 wiring detail, flagged as an open question, §9).
 
+### The vault must work in an INSECURE CONTEXT (added 2026-08-06, #1126)
+
+A **hard constraint on every primitive in this document**, and the one that was missing from it while
+the rest of the design was being ratified. A lazyit served over plain HTTP on a LAN IP is a supported
+deployment shape ([[0087-plain-http-lan-deployment-axis]] `lan` mode), and such a page is **not a
+[secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts)**. In an
+insecure context `window.crypto` still exists, but `crypto.subtle` is `undefined`.
+
+`localhost` **is** a secure context, so **development never reproduces this**. That is not a footnote:
+it is the specific reason the one file that ignored the rule shipped broken and stayed broken.
+
+What this means for the choices above — and why they were already right:
+
+| Primitive | Source | Insecure-context safe? |
+| --- | --- | --- |
+| X25519, AES-256-GCM, HKDF, HMAC | `@noble/*` — pure JS | **Yes** — no `crypto.subtle` anywhere |
+| Argon2id | `hash-wasm` — WebAssembly | **Yes** — `WebAssembly` is not secure-context-gated |
+| Random bytes | `crypto.getRandomValues` | **Yes** — explicitly available in insecure contexts |
+| *(banned)* | `crypto.subtle.*` | **No** — `undefined`; lint-blocked at `error` severity |
+
+So the whole zero-knowledge envelope — DEK wrap/unwrap, seal/open, recovery keys, passphrase derivation
+— is context-independent **by construction**, which is exactly what lets ADR-0087 point at the vault as
+the mitigation that makes `lan` mode acceptable.
+
+This is the practical payoff of the **single audited noble vocabulary** ratified in §10.2 (X25519 via
+`@noble/curves`, ACCEPTED over WebCrypto P-256). That decision was argued on auditability and one
+client+test surface; it *also* bought
+insecure-context portability for free. `apps/web/lib/secret-manager/totp.ts` was the lone WebCrypto
+holdout — it used `crypto.subtle` HMAC for RFC 6238 codes and was therefore dead on every `lan` install
+while the rest of the vault worked. #1126 converted it to `hmac` + `sha1`/`sha256`/`sha512` from
+`@noble/hashes`, restoring the invariant.
+
+**Rules for anyone extending the vault:**
+
+1. **Never reach for `crypto.subtle`**, even when it is the obvious tool. `lazyit/no-secure-context-only-crypto`
+   in `apps/web/eslint.config.mjs` blocks it at `error` severity with no `lib/**` exemptions. The ban is
+   keyed on the **property alone**, not on a `crypto` object — an `object`-scoped restriction only
+   matches a bare identifier, so it would have caught `crypto.subtle` while waving through
+   `window.crypto.subtle`, `globalThis.crypto.subtle`, `self.crypto.subtle` and any local alias. Coverage
+   of those forms is pinned by `apps/web/eslint.config.test.ts`, which lints fixture snippets through the
+   real config; extend that matrix rather than trusting the rule by inspection.
+2. **Never add a "use `crypto.subtle` when available, fall back otherwise" path.** Two branches where
+   development only ever exercises the secure one is precisely how this bug class survives review. One
+   tested path.
+3. **Test the insecure context explicitly.** `crypto.subtle` is a *non-configurable* property of the
+   real `crypto` object, so it cannot be deleted in place — swap the whole `globalThis.crypto` for a
+   `getRandomValues`-only shim and restore it afterwards. `apps/web/lib/secret-manager/totp.test.ts`
+   has the working pattern. Assert the absence with `"subtle" in globalThis.crypto`, not a
+   `globalThis.crypto.subtle` member access: the property-keyed lint ban above applies to test files
+   too, and a guard that needs a disable comment in the very test that proves the bug is not a guard.
+4. **Watch for guarantees you silently lose.** Pure-JS HMAC accepts a zero-length key where
+   `crypto.subtle.importKey` rejected it with `DataError`; without an explicit check, a malformed seed
+   would produce a plausible but meaningless code instead of a visible error. Keep such failures loud.
+
 ### Threat justification of the parameters (5–20-person self-hosted team)
 
 - **64 MiB / t=3 / p=1** is the OWASP-recommended interactive baseline and RFC 9106's "second
