@@ -3,8 +3,9 @@
 import { ArrowPathIcon, SparklesIcon } from "@heroicons/react/24/outline";
 import type { InfraNodeListItem } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Combobox } from "@/components/combobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,13 +22,6 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   useInfraIdentityMatches,
   useInfraNodes,
@@ -55,8 +49,10 @@ interface MergeNodeDialogProps {
  * The suggestions at the top are the payoff of contract v2's `host.identifiers[]`: a node that shares
  * this one's burned-in serial or MAC is almost certainly the same physical box. They are a HINT, never
  * a default — nothing is preselected, because a wrong merge archives a curated node, and the operator
- * is the one who knows whether that box was re-imaged. The picker below lists every other live node,
- * so an estate whose agents predate v2 (no evidence stored, so no suggestions) can still merge.
+ * is the one who knows whether that box was re-imaged. The picker below reaches every other live node
+ * by search, so an estate whose agents predate v2 (no evidence stored, so no suggestions) can still
+ * merge — at any estate size, since #1152 made it a server-search picker rather than a `<Select>` of
+ * whatever nodes happened to be loaded.
  */
 export function MergeNodeDialog({
   open,
@@ -68,11 +64,32 @@ export function MergeNodeDialog({
   const merge = useMergeInfraNode();
   // Only fetched while the dialog is open — the containment scan is not worth paying for a closed one.
   const { data: matches } = useInfraIdentityMatches(node.id, open);
-  const { data: nodes } = useInfraNodes();
 
   const [targetNodeId, setTargetNodeId] = useState<string>("");
+  const [query, setQuery] = useState("");
+  // The chosen target's label, remembered at pick time so the trigger keeps naming it after the
+  // operator types again (a suggestion click sets it too — see the buttons above).
+  const [targetLabel, setTargetLabel] = useState<string>("");
 
-  const candidates = (nodes ?? []).filter((n) => n.id !== node.id);
+  // The candidate picker is a SERVER-SEARCH page (#1152), not the whole node list: this dialog used
+  // to render one `<SelectItem>` per live node, which on a paged endpoint would have made any node
+  // past the first window unmergeable — and "unmergeable" here means a curated host left to drift
+  // OFFLINE forever beside its re-imaged twin. ADR-0030 §8 (#199/#218) removed exactly this ceiling
+  // from the KB asset picker; this is the same move.
+  const { data: page, isFetching } = useInfraNodes(
+    { q: query || undefined, limit: 50 },
+    { enabled: open },
+  );
+
+  // The node being merged is never a candidate — the API 400s a self-merge, and offering it is a
+  // dead end the operator should not have to discover.
+  const candidateItems = useMemo(
+    () =>
+      (page?.items ?? [])
+        .filter((n) => n.id !== node.id)
+        .map((n) => ({ value: n.id, label: n.label })),
+    [page?.items, node.id],
+  );
   const suggestions = matches ?? [];
 
   function handleMerge() {
@@ -106,7 +123,10 @@ export function MergeNodeDialog({
                   <li key={match.id}>
                     <button
                       type="button"
-                      onClick={() => setTargetNodeId(match.id)}
+                      onClick={() => {
+                        setTargetNodeId(match.id);
+                        setTargetLabel(match.label);
+                      }}
                       className={`flex w-full items-center gap-2 rounded-md border p-2 text-left text-sm transition-colors hover:bg-accent ${
                         targetNodeId === match.id
                           ? "border-primary bg-accent"
@@ -133,22 +153,25 @@ export function MergeNodeDialog({
 
           <Field>
             <FieldLabel htmlFor="merge-target">{t("targetLabel")}</FieldLabel>
-            <Select value={targetNodeId} onValueChange={setTargetNodeId}>
-              <SelectTrigger
-                id="merge-target"
-                className="w-full"
-                disabled={merge.isPending}
-              >
-                <SelectValue placeholder={t("targetPlaceholder")} />
-              </SelectTrigger>
-              <SelectContent>
-                {candidates.map((candidate) => (
-                  <SelectItem key={candidate.id} value={candidate.id}>
-                    {candidate.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              id="merge-target"
+              value={targetNodeId}
+              onValueChange={(value) => {
+                setTargetLabel(
+                  candidateItems.find((item) => item.value === value)?.label ?? "",
+                );
+                setTargetNodeId(value);
+              }}
+              items={candidateItems}
+              onSearchChange={setQuery}
+              loading={isFetching}
+              selectedLabel={targetLabel || undefined}
+              disabled={merge.isPending}
+              placeholder={t("targetPlaceholder")}
+              searchPlaceholder={t("targetSearch")}
+              emptyText={t("targetEmpty")}
+              loadingText={tc("searching")}
+            />
             <FieldDescription>{t("targetDescription")}</FieldDescription>
           </Field>
         </FieldGroup>
