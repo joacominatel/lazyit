@@ -5,8 +5,10 @@ import {
   BookOpenIcon,
   CheckIcon,
   CubeIcon,
+  ArrowPathIcon,
   ExclamationTriangleIcon,
   KeyIcon,
+  LinkIcon,
   PencilSquareIcon,
   PlusIcon,
   TrashIcon,
@@ -38,6 +40,15 @@ import { ErrorState } from "@/components/resource-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -56,6 +67,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useInvalidateAssets } from "@/lib/api/hooks/use-assets";
 import {
   useAttachInfraSecret,
   useDeleteInfraNode,
@@ -85,6 +97,12 @@ import {
   AgentPolicyBadge,
 } from "./agent-provenance";
 import { DeleteNodeDialog } from "./delete-node-dialog";
+import { NodeAssetControl } from "./node-asset-control";
+import {
+  relinkAssetArchived,
+  relinkNextStep,
+  type RelinkProgress,
+} from "./relink-sequence";
 import { NodeChangesTab } from "./node-changes-tab";
 import { NodeEdgesManager } from "./node-edges-manager";
 import { nodeSectionKey } from "./node-detail-keys";
@@ -115,9 +133,10 @@ const KIND_OPTIONS = InfraNodeKindSchema.options;
  * behind a modal the operator then has to close in order to read it.
  *
  * `label` is the title (the canvas display name always wins); `assetName` is the secondary inventory
- * name. Write controls (rename, kind/IP/status, edges, secrets, shortcuts, remove-from-map) are gated
- * on `infra:manage` — read-only viewers see the same facts without the affordances, so the API never
- * 403s on a render.
+ * name. Write controls (rename, kind/IP/status, the asset link, edges, secrets, shortcuts,
+ * remove-from-map) are gated on `infra:manage` — read-only viewers see the same facts without the
+ * affordances, so the API never 403s on a render. `infra:manage` is what `PATCH /infra/nodes/:id`
+ * itself requires, so the gate here mirrors the gate there rather than inventing a stricter one.
  */
 export function NodeDetailModal({
   nodeId,
@@ -376,6 +395,11 @@ function GeneralTab({
   const { date } = useFormatters();
   const deleteNode = useDeleteInfraNode();
   const chassis = displayChassis(node.chassis);
+  // The #1202 second gate. Read here rather than threaded from the modal root because it is a LOCAL
+  // concern of two controls in this tab — the asset link and the duplicate remediation — and both of
+  // them are on the same branch: the one that ARCHIVES an auto-created Asset, which the API now
+  // AND-checks `asset:delete` for. `infra:manage` still buys everything else on this screen.
+  const canArchiveAssets = useCan("asset:delete");
 
   return (
     <>
@@ -437,7 +461,32 @@ function GeneralTab({
               assignments, history, tags and attachments — is not something an upgrade does while
               nobody is looking. `?? null` for the read tolerance an older API needs. */}
           {node.duplicateAssetSuspicion ? (
-            <DuplicateAssetNotice asset={node.duplicateAssetSuspicion} />
+            <DuplicateAssetNotice
+              nodeId={node.id}
+              asset={node.duplicateAssetSuspicion}
+              canManage={canManage}
+              canArchiveAssets={canArchiveAssets}
+            />
+          ) : null}
+
+          {/* The inventory LINK itself (#1202) — attach when the node carries none, detach when it
+              does, with the confirmation naming which of the two detach outcomes is about to run.
+              Gated on `infra:manage`, which is how `PATCH /infra/nodes/:id` gates itself, plus
+              `asset:delete` on the archiving arm ONLY — the AND-check the API added in #1202 for the
+              detach that soft-deletes an auto-created row. Gating the whole control on both would
+              take the un-link away from a role that can still perform it, so the second permission
+              travels in as a prop and is applied per arm. It sits right under the identity block
+              because the link IS identity: it is what makes the node asset-backed. */}
+          {canManage ? (
+            <Section title={t("panel.assetLink.title")}>
+              <NodeAssetControl
+                nodeId={node.id}
+                assetId={node.assetId}
+                assetName={node.assetName}
+                assetAutoCreated={node.assetAutoCreated}
+                canArchiveAssets={canArchiveAssets}
+              />
+            </Section>
           ) : null}
 
           {/* Status toggle (write — gated). */}
@@ -881,19 +930,39 @@ function IpConflictNotice({
  * auto-created and carries **no** serial, while the serial the machine reports belongs to a different
  * live Asset. That other Asset is what this names.
  *
- * **A hint, and only ever a hint.** No merge button, no "fix this for me", nothing that acts — v1
- * surfaces the collision and hands the judgement back, because reconciling two inventory rows means
- * deciding what happens to two sets of assignments, history, tags and attachments, and no upgrade
- * gets to make that call unattended. The remedy stays the deliberate detach-then-link two-step
- * (ADR-0093 §7), which this notice deliberately does NOT shortcut or even route to: the drill-in
- * carries no asset attach/detach control today, so pointing at one would be a promise the UI cannot
- * keep. The single link here is a READ — it opens the other Asset so the operator can confirm it
- * really is the same machine before touching anything.
+ * **Still never a merge.** ADR-0093 §8.5 forbids machine-merging two inventory rows — two sets of
+ * assignments, history, tags and attachments — and there is no asset-merge endpoint in the repo by
+ * design. What this notice DOES now offer (#1202) is the thing §7 explicitly authorises: the existing
+ * deliberate two-step, `PATCH { assetId: null }` then `PATCH { assetId: <curated> }`, sequenced behind
+ * one button while the API keeps its #1117 re-point 400 intact. Nothing is merged; the node is simply
+ * pointed at the row the operator kept, and the auto-created stand-in is archived by the ordinary §5
+ * detach because it carries the marker. The judgement is still theirs — the link above is a READ, and
+ * it is there to be used before the button is.
+ *
+ * Until #1202 this notice deliberately routed nowhere, because the drill-in carried no attach/detach
+ * control and pointing at one would have been a promise the UI could not keep. That control now
+ * exists, so the notice ends somewhere.
  *
  * `warning` tone rather than `destructive`: nothing is broken, and both rows are intact. It is a
  * tidy-up waiting for someone with the context to do it right.
  */
-function DuplicateAssetNotice({ asset }: { asset: InfraAssetCandidate }) {
+function DuplicateAssetNotice({
+  nodeId,
+  asset,
+  canManage,
+  canArchiveAssets,
+}: {
+  nodeId: string;
+  asset: InfraAssetCandidate;
+  canManage: boolean;
+  /**
+   * Whether the caller holds `asset:delete` (#1202). Load-bearing here in a way it is not for the
+   * asset-link control: this notice only ever renders for a node whose Asset carries the auto-created
+   * marker (`resolveDuplicateAssetSuspicion` returns null otherwise), so its remediation ALWAYS opens
+   * with the archiving detach. There is no un-archiving arm to fall back to.
+   */
+  canArchiveAssets: boolean;
+}) {
   const t = useTranslations("infra");
   return (
     <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
@@ -926,7 +995,127 @@ function DuplicateAssetNotice({ asset }: { asset: InfraAssetCandidate }) {
           </p>
         ) : null}
       </div>
+      {/* `infra:manage` to see an action at all, plus `asset:delete` to run it: step 1 of the §7
+          sequence archives the auto-created stand-in, which the API AND-checks since #1202. Without
+          the permission the notice keeps its whole point — it still NAMES the curated row and links
+          to it — and says what is missing, rather than offering a button whose first call 403s. */}
+      {canManage ? (
+        canArchiveAssets ? (
+          <RelinkToCuratedControl nodeId={nodeId} peer={asset} />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t("panel.duplicateAssetRelinkBlocked")}
+          </p>
+        )
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * The ADR-0093 §7 remediation, sequenced (issue #1202): detach the auto-created stand-in, then link
+ * the curated row this notice named.
+ *
+ * **Why one button rather than two manual steps.** The moment step 1 lands, the node carries no
+ * `assetId` — and `resolveDuplicateAssetSuspicion` returns null for such a node, so this entire notice
+ * disappears on the next read, taking the only on-screen pointer to `peer` with it. An operator who
+ * stopped between the two steps would be left with an archived asset, an unlinked node, and nothing
+ * naming what they were reconciling to. So `peer.id` is captured in this component's closure BEFORE
+ * step 1 runs, and a step-2 failure keeps the dialog standing with an explicit resume — see
+ * {@link relinkNextStep}, which is why the progress is a value and not just control flow.
+ *
+ * The two PATCHes are the operator's own existing calls, not a new endpoint and not a merge.
+ */
+function RelinkToCuratedControl({
+  nodeId,
+  peer,
+}: {
+  nodeId: string;
+  peer: InfraAssetCandidate;
+}) {
+  const t = useTranslations("infra");
+  const tc = useTranslations("common");
+  const updateNode = useUpdateInfraNode();
+  const invalidateAssets = useInvalidateAssets();
+  const [open, setOpen] = useState(false);
+  const [isPending, setIsPending] = useState(false);
+  const [progress, setProgress] = useState<RelinkProgress>("not-started");
+
+  const archived = relinkAssetArchived(progress);
+
+  async function run() {
+    setIsPending(true);
+    // Local mirror of the progress: `setProgress` is async, and step 2 must not read a stale value.
+    let reached = progress;
+    try {
+      if (relinkNextStep(reached) === "detach") {
+        await updateNode.mutateAsync({ id: nodeId, patch: { assetId: null } });
+        reached = "detached";
+        setProgress(reached);
+        // The stand-in was soft-deleted (it carries the marker), so the assets caches are stale.
+        invalidateAssets();
+      }
+      if (relinkNextStep(reached) === "link") {
+        await updateNode.mutateAsync({ id: nodeId, patch: { assetId: peer.id } });
+        reached = "linked";
+        setProgress(reached);
+      }
+      toast.success(t("panel.duplicateAssetRelinkedToast", { name: peer.name }));
+      setOpen(false);
+    } catch (error) {
+      // Deliberately NOT a bare toast when step 1 already landed: the dialog stays open, states that
+      // the stand-in is archived, and the button becomes a resume that never replays the detach.
+      notifyError(error, t("panel.duplicateAssetRelinkError"));
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <LinkIcon />
+        {t("panel.duplicateAssetRelinkAction")}
+      </Button>
+
+      <AlertDialog
+        open={open}
+        onOpenChange={(next) => {
+          // Never reset `progress` on close: reopening after a half-completed sequence must resume,
+          // and re-running the detach against the relinked node would archive the CURATED row.
+          if (!isPending) setOpen(next);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("panel.duplicateAssetRelinkTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("panel.duplicateAssetRelinkBody", { name: peer.name })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {archived ? (
+            <div className="rounded-md border border-warning/40 bg-warning/5 p-3 text-xs text-muted-foreground">
+              {t("panel.duplicateAssetRelinkResume", { name: peer.name })}
+            </div>
+          ) : null}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>
+              {tc("cancel")}
+            </AlertDialogCancel>
+            <Button onClick={() => void run()} disabled={isPending}>
+              {isPending && <ArrowPathIcon className="animate-spin" />}
+              {archived
+                ? t("panel.duplicateAssetRelinkResumeSubmit", { name: peer.name })
+                : t("panel.duplicateAssetRelinkSubmit")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

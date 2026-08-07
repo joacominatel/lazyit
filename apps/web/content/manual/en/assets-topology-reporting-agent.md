@@ -439,9 +439,10 @@ opening each one. For each proposal you have three choices:
   the **reported facts** onto it — hardware, operating system, installed software — and refreshes them
   on every check-in, so its inventory panel starts filling in. It **never** touches its name, its
   serial, its model, its status, its location or its assignments. Everything you curated stays yours;
-  only the machine-reported half is maintained for you. And if you later unlink the node, an asset
-  that already existed is simply **unlinked and left intact** — only an asset lazyit created itself is
-  archived.
+  only the machine-reported half is maintained for you. And if you later unlink the node — from
+  **Inventory link** on the details window's **General** tab — an asset that already existed is simply
+  **unlinked and left intact**. Only an asset lazyit created itself is archived, and the confirmation
+  says which of the two you are about to do.
 
   Matching is deliberately cautious. lazyit adopts an existing asset only when the report backs its
   serial up with a network-card address as well, and never when that host is already flagged as a
@@ -718,9 +719,25 @@ above). For the ones already in your database, lazyit points them out rather tha
   history, tags and attached documents, and deciding what happens to each of those is your call.
   Nothing is changed while you're not looking.
 
-To reconcile a pair by hand, unlink the auto-created asset from the node — lazyit archives it, because
-it created it — and then link the record you curated. From then on the machine reports into the record
-you kept, and the details window's inventory panel starts filling in there.
+When you have checked and you are sure the two rows are the same box, the notice carries a button:
+**Point this node at the record you curated**. It runs the two steps you would otherwise take by hand
+— the auto-created stand-in is archived (lazyit created it, so it goes with the link), and the node is
+then linked to the record you kept. From then on the machine reports into your record, and the details
+window's inventory panel starts filling in there.
+
+This is still not a merge, and it never will be: nothing moves between the two records. Whatever the
+stand-in carries — assignments, history, tags, attached documents — stays on the stand-in, and the
+stand-in is archived. If it holds anything you want on the record you are keeping, copy it across
+before you press the button; this is the moment to do it, not after.
+
+If the second step fails (the record you curated was archived meanwhile, say), the dialog stays open
+and says so: the stand-in is already archived, and only the link is left to make. Trying again resumes
+from there rather than starting over.
+
+Because the first of those two steps archives the stand-in, this button needs the **delete assets**
+permission on top of manage-topology. Without it the notice still appears and still names the record
+you curated — the part you need in order to go and check — but the button is replaced by a line
+saying which permission is missing.
 
 If you have none of these, you'll never see this warning. It is deliberately quiet.
 

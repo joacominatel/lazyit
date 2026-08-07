@@ -22,7 +22,9 @@ updates any of them that have fallen behind
 > Anyone who can view the topology sees the map and the read-only detail of each node. Adding nodes,
 > drawing connections, changing a status or taking a node off the map needs the manage-topology
 > permission; installing a reporting agent needs the manage-settings permission instead — a separate
-> one, not an addition — because it mints a token. Without a permission its controls simply don't
+> one, not an addition — because it mints a token. The one action here that needs a *second*
+> permission is detaching an asset lazyit created itself: that archives the record, so it also needs
+> **delete assets** ([below](#track-as-asset)). Without a permission its controls simply don't
 > appear.
 
 ## Laptops and desktops are kept off the map
@@ -155,10 +157,34 @@ long-lived VM — so by default a new node is **asset-backed**:
   don't inventory (a short-lived container, say). It appears on the map but has no inventory record
   behind it.
 
-You can change your mind later. Detaching the asset from an asset-backed node leaves the node on
-the map but removes the inventory link: if lazyit had auto-created the asset, that asset is
-deactivated (it never lingers in inventory owned by nobody); if you had linked a pre-existing
-asset, it stays untouched and is simply unlinked.
+You can change your mind later. Open the node's details window and look for **Inventory link** on
+the **General** tab — that is where you detach the asset from an asset-backed node, or link one to a
+node that has none. Both need the **manage topology** permission; a read-only viewer sees the
+inventory name but no controls. Detaching an asset **lazyit created itself** needs one permission
+more — **delete assets** — because that detach archives the record; see the two outcomes below.
+
+Detaching always leaves the node on the map. What happens to the *asset* depends on who created it,
+and the two outcomes are not the same — so the confirmation tells you which one you are about to
+run, before you commit:
+
+- **lazyit created the asset** (it made a minimal record when you added or confirmed the node) —
+  detaching **archives** that asset. It leaves your inventory lists and search — **and it does so
+  even if someone is currently assigned to it**; lazyit does not stop to ask. lazyit created the
+  record, so it removes it rather than leaving a record behind that nothing maintains. Bringing an
+  archived asset back needs the **delete assets** permission and the admin-only archived view, and a
+  restore does **not** re-link the node — so treat this as a decision, not as an undo you can rely on.
+  **This detach needs the delete-assets permission too**, on top of manage-topology: archiving an
+  asset costs the same permission here as it does anywhere else in lazyit. Without it the detach
+  button is disabled and says so, and the API refuses the request with the same explanation.
+- **You linked an asset that already existed** — detaching **only removes the link**. The asset
+  stays exactly as it was: same owners, same history, same documents. Nothing is archived. **This
+  one needs only manage-topology** — nothing is deleted, so nothing extra is charged for it.
+
+lazyit knows which case you are in because it marks the records it creates itself, and it never puts
+that mark on a record you curated. If a node is currently unlinked, the same panel offers a search
+box to link any asset in your inventory. You cannot swap the asset of a node that already has one in
+a single step — detach first, then link the new one, so the outgoing record is dealt with
+deliberately rather than quietly dropped.
 
 The node's **label always wins for display** on the canvas; the linked asset's name shows in the
 details window's header as a secondary *inventory name*, so the two never silently drift. That

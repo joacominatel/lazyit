@@ -265,7 +265,9 @@ immediately has owner (via `AssetAssignment`), KB links, secrets and warranty. T
 off** → graph-only node (right for ephemeral containers). **Detach semantics (fixes the orphan
 contradiction):** toggling off an auto-created Asset **soft-deletes that Asset** (it does not linger in
 inventory owned-by-nobody); if the Asset pre-existed and was merely linked, detach only nulls `assetId`
-and leaves the Asset intact. A node **reads inventory facts through `assetId`**; **`label` is the canvas
+and leaves the Asset intact. **Since #1202 those two branches also cost different permissions** — the
+soft-deleting one AND-checks `asset:delete`, the un-linking one does not; see §8. A node **reads
+inventory facts through `assetId`**; **`label` is the canvas
 display name and always wins for display**, `asset.name` is shown as a secondary "inventory name" in the
 detail panel — no silent copy, no drift.
 
@@ -439,6 +441,39 @@ an afterthought.
 
 New `infra:read` / `infra:manage` in the [[0046-roles-permissions-v2]] catalog (asset-backed node
 create also needs the relevant `assets:*`). Confirming a PENDING node needs `infra:manage`.
+
+> **Updated 2026-08-07 (#1202): the detach that ARCHIVES an auto-created Asset also requires
+> `asset:delete`.** §5's detach has two branches, and only one of them destroys anything: an Asset
+> carrying the provenance marker is **soft-deleted**, a pre-existing one is merely un-linked. The route
+> charged `infra:manage` for both. That made the map a cheaper door to an operation every other route
+> gates on `asset:delete` (`DELETE /assets/:id`) and whose undo (`POST /assets/:id/restore`) is gated
+> the same way — an `infra:manage` holder could archive an inventory row they could then neither see
+> (the archived slice is admin-only) nor restore. It went unnoticed while it took a hand-crafted
+> request to reach; #1202 shipped the button that makes it one click, so it is closed with the button.
+>
+> **The check is CONDITIONAL and lives in the service, not on the decorator.** `@RequirePermission` is
+> static metadata read before the handler runs, so it cannot see the fact that decides whether anything
+> is destroyed: the marker on the **currently linked** Asset. AND-checking `asset:delete` at the
+> decorator would tax the un-link branch too, taking a working, non-destructive affordance away from
+> every role holding `infra:manage` alone. So it fires from `InfraService.detachAsset`, on the exact
+> branch that calls `AssetsService.remove` — which makes it impossible for the archive to happen
+> without it, and impossible for it to fire when nothing is archived. This mirrors
+> `WorkflowConnectionsService.assertMaySetCredentialBinding`, the house pattern for a permission whose
+> applicability depends on row state; the sibling routes that AND-check `asset:write` on the decorator
+> (`POST /nodes`, `POST /nodes/:id/confirm`) can do so precisely because they **always** touch an Asset.
+>
+> It throws before any write, so a 403 leaves the link standing and a retry after the grant starts from
+> the state the operator was looking at. Both principal kinds resolve ([[0048-service-accounts]]): a
+> human through the RolePermission matrix, a service account through its direct grants; no principal
+> holds nothing (fail-closed).
+>
+> **Upgrade note.** Seeded roles are unaffected: `infra:manage` is a coarse verb and `asset:delete` a
+> delete verb, so both are ADMIN-only by seed, and ADMIN holds the whole catalog. Only a hand-tuned
+> MEMBER/VIEWER role granted `infra:manage` **without** `asset:delete` changes behaviour — it now gets
+> a 403 on the archiving detach where a 200 was possible. The two permissions are **not** bundled into
+> one capability toggle: `asset:delete` sits in `inventory.delete`, `infra:manage` in `infra.manage`
+> ([[0046-roles-permissions-v2]] capabilities). The remedy is to grant `inventory.delete` (or the raw
+> `asset:delete` in the fine-tune view), or to accept that those roles can no longer archive.
 
 ## Phasing
 

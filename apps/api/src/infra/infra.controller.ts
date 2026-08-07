@@ -463,10 +463,15 @@ export class InfraController {
   }
 
   @Patch('nodes/:id')
+  // `infra:manage` at the decorator, plus a CONDITIONAL `asset:delete` in the service (#1202). The
+  // sibling asset-backed routes AND-check `asset:write` right here because they ALWAYS touch an Asset;
+  // this one only sometimes does — the detach branch archives an Asset iff the current link carries the
+  // auto-created marker, a stored fact `@RequirePermission` cannot read. So the AND-check lives in
+  // `InfraService.detachAsset`, on the exact branch that soft-deletes, and never taxes the un-link one.
   @RequirePermission('infra:manage')
   @ApiOperation({
     summary:
-      'Update a node. assetId:null DETACHES the link (soft-deletes an auto-created Asset, un-links a pre-existing one — ADR-0070 §5); an assetId on a node that carries NONE attaches it (404 if that asset is missing or discarded). Re-pointing a node that ALREADY has an asset is a 400 — it would orphan the one it is carrying; detach first, then attach (#1117).',
+      'Update a node. assetId:null DETACHES the link (soft-deletes an auto-created Asset, un-links a pre-existing one — ADR-0070 §5); an assetId on a node that carries NONE attaches it (404 if that asset is missing or discarded). Re-pointing a node that ALREADY has an asset is a 400 — it would orphan the one it is carrying; detach first, then attach (#1117). A detach that ARCHIVES the auto-created Asset ALSO requires asset:delete (403 without it, checked server-side against the current link because only the stored row can tell the two detaches apart — #1202); the un-linking detach stays infra:manage only.',
   })
   @ApiOkResponse({ type: InfraNodeDto })
   updateNode(

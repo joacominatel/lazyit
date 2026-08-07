@@ -19,7 +19,11 @@ import {
   type PageQuery,
   softwareFingerprint,
 } from '@lazyit/shared';
-import { InfraService, INFRA_NODE_ASSET_REPOINT_ERROR } from './infra.service';
+import {
+  InfraService,
+  INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR,
+  INFRA_NODE_ASSET_REPOINT_ERROR,
+} from './infra.service';
 import { AgentPolicyService } from './agent-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
@@ -32,6 +36,7 @@ import { SearchService } from '../search/search.service';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` for types (erased) AND at runtime for `Prisma.PrismaClientKnownRequestError` (the P2002
@@ -116,12 +121,33 @@ interface PrismaMock {
   $queryRaw: Mock;
 }
 
-const HUMAN = { kind: 'human', user: { id: 'u-1' } } as never;
+// `role` is load-bearing since #1202 round 2: the archiving-detach gate resolves a HUMAN's permissions
+// through the RolePermission matrix, which is keyed by exactly this field.
+const HUMAN = {
+  kind: 'human',
+  user: { id: 'u-1', role: 'MEMBER' },
+} as never;
 /** The reporting agent's authenticated service principal (ADR-0048) — the #1134 enrollment key. */
 const AGENT_SA = {
   kind: 'service',
   serviceAccount: { id: 'sa-agent' },
   permissions: new Set(['infra:report']),
+} as never;
+/**
+ * A service principal that manages the map but holds NO `asset:delete` (#1202 round 2). A service
+ * account is authorized SOLELY by its direct grants (ADR-0048) — never by the role matrix — so the
+ * archive gate has to read `principal.permissions`, not ask the resolver.
+ */
+const MAP_MANAGER_SA = {
+  kind: 'service',
+  serviceAccount: { id: 'sa-map' },
+  permissions: new Set(['infra:manage']),
+} as never;
+/** The same service account after an admin also granted it the archive verb. */
+const MAP_MANAGER_SA_WITH_DELETE = {
+  kind: 'service',
+  serviceAccount: { id: 'sa-map' },
+  permissions: new Set(['infra:manage', 'asset:delete']),
 } as never;
 
 /**
@@ -169,6 +195,10 @@ describe('InfraService', () => {
   // here we only assert that ingest ASKS it, hands it the node's own override, puts the answer in the
   // ack, and survives it failing.
   let agentPolicy: { resolveForReport: Mock };
+  // The RolePermission matrix (ADR-0046). InfraService asks it exactly ONE question: does this human
+  // hold `asset:delete`, on the detach branch that ARCHIVES an auto-created Asset (#1202). Mocking it
+  // is also how these tests assert the SILENCE — the un-link branch must never consult it at all.
+  let permissions: { hasAll: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration + the #1141 merge write
   // through it — the merge needs both writes in one transaction or the dedup index refuses them).
   let txEdge: { create: Mock; updateMany: Mock };
@@ -261,6 +291,9 @@ describe('InfraService', () => {
     agentPolicy = {
       resolveForReport: jest.fn().mockResolvedValue(AGENT_POLICY_DEFAULT),
     };
+    // Default: the caller holds whatever is asked of them, so every pre-existing test keeps exercising
+    // the path it was written for. The #1202 gate tests flip this per case.
+    permissions = { hasAll: jest.fn().mockResolvedValue(true) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -277,6 +310,7 @@ describe('InfraService', () => {
         { provide: NotificationsService, useValue: notifications },
         { provide: InfraAutoConfirmService, useValue: autoConfirm },
         { provide: AgentPolicyService, useValue: agentPolicy },
+        { provide: PermissionResolverService, useValue: permissions },
       ],
     }).compile();
     service = moduleRef.get(InfraService);
@@ -2910,6 +2944,162 @@ describe('InfraService', () => {
         service.updateNode('node-1', { assetId: 'asset-discarded' }, HUMAN),
       ).rejects.toBeInstanceOf(NotFoundException);
 
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── The archiving detach costs `asset:delete` too (issue #1202 round 2) ─────
+
+  /**
+   * `PATCH /infra/nodes/:id` is gated on `infra:manage`, and one of its branches SOFT-DELETES an
+   * Asset. Every other route that archives an asset costs `asset:delete` (`DELETE /assets/:id`), and
+   * so does the undo (`POST /assets/:id/restore`) — so `infra:manage` alone was a cheaper door to the
+   * same destructive operation. The sibling routes that merely CREATE or LINK an asset already
+   * AND-check `asset:write` at the decorator; this one cannot, because whether it archives at all
+   * depends on a row the decorator never reads. Hence a conditional check in the service, fired from
+   * the exact branch that calls `AssetsService.remove`.
+   */
+  describe('updateNode — the archiving detach AND-checks asset:delete (#1202)', () => {
+    /** The node/asset shape that makes a detach an ARCHIVE: the link carries the provenance marker. */
+    function givenArchivingDetach() {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-auto',
+      });
+      prisma.asset.findFirst.mockResolvedValue({
+        specs: { _infraAutoCreated: true },
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+    }
+
+    it('403s a human holding infra:manage but NOT asset:delete, and writes NOTHING', async () => {
+      givenArchivingDetach();
+      permissions.hasAll.mockResolvedValue(false); // the role lacks `asset:delete`
+
+      await expect(
+        service.updateNode('node-1', { assetId: null }, HUMAN),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      // The refusal is complete, not partial: the asset survives AND the link is left standing, so a
+      // retry after the grant starts from the state the operator was looking at.
+      expect(assets.remove).not.toHaveBeenCalled();
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+      // It asked the matrix the ONE question it needs — the archive verb, resolved DB-first.
+      expect(permissions.hasAll).toHaveBeenCalledWith('MEMBER', [
+        'asset:delete',
+      ]);
+    });
+
+    it('the 403 NAMES the missing permission and why — a policy answer, not a bug report', async () => {
+      givenArchivingDetach();
+      permissions.hasAll.mockResolvedValue(false);
+
+      await expect(
+        service.updateNode('node-1', { assetId: null }, HUMAN),
+      ).rejects.toThrow(INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR);
+
+      const message = INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR;
+      expect(message).toContain('asset:delete'); // the permission to ask an admin for
+      expect(message).toContain('infra:manage'); // what the caller does hold, and what it still buys
+    });
+
+    it('ALLOWS the archiving detach once the role also holds asset:delete', async () => {
+      givenArchivingDetach();
+      permissions.hasAll.mockResolvedValue(true);
+
+      await service.updateNode('node-1', { assetId: null }, HUMAN);
+
+      expect(assets.remove).toHaveBeenCalledWith('asset-auto', HUMAN);
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBeNull();
+    });
+
+    it('does NOT gate the un-link branch: a curated asset detaches on infra:manage alone', async () => {
+      // The whole point of making the check conditional. This branch destroys nothing — it drops a
+      // column — so charging `asset:delete` for it would be a regression dressed as caution.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-curated',
+      });
+      prisma.asset.findFirst.mockResolvedValue({ specs: { cpu: 8 } }); // no marker
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+      permissions.hasAll.mockResolvedValue(false); // no `asset:delete` anywhere in sight
+
+      await service.updateNode('node-1', { assetId: null }, HUMAN);
+
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBeNull();
+      expect(assets.remove).not.toHaveBeenCalled();
+      // …and the matrix was never even consulted: no archive, no question.
+      expect(permissions.hasAll).not.toHaveBeenCalled();
+    });
+
+    it('does not gate a detach whose asset row has already vanished (nothing to archive)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-gone',
+      });
+      prisma.asset.findFirst.mockResolvedValue(null); // already gone
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+      permissions.hasAll.mockResolvedValue(false);
+
+      await service.updateNode('node-1', { assetId: null }, HUMAN);
+
+      expect(prisma.infraNode.update).toHaveBeenCalled();
+      expect(permissions.hasAll).not.toHaveBeenCalled();
+    });
+
+    it('resolves a SERVICE principal from its DIRECT grants, never the role matrix (ADR-0048)', async () => {
+      givenArchivingDetach();
+
+      await service.updateNode(
+        'node-1',
+        { assetId: null },
+        MAP_MANAGER_SA_WITH_DELETE,
+      );
+
+      expect(assets.remove).toHaveBeenCalledWith(
+        'asset-auto',
+        MAP_MANAGER_SA_WITH_DELETE,
+      );
+      // A service account has no Role, so asking the matrix would be a category error.
+      expect(permissions.hasAll).not.toHaveBeenCalled();
+    });
+
+    it('403s a service principal that manages the map but was never granted asset:delete', async () => {
+      givenArchivingDetach();
+
+      await expect(
+        service.updateNode('node-1', { assetId: null }, MAP_MANAGER_SA),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(assets.remove).not.toHaveBeenCalled();
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('FAILS CLOSED when there is no principal at all', async () => {
+      // An unauthenticated caller holds nothing. Treating "no principal" as "not gated" would make
+      // the check bypassable by the one caller least entitled to bypass it.
+      givenArchivingDetach();
+
+      await expect(
+        service.updateNode('node-1', { assetId: null }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(assets.remove).not.toHaveBeenCalled();
       expect(prisma.infraNode.update).not.toHaveBeenCalled();
     });
   });
@@ -7049,6 +7239,156 @@ describe('InfraService', () => {
       const detail = await service.getNodeDetail('node-1', HUMAN);
 
       expect(detail.duplicateAssetSuspicion).toBe(null);
+    });
+  });
+
+  // ── The detach-outcome read field (#1202) ───────────────────────────────────
+  //
+  // `PATCH { assetId: null }` has two materially different outcomes — soft-delete the linked Asset
+  // (it carries `_infraAutoCreated`) or merely un-link it — and until this field the client could
+  // not tell which one a click would run, because `getNodeDetail` selected only the Asset's `name`.
+  // A confirmation that cannot name its own outcome is the #1202 bug; this is what makes it nameable.
+
+  describe('getNodeDetail — `assetAutoCreated`, which detach a click would run (#1202)', () => {
+    it('is TRUE when the linked Asset carries the auto-created marker — a detach ARCHIVES it', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'web-01',
+        specs: { _infraAutoCreated: true },
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(true);
+    });
+
+    it('is FALSE for a curated Asset — a detach only UN-LINKS it (ADR-0093 §4)', async () => {
+      // The marker is never stamped on the adopt branch, so an adopted/hand-linked row lands here.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-curated',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'Dell XPS 7490',
+        specs: { warranty: 'until 2027' },
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(false);
+    });
+
+    it('is FALSE when the linked Asset has NO specs at all — an absent blob is not a marker', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-curated',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({ name: 'srv-01', specs: null });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(false);
+    });
+
+    it('is FALSE when the marker is present but not exactly `true` — strict, like detachAsset', async () => {
+      // `detachAsset` tests `=== true`. This projection must agree with it EXACTLY, or the dialog
+      // would promise an archive the detach does not perform (or worse, the reverse).
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-1',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'srv-01',
+        specs: { _infraAutoCreated: 'true' },
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(false);
+    });
+
+    it('is NULL on a graph-only node — there is no link, so there is no detach to describe', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: null,
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(null);
+    });
+
+    it('is NULL when the linked Asset row is GONE — unknown provenance is never a false "safe"', async () => {
+      // The client renders null as the DESTRUCTIVE copy, so a missing row degrades to the cautious
+      // wording rather than to "nothing will be deleted".
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-gone',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue(null);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(null);
+      expect(detail.assetName).toBe(null);
+    });
+
+    it('costs NO extra query — it rides the Asset read the inventory name already makes', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: null, // no reported serial → the duplicate-suspicion probe short-circuits
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'web-01',
+        specs: { _infraAutoCreated: true },
+      });
+
+      await service.getNodeDetail('node-1', HUMAN);
+
+      // ONE asset read for the whole drill-in: the name + the marker come out of the same row.
+      expect(prisma.asset.findFirst).toHaveBeenCalledTimes(1);
+      expect(prisma.asset.findFirst).toHaveBeenCalledWith({
+        where: { id: 'asset-auto' },
+        select: { name: true, specs: true },
+      });
     });
   });
 
