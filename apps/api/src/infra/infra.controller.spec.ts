@@ -44,6 +44,75 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     // The agent fleet view (ADR-0094 §4, #1206). A READ and only a read — it computes version
     // buckets and projects one string out of `specs`; it writes nothing and pushes nothing to a host.
     expect(permsOf('getAgentFleet')).toEqual(['infra:read']);
+    // The canvas's own bounded graph read (#1152). It is the SAME data the node list exposes, just
+    // projected — so it must carry the SAME gate. A cheaper gate here would be a way to read the
+    // estate's topology without infra:read.
+    expect(permsOf('listGraphNodes')).toEqual(['infra:read']);
+  });
+
+  describe('the node list page params (#1152)', () => {
+    const controller = new InfraController(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    // ADR-0030: an over-max `limit` is REJECTED, never clamped — so a client can never believe it
+    // asked for more than it got. Same for a malformed window or an unknown sort direction.
+    it.each(['201', '0', '-1', 'abc', '1.5'])(
+      'rejects limit=%p with a 400 rather than clamping it',
+      (limit) => {
+        expect(() =>
+          controller.listNodes(
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            limit,
+          ),
+        ).toThrow(BadRequestException);
+      },
+    );
+
+    it('accepts the hard maximum page size (200) — the tray asks for exactly this', () => {
+      const infra = { listNodes: jest.fn().mockReturnValue('ok') };
+      const c = new InfraController(
+        infra as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
+
+      c.listNodes(
+        undefined,
+        undefined,
+        'PENDING',
+        undefined,
+        undefined,
+        undefined,
+        '200',
+      );
+
+      expect(infra.listNodes).toHaveBeenCalledWith(
+        expect.objectContaining({ state: 'PENDING' }),
+        expect.objectContaining({ limit: 200, offset: 0 }),
+      );
+    });
+
+    it('rejects a malformed assetIds element with a 400 (never a silently empty filter)', () => {
+      expect(() =>
+        controller.listNodes(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          'not-a-cuid',
+        ),
+      ).toThrow(BadRequestException);
+    });
   });
 
   describe('the Changes page params (#1143)', () => {
