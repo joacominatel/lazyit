@@ -44,3 +44,29 @@ export function detachOutcome(
   // third wire state (or a dropped field) lands on the cautious arm by construction, not by luck.
   return assetAutoCreated === false ? "unlinks" : "archives";
 }
+
+/**
+ * May this caller run the detach they are looking at? (issue #1202, round 2)
+ *
+ * `PATCH /infra/nodes/:id` is gated on `infra:manage`, and since #1202 its ARCHIVING branch ALSO
+ * requires `asset:delete` — checked server-side against the stored link, because only that row can
+ * tell the two detaches apart. The permission is charged on the arm that soft-deletes an inventory
+ * record and nowhere else: detaching a curated Asset merely drops a column, and taxing it would take
+ * a working affordance away from every role holding `infra:manage` alone.
+ *
+ * The UI therefore has to gate PER ARM, not per control. `canManage && canDelete` around the whole
+ * thing would be the easy fix and the wrong one — it would hide a detach the server still performs.
+ * Extracted (rather than inlined as `archives && !canArchive` in JSX) because `apps/web` has no
+ * component harness (ADR-0012), so a branch left in the markup is a branch nothing tests.
+ *
+ * @param outcome which detach this link would run — see {@link detachOutcome}.
+ * @param canArchiveAssets whether the caller holds `asset:delete` (`useCan("asset:delete")`).
+ * @returns `false` ONLY for an archiving detach by a caller without the permission — the one
+ *   combination the server answers with a 403.
+ */
+export function detachPermitted(
+  outcome: DetachOutcome,
+  canArchiveAssets: boolean,
+): boolean {
+  return outcome === "unlinks" || canArchiveAssets;
+}
