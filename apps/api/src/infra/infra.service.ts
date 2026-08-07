@@ -4085,9 +4085,7 @@ export class InfraService {
     const specs = (asset.specs ?? {}) as Record<string, unknown>;
     if (specs[INFRA_AUTO_ASSET_MARKER] === true) {
       if (!(await this.principalHoldsAssetDelete(principal))) {
-        throw new ForbiddenException(
-          INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR,
-        );
+        throw new ForbiddenException(INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR);
       }
       await this.assets.remove(assetId, principal);
     }
