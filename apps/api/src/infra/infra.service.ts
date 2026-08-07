@@ -433,6 +433,14 @@ export interface InfraNodeFilters {
    */
   assetIds?: string[];
   /**
+   * Restrict to these node ids. The same batch-resolver shape as `assetIds`, for the surfaces that
+   * already KNOW which nodes they need and only lack their labels — the drill-in's edge panel holds
+   * `sourceId`/`targetId` and wants the name on the other end. Before the page it scanned the whole
+   * list for that; asking for exactly the ids it has is both bounded and exact, so the panel never
+   * degrades to printing a raw cuid at an operator.
+   */
+  ids?: string[];
+  /**
    * Case-insensitive search over the row's visible text — label, IP, the linked Asset's inventory
    * name, and each ACTIVE owner's name/email. It has to run in the DATABASE: the Servers table used
    * to filter the loaded array in memory, which under a page becomes a false "no results" for
@@ -3795,6 +3803,7 @@ export class InfraService {
       ...(filters.status ? { status: filters.status } : {}),
       ...(filters.state ? { state: filters.state } : {}),
       ...(filters.source ? { source: filters.source } : {}),
+      ...(filters.ids?.length ? { id: { in: filters.ids } } : {}),
       ...(filters.assetIds?.length ? { assetId: { in: filters.assetIds } } : {}),
       ...(q
         ? {
