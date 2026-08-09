@@ -37,7 +37,7 @@
     "@prisma/client": "^7.8.0",
     "bullmq": "^5.34.0",
     "csv-parse": "^7.0.0",
-    "ioredis": "^5.4.2",
+    "ioredis": "^6.0.0",
     "jose": "^6.2.3",
     "jszip": "^3.10.1",
     "ldapts": "^9.0.0",
