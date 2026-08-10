@@ -26,7 +26,11 @@ import type {
   MergeInfraNode,
   UpdateInfraNode,
 } from "@lazyit/shared";
-import { InfraGraphEdgesSchema } from "@lazyit/shared";
+import {
+  InfraGraphEdgesSchema,
+  InfraGraphSchema,
+  InfraNodeListPageSchema,
+} from "@lazyit/shared";
 import { apiFetch } from "../client";
 
 /**
@@ -40,11 +44,10 @@ import { apiFetch } from "../client";
  *
  * ## The node read is TWO endpoints now (issue #1152)
  *
- * `GET /infra/nodes` used to return a bare `InfraNodeListItem[]` on the claim that "the estate is
- * small by design (ADR-0070)". That claim died the day one hypervisor could enrol up to 500 guests
- * (ADR-0095) and one Docker host one node per container (#1139): an unbounded, POLLED read that grows
- * with the estate. It is now the house `Page<T>` envelope (ADR-0030) with server-side `q`, a sort
- * allowlist and a hard `limit` ceiling of 200 — {@link getInfraNodes}.
+ * First-party lists use `GET /infra/nodes/page`, the house `Page<T>` envelope (ADR-0030) with
+ * server-side `q`, a sort allowlist and a hard `limit` ceiling of 200 — {@link getInfraNodes}.
+ * `GET /infra/nodes` remains only as the deprecated compatibility array until v2.0 and must not be
+ * used by web consumers.
  *
  * The topology canvas cannot live on a page: a map missing a node is not a shorter map, it is a WRONG
  * map, because the missing node takes its edges with it and nothing on screen says so. So it got its
@@ -55,9 +58,9 @@ import { apiFetch } from "../client";
 const BASE = "/infra";
 
 /**
- * Server-side filters for the node list (`GET /infra/nodes`, ADR-0030 / #1152). All of them scope the
- * SAME `where` the envelope's `total` counts, so a consumer showing a count is showing the count of
- * what it asked for.
+ * Server-side filters for the node page (`GET /infra/nodes/page`, ADR-0030 / #1152). All of them
+ * scope the SAME `where` the envelope's `total` counts, so a consumer showing a count is showing the
+ * count of what it asked for.
  *
  *  - `kind` / `status` / `state` / `source` — plain enum scopes.
  *  - `ids` / `assetIds` — exact batch resolve, comma-encoded onto one param. The `GET /users?ids=`
@@ -100,14 +103,14 @@ export interface InfraNodeListParams extends InfraNodeFilters {
 }
 
 /**
- * A page of topology nodes (`GET /infra/nodes`) — the house `{ items, total, limit, offset }`
+ * A page of topology nodes (`GET /infra/nodes/page`) — the house `{ items, total, limit, offset }`
  * envelope over the enriched `InfraNodeListItem` (the lean node PLUS the linked Asset's inventory
  * `assetName` and active `owners`, joined server-side in one query — ADR-0070 §6 / #750).
  *
  * Every param is omitted when empty, never sent blank: an empty `q` must not become `?q=`, because a
  * query key that churns between `{}` and `{ q: "" }` refetches on every keystroke that clears the box.
  */
-export function getInfraNodes(
+export async function getInfraNodes(
   params: InfraNodeListParams = {},
   signal?: AbortSignal,
 ): Promise<InfraNodeListPage> {
@@ -128,9 +131,9 @@ export function getInfraNodes(
     if (params.dir) qs.set("dir", params.dir);
   }
   const search = qs.toString();
-  return apiFetch<InfraNodeListPage>(
-    search ? `${BASE}/nodes?${search}` : `${BASE}/nodes`,
-    { signal },
+  const path = search ? `${BASE}/nodes/page?${search}` : `${BASE}/nodes/page`;
+  return InfraNodeListPageSchema.parse(
+    await apiFetch<unknown>(path, { signal }),
   );
 }
 
@@ -144,8 +147,10 @@ export function getInfraNodes(
  * whole point of the envelope: the read is bounded at `INFRA_GRAPH_NODES_MAX`, and when the cap bites
  * the canvas MUST say so rather than draw a map that is quietly missing boxes. Same `infra:read` gate.
  */
-export function getInfraGraphNodes(signal?: AbortSignal): Promise<InfraGraph> {
-  return apiFetch<InfraGraph>(`${BASE}/graph/nodes`, { signal });
+export async function getInfraGraphNodes(signal?: AbortSignal): Promise<InfraGraph> {
+  return InfraGraphSchema.parse(
+    await apiFetch<unknown>(`${BASE}/graph/nodes`, { signal }),
+  );
 }
 
 /**

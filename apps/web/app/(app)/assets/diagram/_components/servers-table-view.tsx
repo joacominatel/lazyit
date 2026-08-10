@@ -72,8 +72,8 @@ import { PendingReviewTray } from "./pending-review-tray";
  * honours when you flip back (#760).
  *
  * ponytail — search, sort and paging are SERVER-side now (#1152):
- *  - `GET /infra/nodes` is the house `Page<T>` (ADR-0030): `{ items, total, limit, offset }`, a sort
- *    allowlist, and server-side `q` over label / ipAddress / linked asset name / active owner
+ *  - `GET /infra/nodes/page` is the house `Page<T>` (ADR-0030): `{ items, total, limit, offset }`, a
+ *    sort allowlist, and server-side `q` over label / ipAddress / linked asset name / active owner
  *    name+email. So this table gets the ordinary house treatment — `SortableHeader` on the allowlisted
  *    columns, a `Pagination` footer over `total` — exactly as Consumables and Assets do it.
  *  - The in-memory `q` filter this file used to run is GONE, and its removal is the point rather than
@@ -118,7 +118,10 @@ export function ServersTableView() {
   // node list with `.some(...)`, which on a paged endpoint would have inspected one window and shown a
   // "get started" hero to an estate whose only agents sat on page two. `undefined` while loading → the
   // hero stays hidden (no flash).
-  const { data: agentProbe } = useInfraNodes({ source: "AGENT", limit: 1 });
+  const { data: agentProbe } = useInfraNodes(
+    { source: "AGENT", limit: 1 },
+    { refetchInterval: INFRA_LIVE_POLL_MS },
+  );
   const hasAgents = agentProbe ? agentProbe.total > 0 : undefined;
 
   const {

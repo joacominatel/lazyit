@@ -4,6 +4,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  useQueries,
 } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
@@ -22,6 +23,7 @@ import type {
   InfraImpactResponse,
   InfraNode,
   InfraNodeDetail,
+  InfraNodeListItem,
   InfraNodeListPage,
   UpdateInfraNode,
 } from "@lazyit/shared";
@@ -54,6 +56,10 @@ import {
   updateInfraNode,
   updateInfraNodePosition,
 } from "../endpoints/infra";
+import {
+  combineInfraNodeBatchItems,
+  infraNodeIdBatches,
+} from "./infra-node-batches";
 
 /**
  * Query keys + read/write hooks for the infra topology canvas + drill-in panel (ADR-0070, issues
@@ -109,7 +115,7 @@ export const infraKeys = {
 };
 
 /**
- * A PAGE of topology nodes (`GET /infra/nodes`, ADR-0030 / #1152). The canvas keeps the fetch
+ * A PAGE of topology nodes (`GET /infra/nodes/page`, ADR-0030 / #1152). The canvas keeps the fetch
  * client-side (React Flow is client-only — no SSR prefetch, per #741).
  *
  * Returns the `{ items, total, limit, offset }` envelope, NOT a bare array. Every caller reads
@@ -133,6 +139,36 @@ export function useInfraNodes(
     queryFn: ({ signal }) => getInfraNodes(params, signal),
     placeholderData: keepPreviousData,
     ...options,
+  });
+}
+
+/**
+ * Resolve every requested node id without exceeding the API's per-request id ceiling. Edge history
+ * can reference more than 200 unique endpoints (one hypervisor can have 500 guests), so silently
+ * slicing one resolver page would replace valid labels with raw ids. Deterministic batches keep cache
+ * keys stable, and `useQueries` keeps the number of requests to exactly one per non-empty batch.
+ */
+export function useInfraNodesByIds(
+  ids: readonly string[],
+  options?: { enabled?: boolean },
+): {
+  data: InfraNodeListItem[];
+  isLoading: boolean;
+  isError: boolean;
+} {
+  const batches = useMemo(() => infraNodeIdBatches(ids), [ids]);
+  return useQueries({
+    queries: batches.map((batch) => ({
+      queryKey: infraKeys.nodes({ ids: batch, limit: batch.length }),
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        getInfraNodes({ ids: batch, limit: batch.length }, signal),
+      enabled: options?.enabled !== false,
+    })),
+    combine: (results) => ({
+      data: combineInfraNodeBatchItems(results.map((result) => result.data)),
+      isLoading: results.some((result) => result.isLoading),
+      isError: results.some((result) => result.isError),
+    }),
   });
 }
 

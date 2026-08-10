@@ -105,7 +105,7 @@ export interface InfraCanvasApi {
  * The infra topology board (ADR-0070 §6, issue #741). Renders nodes from `GET /infra/graph/nodes` —
  * the board's OWN read since #1152, a narrow projection that is complete by default, bounded at
  * `INFRA_GRAPH_NODES_MAX`, and says so via `truncated` when the bound bites (the Servers table's
- * `GET /infra/nodes` is a page, and a paged map would drop boxes and their edges in silence) — plus
+ * `GET /infra/nodes/page` is a page, and a paged map would drop boxes and their edges in silence) — plus
  * one bounded `GET /infra/graph/edges` read, styled by status/kind. Nodes are draggable; a settled drag
  * trailing-debounces a `PATCH /infra/nodes/:id/position`. Pan/zoom + fit-view on load come from
  * React Flow. Hover shows quick facts AND spotlights the node's neighbourhood; click selects a node

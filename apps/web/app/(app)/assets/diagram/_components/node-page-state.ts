@@ -4,18 +4,19 @@
  *
  * Pure, and out of the components, for the same reason `tray-selection.ts` is: both of these are the
  * only thing standing between an operator and a screen that is quietly incomplete, and until now both
- * were promises made in prose. `GET /infra/nodes` is a page (ADR-0030) and `GET /infra/graph/nodes`
- * is bounded at `INFRA_GRAPH_NODES_MAX` — so either surface CAN legitimately hold less than the
- * estate. The rule the whole split exists to enforce is that when it does, it says so:
+ * were promises made in prose. `GET /infra/nodes/page` is a page (ADR-0030) and
+ * `GET /infra/graph/nodes` is bounded at `INFRA_GRAPH_NODES_MAX` — so either surface CAN
+ * legitimately hold less than the estate. The rule the whole split exists to enforce is that when
+ * it does, it says so:
  *
  *   **no consumer may render a truncated view that looks complete.**
  *
- * A missing topology node is the worst of the two, because it takes its edges with it: the map does
- * not just lose a box, it loses a relationship, and an operator reading a blast radius off it gets a
- * smaller answer than the truth with no cue that anything was dropped. A short pending tray is nearly
- * as bad in the other direction — an ADR-0095 hypervisor can enrol up to 500 guests in one report, so
- * "200 rows" is a routine outcome there, and the header badge must read 431 rather than 200 or the
- * operator believes they finished when they cleared the screen.
+ * A missing topology node is the worst of the two, because it takes its drawn edges and highlights
+ * with it. The impact API still returns the authoritative count/list, but the picture can no longer
+ * draw every row in that answer. A short pending tray is nearly as bad in the other direction — an
+ * ADR-0095 hypervisor can enrol up to 500 guests in one report, so "200 rows" is a routine outcome
+ * there, and the header badge must read 431 rather than 200 or the operator believes they finished
+ * when they cleared the screen.
  *
  * Both functions return `null` for "nothing to say", so a component renders a banner or renders
  * nothing — never a banner that reassures.

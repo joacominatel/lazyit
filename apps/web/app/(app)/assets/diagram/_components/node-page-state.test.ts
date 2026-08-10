@@ -7,9 +7,9 @@
  * are silent ones — the kind nobody files a bug for, because the screen looks fine:
  *
  *  1. **A short map reads as a complete map.** `GET /infra/graph/nodes` is bounded at
- *     `INFRA_GRAPH_NODES_MAX`. A node that falls outside the cap takes its EDGES with it, so the
- *     board does not just lose a box — a blast radius computed while looking at it comes back
- *     smaller than the truth. The banner naming both numbers is the only cue there is.
+ *     `INFRA_GRAPH_NODES_MAX`. A node that falls outside the cap takes its drawn edges and impact
+ *     highlight with it. The impact API's count/list stay authoritative, but the banner naming both
+ *     graph numbers is the only cue that the picture cannot show every affected node.
  *  2. **A batched tray reads as a finished tray.** One ADR-0095 hypervisor can enrol up to 500 guests
  *     in a single report, so a 200-row page of proposals is routine. Confirming everything on screen
  *     and seeing the tray empty must not mean "done" when 231 are still queued.

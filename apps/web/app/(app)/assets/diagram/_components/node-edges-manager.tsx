@@ -4,7 +4,6 @@ import { ArrowPathIcon, PlusIcon } from "@heroicons/react/24/outline";
 import {
   type InfraEdge,
   InfraEdgeKindSchema,
-  MAX_PAGE_LIMIT,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
@@ -34,6 +33,7 @@ import {
   useCreateInfraEdge,
   useInfraNodeEdgesHistory,
   useInfraNodes,
+  useInfraNodesByIds,
 } from "@/lib/api/hooks/use-infra-nodes";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
@@ -68,18 +68,16 @@ export function NodeEdgesManager({
   // The ids this list actually has to NAME: the other endpoint of every edge (active or closed).
   // Sorted + de-duplicated so the query key is stable across re-renders.
   //
-  // CAPPED at the page limit, because `?ids=` is capped there too (an over-cap batch is a 400, the
-  // `GET /users?ids=` rule). One ADR-0095 hypervisor host really can carry 500 RUNS_ON edges, so this
-  // is a live case, not a hypothetical. Past the cap a label falls back to the raw id — which reads as
-  // a name that failed to resolve, not as a missing relationship — and that is deliberately the
-  // failure we take: a 400 would blank the whole panel instead.
+  // One ADR-0095 hypervisor host can carry 500 RUNS_ON edges, so this set can exceed the API's 200-id
+  // resolver ceiling. The hook below splits the whole deterministic set into bounded requests rather
+  // than discarding labels after the first batch.
   const otherIds = useMemo(() => {
     const ids = new Set<string>();
     for (const edge of edges ?? []) {
       ids.add(edge.sourceId === nodeId ? edge.targetId : edge.sourceId);
     }
     ids.delete(nodeId);
-    return [...ids].sort().slice(0, MAX_PAGE_LIMIT);
+    return [...ids].sort();
   }, [edges, nodeId]);
 
   // Resolve exactly those (#1152, the `?ids=` batch-resolve precedent of ADR-0030 §6 / #961) instead
@@ -87,17 +85,16 @@ export function NodeEdgesManager({
   // endpoint: a scan of one window would print a raw cuid at the operator the moment an endpoint sat
   // outside it, and an edge is exactly the place where "which machine?" is the entire question. A
   // node this one has no edge to is not fetched at all.
-  const { data: endpointPage } = useInfraNodes(
-    { ids: otherIds, limit: MAX_PAGE_LIMIT },
-    { enabled: otherIds.length > 0 },
-  );
+  const { data: endpointNodes } = useInfraNodesByIds(otherIds, {
+    enabled: otherIds.length > 0,
+  });
 
   /** The other endpoint's label for an edge (the node that ISN'T this one). */
   const labelById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const node of endpointPage?.items ?? []) map.set(node.id, node.label);
+    for (const node of endpointNodes) map.set(node.id, node.label);
     return map;
-  }, [endpointPage?.items]);
+  }, [endpointNodes]);
 
   const active = (edges ?? []).filter((e) => e.endedAt === null);
   const closed = (edges ?? []).filter((e) => e.endedAt !== null);
