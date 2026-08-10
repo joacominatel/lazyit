@@ -3,7 +3,7 @@ title: "Secret Manager — crypto design note (build-time primitives)"
 tags: [development, security, secrets, crypto, secret-manager, knowledge-base]
 status: accepted
 created: 2026-06-12
-updated: 2026-06-23
+updated: 2026-08-09
 ---
 
 # Secret Manager — crypto design note (build-time primitives)
@@ -46,9 +46,9 @@ All three libraries are **MIT-licensed, audited or maintained pure-JS/WASM** wit
 | Concern | Library (pinned) | Why it wins | Where it runs |
 | --- | --- | --- | --- |
 | **KDF — Argon2id** | **`hash-wasm@4.12.0`** | Hand-tuned WASM Argon2id, ~10× faster than asm.js; tiny; lazy-loads its `.wasm`; `outputType: 'binary'` returns the **raw 32-byte derived key** (not a PHC string) — exactly what we need to *derive a wrapping key*, not *verify a password*. | **Browser only** (and tests). |
-| **Asymmetric (keypair + ECDH)** | **`@noble/curves@2.2.0`** (`x25519`) | Audited, minimal, zero-dep X25519. `x25519.keygen()` / `x25519.getSharedSecret()`. 32-byte keys → tiny wrapped blobs. | **Browser only** (and tests). |
+| **Asymmetric (keypair + ECDH)** | **`@noble/curves@2.3.0`** (`x25519`) | Audited, minimal X25519. `x25519.keygen()` / `x25519.getSharedSecret()`. 32-byte keys → tiny wrapped blobs. | **Browser only** (and tests). |
 | **AEAD — AES-256-GCM** | **`@noble/ciphers@2.2.0`** (`gcm`) | Audited AES-GCM that produces the **same envelope shape** as the `node:crypto` `WorkflowSecret` path (ciphertext ‖ 16-byte tag, explicit 12-byte nonce), so client and server agree byte-for-byte on the `SecretItem` columns. | **Browser only** (and tests). |
-| **HKDF (shared-secret → AES key)** | **`@noble/hashes@2.2.0`** (`hkdf` + `sha256`) | Audited HKDF-SHA-256 to expand the raw X25519 shared secret into a clean 32-byte AES key (never use the raw DH output directly as a key). | **Browser only** (and tests). |
+| **HKDF (shared-secret → AES key)** | **`@noble/hashes@2.3.0`** (`hkdf` + `sha256`) | Audited HKDF-SHA-256 to expand the raw X25519 shared secret into a clean 32-byte AES key (never use the raw DH output directly as a key). | **Browser only** (and tests). |
 
 **Argon2id parameters (pinned — see §1 for the threat justification):**
 
@@ -211,7 +211,7 @@ Each [[user]] has **one [[user-keypair]]** (1:1 with the `uuid` User):
 **Chosen: X25519.** Tiny keys → tiny `publicKey`, `privateKeyEncByPassphrase`, and wrapped-DEK blobs
 (all base64 text columns). No padding oracle. Designed for exactly this — **wrap a symmetric key to a
 recipient's public key** via ECDH. WebCrypto lacks X25519 broadly enough that we don't rely on it;
-`@noble/curves@2.2.0` is audited and runs everywhere we need.
+`@noble/curves@2.3.0` is audited and runs everywhere we need.
 
 > **WebCrypto P-256 was considered** because `crypto.subtle` supports ECDH P-256 natively (no library).
 > Rejected to keep **one** asymmetric vocabulary (noble X25519) shared by client *and* any test/Node
