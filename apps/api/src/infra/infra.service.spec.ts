@@ -11,7 +11,10 @@ import {
   AGENT_POLICY_DEFAULT,
   AGENT_SOFTWARE_HASH_MAX,
   AgentReportSchema,
+  CONTAINER_ID_SEPARATOR,
   DEFAULT_PAGE_LIMIT,
+  GUEST_ID_SEPARATOR,
+  INFRA_GRAPH_EDGES_MAX,
   INFRA_GRAPH_NODES_MAX,
   InfraGraphNodeSchema,
   InfraNodeListItemSchema,
@@ -107,6 +110,7 @@ interface PrismaMock {
   infraEdge: {
     findFirst: Mock;
     findMany: Mock;
+    count: Mock;
     findUnique: Mock;
     create: Mock;
     update: Mock;
@@ -222,6 +226,7 @@ describe('InfraService', () => {
       infraEdge: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
@@ -3802,6 +3807,83 @@ describe('InfraService', () => {
       expect(arg.take).toBe(1);
     });
 
+    it('filters CHILD by either child identity namespace, independent of node kind', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodes({ role: 'CHILD', kind: 'VM' }, FIRST_PAGE);
+
+      const listWhere = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      ).where;
+      expect(listWhere).toMatchObject({ kind: 'VM' });
+      expect(listWhere.AND).toEqual([
+        {
+          OR: [
+            { externalId: { contains: CONTAINER_ID_SEPARATOR } },
+            { externalId: { contains: GUEST_ID_SEPARATOR } },
+          ],
+        },
+      ]);
+      expect(firstArg<{ where: unknown }>(prisma.infraNode.count).where).toBe(
+        listWhere,
+      );
+    });
+
+    it('filters HOST as null or outside both child namespaces, independent of node kind', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodes({ role: 'HOST', kind: 'CONTAINER' }, FIRST_PAGE);
+
+      const listWhere = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      ).where;
+      expect(listWhere).toMatchObject({ kind: 'CONTAINER' });
+      expect(listWhere.AND).toEqual([
+        {
+          OR: [
+            { externalId: null },
+            {
+              NOT: {
+                OR: [
+                  { externalId: { contains: CONTAINER_ID_SEPARATOR } },
+                  { externalId: { contains: GUEST_ID_SEPARATOR } },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+      expect(firstArg<{ where: unknown }>(prisma.infraNode.count).where).toBe(
+        listWhere,
+      );
+    });
+
+    it('applies HOST in Prisma before the page window, so 500 newer children cannot starve one host', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'host-1', label: 'pve-1', assetId: null, asset: null },
+      ]);
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      const page = await service.listNodes(
+        { role: 'HOST' },
+        { ...FIRST_PAGE, limit: MAX_PAGE_LIMIT },
+      );
+
+      const listArg = firstArg<{
+        where: { AND?: unknown[] };
+        take: number;
+      }>(prisma.infraNode.findMany);
+      expect(listArg.where.AND).toBeDefined();
+      expect(listArg.take).toBe(MAX_PAGE_LIMIT);
+      expect(firstArg<{ where: unknown }>(prisma.infraNode.count).where).toBe(
+        listArg.where,
+      );
+      expect(page).toMatchObject({
+        items: [expect.objectContaining({ id: 'host-1' })],
+        total: 1,
+      });
+    });
+
     it('filters by `ids`, so a label lookup asks for exactly the nodes it needs', async () => {
       prisma.infraNode.findMany.mockResolvedValue([]);
 
@@ -3843,6 +3925,29 @@ describe('InfraService', () => {
       expect(or).toContain('email');
       // Case-insensitive, or a search box would only match the operator's exact capitalization.
       expect(or).toContain('insensitive');
+    });
+
+    it('matches a linked Asset name only when that Asset is live', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodes({ q: 'archive' }, FIRST_PAGE);
+
+      const where = firstArg<{
+        where: {
+          OR: Array<{ asset?: { is?: Record<string, unknown> } }>;
+        };
+      }>(prisma.infraNode.findMany).where;
+      const assetNameBranch = where.OR.find(
+        (branch) => branch.asset?.is?.name !== undefined,
+      );
+      expect(assetNameBranch).toEqual({
+        asset: {
+          is: {
+            deletedAt: null,
+            name: { contains: 'archive', mode: 'insensitive' },
+          },
+        },
+      });
     });
 
     it('sorts by an allowlisted field and STILL appends the id tiebreaker', async () => {
@@ -3972,6 +4077,84 @@ describe('InfraService', () => {
       // Letting the canvas ask the paged list for `limit=200` was the cheap option. It is wrong:
       // one ADR-0095 hypervisor host can enrol 500 guests, so 200 drops nodes off a normal map.
       expect(INFRA_GRAPH_NODES_MAX).toBeGreaterThan(MAX_PAGE_LIMIT);
+    });
+  });
+
+  describe('listGraphEdges', () => {
+    it('reads only active edges whose source and target nodes are live, using the same where for count', async () => {
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listGraphEdges();
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      const listWhere = firstArg<{ where: unknown }>(
+        prisma.infraEdge.findMany,
+      ).where;
+      expect(listWhere).toEqual({
+        endedAt: null,
+        source: { deletedAt: null },
+        target: { deletedAt: null },
+      });
+      expect(firstArg<{ where: unknown }>(prisma.infraEdge.count).where).toBe(
+        listWhere,
+      );
+    });
+
+    it('orders newest-first with a unique tiebreaker, caps at 10,000, and has no skip', async () => {
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listGraphEdges();
+
+      const arg = firstArg<{
+        orderBy: unknown;
+        take: number;
+        skip?: number;
+      }>(prisma.infraEdge.findMany);
+      expect(arg.orderBy).toEqual([{ startedAt: 'desc' }, { id: 'desc' }]);
+      expect(arg.take).toBe(INFRA_GRAPH_EDGES_MAX);
+      expect(arg.skip).toBeUndefined();
+    });
+
+    it('returns an untruncated zero envelope', async () => {
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.infraEdge.count.mockResolvedValue(0);
+
+      await expect(service.listGraphEdges()).resolves.toEqual({
+        items: [],
+        total: 0,
+        limit: INFRA_GRAPH_EDGES_MAX,
+        truncated: false,
+      });
+    });
+
+    it('reports exact-cap as complete', async () => {
+      const items = Array.from({ length: INFRA_GRAPH_EDGES_MAX }, (_, id) => ({
+        id: `edge-${id}`,
+      }));
+      prisma.infraEdge.findMany.mockResolvedValue(items);
+      prisma.infraEdge.count.mockResolvedValue(INFRA_GRAPH_EDGES_MAX);
+
+      await expect(service.listGraphEdges()).resolves.toMatchObject({
+        items,
+        total: INFRA_GRAPH_EDGES_MAX,
+        limit: INFRA_GRAPH_EDGES_MAX,
+        truncated: false,
+      });
+    });
+
+    it('reports one-over-cap as truncated', async () => {
+      const items = Array.from({ length: INFRA_GRAPH_EDGES_MAX }, (_, id) => ({
+        id: `edge-${id}`,
+      }));
+      prisma.infraEdge.findMany.mockResolvedValue(items);
+      prisma.infraEdge.count.mockResolvedValue(INFRA_GRAPH_EDGES_MAX + 1);
+
+      await expect(service.listGraphEdges()).resolves.toMatchObject({
+        items,
+        total: INFRA_GRAPH_EDGES_MAX + 1,
+        limit: INFRA_GRAPH_EDGES_MAX,
+        truncated: true,
+      });
     });
   });
 
