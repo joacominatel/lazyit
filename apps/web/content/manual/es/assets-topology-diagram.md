@@ -123,6 +123,17 @@ conjunto resaltado y el número son la respuesta para la parte del parque que el
 mostrando, no para todo. Tomalo como un piso, no como un total, y verificá los servidores afectados en
 la lista de servidores cuando la respuesta importe.
 
+Las relaciones tienen su propio techo, mucho más alto: **10.000 conexiones activas**. Si se alcanza,
+un segundo aviso persistente indica cuántas relaciones se muestran y cuántas existen. Los nodos siguen
+disponibles, pero faltan algunas líneas; llegar exactamente a 10.000 no muestra el aviso salvo que el
+servidor indique que quedaron más relaciones afuera.
+
+Si las relaciones no se pueden cargar, el tablero conserva en pantalla el último mapa que pudo cargar
+y muestra un aviso persistente **No se pudieron cargar las relaciones** con **Reintentar**. Mientras
+aparezca, no interpretes la falta de líneas como "estos nodos están desconectados". Una consulta de
+relaciones fallida nunca se presenta como un mapa vacío y completo, y este aviso se apila con los de
+truncamiento en lugar de taparlos.
+
 ## Agregar al mapa
 
 Con los permisos correspondientes verás un botón **Agregar** en el encabezado de la página, con dos

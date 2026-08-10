@@ -115,6 +115,17 @@ lines with it, so **a blast radius read off a truncated map is incomplete** — 
 the count are the answer for the part of the estate the board is showing, not for all of it. Treat it
 as a floor, not a total, and check the affected servers on the Servers list when the answer matters.
 
+Relationships have their own, much higher ceiling: **10,000 active connections**. If that ceiling is
+reached, a second persistent warning names how many relationships are shown and how many exist. The
+nodes remain available, but some lines are missing; reaching exactly 10,000 does not raise the warning
+unless the server says more relationships were left out.
+
+If relationships fail to load, the board keeps any previously loaded map on screen and shows a
+persistent **Relationships couldn't be loaded** warning with **Retry**. Do not read missing lines as
+"these nodes are disconnected" while that warning is present. A failed relationship request is never
+presented as an empty, complete map, and this warning stacks with either truncation warning rather than
+covering it.
+
 ## Adding to the map
 
 With the right permissions you'll see an **Add** button in the page header, offering two paths:
