@@ -5,20 +5,31 @@ import {
   InfraGraphEdgesSchema,
   InfraGraphNodeSchema,
   InfraGraphSchema,
+  InfraNodeListSchema,
   InfraNodeListRoleSchema,
   InfraNodeListPageSchema,
 } from "./infra-list";
 import { InfraEdgeSchema, InfraNodeListItemSchema } from "./infra";
 import { MAX_PAGE_LIMIT } from "./pagination";
+import { InfraNodeListSchema as ExportedInfraNodeListSchema } from "../index";
 
 /**
- * The two read contracts #1152 splits `GET /infra/nodes` into.
+ * The compatibility list, first-party page, and bounded graph contracts.
  *
- * What these guard: the node list becoming a `Page<T>` is only half the fix — the topology canvas
- * still needs the WHOLE graph, so it got its own endpoint. The failure this suite exists to prevent
+ * What these guard: adding the first-party `Page<T>` is only half the fix — the topology canvas still
+ * needs the WHOLE graph, so it got its own endpoint. The failure this suite exists to prevent
  * is that endpoint quietly becoming a second unbounded list, or its projection drifting back into
  * carrying the joins (`owners`/`assetName`) the canvas never draws.
  */
+
+describe("InfraNodeListSchema — the deprecated compatibility list", () => {
+  test("is a runtime array schema over the lean list item", () => {
+    expect(InfraNodeListSchema.parse([])).toEqual([]);
+    expect(InfraNodeListSchema.element).toBe(InfraNodeListItemSchema);
+    expect(InfraNodeListSchema.safeParse({ items: [] }).success).toBe(false);
+    expect(ExportedInfraNodeListSchema).toBe(InfraNodeListSchema);
+  });
+});
 
 describe("InfraNodeListPageSchema — the paged Servers list (ADR-0030)", () => {
   test("is the house Page<T> envelope over the lean list item", () => {

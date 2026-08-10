@@ -12,7 +12,7 @@ export const InfraNodeListRoleSchema = z.enum(["HOST", "CHILD"]);
 export type InfraNodeListRole = z.infer<typeof InfraNodeListRoleSchema>;
 
 /**
- * The two READ contracts `GET /infra/nodes` was split into (issue #1152).
+ * The first-party node page and bounded graph contracts added in issue #1152.
  *
  * ## Why a split at all
  *
@@ -22,8 +22,10 @@ export type InfraNodeListRole = z.infer<typeof InfraNodeListRoleSchema>;
  * WHOLE graph: a map missing a node is not a shorter map, it is a wrong map — the missing node takes
  * its edges with it and the operator has no cue that anything is absent.
  *
- * So the list paginates on the house `Page<T>` contract ({@link InfraNodeListPageSchema}, ADR-0030)
- * and the canvas got its own read ({@link InfraGraphSchema}). The alternative — letting the canvas
+ * The first-party list paginates on the house `Page<T>` contract
+ * ({@link InfraNodeListPageSchema}, ADR-0030) at `GET /infra/nodes/page`, while the historical
+ * `GET /infra/nodes` array remains available as the deprecated compatibility route. The canvas got
+ * its own read ({@link InfraGraphSchema}). The alternative — letting the canvas
  * ask the paged list for `limit=200` — was rejected: 200 sits BELOW the ADR-0095 `AGENT_GUESTS_MAX`
  * ceiling of 500 guests that a single hypervisor host can enrol, so one ordinary VMware/Proxmox host
  * would have silently pushed nodes off the map.
@@ -38,13 +40,17 @@ export type InfraNodeListRole = z.infer<typeof InfraNodeListRoleSchema>;
  */
 
 /**
- * `GET /infra/nodes` — the house `Page<T>` envelope over the lean {@link InfraNodeListItemSchema}
- * row (ADR-0030: `{ items, total, limit, offset }`, default page 50, hard max 200, an over-max
- * `limit` rejected with 400 rather than clamped).
- *
- * **This is a BREAKING wire-shape change**: the endpoint previously returned a bare
- * `InfraNodeListItem[]`. It follows the precedent ADR-0030 §4 set for `GET /assets/:id/articles`
- * (#220), where `ArticleListItem[]` → `Page<ArticleListItem>` landed front+back in one change.
+ * `GET /infra/nodes` — the deprecated compatibility array. It intentionally preserves the original
+ * unbounded shape and only the historical `kind` / `status` / `state` filters until its v2.0 removal.
+ */
+export const InfraNodeListSchema = z.array(InfraNodeListItemSchema);
+
+export type InfraNodeList = z.infer<typeof InfraNodeListSchema>;
+
+/**
+ * `GET /infra/nodes/page` — the house `Page<T>` envelope over the lean
+ * {@link InfraNodeListItemSchema} row (ADR-0030: `{ items, total, limit, offset }`, default page 50,
+ * hard max 200, an over-max `limit` rejected with 400 rather than clamped).
  *
  * `total` is the count over the SAME `where` as `items` — it reflects the FILTERED set, never the
  * table — so a consumer that shows a count is showing the count of what it asked for.
