@@ -206,9 +206,9 @@
     "successTitle": "{name} reported!",
     "successDescription": "Your server checked in. Confirm it to add it to your inventory.",
     "detected": {
-      "summary": "This host is a hypervisor ({platform}): {count, plural, =0 {no guests are awaiting review yet} one {# guest entered Pending review} other {# guests entered Pending review}}.",
-      "summaryNoPlatform": "This host is a hypervisor: {count, plural, =0 {no guests are awaiting review yet} one {# guest entered Pending review} other {# guests entered Pending review}}.",
-      "review": "Review them"
+      "summary": "This host is a hypervisor ({platform}): {count, plural, =0 {it reported no guests} one {it reported # guest} other {it reported # guests}}.",
+      "summaryNoPlatform": "This host is a hypervisor: {count, plural, =0 {it reported no guests} one {it reported # guest} other {it reported # guests}}.",
+      "review": "Open Pending review"
     },
     "confirmAction": "Confirm server",
     "checkLater": "I'll check later"
@@ -325,7 +325,9 @@
   },
   "graph": {
     "truncated": "Showing {shown} of {total} nodes — this map is incomplete.",
-    "truncatedHint": "The map draws at most {shown} nodes. The ones left out are still in your inventory, on the Servers list and in search, but their connections are not drawn here — read a blast radius with that in mind."
+    "truncatedHint": "The map draws at most {shown} nodes. The ones left out are still in your inventory, on the Servers list and in search, but their connections are not drawn here — read a blast radius with that in mind.",
+    "edgesTruncated": "Showing {shown} of {total} relationships — some connections are not drawn.",
+    "edgesTruncatedHint": "The relationship limit was reached. The map stays usable, but its connection picture is incomplete."
   },
   "legend": {
     "title": "Edge legend"
@@ -561,7 +563,7 @@
     "closedToast": "Connection closed.",
     "closeError": "Couldn't close the connection.",
     "loadError": "Couldn't load connections.",
-    "partialError": "Some relationships couldn't be loaded.",
+    "partialError": "Relationships couldn't be loaded. This map may be missing connections.",
     "retry": "Retry",
     "selfNode": "this node",
     "since": "since {date}",
