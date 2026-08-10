@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  INFRA_GRAPH_EDGES_MAX,
   INFRA_GRAPH_NODES_MAX,
+  InfraGraphEdgesSchema,
   InfraGraphNodeSchema,
   InfraGraphSchema,
+  InfraNodeListRoleSchema,
   InfraNodeListPageSchema,
 } from "./infra-list";
-import { InfraNodeListItemSchema } from "./infra";
+import { InfraEdgeSchema, InfraNodeListItemSchema } from "./infra";
 import { MAX_PAGE_LIMIT } from "./pagination";
 
 /**
@@ -39,6 +42,16 @@ describe("InfraNodeListPageSchema — the paged Servers list (ADR-0030)", () => 
         >,
       ).sort(),
     ).toEqual(Object.keys(InfraNodeListItemSchema.shape).sort());
+  });
+});
+
+describe("InfraNodeListRoleSchema — reporting identity role", () => {
+  test.each(["HOST", "CHILD"])("accepts %s", (role) => {
+    expect(InfraNodeListRoleSchema.parse(role)).toBe(role);
+  });
+
+  test.each(["VM", "CONTAINER", "host", "", undefined])("rejects %p", (role) => {
+    expect(InfraNodeListRoleSchema.safeParse(role).success).toBe(false);
   });
 });
 
@@ -97,5 +110,34 @@ describe("InfraGraphSchema — bounded, and HONEST about it", () => {
     // edges off the map. The graph cap must sit well above any single host's ceiling.
     expect(INFRA_GRAPH_NODES_MAX).toBeGreaterThan(MAX_PAGE_LIMIT);
     expect(INFRA_GRAPH_NODES_MAX).toBeGreaterThan(500);
+  });
+});
+
+describe("InfraGraphEdgesSchema — bounded active-edge envelope", () => {
+  test("reuses InfraEdgeSchema for every item", () => {
+    expect(InfraGraphEdgesSchema.shape.items.element).toBe(InfraEdgeSchema);
+  });
+
+  test("requires `truncated`", () => {
+    expect(
+      InfraGraphEdgesSchema.safeParse({
+        items: [],
+        total: 0,
+        limit: INFRA_GRAPH_EDGES_MAX,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("represents the exact 10,000-edge cap without truncation", () => {
+    const parsed = InfraGraphEdgesSchema.parse({
+      items: [],
+      total: INFRA_GRAPH_EDGES_MAX,
+      limit: INFRA_GRAPH_EDGES_MAX,
+      truncated: false,
+    });
+
+    expect(parsed.limit).toBe(10_000);
+    expect(parsed.total).toBe(10_000);
+    expect(parsed.truncated).toBe(false);
   });
 });
