@@ -48,6 +48,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     // projected — so it must carry the SAME gate. A cheaper gate here would be a way to read the
     // estate's topology without infra:read.
     expect(permsOf('listGraphNodes')).toEqual(['infra:read']);
+    expect(permsOf('listGraphEdges')).toEqual(['infra:read']);
   });
 
   describe('the node list page params (#1152)', () => {
@@ -62,29 +63,8 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     );
 
     /** Named call-through, so adding a filter param never silently re-points these positionals. */
-    function list(params: {
-      state?: string;
-      source?: string;
-      ids?: string;
-      assetIds?: string;
-      q?: string;
-      limit?: string;
-      sort?: string;
-    }) {
-      return controller.listNodes(
-        undefined,
-        undefined,
-        params.state,
-        params.source,
-        params.ids,
-        params.assetIds,
-        params.q,
-        params.limit,
-        undefined,
-        undefined,
-        params.sort,
-        undefined,
-      );
+    function list(params: Record<string, string>) {
+      return controller.listNodes(params);
     }
 
     beforeEach(() => listNodes.mockClear());
@@ -100,7 +80,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     );
 
     it('accepts the hard maximum page size (200) — the PENDING tray asks for exactly this', () => {
-      list({ state: 'PENDING', limit: '200' });
+      void list({ state: 'PENDING', limit: '200' });
 
       expect(listNodes).toHaveBeenCalledWith(
         expect.objectContaining({ state: 'PENDING' }),
@@ -109,7 +89,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     });
 
     it('defaults to the house page size when no window is asked for', () => {
-      list({});
+      void list({});
 
       expect(listNodes).toHaveBeenCalledWith(
         expect.anything(),
@@ -144,13 +124,73 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       // Both exist because the page made client-side scanning wrong: an in-memory search over one
       // window is a false "no results", and "does any agent node exist?" cannot be answered by
       // looking at 50 rows.
-      list({ q: 'web-01', source: 'AGENT', limit: '1' });
+      void list({ q: 'web-01', source: 'AGENT', limit: '1' });
 
       expect(listNodes).toHaveBeenCalledWith(
         expect.objectContaining({ q: 'web-01', source: 'AGENT' }),
         expect.objectContaining({ limit: 1 }),
       );
     });
+
+    it.each(['HOST', 'CHILD'])(
+      'accepts role=%s and dispatches it as an identity-role filter',
+      (role) => {
+        void list({ role });
+
+        expect(listNodes).toHaveBeenCalledWith(
+          expect.objectContaining({ role }),
+          expect.anything(),
+        );
+      },
+    );
+
+    it.each(['VM', 'CONTAINER', 'host', ''])(
+      'rejects invalid role=%p',
+      (role) => {
+        expect(() => list({ role })).toThrow(BadRequestException);
+        expect(listNodes).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['deleted', 'typo'])(
+      'rejects unknown query key %s before dispatch',
+      (key) => {
+        expect(() => list({ [key]: 'active' })).toThrow(BadRequestException);
+        expect(listNodes).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['kind', 'VM'],
+      ['status', 'ONLINE'],
+      ['state', 'PENDING'],
+      ['source', 'AGENT'],
+      ['role', 'CHILD'],
+      ['ids', 'cxxxxxxxxxxxxxxxxxxxxxxxx'],
+      ['assetIds', 'cxxxxxxxxxxxxxxxxxxxxxxxx'],
+      ['q', 'web'],
+      ['limit', '25'],
+      ['offset', '25'],
+      ['page', '2'],
+      ['sort', 'label'],
+      ['dir', 'desc'],
+    ])('accepts documented query key %s', (key, value) => {
+      expect(() => list({ [key]: value })).not.toThrow();
+      expect(listNodes).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('dispatches the bounded graph-edge read through the infra:read route', () => {
+    const listGraphEdges = jest.fn().mockReturnValue('edges');
+    const controller = new InfraController(
+      { listGraphEdges } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    expect(controller.listGraphEdges()).toBe('edges');
+    expect(listGraphEdges).toHaveBeenCalledTimes(1);
   });
 
   describe('the Changes page params (#1143)', () => {
