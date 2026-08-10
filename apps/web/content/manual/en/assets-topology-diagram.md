@@ -95,6 +95,38 @@ double-click on the card opens the details window straight away. Clicking select
 so the map stays visible — the details window is large, and covering the board on every click would
 hide the thing you came to look at.
 
+### If the map says it is incomplete
+
+The map draws your estate in full — up to a ceiling of **2000 nodes**. Above that, a banner sits at
+the top of the board and stays there:
+
+> Showing 2000 of 2431 nodes — this map is incomplete.
+
+It is not an error and there is nothing to retry: it means your estate has grown past what one board
+can usefully draw. There is **no setting to raise the ceiling**.
+
+What matters is what it does *not* mean. The nodes left out are **still in lazyit** — they are in your
+inventory, on the [Servers list](/help/assets-topology-servers) and in search, exactly as before.
+What is missing is only their picture: they are not drawn, and neither are the connections that run
+through them.
+
+That last part is the reason the banner never goes away on its own. A node that isn't drawn takes its
+card, lines and on-canvas highlight with it, so **the picture of a blast radius can be incomplete**.
+The blast-radius query itself is separate from the canvas limit: its summary count and affected-node
+list come from the impact API and remain authoritative for the whole topology. When the warning is
+present, use that list as the answer; use the highlights only as a partial visual guide.
+
+Relationships have their own, much higher ceiling: **10,000 active connections**. If that ceiling is
+reached, a second persistent warning names how many relationships are shown and how many exist. The
+nodes remain available, but some lines are missing; reaching exactly 10,000 does not raise the warning
+unless the server says more relationships were left out.
+
+If relationships fail to load, the board keeps any previously loaded map on screen and shows a
+persistent **Relationships couldn't be loaded** warning with **Retry**. Do not read missing lines as
+"these nodes are disconnected" while that warning is present. A failed relationship request is never
+presented as an empty, complete map, and this warning stacks with either truncation warning rather than
+covering it.
+
 ## Adding to the map
 
 With the right permissions you'll see an **Add** button in the page header, offering two paths:
@@ -328,6 +360,11 @@ connection has no failure direction.
 
 An **empty result is good news** — it means nothing depends on this node, so it's safe to take
 down. lazyit shows that as reassurance, not as an error.
+
+> [!IMPORTANT]
+> If the board is showing the *"this map is incomplete"* banner, some affected nodes may be absent
+> from the drawn highlights. The blast-radius summary count and list remain authoritative. See
+> [If the map says it is incomplete](#if-the-map-says-it-is-incomplete).
 
 ## What's next
 

@@ -10,8 +10,7 @@ import {
   ServerStackIcon,
 } from "@heroicons/react/24/outline";
 import {
-  isContainerChildExternalId,
-  isGuestChildExternalId,
+  MAX_PAGE_LIMIT,
   type CreateServiceAccount,
   type InfraNodeListItem,
 } from "@lazyit/shared";
@@ -42,7 +41,6 @@ import { useCreateServiceAccount } from "@/lib/api/hooks/use-service-accounts";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
 import {
-  countPendingGuests,
   hypervisorFacetOf,
   hypervisorPlatformLabel,
 } from "@/lib/agent/hypervisor-detection";
@@ -559,16 +557,13 @@ function PlatformInstall({
  * Stops polling on close (the query's `enabled` is gated on this step being mounted). The node sits in
  * the Pending review tray regardless, so "I'll check later" is always a safe escape.
  *
- * Container CHILDREN are excluded from the match (#1139), and hypervisor GUEST children with them
- * (#1225): a host that runs containers or VMs enrols them in the SAME request, immediately after
- * itself, and the list is newest-first — so without this filter the wizard would announce `redis`
- * (or `vm-101`) as the server the operator just installed the agent on. The children are still in
- * the tray; they are simply not the thing this step is waiting for.
+ * The server scopes this poll to AGENT/HOST identities before applying the 200-row limit. Container
+ * and hypervisor-guest children therefore cannot fill the page and hide the host this step is waiting
+ * for, and the client does not try to repair an already-truncated response after the fact.
  *
  * When the found host's first report carried the ADR-0095 hypervisor facet, the success screen also
- * says so (#1225): the platform detected (off the node's drill-in — the polled list deliberately
- * carries no `specs`, #1135) and how many guest children entered Pending review (counted off the
- * pending list already in hand), with a CTA into the tray.
+ * says so (#1225): the platform detected and guest count come off the node's drill-in (the polled
+ * list deliberately carries no `specs`, #1135), with a CTA into the tray when guests were reported.
  */
 function StepWait({
   name,
@@ -582,49 +577,50 @@ function StepWait({
   doneLabel: string;
 }) {
   const t = useTranslations("infra.wizard");
-  const { data: pending } = useInfraNodes(
-    { state: "PENDING" },
+  // One batch of PENDING agent HOST proposals, polled fast while this step is open. `role=HOST` is an
+  // identity filter applied by the server BEFORE `take`, not a node-kind guess or an after-page child
+  // filter, so a 500-guest report cannot starve the host from this 200-row window.
+  const { data: pendingPage } = useInfraNodes(
+    {
+      state: "PENDING",
+      source: "AGENT",
+      role: "HOST",
+      limit: MAX_PAGE_LIMIT,
+    },
     { enabled: true, refetchInterval: 5000 },
   );
+  const pending = pendingPage?.items;
   const baselineRef = useRef<Set<string> | null>(null);
   const [found, setFound] = useState<InfraNodeListItem | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  // Hypervisor detection feedback (#1225, ADR-0095). The list row deliberately carries no `specs`
-  // (#1135), so the facet comes off the found node's drill-in — ONE fetch, once, the same read the
-  // node panel does — while the guest children are counted straight out of the PENDING list this
-  // step is already polling (they enrolled in the same report as the host, keyed under its
-  // `/guest/` prefix). No new endpoint, no wire change, and `infra:read` covers both reads.
+  // Hypervisor detection feedback (#1225, ADR-0095). The host-only list deliberately carries no
+  // `specs`, so both the facet and the reported guest count come off the found node's drill-in — one
+  // fetch, once, under the same `infra:read` gate. Counting the report rather than reintroducing child
+  // rows into the poll keeps host detection safe; the copy does not claim every guest stayed PENDING
+  // because auto-confirm rules may already have confirmed some of them.
   const { data: foundDetail } = useInfraNodeDetail(found?.id ?? null);
   const hypervisor = useMemo(
     () => (foundDetail ? hypervisorFacetOf(foundDetail.specs) : null),
     [foundDetail],
   );
-  const pendingGuests = useMemo(
-    () => (found ? countPendingGuests(found.externalId, pending ?? []) : 0),
-    [found, pending],
-  );
+  const reportedGuests = useMemo(() => {
+    if (typeof foundDetail?.specs !== "object" || foundDetail.specs === null) return 0;
+    const host = (foundDetail.specs as Record<string, unknown>).host;
+    if (typeof host !== "object" || host === null) return 0;
+    const guests = (host as Record<string, unknown>).guests;
+    return Array.isArray(guests) ? guests.length : 0;
+  }, [foundDetail]);
 
   useEffect(() => {
     if (!pending) return;
-    // Children are excluded from the match on BOTH child namespaces: Docker containers (#1139) and
-    // ADR-0095 hypervisor guests (#1225) ride the same request as the host that reports them, and
-    // the list is newest-first — without this a Proxmox install would celebrate `vm-101` as the
-    // server the operator just stood up. The children are still in the tray; the guest ones are
-    // what the detection callout below counts.
-    const agentPending = pending.filter(
-      (node) =>
-        node.source === "AGENT" &&
-        !isContainerChildExternalId(node.externalId) &&
-        !isGuestChildExternalId(node.externalId),
-    );
     // First data tick after entering the step: capture the pre-existing set, claim nothing yet.
     if (baselineRef.current === null) {
-      baselineRef.current = new Set(agentPending.map((node) => node.id));
+      baselineRef.current = new Set(pending.map((node) => node.id));
       return;
     }
     if (!found) {
-      const fresh = agentPending.find(
+      const fresh = pending.find(
         (node) => !baselineRef.current?.has(node.id),
       );
       if (fresh) setFound(fresh);
@@ -667,11 +663,11 @@ function StepWait({
                     ? `${label}${hypervisor.version ? ` ${hypervisor.version}` : ""}`
                     : null;
                   return platform
-                    ? t("detected.summary", { platform, count: pendingGuests })
-                    : t("detected.summaryNoPlatform", { count: pendingGuests });
+                    ? t("detected.summary", { platform, count: reportedGuests })
+                    : t("detected.summaryNoPlatform", { count: reportedGuests });
                 })()}
               </p>
-              {pendingGuests > 0 ? (
+              {reportedGuests > 0 ? (
                 <p className="mt-1">
                   <Link
                     href="/assets/diagram?view=table"

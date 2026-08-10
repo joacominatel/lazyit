@@ -215,9 +215,7 @@ export function AssetsListView() {
   // (forbidden presented as nonexistent — issue #935). Gate the whole control on `user:read`: hide it
   // when the caller can't populate it, which also skips the doomed `/users` fetch entirely.
   const canReadUsers = useCan("user:read");
-  // Which assets back a topology node — drives the small "On topology" glyph per row (issue #765).
-  // Gated on infra:read so a viewer without topology access never fires the node-list fetch.
-  const onTopology = useAssetsOnTopology(useCan("infra:read"));
+  const canReadInfra = useCan("infra:read");
   const {
     q,
     sort,
@@ -333,6 +331,14 @@ export function AssetsListView() {
   const visibleIds = useMemo(() => rows.map((asset) => asset.id), [rows]);
   const selection = useRowSelection(visibleIds);
   const selectable = canDelete;
+
+  // Which of the assets ON THIS PAGE back a topology node — the small "On topology" glyph per row
+  // (issue #765), made exact in #1152. It resolves the visible ids as a bounded batch (`?assetIds=`)
+  // instead of fetching the node list and scanning it: a scan answers correctly only for whatever
+  // window it happened to load, so the glyph would go missing on page two and read as "not on the
+  // map" — a wrong answer that looks exactly like a right one. Gated on infra:read so a viewer
+  // without topology access never fires the fetch, and inert while the page is empty.
+  const onTopology = useAssetsOnTopology(visibleIds, canReadInfra);
 
   /** Run a batch mutation, toast the per-id outcome, and clear the selection. */
   async function runBatch(

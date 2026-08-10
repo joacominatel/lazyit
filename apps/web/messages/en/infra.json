@@ -58,6 +58,7 @@
   "pending": {
     "title": "Pending review",
     "description": "Hosts the reporting agent discovered. Confirm to add them to your inventory, or discard.",
+    "batch": "Showing {shown} of {total} pending nodes, most recently discovered first. Confirm or discard these to reveal the rest.",
     "confirmAction": "Confirm",
     "mergeAction": "Merge into…",
     "discardAction": "Discard",
@@ -102,6 +103,8 @@
     },
     "targetLabel": "Merge into",
     "targetPlaceholder": "Pick a server",
+    "targetSearch": "Search servers by name…",
+    "targetEmpty": "No servers match that search.",
     "targetDescription": "The server you pick keeps its own name, kind, position, owner and asset link. Everything the agent owns moves onto it with the reporting key: the reported hardware and software facts, the status, the last check-in and the agent version — and the IP too, unless that IP was set by hand. If it already reports through an agent of its own, that key is replaced: a host still checking in with it will come back as a new pending server.",
     "submit": "Merge",
     "mergedToast": "Server merged.",
@@ -203,9 +206,9 @@
     "successTitle": "{name} reported!",
     "successDescription": "Your server checked in. Confirm it to add it to your inventory.",
     "detected": {
-      "summary": "This host is a hypervisor ({platform}): {count, plural, =0 {no guests are awaiting review yet} one {# guest entered Pending review} other {# guests entered Pending review}}.",
-      "summaryNoPlatform": "This host is a hypervisor: {count, plural, =0 {no guests are awaiting review yet} one {# guest entered Pending review} other {# guests entered Pending review}}.",
-      "review": "Review them"
+      "summary": "This host is a hypervisor ({platform}): {count, plural, =0 {it reported no guests} one {it reported # guest} other {it reported # guests}}.",
+      "summaryNoPlatform": "This host is a hypervisor: {count, plural, =0 {it reported no guests} one {it reported # guest} other {it reported # guests}}.",
+      "review": "Open Pending review"
     },
     "confirmAction": "Confirm server",
     "checkLater": "I'll check later"
@@ -319,6 +322,12 @@
     "showHint": "Laptops and desktops are kept off the map so the estate stays readable. They are still in your inventory, on the Servers list and in search — this only changes what the map draws.",
     "hide": "{count, plural, one {Hide # endpoint} other {Hide # endpoints}}",
     "hideHint": "Take laptops and desktops back off the map. Nothing is removed — they stay in your inventory, on the Servers list and in search."
+  },
+  "graph": {
+    "truncated": "Showing {shown} of {total} nodes — this map is incomplete.",
+    "truncatedHint": "The map draws at most {shown} nodes. Nodes, connections and highlights may be missing from the canvas, but the blast-radius count and affected-node list come from the impact API and remain authoritative.",
+    "edgesTruncated": "Showing {shown} of {total} relationships — some connections are not drawn.",
+    "edgesTruncatedHint": "The relationship limit was reached. The map stays usable, but its connection picture is incomplete."
   },
   "legend": {
     "title": "Edge legend"
@@ -540,8 +549,8 @@
     "kindPlaceholder": "Pick a relationship",
     "targetLabel": "Other node",
     "targetPlaceholder": "Pick a node",
-    "targetSearch": "Search nodes…",
-    "targetEmpty": "No other nodes.",
+    "targetSearch": "Search nodes by name…",
+    "targetEmpty": "No nodes match that search.",
     "directionNote": "This node is the source; the relationship points to the other node.",
     "submit": "Connect",
     "createdToast": "Connection added.",
@@ -554,7 +563,7 @@
     "closedToast": "Connection closed.",
     "closeError": "Couldn't close the connection.",
     "loadError": "Couldn't load connections.",
-    "partialError": "Some relationships couldn't be loaded.",
+    "partialError": "Relationships couldn't be loaded. This map may be missing connections.",
     "retry": "Retry",
     "selfNode": "this node",
     "since": "since {date}",

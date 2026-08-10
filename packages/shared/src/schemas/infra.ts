@@ -2057,7 +2057,7 @@ export function inferNodeKind(host: AgentReportHost): InfraNodeKind | undefined 
 }
 
 /** The separator that scopes a container's name to its host. A machine-id/GUID/UUID never contains it. */
-const CONTAINER_ID_SEPARATOR = "/container/";
+export const CONTAINER_ID_SEPARATOR = "/container/";
 
 /**
  * The dedup `externalId` of a container child node (#1139) — the host's own `externalId`, the
@@ -2140,7 +2140,7 @@ export function containerNodeStatus(state: AgentContainerState | undefined): Inf
  * the container separator, it cannot appear in a host `externalId` (a machine-id is hex, a Windows
  * MachineGuid and a macOS platform UUID are hex-and-dashes).
  */
-const GUEST_ID_SEPARATOR = "/guest/";
+export const GUEST_ID_SEPARATOR = "/guest/";
 
 /**
  * The dedup `externalId` of a guest child node (ADR-0095) — the host's own `externalId`, the

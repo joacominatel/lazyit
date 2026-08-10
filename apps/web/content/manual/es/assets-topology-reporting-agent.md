@@ -515,6 +515,17 @@ Un solo host Docker puede agregar una docena de propuestas en un mismo reporte �
 por cada contenedor en ejecución — así que la bandeja está pensada para resolverse de una pasada y no
 de a un cuadro de diálogo por vez.
 
+- **El número es toda la cola; la bandeja muestra de a 200.** El número que ves junto a **Revisión
+  pendiente** es cuántas propuestas están esperando en total, no cuántas filas hay en pantalla. La
+  bandeja las carga en tandas de **200, las descubiertas más recientemente primero**, y cuando la cola
+  es más grande que la tanda te lo dice arriba de las filas: *"Se muestran 200 de 431 nodos
+  pendientes, los descubiertos más recientemente primero. Confirmá o descartá estos para que aparezcan
+  los demás."* Al resolver una tanda aparece la siguiente, y la bandeja desaparece recién cuando la
+  cola está realmente vacía: limpiar la pantalla nunca es lo mismo que haber terminado. Este es el
+  caso normal después de enrolar un [host hipervisor](/help/assets-topology-hypervisors), que puede
+  proponer hasta **500 invitados en un solo reporte**. La tanda tiene el mismo tamaño que el tope de
+  una acción en conjunto, así que una pantalla llena es exactamente una pasada de **Seleccionar todo
+  lo visible → Confirmar selección**.
 - **Los contenedores quedan debajo del servidor que los reportó.** Cada grupo se encabeza con el
   nombre del servidor y la cantidad de contenedores, y la casilla de ese encabezado toma el servidor
   **y** sus contenedores juntos. Así se confirma un host con todo lo que corre arriba en una sola

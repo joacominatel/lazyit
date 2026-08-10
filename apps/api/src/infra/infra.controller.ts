@@ -12,6 +12,7 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -22,7 +23,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import {
   AgentFleetViewSchema,
   AgentPolicyOverrideSchema,
@@ -39,24 +40,32 @@ import {
   InfraAutoConfirmRuleSchema,
   InfraBulkResponseSchema,
   InfraEdgeSchema,
+  InfraGraphEdgesSchema,
   InfraIdentityMatchSchema,
   InfraImpactResponseSchema,
+  InfraGraphSchema,
   InfraNodeDetailSchema,
   InfraNodeFactChangeListSchema,
   InfraNodeKindSchema,
   InfraNodeListItemSchema,
+  InfraNodeListRoleSchema,
+  InfraNodeListPageSchema,
   InfraNodeSchema,
+  InfraNodeSourceSchema,
   InfraNodeStateSchema,
   InfraNodeStatusSchema,
   InfraSecretRefSchema,
+  MAX_PAGE_LIMIT,
   MergeInfraNodeSchema,
   UpdateInfraAutoConfirmRuleSchema,
   UpdateInfraNodeSchema,
 } from '@lazyit/shared';
 import { z } from 'zod';
-import { InfraService } from './infra.service';
+import { INFRA_NODE_SORT_ALLOWLIST, InfraService } from './infra.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
+import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
+import { parsePageQuery } from '../common/parse-page-query';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
@@ -68,6 +77,9 @@ import { AgentFleetService } from './agent-fleet.service';
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class AgentFleetViewDto extends createZodDto(AgentFleetViewSchema) {}
 class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
+class InfraNodeListPageDto extends createZodDto(InfraNodeListPageSchema) {}
+class InfraGraphDto extends createZodDto(InfraGraphSchema) {}
+class InfraGraphEdgesDto extends createZodDto(InfraGraphEdgesSchema) {}
 class InfraNodeDetailDto extends createZodDto(InfraNodeDetailSchema) {}
 class InfraImpactResponseDto extends createZodDto(InfraImpactResponseSchema) {}
 class InfraNodeFactChangeListDto extends createZodDto(
@@ -117,6 +129,24 @@ const PatchPositionSchema = z.strictObject({
   y: z.number(),
 });
 class PatchPositionDto extends createZodDto(PatchPositionSchema) {}
+
+const LEGACY_INFRA_NODE_LIST_QUERY_KEYS = new Set(['kind', 'status', 'state']);
+
+const INFRA_NODE_PAGE_QUERY_KEYS = new Set([
+  'kind',
+  'status',
+  'state',
+  'source',
+  'role',
+  'ids',
+  'assetIds',
+  'q',
+  'limit',
+  'offset',
+  'page',
+  'sort',
+  'dir',
+]);
 
 @ApiTags('infra')
 @Controller('infra')
@@ -281,8 +311,9 @@ export class InfraController {
   @Get('nodes')
   @RequirePermission('infra:read')
   @ApiOperation({
+    deprecated: true,
     summary:
-      'List topology nodes (filter by kind/status/state; excludes archived/soft-deleted). Newest first.',
+      'Deprecated compatibility list: unbounded InfraNodeListItem[] with only the historical kind/status/state filters. Retained until v2.0; use GET /infra/nodes/page.',
   })
   @ApiQuery({
     name: 'kind',
@@ -301,15 +332,142 @@ export class InfraController {
   })
   @ApiOkResponse({ type: [InfraNodeListItemDto] })
   listNodes(
-    @Query('kind') kind?: string,
-    @Query('status') status?: string,
-    @Query('state') state?: string,
+    @Query() query: Record<string, unknown>,
+    @Res({ passthrough: true }) res: Response,
   ) {
+    this.assertAllowedQueryKeys(query, LEGACY_INFRA_NODE_LIST_QUERY_KEYS);
+    res.setHeader('Deprecation', 'true');
+    res.setHeader('Link', '</infra/nodes/page>; rel="successor-version"');
+
+    const kind = this.parseStringQuery(query.kind, 'kind');
+    const status = this.parseStringQuery(query.status, 'status');
+    const state = this.parseStringQuery(query.state, 'state');
     return this.infra.listNodes({
       kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
       status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
       state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
     });
+  }
+
+  @Get('nodes/page')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      'First-party topology node list, PAGED on the house Page<T> contract (ADR-0030): { items, total, limit, offset }, default 50, hard max 200. Filter by kind/status/state/source/role/ids/assetIds, search with q, and sort on the allowlist. Unknown query keys are rejected.',
+  })
+  @ApiQuery({
+    name: 'kind',
+    required: false,
+    enum: [...InfraNodeKindSchema.options],
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...InfraNodeStatusSchema.options],
+  })
+  @ApiQuery({
+    name: 'state',
+    required: false,
+    enum: [...InfraNodeStateSchema.options],
+  })
+  @ApiQuery({
+    name: 'source',
+    required: false,
+    enum: [...InfraNodeSourceSchema.options],
+    description:
+      'MANUAL (hand-drawn) or AGENT (reported). Pair with limit=1 to ask "does this estate have any agent node yet?" without reading the list.',
+  })
+  @ApiQuery({
+    name: 'role',
+    required: false,
+    enum: [...InfraNodeListRoleSchema.options],
+    description:
+      'Identity role, independent of kind: HOST excludes /container/ and /guest/ child identities; CHILD includes either namespace.',
+  })
+  @ApiQuery({
+    name: 'ids',
+    required: false,
+    description:
+      'Comma-encoded cuids: restrict to these node ids. For a caller that already knows which nodes it needs and only wants their labels (the drill-in edge panel).',
+  })
+  @ApiQuery({
+    name: 'assetIds',
+    required: false,
+    description:
+      'Comma-encoded cuids: restrict to the nodes backing these Assets. Bounded by the page limit; an unknown id matches nothing. Powers the Assets list "on topology" glyph over the rows it is showing.',
+  })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description:
+      "Case-insensitive substring over label / ipAddress / the linked Asset's name / each active owner's name+email.",
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: Object.keys(INFRA_NODE_SORT_ALLOWLIST),
+    description:
+      'Server-side sort field. Unknown field → 400. Default: createdAt desc (with a unique id tiebreaker, which is appended to every sort).',
+  })
+  @ApiQuery({
+    name: 'dir',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default asc when sort is set).',
+  })
+  @ApiOkResponse({ type: InfraNodeListPageDto })
+  listNodePage(@Query() query: Record<string, unknown>) {
+    this.assertAllowedQueryKeys(query, INFRA_NODE_PAGE_QUERY_KEYS);
+    const kind = this.parseStringQuery(query.kind, 'kind');
+    const status = this.parseStringQuery(query.status, 'status');
+    const state = this.parseStringQuery(query.state, 'state');
+    const source = this.parseStringQuery(query.source, 'source');
+    const role = this.parseStringQuery(query.role, 'role');
+    const q = this.parseStringQuery(query.q, 'q');
+    const limit = this.parseStringQuery(query.limit, 'limit');
+    const offset = this.parseStringQuery(query.offset, 'offset');
+    const page = this.parseStringQuery(query.page, 'page');
+    const sort = this.parseStringQuery(query.sort, 'sort');
+    const dir = this.parseStringQuery(query.dir, 'dir');
+
+    return this.infra.listNodePage(
+      {
+        kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
+        status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
+        state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
+        source: this.parseEnum(source, InfraNodeSourceSchema, 'source'),
+        role: this.parseEnum(role, InfraNodeListRoleSchema, 'role'),
+        ids: this.parseIdBatch(query.ids, 'ids'),
+        assetIds: this.parseIdBatch(query.assetIds, 'assetIds'),
+        q,
+      },
+      parsePageQuery({ limit, offset, page, sort, dir }),
+    );
+  }
+
+  @Get('graph/nodes')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      "The topology canvas's own read (#1152): every live node, PROJECTED to just what the board draws (id/label/kind/status/ipAddress/x/y + chassis for the endpoint filter) — no owners/assetName join, no shortcuts, no specs. Deliberately NOT paged, because a map missing a node is a wrong map, not a shorter one. Bounded at INFRA_GRAPH_NODES_MAX and honest about it: the envelope carries `truncated` plus the real `total`, so a ceiling that bites is visible rather than silent. Same infra:read gate as the node list.",
+  })
+  @ApiOkResponse({ type: InfraGraphDto })
+  listGraphNodes() {
+    return this.infra.listGraphNodes();
+  }
+
+  @Get('graph/edges')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      'The topology canvas active-edge read: only open edges whose source and target nodes are live, ordered newest first, capped at 10,000 with required truncation metadata. The per-node edge endpoint remains the detail/history read.',
+  })
+  @ApiOkResponse({ type: InfraGraphEdgesDto })
+  listGraphEdges() {
+    return this.infra.listGraphEdges();
   }
 
   @Get('nodes/:id')
@@ -628,6 +786,49 @@ export class InfraController {
   @ApiOkResponse({ type: InfraEdgeDto })
   closeEdge(@Param('id') id: string) {
     return this.infra.closeEdge(id);
+  }
+
+  /**
+   * Parse a comma-encoded id batch (`?ids=` / `?assetIds=`) and CAP it at the page limit — the same
+   * bound `GET /users?ids=` carries (`MAX_RESOLVE_USER_IDS`, ADR-0030 §6 / #961).
+   *
+   * The cap is the point. These filters exist so a caller can resolve exactly the rows it is showing
+   * instead of scanning the estate, and without a bound the fix trades one unbounded read for an
+   * unbounded `IN` list a client can post in a query string. Over-cap is a clean 400 rather than a
+   * silent trim, for the same reason an over-max `limit` is: a caller must never believe it asked
+   * about more ids than it got answers for.
+   */
+  private parseIdBatch(raw: unknown, name: string): string[] | undefined {
+    if (
+      raw !== undefined &&
+      typeof raw !== 'string' &&
+      !(Array.isArray(raw) && raw.every((value) => typeof value === 'string'))
+    ) {
+      throw new BadRequestException(`Invalid ${name}`);
+    }
+    const ids = parseCuidArrayQuery(raw, name);
+    if (ids && ids.length > MAX_PAGE_LIMIT) {
+      throw new BadRequestException(
+        `Invalid ${name}: expected up to ${MAX_PAGE_LIMIT} comma-separated cuids`,
+      );
+    }
+    return ids;
+  }
+
+  private assertAllowedQueryKeys(
+    query: Record<string, unknown>,
+    allowed: ReadonlySet<string>,
+  ): void {
+    const unknown = Object.keys(query).find((key) => !allowed.has(key));
+    if (unknown)
+      throw new BadRequestException(`Unknown query parameter: ${unknown}`);
+  }
+
+  private parseStringQuery(value: unknown, name: string): string | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== 'string')
+      throw new BadRequestException(`Invalid ${name}`);
+    return value;
   }
 
   /** Parse an optional `@Query` enum against its allowlist; unknown value → 400 (ADR-0030). */

@@ -486,6 +486,16 @@ if the machine starts reporting something different.
 A single Docker host can add a dozen proposals in one check-in — itself plus a node per running
 container — so the tray is built to be worked through in one pass rather than one dialog at a time.
 
+- **The count is the whole queue; the tray shows 200 at a time.** The number beside **Pending
+  review** is how many proposals are waiting in total, not how many rows are on screen. The tray
+  loads them in batches of **200, most recently discovered first**, and when the queue is bigger than
+  the batch it says so above the rows: *"Showing 200 of 431 pending nodes, most recently discovered
+  first. Confirm or discard these to reveal the rest."* Working through a batch reveals the next one,
+  and the tray disappears only when the queue is genuinely empty — so clearing the screen is never
+  the same as being finished. This is the normal case after enrolling a
+  [hypervisor host](/help/assets-topology-hypervisors), which can propose up to **500 guests from a
+  single report**. The batch is the same size as the cap on one bulk action, so a full screen is
+  exactly one pass of **Select everything shown → Confirm selected**.
 - **Containers sit under the server that reported them.** Each group is headed by the server's name
   with a count of its containers, and the checkbox on that header takes the server **and** its
   containers together. That is how you confirm a host with everything on it in one action. If you

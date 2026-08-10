@@ -3,7 +3,7 @@ title: "ADR-0070: Infra topology graph — a generic visual CMDB of the server e
 tags: [adr, infra, topology, graph, cmdb, asset, agent, backend, frontend, shared]
 status: accepted
 created: 2026-06-23
-updated: 2026-06-23
+updated: 2026-08-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -35,8 +35,9 @@ This is a **new major** for lazyit. The ADR fixes the **data model and the phasi
 > the impact/blast-radius query **and its UI** (§7), and the Meilisearch `infra` index; the frontend —
 > the React Flow **Diagram** canvas (drag/persist, status/kind styling, hover quick-facts), the
 > **drill-in panel** (owner / KB links / secret HANDLES / shortcuts / IP / children — the §6 payoff),
-> the **Servers** list (kind/status/state filters + client-side label/IP search), and the
-> impact highlight on the canvas. Nav: **Assets › Servers** + **Assets › Diagram**.
+> the **Servers** list (kind/status/state filters + ~~client-side label/IP search~~ — **corrected
+> 2026-08-07, #1152:** search, sort and paging are all SERVER-side now, see the §6 amendment below),
+> and the impact highlight on the canvas. Nav: **Assets › Servers** + **Assets › Diagram**.
 >
 > **DEFERRED:** the **v2 reporting agent** (its provenance/lifecycle columns — `source`, `state`,
 > `reportingSource`, `externalId`, `lastReportedAt` — exist nullable now, but no agent code, no review
@@ -46,12 +47,9 @@ This is a **new major** for lazyit. The ADR fixes the **data model and the phasi
 > dedicated `InfraNodeHistory`~~ — **partly delivered 2026-08-02 (#1143)** as the append-only
 > `InfraNodeFactChange` ([[0074-server-reporting-agent]] §3 amendment): what the reporting agent
 > observed MOVE (packages, OS/kernel/memory/disk/serial, a container's image digest), not a log of
-> every column edit. Curation changes are still recorded nowhere. **v1 follow-ups:** **#750** — enrich `GET /infra/nodes` with the
-> linked asset's name/owner so the Servers list shows it inline and search can match asset name (today
-> the list row carries only `assetId`, surfaced as a Tracked/Graph-only indicator; the full name +
-> owners are one click away in the drill-in panel); and **asset→secret linkage** so the panel's
-> `secretRefs` populates (the shape is honoured — INV-10 handles only — but the array is empty in v1
-> because no asset↔secret join exists in the data model yet).
+> every column edit. Curation changes are still recorded nowhere. The two named v1 follow-ups shipped:
+> #750 enriched the list row with the linked live Asset's name/owners, and ADR-0073 implemented the
+> node→secret HANDLE linkage (metadata only, never values — INV-10).
 
 ## Context
 
@@ -390,6 +388,66 @@ list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (c
 > agent. The two paths carry different permissions (`settings:manage` vs `infra:manage`) and the control
 > renders only what the caller holds; with one path it collapses to a plain button. Nothing about the
 > wizard itself changed — it is reached, not rebuilt.
+
+> **Amendment (2026-08-07, corrected 2026-08-09, #1152) — a compatibility list, a first-party page,
+> and bounded canvas reads.**
+> Two sentences elsewhere in this ADR were true only while the estate stayed small. They aren't
+> any more, and the reason is [[0095-hypervisor-guest-inventory]]: one hypervisor report can enrol up
+> to `AGENT_GUESTS_MAX` = **500** guests in a single write, and one Docker host adds a node per
+> container ([[0074-server-reporting-agent]] §3). "The estate is small by design" was a premise, and
+> it expired.
+>
+> **`GET /infra/nodes` remains the deprecated compatibility array** — the original unbounded
+> `InfraNodeListItem[]`, accepting only `kind`, `status`, and `state`. OpenAPI marks it deprecated and
+> successful responses point to its successor with `Deprecation: true` and
+> `Link: </infra/nodes/page>; rel="successor-version"`; there is no Sunset date. It remains until
+> v2.0 rather than changing a shipped response shape in place.
+>
+> **`GET /infra/nodes/page` is the first-party `Page<T>` route** — `{ items, total, limit, offset }`,
+> default 50, hard max 200, over-max rejected with 400 ([[0030-list-pagination-contract]] §9). The
+> Servers Table consequently gets the ordinary house treatment: a
+> `Pagination` footer over `total`, `SortableHeader` on `label`/`kind`/`status`/`ipAddress`, and a
+> **server-side** `q` that now matches over the whole estate — label, IP, the linked asset's name and
+> each active owner's name and email — instead of re-filtering the rows already on screen. `asset` and
+> `owner` stay unsortable: they are joined relations, off the API's sort allowlist. Every sort carries
+> a unique `id` tiebreaker, because under a window a partial order duplicates a row onto one page and
+> drops it from another with nothing to signal the loss.
+>
+> **The canvas no longer reads that list.** §6 above describes a board that draws every node; a paged
+> list cannot feed it, because a map missing a node is not a shorter map — the node takes its edges
+> with it, so the board loses a *relationship* and cannot highlight an affected node that was never
+> delivered, even though §7's API still returns the estate-wide answer. So the board got
+> **`GET /infra/graph/nodes`** (same `infra:read` gate): every live
+> node, projected to exactly what the board draws — `id`, `label`, `kind`, `status`, `ipAddress`,
+> `chassis` (for the ADR-0093 endpoint partition) and `x`/`y` — with the `owners`/`assetName` joins
+> and `shortcuts` dropped, so the complete read is strictly **cheaper** than the paged one it
+> replaced. It is bounded at `INFRA_GRAPH_NODES_MAX` = 2000 and **says so on the wire** via a required
+> `truncated` flag, which the canvas renders as a persistent banner naming both numbers. Pointing the
+> board at `/infra/nodes/page?limit=200` was rejected: 200 sits *below* the 500-guest ceiling above, so
+> one ordinary hypervisor host would have pushed nodes off the map on the day it was enrolled. The general rule
+> this instantiates — bounded-but-complete instead of paged, whenever a partial answer would be
+> *wrong* rather than merely short — is recorded as [[0030-list-pagination-contract]] §12.
+>
+> **Follow-up (2026-08-09) — nodes and edges now have matching bounded graph reads.**
+> `GET /infra/graph/edges` carries the same `infra:read` gate and bounded-complete envelope, capped
+> separately at `INFRA_GRAPH_EDGES_MAX = 10_000`. It returns only open edges whose two endpoints are
+> live, ordered `startedAt desc, id desc`; its paired `findMany`/`count` share one predicate and
+> `truncated` is required. The node and edge reads make the canvas contract a constant **two requests**
+> rather than one edge request per node. The old `GET /infra/nodes/:id/edges` is intentionally retained:
+> the Connections detail needs one node's closed-edge history, which the canvas endpoint excludes.
+>
+> The paged node list also gains `role=HOST|CHILD`, derived from the reporting identity namespaces
+> (`/container/` and `/guest/`) rather than `kind`, and rejects every query key outside its explicit
+> allowlist with 400. Its Asset-name and owner search branches require the linked Asset to be live,
+> matching the row projection: an archived Asset yields `assetName: null`, `owners: []`, and cannot
+> match through either hidden relation. Departed users on live Assets remain projected.
+>
+> The page, graph-node, and graph-edge row/count pairs use RepeatableRead transactions, so each
+> envelope is one coherent snapshot and a transaction failure propagates rather than falling back to
+> mismatched reads. The estate-wide `GET /infra/nodes/:id/impact` recursive traversal remains
+> independent of these bounded canvas payloads. If a graph cap bites, only canvas highlighting can
+> omit undelivered nodes; the impact API still returns the estate-wide answer, and the required canvas
+> truncation warning tells the operator why visualization and answer may differ.
 
 ### 7. Impact / blast-radius — the query that justifies a graph
 
