@@ -376,33 +376,33 @@ The type-to-search precondition is preserved as an **opt-in** via a new `minQuer
 needs it. ADR-0049 is untouched (no new colours/motion/tokens — same `bg-popover` surface, `bg-accent`
 selected tint, and `prefers-reduced-motion`-guarded popover motion).
 
-## Amendment (2026-08-07) — `GET /infra/nodes` joins the contract, and the bounded-complete read gets a name (#1152)
+## Amendment (2026-08-07, corrected 2026-08-09) — infra compatibility, paging, and bounded graph reads (#1152)
 
-The topology node list was the last high-traffic list still returning a bare array. It now returns
-`Page<T>`. Doing that surfaced a shape this ADR had never named: a read that must be **complete** but
-must still be **bounded**. Both are recorded here, because the second is the general rule, not an
-infra quirk.
+The topology node list was the last high-traffic list still returning a bare array. Its first-party
+successor now returns `Page<T>`, while the historical route remains as an explicitly deprecated
+compatibility contract. This work also named a second shape: a read that must be **complete** but must
+still be **bounded**. Both decisions are recorded here because they are general API rules, not infra
+quirks.
 
-### 9. `GET /infra/nodes` — the second breaking array → `Page<T>` change
+### 9. Infra node list compatibility and the first-party page
 
-`GET /infra/nodes` ([[0070-infra-topology-graph]], [[infra-node]]) returned an unbounded
-`InfraNodeListItem[]`. It now returns the house envelope — `{ items, total, limit, offset }`, default
-50, hard max 200, an over-max `limit` **rejected with 400, never clamped** — through the same
-`findMany` + `count` over ONE `where` in a `$transaction` every other list uses, so `total` counts the
-**FILTERED** set and can never drift from the rows describing it. The PENDING review tray renders that
-number as its badge, which is the whole reason it has to be the filtered count.
+`GET /infra/nodes` ([[0070-infra-topology-graph]], [[infra-node]]) keeps its historical, unbounded
+`InfraNodeListItem[]` response and accepts only the historical `kind`, `status`, and `state` filters.
+It is deprecated in OpenAPI and successful responses carry `Deprecation: true` plus
+`Link: </infra/nodes/page>; rel="successor-version"`. There is deliberately **no Sunset date**. The
+compatibility route remains until **v2.0**, where its removal can be handled as an explicit major
+contract change instead of changing the shape in place.
 
-**This is the second time a shipped endpoint's wire shape has been broken this way, and the precedent
-is §4 (#220):** `GET /assets/:id/articles` and `GET /applications/:id/articles` went from
-`ArticleListItem[]` to `Page<ArticleListItem>` and landed **front+back in lockstep** in one change.
-Same posture here — the API, `@lazyit/shared` and every web consumer moved together, so there is no
-window where a client reads `.map()` off an envelope. There is no migration and no compatibility
-shim: a `Page<T>` is not read-tolerantly an array, and pretending otherwise would ship the silent
-truncation the contract exists to prevent.
+`GET /infra/nodes/page` is the first-party route. It returns the house envelope —
+`{ items, total, limit, offset }`, default 50, hard max 200, an over-max `limit` **rejected with 400,
+never clamped** — through `findMany` + `count` over ONE `where` in one **RepeatableRead** transaction.
+`total` therefore describes the same filtered snapshot as `items`. The PENDING review tray renders
+that number as its badge, which is why it must be the filtered count rather than the table count.
 
-New query params beyond the standard `PageQuery`: **`q`** (server-side, case-insensitive, over
-`label` / `ipAddress` / the linked Asset's `name` / each **active** owner's `firstName`/`lastName`/
-`email`), **`source`** (`MANUAL` | `AGENT` — so *"does this estate have any agent node yet?"* is
+New query params beyond the standard `PageQuery` on `/infra/nodes/page`: **`q`** (server-side,
+case-insensitive, over `label` / `ipAddress` / the linked Asset's `name` / each **active** owner's
+`firstName`/`lastName`/`email`), **`source`** (`MANUAL` | `AGENT` — so *"does this estate have any
+agent node yet?"* is
 `?source=AGENT&limit=1` and a look at `total`, not a scan), and the two batch filters below. The
 client-side `q` the Servers table used to run is **gone**: filtering a page in the browser
 double-filters what the API already filtered, and keeps implying the search covered the estate when
@@ -412,7 +412,7 @@ Sortable-field allowlist (the §1 table, extended):
 
 | Endpoint | `sort` keys | default order |
 | --- | --- | --- |
-| `GET /infra/nodes` (§9, #1152) | `label`, `kind`, `status`, `state`, `ipAddress`, `lastReportedAt`, `createdAt`, `updatedAt` | `createdAt desc`, then `id desc` |
+| `GET /infra/nodes/page` (§9, #1152) | `label`, `kind`, `status`, `state`, `ipAddress`, `lastReportedAt`, `createdAt`, `updatedAt` | `createdAt desc`, then `id desc` |
 
 **The unique `id` tiebreaker is appended to EVERY sort, allowlisted or default — this is a contract
 rule, not an infra detail.** None of the allowlisted columns is unique: two hosts can carry the same
@@ -428,7 +428,7 @@ queries that produce a page and across the polls that refresh it.
 active `AssetAssignment` → User), and the web leaves those column headers unsortable exactly as the
 asset list leaves model/owners unsortable (§6). A header that looked clickable would be a 400.
 
-### 10. `ids` / `assetIds` — batch resolve filters on the node list
+### 10. `ids` / `assetIds` — batch resolve filters on the node page
 
 Two comma-encoded cuid filters (parsed by the §"multi-value" `parseCuidArrayQuery`): **`ids`**
 restricts to those node ids, **`assetIds`** to the nodes backing those Asset ids. This is the batch
@@ -443,15 +443,13 @@ trades one unbounded read for an unbounded `IN` list any client can post in a qu
 trim would be the §1 failure in a new place — a caller must never believe it asked about more ids
 than it got answers for. An unknown id simply matches nothing.
 
-### 11. No `deleted` slice here — deliberately
+### 11. No `deleted` slice on either list route — deliberately
 
-`GET /infra/nodes` does **not** accept §7's `deleted` param. There is no archived-nodes view in the
-web: a node comes off the map with `DELETE /infra/nodes/:id` and returns with
-`POST /infra/nodes/:id/restore`, and nothing renders a list of the archived ones. Shipping the slice
-anyway would be contract surface no consumer reads, an ADMIN gate nobody exercises, and a `where`
-branch nobody tests. Not *accepting* the param — rather than accepting and ignoring it — is also what
-keeps the 400-on-unknown posture honest: a caller cannot ask this endpoint for a slice it does not
-serve and be answered as if it had. **The slice lands with the view that needs it, not before.**
+Neither `GET /infra/nodes` nor `GET /infra/nodes/page` accepts §7's `deleted` param. There is no
+archived-nodes view in the web: a node comes off the map with `DELETE /infra/nodes/:id` and returns
+with `POST /infra/nodes/:id/restore`. Shipping the slice anyway would be contract surface no consumer
+reads. Not accepting the param, rather than ignoring it, keeps the 400-on-unknown posture honest.
+**The slice lands with the view that needs it, not before.**
 
 ### 12. Bounded-but-complete reads — the shape that is NOT a `Page<T>`
 
@@ -480,7 +478,7 @@ projected to exactly `{ id, label, kind, status, ipAddress, chassis, x, y }`: th
 rendered them. So the complete read is strictly **cheaper** than the paged list read it replaced —
 completeness here costs less than the window did. The cap is `INFRA_GRAPH_NODES_MAX = 2000`.
 
-**Why the obvious alternative — point the canvas at `GET /infra/nodes?limit=200` — was rejected.** It
+**Why the obvious alternative — point the canvas at `GET /infra/nodes/page?limit=200` — was rejected.** It
 is not a matter of taste. 200 is the ADR-0030 page cap, and it sits **below**
 [[0095-hypervisor-guest-inventory]]'s `AGENT_GUESTS_MAX` of 500 guests that ONE hypervisor host can
 enrol in a single report. One ordinary Proxmox or Hyper-V host would therefore have pushed nodes off
@@ -497,17 +495,19 @@ nobody has measured. It becomes a real decision when an estate reports one.
 
 ### 13. Infra list hardening and the bounded graph-edge companion (2026-08-09)
 
-`GET /infra/nodes` adds `role=HOST|CHILD` for the reporting-agent wizard. This is an **identity
+`GET /infra/nodes/page` adds `role=HOST|CHILD` for the reporting-agent wizard. This is an **identity
 role**, not `kind`: CHILD means `externalId` is in either the `/container/` or `/guest/` namespace;
 HOST means neither namespace (including a null `externalId`). The predicate is part of the same Prisma
 `where` used by `findMany` and `count`, before `take`, and AND-combines with every existing filter. A
 500-child enrollment therefore cannot fill the page and starve the host the wizard is waiting for.
 
-The endpoint now rejects unknown query keys locally before dispatch. Its complete allowlist is
+The page endpoint rejects unknown query keys locally before dispatch. Its complete allowlist is
 `kind,status,state,source,role,ids,assetIds,q,limit,offset,page,sort,dir`; `deleted` remains deliberately
 unsupported (§11), and both it and a typo return 400 rather than being ignored. The Asset-name branch
 of `q` also requires `asset.deletedAt IS NULL`, matching the response projection: an archived linked
-Asset cannot be found through a name the row is forbidden to reveal.
+Asset cannot be found through a name the row is forbidden to reveal. Its owners are also projected as
+`[]` and excluded from `q`; a departed user on a **live** Asset remains projected, preserving the
+historical ownership context and departed-owner affordance.
 
 The bounded-complete graph pattern gets its edge companion: `GET /infra/graph/edges` (`infra:read`)
 returns `{ items, total, limit, truncated }`, with required `truncated` and
@@ -517,6 +517,16 @@ target nodes are live; `findMany` and `count` share one `where` in one transacti
 canvas data contract at **two bounded requests regardless of node count**, replacing the per-node
 edge fan-out when the canvas consumer adopts the companion endpoint. The existing
 `GET /infra/nodes/:id/edges` remains unchanged for node detail and closed-edge history.
+
+The paired node-page, graph-node, and graph-edge `findMany`/`count` reads all use Prisma
+**RepeatableRead** transactions. A count and rows from different READ COMMITTED snapshots can disagree
+even with one shared predicate; RepeatableRead makes each envelope internally coherent. Transaction
+failures propagate — there is no fallback to mismatched independent reads.
+
+The estate-wide `GET /infra/nodes/:id/impact` traversal is **not computed from the bounded canvas
+payload** and remains estate-wide. If the graph-node cap is exceeded, only canvas highlighting can omit
+nodes that were not delivered to the browser; the impact API's count/list remains complete. The
+canvas's required truncation warning must make that visualization limit explicit.
 
 ## References
 

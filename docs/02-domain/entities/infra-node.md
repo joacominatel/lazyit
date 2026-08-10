@@ -206,16 +206,21 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
 
 `apps/api/src/infra/` (`InfraModule`), all gated server-side (`infra:read` / `infra:manage`):
 
-- `GET /infra/nodes?kind=&status=&state=&source=&role=&ids=&assetIds=&q=&limit=&offset=&page=&sort=&dir=` —
-  the **paged** list. Since #1152 it is the house `Page<T>` envelope
+- `GET /infra/nodes?kind=&status=&state=` — the deprecated compatibility list. It preserves the
+  historical, unbounded `InfraNodeListItem[]` shape and only those three historical filters until
+  v2.0. OpenAPI marks it deprecated; successful responses carry `Deprecation: true` and
+  `Link: </infra/nodes/page>; rel="successor-version"`. There is no Sunset date.
+- `GET /infra/nodes/page?kind=&status=&state=&source=&role=&ids=&assetIds=&q=&limit=&offset=&page=&sort=&dir=` —
+  the first-party **paged** list. Since #1152 it is the house `Page<T>` envelope
   ([[0030-list-pagination-contract]] §9): `{ items, total, limit, offset }`, `limit` default 50 and
   hard-capped at 200 (an over-max `limit` is a **400**, never a clamp), `total` counted over the
   **same `where`** as `items` — so it is the count of what the filters asked for, which is what the
-  PENDING tray renders as its badge. **This replaced a bare `InfraNodeListItem[]`** — a breaking wire
-  change that landed front+back in lockstep, the second one this contract has taken (the first was
-  the reverse KB lookups, #220). Excludes soft-deleted.
+  PENDING tray renders as its badge. The paired reads use a Prisma **RepeatableRead** transaction so
+  count and rows are from one snapshot; a transaction failure propagates. Excludes soft-deleted.
   - **Row shape.** Each row is the node PLUS the linked Asset's inventory `assetName` and its active
-    `owners`, joined in ONE query and flattened (#750) — a soft-deleted asset never leaks its name.
+    `owners`, joined in ONE query and flattened (#750) — a soft-deleted asset yields
+    `assetName: null` and `owners: []`; neither hidden value can match `q`. A departed user on a live
+    Asset remains projected with `deletedAt` so historical ownership context is preserved.
     **Minus `specs`** (#1135): a lean `select` projection omits the blob, because on an agent-reported
     host it is the whole inventory (installed-software list included) and this endpoint is polled —
     every 40s by the PENDING review tray, every 5s by the create-agent wizard. Nothing renders `specs`
@@ -229,7 +234,7 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
     capped at **200** with over-cap a 400 rather than a silent trim; an unknown id matches nothing.
     `q` is a **server-side**, case-insensitive substring over `label` / `ipAddress` / the linked
     **live** Asset's `name` / each active owner's `firstName`, `lastName` and `email`; an archived
-    linked Asset is neither projected nor searchable by name.
+    linked Asset is neither projected nor searchable by name or owners.
   - **Sort allowlist:** `label`, `kind`, `status`, `state`, `ipAddress`, `lastReportedAt`,
     `createdAt`, `updatedAt`; anything else → 400. `assetName` and `owners` are **not** sortable —
     joined relations, deliberately off the allowlist.
@@ -243,25 +248,27 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   - **No `deleted` slice.** The ADR-0030 §7 "Show archived" param is deliberately **not accepted**
     here: there is no archived-nodes view, so the slice would be contract surface nothing reads. It
     lands with the view that needs it ([[0030-list-pagination-contract]] §11). The endpoint-local
-    allowlist is exact: `kind,status,state,source,role,ids,assetIds,q,limit,offset,page,sort,dir`; any
-    other key, including `deleted` or a typo, returns 400 before the service is called.
+    page-route allowlist is exact:
+    `kind,status,state,source,role,ids,assetIds,q,limit,offset,page,sort,dir`; any other key, including
+    `deleted` or a typo, returns 400 before the service is called.
 - `GET /infra/graph/nodes` — **the topology canvas's own read** (#1152, same `infra:read` gate).
   Returns `{ items, total, limit, truncated }` — **not** a `Page<T>`, and deliberately so: there is no
   `offset`, because a map missing a node is a *wrong* map rather than a shorter one (the node takes
-  its edges with it, and the blast radius read off it comes back smaller than the truth). Each item is
+  its edges with it, so the canvas cannot draw or highlight that relationship). Each item is
   projected to exactly `{ id, label, kind, status, ipAddress, chassis, x, y }` — the `owners` /
   `assetName` relation joins and the `shortcuts` blob are dropped, because the board never drew them,
   so this complete read is strictly **cheaper** than the paged list read it replaced. Bounded at
   `INFRA_GRAPH_NODES_MAX` = **2000**, with `truncated` **REQUIRED** on the wire (`total >
   items.length`, so an estate landing exactly on the cap reads as complete) — a client must never be
   able to read *absent* as *fine*, and the canvas renders a persistent banner naming both numbers.
-  The general rule is [[0030-list-pagination-contract]] §12.
+  Rows and count use one RepeatableRead transaction. The general rule is
+  [[0030-list-pagination-contract]] §12.
 - `GET /infra/graph/edges` — the canvas's bounded active-edge companion (same `infra:read` gate).
   Returns `{ items: InfraEdge[], total, limit, truncated }`, capped at
   `INFRA_GRAPH_EDGES_MAX = 10_000`, with required `truncated`. Only `endedAt = null` edges whose
   source and target nodes are both live are eligible. Rows and count use one identical predicate in
-  one transaction; order is `startedAt desc, id desc`, with no offset. Together with the graph-node
-  read this makes the canvas data contract a constant **two bounded requests** regardless of node
+  one RepeatableRead transaction; order is `startedAt desc, id desc`, with no offset. Together with
+  the graph-node read this makes the canvas data contract a constant **two bounded requests** regardless of node
   count. The per-node edge route below remains the detail/history surface.
 - `GET /infra/nodes/:id` — the enriched **drill-in** (`InfraNodeDetail`): the node plus its
   asset-backed payoff — `assetName`, active `owners`, published `articleLinks`, `secretRefs`
@@ -281,7 +288,10 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
 - `DELETE /infra/nodes/:id` — soft delete (off the map). `POST /infra/nodes/:id/restore` — back on.
 - `GET /infra/nodes/:id/impact` — **blast radius** ([[0070-infra-topology-graph]] §7): the downstream
   set reachable over active inverse RUNS_ON/DEPENDS_ON edges, each with a hop `depth`. "What's
-  affected if this goes down."
+  affected if this goes down." This recursive query remains **estate-wide** and is not computed from
+  either bounded graph response. If the graph-node cap bites, only canvas highlighting may omit an
+  undelivered affected node; the impact API response remains complete and the canvas warns that its
+  visualization is truncated.
 - `GET /infra/nodes/:id/edges?active=` — the node's [[infra-edge]]s (active-only by default; pass
   `active=false` for full history incl. closed migrations).
 - `GET /infra/nodes/:id/changes?limit=&cursor=` — the node's [[infra-node-fact-change]] history,
