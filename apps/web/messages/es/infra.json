@@ -206,9 +206,9 @@
     "successTitle": "¡{name} reportó!",
     "successDescription": "Tu servidor reportó. Confirmalo para sumarlo a tu inventario.",
     "detected": {
-      "summary": "Este host es un hipervisor ({platform}): {count, plural, =0 {todavía no hay invitados esperando revisión} one {# invitado entró a Revisión pendiente} other {# invitados entraron a Revisión pendiente}}.",
-      "summaryNoPlatform": "Este host es un hipervisor: {count, plural, =0 {todavía no hay invitados esperando revisión} one {# invitado entró a Revisión pendiente} other {# invitados entraron a Revisión pendiente}}.",
-      "review": "Revisalos"
+      "summary": "Este host es un hipervisor ({platform}): {count, plural, =0 {no reportó invitados} one {reportó # invitado} other {reportó # invitados}}.",
+      "summaryNoPlatform": "Este host es un hipervisor: {count, plural, =0 {no reportó invitados} one {reportó # invitado} other {reportó # invitados}}.",
+      "review": "Abrir Revisión pendiente"
     },
     "confirmAction": "Confirmar servidor",
     "checkLater": "Reviso después"
@@ -325,7 +325,9 @@
   },
   "graph": {
     "truncated": "Se muestran {shown} de {total} nodos: este mapa está incompleto.",
-    "truncatedHint": "El mapa dibuja como máximo {shown} nodos. Los que quedaron afuera siguen en tu inventario, en la lista de servidores y en la búsqueda, pero sus conexiones no se dibujan acá: tenelo en cuenta al leer un radio de impacto."
+    "truncatedHint": "El mapa dibuja como máximo {shown} nodos. Los que quedaron afuera siguen en tu inventario, en la lista de servidores y en la búsqueda, pero sus conexiones no se dibujan acá: tenelo en cuenta al leer un radio de impacto.",
+    "edgesTruncated": "Se muestran {shown} de {total} relaciones: algunas conexiones no están dibujadas.",
+    "edgesTruncatedHint": "Se alcanzó el límite de relaciones. El mapa sigue disponible, pero la imagen de sus conexiones está incompleta."
   },
   "legend": {
     "title": "Referencia de conexiones"
@@ -561,7 +563,7 @@
     "closedToast": "Conexión cerrada.",
     "closeError": "No se pudo cerrar la conexión.",
     "loadError": "No se pudieron cargar las conexiones.",
-    "partialError": "No se pudieron cargar algunas relaciones.",
+    "partialError": "No se pudieron cargar las relaciones. A este mapa pueden faltarle conexiones.",
     "retry": "Reintentar",
     "selfNode": "este nodo",
     "since": "desde {date}",
