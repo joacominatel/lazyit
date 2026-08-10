@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-08-07
+updated: 2026-08-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -171,6 +171,14 @@ caught"* and *"which hosts does this filter show"* can never be answered by two 
 > these to reveal the rest."* An operator who clears the screen must not be able to conclude *done*
 > while 231 are still queued. The 200-item cap on a single bulk action was already the tray's rule;
 > the batch is now the same size, so a full screen is exactly one bulk pass.
+>
+> **Follow-up (2026-08-09) — a bounded HOST filter for the wizard.**
+> `GET /infra/nodes` now exposes `role=HOST` for the create-agent poll. Role is derived from `externalId`:
+> `/container/` and `/guest/` are CHILD identities; everything else, including null, is HOST. It is
+> deliberately not derived from `kind` — a host can legitimately be a VM or container, while a
+> hypervisor guest may also be `VM` or `CONTAINER`. The role predicate runs in Prisma before the
+> page `take` and in the paired count, so one report enrolling 500 newer children cannot hide the
+> reporting host behind the 200-row page ceiling.
 
 **What a bulk action touches is the VISIBLE selection, and one function decides that for every
 surface.** The ticked-ids set outlives a filter change, and no action and no count is derived from it:

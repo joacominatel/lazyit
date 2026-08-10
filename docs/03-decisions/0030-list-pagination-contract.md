@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-08-07
+updated: 2026-08-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -494,6 +494,29 @@ No migration, no index. The `where` fragments are all equality/`IN` predicates o
 columns plus an `ILIKE` `q` over a table whose realistic ceiling is thousands of rows, not millions;
 adding an index against a hypothetical is churn on production data ([[claude-workflow]] §8) for a plan
 nobody has measured. It becomes a real decision when an estate reports one.
+
+### 13. Infra list hardening and the bounded graph-edge companion (2026-08-09)
+
+`GET /infra/nodes` adds `role=HOST|CHILD` for the reporting-agent wizard. This is an **identity
+role**, not `kind`: CHILD means `externalId` is in either the `/container/` or `/guest/` namespace;
+HOST means neither namespace (including a null `externalId`). The predicate is part of the same Prisma
+`where` used by `findMany` and `count`, before `take`, and AND-combines with every existing filter. A
+500-child enrollment therefore cannot fill the page and starve the host the wizard is waiting for.
+
+The endpoint now rejects unknown query keys locally before dispatch. Its complete allowlist is
+`kind,status,state,source,role,ids,assetIds,q,limit,offset,page,sort,dir`; `deleted` remains deliberately
+unsupported (§11), and both it and a typo return 400 rather than being ignored. The Asset-name branch
+of `q` also requires `asset.deletedAt IS NULL`, matching the response projection: an archived linked
+Asset cannot be found through a name the row is forbidden to reveal.
+
+The bounded-complete graph pattern gets its edge companion: `GET /infra/graph/edges` (`infra:read`)
+returns `{ items, total, limit, truncated }`, with required `truncated` and
+`INFRA_GRAPH_EDGES_MAX = 10_000`. It includes only active edges (`endedAt IS NULL`) whose source and
+target nodes are live; `findMany` and `count` share one `where` in one transaction, ordered by
+`startedAt desc, id desc`, with no offset. Together with `GET /infra/graph/nodes`, this fixes the
+canvas data contract at **two bounded requests regardless of node count**, replacing the per-node
+edge fan-out when the canvas consumer adopts the companion endpoint. The existing
+`GET /infra/nodes/:id/edges` remains unchanged for node detail and closed-edge history.
 
 ## References
 

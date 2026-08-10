@@ -3,7 +3,7 @@ title: "ADR-0070: Infra topology graph — a generic visual CMDB of the server e
 tags: [adr, infra, topology, graph, cmdb, asset, agent, backend, frontend, shared]
 status: accepted
 created: 2026-06-23
-updated: 2026-08-07
+updated: 2026-08-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -423,6 +423,19 @@ list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (c
 > hypervisor host would have pushed nodes off the map on the day it was enrolled. The general rule
 > this instantiates — bounded-but-complete instead of paged, whenever a partial answer would be
 > *wrong* rather than merely short — is recorded as [[0030-list-pagination-contract]] §12.
+>
+> **Follow-up (2026-08-09) — nodes and edges now have matching bounded graph reads.**
+> `GET /infra/graph/edges` carries the same `infra:read` gate and bounded-complete envelope, capped
+> separately at `INFRA_GRAPH_EDGES_MAX = 10_000`. It returns only open edges whose two endpoints are
+> live, ordered `startedAt desc, id desc`; its paired `findMany`/`count` share one predicate and
+> `truncated` is required. The node and edge reads make the canvas contract a constant **two requests**
+> rather than one edge request per node. The old `GET /infra/nodes/:id/edges` is intentionally retained:
+> the Connections detail needs one node's closed-edge history, which the canvas endpoint excludes.
+>
+> The paged node list also gains `role=HOST|CHILD`, derived from the reporting identity namespaces
+> (`/container/` and `/guest/`) rather than `kind`, and rejects every query key outside its explicit
+> allowlist with 400. Its Asset-name search now requires the linked Asset to be live, matching the
+> name projection instead of making an archived name searchable but invisible.
 
 ### 7. Impact / blast-radius — the query that justifies a graph
 

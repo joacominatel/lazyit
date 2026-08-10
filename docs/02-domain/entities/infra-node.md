@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-08-07
+updated: 2026-08-09
 ---
 
 # InfraNode
@@ -206,7 +206,7 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
 
 `apps/api/src/infra/` (`InfraModule`), all gated server-side (`infra:read` / `infra:manage`):
 
-- `GET /infra/nodes?kind=&status=&state=&source=&ids=&assetIds=&q=&limit=&offset=&page=&sort=&dir=` —
+- `GET /infra/nodes?kind=&status=&state=&source=&role=&ids=&assetIds=&q=&limit=&offset=&page=&sort=&dir=` —
   the **paged** list. Since #1152 it is the house `Page<T>` envelope
   ([[0030-list-pagination-contract]] §9): `{ items, total, limit, offset }`, `limit` default 50 and
   hard-capped at 200 (an over-max `limit` is a **400**, never a clamp), `total` counted over the
@@ -221,11 +221,15 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
     every 40s by the PENDING review tray, every 5s by the create-agent wizard. Nothing renders `specs`
     from a list row; read it from the drill-in below.
   - **Filters.** `kind` / `status` / `state` / `source` (`MANUAL` | `AGENT`) are single-value enums,
-    unknown → 400. `ids` and `assetIds` are comma-encoded cuid batches (nodes by id, and the nodes
+    unknown → 400. `role=HOST|CHILD` is based on the reporting identity, never on `kind`: CHILD means
+    `externalId` contains `/container/` or `/guest/`; HOST means neither (including null). It is applied
+    in the database before paging and in the paired count, so 500 newer children cannot starve a host
+    lookup. `ids` and `assetIds` are comma-encoded cuid batches (nodes by id, and the nodes
     backing those Assets) — the batch-resolver shape `GET /users?ids=` set (ADR-0030 §6, #961), each
     capped at **200** with over-cap a 400 rather than a silent trim; an unknown id matches nothing.
     `q` is a **server-side**, case-insensitive substring over `label` / `ipAddress` / the linked
-    Asset's `name` / each active owner's `firstName`, `lastName` and `email`.
+    **live** Asset's `name` / each active owner's `firstName`, `lastName` and `email`; an archived
+    linked Asset is neither projected nor searchable by name.
   - **Sort allowlist:** `label`, `kind`, `status`, `state`, `ipAddress`, `lastReportedAt`,
     `createdAt`, `updatedAt`; anything else → 400. `assetName` and `owners` are **not** sortable —
     joined relations, deliberately off the allowlist.
@@ -238,7 +242,9 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
     it from another, silently.
   - **No `deleted` slice.** The ADR-0030 §7 "Show archived" param is deliberately **not accepted**
     here: there is no archived-nodes view, so the slice would be contract surface nothing reads. It
-    lands with the view that needs it ([[0030-list-pagination-contract]] §11).
+    lands with the view that needs it ([[0030-list-pagination-contract]] §11). The endpoint-local
+    allowlist is exact: `kind,status,state,source,role,ids,assetIds,q,limit,offset,page,sort,dir`; any
+    other key, including `deleted` or a typo, returns 400 before the service is called.
 - `GET /infra/graph/nodes` — **the topology canvas's own read** (#1152, same `infra:read` gate).
   Returns `{ items, total, limit, truncated }` — **not** a `Page<T>`, and deliberately so: there is no
   `offset`, because a map missing a node is a *wrong* map rather than a shorter one (the node takes
@@ -250,6 +256,13 @@ Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDIN
   items.length`, so an estate landing exactly on the cap reads as complete) — a client must never be
   able to read *absent* as *fine*, and the canvas renders a persistent banner naming both numbers.
   The general rule is [[0030-list-pagination-contract]] §12.
+- `GET /infra/graph/edges` — the canvas's bounded active-edge companion (same `infra:read` gate).
+  Returns `{ items: InfraEdge[], total, limit, truncated }`, capped at
+  `INFRA_GRAPH_EDGES_MAX = 10_000`, with required `truncated`. Only `endedAt = null` edges whose
+  source and target nodes are both live are eligible. Rows and count use one identical predicate in
+  one transaction; order is `startedAt desc, id desc`, with no offset. Together with the graph-node
+  read this makes the canvas data contract a constant **two bounded requests** regardless of node
+  count. The per-node edge route below remains the detail/history surface.
 - `GET /infra/nodes/:id` — the enriched **drill-in** (`InfraNodeDetail`): the node plus its
   asset-backed payoff — `assetName`, active `owners`, published `articleLinks`, `secretRefs`
   (HANDLES only, never values — INV-10, [[0061-secret-manager-zero-knowledge]]; resolved from the
