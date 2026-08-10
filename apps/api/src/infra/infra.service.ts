@@ -3771,10 +3771,11 @@ export class InfraService {
     // An allowlisted sort still gets the unique `id` appended. Sorting by `label` re-opens exactly
     // the tie the default order closed — two hosts can share a label — and under a window a partial
     // order is silent row loss, not a cosmetic wobble. So the tiebreaker is unconditional.
-    const sorted = resolveSortOrBadRequest<Prisma.InfraNodeOrderByWithRelationInput>(
-      page,
-      INFRA_NODE_SORT_ALLOWLIST,
-    );
+    const sorted =
+      resolveSortOrBadRequest<Prisma.InfraNodeOrderByWithRelationInput>(
+        page,
+        INFRA_NODE_SORT_ALLOWLIST,
+      );
     const orderBy = sorted
       ? [sorted, INFRA_NODE_TIEBREAKER]
       : INFRA_NODE_DEFAULT_ORDER;
@@ -3823,7 +3824,9 @@ export class InfraService {
       ...(filters.state ? { state: filters.state } : {}),
       ...(filters.source ? { source: filters.source } : {}),
       ...(filters.ids?.length ? { id: { in: filters.ids } } : {}),
-      ...(filters.assetIds?.length ? { assetId: { in: filters.assetIds } } : {}),
+      ...(filters.assetIds?.length
+        ? { assetId: { in: filters.assetIds } }
+        : {}),
       ...(q
         ? {
             OR: [
