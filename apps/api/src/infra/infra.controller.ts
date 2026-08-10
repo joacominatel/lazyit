@@ -39,12 +39,14 @@ import {
   InfraAutoConfirmRuleSchema,
   InfraBulkResponseSchema,
   InfraEdgeSchema,
+  InfraGraphEdgesSchema,
   InfraIdentityMatchSchema,
   InfraImpactResponseSchema,
   InfraGraphSchema,
   InfraNodeDetailSchema,
   InfraNodeFactChangeListSchema,
   InfraNodeKindSchema,
+  InfraNodeListRoleSchema,
   InfraNodeListPageSchema,
   InfraNodeSchema,
   InfraNodeSourceSchema,
@@ -74,6 +76,7 @@ class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class AgentFleetViewDto extends createZodDto(AgentFleetViewSchema) {}
 class InfraNodeListPageDto extends createZodDto(InfraNodeListPageSchema) {}
 class InfraGraphDto extends createZodDto(InfraGraphSchema) {}
+class InfraGraphEdgesDto extends createZodDto(InfraGraphEdgesSchema) {}
 class InfraNodeDetailDto extends createZodDto(InfraNodeDetailSchema) {}
 class InfraImpactResponseDto extends createZodDto(InfraImpactResponseSchema) {}
 class InfraNodeFactChangeListDto extends createZodDto(
@@ -123,6 +126,22 @@ const PatchPositionSchema = z.strictObject({
   y: z.number(),
 });
 class PatchPositionDto extends createZodDto(PatchPositionSchema) {}
+
+const INFRA_NODE_LIST_QUERY_KEYS = new Set([
+  'kind',
+  'status',
+  'state',
+  'source',
+  'role',
+  'ids',
+  'assetIds',
+  'q',
+  'limit',
+  'offset',
+  'page',
+  'sort',
+  'dir',
+]);
 
 @ApiTags('infra')
 @Controller('infra')
@@ -288,7 +307,7 @@ export class InfraController {
   @RequirePermission('infra:read')
   @ApiOperation({
     summary:
-      'List topology nodes, PAGED on the house Page<T> contract (ADR-0030): { items, total, limit, offset }, default 50, hard max 200 (an over-max limit is a 400, never clamped). Filter by kind/status/state/source/assetIds, search with q (label / IP / linked asset name / owner name+email), sort on the allowlist. `total` counts the FILTERED set. Excludes archived/soft-deleted. Default order: newest first with a unique id tiebreaker. BREAKING (#1152): this returned a bare array before — the topology canvas moved to GET /infra/graph/nodes.',
+      'List topology nodes, PAGED on the house Page<T> contract (ADR-0030): { items, total, limit, offset }, default 50, hard max 200 (an over-max limit is a 400, never clamped). Filter by kind/status/state/source/role/assetIds, search with q (label / IP / live linked asset name / owner name+email), sort on the allowlist. Unknown query keys are rejected. `total` counts the FILTERED set. Excludes archived/soft-deleted. Default order: newest first with a unique id tiebreaker. BREAKING (#1152): this returned a bare array before — the topology canvas moved to GET /infra/graph/nodes.',
   })
   @ApiQuery({
     name: 'kind',
@@ -311,6 +330,13 @@ export class InfraController {
     enum: [...InfraNodeSourceSchema.options],
     description:
       'MANUAL (hand-drawn) or AGENT (reported). Pair with limit=1 to ask "does this estate have any agent node yet?" without reading the list.',
+  })
+  @ApiQuery({
+    name: 'role',
+    required: false,
+    enum: [...InfraNodeListRoleSchema.options],
+    description:
+      'Identity role, independent of kind: HOST excludes /container/ and /guest/ child identities; CHILD includes either namespace.',
   })
   @ApiQuery({
     name: 'ids',
@@ -347,31 +373,29 @@ export class InfraController {
     description: 'Sort direction (default asc when sort is set).',
   })
   @ApiOkResponse({ type: InfraNodeListPageDto })
-  listNodes(
-    @Query('kind') kind?: string,
-    @Query('status') status?: string,
-    @Query('state') state?: string,
-    @Query('source') source?: string,
-    @Query('ids') ids?: string | string[],
-    @Query('assetIds') assetIds?: string | string[],
-    @Query('q') q?: string,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
-    @Query('page') page?: string,
-    @Query('sort') sort?: string,
-    @Query('dir') dir?: string,
-  ) {
-    // `deleted` is deliberately NOT forwarded (ADR-0030 §7): the web has no archived-nodes view, so
-    // the slice would be contract surface nothing consumes. Not accepting the param is also why
-    // nothing is silently ignored — a caller cannot ask for a slice this endpoint doesn't serve.
+  listNodes(@Query() query: Record<string, unknown>) {
+    this.assertAllowedQueryKeys(query, INFRA_NODE_LIST_QUERY_KEYS);
+    const kind = this.parseStringQuery(query.kind, 'kind');
+    const status = this.parseStringQuery(query.status, 'status');
+    const state = this.parseStringQuery(query.state, 'state');
+    const source = this.parseStringQuery(query.source, 'source');
+    const role = this.parseStringQuery(query.role, 'role');
+    const q = this.parseStringQuery(query.q, 'q');
+    const limit = this.parseStringQuery(query.limit, 'limit');
+    const offset = this.parseStringQuery(query.offset, 'offset');
+    const page = this.parseStringQuery(query.page, 'page');
+    const sort = this.parseStringQuery(query.sort, 'sort');
+    const dir = this.parseStringQuery(query.dir, 'dir');
+
     return this.infra.listNodes(
       {
         kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
         status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
         state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
         source: this.parseEnum(source, InfraNodeSourceSchema, 'source'),
-        ids: this.parseIdBatch(ids, 'ids'),
-        assetIds: this.parseIdBatch(assetIds, 'assetIds'),
+        role: this.parseEnum(role, InfraNodeListRoleSchema, 'role'),
+        ids: this.parseIdBatch(query.ids, 'ids'),
+        assetIds: this.parseIdBatch(query.assetIds, 'assetIds'),
         q,
       },
       parsePageQuery({ limit, offset, page, sort, dir }),
@@ -387,6 +411,17 @@ export class InfraController {
   @ApiOkResponse({ type: InfraGraphDto })
   listGraphNodes() {
     return this.infra.listGraphNodes();
+  }
+
+  @Get('graph/edges')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      'The topology canvas active-edge read: only open edges whose source and target nodes are live, ordered newest first, capped at 10,000 with required truncation metadata. The per-node edge endpoint remains the detail/history read.',
+  })
+  @ApiOkResponse({ type: InfraGraphEdgesDto })
+  listGraphEdges() {
+    return this.infra.listGraphEdges();
   }
 
   @Get('nodes/:id')
@@ -717,10 +752,14 @@ export class InfraController {
    * silent trim, for the same reason an over-max `limit` is: a caller must never believe it asked
    * about more ids than it got answers for.
    */
-  private parseIdBatch(
-    raw: string | string[] | undefined,
-    name: string,
-  ): string[] | undefined {
+  private parseIdBatch(raw: unknown, name: string): string[] | undefined {
+    if (
+      raw !== undefined &&
+      typeof raw !== 'string' &&
+      !(Array.isArray(raw) && raw.every((value) => typeof value === 'string'))
+    ) {
+      throw new BadRequestException(`Invalid ${name}`);
+    }
     const ids = parseCuidArrayQuery(raw, name);
     if (ids && ids.length > MAX_PAGE_LIMIT) {
       throw new BadRequestException(
@@ -728,6 +767,22 @@ export class InfraController {
       );
     }
     return ids;
+  }
+
+  private assertAllowedQueryKeys(
+    query: Record<string, unknown>,
+    allowed: ReadonlySet<string>,
+  ): void {
+    const unknown = Object.keys(query).find((key) => !allowed.has(key));
+    if (unknown)
+      throw new BadRequestException(`Unknown query parameter: ${unknown}`);
+  }
+
+  private parseStringQuery(value: unknown, name: string): string | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== 'string')
+      throw new BadRequestException(`Invalid ${name}`);
+    return value;
   }
 
   /** Parse an optional `@Query` enum against its allowlist; unknown value → 400 (ADR-0030). */
