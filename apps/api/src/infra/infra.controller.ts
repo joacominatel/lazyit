@@ -45,7 +45,6 @@ import {
   InfraNodeDetailSchema,
   InfraNodeFactChangeListSchema,
   InfraNodeKindSchema,
-  InfraNodeListItemSchema,
   InfraNodeListPageSchema,
   InfraNodeSchema,
   InfraNodeSourceSchema,
@@ -73,7 +72,6 @@ import { AgentFleetService } from './agent-fleet.service';
 
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class AgentFleetViewDto extends createZodDto(AgentFleetViewSchema) {}
-class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
 class InfraNodeListPageDto extends createZodDto(InfraNodeListPageSchema) {}
 class InfraGraphDto extends createZodDto(InfraGraphSchema) {}
 class InfraNodeDetailDto extends createZodDto(InfraNodeDetailSchema) {}
