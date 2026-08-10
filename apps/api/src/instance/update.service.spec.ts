@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { UpdateService, UPDATE_CANCELLED_REASON } from './update.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AgentFleetService } from '../infra/agent-fleet.service';
 import type { Principal } from '../auth/principal';
 
 // No DB / no real Prisma client — the service only touches updateSettings + updateRun, both mocked.
@@ -33,6 +34,9 @@ describe('UpdateService', () => {
   const runUpdateMany = jest.fn();
   const emit = jest.fn();
   const fetchMock = jest.fn();
+  // ADR-0094 (#1206): the ONE aggregate agent line on the existing `update.available` email. Zero by
+  // default, which is the shape every pre-#1206 assertion in this file was written against.
+  const countAgentsMajorBehind = jest.fn();
 
   const ORIGINAL_APP_VERSION = process.env.APP_VERSION;
 
@@ -58,6 +62,10 @@ describe('UpdateService', () => {
           },
         },
         { provide: NotificationsService, useValue: { emit } },
+        {
+          provide: AgentFleetService,
+          useValue: { countAgentsMajorBehind },
+        },
       ],
     }).compile();
     return moduleRef.get(UpdateService);
@@ -75,9 +83,11 @@ describe('UpdateService', () => {
       runUpdateMany,
       emit,
       fetchMock,
+      countAgentsMajorBehind,
     ]) {
       m.mockReset();
     }
+    countAgentsMajorBehind.mockResolvedValue(0);
     process.env.APP_VERSION = 'v1.4.2';
     process.env.NODE_ENV = 'test';
     global.fetch = fetchMock;
@@ -318,6 +328,107 @@ describe('UpdateService', () => {
       await service.runCheck();
 
       expect(emit).not.toHaveBeenCalled();
+    });
+
+    // ── the ONE aggregate agent line (ADR-0094 §Decisions resolved 1, #1206) ──
+    //
+    // ONE sentence on the EXISTING email. No new notification type, no new schedule, no per-host
+    // mail — epic #1146 item 8's per-host anti-pattern stays rejected, and these tests are what
+    // stops it creeping back in.
+    describe('the agent line', () => {
+      /** The stock "one new version is out" check the agent-line tests all ride on. */
+      function behindOne() {
+        settingsFindFirst.mockResolvedValue({
+          checkEnabled: true,
+          lastEmailedVersion: null,
+        });
+        githubOk([{ tag_name: 'v1.6.0' }, { tag_name: 'v1.4.2' }]);
+      }
+
+      it('adds nothing when no agent is a MAJOR behind — the email is exactly what it was', async () => {
+        behindOne();
+        countAgentsMajorBehind.mockResolvedValue(0);
+        const service = await build();
+
+        await service.runCheck();
+
+        const summary = String(emitPayload().summary);
+        expect(summary).not.toContain('MAJOR');
+        expect(emitPayload().metadata).not.toHaveProperty('agentsMajorBehind');
+      });
+
+      it('appends one sentence naming the count, and records it in the metadata', async () => {
+        behindOne();
+        countAgentsMajorBehind.mockResolvedValue(12);
+        const service = await build();
+
+        await service.runCheck();
+
+        expect(String(emitPayload().summary)).toContain(
+          '12 reporting agents are a MAJOR version behind',
+        );
+        expect(emitPayload().metadata).toMatchObject({
+          agentsMajorBehind: 12,
+        });
+      });
+
+      it('reads singular for exactly one agent', async () => {
+        behindOne();
+        countAgentsMajorBehind.mockResolvedValue(1);
+        const service = await build();
+
+        await service.runCheck();
+
+        expect(String(emitPayload().summary)).toContain(
+          'One reporting agent is a MAJOR version behind',
+        );
+      });
+
+      it('rides on the SECURITY variant too — still one email, still one line', async () => {
+        settingsFindFirst.mockResolvedValue({
+          checkEnabled: true,
+          lastEmailedVersion: null,
+        });
+        githubOk([{ tag_name: 'v1.6.0', body: '<!-- lazyit:security -->' }]);
+        countAgentsMajorBehind.mockResolvedValue(3);
+        const service = await build();
+
+        await service.runCheck();
+
+        expect(emit).toHaveBeenCalledTimes(1);
+        const summary = String(emitPayload().summary);
+        expect(summary).toContain('security-relevant');
+        expect(summary).toContain(
+          '3 reporting agents are a MAJOR version behind',
+        );
+      });
+
+      it('never fires on its own — a current instance sends no email however stale the fleet', async () => {
+        settingsFindFirst.mockResolvedValue({
+          checkEnabled: true,
+          lastEmailedVersion: null,
+        });
+        githubOk([{ tag_name: 'v1.4.2' }]);
+        countAgentsMajorBehind.mockResolvedValue(40);
+        const service = await build();
+
+        await service.runCheck();
+
+        // The line is a passenger on the update email, never a schedule of its own (ADR-0094 §8).
+        expect(emit).not.toHaveBeenCalled();
+      });
+
+      it('is fail-soft: a fleet-count failure still sends the update email, minus the line', async () => {
+        behindOne();
+        countAgentsMajorBehind.mockRejectedValue(new Error('db down'));
+        const service = await build();
+
+        const result = await service.runCheck();
+
+        expect(result.emailed).toBe(true);
+        expect(emit).toHaveBeenCalledTimes(1);
+        expect(String(emitPayload().summary)).not.toContain('MAJOR');
+      });
     });
 
     it('is fail-soft: a fetch error leaves the cache untouched and does not throw', async () => {

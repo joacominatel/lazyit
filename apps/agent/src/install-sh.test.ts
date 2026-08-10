@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmod, mkdir, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,6 +32,21 @@ function heredocFor(variable: string): string {
   const end = script.indexOf("\nEOF\n", bodyStart);
   expect(end).toBeGreaterThan(bodyStart);
   return script.slice(bodyStart, end);
+}
+
+/**
+ * A complete `name() { ... }` definition, read out of the shipped installer.
+ *
+ * The functions this reaches for are PURE on purpose - parameters or stdin in, one value out, no
+ * path of their own and no root - which is what lets a corpus run the SHIPPED code rather than a
+ * copy of it pasted in here.
+ */
+function shellFunction(name: string): string {
+  const start = script.indexOf(`\n${name}() {\n`);
+  expect(start, `install.sh defines no function ${name}`).toBeGreaterThan(-1);
+  const end = script.indexOf("\n}\n", start);
+  expect(end).toBeGreaterThan(start);
+  return script.slice(start + 1, end + 2);
 }
 
 test("the script is valid POSIX shell (`sh -n`)", async () => {
@@ -180,19 +195,77 @@ afterAll(async () => {
   await rm(SHIM_DIR, { recursive: true, force: true });
 });
 
-/** Runs the installer with `--url <url>` and returns everything it said before it stopped. */
-async function guard(url: string): Promise<{ code: number; stderr: string }> {
-  const proc = Bun.spawn(["sh", INSTALL_SH, "--url", url, "--token", "lzit_sa_not_a_real_token"], {
+/**
+ * Runs a script with the given arguments under the `id` shim, and answers everything it said before
+ * it stopped. `path` is the shipped installer everywhere except the `--keep-token` and `--upgrade`
+ * blocks below, which need their config file somewhere a test can write.
+ */
+async function runInstaller(
+  path: string,
+  args: string[],
+  env: Record<string, string> = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(["sh", path, ...args], {
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, PATH: `${SHIM_DIR}:${process.env.PATH}`, LAZYIT_URL: "", LAZYIT_TOKEN: "" },
+    env: {
+      ...process.env,
+      PATH: `${SHIM_DIR}:${process.env.PATH}`,
+      LAZYIT_URL: "",
+      LAZYIT_TOKEN: "",
+      ...env,
+    },
   });
-  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-  return { code, stderr };
+  const [code, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  return { code, stdout, stderr };
+}
+
+/**
+ * Runs the installer with `--url <url>` and returns everything it said before it stopped.
+ * `extraArgs` is what the #1190 http gate needs to say "and now with the opt-in".
+ */
+async function guard(
+  url: string,
+  extraArgs: string[] = [],
+): Promise<{ code: number; stderr: string }> {
+  return runInstaller(INSTALL_SH, [
+    "--url",
+    url,
+    "--token",
+    "lzit_sa_not_a_real_token",
+    ...extraArgs,
+  ]);
 }
 
 /** The message the script prints when a URL got PAST the guard: the very next check is `id -u`. */
 const PAST_THE_GUARD = "must run as root";
+
+/**
+ * The shipped script with ONE line changed - `CONFIG_DIR` - so a fixture config can live where a
+ * test can write it. Everything else is byte for byte the installer that ships, and the
+ * substitution is asserted to have happened exactly once, so a rename cannot turn these cases into
+ * a copy of the script quietly testing nothing.
+ */
+async function installerWithConfigIn(dir: string): Promise<string> {
+  const original = 'CONFIG_DIR="/etc/lazyit-agent"';
+  expect(script.split(original).length - 1, "install.sh no longer sets CONFIG_DIR this way").toBe(1);
+  const copy = join(dir, "install.sh");
+  await writeFile(copy, script.replace(original, `CONFIG_DIR="${dir}"`));
+  return copy;
+}
+
+/** A config file shaped like the one the installer writes, with this host's own veto in it. */
+const EXISTING_CONFIG = [
+  "# lazyit reporting agent config (ADR-0074). Holds your instance URL + SA token. chmod 600.",
+  "LAZYIT_URL=https://lazyit.example.com",
+  "LAZYIT_TOKEN=lzit_sa_already_here",
+  "LAZYIT_COLLECT_SOFTWARE=false",
+  "",
+].join("\n");
 
 describe("the --url guard, executed against the shipped install.sh (#1166)", () => {
   test("the shim really does stand in for root, so 'accepted' means accepted", async () => {
@@ -244,11 +317,14 @@ describe("the --url guard, executed against the shipped install.sh (#1166)", () 
   // on Windows and was refused here. RFC 3986 section 3.1 makes the scheme case-insensitive and curl
   // agrees, so the two installers are aligned on accepting it — see install.ps1 for the same note.
   test("an uppercase scheme is accepted, exactly as install.ps1 accepts it", async () => {
-    for (const url of ["HTTPS://lazyit.example.com", "Http://lazyit.example.com:8080"]) {
-      const { stderr } = await guard(url);
-      expect(stderr, url).not.toContain("starting with http:// or https://");
-      expect(stderr, url).toContain(PAST_THE_GUARD);
-    }
+    const https = await guard("HTTPS://lazyit.example.com");
+    expect(https.stderr).not.toContain("starting with http:// or https://");
+    expect(https.stderr).toContain(PAST_THE_GUARD);
+    // `Http://` is still recognised as a scheme rather than refused as schemeless — and recognised
+    // as PLAIN HTTP, so since #1190 it needs the explicit opt-in to get past the cleartext gate.
+    const http = await guard("Http://lazyit.example.com:8080", ["--allow-insecure-http"]);
+    expect(http.stderr).not.toContain("starting with http:// or https://");
+    expect(http.stderr).toContain(PAST_THE_GUARD);
   });
 
   test("an uppercase scheme is still split into origin and path, so the guard keeps biting", async () => {
@@ -281,6 +357,44 @@ describe("the --url guard, executed against the shipped install.sh (#1166)", () 
   });
 });
 
+/**
+ * PLAIN HTTP IS AN EXPLICIT DECISION, NOT A DEFAULT (#1190), executed like the URL guard above.
+ *
+ * An http --url used to be accepted silently — with the binary AND its sha256 travelling over the
+ * same cleartext channel, and the URL then persisted so the SA token crossed the LAN in cleartext
+ * on every later report. ADR-0087's LAN reality means http stays POSSIBLE, but behind an opt-in
+ * whose refusal and warning both name what it costs. The gate sits with the other URL checks,
+ * before the root check, which is what makes it observable here the same way.
+ */
+describe("plain http needs --allow-insecure-http, and the cost is named (#1190)", () => {
+  test("http without the flag is a hard stop naming BOTH exposures, before anything else happens", async () => {
+    const { code, stderr } = await guard("http://192.168.100.75:8080");
+    expect(code).toBe(1);
+    expect(stderr).toContain("plain http");
+    // The two things cleartext costs: the binary that will run as root, and the token that is
+    // persisted with this URL and re-exposed on every report the host ever sends.
+    expect(stderr).toContain("root");
+    expect(stderr).toContain("token");
+    expect(stderr).toContain("every report");
+    expect(stderr).toContain("--allow-insecure-http");
+    // It stopped inside the URL gate — it never even reached the root check.
+    expect(stderr).not.toContain(PAST_THE_GUARD);
+  });
+
+  test("with the flag it proceeds, and the warning still names the exposure", async () => {
+    const { stderr } = await guard("http://192.168.100.75:8080", ["--allow-insecure-http"]);
+    expect(stderr).toContain("WARNING");
+    expect(stderr).toContain("cleartext");
+    expect(stderr).toContain(PAST_THE_GUARD);
+  });
+
+  test("https never triggers the gate", async () => {
+    const { stderr } = await guard("https://lazyit.example.com");
+    expect(stderr).not.toContain("plain http");
+    expect(stderr).toContain(PAST_THE_GUARD);
+  });
+});
+
 describe("artifact selection — a SIGILL months after a vMotion is not an acceptable failure", () => {
   test("a host without AVX2 gets the baseline build", () => {
     expect(script).toContain("x64-baseline");
@@ -307,7 +421,7 @@ describe("artifact selection — a SIGILL months after a vMotion is not an accep
   });
 });
 
-describe("integrity — TLS and four bytes of ELF magic were the whole check", () => {
+describe("integrity — the sha256 is REQUIRED and cannot fail open (#1190)", () => {
   test("the installer fetches a published digest and compares it", () => {
     expect(script).toContain("/api/agent/checksum");
     expect(script).toMatch(/sha256/i);
@@ -317,8 +431,26 @@ describe("integrity — TLS and four bytes of ELF magic were the whole check", (
     expect(script).toMatch(/die "checksum mismatch/);
   });
 
-  test("--require-checksum exists for an operator who wants a missing digest to be fatal too", () => {
-    expect(script).toContain("--require-checksum");
+  test("a digest that cannot be fetched, or is not a digest, is fatal too — the fail-open branch is gone", () => {
+    // The old shape: any fetch error silently degraded to a note unless --require-checksum was
+    // passed — so an attacker who could 404 one route stripped the check entirely.
+    expect(script).not.toContain("Pass --require-checksum to make this fatal");
+    expect(script).toContain('die "could not fetch the sha256');
+    expect(script).toMatch(/checksum verification is REQUIRED/);
+  });
+
+  test("--sha256 is the out-of-band escape hatch, in both argument spellings", () => {
+    expect(script).toContain("--sha256)");
+    expect(script).toContain("--sha256=*)");
+    expect(script).toContain("--sha256 <hex>");
+  });
+
+  test("a host with no sha256 tool cannot skip the check by lacking one", () => {
+    expect(script).toMatch(/die "checksum verification is required and this host has neither sha256sum nor shasum/);
+  });
+
+  test("--require-checksum stays accepted for existing automation — it is simply the default now", () => {
+    expect(script).toContain("--require-checksum)");
   });
 });
 
@@ -332,6 +464,32 @@ describe("the token stays out of argv where it can", () => {
     expect(script).toContain('TOKEN="${TOKEN:-${LAZYIT_TOKEN:-}}"');
   });
 
+  // The token a run resolved is what every LATER guard is written against, so one universal check
+  // beats three per-source ones. It also closes the injection the `curl --config` form below would
+  // otherwise open: a newline inside the value would end the header line and let whatever follows it
+  // be read as another curl option.
+  test("a token carrying whitespace is refused whatever source produced it", async () => {
+    const { code, stderr } = await runInstaller(INSTALL_SH, [
+      "--url",
+      "https://lazyit.example.com",
+      "--token",
+      "lzit_sa_one lzit_sa_two",
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("whitespace");
+    expect(stderr).not.toContain(PAST_THE_GUARD);
+  });
+
+  test("and from the environment too, which is where a multi-line paste lands", async () => {
+    const { code, stderr } = await runInstaller(
+      INSTALL_SH,
+      ["--url", "https://lazyit.example.com"],
+      { LAZYIT_TOKEN: "lzit_sa_abc\nheader = \"X-Injected: 1\"" },
+    );
+    expect(code).toBe(1);
+    expect(stderr).toContain("whitespace");
+  });
+
   // The help says `--token-file -` cannot be combined with `curl | sh`. That is a promise, and
   // without this the code would break it silently: under the pipe, stdin IS the rest of the script,
   // `cat` reads it, and a few kilobytes of shell get sent as a bearer token.
@@ -339,6 +497,159 @@ describe("the token stays out of argv where it can", () => {
     expect(script).toMatch(/\*\[\[:space:\]\]\*\)/);
     expect(script).toMatch(/die "what was read from .* is not a token/);
   });
+});
+
+/**
+ * THE TOKEN NEVER REACHES CURL'S ARGV EITHER (#1208 review).
+ *
+ * Three of this installer's four token sources exist to keep the credential out of `ps` - and then
+ * every one of them handed it straight back, because the two downloads spelled the header as
+ * `-H "Authorization: Bearer $TOKEN"` on curl's COMMAND LINE. `/proc/<pid>/cmdline` is world-readable
+ * on Linux, so any unprivileged user polling it during an install - or during an upgrade, which is
+ * the run an operator repeats on every host in the estate - collects a live `infra:report` token.
+ * The help text above it claimed "No secret on the command line" while it did that.
+ *
+ * `curl --config -` reads options from STDIN, which is not in `ps` and not in `/proc`, and it is the
+ * only per-request way to give curl a header without argv. The pipe is curl's own stdin, so it does
+ * not collide with `--token-file -` reading the SCRIPT's stdin.
+ *
+ * WHAT THESE PROVE. The shape assertions pin that the shipped script has no Authorization on a
+ * command line and builds both requests through the one function. The live case runs that shipped
+ * function into a real curl against a real server, reads `ps` while the request is in flight, and
+ * asserts the token is in the request but in nobody's argv. What it does not prove is the install
+ * path end to end: that needs root, and the suite deliberately shims `id` so it never gets there.
+ */
+describe("the token reaches curl on stdin, never on a command line (#1208 review)", () => {
+  /**
+   * The script with its comment lines dropped. Both assertions below COUNT things, and the header
+   * quotes the shape it replaced at length - prose explaining a defect is not the defect, but it
+   * does otherwise make the counting meaningless.
+   */
+  const code = script
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+
+  test("no Authorization header is spelled on any command line in the script", () => {
+    expect(code).not.toMatch(/-H\s+["']?Authorization/);
+  });
+
+  test("both downloads pipe the credential into curl's stdin instead", () => {
+    expect(code.match(/auth_config "\$TOKEN" \| curl /g) ?? []).toHaveLength(2);
+    expect(code.match(/--config -/g) ?? []).toHaveLength(2);
+  });
+
+  test("auth_config is PURE - the token in as a parameter, one config line out", () => {
+    const body = shellFunction("auth_config");
+    // If it reads $TOKEN itself it stops being runnable over a corpus, and the corpus below stops
+    // testing the shipped logic.
+    expect(body).not.toContain("$TOKEN");
+    expect(body).not.toContain("$CONFIG_FILE");
+  });
+
+  /** The shipped `auth_config`, run by a real shell over one token. */
+  async function authConfig(token: string): Promise<string> {
+    const proc = Bun.spawn(
+      ["sh", "-c", `set -eu\n${shellFunction("auth_config")}\nauth_config "$LAZYIT_TEST_TOKEN"`],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        // Through the ENVIRONMENT, not argv: this helper is also what the `ps` case below runs, and a
+        // token in the harness's own command line would make that assertion fail for the wrong reason.
+        env: { ...process.env, LAZYIT_TEST_TOKEN: token },
+      },
+    );
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    expect(stderr, "auth_config wrote to stderr").toBe("");
+    expect(code, "auth_config exited non-zero").toBe(0);
+    return stdout;
+  }
+
+  test("an ordinary token becomes the header curl expects", async () => {
+    expect(await authConfig("lzit_sa_abc")).toBe('header = "Authorization: Bearer lzit_sa_abc"\n');
+  });
+
+  // curl's config format gives `"` and `\` a meaning inside a quoted value, so a token carrying
+  // either would otherwise be sent truncated or mangled - a 401 with nothing in it to explain why.
+  // The whitespace guard above is what closes the remaining shape, a newline ending the line.
+  test("a token carrying a quote or a backslash is escaped, not truncated", async () => {
+    expect(await authConfig('lzit_sa_a"b')).toBe('header = "Authorization: Bearer lzit_sa_a\\"b"\n');
+    expect(await authConfig("lzit_sa_a\\b")).toBe('header = "Authorization: Bearer lzit_sa_a\\\\b"\n');
+    expect(await authConfig('lzit_sa_\\"')).toBe('header = "Authorization: Bearer lzit_sa_\\\\\\""\n');
+  });
+
+  test("a real curl sends the header from stdin, and `ps` never shows the token", async () => {
+    const token = "lzit_sa_argv_probe_4f19c7";
+    // A box rather than a bare `let`: the assignment happens inside the server's handler, which TS
+    // cannot see, so a `string | null` local would narrow to `null` at the assertion.
+    const request: { authorization: string | null } = { authorization: null };
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const server = Bun.serve({
+      port: 0,
+      async fetch(incoming) {
+        request.authorization = incoming.headers.get("authorization");
+        // Hold the response open so there is a live curl for `ps` to look at.
+        await held;
+        return new Response("ok");
+      },
+    });
+
+    try {
+      const proc = Bun.spawn(
+        [
+          "sh",
+          "-c",
+          `set -eu\n${shellFunction("auth_config")}\nauth_config "$LAZYIT_TEST_TOKEN" | curl -fsS --config - "$1"`,
+          "sh",
+          server.url.href,
+        ],
+        {
+          stdout: "pipe",
+          stderr: "pipe",
+          env: { ...process.env, LAZYIT_TEST_TOKEN: token },
+        },
+      );
+
+      // EVERY `ps` THIS MIGHT RUN UNDER, concatenated. The suite runs on BSD ps (macOS) and procps
+      // (the Linux CI image), which disagree about how to ask for untruncated arguments - and a
+      // truncated snapshot would make the assertion below pass by not seeing anything. Whichever
+      // forms this host accepts all contribute; the `--config -` assertion is what proves at least
+      // one of them actually looked at a live curl.
+      let snapshot = "";
+      for (let attempt = 0; attempt < 100 && !snapshot.includes("--config -"); attempt += 1) {
+        await Bun.sleep(30);
+        snapshot = "";
+        for (const form of [
+          ["ps", "-A", "-ww", "-o", "args="],
+          ["ps", "-A", "-o", "args="],
+          ["ps", "axww", "-o", "args="],
+        ]) {
+          const ps = Bun.spawnSync(form, { stderr: "ignore" });
+          if (ps.exitCode === 0) snapshot += new TextDecoder().decode(ps.stdout);
+        }
+      }
+      expect(snapshot, "no live curl was ever visible to ps - this case proved nothing").toContain(
+        "--config -",
+      );
+      expect(snapshot, "the token is in some process's argv").not.toContain(token);
+
+      release();
+      const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+      expect(stderr).toBe("");
+      expect(code).toBe(0);
+      expect(request.authorization).toBe(`Bearer ${token}`);
+    } finally {
+      release();
+      await server.stop(true);
+    }
+  }, 10_000);
 });
 
 describe("private CA — the Manual used to say 'trust it system-wide', which is worse", () => {
@@ -456,5 +767,782 @@ describe("a re-install must not delete a setting the agent actually reads", () =
       ownedPatterns[0] as string,
     );
     expect(kept).toEqual([]);
+  });
+
+  // `--keep-token` (#1208) changes where the token COMES FROM, and nothing about who owns which key.
+  // The old LAZYIT_TOKEN line is still dropped here and written back once at the top of the file, so
+  // a re-run cannot leave two of them and hand the parser the choice - while the host owner's veto
+  // survives the upgrade exactly as it did before.
+  test("--keep-token does not widen the owned set: the veto survives, the token is written once", async () => {
+    const kept = await preserved(
+      [
+        "LAZYIT_URL=https://lazyit.example.com",
+        "LAZYIT_TOKEN=lzit_sa_already_here",
+        "LAZYIT_COLLECT_SOFTWARE=false",
+        "https_proxy=http://proxy.corp:3128",
+      ].join("\n"),
+      ownedPatterns[0] as string,
+    );
+    expect(kept).toEqual(["LAZYIT_COLLECT_SOFTWARE=false", "https_proxy=http://proxy.corp:3128"]);
+  });
+
+  /*
+   * A KEY WITH SPACE AROUND IT IS STILL THAT KEY, because the agent says so: `readConfigFile` in
+   * apps/agent/src/config.ts trims the key before it compares (`line.slice(0, eq).trim()`). So
+   * `LAZYIT_COLLECT_SOFTWARE =false` - a hand edit, or a config-management template that pads its
+   * assignments - is a live veto on that host, and a keep-pattern that demanded `=` immediately
+   * after the key would DELETE it on the upgrade path. That is the erasure of #1160 in a different
+   * shape, and the same widening has to reach the OWNED pattern in the same breath: a padded
+   * `LAZYIT_TOKEN =` that survives into the kept block is written BELOW the fresh one, and the last
+   * assignment is the one the agent uses - so a host would come out of an upgrade authenticating
+   * with the stale credential.
+   */
+  test("a padded veto survives, because the agent honours it", async () => {
+    const kept = await preserved(
+      [
+        "LAZYIT_COLLECT_SOFTWARE =false",
+        "  LAZYIT_MIN_INTERVAL\t= 3600",
+        "https_proxy =http://proxy.corp:3128",
+      ].join("\n"),
+      ownedPatterns[0] as string,
+    );
+    expect(kept).toEqual([
+      "LAZYIT_COLLECT_SOFTWARE =false",
+      "  LAZYIT_MIN_INTERVAL\t= 3600",
+      "https_proxy =http://proxy.corp:3128",
+    ]);
+  });
+
+  test("a padded owned key is still dropped, so no stale token outlives the re-run", async () => {
+    const kept = await preserved(
+      [
+        "LAZYIT_URL =https://old.example.com",
+        "LAZYIT_TOKEN\t= lzit_sa_stale",
+        "  LAZYIT_INTERVAL = 900",
+      ].join("\n"),
+      ownedPatterns[0] as string,
+    );
+    expect(kept).toEqual([]);
+  });
+
+  test("--ca-file replaces a padded CA line in either spelling too", async () => {
+    const kept = await preserved(
+      ["LAZYIT_CA_FILE =/old/upper.pem", "lazyit_ca_file\t=/old/lower.pem"].join("\n"),
+      ownedPatterns[1] as string,
+    );
+    expect(kept).toEqual([]);
+  });
+
+  /**
+   * The `--keep-config` half of the same widening, run against the uninstall path's own pattern.
+   * That branch is the one promise this installer cannot bend: the token NEVER survives an
+   * uninstall. A padded `LAZYIT_TOKEN =` that the strip-pattern did not recognise would be left on
+   * a host somebody has just decommissioned, as a working credential, in a file the operator was
+   * told keeps only their own limits.
+   */
+  test("--keep-config strips a padded token line, not only a tight one", async () => {
+    const strip = script.match(/KEPT="\$\(grep -Ev '([^']+)' "\$CONFIG_FILE"/)?.[1];
+    expect(strip, "install.sh no longer strips the token this way on uninstall").toBeTruthy();
+    const proc = Bun.spawn(["sh", "-c", `grep -Ev '${strip}' || true`], {
+      stdin: new TextEncoder().encode(
+        [
+          "LAZYIT_TOKEN =lzit_sa_padded",
+          "  LAZYIT_URL\t= https://lazyit.example.com",
+          "LAZYIT_COLLECT_NICS=false",
+        ].join("\n"),
+      ),
+      stdout: "pipe",
+    });
+    const out = await new Response(proc.stdout).text();
+    expect(out.split("\n").filter((one) => one.length > 0)).toEqual(["LAZYIT_COLLECT_NICS=false"]);
+  });
+
+  /*
+   * ADR-0095. The installer now writes a template line for LAZYIT_COLLECT_HYPERVISOR itself
+   * (`--no-hypervisor` activates it), so the regression that matters is the merge clobbering an
+   * ACTIVE veto with that template on the upgrade path. It cannot: the key is deliberately NOT in
+   * either OWNED spelling, so an existing veto rides the kept block like every other host-owner
+   * setting - and the template the installer writes below it is a COMMENT, which assigns nothing.
+   */
+  test("an active hypervisor veto survives the merge, padded or not (ADR-0095)", async () => {
+    const kept = await preserved(
+      ["LAZYIT_COLLECT_HYPERVISOR=false", "LAZYIT_COLLECT_HYPERVISOR =false"].join("\n"),
+      ownedPatterns[0] as string,
+    );
+    expect(kept).toEqual(["LAZYIT_COLLECT_HYPERVISOR=false", "LAZYIT_COLLECT_HYPERVISOR =false"]);
+  });
+
+  test("the --ca-file widening of OWNED does not swallow the hypervisor veto either", async () => {
+    const kept = await preserved(
+      ["LAZYIT_COLLECT_HYPERVISOR=false", "lazyit_ca_file=/old/lower.pem"].join("\n"),
+      ownedPatterns[1] as string,
+    );
+    expect(kept).toEqual(["LAZYIT_COLLECT_HYPERVISOR=false"]);
+  });
+});
+
+/**
+ * `--keep-token`: A RE-RUN AUTHENTICATES WITH THE TOKEN THIS HOST ALREADY HAS (#1208).
+ *
+ * Re-running the installer is the documented upgrade path, and until now it demanded the Service
+ * Account token on every run - which the server structurally cannot re-issue, because it stores only
+ * a hash and a prefix. So "run this command again" was copy-paste PLUS go and find a secret.
+ *
+ * WHAT IS AND IS NOT EXECUTED HERE. The extraction itself is the shipped `config_value` function,
+ * lifted out of the script and run over a corpus - the same trick `install-ps1.test.ts` plays on its
+ * two PATH functions, and the reason that function takes stdin and touches no path. ONE extractor
+ * serves the token, the URL and the CA bundle, so the three cannot drift apart in how they read a
+ * hand-edited file. The end-to-end cases run the WHOLE script: the refusals against the shipped
+ * file, and those that need a config file against a copy whose `CONFIG_DIR` line - and only that
+ * line - names a temp directory, because the real one is `/etc/lazyit-agent` and a test cannot
+ * write there.
+ */
+describe("--keep-token authenticates a re-run with the token already on disk (#1208)", () => {
+  /** The shipped `config_value`, run by a real shell over one fixture config. */
+  async function configValue(key: string, config: string): Promise<string> {
+    const proc = Bun.spawn(
+      ["sh", "-c", `set -eu\n${shellFunction("config_value")}\nconfig_value "$1"`, "sh", key],
+      {
+        stdin: new TextEncoder().encode(config),
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    expect(stderr, "config_value wrote to stderr").toBe("");
+    expect(code, "config_value exited non-zero").toBe(0);
+    return stdout;
+  }
+
+  /** The same extractor, asked for the key the token lives under. */
+  const configToken = (config: string): Promise<string> => configValue("LAZYIT_TOKEN", config);
+
+  test("config_value is PURE - stdin in, one value out, no path and no root", () => {
+    const body = shellFunction("config_value");
+    // If it ever reaches for "$CONFIG_FILE" itself, the corpus below stops testing the shipped
+    // logic and the function stops being runnable anywhere but a host with an install on it.
+    expect(body).not.toContain("$CONFIG_FILE");
+  });
+
+  test("a config that carries a token supplies it", async () => {
+    expect(
+      await configToken("LAZYIT_URL=https://lazyit.example.com\nLAZYIT_TOKEN=lzit_sa_abc\n"),
+    ).toBe("lzit_sa_abc");
+  });
+
+  // THE LINE THE AGENT ACCEPTS AND THE INSTALLER COULD NOT SEE. `readConfigFile` trims the key
+  // before it compares, so `LAZYIT_TOKEN =lzit_sa_abc` authenticates every tick - while an
+  // extractor that demanded `=` immediately after the key reported "this host has no token" and
+  // refused the upgrade on a host that was reporting happily. A hand edit or a padded template is
+  // all it takes to get there.
+  test("whitespace around the KEY does not hide it, exactly as the agent reads it", async () => {
+    expect(await configToken("LAZYIT_TOKEN =lzit_sa_abc\n")).toBe("lzit_sa_abc");
+    expect(await configToken("  LAZYIT_TOKEN\t=  lzit_sa_abc\r\n")).toBe("lzit_sa_abc");
+    expect(await configToken('LAZYIT_TOKEN = "lzit_sa_abc"\n')).toBe("lzit_sa_abc");
+  });
+
+  // The widening must not turn a neighbouring key into this one. `_` is not whitespace, so it does
+  // not - and this is the case that says so out loud.
+  test("a padded key is still THAT key - LAZYIT_TOKEN_FILE is not a token", async () => {
+    expect(await configToken("LAZYIT_TOKEN_FILE =/root/agent.token\n")).toBe("");
+  });
+
+  // The URL and the CA bundle go through the SAME function, which is the point of generalising it:
+  // three keys read by one set of rules cannot disagree about a file a host actually has.
+  test("the same extractor answers for the other keys a re-run re-uses", async () => {
+    const config = [
+      "LAZYIT_URL = https://lazyit.example.com",
+      "LAZYIT_TOKEN=lzit_sa_abc",
+      "lazyit_ca_file='/etc/pki/corp-root.pem'",
+      "",
+    ].join("\n");
+    expect(await configValue("LAZYIT_URL", config)).toBe("https://lazyit.example.com");
+    expect(await configValue("lazyit_ca_file", config)).toBe("/etc/pki/corp-root.pem");
+    expect(await configValue("LAZYIT_CA_FILE", config)).toBe("");
+  });
+
+  // The installer writes this file, but an operator edits it - and a file that has been through a
+  // Windows editor comes back with CRLF. A trailing CR inside a bearer token is a 401 nobody can
+  // explain from the message. The quoted forms are what the AGENT's own parser accepts, so a config
+  // it reads happily must not be one this refuses.
+  test("a CRLF file, surrounding space and a quoted value all yield the bare token", async () => {
+    expect(await configToken("LAZYIT_TOKEN=lzit_sa_abc\r\n")).toBe("lzit_sa_abc");
+    expect(await configToken("  LAZYIT_TOKEN=  lzit_sa_abc  \n")).toBe("lzit_sa_abc");
+    expect(await configToken('LAZYIT_TOKEN="lzit_sa_abc"\n')).toBe("lzit_sa_abc");
+    expect(await configToken("LAZYIT_TOKEN='lzit_sa_abc'\n")).toBe("lzit_sa_abc");
+  });
+
+  // The agent's own parser assigns key by key as it reads, so the LAST line is the one that is live
+  // on this host. An installer that authenticated with the first would use a token the agent does
+  // not - and report success while the timer kept failing.
+  test("the LAST token line wins, exactly as the agent's own parser resolves it", async () => {
+    expect(await configToken("LAZYIT_TOKEN=lzit_sa_old\nLAZYIT_TOKEN=lzit_sa_new\n")).toBe(
+      "lzit_sa_new",
+    );
+  });
+
+  test("a token with '=' inside it survives - only the first '=' is the separator", async () => {
+    expect(await configToken("LAZYIT_TOKEN=lzit_sa_a=b=c\n")).toBe("lzit_sa_a=b=c");
+  });
+
+  test("a config with no token line - or a commented-out one - supplies nothing at all", async () => {
+    expect(
+      await configToken("LAZYIT_URL=https://lazyit.example.com\nLAZYIT_COLLECT_NICS=false\n"),
+    ).toBe("");
+    expect(await configToken("#LAZYIT_TOKEN=lzit_sa_abc\n")).toBe("");
+    expect(await configToken("")).toBe("");
+    // Not this key. `LAZYIT_TOKEN_FILE` is not a token and must not be read as one.
+    expect(await configToken("LAZYIT_TOKEN_FILE=/root/agent.token\n")).toBe("");
+  });
+
+  // THE CASE THE ISSUE ASKED FOR. No `--token`, no `--token-file`, no `LAZYIT_TOKEN` - and the run
+  // gets PAST the token requirement, all the way to the root check, which is the next thing that
+  // stops it. That is the whole feature: an upgrade needs no secret on the command line.
+  test("a re-run with NO token argument gets through, because the config supplies one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-keep-token-"));
+    try {
+      await writeFile(join(dir, "config"), EXISTING_CONFIG);
+      const { stdout, stderr } = await runInstaller(await installerWithConfigIn(dir), [
+        "--url",
+        "https://lazyit.example.com",
+        "--keep-token",
+      ]);
+      expect(stderr).toContain(PAST_THE_GUARD);
+      expect(stderr).not.toContain("a token is required");
+      // …and it says which token it used, without printing it. An installer that silently changes
+      // where a credential comes from is exactly what this flag exists to avoid being.
+      expect(stdout + stderr).toContain("--keep-token");
+      expect(stdout + stderr).not.toContain("lzit_sa_already_here");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // …and the "only when" half: the same run against a config with no token in it must STOP, with a
+  // message an operator can act on. A silent unauthenticated install is the one outcome this must
+  // never have.
+  test("the same re-run STOPS when the config carries no token, and says what to do", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-keep-token-"));
+    try {
+      await writeFile(
+        join(dir, "config"),
+        "LAZYIT_URL=https://lazyit.example.com\nLAZYIT_COLLECT_NICS=false\n",
+      );
+      const { code, stderr } = await runInstaller(await installerWithConfigIn(dir), [
+        "--url",
+        "https://lazyit.example.com",
+        "--keep-token",
+      ]);
+      expect(code).toBe(1);
+      expect(stderr).toContain("no LAZYIT_TOKEN");
+      expect(stderr).toContain("--token");
+      expect(stderr).not.toContain(PAST_THE_GUARD);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The ordinary first install on a host that never had the agent. The message names root FIRST,
+  // because the file is 0600 and "I forgot sudo" is the likelier of the two ways to get here.
+  test("no readable config is an actionable refusal naming root and the first-install forms", async () => {
+    const { code, stderr } = await runInstaller(INSTALL_SH, [
+      "--url",
+      "https://lazyit.example.com",
+      "--keep-token",
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("/etc/lazyit-agent/config");
+    expect(stderr).toContain("as root");
+    expect(stderr).toContain("--token-file");
+    expect(stderr).not.toContain(PAST_THE_GUARD);
+  });
+
+  // A HARD ERROR, never a precedence rule. Two token sources on one command line is an operator who
+  // believes something about this run that is not true, and picking one silently is how a host ends
+  // up authenticating with the credential that was just rotated away.
+  test.each([
+    [["--token", "lzit_sa_passed"], {}],
+    [["--token-file", "/root/agent.token"], {}],
+    [[], { LAZYIT_TOKEN: "lzit_sa_from_the_environment" }],
+  ] as [string[], Record<string, string>][])(
+    "--keep-token refuses to share the run with another token source (%p)",
+    async (args, env) => {
+      const { code, stderr } = await runInstaller(
+        INSTALL_SH,
+        ["--url", "https://lazyit.example.com", "--keep-token", ...args],
+        env,
+      );
+      expect(code).toBe(1);
+      expect(stderr).toContain("--keep-token");
+      expect(stderr).toMatch(/pass one|mutually exclusive/);
+      expect(stderr).not.toContain(PAST_THE_GUARD);
+    },
+  );
+
+  // `--keep-config` keeps this host's limits through an uninstall; the TOKEN never survives one.
+  // Accepting `--keep-token` there - even as a no-op - would let an operator believe otherwise about
+  // a live credential on a host they are decommissioning.
+  test("--uninstall --keep-token is refused rather than quietly ignored", async () => {
+    const { code, stderr } = await runInstaller(INSTALL_SH, ["--uninstall", "--keep-token"]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("--keep-token");
+    expect(stderr).toContain("--uninstall");
+  });
+
+  test("without --keep-token, a run with no token still fails exactly as it always did", async () => {
+    const { code, stderr } = await runInstaller(INSTALL_SH, ["--url", "https://lazyit.example.com"]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("a token is required");
+  });
+
+  test("the usage text documents it, and names it as the re-run form", () => {
+    expect(script).toContain("--keep-token");
+    expect(script).toMatch(/--keep-token\s+.*re-run/i);
+  });
+});
+
+/**
+ * `--upgrade`: A RE-RUN KEEPS THIS HOST'S WHOLE CONFIGURATION, NOT ONLY ITS TOKEN (#1208).
+ *
+ * `--keep-token` closed the credential half of the upgrade path and left three holes open in the
+ * command an admin is handed, because that command still has to carry `--url`:
+ *
+ *   1. it RE-PINS every host's `LAZYIT_URL` to whatever origin the admin's browser happened to be
+ *      on, which in the `lan` mode of ADR-0087 silently repoints a fleet at one admin's IP;
+ *   2. it carries no `--ca-file`, so a host installed against an internal CA fails its download on
+ *      the very run that was supposed to be the easy one;
+ *   3. and the shape that made a token bearable alongside it - `sudo -E` - preserves the WHOLE
+ *      interactive environment into a root process just to move one variable.
+ *
+ * All three dissolve if a re-run can take the configuration from the host instead of the command
+ * line. `--upgrade` is `--keep-token` plus that: `LAZYIT_URL` and `LAZYIT_CA_FILE` come from
+ * `/etc/lazyit-agent/config` when they are not passed, so the generated command needs neither.
+ *
+ * A FRESH INSTALL IS STILL A FRESH INSTALL. `--upgrade` with no readable config is the same
+ * actionable refusal `--keep-token` gives, and a config with no URL in it is refused by name: there
+ * is no path here where a missing config yields an unconfigured or unauthenticated install.
+ */
+describe("--upgrade re-runs a host from its own configuration (#1208)", () => {
+  test("--upgrade is an accepted argument and the usage text names it", () => {
+    expect(script).toContain("--upgrade)");
+    expect(script).toMatch(/--upgrade\s+.*re-run/i);
+  });
+
+  // THE COMMAND THE WEB WIZARD CAN NOW GENERATE: no --url, no token, nothing origin-specific.
+  test("a re-run with NO --url and no token gets through, on the config alone", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      await writeFile(join(dir, "config"), EXISTING_CONFIG);
+      const { stdout, stderr } = await runInstaller(await installerWithConfigIn(dir), ["--upgrade"]);
+      expect(stderr).toContain(PAST_THE_GUARD);
+      expect(stderr).not.toContain("a token is required");
+      expect(stderr).not.toContain("--url is required");
+      // It says what it re-used, and never prints the credential itself.
+      expect(stdout + stderr).toContain("--upgrade");
+      expect(stdout + stderr).toContain("https://lazyit.example.com");
+      expect(stdout + stderr).not.toContain("lzit_sa_already_here");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // An explicit --url still wins, because retargeting a host at a moved instance is a real thing to
+  // want - it just has to be TYPED rather than inherited from whoever generated the command. The
+  // observable is the #1166 guard biting on the value that won.
+  test("an explicit --url still wins over the one on disk", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      await writeFile(join(dir, "config"), EXISTING_CONFIG);
+      const { code, stderr } = await runInstaller(await installerWithConfigIn(dir), [
+        "--upgrade",
+        "--url",
+        "https://moved.example.com/install.sh",
+      ]);
+      expect(code).toBe(1);
+      expect(stderr).toContain("pass --url https://moved.example.com instead");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The CA hole. A host installed with --ca-file keeps that bundle in its config, and the agent
+  // uses it on every tick - but the installer's own curl was given nothing on a re-run, so the
+  // download failed with a certificate error on a host that has been reporting for months.
+  test("it re-uses the CA bundle this host was installed against", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      const ca = join(dir, "corp-root.pem");
+      await writeFile(ca, "-----BEGIN CERTIFICATE-----\n");
+      await writeFile(
+        join(dir, "config"),
+        [
+          "LAZYIT_URL=https://lazyit.example.com",
+          "LAZYIT_TOKEN=lzit_sa_already_here",
+          `LAZYIT_CA_FILE=${ca}`,
+          "",
+        ].join("\n"),
+      );
+      const { stdout, stderr } = await runInstaller(await installerWithConfigIn(dir), ["--upgrade"]);
+      expect(stdout + stderr).toContain(ca);
+      expect(stderr).toContain(PAST_THE_GUARD);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The agent prefers the LOWERCASE spelling when a host carries both (`networkFrom` in
+  // apps/agent/src/net.ts, measured against curl and Bun). Reading the other one here would have
+  // the installer download over one trust anchor and the agent report over another.
+  test("the lowercase CA spelling wins, exactly as the agent resolves it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      const lower = join(dir, "lower.pem");
+      const upper = join(dir, "upper.pem");
+      await writeFile(lower, "-----BEGIN CERTIFICATE-----\n");
+      await writeFile(upper, "-----BEGIN CERTIFICATE-----\n");
+      await writeFile(
+        join(dir, "config"),
+        [
+          "LAZYIT_URL=https://lazyit.example.com",
+          "LAZYIT_TOKEN=lzit_sa_already_here",
+          `LAZYIT_CA_FILE=${upper}`,
+          `lazyit_ca_file=${lower}`,
+          "",
+        ].join("\n"),
+      );
+      const { stdout, stderr } = await runInstaller(await installerWithConfigIn(dir), ["--upgrade"]);
+      expect(stdout + stderr).toContain(lower);
+      expect(stdout + stderr).not.toContain(upper);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a CA bundle that has moved since the install is named, not left to fail inside curl", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      await writeFile(
+        join(dir, "config"),
+        [
+          "LAZYIT_URL=https://lazyit.example.com",
+          "LAZYIT_TOKEN=lzit_sa_already_here",
+          "LAZYIT_CA_FILE=/gone/corp-root.pem",
+          "",
+        ].join("\n"),
+      );
+      const { code, stderr } = await runInstaller(await installerWithConfigIn(dir), ["--upgrade"]);
+      expect(code).toBe(1);
+      expect(stderr).toContain("/gone/corp-root.pem");
+      expect(stderr).toContain("--ca-file");
+      expect(stderr).not.toContain(PAST_THE_GUARD);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // NEVER A SILENT UNCONFIGURED INSTALL. A first install has nothing to re-use by definition, and
+  // the refusal has to name both ways of arriving here - the file is 0600, so a forgotten sudo
+  // looks exactly like a host that was never installed.
+  test("no readable config is an actionable refusal, and a fresh install still needs --url", async () => {
+    const { code, stderr } = await runInstaller(INSTALL_SH, ["--upgrade"]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("/etc/lazyit-agent/config");
+    expect(stderr).toContain("as root");
+    expect(stderr).toContain("--url");
+    expect(stderr).not.toContain(PAST_THE_GUARD);
+  });
+
+  test("a config with a token but no URL is refused by name, not left to a confusing default", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      await writeFile(join(dir, "config"), "LAZYIT_TOKEN=lzit_sa_already_here\n");
+      const { code, stderr } = await runInstaller(await installerWithConfigIn(dir), ["--upgrade"]);
+      expect(code).toBe(1);
+      expect(stderr).toContain("LAZYIT_URL");
+      expect(stderr).toContain("--url");
+      expect(stderr).not.toContain(PAST_THE_GUARD);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a config with a URL but no token stops on the token, as --keep-token does", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      await writeFile(join(dir, "config"), "LAZYIT_URL=https://lazyit.example.com\n");
+      const { code, stderr } = await runInstaller(await installerWithConfigIn(dir), ["--upgrade"]);
+      expect(code).toBe(1);
+      expect(stderr).toContain("no LAZYIT_TOKEN");
+      expect(stderr).not.toContain(PAST_THE_GUARD);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // --upgrade CONTAINS --keep-token, so it inherits its posture on credentials whole: a hard error
+  // against every other source, and no precedence rule anywhere.
+  test.each([
+    [["--token", "lzit_sa_passed"], {}],
+    [["--token-file", "/root/agent.token"], {}],
+    [[], { LAZYIT_TOKEN: "lzit_sa_from_the_environment" }],
+  ] as [string[], Record<string, string>][])(
+    "--upgrade refuses to share the run with another token source (%p)",
+    async (args, env) => {
+      const { code, stderr } = await runInstaller(INSTALL_SH, ["--upgrade", ...args], env);
+      expect(code).toBe(1);
+      expect(stderr).toContain("--upgrade");
+      expect(stderr).toMatch(/pass one|mutually exclusive/);
+      expect(stderr).not.toContain(PAST_THE_GUARD);
+    },
+  );
+
+  test("--uninstall --upgrade is refused rather than quietly ignored", async () => {
+    const { code, stderr } = await runInstaller(INSTALL_SH, ["--uninstall", "--upgrade"]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("--upgrade");
+    expect(stderr).toContain("--uninstall");
+  });
+
+  test("--upgrade --keep-token is redundant, not contradictory, and is accepted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      await writeFile(join(dir, "config"), EXISTING_CONFIG);
+      const { stderr } = await runInstaller(await installerWithConfigIn(dir), [
+        "--upgrade",
+        "--keep-token",
+      ]);
+      expect(stderr).toContain(PAST_THE_GUARD);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  /*
+   * THE SET IS COMPLETE, AND THAT IS CHECKABLE RATHER THAN CLAIMED. The installer owns exactly four
+   * keys in the config merge - URL, TOKEN, INTERVAL and CA_FILE - and everything else already
+   * crosses an upgrade through the preserved block. INTERVAL is accepted and IGNORED since #1140,
+   * so there is nothing to re-use. Re-using the other three therefore re-uses everything a re-run
+   * would otherwise have had to be told again.
+   */
+  /*
+   * WHERE THIS WAVE MEETS THE HARDENING WAVE. #1190 made the checksum required and fail-closed, and
+   * put plain http behind an explicit opt-in; --upgrade arrived on a branch cut before either. The
+   * composition is new surface that neither side tested, and it has exactly one correct answer: a
+   * re-run is an install, so it clears the same two bars.
+   *
+   * THE HTTP ONE IS THE INTERESTING HALF. A host installed with --allow-insecure-http carries
+   * `LAZYIT_URL=http://…` in its config, so `--upgrade` alone arrives at the gate with a cleartext
+   * URL nobody typed. Re-using it silently would let the FILE answer "yes, cleartext is acceptable"
+   * on the operator's behalf — the same fail-open #1190 closed, one input over. Settings are
+   * re-used; an acceptance of exposure is not a setting, and has to be said again.
+   */
+  test("an upgrade over a re-used plain-http URL still needs --allow-insecure-http", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyit-upgrade-"));
+    try {
+      await writeFile(
+        join(dir, "config"),
+        ["LAZYIT_URL=http://192.168.100.75:8080", "LAZYIT_TOKEN=lzit_sa_already_here", ""].join("\n"),
+      );
+      const installer = await installerWithConfigIn(dir);
+      const refused = await runInstaller(installer, ["--upgrade"]);
+      expect(refused.code).toBe(1);
+      expect(refused.stderr).toContain("plain http");
+      expect(refused.stderr).toContain("--allow-insecure-http");
+      // It names the CONFIG as where that URL came from, not a --url the operator never passed.
+      expect(refused.stderr).toContain("LAZYIT_URL in");
+      expect(refused.stderr).not.toContain(PAST_THE_GUARD);
+
+      // …and with the opt-in said out loud, the same re-run proceeds.
+      const allowed = await runInstaller(installer, ["--upgrade", "--allow-insecure-http"]);
+      expect(allowed.stderr).toContain("WARNING");
+      expect(allowed.stderr).toContain("cleartext");
+      expect(allowed.stderr).toContain(PAST_THE_GUARD);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The checksum half, asserted structurally: an upgrade takes the SAME path to the integrity block
+  // as a first install, so there is no --upgrade branch that could skip it. The one escape hatch
+  // stays --sha256, which is a digest obtained out of band and never a way to skip verification.
+  test("an upgrade verifies the checksum on the same fail-closed path as a first install", () => {
+    // The integrity block is downstream of every re-run branch, and nothing between them re-enters
+    // the argument handling: --upgrade resolves the URL and the token and then falls through.
+    const upgradeBlock = script.indexOf('if [ "$UPGRADE" = "1" ]; then');
+    const integrity = script.indexOf("# --- integrity: the digest the instance published");
+    expect(upgradeBlock).toBeGreaterThan(-1);
+    expect(integrity).toBeGreaterThan(upgradeBlock);
+    // Neither the required-checksum branch nor its hard stops are conditional on how this run got
+    // its settings: no branch in the integrity block mentions the re-run flags at all.
+    const block = script.slice(integrity, script.indexOf('install -m 755 "$TMP_BIN"'));
+    expect(block).not.toContain("UPGRADE");
+    expect(block).not.toContain("KEEP_TOKEN");
+    expect(block).toMatch(/die "could not fetch the sha256/);
+    expect(block).toMatch(/die "checksum mismatch/);
+  });
+
+  test("it re-uses exactly the keys the installer owns, the ignored INTERVAL aside", () => {
+    const widest = [...script.matchAll(/^[ \t]*OWNED='([^']+)'$/gm)]
+      .map((match) => match[1] as string)
+      .find((pattern) => pattern.includes("CA_FILE"));
+    expect(widest, "install.sh no longer widens OWNED for --ca-file").toBeTruthy();
+    const owned = new Set(
+      (widest as string)
+        .match(/LAZYIT_\(([^)]+)\)/)?.[1]
+        ?.split("|")
+        .map((key) => `LAZYIT_${key}`) ?? [],
+    );
+    expect(owned).toEqual(
+      new Set(["LAZYIT_URL", "LAZYIT_TOKEN", "LAZYIT_INTERVAL", "LAZYIT_CA_FILE"]),
+    );
+
+    const reused = new Set(
+      [...script.matchAll(/config_value ([A-Za-z0-9_]+)/g)].map((match) =>
+        (match[1] as string).toUpperCase(),
+      ),
+    );
+    expect(reused).toEqual(new Set(["LAZYIT_URL", "LAZYIT_TOKEN", "LAZYIT_CA_FILE"]));
+  });
+});
+
+/**
+ * HYPERVISOR HOSTS: THE BANNER AND THE `--no-hypervisor` VETO (ADR-0095, #1217).
+ *
+ * A Proxmox VE or libvirt/KVM host reports its guests automatically, and the installer configures
+ * NOTHING for that: the AGENT re-detects the role on every run, so the banner this script prints
+ * can never become stale authority - it is one informational line, best-effort and never fatal,
+ * telling the operator what is about to be inventoried and how to say no. The one knob is negative:
+ * `--no-hypervisor` writes the host-owner veto `LAZYIT_COLLECT_HYPERVISOR=false` into the config,
+ * where it rides the same preservation every other `LAZYIT_*` key rides across `--upgrade`.
+ */
+describe("hypervisor hosts: the banner and --no-hypervisor (ADR-0095)", () => {
+  test("--no-hypervisor is an accepted argument and the usage text names the veto it writes", () => {
+    expect(script).toContain("--no-hypervisor)");
+    expect(script).toMatch(/--no-hypervisor\s+[\s\S]{0,200}LAZYIT_COLLECT_HYPERVISOR=false/);
+  });
+
+  test("a run with --no-hypervisor parses and proceeds - the flag breaks nothing", async () => {
+    const { stderr } = await guard("https://lazyit.example.com", ["--no-hypervisor"]);
+    expect(stderr).not.toContain("unknown argument");
+    expect(stderr).toContain(PAST_THE_GUARD);
+  });
+
+  test("without the flag the config carries ONLY the commented invitation", () => {
+    expect(script).toContain('HYPERVISOR_LINE="#LAZYIT_COLLECT_HYPERVISOR=false"');
+    // …and the ACTIVE form exists only behind the flag: the assignment sits inside the
+    // NO_HYPERVISOR branch, after the commented default.
+    const active = script.indexOf('HYPERVISOR_LINE="LAZYIT_COLLECT_HYPERVISOR=false"');
+    const flagGuard = script.indexOf('if [ "$NO_HYPERVISOR" = "1" ]');
+    expect(active).toBeGreaterThan(-1);
+    expect(flagGuard).toBeGreaterThan(-1);
+    expect(active).toBeGreaterThan(flagGuard);
+  });
+
+  // The line lands BELOW the kept block on purpose: the agent reads the LAST assignment, so a
+  // re-run WITH the flag beats whatever an older config carried - while without the flag the
+  // commented form assigns nothing and a kept veto stays the live one.
+  test("the veto line sits below the kept block in the file the installer writes", () => {
+    const config = heredocFor("CONFIG_FILE");
+    expect(config).toContain("$HYPERVISOR_LINE");
+    expect(config.indexOf("$PRESERVED")).toBeGreaterThan(-1);
+    expect(config.indexOf("$PRESERVED")).toBeLessThan(config.indexOf("$HYPERVISOR_LINE"));
+  });
+
+  test("the banner sits before the root check and cannot stop the install", () => {
+    const start = script.indexOf("# --- hypervisor detection banner");
+    const rootCheck = script.indexOf('die "must run as root (installs');
+    expect(start).toBeGreaterThan(-1);
+    expect(rootCheck).toBeGreaterThan(-1);
+    expect(start).toBeLessThan(rootCheck);
+    const block = script.slice(start, rootCheck);
+    expect(block).not.toContain("die ");
+  });
+
+  test("the wording names the platform, the guests and the way out - and the flag flips it", () => {
+    expect(script).toContain("Detected: Proxmox VE");
+    expect(script).toContain("QEMU VMs, LXC containers");
+    expect(script).toContain("Disable with --no-hypervisor");
+    expect(script).toContain("Detected: libvirt/KVM");
+    expect(script).toContain("disabled by --no-hypervisor");
+  });
+
+  test("the header documents the flag and that detection is the agent's, per run", () => {
+    expect(script).toMatch(/ADR-0095/);
+    expect(script).toMatch(/--no-hypervisor/);
+    expect(script).toMatch(/every run/i);
+  });
+});
+
+/**
+ * The detection itself, executed over fixtures - the same trick `config_value` and `auth_config`
+ * play: the function is PURE (the mounts table on stdin, the two probes as parameters), so the
+ * corpus runs the SHIPPED logic rather than a copy of it.
+ */
+describe("hypervisor_kind, executed over fixtures (ADR-0095)", () => {
+  /** The shipped `hypervisor_kind`, run by a real shell over one mounts fixture. */
+  async function hypervisorKind(mounts: string, kvm: "0" | "1", virsh: "0" | "1"): Promise<string> {
+    const proc = Bun.spawn(
+      ["sh", "-c", `set -eu\n${shellFunction("hypervisor_kind")}\nhypervisor_kind "$1" "$2"`, "sh", kvm, virsh],
+      {
+        stdin: new TextEncoder().encode(mounts),
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    expect(stderr, "hypervisor_kind wrote to stderr").toBe("");
+    expect(code, "hypervisor_kind exited non-zero").toBe(0);
+    return stdout;
+  }
+
+  /** A real PVE node's mounts table, abridged: pmxcfs is /etc/pve on a fuse filesystem. */
+  const PVE_MOUNTS = [
+    "sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0",
+    "/dev/mapper/pve-root / ext4 rw,relatime,errors=remount-ro 0 0",
+    "/dev/fuse /etc/pve fuse rw,nosuid,nodev,relatime,user_id=0,group_id=0,default_permissions,allow_other 0 0",
+  ].join("\n");
+
+  test("hypervisor_kind is PURE - mounts on stdin, probes as parameters, no path of its own", () => {
+    const body = shellFunction("hypervisor_kind");
+    expect(body).not.toContain("/proc/mounts");
+    expect(body).not.toContain("/dev/kvm");
+  });
+
+  test("a mounted /etc/pve fuse filesystem is Proxmox VE", async () => {
+    expect(await hypervisorKind(PVE_MOUNTS, "0", "0")).toBe("proxmox");
+  });
+
+  // A PVE node HAS /dev/kvm and commonly virsh too; the more specific answer must win, because the
+  // banner names what the agent will actually collect there: QEMU VMs and LXC containers.
+  test("Proxmox wins when the libvirt probes would also answer", async () => {
+    expect(await hypervisorKind(PVE_MOUNTS, "1", "1")).toBe("proxmox");
+  });
+
+  // /dev/kvm alone is any machine with virtualization exposed (most laptops); virsh alone is a
+  // client package. Only the pair says "this host runs guests through libvirt".
+  test("/dev/kvm plus virsh is libvirt - either alone is not", async () => {
+    expect(await hypervisorKind("", "1", "1")).toBe("libvirt");
+    expect(await hypervisorKind("", "1", "0")).toBe("");
+    expect(await hypervisorKind("", "0", "1")).toBe("");
+  });
+
+  test("an empty mounts table and no probes answer nothing at all, silently", async () => {
+    expect(await hypervisorKind("", "0", "0")).toBe("");
+  });
+
+  test("/etc/pve on an ordinary filesystem is NOT Proxmox - the check demands the fuse mount", async () => {
+    expect(await hypervisorKind("/dev/sda1 /etc/pve ext4 rw,relatime 0 0", "0", "0")).toBe("");
+  });
+
+  test("a mountpoint that merely starts with /etc/pve is not it", async () => {
+    expect(await hypervisorKind("/dev/fuse /etc/pve2 fuse rw,relatime 0 0", "0", "0")).toBe("");
   });
 });

@@ -4,7 +4,7 @@ import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { type AssetModel, CreateAssetModelSchema } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/category-combobox";
@@ -42,10 +42,19 @@ interface CreateAssetModelDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Called with the created model so the caller can select it. */
   onCreated?: (model: AssetModel) => void;
+  /**
+   * Seeds the `name` field when the dialog OPENS (issue #1229). Callers pass what the operator was
+   * searching for in the picker, so a model created after a fruitless search starts from that exact
+   * term instead of a blank field — the cheapest guard against near-duplicate models
+   * ("Latitude 5520" vs "Latitude5520"), since `AssetModel` has no (name, manufacturer) uniqueness.
+   * Read once per open: changing it while the dialog is open never clobbers what is being typed.
+   */
+  defaultName?: string;
 }
 
 /**
- * Quick-create for an AssetModel, used by the inline "+ New" on the asset form's model select.
+ * Quick-create for an AssetModel, used by the inline "+ New" on every model picker — the asset form
+ * and the stock-intake (Receive stock) dialog (issue #1229).
  * Collects name + manufacturer (both required) and an optional category. The asset category is a
  * plain select here — making it creatable too would nest a dialog inside this one (deferred). Issue
  * #25. Converged onto react-hook-form + zod (`CreateAssetModelSchema`) + the
@@ -56,6 +65,7 @@ export function CreateAssetModelDialog({
   open,
   onOpenChange,
   onCreated,
+  defaultName,
 }: CreateAssetModelDialogProps) {
   const t = useTranslations("settings.taxonomies.quickCreate.model");
   const tc = useTranslations("common");
@@ -68,9 +78,18 @@ export function CreateAssetModelDialog({
     defaultValues: { name: "", manufacturer: "" },
   });
 
-  // Reset whenever it reopens, so a reused dialog never shows stale values/errors.
+  // Keep the seed in a ref so the reset effect stays keyed on `open` alone: a `defaultName` that
+  // changes while the dialog is open must never reset the form under the operator's hands.
+  const defaultNameRef = useRef(defaultName);
   useEffect(() => {
-    if (open) form.reset({ name: "", manufacturer: "" });
+    defaultNameRef.current = defaultName;
+  });
+
+  // Reset whenever it reopens, so a reused dialog never shows stale values/errors — seeding `name`
+  // with the caller's search term when it supplied one (issue #1229).
+  useEffect(() => {
+    if (open)
+      form.reset({ name: defaultNameRef.current ?? "", manufacturer: "" });
   }, [open, form]);
 
   const onSubmit = form.handleSubmit(

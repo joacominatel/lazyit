@@ -11,14 +11,27 @@ import {
   AGENT_POLICY_DEFAULT,
   AGENT_SOFTWARE_HASH_MAX,
   AgentReportSchema,
+  CONTAINER_ID_SEPARATOR,
+  DEFAULT_PAGE_LIMIT,
+  GUEST_ID_SEPARATOR,
+  INFRA_GRAPH_EDGES_MAX,
+  INFRA_GRAPH_NODES_MAX,
+  InfraGraphNodeSchema,
   InfraNodeListItemSchema,
+  MAX_PAGE_LIMIT,
+  type PageQuery,
   softwareFingerprint,
 } from '@lazyit/shared';
-import { InfraService, INFRA_NODE_ASSET_REPOINT_ERROR } from './infra.service';
+import {
+  InfraService,
+  INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR,
+  INFRA_NODE_ASSET_REPOINT_ERROR,
+} from './infra.service';
 import { AgentPolicyService } from './agent-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { ArticlesService } from '../articles/articles.service';
 import { SecretManagerService } from '../secret-manager/secret-manager.service';
@@ -26,6 +39,7 @@ import { SearchService } from '../search/search.service';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` for types (erased) AND at runtime for `Prisma.PrismaClientKnownRequestError` (the P2002
@@ -42,6 +56,10 @@ jest.mock('../../generated/prisma/client', () => ({
       strings,
       values,
     }),
+    // `Prisma.join` builds the IN-list fragment of the ADR-0095 §6 candidate query. The real helper
+    // returns a Sql instance; the test only needs the call not to throw and the values to survive.
+    join: (values: unknown[]) => ({ values }),
+    TransactionIsolationLevel: { RepeatableRead: 'RepeatableRead' },
     PrismaClientKnownRequestError: class extends Error {
       constructor(
         public code: string,
@@ -83,6 +101,9 @@ interface PrismaMock {
   infraNode: {
     findFirst: Mock;
     findMany: Mock;
+    // The paired `count` of the ADR-0030 page (#1152): findMany + count over ONE `where`, so the
+    // envelope's `total` can never drift from the rows it describes.
+    count: Mock;
     create: Mock;
     update: Mock;
     updateMany: Mock;
@@ -90,6 +111,7 @@ interface PrismaMock {
   infraEdge: {
     findFirst: Mock;
     findMany: Mock;
+    count: Mock;
     findUnique: Mock;
     create: Mock;
     update: Mock;
@@ -104,18 +126,59 @@ interface PrismaMock {
   $queryRaw: Mock;
 }
 
-const HUMAN = { kind: 'human', user: { id: 'u-1' } } as never;
+// `role` is load-bearing since #1202 round 2: the archiving-detach gate resolves a HUMAN's permissions
+// through the RolePermission matrix, which is keyed by exactly this field.
+const HUMAN = {
+  kind: 'human',
+  user: { id: 'u-1', role: 'MEMBER' },
+} as never;
 /** The reporting agent's authenticated service principal (ADR-0048) — the #1134 enrollment key. */
 const AGENT_SA = {
   kind: 'service',
   serviceAccount: { id: 'sa-agent' },
   permissions: new Set(['infra:report']),
 } as never;
+/**
+ * A service principal that manages the map but holds NO `asset:delete` (#1202 round 2). A service
+ * account is authorized SOLELY by its direct grants (ADR-0048) — never by the role matrix — so the
+ * archive gate has to read `principal.permissions`, not ask the resolver.
+ */
+const MAP_MANAGER_SA = {
+  kind: 'service',
+  serviceAccount: { id: 'sa-map' },
+  permissions: new Set(['infra:manage']),
+} as never;
+/** The same service account after an admin also granted it the archive verb. */
+const MAP_MANAGER_SA_WITH_DELETE = {
+  kind: 'service',
+  serviceAccount: { id: 'sa-map' },
+  permissions: new Set(['infra:manage', 'asset:delete']),
+} as never;
+
+/**
+ * The policy WIRE shape a pre-1.11 agent receives (ADR-0095 §7): the resolved default with
+ * `collect.hypervisor` REMOVED — genuine key absence, because the agent-side strict `safeParse`
+ * rejects an unknown key whatever its value and would keep its cached policy forever. Built by hand
+ * rather than through `projectAgentPolicy`, so these tests assert the shape the wire carries instead
+ * of comparing the helper against itself. The stored/resolved policy is untouched — projection is
+ * wire-only, which is why the node-column assertions elsewhere still see the six-key resolution.
+ */
+const LEGACY_POLICY_DEFAULT = (() => {
+  const collect: Partial<typeof AGENT_POLICY_DEFAULT.collect> = {
+    ...AGENT_POLICY_DEFAULT.collect,
+  };
+  delete collect.hypervisor;
+  return { ...AGENT_POLICY_DEFAULT, collect };
+})();
 
 describe('InfraService', () => {
   let service: InfraService;
   let prisma: PrismaMock;
   let assets: { create: Mock; remove: Mock; assertExists: Mock };
+  // The append-only asset trail (ADR-0033). InfraService writes exactly ONE event through it: the
+  // AGENT_LINKED an adoption emits at the moment of the link (ADR-0093 §4). Mocking it is also how
+  // these tests assert the SILENCE — no event on a mint, and none per report.
+  let assetHistory: { record: Mock };
   let assignments: { findAll: Mock };
   let articles: { findArticlesForAsset: Mock };
   // The node→secret linkage helpers (ADR-0073, #801): metadata-only resolve + attach authz.
@@ -137,6 +200,10 @@ describe('InfraService', () => {
   // here we only assert that ingest ASKS it, hands it the node's own override, puts the answer in the
   // ack, and survives it failing.
   let agentPolicy: { resolveForReport: Mock };
+  // The RolePermission matrix (ADR-0046). InfraService asks it exactly ONE question: does this human
+  // hold `asset:delete`, on the detach branch that ARCHIVES an auto-created Asset (#1202). Mocking it
+  // is also how these tests assert the SILENCE — the un-link branch must never consult it at all.
+  let permissions: { hasAll: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration + the #1141 merge write
   // through it — the merge needs both writes in one transaction or the dedup index refuses them).
   let txEdge: { create: Mock; updateMany: Mock };
@@ -152,6 +219,7 @@ describe('InfraService', () => {
       infraNode: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -159,6 +227,7 @@ describe('InfraService', () => {
       infraEdge: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
@@ -177,13 +246,21 @@ describe('InfraService', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       asset: { findFirst: jest.fn(), update: jest.fn() },
+      // Two call shapes, because the service uses both: the interactive form (a callback handed a tx
+      // client — the merge/RUNS_ON writes) and the BATCH form (an array of operations — the ADR-0030
+      // `findMany` + `count` page, #1152). Dispatch on the argument so neither idiom needs its own mock.
       $transaction: jest.fn(
         (
-          cb: (tx: {
-            infraEdge: typeof txEdge;
-            infraNode: typeof txNode;
-          }) => unknown,
-        ) => cb({ infraEdge: txEdge, infraNode: txNode }),
+          arg:
+            | Promise<unknown>[]
+            | ((tx: {
+                infraEdge: typeof txEdge;
+                infraNode: typeof txNode;
+              }) => unknown),
+        ) =>
+          Array.isArray(arg)
+            ? Promise.all(arg)
+            : arg({ infraEdge: txEdge, infraNode: txNode }),
       ),
       $queryRaw: jest.fn().mockResolvedValue([]),
     };
@@ -192,6 +269,7 @@ describe('InfraService', () => {
       remove: jest.fn(),
       assertExists: jest.fn().mockResolvedValue(undefined),
     };
+    assetHistory = { record: jest.fn().mockResolvedValue(undefined) };
     assignments = { findAll: jest.fn().mockResolvedValue([]) };
     articles = {
       findArticlesForAsset: jest.fn().mockResolvedValue({ items: [] }),
@@ -219,6 +297,9 @@ describe('InfraService', () => {
     agentPolicy = {
       resolveForReport: jest.fn().mockResolvedValue(AGENT_POLICY_DEFAULT),
     };
+    // Default: the caller holds whatever is asked of them, so every pre-existing test keeps exercising
+    // the path it was written for. The #1202 gate tests flip this per case.
+    permissions = { hasAll: jest.fn().mockResolvedValue(true) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -226,6 +307,7 @@ describe('InfraService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ActorService, useValue: new ActorService() },
         { provide: AssetsService, useValue: assets },
+        { provide: AssetHistoryService, useValue: assetHistory },
         { provide: AssetAssignmentsService, useValue: assignments },
         { provide: ArticlesService, useValue: articles },
         { provide: SecretManagerService, useValue: secrets },
@@ -234,6 +316,7 @@ describe('InfraService', () => {
         { provide: NotificationsService, useValue: notifications },
         { provide: InfraAutoConfirmService, useValue: autoConfirm },
         { provide: AgentPolicyService, useValue: agentPolicy },
+        { provide: PermissionResolverService, useValue: permissions },
       ],
     }).compile();
     service = moduleRef.get(InfraService);
@@ -387,7 +470,7 @@ describe('InfraService', () => {
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-        policy: AGENT_POLICY_DEFAULT,
+        policy: LEGACY_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
         softwareDelta: true,
@@ -433,7 +516,7 @@ describe('InfraService', () => {
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-        policy: AGENT_POLICY_DEFAULT,
+        policy: LEGACY_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
         softwareDelta: true,
@@ -471,7 +554,7 @@ describe('InfraService', () => {
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-        policy: AGENT_POLICY_DEFAULT,
+        policy: LEGACY_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
         softwareDelta: true,
@@ -511,7 +594,7 @@ describe('InfraService', () => {
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
         // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-        policy: AGENT_POLICY_DEFAULT,
+        policy: LEGACY_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
         softwareDelta: true,
@@ -1343,7 +1426,7 @@ describe('InfraService', () => {
           accepted: true,
           // #1140: the ack is the policy channel, so an accepted report carries the resolved
           // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-          policy: AGENT_POLICY_DEFAULT,
+          policy: LEGACY_POLICY_DEFAULT,
           // #1142: and every ack states that this build understands `softwareState` — the evidence
           // the agent needs before it may omit an unchanged package list.
           softwareDelta: true,
@@ -1441,6 +1524,90 @@ describe('InfraService', () => {
         ).toEqual({
           reportingSource: 'agent:abc123',
           externalId: { startsWith: 'machine-id-xyz/container/' },
+        });
+      });
+
+      it('a racing child create (P2002) falls through to the refresh — later children still reconcile', async () => {
+        // Two reports from one host racing (the install's report vs the freshly-armed timer) can
+        // both reach the child create. The loser must refresh the row the winner inserted and KEEP
+        // GOING: a throw here starved every child after it of its heartbeat and RUNS_ON self-heal,
+        // and skipped the vanished sweep — a false outage a few hours later, every report.
+        // Keyed on the QUERY SHAPE rather than call order: the fire-and-forget search sync also
+        // reads through findFirst, so a positional Once-chain would hand the raced row to the
+        // wrong caller. Only the raced child's exact dedup lookup answers with the row.
+        prisma.infraNode.findFirst.mockImplementation(
+          (args: { where?: Record<string, unknown> }) =>
+            Promise.resolve(
+              args?.where?.externalId === 'machine-id-xyz/container/api' &&
+                !('deletedAt' in (args?.where ?? {}))
+                ? { id: 'node-c1', specs: {}, assetId: null }
+                : null,
+            ),
+        );
+        prisma.infraNode.create
+          .mockResolvedValueOnce({ id: 'node-host', state: 'PENDING' })
+          .mockRejectedValueOnce(new KnownError('P2002'))
+          .mockResolvedValueOnce({ id: 'node-w' });
+        prisma.infraNode.findMany.mockResolvedValue([]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+
+        const ack = await service.ingestReport(
+          reportWithContainers([
+            { name: 'api', state: 'running' },
+            { name: 'web', state: 'running' },
+          ]),
+          AGENT_SA,
+        );
+
+        expect(ack.accepted).toBe(true);
+        // The raced child was REFRESHED, not abandoned…
+        const racedUpdate = (
+          prisma.infraNode.update.mock.calls as unknown[][]
+        ).find(
+          (c) => (c[0] as { where: { id: string } }).where.id === 'node-c1',
+        )?.[0] as { data: Record<string, unknown> } | undefined;
+        expect(racedUpdate?.data.status).toBe('ONLINE');
+        // …the child listed AFTER the race still enrolled…
+        expect(prisma.infraNode.create).toHaveBeenCalledTimes(3);
+        // …and BOTH children got their RUNS_ON self-heal.
+        expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+          data: { sourceId: 'node-c1', targetId: 'node-host', kind: 'RUNS_ON' },
+        });
+        expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+          data: { sourceId: 'node-w', targetId: 'node-host', kind: 'RUNS_ON' },
+        });
+      });
+
+      it('escapes LIKE metacharacters in the child-lookup prefix (defense-in-depth)', async () => {
+        // Prisma emits `startsWith` into a raw LIKE pattern, so `%`/`_` inside a reported
+        // externalId would widen the prefix match. Contained today by the reportingSource
+        // equality on the same query — the escape makes that containment structural.
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+        prisma.infraNode.create.mockResolvedValue({
+          id: 'node-host',
+          state: 'PENDING',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([]);
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+
+        await service.ingestReport(
+          AgentReportSchema.parse({
+            agentVersion: '1.0.0',
+            reportingSource: 'agent:weird',
+            externalId: 'machine_50%',
+            reportedAt: '2026-06-27T12:00:00.000Z',
+            host: { hostname: 'weird-01', containers: [{ name: 'redis' }] },
+          }),
+          AGENT_SA,
+        );
+
+        expect(
+          firstArg<{ where: Record<string, unknown> }>(
+            prisma.infraNode.findMany,
+          ).where,
+        ).toEqual({
+          reportingSource: 'agent:weird',
+          externalId: { startsWith: 'machine\\_50\\%/container/' },
         });
       });
 
@@ -2270,7 +2437,7 @@ describe('InfraService', () => {
           accepted: true,
           // #1140: the ack is the policy channel, so an accepted report carries the resolved
           // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
-          policy: AGENT_POLICY_DEFAULT,
+          policy: LEGACY_POLICY_DEFAULT,
           // #1142: and every ack states that this build understands `softwareState` — the evidence
           // the agent needs before it may omit an unchanged package list.
           softwareDelta: true,
@@ -2787,6 +2954,162 @@ describe('InfraService', () => {
     });
   });
 
+  // ── The archiving detach costs `asset:delete` too (issue #1202 round 2) ─────
+
+  /**
+   * `PATCH /infra/nodes/:id` is gated on `infra:manage`, and one of its branches SOFT-DELETES an
+   * Asset. Every other route that archives an asset costs `asset:delete` (`DELETE /assets/:id`), and
+   * so does the undo (`POST /assets/:id/restore`) — so `infra:manage` alone was a cheaper door to the
+   * same destructive operation. The sibling routes that merely CREATE or LINK an asset already
+   * AND-check `asset:write` at the decorator; this one cannot, because whether it archives at all
+   * depends on a row the decorator never reads. Hence a conditional check in the service, fired from
+   * the exact branch that calls `AssetsService.remove`.
+   */
+  describe('updateNode — the archiving detach AND-checks asset:delete (#1202)', () => {
+    /** The node/asset shape that makes a detach an ARCHIVE: the link carries the provenance marker. */
+    function givenArchivingDetach() {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-auto',
+      });
+      prisma.asset.findFirst.mockResolvedValue({
+        specs: { _infraAutoCreated: true },
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+    }
+
+    it('403s a human holding infra:manage but NOT asset:delete, and writes NOTHING', async () => {
+      givenArchivingDetach();
+      permissions.hasAll.mockResolvedValue(false); // the role lacks `asset:delete`
+
+      await expect(
+        service.updateNode('node-1', { assetId: null }, HUMAN),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      // The refusal is complete, not partial: the asset survives AND the link is left standing, so a
+      // retry after the grant starts from the state the operator was looking at.
+      expect(assets.remove).not.toHaveBeenCalled();
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+      // It asked the matrix the ONE question it needs — the archive verb, resolved DB-first.
+      expect(permissions.hasAll).toHaveBeenCalledWith('MEMBER', [
+        'asset:delete',
+      ]);
+    });
+
+    it('the 403 NAMES the missing permission and why — a policy answer, not a bug report', async () => {
+      givenArchivingDetach();
+      permissions.hasAll.mockResolvedValue(false);
+
+      await expect(
+        service.updateNode('node-1', { assetId: null }, HUMAN),
+      ).rejects.toThrow(INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR);
+
+      const message = INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR;
+      expect(message).toContain('asset:delete'); // the permission to ask an admin for
+      expect(message).toContain('infra:manage'); // what the caller does hold, and what it still buys
+    });
+
+    it('ALLOWS the archiving detach once the role also holds asset:delete', async () => {
+      givenArchivingDetach();
+      permissions.hasAll.mockResolvedValue(true);
+
+      await service.updateNode('node-1', { assetId: null }, HUMAN);
+
+      expect(assets.remove).toHaveBeenCalledWith('asset-auto', HUMAN);
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBeNull();
+    });
+
+    it('does NOT gate the un-link branch: a curated asset detaches on infra:manage alone', async () => {
+      // The whole point of making the check conditional. This branch destroys nothing — it drops a
+      // column — so charging `asset:delete` for it would be a regression dressed as caution.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-curated',
+      });
+      prisma.asset.findFirst.mockResolvedValue({ specs: { cpu: 8 } }); // no marker
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+      permissions.hasAll.mockResolvedValue(false); // no `asset:delete` anywhere in sight
+
+      await service.updateNode('node-1', { assetId: null }, HUMAN);
+
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBeNull();
+      expect(assets.remove).not.toHaveBeenCalled();
+      // …and the matrix was never even consulted: no archive, no question.
+      expect(permissions.hasAll).not.toHaveBeenCalled();
+    });
+
+    it('does not gate a detach whose asset row has already vanished (nothing to archive)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-gone',
+      });
+      prisma.asset.findFirst.mockResolvedValue(null); // already gone
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+      permissions.hasAll.mockResolvedValue(false);
+
+      await service.updateNode('node-1', { assetId: null }, HUMAN);
+
+      expect(prisma.infraNode.update).toHaveBeenCalled();
+      expect(permissions.hasAll).not.toHaveBeenCalled();
+    });
+
+    it('resolves a SERVICE principal from its DIRECT grants, never the role matrix (ADR-0048)', async () => {
+      givenArchivingDetach();
+
+      await service.updateNode(
+        'node-1',
+        { assetId: null },
+        MAP_MANAGER_SA_WITH_DELETE,
+      );
+
+      expect(assets.remove).toHaveBeenCalledWith(
+        'asset-auto',
+        MAP_MANAGER_SA_WITH_DELETE,
+      );
+      // A service account has no Role, so asking the matrix would be a category error.
+      expect(permissions.hasAll).not.toHaveBeenCalled();
+    });
+
+    it('403s a service principal that manages the map but was never granted asset:delete', async () => {
+      givenArchivingDetach();
+
+      await expect(
+        service.updateNode('node-1', { assetId: null }, MAP_MANAGER_SA),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(assets.remove).not.toHaveBeenCalled();
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('FAILS CLOSED when there is no principal at all', async () => {
+      // An unauthenticated caller holds nothing. Treating "no principal" as "not gated" would make
+      // the check bypassable by the one caller least entitled to bypass it.
+      givenArchivingDetach();
+
+      await expect(
+        service.updateNode('node-1', { assetId: null }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(assets.remove).not.toHaveBeenCalled();
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+  });
+
   // ── RUNS_ON migration / active-unique (ADR-0070 §3/§4 UC-4) ─────────────────
 
   describe('createEdge — RUNS_ON one-active-host', () => {
@@ -3223,10 +3546,82 @@ describe('InfraService', () => {
     });
   });
 
-  // ── listNodes — the Servers-list enrichment (ADR-0070 §6, #750) ─────────────
+  describe('listNodes — deprecated compatibility array', () => {
+    it('stays unbounded, preserves the historical filters, and returns a bare array', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-1', label: 'web-01', assetId: null, asset: null },
+      ]);
 
-  describe('listNodes — asset name + owners enrichment', () => {
+      const rows = await service.listNodes({
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+      });
+
+      const arg = firstArg<{
+        where: Record<string, unknown>;
+        take?: number;
+        skip?: number;
+        select: Record<string, unknown>;
+      }>(prisma.infraNode.findMany);
+      expect(arg.where).toMatchObject({
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+      });
+      expect(arg.take).toBeUndefined();
+      expect(arg.skip).toBeUndefined();
+      expect(arg.select.asset).toBeDefined();
+      expect(rows).toEqual([
+        expect.objectContaining({ id: 'node-1', assetName: null, owners: [] }),
+      ]);
+      expect(rows).not.toHaveProperty('items');
+      expect(prisma.infraNode.count).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('uses the shared privacy mapper for an archived linked Asset', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-1',
+          asset: {
+            name: 'archived-secret-name',
+            deletedAt: new Date('2026-01-01T00:00:00.000Z'),
+            assignments: [
+              {
+                id: 'as-1',
+                user: {
+                  id: 'u-1',
+                  firstName: 'Archived',
+                  lastName: 'Owner',
+                  email: 'archived@example.com',
+                  deletedAt: null,
+                },
+              },
+            ],
+          },
+        },
+      ]);
+
+      await expect(service.listNodes({})).resolves.toEqual([
+        expect.objectContaining({ assetName: null, owners: [] }),
+      ]);
+    });
+  });
+
+  // ── listNodePage — the Servers-list enrichment (ADR-0070 §6, #750) ─────────
+
+  describe('listNodePage — asset name + owners enrichment', () => {
+    /** What the controller hands the service for a bare `GET /infra/nodes/page`. */
+    const FIRST_PAGE = {
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      deleted: 'active',
+    } as const satisfies PageQuery;
+
     it('flattens assetName + owners from ONE include (no N+1), via the active assignments + user', async () => {
+      const departedAt = new Date('2026-01-02T00:00:00.000Z');
+      prisma.infraNode.count.mockResolvedValue(1);
       prisma.infraNode.findMany.mockResolvedValue([
         {
           id: 'node-1',
@@ -3243,7 +3638,7 @@ describe('InfraService', () => {
                   firstName: 'Ada',
                   lastName: 'Lovelace',
                   email: 'ada@example.com',
-                  deletedAt: null,
+                  deletedAt: departedAt,
                 },
               },
             ],
@@ -3251,7 +3646,7 @@ describe('InfraService', () => {
         },
       ]);
 
-      const rows = await service.listNodes();
+      const { items: rows } = await service.listNodePage({}, FIRST_PAGE);
 
       // The enrichment came from ONE query — a relation include, NOT a per-row detail fetch.
       expect(assignments.findAll).not.toHaveBeenCalled();
@@ -3270,14 +3665,14 @@ describe('InfraService', () => {
           firstName: 'Ada',
           lastName: 'Lovelace',
           email: 'ada@example.com',
-          deletedAt: null,
+          deletedAt: departedAt,
         },
       ]);
       // The flattened row must NOT carry the raw relation object.
       expect((rows[0] as unknown as { asset?: unknown }).asset).toBeUndefined();
     });
 
-    it('does NOT leak a soft-deleted asset name (deletedAt set → assetName null), keeping the node', async () => {
+    it('does NOT leak a soft-deleted asset name or owners, keeping the node', async () => {
       // The soft-delete extension only filters the TOP-LEVEL findMany, not the nested asset include —
       // a soft-deleted asset still arrives through the relation, so the name MUST be gated in app code.
       prisma.infraNode.findMany.mockResolvedValue([
@@ -3288,15 +3683,27 @@ describe('InfraService', () => {
           asset: {
             name: 'should-not-leak',
             deletedAt: new Date('2026-01-01T00:00:00.000Z'),
-            assignments: [],
+            assignments: [
+              {
+                id: 'as-archived',
+                user: {
+                  id: 'u-archived',
+                  firstName: 'Should',
+                  lastName: 'Not leak',
+                  email: 'hidden@example.com',
+                  deletedAt: null,
+                },
+              },
+            ],
           },
         },
       ]);
 
-      const rows = await service.listNodes();
+      const { items: rows } = await service.listNodePage({}, FIRST_PAGE);
 
       expect(rows).toHaveLength(1); // the NODE still surfaces…
       expect(rows[0].assetName).toBeNull(); // …but the archived asset's name is withheld.
+      expect(rows[0].owners).toEqual([]);
     });
 
     it('returns null assetName + empty owners for a graph-only node (no linked asset)', async () => {
@@ -3304,7 +3711,7 @@ describe('InfraService', () => {
         { id: 'node-1', label: 'redis', assetId: null, asset: null },
       ]);
 
-      const rows = await service.listNodes();
+      const { items: rows } = await service.listNodePage({}, FIRST_PAGE);
 
       expect(rows[0].assetName).toBeNull();
       expect(rows[0].owners).toEqual([]);
@@ -3319,7 +3726,7 @@ describe('InfraService', () => {
     it('SELECTS an explicit column list that excludes `specs` (never the full inventory blob)', async () => {
       prisma.infraNode.findMany.mockResolvedValue([]);
 
-      await service.listNodes();
+      await service.listNodePage({}, FIRST_PAGE);
 
       const arg = firstArg<{
         select?: Record<string, unknown>;
@@ -3336,7 +3743,7 @@ describe('InfraService', () => {
     it('still selects every OTHER wire field, so the projection cannot silently starve the list', async () => {
       prisma.infraNode.findMany.mockResolvedValue([]);
 
-      await service.listNodes();
+      await service.listNodePage({}, FIRST_PAGE);
 
       const arg = firstArg<{ select: Record<string, unknown> }>(
         prisma.infraNode.findMany,
@@ -3348,6 +3755,585 @@ describe('InfraService', () => {
           field !== 'assetName' && field !== 'owners' && !arg.select[field],
       );
       expect(missing).toEqual([]);
+    });
+
+    // ── Deterministic ordering (#1152) ──────────────────────────────────────
+    // `createdAt desc` alone is NOT a total order: `createdAt` is not unique. ADR-0095 makes ties
+    // the NORMAL case rather than a freak coincidence — one hypervisor report enrols up to
+    // AGENT_GUESTS_MAX (500) PENDING guest children in a single write, so hundreds of rows share a
+    // `createdAt` down to the millisecond. Postgres is free to return tied rows in any order, and
+    // it does change between reads (heap order shifts as rows are updated by the 40s poll's
+    // confirm/discard traffic). Two consequences, both live today:
+    //   1. The Servers table and the PENDING tray re-shuffle tied rows between polls with no data
+    //      change — rows visibly jump under the operator's cursor mid-review.
+    //   2. It is the precondition for the paging this issue exists to add: an unstable sort under
+    //      LIMIT/OFFSET silently DUPLICATES rows onto one page and DROPS them from another, which
+    //      no error surfaces. Appending the unique `id` makes the order total, so the tiebreaker
+    //      must land before (or with) any page window — it is correct under every paging option.
+    it('orders by createdAt desc with a UNIQUE `id` tiebreaker (a total order, not just newest-first)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({}, FIRST_PAGE);
+
+      const arg = firstArg<{ orderBy: unknown }>(prisma.infraNode.findMany);
+      expect(arg.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
+    });
+
+    it('breaks a same-millisecond tie deterministically (the 500-guest bulk-enrolment case)', async () => {
+      // A hypervisor report writing its guest children in one transaction: identical `createdAt`.
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({}, FIRST_PAGE);
+
+      const arg = firstArg<{ orderBy: Array<Record<string, unknown>> }>(
+        prisma.infraNode.findMany,
+      );
+      // The LAST orderBy term must be a column that is unique per row — otherwise the order stays
+      // partial and ties remain free to move. `id` is the cuid primary key.
+      const tiebreaker = arg.orderBy[arg.orderBy.length - 1];
+      expect(Object.keys(tiebreaker)).toEqual(['id']);
+    });
+
+    // ── The page window (#1152) ─────────────────────────────────────────────
+    // The ordering half of #1152 shipped first (PR #1234) precisely so this half would be safe: an
+    // unstable sort under LIMIT/OFFSET duplicates a row onto one page and drops it from another with
+    // nothing to signal the loss. These pin the window itself.
+
+    it('applies the page window and returns the house Page<T> envelope', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-1', label: 'web-01', assetId: null, asset: null },
+      ]);
+      prisma.infraNode.count.mockResolvedValue(137);
+
+      const page = await service.listNodePage(
+        {},
+        { limit: 25, offset: 50, deleted: 'active' },
+      );
+
+      const arg = firstArg<{ take: number; skip: number }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.take).toBe(25);
+      expect(arg.skip).toBe(50);
+      expect(page).toEqual({
+        items: [expect.objectContaining({ id: 'node-1' })],
+        total: 137,
+        limit: 25,
+        offset: 50,
+      });
+    });
+
+    it('runs findMany + count in ONE transaction over the SAME where (total cannot drift)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraNode.count.mockResolvedValue(0);
+
+      await service.listNodePage({ state: 'PENDING' }, FIRST_PAGE);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), {
+        isolationLevel: 'RepeatableRead',
+      });
+      const listWhere = firstArg<{ where: unknown }>(
+        prisma.infraNode.findMany,
+      ).where;
+      const countWhere = firstArg<{ where: unknown }>(
+        prisma.infraNode.count,
+      ).where;
+      expect(countWhere).toEqual(listWhere);
+    });
+
+    it('propagates a RepeatableRead transaction rejection', async () => {
+      const failure = new Error('page snapshot failed');
+      prisma.$transaction.mockRejectedValueOnce(failure);
+
+      await expect(
+        service.listNodePage({ state: 'PENDING' }, FIRST_PAGE),
+      ).rejects.toBe(failure);
+    });
+
+    it('counts the FILTERED set, not the table — a filter narrows `total` too', async () => {
+      // The tray shows `total` as its pending badge. If `total` counted the whole table, a 3-pending
+      // estate would advertise every node it has ever seen as awaiting review.
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraNode.count.mockResolvedValue(3);
+
+      const page = await service.listNodePage({ state: 'PENDING' }, FIRST_PAGE);
+
+      const countArg = firstArg<{ where: { state?: string } }>(
+        prisma.infraNode.count,
+      );
+      expect(countArg.where.state).toBe('PENDING');
+      expect(page.total).toBe(3);
+    });
+
+    it('keeps every legacy filter (kind / status / state) working under the page', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage(
+        { kind: 'VM', status: 'ONLINE', state: 'CONFIRMED' },
+        FIRST_PAGE,
+      );
+
+      const arg = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where).toMatchObject({
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+      });
+    });
+
+    it('filters by `source`, so "does this estate have any agent node?" is one bounded ask', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage(
+        { source: 'AGENT' },
+        { ...FIRST_PAGE, limit: 1 },
+      );
+
+      const arg = firstArg<{ where: Record<string, unknown>; take: number }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where.source).toBe('AGENT');
+      expect(arg.take).toBe(1);
+    });
+
+    it('filters CHILD by either child identity namespace, independent of node kind', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ role: 'CHILD', kind: 'VM' }, FIRST_PAGE);
+
+      const listWhere = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      ).where;
+      expect(listWhere).toMatchObject({ kind: 'VM' });
+      expect(listWhere.AND).toEqual([
+        {
+          OR: [
+            { externalId: { contains: CONTAINER_ID_SEPARATOR } },
+            { externalId: { contains: GUEST_ID_SEPARATOR } },
+          ],
+        },
+      ]);
+      expect(firstArg<{ where: unknown }>(prisma.infraNode.count).where).toBe(
+        listWhere,
+      );
+    });
+
+    it('filters HOST as null or outside both child namespaces, independent of node kind', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage(
+        { role: 'HOST', kind: 'CONTAINER' },
+        FIRST_PAGE,
+      );
+
+      const listWhere = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      ).where;
+      expect(listWhere).toMatchObject({ kind: 'CONTAINER' });
+      expect(listWhere.AND).toEqual([
+        {
+          OR: [
+            { externalId: null },
+            {
+              NOT: {
+                OR: [
+                  { externalId: { contains: CONTAINER_ID_SEPARATOR } },
+                  { externalId: { contains: GUEST_ID_SEPARATOR } },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+      expect(firstArg<{ where: unknown }>(prisma.infraNode.count).where).toBe(
+        listWhere,
+      );
+    });
+
+    it('applies HOST in Prisma before the page window, so 500 newer children cannot starve one host', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'host-1', label: 'pve-1', assetId: null, asset: null },
+      ]);
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      const page = await service.listNodePage(
+        { role: 'HOST' },
+        { ...FIRST_PAGE, limit: MAX_PAGE_LIMIT },
+      );
+
+      const listArg = firstArg<{
+        where: { AND?: unknown[] };
+        take: number;
+      }>(prisma.infraNode.findMany);
+      expect(listArg.where.AND).toBeDefined();
+      expect(listArg.take).toBe(MAX_PAGE_LIMIT);
+      expect(firstArg<{ where: unknown }>(prisma.infraNode.count).where).toBe(
+        listArg.where,
+      );
+      expect(page).toMatchObject({
+        items: [expect.objectContaining({ id: 'host-1' })],
+        total: 1,
+      });
+    });
+
+    it('filters by `ids`, so a label lookup asks for exactly the nodes it needs', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ ids: ['n-1', 'n-2'] }, FIRST_PAGE);
+
+      const arg = firstArg<{ where: { id?: { in: string[] } } }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where.id).toEqual({ in: ['n-1', 'n-2'] });
+    });
+
+    it('filters by `assetIds`, so the Assets list can ask only about the rows it is showing', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ assetIds: ['a-1', 'a-2'] }, FIRST_PAGE);
+
+      const arg = firstArg<{ where: { assetId?: { in: string[] } } }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where.assetId).toEqual({ in: ['a-1', 'a-2'] });
+    });
+
+    it('searches server-side over label / IP / linked asset name / owner name+email', async () => {
+      // The Servers table used to filter the loaded array in memory. Under a page that would be a
+      // FALSE "no results" for anything past the window, so `q` has to reach the database.
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ q: 'ada' }, FIRST_PAGE);
+
+      const arg = firstArg<{ where: { OR?: unknown[] } }>(
+        prisma.infraNode.findMany,
+      );
+      const or = JSON.stringify(arg.where.OR);
+      expect(arg.where.OR).toBeDefined();
+      expect(or).toContain('label');
+      expect(or).toContain('ipAddress');
+      // The linked Asset's inventory name and its ACTIVE owners — the two joined facts the row shows.
+      expect(or).toContain('asset');
+      expect(or).toContain('email');
+      // Case-insensitive, or a search box would only match the operator's exact capitalization.
+      expect(or).toContain('insensitive');
+    });
+
+    it('matches a linked Asset name only when that Asset is live', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ q: 'archive' }, FIRST_PAGE);
+
+      const where = firstArg<{
+        where: {
+          OR: Array<{ asset?: { is?: Record<string, unknown> } }>;
+        };
+      }>(prisma.infraNode.findMany).where;
+      const assetNameBranch = where.OR.find(
+        (branch) => branch.asset?.is?.name !== undefined,
+      );
+      expect(assetNameBranch).toEqual({
+        asset: {
+          is: {
+            deletedAt: null,
+            name: { contains: 'archive', mode: 'insensitive' },
+          },
+        },
+      });
+    });
+
+    it('cannot match owners through an archived linked Asset', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ q: 'hidden-owner' }, FIRST_PAGE);
+
+      const where = firstArg<{
+        where: {
+          OR: Array<{ asset?: { is?: Record<string, unknown> } }>;
+        };
+      }>(prisma.infraNode.findMany).where;
+      const ownerBranch = where.OR.find(
+        (branch) => branch.asset?.is?.assignments !== undefined,
+      );
+      expect(ownerBranch?.asset?.is).toMatchObject({
+        deletedAt: null,
+        assignments: {
+          some: { releasedAt: null },
+        },
+      });
+    });
+
+    it('sorts by an allowlisted field and STILL appends the id tiebreaker', async () => {
+      // Sorting by `label` re-opens the tie problem the default order closed: labels are not unique
+      // (two hosts named `web-01` in different sites), so without `id` the page window is unstable
+      // again — which is a silent row loss, not a cosmetic wobble.
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage(
+        {},
+        { ...FIRST_PAGE, sort: 'label', dir: 'asc' },
+      );
+
+      const arg = firstArg<{ orderBy: Array<Record<string, unknown>> }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.orderBy[0]).toEqual({ label: 'asc' });
+      expect(arg.orderBy[arg.orderBy.length - 1]).toEqual({ id: 'desc' });
+    });
+
+    it('rejects a sort field outside the allowlist with 400 (never silently ignored)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.listNodePage({}, { ...FIRST_PAGE, sort: 'specs', dir: 'asc' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+    });
+
+    it('keeps the lean projection under the page (no `specs`, still one join)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({}, FIRST_PAGE);
+
+      const arg = firstArg<{ select: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.select).not.toHaveProperty('specs');
+      expect(arg.select.asset).toBeDefined();
+    });
+  });
+
+  // ── listGraphNodes — the canvas's own bounded read (#1152) ──────────────────
+  //
+  // The map is the one surface that must stay COMPLETE: a node dropped from a page is a shorter
+  // list, but a node dropped from the map takes its edges with it and reads as "nothing runs here".
+  // So it gets its own endpoint — bounded, but bounded HONESTLY.
+
+  describe('listGraphNodes', () => {
+    it('projects ONLY what the board draws — no owners/assetName join, no specs', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listGraphNodes();
+
+      const arg = firstArg<{
+        select: Record<string, unknown>;
+        include?: unknown;
+      }>(prisma.infraNode.findMany);
+      expect(Object.keys(arg.select).sort()).toEqual(
+        Object.keys(InfraGraphNodeSchema.shape).sort(),
+      );
+      // The joins the canvas never rendered. Each one costs a relation read PER ROW on an
+      // unpaginated, polled endpoint — the whole point of giving the canvas its own projection.
+      expect(arg.select).not.toHaveProperty('asset');
+      expect(arg.select).not.toHaveProperty('shortcuts');
+      expect(arg.select).not.toHaveProperty('specs');
+      expect(arg.include).toBeUndefined();
+    });
+
+    it('caps the read at INFRA_GRAPH_NODES_MAX and orders it totally', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listGraphNodes();
+
+      const arg = firstArg<{ take: number; orderBy: unknown; skip?: number }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.take).toBe(INFRA_GRAPH_NODES_MAX);
+      expect(arg.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
+      // No window to address: this is a complete read with a ceiling, not page one of many.
+      expect(arg.skip).toBeUndefined();
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), {
+        isolationLevel: 'RepeatableRead',
+      });
+    });
+
+    it('propagates a RepeatableRead transaction rejection', async () => {
+      const failure = new Error('graph-node snapshot failed');
+      prisma.$transaction.mockRejectedValueOnce(failure);
+
+      await expect(service.listGraphNodes()).rejects.toBe(failure);
+    });
+
+    it('reports truncated: false when the whole estate fits', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'n-1' },
+        { id: 'n-2' },
+      ]);
+      prisma.infraNode.count.mockResolvedValue(2);
+
+      await expect(service.listGraphNodes()).resolves.toEqual({
+        items: [{ id: 'n-1' }, { id: 'n-2' }],
+        total: 2,
+        limit: INFRA_GRAPH_NODES_MAX,
+        truncated: false,
+      });
+    });
+
+    it('reports truncated: true the moment the cap bites — the map is never quietly short', async () => {
+      const capped = Array.from({ length: INFRA_GRAPH_NODES_MAX }, (_, i) => ({
+        id: `n-${i}`,
+      }));
+      prisma.infraNode.findMany.mockResolvedValue(capped);
+      prisma.infraNode.count.mockResolvedValue(INFRA_GRAPH_NODES_MAX + 1);
+
+      const graph = await service.listGraphNodes();
+
+      expect(graph.truncated).toBe(true);
+      // `total` is what EXISTS, not what was returned, so the UI can say "2000 of 2001".
+      expect(graph.total).toBe(INFRA_GRAPH_NODES_MAX + 1);
+      expect(graph.items).toHaveLength(INFRA_GRAPH_NODES_MAX);
+    });
+
+    it('is exactly at the boundary: total === cap is COMPLETE, not truncated', async () => {
+      // An off-by-one here is the difference between a permanent false alarm on a full estate and a
+      // silent loss on an over-full one.
+      const capped = Array.from({ length: INFRA_GRAPH_NODES_MAX }, (_, i) => ({
+        id: `n-${i}`,
+      }));
+      prisma.infraNode.findMany.mockResolvedValue(capped);
+      prisma.infraNode.count.mockResolvedValue(INFRA_GRAPH_NODES_MAX);
+
+      await expect(service.listGraphNodes()).resolves.toMatchObject({
+        truncated: false,
+        total: INFRA_GRAPH_NODES_MAX,
+      });
+    });
+
+    it('cannot be starved by the ADR-0030 page cap (the rejected Option 2)', () => {
+      // Letting the canvas ask the paged list for `limit=200` was the cheap option. It is wrong:
+      // one ADR-0095 hypervisor host can enrol 500 guests, so 200 drops nodes off a normal map.
+      expect(INFRA_GRAPH_NODES_MAX).toBeGreaterThan(MAX_PAGE_LIMIT);
+    });
+  });
+
+  describe('listGraphEdges', () => {
+    it('reads only active edges whose source and target nodes are live, using the same where for count', async () => {
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listGraphEdges();
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), {
+        isolationLevel: 'RepeatableRead',
+      });
+      const listWhere = firstArg<{ where: unknown }>(
+        prisma.infraEdge.findMany,
+      ).where;
+      expect(listWhere).toEqual({
+        endedAt: null,
+        source: { deletedAt: null },
+        target: { deletedAt: null },
+      });
+      expect(firstArg<{ where: unknown }>(prisma.infraEdge.count).where).toBe(
+        listWhere,
+      );
+    });
+
+    it('propagates a RepeatableRead transaction rejection', async () => {
+      const failure = new Error('graph-edge snapshot failed');
+      prisma.$transaction.mockRejectedValueOnce(failure);
+
+      await expect(service.listGraphEdges()).rejects.toBe(failure);
+    });
+
+    it('orders newest-first with a unique tiebreaker, caps at 10,000, and has no skip', async () => {
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listGraphEdges();
+
+      const arg = firstArg<{
+        orderBy: unknown;
+        take: number;
+        skip?: number;
+      }>(prisma.infraEdge.findMany);
+      expect(arg.orderBy).toEqual([{ startedAt: 'desc' }, { id: 'desc' }]);
+      expect(arg.take).toBe(INFRA_GRAPH_EDGES_MAX);
+      expect(arg.skip).toBeUndefined();
+    });
+
+    it('returns an untruncated zero envelope', async () => {
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.infraEdge.count.mockResolvedValue(0);
+
+      await expect(service.listGraphEdges()).resolves.toEqual({
+        items: [],
+        total: 0,
+        limit: INFRA_GRAPH_EDGES_MAX,
+        truncated: false,
+      });
+    });
+
+    it('reports exact-cap as complete', async () => {
+      const items = Array.from({ length: INFRA_GRAPH_EDGES_MAX }, (_, id) => ({
+        id: `edge-${id}`,
+      }));
+      prisma.infraEdge.findMany.mockResolvedValue(items);
+      prisma.infraEdge.count.mockResolvedValue(INFRA_GRAPH_EDGES_MAX);
+
+      await expect(service.listGraphEdges()).resolves.toMatchObject({
+        items,
+        total: INFRA_GRAPH_EDGES_MAX,
+        limit: INFRA_GRAPH_EDGES_MAX,
+        truncated: false,
+      });
+    });
+
+    it('reports one-over-cap as truncated', async () => {
+      const items = Array.from({ length: INFRA_GRAPH_EDGES_MAX }, (_, id) => ({
+        id: `edge-${id}`,
+      }));
+      prisma.infraEdge.findMany.mockResolvedValue(items);
+      prisma.infraEdge.count.mockResolvedValue(INFRA_GRAPH_EDGES_MAX + 1);
+
+      await expect(service.listGraphEdges()).resolves.toMatchObject({
+        items,
+        total: INFRA_GRAPH_EDGES_MAX + 1,
+        limit: INFRA_GRAPH_EDGES_MAX,
+        truncated: true,
+      });
+    });
+  });
+
+  // ── Edge list ordering (#1152) ──────────────────────────────────────────────
+
+  describe('listEdgesForNode', () => {
+    // The SAME defect as the node list above, one method away and on the same screens. `startedAt`
+    // is `@default(now())` with no unique tiebreaker, and a hypervisor report creates its guests'
+    // `RUNS_ON` edges back to back inside one write — so same-millisecond ties are the normal case
+    // here too, not a freak coincidence.
+    //
+    // Why it is worse on this endpoint than on the node list: the Connections drill-in
+    // (`node-edges-manager.tsx`) renders this array in SERVER order (it only filters on `endedAt`,
+    // it never sorts), and every infra mutation invalidates `infraKeys.all`, so it re-fetches
+    // constantly. The operator opens Connections to close one stale edge on a 40-guest host; any
+    // invalidation re-orders the tied rows and the row under the cursor is now a DIFFERENT edge.
+    // Closing an edge is a write, so the mis-click lands. Appending the unique `id` makes the order
+    // total and the rows stable between reads.
+    it('orders by startedAt desc with a UNIQUE `id` tiebreaker (a total order)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'host-1' });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listEdgesForNode('host-1');
+
+      const arg = firstArg<{ orderBy: unknown }>(prisma.infraEdge.findMany);
+      expect(arg.orderBy).toEqual([{ startedAt: 'desc' }, { id: 'desc' }]);
+    });
+
+    it('breaks a same-millisecond tie deterministically (guests enrolled in one hypervisor report)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({ id: 'host-1' });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listEdgesForNode('host-1', false);
+
+      const arg = firstArg<{ orderBy: Array<Record<string, unknown>> }>(
+        prisma.infraEdge.findMany,
+      );
+      // The LAST orderBy term must be unique per row, or the order stays partial and ties can move.
+      const tiebreaker = arg.orderBy[arg.orderBy.length - 1];
+      expect(Object.keys(tiebreaker)).toEqual(['id']);
     });
   });
 
@@ -3743,7 +4729,8 @@ describe('InfraService', () => {
         state: 'CONFIRMED',
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
-        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        // policy. This fixture reports agentVersion 2.0.0 — past the ADR-0095 §7 floor — so the
+        // projection is the identity and the SIX-key default rides out unchanged.
         policy: AGENT_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
@@ -3844,7 +4831,8 @@ describe('InfraService', () => {
         state: 'PENDING',
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
-        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        // policy. This fixture reports agentVersion 2.0.0 — past the ADR-0095 §7 floor — so the
+        // projection is the identity and the SIX-key default rides out unchanged.
         policy: AGENT_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
@@ -4136,7 +5124,8 @@ describe('InfraService', () => {
         state: 'PENDING',
         accepted: true,
         // #1140: the ack is the policy channel, so an accepted report carries the resolved
-        // policy. The default mock resolves AGENT_POLICY_DEFAULT — the pre-#1140 behaviour.
+        // policy. This fixture reports agentVersion 2.0.0 — past the ADR-0095 §7 floor — so the
+        // projection is the identity and the SIX-key default rides out unchanged.
         policy: AGENT_POLICY_DEFAULT,
         // #1142: and every ack states that this build understands `softwareState` — the evidence
         // the agent needs before it may omit an unchanged package list.
@@ -4777,6 +5766,9 @@ describe('InfraService', () => {
         // `virtualization: kvm` ⇒ the server proposed VM (#1139); the rule matches what it proposed,
         // never a value the agent chose.
         kind: 'VM',
+        // The report carried no `host.chassis`, and absent evidence is stated as null rather than
+        // omitted — a rule that states a chassis must never match on a fact nobody reported.
+        chassis: null,
         isContainerChild: false,
       });
     });
@@ -4977,6 +5969,10 @@ describe('InfraService', () => {
 
       expect(autoConfirm.resolve).toHaveBeenCalledWith({
         hostname: 'redis',
+        // A container child's blob is `{ container, reportedAt }` — no `host` key at all (#1139) — so
+        // it has no form factor, and offering its HOST's would let a chassis rule confirm containers
+        // on the strength of the box they run on (ADR-0093 §6).
+        chassis: null,
         // A container child has no IP of its own on the node (the host owns the address).
         ipAddress: null,
         kind: 'CONTAINER',
@@ -6019,6 +7015,1850 @@ describe('InfraService', () => {
         ).rejects.toBeInstanceOf(NotFoundException);
         expect(prisma.infraNodeFactChange.findMany).not.toHaveBeenCalled();
       });
+    });
+  });
+  // ── Chassis routing + adoption by corroborated serial (ADR-0093, #1198) ─────
+
+  describe('the agent-owned chassis column (ADR-0093 §2)', () => {
+    const laptopReport = (chassis?: string) =>
+      AgentReportSchema.parse({
+        agentVersion: '2.0.0',
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+        reportedAt: '2026-08-03T12:00:00.000Z',
+        host: {
+          hostname: 'jm-laptop',
+          os: { family: 'linux', name: 'Fedora', version: '42' },
+          ...(chassis !== undefined ? { chassis } : {}),
+        },
+      });
+
+    it('writes the reported form factor on the CREATE branch — routable on day one', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-1',
+        state: 'PENDING',
+      });
+
+      await service.ingestReport(laptopReport('laptop'), AGENT_SA);
+
+      const arg = firstArg<{ data: { chassis?: string } }>(
+        prisma.infraNode.create,
+      );
+      expect(arg.data.chassis).toBe('laptop');
+    });
+
+    it('refreshes it on EVERY report — a re-image or a board swap changes the truth', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'jm-laptop',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(laptopReport('server'), AGENT_SA);
+
+      const arg = firstArg<{ data: { chassis?: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.chassis).toBe('server');
+    });
+
+    it('`unknown` IS a reported value and DOES write — it retires a stale `laptop`', async () => {
+      // "The probe did not run" is a fact the host reported about itself, and it is a DIFFERENT fact
+      // from `laptop`. Refusing to write it would leave a re-imaged box hidden from the canvas on the
+      // strength of a chassis nobody has confirmed since.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'jm-laptop',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(laptopReport('unknown'), AGENT_SA);
+
+      const arg = firstArg<{ data: { chassis?: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.chassis).toBe('unknown');
+    });
+
+    it('an ABSENT chassis never clears a stored one — a downgraded agent must not un-heal the estate', async () => {
+      // A pre-v2 agent (or a rolled-back collector) sends no chassis at all. Treating that silence as
+      // `null` would wipe a good value on every report from a host whose agent was downgraded, and the
+      // §8 upgrade promise is that the column FILLS lazily, never that it empties lazily.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'jm-laptop',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+
+      await service.ingestReport(laptopReport(), AGENT_SA);
+
+      const arg = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data).not.toHaveProperty('chassis');
+    });
+
+    it('a CONTAINER child never carries one — its blob has no `host` key at all (#1139)', async () => {
+      const dockerHost = AgentReportSchema.parse({
+        agentVersion: '2.0.0',
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+        reportedAt: '2026-08-03T12:00:00.000Z',
+        host: {
+          hostname: 'docker-01',
+          os: { family: 'linux', name: 'Debian', version: '13' },
+          chassis: 'server',
+          containers: [{ name: 'redis', id: 'aaaaaaaaaaaa', state: 'running' }],
+        },
+      });
+      // The HOST resolves (create), then the child lookup finds nothing and creates the child.
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-host', state: 'PENDING' })
+        .mockResolvedValue({ id: 'node-child' });
+
+      await service.ingestReport(dockerHost, AGENT_SA);
+
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      const hostCreate = calls[0][0] as { data: { chassis?: string } };
+      const childCreate = calls[1][0] as { data: Record<string, unknown> };
+      expect(hostCreate.data.chassis).toBe('server');
+      expect(childCreate.data).not.toHaveProperty('chassis');
+    });
+  });
+
+  describe('confirmNode — adoption by corroborated serial (ADR-0093 §3/§3a/§4)', () => {
+    /** A PENDING node whose stored blob corroborates its serial: the serial IS in the evidence, plus a MAC. */
+    function pendingCorroborated(
+      overrides: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'PENDING',
+        assetId: null,
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+        specs: {
+          host: {
+            hostname: 'jm-laptop',
+            hardware: { serial: 'SN-REAL-123' },
+            identifiers: [
+              { kind: 'serial', value: 'SN-REAL-123' },
+              { kind: 'mac', value: '00:15:5d:01:02:03' },
+            ],
+          },
+        },
+        ...overrides,
+      };
+    }
+
+    /** confirmNode reads the node first (PENDING), then re-reads it CONFIRMED for the detail. */
+    function confirmReads(node: Record<string, unknown>): void {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(node)
+        .mockResolvedValue({ ...node, state: 'CONFIRMED' });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        state: 'CONFIRMED',
+      });
+    }
+
+    it('ADOPTS the live Asset carrying the corroborated serial instead of minting a duplicate', async () => {
+      confirmReads(pendingCorroborated());
+      // The one indexed probe answers with the operator's curated row.
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      // No Asset is created — the whole point.
+      expect(assets.create).not.toHaveBeenCalled();
+      const arg = firstArg<{ data: { state: string; assetId?: string } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.state).toBe('CONFIRMED');
+      expect(arg.data.assetId).toBe('asset-curated');
+    });
+
+    it('probes the INDEXED serial lookup, and never `findIdentityMatches`', async () => {
+      // `findIdentityMatches` asks "which other NODES look like this node?" over an un-indexed jsonb
+      // containment scan — a different question on the wrong side of the join. Adoption asks "which
+      // ASSET carries this serial?", which `assets_serial_active_key` answers as an index lookup, and
+      // this path runs INSIDE the report request when an auto-confirm rule is saved (#1145).
+      const identityMatches = jest.spyOn(service, 'findIdentityMatches');
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(identityMatches).not.toHaveBeenCalled();
+      const probe = firstArg<{ where: Record<string, unknown> }>(
+        prisma.asset.findFirst,
+      );
+      expect(probe.where).toEqual({ serial: 'SN-REAL-123' });
+    });
+
+    it('does NOT stamp the auto-created marker on an adopted Asset — the load-bearing safety rule', async () => {
+      // `detachAsset` soft-deletes an asset carrying `_infraAutoCreated`. Stamping it here would mean
+      // a later detach silently deleted the operator's curated inventory row.
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      // Nothing wrote to the adopted asset at all: no create, no specs update, no serial write-back.
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(prisma.asset.update).not.toHaveBeenCalled();
+    });
+
+    it('and so DETACHING an adopted Asset leaves it intact — exactly what #1117 promises', async () => {
+      // The end-to-end consequence of the rule above, asserted where an operator would feel it.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        assetId: 'asset-curated',
+      });
+      // The adopted asset carries no marker — because adoption never wrote one.
+      prisma.asset.findFirst.mockResolvedValue({
+        specs: { host: { hostname: 'jm-laptop' } },
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-1',
+        assetId: null,
+      });
+
+      await service.updateNode('node-1', { assetId: null }, HUMAN);
+
+      expect(assets.remove).not.toHaveBeenCalled();
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBe(null);
+    });
+
+    it('emits AGENT_LINKED ONCE, at the link, naming the node that started writing', async () => {
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(assetHistory.record).toHaveBeenCalledTimes(1);
+      const event = (assetHistory.record.mock.calls as unknown[][])[0][1] as {
+        assetId: string;
+        eventType: string;
+        payload: Record<string, unknown>;
+      };
+      expect(event.assetId).toBe('asset-curated');
+      expect(event.eventType).toBe('AGENT_LINKED');
+      expect(event.payload).toEqual({
+        nodeId: 'node-1',
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+      });
+    });
+
+    it('emits NO AssetHistory event when it MINTS — CREATED is the assets service`s to write', async () => {
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue(null); // no live asset carries the serial
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(assetHistory.record).not.toHaveBeenCalled();
+    });
+
+    it('mints WITH the serial when no live Asset carries it — unchanged #1081 behaviour', async () => {
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue(null);
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      const createArg = firstArg<{
+        serial?: string;
+        modelId?: string;
+        specs: Record<string, unknown>;
+      }>(assets.create);
+      expect(createArg.serial).toBe('SN-REAL-123');
+      // `modelId` stays null on the mint branch: no AssetModel auto-create (#1081), and category
+      // lives on AssetModel, so the agent has no path to one by construction.
+      expect(createArg).not.toHaveProperty('modelId');
+      // The marker IS stamped here — this is the row lazyit invented, so a detach may clean it up.
+      expect(createArg.specs._infraAutoCreated).toBe(true);
+    });
+
+    it('a serial with NO corroborating MAC mints — one fact is not corroboration', async () => {
+      confirmReads(
+        pendingCorroborated({
+          specs: {
+            host: {
+              hostname: 'jm-laptop',
+              hardware: { serial: 'SN-REAL-123' },
+              identifiers: [{ kind: 'serial', value: 'SN-REAL-123' }],
+            },
+          },
+        }),
+      );
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      // The gate short-circuits BEFORE the probe: no query, and a brand-new Asset.
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+      expect(assets.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('FAILS CLOSED on a flagged identity collision — a machine-id under suspicion never adopts', async () => {
+      // Minting is recoverable by hand; attaching the wrong machine to a curated row is not.
+      const node = pendingCorroborated();
+      const specs = node.specs as Record<string, unknown>;
+      confirmReads({
+        ...node,
+        specs: { ...specs, identityConflict: { peerNodeId: 'node-2' } },
+      });
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+      expect(assets.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('a junk (placeholder) serial never adopts — there is nothing to key on', async () => {
+      confirmReads(
+        pendingCorroborated({
+          specs: {
+            host: {
+              hostname: 'jm-laptop',
+              hardware: { serial: 'To be filled by O.E.M.' },
+              identifiers: [{ kind: 'mac', value: '00:15:5d:01:02:03' }],
+            },
+          },
+        }),
+      );
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+      const createArg = firstArg<{ serial?: string }>(assets.create);
+      expect(createArg).not.toHaveProperty('serial');
+    });
+
+    it('trackAsAsset:false still adopts nothing and mints nothing (graph-only is untouched)', async () => {
+      confirmReads(pendingCorroborated());
+
+      await service.confirmNode('node-1', { trackAsAsset: false }, HUMAN);
+
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(assetHistory.record).not.toHaveBeenCalled();
+    });
+
+    it('the #1081 collision retry survives as a RACE BACKSTOP, not the designed path', async () => {
+      // Under §3 a serial that would collide is a serial that corroborates, and a corroborating serial
+      // adopts — so this catch is only reachable when two confirms land at once. Retrying without the
+      // serial still beats failing an operator`s confirm.
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue(null); // nothing to adopt at probe time…
+      assets.create
+        .mockRejectedValueOnce(
+          new KnownError('P2002', { target: 'assets_serial_active_key' }),
+        )
+        .mockResolvedValueOnce({ id: 'asset-new' }); // …but a racing confirm minted it in between
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(assets.create).toHaveBeenCalledTimes(2);
+      const retry = (assets.create.mock.calls as unknown[][])[1][0] as {
+        serial?: string;
+      };
+      expect(retry).not.toHaveProperty('serial');
+    });
+  });
+
+  describe('getNodeDetail — the ADR-0093 display-only hints', () => {
+    const CORROBORATED_SPECS = {
+      host: {
+        hostname: 'jm-laptop',
+        hardware: { serial: 'SN-REAL-123' },
+        identifiers: [
+          { kind: 'serial', value: 'SN-REAL-123' },
+          { kind: 'mac', value: '00:15:5d:01:02:03' },
+        ],
+      },
+    };
+
+    it('`assetCandidate` names the Asset a confirm WOULD adopt', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'PENDING',
+        assetId: null,
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetCandidate).toEqual({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+      // Mutually exclusive with the duplicate hint by construction.
+      expect(detail.duplicateAssetSuspicion).toBe(null);
+    });
+
+    it('is null when the confirm would MINT — the tray must never promise a link it will not make', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'PENDING',
+        assetId: null,
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue(null);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetCandidate).toBe(null);
+    });
+
+    it('is null on a node that is already CONFIRMED — its confirm is an idempotent no-op', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'CONFIRMED',
+        assetId: null,
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetCandidate).toBe(null);
+      expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('`duplicateAssetSuspicion` names the curated row an OLD collision retry duplicated (§8.5)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst
+        // getNodeDetail`s own assetName read…
+        .mockResolvedValueOnce({ name: 'jm-laptop' })
+        // …then the suspicion check: the linked row is auto-created AND serial-less…
+        .mockResolvedValueOnce({
+          serial: null,
+          specs: { _infraAutoCreated: true },
+        })
+        // …and this node`s serial belongs to a DIFFERENT live asset.
+        .mockResolvedValueOnce({
+          id: 'asset-curated',
+          name: 'Dell XPS 7490',
+          serial: 'SN-REAL-123',
+        });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.duplicateAssetSuspicion).toEqual({
+        id: 'asset-curated',
+        name: 'Dell XPS 7490',
+        serial: 'SN-REAL-123',
+      });
+      expect(detail.assetCandidate).toBe(null);
+    });
+
+    it('a linked Asset that CARRIES a serial is not suspicious — nothing was dropped', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst
+        .mockResolvedValueOnce({ name: 'jm-laptop' })
+        .mockResolvedValueOnce({
+          serial: 'SN-REAL-123',
+          specs: { _infraAutoCreated: true },
+        });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.duplicateAssetSuspicion).toBe(null);
+    });
+
+    it('a HUMAN-created linked Asset is never suspected — the marker is the whole signal', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'jm-laptop',
+        state: 'CONFIRMED',
+        assetId: 'asset-human',
+        ipAddress: null,
+        specs: CORROBORATED_SPECS,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst
+        .mockResolvedValueOnce({ name: 'jm-laptop' })
+        .mockResolvedValueOnce({ serial: null, specs: {} });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.duplicateAssetSuspicion).toBe(null);
+    });
+  });
+
+  // ── The detach-outcome read field (#1202) ───────────────────────────────────
+  //
+  // `PATCH { assetId: null }` has two materially different outcomes — soft-delete the linked Asset
+  // (it carries `_infraAutoCreated`) or merely un-link it — and until this field the client could
+  // not tell which one a click would run, because `getNodeDetail` selected only the Asset's `name`.
+  // A confirmation that cannot name its own outcome is the #1202 bug; this is what makes it nameable.
+
+  describe('getNodeDetail — `assetAutoCreated`, which detach a click would run (#1202)', () => {
+    it('is TRUE when the linked Asset carries the auto-created marker — a detach ARCHIVES it', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'web-01',
+        specs: { _infraAutoCreated: true },
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(true);
+    });
+
+    it('is FALSE for a curated Asset — a detach only UN-LINKS it (ADR-0093 §4)', async () => {
+      // The marker is never stamped on the adopt branch, so an adopted/hand-linked row lands here.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-curated',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'Dell XPS 7490',
+        specs: { warranty: 'until 2027' },
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(false);
+    });
+
+    it('is FALSE when the linked Asset has NO specs at all — an absent blob is not a marker', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-curated',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({ name: 'srv-01', specs: null });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(false);
+    });
+
+    it('is FALSE when the marker is present but not exactly `true` — strict, like detachAsset', async () => {
+      // `detachAsset` tests `=== true`. This projection must agree with it EXACTLY, or the dialog
+      // would promise an archive the detach does not perform (or worse, the reverse).
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-1',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'srv-01',
+        specs: { _infraAutoCreated: 'true' },
+      });
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(false);
+    });
+
+    it('is NULL on a graph-only node — there is no link, so there is no detach to describe', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: null,
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(null);
+    });
+
+    it('is NULL when the linked Asset row is GONE — unknown provenance is never a false "safe"', async () => {
+      // The client renders null as the DESTRUCTIVE copy, so a missing row degrades to the cautious
+      // wording rather than to "nothing will be deleted".
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-gone',
+        ipAddress: null,
+        specs: null,
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue(null);
+
+      const detail = await service.getNodeDetail('node-1', HUMAN);
+
+      expect(detail.assetAutoCreated).toBe(null);
+      expect(detail.assetName).toBe(null);
+    });
+
+    it('costs NO extra query — it rides the Asset read the inventory name already makes', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'CONFIRMED',
+        assetId: 'asset-auto',
+        ipAddress: null,
+        specs: null, // no reported serial → the duplicate-suspicion probe short-circuits
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.asset.findFirst.mockResolvedValue({
+        name: 'web-01',
+        specs: { _infraAutoCreated: true },
+      });
+
+      await service.getNodeDetail('node-1', HUMAN);
+
+      // ONE asset read for the whole drill-in: the name + the marker come out of the same row.
+      expect(prisma.asset.findFirst).toHaveBeenCalledTimes(1);
+      expect(prisma.asset.findFirst).toHaveBeenCalledWith({
+        where: { id: 'asset-auto' },
+        select: { name: true, specs: true },
+      });
+    });
+  });
+
+  // ── Hypervisor guest children (ADR-0095 §5, #1217) ──────────────────────────
+  //
+  // The container machinery one level up, MIRRORED: reported-set diff, skip-when-unchanged,
+  // enrollment charged per new child with skip-don't-break, vanished→OFFLINE never deleted,
+  // self-healing RUNS_ON — plus the two things only guests have: a kind derived from the guest's own
+  // nature, and the absorbed-child resolution the §6 identity join leaves behind.
+
+  describe('ingestReport — hypervisor guest children (ADR-0095 §5)', () => {
+    const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+    /** A Proxmox host's report — `guests` ABSENT unless a test supplies it. */
+    const HV_REPORT = {
+      agentVersion: '1.11.0',
+      reportingSource: 'agent:pve',
+      externalId: 'machine-id-pve1',
+      reportedAt: '2026-08-05T12:00:00.000Z',
+      host: {
+        hostname: 'pve-01',
+        hypervisor: { platform: 'proxmox', version: '8.4', nodeName: 'pve1' },
+      },
+    };
+    const reportWithGuests = (guests?: unknown[]) =>
+      AgentReportSchema.parse({
+        ...clone(HV_REPORT),
+        host: {
+          ...clone(HV_REPORT.host),
+          ...(guests !== undefined ? { guests } : {}),
+        },
+      });
+
+    /** Land the host on the CREATE branch, with no guest children known yet. */
+    function hostIsNew(): void {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-hv',
+        state: 'PENDING',
+      });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+    }
+
+    /** Land the host on the KNOWN-key refresh branch. */
+    function hostIsKnown(): void {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-hv',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'pve-01',
+        agentPolicy: null,
+        policyRevision: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-hv',
+        state: 'CONFIRMED',
+      });
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+    }
+
+    it('an ABSENT guests key touches nothing — a downgraded agent never retires children', async () => {
+      // Absent = the collector never probed (older agent, no hypervisor, `collect.hypervisor` off).
+      hostIsNew();
+      await service.ingestReport(reportWithGuests(), AGENT_SA);
+      expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+      expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+      expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+    });
+
+    it("the host's hypervisor facet lands inside specs.host — the existing blob, no new column", async () => {
+      hostIsNew();
+      await service.ingestReport(reportWithGuests(), AGENT_SA);
+      const createArg = firstArg<{
+        data: { specs: { host: { hypervisor?: unknown } } };
+      }>(prisma.infraNode.create);
+      expect(createArg.data.specs.host.hypervisor).toEqual({
+        platform: 'proxmox',
+        version: '8.4',
+        nodeName: 'pve1',
+      });
+    });
+
+    it('mints a PENDING VM child (qemu) with an ACTIVE RUNS_ON edge and NO chassis', async () => {
+      hostIsNew();
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-g1' });
+
+      await service.ingestReport(
+        reportWithGuests([
+          {
+            ref: '101',
+            name: 'db-vm',
+            kind: 'qemu',
+            state: 'running',
+            smbiosUuid: '4C4C4544-0031-3910-8047-B7C04F375A32',
+            macs: ['AA:BB:CC:DD:EE:01'],
+            cores: 4,
+            memoryBytes: 8589934592,
+          },
+        ]),
+        AGENT_SA,
+      );
+
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      const child = (calls[1][0] as { data: Record<string, unknown> }).data;
+      expect(child.kind).toBe('VM');
+      expect(child.label).toBe('db-vm');
+      // The human gate is untouched: a guest is a PROPOSAL, exactly like a container child.
+      expect(child.state).toBe('PENDING');
+      expect(child.source).toBe('AGENT');
+      expect(child.status).toBe('ONLINE');
+      // Keyed on the platform's STABLE ref, scoped to the host — never the name, freely renamed.
+      expect(child.externalId).toBe('machine-id-pve1/guest/101');
+      expect(child.reportingSource).toBe('agent:pve');
+      // Chassis is NEVER written for a child (ADR-0093 §2) — it arrives with the guest's own agent.
+      expect(child).not.toHaveProperty('chassis');
+      // The blob mirrors the container child's shape: `{ guest, reportedAt }`, no `host` key.
+      const specs = child.specs as Record<string, unknown>;
+      expect(specs).not.toHaveProperty('host');
+      expect(specs.reportedAt).toBe('2026-08-05T12:00:00.000Z');
+      expect(specs.guest).toMatchObject({
+        ref: '101',
+        name: 'db-vm',
+        kind: 'qemu',
+        // Normalized by the shared schema — lower-cased UUID, canonical MACs.
+        smbiosUuid: '4c4c4544-0031-3910-8047-b7c04f375a32',
+        macs: ['aa:bb:cc:dd:ee:01'],
+      });
+
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-g1', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
+      // NO auto-confirm offer for a guest child: the #1145 rule vocabulary is HOST/CONTAINER, and a
+      // hypervisor-proposed guest is honestly neither. Only the HOST itself was offered.
+      expect(autoConfirm.resolve).toHaveBeenCalledTimes(1);
+      expect(firstArg<{ hostname: string }>(autoConfirm.resolve).hostname).toBe(
+        'pve-01',
+      );
+    });
+
+    it('an LXC guest is a CONTAINER — the kind derives from the guest, never a hardcode', async () => {
+      hostIsNew();
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-ct' });
+
+      await service.ingestReport(
+        reportWithGuests([{ ref: '200', name: 'ct-cache', kind: 'lxc' }]),
+        AGENT_SA,
+      );
+
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      const child = (calls[1][0] as { data: Record<string, unknown> }).data;
+      expect(child.kind).toBe('CONTAINER');
+      // No reported state → UNKNOWN, never a guess in either direction.
+      expect(child.status).toBe('UNKNOWN');
+    });
+
+    it('maps guest state to node status: running→ONLINE, stopped→OFFLINE', async () => {
+      hostIsNew();
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-g1' })
+        .mockResolvedValueOnce({ id: 'node-g2' });
+
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'up', kind: 'qemu', state: 'running' },
+          { ref: '102', name: 'down', kind: 'qemu', state: 'stopped' },
+        ]),
+        AGENT_SA,
+      );
+
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      expect((calls[1][0] as { data: { status: string } }).data.status).toBe(
+        'ONLINE',
+      );
+      expect((calls[2][0] as { data: { status: string } }).data.status).toBe(
+        'OFFLINE',
+      );
+    });
+
+    it('scopes the child lookup to THIS host and reads past the soft-delete filter', async () => {
+      // The prefix keeps two PVE nodes both running VMID 101 as two guests; `includeSoftDeleted` is
+      // how an ABSORBED guest's archived row keeps resolving its ref to the canonical node.
+      hostIsNew();
+      await service.ingestReport(
+        reportWithGuests([{ ref: '101', name: 'db-vm', kind: 'qemu' }]),
+        AGENT_SA,
+      );
+      const arg = firstArg<{
+        where: Record<string, unknown>;
+        includeSoftDeleted?: boolean;
+      }>(prisma.infraNode.findMany);
+      expect(arg.where).toEqual({
+        reportingSource: 'agent:pve',
+        externalId: { startsWith: 'machine-id-pve1/guest/' },
+      });
+      expect(arg.includeSoftDeleted).toBe(true);
+    });
+
+    it('a KNOWN guest is refreshed, never duplicated — and the unchanged blob is not rewritten', async () => {
+      hostIsKnown();
+      // The stored blob is EXACTLY what this report would write, minus the volatile reportedAt —
+      // parsing the same wire element guarantees the two sides agree byte for byte (#1153).
+      const parsed = reportWithGuests([
+        { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+      ]);
+      const storedGuest = clone(parsed.host.guests![0]);
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-g1',
+          externalId: 'machine-id-pve1/guest/101',
+          specs: { guest: storedGuest, reportedAt: '2026-08-01T00:00:00.000Z' },
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+      prisma.infraEdge.findMany.mockResolvedValue([
+        { id: 'edge-1', sourceId: 'node-g1', target: { deletedAt: null } },
+      ]);
+
+      await service.ingestReport(parsed, AGENT_SA);
+
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      expect(enrollment.tryCharge).not.toHaveBeenCalled();
+      const childUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-g1',
+      )?.[0] as { data: Record<string, unknown> };
+      // Heartbeat scalars always; the jsonb blob only when the facts moved — they did not.
+      expect(childUpdate.data.status).toBe('ONLINE');
+      expect(childUpdate.data.lastReportedAt).toBeInstanceOf(Date);
+      expect(childUpdate.data).not.toHaveProperty('specs');
+      // Curation stays the human's.
+      expect(childUpdate.data).not.toHaveProperty('kind');
+      expect(childUpdate.data).not.toHaveProperty('label');
+      expect(childUpdate.data).not.toHaveProperty('state');
+      // The edge is already active — re-opening would trip the one-active-RUNS_ON index.
+      expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+    });
+
+    it('a guest whose facts MOVED gets its blob rewritten wholesale', async () => {
+      hostIsKnown();
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-g1',
+          externalId: 'machine-id-pve1/guest/101',
+          specs: {
+            guest: {
+              ref: '101',
+              name: 'db-vm',
+              kind: 'qemu',
+              state: 'stopped',
+            },
+            reportedAt: '2026-08-01T00:00:00.000Z',
+          },
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+      prisma.infraEdge.findMany.mockResolvedValue([
+        { id: 'edge-1', sourceId: 'node-g1', target: { deletedAt: null } },
+      ]);
+
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      const childUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-g1',
+      )?.[0] as { data: Record<string, unknown> };
+      expect(childUpdate.data.specs).toMatchObject({
+        guest: { ref: '101', state: 'running' },
+        reportedAt: '2026-08-05T12:00:00.000Z',
+      });
+      expect(childUpdate.data.status).toBe('ONLINE');
+    });
+
+    it('a VANISHED guest goes OFFLINE — never soft-deleted behind the operator', async () => {
+      hostIsKnown();
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-gone',
+          externalId: 'machine-id-pve1/guest/999',
+          specs: {},
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+
+      // `[]` is a POSITIVE finding: the probe ran and this hypervisor runs no guests.
+      await service.ingestReport(reportWithGuests([]), AGENT_SA);
+
+      expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['node-gone'] } },
+        data: { status: 'OFFLINE' },
+      });
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+    });
+
+    it('a spent enrollment budget SKIPS new guests without breaking the rest — no false outage', async () => {
+      hostIsKnown();
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-keep',
+          externalId: 'machine-id-pve1/guest/101',
+          specs: {},
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+      prisma.infraEdge.findMany.mockResolvedValue([
+        { id: 'edge-keep', sourceId: 'node-keep', target: { deletedAt: null } },
+      ]);
+      enrollment.tryCharge.mockReturnValue(false);
+
+      // `900` exhausts the budget; `101` is listed AFTER it and is already known + running.
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '900', name: 'brand-new', kind: 'qemu', state: 'running' },
+          { ref: '101', name: 'keep', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      // The refusal never becomes a retirement…
+      expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      // …and the known guest is still refreshed, so the staleness sweeper stays quiet too.
+      const keepUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-keep',
+      )?.[0] as { data: Record<string, unknown> } | undefined;
+      expect(keepUpdate?.data.status).toBe('ONLINE');
+      expect(keepUpdate?.data.lastReportedAt).toBeInstanceOf(Date);
+    });
+
+    it('still retires a guest the hypervisor genuinely stopped listing, budget or no budget', async () => {
+      hostIsKnown();
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-gone',
+          externalId: 'machine-id-pve1/guest/999',
+          specs: {},
+          assetId: null,
+          deletedAt: null,
+        },
+      ]);
+      enrollment.tryCharge.mockReturnValue(false);
+
+      await service.ingestReport(
+        reportWithGuests([{ ref: '900', name: 'brand-new', kind: 'qemu' }]),
+        AGENT_SA,
+      );
+
+      expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['node-gone'] } },
+        data: { status: 'OFFLINE' },
+      });
+    });
+
+    it('a guest reconcile failure NEVER fails the host report', async () => {
+      hostIsNew();
+      prisma.infraNode.findMany.mockRejectedValue(new Error('db hiccup'));
+
+      const ack = await service.ingestReport(
+        reportWithGuests([{ ref: '101', name: 'db-vm', kind: 'qemu' }]),
+        AGENT_SA,
+      );
+      expect(ack.accepted).toBe(true);
+      expect(ack.nodeId).toBe('node-hv');
+    });
+
+    it('DUPLICATE refs in one report: first occurrence wins, the rest never reach a create', async () => {
+      // A buggy or hostile collector listing one ref twice must not poison the reconcile: without
+      // the dedupe the second create hits the unique index and the throw abandoned every guest
+      // after it — no heartbeat, no edge self-heal, no vanished sweep, on every report forever.
+      hostIsNew();
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockResolvedValueOnce({ id: 'node-g1' })
+        .mockResolvedValueOnce({ id: 'node-g2' });
+
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'first', kind: 'qemu', state: 'running' },
+          { ref: '101', name: 'dup', kind: 'qemu', state: 'stopped' },
+          { ref: '102', name: 'after', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      // The host + exactly TWO children — the duplicate never reached a create…
+      expect(prisma.infraNode.create).toHaveBeenCalledTimes(3);
+      const calls = prisma.infraNode.create.mock.calls as unknown[][];
+      expect((calls[1][0] as { data: { label: string } }).data.label).toBe(
+        'first',
+      ); // first occurrence wins
+      expect((calls[2][0] as { data: { label: string } }).data.label).toBe(
+        'after',
+      ); // the guest AFTER the duplicate still enrolled
+      // …and both real children got their RUNS_ON edge.
+      expect(prisma.infraEdge.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('a racing guest create (P2002) falls through to the refresh — later guests still reconcile', async () => {
+      // Keyed on the QUERY SHAPE rather than call order: the fire-and-forget search sync also
+      // reads through findFirst, so a positional Once-chain would hand the raced row to the
+      // wrong caller. Only the raced child's exact dedup lookup answers with the row.
+      prisma.infraNode.findFirst.mockImplementation(
+        (args: { where?: Record<string, unknown> }) =>
+          Promise.resolve(
+            args?.where?.externalId === 'machine-id-pve1/guest/101' &&
+              !('deletedAt' in (args?.where ?? {}))
+              ? { id: 'node-g1', specs: {}, assetId: null }
+              : null,
+          ),
+      );
+      prisma.infraNode.create
+        .mockResolvedValueOnce({ id: 'node-hv', state: 'PENDING' })
+        .mockRejectedValueOnce(new KnownError('P2002'))
+        .mockResolvedValueOnce({ id: 'node-g2' });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      const ack = await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'raced', kind: 'qemu', state: 'running' },
+          { ref: '102', name: 'after', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      expect(ack.accepted).toBe(true);
+      // The raced child was refreshed, not abandoned…
+      const racedUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-g1',
+      )?.[0] as { data: Record<string, unknown> } | undefined;
+      expect(racedUpdate?.data.status).toBe('ONLINE');
+      // …the guest listed AFTER the race still enrolled, and both got their edge.
+      expect(prisma.infraNode.create).toHaveBeenCalledTimes(3);
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-g1', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-g2', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
+    });
+
+    it('escapes LIKE metacharacters in the guest-lookup prefix (defense-in-depth)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-hv',
+        state: 'PENDING',
+      });
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.ingestReport(
+        AgentReportSchema.parse({
+          ...clone(HV_REPORT),
+          externalId: 'machine_50%',
+          host: {
+            ...clone(HV_REPORT.host),
+            guests: [{ ref: '101', name: 'db-vm', kind: 'qemu' }],
+          },
+        }),
+        AGENT_SA,
+      );
+
+      const arg = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where).toEqual({
+        reportingSource: 'agent:pve',
+        externalId: { startsWith: 'machine\\_50\\%/guest/' },
+      });
+    });
+
+    it('an ABSORBED guest is never re-proposed — its ref resolves to the canonical node', async () => {
+      // The §6 join archived this child with the merge marker AND its reporting key. The next host
+      // report must not mint a fresh PENDING duplicate; it only self-heals the canonical RUNS_ON.
+      hostIsKnown();
+      prisma.infraNode.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'node-g1',
+            externalId: 'machine-id-pve1/guest/101',
+            specs: {
+              guest: { ref: '101', name: 'db-vm', kind: 'qemu' },
+              _infraMergedInto: {
+                nodeId: 'node-canonical',
+                at: '2026-08-04T00:00:00.000Z',
+              },
+            },
+            assetId: null,
+            deletedAt: new Date('2026-08-04T00:00:00.000Z'),
+          },
+        ])
+        // The canonical-liveness check: the node the marker points at is still on the map.
+        .mockResolvedValueOnce([{ id: 'node-canonical' }]);
+
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      // No new child, no enrollment charge, no OFFLINE sweep against the archived row…
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      expect(enrollment.tryCharge).not.toHaveBeenCalled();
+      expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+      // …and the RUNS_ON self-heal wires the CANONICAL node to the reporting host.
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: {
+          sourceId: 'node-canonical',
+          targetId: 'node-hv',
+          kind: 'RUNS_ON',
+        },
+      });
+    });
+
+    it('an absorbed guest whose canonical node was DISCARDED is RE-PROPOSED as a fresh PENDING child', async () => {
+      // The file's own discard semantics, applied consistently: a discarded HOST that keeps
+      // reporting re-proposes PENDING, and a discarded marker-less guest child re-proposes too.
+      // Skipping the ref forever would make the guest permanently unrepresentable with no signal —
+      // the operator uninstalled the in-guest agent and discarded its node, but the hypervisor
+      // still runs the VM every tick, and the tray is where that fact belongs.
+      hostIsKnown();
+      prisma.infraNode.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'node-g1',
+            externalId: 'machine-id-pve1/guest/101',
+            specs: {
+              guest: { ref: '101', name: 'db-vm', kind: 'qemu' },
+              _infraMergedInto: { nodeId: 'node-canonical' },
+            },
+            assetId: null,
+            deletedAt: new Date('2026-08-04T00:00:00.000Z'),
+          },
+        ])
+        .mockResolvedValueOnce([]); // the canonical node is off the map
+      prisma.infraNode.create.mockResolvedValueOnce({ id: 'node-g2' });
+
+      await service.ingestReport(
+        reportWithGuests([
+          { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+        ]),
+        AGENT_SA,
+      );
+
+      // The ref is treated as UNKNOWN again: a fresh PENDING proposal, budget charged, edge opened.
+      expect(enrollment.tryCharge).toHaveBeenCalledTimes(1);
+      const created = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.create,
+      );
+      expect(created.data.state).toBe('PENDING');
+      expect(created.data.externalId).toBe('machine-id-pve1/guest/101');
+      expect(prisma.infraEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-g2', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
+    });
+  });
+
+  // ── The guest identity join (ADR-0095 §6, #1217) ────────────────────────────
+  //
+  // Corroborated SMBIOS UUID + MAC absorbs the host-proposed /guest/ child into the in-guest
+  // agent's own node — ADR-0093's discipline: one notion of "same machine", corroborated, never a
+  // single-signal auto-merge.
+
+  describe('ingestReport — guest identity join (ADR-0095 §6)', () => {
+    const UUID = '4c4c4544-0031-3910-8047-b7c04f375a32';
+
+    /**
+     * The in-guest agent's own report — the report that closes the two-nodes fork. `diagnostics` is
+     * a parameter because #1227's fallback branches its advice on `privileged`: an agent that could
+     * not read the firmware because it is not root gets a different instruction than one whose
+     * firmware is genuinely unreadable.
+     */
+    const vmReport = (identifiers?: unknown[], privileged?: boolean) =>
+      AgentReportSchema.parse({
+        agentVersion: '1.11.0',
+        reportingSource: 'agent:vm',
+        externalId: 'machine-id-vm1',
+        reportedAt: '2026-08-05T12:00:00.000Z',
+        host: {
+          hostname: 'db-vm',
+          ...(identifiers !== undefined ? { identifiers } : {}),
+        },
+        ...(privileged !== undefined
+          ? { diagnostics: { privileged, durationMs: 12 } }
+          : {}),
+      });
+
+    const CORROBORATING = [
+      { kind: 'smbios-uuid', value: UUID.toUpperCase() },
+      { kind: 'mac', value: 'AA:BB:CC:DD:EE:01' },
+    ];
+
+    /** The live /guest/ child the hypervisor proposed for this same machine. */
+    const guestChild = (macs: string[]) => ({
+      id: 'node-guest',
+      externalId: 'machine-id-pve1/guest/101',
+      label: 'db-vm',
+      reportingSource: 'agent:pve',
+      specs: {
+        guest: {
+          ref: '101',
+          name: 'db-vm',
+          kind: 'qemu',
+          smbiosUuid: UUID,
+          macs,
+        },
+        reportedAt: '2026-08-05T11:00:00.000Z',
+      },
+    });
+
+    /**
+     * Route the raw queries by shape: the join's candidate lookup (matches on the smbiosUuid
+     * predicate) and the identity-conflict marker read. Everything else answers empty.
+     */
+    function rawQueries(
+      candidates: unknown[],
+      conflictDetectedAt: string | null = null,
+    ): void {
+      prisma.$queryRaw.mockImplementation((query: { strings?: string[] }) => {
+        const sql = (query?.strings ?? []).join(' ');
+        if (sql.includes('smbiosUuid')) return Promise.resolve(candidates);
+        if (sql.includes('identityConflict')) {
+          return Promise.resolve([{ detectedAt: conflictDetectedAt }]);
+        }
+        return Promise.resolve([]);
+      });
+    }
+
+    /** The VM lands as a NEW node — the branch a fresh in-guest agent install takes. */
+    function vmIsNew(): void {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-vm',
+        state: 'PENDING',
+      });
+    }
+
+    it('CORROBORATED (UUID + MAC): absorbs the child into the canonical node, edge re-pointed', async () => {
+      vmIsNew();
+      rawQueries([guestChild(['aa:bb:cc:dd:ee:01'])]);
+      // The child's active RUNS_ON names the hypervisor host; the canonical node has none yet.
+      prisma.infraEdge.findFirst
+        .mockResolvedValueOnce({ id: 'edge-child', targetId: 'node-hv' })
+        .mockResolvedValueOnce(null);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      // One transaction: archive the child (marker stamped, reporting key KEPT — the guest reconcile
+      // reads it back so the hypervisor can never re-propose an absorbed guest)…
+      const archived = firstArg<{
+        where: { id: string };
+        data: Record<string, unknown>;
+      }>(txNode.update);
+      expect(archived.where).toEqual({ id: 'node-guest' });
+      expect(archived.data.deletedAt).toBeInstanceOf(Date);
+      expect(archived.data).not.toHaveProperty('reportingSource');
+      expect(archived.data).not.toHaveProperty('externalId');
+      expect(archived.data.specs).toMatchObject({
+        _infraMergedInto: { nodeId: 'node-vm' },
+      });
+      // …the child's edge is CLOSED (close-before-open, one-active-RUNS_ON-per-source)…
+      expect(txEdge.updateMany).toHaveBeenCalledWith({
+        where: { id: 'edge-child' },
+        data: { endedAt: expect.any(Date) as Date },
+      });
+      // …and the RUNS_ON lands on the canonical node, pointing at the same hypervisor host.
+      expect(txEdge.create).toHaveBeenCalledWith({
+        data: { sourceId: 'node-vm', targetId: 'node-hv', kind: 'RUNS_ON' },
+      });
+      // The duplicate is off the map and off the index; no suspicion nudge for a resolved join.
+      expect(search.remove).toHaveBeenCalledWith('infra', 'node-guest');
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('UUID WITHOUT a corroborating MAC never merges — it surfaces the suspicion once', async () => {
+      // Clones demonstrably duplicate BIOS UUIDs (VMware KB 321451). One fact is a hint, not a merge.
+      vmIsNew();
+      rawQueries([guestChild(['aa:bb:cc:dd:ee:99'])]); // a different NIC — no corroboration
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(txNode.update).not.toHaveBeenCalled();
+      const emitted = firstArg<{ type: string; dedupeKey: string }>(
+        notifications.emit,
+      );
+      expect(emitted.type).toBe('infra.identity_conflict');
+      // Deduped per (child, uuid): a VM checking in every 15 minutes nudges the operator ONCE.
+      expect(emitted.dedupeKey).toBe(
+        `infra.guest_uuid_suspicion:node-guest:${UUID}`,
+      );
+    });
+
+    it('a child flagged with an identity conflict is NEVER merged — and not even nudged', async () => {
+      vmIsNew();
+      rawQueries([
+        {
+          ...guestChild(['aa:bb:cc:dd:ee:01']),
+          specs: {
+            ...guestChild(['aa:bb:cc:dd:ee:01']).specs,
+            identityConflict: { peerNodeId: 'node-x', detectedAt: 'whenever' },
+          },
+        },
+      ]);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('a reporting node carrying its own conflict marker absorbs nothing', async () => {
+      vmIsNew();
+      rawQueries(
+        [guestChild(['aa:bb:cc:dd:ee:01'])],
+        '2026-08-01T00:00:00.000Z', // the node is under an active #1141 collision marker
+      );
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(txNode.update).not.toHaveBeenCalled();
+    });
+
+    it('NO smbios-uuid AND NO mac in the report → NO candidate query at all — the join is gated, not filtered', async () => {
+      // The bound the ADR demands, NARROWED by #1227 rather than removed: a report carrying no
+      // identity evidence whatsoever still costs literally zero queries. What changed is that
+      // "no smbios-uuid" alone is no longer the gate — see the MAC-fallback block below for why
+      // a bare `return` there was the field bug, and why the fallback can still never merge.
+      vmIsNew();
+
+      await service.ingestReport(vmReport([]), AGENT_SA);
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('the candidate query is deterministic: ORDER BY id under the LIMIT', async () => {
+      // Without an ORDER BY, which 8 rows the LIMIT keeps is planner-dependent — two replicas could
+      // absorb different children from the same estate.
+      vmIsNew();
+      rawQueries([]);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      const candidateCall = (prisma.$queryRaw.mock.calls as unknown[][]).find(
+        (c) =>
+          ((c[0] as { strings?: string[] })?.strings ?? [])
+            .join(' ')
+            .includes('smbiosUuid'),
+      );
+      const sql = (
+        (candidateCall?.[0] as { strings?: string[] })?.strings ?? []
+      ).join(' ');
+      expect(sql).toContain('ORDER BY "id"');
+      expect(sql).toContain('LIMIT');
+    });
+
+    it('warns when the candidate set hits the cap — the true child may be outside it', async () => {
+      // A clone farm sharing one baked UUID can fill the LIMIT with impostors and push the real
+      // child out of the set; the absorb then silently never fires. The warning is the signal.
+      vmIsNew();
+      const impostor = (n: number) => ({
+        id: `node-x${n}`,
+        externalId: `not-a-guest-key-${n}`, // skipped by the guest-key re-check — no merge, no nudge
+        label: `x${n}`,
+        reportingSource: 'agent:x',
+        specs: {},
+      });
+      rawQueries([1, 2, 3, 4, 5, 6, 7, 8].map(impostor));
+      const warn = jest
+        .spyOn(
+          (service as unknown as { logger: { warn: (msg: string) => void } })
+            .logger,
+          'warn',
+        )
+        .mockImplementation(() => undefined);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(
+        warn.mock.calls.some(
+          (c) => typeof c[0] === 'string' && c[0].includes('candidate cap'),
+        ),
+      ).toBe(true);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    // ── #1227: the guest that cannot read its own SMBIOS UUID ────────────────
+    //
+    // THE FIELD BUG. A Windows 11 VM on Proxmox produced two permanent nodes and said nothing.
+    // `Win32_ComputerSystemProduct` returns NO INSTANCE when the QEMU machine type exposes only the
+    // 64-bit SMBIOS 3.0 entry point (QEMU issue #2008), and Proxmox pins the machine version at
+    // creation for WINDOWS guests only — so the Linux VMs on the same host converged and this one
+    // did not. The report then carried no `smbios-uuid`, the join hit a bare `return`, and the
+    // matching MAC — sitting right there on both sides — was never looked at.
+    //
+    // The fallback is HINT-ONLY. A MAC alone must never merge, exactly as a UUID alone never does.
+
+    /** Real Proxmox VE 8.x values for one Windows 11 guest — PVE's own `BC:24:11:` OUI. */
+    const PVE_MAC = 'bc:24:11:2e:9a:0f';
+    const PVE_UUID = '9d6f4b1a-3c2e-4f57-9a80-5e1c7b2d4e63';
+
+    /** What the in-guest Windows agent actually sends on an affected VM: a MAC, and nothing else. */
+    const WINDOWS_ON_PVE = [{ kind: 'mac', value: 'BC:24:11:2E:9A:0F' }]; // WMI answers upper-case
+
+    /** The child the PVE host proposed for that same machine — it DOES know the UUID. */
+    const pveGuestChild = (macs: string[]) => ({
+      id: 'node-guest',
+      externalId: 'machine-id-pve1/guest/101',
+      label: 'WIN11-DC01',
+      reportingSource: 'agent:pve',
+      specs: {
+        guest: {
+          ref: '101',
+          name: 'WIN11-DC01',
+          kind: 'qemu',
+          smbiosUuid: PVE_UUID,
+          macs,
+        },
+      },
+    });
+
+    /** Route the MAC-keyed fallback lookup; everything else answers empty. */
+    function rawQueriesByMac(candidates: unknown[]): void {
+      prisma.$queryRaw.mockImplementation((query: { strings?: string[] }) => {
+        const sql = (query?.strings ?? []).join(' ');
+        if (sql.includes("'macs'")) return Promise.resolve(candidates);
+        return Promise.resolve([]);
+      });
+    }
+
+    function macQuery(): { sql: string; values: unknown[] } {
+      const call = (prisma.$queryRaw.mock.calls as unknown[][]).find((c) =>
+        ((c[0] as { strings?: string[] })?.strings ?? [])
+          .join(' ')
+          .includes("'macs'"),
+      );
+      const arg = call?.[0] as
+        | { strings?: string[]; values?: unknown[] }
+        | undefined;
+      return {
+        sql: (arg?.strings ?? []).join(' '),
+        values: arg?.values ?? [],
+      };
+    }
+
+    it('a guest whose own agent cannot read its SMBIOS UUID still SURFACES — the MAC corroborates', async () => {
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      // (a) The lookup runs at all — today it does not, which is the whole bug.
+      const { sql, values } = macQuery();
+      expect(sql).toContain("'macs'");
+      // Same bounds as the UUID query: /guest/ children only, deterministic, capped — and the
+      // reported MAC is bound lower-cased, so it can meet the stored (schema-canonical) spelling.
+      expect(values).toContain('%/guest/%');
+      // The reported MAC is BOUND (through Prisma.join, hence the nesting) already lower-cased, so
+      // it can meet the stored, schema-canonical spelling without the query doing any work.
+      expect(JSON.stringify(values)).toContain(PVE_MAC);
+      expect(sql).toContain('ORDER BY "id"');
+      expect(sql).toContain('LIMIT');
+
+      // (b) The operator gets ONE nudge, deduped per (child, mac) so a 20-VM host does not ring 20
+      // times per tick for the same pair.
+      const emitted = firstArg<{
+        type: string;
+        dedupeKey: string;
+        summary: string;
+      }>(notifications.emit);
+      expect(emitted.type).toBe('infra.identity_conflict');
+      expect(emitted.dedupeKey).toBe(
+        `infra.guest_mac_suspicion:node-guest:${PVE_MAC}`,
+      );
+      // The copy names the CAUSE — an operator who cannot act on a nudge is being pinged, not told.
+      expect(emitted.summary).toContain('SMBIOS');
+
+      // (c) A MAC ALONE NEVER MERGES. ADR-0095 §6's rule, unweakened.
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(txNode.update).not.toHaveBeenCalled();
+    });
+
+    it('a child whose MACs do NOT actually match is dropped by the read-side re-check — no nudge', async () => {
+      // The negative twin. The jsonb prefilter is not the authority; `guestChildMacs` is, exactly as
+      // on the UUID path — a hand-edited or pre-sanitize blob must not become a false suspicion.
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild(['bc:24:11:2e:9a:99'])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      expect(notifications.emit).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('no matching child at all → no nudge, and still no merge', async () => {
+      vmIsNew();
+      rawQueriesByMac([]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      expect(notifications.emit).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a child under an identity conflict is not even nudged about — suspicion disqualifies both directions', async () => {
+      vmIsNew();
+      rawQueriesByMac([
+        {
+          ...pveGuestChild([PVE_MAC]),
+          specs: {
+            ...pveGuestChild([PVE_MAC]).specs,
+            identityConflict: { peerNodeId: 'node-x', detectedAt: 'whenever' },
+          },
+        },
+      ]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      expect(notifications.emit).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a non-/guest/ row that slipped the LIKE is re-checked and skipped', async () => {
+      vmIsNew();
+      rawQueriesByMac([
+        { ...pveGuestChild([PVE_MAC]), externalId: 'machine-id-pve1' },
+      ]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE), AGENT_SA);
+
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('a report that DOES carry an smbios-uuid never runs the MAC query — the fleet-wide cost bound', async () => {
+      // THE REGRESSION RISK OF THIS FIX. Almost every report carries a `mac`, so an unguarded second
+      // lookup would turn a rare scan into a per-report one across the whole fleet. The fallback is
+      // for reports that have NOTHING ELSE — the UUID path is untouched and remains the only channel
+      // that can merge.
+      vmIsNew();
+      rawQueries([guestChild(['aa:bb:cc:dd:ee:99'])]);
+
+      await service.ingestReport(vmReport(CORROBORATING), AGENT_SA);
+
+      expect(macQuery().sql).toBe('');
+    });
+
+    // ── Who this path ACTUALLY fires on, and what it is allowed to say to them ───
+    //
+    // The gate is "no smbios-uuid + has MACs", and that population is NOT dominated by #1227's
+    // Windows-on-QEMU case. Two much larger groups sit inside it, permanently:
+    //
+    //  (a) UNPRIVILEGED LINUX AGENTS — `/sys/class/dmi/id/product_uuid` is mode 0400, so an
+    //      unprivileged run simply omits the identifier. Unprivileged is a FIRST-CLASS documented
+    //      posture (ADR-0074), not a misconfiguration.
+    //  (b) EVERY PVE LXC CONTAINER RUNNING ITS OWN AGENT — `parsePveConfig` reads `smbios1`, which
+    //      an LXC config does not have, so every LXC `/guest/` child carries macs and no
+    //      smbiosUuid; the in-container agent reports a MAC and no smbios-uuid. That is a
+    //      guaranteed, permanent match on every LXC estate, every report, forever.
+    //
+    // Telling either of those "raise your QEMU machine version" is telling them to do something
+    // that cannot possibly help — a container has no SMBIOS at all. Both facts needed to say the
+    // right thing are already in hand, so the copy branches on them.
+
+    /** The same pair, but the child is a CONTAINER — no SMBIOS UUID exists to be read. */
+    const lxcGuestChild = () => ({
+      id: 'node-ct',
+      externalId: 'machine-id-pve1/guest/205',
+      label: 'ct-web',
+      reportingSource: 'agent:pve',
+      specs: {
+        guest: { ref: '205', name: 'ct-web', kind: 'lxc', macs: [PVE_MAC] },
+      },
+    });
+
+    const emittedSummary = (): string =>
+      firstArg<{ summary: string }>(notifications.emit).summary;
+
+    const spyOnWarn = () =>
+      jest
+        .spyOn(
+          (service as unknown as { logger: { warn: (msg: string) => void } })
+            .logger,
+          'warn',
+        )
+        .mockImplementation(() => undefined);
+
+    it('an LXC child is told the truth: a container has no SMBIOS UUID, so only a hand merge can close it', async () => {
+      vmIsNew();
+      rawQueriesByMac([lxcGuestChild()]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, true), AGENT_SA);
+
+      const summary = emittedSummary();
+      expect(summary).toContain('Containers');
+      // The QEMU advice is FALSE here and must not appear — there is no firmware to fix.
+      expect(summary).not.toContain('smbios-entry-point-type');
+      expect(summary).not.toContain('machine version');
+    });
+
+    it('an UNPRIVILEGED agent is told to run as root, not to reconfigure its hypervisor', async () => {
+      // ADR-0074's documented posture. The firmware UUID is readable; this process just is not
+      // allowed to read it. "Raise your machine version" would be a wild-goose chase.
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, false), AGENT_SA);
+
+      const summary = emittedSummary();
+      expect(summary).toContain('unprivileged');
+      expect(summary).not.toContain('smbios-entry-point-type');
+    });
+
+    it('a PRIVILEGED agent on a qemu guest still gets the #1227 QEMU repair — the case this shipped for', async () => {
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, true), AGENT_SA);
+
+      expect(emittedSummary()).toContain('smbios-entry-point-type=32');
+    });
+
+    it('the fallback LOG is silent when nothing matched — one WARN per report per host, forever, is not a log', async () => {
+      // With the real population above, an unconditional pre-query WARN is ~9,600 lines/day on a
+      // 100-host estate that will never match anything. A log that always fires says nothing.
+      vmIsNew();
+      rawQueriesByMac([]);
+      const warn = spyOnWarn();
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, false), AGENT_SA);
+
+      expect(
+        warn.mock.calls.filter(
+          (c) => typeof c[0] === 'string' && c[0].includes('no SMBIOS UUID'),
+        ),
+      ).toEqual([]);
+    });
+
+    it('…and speaks the moment there IS something to say', async () => {
+      vmIsNew();
+      rawQueriesByMac([pveGuestChild([PVE_MAC])]);
+      const warn = spyOnWarn();
+
+      await service.ingestReport(vmReport(WINDOWS_ON_PVE, true), AGENT_SA);
+
+      expect(
+        warn.mock.calls.some(
+          (c) => typeof c[0] === 'string' && c[0].includes('no SMBIOS UUID'),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  // ── Ack-time policy projection (ADR-0095 §7, #1217) ─────────────────────────
+
+  describe('ingestReport — ack policy projection (ADR-0095 §7)', () => {
+    const reportAt = (agentVersion: string) =>
+      AgentReportSchema.parse({
+        agentVersion,
+        reportingSource: 'agent:proj',
+        externalId: 'machine-id-proj',
+        reportedAt: '2026-08-05T12:00:00.000Z',
+        host: { hostname: 'web-77' },
+      });
+
+    beforeEach(() => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-proj',
+        state: 'PENDING',
+      });
+    });
+
+    it("a pre-1.11 agent ('1.10.3') receives the FIVE-key collect — the shape its strict parse accepts", async () => {
+      const ack = await service.ingestReport(reportAt('1.10.3'), AGENT_SA);
+      expect(ack.policy?.collect).not.toHaveProperty('hypervisor');
+      // The five pre-0095 keys all survive the projection untouched.
+      expect(Object.keys(ack.policy?.collect ?? {}).sort()).toEqual([
+        'containers',
+        'disks',
+        'hardware',
+        'nics',
+        'software',
+      ]);
+    });
+
+    it("an unparseable agentVersion ('dev') projects to the five-key shape — fail-soft", async () => {
+      const ack = await service.ingestReport(reportAt('dev'), AGENT_SA);
+      expect(ack.policy?.collect).not.toHaveProperty('hypervisor');
+    });
+
+    it('a 1.11.0 agent keeps collect.hypervisor — the projection is the identity from the floor on', async () => {
+      const ack = await service.ingestReport(reportAt('1.11.0'), AGENT_SA);
+      expect(ack.policy?.collect.hypervisor).toBe(true);
+    });
+
+    it('projection is WIRE-ONLY: the stored policy columns still see the un-projected resolution', async () => {
+      // A pre-1.11 agent that echoes a revision still has its node stamped with the RESOLVED
+      // staleness — the projection changes what rides the ack, never what the server holds.
+      agentPolicy.resolveForReport.mockResolvedValue({
+        ...AGENT_POLICY_DEFAULT,
+        revision: 9,
+        staleAfterSeconds: 5400,
+      });
+
+      const ack = await service.ingestReport(
+        AgentReportSchema.parse({
+          agentVersion: '1.10.3',
+          reportingSource: 'agent:proj',
+          externalId: 'machine-id-proj',
+          reportedAt: '2026-08-05T12:00:00.000Z',
+          host: { hostname: 'web-77' },
+          policyRevision: 9,
+        }),
+        AGENT_SA,
+      );
+
+      const createArg = firstArg<{
+        data: { policyStaleAfterSeconds?: number };
+      }>(prisma.infraNode.create);
+      expect(createArg.data.policyStaleAfterSeconds).toBe(5400);
+      // The wire still got the projected shape.
+      expect(ack.policy?.collect).not.toHaveProperty('hypervisor');
+      expect(ack.policy?.revision).toBe(9);
     });
   });
 });

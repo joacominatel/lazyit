@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, LinkIcon } from "@heroicons/react/24/outline";
 import {
   type ConfirmInfraNode,
+  type InfraAssetCandidate,
   type InfraNodeKind,
   InfraNodeKindSchema,
   type InfraNodeListItem,
@@ -34,7 +35,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { useConfirmInfraNode } from "@/lib/api/hooks/use-infra-nodes";
+import {
+  useConfirmInfraNode,
+  useInfraNodeDetail,
+} from "@/lib/api/hooks/use-infra-nodes";
 import { notifyError } from "@/lib/api/notify-error";
 
 const KIND_OPTIONS = InfraNodeKindSchema.options;
@@ -56,6 +60,21 @@ interface ConfirmNodeDialogProps {
  * ponytail: no zod resolver — `ConfirmInfraNodeSchema` is a `strictObject` and the API is the real
  * authority; we send only the keys that DIFFER from the node's current kind/label (a bare confirm is
  * `{ trackAsAsset }`). The form remounts per node via the parent's `key`, so it never shows stale drafts.
+ *
+ * **Adoption foresight (ADR-0093 §7).** Since the confirm gate learned to ADOPT an existing Asset
+ * whose serial this report corroborates, rather than mint a second one, "track as an asset" no longer
+ * means one thing — and the operator has to know which before they click, not after. So the dialog
+ * fetches the node's detail purely to read `assetCandidate` and, when the server names one, says so:
+ * *this will link Dell-XPS-7490*, with the serial it matched on. This is the entire reason that read
+ * field exists; a confirm that silently attaches a machine to a row somebody curated is precisely the
+ * surprise it was added to prevent.
+ *
+ * The detail read is display-only and never a gate. `trackAsAsset` stays a plain boolean on a
+ * `strictObject` — adoption is HOW `true` is satisfied, chosen server-side from evidence, not a third
+ * thing this form asks for — so the confirm re-derives its own answer at the moment it runs. A
+ * candidate that is stale, absent, or still in flight can therefore only ever under-inform a human;
+ * it can never mis-link a machine. That is why the copy falls back to today's "will create" wording
+ * rather than blocking on the fetch.
  */
 export function ConfirmNodeDialog({
   open,
@@ -66,6 +85,10 @@ export function ConfirmNodeDialog({
   const tInfra = useTranslations("infra");
   const tc = useTranslations("common");
   const confirm = useConfirmInfraNode();
+  // Read only while the dialog is open: the tray mounts this per target (`key={target.id}`), so the
+  // fetch is bounded to the one node the operator is actually deciding about.
+  const { data: detail } = useInfraNodeDetail(open ? node.id : null);
+  const candidate = detail?.assetCandidate ?? null;
 
   const [trackAsAsset, setTrackAsAsset] = useState(true);
   const [kind, setKind] = useState<InfraNodeKind>(node.kind);
@@ -146,6 +169,12 @@ export function ConfirmNodeDialog({
               />
             </div>
             <FieldDescription>{t("trackAsAssetDescription")}</FieldDescription>
+            {/* Foresight, not a surprise (ADR-0093 §7). Shown only while the toggle is ON, because
+                with it off no Asset is touched at all and naming one would be a promise about
+                something that will not happen. */}
+            {trackAsAsset && candidate ? (
+              <AdoptionNotice candidate={candidate} />
+            ) : null}
           </Field>
         </FieldGroup>
 
@@ -165,5 +194,37 @@ export function ConfirmNodeDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * *"Confirming will link an asset you already have"* (ADR-0093 §7) — the display-only heads-up that
+ * turns an invisible server-side choice into one the operator saw coming.
+ *
+ * It names the Asset and the **serial the server matched on**, because the serial is the entire basis
+ * for the match: a name alone asks the operator to trust a link they cannot check, and the whole
+ * point of adopting rather than duplicating is that the machine in front of them is provably the one
+ * already in inventory. The `info` tone, not `warning` — nothing is wrong here. This is the good
+ * outcome, and the alternative it replaces (a second, serial-less Asset for one physical machine) is
+ * the one worth warning about.
+ */
+function AdoptionNotice({ candidate }: { candidate: InfraAssetCandidate }) {
+  const t = useTranslations("infra.confirm");
+  return (
+    <div className="mt-2 flex items-start gap-2 rounded-md border border-info/40 bg-info/5 p-3 text-xs">
+      <LinkIcon className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
+      <div className="min-w-0 space-y-0.5">
+        <p>{t("adoptExisting")}</p>
+        <p className="truncate font-medium text-foreground" title={candidate.name}>
+          {candidate.name}
+        </p>
+        {candidate.serial ? (
+          <p className="text-muted-foreground">
+            {t("adoptSerial")}{" "}
+            <span className="font-mono">{candidate.serial}</span>
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }

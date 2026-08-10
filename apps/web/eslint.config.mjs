@@ -70,22 +70,31 @@ const eslintConfig = defineConfig([
   {
     name: "lazyit/no-secure-context-only-crypto",
     files: ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.ts"],
-    // `totp.ts` is the one KNOWN remaining offender (TOTP codes are dead on plain HTTP) — tracked
-    // as #1126, which swaps `crypto.subtle` for @noble/hashes. Drop this ignore when it lands.
-    ignores: ["components/ui/**", "lib/secret-manager/totp.ts"],
+    // No `lib/**` exemptions remain: #1126 swapped the last `crypto.subtle` offender
+    // (`lib/secret-manager/totp.ts`) to @noble/hashes, so the guard now covers every file it matches.
+    ignores: ["components/ui/**"],
     rules: {
       // `no-restricted-properties`, NOT `no-restricted-syntax`: flat config REPLACES a rule's
       // options per matching file, so a second `no-restricted-syntax` block would silently
       // disable the raw-palette guard above on every file both blocks match.
+      //
+      // Deliberately PROPERTY-ONLY (no `object: "crypto"`): ESLint matches an `object` key only
+      // when the member-expression object is a bare `Identifier`, so an `object`-scoped entry
+      // caught `crypto.subtle` but silently let through `window.crypto.subtle`,
+      // `globalThis.crypto.subtle`, `self.crypto.subtle` and any local alias — the forms you
+      // actually write in a worker, in SSR-guarded code, or after a `const c = crypto`
+      // extraction. Lint would stay green while the crash shipped again. Matching the property
+      // alone closes every one of those. `.subtle` and `.randomUUID` are not used as ordinary
+      // property names anywhere in apps/web, so the broader match costs no false positives; if a
+      // legitimate unrelated `.subtle` ever appears, exempt that line explicitly rather than
+      // reinstating the `object` key. Pinned by `eslint.config.test.ts`.
       "no-restricted-properties": [
         "error",
         {
-          object: "crypto",
           property: "randomUUID",
           message: SECURE_CONTEXT_ONLY_MESSAGE,
         },
         {
-          object: "crypto",
           property: "subtle",
           message: SECURE_CONTEXT_ONLY_MESSAGE,
         },

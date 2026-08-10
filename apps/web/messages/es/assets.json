@@ -313,6 +313,7 @@
         "modelChanged": "Modelo",
         "specsChanged": "Especificaciones",
         "acknowledged": "Confirmado",
+        "agentLinked": "Agente vinculado",
         "deleted": "Eliminado",
         "restored": "Restaurado"
       },
@@ -323,6 +324,7 @@
         "modelChanged": "Modelo actualizado",
         "specsChanged": "Especificaciones actualizadas",
         "acknowledged": "Recepción confirmada",
+        "agentLinked": "Un agente comenzó a reportar a este activo",
         "deleted": "Activo eliminado",
         "restored": "Activo restaurado"
       }

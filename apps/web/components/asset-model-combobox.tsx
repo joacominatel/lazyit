@@ -24,6 +24,7 @@ export function AssetModelCombobox({
   value,
   onValueChange,
   onModelSelect,
+  onSearchChange,
   ariaInvalid,
   disabled,
   placeholder,
@@ -34,6 +35,14 @@ export function AssetModelCombobox({
   value?: string;
   onValueChange: (value: string) => void;
   onModelSelect?: (model: AssetModel) => void;
+  /**
+   * Optional mirror of the debounced search term (issue #1229): the picker owns its own query — this
+   * only lets a caller *observe* it, e.g. to seed an inline "create model" dialog with what the
+   * operator was searching for when they found nothing. Note the picker resets its query to `""`
+   * when the popover closes, so a caller that wants the term afterwards must keep the last
+   * non-empty one.
+   */
+  onSearchChange?: (query: string) => void;
   ariaInvalid?: boolean;
   disabled?: boolean;
   placeholder?: string;
@@ -75,7 +84,10 @@ export function AssetModelCombobox({
         if (model) onModelSelect?.(model);
       }}
       items={items}
-      onSearchChange={setQuery}
+      onSearchChange={(next) => {
+        setQuery(next);
+        onSearchChange?.(next);
+      }}
       loading={isFetching}
       selectedLabel={
         selected ? `${selected.manufacturer} ${selected.name}` : undefined

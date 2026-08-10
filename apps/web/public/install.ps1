@@ -32,7 +32,8 @@
 
 .PARAMETER Url
   Your lazyit instance BASE URL - scheme, host and port, nothing else. For example
-  https://lazyit.example.com, or http://192.168.100.75:8080 on a LAN instance.
+  https://lazyit.example.com - or, WITH -AllowInsecureHttp, http://192.168.100.75:8080 on a LAN
+  instance you accept running in cleartext.
 
   NOT the address of this script. Every request this installer makes is built by appending a path to
   what you pass here, so -Url https://lazyit.example.com/install.ps1 asks the server for
@@ -47,6 +48,51 @@
 .PARAMETER TokenFile
   Read the token from a file instead. Mutually exclusive with -Token.
 
+.PARAMETER KeepToken
+  Re-run over an existing install, authenticating with the token already in
+  C:\ProgramData\lazyit-agent\config - so an upgrade needs no secret on the command line (#1208).
+  This installer wrote that file itself, with an ACL restricted to SYSTEM + Administrators, and this
+  script runs elevated: reading back what it wrote is not a new exposure, and lazyit cannot hand the
+  token back to you (it stores only a hash and a prefix of it).
+
+  AN EXPLICIT SWITCH, NOT AN IMPLICIT DEFAULT FOR A RE-RUN, and that is the whole decision. Implicit
+  is friendlier by one word and wrong in the case that matters: `-Token $t` with the variable
+  misspelled, or a wrapper that stopped setting $env:LAZYIT_TOKEN, would stop being a loud "a token
+  is required" and become a silent install with the OLD credential - so a host keeps reporting with a
+  token somebody believes they replaced, and nobody finds out. Where the credential for a SYSTEM
+  install came from is not a thing to infer from the state of the disk.
+
+  Mutually exclusive with -Token, -TokenFile and $env:LAZYIT_TOKEN - a hard error, never a silent
+  precedence rule. It has no meaning with -Uninstall, where the token never survives.
+
+.PARAMETER Upgrade
+  Re-run this host from the settings it already has: -KeepToken, PLUS LAZYIT_URL and LAZYIT_CA_FILE
+  out of C:\ProgramData\lazyit-agent\config when they are not passed (#1208). An upgrade then needs
+  no arguments at all.
+
+  WHY THAT MATTERS MORE THAN IT SOUNDS. The update command an admin is handed comes out of a browser,
+  so a -Url in it is whatever ORIGIN that browser was on - and on a fleet in the `lan` deployment
+  mode of ADR-0087 that silently repoints every host it touches at one admin's address. It also
+  carries no -CaFile, so a host installed against an internal CA loses that setting's provenance on
+  the very run that was supposed to be the easy one.
+
+  A SEPARATE SWITCH RATHER THAN A WIDER -KeepToken, because the name has to be true where it is read
+  a year from now: -KeepToken says token, and a host reading its own URL back off disk is not that.
+  -KeepConfig was the other candidate and already means "keep the file when removing the agent" under
+  -Uninstall; one word for two different things in two different modes is what an operator misreads.
+
+  Anything explicit still wins, so `-Upgrade -Url https://moved.example.com` retargets a host that
+  really did move - typed, rather than inherited from whoever generated the command. The CREDENTIAL
+  keeps -KeepToken's posture whole: a hard error against -Token, -TokenFile and $env:LAZYIT_TOKEN,
+  because quietly choosing between two credentials is how a host ends up authenticating with the one
+  that was just rotated away. Rotating a token is therefore still the ordinary install form.
+
+  WHAT -CaFile DOES HERE, said plainly because it differs from Linux: Invoke-WebRequest offers no
+  per-request CA bundle (see the note above the download), so re-using the host's bundle carries it
+  into the agent's config and does not change how THIS script downloads. The switch is symmetric with
+  install.sh anyway - one flag, one meaning, both platforms - and the half that bites a fleet, the
+  URL, behaves identically.
+
 .PARAMETER CaFile
   A PEM bundle to trust instead of trusting your internal CA machine-wide. Used for THIS script's
   downloads and written into the agent's config so the agent uses it too.
@@ -56,8 +102,20 @@
   unlike install.sh this cannot be auto-detected - pass it for a pre-Haswell host, or for a cluster
   whose EVC/processor-compatibility baseline masks AVX2 and may live-migrate onto older silicon.
 
+.PARAMETER Sha256
+  The executable's sha256 as 64 hex characters, obtained OUT OF BAND - from the release notes, or
+  from the instance admin over a channel that is not this download. Used INSTEAD of the digest the
+  instance publishes: the escape hatch for an instance older than this installer, which publishes
+  none. Verification itself is required either way, and a mismatch is always fatal.
+
+.PARAMETER AllowInsecureHttp
+  Allow a plain-http -Url. CLEARTEXT: an on-path attacker can replace the executable this host will
+  run as SYSTEM, and the Service Account token - persisted with this URL - crosses the network
+  unencrypted on every report the agent ever sends. For a physically trusted LAN (ADR-0087). Prefer
+  https, with -CaFile for an internal CA.
+
 .PARAMETER RequireChecksum
-  Fail if this instance publishes no sha256 for the executable.
+  Accepted for compatibility and IGNORED - checksum verification is required by default (#1190).
 
 .PARAMETER Uninstall
   Stop and remove the agent, its task, its state, its PATH entry and its token.
@@ -65,6 +123,14 @@
 .PARAMETER KeepConfig
   With -Uninstall: keep this host's own limits for a later re-install. The token is destroyed either
   way.
+
+.PARAMETER NoHypervisor
+  Write LAZYIT_COLLECT_HYPERVISOR=false into the agent's config: this host never reports its
+  hypervisor guests, whatever lazyit's policy says (ADR-0095). Without the switch nothing is
+  configured - the AGENT detects the Hyper-V role itself, on every run, so a host that gains or
+  loses the role starts or stops reporting guests with no re-install, and the "Detected: Hyper-V"
+  banner this script prints is informational only. The veto is a host-owner setting the server can
+  never widen, and re-running this installer preserves it like every other local setting.
 
 .EXAMPLE
   # Run from an ELEVATED PowerShell. The pipe form of `irm | iex` cannot take parameters, so the
@@ -75,6 +141,14 @@
   # Keeping the token out of the session history:
   $env:LAZYIT_TOKEN = 'lzit_sa_xxx'
   .\install.ps1 -Url https://lazyit.example.com
+
+.EXAMPLE
+  # Upgrading a host that is already installed: no token anywhere on the command line.
+  .\install.ps1 -Url https://lazyit.example.com -KeepToken
+
+.EXAMPLE
+  # The same upgrade with nothing typed at all - the URL and the CA come off this host.
+  .\install.ps1 -Upgrade
 
 .EXAMPLE
   .\install.ps1 -Uninstall
@@ -90,13 +164,34 @@ param(
   # can see what happened to it.
   [string] $Interval,
   [switch] $Baseline,
+  # The executable's sha256, obtained OUT OF BAND - the escape hatch for an instance that publishes
+  # no digest, never a way to skip verification. See the integrity block below (#1190).
+  [string] $Sha256,
+  # Plain http is an explicit decision, not a default - see the gate below (#1190).
+  [switch] $AllowInsecureHttp,
+  # Accepted for compatibility and IGNORED: checksum verification is required by default since
+  # #1190. Recorded here so existing automation that passes it keeps working unchanged.
   [switch] $RequireChecksum,
   [switch] $Uninstall,
-  [switch] $KeepConfig
+  [switch] $KeepConfig,
+  # Authenticate this run with the token already in the config file (#1208). See .PARAMETER KeepToken
+  # above for why it is a switch and not the implicit default for a re-run.
+  [switch] $KeepToken,
+  # -KeepToken plus this host's own URL and CA bundle (#1208). See .PARAMETER Upgrade above for why
+  # it is its own switch rather than a wider -KeepToken.
+  [switch] $Upgrade,
+  # Write the ADR-0095 hypervisor veto (LAZYIT_COLLECT_HYPERVISOR=false) into the config. See
+  # .PARAMETER NoHypervisor above; detection and collection are otherwise automatic, re-evaluated
+  # by the agent on every run.
+  [switch] $NoHypervisor
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+# Where the resolved -Url came from, so the plain-http gate can name it. -Upgrade rewrites this when
+# it takes the URL off the host (#1208); under StrictMode it has to exist before anything reads it.
+$urlSource = '-Url'
 
 # The FIXED tick, matching AGENT_POLICY_TICK_SECONDS. Deliberately not configurable: the whole point
 # of #1140 is that the schedule is one unchanging thing on every platform while the cadence is a
@@ -117,13 +212,83 @@ $ConfigDir  = Join-Path $env:ProgramData 'lazyit-agent'
 $ConfigFile = Join-Path $ConfigDir 'config'
 $StateDir   = Join-Path $ConfigDir 'state'
 
+# A FAILURE MUST BE CHECKABLE BY A SCRIPT (#1191). Under $ErrorActionPreference='Stop' a Write-Error
+# is ITSELF a terminating error, so the old Write-Error + exit pair never reached its exit line -
+# every failure stopped on an unhandled error record instead of a clean code. `throw` is deliberate:
+# powershell -File and -Command both turn an uncaught throw into process exit code 1, which is what a
+# fleet script checks - and, unlike Write-Host + exit, the & ([scriptblock]::Create((irm ...))) form
+# the Manual documents keeps an INTERACTIVE operator's elevated console open on a mistyped token
+# instead of closing it.
 function Die([string] $Message) {
-  Write-Error "lazyit-agent install: $Message"
-  exit 1
+  throw "lazyit-agent install: $Message"
 }
 
 function Say([string] $Message) {
   Write-Host "lazyit-agent install: $Message"
+}
+
+# The value the config lines handed in assign to $Key, or '' when they assign none (#1208).
+#
+# PURE ON PURPOSE: lines and a key in, one word out, no path of its own and no registry. That is what
+# lets the contract test in apps/agent run THIS function through real PowerShell on a Linux CI runner
+# over a corpus of real config files, rather than a copy of it - the same reason the two PATH
+# functions below take their input as parameters.
+#
+# ONE EXTRACTOR FOR ALL THREE KEYS the re-run forms read back (TOKEN, URL, CA_FILE). Three copies
+# with the same intent are three chances to disagree about a file a host actually has, and the one
+# that disagreed would be found the way the padded key below was found: on a host that had been
+# reporting for months.
+#
+# IT HAS TO AGREE WITH THE AGENT'S OWN PARSER (`readConfigFile` in apps/agent/src/config.ts) on every
+# point where a hand-edited file can differ from the one this script writes, because the whole
+# promise of -KeepToken is "the credential this host is ALREADY using": the LAST assignment wins (the
+# agent assigns key by key as it reads), the value is trimmed, and one matching pair of surrounding
+# quotes is stripped. Reading a different token than the agent reads would install cleanly, report
+# once with the wrong credential, and then fail on every tick.
+#
+# WHITESPACE IS ALLOWED AROUND THE KEY for the same reason, and it is not hypothetical: the agent
+# trims the key before it compares, so `LAZYIT_TOKEN =lzit_sa_...` - a hand edit, or a template that
+# pads its assignments - authenticates every tick, while a pattern demanding `=` immediately after
+# the key answered "this host has no token" and refused the upgrade. `_` is not whitespace, so
+# LAZYIT_TOKEN_FILE is still a different key.
+#
+# -cmatch AND NOT -match, which is the one place PowerShell's defaults would quietly diverge from the
+# agent: `-match` is case-insensitive, so it would read `lazyit_token=` as a credential when the
+# agent does not read that key at all - and it would make `lazyit_ca_file` and `LAZYIT_CA_FILE`, which
+# the agent reads as two keys with a preference between them, indistinguishable here. Trimming also
+# drops the carriage return Get-Content leaves on every line of a CRLF file - and a trailing CR inside
+# a bearer token is a 401 with nothing in the message to explain it.
+function Get-LazyitConfigValue([string[]] $Lines, [string] $Key) {
+  if (-not $Lines) { return '' }
+  $found = ''
+  foreach ($line in $Lines) {
+    # Only the FIRST '=' separates the key from the value - a token is opaque and may contain one.
+    if ($line -cmatch "^\s*$Key\s*=(.*)$") { $found = $Matches[1] }
+  }
+  $found = $found.Trim()
+  if ($found.Length -ge 2) {
+    $quote = $found.Substring(0, 1)
+    if (($quote -eq '"' -or $quote -eq "'") -and $found.EndsWith($quote)) {
+      $found = $found.Substring(1, $found.Length - 2)
+    }
+  }
+  return $found
+}
+
+# Whether this host is a Hyper-V host, best-effort, for the banner below (ADR-0095): the `vmms`
+# service (Hyper-V Virtual Machine Management) exists exactly on hosts with the role enabled.
+#
+# GUARDED TWICE AND NEVER FATAL by construction: -ErrorAction SilentlyContinue answers $null for a
+# service that does not exist, and the try/catch absorbs a platform with no service manager at all -
+# which is what lets the contract test in apps/agent run THIS function through real PowerShell on a
+# Linux CI runner and prove the answer is $false rather than a throw, which under
+# $ErrorActionPreference='Stop' would have stopped an install over one informational line. The
+# AGENT's own per-run detection is the authority; this only feeds the banner.
+function Test-LazyitHyperVHost() {
+  try {
+    return ($null -ne (Get-Service -Name 'vmms' -ErrorAction SilentlyContinue))
+  }
+  catch { return $false }
 }
 
 # --- the machine PATH ------------------------------------------------------
@@ -242,6 +407,12 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 # "I will not deploy something I can't cleanly remove" is a reasonable position. Everything below is
 # idempotent and never fails on a partial install.
 if ($Uninstall) {
+  # REFUSED RATHER THAN IGNORED (#1208). -KeepConfig keeps this host's own limits through an
+  # uninstall; nothing keeps the TOKEN, and that is the point of the block further down. Accepting
+  # -KeepToken here - even as a harmless no-op - would let an operator finish an uninstall believing
+  # a live credential survived on a host they are decommissioning, or that it did not.
+  if ($Upgrade) { Die '-Upgrade has no meaning with -Uninstall: there is nothing to re-run and nothing to carry forward. -KeepConfig keeps this host''s own limits; the token NEVER survives an uninstall.' }
+  if ($KeepToken) { Die '-KeepToken has no meaning with -Uninstall: the token NEVER survives an uninstall. -KeepConfig keeps this host''s own limits, never the credential.' }
   # Disarm FIRST. Deleting the executable out from under a registered task does not stop the task; it
   # turns every tick into a failed run and an event-log entry, on a host somebody believes is clean.
   try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop | Out-Null }
@@ -270,7 +441,10 @@ if ($Uninstall) {
   # LOCAL VETO (LAZYIT_COLLECT_*=false, LAZYIT_MIN_INTERVAL, ...), which is the host owner's setting
   # and is genuinely painful to lose, while still stripping the token and the URL.
   if ($KeepConfig -and (Test-Path -LiteralPath $ConfigFile)) {
-    $kept = Get-Content -LiteralPath $ConfigFile | Where-Object { $_ -notmatch '^\s*LAZYIT_(TOKEN|URL)=' }
+    # The key may carry whitespace before its `=`, because the AGENT accepts that spelling and so a
+    # host can really have one. A pattern that missed `LAZYIT_TOKEN =` would leave a working
+    # credential on a decommissioned host, in the file the operator was told keeps only their limits.
+    $kept = Get-Content -LiteralPath $ConfigFile | Where-Object { $_ -notmatch '^\s*LAZYIT_(TOKEN|URL)\s*=' }
     [IO.File]::WriteAllLines($ConfigFile, $kept, (New-Object Text.UTF8Encoding($false)))
     Say "kept $ConfigFile without its token or URL (-KeepConfig)."
   }
@@ -289,6 +463,89 @@ if ($Uninstall) {
 if ($KeepConfig) { Die '-KeepConfig only means something with -Uninstall' }
 
 # --- token -----------------------------------------------------------------
+# THE RE-RUN FORM (#1208), resolved FIRST so that a second token source is refused before anything
+# else is read - `-KeepToken -TokenFile C:\gone` must name the contradiction, not the missing file.
+#
+# A HARD ERROR FOR EVERY OTHER SOURCE, INCLUDING THE ENVIRONMENT, and no precedence rule anywhere.
+# Two token sources on one SYSTEM install is an operator who believes something about this run that
+# is not true, and quietly picking one is how a host ends up authenticating with the credential that
+# was just rotated away - the failure this switch exists to prevent, arriving through the switch
+# itself. $env:LAZYIT_TOKEN is included even though it is ambient rather than typed: it is the form
+# the docs recommend for keeping a token out of the session history, so it is exactly the one that
+# would be left set in an elevated console from the install before this one.
+#
+# This runs AFTER the elevation check above, on purpose. The config file's ACL is SYSTEM +
+# Administrators, so a non-elevated run must be told THAT rather than that its own host has no
+# install on it.
+#
+# -Upgrade CONTAINS -KeepToken rather than competing with it: it is the same read of the same file,
+# plus the settings. Everything below therefore has ONE name for whichever switch the operator
+# actually typed, so a run that said -Upgrade is never answered about a switch it did not pass.
+if ($Upgrade) { $KeepToken = $true }
+$rerun = if ($Upgrade) { '-Upgrade' } else { '-KeepToken' }
+
+if ($KeepToken) {
+  if ($Token)     { Die "$rerun and -Token are mutually exclusive - pass one. $rerun means ""authenticate with the token this host already has""; passing another one says the opposite. To ROTATE the credential on a host, install it the ordinary way: -Url <base-url> -Token <new>." }
+  if ($TokenFile) { Die "$rerun and -TokenFile are mutually exclusive - pass one. $rerun means ""authenticate with the token this host already has""; passing a file says the opposite." }
+  if ($env:LAZYIT_TOKEN) { Die "$rerun and LAZYIT_TOKEN in the environment both supply a token - pass one. Clear `$env:LAZYIT_TOKEN to re-use what is on this host, or drop $rerun to install with the one in the environment." }
+  # NEVER A SILENT UNAUTHENTICATED OR UNCONFIGURED INSTALL: no readable config is fatal here, and the
+  # message names the first install as the other way to arrive at it - which by definition has
+  # nothing to re-use and needs a URL and a token of its own.
+  if (-not (Test-Path -LiteralPath $ConfigFile)) {
+    Die "$rerun re-runs this host from the settings it already has, and there is no $ConfigFile. This is a first install and there is nothing to re-use: pass -Url plus -Token, -TokenFile, or the LAZYIT_TOKEN environment variable."
+  }
+  $existing = @()
+  try { $existing = @(Get-Content -LiteralPath $ConfigFile -ErrorAction Stop) }
+  catch { Die "$rerun cannot read $ConfigFile - $($_.Exception.Message)" }
+  $Token = Get-LazyitConfigValue ($existing) 'LAZYIT_TOKEN'
+  if (-not $Token) {
+    Die "$ConfigFile has no LAZYIT_TOKEN line, so there is no token on this host to re-use. Pass -Token, -TokenFile, or set the LAZYIT_TOKEN environment variable. Note that lazyit cannot show you an existing token a second time (it stores only a hash and a prefix), so this may need a fresh one from Settings -> Instance -> Reporting agents."
+  }
+  # The same guard -TokenFile applies, one source over: a Service Account token is one opaque word,
+  # and a hand-edited config that split it across a space would otherwise be sent as a bearer token
+  # and come back 401 with nothing to say which of the two files was wrong.
+  if ($Token -match '\s') { Die "the LAZYIT_TOKEN line in $ConfigFile is not a token (it contains whitespace). Fix that file, or pass -Token / -TokenFile for this run." }
+  Say "authenticating with the token already in $ConfigFile ($rerun); nothing was passed on the command line."
+
+  # THE SETTINGS HALF, and only under -Upgrade. An explicit parameter still wins; nothing is re-used
+  # silently, so what came off the disk is printed by key before anything is downloaded or written.
+  #
+  # THE LOWERCASE CA SPELLING IS TRIED FIRST because that is how the AGENT resolves it - `networkFrom`
+  # in apps/agent/src/net.ts prefers `lazyit_ca_file` over `LAZYIT_CA_FILE` when a host carries both,
+  # measured against curl and Bun rather than recalled. Reading the other one here would carry a
+  # different bundle into the config than the one the agent had been using.
+  if ($Upgrade) {
+    $reused = @()
+    if (-not $Url) {
+      $Url = Get-LazyitConfigValue ($existing) 'LAZYIT_URL'
+      if ($Url) {
+        $reused += "LAZYIT_URL=$Url"
+        # So the plain-http gate further down names the file rather than a -Url nobody passed.
+        $urlSource = "LAZYIT_URL in $ConfigFile (re-used by -Upgrade)"
+      }
+    }
+    if (-not $CaFile) {
+      $CaFile = Get-LazyitConfigValue ($existing) 'lazyit_ca_file'
+      if (-not $CaFile) { $CaFile = Get-LazyitConfigValue ($existing) 'LAZYIT_CA_FILE' }
+      if ($CaFile) {
+        $reused += "LAZYIT_CA_FILE=$CaFile"
+        # Named HERE rather than left to the download, because a certificate failure on an upgrade
+        # sends an operator looking at their instance's certificate when the answer is a file that
+        # moved on this host.
+        if (-not (Test-Path -LiteralPath $CaFile)) {
+          Die "LAZYIT_CA_FILE in $ConfigFile names a PEM bundle that cannot be read: $CaFile. Restore it, or pass -CaFile with the path it moved to."
+        }
+      }
+    }
+    if ($reused.Count -gt 0) { Say "-Upgrade re-used this host's own $($reused -join ', ') from $ConfigFile." }
+    # A config with a token but no URL. Refused by name: the generic "-Url is required" below would be
+    # true and useless, because the operator did not think they were supplying one.
+    if (-not $Url) {
+      Die "-Upgrade re-runs this host on the URL it already has, and $ConfigFile has no LAZYIT_URL line. Pass -Url <base-url> for this run (the agent has been unable to report without one)."
+    }
+  }
+}
+
 if ($TokenFile) {
   if ($Token) { Die '-Token and -TokenFile are mutually exclusive - pass one' }
   if (-not (Test-Path -LiteralPath $TokenFile)) { Die "cannot read the token file: $TokenFile" }
@@ -303,7 +560,7 @@ if (-not $Token) { $Token = $env:LAZYIT_TOKEN }
 if (-not $Url)   { $Url   = $env:LAZYIT_URL }
 
 if (-not $Url)   { Die '-Url is required (your lazyit instance, e.g. https://lazyit.example.com)' }
-if (-not $Token) { Die 'a token is required - pass -Token, -TokenFile, or set $env:LAZYIT_TOKEN (needs infra:report)' }
+if (-not $Token) { Die 'a token is required - pass -Token, -TokenFile, -KeepToken (a re-run over an existing install), or set $env:LAZYIT_TOKEN (needs infra:report)' }
 $Url = $Url.TrimEnd('/')
 
 # --- -Url IS THE INSTANCE BASE URL, NOT THE ADDRESS OF THIS SCRIPT (#1166) ---
@@ -351,6 +608,28 @@ if ($UrlPath) {
   Write-Warning "lazyit-agent install: -Url carries a path ($UrlPath) and lazyit is served from the root of its origin, so this is usually a mistake - pass just the scheme, host and port. Continuing, in case your reverse proxy really does mount lazyit under that path."
 }
 
+# --- plain http is an explicit decision, not a default (#1190) --------------
+# ADR-0087 accepts that a self-hosted LAN instance may have no TLS at all, so http stays POSSIBLE -
+# but never silent. Everything on a cleartext channel is readable and replaceable by anyone on the
+# network path: the executable this script installs to run as SYSTEM, its sha256 (fetched over the
+# SAME channel, so a matching digest proves nothing against an on-path attacker - pass -Sha256 from
+# somewhere else if you can), and the Service Account token, which is persisted into the config WITH
+# this URL and therefore crosses the network in cleartext again on every report this host ever
+# sends. `-match` is case-insensitive, so HTTP:// lands here exactly like http://.
+#
+# AND -Upgrade DOES NOT INHERIT THE DECISION (#1208 review). A host installed with -AllowInsecureHttp
+# carries `LAZYIT_URL=http://...` in its config, so a re-run that re-used it would arrive here with a
+# cleartext URL nobody typed - and letting the file answer "yes, cleartext is acceptable" on the
+# operator's behalf is exactly the fail-open #1190 closed, one input over. The gate bites on the
+# RESOLVED url whatever supplied it; `$urlSource` names which that was. Settings are re-used; an
+# acceptance of exposure is not a setting.
+if ($Url -match '^http://') {
+  if (-not $AllowInsecureHttp) {
+    Die "$urlSource uses plain http, and everything on this channel crosses the network in CLEARTEXT: an on-path attacker can replace the executable this host will run as SYSTEM, and the Service Account token is saved with this URL, so it is exposed again on every report this host ever sends. Use https (see -CaFile for an internal CA), or pass -AllowInsecureHttp if you accept BOTH exposures on this network."
+  }
+  Write-Warning 'lazyit-agent install: -AllowInsecureHttp - installing over plain http. The executable this host will run as SYSTEM and the Service Account token BOTH cross the network in cleartext, the token on every report from now on, not only today. Anyone on the network path can take SYSTEM on this host. Move to https when you can.'
+}
+
 # TLS 1.2 explicitly. Windows PowerShell 5.1 defaults its ServicePointManager to SSL3/TLS1.0 on
 # older builds, which a modern Caddy front refuses - the symptom is an opaque "underlying connection
 # was closed" that reads like a certificate problem and is not.
@@ -365,11 +644,41 @@ if ($CaFile) {
 # --- arch ------------------------------------------------------------------
 # There is no bun-windows-arm64 target, so an ARM64 host has no artifact and saying so plainly beats
 # downloading an x64 executable that WOW64 might or might not emulate acceptably.
+#
+# THE GATE DECIDES ON THE MACHINE, NOT THE PROCESS (#1191). Inside a 32-BIT PowerShell on x64
+# Windows - which is exactly what RMM and deployment tools commonly spawn, the fleet-install vector -
+# PROCESSOR_ARCHITECTURE answers 'x86': the architecture of the PROCESS asking, not of the machine.
+# PROCESSOR_ARCHITEW6432 exists only inside a WOW64 process and holds the real one; the
+# Is64BitOperatingSystem check is the belt for a host that exports neither. Without this, a perfectly
+# supported x64 host was refused as "unsupported architecture".
 $machine = $env:PROCESSOR_ARCHITECTURE
+if ($env:PROCESSOR_ARCHITEW6432) { $machine = $env:PROCESSOR_ARCHITEW6432 }
+elseif ($machine -eq 'x86' -and [Environment]::Is64BitOperatingSystem) { $machine = 'AMD64' }
 if ($machine -ne 'AMD64') {
   Die "unsupported architecture: $machine (only x64 Windows is built; there is no ARM64 target)"
 }
+# The machine is x64 - but a 32-bit shell must still not RUN the install: %ProgramFiles% answers
+# 'Program Files (x86)' under WOW64, so proceeding would install beside (not over) a 64-bit install
+# and put the agent under the wrong directory. INSTRUCT rather than refuse blind: SysNative is the
+# alias a 32-bit process uses to reach the real System32, so the command below works from THIS shell.
+if (-not [Environment]::Is64BitProcess) {
+  Die "this shell is a 32-bit PowerShell on 64-bit Windows (WOW64), and installing from it would land the agent under the wrong Program Files. Re-run this installer from a 64-bit PowerShell - from this very shell you can start one with: & $env:SystemRoot\SysNative\WindowsPowerShell\v1.0\powershell.exe"
+}
 $arch = if ($Baseline) { 'x64-baseline' } else { 'x64' }
+
+# --- hypervisor detection banner (ADR-0095) ---------------------------------
+# INFORMATIONAL ONLY. The AGENT re-detects the Hyper-V role on every run, so this banner can never
+# become stale authority - it exists so the operator learns, at the one moment they are looking,
+# that this host's guests are about to be inventoried and how to say no. Best-effort and never
+# fatal: the probe answers $false anywhere it cannot ask, and a false answer prints nothing.
+if (Test-LazyitHyperVHost) {
+  if ($NoHypervisor) {
+    Say 'Detected: Hyper-V - hypervisor guest collection is disabled by -NoHypervisor (the config gets LAZYIT_COLLECT_HYPERVISOR=false).'
+  }
+  else {
+    Say "Detected: Hyper-V - this host's guests (virtual machines) will be inventoried. Disable with -NoHypervisor."
+  }
+}
 
 # --- download the executable (token-gated) ---------------------------------
 Say "downloading agent (windows/$arch) from $Url ..."
@@ -429,37 +738,78 @@ if ($magic[0] -ne 0x4D -or $magic[1] -ne 0x5A) {
   Die 'downloaded file is not a Windows executable (no MZ header) - is -Url your lazyit HTTPS origin (the reverse proxy), not the raw web port :3000?'
 }
 
-# --- integrity: the digest the instance published --------------------------
+# --- integrity: the digest, REQUIRED (#1190) --------------------------------
 # TLS plus two bytes of PE magic answers "did the bytes arrive intact from the origin I dialled". It
 # does not answer "are these the bytes the build produced" - and this file becomes SYSTEM on every
 # host in the estate. STATED HONESTLY: this is a checksum, not a signature. Anyone who can write both
 # files in the API container defeats it, and it is not meant to survive that.
-$expected = ''
-try {
-  $response = Invoke-LazyitDownload "/api/agent/checksum?os=windows&arch=$arch" $null
-  $expected = ($response.Content | Out-String).Trim()
-}
-catch { $expected = '' }
-if ($expected -notmatch '^[0-9a-f]{64}$') { $expected = '' }
-
-if ($expected) {
-  $actual = (Get-FileHash -LiteralPath $tmpBin -Algorithm SHA256).Hash.ToLowerInvariant()
-  if ($actual -ne $expected) {
+#
+# REQUIRED BY DEFAULT, AND IT CANNOT FAIL OPEN. The first shape of this check degraded ANY error
+# fetching the digest to a warning unless -RequireChecksum was passed - so an attacker who could 404
+# one route stripped the verification entirely. A check the party being checked can switch off is
+# not a check. The one escape hatch is -Sha256: a digest obtained OUT OF BAND, for an instance older
+# than this installer, which publishes none. -RequireChecksum stays accepted and now means nothing.
+if ($Sha256) {
+  if ($Sha256 -notmatch '^[0-9a-fA-F]{64}$') {
     Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
-    Die "checksum mismatch - the executable this instance served is not the one it published a digest for (expected $expected, got $actual). Nothing installed. Re-run; if it persists, treat the instance as suspect."
+    Die "-Sha256 must be the executable's sha256 as 64 hex characters. Got: $Sha256"
   }
-  Say 'sha256 verified.'
-}
-elseif ($RequireChecksum) {
-  Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
-  Die "-RequireChecksum was passed but this instance published no sha256 for windows/$arch (an instance older than this installer does not)"
+  $expected = $Sha256.ToLowerInvariant()
+  Say 'verifying against the sha256 passed with -Sha256 (out of band).'
 }
 else {
-  Write-Warning "lazyit-agent install: this instance published no sha256 for the executable, so TLS and the MZ check are the only integrity check. Pass -RequireChecksum to make this fatal."
+  $expected = ''
+  try {
+    $response = Invoke-LazyitDownload "/api/agent/checksum?os=windows&arch=$arch" $null
+    $expected = ($response.Content | Out-String).Trim().ToLowerInvariant()
+  }
+  catch {
+    Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
+    Die "could not fetch the sha256 this instance publishes for windows/$arch, and checksum verification is REQUIRED - a fetch that fails open is a check an attacker strips by failing it. Nothing installed. An instance older than this installer publishes no digest: upgrade lazyit, or pass -Sha256 <digest> obtained OUT OF BAND. $($_.Exception.Message)"
+  }
+  if ($expected -notmatch '^[0-9a-f]{64}$') {
+    Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
+    Die "what this instance answered for windows/$arch is not a sha256 digest, and checksum verification is REQUIRED. Nothing installed. Upgrade lazyit, or pass -Sha256 <digest> obtained out of band."
+  }
 }
 
+$actual = (Get-FileHash -LiteralPath $tmpBin -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) {
+  Remove-Item -LiteralPath $tmpBin -Force -ErrorAction SilentlyContinue
+  Die "checksum mismatch - the executable this instance served is not the one it published a digest for (expected $expected, got $actual). Nothing installed. Re-run; if it persists, treat the instance as suspect."
+}
+Say 'sha256 verified.'
+
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+# A MOVE, not a copy, on purpose: on an upgrade the scheduled task from the previous install is
+# still armed, and a rename is atomic where a ~100 MB copy leaves a window in which that task could
+# execute a half-written file.
 Move-Item -LiteralPath $tmpBin -Destination $BinPath -Force
+
+# --- the binary's ACL: inherited from Program Files, nothing else (#1189) ---
+# On the same volume that move is a rename and KEEPS the source DACL - the user-temp one, which
+# grants the installing user's SID FullControl. Left alone, the executable the task runs as SYSTEM
+# every tick stays writable by that user's MEDIUM-INTEGRITY (non-elevated) processes: any malware in
+# their session overwrites the file and is SYSTEM within one tick, on every host installed this way,
+# persistently. The config dir's ACL below is carefully rebuilt; this is the same care for the
+# binary. `icacls /reset` is the documented primitive for exactly this repair - it "replaces ACLs
+# with default inherited ACLs": every explicit ACE goes, including the stale ones the rename carried
+# over, and inheritance from %ProgramFiles% (administrator-only write) is what remains. Chosen over
+# a Get-Acl/Set-Acl round trip because the rename leaves the carried ACEs flagged as inherited,
+# which that API cannot remove without a two-pass protect-then-unprotect dance and a moment with an
+# empty DACL. It runs UNCONDITIONALLY on every install, so re-running this script - the documented
+# upgrade path - also heals the ACL of a binary installed by an earlier version of it.
+# Failure is FATAL and removes the binary: a SYSTEM executable a user can rewrite is not an install.
+$aclReset = $false
+try {
+  & "$env:SystemRoot\System32\icacls.exe" $BinPath /reset /q | Out-Null
+  $aclReset = ($LASTEXITCODE -eq 0)
+}
+catch { $aclReset = $false }
+if (-not $aclReset) {
+  Remove-Item -LiteralPath $BinPath -Force -ErrorAction SilentlyContinue
+  Die "could not reset the ACL on $BinPath (icacls /reset failed), so the executable could have kept the permissive ACL of the temp directory it was downloaded into - and it runs as SYSTEM. Nothing has been installed and no task was registered."
+}
 
 # --- can this host actually RUN it? ----------------------------------------
 # `--help` prints and exits: no network, no config, no state. It fails exactly when the host cannot
@@ -531,11 +881,25 @@ Set-Acl -LiteralPath $ConfigDir -AclObject $acl
 # The pattern is deliberately wider than LAZYIT_*: HTTPS_PROXY, HTTP_PROXY and NO_PROXY live here too,
 # under the names every other tool uses, and BOTH CASES, because the agent reads both - a pattern that
 # matched only the uppercase half would silently delete a working proxy on the upgrade path.
-$owned = if ($CaFile) { '^\s*(LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)|lazyit_ca_file)=' } else { '^\s*LAZYIT_(URL|TOKEN|INTERVAL)=' }
+#
+# -KeepToken and -Upgrade (#1208) CHANGE NOTHING HERE, deliberately. They change where $Token, $Url
+# and $CaFile came FROM, not who owns those keys: the old lines are still dropped from the kept set
+# and written back once below, so a re-run cannot leave two of them and hand the parser the choice -
+# and the host owner's veto crosses the upgrade exactly as it did before. A re-used value being
+# written back where a passed one would go is the point: the file comes out of an upgrade in one
+# canonical shape, whoever supplied what.
+#
+# BOTH PATTERNS ALLOW WHITESPACE BEFORE THE `=`, and they have to move together. The agent trims the
+# key before it compares, so `LAZYIT_COLLECT_SOFTWARE =false` is a live veto on that host - a keep
+# pattern that missed it would DELETE the host owner's setting on the upgrade path. And an owned
+# pattern that missed `LAZYIT_TOKEN =` would let a stale credential through into the kept block
+# BELOW the fresh one, where last-assignment-wins hands the agent the old token. Either half alone
+# is a bug; the pair is the fix.
+$owned = if ($CaFile) { '^\s*(LAZYIT_(URL|TOKEN|INTERVAL|CA_FILE)|lazyit_ca_file)\s*=' } else { '^\s*LAZYIT_(URL|TOKEN|INTERVAL)\s*=' }
 $preserved = @()
 if (Test-Path -LiteralPath $ConfigFile) {
   $preserved = Get-Content -LiteralPath $ConfigFile |
-    Where-Object { $_ -match '^\s*(LAZYIT_[A-Z0-9_]+|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy|lazyit_ca_file)=' } |
+    Where-Object { $_ -match '^\s*(LAZYIT_[A-Z0-9_]+|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy|lazyit_ca_file)\s*=' } |
     Where-Object { $_ -notmatch $owned }
 }
 
@@ -564,6 +928,13 @@ $lines.Add('#LAZYIT_COLLECT_DISKS=false')
 $lines.Add('#LAZYIT_COLLECT_NICS=false')
 $lines.Add('#LAZYIT_COLLECT_SOFTWARE=false')
 $lines.Add('#LAZYIT_COLLECT_CONTAINERS=false')
+# The ADR-0095 hypervisor veto: the commented invitation every other collector gets, or the ACTIVE
+# veto when -NoHypervisor said so. Below the kept block either way, so on a re-run WITH the switch
+# it beats whatever an older config carried (the agent reads the LAST assignment) - while without
+# the switch the commented form assigns nothing and a kept veto stays the live one. The key is
+# deliberately not in $owned above: the merge must never clobber a host owner's existing veto with
+# this template on the upgrade path.
+if ($NoHypervisor) { $lines.Add('LAZYIT_COLLECT_HYPERVISOR=false') } else { $lines.Add('#LAZYIT_COLLECT_HYPERVISOR=false') }
 $lines.Add('#LAZYIT_MIN_INTERVAL=3600')
 $lines.Add('#LAZYIT_SOFTWARE_MAX=500')
 $lines.Add('#LAZYIT_EXCLUDE_NICS=vEthernet*,Loopback*')

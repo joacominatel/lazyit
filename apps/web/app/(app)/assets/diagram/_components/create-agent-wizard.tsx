@@ -7,19 +7,22 @@ import {
   CommandLineIcon,
   ExclamationTriangleIcon,
   InformationCircleIcon,
+  ServerStackIcon,
 } from "@heroicons/react/24/outline";
 import {
-  isContainerChildExternalId,
+  MAX_PAGE_LIMIT,
   type CreateServiceAccount,
   type InfraNodeListItem,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SecretReveal } from "@/app/(app)/settings/service-accounts/_components/secret-reveal";
 import { Callout } from "@/components/callout";
 import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -30,17 +33,24 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { useInfraNodes } from "@/lib/api/hooks/use-infra-nodes";
+import {
+  useInfraNodeDetail,
+  useInfraNodes,
+} from "@/lib/api/hooks/use-infra-nodes";
 import { useCreateServiceAccount } from "@/lib/api/hooks/use-service-accounts";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
+import {
+  hypervisorFacetOf,
+  hypervisorPlatformLabel,
+} from "@/lib/agent/hypervisor-detection";
 import {
   AGENT_PLATFORMS,
   type AgentPlatform,
   agentDiagnosticsCommand,
   agentInstallCommand,
   agentManualInstallSteps,
-} from "./agent-install-commands";
+} from "@/lib/agent/install-commands";
 import { ConfirmNodeDialog } from "./confirm-node-dialog";
 
 /**
@@ -81,8 +91,11 @@ export function CreateAgentWizard({
         onOpenChange(next);
       }}
     >
+      {/* `sm:max-w-2xl` (the clone-user wizard's width, #1225) rather than the form-dialog `lg`:
+          step 2's one-liner carries a full origin + an opaque token, and at `lg` it wrapped
+          MID-TOKEN — the exact string an operator must trust reads as two broken halves. */}
       <DialogContent
-        className="max-h-[90vh] overflow-y-auto sm:max-w-lg"
+        className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"
         showCloseButton={!locked}
         onEscapeKeyDown={locked ? (e) => e.preventDefault() : undefined}
         onInteractOutside={locked ? (e) => e.preventDefault() : undefined}
@@ -312,6 +325,9 @@ function StepInstall({
 }) {
   const t = useTranslations("infra.wizard");
   const [platform, setPlatform] = useState<AgentPlatform>("linux");
+  // ADR-0095 §8's host-owner veto, surfaced as the ONE advanced option (#1225). Default unchecked:
+  // guest collection is the default, and the flag is negative on purpose.
+  const [noHypervisor, setNoHypervisor] = useState(false);
   const origin =
     typeof window !== "undefined"
       ? window.location.origin
@@ -340,7 +356,13 @@ function StepInstall({
         </div>
       </fieldset>
 
-      <PlatformInstall platform={platform} origin={origin} token={token} />
+      <PlatformInstall
+        platform={platform}
+        origin={origin}
+        token={token}
+        noHypervisor={noHypervisor}
+        onNoHypervisorChange={setNoHypervisor}
+      />
 
       <SecretReveal
         name={name}
@@ -364,18 +386,24 @@ function PlatformInstall({
   platform,
   origin,
   token,
+  noHypervisor,
+  onNoHypervisorChange,
 }: {
   platform: AgentPlatform;
   origin: string;
   token: string;
+  noHypervisor: boolean;
+  onNoHypervisorChange: (value: boolean) => void;
 }) {
   const t = useTranslations("infra.wizard");
   const isWindows = platform === "windows";
+  // The flag the veto checkbox appends, named in its hint so the operator can grep for it later.
+  const vetoFlag = isWindows ? "-NoHypervisor" : "--no-hypervisor";
 
   // ONE structure, label key and command together. These used to be two positionally-indexed arrays
   // — the labels listed here, the commands built in the module — and nothing tied index N of one to
   // index N of the other, so an edit could add a step to one side only and no test would notice.
-  // `agent-install-commands.test.ts` holds every `labelKey` below to the `stepN` keys both locale
+  // `lib/agent/install-commands.test.ts` holds every `labelKey` below to the `stepN` keys both locale
   // catalogs actually ship.
   const manualSteps = agentManualInstallSteps(platform, origin, token);
 
@@ -387,6 +415,27 @@ function PlatformInstall({
         className="rounded-lg text-sm"
       >
         {isWindows ? t("requirements.windows") : t("requirements.linux")}
+      </Callout>
+
+      {/* Hypervisor discoverability (#1225, ADR-0095 §8). Deliberately a CALLOUT and not a third
+          platform button: a Proxmox/Hyper-V/libvirt host IS a Linux or Windows server, and the
+          command is IDENTICAL — detection lives in the agent and re-runs every tick. A third
+          button would say the opposite of the truth it exists to teach. */}
+      <Callout
+        tone="info"
+        icon={<ServerStackIcon />}
+        className="rounded-lg text-sm"
+      >
+        {t.rich("hypervisorNote", {
+          link: (chunks) => (
+            <Link
+              href="/help/assets-topology-hypervisors"
+              className="underline underline-offset-4"
+            >
+              {chunks}
+            </Link>
+          ),
+        })}
       </Callout>
 
       {/* Said BEFORE they click, not after SmartScreen has. ADR-0074's Windows amendment records the
@@ -407,11 +456,45 @@ function PlatformInstall({
         <p className="text-sm font-medium text-foreground">
           {t("installTitle")}
         </p>
-        <CommandBlock command={agentInstallCommand(platform, origin, token)} />
+        <CommandBlock
+          command={agentInstallCommand(platform, origin, token, { noHypervisor })}
+        />
         <p className="text-xs text-muted-foreground">
           {isWindows ? t("installHint.windows") : t("installHint.linux")}
         </p>
       </div>
+
+      {/* The one advanced option (#1225): ADR-0095 §8's host-owner veto, collapsed because the
+          default — inventory the guests — is the right answer for almost everyone. Checking it
+          rewrites the command ABOVE (the builder appends the platform's veto flag), so the paste
+          stays one artifact and the flag can never be forgotten separately. */}
+      <details className="group rounded-lg border bg-muted/30">
+        <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground select-none">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none">
+              ›
+            </span>
+            {t("advanced.toggle")}
+          </span>
+        </summary>
+        <div className="px-3 pt-1 pb-3">
+          <label className="flex items-start gap-2">
+            <Checkbox
+              checked={noHypervisor}
+              onCheckedChange={(value) => onNoHypervisorChange(value === true)}
+              className="mt-0.5"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-sm text-foreground">
+                {t("advanced.noHypervisor")}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {t("advanced.noHypervisorHint", { flag: vetoFlag })}
+              </span>
+            </span>
+          </label>
+        </div>
+      </details>
 
       <details className="group rounded-lg border bg-muted/30">
         <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground select-none">
@@ -474,10 +557,13 @@ function PlatformInstall({
  * Stops polling on close (the query's `enabled` is gated on this step being mounted). The node sits in
  * the Pending review tray regardless, so "I'll check later" is always a safe escape.
  *
- * Container CHILDREN are excluded from the match (#1139). A host that runs containers enrols them in
- * the SAME request, immediately after itself, and the list is newest-first — so without this filter the
- * wizard would announce `redis` as the server the operator just installed the agent on. The child is
- * still in the tray; it is simply not the thing this step is waiting for.
+ * The server scopes this poll to AGENT/HOST identities before applying the 200-row limit. Container
+ * and hypervisor-guest children therefore cannot fill the page and hide the host this step is waiting
+ * for, and the client does not try to repair an already-truncated response after the fact.
+ *
+ * When the found host's first report carried the ADR-0095 hypervisor facet, the success screen also
+ * says so (#1225): the platform detected and guest count come off the node's drill-in (the polled
+ * list deliberately carries no `specs`, #1135), with a CTA into the tray when guests were reported.
  */
 function StepWait({
   name,
@@ -491,27 +577,50 @@ function StepWait({
   doneLabel: string;
 }) {
   const t = useTranslations("infra.wizard");
-  const { data: pending } = useInfraNodes(
-    { state: "PENDING" },
+  // One batch of PENDING agent HOST proposals, polled fast while this step is open. `role=HOST` is an
+  // identity filter applied by the server BEFORE `take`, not a node-kind guess or an after-page child
+  // filter, so a 500-guest report cannot starve the host from this 200-row window.
+  const { data: pendingPage } = useInfraNodes(
+    {
+      state: "PENDING",
+      source: "AGENT",
+      role: "HOST",
+      limit: MAX_PAGE_LIMIT,
+    },
     { enabled: true, refetchInterval: 5000 },
   );
+  const pending = pendingPage?.items;
   const baselineRef = useRef<Set<string> | null>(null);
   const [found, setFound] = useState<InfraNodeListItem | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // Hypervisor detection feedback (#1225, ADR-0095). The host-only list deliberately carries no
+  // `specs`, so both the facet and the reported guest count come off the found node's drill-in — one
+  // fetch, once, under the same `infra:read` gate. Counting the report rather than reintroducing child
+  // rows into the poll keeps host detection safe; the copy does not claim every guest stayed PENDING
+  // because auto-confirm rules may already have confirmed some of them.
+  const { data: foundDetail } = useInfraNodeDetail(found?.id ?? null);
+  const hypervisor = useMemo(
+    () => (foundDetail ? hypervisorFacetOf(foundDetail.specs) : null),
+    [foundDetail],
+  );
+  const reportedGuests = useMemo(() => {
+    if (typeof foundDetail?.specs !== "object" || foundDetail.specs === null) return 0;
+    const host = (foundDetail.specs as Record<string, unknown>).host;
+    if (typeof host !== "object" || host === null) return 0;
+    const guests = (host as Record<string, unknown>).guests;
+    return Array.isArray(guests) ? guests.length : 0;
+  }, [foundDetail]);
+
   useEffect(() => {
     if (!pending) return;
-    const agentPending = pending.filter(
-      (node) =>
-        node.source === "AGENT" && !isContainerChildExternalId(node.externalId),
-    );
     // First data tick after entering the step: capture the pre-existing set, claim nothing yet.
     if (baselineRef.current === null) {
-      baselineRef.current = new Set(agentPending.map((node) => node.id));
+      baselineRef.current = new Set(pending.map((node) => node.id));
       return;
     }
     if (!found) {
-      const fresh = agentPending.find(
+      const fresh = pending.find(
         (node) => !baselineRef.current?.has(node.id),
       );
       if (fresh) setFound(fresh);
@@ -534,6 +643,43 @@ function StepWait({
               {t("successDescription")}
             </p>
           </div>
+
+          {/* The host's first report carried the ADR-0095 facet: say what was detected and where
+              its guests went (#1225). Rendered only on a positive facet — a plain server's
+              celebration is unchanged. The count can be 0 (a vetoed host, an idle hypervisor);
+              the copy stays honest and the review CTA only shows when there is something to
+              review. The link lands on the Servers view, which hosts the Pending review tray,
+              and closes the wizard on the way out. */}
+          {hypervisor ? (
+            <Callout
+              tone="info"
+              icon={<ServerStackIcon />}
+              className="rounded-lg text-left text-sm"
+            >
+              <p>
+                {(() => {
+                  const label = hypervisorPlatformLabel(hypervisor.platform);
+                  const platform = label
+                    ? `${label}${hypervisor.version ? ` ${hypervisor.version}` : ""}`
+                    : null;
+                  return platform
+                    ? t("detected.summary", { platform, count: reportedGuests })
+                    : t("detected.summaryNoPlatform", { count: reportedGuests });
+                })()}
+              </p>
+              {reportedGuests > 0 ? (
+                <p className="mt-1">
+                  <Link
+                    href="/assets/diagram?view=table"
+                    onClick={onClose}
+                    className="font-medium underline underline-offset-4"
+                  >
+                    {t("detected.review")}
+                  </Link>
+                </p>
+              ) : null}
+            </Callout>
+          ) : null}
         </div>
 
         <DialogFooter>

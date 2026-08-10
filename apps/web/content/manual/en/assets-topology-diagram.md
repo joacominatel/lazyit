@@ -12,15 +12,57 @@ clusters, network devices, storage and more — drawn as draggable cards joined 
 relationships. It is a generic visual inventory of *how your things relate*: which machine runs on
 which host, what belongs to a cluster, what backs up to where, what depends on what.
 
-You reach it from the sidebar under **Assets › Topology**. The same screen has a **Map ⇄ Table**
-toggle in the top-right: the **Map** is this free-move board, and the **Table** is a plain,
-filterable list of the same nodes — see [Servers list](/help/assets-topology-servers).
+You reach it from the sidebar under **Assets › Topology**. The same screen has a
+**Map · Table · Agents** toggle in the top-right: the **Map** is this free-move board, the **Table**
+is a plain, filterable list of the same nodes — see [Servers list](/help/assets-topology-servers) —
+and **Agents** is the fleet view of the machines that report themselves, with the command that
+updates any of them that have fallen behind
+([Reporting agent](/help/assets-topology-reporting-agent#the-agents-view)).
 
 > Anyone who can view the topology sees the map and the read-only detail of each node. Adding nodes,
 > drawing connections, changing a status or taking a node off the map needs the manage-topology
 > permission; installing a reporting agent needs the manage-settings permission instead — a separate
-> one, not an addition — because it mints a token. Without a permission its controls simply don't
+> one, not an addition — because it mints a token. The one action here that needs a *second*
+> permission is detaching an asset lazyit created itself: that archives the record, so it also needs
+> **delete assets** ([below](#track-as-asset)). Without a permission its controls simply don't
 > appear.
+
+## Laptops and desktops are kept off the map
+
+**If your map has got smaller, nothing has been deleted.** lazyit keeps reported **laptops and
+desktops** off the diagram by default. When there are any, a button sits in the board's top-right
+corner saying exactly how many — *Show 142 endpoints*. Click it and they all appear; click *Hide 142
+endpoints* and they go away again. The choice is kept in the page address, so it survives a reload,
+the browser Back button, and a switch to the Table and back.
+
+**Why.** A typical estate is a couple of dozen servers and a couple of *hundred* workstations. Drawing
+all of them turns the map into a wall of boxes with the infrastructure buried somewhere inside it —
+and the estate topology is the thing you came here to read. Every machine still belongs in lazyit;
+it just doesn't belong on this particular picture by default.
+
+**Nothing has left your inventory.** A hidden machine is exactly as present as it was before:
+
+- it is on the [Servers list](/help/assets-topology-servers), which **shows everything, always** —
+  this hiding is the map's alone,
+- it is in search, in your asset inventory and in every report,
+- it still counts in a [blast radius](#impact--blast-radius): if a server goes down and a hidden
+  laptop depends on it, that laptop is still in the answer,
+- its own details window opens as it always did.
+
+Hiding is a **drawing** decision about one screen, and it is the only thing it is.
+
+**Only a machine that says it is one gets hidden.** Each reporting agent tells lazyit the host's
+**form factor**, read from the machine's own firmware — *laptop*, *desktop*, *server*, *virtual
+machine*, *container*. Only the first two come off the map. Anything else stays, and so does anything
+that hasn't said: a node you drew by hand, a server running an older agent, a machine whose hardware
+doesn't report a form factor, or one that simply hasn't checked in since you upgraded. **lazyit never
+hides a machine on a guess** — a host that vanished from every screen would be far worse than a busy
+map. You can see the form factor of any node on its details window's **General** tab.
+
+**It happens gradually, not all at once.** The moment you upgrade, the map is identical: no machine
+has reported a form factor yet. Each one fills it in on its next check-in, so over the following few
+minutes the workstations fade off the board while the servers stay. There is nothing to run and
+nothing to configure.
 
 ## The canvas
 
@@ -28,6 +70,9 @@ The board is a panning, zooming surface with a dotted background and a small min
 to reposition it — the new position is saved automatically after the drag settles, so the layout
 you arrange is the layout everyone sees next time. Use the controls in the corner (or your
 trackpad/scroll) to zoom and fit the view.
+
+The board's top-right corner is where its controls live: the **Show/Hide endpoints** button described
+above (everyone sees it), and — with the manage permission — **Tidy**.
 
 With the manage permission, a **Tidy** button sits in the board's top-right corner. Click it to
 auto-arrange the whole map into a clean top-down layout — hosts above the machines that run on them,
@@ -49,6 +94,38 @@ draws its answer on the map itself) and **Details**, which opens the node's deta
 double-click on the card opens the details window straight away. Clicking selects rather than opening
 so the map stays visible — the details window is large, and covering the board on every click would
 hide the thing you came to look at.
+
+### If the map says it is incomplete
+
+The map draws your estate in full — up to a ceiling of **2000 nodes**. Above that, a banner sits at
+the top of the board and stays there:
+
+> Showing 2000 of 2431 nodes — this map is incomplete.
+
+It is not an error and there is nothing to retry: it means your estate has grown past what one board
+can usefully draw. There is **no setting to raise the ceiling**.
+
+What matters is what it does *not* mean. The nodes left out are **still in lazyit** — they are in your
+inventory, on the [Servers list](/help/assets-topology-servers) and in search, exactly as before.
+What is missing is only their picture: they are not drawn, and neither are the connections that run
+through them.
+
+That last part is the reason the banner never goes away on its own. A node that isn't drawn takes its
+card, lines and on-canvas highlight with it, so **the picture of a blast radius can be incomplete**.
+The blast-radius query itself is separate from the canvas limit: its summary count and affected-node
+list come from the impact API and remain authoritative for the whole topology. When the warning is
+present, use that list as the answer; use the highlights only as a partial visual guide.
+
+Relationships have their own, much higher ceiling: **10,000 active connections**. If that ceiling is
+reached, a second persistent warning names how many relationships are shown and how many exist. The
+nodes remain available, but some lines are missing; reaching exactly 10,000 does not raise the warning
+unless the server says more relationships were left out.
+
+If relationships fail to load, the board keeps any previously loaded map on screen and shows a
+persistent **Relationships couldn't be loaded** warning with **Retry**. Do not read missing lines as
+"these nodes are disconnected" while that warning is present. A failed relationship request is never
+presented as an empty, complete map, and this warning stacks with either truncation warning rather than
+covering it.
 
 ## Adding to the map
 
@@ -92,10 +169,34 @@ long-lived VM — so by default a new node is **asset-backed**:
   don't inventory (a short-lived container, say). It appears on the map but has no inventory record
   behind it.
 
-You can change your mind later. Detaching the asset from an asset-backed node leaves the node on
-the map but removes the inventory link: if lazyit had auto-created the asset, that asset is
-deactivated (it never lingers in inventory owned by nobody); if you had linked a pre-existing
-asset, it stays untouched and is simply unlinked.
+You can change your mind later. Open the node's details window and look for **Inventory link** on
+the **General** tab — that is where you detach the asset from an asset-backed node, or link one to a
+node that has none. Both need the **manage topology** permission; a read-only viewer sees the
+inventory name but no controls. Detaching an asset **lazyit created itself** needs one permission
+more — **delete assets** — because that detach archives the record; see the two outcomes below.
+
+Detaching always leaves the node on the map. What happens to the *asset* depends on who created it,
+and the two outcomes are not the same — so the confirmation tells you which one you are about to
+run, before you commit:
+
+- **lazyit created the asset** (it made a minimal record when you added or confirmed the node) —
+  detaching **archives** that asset. It leaves your inventory lists and search — **and it does so
+  even if someone is currently assigned to it**; lazyit does not stop to ask. lazyit created the
+  record, so it removes it rather than leaving a record behind that nothing maintains. Bringing an
+  archived asset back needs the **delete assets** permission and the admin-only archived view, and a
+  restore does **not** re-link the node — so treat this as a decision, not as an undo you can rely on.
+  **This detach needs the delete-assets permission too**, on top of manage-topology: archiving an
+  asset costs the same permission here as it does anywhere else in lazyit. Without it the detach
+  button is disabled and says so, and the API refuses the request with the same explanation.
+- **You linked an asset that already existed** — detaching **only removes the link**. The asset
+  stays exactly as it was: same owners, same history, same documents. Nothing is archived. **This
+  one needs only manage-topology** — nothing is deleted, so nothing extra is charged for it.
+
+lazyit knows which case you are in because it marks the records it creates itself, and it never puts
+that mark on a record you curated. If a node is currently unlinked, the same panel offers a search
+box to link any asset in your inventory. You cannot swap the asset of a node that already has one in
+a single step — detach first, then link the new one, so the outgoing record is dealt with
+deliberately rather than quietly dropped.
 
 The node's **label always wins for display** on the canvas; the linked asset's name shows in the
 details window's header as a secondary *inventory name*, so the two never silently drift. That
@@ -170,6 +271,7 @@ scrolling past everything to reach one thing.
 **The tabs adapt to the node.** You only ever see the ones that have something to say:
 
 - **General** *(always)* — what this node is and who is responsible for it: kind, IP address,
+  **form factor** (for agent-reported hosts — what decides whether it's drawn on the map by default),
   added-on date, status, owner(s), knowledge-base articles, secret references and shortcuts, plus
   **Remove from map**.
 - **Reported facts** *(agent-reported nodes only)* — what the machine says it is made of. For a
@@ -210,10 +312,25 @@ A few things on the **General** tab worth calling out:
 - **Shortcuts** — quick links (SSH, web UI, console) that open in a new tab. With the manage
   permission you edit them inline: each shortcut is a label + URL pair you can change, add or remove,
   then **Save** the list (lazyit checks each URL is valid before saving).
+- **Form factor** — for a node reported by an agent, what the machine says it physically is, read
+  from its firmware: *laptop*, *desktop*, *server*, *virtual machine* or *container*. It's shown, not
+  editable — the agent rewrites it on every check-in, so a machine that's re-imaged or gets a new
+  board keeps it honest by itself. It's also what decides whether the node is drawn on the map by
+  default (see *Laptops and desktops are kept off the map* above). A hand-drawn node has none, and a
+  machine that hasn't reported one simply doesn't show this field.
 - **Duplicate IP** — if another node on the map already carries the *exact same* IP, a **non-blocking
   warning** lists the other node(s) — a heads-up, not a block: the address is still saved (lazyit
   enforces no uniqueness on IPs), and each listed node is a click away so you can jump over and
   reconcile.
+- **Possible duplicate in inventory** — a second non-blocking warning, for machines that were recorded
+  twice by older versions of lazyit. If this node's asset was created automatically and has no serial
+  number, while the serial the machine reports belongs to a *different* asset, lazyit says so and
+  links the other asset so you can go and look. **It is a heads-up and nothing else: lazyit never
+  merges the two for you.** Combining two inventory records means deciding what happens to two sets of
+  assignments, history, tags and attached documents, and that's a judgement call, not something an
+  upgrade should make while you're not watching. See
+  [Reporting agent](/help/assets-topology-reporting-agent) for how this situation came about and what
+  stops it happening again.
 
 A row in the [Servers list](/help/assets-topology-servers) deep-links straight into this window, so
 you can jump from the table to a machine's full picture in one click.
@@ -243,6 +360,11 @@ connection has no failure direction.
 
 An **empty result is good news** — it means nothing depends on this node, so it's safe to take
 down. lazyit shows that as reassurance, not as an error.
+
+> [!IMPORTANT]
+> If the board is showing the *"this map is incomplete"* banner, some affected nodes may be absent
+> from the drawn highlights. The blast-radius summary count and list remain authoritative. See
+> [If the map says it is incomplete](#if-the-map-says-it-is-incomplete).
 
 ## What's next
 

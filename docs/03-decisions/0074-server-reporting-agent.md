@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-08-02
+updated: 2026-08-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -69,7 +69,7 @@ Constraints that shaped the decision:
 | Axis | Decision | Rejected |
 | --- | --- | --- |
 | **What it reports** | **Inventory only** — host identity, hardware facts, installed software. | Health snapshots; time-series metrics + alerting (a different product). |
-| **What it discovers** | **Self only** — the host the agent runs on. "Expand" = install it on more hosts. | Network scanning / agentless discovery (security surface, false positives, LAN noise). |
+| **What it discovers** | **Self only** — the host the agent runs on. "Expand" = install it on more hosts. **Qualified 2026-08-06 (#1217): a hypervisor host's own guest list, read locally (`pvesh`/WMI/`virsh`), is inside "self only" by the same §3 #1139 defence — the local runtime's own list of what it is executing. Governed by [[0095-hypervisor-guest-inventory]]; remote hypervisor APIs stay on the rejected side.** | Network scanning / agentless discovery (security surface, false positives, LAN noise). |
 | **OS targets** | **Linux only** — `x64` + `arm64`. | Windows (WMI service), macOS (launchd) — deferred, contract is OS-neutral so they can be added. |
 | **Trust** | **Review tray** — new hosts arrive `state=PENDING`, `source=AGENT`; a human confirms. **Qualified by the 2026-08-01 amendment below: with an operator-authored auto-confirm rule saved, a proposal that rule matches is confirmed by the machine.** | ~~Auto-confirm~~ → **blanket** auto-confirm, i.e. with no operator-authored rule (any agent noise dirties the official inventory with no containment). |
 
@@ -152,7 +152,38 @@ projection precisely because the tray polls it, and nothing here re-fattens it �
 `label`, `kind`, `ipAddress`, `createdAt` and `externalId`, all of which the list already carries. The
 subnet box uses the **same** `ipInCidr` the saved rules use, so *"which hosts would this rule have
 caught"* and *"which hosts does this filter show"* can never be answered by two implementations.
-Server-side paging of `GET /infra/nodes` is **out of scope** and tracked separately (#1152).
+~~Server-side paging of `GET /infra/nodes` is **out of scope** and tracked separately (#1152).~~
+
+> **Corrected 2026-08-07 and 2026-08-09 (#1152) — the first-party list pages, while compatibility
+> stays an array.** `GET /infra/nodes/page` is the house `Page<T>`
+> ([[0030-list-pagination-contract]] §9): default 50, hard
+> max 200, `total` over the filtered set. The paragraph above still describes the tray correctly —
+> its filter, sort, grouping and bulk selection are all still client-side over the loaded lean list —
+> but that list is now **one batch, not the queue**. The tray requests the maximum page (200) of
+> `state=PENDING` in the list's default `createdAt desc` order, so a host that just checked in is
+> always in the window, which is what an onboarding operator is waiting for.
+>
+> The constraint the #1145 text named — *"whatever bounds this list must surface a `total` and a
+> truncation cue, never a quiet partial view"* — is met, and it is met exactly because
+> [[0095-hypervisor-guest-inventory]] made 200 a routine outcome here rather than a theoretical one:
+> one hypervisor report enrols up to `AGENT_GUESTS_MAX` = 500 guests at once. So the header badge
+> counts **`total`**, never `items.length`, and whenever the two differ the tray states it in plain
+> language — *"Showing 200 of 431 pending nodes, most recently discovered first. Confirm or discard
+> these to reveal the rest."* An operator who clears the screen must not be able to conclude *done*
+> while 231 are still queued. The 200-item cap on a single bulk action was already the tray's rule;
+> the batch is now the same size, so a full screen is exactly one bulk pass.
+>
+> The historical `GET /infra/nodes` remains an unbounded, deprecated `InfraNodeListItem[]` accepting
+> only `kind` / `status` / `state` until v2.0. It is a compatibility route, not a first-party agent
+> poll; successful responses point to `/infra/nodes/page`, with no Sunset date.
+>
+> **Follow-up (2026-08-09) — a bounded HOST filter for the wizard.**
+> `GET /infra/nodes/page` exposes `role=HOST` for the create-agent poll. Role is derived from `externalId`:
+> `/container/` and `/guest/` are CHILD identities; everything else, including null, is HOST. It is
+> deliberately not derived from `kind` — a host can legitimately be a VM or container, while a
+> hypervisor guest may also be `VM` or `CONTAINER`. The role predicate runs in Prisma before the
+> page `take` and in the paired count, so one report enrolling 500 newer children cannot hide the
+> reporting host behind the 200-row page ceiling.
 
 **What a bulk action touches is the VISIBLE selection, and one function decides that for every
 surface.** The ticked-ids set outlives a filter change, and no action and no count is derived from it:
@@ -287,7 +318,7 @@ Added, all **additive and optional** except `os.family`:
 | Field | What it answers |
 | --- | --- |
 | `os.family` (`linux`\|`windows`\|`darwin`\|`bsd`\|`other`) + `os.build` | the discriminator every consumer branches on; `build` is the identifier Windows/macOS keep distinct from `version`. |
-| `host.chassis` (`server`\|`desktop`\|`laptop`\|`vm`\|`container`\|`unknown`) | what the host *is* — the hint #1139's `kind` inference **will** read instead of landing every host as `PHYSICAL_HOST`. Stored on the node's blob today; nothing reads or displays it yet. |
+| `host.chassis` (`server`\|`desktop`\|`laptop`\|`vm`\|`container`\|`unknown`) | what the host *is* — the hint #1139's `kind` inference **will** read instead of landing every host as `PHYSICAL_HOST`. ~~Stored on the node's blob today; nothing reads or displays it yet.~~ — **corrected 2026-08-03 (#1196):** `inferNodeKind` has read it since #1139, but only as the **fallback** branch, so on a report carrying `host.virtualization` (which both collectors send whenever the probe succeeds) it is still read by nothing. [[0093-chassis-routing-and-asset-adoption]] proposes reading it directly, orthogonally to `kind`. |
 | `host.virtualization` (`{ type, host? }`) | what it runs *under*. `{ type: 'none' }` is a **positive** bare-metal finding, not "unknown". |
 | `host.fqdn`, `host.domain` (`{ name?, joined? }`) | the Windows/macOS facts `host` had nowhere to put. `hostname` stays the SHORT name; without these a Windows collector would have to overload it or wait for a v3, and §3 says there is no v3 identity migration. Unpopulated on Linux today, which costs nothing. |
 | `host.identifiers[]` (`{ kind, namespace?, value }`) | the **corroborating** identity set #1141 will consume. `externalId` stays the primary dedup key; these are evidence beside it, never a second key. `value` is **canonicalised and sanitized per kind** (below); `namespace` labels an identifier whose `kind` this build does not recognise. Stored on the node's blob; nothing compares or displays it yet. |
@@ -548,7 +579,9 @@ rather than the data-entry path.
 an active `RUNS_ON` edge to the reporting host. `PLAUSIBLE_EDGE_TARGETS.RUNS_ON` has anticipated
 `CONTAINER -> PHYSICAL_HOST` since [[0070-infra-topology-graph]] shipped, so nothing in the
 plausibility model changed. This stays inside §1's **self only** scope: it is the local runtime's own
-list of what it is executing, read over a local socket — not a network scan. **Running** containers
+list of what it is executing, read over a local socket — not a network scan. // The same defence
+covers a hypervisor host's own guest list since [[0095-hypervisor-guest-inventory]] (2026-08-06,
+#1217). **Running** containers
 only; a `RUNS_ON` edge describes what *executes*, and an exited one-shot job from six months ago has
 no relationship worth drawing. The collector decides whether to try the socket by **stat**ing it:
 `Bun.file(path).exists()` is a regular-file check that answers `false` for a unix socket, and gating
@@ -1316,10 +1349,15 @@ Stated honestly, and it is worth stating because the temptation is to oversell i
 checksum, not a signature.** Anyone who can write both files in the API container defeats it, and it
 is not meant to survive that — cosign stays deferred below. What it buys is a corrupted layer, a
 half-written volume, a caching proxy serving a stale artifact, and a tamper that changed one file and
-not the other, all stopping at the installer instead of nowhere. A build that publishes no digest
+not the other, all stopping at the installer instead of nowhere. ~~A build that publishes no digest
 (any instance older than this) makes the installer **warn and continue**, because web and API ship
 from the same image and failing closed there would brick every install during a rollback;
-`--require-checksum` makes it fatal for an operator who wants that.
+`--require-checksum` makes it fatal for an operator who wants that.~~ — **superseded (2026-08-03,
+#1190): verification is required by default and cannot fail open — a check the party being checked
+can strip by failing one fetch is not a check. A build that publishes no digest is now FATAL; the one
+escape is `--sha256`/`-Sha256`, a digest obtained out of band, and `--require-checksum`/
+`-RequireChecksum` stays accepted and means nothing. Plain-`http` URLs moved behind the explicit
+`--allow-insecure-http`/`-AllowInsecureHttp` opt-in at the same time ([[0087-plain-http-lan-deployment-axis]]).**
 
 **Amendment (2026-08-02, #1166) — the installers are ASCII, and `--url` is checked before anything is
 downloaded.** Two defects found on the **first real Windows host**, during first-run validation.
@@ -1913,7 +1951,7 @@ and had to leave for `/help` to find out what to type.
 Step 2 now takes a **platform choice** (Linux default) and switches four things with it: the
 requirements line, the emitted install command, the inspect-first path, and the post-install check.
 Each is worth stating because each is a promise about code this component does not contain, and
-`agent-install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}` as served
+`lib/agent/install-commands.test.ts` asserts them against `apps/web/public/install.{sh,ps1}` as served
 and against both locale catalogs as shipped:
 
 - **The requirements line states the real constraint, not a friendly one.** Windows 10/11 or Server
@@ -1972,6 +2010,136 @@ operator who meets it with no warning of their own reasonably concludes the down
 stops. Frontend and message catalogs only: no contract, schema, migration or installer change, and no
 existing agent is affected.
 
+**Amendment (2026-08-04, #1208) — a re-run can authenticate with the token already on the host.**
+§7 above lists three ways to hand the installer a token and all three assume you *have* one. On the
+**upgrade** path you frequently do not: re-running the installer is the documented way to pick up a
+new binary and a new unit file, and lazyit **cannot** hand the token back — `ServiceAccount` stores
+only `tokenHash` and `tokenPrefix`, and the plaintext is revealed exactly once at mint or rotate
+([[0048-service-accounts]]). So "re-run this command" was copy-paste *plus* go and find a
+secret, on every host in the estate.
+
+The host already holds it. The installer wrote it there itself — `/etc/lazyit-agent/config` at
+`chmod 600`, `C:\ProgramData\lazyit-agent\config` with an ACL of SYSTEM + Administrators — and both
+installers run as root/SYSTEM. Reading back what it wrote is not a new exposure: anyone who can run
+the installer can read that file directly.
+
+`--keep-token` / `-KeepToken` therefore authenticates a run with the token in that file, and four
+things about it are deliberate:
+
+- **An explicit flag, not the implicit default for a re-run.** Implicit is friendlier by one word and
+  wrong in the case that matters: a misspelled `$TOKEN` variable, or a wrapper that stopped exporting
+  `LAZYIT_TOKEN`, would stop being a loud *"a token is required"* and become a silent install with
+  the **old** credential — a host reporting with a token somebody believes they replaced, and no
+  signal anywhere. Where the credential for a root install came from is not a thing to infer from the
+  state of the disk. It is also what makes the decision greppable in an audit: a run either says
+  `--keep-token`, or it carries a token.
+- **No readable config is fatal, never a silent unauthenticated install.** The message names root
+  first (the file is `0600`, and "I forgot sudo" is the likelier of the two ways to get there) and
+  the first-install forms second. A config that exists but carries no `LAZYIT_TOKEN` line — the shape
+  `--uninstall --keep-config` leaves behind — is fatal with its own message, which says lazyit cannot
+  show an existing token again and this may need a fresh one.
+- **A hard error against every other token source, including the environment.** `--token`,
+  `--token-file` and `LAZYIT_TOKEN` each refuse to share a run with it, in the same posture as the
+  existing `--token`/`--token-file` pair. Two sources on one root install is an operator who believes
+  something untrue about the run, and quietly picking one is how a host ends up authenticating with
+  the credential that was just rotated away.
+- **The config merge is untouched.** `--keep-token` changes where the token *comes from*, not who
+  owns the key: `LAZYIT_TOKEN` is still dropped from the preserved set and written back once, so the
+  host owner's `LAZYIT_COLLECT_*=false` veto, its proxy and its CA cross the upgrade exactly as they
+  did before (#1140/#1137/#1160) and no re-run can leave two token lines for the parser to choose
+  between.
+
+The extraction agrees with the agent's own `readConfigFile` on every point where a hand-edited file
+can differ from the one the installer writes — last assignment wins, value trimmed, one matching pair
+of surrounding quotes stripped, `CR` dropped — because "the credential this host is already using" is
+the whole promise. Reading a different token than the agent reads would install cleanly and then fail
+on every tick.
+
+**Nothing about stored credentials changes**: the server still never holds a plaintext token, and
+`--uninstall` still destroys the one on the host unconditionally (`--keep-token` is *refused* there
+rather than ignored, so no operator can finish an uninstall believing a live credential survived).
+Purely additive: every existing invocation keeps working unchanged, and an older instance serving an
+older installer is unaffected — this arrives only where the new script is fetched and run.
+
+**Amendment (2026-08-04, #1208 review) — the token leaves `curl`'s argv, and a re-run keeps the whole
+configuration.** Adversarial review of the above found two defects and one gap, and all three are
+about the same thing: what an *upgrade command* has to carry.
+
+*The credential was on a command line the whole time.* §7 lists three token forms whose entire
+purpose is keeping the secret out of `ps`, and `install.sh` then passed it to both downloads as
+`-H "Authorization: Bearer $TOKEN"`. `/proc/<pid>/cmdline` is world-readable on Linux, so an
+unprivileged user polling it during an install — or during an upgrade, the run that gets repeated on
+every host in the estate — collected a live `infra:report` token. The help text directly above it
+claimed *"No secret on the command line"*. The header now goes in on `curl`'s **stdin**
+(`curl --config -`), built by a pure `auth_config` function that escapes the two characters `curl`
+gives a meaning to inside a quoted value; the pipe is `curl`'s stdin, not the script's, so
+`--token-file -` is unaffected. The remaining shape — a newline ending the header line and letting
+what follows be read as another `curl` option — is closed by refusing a token containing any
+whitespace, **whatever source produced it**. `install.ps1` never had this defect (`Invoke-WebRequest`
+takes a headers hashtable in-process); that is now pinned by a test so a later move to `curl.exe`
+cannot import it. Both claims in the help text are rewritten to describe what the code does.
+
+*A padded key is still that key.* `readConfigFile` **trims** the key before comparing, so
+`LAZYIT_TOKEN =lzit_sa_…` — a hand edit, or a config-management template that pads its assignments —
+authenticates on every tick, while the installers' extractors demanded `=` immediately after the key
+and reported *"this host has no token"* on a host that was reporting happily. Both extractors now
+allow whitespace around the key, and so do **both halves of the config merge and the `--keep-config`
+strip** — which have to move together: a padded veto the keep-pattern misses is the erasure of #1160
+in a different shape, and a padded `LAZYIT_TOKEN =` the *owned* pattern misses survives into the kept
+block **below** the fresh one, where last-assignment-wins hands the agent the stale credential. The
+per-key extractor is now one `config_value` / `Get-LazyitConfigValue` serving all three keys a re-run
+reads back, so they cannot drift apart in how they read a hand-edited file.
+
+*`--upgrade` / `-Upgrade`, because `--url` in a generated command is a defect of its own.* An update
+command is produced in a browser, so the `--url` in it is whatever **origin that browser was on**. Run
+across a fleet in the `lan` deployment mode of [[0087-plain-http-lan-deployment-axis]] — where an
+instance is reachable by several addresses — it silently re-pins every host it touches at one admin's
+address. It also carries no `--ca-file`, so a host installed against an internal CA fails the download
+on the very run meant to be the easy one; and the `sudo -E` that made a token in the environment work
+preserves the whole interactive environment into a root process to move one variable. `--upgrade` is
+`--keep-token` **plus** the settings: `LAZYIT_URL` and `LAZYIT_CA_FILE` come off the host when they
+are not passed, so the generated command is `curl -fsSL <origin>/install.sh | sudo sh -s -- --upgrade`
+— identical on every machine, with no origin, no secret and no `-E`.
+
+Four things about it are deliberate, in the same spirit as `--keep-token` above:
+
+- **Its own flag, not a wider `--keep-token`.** The name has to be true where it is read a year from
+  now: `--keep-token` says *token*, and a host reading its own URL back off disk is not that.
+  `--keep-config` was the other candidate and already means "keep the file when removing the agent"
+  under `--uninstall`; one word for two different things in two different modes is what gets misread.
+  `--upgrade` says what the run **is**, which is also why it can be the whole command.
+- **Settings take precedence; a credential does not.** `LAZYIT_URL` and `LAZYIT_CA_FILE` follow the
+  ordinary flag-over-environment-over-file order the agent's own config resolution uses, so
+  `--upgrade --url https://moved.example.com` retargets a host that really did move — *typed*, rather
+  than inherited from whoever generated the command. The token keeps `--keep-token`'s hard refusal of
+  every other source, for the reason given above, and the refusal names the rotation form
+  (`--url … --token <new>`).
+- **A fresh install is still a fresh install.** No readable config is the same actionable refusal
+  `--keep-token` gives, and a config carrying a token but no `LAZYIT_URL` is refused **by name**
+  rather than falling through to a generic *"--url is required"*. There is no path where a missing
+  config yields an unconfigured or unauthenticated install, and `--upgrade` is refused with
+  `--uninstall` exactly as `--keep-token` is.
+- **The re-used set is exactly the installer-owned set.** The merge owns `LAZYIT_URL`,
+  `LAZYIT_TOKEN`, `LAZYIT_INTERVAL` and `LAZYIT_CA_FILE`; `INTERVAL` is accepted and *ignored* since
+  #1140, so re-using the other three re-uses everything a re-run would otherwise have to be told
+  again — everything else already crosses an upgrade through the preserved block. That equality is a
+  test, not a claim. The **lowercase** `lazyit_ca_file` is read first, because `networkFrom` prefers
+  it when a host carries both; reading the other one would download over one trust anchor and report
+  over another.
+
+**Where this meets the #1189/#1190/#1191 hardening, because the two landed on branches cut from the
+same `dev`.** A re-run is an install, so it clears the same bars: the checksum is verified on the
+fail-closed path with no `--upgrade` branch anywhere near it, and plain http still needs
+`--allow-insecure-http`. That second one is a decision, not a setting. A host installed with the
+opt-in carries `LAZYIT_URL=http://…`, so `--upgrade` alone reaches the gate with a cleartext URL
+nobody typed — and letting the *file* answer *"yes, cleartext is acceptable"* on the operator's
+behalf is the same fail-open #1190 closed, one input over. The gate therefore reads the **resolved**
+URL whatever supplied it, and the refusal names the config file as the source rather than a `--url`
+the operator never passed (`$URL_SOURCE` / `$urlSource`, the same shape `$CA_SOURCE` already had).
+Settings are re-used; an acceptance of exposure is re-stated. Both compositions are tested.
+
+Upgrade behaviour is unchanged from the amendment above: purely additive, no flag changed meaning,
+no default moved, and the config format an older installer wrote is read as-is.
 
 ### §8 — Security model
 
@@ -1985,7 +2153,11 @@ existing agent is affected.
 - **`curl | sh` posture.** The installer is served by the operator's own TLS-fronted instance
   (same-origin, no third party). The token is the operator's, scoped to one permission, revocable from
   the UI. A "download, inspect, then run" path is available for the cautious; the one-liner is the
-  default.
+  default. **Amended (2026-08-03, #1190):** the served executable is verified against its published
+  sha256 **by default, fail-closed** (`--sha256`/`-Sha256` is the out-of-band escape for an instance
+  that publishes none), and "TLS-fronted" is the default rather than a guarantee — a plain-`http`
+  instance installs only behind the explicit `--allow-insecure-http`/`-AllowInsecureHttp` opt-in,
+  which names both cleartext exposures ([[0087-plain-http-lan-deployment-axis]]).
 
 **Amendment (2026-07-31, #1134) — throttling `POST /infra/report`.** The bullets above reason about
 **authorization** and are right: one permission, a human gate, no secret reach, and a leaked token buys
@@ -2161,10 +2333,20 @@ would be a separate ADR and arguably a separate product).
   operator-authored auto-confirm rules): §1 Amendment (2026-08-01), issue #1145 — the ergonomics debt
   the #1139 container amendment named as it created it. It moves *when* the human decides, so it
   carries a paired **§8 Amendment (2026-08-01)** stating the widened `infra:report` blast radius.
-  Server-side paging of `GET /infra/nodes` is tracked separately (#1152).
+  ~~Server-side paging of `GET /infra/nodes` is tracked separately (#1152).~~ **Landed 2026-08-07
+  (#1152, corrected 2026-08-09):** `/infra/nodes/page` is the house `Page<T>` and the tray works the
+  queue in batches of 200; deprecated `/infra/nodes` retains the legacy array until v2.0 — see the
+  §1 correction above and [[0030-list-pagination-contract]] §§9–12.
 - Server-driven agent policy (the ack as the config channel, the fixed-tick interval inversion, the
   local veto, the three scopes): §7 Amendment (2026-08-01), issue #1140 — the consumer of contract
   v2's reserved `policyRevision`, with a §4 amendment making the staleness threshold per node.
+- A re-run authenticates with the token already on the host (`--keep-token` / `-KeepToken`, an
+  explicit flag and a hard error against every other token source): §7 Amendment (2026-08-04), issue
+  #1208 — the upgrade path stops needing a secret lazyit structurally cannot re-issue.
+- The token leaves `curl`'s argv, a padded config key is read as the agent reads it, and `--upgrade` /
+  `-Upgrade` re-runs a host from its own `LAZYIT_URL` and `LAZYIT_CA_FILE`: §7 Amendment (2026-08-04,
+  review of #1208) — an upgrade command that carries an origin re-pins a fleet, and one that carries
+  a header argument publishes the credential.
 - Software delta + the unchanged-write skip + the container child's Asset sync: §2/§3 Amendment
   (2026-08-01), issues #1142, #1153 and #1157 — one change, because giving an absent `software` key
   the meaning *unchanged* is only safe once the wire can also say *disabled*. It reconciles #1147's

@@ -48,12 +48,14 @@ import {
   type AgentVirtualizationType,
 } from "@lazyit/shared";
 import type { SoftwareCollection } from "../software-delta";
+import { collectHypervisorWindows } from "./hypervisor-windows";
 import {
   applyDiskPolicy,
   applyNicPolicy,
   applySoftwarePolicy,
   asArray,
   buildIdentifiers,
+  canonicalMac,
   clean,
   CONTAINER_PORT_PROTOCOLS,
   mapContainerState,
@@ -63,6 +65,7 @@ import {
   SOFTWARE_CAP,
   type Containers,
   type Disks,
+  type Exec,
   type Host,
   type HostFacts,
   type Nics,
@@ -82,7 +85,8 @@ import {
 const POWERSHELL = "powershell.exe";
 
 /**
- * The collection script, as ONE line.
+ * The collection script, as ONE line — COMPOSED from the collectors the policy actually wants
+ * (#1177).
  *
  * EVERY string literal in it is SINGLE-quoted, deliberately. The script travels as one argv element
  * and Windows has no argv — the OS hands the child a command LINE, which every runtime re-quotes on
@@ -90,6 +94,30 @@ const POWERSHELL = "powershell.exe";
  * correctness of the whole collector at the mercy of that round trip. `-EncodedCommand` would remove
  * the hazard entirely and is rejected for a different one: base64'd PowerShell is a signature EDR
  * products alert on, and an unsigned inventory agent has no budget for looking like malware.
+ *
+ * WHY IT IS COMPOSED RATHER THAN FIXED (#1177). The first cut queried every class unconditionally
+ * and let `applyNicPolicy` / `applyDiskPolicy` decline to COPY the results into the report — so a
+ * Windows host gathered the facts and threw them away, while Linux (`policy.collect.hardware ?
+ * collectHardware(warn) : undefined`) genuinely never spawned `dmidecode`. That made one toggle mean
+ * two different things: "do not report this" worked on both platforms, "do not READ this on my host"
+ * worked only on Linux. The second is the one a security-minded operator is exercising, and it is
+ * what ADR-0074 §7's `local may VETO, never widen` is built on — a host owner has to be able to
+ * genuinely refuse. The cost intent failed too: turning Disks and Network off on an expensive file
+ * server changed nothing about what the tick cost.
+ *
+ * It is a STRING-BUILDING change and deliberately not an architectural one: the design decision that
+ * matters — ONE `powershell.exe` start per tick, one JSON document — is untouched. A veto removes
+ * keys from that document; a missing key degrades to "not collected" through the same `asArray` /
+ * optional-chaining paths an absent CIM class already took, so nothing downstream distinguishes
+ * "the policy said no" from "the class answered nothing" except the warning each files.
+ *
+ * WHAT IS NEVER GATED, and why that is not an oversight. `Win32_ComputerSystem` survives every veto:
+ * memory, domain membership and the virtualization signature all come off it and none of them is the
+ * hardware collector's fact — `hardware=false` still drops manufacturer/model from the REPORT, and
+ * additionally stops the one privileged read (`Win32_BIOS`, the serial) the operator is refusing.
+ * Identity (`MachineGuid`, `Win32_ComputerSystemProduct`) and the chassis code are likewise not
+ * gated: no policy flag names them, and vetoing them here would widen a toggle's meaning past what
+ * the operator agreed to.
  *
  * `$ErrorActionPreference='SilentlyContinue'` is the best-effort contract expressed in PowerShell: a
  * class that does not exist on this SKU, a registry hive that is absent on 32-bit Windows, or a
@@ -101,56 +129,124 @@ const POWERSHELL = "powershell.exe";
  * Windows call was the only collector in this agent that could degrade with nothing to show for it,
  * while every Linux probe warns. `$Error` is CLEARED first so nothing from before the sweep can be
  * attributed to it, and `errors` is the LAST key because a hashtable literal is evaluated in written
- * order — which is the only reason it sees what the earlier keys raised.
+ * order — which is the only reason it sees what the earlier keys raised. That ordering is a property
+ * of the COMPOSER now, so it holds however many sections a policy removed.
+ *
+ * THE STDOUT OF THIS SCRIPT IS UTF-8, BY DECLARATION, NOT BY LUCK (#1191). Windows PowerShell 5.1
+ * writes redirected stdout in the OEM CODE PAGE by default, while `run()` (shared.ts) decodes UTF-8.
+ * The only reason that ever worked is that 5.1's `ConvertTo-Json` escapes every non-ASCII character
+ * to `\uXXXX` — an undocumented dependency that a switch to `pwsh`, or ONE fact emitted as a raw
+ * string, would turn into mojibake on every localized adapter name, a broken `LAZYIT_EXCLUDE_NICS`
+ * glob, and a `softwareHash` that churns on every report. So the script sets
+ * `[Console]::OutputEncoding` to BOM-LESS UTF-8 itself, first thing: the invariant is "this
+ * boundary speaks UTF-8", stated where the bytes are produced. No BOM, because the decoder must
+ * never depend on stripping one; in a try/catch (BEFORE `$Error.Clear()`, so a refusal cannot leak
+ * into `errors[]`), because a host without a console handle can throw on the setter and the sweep
+ * must degrade to today's escaped-ASCII behaviour rather than die.
  */
-export const WINDOWS_FACTS_SCRIPT = [
-  "$ErrorActionPreference='SilentlyContinue'",
-  "$ProgressPreference='SilentlyContinue'",
-  "$Error.Clear()",
-  "$os=Get-CimInstance -ClassName Win32_OperatingSystem",
-  "$cs=Get-CimInstance -ClassName Win32_ComputerSystem",
-  // An ABSOLUTE instant, round-trip formatted HERE rather than left to ConvertTo-Json, whose
-  // DateTime rendering differs between Windows PowerShell 5.1 and PowerShell 7. Formatting it in the
-  // script makes the wire value the same string whichever interpreter answered, which is worth more
-  // than knowing exactly what each one would otherwise have produced.
-  "$boot=$null;if($os -and $os.LastBootUpTime){$boot=$os.LastBootUpTime.ToUniversalTime().ToString('o')}",
-  // The primary dedup key. Read from the 64-bit view (this process is the x64 build), which is the
-  // view `sysprep /generalize` regenerates.
-  "$mg=$null;try{$mg=(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Cryptography' -Name MachineGuid).MachineGuid}catch{}",
-  // SYSTEM is a member of the Administrators role, so the scheduled run reports `true` and a
-  // hand-run under an ordinary account reports `false` — which is exactly what `privileged` means.
-  "$el=$false;try{$el=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}catch{}",
-  "[pscustomobject]@{" +
+export function buildWindowsFactsScript(policy: AgentPolicy = AGENT_POLICY_DEFAULT): string {
+  // The keys of the ONE emitted hashtable, in written order. `errors` must stay last (see above), so
+  // it is appended by this function rather than by any caller.
+  const keys: string[] = [
     // BuildNumber, not just Version: 'Windows 11, version 10.0' tells an operator nothing, and the
     // build is how anyone actually names a Windows release (26100 = 24H2).
-    "os=[pscustomobject]@{Caption=$os.Caption;Version=$os.Version;BuildNumber=$os.BuildNumber;LastBootUpTime=$boot};" +
-    "cs=$cs|Select-Object TotalPhysicalMemory,Manufacturer,Model,Domain,PartOfDomain,DNSHostName;" +
-    "cpu=@(Get-CimInstance -ClassName Win32_Processor|Select-Object Name,NumberOfCores,NumberOfLogicalProcessors);" +
-    "bios=Get-CimInstance -ClassName Win32_BIOS|Select-Object SerialNumber;" +
-    "csp=Get-CimInstance -ClassName Win32_ComputerSystemProduct|Select-Object UUID;" +
-    "enclosure=Get-CimInstance -ClassName Win32_SystemEnclosure|Select-Object -First 1 ChassisTypes;" +
-    "disks=@(Get-CimInstance -ClassName Win32_DiskDrive|Select-Object DeviceID,Model,Size);" +
-    // The fallback for hosts where Win32_DiskDrive enumerates nothing (Storage Spaces, some
-    // paravirtual controllers). Its namespace may be missing on old SKUs; the error is swallowed.
-    "physicalDisks=@(Get-CimInstance -Namespace 'root\\Microsoft\\Windows\\Storage' -ClassName MSFT_PhysicalDisk|Select-Object FriendlyName,Size);" +
-    // `MACAddress IS NOT NULL` is what separates real interfaces from the several dozen WAN Miniport
-    // and tunnelling pseudo-adapters every Windows install carries. A DISCONNECTED physical NIC still
-    // has one, and its burned-in address is identity evidence, so it is deliberately kept.
-    "adapters=@(Get-CimInstance -ClassName Win32_NetworkAdapter -Filter 'MACAddress IS NOT NULL'|Select-Object Index,NetConnectionID,MACAddress,PhysicalAdapter);" +
-    "adapterConfigs=@(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'MACAddress IS NOT NULL'|Select-Object Index,MACAddress,IPAddress,IPSubnet);" +
+    "os=[pscustomobject]@{Caption=$os.Caption;Version=$os.Version;BuildNumber=$os.BuildNumber;LastBootUpTime=$boot}",
+    "cs=$cs|Select-Object TotalPhysicalMemory,Manufacturer,Model,Domain,PartOfDomain,DNSHostName",
+    "cpu=@(Get-CimInstance -ClassName Win32_Processor|Select-Object Name,NumberOfCores,NumberOfLogicalProcessors)",
+  ];
+  // The SERIAL, and the only privileged read the hardware collector makes on this platform.
+  // Manufacturer and model ride on `cs` above, which the report needs whatever the policy says.
+  if (policy.collect.hardware) {
+    keys.push("bios=Get-CimInstance -ClassName Win32_BIOS|Select-Object SerialNumber");
+  }
+  keys.push(
+    "csp=Get-CimInstance -ClassName Win32_ComputerSystemProduct|Select-Object UUID",
+    "enclosure=Get-CimInstance -ClassName Win32_SystemEnclosure|Select-Object -First 1 ChassisTypes",
+  );
+  if (policy.collect.disks) {
+    keys.push(
+      "disks=@(Get-CimInstance -ClassName Win32_DiskDrive|Select-Object DeviceID,Model,Size)",
+      // The fallback for hosts where Win32_DiskDrive enumerates nothing (Storage Spaces, some
+      // paravirtual controllers). Its namespace may be missing on old SKUs; the error is swallowed.
+      "physicalDisks=@(Get-CimInstance -Namespace 'root\\Microsoft\\Windows\\Storage' -ClassName MSFT_PhysicalDisk|Select-Object FriendlyName,Size)",
+    );
+  }
+  if (policy.collect.nics) {
+    keys.push(
+      // `MACAddress IS NOT NULL` is what separates real interfaces from the several dozen WAN
+      // Miniport and tunnelling pseudo-adapters every Windows install carries. A DISCONNECTED
+      // physical NIC still has one, and its burned-in address is identity evidence, so it is kept.
+      "adapters=@(Get-CimInstance -ClassName Win32_NetworkAdapter -Filter 'MACAddress IS NOT NULL'|Select-Object Index,NetConnectionID,MACAddress,PhysicalAdapter)",
+      "adapterConfigs=@(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'MACAddress IS NOT NULL'|Select-Object Index,MACAddress,IPAddress,IPSubnet)",
+    );
+  }
+  if (policy.collect.software) {
     // BOTH MACHINE-WIDE uninstall hives. Half of a real inventory lives in WOW6432Node and missing
     // it is the #1 thing homegrown inventory scripts get wrong. Per-USER installs live under HKCU /
     // HKU\<sid> and are NOT read — see `parseWindowsSoftware` for why that is its own piece of work.
     // Nothing is filtered here; the DisplayName / SystemComponent rules live in the tested mapper.
-    "software=@(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'|Select-Object DisplayName,DisplayVersion,SystemComponent);" +
-    "machineGuid=$mg;" +
-    "elevated=$el;" +
+    keys.push(
+      "software=@(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'|Select-Object DisplayName,DisplayVersion,SystemComponent)",
+    );
+  }
+  // Hyper-V host detection (ADR-0095 §2): the vmms service exists AND the virtualization namespace
+  // is reachable — the management stack itself, never CPUID or the SMBIOS vendor strings, because
+  // the host's OWN root partition advertises "Microsoft Hv" too (the classic false positive). It
+  // rides THIS sweep so a non-Hyper-V host pays zero extra interpreter starts; only a `true` here
+  // makes `collectHost` pay for the second document (`HYPERV_GUESTS_SCRIPT`). Gated like every
+  // other section: a policy that turns the collector off must stop the PROBE, not just the fact.
+  if (policy.collect.hypervisor) {
+    keys.push("hyperv=$hv");
+  }
+  keys.push(
+    "machineGuid=$mg",
+    "elevated=$el",
     // LAST, deliberately — see the note above. `Activity` is the cmdlet that failed, which is what
     // turns a bare "Access is denied." into something an operator can act on. Bounded at 10: a
     // pathological host must degrade into a report, not into an error log.
-    "errors=@($Error|Select-Object -First 10|ForEach-Object{('{0}: {1}' -f $_.CategoryInfo.Activity,$_.Exception.Message)})" +
-    "}|ConvertTo-Json -Compress -Depth 4",
-].join(";");
+    "errors=@($Error|Select-Object -First 10|ForEach-Object{('{0}: {1}' -f $_.CategoryInfo.Activity,$_.Exception.Message)})",
+  );
+
+  return [
+    "$ErrorActionPreference='SilentlyContinue'",
+    "$ProgressPreference='SilentlyContinue'",
+    // The UTF-8 boundary declaration — see the header note (#1191). Deliberately before
+    // `$Error.Clear()` and inside try/catch: a refused setter is a degradation, not an error line.
+    "try{[Console]::OutputEncoding=New-Object Text.UTF8Encoding $false}catch{}",
+    "$Error.Clear()",
+    "$os=Get-CimInstance -ClassName Win32_OperatingSystem",
+    "$cs=Get-CimInstance -ClassName Win32_ComputerSystem",
+    // An ABSOLUTE instant, round-trip formatted HERE rather than left to ConvertTo-Json, whose
+    // DateTime rendering differs between Windows PowerShell 5.1 and PowerShell 7. Formatting it in
+    // the script makes the wire value the same string whichever interpreter answered, which is worth
+    // more than knowing exactly what each one would otherwise have produced.
+    "$boot=$null;if($os -and $os.LastBootUpTime){$boot=$os.LastBootUpTime.ToUniversalTime().ToString('o')}",
+    // The primary dedup key. Read from the 64-bit view (this process is the x64 build), which is the
+    // view `sysprep /generalize` regenerates.
+    "$mg=$null;try{$mg=(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Cryptography' -Name MachineGuid).MachineGuid}catch{}",
+    // SYSTEM is a member of the Administrators role, so the scheduled run reports `true` and a
+    // hand-run under an ordinary account reports `false` — which is exactly what `privileged` means.
+    "$el=$false;try{$el=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}catch{}",
+    // `-ErrorAction Ignore`, not the ambient SilentlyContinue: a missing service or namespace is
+    // the NORMAL answer on most of the estate, and recording it in $Error would put a line in
+    // every non-Hyper-V host's warnings. `Get-CimClass` reads class metadata without enumerating
+    // instances, which is what keeps the probe cheap on a host running hundreds of VMs.
+    ...(policy.collect.hypervisor
+      ? [
+          "$hv=$false;try{if((Get-Service -Name vmms -ErrorAction Ignore) -and (Get-CimClass -Namespace 'root\\virtualization\\v2' -ClassName Msvm_ComputerSystem -ErrorAction Ignore)){$hv=$true}}catch{}",
+        ]
+      : []),
+    `[pscustomobject]@{${keys.join(";")}}|ConvertTo-Json -Compress -Depth 4`,
+  ].join(";");
+}
+
+/**
+ * The script an UNCONFIGURED host runs — every collector on, which is the built-in default and the
+ * behaviour the agent had before the policy channel existed. Kept as a named constant because it is
+ * what the invariant tests assert over and what the ADR names; a host's ACTUAL script comes from
+ * {@link buildWindowsFactsScript} with that host's effective policy.
+ */
+export const WINDOWS_FACTS_SCRIPT = buildWindowsFactsScript(AGENT_POLICY_DEFAULT);
 
 /**
  * Budget for the one PowerShell call, and deliberately far above the 10 s every other collector gets.
@@ -166,41 +262,59 @@ export const WINDOWS_COLLECT_TIMEOUT_MS = 60_000;
 
 // ── The document the script emits ─────────────────────────────────────────────────────────────────
 
-/** One entry of either Uninstall hive, as `Get-ItemProperty` hands it over. */
+/**
+ * One entry of either Uninstall hive, as `Get-ItemProperty` hands it over.
+ *
+ * Every field is `unknown`, not the type it SHOULD hold (#1188): this hive is written by arbitrary
+ * third-party installers, and a `DisplayVersion` stored as REG_DWORD reaches this process through
+ * `ConvertTo-Json` as a number, a REG_MULTI_SZ `DisplayName` as an array of strings. The mapper
+ * guards; it does not trust.
+ */
 export interface WindowsUninstallEntry {
-  DisplayName?: string | null;
-  DisplayVersion?: string | null;
-  /** A DWORD; `1` marks an update stub or runtime fragment nobody wants in an inventory. */
-  SystemComponent?: number | null;
+  DisplayName?: unknown;
+  DisplayVersion?: unknown;
+  /** Normally a DWORD; `1` marks an update stub or runtime fragment nobody wants in an inventory. */
+  SystemComponent?: unknown;
 }
 
-/** The single JSON document the collection script produces. Every key may be absent or null. */
+/**
+ * The single JSON document the collection script produces. Every key may be absent or null — and
+ * every STRING-typed fact is declared `unknown` (#1188), because the document is parsed from a host,
+ * not constructed here: a registry value or CIM property of the wrong type must cost its field,
+ * never the report. {@link str} is the one gate they all pass through.
+ */
 export interface WindowsFacts {
   os?: {
-    Caption?: string | null;
-    Version?: string | null;
-    BuildNumber?: string | null;
+    Caption?: unknown;
+    Version?: unknown;
+    BuildNumber?: unknown;
     /** Round-trip ('o') formatted UTC, produced by the script — never a raw CIM DateTime. */
-    LastBootUpTime?: string | null;
+    LastBootUpTime?: unknown;
   } | null;
   cs?: {
     TotalPhysicalMemory?: number | string | null;
-    Manufacturer?: string | null;
-    Model?: string | null;
-    Domain?: string | null;
+    Manufacturer?: unknown;
+    Model?: unknown;
+    Domain?: unknown;
     PartOfDomain?: boolean | null;
-    DNSHostName?: string | null;
+    DNSHostName?: unknown;
   } | null;
   cpu?: unknown;
-  bios?: { SerialNumber?: string | null } | null;
-  csp?: { UUID?: string | null } | null;
+  bios?: { SerialNumber?: unknown } | null;
+  csp?: { UUID?: unknown } | null;
   enclosure?: { ChassisTypes?: number[] | number | null } | null;
   disks?: unknown;
   physicalDisks?: unknown;
   adapters?: unknown;
   adapterConfigs?: unknown;
   software?: unknown;
-  machineGuid?: string | null;
+  /**
+   * Hyper-V host detection (ADR-0095): `true` when the vmms service exists AND the
+   * `root\virtualization\v2` namespace is reachable. Only a literal `true` triggers the second
+   * (guest sweep) document; absent, null or mangled all read as "not a hypervisor host".
+   */
+  hyperv?: unknown;
+  machineGuid?: unknown;
   elevated?: boolean | null;
   /**
    * What `$ErrorActionPreference='SilentlyContinue'` swallowed, as `"<cmdlet>: <message>"` lines.
@@ -211,23 +325,23 @@ export interface WindowsFacts {
 }
 
 interface WindowsCpu {
-  Name?: string | null;
+  Name?: unknown;
   NumberOfCores?: number | null;
   NumberOfLogicalProcessors?: number | null;
 }
 interface WindowsDiskDrive {
-  DeviceID?: string | null;
-  Model?: string | null;
+  DeviceID?: unknown;
+  Model?: unknown;
   Size?: number | string | null;
 }
 interface WindowsPhysicalDisk {
-  FriendlyName?: string | null;
+  FriendlyName?: unknown;
   Size?: number | string | null;
 }
 interface WindowsAdapter {
   Index?: number | null;
-  NetConnectionID?: string | null;
-  MACAddress?: string | null;
+  NetConnectionID?: unknown;
+  MACAddress?: unknown;
   PhysicalAdapter?: boolean | null;
 }
 interface WindowsAdapterConfig {
@@ -235,6 +349,21 @@ interface WindowsAdapterConfig {
   MACAddress?: string | null;
   IPAddress?: string[] | string | null;
   IPSubnet?: string[] | string | null;
+}
+
+/**
+ * A host-parsed value as a trimmed, non-empty string — or `undefined` for anything else (#1188).
+ *
+ * Optional chaining only guards null/undefined, and the collection document does not guarantee its
+ * types: `.trim()` on a REG_DWORD-turned-number was a TypeError that rejected the WHOLE report,
+ * every tick, until the offending software was uninstalled. Deliberately no `String()` here — a
+ * stringified array or object is not a fact, it is junk consistently spelled. Where a number IS
+ * genuinely meaningful (a numeric `DisplayVersion`), the caller coerces it explicitly.
+ */
+function str(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 /**
@@ -259,10 +388,12 @@ export function parseWindowsBlob(raw: string | null): WindowsFacts | null {
 }
 
 /**
- * How this module spawns. Injectable so the tests can drive the two impure boundaries — the PowerShell
- * calls and `docker ps` — without a Windows host; the production default is always {@link run}.
+ * How this module spawns — the shared {@link Exec} alias, re-exported here because this file is
+ * where the injectable-boundary pattern was established (#1144) and its tests import it by this
+ * path. Injectable so the tests can drive the impure boundaries — the PowerShell calls and
+ * `docker ps` — without a Windows host; the production default is always {@link run}.
  */
-export type Exec = typeof run;
+export type { Exec } from "./shared";
 
 /** The memoized dedup-key read. See {@link readMachineGuid}. */
 let machineGuidRun: Promise<string | null> | undefined;
@@ -399,18 +530,37 @@ export function windowsChassis(
  * registered, so identical name+version pairs are collapsed. Two DIFFERENT versions of the same name
  * are kept: that is a real and interesting state (a half-finished upgrade), not a duplicate.
  */
-export function parseWindowsSoftware(raw: unknown): Software {
+export function parseWindowsSoftware(raw: unknown, warn: Warn = NO_WARN): Software {
   const seen = new Set<string>();
   const pkgs: Software = [];
+  let malformed = 0;
   for (const entry of asArray<WindowsUninstallEntry>(raw)) {
-    const name = entry?.DisplayName?.trim();
+    const rawName = entry?.DisplayName;
+    // A name of the WRONG TYPE (REG_MULTI_SZ, REG_DWORD — #1188) is not the silent fragment case
+    // below: it is an entry an operator can see in Programs and Features that will never reach the
+    // inventory, so its skip is counted and explained after the loop. Never fatal, either way.
+    if (rawName != null && typeof rawName !== "string") {
+      malformed += 1;
+      continue;
+    }
+    const name = str(rawName);
     if (!name) continue;
     if (Number(entry.SystemComponent) === 1) continue;
-    const version = entry.DisplayVersion?.trim();
+    // A REG_DWORD version IS a meaningful version (`5` → "5"), so a finite number is coerced;
+    // anything else non-string costs the FIELD, not the entry.
+    const version =
+      typeof entry.DisplayVersion === "number" && Number.isFinite(entry.DisplayVersion)
+        ? String(entry.DisplayVersion)
+        : str(entry.DisplayVersion);
     const key = `${name}\0${version ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     pkgs.push({ name: name.slice(0, 255), ...(version ? { version: version.slice(0, 120) } : {}), source: "registry" });
+  }
+  if (malformed) {
+    warn(
+      `software: skipped ${malformed} uninstall ${malformed === 1 ? "entry" : "entries"} whose DisplayName is not a string — third-party installers write non-string registry values`,
+    );
   }
   return pkgs;
 }
@@ -431,19 +581,22 @@ export async function collectSoftware(
   facts?: WindowsFacts | null,
 ): Promise<SoftwareCollection> {
   if (!policy.collect.software) {
+    // Returned BEFORE the sweep is touched, so a host whose policy turns software off never walks
+    // the Uninstall hives — the composed script does not carry them either (#1177), and this is the
+    // path that keeps a standalone `collectSoftware` from starting the sweep just to discard it.
     warn("software: disabled by agent policy — installed package list omitted");
     return { state: "disabled" };
   }
   // `collectHost` already paid for the one PowerShell call and passes its document in; a standalone
   // caller (the dispatcher's `collectSoftware`) makes it itself rather than going without.
-  const blob = facts !== undefined ? facts : parseWindowsBlob(await runFactsScript(warn));
+  const blob = facts !== undefined ? facts : parseWindowsBlob(await runFactsScript(warn, policy));
   if (!blob) {
     warn(
       "software: the Windows fact collector did not answer — installed list omitted (the stored list is kept)",
     );
     return { state: "unavailable" };
   }
-  const pkgs = parseWindowsSoftware(blob.software);
+  const pkgs = parseWindowsSoftware(blob.software, warn);
   return {
     state: "reported",
     software: applySoftwarePolicy(pkgs.slice(0, SOFTWARE_CAP), policy, warn),
@@ -665,12 +818,21 @@ export async function collectContainers(
  * Process-scoped is exactly right here and would be wrong in a daemon: the agent is a one-shot
  * (ADR-0074 §7) — it runs, gathers, POSTs and exits — so "once per process" IS "once per report", and
  * the facts can never go stale within one. A long-lived agent would have to invalidate this.
+ *
+ * The memo is deliberately NOT keyed by policy (#1177), even though the script is now composed from
+ * one: a run resolves its effective policy ONCE, before anything is collected, and passes the same
+ * value to `collectHost` and `collectSoftware`. One process, one policy, one script — a key would be
+ * a cache for a case that cannot occur, and it would silently permit a second sweep if it ever did.
  */
 let factsScriptRun: Promise<string | null> | undefined;
 
-async function runFactsScript(warn: Warn): Promise<string | null> {
-  factsScriptRun ??= run(
-    [POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", WINDOWS_FACTS_SCRIPT],
+async function runFactsScript(
+  warn: Warn,
+  policy: AgentPolicy = AGENT_POLICY_DEFAULT,
+  exec: Exec = run,
+): Promise<string | null> {
+  factsScriptRun ??= exec(
+    [POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", buildWindowsFactsScript(policy)],
     WINDOWS_COLLECT_TIMEOUT_MS,
     warn,
   );
@@ -752,12 +914,17 @@ function buildNics(facts: WindowsFacts): Nics | undefined {
   }
   const nics: Nics = [];
   for (const adapter of adapters) {
-    const name = adapter?.NetConnectionID?.trim();
+    const name = str(adapter?.NetConnectionID);
     if (!name) continue;
     const cfg = typeof adapter.Index === "number" ? configs.get(adapter.Index) : undefined;
     const { ipv4, ipv6 } = cfg ? splitAddresses(cfg) : { ipv4: [], ipv6: [] };
     const nic: Nics[number] = { name };
-    if (adapter.MACAddress?.trim()) nic.mac = adapter.MACAddress.trim();
+    // WMI answers in UPPER CASE (`AA:BB:CC:DD:EE:01`) and Linux in lower — the same address, spelled
+    // two ways depending on which OS reported it (#1169). Canonicalised through the shared helper so
+    // the wire carries ONE form, and so this NIC's `mac` matches the `mac` identifier derived from it
+    // further down (which has gone through the contract's sanitiser since #1138).
+    const mac = canonicalMac(str(adapter.MACAddress));
+    if (mac) nic.mac = mac;
     if (typeof adapter.PhysicalAdapter === "boolean") nic.isVirtual = !adapter.PhysicalAdapter;
     if (ipv4.length) nic.ipv4 = ipv4;
     if (ipv6.length) nic.ipv6 = ipv6;
@@ -779,8 +946,8 @@ function buildNics(facts: WindowsFacts): Nics | undefined {
  */
 function buildDisks(facts: WindowsFacts): Disks | undefined {
   /** One entry, or nothing when the source could not even name the device. */
-  const toDisk = (device: string | undefined, size: unknown): Disks[number] | undefined => {
-    const name = device?.trim();
+  const toDisk = (device: unknown, size: unknown): Disks[number] | undefined => {
+    const name = str(device);
     if (!name) return undefined;
     const sizeBytes = size != null ? Number(size) : Number.NaN;
     return {
@@ -823,17 +990,25 @@ export function buildWindowsHost(
   warn: Warn,
 ): HostFacts {
   const cs = facts?.cs ?? undefined;
-  const dnsHostName = cs?.DNSHostName?.trim();
-  const host: Host = { hostname: dnsHostName || osHostname() || "unknown" };
+  const dnsHostName = str(cs?.DNSHostName);
+  // ONE canonical hostname, LOWERCASE, from the SWEEP-INDEPENDENT source (#1191). The first cut
+  // preferred the sweep's DNSHostName and fell back to `os.hostname()` (NetBIOS-style, typically
+  // uppercase) only when the CIM sweep degraded — so a transient WMI failure flipped the reported
+  // name/case between consecutive reports of the SAME node, and `fqdn` (lowercased below) could
+  // disagree with `hostname` in case inside one report. `os.hostname()` answers on every run,
+  // healthy or degraded, which is what makes it the stable source; DNS names are case-insensitive,
+  // so folding to lowercase — the case `fqdn` already ships, and the case Linux hostnames
+  // conventionally carry — loses nothing and makes the value constant.
+  const host: Host = { hostname: (osHostname() || dnsHostName || "unknown").toLowerCase() };
 
   host.os = {
     family: "windows",
     ...clean({
-      name: facts?.os?.Caption?.trim(),
-      version: facts?.os?.Version?.trim(),
+      name: str(facts?.os?.Caption),
+      version: str(facts?.os?.Version),
       // The number an operator actually names a Windows release by (26100 = 24H2). Without it,
       // `version: "10.0.26100"` is the only clue and `Windows 11` reports a major version of 10.
-      build: facts?.os?.BuildNumber?.trim(),
+      build: str(facts?.os?.BuildNumber),
     }),
   };
 
@@ -842,7 +1017,7 @@ export function buildWindowsHost(
   // as an AD domain would be a confidently wrong answer. `joined: false` is still reported — "not in
   // the directory" is the fact an operator triages on, and it is different from "we never looked".
   const joined = cs?.PartOfDomain;
-  const domainName = cs?.Domain?.trim();
+  const domainName = str(cs?.Domain);
   if (typeof joined === "boolean") {
     host.domain = { ...(joined && domainName ? { name: domainName } : {}), joined };
     if (joined && domainName && dnsHostName) {
@@ -851,11 +1026,17 @@ export function buildWindowsHost(
   }
 
   const cpus = asArray<WindowsCpu>(facts?.cpu);
-  // PHYSICAL cores, summed across sockets — the same fact `/proc/cpuinfo`'s processor count does NOT
-  // report on Linux (that one counts logical CPUs). The two collectors therefore disagree about SMT,
-  // which is stated here rather than discovered: `cores` on Windows excludes hyper-threads.
-  const cores = cpus.reduce((n, c) => n + (Number(c?.NumberOfCores) || 0), 0);
-  const cpu = clean({ model: cpus[0]?.Name?.trim(), cores: cores || undefined });
+  // LOGICAL CPUs, summed across sockets (#1191) — the ONE wire semantic `host.cpu.cores` has, and
+  // the one Linux has always shipped (`/proc/cpuinfo`'s `processor :` lines count hyper-threads).
+  // The first cut summed physical `NumberOfCores` instead, so the same 8c/16t machine reported 8 or
+  // 16 depending on OS and fleet-wide capacity comparisons were silently 2x off. A (very old) SKU
+  // that omits `NumberOfLogicalProcessors` falls back to its physical count per entry — fewer than
+  // the truth beats reporting nothing.
+  const cores = cpus.reduce(
+    (n, c) => n + (Number(c?.NumberOfLogicalProcessors) || Number(c?.NumberOfCores) || 0),
+    0,
+  );
+  const cpu = clean({ model: str(cpus[0]?.Name), cores: cores || undefined });
   if (cpu) host.cpu = cpu;
 
   const memoryBytes = cs?.TotalPhysicalMemory != null ? Number(cs.TotalPhysicalMemory) : undefined;
@@ -863,7 +1044,7 @@ export function buildWindowsHost(
     host.memoryBytes = memoryBytes;
   }
 
-  const bootedAt = facts?.os?.LastBootUpTime?.trim();
+  const bootedAt = str(facts?.os?.LastBootUpTime);
   if (bootedAt) {
     const parsed = new Date(bootedAt);
     if (!Number.isNaN(parsed.getTime())) host.bootedAt = parsed.toISOString();
@@ -871,11 +1052,11 @@ export function buildWindowsHost(
 
   const hardware = policy.collect.hardware
     ? clean({
-        manufacturer: cs?.Manufacturer?.trim(),
-        model: cs?.Model?.trim(),
+        manufacturer: str(cs?.Manufacturer),
+        model: str(cs?.Model),
         // The serial needs Administrator, exactly as dmidecode needs root on Linux; an unprivileged
         // run simply gets nothing here and `diagnostics.privileged` explains the empty column.
-        serial: facts?.bios?.SerialNumber?.trim(),
+        serial: str(facts?.bios?.SerialNumber),
       })
     : undefined;
   if (!policy.collect.hardware) {
@@ -888,13 +1069,13 @@ export function buildWindowsHost(
   if (nics) host.nics = nics;
   if (disks) host.disks = disks;
 
-  const virtualization = windowsVirtualization(cs?.Manufacturer, cs?.Model);
+  const virtualization = windowsVirtualization(str(cs?.Manufacturer), str(cs?.Model));
   host.chassis = windowsChassis(virtualization, facts?.enclosure?.ChassisTypes);
   if (virtualization) host.virtualization = { type: virtualization };
 
   const identifiers = buildIdentifiers({
-    windowsMachineGuid: facts?.machineGuid,
-    smbiosUuid: facts?.csp?.UUID,
+    windowsMachineGuid: str(facts?.machineGuid),
+    smbiosUuid: str(facts?.csp?.UUID),
     serial: hardware?.serial,
     // WHICH mac is the contract's rule, not this collector's (#1138): it must be a property of the
     // NIC SET, because adapter enumeration order is not stable and #1141 compares this across reports.
@@ -982,9 +1163,25 @@ function warnEmptyWindowsFacts(
       "identity: HKLM\\SOFTWARE\\Microsoft\\Cryptography\\MachineGuid was unreadable — the primary Windows identifier is omitted",
     );
   }
+  // NAMING THE CAUSE IS THE WHOLE POINT (#1227). On a VM this is almost never a WMI fault: QEMU 8.1
+  // defaulted `pc-*` machine types to the 64-bit SMBIOS 3.0 entry point, which Windows cannot locate
+  // (QEMU issue #2008) — and Proxmox PINS the machine version at creation for Windows guests only,
+  // so an affected VM stays affected across every PVE upgrade while the Linux VMs beside it are fine.
+  // There is no in-guest fallback to reach for: GetSystemFirmwareTable('RSMB') and the
+  // ComputerHardwareId registry path fail for the same reason. The repair is on the HOST, so the
+  // warning has to say so or the operator is left staring at a blank field with no next step.
+  //
+  // BUDGET: this string is sliced to AGENT_WARNING_LENGTH_MAX (300) by `buildDiagnostics` and AGAIN
+  // by `AgentReportSchema` on the server. The first version of it was 347 chars and reached the
+  // operator ending mid-token at "…-machine smbios-", losing the whole actionable half — so the
+  // repair instruction is deliberately at the END of a string that FITS, and the test asserts it
+  // through `buildDiagnostics` rather than at the `warn` sink, which is upstream of both caps.
   if (!kinds.has("smbios-uuid")) {
     warn(
-      "identity: Win32_ComputerSystemProduct reported no usable UUID — the SMBIOS identifier is omitted",
+      "identity: Win32_ComputerSystemProduct reported no usable UUID — the SMBIOS identifier is " +
+        "omitted. On a VM the host usually exposes only the 64-bit SMBIOS entry point, which " +
+        "Windows cannot read: fix it host-side (Proxmox/QEMU: raise the machine version or " +
+        "-machine smbios-entry-point-type=32).",
     );
   }
 }
@@ -995,17 +1192,28 @@ function warnEmptyWindowsFacts(
  * ONE PowerShell call and one optional `docker ps`, fired concurrently. The policy decides what is
  * SPAWNED, not merely what is filtered — a host whose policy turns containers off must not pay for a
  * docker probe, exactly as the Linux collector never shells out to `dmidecode` when hardware is off.
- * The WMI classes cannot be turned off individually because they all ride the same call; the
- * corresponding facts are dropped in {@link buildWindowsHost} and each drop files its own warning, so
- * a disabled collector reads identically on both platforms.
+ *
+ * SINCE #1177 THAT IS TRUE OF THE WMI CLASSES TOO. They all ride the same call, which used to mean
+ * they were all queried whatever the policy said and the unwanted results were simply not copied
+ * into the report — so "do not read this on my host" worked on Linux and silently failed here. The
+ * script is now COMPOSED from the collectors the policy wants ({@link buildWindowsFactsScript}), so
+ * the veto reaches the host rather than stopping at the mapper, and the design that made the single
+ * call worth having is unchanged: it is still ONE interpreter start per tick.
+ *
+ * `exec` is injectable for the same reason the docker lookup is: it is an impure boundary, and the
+ * one that was left implicit is exactly the one that failed silently. Production always passes the
+ * default {@link run}.
  */
 export async function collectHost(
   warn: Warn = NO_WARN,
   policy: AgentPolicy = AGENT_POLICY_DEFAULT,
+  exec: Exec = run,
 ): Promise<HostFacts> {
   const [raw, containers] = await Promise.all([
-    runFactsScript(warn),
-    policy.collect.containers ? collectContainers(warn) : Promise.resolve(undefined),
+    runFactsScript(warn, policy, exec),
+    policy.collect.containers
+      ? collectContainers(warn, "docker", (name) => Bun.which(name), process.env.PATHEXT, exec)
+      : Promise.resolve(undefined),
   ]);
   if (!policy.collect.containers) {
     warn("containers: disabled by agent policy — container list omitted");
@@ -1019,5 +1227,21 @@ export async function collectHost(
       "windows: the PowerShell fact collector returned nothing usable — OS, hardware, NICs, disks and identifiers omitted",
     );
   }
-  return buildWindowsHost(facts, containers, policy, warn);
+  // The hypervisor collector (ADR-0095) runs AFTER the sweep because the sweep IS its detection:
+  // only a document that answered `hyperv: true` makes a host pay for the second PowerShell start,
+  // which is what keeps the non-Hyper-V majority of the estate at one interpreter per tick. The
+  // policy gate (and its one disabled-collector warning) lives inside the collector itself.
+  const hypervisorFacts = await collectHypervisorWindows(
+    warn,
+    policy,
+    facts?.hyperv === true,
+    str(facts?.os?.Version),
+    exec,
+  );
+  const hostFacts = buildWindowsHost(facts, containers, policy, warn);
+  if (hypervisorFacts?.hypervisor) hostFacts.host.hypervisor = hypervisorFacts.hypervisor;
+  // ABSENT (the sweep could not answer) and `[]` (it ran and found none) are different answers the
+  // server acts on differently — the same rule `containers` rides (#1139).
+  if (hypervisorFacts?.guests !== undefined) hostFacts.host.guests = hypervisorFacts.guests;
+  return hostFacts;
 }

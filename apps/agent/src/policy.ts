@@ -201,6 +201,7 @@ const COLLECT_KEYS: readonly [keyof AgentPolicyCollect, string][] = [
   ["nics", "LAZYIT_COLLECT_NICS"],
   ["software", "LAZYIT_COLLECT_SOFTWARE"],
   ["containers", "LAZYIT_COLLECT_CONTAINERS"],
+  ["hypervisor", "LAZYIT_COLLECT_HYPERVISOR"],
 ];
 
 /**

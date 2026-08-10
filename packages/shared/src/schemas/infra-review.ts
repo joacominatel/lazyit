@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { requireAtLeastOneKey } from "./primitives";
-import { ConfirmInfraNodeSchema, InfraNodeKindSchema, type InfraNodeKind } from "./infra";
+import {
+  AgentChassisSchema,
+  ConfirmInfraNodeSchema,
+  InfraNodeKindSchema,
+  type AgentChassis,
+  type InfraNodeKind,
+} from "./infra";
 
 /**
  * The PENDING review tray AT SCALE (ADR-0074 §1/§3 amendment, issue #1145) — bulk review actions and
@@ -197,6 +203,13 @@ export const InfraAutoConfirmRuleSchema = z.object({
   hostnamePattern: z.string().nullable(),
   subnetCidr: z.string().nullable(),
   reportedKind: InfraNodeKindSchema.nullable(),
+  /**
+   * The reported form factor this rule speaks for (ADR-0093 §6) — *"auto-confirm the servers, review
+   * the laptops"*, which is the bounded operator judgement the whole ADR makes writable. `null` = the
+   * rule does not test chassis. Read-tolerant like the node's own column: an unrecognised stored value
+   * degrades to "no condition" rather than failing the rules list.
+   */
+  chassis: AgentChassisSchema.nullish().catch(null),
   confirmAsKind: InfraNodeKindSchema.nullable(),
   trackAsAsset: z.boolean(),
   createdById: z.uuid().nullable(),
@@ -208,14 +221,28 @@ export const InfraAutoConfirmRuleSchema = z.object({
 });
 export type InfraAutoConfirmRule = z.infer<typeof InfraAutoConfirmRuleSchema>;
 
-/** The three condition fields. A patch mentioning any of them is re-checked — see the refinement. */
-const RULE_CONDITION_KEYS = ["hostnamePattern", "subnetCidr", "reportedKind"] as const;
+/** The four condition fields. A patch mentioning ALL of them is re-checked — see the refinement. */
+const RULE_CONDITION_KEYS = [
+  "hostnamePattern",
+  "subnetCidr",
+  "reportedKind",
+  // ADR-0093 §6 — additive, and it fits the existing contract with no new semantics.
+  "chassis",
+] as const;
 
 /** The condition half of a rule, as a create body, a patch, a wire rule or a DB row all express it. */
 export interface InfraAutoConfirmConditionFields {
   hostnamePattern?: string | null;
   subnetCidr?: string | null;
   reportedKind?: InfraNodeKind | null;
+  /**
+   * Widened to `string` rather than {@link AgentChassis} on purpose: the DB column is `String?` (the
+   * vocabulary is `.catch()`-degrading on the report path, so a Postgres enum would turn a value a
+   * future collector invents into a write error on the hot path — ADR-0093 §2), and this predicate is
+   * asked about DB rows as well as validated bodies. The WRITE contract is where the vocabulary is
+   * enforced; this only has to answer "is a condition stated".
+   */
+  chassis?: string | null;
 }
 
 /**
@@ -264,12 +291,19 @@ export function statesAutoConfirmCondition(
   return (
     narrowsByHostname(value.hostnamePattern) ||
     narrowsBySubnet(value.subnetCidr) ||
-    (value.reportedKind !== undefined && value.reportedKind !== null)
+    (value.reportedKind !== undefined && value.reportedKind !== null) ||
+    // ADR-0093 §6: chassis can rule a proposal OUT on exactly the same footing `reportedKind` does, so
+    // a rule stating only `chassis: server` is a valid single-condition rule. Any stated value counts,
+    // including `unknown` — which yields a rule that matches NOTHING, since a report with no chassis
+    // signal never matches a stated one. That is the safe direction to be wrong in (the proposals wait
+    // in the tray, where they were going anyway) and it is not what this predicate guards against: the
+    // invariant is "the rule can EXCLUDE something", i.e. it refuses rules that fire on EVERYTHING.
+    (value.chassis !== undefined && value.chassis !== null)
   );
 }
 
 const RULE_CONDITION_ERROR =
-  "A rule must state at least one condition that can rule a proposal OUT: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern made only of wildcards is refused because it cannot meaningfully exclude anything — most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them, conservatively, so the line stays one you can check by looking. 0.0.0.0/0 is every address there is. ADR-0074 §1 rejected blanket auto-confirm.";
+  "A rule must state at least one condition that can rule a proposal OUT: a hostname pattern containing something other than * and ?, a subnet narrower than /0, a reported kind, or a reported chassis. A pattern made only of wildcards is refused because it cannot meaningfully exclude anything — most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them, conservatively, so the line stays one you can check by looking. 0.0.0.0/0 is every address there is. ADR-0074 §1 rejected blanket auto-confirm.";
 
 /**
  * The PATCH message. It names the real reason a patch is refused — the merged rule it would leave —
@@ -277,7 +311,7 @@ const RULE_CONDITION_ERROR =
  * simply drops one of several conditions.
  */
 const PATCH_CONDITION_ERROR =
-  "This patch sets all three condition fields (hostname pattern, subnet and reported kind) and none of them counts as a condition that can rule a proposal OUT, so whatever is stored now, the rule left behind would have none — and ADR-0074 §1 rejected rules that state no condition. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, or a reported kind. A pattern made only of wildcards does not count: most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them, conservatively. Dropping one condition while leaving another in place is fine.";
+  "This patch sets all four condition fields (hostname pattern, subnet, reported kind and chassis) and none of them counts as a condition that can rule a proposal OUT, so whatever is stored now, the rule left behind would have none — and ADR-0074 §1 rejected rules that state no condition. Keep at least one: a hostname pattern containing something other than * and ?, a subnet narrower than /0, a reported kind, or a reported chassis. A pattern made only of wildcards does not count: most of them (*, **, *?*) match every hostname there is, and the few that do narrow (? alone matches only one-character names) are refused with them, conservatively. Dropping one condition while leaving another in place is fine.";
 
 const RuleWritableShape = {
   name: z.string().trim().min(1).max(INFRA_RULE_NAME_MAX),
@@ -286,6 +320,9 @@ const RuleWritableShape = {
   hostnamePattern: HostnamePatternSchema.nullable(),
   subnetCidr: CidrSchema.nullable(),
   reportedKind: InfraNodeKindSchema.nullable(),
+  // STRICT on write (no `.catch`), unlike the read schema above: a chassis a human typed wrong is a
+  // clean 400, not a rule that silently never fires.
+  chassis: AgentChassisSchema.nullable(),
   confirmAsKind: InfraNodeKindSchema.nullable(),
   trackAsAsset: z.boolean(),
 };
@@ -303,6 +340,7 @@ export const CreateInfraAutoConfirmRuleSchema = z
     hostnamePattern: RuleWritableShape.hostnamePattern.optional(),
     subnetCidr: RuleWritableShape.subnetCidr.optional(),
     reportedKind: RuleWritableShape.reportedKind.optional(),
+    chassis: RuleWritableShape.chassis.optional(),
     confirmAsKind: RuleWritableShape.confirmAsKind.optional(),
     trackAsAsset: RuleWritableShape.trackAsAsset.optional(),
   })
@@ -348,7 +386,11 @@ export type UpdateInfraAutoConfirmRule = z.infer<typeof UpdateInfraAutoConfirmRu
 export type InfraAutoConfirmConditions = Pick<
   InfraAutoConfirmRule,
   "enabled" | "appliesTo" | "hostnamePattern" | "subnetCidr" | "reportedKind"
->;
+> &
+  // NOT picked from the wire rule: `chassis` is stored as `String?` (ADR-0093 §2), so a Prisma row
+  // types it `string | null` and picking the narrowed wire type would make the DB row — which this
+  // exists to evaluate DIRECTLY, cast-free — fail to satisfy it.
+  Pick<InfraAutoConfirmConditionFields, "chassis">;
 
 /** What a rule is evaluated AGAINST: one freshly-proposed node, before it is written. */
 export interface InfraAutoConfirmCandidate {
@@ -358,6 +400,12 @@ export interface InfraAutoConfirmCandidate {
   ipAddress?: string | null;
   /** The kind the SERVER proposed for this node (`inferNodeKind`, or CONTAINER for a child). */
   kind: InfraNodeKind;
+  /**
+   * The form factor the report carried in `host.chassis` (ADR-0093 §6), or null/undefined when it
+   * carried none — a pre-v2 agent, a collector whose probe did not run, or a CONTAINER child, whose
+   * blob has no `host` key at all (#1139). Absent evidence never matches a stated condition.
+   */
+  chassis?: AgentChassis | null;
   isContainerChild: boolean;
 }
 
@@ -390,7 +438,24 @@ export function matchesAutoConfirmRule(
   }
   if (rule.subnetCidr !== null && !ipInCidr(candidate.ipAddress, rule.subnetCidr)) return false;
   if (rule.reportedKind !== null && rule.reportedKind !== candidate.kind) return false;
+  // ADR-0093 §6. `unknown` is deliberately NOT evidence: it means the probe did not run — a container
+  // reading `/sys/class/dmi` sees the HOST's board — which is a different fact from any form factor,
+  // and the ADR states plainly that a report with `chassis: unknown` or no chassis never matches a rule
+  // that states one. Same conservatism as the subnet condition: "we do not know what this box is" is
+  // not "it is the kind of box you described".
+  if (rule.chassis != null && !matchesChassisCondition(rule.chassis, candidate.chassis)) {
+    return false;
+  }
   return true;
+}
+
+/** The chassis half of {@link matchesAutoConfirmRule}: exact, and never satisfied by missing evidence. */
+function matchesChassisCondition(
+  stated: string,
+  reported: AgentChassis | null | undefined,
+): boolean {
+  if (reported == null || reported === "unknown") return false;
+  return stated === reported;
 }
 
 /**

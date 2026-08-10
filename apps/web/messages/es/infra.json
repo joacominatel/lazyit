@@ -27,6 +27,14 @@
     "APPLIANCE": "Appliance",
     "OTHER": "Otro"
   },
+  "chassis": {
+    "server": "Servidor",
+    "desktop": "Equipo de escritorio",
+    "laptop": "Notebook",
+    "vm": "Máquina virtual",
+    "container": "Contenedor",
+    "unknown": "Sin reportar"
+  },
   "status": {
     "ONLINE": "En línea",
     "OFFLINE": "Fuera de línea",
@@ -50,6 +58,7 @@
   "pending": {
     "title": "Revisión pendiente",
     "description": "Hosts que descubrió el agente de reporte. Confirmá para sumarlos a tu inventario, o descartalos.",
+    "batch": "Se muestran {shown} de {total} nodos pendientes, los descubiertos más recientemente primero. Confirmá o descartá estos para que aparezcan los demás.",
     "confirmAction": "Confirmar",
     "mergeAction": "Unificar con…",
     "discardAction": "Descartar",
@@ -94,6 +103,8 @@
     },
     "targetLabel": "Unificar con",
     "targetPlaceholder": "Elegí un servidor",
+    "targetSearch": "Buscá servidores por nombre…",
+    "targetEmpty": "Ningún servidor coincide con esa búsqueda.",
     "targetDescription": "El servidor que elijas conserva su nombre, tipo, posición, responsable y activo vinculado. Todo lo que pertenece al agente se mueve con la clave de reporte: los datos reportados de hardware y software, el estado, el último reporte y la versión del agente — y también la IP, salvo que esa IP se haya cargado a mano. Si ya reporta con un agente propio, esa clave se reemplaza: un host que siga usándola volverá como un servidor pendiente nuevo.",
     "submit": "Unificar",
     "mergedToast": "Servidor unificado.",
@@ -106,6 +117,8 @@
     "kindLabel": "Tipo",
     "trackAsAssetLabel": "Registrar como activo de inventario",
     "trackAsAssetDescription": "Activado por defecto: también crea un activo registrado (con los datos reportados del host) para que este servidor pueda tener responsable, artículos de la base de conocimiento y secretos. Desactivalo para dejarlo solo en el grafo.",
+    "adoptExisting": "Esta máquina ya está en tu inventario. Al confirmar se la vincula a ese activo en lugar de crear un segundo:",
+    "adoptSerial": "Coincide por número de serie",
     "submit": "Confirmar servidor",
     "confirmedToast": "Servidor confirmado.",
     "error": "No se pudo confirmar el servidor."
@@ -155,8 +168,14 @@
     },
     "installTitle": "Ejecutá esto en tu servidor",
     "installHint": {
-      "linux": "Copiá el comando y ejecutalo en el servidor Linux como root. El token se muestra una sola vez: capturalo antes de cerrar.",
-      "windows": "Copiá el comando y ejecutalo desde una PowerShell elevada. La forma con bloque de script es deliberada: un pipe irm | iex no puede pasar la URL ni el token. El token se muestra una sola vez: capturalo antes de cerrar."
+      "linux": "Copiá el comando y ejecutalo en el servidor Linux como root. La primera línea pasa el token por el entorno, así nunca aparece en la lista de procesos. El token se muestra una sola vez: capturalo antes de cerrar.",
+      "windows": "Copiá el comando y ejecutalo desde una PowerShell elevada. La primera línea pasa el token por el entorno, así queda fuera de la línea de comandos; la forma con bloque de script es deliberada: un pipe irm | iex no puede pasar la URL. El token se muestra una sola vez: capturalo antes de cerrar."
+    },
+    "hypervisorNote": "¿Instalás en un host hipervisor (Proxmox VE, Hyper-V, libvirt/KVM)? No hay nada extra que hacer: este mismo comando detecta la plataforma e inventaría sus invitados automáticamente. <link>Cómo funciona</link>",
+    "advanced": {
+      "toggle": "Opciones avanzadas",
+      "noHypervisor": "No inventariar los invitados de este host",
+      "noHypervisorHint": "Agrega {flag} al comando de arriba: el host guarda un veto local (LAZYIT_COLLECT_HYPERVISOR=false en su archivo de configuración) que gana sobre cualquier configuración de lazyit y sobrevive a las actualizaciones."
     },
     "unsigned": "El ejecutable de Windows todavía no está firmado, así que SmartScreen va a advertir sobre él y algunos antivirus pueden ponerlo en cuarentena. Es un estado deliberado para validación interna, no una señal de que la descarga esté mal.",
     "copyCommandAria": "Copiar el comando",
@@ -186,15 +205,129 @@
     "waitDescription": "Ejecutá el comando de instalación en tu servidor. Apenas el agente reporte, aparecerá acá, normalmente en un par de minutos.",
     "successTitle": "¡{name} reportó!",
     "successDescription": "Tu servidor reportó. Confirmalo para sumarlo a tu inventario.",
+    "detected": {
+      "summary": "Este host es un hipervisor ({platform}): {count, plural, =0 {no reportó invitados} one {reportó # invitado} other {reportó # invitados}}.",
+      "summaryNoPlatform": "Este host es un hipervisor: {count, plural, =0 {no reportó invitados} one {reportó # invitado} other {reportó # invitados}}.",
+      "review": "Abrir Revisión pendiente"
+    },
     "confirmAction": "Confirmar servidor",
     "checkLater": "Reviso después"
   },
   "view": {
     "map": "Mapa",
-    "table": "Tabla"
+    "table": "Tabla",
+    "agents": "Agentes"
+  },
+  "fleet": {
+    "loadError": "No se pudo cargar la flota de agentes.",
+    "empty": {
+      "title": "Todavía no hay agentes reportando",
+      "description": "Instalá el agente de reporte en un servidor y aparecerá acá con su versión, su último reporte y — cuando quede atrasado — el comando que lo actualiza."
+    },
+    "summary": {
+      "aria": "Distribución de versiones de los agentes",
+      "total": "{count, plural, =0 {Sin agentes} one {# agente} other {# agentes}}",
+      "ofTotal": "de {total}",
+      "comparedTo": "Comparado con esta instancia, que corre {version}.",
+      "refresh": "Actualizar"
+    },
+    "filter": {
+      "ALL": "Todos los agentes",
+      "majorBehind": "una versión mayor por detrás",
+      "behind": "atrasados",
+      "unknown": "versión desconocida",
+      "current": "al día",
+      "notReporting": "sin reportar",
+      "degraded": "reportando incompleto"
+    },
+    "columns": {
+      "host": "Host",
+      "version": "Versión del agente",
+      "os": "Sistema",
+      "reported": "Último reporte",
+      "state": "Estado",
+      "actions": "Acciones"
+    },
+    "searchLabel": "Buscar agentes",
+    "searchPlaceholder": "Buscar por host, activo, IP o versión…",
+    "chipSearch": "Búsqueda: {query}",
+    "chipFilter": "Mostrando: {filter}",
+    "filteredEmpty": "Ningún agente coincide con estos filtros.",
+    "updateAction": "Actualizar",
+    "versionUnknownShort": "desconocida",
+    "osUnknown": "No reportado",
+    "os": {
+      "linux": "Linux",
+      "windows": "Windows",
+      "darwin": "macOS",
+      "bsd": "BSD",
+      "other": "Otro"
+    },
+    "platform": {
+      "linux": "Linux",
+      "windows": "Windows"
+    },
+    "reported": "reportó {time}",
+    "reportedStale": "reportó {time} · desactualizado",
+    "neverReported": "Nunca reportó",
+    "flags": {
+      "pending": "Revisión pendiente",
+      "notReporting": "Sin reportar",
+      "degraded": "Reporte incompleto",
+      "degradedWarnings": "El último reporte llegó incompleto: {warnings}",
+      "degradedUnprivileged": "El recolector corrió sin root ni SYSTEM, así que no pudo leer algunos datos (número de serie, modelo)."
+    },
+    "copyCommandAria": "Copiar comando",
+    "commandCopied": "Comando copiado",
+    "bulk": {
+      "title": "{count, plural, one {Se puede actualizar # host} other {Se pueden actualizar # hosts}}",
+      "subtitle": "Un comando por plataforma, idéntico en todos los hosts — no hay nada por máquina, porque cada host vuelve a ejecutarse con la config que ya tiene. Entregalo a lo que ya ejecuta comandos en esos hosts (Ansible, un script de inicio por GPO, Intune). Volver a ejecutar el instalador es seguro: verifica de nuevo la descarga, conserva la configuración propia de cada host y el host mantiene su identidad en lazyit.",
+      "groupHosts": "{platform} · {count, plural, one {# host} other {# hosts}}",
+      "copyAll": "O copiá el conjunto completo, anotado con los hosts a los que corresponde cada comando:",
+      "scriptHeadline": "actualización de agentes lazyit — {count, plural, one {# host atrasado} other {# hosts atrasados}} (instancia {version})",
+      "scriptCredentialNote": "Sin token ni URL para completar: --upgrade vuelve a ejecutar cada host con la config que ya tiene. NO definas LAZYIT_TOKEN — se rechaza junto con --upgrade.",
+      "scriptHosts": "{platform} · {count, plural, one {# host} other {# hosts}}: {hosts}"
+    },
+    "unknownNote": {
+      "body": "{count, plural, one {# agente reporta una versión que lazyit no puede comparar} other {# agentes reportan una versión que lazyit no puede comparar}} — los agentes instalados antes del sellado de versión reportan `dev`. Nunca se los trata como atrasados, y cada uno pasa a un grupo real la primera vez que volvés a ejecutar su comando de instalación. Esa primera actualización es la única con la que lazyit no puede ayudarte.",
+      "devServer": "Esta instancia reporta su propia versión como `dev`, así que ningún agente puede compararse contra ella y {count, plural, one {# agente queda} other {# agentes quedan}} en «versión desconocida». Ejecutá una build publicada para obtener una distribución real.",
+      "help": "<link>Mantener el agente al día</link> explica qué cambia y qué no cuando volvés a ejecutar el instalador."
+    },
+    "identities": {
+      "title": "{count, plural, one {# token de agente nunca se usó} other {# tokens de agente nunca se usaron}}",
+      "body": "Se creó un token para un host que nunca reportó — probablemente la instalación falló, o nunca se ejecutó. No hay ningún nodo que mostrar por él, y por eso se lo nombra acá.",
+      "created": "creado el {date}",
+      "disabled": "Deshabilitado",
+      "more": "…y {count} más.",
+      "manage": "Gestionar cuentas de servicio"
+    },
+    "command": {
+      "title": "Actualizar {host}",
+      "subtitle": "Este host reporta el agente {agentVersion}; esta instancia corre {serverVersion}. Ejecutá el comando en el host — desde acá no se le envía nada.",
+      "credentialNote": "Este comando no lleva token ni URL — no los necesita. `--upgrade` vuelve a ejecutar este host con el token, la URL de la instancia y la autoridad certificante que ya están en su propia config, así que la misma línea funciona igual en todos los hosts y no se repunta nada de este host. No exportes `LAZYIT_TOKEN` para esto: se rechaza junto con `--upgrade`, para que un token olvidado en tu shell no pueda pisar en silencio al que este host está usando.",
+      "tokenLost": "¿Ya no tenés el token de este host? No hace falta — lo sigue teniendo el host, y es el que usa `--upgrade`. Solo si un host se quedó sin config legible necesitás uno nuevo desde <link>Cuentas de servicio</link>: creá un token ahí y después instalá con `--url` y `--token`, como la primera vez. Rotar no es lo mismo: invalida el secreto actual, así que todos los demás hosts que usan esa cuenta de servicio dejan de reportar.",
+      "internalCa": "¿Detrás de una autoridad certificante interna? `--upgrade` reutiliza la CA configurada en este host, pero el `curl`/`irm` que descarga el script de arriba corre antes de que eso se lea — así que esa CA tiene que seguir estando en el almacén de confianza del sistema, igual que cuando instalaste la primera vez.",
+      "unknownOs": "Este host no reportó qué sistema ejecuta, así que se muestran los dos comandos. Ejecutá el que corresponda al host — lazyit no lo adivina por vos.",
+      "windowsElevated": "Ejecutalo desde una PowerShell con privilegios elevados.",
+      "verify": "Después, revisá el host sin esperar a que reporte:",
+      "rerunSafe": "Volver a ejecutar el instalador es seguro en un host que ya tiene el agente: la descarga se verifica por checksum, el binario se prueba antes de activar nada, tu configuración existente se combina en vez de reemplazarse, y el host mantiene su identidad en lazyit. En un host que ya está al día, no hace nada.",
+      "close": "Cerrar"
+    }
   },
   "tidy": {
     "action": "Ordenar"
+  },
+  "endpoints": {
+    "show": "{count, plural, one {Mostrar # equipo de usuario} other {Mostrar # equipos de usuario}}",
+    "showHint": "Las notebooks y los equipos de escritorio se mantienen fuera del mapa para que el parque siga siendo legible. Siguen en tu inventario, en la lista de servidores y en la búsqueda: esto solo cambia lo que el mapa dibuja.",
+    "hide": "{count, plural, one {Ocultar # equipo de usuario} other {Ocultar # equipos de usuario}}",
+    "hideHint": "Volvé a sacar del mapa las notebooks y los equipos de escritorio. No se elimina nada: siguen en tu inventario, en la lista de servidores y en la búsqueda."
+  },
+  "graph": {
+    "truncated": "Se muestran {shown} de {total} nodos: este mapa está incompleto.",
+    "truncatedHint": "El mapa dibuja como máximo {shown} nodos. Pueden faltar nodos, conexiones y resaltados en el lienzo, pero el total y la lista de nodos afectados del radio vienen de la API de impacto y siguen siendo autoritativos.",
+    "edgesTruncated": "Se muestran {shown} de {total} relaciones: algunas conexiones no están dibujadas.",
+    "edgesTruncatedHint": "Se alcanzó el límite de relaciones. El mapa sigue disponible, pero la imagen de sus conexiones está incompleta."
   },
   "legend": {
     "title": "Referencia de conexiones"
@@ -269,6 +402,29 @@
   "panel": {
     "inventoryName": "Nombre en inventario",
     "noInventoryName": "No registrado como activo",
+    "assetLink": {
+      "title": "Vínculo de inventario",
+      "unnamedAsset": "el activo vinculado",
+      "detachAction": "Desvincular activo",
+      "detachHintArchives": "lazyit creó este activo para el nodo, así que al desvincularlo se archiva.",
+      "detachHintUnlinks": "Este activo ya existía en tu inventario, así que al desvincularlo queda intacto.",
+      "detachBlockedArchives": "No podés desvincular este: hacerlo archivaría el activo que lazyit creó para el nodo, y archivar un activo requiere el permiso de baja de activos. Pedile a un administrador que se lo dé a tu rol, o que lo haga alguien que ya lo tenga. Desvincular un nodo de un activo que cargó una persona sigue funcionando: eso solo quita el vínculo.",
+      "confirmArchiveTitle": "¿Desvincular y archivar este activo?",
+      "confirmArchiveBody": "lazyit creó {name} por su cuenta cuando se agregó este nodo, así que desvincularlo no solo quita el vínculo: el activo se archiva, junto con sus asignaciones y su lugar en las listas y la búsqueda de inventario. El nodo sigue en el mapa, sin registro de inventario detrás.",
+      "confirmArchiveRestoreNote": "Restaurar un activo archivado requiere el permiso de baja de activos y la vista de archivados, que es solo de administradores, así que puede que no puedas deshacer esto vos mismo. Restaurarlo tampoco vuelve a vincular el nodo: lo tendrías que vincular de nuevo a mano.",
+      "confirmArchiveSubmit": "Desvincular y archivar",
+      "confirmUnlinkTitle": "¿Desvincular este activo del nodo?",
+      "confirmUnlinkBody": "{name} queda en tu inventario tal cual está: no se archiva nada, y sus dueños, su historial y sus documentos quedan intactos. Solo se quita el vínculo entre este nodo y ese registro. El nodo sigue en el mapa y después podés vincular otro activo.",
+      "confirmUnlinkSubmit": "Desvincular",
+      "detachedToast": "Activo desvinculado. El registro quedó intacto.",
+      "detachedArchivedToast": "Activo desvinculado y archivado.",
+      "detachError": "No se pudo desvincular el activo.",
+      "attachHint": "Este nodo no tiene un registro de inventario detrás. Vinculá uno para darle un responsable, una garantía y sus artículos de la base de conocimiento.",
+      "attachPlaceholder": "Buscar activos…",
+      "attachAction": "Vincular activo",
+      "attachedToast": "Activo vinculado al nodo.",
+      "attachError": "No se pudo vincular el activo."
+    },
     "ipLabel": "Dirección IP",
     "createdLabel": "Agregado",
     "ownersTitle": "Dueños",
@@ -307,6 +463,19 @@
     "ipPlaceholder": "ej. 10.0.0.12",
     "ipClear": "Borrar",
     "ipConflictWarning": "{count, plural, one {Esta IP también la usa # nodo más} other {Esta IP también la usan # nodos más}}",
+    "chassisLabel": "Formato",
+    "duplicateAssetWarning": "Puede que esta máquina ya esté dos veces en tu inventario",
+    "duplicateAssetHint": "El activo vinculado a este nodo se creó automáticamente y no tiene número de serie, mientras que el serie que reporta esta máquina pertenece a otro activo. Suele significar que la máquina se registró dos veces, antes de que lazyit supiera vincular un registro existente. No se cambió nada y no se va a fusionar nada por vos: abrí el otro activo para verificar si realmente es la misma máquina y después reconciliá los dos vos mismo.",
+    "duplicateAssetSerial": "Número de serie",
+    "duplicateAssetRelinkAction": "Apuntar este nodo al registro que curaste",
+    "duplicateAssetRelinkTitle": "¿Apuntar este nodo al activo que curaste?",
+    "duplicateAssetRelinkBody": "Esto ejecuta los dos pasos que si no harías a mano: el activo que lazyit creó automáticamente para este nodo se archiva (lo creó lazyit, así que se va con él) y después el nodo se vincula a {name}. De ahí en más la máquina reporta sobre {name} y su panel de inventario se empieza a completar. No se fusiona nada: ni asignaciones, ni historial, ni etiquetas, ni adjuntos pasan de un registro al otro.",
+    "duplicateAssetRelinkSubmit": "Archivar y revincular",
+    "duplicateAssetRelinkResume": "El activo creado automáticamente ya se archivó. Solo queda el segundo paso: vincular este nodo a {name}. Probá de nuevo — el archivado no se repite.",
+    "duplicateAssetRelinkResumeSubmit": "Vincular {name}",
+    "duplicateAssetRelinkedToast": "Este nodo ahora apunta a {name}.",
+    "duplicateAssetRelinkError": "No se pudo revincular el nodo.",
+    "duplicateAssetRelinkBlocked": "Resolver esto desde acá archiva primero el activo creado automáticamente, y eso requiere el permiso de baja de activos que tu rol no tiene. Pedile a un administrador que te lo dé, o que alguien que lo tenga apunte este nodo al registro de arriba.",
     "editSave": "Guardar",
     "editCancel": "Cancelar",
     "editedToast": "Nodo actualizado.",
@@ -380,8 +549,8 @@
     "kindPlaceholder": "Elegí una relación",
     "targetLabel": "Otro nodo",
     "targetPlaceholder": "Elegí un nodo",
-    "targetSearch": "Buscar nodos…",
-    "targetEmpty": "No hay otros nodos.",
+    "targetSearch": "Buscá nodos por nombre…",
+    "targetEmpty": "Ningún nodo coincide con esa búsqueda.",
     "directionNote": "Este nodo es el origen; la relación apunta al otro nodo.",
     "submit": "Conectar",
     "createdToast": "Conexión agregada.",
@@ -394,7 +563,7 @@
     "closedToast": "Conexión cerrada.",
     "closeError": "No se pudo cerrar la conexión.",
     "loadError": "No se pudieron cargar las conexiones.",
-    "partialError": "No se pudieron cargar algunas relaciones.",
+    "partialError": "No se pudieron cargar las relaciones. A este mapa pueden faltarle conexiones.",
     "retry": "Reintentar",
     "selfNode": "este nodo",
     "since": "desde {date}",
@@ -441,11 +610,14 @@
     "reportedKindLabel": "Reportado como",
     "reportedKindDescription": "Lo que el reporte del agente hizo que lazyit propusiera para este host, no lo que querés que sea.",
     "anyKind": "Cualquier tipo",
+    "chassisLabel": "Formato reportado",
+    "chassisDescription": "Lo que la máquina dice que es físicamente, leído de su firmware y no de su nombre. Alcanza como condición por sí solo, así que «autoconfirmar los servidores y revisar las notebooks» es una regla que podés escribir. Un host que no reporta formato nunca coincide con una regla que nombra uno.",
+    "anyChassis": "Cualquier formato",
     "confirmAsKindLabel": "Confirmarlo como",
     "keepProposedKind": "Mantener el tipo reportado",
     "trackAsAssetLabel": "Registrar como activo de inventario",
     "trackAsAssetDescription": "Activado por defecto en una regla solo para servidores, y desactivado en cualquier regla que también pueda alcanzar contenedores, con el mismo criterio que al confirmar a mano. Activalo si esos contenedores realmente son algo que registrás.",
-    "needsCondition": "Una regla necesita al menos una condición que pueda descartar un host: un patrón de nombre con algo más que * y ?, una subred más acotada que 0.0.0.0/0, o un tipo reportado. La mayoría de los patrones hechos solo de comodines coinciden con todos los hosts, así que confirmarían todo lo que encuentre el agente; ? por sí solo coincide únicamente con nombres de un carácter, y se rechaza junto con ellos para que la regla siga siendo simple de verificar.",
+    "needsCondition": "Una regla necesita al menos una condición que pueda descartar un host: un patrón de nombre con algo más que * y ?, una subred más acotada que 0.0.0.0/0, un tipo reportado o un formato reportado. La mayoría de los patrones hechos solo de comodines coinciden con todos los hosts, así que confirmarían todo lo que encuentre el agente; ? por sí solo coincide únicamente con nombres de un carácter, y se rechaza junto con ellos para que la regla siga siendo simple de verificar.",
     "saveSubmit": "Guardar regla",
     "savedToast": "Regla guardada. Se aplica a partir del próximo reporte.",
     "saveError": "No se pudo guardar la regla.",
@@ -457,6 +629,7 @@
     "conditionHostname": "Nombre {pattern}",
     "conditionSubnet": "Desde {cidr}",
     "conditionKind": "Reportado como {kind}",
+    "conditionChassis": "Formato {chassis}",
     "author": "Escrita por {name}",
     "authorUnknown": "Autor ya no está en el directorio",
     "lastMatched": "{count, plural, one {Usada # vez} other {Usada # veces}}, la última el {when}",

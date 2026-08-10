@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   AGENT_CONTAINERS_MAX,
   AGENT_EXTERNAL_ID_MAX,
+  AGENT_GUEST_MACS_MAX,
+  AGENT_GUESTS_MAX,
   AGENT_IDENTIFIERS_MAX,
   AGENT_SKEW_PATHS_MAX,
   AGENT_SOFTWARE_HASH_MAX,
@@ -21,8 +23,18 @@ import {
   AgentReportSchema,
   containerExternalId,
   containerNodeStatus,
+  corroboratesAdoption,
+  guestExternalId,
+  guestExternalIdPrefix,
+  guestNodeKind,
+  guestNodeStatus,
+  hostExternalIdOfGuestChild,
+  isGuestChildExternalId,
   CreateInfraEdgeSchema,
   CreateInfraNodeSchema,
+  ENDPOINT_CHASSIS,
+  InfraAssetCandidateSchema,
+  isEndpointChassis,
   InfraNodeDetailSchema,
   InfraNodeListItemSchema,
   InfraNodeSchema,
@@ -1057,6 +1069,270 @@ describe("host.containers[] — additive, optional, degrade-never-reject (#1139)
   });
 });
 
+/**
+ * Hypervisor guest inventory (ADR-0095, #1217) — the host's own hypervisor block plus the guests it
+ * runs, mirroring the container child contract (#1139): additive, optional, degrade-never-reject,
+ * absent ≠ empty, and a `/guest/`-scoped child key as permanent as the host one.
+ */
+describe("host.hypervisor — additive, optional, degrade-never-reject (ADR-0095)", () => {
+  const withHypervisor = (hypervisor: unknown) =>
+    AgentReportSchema.parse({
+      ...V1_REPORT,
+      host: { ...V1_REPORT.host, hypervisor },
+    }).host.hypervisor;
+
+  test("a pre-0095 report carries neither key — nothing is invented", () => {
+    const parsed = AgentReportSchema.parse(V1_REPORT);
+    expect(parsed.host.hypervisor).toBeUndefined();
+    expect(parsed.host.guests).toBeUndefined();
+  });
+
+  test("carries the platform and the optional facts, trimmed", () => {
+    expect(
+      withHypervisor({
+        platform: "proxmox",
+        version: " 8.2.4 ",
+        clusterName: "pve-main",
+        nodeName: "pve-01",
+      }),
+    ).toEqual({ platform: "proxmox", version: "8.2.4", clusterName: "pve-main", nodeName: "pve-01" });
+  });
+
+  test("an unknown platform folds to `other` — never a 400 on the whole host", () => {
+    expect(withHypervisor({ platform: "esxi" })).toEqual({ platform: "other" });
+  });
+
+  test("a malformed non-object block degrades to ABSENT, not to an invented platform", () => {
+    expect(withHypervisor("proxmox")).toBeUndefined();
+    expect(withHypervisor(7)).toBeUndefined();
+  });
+});
+
+describe("host.guests[] — additive, optional, degrade-never-reject (ADR-0095)", () => {
+  const withGuests = (guests: unknown) =>
+    AgentReportSchema.parse({
+      ...V1_REPORT,
+      host: { ...V1_REPORT.host, guests },
+    }).host.guests;
+
+  test("carries the identity, the kind, the state and the hardware facts", () => {
+    expect(
+      withGuests([
+        {
+          ref: "101",
+          name: "dc-01",
+          kind: "qemu",
+          state: "running",
+          smbiosUuid: " 4C4C4544-0042-4A10-8052-B2C04F4E3232 ",
+          macs: ["AA-BB-CC-DD-EE-FF"],
+          cores: 4,
+          memoryBytes: 8_589_934_592,
+          osHint: "win11",
+        },
+      ]),
+    ).toEqual([
+      {
+        ref: "101",
+        name: "dc-01",
+        kind: "qemu",
+        state: "running",
+        smbiosUuid: "4c4c4544-0042-4a10-8052-b2c04f4e3232",
+        macs: ["aa:bb:cc:dd:ee:ff"],
+        cores: 4,
+        memoryBytes: 8_589_934_592,
+        osHint: "win11",
+      },
+    ]);
+  });
+
+  test("an unknown kind or state folds to `other` — never a 400 on the whole host", () => {
+    const guest = withGuests([{ ref: "vm-9", name: "edge", kind: "vz", state: "hibernating" }])?.[0];
+    expect(guest?.kind).toBe("other");
+    expect(guest?.state).toBe("other");
+  });
+
+  test("an ABSENT state stays absent — a hypervisor that said nothing is not one that said `other`", () => {
+    expect(withGuests([{ ref: "1", name: "a", kind: "qemu" }])?.[0]?.state).toBeUndefined();
+  });
+
+  test("smbiosUuid is normalized (trim + lowercase) so #1141 evidence compares across readers", () => {
+    expect(
+      withGuests([{ ref: "1", name: "a", kind: "qemu", smbiosUuid: "  ABC-DEF  " }])?.[0]?.smbiosUuid,
+    ).toBe("abc-def");
+  });
+
+  // #1227. The blob and the report are the TWO SIDES of the §6 identity join, and the join is an
+  // equality test — so the one thing they must never do is spell one fact two ways. The JSDoc above
+  // this field promised `sanitizeIdentifierValue` on both sides; the field itself did a bare
+  // `trim().toLowerCase()`, which leaves braces braced and undashed hex undashed while the report
+  // side strips and re-hyphenates. Proxmox happened to dodge it (PVE writes bare dashed lower-case)
+  // and Hyper-V happened to dodge it (its collector strips `{}` itself) — the contract was being
+  // upheld by collector accident, and VMware's `bios_uuid` would have walked straight into it.
+  test("smbiosUuid canonicalises EXACTLY like the identifier contract — both sides or neither (#1227)", () => {
+    for (const raw of [
+      "{4C4C4544-0031-3910-8047-B7C04F375A32}", // the braced form Windows/Hyper-V surfaces
+      "4C4C4544003139108047B7C04F375A32", // undashed, as a raw firmware table renders it
+      " 4C4C4544-0031-3910-8047-B7C04F375A32 ", // already canonical modulo whitespace
+    ]) {
+      expect(
+        withGuests([{ ref: "1", name: "a", kind: "qemu", smbiosUuid: raw }])?.[0]?.smbiosUuid,
+      ).toBe(sanitizeIdentifierValue("smbios-uuid", raw));
+    }
+  });
+
+  test("the two operands are cut at the SAME length, or the join can never fire (#1227)", () => {
+    // The last asymmetry. `normalizeUuidValue` re-renders anything shaped like a UUID and returns
+    // everything else UNCHANGED — so a long non-UUID value (a vendor string, a hand-edited blob)
+    // survives both sides intact and is then TRUNCATED. The blob side used to cut at 64 and the
+    // report side at AGENT_IDENTIFIER_VALUE_MAX (200): for any value between the two, the operands
+    // could never compare equal no matter how correct the normalisation above it was. Irrelevant to
+    // a real 36-char UUID and exactly the kind of edge the join is not allowed to have.
+    const long = `x${"a".repeat(80)}`; // 81 chars: past 64, inside 200, and not UUID-shaped
+    const viaReport = AgentReportSchema.parse({
+      ...V1_REPORT,
+      host: {
+        ...V1_REPORT.host,
+        identifiers: [{ kind: "smbios-uuid", namespace: "", value: long }],
+      },
+    }).host.identifiers?.find((i) => i.kind === "smbios-uuid")?.value;
+
+    expect(
+      withGuests([{ ref: "1", name: "a", kind: "qemu", smbiosUuid: long }])?.[0]?.smbiosUuid,
+    ).toBe(viaReport);
+  });
+
+  test("a placeholder SMBIOS UUID is dropped from the blob, exactly as it is from `macs` (#1227)", () => {
+    // Evidence that cannot corroborate must never be STORED as if it could — the sibling rule the
+    // `macs` field has enforced since #1138. A whole production run of consumer boards ships this.
+    expect(
+      withGuests([
+        { ref: "1", name: "a", kind: "qemu", smbiosUuid: "03000200-0400-0500-0006-000700080009" },
+      ])?.[0]?.smbiosUuid,
+    ).toBeUndefined();
+  });
+
+  test("guest MACs are canonicalised, junk-dropped and capped", () => {
+    const macs = [
+      "AA-BB-CC-DD-EE-01",
+      "00:00:00:00:00:00", // all-zero: a placeholder, never identity evidence
+      ...Array.from(
+        { length: AGENT_GUEST_MACS_MAX + 10 },
+        (_, i) => `aa:bb:cc:dd:ee:${(i + 2).toString(16).padStart(2, "0")}`,
+      ),
+    ];
+    const kept = withGuests([{ ref: "1", name: "a", kind: "qemu", macs }])?.[0]?.macs;
+    expect(kept?.[0]).toBe("aa:bb:cc:dd:ee:01");
+    expect(kept).not.toContain("00:00:00:00:00:00");
+    expect(kept).toHaveLength(AGENT_GUEST_MACS_MAX);
+  });
+
+  test("cores/memoryBytes degrade to absent on a nonsense value, never a 400", () => {
+    const guest = withGuests([
+      { ref: "1", name: "a", kind: "qemu", cores: 0, memoryBytes: -5 },
+    ])?.[0];
+    expect(guest?.cores).toBeUndefined();
+    expect(guest?.memoryBytes).toBeUndefined();
+  });
+
+  test("a ref-less, nameless or malformed element is DROPPED, the rest of the host still lands", () => {
+    expect(
+      withGuests([
+        { ref: "100", name: "keep", kind: "qemu" },
+        { ref: "  ", name: "no-ref", kind: "qemu" },
+        { ref: "7", name: "  ", kind: "qemu" },
+        "not-an-object",
+        7,
+        null,
+      ]),
+    ).toEqual([{ ref: "100", name: "keep", kind: "qemu" }]);
+  });
+
+  test("the set is TRUNCATED past the cap, never rejected", () => {
+    const many = Array.from({ length: AGENT_GUESTS_MAX + 40 }, (_, i) => ({
+      ref: `${i}`,
+      name: `g${i}`,
+      kind: "qemu",
+    }));
+    expect(withGuests(many)).toHaveLength(AGENT_GUESTS_MAX);
+  });
+
+  test("an EMPTY list is a POSITIVE finding — `this host runs no guests` (not `omitted`)", () => {
+    // Same load-bearing distinction as containers: ABSENT means the probe never ran and the server
+    // must touch nothing; `[]` means it ran and found none, which retires the child nodes.
+    expect(withGuests([])).toEqual([]);
+    expect(AgentReportSchema.parse(V1_REPORT).host.guests).toBeUndefined();
+  });
+});
+
+describe("guestExternalId — the /guest/ child key, mirroring the container one (ADR-0095)", () => {
+  test("scopes the guest's REF to its host's externalId", () => {
+    expect(guestExternalId("9f8d7c6b", "101")).toBe("9f8d7c6b/guest/101");
+  });
+
+  test("the same ref on the same host is the SAME key; on ANOTHER host a DIFFERENT one", () => {
+    expect(guestExternalId("m1", "101")).toBe(guestExternalId("m1", "101"));
+    expect(guestExternalId("m1", "101")).not.toBe(guestExternalId("m2", "101"));
+  });
+
+  test("roundtrips: the host half comes back exactly, split on the FIRST separator", () => {
+    expect(hostExternalIdOfGuestChild(guestExternalId("m1", "101"))).toBe("m1");
+    // A guest ref containing the separator can never re-parent the child onto another host.
+    expect(hostExternalIdOfGuestChild(guestExternalId("m1", "a/guest/b"))).toBe("m1");
+  });
+
+  test("the prefix selects exactly this host's guest children", () => {
+    expect(guestExternalId("m1", "101").startsWith(guestExternalIdPrefix("m1"))).toBe(true);
+    expect(guestExternalId("m2", "101").startsWith(guestExternalIdPrefix("m1"))).toBe(false);
+  });
+
+  test("isGuestChildExternalId tells a guest child from a host AND from a container child", () => {
+    expect(isGuestChildExternalId(guestExternalId("m1", "101"))).toBe(true);
+    expect(isGuestChildExternalId("9f8d7c6b5a4e3f2a")).toBe(false);
+    expect(isGuestChildExternalId(null)).toBe(false);
+    expect(isGuestChildExternalId(undefined)).toBe(false);
+    // The two child namespaces never bleed into each other.
+    expect(isGuestChildExternalId(containerExternalId("m1", "web"))).toBe(false);
+    expect(isContainerChildExternalId(guestExternalId("m1", "101"))).toBe(false);
+  });
+
+  test("hostExternalIdOfGuestChild is undefined for a non-child key", () => {
+    expect(hostExternalIdOfGuestChild("plainhost")).toBeUndefined();
+    expect(hostExternalIdOfGuestChild(null)).toBeUndefined();
+    expect(hostExternalIdOfGuestChild(undefined)).toBeUndefined();
+  });
+
+  test("a max-length host key survives composition intact — never re-truncated", () => {
+    // The host half is bounded by the report schema's own `.max(AGENT_EXTERNAL_ID_MAX)`, exactly as
+    // it is for container children; the composition must never mangle the trustworthy half.
+    const host = "h".repeat(AGENT_EXTERNAL_ID_MAX);
+    expect(hostExternalIdOfGuestChild(guestExternalId(host, "101"))).toBe(host);
+  });
+});
+
+describe("guestNodeKind / guestNodeStatus — a guest's node projection (ADR-0095)", () => {
+  test("an LXC guest is a CONTAINER, every other kind a VM", () => {
+    expect(guestNodeKind("lxc")).toBe("CONTAINER");
+    for (const kind of ["qemu", "hyperv", "libvirt", "other"] as const) {
+      expect(guestNodeKind(kind)).toBe("VM");
+    }
+  });
+
+  test("a running guest is ONLINE", () => {
+    expect(guestNodeStatus("running")).toBe("ONLINE");
+  });
+
+  test("anything the hypervisor says is not running is OFFLINE", () => {
+    for (const state of ["stopped", "paused", "suspended"] as const) {
+      expect(guestNodeStatus(state)).toBe("OFFLINE");
+    }
+  });
+
+  test("an unreported or unrecognised state is UNKNOWN, never a guess", () => {
+    expect(guestNodeStatus("other")).toBe("UNKNOWN");
+    expect(guestNodeStatus(undefined)).toBe("UNKNOWN");
+  });
+});
+
 describe("diagnostics — bounded by TRUNCATION, never by a 400 (#1138)", () => {
   test("an over-long / over-full warning list is trimmed, not rejected", () => {
     // These fields exist to serve agents that are NOT version-locked to the instance. Making them
@@ -1403,5 +1679,231 @@ describe("AgentReportAckSchema — the capability handshake (#1142)", () => {
 
   test("a server that understands `softwareState` says so — the evidence that unlocks the omission", () => {
     expect(AgentReportAckSchema.parse({ ...ack, softwareDelta: true }).softwareDelta).toBe(true);
+  });
+});
+
+// ── Chassis routing + adoption (ADR-0093, issue #1198) ─────────────────────────────────────────────
+
+describe("isEndpointChassis (ADR-0093 §5)", () => {
+  test("a laptop and a desktop are endpoints — a workstation is somebody's desk, not topology", () => {
+    expect(isEndpointChassis("laptop")).toBe(true);
+    expect(isEndpointChassis("desktop")).toBe(true);
+    expect([...ENDPOINT_CHASSIS]).toEqual(["laptop", "desktop"]);
+  });
+
+  test("a server, a guest and a container are NOT endpoints — they stay on the canvas", () => {
+    expect(isEndpointChassis("server")).toBe(false);
+    expect(isEndpointChassis("vm")).toBe(false);
+    expect(isEndpointChassis("container")).toBe(false);
+  });
+
+  test("NO SIGNAL is never an endpoint — routing may only remove noise a POSITIVE fact identified", () => {
+    // `unknown` means the probe did not run (a container reading /sys/class/dmi sees the HOST's
+    // board), null is a manual node or one that predates the column, undefined is an older API. All
+    // three must behave exactly as lazyit did before this ADR: on the canvas. A host that silently
+    // vanishes from every surface is worse than a noisy map.
+    expect(isEndpointChassis("unknown")).toBe(false);
+    expect(isEndpointChassis(null)).toBe(false);
+    expect(isEndpointChassis(undefined)).toBe(false);
+    expect(isEndpointChassis("toaster")).toBe(false);
+  });
+});
+
+describe("InfraNodeSchema.chassis (ADR-0093 §2)", () => {
+  /** The lean persisted node, as the API returns it. */
+  const node = {
+    id: CUID,
+    kind: "PHYSICAL_HOST" as const,
+    label: "web-01",
+    status: "ONLINE" as const,
+    assetId: null,
+    ipAddress: "10.0.0.5",
+    ipAddressSource: "AGENT" as const,
+    shortcuts: null,
+    specs: null,
+    x: null,
+    y: null,
+    source: "AGENT" as const,
+    state: "CONFIRMED" as const,
+    reportingSource: "agent:web-01",
+    externalId: "9f8d7c",
+    lastReportedAt: "2026-08-03T12:00:00.000Z",
+    agentVersion: "2.0.0",
+    createdAt: "2026-08-03T12:00:00.000Z",
+    updatedAt: "2026-08-03T12:00:00.000Z",
+    deletedAt: null,
+  };
+
+  test("carries the reported form factor", () => {
+    expect(InfraNodeSchema.parse({ ...node, chassis: "laptop" }).chassis).toBe("laptop");
+  });
+
+  test("READ-TOLERANT: a row that predates the column, or a value a future collector invents, is `null`", () => {
+    // The upgrade promise (§8.1): every existing row has `chassis = null` the second after
+    // `prisma migrate deploy`, which is no signal, which is today's behaviour. And the write boundary
+    // `.catch(undefined)`s an unrecognised value precisely so a report never 400s — the read must
+    // degrade the same way or the tolerance stops one hop short of the surface that renders it.
+    // Absent (an API that predates the column) stays `undefined`; a stored null stays null; a value
+    // outside the vocabulary is CAUGHT to null rather than failing the payload. All three are "no
+    // signal" to `isEndpointChassis`, which is the only thing that reads it.
+    expect(InfraNodeSchema.parse(node).chassis).toBeUndefined();
+    expect(InfraNodeSchema.parse({ ...node, chassis: null }).chassis).toBe(null);
+    expect(InfraNodeSchema.parse({ ...node, chassis: "toaster" }).chassis).toBe(null);
+    expect(isEndpointChassis(InfraNodeSchema.parse(node).chassis)).toBe(false);
+  });
+
+  test("sits on the LIST row — that is what lets the canvas filter with no second request", () => {
+    // `specs` is the only thing the lean projection drops (#1135); chassis is a scalar, so it rides
+    // along and the endpoint toggle is instant.
+    expect(Object.keys(InfraNodeListItemSchema.shape)).toContain("chassis");
+  });
+});
+
+describe("corroboratesAdoption (ADR-0093 §3a)", () => {
+  /** A stored node blob whose host offers a serial AND a MAC — the corroborated shape. */
+  const specs = (identifiers: unknown[], extra: Record<string, unknown> = {}) => ({
+    host: { hostname: "web-01", hardware: { serial: "SN-REAL-123" }, identifiers },
+    reportedAt: "2026-08-03T12:00:00.000Z",
+    ...extra,
+  });
+  const CORROBORATED = [
+    { kind: "serial", value: "SN-REAL-123" },
+    { kind: "mac", value: "00:15:5d:01:02:03" },
+  ];
+
+  test("a serial the host's own evidence carries, plus a MAC, corroborates", () => {
+    expect(corroboratesAdoption(specs(CORROBORATED), "SN-REAL-123")).toBe(true);
+  });
+
+  test("a serial with NO MAC is one fact, not corroboration", () => {
+    // `identityDiscriminator` must be derivable from more than the serial itself: a report whose only
+    // identity fact is the very value being matched on corroborates nothing.
+    expect(corroboratesAdoption(specs([{ kind: "serial", value: "SN-REAL-123" }]), "SN-REAL-123")).toBe(
+      false,
+    );
+  });
+
+  test("a serial the evidence does not carry never adopts", () => {
+    expect(corroboratesAdoption(specs(CORROBORATED), "SN-SOMETHING-ELSE")).toBe(false);
+  });
+
+  test("a MAC that does not survive sanitizing is not a MAC", () => {
+    // `00:00:00:00:00:00` is a placeholder, dropped by `sanitizeIdentifierValue` — so this host offers
+    // its serial and nothing else, which is the case above wearing a disguise.
+    expect(
+      corroboratesAdoption(
+        specs([
+          { kind: "serial", value: "SN-REAL-123" },
+          { kind: "mac", value: "00:00:00:00:00:00" },
+        ]),
+        "SN-REAL-123",
+      ),
+    ).toBe(false);
+  });
+
+  test("FAILS CLOSED on an identity collision — a machine-id under suspicion never adopts", () => {
+    // The #1141 marker means two hosts are reporting one identity. Minting is recoverable by hand;
+    // attaching the wrong machine to a row a human curated is not.
+    expect(
+      corroboratesAdoption(specs(CORROBORATED, { identityConflict: { peerNodeId: "x" } }), "SN-REAL-123"),
+    ).toBe(false);
+    // A cleared flag is not a flag.
+    expect(corroboratesAdoption(specs(CORROBORATED, { identityConflict: null }), "SN-REAL-123")).toBe(
+      true,
+    );
+  });
+
+  test("matches on the CANONICAL serial, so padding cannot split one machine into two answers", () => {
+    // `sanitizeSerial` trims; `sanitizeIdentifierValue` also collapses internal whitespace runs (WMI
+    // and dmidecode disagree about padding). Comparing the raw form against the canonical set would
+    // silently refuse to adopt a machine whose serial has a double space in it.
+    expect(
+      corroboratesAdoption(
+        specs([
+          { kind: "serial", value: "SN  REAL  123" },
+          { kind: "mac", value: "00:15:5d:01:02:03" },
+        ]),
+        "SN  REAL  123",
+      ),
+    ).toBe(true);
+  });
+
+  test("a malformed or absent blob degrades to `false`, never throws", () => {
+    // This runs over a Prisma JsonValue that may have been hand-edited or written by an older build.
+    expect(corroboratesAdoption(null, "SN-REAL-123")).toBe(false);
+    expect(corroboratesAdoption("nonsense", "SN-REAL-123")).toBe(false);
+    expect(corroboratesAdoption({}, "SN-REAL-123")).toBe(false);
+    expect(corroboratesAdoption({ host: 42 }, "SN-REAL-123")).toBe(false);
+  });
+});
+
+describe("InfraNodeDetailSchema — the ADR-0093 display-only read fields", () => {
+  test("`assetCandidate` names the Asset a confirm would ADOPT, and is nullable", () => {
+    const candidate = { id: CUID, name: "Dell XPS 7490", serial: "SN-REAL-123" };
+    expect(InfraAssetCandidateSchema.parse(candidate)).toEqual(candidate);
+    expect(InfraAssetCandidateSchema.parse({ ...candidate, serial: null }).serial).toBe(null);
+  });
+
+  test("both read fields are `.nullish()` — an older API omits them and web reads that as 'no hint'", () => {
+    // The ADR-0090 `ipConflict` mold: computed per read, display-only, never a gate.
+    expect(InfraNodeDetailSchema.shape.assetCandidate.safeParse(undefined).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.assetCandidate.safeParse(null).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.duplicateAssetSuspicion.safeParse(undefined).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.duplicateAssetSuspicion.safeParse(null).success).toBe(true);
+  });
+});
+
+describe("InfraNodeDetailSchema — `assetAutoCreated`, the detach-outcome read field (#1202)", () => {
+  test("accepts `true` / `false` — the two detach outcomes the drill-in must name apart", () => {
+    // `true`  → a detach runs `AssetsService.remove` on the linked Asset (ADR-0093 §4).
+    // `false` → a detach only nulls `InfraNode.assetId`; the curated row is untouched.
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(true).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(false).success).toBe(true);
+  });
+
+  test("is `.nullish()` — an older API omits it, and a graph-only node has no answer", () => {
+    // The read-tolerance contract (CLAUDE.md #8): web must parse a pre-#1202 payload. It is also
+    // genuinely absent for a node carrying no Asset, where there is no detach to describe.
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(null).success).toBe(true);
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(undefined).success).toBe(true);
+  });
+
+  test("a whole detail payload MISSING the key still parses", () => {
+    // The field-level check above passes even if the key were required on the object, so assert the
+    // object contract itself: an older API's response must survive `InfraNodeDetailSchema.parse`.
+    const legacy = {
+      id: CUID,
+      kind: "PHYSICAL_HOST",
+      label: "web-01",
+      status: "ONLINE",
+      assetId: null,
+      ipAddress: null,
+      shortcuts: null,
+      specs: null,
+      x: 0,
+      y: 0,
+      source: "MANUAL",
+      state: "CONFIRMED",
+      reportingSource: null,
+      externalId: null,
+      lastReportedAt: null,
+      agentVersion: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      deletedAt: null,
+      assetName: null,
+      owners: [],
+      articleLinks: [],
+      secretRefs: [],
+      children: [],
+    };
+    const parsed = InfraNodeDetailSchema.safeParse(legacy);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success ? (parsed.data.assetAutoCreated ?? null) : "did not parse").toBe(null);
+  });
+
+  test("rejects a non-boolean — it is a provenance FACT, never a free-form string", () => {
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse("true").success).toBe(false);
+    expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(1).success).toBe(false);
   });
 });

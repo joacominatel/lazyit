@@ -73,6 +73,14 @@ When a newer release is first seen, administrators get one notification about it
 SMTP is configured — see the SMTP card on this page). You are reminded **once per new version**, not
 every week, so the reminder stays meaningful.
 
+**Reporting agents get one line, not their own email.** Your installed reporting agents fall behind
+precisely *because* the instance moved forward, so when any of them is a whole MAJOR version behind
+the running instance, that same notification adds one sentence — *"12 reporting agents are a MAJOR
+version behind"*. That is deliberately all it is: there is **no separate agent email, no schedule of
+its own, and never one message per host**. If no agent is a MAJOR behind — or if lazyit cannot tell
+what version they are running — the line simply is not there, and the notification is exactly what it
+always was.
+
 **Security releases stand out.** When a release in the gap is a security fix, the status badge turns red
 (*N versions behind — security*), a distinct **Security update available** callout appears, and the email
 is flagged as a security update in its subject — so a fix worth applying tonight is never lost among

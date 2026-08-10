@@ -3,7 +3,7 @@ title: "Secret Manager — crypto design note (build-time primitives)"
 tags: [development, security, secrets, crypto, secret-manager, knowledge-base]
 status: accepted
 created: 2026-06-12
-updated: 2026-06-23
+updated: 2026-08-09
 ---
 
 # Secret Manager — crypto design note (build-time primitives)
@@ -46,9 +46,9 @@ All three libraries are **MIT-licensed, audited or maintained pure-JS/WASM** wit
 | Concern | Library (pinned) | Why it wins | Where it runs |
 | --- | --- | --- | --- |
 | **KDF — Argon2id** | **`hash-wasm@4.12.0`** | Hand-tuned WASM Argon2id, ~10× faster than asm.js; tiny; lazy-loads its `.wasm`; `outputType: 'binary'` returns the **raw 32-byte derived key** (not a PHC string) — exactly what we need to *derive a wrapping key*, not *verify a password*. | **Browser only** (and tests). |
-| **Asymmetric (keypair + ECDH)** | **`@noble/curves@2.2.0`** (`x25519`) | Audited, minimal, zero-dep X25519. `x25519.keygen()` / `x25519.getSharedSecret()`. 32-byte keys → tiny wrapped blobs. | **Browser only** (and tests). |
+| **Asymmetric (keypair + ECDH)** | **`@noble/curves@2.3.0`** (`x25519`) | Audited, minimal X25519. `x25519.keygen()` / `x25519.getSharedSecret()`. 32-byte keys → tiny wrapped blobs. | **Browser only** (and tests). |
 | **AEAD — AES-256-GCM** | **`@noble/ciphers@2.2.0`** (`gcm`) | Audited AES-GCM that produces the **same envelope shape** as the `node:crypto` `WorkflowSecret` path (ciphertext ‖ 16-byte tag, explicit 12-byte nonce), so client and server agree byte-for-byte on the `SecretItem` columns. | **Browser only** (and tests). |
-| **HKDF (shared-secret → AES key)** | **`@noble/hashes@2.2.0`** (`hkdf` + `sha256`) | Audited HKDF-SHA-256 to expand the raw X25519 shared secret into a clean 32-byte AES key (never use the raw DH output directly as a key). | **Browser only** (and tests). |
+| **HKDF (shared-secret → AES key)** | **`@noble/hashes@2.3.0`** (`hkdf` + `sha256`) | Audited HKDF-SHA-256 to expand the raw X25519 shared secret into a clean 32-byte AES key (never use the raw DH output directly as a key). | **Browser only** (and tests). |
 
 **Argon2id parameters (pinned — see §1 for the threat justification):**
 
@@ -122,6 +122,60 @@ guarding a private key. So Argon2id must come from a library:
 > client-side; verify it is **not** pulled into a Server Component / RSC graph and that the bundler
 > emits the wasm correctly (a Phase-2 wiring detail, flagged as an open question, §9).
 
+### The vault must work in an INSECURE CONTEXT (added 2026-08-06, #1126)
+
+A **hard constraint on every primitive in this document**, and the one that was missing from it while
+the rest of the design was being ratified. A lazyit served over plain HTTP on a LAN IP is a supported
+deployment shape ([[0087-plain-http-lan-deployment-axis]] `lan` mode), and such a page is **not a
+[secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts)**. In an
+insecure context `window.crypto` still exists, but `crypto.subtle` is `undefined`.
+
+`localhost` **is** a secure context, so **development never reproduces this**. That is not a footnote:
+it is the specific reason the one file that ignored the rule shipped broken and stayed broken.
+
+What this means for the choices above — and why they were already right:
+
+| Primitive | Source | Insecure-context safe? |
+| --- | --- | --- |
+| X25519, AES-256-GCM, HKDF, HMAC | `@noble/*` — pure JS | **Yes** — no `crypto.subtle` anywhere |
+| Argon2id | `hash-wasm` — WebAssembly | **Yes** — `WebAssembly` is not secure-context-gated |
+| Random bytes | `crypto.getRandomValues` | **Yes** — explicitly available in insecure contexts |
+| *(banned)* | `crypto.subtle.*` | **No** — `undefined`; lint-blocked at `error` severity |
+
+So the whole zero-knowledge envelope — DEK wrap/unwrap, seal/open, recovery keys, passphrase derivation
+— is context-independent **by construction**, which is exactly what lets ADR-0087 point at the vault as
+the mitigation that makes `lan` mode acceptable.
+
+This is the practical payoff of the **single audited noble vocabulary** ratified in §10.2 (X25519 via
+`@noble/curves`, ACCEPTED over WebCrypto P-256). That decision was argued on auditability and one
+client+test surface; it *also* bought
+insecure-context portability for free. `apps/web/lib/secret-manager/totp.ts` was the lone WebCrypto
+holdout — it used `crypto.subtle` HMAC for RFC 6238 codes and was therefore dead on every `lan` install
+while the rest of the vault worked. #1126 converted it to `hmac` + `sha1`/`sha256`/`sha512` from
+`@noble/hashes`, restoring the invariant.
+
+**Rules for anyone extending the vault:**
+
+1. **Never reach for `crypto.subtle`**, even when it is the obvious tool. `lazyit/no-secure-context-only-crypto`
+   in `apps/web/eslint.config.mjs` blocks it at `error` severity with no `lib/**` exemptions. The ban is
+   keyed on the **property alone**, not on a `crypto` object — an `object`-scoped restriction only
+   matches a bare identifier, so it would have caught `crypto.subtle` while waving through
+   `window.crypto.subtle`, `globalThis.crypto.subtle`, `self.crypto.subtle` and any local alias. Coverage
+   of those forms is pinned by `apps/web/eslint.config.test.ts`, which lints fixture snippets through the
+   real config; extend that matrix rather than trusting the rule by inspection.
+2. **Never add a "use `crypto.subtle` when available, fall back otherwise" path.** Two branches where
+   development only ever exercises the secure one is precisely how this bug class survives review. One
+   tested path.
+3. **Test the insecure context explicitly.** `crypto.subtle` is a *non-configurable* property of the
+   real `crypto` object, so it cannot be deleted in place — swap the whole `globalThis.crypto` for a
+   `getRandomValues`-only shim and restore it afterwards. `apps/web/lib/secret-manager/totp.test.ts`
+   has the working pattern. Assert the absence with `"subtle" in globalThis.crypto`, not a
+   `globalThis.crypto.subtle` member access: the property-keyed lint ban above applies to test files
+   too, and a guard that needs a disable comment in the very test that proves the bug is not a guard.
+4. **Watch for guarantees you silently lose.** Pure-JS HMAC accepts a zero-length key where
+   `crypto.subtle.importKey` rejected it with `DataError`; without an explicit check, a malformed seed
+   would produce a plausible but meaningless code instead of a visible error. Keep such failures loud.
+
 ### Threat justification of the parameters (5–20-person self-hosted team)
 
 - **64 MiB / t=3 / p=1** is the OWASP-recommended interactive baseline and RFC 9106's "second
@@ -157,7 +211,7 @@ Each [[user]] has **one [[user-keypair]]** (1:1 with the `uuid` User):
 **Chosen: X25519.** Tiny keys → tiny `publicKey`, `privateKeyEncByPassphrase`, and wrapped-DEK blobs
 (all base64 text columns). No padding oracle. Designed for exactly this — **wrap a symmetric key to a
 recipient's public key** via ECDH. WebCrypto lacks X25519 broadly enough that we don't rely on it;
-`@noble/curves@2.2.0` is audited and runs everywhere we need.
+`@noble/curves@2.3.0` is audited and runs everywhere we need.
 
 > **WebCrypto P-256 was considered** because `crypto.subtle` supports ECDH P-256 natively (no library).
 > Rejected to keep **one** asymmetric vocabulary (noble X25519) shared by client *and* any test/Node

@@ -1,22 +1,16 @@
 # syntax=docker/dockerfile:1
 #
-# lazyit Web image — Next.js 16 standalone server on Node, built with Bun.
+# lazyit Web image — Next.js 16 standalone server built and run on Node; Bun installs dependencies.
 # Build from the repo ROOT:  docker build -f infra/docker/web.Dockerfile -t lazyit-web:dev .
 # Rationale: ADR-0025 (standalone output) + ADR-0026 (NEXT_PUBLIC_API_URL=/api -> domain-portable).
 
 # Base images are digest-pinned (@sha256) for reproducibility (ADR-0025 follow-up); human tag kept
 # in the comment. Re-pin: docker buildx imagetools inspect <image>:<tag> --format '{{.Manifest.Digest}}'.
 
-# ---- Builder: Bun (Debian) builds @lazyit/shared then the Next.js standalone bundle ----
+# ---- Tooling: Bun (Debian) installs the workspace and builds @lazyit/shared ----
 # oven/bun:1.3.14
 FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS builder
 WORKDIR /app
-
-# NEXT_PUBLIC_* is inlined at BUILD time. Default "/api" makes the image domain-portable:
-# the browser calls /api/* same-origin and Caddy routes it to the API (ADR-0026).
-ARG NEXT_PUBLIC_API_URL=/api
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
@@ -32,7 +26,22 @@ COPY packages/shared/ packages/shared/
 COPY apps/web/ apps/web/
 
 RUN bun run --filter @lazyit/shared build
-RUN bun run --filter @lazyit/web build      # next build -> apps/web/.next (standalone)
+
+# ---- Web builder: run the Next.js CLI under real Node, not Bun's Node compatibility runtime ----
+# node:26-trixie-slim — matches the Bun tooling stage's Debian/glibc family.
+FROM node:26-trixie-slim@sha256:4ebb5ace66f15a24c14c492e01a8beeed4fddf970a856109f5126e703e5fe503 AS web-builder
+WORKDIR /app
+
+# NEXT_PUBLIC_* is inlined at BUILD time. Default "/api" makes the image domain-portable:
+# the browser calls /api/* same-origin and Caddy routes it to the API (ADR-0026).
+ARG NEXT_PUBLIC_API_URL=/api
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=builder /app /app
+
+WORKDIR /app/apps/web
+RUN node node_modules/next/dist/bin/next build
 
 # ---- Runtime: minimal Node (Alpine), runs the standalone server ----
 # node:26-alpine — pinned by digest (26-alpine is a ROLLING tag; this closes the ADR-0025 follow-up).
@@ -53,9 +62,9 @@ ENV GIT_SHA=${GIT_SHA}
 
 # Standalone output already contains a traced, minimal node_modules. In this monorepo the
 # server entry lands at apps/web/server.js; static assets and public/ are copied alongside it.
-COPY --from=builder /app/apps/web/.next/standalone ./
-COPY --from=builder /app/apps/web/.next/static     ./apps/web/.next/static
-COPY --from=builder /app/apps/web/public           ./apps/web/public
+COPY --from=web-builder /app/apps/web/.next/standalone ./
+COPY --from=web-builder /app/apps/web/.next/static     ./apps/web/.next/static
+COPY --from=web-builder /app/apps/web/public           ./apps/web/public
 
 USER node
 EXPOSE 3000

@@ -1,0 +1,514 @@
+/**
+ * The commands the "Add a server" wizard and the agent fleet view hand an operator, held to the two
+ * installers they are supposed to drive (issues #1168 and #1207).
+ *
+ * The wizard emitted a `curl … | sh` one-liner and nothing else, so an operator standing at a Windows
+ * host was given a command that cannot run there — at the exact moment they were holding a fresh,
+ * once-only token. The Manual had carried the PowerShell form since #1144; the UI had not learned it.
+ *
+ * These are pure string builders, so this file can do the one thing prose could not: assert that what
+ * the UI prints is the same thing `install.sh` and `install.ps1` actually accept. Several tests read
+ * the installers off disk and check the emitted switches against their real argument parsers, which
+ * is what keeps this from becoming a sixth claim nobody re-checked. It is also why ADR-0094 §5 keeps
+ * this module in `apps/web` rather than promoting it to `@lazyit/shared`: the assertions below are
+ * against `apps/web/public/install.{sh,ps1}` **as this app serves them**.
+ */
+import { describe, expect, test } from "bun:test";
+import path from "node:path";
+import {
+  AGENT_PLATFORMS,
+  agentDiagnosticsCommand,
+  agentInstallCommand,
+  agentManualInstallSteps,
+  agentUpdateCommand,
+} from "./install-commands";
+
+const ORIGIN = "https://lazyit.example.com";
+const TOKEN = "lzit_sa_xxx";
+
+/** `apps/web/public/<name>` — the installers this instance actually serves. */
+function installerPath(name: string): string {
+  return path.join(import.meta.dir, "..", "..", "public", name);
+}
+
+/** The slice of `infra.wizard` these tests hold both locales to. */
+type WizardMessages = {
+  requirements: Record<string, string>;
+  diagnostics: Record<string, string>;
+  manual: Record<string, Record<string, string>>;
+};
+
+/** `infra.wizard` out of `apps/web/messages/<locale>/infra.json` — the copy the wizard renders. */
+async function wizardMessages(locale: string): Promise<WizardMessages> {
+  const file = path.join(
+    import.meta.dir,
+    "..",
+    "..",
+    "messages",
+    locale,
+    "infra.json",
+  );
+  const catalog = (await Bun.file(file).json()) as { wizard: WizardMessages };
+  return catalog.wizard;
+}
+
+/** Both shipped locales, so a claim can never be asserted in English alone. */
+const LOCALES = ["en", "es"] as const;
+
+describe("the platform set", () => {
+  test("is exactly the two platforms an agent is built for", () => {
+    // No macOS: ADR-0074 builds bun-linux-{x64,x64-baseline,arm64} and bun-windows-x64{,-baseline}
+    // and nothing else, so offering a third choice would be an install that cannot be served.
+    expect(AGENT_PLATFORMS).toEqual(["linux", "windows"]);
+  });
+});
+
+describe("agentInstallCommand — Linux", () => {
+  const command = agentInstallCommand("linux", ORIGIN, TOKEN);
+
+  test("is the env-prefixed two-liner: export the token, pipe the script through `sudo -E sh` (#1225)", () => {
+    // The token used to ride argv (`--token <secret>`), which is world-readable in /proc/<pid>/cmdline
+    // for the seconds the install runs and lands in shell history besides. install.sh's own header
+    // (#1137) names `LAZYIT_TOKEN` as the safe channel, and the retired update command already proved
+    // the pipe form of it: `export` + `sudo -E`. The `-E` is load-bearing — sudo resets the
+    // environment, so without it the installer sees no token at all. A prefix assignment
+    // (`LAZYIT_TOKEN=x curl … | sudo …`) would NOT work: it scopes the variable to `curl` alone.
+    expect(command).toBe(
+      `export LAZYIT_TOKEN='${TOKEN}'\ncurl -fsSL ${ORIGIN}/install.sh | sudo -E sh -s -- --url ${ORIGIN}`,
+    );
+  });
+
+  test("carries no --token switch — the argv channel is what #1225 retired", () => {
+    expect(command).not.toMatch(/--token\b/);
+    // The secret appears exactly once: in the shell assignment, never in the installer's argv.
+    expect(command.split(TOKEN).length - 1).toBe(1);
+    expect(command.split("\n")[0]).toContain(TOKEN);
+  });
+
+  test("carries no PowerShell", () => {
+    expect(command).not.toContain("powershell");
+    expect(command).not.toContain("scriptblock");
+  });
+
+  test("names the exact env var install.sh reads, and keeps -E on the sudo that must pass it through", async () => {
+    const script = await Bun.file(installerPath("install.sh")).text();
+    // The installer's own fallback chain: `TOKEN="${TOKEN:-${LAZYIT_TOKEN:-}}"`. If this line ever
+    // leaves install.sh, the emitted command hands the token to nobody.
+    expect(script).toContain('TOKEN="${TOKEN:-${LAZYIT_TOKEN:-}}"');
+    expect(command).toContain("export LAZYIT_TOKEN=");
+    expect(command).toContain("sudo -E sh -s --");
+  });
+});
+
+describe("agentInstallCommand — Windows", () => {
+  const command = agentInstallCommand("windows", ORIGIN, TOKEN);
+
+  test("sets $env:LAZYIT_TOKEN first, then runs the script-block form with -Url only (#1225)", () => {
+    // The script-block form stays — `irm … | iex` runs the installer with NO arguments, so -Url
+    // would never arrive (install.ps1's own .EXAMPLE says so). What changed is the token channel:
+    // install.ps1's header documents `$env:LAZYIT_TOKEN` as the form that keeps the secret out of
+    // the session history, and the installer falls back to it when -Token is absent. No sudo hop on
+    // Windows — the wizard already requires an elevated PowerShell, so the same session that sets
+    // the variable runs the installer.
+    expect(command).toBe(
+      `$env:LAZYIT_TOKEN = '${TOKEN}'\n& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Url ${ORIGIN}`,
+    );
+    expect(command).not.toContain("| iex");
+    expect(command).not.toContain("Invoke-Expression");
+  });
+
+  test("carries no -Token switch, and the secret appears exactly once — in the assignment", () => {
+    expect(command).not.toMatch(/-Token\b/);
+    expect(command.split(TOKEN).length - 1).toBe(1);
+    expect(command.split("\n")[0]).toContain(TOKEN);
+  });
+
+  test("carries no sudo and no curl — neither exists on the host it is pasted into", () => {
+    expect(command).not.toContain("sudo");
+    expect(command).not.toContain("curl");
+  });
+
+  test("names a switch install.ps1 declares, and the env var it actually falls back to", async () => {
+    const script = await Bun.file(installerPath("install.ps1")).text();
+    const paramBlock = script.slice(script.indexOf("param("), script.indexOf("$ErrorActionPreference"));
+    expect(command).toContain("-Url ");
+    expect(paramBlock).toContain("$Url");
+    // The installer's own fallback: `if (-not $Token) { $Token = $env:LAZYIT_TOKEN }`. If that line
+    // ever leaves install.ps1, the assignment above hands the token to nobody.
+    expect(script).toContain("$Token = $env:LAZYIT_TOKEN");
+    expect(command).toContain("$env:LAZYIT_TOKEN = ");
+  });
+});
+
+describe("agentInstallCommand — the --no-hypervisor veto (#1225, ADR-0095 §8)", () => {
+  test("Linux appends --no-hypervisor when asked, after the url", () => {
+    expect(agentInstallCommand("linux", ORIGIN, TOKEN, { noHypervisor: true })).toBe(
+      `export LAZYIT_TOKEN='${TOKEN}'\ncurl -fsSL ${ORIGIN}/install.sh | sudo -E sh -s -- --url ${ORIGIN} --no-hypervisor`,
+    );
+  });
+
+  test("Windows appends -NoHypervisor when asked", () => {
+    expect(agentInstallCommand("windows", ORIGIN, TOKEN, { noHypervisor: true })).toBe(
+      `$env:LAZYIT_TOKEN = '${TOKEN}'\n& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Url ${ORIGIN} -NoHypervisor`,
+    );
+  });
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: absent by default — the wizard's checkbox starts unchecked because collection is the default",
+    (platform) => {
+      const command = agentInstallCommand(platform, ORIGIN, TOKEN);
+      expect(command).not.toMatch(/-{1,2}[Nn]o-?[Hh]ypervisor/);
+    },
+  );
+
+  test("the veto flag it emits is one the SHIPPED installers actually declare", async () => {
+    // Same discipline as --upgrade below: a generated command naming a flag the served script
+    // rejects fails on an operator's host, not in CI — unless this test exists.
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--no-hypervisor)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toMatch(/\[switch\] \$NoHypervisor/);
+  });
+});
+
+describe("agentInstallCommand — the token and origin are never placeholders", () => {
+  test.each([...AGENT_PLATFORMS])("%s carries both verbatim", (platform) => {
+    const command = agentInstallCommand(platform, ORIGIN, TOKEN);
+    expect(command).toContain(TOKEN);
+    expect(command).toContain(ORIGIN);
+    expect(command).not.toContain("<token>");
+    expect(command).not.toContain("your-instance");
+  });
+});
+
+describe("agentUpdateCommand — the update of an already-installed host (ADR-0094 §5/§6, #1208)", () => {
+  test("Linux is `--upgrade` and nothing else", () => {
+    expect(agentUpdateCommand("linux", ORIGIN)).toBe(
+      `curl -fsSL ${ORIGIN}/install.sh | sudo sh -s -- --upgrade`,
+    );
+  });
+
+  test("Windows is `-Upgrade` and nothing else, in the same script-block form", () => {
+    expect(agentUpdateCommand("windows", ORIGIN)).toBe(
+      `& ([scriptblock]::Create((irm ${ORIGIN}/install.ps1))) -Upgrade`,
+    );
+  });
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: NO token, no switch, no placeholder standing in for one",
+    (platform) => {
+      // The server structurally cannot re-emit an installed host's secret — only `tokenHash` and
+      // `tokenPrefix` are stored (ADR-0094 §6). A command that LOOKED like it carried one, or that
+      // shipped a `<token>` placeholder, would send the operator hunting for a flag that cannot
+      // exist. `--upgrade` reads the one the host already has instead.
+      const command = agentUpdateCommand(platform, ORIGIN);
+      expect(command).not.toContain(TOKEN);
+      expect(command).not.toContain("lzit_sa_");
+      expect(command).not.toContain("<token>");
+      expect(command).not.toMatch(/-{1,2}[Tt]oken/);
+    },
+  );
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: the origin appears ONLY as where the script is fetched from — never as --url",
+    (platform) => {
+      // THE MERGE-BLOCKING BUG THIS REPLACED. The command used to carry `--url <browser origin>`,
+      // and `LAZYIT_URL` is a key the installer OWNS and REWRITES. On an ADR-0087 `lan` instance —
+      // which answers on every address it is reached by — pasting that on forty hosts re-pinned the
+      // whole estate at whichever origin one admin's browser happened to be on, silently, while the
+      // Manual promised that a host's configuration is merged rather than replaced.
+      //
+      // The origin still appears, because the script has to be downloaded from somewhere. What must
+      // never appear again is an origin being ASSIGNED to the host.
+      const command = agentUpdateCommand(platform, ORIGIN);
+      expect(command).toContain(`${ORIGIN}/install.`);
+      expect(command).not.toMatch(/--url\b/);
+      expect(command).not.toMatch(/-Url\b/);
+      expect(command).not.toMatch(/--ca-file\b/);
+      expect(command).not.toMatch(/-CaFile\b/);
+    },
+  );
+
+  test.each([...AGENT_PLATFORMS])(
+    "%s: identical on every host — the string depends on nothing but the origin",
+    (platform) => {
+      // This is what makes ADR-0094 §7's bulk handoff a two-line artifact instead of a generated
+      // per-host inventory, and it is only true because nothing host-specific is in the command.
+      expect(agentUpdateCommand(platform, ORIGIN)).toBe(agentUpdateCommand(platform, ORIGIN));
+    },
+  );
+
+  test("the switch it emits is one the SHIPPED installers actually declare", async () => {
+    // The strings above were written against an installer that did not have `--upgrade` yet — it
+    // landed separately (#1208's installer half). A generated command naming a flag the served
+    // script rejects is the exact failure this file exists to prevent, and it fails on an
+    // operator's host rather than in CI. So the switch is read back off the two files
+    // `apps/web/public/` serves, the same way the plain-http opt-in is below.
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--upgrade)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toMatch(/\[switch\] \$Upgrade/);
+  });
+
+  test("Linux drops `sudo -E`, which existed only to carry LAZYIT_TOKEN across sudo", () => {
+    // `-E` preserves the environment. It was load-bearing while the command depended on an exported
+    // LAZYIT_TOKEN. `--upgrade` REFUSES to share a run with LAZYIT_TOKEN (#1208), so preserving the
+    // environment now only widens the chance of hitting that refusal with a stale leftover token.
+    expect(agentUpdateCommand("linux", ORIGIN)).not.toContain("sudo -E");
+    expect(agentUpdateCommand("linux", ORIGIN)).toContain("sudo sh -s --");
+  });
+});
+
+describe("a plain-http origin carries the explicit opt-in the installers now demand (#1190)", () => {
+  // Since #1190 both installers REFUSE a cleartext http URL unless the operator opts in. The wizard
+  // fills the origin in from the instance the operator is already browsing — so on a LAN (`lan`
+  // mode) instance served over http, a command without the opt-in would hard-stop on paste, at the
+  // moment the operator is holding a once-only token. The flag rides only the origin the operator
+  // is USING: an https instance never sees it, so the loud warning stays tied to a real exposure.
+  const HTTP_ORIGIN = "http://192.168.100.75:8080";
+
+  test("the Linux install appends --allow-insecure-http, and only on http", () => {
+    expect(agentInstallCommand("linux", HTTP_ORIGIN, TOKEN)).toBe(
+      `export LAZYIT_TOKEN='${TOKEN}'\ncurl -fsSL ${HTTP_ORIGIN}/install.sh | sudo -E sh -s -- --url ${HTTP_ORIGIN} --allow-insecure-http`,
+    );
+    expect(agentInstallCommand("linux", ORIGIN, TOKEN)).not.toContain("--allow-insecure-http");
+  });
+
+  test("the Windows install appends -AllowInsecureHttp, and only on http", () => {
+    expect(agentInstallCommand("windows", HTTP_ORIGIN, TOKEN)).toBe(
+      `$env:LAZYIT_TOKEN = '${TOKEN}'\n& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Url ${HTTP_ORIGIN} -AllowInsecureHttp`,
+    );
+    expect(agentInstallCommand("windows", ORIGIN, TOKEN)).not.toContain("-AllowInsecureHttp");
+  });
+
+  test("both riders compose: the http opt-in rides before the hypervisor veto, both after the url", () => {
+    expect(agentInstallCommand("linux", HTTP_ORIGIN, TOKEN, { noHypervisor: true })).toContain(
+      `--url ${HTTP_ORIGIN} --allow-insecure-http --no-hypervisor`,
+    );
+    expect(agentInstallCommand("windows", HTTP_ORIGIN, TOKEN, { noHypervisor: true })).toContain(
+      `-Url ${HTTP_ORIGIN} -AllowInsecureHttp -NoHypervisor`,
+    );
+  });
+
+  test("the UPDATE command carries it too, on both platforms — it runs the same installers", () => {
+    // ADR-0094 §5: the fleet view reuses this module precisely so the flags ride for free. A
+    // hand-rolled second builder would get exactly this wrong, silently, on the LAN installs that
+    // are hardest to test — and the fleet view is the surface an operator uses at scale.
+    //
+    // The opt-in is NOT a re-pin and does not reintroduce the `--url` defect: it is a per-run
+    // decision rather than a config key the installer writes, so it is still the same string on
+    // every host for a given origin.
+    expect(agentUpdateCommand("linux", HTTP_ORIGIN)).toBe(
+      `curl -fsSL ${HTTP_ORIGIN}/install.sh | sudo sh -s -- --upgrade --allow-insecure-http`,
+    );
+    expect(agentUpdateCommand("windows", HTTP_ORIGIN)).toBe(
+      `& ([scriptblock]::Create((irm ${HTTP_ORIGIN}/install.ps1))) -Upgrade -AllowInsecureHttp`,
+    );
+    expect(agentUpdateCommand("linux", ORIGIN)).not.toContain("--allow-insecure-http");
+    expect(agentUpdateCommand("windows", ORIGIN)).not.toContain("-AllowInsecureHttp");
+  });
+
+  test("the Windows inspect-first RUN step carries it too — it runs the same installer", () => {
+    const steps = agentManualInstallSteps("windows", HTTP_ORIGIN, TOKEN);
+    expect(steps[1]?.command).toContain(" -AllowInsecureHttp");
+    expect(agentManualInstallSteps("windows", ORIGIN, TOKEN)[1]?.command).not.toContain(
+      "-AllowInsecureHttp",
+    );
+  });
+
+  test("the emitted flags are the ones the installers' own parsers declare", async () => {
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--allow-insecure-http)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toMatch(/\[switch\] \$AllowInsecureHttp/);
+  });
+
+  test("the opt-in is NOT inherited across --upgrade, which is why the update command must carry it", async () => {
+    // #1208's final resolution, and the reason `insecureHttp()` has to key the UPDATE command too.
+    // A host installed over cleartext carries `LAZYIT_URL=http://…` in its config; `--upgrade`
+    // re-uses that URL, arrives at the same gate, and is REFUSED unless the opt-in is passed again
+    // — accepting exposure is a per-run decision, not a config key the file can answer on the
+    // operator's behalf. If a future edit made the flag inheritable, dropping it from the generated
+    // command would become correct; while these lines stand, dropping it hands every LAN operator a
+    // command that hard-stops on paste.
+    const sh = await Bun.file(installerPath("install.sh")).text();
+    expect(sh).toContain("--upgrade` DOES NOT INHERIT THE DECISION");
+    // The gate bites on the RESOLVED url and names where it came from, so the refusal on an upgrade
+    // points at the config file rather than a `--url` the operator never passed.
+    expect(sh).toContain("(re-used by --upgrade)");
+    const ps1 = await Bun.file(installerPath("install.ps1")).text();
+    expect(ps1).toContain("-Upgrade DOES NOT INHERIT THE DECISION");
+    expect(ps1).toContain("(re-used by -Upgrade)");
+  });
+
+  test("the Linux by-hand steps stay flagless — they never run install.sh", () => {
+    // That path downloads the binary and writes the config itself, so there is no gate to satisfy.
+    // Asserted so an edit that starts running the installer there fails here, not on a LAN host.
+    for (const step of agentManualInstallSteps("linux", HTTP_ORIGIN, TOKEN)) {
+      expect(step.command).not.toContain("install.sh");
+      expect(step.command).not.toContain("--allow-insecure-http");
+    }
+  });
+});
+
+describe("agentManualInstallSteps — label and command travel together", () => {
+  // The invariant this file exists to hold. The labels live in the message catalogs and the
+  // commands live here; while they were two positionally-indexed arrays, an edit could add a step
+  // to one and not the other and every test still passed. One structure plus this test is what
+  // makes that impossible: each step names its own catalog key, and the key set has to be exactly
+  // the `stepN` keys the catalogs ship, in order, in BOTH locales.
+  test.each([...AGENT_PLATFORMS])(
+    "%s: every step's labelKey is a real key in en and es, and no catalog step is orphaned",
+    async (platform) => {
+      const steps = agentManualInstallSteps(platform, ORIGIN, TOKEN);
+      expect(steps.length).toBeGreaterThan(0);
+      for (const locale of LOCALES) {
+        const wizard = await wizardMessages(locale);
+        const catalogSteps = Object.keys(wizard.manual[platform] ?? {})
+          .filter((key) => /^step\d+$/.test(key))
+          .sort();
+        expect(steps.map((step) => step.labelKey as string)).toEqual(
+          catalogSteps.map((key) => `manual.${platform}.${key}`),
+        );
+        for (const step of steps) {
+          const leaf = step.labelKey.split(".").at(-1) as string;
+          expect(wizard.manual[platform]?.[leaf]).toBeTruthy();
+        }
+      }
+    },
+  );
+});
+
+describe("agentManualInstallSteps — Linux", () => {
+  const steps = agentManualInstallSteps("linux", ORIGIN, TOKEN);
+
+  test("is the four-step by-hand reproduction of install.sh", () => {
+    expect(steps.map((step) => step.command)).toEqual([
+      `curl -fsSL -H "Authorization: Bearer ${TOKEN}" "${ORIGIN}/api/agent/download?arch=x64" -o lazyit-agent`,
+      "chmod +x lazyit-agent && sudo mv lazyit-agent /usr/local/bin/",
+      `sudo install -d -m 700 /etc/lazyit-agent && printf 'LAZYIT_URL=%s\\nLAZYIT_TOKEN=%s\\n' "${ORIGIN}" "${TOKEN}" | sudo tee /etc/lazyit-agent/config >/dev/null && sudo chmod 600 /etc/lazyit-agent/config`,
+      "sudo lazyit-agent report --once --force",
+    ]);
+  });
+});
+
+describe("agentManualInstallSteps — Windows", () => {
+  const steps = agentManualInstallSteps("windows", ORIGIN, TOKEN);
+
+  test("is download-then-run: fetch the installer, read it, run it", () => {
+    expect(steps.map((step) => step.command)).toEqual([
+      `irm ${ORIGIN}/install.ps1 -OutFile "$env:TEMP\\lazyit-install.ps1"`,
+      `& ([scriptblock]::Create((Get-Content -Raw "$env:TEMP\\lazyit-install.ps1"))) -Url ${ORIGIN} -Token ${TOKEN}`,
+    ]);
+  });
+
+  test("saves the installer somewhere sane, NOT into the working directory", () => {
+    // An elevated PowerShell — the one the wizard just told the operator to open — starts in
+    // C:\Windows\System32, so a bare `-OutFile .\install.ps1` writes a downloaded script into the
+    // system directory. Both steps name the same explicit destination under %TEMP% instead.
+    expect(steps[0]?.command).toContain('-OutFile "$env:TEMP\\lazyit-install.ps1"');
+    expect(steps[1]?.command).toContain('"$env:TEMP\\lazyit-install.ps1"');
+    for (const step of steps) {
+      expect(step.command).not.toContain(".\\install.ps1");
+    }
+  });
+
+  test("runs the downloaded file through the SAME script-block form, not as a `.ps1` file", () => {
+    // A downloaded `.ps1` invoked as a file is subject to the host's execution policy, which is
+    // `Restricted` by default on Windows client editions. The script block is built in memory from
+    // the file's text, so it runs whatever that policy is — and it is not a second spelling of the
+    // command: it is the form install.ps1's own header prescribes, sourced from disk instead of the
+    // network. (What it does NOT do is reproduce install.ps1 by hand the way the Linux path does:
+    // the ACL on the config file and the SYSTEM scheduled task are not four copy-pasteable lines.)
+    expect(steps[1]?.command).toContain("[scriptblock]::Create");
+    expect(steps[1]?.command).not.toMatch(/(^|\s)"?[.$][^\s]*\.ps1"?\s+-Url/);
+  });
+
+  test("keeps its backslashes — a JS string escape would silently eat them", () => {
+    // `"$env:TEMP\lazyit-install.ps1"` in TypeScript is `$env:TEMPlazyit-install.ps1`: `\l` is not
+    // an escape, so the backslash is dropped without a warning. Every Windows path in this module
+    // is written `\\` for that reason.
+    for (const step of steps) {
+      expect(step.command).toContain("TEMP\\lazyit-install.ps1");
+    }
+  });
+
+  test("names switches install.ps1's own param() block declares", async () => {
+    const script = await Bun.file(installerPath("install.ps1")).text();
+    expect(script).toContain("$Url");
+    expect(script).toContain("$Token");
+    expect(steps[1]?.command).toContain("-Url ");
+    expect(steps[1]?.command).toContain("-Token ");
+  });
+});
+
+describe("agentDiagnosticsCommand", () => {
+  test("Linux runs the bare name — /usr/local/bin is on PATH", async () => {
+    const command = agentDiagnosticsCommand("linux");
+    expect(command).toBe("sudo lazyit-agent test");
+    const script = await Bun.file(installerPath("install.sh")).text();
+    expect(script).toContain("/usr/local/bin");
+  });
+
+  test("Windows runs the ABSOLUTE path — the one form the pasting console can always run", async () => {
+    const command = agentDiagnosticsCommand("windows");
+    expect(command).toBe(
+      '& "$env:ProgramFiles\\lazyit-agent\\lazyit-agent.exe" test',
+    );
+    // The spelling is the installer's own: `Join-Path $env:ProgramFiles 'lazyit-agent'`, not a
+    // hard-coded `C:\Program Files`, so it survives a redirected or relocated ProgramFiles.
+    const script = await Bun.file(installerPath("install.ps1")).text();
+    expect(script).toContain("Join-Path $env:ProgramFiles 'lazyit-agent'");
+    expect(script).toContain("'lazyit-agent.exe'");
+    // This assertion used to be the INVERSE — a tripwire asserting nothing in install.ps1 wrote PATH
+    // — from when #1167 was open and the bare name raised CommandNotFoundException. #1167 has landed
+    // and the installer now edits the machine PATH through the registry, so the tripwire has fired
+    // and is replaced by what it was watching for. The absolute form above did not need revising,
+    // which was the reason it was chosen.
+    //
+    // It is asserted POSITIVELY now because the copy beside the command depends on it: `windowsNote`
+    // tells the operator the full path is printed because their own console cannot see the new entry
+    // — a sentence that becomes nonsense if the entry stops being written at all.
+    expect(script).toContain(
+      "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+    );
+  });
+
+  test("neither form carries the other platform's privilege verb", () => {
+    expect(agentDiagnosticsCommand("windows")).not.toContain("sudo");
+    expect(agentDiagnosticsCommand("linux")).not.toContain("ProgramFiles");
+  });
+});
+
+describe("the Windows copy states what the host must be, and what the shell must be", () => {
+  // Two claims the commands themselves cannot carry, and both cost an operator the once-only token
+  // if they are learned too late — the SA is minted in step 1, before any of this is read.
+  test.each([...LOCALES])(
+    "%s: requirements name x64 and rule out ARM64, the way install.ps1 does",
+    async (locale) => {
+      const script = await Bun.file(installerPath("install.ps1")).text();
+      // The installer's own constraint: anything but AMD64 dies before a byte is downloaded.
+      expect(script).toContain("$machine -ne 'AMD64'");
+      const { requirements } = await wizardMessages(locale);
+      expect(requirements.windows).toMatch(/x64/i);
+      expect(requirements.windows).toMatch(/arm64/i);
+      // Windows 10/11 or Server 2016+ — the floor the Manual states for the same host.
+      expect(requirements.windows).toMatch(/10\/11/);
+      expect(requirements.windows).toMatch(/2016/);
+    },
+  );
+
+  test.each([...LOCALES])(
+    "%s: the diagnostics note says the check needs an elevated PowerShell",
+    async (locale) => {
+      const script = await Bun.file(installerPath("install.ps1")).text();
+      // WHY it needs one: the config file holding the URL and the token is ACL'd to SYSTEM and
+      // Administrators only, so an unelevated `test` reads nothing and reports itself unconfigured
+      // — an error that reads like a broken install.
+      expect(script).toContain("'S-1-5-18', 'S-1-5-32-544'");
+      const { diagnostics } = await wizardMessages(locale);
+      expect(diagnostics.windowsNote).toMatch(locale === "es" ? /elevad/i : /elevated/i);
+      expect(diagnostics.windowsNote).toMatch(/PowerShell/i);
+    },
+  );
+});

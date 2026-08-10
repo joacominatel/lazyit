@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import {
   AGENT_POLICY_DEFAULT,
+  AGENT_POLICY_HYPERVISOR_MIN_VERSION,
   AGENT_POLICY_GLOBS_MAX,
   AGENT_POLICY_INTERVAL_MAX_SECONDS,
   AGENT_POLICY_INTERVAL_MIN_SECONDS,
@@ -14,6 +16,7 @@ import {
   globMatches,
   matchesAnyGlob,
   policyJitterSeconds,
+  projectAgentPolicy,
   resolveAgentPolicy,
   AgentPolicySoftwareSourceSchema,
   type AgentPolicyOverride,
@@ -95,6 +98,7 @@ describe("AgentPolicySchema — a CLOSED set of booleans, integers and globs (#1
       nics: true,
       software: true,
       containers: true,
+      hypervisor: true,
     });
     expect(AGENT_POLICY_DEFAULT.exclude).toEqual({
       nicNames: [],
@@ -168,6 +172,93 @@ describe("AgentPolicyOverrideSchema — what a stored layer may say", () => {
     expect(
       AgentPolicyOverrideSchema.safeParse({ exclude: { paths: ["/etc/shadow"] } }).success,
     ).toBe(false);
+  });
+});
+
+describe("collect.hypervisor — the SIXTH collector, default-true for forward-compat (ADR-0095)", () => {
+  test("a 5-key policy from an OLD server parses on the NEW agent and applies hypervisor: true", () => {
+    // The load-bearing `.default(true)`: an upgraded agent against a pre-0095 server receives the
+    // 5-key shape, and a strict parse without the default would reject it WHOLESALE — the agent
+    // would fall back to its cached policy forever. Defaulting keeps the fleet on the server's
+    // policy and turns the new collector on, which is the pre-0095-equivalent behaviour.
+    const { hypervisor: _dropped, ...fiveKey } = AGENT_POLICY_DEFAULT.collect;
+    const parsed = AgentPolicySchema.parse({ ...AGENT_POLICY_DEFAULT, collect: fiveKey });
+    expect(parsed.collect.hypervisor).toBe(true);
+    expect(parsed.collect).toEqual(AGENT_POLICY_DEFAULT.collect);
+  });
+
+  test("a 6-key policy parses verbatim", () => {
+    const parsed = AgentPolicySchema.parse({
+      ...AGENT_POLICY_DEFAULT,
+      collect: { ...AGENT_POLICY_DEFAULT.collect, hypervisor: false },
+    });
+    expect(parsed.collect.hypervisor).toBe(false);
+  });
+
+  test("a SEVENTH unknown key still rejects — the closed set stays closed", () => {
+    expect(
+      AgentPolicySchema.safeParse({
+        ...AGENT_POLICY_DEFAULT,
+        collect: { ...AGENT_POLICY_DEFAULT.collect, gpus: true },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("an override may state hypervisor alone — and one that does not NEVER gains it", () => {
+    // The override is a layer that states only what it changes; a default that materialised
+    // `hypervisor: true` into every stored partial layer would break exactly that.
+    expect(AgentPolicyOverrideSchema.parse({ collect: { hypervisor: false } })).toEqual({
+      collect: { hypervisor: false },
+    });
+    expect(AgentPolicyOverrideSchema.parse({ collect: { software: false } })).toEqual({
+      collect: { software: false },
+    });
+  });
+});
+
+describe("projectAgentPolicy — the per-agent ack projection (ADR-0095)", () => {
+  /** The OLD agent's expectation, simulated: a strictObject of exactly the five pre-0095 booleans. */
+  const OldCollectSchema = z.strictObject({
+    hardware: z.boolean(),
+    disks: z.boolean(),
+    nics: z.boolean(),
+    software: z.boolean(),
+    containers: z.boolean(),
+  });
+
+  test("an agent at or above the minimum keeps the 6-key shape unchanged", () => {
+    for (const version of [AGENT_POLICY_HYPERVISOR_MIN_VERSION, "1.12.0", "2.0.0"]) {
+      expect(projectAgentPolicy(AGENT_POLICY_DEFAULT, version)).toEqual(AGENT_POLICY_DEFAULT);
+    }
+  });
+
+  test("an older agent gets the 5-key shape — the key genuinely ABSENT, not undefined-valued", () => {
+    // Old agents safeParse the whole policy strictly and keep their CACHED policy on any failure,
+    // so an unknown key — even one valued `undefined` — would freeze the fleet's config. The old
+    // expectation is simulated below; `in` is the check JSON serialization actually honours.
+    for (const version of ["1.10.3", "1.0.0", "0.9.9"]) {
+      const projected = projectAgentPolicy(AGENT_POLICY_DEFAULT, version);
+      expect("hypervisor" in projected.collect).toBe(false);
+      expect(OldCollectSchema.parse(projected.collect)).toEqual({
+        hardware: true,
+        disks: true,
+        nics: true,
+        software: true,
+        containers: true,
+      });
+    }
+  });
+
+  test("an unparseable or missing version fails soft to the 5-key shape", () => {
+    for (const version of ["dev", undefined, "unknown", ""]) {
+      expect("hypervisor" in projectAgentPolicy(AGENT_POLICY_DEFAULT, version).collect).toBe(false);
+    }
+  });
+
+  test("projection never mutates the input policy", () => {
+    const policy = { ...AGENT_POLICY_DEFAULT, collect: { ...AGENT_POLICY_DEFAULT.collect } };
+    projectAgentPolicy(policy, "1.0.0");
+    expect(policy.collect.hypervisor).toBe(true);
   });
 });
 

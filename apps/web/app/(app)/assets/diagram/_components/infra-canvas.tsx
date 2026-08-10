@@ -24,16 +24,18 @@ import {
   BoltIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  ComputerDesktopIcon,
   ExclamationTriangleIcon,
+  EyeSlashIcon,
   ShieldCheckIcon,
   Squares2X2Icon,
 } from "@heroicons/react/24/outline";
 import type {
   InfraEdge,
   InfraEdgeKind,
+  InfraGraphNode,
   InfraImpactResponse,
   InfraNode,
-  InfraNodeListItem,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
@@ -45,8 +47,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   INFRA_LIVE_POLL_MS,
-  useInfraEdges,
-  useInfraNodes,
+  useInfraGraphEdges,
+  useInfraGraphNodes,
   useUpdateInfraNodePosition,
 } from "@/lib/api/hooks/use-infra-nodes";
 import { useCan } from "@/lib/hooks/use-permissions";
@@ -58,7 +60,13 @@ import {
   placementOffset,
   statusTone,
 } from "@/lib/infra/canvas";
+import { edgesBetweenVisible, partitionEndpoints } from "@/lib/infra/endpoints";
 import { cn } from "@/lib/utils";
+import {
+  type GraphTruncationNotice,
+  graphEdgeLoadState,
+  graphTruncationNotice,
+} from "./node-page-state";
 import { type ImpactSummaryPlan, planImpactSummary } from "./impact-summary-plan";
 import { impactSummaryTone } from "./impact-summary-tone";
 import { InfraEdge as InfraEdgeRenderer, type InfraEdgeData } from "./infra-edge";
@@ -94,8 +102,11 @@ export interface InfraCanvasApi {
 }
 
 /**
- * The infra topology board (ADR-0070 §6, issue #741). Renders nodes from `GET /infra/nodes` and the
- * graph's edges (fanned out per-node), styled by status/kind. Nodes are draggable; a settled drag
+ * The infra topology board (ADR-0070 §6, issue #741). Renders nodes from `GET /infra/graph/nodes` —
+ * the board's OWN read since #1152, a narrow projection that is complete by default, bounded at
+ * `INFRA_GRAPH_NODES_MAX`, and says so via `truncated` when the bound bites (the Servers table's
+ * `GET /infra/nodes/page` is a page, and a paged map would drop boxes and their edges in silence) — plus
+ * one bounded `GET /infra/graph/edges` read, styled by status/kind. Nodes are draggable; a settled drag
  * trailing-debounces a `PATCH /infra/nodes/:id/position`. Pan/zoom + fit-view on load come from
  * React Flow. Hover shows quick facts AND spotlights the node's neighbourhood; click selects a node
  * and bubbles up via `onSelectNode` — the SEAM for #742's drill-in, which since #1182 is the tabbed
@@ -115,6 +126,14 @@ export interface InfraCanvasApi {
  * ones" are different questions. Clicking a node therefore SELECTS it and
  * nothing more — the detail modal is one deliberate click (or a double-click) away, so the map is
  * never covered by a surface the operator did not ask for.
+ *
+ * **Endpoints are off the board by default** (ADR-0093 §5). A representative estate is ~180 reported
+ * laptops and desktops against ~65 servers, and drawing all 245 is what made this canvas unusable —
+ * so a node whose agent reports `chassis: laptop|desktop` is not drawn unless the toolbar's toggle
+ * says otherwise. It is a treatment of THIS SURFACE and nothing else: the node is still in the CMDB,
+ * still on the Servers table, still reachable by search, still counted by a blast radius. The filter
+ * lives in `lib/infra/endpoints.ts`, the queries above are untouched, and the count of what is
+ * missing is on the board rather than left to be inferred.
  */
 export function InfraCanvas({
   onSelectNode,
@@ -126,6 +145,8 @@ export function InfraCanvas({
   impactOn = false,
   onToggleImpact,
   onRetryImpact,
+  showEndpoints = false,
+  onToggleEndpoints,
   onApiReady,
   emptyAction,
 }: {
@@ -158,26 +179,66 @@ export function InfraCanvas({
   onToggleImpact?: () => void;
   /** Re-run the blast-radius query after it failed (the summary's Retry). */
   onRetryImpact?: () => void;
+  /**
+   * Draw reported laptops and desktops too (ADR-0093 §5). OFF by default — that default IS the
+   * feature, because a representative estate is ~180 endpoints against ~65 servers and drawing all
+   * of them is what makes the board unusable. Owned by `diagram-view` as `?endpoints=1` so the
+   * choice is URL-backed and survives a reload.
+   */
+  showEndpoints?: boolean;
+  /** Flip {@link showEndpoints} — the toolbar's one-click undo of the default. */
+  onToggleEndpoints?: () => void;
   /** Receives the canvas's imperative API once mounted (issue #765 — diagram-view's `?focus=1`). */
   onApiReady?: (api: InfraCanvasApi) => void;
   /** Rendered inside the "no nodes yet" state — the Topology screen's add affordance (#1181). */
   emptyAction?: React.ReactNode;
 }) {
   const t = useTranslations("infra");
-  // Poll so live nodes show fresh status/lastReportedAt/IP on the map without a manual reload (#1081).
-  const { data: rawNodes, isLoading, isError, error, refetch } = useInfraNodes(
-    {},
-    { refetchInterval: INFRA_LIVE_POLL_MS },
-  );
-  const nodeIds = useMemo(() => (rawNodes ?? []).map((n) => n.id), [rawNodes]);
+  // The canvas's OWN read (`GET /infra/graph/nodes`, #1152) — not the paged Servers list. A map is
+  // the one surface where a window is unusable: the node that falls off takes its edges with it, so
+  // the board loses a relationship rather than a row and nothing on screen says so. This read is
+  // complete by default, bounded at `INFRA_GRAPH_NODES_MAX`, and honest about the bound via
+  // `truncated` (rendered below). Poll so live nodes show fresh status/IP without a reload (#1081).
   const {
-    edges: rawEdges,
+    data: graph,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useInfraGraphNodes({ refetchInterval: INFRA_LIVE_POLL_MS });
+  const rawNodes = useMemo(() => graph?.items ?? [], [graph]);
+  const truncation = graph ? graphTruncationNotice(graph) : null;
+  const {
+    data: edgeGraph,
+    isLoading: edgesLoading,
     isError: edgesError,
     refetch: refetchEdges,
-  } = useInfraEdges(nodeIds);
+  } = useInfraGraphEdges({ refetchInterval: INFRA_LIVE_POLL_MS });
+  const rawEdges = useMemo(() => edgeGraph?.items ?? [], [edgeGraph]);
+  const edgeState = graphEdgeLoadState(edgeGraph, edgesError);
 
-  if (isLoading) return <CanvasSkeleton label={t("loading")} />;
-  if (isError) {
+  // Endpoint routing (ADR-0093 §5) — the ONE place the canvas narrows what it draws.
+  //
+  // Client-side over the rows already fetched: `chassis` rides the graph projection deliberately (it
+  // is a scalar and this filter is the reason it is there), so the toggle costs no request and is
+  // instant. Both graph queries remain complete-by-default; filtering returned edges only here means
+  // toggling endpoints back on redraws from cache without another request.
+  const { visible: visibleNodes, endpointCount } = useMemo(
+    () => partitionEndpoints(rawNodes, showEndpoints),
+    [rawNodes, showEndpoints],
+  );
+  const visibleEdges = useMemo(
+    () =>
+      edgesBetweenVisible(rawEdges, new Set(visibleNodes.map((n) => n.id))),
+    [rawEdges, visibleNodes],
+  );
+
+  // The first paint waits for BOTH bounded graph reads. Once data exists, React Query retains it
+  // during background polls/retries, so a transient refetch never blanks the board.
+  if ((!graph && isLoading) || (!edgeGraph && edgesLoading)) {
+    return <CanvasSkeleton label={t("loading")} />;
+  }
+  if (isError && !graph) {
     return (
       <div className="rounded-lg border border-border p-6">
         <ErrorState
@@ -190,15 +251,25 @@ export function InfraCanvas({
     );
   }
 
-  const nodes = rawNodes ?? [];
-  if (nodes.length === 0) return <InfraEmptyState action={emptyAction} />;
+  // The onboarding hero belongs to a genuinely EMPTY estate, so it is gated on the raw rows. A board
+  // whose every node is a hidden endpoint renders as an empty canvas carrying the "N endpoints
+  // hidden" control instead — "you have nothing yet" would be a lie, and the wrong lie: it would read
+  // as the data loss ADR-0093 §8.3 is at pains to say this is not.
+  if (rawNodes.length === 0 && edgeState.canShowEmpty) {
+    return <InfraEmptyState action={emptyAction} />;
+  }
 
   return (
     <ReactFlowProvider>
       <CanvasBoard
-        nodes={nodes}
-        edges={rawEdges}
-        edgesError={edgesError}
+        nodes={visibleNodes}
+        edges={visibleEdges}
+        truncation={truncation}
+        edgeTruncation={edgeState.truncation}
+        endpointCount={endpointCount}
+        showEndpoints={showEndpoints}
+        onToggleEndpoints={onToggleEndpoints}
+        edgesError={edgeState.failure !== null}
         onRetryEdges={refetchEdges}
         onSelectNode={onSelectNode}
         selectedId={selectedId}
@@ -215,10 +286,15 @@ export function InfraCanvas({
   );
 }
 
-/** The mounted board — data is loaded and non-empty by the time we reach here. */
+/** The mounted board — both initial requests settled; it may be node-empty only when edges failed. */
 function CanvasBoard({
   nodes: infraNodes,
   edges: infraEdges,
+  truncation,
+  edgeTruncation,
+  endpointCount,
+  showEndpoints,
+  onToggleEndpoints,
   edgesError,
   onRetryEdges,
   onSelectNode,
@@ -232,13 +308,26 @@ function CanvasBoard({
   onRetryImpact,
   onApiReady,
 }: {
-  // The list row, NOT the full `InfraNode` (#1135): `GET /infra/nodes` no longer ships `specs`, and
-  // the board never wanted it — it renders label/kind/status/IP and positions from x/y.
-  nodes: InfraNodeListItem[];
+  // The graph PROJECTION, not the list row (#1152) — `GET /infra/graph/nodes` ships exactly what the
+  // board draws (label/kind/status/IP, x/y) plus `chassis` for the endpoint filter, and nothing else.
+  // Typing the board against the narrow shape is what makes the projection compiler-enforced: reach
+  // for `owners` or `assetName` here and it fails to build rather than quietly re-fattening the read.
+  nodes: InfraGraphNode[];
   edges: InfraEdge[];
-  /** At least one per-node edge fetch failed — some relationships are missing from the graph (#778). */
+  /**
+   * Set when the graph read hit `INFRA_GRAPH_NODES_MAX` and the map is therefore INCOMPLETE — the
+   * banner below states both numbers. Null on every normal estate.
+   */
+  truncation: GraphTruncationNotice | null;
+  /** Set when the bounded edge read hit its server-reported cap. */
+  edgeTruncation: { shown: number; total: number } | null;
+  /** How many endpoints the estate reports, drawn or not — the toolbar states the number (§5). */
+  endpointCount: number;
+  showEndpoints: boolean;
+  onToggleEndpoints?: () => void;
+  /** The graph-edge request failed — the retained/empty relationship set is explicitly incomplete. */
   edgesError: boolean;
-  /** Re-run the per-node edge fetches; on success the inline notice auto-clears. */
+  /** Re-run the graph-edge request; on success the inline notice auto-clears. */
   onRetryEdges: () => void;
   onSelectNode?: (nodeId: string | null) => void;
   selectedId: string | null;
@@ -684,45 +773,120 @@ function CanvasBoard({
           nodeColor="var(--muted-foreground)"
         />
 
-        {/* Tidy / auto-arrange (issue #766) — manager-only; viewers can't persist a layout. */}
-        {canManage ? (
-          <Panel position="top-right">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onTidy}
-              className="shadow-sm"
-            >
-              <Squares2X2Icon />
-              {t("tidy.action")}
-            </Button>
+        {/* The board toolbar. Two controls with different audiences, so the panel renders whenever
+            EITHER has something to offer. */}
+        {canManage || endpointCount > 0 ? (
+          <Panel position="top-right" className="flex items-center gap-2">
+            {/* Show / hide endpoints (ADR-0093 §5). Shown to EVERY reader, not just managers: hiding
+                is a rendering preference, not a mutation, and a viewer looking at a map that is
+                quietly missing 142 machines needs the undo more than anyone. The count is on the
+                control rather than implied, because "the map got smaller" must never be something an
+                operator has to infer. Rendered only when the estate actually reports endpoints —
+                explaining a filter that removes nothing is just noise on the board. */}
+            {endpointCount > 0 && onToggleEndpoints ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-pressed={showEndpoints}
+                title={
+                  showEndpoints ? t("endpoints.hideHint") : t("endpoints.showHint")
+                }
+                onClick={onToggleEndpoints}
+                className="shadow-sm"
+              >
+                {showEndpoints ? <EyeSlashIcon /> : <ComputerDesktopIcon />}
+                {showEndpoints
+                  ? t("endpoints.hide", { count: endpointCount })
+                  : t("endpoints.show", { count: endpointCount })}
+              </Button>
+            ) : null}
+
+            {/* Tidy / auto-arrange (issue #766) — manager-only; viewers can't persist a layout. */}
+            {canManage ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onTidy}
+                className="shadow-sm"
+              >
+                <Squares2X2Icon />
+                {t("tidy.action")}
+              </Button>
+            ) : null}
           </Panel>
         ) : null}
 
-        {/* Partial edge-fetch notice (issue #778) — a per-node edge fetch failed, so some relationships
-            are missing from the graph. A subtle, non-blocking banner (NOT a toast — this state persists
-            while edges are absent) over the still-valid nodes, with a Retry that re-runs the fetches;
-            it auto-clears the moment a retry succeeds. */}
-        {edgesError ? (
-          <Panel position="top-center">
-            <Callout
-              tone="warning"
-              icon={<ExclamationTriangleIcon />}
-              className="items-center py-2 shadow-md backdrop-blur-sm"
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-sm">{t("edges.partialError")}</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onRetryEdges()}
-                >
-                  {t("edges.retry")}
-                </Button>
-              </div>
-            </Callout>
+        {/* Completeness warnings share ONE stack so node truncation, edge truncation and an edge-read
+            failure can all remain visible without covering each other. These are persistent map state,
+            never transient toasts. */}
+        {truncation || edgeTruncation || edgesError ? (
+          <Panel position="top-center" className="flex flex-col items-center gap-2">
+            {/* Truncated graph (#1152) — the read hit `INFRA_GRAPH_NODES_MAX`, so nodes (and the
+                edges they carry) are simply not on the board. There is no Retry to offer: refetching
+                returns the same cap. What the operator gets instead is the two numbers, said plainly,
+                because the alternative is a map that looks finished and is not. Never a tooltip: a
+                cue you have to hover to find is a cue nobody finds. */}
+            {truncation ? (
+              <Callout
+                tone="warning"
+                icon={<ExclamationTriangleIcon />}
+                className="items-center py-2 shadow-md backdrop-blur-sm"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-sm font-medium">
+                    {t("graph.truncated", {
+                      shown: truncation.shown,
+                      total: truncation.total,
+                    })}
+                  </span>
+                  <span className="text-xs">
+                    {t("graph.truncatedHint", { shown: truncation.shown })}
+                  </span>
+                </div>
+              </Callout>
+            ) : null}
+
+            {edgeTruncation ? (
+              <Callout
+                tone="warning"
+                icon={<ExclamationTriangleIcon />}
+                className="items-center py-2 shadow-md backdrop-blur-sm"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-sm font-medium">
+                    {t("graph.edgesTruncated", {
+                      shown: edgeTruncation.shown,
+                      total: edgeTruncation.total,
+                    })}
+                  </span>
+                  <span className="text-xs">{t("graph.edgesTruncatedHint")}</span>
+                </div>
+              </Callout>
+            ) : null}
+
+            {/* A failed edge read never becomes an empty relationship set. Retained data stays drawn,
+                this warning persists, and Retry re-runs the one bounded request. */}
+            {edgesError ? (
+              <Callout
+                tone="warning"
+                icon={<ExclamationTriangleIcon />}
+                className="items-center py-2 shadow-md backdrop-blur-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-sm">{t("edges.partialError")}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onRetryEdges()}
+                  >
+                    {t("edges.retry")}
+                  </Button>
+                </div>
+              </Callout>
+            ) : null}
           </Panel>
         ) : null}
 

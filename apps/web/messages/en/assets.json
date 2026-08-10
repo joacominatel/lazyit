@@ -313,6 +313,7 @@
         "modelChanged": "Model",
         "specsChanged": "Specs",
         "acknowledged": "Acknowledged",
+        "agentLinked": "Agent linked",
         "deleted": "Deleted",
         "restored": "Restored"
       },
@@ -323,6 +324,7 @@
         "modelChanged": "Model updated",
         "specsChanged": "Specs updated",
         "acknowledged": "Confirmed receipt",
+        "agentLinked": "An agent started reporting to this asset",
         "deleted": "Asset deleted",
         "restored": "Asset restored"
       }

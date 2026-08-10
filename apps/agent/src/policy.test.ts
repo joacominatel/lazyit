@@ -219,8 +219,17 @@ describe("localLimitsFrom — the host's own config file, read as a VETO only", 
         LAZYIT_COLLECT_DISKS: "false",
         LAZYIT_COLLECT_NICS: "false",
         LAZYIT_COLLECT_CONTAINERS: "false",
+        LAZYIT_COLLECT_HYPERVISOR: "false",
       }).collect,
-    ).toEqual({ hardware: false, disks: false, nics: false, containers: false });
+    ).toEqual({ hardware: false, disks: false, nics: false, containers: false, hypervisor: false });
+  });
+
+  test("the hypervisor veto (ADR-0095) follows the veto-never-widen rule like its five siblings", () => {
+    expect(localLimitsFrom({ LAZYIT_COLLECT_HYPERVISOR: "false" })).toEqual({
+      collect: { hypervisor: false },
+    });
+    // A local `true` can never re-enable a collector the server turned off — not carried at all.
+    expect(localLimitsFrom({ LAZYIT_COLLECT_HYPERVISOR: "true" })).toEqual({});
   });
 
   test("MIN_INTERVAL is a floor in seconds; a bad value is ignored, not guessed at", () => {

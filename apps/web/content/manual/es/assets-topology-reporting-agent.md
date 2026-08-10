@@ -38,16 +38,21 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    **Linux**:
 
    ```sh
-   curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --url https://tu-instancia --token <token>
+   export LAZYIT_TOKEN='<token>'
+   curl -fsSL https://tu-instancia/install.sh | sudo -E sh -s -- --url https://tu-instancia
    ```
 
    En **Windows**, la misma instalación con el mismo token, desde una PowerShell **elevada**:
 
    ```powershell
-   & ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia -Token <token>
+   $env:LAZYIT_TOKEN = '<token>'
+   & ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia
    ```
 
-   (La forma con bloque de script no es adorno: el pipe `irm … | iex` no puede pasar parámetros.)
+   (Las dos formas son deliberadas. La primera línea entrega el token **por el entorno** en lugar de
+   como argumento — la nota sobre el token, más abajo, explica qué gana con eso. En Linux la `-E`
+   importa: `sudo` limpia el entorno, y sin ella el instalador nunca ve el token. Y la forma con
+   bloque de script no es adorno: el pipe `irm … | iex` no puede pasar parámetros.)
    Ver **[Hosts Windows](#hosts-windows)** más abajo para qué hace esa instalación y qué necesita.
 
    La elección cambia todo lo que el asistente muestra alrededor: qué necesita el host, la vía para
@@ -82,13 +87,17 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    prueba); en Windows, **Descargar y leer el instalador primero** guarda `install.ps1` en tu carpeta
    temporal para que lo leas y después ejecuta la copia que leíste.
 
-   > **Mantené el token fuera de la shell.** Tal como está escrito arriba, el token queda visible en
-   > `ps` para cualquier usuario de esa máquina durante los pocos segundos que dura la instalación, y
-   > queda en el historial de la shell de root. Si eso importa donde trabajás, dos formas equivalentes
-   > lo evitan: poner el token en el entorno (`LAZYIT_TOKEN=… sh install.sh --url …`), o en un archivo
-   > y pasar `--token-file /root/agent.token`. Para cualquiera de las dos hay que descargar el script
-   > primero. (`--token-file -` lo lee de una tubería, y por eso no puede combinarse con
-   > `curl … | sh`: la tubería ya es la entrada del script.)
+   > **El token viaja por el entorno, no por la línea de comandos.** La primera línea de cada
+   > comando de arriba define `LAZYIT_TOKEN`, la variable que ambos instaladores leen. La forma con
+   > argumento (`--token <token>` / `-Token <token>`) sigue funcionando, pero un argumento queda
+   > visible en `ps` para cualquier usuario de esa máquina durante los pocos segundos que dura la
+   > instalación — por eso el asistente dejó de mostrarla. La línea pegada igual queda en el
+   > historial de tu shell, token incluido; si *eso* importa donde trabajás, poné el token en un
+   > archivo y pasá `--token-file /root/agent.token` (descargando el script primero —
+   > `--token-file -` lo lee de una tubería, y por eso no puede combinarse con `curl … | sh`: la
+   > tubería ya es la entrada del script). Todas las formas mantienen el token fuera de `ps` durante
+   > *toda* la instalación: el instalador se lo pasa a `curl` por una tubería y no como argumento,
+   > así que nunca vuelve a aparecer en la lista de procesos camino a tu instancia.
 
    > **¿Despliegue en LAN (sin dominio público)?** Si tu instancia solo es alcanzable por una IP o
    > nombre de host de LAN con un certificado autofirmado, copiá el `.pem` de esa autoridad
@@ -97,6 +106,16 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    > falta confiar en esa autoridad a nivel de todo el sistema, que sería un cambio mucho más grande
    > en la máquina que "un agente de inventario habla con un servidor". Confiar en ella a nivel
    > sistema sigue funcionando si tu flota ya está armada así.
+
+   > **¿`http://` plano, sin TLS?** Los instaladores lo rechazan salvo que lo aceptes explícitamente
+   > — **`--allow-insecure-http`** en Linux, **`-AllowInsecureHttp`** en Windows — porque el costo es
+   > real y permanente, y conviene aceptarlo a sabiendas y no por omisión. En un canal sin cifrar,
+   > cualquiera en el camino de red puede reemplazar el programa del agente (que después corre como
+   > root, o como SYSTEM en Windows) — y el token queda guardado con esa dirección, así que vuelve a
+   > cruzar la red sin cifrar en **cada reporte que ese host envíe**, no solo durante la
+   > instalación. En una LAN físicamente confiable puede ser un intercambio aceptable — para eso
+   > existe la opción — pero la solución honesta cuesta un archivo: una autoridad certificadora
+   > interna más `--ca-file` (arriba) elimina las dos exposiciones.
 
    > **¿Detrás de un proxy de salida?** No hace falta pasar nada al instalar; agregá `HTTPS_PROXY` (y
    > `NO_PROXY` si tu instancia es interna) a `/etc/lazyit-agent/config` después. Tiene que ir **ahí**,
@@ -107,10 +126,24 @@ Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
    > en ese archivo es la respuesta **completa** del agente: un `NO_PROXY` ahí sí frena un proxy que la
    > máquina haya definido en otro lado, en vez de perder contra él. Reinstalar conserva esas líneas,
    > en cualquiera de las dos formas.
+
+   > **¿Instalando sobre un host hipervisor?** No hay nada que agregar: el mismo agente detecta por
+   > sí solo que la máquina corre Proxmox VE, Hyper-V o libvirt/KVM y también inventaría sus
+   > invitados — el instalador imprime lo que detectó, y la detección se repite en cada ejecución,
+   > así que un host que se convierte en hipervisor más tarde simplemente empieza a reportar sus
+   > invitados. Si *no* querés que los invitados de ese host se reporten, agregá
+   > **`--no-hypervisor`** (**`-NoHypervisor`** en Windows): escribe
+   > `LAZYIT_COLLECT_HYPERVISOR=false` en el archivo de configuración del host — un veto local, así
+   > que como todo ajuste local gana sobre cualquier cosa configurada en lazyit y sobrevive a las
+   > actualizaciones. El asistente también trae este veto: en **Opciones avanzadas**, la casilla
+   > **No inventariar los invitados de este host** agrega la opción al comando por vos. La historia
+   > completa está en [Hosts hipervisores](/help/assets-topology-hypervisors).
 3. **Espera.** El asistente entonces espera a que el servidor reporte. Apenas el agente reporta —
    normalmente en un par de minutos — muestra un mensaje de éxito y un botón **Confirmar** en línea.
    Podés confirmar ahí mismo, o cerrar el asistente y confirmarlo más tarde desde la bandeja de
-   Revisión pendiente.
+   Revisión pendiente. Si el host resultó ser un **hipervisor**, el asistente lo dice en esa misma
+   pantalla: la plataforma que detectó (con su versión cuando el host la reportó) y cuántos
+   invitados entraron a Revisión pendiente, con un atajo para revisarlos.
 
 ### Instalar manualmente (paso a paso)
 
@@ -264,7 +297,9 @@ administrador*). El instalador:
 1. verifica que esté elevado y que la máquina sea x64;
 2. descarga el ejecutable desde **tu** instancia con tu token, y rechaza cualquier cosa que no sea un
    ejecutable de Windows real — la misma protección que el instalador de Linux aplica a su binario;
-3. compara la **huella** que tu instancia publica para ese ejecutable y rechaza una que no coincida;
+3. compara la **huella** que tu instancia publica para ese ejecutable y rechaza una que no coincida —
+   y se niega a continuar si la huella no se puede obtener, en vez de encogerse de hombros e
+   instalar igual (la salida de emergencia está en [Seguridad](#seguridad));
 4. **lo ejecuta una vez** (`--help`) antes de registrar nada: si la máquina no puede arrancarlo,
    obtenés una sola frase clara, no se instala nada y no se registra ninguna tarea;
 5. agrega `C:\Program Files\lazyit-agent` al **PATH de la máquina**, para que los comandos de
@@ -387,7 +422,9 @@ Si estás reimaginando una máquina que va a volver a tener el agente, agregá *
 conserva los límites propios de ese host y su configuración de proxy (lo que eligió el dueño de la
 máquina, que es molesto de reconstruir) y de todos modos quita el token y la dirección de la
 instancia. No hay ninguna opción que deje el token: una credencial que funciona contra tu instancia no
-debería sobrevivir en una máquina que acabás de dar de baja.
+debería sobrevivir en una máquina que acabás de dar de baja. (`--keep-token`, más abajo, es la
+operación opuesta y pertenece a una *instalación*: combinarla con `--uninstall` se rechaza en vez de
+ignorarse, para que nadie termine una desinstalación creyendo que la credencial sobrevivió.)
 
 Dos cosas que desinstalar **no** hace, deliberadamente. La entrada del servidor en lazyit queda tal
 como está: descartala desde la vista de Servidores si querés sacarla del mapa. Y el token solo se
@@ -397,8 +434,12 @@ elimina *de ese host* — si ninguna otra máquina lo usa, revocá la cuenta de 
 ## Revisión pendiente
 
 Los hosts descubiertos no entran directo a tu inventario: te esperan en la bandeja de **Revisión
-pendiente** arriba de la vista de Servidores, cada uno mostrando su nombre de host, su tipo, de dónde
-vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés tres opciones:
+pendiente** arriba de la vista de Servidores, cada uno mostrando su nombre de host, su tipo, su
+**formato** cuando la máquina reportó uno (*notebook*, *equipo de escritorio*, *servidor*, *máquina
+virtual*, *contenedor*), de dónde vino el reporte y hace cuánto reportó por última vez. El formato
+está ahí para que puedas ver de un vistazo cuáles de cuarenta propuestas son el puesto de trabajo de
+alguien y cuáles son infraestructura del parque, sin abrir cada una. Para cada propuesta tenés tres
+opciones:
 
 - **Confirmar** — suma el host a tu topología activa. Un diálogo breve te permite renombrarlo y
   cambiar su tipo antes, y ofrece un interruptor **Registrar como activo de inventario** (**activado**
@@ -408,6 +449,30 @@ vino el reporte y hace cuánto reportó por última vez. Para cada uno tenés tr
   hardware real, ese pasa a ser el serie del activo automáticamente (un texto de relleno como
   *"To be filled by O.E.M."*, o un serie que ya usa otro activo, se descarta). Desactivá el
   interruptor para dejar el nodo solo en el grafo.
+
+  **Si la máquina ya está en tu inventario, confirmar la vincula: no crea una segunda.** Cuando el
+  serie que reporta el host coincide con un activo que ya tenés, el diálogo de confirmación lo dice
+  antes de que hagas clic, nombrando ese activo y el serie por el que coincidió: *"Esta máquina ya
+  está en tu inventario. Al confirmar se la vincula a ese activo en lugar de crear un segundo."* Es el
+  caso habitual de un parque de puestos de trabajo que curaste a mano mucho antes de instalar ningún
+  agente: las máquinas ya están registradas y, de ahora en más, empiezan a mantener al día sus propios
+  datos de hardware y software sobre los registros que hiciste **vos**, en lugar de aparecer al lado
+  como duplicados.
+
+  Vale la pena ser preciso sobre qué recibe ese activo adoptado y qué nunca recibe. El agente escribe
+  en él los **datos reportados** —hardware, sistema operativo, software instalado— y los refresca en
+  cada reporte, así que su panel de inventario se empieza a completar. **Nunca** toca su nombre, su
+  número de serie, su modelo, su estado, su ubicación ni sus asignaciones. Todo lo que curaste sigue
+  siendo tuyo; solo se mantiene por vos la mitad que reporta la máquina. Y si después desvinculás el
+  nodo —desde **Vínculo de inventario**, en la pestaña **General** de la ventana de detalle— un activo
+  que ya existía simplemente se **desvincula y queda intacto**. Solo se archiva un activo que creó el
+  propio lazyit, y la confirmación te dice cuál de los dos estás por hacer.
+
+  La coincidencia es deliberadamente cautelosa. lazyit adopta un activo existente solo cuando el
+  reporte respalda su serie también con una dirección de placa de red, y nunca cuando ese host ya está
+  marcado como posible clon de otro. Cualquier cosa menos certera crea un activo nuevo, como antes: un
+  duplicado se ve y se corrige, mientras que una máquina vinculada al registro de inventario
+  equivocado no es ninguna de las dos cosas.
 - **Unificar con…** — este host ya lo tenés. Elegí el servidor existente que realmente es y su clave
   de reporte se muda ahí: los próximos reportes llegan a ese servidor y esta propuesta se archiva.
   Usalo cuando una máquina fue **reinstalada** (un sistema operativo nuevo le da un machine ID nuevo,
@@ -450,6 +515,17 @@ Un solo host Docker puede agregar una docena de propuestas en un mismo reporte �
 por cada contenedor en ejecución — así que la bandeja está pensada para resolverse de una pasada y no
 de a un cuadro de diálogo por vez.
 
+- **El número es toda la cola; la bandeja muestra de a 200.** El número que ves junto a **Revisión
+  pendiente** es cuántas propuestas están esperando en total, no cuántas filas hay en pantalla. La
+  bandeja las carga en tandas de **200, las descubiertas más recientemente primero**, y cuando la cola
+  es más grande que la tanda te lo dice arriba de las filas: *"Se muestran 200 de 431 nodos
+  pendientes, los descubiertos más recientemente primero. Confirmá o descartá estos para que aparezcan
+  los demás."* Al resolver una tanda aparece la siguiente, y la bandeja desaparece recién cuando la
+  cola está realmente vacía: limpiar la pantalla nunca es lo mismo que haber terminado. Este es el
+  caso normal después de enrolar un [host hipervisor](/help/assets-topology-hypervisors), que puede
+  proponer hasta **500 invitados en un solo reporte**. La tanda tiene el mismo tamaño que el tope de
+  una acción en conjunto, así que una pantalla llena es exactamente una pasada de **Seleccionar todo
+  lo visible → Confirmar selección**.
 - **Los contenedores quedan debajo del servidor que los reportó.** Cada grupo se encabeza con el
   nombre del servidor y la cantidad de contenedores, y la casilla de ese encabezado toma el servidor
   **y** sus contenedores juntos. Así se confirma un host con todo lo que corre arriba en una sola
@@ -487,9 +563,18 @@ gestión es una máquina virtual y lo quiero registrado"* — podés escribirlo 
 
 Una regla tiene un **nombre**, a qué **se aplica** (servidores, contenedores o ambos) y al menos una
 condición: un **patrón de nombre** (`*` para cualquier secuencia de caracteres, `?` para exactamente
-uno; tiene que coincidir el nombre completo), una **subred** en formato CIDR, o el **tipo que el
-reporte del agente hizo que lazyit propusiera**. Después indica qué hacer: con qué tipo confirmarlo y
-si registrarlo como activo de inventario.
+uno; tiene que coincidir el nombre completo), una **subred** en formato CIDR, el **tipo que el
+reporte del agente hizo que lazyit propusiera**, o el **formato que reportó la máquina**. Después
+indica qué hacer: con qué tipo confirmarlo y si registrarlo como activo de inventario.
+
+**El formato es una condición por derecho propio**, lo que convierte a *"autoconfirmar los servidores
+y revisar las notebooks"* en una regla que podés escribir sin declarar nada más — posiblemente la
+regla más útil que existe en un parque mixto. Lee el firmware de la propia máquina, no su nombre de
+host, así que no depende de que alguien haya nombrado las cosas de manera consistente. Prestá
+atención a la dirección en la que falla: **un host que no reporta formato nunca coincide con una regla
+que nombra uno.** Un agente más viejo, una máquina cuyo hardware no lo dice, o una que todavía no
+reportó, siguen esperándote en la bandeja — que es el lado seguro para una compuerta que confirma sin
+que haya nadie presente.
 
 **Tené claro qué estás activando.** Un host que coincide con una regla se confirma en el momento en
 que reporta: esa fila nunca pasa por la bandeja, y si la regla indica registrarlo, también se crea su
@@ -503,7 +588,8 @@ Lo demás que conviene saber antes de escribir una:
 - **Una regla se aplica solo a partir del próximo reporte.** Nada de lo que ya está esperando en tu
   bandeja se confirma por su cuenta: eso lo seguís revisando vos, de a uno o en conjunto. Guardar una
   regla nunca toca una propuesta que ya podés ver.
-- **Una regla necesita una condición que pueda descartar algo.** Un patrón de nombre tiene que llevar
+- **Una regla necesita una condición que pueda descartar algo.** Un tipo reportado y un formato
+  reportado valen cada uno por sí solo. Un patrón de nombre tiene que llevar
   al menos un carácter literal, y una subred tiene que ser más acotada que `/0`. La mayoría de los
   patrones hechos solo de comodines (`*`, `**`, `*?*`) coinciden con todos los hosts que existan, igual
   que `0.0.0.0/0` son todas las direcciones que existen: lazyit no guarda ninguna de las dos, ni por
@@ -650,6 +736,52 @@ recolección ahora nombran la fuente que volvió vacía y el error detrás, tant
 detección de clones te importa, corré el agente como root (en Linux, con `dmidecode` instalado) o
 desde la tarea programada (en Windows), y no esperes nada de él en guests de contenedor.
 
+## Máquinas ya registradas dos veces
+
+Esto es sobre el pasado, y solo afecta a instalaciones que ya venían confirmando hosts reportados por
+agente antes de que lazyit supiera vincular un activo existente.
+
+En aquel momento, confirmar un host con **Registrar como activo de inventario** activado siempre
+creaba un activo *nuevo*. Si el serie que reportaba ese host ya lo usaba un activo que habías curado,
+lazyit no podía guardarlo dos veces, así que creaba el activo nuevo **sin número de serie** en lugar
+de hacer fallar tu confirmación. El resultado eran dos registros activos para una misma máquina
+física: el que curaste vos y uno sin serie sobre el que el agente viene escribiendo desde entonces.
+
+**Eso ya no puede pasar** — una confirmación ahora vincula el activo que ya tenés (ver *Revisión
+pendiente* más arriba). Para los que ya están en tu base de datos, lazyit los señala en lugar de
+arreglarlos:
+
+- Abrí la ventana de detalle del nodo. En la pestaña **General** vas a ver **Posible duplicado en el
+  inventario**, nombrando el otro activo y enlazándolo.
+- Verificalo. La señal es fuerte —un activo creado automáticamente y sin serie, cuya máquina reporta
+  un serie que pertenece a otro activo activo— pero vos sos quien sabe si esas dos filas realmente son
+  la misma caja.
+- **lazyit no los va a fusionar por vos, nunca.** Dos registros de inventario son dos conjuntos de
+  asignaciones, historial, etiquetas y documentos adjuntos, y decidir qué pasa con cada uno es tu
+  criterio. No se cambia nada mientras no estás mirando.
+
+Cuando ya lo verificaste y estás seguro de que las dos filas son la misma caja, el aviso trae un
+botón: **Apuntar este nodo al registro que curaste**. Ejecuta los dos pasos que si no harías a mano
+—el suplente creado automáticamente se archiva (lo creó lazyit, así que se va con el vínculo) y
+después el nodo se vincula al registro que conservaste—. De ahí en más la máquina reporta sobre tu
+registro, y el panel de inventario de la ventana de detalle se empieza a completar ahí.
+
+Esto sigue sin ser una fusión, y nunca lo va a ser: no se mueve nada de un registro al otro. Todo lo
+que lleva el suplente —asignaciones, historial, etiquetas, documentos adjuntos— se queda en el
+suplente, y el suplente se archiva. Si tiene algo que quieras en el registro que vas a conservar,
+copialo antes de apretar el botón: este es el momento, no después.
+
+Si el segundo paso falla (porque el registro que curaste se archivó mientras tanto, por ejemplo), el
+diálogo queda abierto y te lo dice: el suplente ya está archivado y solo falta hacer el vínculo.
+Reintentar retoma desde ahí en vez de empezar de cero.
+
+Como el primero de esos dos pasos archiva el suplente, este botón requiere el permiso de **dar de
+baja activos** además del de gestionar topología. Sin él, el aviso igual aparece y sigue nombrando el
+registro que curaste — que es lo que necesitás para ir a verificar —, pero en lugar del botón hay una
+línea que dice qué permiso falta.
+
+Si no tenés ninguno de estos casos, nunca vas a ver este aviso. Es deliberadamente silencioso.
+
 ## Qué recopila el agente
 
 - **Identidad y hardware** — nombre de host, sistema operativo y kernel, CPU y memoria, discos e
@@ -670,6 +802,15 @@ desde la tarea programada (en Windows), y no esperes nada de él en guests de co
   datos en un panel **Contenedor** sobre el nodo (ver Revisión pendiente, más arriba). Sigue siendo la
   máquina local describiéndose a sí misma: el agente le pregunta al runtime de ese host qué está
   corriendo *él* — nunca escanea tu red.
+- **Los invitados que aloja** — en una máquina que *es* un hipervisor (un nodo Proxmox VE, un
+  servidor Hyper-V, un host libvirt/KVM), las máquinas virtuales y contenedores que está
+  ejecutando, automáticamente: el agente detecta la plataforma por sí solo en cada ejecución y lee
+  la lista de invitados localmente del propio hipervisor del host, sin token de API y sin nada que
+  activar. Cada invitado se convierte en un nodo propio conectado al host por un enlace **runs-on**,
+  exactamente igual que los contenedores — y esto también es la máquina local describiéndose a sí
+  misma, nunca una API de hipervisor remota y nunca un escaneo de red. La historia completa — qué
+  aparece y dónde, cómo un invitado que corre su propio agente converge en un solo nodo, y cómo
+  apagarlo — está en [Hosts hipervisores](/help/assets-topology-hypervisors).
 - **Cuándo arrancó por última vez** — una sola marca de tiempo, actualizada en cada reporte y sin
   histórico: es un dato de inventario ("¿este equipo realmente se reinició después de la ventana de
   parches?"), no monitoreo de uptime. Se guarda junto a los demás datos reportados del host y, igual
@@ -823,12 +964,16 @@ Lo que podés configurar ahí, en tres grupos:
   queda marcado fuera de línea entre dos de sus propios reportes — el editor no te deja guardar un
   valor que provoque eso, y lo aclara debajo del campo en lugar de después de que presiones Guardar.
 - **Qué recolectan los agentes** — hardware, discos, interfaces de red, software instalado y
-  contenedores, más un tope estricto de cuántos paquetes puede informar un host. **En Linux** un
-  recolector desactivado directamente no se ejecuta: el agente no reúne los datos para después
-  descartarlos. **En Windows** eso solo vale para los contenedores — hardware, discos, interfaces de
-  red y la lista de software salen todos de una única llamada de PowerShell que se ejecuta diga lo que
-  diga la política, así que apagar uno ahí mantiene el dato fuera del reporte pero no le ahorra al host
-  el trabajo de recolectarlo. En los dos casos, un recolector apagado nunca llega a lazyit.
+  contenedores, más un tope estricto de cuántos paquetes puede informar un host. **Un recolector
+  desactivado no se ejecuta**, en ninguna de las dos plataformas: el agente no reúne los datos para
+  después descartarlos. En Windows eso antes valía solo para los contenedores, porque todo lo demás
+  salía de una única llamada de PowerShell que se ejecutaba dijera lo que dijera la política; desde
+  la v1.10 esa llamada se arma con los recolectores que la política realmente pide, así que apagar
+  uno le ahorra al host el trabajo además de mantener el dato fuera del reporte. Una excepción que
+  conviene conocer en Windows: apagar **hardware** evita que el agente lea el número de serie del
+  BIOS, y sigue dejando fabricante y modelo fuera del reporte — pero esos dos vienen junto con datos
+  que lazyit necesita igual (memoria, pertenencia al dominio), así que esa lectura puntual no se le
+  ahorra al host.
 - **Exclusiones** — patrones de nombre para interfaces de red (`veth*`, `docker*`), puntos de montaje
   (`/var/lib/docker/*`, `/snap/*`) y paquetes (`linux-image-*`). `*` coincide con cualquier texto y `?`
   con un solo carácter; no se aceptan expresiones regulares, y cada lista admite como máximo 32
@@ -905,11 +1050,23 @@ las dos, porque nunca informa una versión de política.
   `/etc/systemd/system/lazyit-agent.service` y leelo; es corto, y está escrito para ser leído. Además
   corre con la **prioridad de CPU y disco más baja del sistema**, así que listar tres mil paquetes en
   un servidor de base de datos ocupado nunca compite con aquello para lo que ese servidor existe.
-- **La descarga se verifica.** Tu instancia publica una huella del binario del agente junto al binario
-  mismo, y el instalador se niega a instalar uno que no coincida. Es una verificación de integridad,
-  no una firma criptográfica: detecta una descarga corrupta o desactualizada, y una manipulación donde
-  se cambió solo uno de los dos archivos. Pasá `--require-checksum` (o `-RequireChecksum` en Windows)
-  para que una huella *ausente* también sea fatal.
+- **La descarga se verifica, y la verificación no se puede saltear.** Tu instancia publica una huella
+  del binario del agente junto al binario mismo, y el instalador se niega a instalar uno que no
+  coincida — o uno que **no pudo verificar**: una huella que no se puede obtener ahora detiene la
+  instalación en vez de degradarse a una advertencia, porque una verificación que falla en abierto es
+  una verificación que un atacante elimina con solo hacerla fallar. Si tu instancia es más vieja que
+  el instalador y no publica huella, pasá el digest vos mismo — `--sha256 <hex>` en Linux, `-Sha256`
+  en Windows — obtenido por un canal que no sea la propia descarga, o actualizá la instancia. Es una
+  verificación de integridad, no una firma criptográfica: detecta una descarga corrupta o
+  desactualizada, y una manipulación donde se cambió solo uno de los dos archivos.
+  (`--require-checksum` y `-RequireChecksum` se siguen aceptando para que la automatización existente
+  no se rompa; simplemente describen lo que ahora es el comportamiento por omisión.)
+- **HTTP sin cifrar es una decisión explícita.** Una dirección de instancia `http://` es rechazada
+  por ambos instaladores salvo que pases `--allow-insecure-http` (`-AllowInsecureHttp` en Windows), y
+  el rechazo dice con todas las letras qué expone ese canal: el programa que va a correr como root o
+  SYSTEM, y el token — reenviado sin cifrar en cada reporte de ahí en adelante. El intercambio está
+  explicado en el paso de instalación de arriba; cuando puedas, preferí `--ca-file` con una autoridad
+  certificadora interna.
 - **Puede usar tu autoridad certificadora, no la de la máquina.** `--ca-file` (o `LAZYIT_CA_FILE` en
   la configuración) apunta el agente a un paquete de certificados en el que confía solo él, así que
   una autoridad certificadora interna nunca tiene que instalarse a nivel de toda la máquina solo para
@@ -944,6 +1101,189 @@ binario. Es solo un empujón: un agente desactualizado sigue reportando con norm
 nada, y las actualizaciones menores no la activan. Los agentes compilados desde el código fuente (o
 anteriores al versionado) reportan como `dev` y nunca muestran la insignia.
 
+**¿Todos los agentes reportan `dev`?** Hasta esta versión, los binarios que servía una instancia se
+compilaban sin el estampado de versión, así que todos los agentes instalados reportaban `dev` y la
+insignia nunca podía aparecer. Una vez que la instancia se actualiza y se reconstruye, los binarios
+que sirve llevan su versión — pero los agentes ya instalados siguen reportando `dev` hasta que se
+vuelve a ejecutar el comando de instalación en esos hosts. Nada más cambia: `dev` sigue siendo un
+valor legítimo y sigue sin generar ningún aviso.
+
+La insignia responde *«¿este host está atrasado?»*. La vista **Agentes** responde la misma pregunta a
+escala de toda la flota, y te entrega el comando.
+
+### La vista Agentes
+
+**Activos › Topología › Agentes** (la tercera solapa del interruptor del encabezado, junto a Mapa y
+Tabla) es la vista de flota: todas las máquinas que corren el agente de reporte, en una sola pantalla,
+con
+
+- **la distribución de versiones arriba** — cuántos agentes tenés, cuántos están una versión *mayor*
+  por detrás, cuántos están atrasados por menos, cuántos reportan una versión que lazyit no puede
+  comparar y cuántos están al día. Cada número es además un filtro: hacé clic en **atrasados** y la
+  tabla de abajo muestra exactamente esos hosts.
+- **quién dejó de reportar** — un host que el barrido de obsolescencia marcó **Sin reportar**, o uno
+  que nunca reportó.
+- **quién reporta incompleto** — la marca *Reporte incompleto*, para un host cuya última recolección
+  llegó corta (normalmente porque el agente corrió sin root ni SYSTEM y no pudo leer el número de
+  serie ni el modelo).
+- **tokens de agente que nunca se usaron** — un token que creaste para un host que nunca reportó. No
+  hay ningún nodo que mostrar por él, así que sin esta línea la falla de instalación más común — la
+  instalación que nunca se ejecutó, o que falló — es invisible. **Esto es solo para administradores:**
+  requiere el mismo permiso que gestionar la configuración, y para el resto la tarjeta directamente no
+  aparece. Se omite en vez de mostrarse vacía, porque una lista vacía se leería como «no hay tokens de
+  agente sin usar» — una afirmación sobre credenciales que esa persona nunca vio.
+- **el comando de actualización, por host** — pero solo en un host que está realmente atrasado.
+
+Eso último es deliberado. No hay botón de actualizar en un host que ya está al día, no hay cartel en
+tu panel y no hay un mail por host: esta es una página a la que venís, no una que te interrumpe. La
+distribución completa vive en una tabla porque una tabla que abriste vos no te está molestando; lo
+único que alguna vez toma color es el nivel de *una versión mayor por detrás*, igual que la insignia.
+
+La vista es de solo lectura en el sentido más fuerte: **lazyit nunca le envía nada a un host.** Te
+dice lo que sabe y te da un comando para que lo ejecutes vos.
+
+### El comando de actualización
+
+Hacé clic en **Actualizar** en una fila atrasada y lazyit muestra el comando exacto para esa máquina,
+armado para el sistema que ese host efectivamente reportó — la línea de Linux o la forma de bloque de
+script de PowerShell, nunca una suposición. Si un host nunca le dijo a lazyit qué sistema ejecuta, se
+muestran **los dos** comandos con una nota, porque entregarle una línea de PowerShell a una máquina
+Debian es peor que pedirte que elijas.
+
+El comando es el mismo instalador que usaste la primera vez, así que todo lo que ya hace viene
+incluido: la descarga se verifica por checksum, el binario se prueba antes de activar nada, y una
+instancia en `http` plano recibe la opción explícita `--allow-insecure-http` / `-AllowInsecureHttp`
+que necesita — la única decisión que `--upgrade` *no* arrastra por vos, descrita unos párrafos más
+abajo.
+
+**No hay nada que completar en él.** En una instancia `https` el comando de actualización es
+`--upgrade` y nada más — lo único que alguna vez se le suma es la opción explícita de `http` plano,
+más abajo:
+
+```sh
+curl -fsSL https://tu-instancia/install.sh | sudo sh -s -- --upgrade
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Upgrade
+```
+
+`--upgrade` vuelve a ejecutar el host usando el token, la URL de la instancia y la autoridad
+certificante **que ya están en el archivo de configuración de ese host** — el que el instalador
+escribió ahí mismo, legible solo por root (Linux) o por SYSTEM y Administradores (Windows). Así que
+esas dos líneas funcionan igual en todas tus máquinas, que es lo que hace que el «Copiar todo» de más
+abajo sea un artefacto de dos líneas y no una lista con un comando distinto por host.
+
+Esa URL importa más de lo que parece. lazyit deliberadamente **no** pone `--url` en el comando de
+actualización, porque `LAZYIT_URL` es una clave que el instalador *posee y reescribe* — y la URL de un
+comando generado es la dirección por la que tu navegador llegó a esta instancia. Si tu instancia
+responde en varias direcciones (la configuración LAN en `http` plano hace exactamente eso), un comando
+con `--url` re-apuntaría en silencio a tu dirección todos los hosts donde lo pegaras. `--upgrade` no
+puede: lee la URL de cada host desde ese mismo host. Igual, lo que sí pasés sigue ganando:
+`--upgrade --url https://nueva-direccion` mueve una máquina a propósito, que es otra cosa que moverla
+sin querer.
+
+**No lleva token, y no puede llevarlo.** lazyit solo guarda un *hash* del token de cada host — no está
+en condiciones de volver a mostrarlo, ni para vos ni para quien entre a la base de datos. Y no le hace
+falta: el host tiene el suyo.
+
+> **No definas `LAZYIT_TOKEN` para este comando.** `--upgrade` *se niega* a ejecutarse junto con un
+> token de cualquier otra fuente — `--token`, `--token-file` o `LAZYIT_TOKEN` en el entorno — a
+> propósito, para que un token olvidado en tu shell no pueda pisar en silencio al que un host está
+> usando de verdad. Si querés darle a un host un token *distinto*, eso es la forma de instalación
+> normal (`--url … --token …`), escrita a conciencia. Y en una máquina que todavía no tiene agente —
+> o cuyo archivo de configuración no tiene token, que es lo que deja `--keep-config` — `--upgrade` se
+> detiene y te lo dice: no hay nada que reutilizar, y una primera instalación sigue necesitando
+> dirección y token.
+
+**Algo que `--upgrade` deliberadamente no arrastra: la opción explícita de `http` plano.** Si la
+máquina se instaló contra una dirección `http` plana, reutilizar esa dirección está bien — pero
+*aceptar* lo que cuesta el texto plano es una decisión, no una configuración, así que se vuelve a
+decir. Por eso el comando que lazyit genera para una instancia en `http` plano ya termina en
+`--allow-insecure-http` (`-AllowInsecureHttp` en Windows): pegarlo *es* la decisión. Ejecutá
+`--upgrade` en un host así sin esa opción y el instalador lo rechaza, nombrando al *archivo de
+configuración* como origen de esa dirección `http`, para que quede claro que no te están preguntando
+por una dirección que hayas escrito vos. Todo lo demás sigue igual: en una actualización el checksum
+se verifica exactamente como en una primera instalación, y una diferencia la detiene.
+
+**¿Ya no tenés el token de ese host? No lo necesitás.** El host lo sigue teniendo, y es justamente el
+que usa `--upgrade` — así que un token perdido no es motivo para tocar Cuentas de servicio.
+
+Solo un host **sin configuración legible** — uno que estás rehaciendo, o donde se borró la config —
+necesita una credencial nueva. Para ese, creá un token en
+[Cuentas de servicio](/help/users-permissions-service-accounts) e instalalo como la primera vez, con
+`--url` y `--token`.
+
+> **Rotar no es lo mismo que crear, y no se deshace.** Rotar una cuenta de servicio **invalida el
+> secreto que está en uso**. Si tus hosts comparten una sola cuenta `infra:report` — que es lo
+> habitual — rotarla hace que *todos los demás agentes de esa cuenta* dejen de reportar, de golpe.
+> Rotá cuando quieras retirar una credencial, nunca para «conseguir una copia» de una.
+
+**¿Detrás de una autoridad certificante interna?** `--upgrade` reutiliza la CA ya configurada en el
+host para el tráfico propio del agente, así que no tenés que acordarte de la ruta del `.pem` de esa
+máquina. El `curl` / `irm` del principio del comando es un paso
+anterior y aparte — corre antes de que se lea ninguna config — así que esa CA tiene que seguir estando
+en el almacén de confianza del sistema, igual que cuando instalaste la primera vez. Esto no cambió; es
+lo único que el comando no puede resolver por vos.
+
+### Entregárselo a Ansible, GPO o Intune
+
+**El comando es toda la integración.** lazyit no genera playbooks, ni scripts de inicio por GPO, ni
+paquetes de Intune, y no lo va a hacer: son promesas sobre sistemas que no puede probar, y se pudren
+en silencio. En cambio, la vista Agentes te da un **Copiar todo** del conjunto atrasado — un comando
+por plataforma, anotado con los hosts a los que corresponde cada uno — para que se lo entregues a lo
+que ya ejecuta comandos en esas máquinas.
+
+Esa copia sigue lo que tengas filtrado. Achicá la tabla a *una versión mayor por detrás* y la tarjeta
+de actualización masiva te da los comandos de exactamente esos hosts, contados igual que el resumen de
+arriba.
+
+Como `--upgrade` no lleva credencial ni URL, no hay nada que plantillar por host ni ningún secreto que
+meter en tu automatización para esto: cada máquina se autentica con el token que ya tiene. No tenés
+que entregarle a Ansible ni a Intune el token `infra:report` de tu flota solo para mantener los
+agentes al día.
+
+### Por qué es seguro volver a ejecutar el instalador
+
+La razón por la que entregarle ese comando a una máquina es razonable es que volver a ejecutar el
+instalador es **idempotente y no destructivo**, y viene siendo el camino de actualización documentado
+en las dos plataformas desde siempre:
+
+- **La descarga se verifica por checksum en cada ejecución**, y una diferencia siempre es fatal.
+- **El binario se ejecuta una vez (`--help`) antes de activar nada.** Si no puede arrancar en ese
+  host, el instalador lo borra y deja la máquina como la encontró — así un artefacto defectuoso falla
+  en la instalación en vez de convertirse en un host que parece instalado y nunca reporta.
+- **Tu configuración se combina, no se reemplaza.** Cada ajuste `LAZYIT_*` que ya está en el host se
+  conserva — que es lo que preserva las decisiones propias del dueño del host, sus
+  `LAZYIT_COLLECT_*=false`, y con ellas los límites propios de ese host y su configuración de proxy.
+  Una actualización de flota nunca debe volver a encender en silencio un recolector que alguien
+  apagó, y no lo hace. Las únicas líneas que reescribe son las que le pertenecen — la URL de la
+  instancia y el token (más el obsoleto `LAZYIT_INTERVAL`, y el archivo de CA cuando hay uno) — y
+  justamente por eso el comando de actualización usa `--upgrade` y no pasa ninguna: se reescriben con
+  los valores que ese host ya tenía.
+- **El host conserva su identidad en lazyit.** Un nodo se identifica por desde dónde reporta y por su
+  identidad de máquina, no por el binario, así que un host sigue siendo un nodo a través de la
+  actualización — sin duplicados y sin volver a revisarlo.
+- **Ejecutarlo en un host que ya está al día es una reinstalación sin efecto**, no un error.
+
+### La primera actualización es la única en la que lazyit no puede ayudarte
+
+Siendo honestos sobre el estado en el que vas a encontrar esta vista: **la mayoría de los parques la
+abren en «versión desconocida»**, y eso es la verdad, no un error.
+
+Es la historia de `dev` del principio de esta sección, vista a escala de flota: todos los agentes
+instalados antes del sellado de versión — que es todo agente que una instancia sirvió hasta esta
+release — reportan `dev`, y `dev` no se puede comparar con una versión real. Así que esos agentes
+nunca se cuentan como atrasados, nunca se marcan y nunca reciben un empujón. Quedan en el grupo
+*versión desconocida*, y la vista lo dice en vez de insinuar por lo bajo que están bien.
+
+Se van completando de a un host: cada host que ejecuta el comando de actualización una vez obtiene una
+versión sellada y pasa a un grupo real. No hay backfill ni ventana de mantenimiento — pero tampoco hay
+forma de que lazyit te diga cuáles de esos hosts lo necesitaban. **Esa primera pasada es la que hacés
+sin ayuda.** Después de eso, la vista de flota es exacta y los comandos de actualización también.
+
+### Volver a ejecutar el instalador a mano
+
 **Algunas mejoras solo llegan cuando volvés a ejecutar el comando de instalación.** El agente son dos
 cosas: un programa, y el servicio y el timer de systemd que lo ejecutan. Todo lo que está en el
 *programa* — los diagnósticos de más arriba, el soporte de proxy y de autoridad certificadora — llega
@@ -953,6 +1293,43 @@ segundo después de una ventana de mantenimiento — se escribe cuando corre el 
 existente conserva la unidad que le tocó originalmente hasta que lo vuelvas a ejecutar. Volver a
 ejecutarlo es seguro y conserva la configuración propia de ese host, así que en una flota que ya
 tenés, vale la pena hacerlo una vez.
+
+**Volver a ejecutarlo no necesita el token de nuevo.** Agregá **`--keep-token`** (Linux) o
+**`-KeepToken`** (Windows) y el instalador se autentica con el token que ya está en esa máquina — el
+que él mismo escribió en el archivo de configuración, legible solo por root (Linux) o por SYSTEM y
+Administradores (Windows). Así una actualización es un solo comando, sin ningún secreto adentro:
+
+```sh
+sudo sh install.sh --url https://tu-instancia --keep-token
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Url https://tu-instancia -KeepToken
+```
+
+Esto importa más de lo que parece: lazyit **no puede** volver a mostrarte un token existente. Guarda
+solo una huella de él, y el token en sí se muestra una única vez, cuando creás o rotás la cuenta de
+servicio. Antes de esta opción, "volvé a ejecutar el comando de instalación" quería decir, en
+silencio, "primero andá a buscar el token", en cada máquina.
+
+Es una opción que hay que pedir, no algo que ocurra solo al volver a ejecutar: así, un comando que
+*debía* llevar un token y lo perdió (una variable mal escrita, un script que dejó de definir
+`LAZYIT_TOKEN`) sigue deteniéndose con *"a token is required"* en vez de instalar en silencio con el
+token viejo. Por la misma razón se niega a convivir con `--token`, `--token-file` o un `LAZYIT_TOKEN`
+en el entorno: dos respuestas a la misma pregunta son un error que conviene frenar, no uno que
+convenga resolver por lo bajo. Y en una máquina sin agente — o cuyo archivo de configuración no tiene
+token, que es lo que deja `--keep-config` — se detiene y te lo dice, en vez de instalar algo que no va
+a poder reportar. Ese caso necesita un token nuevo desde el asistente.
+
+**Y `--upgrade` no necesita ningún argumento.** Donde `--keep-token` reutiliza la credencial,
+**`--upgrade`** (Linux) / **`-Upgrade`** (Windows) reutiliza toda la configuración — el token, la
+dirección de la instancia y la autoridad certificadora con la que se instaló esa máquina — así que el
+comando entero es `sh install.sh --upgrade`. Es exactamente el comando que te entrega la vista
+Agentes, y [El comando de actualización](#el-comando-de-actualización) de más arriba lo describe
+completo: por qué no lleva `--url` ni token, con qué se niega a convivir, y la única decisión que no
+arrastra por vos (la opción explícita de `http` plano).
+
+### Versiones de la instancia y de los agentes
 
 **Actualizar tu instancia nunca rompe los agentes ya instalados.** No hace falta reinstalar nada: un
 agente más viejo sigue reportando igual que antes, y cada dato que envía aterriza exactamente donde

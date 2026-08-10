@@ -1,4 +1,5 @@
 import type {
+  AgentFleetView,
   AgentPolicyOverride,
   AgentPolicySettings,
   AttachInfraSecret,
@@ -17,10 +18,18 @@ import type {
   InfraNode,
   InfraNodeDetail,
   InfraNodeFactChangeList,
-  InfraNodeListItem,
+  InfraGraph,
+  InfraGraphEdges,
+  InfraNodeListPage,
+  InfraNodeListRole,
   InfraSecretRef,
   MergeInfraNode,
   UpdateInfraNode,
+} from "@lazyit/shared";
+import {
+  InfraGraphEdgesSchema,
+  InfraGraphSchema,
+  InfraNodeListPageSchema,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
 
@@ -30,53 +39,130 @@ import { apiFetch } from "../client";
  * flows (issue #742) are wired below — the panel + write surface that makes this beat a Draw.io
  * diagram.
  *
- * Edges are read PER-NODE (`GET /infra/nodes/:id/edges`) — the API has no global edges list. The
- * canvas fans those reads out across the loaded nodes and dedupes by edge id (see `use-infra-nodes`).
+ * The canvas reads active edges once from `GET /infra/graph/edges`. The per-node endpoint remains the
+ * detail/history read, where closed relationships matter.
+ *
+ * ## The node read is TWO endpoints now (issue #1152)
+ *
+ * First-party lists use `GET /infra/nodes/page`, the house `Page<T>` envelope (ADR-0030) with
+ * server-side `q`, a sort allowlist and a hard `limit` ceiling of 200 — {@link getInfraNodes}.
+ * `GET /infra/nodes` remains only as the deprecated compatibility array until v2.0 and must not be
+ * used by web consumers.
+ *
+ * The topology canvas cannot live on a page: a map missing a node is not a shorter map, it is a WRONG
+ * map, because the missing node takes its edges with it and nothing on screen says so. So it got its
+ * own read — {@link getInfraGraphNodes} — a narrow projection, complete by default, bounded at
+ * `INFRA_GRAPH_NODES_MAX` and HONEST about the bound via `truncated`.
  */
 
 const BASE = "/infra";
 
 /**
- * Server-side filters for the node list. `kind`/`status`/`state` scope the result set; omit for all
- * confirmed nodes. The API excludes soft-deleted rows and returns a plain `InfraNodeListItem[]` (no
- * page envelope — the estate is small by design, ADR-0070).
+ * Server-side filters for the node page (`GET /infra/nodes/page`, ADR-0030 / #1152). All of them
+ * scope the SAME `where` the envelope's `total` counts, so a consumer showing a count is showing the
+ * count of what it asked for.
+ *
+ *  - `kind` / `status` / `state` / `source` — plain enum scopes.
+ *  - `ids` / `assetIds` — exact batch resolve, comma-encoded onto one param. The `GET /users?ids=`
+ *    precedent (ADR-0030 §6 / #961): resolve the ids you actually reference instead of scanning a
+ *    window and silently missing whatever fell outside it.
+ *  - `q` — server-side text search over label / ipAddress / linked asset name / active owner
+ *    name+email. It searches the TABLE, not the loaded page, which is why the Servers table no longer
+ *    filters in memory.
+ *
+ * There is deliberately NO `deleted` param: this endpoint has no archived-nodes view to back it.
  */
 export interface InfraNodeFilters {
   kind?: InfraNode["kind"];
   status?: InfraNode["status"];
   state?: InfraNode["state"];
+  source?: InfraNode["source"];
+  /** Reporting identity role; HOST excludes container and hypervisor-guest child namespaces. */
+  role?: InfraNodeListRole;
+  /** Exact node cuids — comma-encoded on the wire. */
+  ids?: string[];
+  /** Exact linked-Asset cuids — comma-encoded on the wire. */
+  assetIds?: string[];
+  q?: string;
 }
 
 /**
- * List topology nodes (`GET /infra/nodes`), optionally filtered. Newest first. Each row is an
- * `InfraNodeListItem` — the lean node PLUS the linked Asset's inventory `assetName` and active
- * `owners` (joined server-side in one query, ADR-0070 §6 / issue #750) so the Servers list can show
- * and search them inline. Hooks that only read `assetId` keep working (the list shape is a superset).
+ * The full query for a page of nodes: the filters plus the house paging/sort params (ADR-0030).
+ *
+ * `limit` defaults to 50 server-side and is hard-capped at `MAX_PAGE_LIMIT` (200) — an over-max value
+ * is REJECTED with a 400, never clamped, so a caller can never believe it asked for more than it got.
+ * `sort` is an allowlist (`label`, `kind`, `status`, `state`, `ipAddress`, `lastReportedAt`,
+ * `createdAt`, `updatedAt`); anything else 400s. Every sort carries the unique `id` as a tiebreaker,
+ * so page boundaries are stable while reports land.
  */
-export function getInfraNodes(
-  filters: InfraNodeFilters = {},
+export interface InfraNodeListParams extends InfraNodeFilters {
+  limit?: number;
+  offset?: number;
+  sort?: string;
+  dir?: "asc" | "desc";
+}
+
+/**
+ * A page of topology nodes (`GET /infra/nodes/page`) — the house `{ items, total, limit, offset }`
+ * envelope over the enriched `InfraNodeListItem` (the lean node PLUS the linked Asset's inventory
+ * `assetName` and active `owners`, joined server-side in one query — ADR-0070 §6 / #750).
+ *
+ * Every param is omitted when empty, never sent blank: an empty `q` must not become `?q=`, because a
+ * query key that churns between `{}` and `{ q: "" }` refetches on every keystroke that clears the box.
+ */
+export async function getInfraNodes(
+  params: InfraNodeListParams = {},
   signal?: AbortSignal,
-): Promise<InfraNodeListItem[]> {
-  const params = new URLSearchParams();
-  if (filters.kind) params.set("kind", filters.kind);
-  if (filters.status) params.set("status", filters.status);
-  if (filters.state) params.set("state", filters.state);
-  const qs = params.toString();
-  return apiFetch<InfraNodeListItem[]>(
-    qs ? `${BASE}/nodes?${qs}` : `${BASE}/nodes`,
-    { signal },
+): Promise<InfraNodeListPage> {
+  const qs = new URLSearchParams();
+  if (params.kind) qs.set("kind", params.kind);
+  if (params.status) qs.set("status", params.status);
+  if (params.state) qs.set("state", params.state);
+  if (params.source) qs.set("source", params.source);
+  if (params.role) qs.set("role", params.role);
+  if (params.ids && params.ids.length > 0) qs.set("ids", params.ids.join(","));
+  if (params.assetIds && params.assetIds.length > 0)
+    qs.set("assetIds", params.assetIds.join(","));
+  if (params.q) qs.set("q", params.q);
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params.sort) {
+    qs.set("sort", params.sort);
+    if (params.dir) qs.set("dir", params.dir);
+  }
+  const search = qs.toString();
+  const path = search ? `${BASE}/nodes/page?${search}` : `${BASE}/nodes/page`;
+  return InfraNodeListPageSchema.parse(
+    await apiFetch<unknown>(path, { signal }),
   );
 }
 
 /**
- * A node's edges (`GET /infra/nodes/:id/edges`), active (open) only by default. The canvas calls
- * this once per node and dedupes by edge id to assemble the whole graph's edge set.
+ * The topology canvas's own read (`GET /infra/graph/nodes`, #1152) — the whole graph, in the narrow
+ * projection the board actually draws (`id`, `label`, `kind`, `status`, `ipAddress`, `chassis`,
+ * `x`, `y`). No `owners`, no `assetName`, no `shortcuts`: each of those cost a relation join per row
+ * on a read that is unpaginated AND polled, and the canvas has never rendered one.
+ *
+ * No filters and no `offset`, deliberately — there is no second page to fetch. `truncated` is the
+ * whole point of the envelope: the read is bounded at `INFRA_GRAPH_NODES_MAX`, and when the cap bites
+ * the canvas MUST say so rather than draw a map that is quietly missing boxes. Same `infra:read` gate.
  */
-export function getInfraNodeEdges(
-  nodeId: string,
+export async function getInfraGraphNodes(signal?: AbortSignal): Promise<InfraGraph> {
+  return InfraGraphSchema.parse(
+    await apiFetch<unknown>(`${BASE}/graph/nodes`, { signal }),
+  );
+}
+
+/**
+ * The canvas's active relationships (`GET /infra/graph/edges`) in one bounded-complete envelope.
+ * Runtime parsing keeps the required `truncated` signal from being accidentally treated as optional.
+ */
+export async function getInfraGraphEdges(
   signal?: AbortSignal,
-): Promise<InfraEdge[]> {
-  return apiFetch<InfraEdge[]>(`${BASE}/nodes/${nodeId}/edges`, { signal });
+): Promise<InfraGraphEdges> {
+  return InfraGraphEdgesSchema.parse(
+    await apiFetch<unknown>(`${BASE}/graph/edges`, { signal }),
+  );
 }
 
 /**
@@ -361,6 +447,22 @@ export function detachInfraNodeSecret(
     method: "DELETE",
     body,
   });
+}
+
+/**
+ * The agent fleet read (`GET /infra/agents/fleet`, ADR-0094 §4 / #1206) — *"how many agents do I
+ * have, on what versions, who has not checked in, and who is degraded?"* in ONE request.
+ *
+ * Read-only and derived: every field comes from data the server already stores, and nothing here
+ * pushes anything toward a host. The response carries the instance's own `serverVersion` alongside
+ * the rows, so the table can never render a distribution against a version it did not come from.
+ *
+ * NOT polled like `getInfraNodes` is. This is a page an operator navigates to and reads, not a live
+ * board — and the read is heavier (it projects `specs.host.os.family` and `specs.diagnostics` per
+ * row), which is exactly why #1135 kept `specs` off the list projection in the first place.
+ */
+export function getAgentFleet(signal?: AbortSignal): Promise<AgentFleetView> {
+  return apiFetch<AgentFleetView>(`${BASE}/agents/fleet`, { signal });
 }
 
 /**

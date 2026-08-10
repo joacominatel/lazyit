@@ -36,16 +36,21 @@ Either one opens a short, guided wizard with three steps:
    ready-to-paste **install command** for it, with the token already filled in. On **Linux**:
 
    ```sh
-   curl -fsSL https://your-instance/install.sh | sudo sh -s -- --url https://your-instance --token <token>
+   export LAZYIT_TOKEN='<token>'
+   curl -fsSL https://your-instance/install.sh | sudo -E sh -s -- --url https://your-instance
    ```
 
    On **Windows**, the same install with the same token, from an **elevated PowerShell**:
 
    ```powershell
-   & ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Url https://your-instance -Token <token>
+   $env:LAZYIT_TOKEN = '<token>'
+   & ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Url https://your-instance
    ```
 
-   (The script-block form is not decoration: the plain `irm … | iex` pipe cannot pass parameters.)
+   (Both shapes are deliberate. The first line hands the token over **through the environment**
+   rather than as an argument — see the token note below for what that buys. On Linux the `-E`
+   matters: `sudo` clears the environment, and without it the installer never sees the token. And
+   the script-block form is not decoration: the plain `irm … | iex` pipe cannot pass parameters.)
    See **[Windows hosts](#windows-hosts)** below for what that install does and what it needs.
 
    The choice changes everything the wizard prints alongside it: what the host needs, the
@@ -76,12 +81,16 @@ Either one opens a short, guided wizard with three steps:
    send a test report); on Windows, **Download and read the installer first** saves `install.ps1` to
    your temp folder so you can read it, then runs the copy you read.
 
-   > **Keep the token out of the shell.** As written above, the token is visible in `ps` to every
-   > user on that machine for the few seconds the install runs, and it lands in root's shell history.
-   > If that matters where you work, two equivalent forms avoid it: put the token in the environment
-   > (`LAZYIT_TOKEN=… sh install.sh --url …`), or in a file and pass `--token-file /root/agent.token`.
-   > Download the script first for either. (`--token-file -` reads it from a pipe, which is why it
-   > can't be combined with `curl … | sh` — the pipe is already the script's input.)
+   > **The token rides the environment, not the command line.** The first line of each command above
+   > sets `LAZYIT_TOKEN`, the variable both installers read. The older argument form
+   > (`--token <token>` / `-Token <token>`) still works, but an argument is visible in `ps` to every
+   > user on that machine for the few seconds the install runs — which is why the wizard stopped
+   > printing it. The pasted line still lands in your shell history, token and all; if *that* matters
+   > where you work, put the token in a file and pass `--token-file /root/agent.token` instead
+   > (download the script first — `--token-file -` reads it from a pipe, which is why it can't be
+   > combined with `curl … | sh`: the pipe is already the script's input). Every form keeps the token
+   > out of `ps` for the *whole* install: the installer hands it to `curl` through a pipe rather than
+   > as an argument, so it never reappears in the process list on its way to your instance.
 
    > **LAN deployment (no public domain)?** If your instance is reachable only by a LAN IP or hostname
    > with a self-signed certificate, copy that certificate authority's `.pem` onto the agent host and
@@ -89,6 +98,16 @@ Either one opens a short, guided wizard with three steps:
    > so the agent uses it on every report — you do **not** need to trust that authority system-wide,
    > which would have been a much larger change to the machine than "one inventory agent talks to one
    > server". Trusting it system-wide still works if that's already how your fleet is built.
+
+   > **Plain `http://`, no TLS at all?** The installers refuse it unless you opt in explicitly —
+   > **`--allow-insecure-http`** on Linux, **`-AllowInsecureHttp`** on Windows — because the cost is
+   > real and permanent, and you should accept it knowingly rather than by default. On a cleartext
+   > channel, anyone on the network path can replace the agent program itself (which then runs as
+   > root, or as SYSTEM on Windows) — and the token is saved with that address, so it crosses the
+   > network unencrypted again on **every report that host ever sends**, not just during the
+   > install. On a physically trusted LAN that can be an acceptable trade — that is why the flag
+   > exists — but the honest fix costs one file: an internal certificate authority plus `--ca-file`
+   > (above) removes both exposures.
 
    > **Behind an egress proxy?** Pass nothing at install time; add `HTTPS_PROXY` (and `NO_PROXY` if
    > your instance is internal) to `/etc/lazyit-agent/config` afterwards. It has to go **there**, not
@@ -98,9 +117,23 @@ Either one opens a short, guided wizard with three steps:
    > wins if you write both, the same way `curl` reads them. What you put in that file is the agent's
    > **whole** answer: a `NO_PROXY` there does stop a proxy the machine set elsewhere, rather than
    > losing to it. Re-running the installer keeps these lines, in either spelling.
+
+   > **Installing on a hypervisor host?** Nothing to add: the same agent detects for itself that the
+   > machine runs Proxmox VE, Hyper-V or libvirt/KVM and inventories its guests too — the installer
+   > prints what it detected, and detection is re-checked on every run, so a host that becomes a
+   > hypervisor later simply starts reporting its guests. If you *don't* want that host's guests
+   > reported, add **`--no-hypervisor`** (**`-NoHypervisor`** on Windows): it writes
+   > `LAZYIT_COLLECT_HYPERVISOR=false` into the host's config file — a local veto, so like every
+   > local setting it wins over anything set in lazyit and survives upgrades. The wizard carries
+   > this veto too: under **Advanced options**, the **Don't inventory this host's guests** checkbox
+   > appends the flag to the command for you. The full story is on
+   > [Hypervisor hosts](/help/assets-topology-hypervisors).
 3. **Wait.** The wizard then waits for the server to report. As soon as the agent checks in — usually
    within a couple of minutes — it shows a success message and an inline **Confirm** button. You can
-   confirm right there, or close the wizard and confirm later from the Pending review tray.
+   confirm right there, or close the wizard and confirm later from the Pending review tray. If the
+   host turned out to be a **hypervisor**, the wizard says so on the same screen — the platform it
+   detected (with its version when the host reported one) and how many guests entered Pending
+   review, with a shortcut to review them.
 
 ### Install manually (step by step)
 
@@ -247,7 +280,9 @@ Run from an **elevated PowerShell** (right-click PowerShell → *Run as administ
 1. checks it is elevated, and that the machine is x64;
 2. downloads the executable from **your** instance with your token, and refuses anything that isn't a
    real Windows executable — the same guard the Linux installer applies to its own binary;
-3. compares the **fingerprint** your instance publishes for that executable and refuses a mismatch;
+3. compares the **fingerprint** your instance publishes for that executable and refuses a mismatch —
+   and refuses to continue at all if the fingerprint can't be fetched, rather than shrugging and
+   installing anyway (see [Security](#security) for the escape hatch);
 4. **runs it once** (`--help`) before registering anything — if the machine can't start it, you get
    one clear sentence, nothing is installed and no task is registered;
 5. adds `C:\Program Files\lazyit-agent` to the **machine PATH**, so the diagnostic commands work by
@@ -366,7 +401,9 @@ If you're re-imaging a machine that will get the agent back, add **`--keep-confi
 **`-KeepConfig`** (Windows): it keeps that host's own limits and its proxy settings (the things the machine's owner chose, which are annoying to
 reconstruct) and still strips the token and the instance address. There is no option that leaves the
 token behind — a working credential for your instance should not survive on a machine you just
-decommissioned.
+decommissioned. (`--keep-token`, further down, is the opposite operation and belongs to an *install*:
+combining it with `--uninstall` is refused rather than ignored, so nobody finishes an uninstall
+believing the credential survived.)
 
 Two things uninstalling does **not** do, deliberately. The server's entry in lazyit stays exactly as
 it is: discard it from the Servers view if you want it off the map. And the token is only removed
@@ -376,8 +413,11 @@ it is: discard it from the Servers view if you want it off the map. And the toke
 ## Pending review
 
 Discovered hosts don't go straight into your inventory — they wait for you in the **Pending review**
-tray at the top of the Servers view, each showing its hostname, kind, where the report came from and
-how long ago it last reported. For each one you have three choices:
+tray at the top of the Servers view, each showing its hostname, kind, its **form factor** when the
+machine reported one (*laptop*, *desktop*, *server*, *virtual machine*, *container*), where the report
+came from and how long ago it last reported. The form factor is there so you can tell at a glance
+which of forty proposals are somebody's workstation and which are estate infrastructure, without
+opening each one. For each proposal you have three choices:
 
 - **Confirm** — adds the host to your live topology. A short dialog lets you rename it and change its
   kind first, and offers a **Track as an inventory asset** toggle (**on** by default): left on,
@@ -386,6 +426,28 @@ how long ago it last reported. For each one you have three choices:
   hardware **serial number**, it becomes that asset's serial automatically (a placeholder like
   *"To be filled by O.E.M."*, or a serial already used by another asset, is skipped). Turn the toggle
   off to keep the node graph-only.
+
+  **If the machine is already in your inventory, confirming links it — it doesn't create a second
+  one.** When the serial the host reports matches an asset you already have, the Confirm dialog says
+  so before you click, naming that asset and the serial it matched on: *"This machine is already in
+  your inventory. Confirming links it to that asset instead of creating a second one."* This is the
+  common case for a workstation estate you curated by hand long before you installed any agents — the
+  machines are already recorded, and from now on they start keeping their own hardware and software
+  details up to date on the records **you** made, rather than appearing beside them as duplicates.
+
+  What that adopted asset gets, and what it never gets, is worth being precise about. The agent writes
+  the **reported facts** onto it — hardware, operating system, installed software — and refreshes them
+  on every check-in, so its inventory panel starts filling in. It **never** touches its name, its
+  serial, its model, its status, its location or its assignments. Everything you curated stays yours;
+  only the machine-reported half is maintained for you. And if you later unlink the node — from
+  **Inventory link** on the details window's **General** tab — an asset that already existed is simply
+  **unlinked and left intact**. Only an asset lazyit created itself is archived, and the confirmation
+  says which of the two you are about to do.
+
+  Matching is deliberately cautious. lazyit adopts an existing asset only when the report backs its
+  serial up with a network-card address as well, and never when that host is already flagged as a
+  possible clone of another. Anything less certain creates a new asset, as before — a duplicate is
+  visible and fixable, whereas a machine attached to the wrong inventory record is neither.
 - **Merge into…** — this host is one you already have. Pick the existing server it really is, and its
   reporting key moves there: future check-ins land on that server, and this proposal is archived. Use
   it when a machine was **reinstalled** (a fresh OS gives it a new machine ID, so it comes back looking
@@ -424,6 +486,16 @@ if the machine starts reporting something different.
 A single Docker host can add a dozen proposals in one check-in — itself plus a node per running
 container — so the tray is built to be worked through in one pass rather than one dialog at a time.
 
+- **The count is the whole queue; the tray shows 200 at a time.** The number beside **Pending
+  review** is how many proposals are waiting in total, not how many rows are on screen. The tray
+  loads them in batches of **200, most recently discovered first**, and when the queue is bigger than
+  the batch it says so above the rows: *"Showing 200 of 431 pending nodes, most recently discovered
+  first. Confirm or discard these to reveal the rest."* Working through a batch reveals the next one,
+  and the tray disappears only when the queue is genuinely empty — so clearing the screen is never
+  the same as being finished. This is the normal case after enrolling a
+  [hypervisor host](/help/assets-topology-hypervisors), which can propose up to **500 guests from a
+  single report**. The batch is the same size as the cap on one bulk action, so a full screen is
+  exactly one pass of **Select everything shown → Confirm selected**.
 - **Containers sit under the server that reported them.** Each group is headed by the server's name
   with a count of its containers, and the checkbox on that header takes the server **and** its
   containers together. That is how you confirm a host with everything on it in one action. If you
@@ -459,8 +531,17 @@ the tray.
 
 A rule has a **name**, what it **applies to** (servers, containers, or both), and at least one
 condition: a **name pattern** (`*` for any run of characters, `?` for exactly one — the whole name has
-to match), a **subnet** in CIDR form, or the **kind the agent's report made lazyit propose**. It then
-says what to do: which kind to confirm it as, and whether to track it as an inventory asset.
+to match), a **subnet** in CIDR form, the **kind the agent's report made lazyit propose**, or the
+**form factor the machine reported**. It then says what to do: which kind to confirm it as, and
+whether to track it as an inventory asset.
+
+**Form factor is a condition in its own right**, which makes *"auto-confirm the servers, review the
+laptops"* a rule you can write with nothing else stated — arguably the most useful rule there is on a
+mixed estate. It reads the machine's own firmware, not its hostname, so it doesn't depend on anyone
+having named things consistently. Note the direction it fails in: **a host that reports no form
+factor never matches a rule that names one.** An older agent, a machine whose hardware doesn't say,
+or one that hasn't checked in yet, all keep waiting in the tray for you — which is the safe way round
+for a gate that confirms without anyone present.
 
 **Be clear about what you're turning on.** A host a rule matches is confirmed the moment it reports —
 you never see that row in the tray, and if the rule says to track it, its asset is created too. You
@@ -474,7 +555,8 @@ What else you should know before writing one:
 - **A rule only applies from the next report onwards.** Nothing already waiting in your tray is
   confirmed behind you — those are still yours to review, one at a time or in bulk. Saving a rule
   never touches a proposal you can already see.
-- **A rule needs a condition that can actually rule something out.** A name pattern has to carry at
+- **A rule needs a condition that can actually rule something out.** A reported kind and a reported
+  form factor each count on their own. A name pattern has to carry at
   least one literal character, and a subnet has to be narrower than `/0`. Most patterns made only of
   wildcards (`*`, `**`, `*?*`) match every host there is, just as `0.0.0.0/0` is every address there
   is, so lazyit refuses to save either — alone or together — because a rule that excludes nothing is
@@ -614,6 +696,51 @@ as on Linux (see *What the agent collects* below; nothing displays those notes i
 If clone detection matters to you, run the agent as root (Linux, with `dmidecode` installed) or from
 the scheduled task (Windows), and expect nothing from it on container guests.
 
+## Machines already recorded twice
+
+This one is about the past, and it only affects installs that were confirming agent-reported hosts
+before lazyit knew how to link an existing asset.
+
+Back then, confirming a host with **Track as an inventory asset** on always created a *new* asset. If
+the serial that host reported was already in use by an asset you had curated, lazyit couldn't store
+it twice — so it created the new asset **without a serial** rather than failing your confirm. The
+result was two live records for one physical machine: the one you curated, and a serial-less one the
+agent has been writing to ever since.
+
+**That can't happen any more** — a confirm now links the asset you already have (see *Pending review*
+above). For the ones already in your database, lazyit points them out rather than fixing them:
+
+- Open the node's details window. On the **General** tab you'll see **Possible duplicate in
+  inventory**, naming the other asset and linking to it.
+- Check it. The signal is a strong one — an auto-created asset with no serial, whose machine reports
+  a serial belonging to a different live asset — but you are the one who knows whether those two rows
+  really are the same box.
+- **lazyit will not merge them for you, ever.** Two inventory records mean two sets of assignments,
+  history, tags and attached documents, and deciding what happens to each of those is your call.
+  Nothing is changed while you're not looking.
+
+When you have checked and you are sure the two rows are the same box, the notice carries a button:
+**Point this node at the record you curated**. It runs the two steps you would otherwise take by hand
+— the auto-created stand-in is archived (lazyit created it, so it goes with the link), and the node is
+then linked to the record you kept. From then on the machine reports into your record, and the details
+window's inventory panel starts filling in there.
+
+This is still not a merge, and it never will be: nothing moves between the two records. Whatever the
+stand-in carries — assignments, history, tags, attached documents — stays on the stand-in, and the
+stand-in is archived. If it holds anything you want on the record you are keeping, copy it across
+before you press the button; this is the moment to do it, not after.
+
+If the second step fails (the record you curated was archived meanwhile, say), the dialog stays open
+and says so: the stand-in is already archived, and only the link is left to make. Trying again resumes
+from there rather than starting over.
+
+Because the first of those two steps archives the stand-in, this button needs the **delete assets**
+permission on top of manage-topology. Without it the notice still appears and still names the record
+you curated — the part you need in order to go and check — but the button is replaced by a line
+saying which permission is missing.
+
+If you have none of these, you'll never see this warning. It is deliberately quiet.
+
 ## What the agent collects
 
 - **Identity & hardware** — hostname, operating system and kernel, CPU and memory, disks and network
@@ -631,6 +758,14 @@ the scheduled task (Windows), and expect nothing from it on container guests.
   its socket. Each one becomes its own node linked to the host, with those facts on a **Container**
   panel on the node (see Pending review above). This is still the local machine describing itself: the
   agent asks the runtime on that host what *it* is running — it never scans your network.
+- **The guests it hosts** — on a machine that *is* a hypervisor (a Proxmox VE node, a Hyper-V
+  server, a libvirt/KVM host), the virtual machines and containers it is running, automatically: the
+  agent detects the platform for itself on every run and reads the guest list locally from the
+  host's own hypervisor, with no API token and nothing to enable. Each guest becomes its own node
+  connected to the host by a **runs-on** link, exactly as containers do — and this too is the local
+  machine describing itself, never a remote hypervisor API and never a network scan. The full story —
+  what appears where, how a guest running its own agent converges onto one node, and how to turn it
+  off — is on [Hypervisor hosts](/help/assets-topology-hypervisors).
 - **When it last booted** — a single timestamp, refreshed on each report, with no history kept: it's
   an inventory fact ("did this box actually reboot after the patch window?"), not uptime monitoring.
   Stored with the host's other reported facts and, like the machine type, not shown on any screen yet.
@@ -772,12 +907,15 @@ What you can set there, in three groups:
   between two of its own reports — the editor will not let you save a value that would do that, and it
   says so under the field rather than after you press Save.
 - **What agents collect** — hardware, disks, network interfaces, installed software, containers, plus
-  a hard cap on how many packages a host may report. **On Linux** a collector that is off is never run
-  at all: the agent does not gather the facts and then throw them away. **On Windows** only containers
-  works that way — hardware, disks, network interfaces and the installed list all come out of a single
-  PowerShell call that runs whatever the policy says, so switching one off there keeps the fact out of
-  the report but does not save the host the work of collecting it. Either way, a switched-off
-  collector never reaches lazyit.
+  a hard cap on how many packages a host may report. **A collector that is off is never run**, on
+  either platform: the agent does not gather the facts and then throw them away. On Windows that
+  used to be true only of containers, because everything else came out of one PowerShell call that
+  ran whatever the policy said; since v1.10 that call is built from the collectors the policy
+  actually wants, so switching one off stops the host doing the work as well as keeping the fact out
+  of the report. One exception worth knowing on Windows: turning **hardware** off stops the agent
+  reading the BIOS serial, and still keeps the manufacturer and model out of the report — but those
+  two ride along with facts lazyit needs anyway (memory, domain membership), so the host is not
+  spared that particular read.
 - **Exclusions** — name patterns for network interfaces (`veth*`, `docker*`), mountpoints
   (`/var/lib/docker/*`, `/snap/*`) and packages (`linux-image-*`). `*` matches anything and `?`
   matches a single character; regular expressions are not accepted, and each list holds at most 32
@@ -847,11 +985,22 @@ reports a policy version at all.
   `/etc/systemd/system/lazyit-agent.service` and read it; it is short, and it is written to be read.
   It also runs at the **lowest CPU and disk priority the system has**, so listing three thousand
   packages on a busy database server never competes with what that server is for.
-- **The download is checksummed.** Your instance publishes a fingerprint of the agent binary next to
-  the binary itself, and the installer refuses to install one that doesn't match. This is an
-  integrity check, not a cryptographic signature — it catches a corrupted or stale download, and a
-  tampered file where only one of the two was changed. Pass `--require-checksum` (or `-RequireChecksum` on Windows) to
-  make a *missing* fingerprint fatal too.
+- **The download is checksummed, and the check cannot be skipped.** Your instance publishes a
+  fingerprint of the agent binary next to the binary itself, and the installer refuses to install
+  one that doesn't match — or one it **couldn't verify**: a fingerprint that can't be fetched now
+  stops the install instead of degrading to a warning, because a check that fails open is a check
+  an attacker can strip just by making it fail. If your instance is older than the installer and
+  publishes no fingerprint, pass the digest yourself — `--sha256 <hex>` on Linux, `-Sha256` on
+  Windows — obtained from a channel other than the download itself, or upgrade the instance. This
+  is an integrity check, not a cryptographic signature — it catches a corrupted or stale download,
+  and a tampered file where only one of the two was changed. (`--require-checksum` and
+  `-RequireChecksum` are still accepted so existing automation keeps working; they simply describe
+  the default now.)
+- **Cleartext HTTP is an explicit opt-in.** An `http://` instance address is refused by both
+  installers unless you pass `--allow-insecure-http` (`-AllowInsecureHttp` on Windows), and the
+  refusal spells out what the channel exposes: the program that will run as root or SYSTEM, and the
+  token — re-sent in cleartext on every report from then on. See the install step above for the
+  trade-off, and prefer `--ca-file` with an internal CA when you can.
 - **It can use your CA, not the machine's.** `--ca-file` (or `LAZYIT_CA_FILE` in the config) points
   the agent at a certificate bundle it alone trusts, so an internal certificate authority never has
   to be installed machine-wide just so one inventory agent can report.
@@ -883,6 +1032,178 @@ re-run the install command and pick up the latest binary. It's only a nudge: an 
 reporting normally, nothing is blocked, and minor updates don't raise it. Agents built from source (or
 before versioning was added) report as `dev` and never show the badge.
 
+**Is every agent reporting `dev`?** Until this version, the binaries an instance served were compiled
+without the version stamp, so every installed agent reported `dev` and the badge could never appear.
+Once your instance is updated and rebuilt, the binaries it serves carry its version — but the agents
+already installed keep reporting `dev` until the install command is re-run on those hosts. Nothing
+else changes: `dev` is still a legitimate value, and it is still never nagged.
+
+The badge answers *"is this one host behind?"*. The **Agents** view answers the fleet-sized version of
+the same question, and hands you the command.
+
+### The Agents view
+
+**Assets › Topology › Agents** (the third tab in the header toggle, beside Map and Table) is the fleet
+view: every machine that runs the reporting agent, on one screen, with
+
+- **the version distribution across the top** — how many agents you have, how many are a *major*
+  behind, how many are behind by less, how many report a version lazyit can't compare, and how many
+  are up to date. Every count is also a filter: click **behind** and the table below shows exactly
+  those hosts.
+- **who has stopped checking in** — a host the staleness sweep marked **Not reporting**, or one that
+  has never reported at all.
+- **who is reporting incompletely** — the *Incomplete report* flag, for a host whose last collection
+  came back short (usually because the agent ran without root or SYSTEM, so it couldn't read the
+  serial or model).
+- **agent tokens that were never used** — a token you created for a host that never checked in. There
+  is no node to show for it, so without this line the most common install failure — the install that
+  was never run, or that failed — is invisible. **This one is admin-only:** it needs the same
+  permission as managing settings, and for anyone else the card is simply not there. It is left out
+  rather than shown empty, because an empty list would read as "no agent tokens are unused" — a claim
+  about credentials that viewer was never shown.
+- **the update command, per host** — but only on a host that is genuinely behind.
+
+That last point is deliberate. There is no update button on a host that is already current, no banner
+on your dashboard, and no email per host: this is a page you come to, not one that interrupts you. The
+full distribution sits in a table because a table you navigated to isn't nagging you; the only thing
+that ever raises a colour is the *major version behind* tier, exactly as the badge does.
+
+The view is read-only in the strongest sense: **lazyit never sends anything to a host.** It tells you
+what it knows and gives you a command to run yourself.
+
+### The update command
+
+Click **Update** on a row that is behind and lazyit shows the exact command for that machine, built
+for the system that host actually reported — the Linux one-liner or the PowerShell script-block form,
+never a guess. If a host has never told lazyit which system it runs, **both** commands are shown with
+a note, because handing a PowerShell line to a Debian box is worse than asking you to pick.
+
+The command is the same installer you used the first time, so everything it already does comes along:
+the download is checksum-verified, the binary is tested before anything is armed, and a plain-`http`
+instance gets the explicit `--allow-insecure-http` / `-AllowInsecureHttp` opt-in it needs — the one
+decision `--upgrade` will *not* carry over for you, described a few paragraphs down.
+
+**There is nothing in it to fill in.** On an `https` instance the update command is `--upgrade` and
+nothing else — the one thing that can ever join it is the plain-`http` opt-in, below:
+
+```sh
+curl -fsSL https://your-instance/install.sh | sudo sh -s -- --upgrade
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Upgrade
+```
+
+`--upgrade` re-runs the host using the token, instance URL and certificate authority **already in
+that host's own config file** — the one the installer wrote there itself, readable only by root
+(Linux) or SYSTEM and Administrators (Windows). So the same two lines work unchanged on every machine
+you have, which is what makes the bulk copy below a two-line artifact rather than a generated list
+with a different command per host.
+
+That URL matters more than it looks. lazyit deliberately does **not** put `--url` in the update
+command, because `LAZYIT_URL` is a key the installer *owns and rewrites* — and the URL in a generated
+command is whichever address your browser happened to reach this instance on. If your instance answers
+on several addresses (the plain-`http` LAN setup does exactly this), a command carrying `--url` would
+silently re-point every host you pasted it on at your address. `--upgrade` cannot: it reads each
+host's URL back off that host. Anything you *do* pass still wins, though —
+`--upgrade --url https://new-address` moves a machine deliberately, which is a different thing from
+moving it by accident.
+
+**It carries no token, and it can't.** lazyit only ever stores a *hash* of each host's token — it is
+not able to print one back, not for you and not for anyone who gets into the database. It doesn't need
+to: the host has its own.
+
+> **Don't set `LAZYIT_TOKEN` for this command.** `--upgrade` *refuses* to run alongside a token from
+> any other source — `--token`, `--token-file`, or `LAZYIT_TOKEN` in the environment — on purpose, so
+> that a token left over in your shell can never quietly overrule the one a host is actually using. If
+> you need to give a host a *different* token, that's the ordinary install form (`--url … --token …`),
+> typed deliberately. And on a machine that has no agent yet — or one whose config file has no token
+> in it, which is what `--keep-config` leaves behind — `--upgrade` stops and says so: there is nothing
+> to re-use, and a first install still needs an address and a token.
+
+**One thing `--upgrade` deliberately does not carry over: the plain-`http` opt-in.** If the machine
+was installed against a plain-`http` address, re-using that address is fine — but *accepting* what
+cleartext costs is a decision, not a setting, so you say it again. That is why the command lazyit
+generates for a plain-`http` instance already ends in `--allow-insecure-http`
+(`-AllowInsecureHttp` on Windows): pasting it is the decision. Run `--upgrade` on such a host without
+it and the installer refuses, naming the *configuration file* as where the `http` address came from,
+so it is clear you are not being asked about an address you typed. Everything else is unchanged: the
+checksum is verified on an upgrade exactly as on a first install, and a mismatch stops it.
+
+**Don't have that host's token any more? You don't need it.** The host still has it, and that is
+exactly what `--upgrade` uses — so a lost token is not a reason to touch Service accounts at all.
+
+Only a host with **no readable config left** — one you're rebuilding, or where the config was removed
+— needs a new credential. For that one, mint a token under
+[Service accounts](/help/users-permissions-service-accounts) and install it the first-time way, with
+`--url` and `--token`.
+
+> **Rotating is not the same as minting, and it is not undoable.** Rotating a service account
+> **invalidates the secret currently in use**. If your hosts share one `infra:report` account — which
+> is the normal setup — rotating it stops *every other agent on that account* from reporting, all at
+> once. Rotate when you mean to retire a credential, never as a way to "get a copy" of one.
+
+**Behind an internal certificate authority?** `--upgrade` re-uses the CA already configured on the
+host for the agent's own traffic, so you never have to remember the path to that machine's `.pem`.
+The `curl` / `irm` on the front of the command is a separate, earlier step — it runs before any config
+is read — so that CA still has to be in the host's system trust store, exactly as it did when you
+first installed. This hasn't changed; it's just the one thing the command can't carry for you.
+
+### Handing it to Ansible, GPO or Intune
+
+**The command is the whole integration.** lazyit does not generate playbooks, GPO startup scripts or
+Intune packages, and won't: those are promises about systems it can't test, and they rot silently. The
+Agents view instead gives you a **Copy all** of the behind set — one command per platform, annotated
+with which hosts each one is for — for you to feed to whatever already runs commands on those hosts.
+
+That copy follows whatever you have filtered. Narrow the table to *a major behind* and the bulk card
+gives you the commands for exactly those hosts, counted the same way as the summary above it.
+
+Because `--upgrade` carries no credential and no URL, there is nothing to template per host and no
+secret to put into your automation for this: each machine authenticates with the token it already
+holds. You don't have to hand your fleet's `infra:report` token to Ansible or Intune just to keep
+agents current.
+
+### Why re-running the installer is safe
+
+The reason handing that command to a machine is reasonable is that re-running the installer is
+**idempotent and non-destructive**, and has been the documented upgrade path on both platforms all
+along:
+
+- **The download is checksum-verified every time**, and a mismatch is always fatal.
+- **The binary is run once (`--help`) before anything is armed.** If it can't start on that host, the
+  installer removes it and leaves the machine as it found it — so a bad artifact fails at install
+  instead of becoming a host that looks installed and silently never reports.
+- **Your configuration is merged, not replaced.** Every `LAZYIT_*` setting already on the host is
+  carried forward — which is what preserves a host owner's own `LAZYIT_COLLECT_*=false` decisions,
+  and this host's own report limits and proxy settings with them. A fleet update must never quietly
+  switch a collector back on that someone turned off, and it doesn't. The only lines it rewrites are
+  the ones it owns — the instance URL and the token (plus the obsolete `LAZYIT_INTERVAL`, and the CA
+  file whenever there is one) — which is precisely why the update command uses `--upgrade` and passes
+  none of them: they get written back as the values that host already had.
+- **The host keeps its identity in lazyit.** A node is identified by where it reports from and its
+  machine identity, not by the binary, so one host stays one node across an update — no duplicate, no
+  re-review.
+- **Running it on a host that's already current is a no-op re-install**, not an error.
+
+### The first update is the one lazyit can't help you with
+
+Being honest about the state you'll actually find this view in: **most estates open it on "version
+unknown"**, and that is the truth rather than a bug.
+
+It is the `dev` story from the top of this section, seen at fleet size: every agent installed before
+version stamping — which is every agent an instance served until this release — reports `dev`, and
+`dev` cannot be compared to a real version. So those agents are never counted as behind, never
+flagged and never nudged. They sit in the *version unknown* bucket, and the view says so instead of
+quietly implying that they're fine.
+
+They fill in one host at a time: each host that runs the update command once gets a stamped version
+and moves into a real bucket. There is no backfill and no maintenance window — but there is also no
+way for lazyit to tell you which of those hosts needed it. **That first pass is the one you do
+without help.** After it, the fleet view is accurate and the update commands are exact.
+
+### Re-running the installer by hand
+
 **Some improvements only arrive when you re-run the install command.** The agent is two things: a
 program, and the systemd service and timer that run it. Anything in the *program* — the diagnostics
 above, proxy and certificate-authority support — comes with a new binary. Anything in the *service
@@ -891,6 +1212,43 @@ that stops a whole estate reporting in the same second after a maintenance windo
 the installer runs, and an existing host keeps the unit it was originally given until you re-run it.
 Re-running is safe and keeps that host's own settings, so on a fleet you already have, this is worth
 doing once.
+
+**Re-running does not need the token again.** Add **`--keep-token`** (Linux) or **`-KeepToken`**
+(Windows) and the installer authenticates with the token already on that machine — the one it wrote
+into the configuration file itself, readable only by root (Linux) or SYSTEM and Administrators
+(Windows). So an upgrade is one command with no secret in it:
+
+```sh
+sudo sh install.sh --url https://your-instance --keep-token
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Url https://your-instance -KeepToken
+```
+
+This matters more than it looks: lazyit **cannot** show you an existing token a second time. It
+stores only a fingerprint of it, and the token itself is displayed once, when you create or rotate
+the service account. Before this option, "re-run the install command" quietly meant "find the token
+first", on every machine.
+
+It is a flag you have to ask for, not something that happens by itself on a re-run — that way a
+command that was *meant* to carry a token and lost it (a mistyped variable, a script that stopped
+setting `LAZYIT_TOKEN`) still stops with *"a token is required"* instead of silently installing with
+the old one. For the same reason it refuses to run alongside `--token`, `--token-file` or a
+`LAZYIT_TOKEN` in the environment: two answers to the same question is a mistake worth stopping for,
+not one to resolve quietly. And on a machine with no agent — or one whose configuration file has no
+token in it, which is what `--keep-config` leaves behind — it stops and tells you, rather than
+installing something that cannot report. That case needs a fresh token from the wizard.
+
+**And `--upgrade` needs no arguments at all.** Where `--keep-token` re-uses the credential,
+**`--upgrade`** (Linux) / **`-Upgrade`** (Windows) re-uses the whole configuration — the token, the
+instance address and the certificate authority the machine was installed with — so the entire command
+is `sh install.sh --upgrade`. That is exactly the command the Agents view hands you, and
+[The update command](#the-update-command) above describes it in full: why it carries no `--url` and no
+token, what it refuses to run alongside, and the one decision it will not carry over for you (the
+plain-`http` opt-in).
+
+### Instance upgrades and agent versions
 
 **Upgrading your instance never breaks the agents already installed.** You do not have to re-install
 anything: an older agent keeps reporting exactly as it did, and every fact it sends lands exactly where

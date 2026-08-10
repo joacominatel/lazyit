@@ -14,15 +14,60 @@ relacionan tus cosas*: qué máquina corre sobre qué host, qué pertenece a un 
 dónde, qué depende de qué.
 
 Lo abres desde la barra lateral en **Activos › Topología**. La misma pantalla tiene un interruptor
-**Mapa ⇄ Tabla** arriba a la derecha: el **Mapa** es este tablero de movimiento libre, y la **Tabla**
-es una lista plana y filtrable de los mismos nodos — ver
-[Lista de servidores](/help/assets-topology-servers).
+**Mapa · Tabla · Agentes** arriba a la derecha: el **Mapa** es este tablero de movimiento libre, la
+**Tabla** es una lista plana y filtrable de los mismos nodos — ver
+[Lista de servidores](/help/assets-topology-servers) — y **Agentes** es la vista de flota de las
+máquinas que se reportan solas, con el comando que actualiza las que quedaron atrasadas
+([Agente de reporte](/help/assets-topology-reporting-agent#la-vista-agentes)).
 
 > Cualquiera que pueda ver la topología ve el mapa y el detalle de solo lectura de cada nodo.
 > Agregar nodos, dibujar conexiones, cambiar un estado o quitar un nodo del mapa requiere el permiso
 > de gestión de topología; instalar un agente de reporte requiere en cambio el de gestión de
-> configuración —un permiso aparte, no un agregado—, porque genera un token. Sin un permiso, sus
-> controles simplemente no aparecen.
+> configuración —un permiso aparte, no un agregado—, porque genera un token. La única acción de acá
+> que requiere un *segundo* permiso es desvincular un activo que creó lazyit: eso archiva el registro,
+> así que también requiere **dar de baja activos** ([más abajo](#rastrear-como-activo)). Sin un
+> permiso, sus controles simplemente no aparecen.
+
+## Las notebooks y los equipos de escritorio se mantienen fuera del mapa
+
+**Si tu mapa se achicó, no se borró nada.** lazyit mantiene fuera del diagrama, por defecto, las
+**notebooks y los equipos de escritorio** reportados. Cuando hay alguno, aparece un botón en la
+esquina superior derecha del tablero que dice exactamente cuántos son — *Mostrar 142 equipos de
+usuario*. Al hacer clic aparecen todos; con *Ocultar 142 equipos de usuario* se van de nuevo. La
+elección queda en la dirección de la página, así que sobrevive a una recarga, al botón Atrás del
+navegador y a cambiar a la Tabla y volver.
+
+**Por qué.** Un parque típico tiene un par de decenas de servidores y un par de *cientos* de puestos
+de trabajo. Dibujarlos todos convierte el mapa en una pared de cajas con la infraestructura enterrada
+en algún lugar adentro — y la topología del parque es justamente lo que viniste a leer acá. Cada
+máquina sigue perteneciendo a lazyit; simplemente no pertenece a esta imagen en particular por
+defecto.
+
+**Nada salió de tu inventario.** Una máquina oculta sigue estando exactamente igual de presente que
+antes:
+
+- está en la [lista de servidores](/help/assets-topology-servers), que **muestra todo, siempre** —
+  esta ocultación es solo del mapa,
+- está en la búsqueda, en tu inventario de activos y en cada informe,
+- sigue contando en un [radio de afectación](#impacto--radio-de-afectación): si un servidor se cae y
+  una notebook oculta depende de él, esa notebook sigue estando en la respuesta,
+- su propia ventana de detalle se abre como siempre.
+
+Ocultar es una decisión de **dibujo** sobre una sola pantalla, y no es nada más que eso.
+
+**Solo se oculta una máquina que dice que lo es.** Cada agente de reporte le informa a lazyit el
+**formato** del host, leído del firmware de la propia máquina: *notebook*, *equipo de escritorio*,
+*servidor*, *máquina virtual*, *contenedor*. Solo los dos primeros salen del mapa. Todo lo demás se
+queda, y también se queda todo lo que no dijo nada: un nodo que dibujaste a mano, un servidor con un
+agente más viejo, una máquina cuyo hardware no reporta el formato, o una que simplemente no se
+reportó desde que actualizaste. **lazyit nunca oculta una máquina por una suposición** — un host que
+desapareciera de todas las pantallas sería mucho peor que un mapa cargado. Podés ver el formato de
+cualquier nodo en la pestaña **General** de su ventana de detalle.
+
+**Pasa de a poco, no de golpe.** En el momento de actualizar, el mapa es idéntico: ninguna máquina
+reportó todavía su formato. Cada una lo completa en su próximo reporte, así que a lo largo de los
+minutos siguientes los puestos de trabajo se van del tablero mientras los servidores se quedan. No
+hay nada que ejecutar ni nada que configurar.
 
 ## El lienzo
 
@@ -30,6 +75,9 @@ El tablero es una superficie que se desplaza y hace zoom, con fondo punteado y u
 Arrastra un nodo para reubicarlo: la nueva posición se guarda automáticamente cuando termina el
 arrastre, así que la disposición que armes es la que todos verán la próxima vez. Usa los controles
 de la esquina (o tu trackpad/scroll) para hacer zoom y ajustar la vista.
+
+La esquina superior derecha del tablero es donde viven sus controles: el botón **Mostrar/Ocultar
+equipos de usuario** descrito arriba (lo ve todo el mundo) y —con el permiso de gestión— **Ordenar**.
 
 Con el permiso de gestión, un botón **Ordenar** aparece en la esquina superior derecha del tablero.
 Al hacer clic, reorganiza todo el mapa en una disposición limpia de arriba hacia abajo — los hosts
@@ -53,6 +101,39 @@ botones: **Mostrar radio de afectación** (lo vemos abajo; dibuja su respuesta s
 **Detalles**, que abre la ventana de detalle del nodo. Un doble clic sobre la tarjeta abre la ventana
 de detalle directamente. El clic selecciona en lugar de abrir para que el mapa siga visible: la
 ventana de detalle es grande, y taparlo en cada clic escondería justo lo que viniste a mirar.
+
+### Si el mapa avisa que está incompleto
+
+El mapa dibuja tu parque entero, hasta un techo de **2000 nodos**. Por encima de eso aparece un aviso
+arriba del tablero, y se queda ahí:
+
+> Se muestran 2000 de 2431 nodos: este mapa está incompleto.
+
+No es un error y no hay nada que reintentar: significa que tu parque creció más allá de lo que un
+tablero puede dibujar de forma útil. **No hay ninguna opción para subir ese techo.**
+
+Lo importante es lo que *no* significa. Los nodos que quedaron afuera **siguen en lazyit**: están en
+tu inventario, en la [lista de servidores](/help/assets-topology-servers) y en la búsqueda, igual que
+antes. Lo único que falta es su dibujo: no se los dibuja a ellos, ni a las conexiones que pasan por
+ellos.
+
+Esa última parte es la razón por la que el aviso no se va solo. Un nodo que no está dibujado se lleva
+su tarjeta, sus líneas y su resaltado en el lienzo, así que **la imagen de un radio de afectación puede
+estar incompleta**. La consulta del radio es independiente del límite del lienzo: el total del resumen
+y la lista de nodos afectados vienen de la API de impacto y siguen siendo autoritativos para toda la
+topología. Cuando aparezca el aviso, usá esa lista como respuesta y los resaltados solo como guía visual
+parcial.
+
+Las relaciones tienen su propio techo, mucho más alto: **10.000 conexiones activas**. Si se alcanza,
+un segundo aviso persistente indica cuántas relaciones se muestran y cuántas existen. Los nodos siguen
+disponibles, pero faltan algunas líneas; llegar exactamente a 10.000 no muestra el aviso salvo que el
+servidor indique que quedaron más relaciones afuera.
+
+Si las relaciones no se pueden cargar, el tablero conserva en pantalla el último mapa que pudo cargar
+y muestra un aviso persistente **No se pudieron cargar las relaciones** con **Reintentar**. Mientras
+aparezca, no interpretes la falta de líneas como "estos nodos están desconectados". Una consulta de
+relaciones fallida nunca se presenta como un mapa vacío y completo, y este aviso se apila con los de
+truncamiento en lugar de taparlos.
 
 ## Agregar al mapa
 
@@ -99,10 +180,36 @@ activo**:
   inventarías (un contenedor de vida corta, por ejemplo). Aparece en el mapa pero no tiene registro
   de inventario detrás.
 
-Puedes cambiar de opinión después. Desvincular el activo de un nodo respaldado deja el nodo en el
-mapa pero quita el vínculo de inventario: si lazyit había creado el activo automáticamente, ese
-activo se desactiva (nunca queda en el inventario sin dueño); si habías vinculado un activo
-preexistente, queda intacto y simplemente se desvincula.
+Puedes cambiar de opinión después. Abrí la ventana de detalle del nodo y buscá **Vínculo de
+inventario** en la pestaña **General**: ahí es donde desvinculás el activo de un nodo respaldado, o
+vinculás uno a un nodo que no tiene. Ambas acciones requieren el permiso de **gestionar topología**;
+quien solo puede leer ve el nombre de inventario pero ningún control. Desvincular un activo que
+**creó lazyit** requiere un permiso más — **dar de baja activos** — porque esa desvinculación archiva
+el registro; mirá los dos resultados acá abajo.
+
+Desvincular siempre deja el nodo en el mapa. Lo que pasa con el *activo* depende de quién lo creó, y
+los dos resultados no son lo mismo — así que la confirmación te dice cuál estás por ejecutar, antes
+de que confirmes:
+
+- **lazyit creó el activo** (armó un registro mínimo cuando agregaste o confirmaste el nodo) — al
+  desvincular, ese activo se **archiva**. Sale de tus listas de inventario y de la búsqueda —**y lo
+  hace incluso si alguien lo tiene asignado en este momento**; lazyit no se detiene a preguntar.
+  lazyit creó el registro, así que lo retira en vez de dejar un registro que ya nadie mantiene.
+  Recuperar un activo archivado requiere el permiso de **dar de baja activos** y la vista de
+  archivados, que es solo de administradores, y restaurarlo **no** vuelve a vincular el nodo — así que
+  tomalo como una decisión, no como un deshacer con el que puedas contar. **Esta desvinculación
+  también requiere el permiso de dar de baja activos**, además del de gestionar topología: archivar un
+  activo cuesta acá el mismo permiso que en cualquier otra parte de lazyit. Sin él, el botón de
+  desvincular queda deshabilitado y lo explica, y la API rechaza el pedido con la misma explicación.
+- **Vinculaste un activo que ya existía** — al desvincular **solo se quita el vínculo**. El activo
+  queda tal cual estaba: mismos dueños, mismo historial, mismos documentos. No se archiva nada.
+  **Esta solo requiere gestionar topología**: no se borra nada, así que no se cobra nada extra.
+
+lazyit sabe en cuál de los dos casos estás porque marca los registros que crea él mismo, y nunca le
+pone esa marca a un registro que curaste vos. Si un nodo está desvinculado, ese mismo panel ofrece un
+buscador para vincular cualquier activo de tu inventario. No se puede cambiar de un solo paso el
+activo de un nodo que ya tiene uno: primero desvinculás y después vinculás el nuevo, para que el
+registro saliente se resuelva de forma deliberada y no se descarte en silencio.
 
 La **etiqueta del nodo siempre manda para mostrarse** en el lienzo; el nombre del activo vinculado
 aparece en el encabezado de la ventana de detalle como un *nombre de inventario* secundario, así que
@@ -183,9 +290,10 @@ una sola cosa.
 
 **Las pestañas se adaptan al nodo.** Solo ves las que tienen algo que decir:
 
-- **General** *(siempre)* — qué es este nodo y quién es responsable de él: tipo, dirección IP, fecha
-  de agregado, estado, responsable(s), artículos de la base de conocimiento, referencias de secretos
-  y accesos directos, además de **Quitar del mapa**.
+- **General** *(siempre)* — qué es este nodo y quién es responsable de él: tipo, dirección IP,
+  **formato** (para hosts reportados por agente — lo que decide si se dibuja en el mapa por defecto),
+  fecha de agregado, estado, responsable(s), artículos de la base de conocimiento, referencias de
+  secretos y accesos directos, además de **Quitar del mapa**.
 - **Datos reportados** *(solo nodos reportados por agente)* — lo que la máquina dice que es. Para un
   servidor: sistema operativo, kernel, CPU, memoria, fabricante/modelo/número de serie, y los discos
   e interfaces de red que encontró. Para un contenedor: su nombre, imagen, digest de la imagen, estado
@@ -229,10 +337,26 @@ Algunas cosas de la pestaña **General** que vale la pena señalar:
   nueva. Con el permiso de gestión los editás ahí mismo: cada acceso directo es un par etiqueta + URL
   que podés cambiar, agregar o quitar, y luego **Guardás** la lista (lazyit verifica que cada URL sea
   válida antes de guardar).
+- **Formato** — para un nodo reportado por un agente, lo que la máquina dice que es físicamente,
+  leído de su firmware: *notebook*, *equipo de escritorio*, *servidor*, *máquina virtual* o
+  *contenedor*. Se muestra, no se edita: el agente lo reescribe en cada reporte, así que una máquina
+  reinstalada o con una placa nueva lo mantiene honesto por sí sola. También es lo que decide si el
+  nodo se dibuja en el mapa por defecto (ver *Las notebooks y los equipos de escritorio se mantienen
+  fuera del mapa* más arriba). Un nodo dibujado a mano no tiene ninguno, y una máquina que no reportó
+  uno simplemente no muestra este campo.
 - **IP duplicada** — si otro nodo del mapa ya tiene la *misma* IP exacta, un **aviso no bloqueante**
   lista el/los otro(s) nodo(s) — es un aviso, no un bloqueo: la dirección se guarda igual (lazyit no
   impone unicidad en las IP), y cada nodo listado está a un clic para que puedas saltar a él y
   resolverlo.
+- **Posible duplicado en el inventario** — un segundo aviso no bloqueante, para máquinas que
+  versiones anteriores de lazyit registraron dos veces. Si el activo de este nodo se creó
+  automáticamente y no tiene número de serie, mientras que el serie que reporta la máquina pertenece
+  a un activo *distinto*, lazyit lo dice y enlaza el otro activo para que vayas a mirarlo. **Es un
+  aviso y nada más: lazyit nunca fusiona los dos por vos.** Combinar dos registros de inventario
+  implica decidir qué pasa con dos conjuntos de asignaciones, historial, etiquetas y documentos
+  adjuntos, y eso es un criterio humano, no algo que una actualización deba resolver mientras no
+  estás mirando. Ver [Agente de reporte](/help/assets-topology-reporting-agent) para saber cómo se
+  llegó a esa situación y qué evita que vuelva a pasar.
 
 Una fila de la [Lista de servidores](/help/assets-topology-servers) enlaza directamente a esta
 ventana, así puedes saltar de la tabla a la imagen completa de una máquina con un clic.
@@ -264,6 +388,11 @@ respaldo no tumba al primario, y una conexión de red simple no tiene dirección
 
 Un **resultado vacío es buena noticia** — significa que nada depende de este nodo, así que es seguro
 darlo de baja. lazyit lo muestra como tranquilidad, no como un error.
+
+> [!IMPORTANT]
+> Si el tablero muestra el aviso de *"este mapa está incompleto"*, pueden faltar nodos afectados en
+> los resaltados dibujados. El total y la lista del resumen del radio siguen siendo autoritativos. Ver
+> [Si el mapa avisa que está incompleto](#si-el-mapa-avisa-que-está-incompleto).
 
 ## Qué sigue
 

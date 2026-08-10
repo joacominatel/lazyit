@@ -201,8 +201,15 @@ three stored fields are echoed on create/update.
 - **Advanced asset search** — `?q=` today is a simple case-insensitive substring (ILIKE) over
   `name`/`serial`/`assetTag`, **unindexed** (fine at small-team scale). Full-text / indexed search
   is deferred to its own task.
+- **Adoption of an existing Asset by a reporting agent** — *proposed, not built*
+  ([[0093-chassis-routing-and-asset-adoption]], #1196). Today a confirm whose discovered serial
+  collides with a live Asset **retries the create without the serial**, so one physical machine ends
+  up as two Assets (ADR-0074 §3 / #1081). The proposal links the existing Asset instead, gated on a
+  **corroborated** serial. Read it before changing anything on this page's `serial` /
+  `assets_serial_active_key` behaviour or the agent's `specs` write path.
 
 Related: [[asset-model]] · [[location]] · [[asset-category]] · [[asset-assignment]] ·
 [[asset-history]] · [[asset-centric]] · [[0007-flexible-asset-specs-jsonb]] ·
 [[0018-api-documentation-swagger]] · [[0033-asset-history-event-model]] ·
-[[0063-configurable-asset-tag-scheme]] · [[0089-bulk-receiving-and-checkout-acknowledgement]]
+[[0063-configurable-asset-tag-scheme]] · [[0089-bulk-receiving-and-checkout-acknowledgement]] ·
+[[0093-chassis-routing-and-asset-adoption]]

@@ -27,6 +27,14 @@
     "APPLIANCE": "Appliance",
     "OTHER": "Other"
   },
+  "chassis": {
+    "server": "Server",
+    "desktop": "Desktop",
+    "laptop": "Laptop",
+    "vm": "Virtual machine",
+    "container": "Container",
+    "unknown": "Not reported"
+  },
   "status": {
     "ONLINE": "Online",
     "OFFLINE": "Offline",
@@ -50,6 +58,7 @@
   "pending": {
     "title": "Pending review",
     "description": "Hosts the reporting agent discovered. Confirm to add them to your inventory, or discard.",
+    "batch": "Showing {shown} of {total} pending nodes, most recently discovered first. Confirm or discard these to reveal the rest.",
     "confirmAction": "Confirm",
     "mergeAction": "Merge into…",
     "discardAction": "Discard",
@@ -94,6 +103,8 @@
     },
     "targetLabel": "Merge into",
     "targetPlaceholder": "Pick a server",
+    "targetSearch": "Search servers by name…",
+    "targetEmpty": "No servers match that search.",
     "targetDescription": "The server you pick keeps its own name, kind, position, owner and asset link. Everything the agent owns moves onto it with the reporting key: the reported hardware and software facts, the status, the last check-in and the agent version — and the IP too, unless that IP was set by hand. If it already reports through an agent of its own, that key is replaced: a host still checking in with it will come back as a new pending server.",
     "submit": "Merge",
     "mergedToast": "Server merged.",
@@ -106,6 +117,8 @@
     "kindLabel": "Kind",
     "trackAsAssetLabel": "Track as an inventory asset",
     "trackAsAssetDescription": "On by default — also create a tracked Asset (with the reported host facts) so this server can carry an owner, KB links and secrets. Turn off to keep it graph-only.",
+    "adoptExisting": "This machine is already in your inventory. Confirming links it to that asset instead of creating a second one:",
+    "adoptSerial": "Matched on serial",
     "submit": "Confirm server",
     "confirmedToast": "Server confirmed.",
     "error": "Couldn't confirm the server."
@@ -155,8 +168,14 @@
     },
     "installTitle": "Run this on your server",
     "installHint": {
-      "linux": "Copy the command and run it on the Linux server as root. The token is shown only once — capture it before closing.",
-      "windows": "Copy the command and run it from an elevated PowerShell. The script-block form is deliberate: a plain irm | iex pipe can't pass the URL and the token. The token is shown only once — capture it before closing."
+      "linux": "Copy the command and run it on the Linux server as root. The first line hands the token over through the environment, so it never appears in the process list. The token is shown only once — capture it before closing.",
+      "windows": "Copy the command and run it from an elevated PowerShell. The first line hands the token over through the environment, so it stays off the command line; the script-block form is deliberate: a plain irm | iex pipe can't pass the URL. The token is shown only once — capture it before closing."
+    },
+    "hypervisorNote": "Installing on a hypervisor host (Proxmox VE, Hyper-V, libvirt/KVM)? There's nothing extra to do: this exact same command detects the platform and inventories its guests automatically. <link>How it works</link>",
+    "advanced": {
+      "toggle": "Advanced options",
+      "noHypervisor": "Don't inventory this host's guests",
+      "noHypervisorHint": "Adds {flag} to the command above: the host keeps a local veto (LAZYIT_COLLECT_HYPERVISOR=false in its config file) that wins over anything set in lazyit and survives upgrades."
     },
     "unsigned": "The Windows executable isn't code-signed yet, so SmartScreen will warn about it and some antivirus products may quarantine it. That's a deliberate state for internal validation, not a sign the download is wrong.",
     "copyCommandAria": "Copy the command",
@@ -186,15 +205,129 @@
     "waitDescription": "Run the install command on your server. As soon as the agent checks in, it'll show up here — usually within a couple of minutes.",
     "successTitle": "{name} reported!",
     "successDescription": "Your server checked in. Confirm it to add it to your inventory.",
+    "detected": {
+      "summary": "This host is a hypervisor ({platform}): {count, plural, =0 {it reported no guests} one {it reported # guest} other {it reported # guests}}.",
+      "summaryNoPlatform": "This host is a hypervisor: {count, plural, =0 {it reported no guests} one {it reported # guest} other {it reported # guests}}.",
+      "review": "Open Pending review"
+    },
     "confirmAction": "Confirm server",
     "checkLater": "I'll check later"
   },
   "view": {
     "map": "Map",
-    "table": "Table"
+    "table": "Table",
+    "agents": "Agents"
+  },
+  "fleet": {
+    "loadError": "Couldn't load the agent fleet.",
+    "empty": {
+      "title": "No reporting agents yet",
+      "description": "Install the reporting agent on a server and it will appear here with its version, its last check-in and — when it falls behind — the command that updates it."
+    },
+    "summary": {
+      "aria": "Agent version distribution",
+      "total": "{count, plural, =0 {No agents} one {# agent} other {# agents}}",
+      "ofTotal": "of {total}",
+      "comparedTo": "Compared against this instance, running {version}.",
+      "refresh": "Refresh"
+    },
+    "filter": {
+      "ALL": "All agents",
+      "majorBehind": "a major behind",
+      "behind": "behind",
+      "unknown": "version unknown",
+      "current": "up to date",
+      "notReporting": "not reporting",
+      "degraded": "reporting incompletely"
+    },
+    "columns": {
+      "host": "Host",
+      "version": "Agent version",
+      "os": "System",
+      "reported": "Last report",
+      "state": "State",
+      "actions": "Actions"
+    },
+    "searchLabel": "Search agents",
+    "searchPlaceholder": "Search by host, asset, IP or version…",
+    "chipSearch": "Search: {query}",
+    "chipFilter": "Showing: {filter}",
+    "filteredEmpty": "No agents match these filters.",
+    "updateAction": "Update",
+    "versionUnknownShort": "unknown",
+    "osUnknown": "Not reported",
+    "os": {
+      "linux": "Linux",
+      "windows": "Windows",
+      "darwin": "macOS",
+      "bsd": "BSD",
+      "other": "Other"
+    },
+    "platform": {
+      "linux": "Linux",
+      "windows": "Windows"
+    },
+    "reported": "reported {time}",
+    "reportedStale": "reported {time} · stale",
+    "neverReported": "Never reported",
+    "flags": {
+      "pending": "Pending review",
+      "notReporting": "Not reporting",
+      "degraded": "Incomplete report",
+      "degradedWarnings": "The last report came back incomplete: {warnings}",
+      "degradedUnprivileged": "The collector ran without root or SYSTEM, so some facts (serial, model) could not be read."
+    },
+    "copyCommandAria": "Copy command",
+    "commandCopied": "Command copied",
+    "bulk": {
+      "title": "{count, plural, one {# host can be updated} other {# hosts can be updated}}",
+      "subtitle": "One command per platform, identical on every host — nothing in it is per-machine, because each host re-runs from the config it already has. Hand it to whatever already runs commands on those hosts (Ansible, a GPO startup script, Intune). Re-running the installer is safe: it re-verifies the download, keeps each host's own settings, and the host keeps its identity in lazyit.",
+      "groupHosts": "{platform} · {count, plural, one {# host} other {# hosts}}",
+      "copyAll": "Or copy the whole set, annotated with which hosts each command is for:",
+      "scriptHeadline": "lazyit agent update — {count, plural, one {# host} other {# hosts}} behind (instance {version})",
+      "scriptCredentialNote": "No token and no URL to fill in: --upgrade re-runs each host from the config it already has. Do NOT set LAZYIT_TOKEN — it is refused alongside --upgrade.",
+      "scriptHosts": "{platform} · {count, plural, one {# host} other {# hosts}}: {hosts}"
+    },
+    "unknownNote": {
+      "body": "{count, plural, one {# agent reports a version lazyit cannot compare} other {# agents report a version lazyit cannot compare}} — agents installed before version stamping report `dev`. They are never treated as behind, and each one moves into a real bucket the first time you re-run its install command. That first update is the one lazyit cannot help you with.",
+      "devServer": "This instance reports its own version as `dev`, so no agent can be compared against it and {count, plural, one {# agent stays} other {# agents stay}} in \"version unknown\". Run a released build to get a real distribution.",
+      "help": "<link>How the reporting agent stays current</link> explains what re-running the installer does and does not change."
+    },
+    "identities": {
+      "title": "{count, plural, one {# agent token has never been used} other {# agent tokens have never been used}}",
+      "body": "A token was created for a host that never checked in — the install probably failed, or was never run. There is no node to show for it, which is why it is named here.",
+      "created": "created {date}",
+      "disabled": "Disabled",
+      "more": "…and {count} more.",
+      "manage": "Manage service accounts"
+    },
+    "command": {
+      "title": "Update {host}",
+      "subtitle": "This host reports agent {agentVersion}; this instance runs {serverVersion}. Run the command on the host — nothing is sent to it from here.",
+      "credentialNote": "This command carries no token and no URL — it needs neither. `--upgrade` re-runs this host with the token, instance URL and certificate authority already in its own config, so the same line works unchanged on every host and nothing about this host is re-pointed. Do not export `LAZYIT_TOKEN` for it: it is refused alongside `--upgrade`, so a token left over in your shell can never quietly override the one this host is using.",
+      "tokenLost": "No longer have this host's token? You don't need it — the host still has it, which is what `--upgrade` uses. Only if a host has no readable config left do you need a new one from <link>Service accounts</link>: mint a token there, then install with `--url` and `--token` as you first did. Rotating is not the same thing — it invalidates the current secret, so every other host using that service account stops reporting.",
+      "internalCa": "Behind an internal certificate authority? `--upgrade` re-uses this host's own CA setting, but the `curl`/`irm` that downloads the script above runs before that is read — so that CA still has to be in the host's system trust store, exactly as when you first installed.",
+      "unknownOs": "This host has not reported which system it runs, so both commands are shown. Run the one that matches the host — lazyit will not guess for you.",
+      "windowsElevated": "Run from an elevated PowerShell.",
+      "verify": "Afterwards, check the host without waiting for a report:",
+      "rerunSafe": "Re-running the installer is safe on a host that already has the agent: the download is checksum-verified, the binary is tested before anything is armed, your existing settings are merged rather than replaced, and the host keeps its identity in lazyit. On a host that is already current it does nothing.",
+      "close": "Close"
+    }
   },
   "tidy": {
     "action": "Tidy"
+  },
+  "endpoints": {
+    "show": "{count, plural, one {Show # endpoint} other {Show # endpoints}}",
+    "showHint": "Laptops and desktops are kept off the map so the estate stays readable. They are still in your inventory, on the Servers list and in search — this only changes what the map draws.",
+    "hide": "{count, plural, one {Hide # endpoint} other {Hide # endpoints}}",
+    "hideHint": "Take laptops and desktops back off the map. Nothing is removed — they stay in your inventory, on the Servers list and in search."
+  },
+  "graph": {
+    "truncated": "Showing {shown} of {total} nodes — this map is incomplete.",
+    "truncatedHint": "The map draws at most {shown} nodes. Nodes, connections and highlights may be missing from the canvas, but the blast-radius count and affected-node list come from the impact API and remain authoritative.",
+    "edgesTruncated": "Showing {shown} of {total} relationships — some connections are not drawn.",
+    "edgesTruncatedHint": "The relationship limit was reached. The map stays usable, but its connection picture is incomplete."
   },
   "legend": {
     "title": "Edge legend"
@@ -269,6 +402,29 @@
   "panel": {
     "inventoryName": "Inventory name",
     "noInventoryName": "Not tracked as an asset",
+    "assetLink": {
+      "title": "Inventory link",
+      "unnamedAsset": "the linked asset",
+      "detachAction": "Detach asset",
+      "detachHintArchives": "lazyit created this asset for the node, so detaching archives it.",
+      "detachHintUnlinks": "This asset already existed in your inventory, so detaching leaves it untouched.",
+      "detachBlockedArchives": "You can't detach this one: doing so would archive the asset lazyit created for the node, and archiving an asset needs the asset-delete permission. Ask an admin to grant it to your role, or ask someone who has it to run this. Detaching a node from an asset a person added to inventory still works — that only removes the link.",
+      "confirmArchiveTitle": "Detach and archive this asset?",
+      "confirmArchiveBody": "lazyit created {name} itself when this node was added, so detaching it does not just remove the link — the asset is archived, along with its assignments and its place in your inventory lists and search. The node stays on the map, with no inventory record behind it.",
+      "confirmArchiveRestoreNote": "Restoring an archived asset needs the asset-delete permission and the admin-only archived view, so you may not be able to undo this yourself. A restore does not re-link the node either — you would link it again by hand.",
+      "confirmArchiveSubmit": "Detach and archive",
+      "confirmUnlinkTitle": "Detach this asset from the node?",
+      "confirmUnlinkBody": "{name} stays in your inventory exactly as it is — nothing is archived, and its owners, history and documents are untouched. Only the link between this node and that record is removed. The node stays on the map, and you can link an asset again afterwards.",
+      "confirmUnlinkSubmit": "Detach",
+      "detachedToast": "Asset detached. The record is untouched.",
+      "detachedArchivedToast": "Asset detached and archived.",
+      "detachError": "Couldn't detach the asset.",
+      "attachHint": "This node has no inventory record behind it. Link one to give it an owner, a warranty and its knowledge-base articles.",
+      "attachPlaceholder": "Search assets…",
+      "attachAction": "Link asset",
+      "attachedToast": "Asset linked to the node.",
+      "attachError": "Couldn't link the asset."
+    },
     "ipLabel": "IP address",
     "createdLabel": "Added",
     "ownersTitle": "Owners",
@@ -307,6 +463,19 @@
     "ipPlaceholder": "e.g. 10.0.0.12",
     "ipClear": "Clear",
     "ipConflictWarning": "{count, plural, one {This IP is also used by # other node} other {This IP is also used by # other nodes}}",
+    "chassisLabel": "Form factor",
+    "duplicateAssetWarning": "This machine may already be in your inventory twice",
+    "duplicateAssetHint": "The asset linked to this node was created automatically and carries no serial, while the serial this machine reports belongs to a different asset. That usually means the machine was recorded twice, before lazyit knew how to link an existing record. Nothing has been changed and nothing will be merged for you — open the other asset to check whether it really is the same machine, then reconcile the two yourself.",
+    "duplicateAssetSerial": "Serial",
+    "duplicateAssetRelinkAction": "Point this node at the record you curated",
+    "duplicateAssetRelinkTitle": "Point this node at the asset you curated?",
+    "duplicateAssetRelinkBody": "This runs the two steps you would otherwise take by hand: the auto-created asset lazyit made for this node is archived (lazyit created it, so it is removed with it), and the node is then linked to {name}. From then on the machine reports into {name}, and its inventory panel starts filling in. Nothing is merged — no assignments, history, tags or attachments move between the two records.",
+    "duplicateAssetRelinkSubmit": "Archive and relink",
+    "duplicateAssetRelinkResume": "The auto-created asset has already been archived. Only the second step is left: linking this node to {name}. Try it again — the archive is not repeated.",
+    "duplicateAssetRelinkResumeSubmit": "Link {name}",
+    "duplicateAssetRelinkedToast": "This node now points at {name}.",
+    "duplicateAssetRelinkError": "Couldn't relink the node.",
+    "duplicateAssetRelinkBlocked": "Fixing this from here archives the auto-created asset first, which needs the asset-delete permission your role doesn't have. Ask an admin to grant it, or ask someone who has it to point this node at the record above.",
     "editSave": "Save",
     "editCancel": "Cancel",
     "editedToast": "Node updated.",
@@ -380,8 +549,8 @@
     "kindPlaceholder": "Pick a relationship",
     "targetLabel": "Other node",
     "targetPlaceholder": "Pick a node",
-    "targetSearch": "Search nodes…",
-    "targetEmpty": "No other nodes.",
+    "targetSearch": "Search nodes by name…",
+    "targetEmpty": "No nodes match that search.",
     "directionNote": "This node is the source; the relationship points to the other node.",
     "submit": "Connect",
     "createdToast": "Connection added.",
@@ -394,7 +563,7 @@
     "closedToast": "Connection closed.",
     "closeError": "Couldn't close the connection.",
     "loadError": "Couldn't load connections.",
-    "partialError": "Some relationships couldn't be loaded.",
+    "partialError": "Relationships couldn't be loaded. This map may be missing connections.",
     "retry": "Retry",
     "selfNode": "this node",
     "since": "since {date}",
@@ -441,11 +610,14 @@
     "reportedKindLabel": "Reported as",
     "reportedKindDescription": "What the agent's report made lazyit propose for this host — not what you want it to become.",
     "anyKind": "Any kind",
+    "chassisLabel": "Reported form factor",
+    "chassisDescription": "What the machine says it physically is — read from its firmware, not from its name. This is enough of a condition on its own, so \"auto-confirm the servers, review the laptops\" is a rule you can write. A host that reports no form factor never matches a rule that names one.",
+    "anyChassis": "Any form factor",
     "confirmAsKindLabel": "Confirm it as",
     "keepProposedKind": "Keep the reported kind",
     "trackAsAssetLabel": "Track as an inventory asset",
     "trackAsAssetDescription": "On by default for a servers-only rule, off for any rule that can also match containers — the same reasoning as confirming by hand. Turn it on if these containers really are things you track.",
-    "needsCondition": "A rule needs at least one condition that can rule a host out: a name pattern with something other than * and ?, a subnet narrower than 0.0.0.0/0, or a reported kind. Most wildcard-only patterns match every host there is, so they would confirm everything the agent finds; ? on its own matches only one-character names, and is refused along with them to keep the rule one you can check by looking.",
+    "needsCondition": "A rule needs at least one condition that can rule a host out: a name pattern with something other than * and ?, a subnet narrower than 0.0.0.0/0, a reported kind, or a reported form factor. Most wildcard-only patterns match every host there is, so they would confirm everything the agent finds; ? on its own matches only one-character names, and is refused along with them to keep the rule one you can check by looking.",
     "saveSubmit": "Save rule",
     "savedToast": "Rule saved. It applies from the next report onwards.",
     "saveError": "Couldn't save the rule.",
@@ -457,6 +629,7 @@
     "conditionHostname": "Name {pattern}",
     "conditionSubnet": "From {cidr}",
     "conditionKind": "Reported as {kind}",
+    "conditionChassis": "Form factor {chassis}",
     "author": "Written by {name}",
     "authorUnknown": "Author no longer in the directory",
     "lastMatched": "{count, plural, one {Used # time} other {Used # times}}, last on {when}",

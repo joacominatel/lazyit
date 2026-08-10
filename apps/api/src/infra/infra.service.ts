@@ -1,30 +1,42 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
   agentReportSkewPaths,
+  CONTAINER_ID_SEPARATOR,
   containerExternalId,
   containerExternalIdPrefix,
   containerNodeStatus,
+  corroboratesAdoption,
   diffContainerFacts,
   diffHostFacts,
   diffSoftwareFacts,
   disambiguateExternalId,
+  guestExternalId,
+  guestExternalIdPrefix,
+  GUEST_ID_SEPARATOR,
+  guestNodeKind,
+  guestNodeStatus,
   hostIdentityEvidence,
   identityDiscriminator,
   inferNodeKind,
   isClonedMachineId,
+  isGuestChildExternalId,
   isNewerVersion,
   isPlausibleEdge,
   osFamily,
   primaryIp,
+  projectAgentPolicy,
+  sanitizeIdentifierValue,
   sanitizeSerial,
   softwareFingerprint,
   type AgentContainer,
+  type AgentGuest,
   type AgentOsFamily,
   type AgentPolicy,
   type AgentReport,
@@ -47,29 +59,41 @@ import {
   type InfraImpactResponse,
   type InfraNodeChild,
   type InfraNodeKind,
+  type InfraNodeListRole,
+  type InfraAssetCandidate,
   type InfraAutoConfirmCandidate,
   type InfraNodeFactChangeList,
+  type InfraNodeSource,
   type InfraNodeState,
   type InfraNodeStatus,
   type InfraSecretRef,
+  type PageQuery,
   type UpdateInfraNode,
   INFRA_FACT_CHANGE_FACT_MAX,
   INFRA_FACT_CHANGE_PAGE_SIZE,
   INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
+  INFRA_GRAPH_EDGES_MAX,
+  INFRA_GRAPH_NODES_MAX,
+  offsetOf,
+  pageOf,
 } from '@lazyit/shared';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { AssetsService } from '../assets/assets.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { ArticlesService } from '../articles/articles.service';
 import { SecretManagerService } from '../secret-manager/secret-manager.service';
 import { SearchService } from '../search/search.service';
 import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
+import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { appVersion } from '../common/export-provenance';
 import type { Principal } from '../auth/principal';
+import { isServicePrincipal } from '../auth/principal';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
@@ -86,6 +110,17 @@ import { AgentPolicyService } from './agent-policy.service';
  */
 export const INFRA_NODE_ASSET_REPOINT_ERROR =
   'This node already carries an asset, and a patch cannot swap it for another in one step: the current link would be dropped without the detach that cleans up after it, orphaning that asset if lazyit auto-created it — it would be left in inventory owned by nobody. Send `assetId: null` first to detach (an auto-created asset is soft-deleted, a pre-existing one is left intact and merely un-linked), then a second patch carrying the new `assetId`. Attaching an asset to a node that carries none is allowed directly. ADR-0070 §5.';
+
+/**
+ * The 403 an ARCHIVING detach gets without `asset:delete` (issue #1202). Written as a POLICY ANSWER,
+ * not a bug report: it names the permission that is missing, what the caller's `infra:manage` still
+ * buys them (every other edit on this node, including detaching an asset a human curated), and who
+ * can change the situation — so the operator reads a rule rather than a malfunction.
+ *
+ * Exported so the spec asserts the message the caller actually receives, not a copy of it.
+ */
+export const INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR =
+  'Detaching this node would ARCHIVE the asset lazyit auto-created for it — a soft delete, with its assignments and its place in inventory and search — and archiving an asset requires the `asset:delete` permission, here exactly as it does on `DELETE /assets/:id`. Your `infra:manage` still covers every other edit to this node, including detaching an asset a human curated (that only removes the link and leaves the row untouched). Ask an admin to grant `asset:delete` to your role, or have someone who holds it run this detach. ADR-0070 §5.';
 
 /**
  * The policy-related columns one report writes (#1140) — spread into the node `data` on every branch.
@@ -401,7 +436,188 @@ export interface InfraNodeFilters {
   status?: InfraNodeStatus;
   /** CONFIRMED (live map) | PENDING (v2 review tray). */
   state?: InfraNodeState;
+  /**
+   * MANUAL (hand-drawn) | AGENT (reported). Added with the page (#1152) for the one question the
+   * Servers screen used to answer by scanning the whole list: "does this estate have ANY agent node
+   * yet?" — which drives the ADR-0074 §6 onboarding hero. Under a page that scan is a lie; with this
+   * filter it is `?source=AGENT&limit=1` and a look at `total`.
+   */
+  source?: InfraNodeSource;
+  /** HOST excludes both child identity namespaces; CHILD includes either namespace. */
+  role?: InfraNodeListRole;
+  /**
+   * Restrict to the nodes backing these Asset ids. The batch-resolver shape ADR-0030 §6 (#961) set
+   * for `GET /users?ids=` : the Assets list shows an "on topology" glyph per row, and under a page it
+   * must ask about the ~50 rows it is actually rendering rather than materialize every node and hope
+   * the window covered them. Bounded by the caller's page limit; an unknown id simply matches nothing.
+   */
+  assetIds?: string[];
+  /**
+   * Restrict to these node ids. The same batch-resolver shape as `assetIds`, for the surfaces that
+   * already KNOW which nodes they need and only lack their labels — the drill-in's edge panel holds
+   * `sourceId`/`targetId` and wants the name on the other end. Before the page it scanned the whole
+   * list for that; asking for exactly the ids it has is both bounded and exact, so the panel never
+   * degrades to printing a raw cuid at an operator.
+   */
+  ids?: string[];
+  /**
+   * Case-insensitive search over the row's visible text — label, IP, the linked Asset's inventory
+   * name, and each ACTIVE owner's name/email. It has to run in the DATABASE: the Servers table used
+   * to filter the loaded array in memory, which under a page becomes a false "no results" for
+   * anything outside the window (the exact bug ADR-0030 §2 fixed for four other lists).
+   */
+  q?: string;
 }
+
+/** The only filters exposed by the deprecated, unbounded `GET /infra/nodes` compatibility route. */
+export type LegacyInfraNodeFilters = Pick<
+  InfraNodeFilters,
+  'kind' | 'status' | 'state'
+>;
+
+/** Child identity is namespaced in `externalId`; it is deliberately independent of node `kind`. */
+const INFRA_CHILD_IDENTITY_WHERE = {
+  OR: [
+    { externalId: { contains: CONTAINER_ID_SEPARATOR } },
+    { externalId: { contains: GUEST_ID_SEPARATOR } },
+  ],
+} satisfies Prisma.InfraNodeWhereInput;
+
+function infraNodeRoleWhere(
+  role: InfraNodeListRole,
+): Prisma.InfraNodeWhereInput {
+  if (role === 'CHILD') return INFRA_CHILD_IDENTITY_WHERE;
+  return {
+    OR: [{ externalId: null }, { NOT: INFRA_CHILD_IDENTITY_WHERE }],
+  };
+}
+
+/**
+ * Sortable fields for `GET /infra/nodes/page` (ADR-0030 §1) — public `?sort=` key → Prisma column. An
+ * unknown key is a 400, never a silent no-op, so a sort always means what it says.
+ *
+ * Bounded to real columns on the node itself. The Servers table's `asset` and `owner` columns are
+ * joined relations, so they are deliberately NOT sortable — the same call every other list makes
+ * (model/owners/category are not sortable on Assets either).
+ */
+export const INFRA_NODE_SORT_ALLOWLIST = {
+  label: 'label',
+  kind: 'kind',
+  status: 'status',
+  state: 'state',
+  ipAddress: 'ipAddress',
+  lastReportedAt: 'lastReportedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+} as const;
+
+/**
+ * The TOTAL order every node read shares (#1152, shipped in PR #1234 and now load-bearing).
+ *
+ * `createdAt` is not unique and ADR-0095 makes ties the NORMAL case — one hypervisor report enrols
+ * up to `AGENT_GUESTS_MAX` (500) PENDING guests in a single write, so hundreds of rows share a
+ * millisecond. Postgres may return tied rows in any order and does reorder them between reads. Under
+ * a LIMIT/OFFSET window that is not cosmetic: a row can appear on two pages and on neither, and
+ * nothing surfaces the loss. The unique `id` primary key closes it.
+ */
+const INFRA_NODE_TIEBREAKER = { id: 'desc' } as const;
+const INFRA_NODE_DEFAULT_ORDER = [
+  { createdAt: 'desc' },
+  INFRA_NODE_TIEBREAKER,
+] satisfies Prisma.InfraNodeOrderByWithRelationInput[];
+
+/**
+ * The shared node-list row projection (#1135) — an explicit `select`, never `include`.
+ *
+ * `specs` is the ONE column left out, and that is the whole point: on an agent-reported host it is
+ * the entire inventory blob (~1500 software entries on a real Linux box), and a bare `include`
+ * returns every scalar. Keep this in step with `InfraNodeListItemSchema` — a field added there but
+ * not here silently disappears from the list (the spec asserts the two agree).
+ */
+const INFRA_NODE_LIST_SELECT = {
+  id: true,
+  kind: true,
+  label: true,
+  status: true,
+  assetId: true,
+  ipAddress: true,
+  ipAddressSource: true,
+  shortcuts: true, // bounded by INFRA_SHORTCUTS_MAX — unlike `specs`, safe to carry per row
+  x: true,
+  y: true,
+  source: true,
+  state: true,
+  reportingSource: true,
+  externalId: true,
+  lastReportedAt: true,
+  agentVersion: true,
+  chassis: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+  // NOTE: `specs` is deliberately absent (#1135) — see listNodePage's doc comment.
+  asset: {
+    // `deletedAt` is selected (not filterable on a to-one relation) so the flatten can gate the
+    // name — a soft-deleted asset must NOT leak its name through the list.
+    select: {
+      name: true,
+      deletedAt: true,
+      assignments: {
+        where: { releasedAt: null },
+        orderBy: { assignedAt: 'desc' },
+        select: {
+          id: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              deletedAt: true,
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.InfraNodeSelect;
+
+type InfraNodeListRow = Prisma.InfraNodeGetPayload<{
+  select: typeof INFRA_NODE_LIST_SELECT;
+}>;
+
+/** Privacy-safe flattening shared by the compatibility array and the first-party page. */
+function projectInfraNodeListRow({ asset, ...node }: InfraNodeListRow) {
+  const liveAsset = asset?.deletedAt === null ? asset : null;
+  return {
+    ...node,
+    assetName: liveAsset?.name ?? null,
+    owners: (liveAsset?.assignments ?? []).map((assignment) => ({
+      assignmentId: assignment.id,
+      userId: assignment.user.id,
+      firstName: assignment.user.firstName,
+      lastName: assignment.user.lastName,
+      email: assignment.user.email,
+      deletedAt: assignment.user.deletedAt,
+    })),
+  };
+}
+
+/**
+ * The `GET /infra/graph/nodes` projection (#1152) — exactly what the React Flow board draws, and
+ * nothing that costs a join. Mirrors `InfraGraphNodeSchema`; the spec asserts the two agree, so the
+ * canvas contract cannot drift away from the query that feeds it.
+ */
+const INFRA_GRAPH_NODE_SELECT = {
+  id: true,
+  label: true,
+  kind: true,
+  status: true,
+  ipAddress: true,
+  chassis: true,
+  x: true,
+  y: true,
+} satisfies Prisma.InfraNodeSelect;
 
 /**
  * Provenance marker stamped into an AUTO-CREATED backing Asset's `specs` (ADR-0070 §5). It is how the
@@ -472,6 +688,10 @@ export class InfraService {
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
     private readonly assets: AssetsService,
+    // The append-only asset trail (ADR-0033). Injected for exactly ONE event: the AGENT_LINKED an
+    // adoption emits at the moment of the link (ADR-0093 §4). The recurring specs refresh stays
+    // silent on purpose — see {@link syncAssetSpecs}.
+    private readonly assetHistory: AssetHistoryService,
     private readonly assignments: AssetAssignmentsService,
     private readonly articles: ArticlesService,
     private readonly secrets: SecretManagerService,
@@ -485,6 +705,11 @@ export class InfraService {
     private readonly autoConfirm: InfraAutoConfirmService,
     // The #1140 policy channel — resolution only; every WRITE to a policy scope is a human route.
     private readonly agentPolicy: AgentPolicyService,
+    // The RolePermission matrix (ADR-0046). Injected for exactly ONE decision: whether the caller may
+    // ARCHIVE the auto-created Asset a detach would soft-delete (#1202). It answers a question the
+    // `@RequirePermission` decorator cannot, because the answer depends on a stored row — see
+    // {@link detachAsset}. AuthModule is @Global, so no module wiring is needed.
+    private readonly permissions: PermissionResolverService,
   ) {}
 
   /**
@@ -595,7 +820,7 @@ export class InfraService {
    *
    * TOPOLOGY, NOT JUST INVENTORY (#1139). When the report carries `host.containers`, each container
    * becomes a CONTAINER child node with an active `RUNS_ON` edge back to this host — see
-   * {@link reconcileContainers}. That is the first thing the agent produces that the graph can
+   * {@link reconcileChildren}. That is the first thing the agent produces that the graph can
    * actually traverse.
    *
    * THROTTLED (#1134): the CREATE branch — the only branch that adds a row — first charges the
@@ -729,7 +954,7 @@ export class InfraService {
         samePolicyGeneration,
         stored,
       });
-      return this.reconcileContainers(
+      return this.reconcileChildren(
         ack,
         report,
         now,
@@ -781,6 +1006,11 @@ export class InfraService {
           ...(primaryIpAddress !== undefined
             ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
             : {}),
+          // The reported form factor (ADR-0093 §2) — written on the create branch as well as the
+          // refresh, so a host that enrols today is routable today rather than one cadence from now.
+          ...(report.host.chassis !== undefined
+            ? { chassis: report.host.chassis }
+            : {}),
           // A brand-new node has no stored revision, so an agent that already echoes one is recorded
           // as having applied it from its very first report (#1140) — a re-installed host whose cache
           // survived must not read as "pending" forever.
@@ -799,6 +1029,10 @@ export class InfraService {
           hostname: report.host.hostname,
           ipAddress: primaryIpAddress ?? null,
           kind: proposedKind,
+          // The reported form factor (ADR-0093 §6) — the fact that makes "auto-confirm the servers,
+          // review the laptops" a rule an operator can write. `null` when the report carried none,
+          // which never matches a rule that states one.
+          chassis: report.host.chassis ?? null,
           isContainerChild: false,
         },
         {
@@ -806,7 +1040,7 @@ export class InfraService {
           externalId: report.externalId,
         },
       );
-      return this.reconcileContainers(
+      return this.reconcileChildren(
         {
           nodeId: created.id,
           state,
@@ -867,7 +1101,7 @@ export class InfraService {
             ),
             samePolicyGeneration,
           });
-          return this.reconcileContainers(
+          return this.reconcileChildren(
             ack,
             report,
             now,
@@ -921,15 +1155,34 @@ export class InfraService {
    * `agentSkew` would RECORD that strip on the node; only this handshake prevents it. A failed policy
    * resolution must therefore never suppress this flag: that would un-teach every agent in the estate
    * over a settings row nobody could read.
+   *
+   * THE POLICY IS PROJECTED PER AGENT, WIRE-ONLY (ADR-0095 §7). The agent parses the ack's policy
+   * with a `strictObject` `safeParse` and keeps its CACHED policy on ANY failure, so serving the
+   * six-key `collect` shape to a pre-1.11 build would freeze that host's configuration — cadence,
+   * exclusions and all — at whatever revision it last understood. `projectAgentPolicy` removes
+   * `collect.hypervisor` for an `agentVersion` that predates the flag (and for `dev`/unparseable —
+   * fail-soft toward the shape every build parses). The STORED and RESOLVED policy are untouched:
+   * the node's policy columns above are written from the un-projected resolution, and the same
+   * resolved revision is what the agent echoes back. The cast is the one place the server admits the
+   * wire shape (`AgentPolicyWire`, where the defaulted key is legitimately absent) into the ack type;
+   * the shared contract documents the assignability in that direction.
    */
   private finishAck(
     ack: AgentReportAck,
     policy: AgentPolicy | undefined,
+    agentVersion: string,
   ): AgentReportAck {
     return {
       ...ack,
       softwareDelta: true,
-      ...(policy !== undefined ? { policy } : {}),
+      ...(policy !== undefined
+        ? {
+            policy: projectAgentPolicy(
+              policy,
+              agentVersion,
+            ) as AgentReportAck['policy'],
+          }
+        : {}),
     };
   }
 
@@ -1145,6 +1398,17 @@ export class InfraService {
     // the report actually carries one (never clear a good IP on a partial report). CEO policy #1081.
     if (node.ipAddressSource !== 'MANUAL' && primaryIpAddress !== undefined) {
       data.ipAddress = primaryIpAddress;
+    }
+    // The host form factor (ADR-0093 §2), refreshed on every report — a re-image or a board swap
+    // changes the truth and the column follows it. There is no MANUAL counterpart to protect: chassis
+    // is not on any DTO, so nothing a human owns can be clobbered here.
+    //
+    // WRITTEN ONLY WHEN THE REPORT CARRIES ONE, on the same rule as the IP above. `unknown` IS a
+    // reported value and does write (the probe ran and said so, which correctly retires a stale
+    // `laptop`); an ABSENT key is a pre-v2 agent or a downgraded collector, and letting that clear a
+    // good value would make the estate un-heal itself on a rollback.
+    if (args.blob.host.chassis !== undefined) {
+      data.chassis = args.blob.host.chassis;
     }
     const updated = await this.prisma.infraNode.update({
       where: { id: node.id },
@@ -1659,6 +1923,7 @@ export class InfraService {
           samePolicyGeneration: false,
         }),
         policy,
+        report.agentVersion,
       );
     }
     const externalId = disambiguateExternalId(report.externalId, discriminator);
@@ -1701,6 +1966,7 @@ export class InfraService {
           ),
         }),
         policy,
+        report.agentVersion,
       );
     };
 
@@ -1739,6 +2005,10 @@ export class InfraService {
           agentVersion: report.agentVersion,
           ...(primaryIpAddress !== undefined
             ? { ipAddress: primaryIpAddress, ipAddressSource: 'AGENT' as const }
+            : {}),
+          // A colliding clone is still a reporting host, and its form factor is still its own fact.
+          ...(report.host.chassis !== undefined
+            ? { chassis: report.host.chassis }
             : {}),
           ...this.policyWriteFields(report, null, policy, now),
           // Same rule as the ordinary create branch (#1142): a row that does not exist yet holds no
@@ -1842,29 +2112,32 @@ export class InfraService {
           : {}),
       },
       policy,
+      report.agentVersion,
     );
   }
 
   /**
-   * Reconcile the containers a host reported into CONTAINER child nodes joined to it by an active
-   * `RUNS_ON` edge (#1139) — the first thing the agent produces that the topology GRAPH can traverse.
+   * Reconcile everything a report says about machines OTHER than the reporting host — its container
+   * children (#1139), its hypervisor guest children (ADR-0095 §5) and the §6 identity join — then
+   * finish the ack. One seam, called from every ordinary ingest branch (known-key refresh, unknown-key
+   * create, P2002 race), so a branch added later cannot ship a report that reconciles one child
+   * channel and silently drops the other. Deliberately NOT called from {@link ingestCollidingHost}:
+   * a host under an identity collision reconciles no children — a recorded ADR-0095 limitation.
    *
-   * Until this existed the agent produced not one edge: install it on a Proxmox host and its guests
-   * and you got unrelated boxes floating on a canvas, with the blast-radius traversal ADR-0070 §7 was
-   * built for reduced to a feature the operator had to hand-draw before using. `PLAUSIBLE_EDGE_TARGETS`
-   * has anticipated `CONTAINER -> PHYSICAL_HOST` since day one; this is what finally opens it.
-   *
-   * ABSENT AND EMPTY ARE DIFFERENT ANSWERS. An absent `containers` key means the collector never
-   * probed — an older agent, a non-Linux collector, an unreadable socket — so nothing is touched and a
-   * host keeps every child it already has. `[]` means the probe RAN and found none, which retires
-   * them. Conflating the two would let a downgraded agent silently wipe a host's whole topology.
+   * ABSENT AND EMPTY ARE DIFFERENT ANSWERS, per channel and independently. An absent `containers` or
+   * `guests` key means that collector never probed — an older agent, a non-Linux collector, an
+   * unreadable socket, a policy that turned it off — so nothing is touched and a host keeps every
+   * child it already has. `[]` means the probe RAN and found none, which retires them. Conflating the
+   * two would let a downgraded agent silently wipe a host's whole topology.
    *
    * NEVER FAILS THE REPORT. Everything here runs after the host row is durable, so a failure degrades
-   * to a stale container topology and a warning — the same degrade-never-reject posture the contract
-   * takes. Losing the container list for one tick costs a field; losing the report makes the HOST
-   * vanish from the inventory, which is the failure class ADR-0074 §2's amendment exists to prevent.
+   * to a stale child topology and a warning — the same degrade-never-reject posture the contract
+   * takes. Losing a child list for one tick costs a field; losing the report makes the HOST vanish
+   * from the inventory, which is the failure class ADR-0074 §2's amendment exists to prevent. Each
+   * channel gets its OWN try/catch, so a container hiccup cannot starve the guest reconcile or the
+   * identity join, and vice versa.
    */
-  private async reconcileContainers(
+  private async reconcileChildren(
     ack: AgentReportAck,
     report: AgentReport,
     now: Date,
@@ -1879,27 +2152,55 @@ export class InfraService {
     policy?: AgentPolicy,
   ): Promise<AgentReportAck> {
     const containers = report.host.containers;
-    if (containers === undefined) return this.finishAck(ack, policy);
+    if (containers !== undefined) {
+      try {
+        await this.applyContainerTopology(
+          ack.nodeId,
+          containers,
+          report,
+          now,
+          samePolicyGeneration,
+          principal,
+          policy,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Container topology for ${report.host.hostname} could not be reconciled — the host itself still reported. ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    const guests = report.host.guests;
+    if (guests !== undefined) {
+      try {
+        await this.applyGuestTopology(
+          ack.nodeId,
+          guests,
+          report,
+          now,
+          principal,
+          policy,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Guest topology for ${report.host.hostname} could not be reconciled — the host itself still reported. ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    // The §6 identity join runs on EVERY ordinary report, not only ones carrying children: the report
+    // that closes the two-nodes-for-one-machine fork is the IN-GUEST agent's own — a report that
+    // carries no `guests` at all.
     try {
-      await this.applyContainerTopology(
-        ack.nodeId,
-        containers,
-        report,
-        now,
-        samePolicyGeneration,
-        principal,
-        policy,
-      );
+      await this.absorbCorroboratedGuestChildren(ack.nodeId, report, now);
     } catch (err) {
       this.logger.warn(
-        `Container topology for ${report.host.hostname} could not be reconciled — the host itself still reported. ${err instanceof Error ? err.message : String(err)}`,
+        `The guest identity join for ${report.host.hostname} could not run — the report was still accepted. ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    return this.finishAck(ack, policy);
+    return this.finishAck(ack, policy, report.agentVersion);
   }
 
   /**
-   * The container reconcile proper (#1139), split out so {@link reconcileContainers} owns exactly one
+   * The container reconcile proper (#1139), split out so {@link reconcileChildren} owns exactly one
    * thing: the promise that none of this can fail the host's report.
    *
    * Children are reconciled on the SAME `(reportingSource, externalId)` unique index the host path
@@ -1957,7 +2258,9 @@ export class InfraService {
         where: {
           reportingSource: report.reportingSource,
           externalId: {
-            startsWith: containerExternalIdPrefix(report.externalId),
+            startsWith: escapeLikePrefix(
+              containerExternalIdPrefix(report.externalId),
+            ),
           },
         },
         select: { id: true, externalId: true, specs: true, assetId: true },
@@ -1998,62 +2301,15 @@ export class InfraService {
 
       const child = knownByExternalId.get(externalId);
       if (child !== undefined) {
-        // Facts + liveness only. `kind`/`label`/`state`/position stay the human's, on the same rule
-        // `refreshKnownNode` applies to hosts — and, since #1153, on the same write rule too: the
-        // `specs` column is touched only when the container's facts actually changed, while the
-        // heartbeat columns are written on every report because that is what a check-in is.
-        const storedSpecs = (child.specs ?? {}) as Record<string, unknown>;
-        const unchanged = isDeepStrictEqual(
-          withoutVolatileReportFacts(storedSpecs),
-          withoutVolatileReportFacts(specs),
+        await this.refreshContainerChild(
+          child,
+          specs,
+          status,
+          report,
+          now,
+          samePolicyGeneration,
+          childPolicyFields,
         );
-        // What the child HOLDS after this report — the stored collection time when the write was
-        // skipped, so the node and its Asset never disagree about when these facts were gathered.
-        const effective: ContainerSpecsBlob = unchanged
-          ? {
-              container: specs.container,
-              ...(typeof storedSpecs.reportedAt === 'string'
-                ? { reportedAt: storedSpecs.reportedAt }
-                : { reportedAt: specs.reportedAt }),
-            }
-          : specs;
-        // WHAT MOVED on this container (#1143), read off the SAME comparison the write rule above
-        // already made — computed before the update, for the same reason the host path computes it
-        // there: `storedSpecs` is about to be replaced. A container whose image digest moved under an
-        // unchanged `:latest` tag is the deploy nobody remembers doing, and it is exactly the kind of
-        // change this table exists for. Runtime `state` is deliberately NOT recorded — it is liveness,
-        // it already drives this node's `status`, and a nightly restart would write two rows a day
-        // forever. See {@link diffContainerFacts}.
-        const childChanges = unchanged
-          ? []
-          : diffContainerFacts(storedSpecs.container, specs.container, {
-              samePolicyGeneration,
-            });
-        await this.prisma.infraNode.update({
-          where: { id: child.id },
-          data: {
-            ...(unchanged
-              ? {}
-              : { specs: specs as unknown as Prisma.InputJsonValue }),
-            status,
-            lastReportedAt: now,
-            agentVersion: report.agentVersion,
-            ...childPolicyFields,
-          },
-        });
-        await this.recordFactChanges(child.id, childChanges);
-        // #1157: the host path has synced its linked Asset since #1081 and this one never did, so a
-        // container confirmed with `trackAsAsset` froze its Asset panel at the instant it was
-        // confirmed — image tag, digest, runtime state and published ports all drifting silently while
-        // the node panel stayed fresh. Same discipline as the host: a direct write (no SPECS_CHANGED
-        // event per report), human-owned columns untouched, a soft-deleted asset skipped, only the
-        // agent-owned keys replaced — and no write at all when nothing moved.
-        if (child.assetId) {
-          await this.syncAssetSpecs(child.assetId, { ...effective }, [
-            'container',
-            'reportedAt',
-          ]);
-        }
         childIds.push(child.id);
         void this.syncNodeToSearch(child.id);
         continue;
@@ -2073,22 +2329,56 @@ export class InfraService {
         budgetSpent = true;
         continue;
       }
-      const created = await this.prisma.infraNode.create({
-        data: {
-          kind: 'CONTAINER',
-          label: container.name,
-          status,
-          source: 'AGENT',
-          state: 'PENDING',
-          reportingSource: report.reportingSource,
-          externalId,
-          lastReportedAt: now,
-          agentVersion: report.agentVersion,
-          ...childPolicyFields,
-          specs: specs as unknown as Prisma.InputJsonValue,
-        },
-        select: { id: true },
-      });
+      let created: { id: string };
+      try {
+        created = await this.prisma.infraNode.create({
+          data: {
+            kind: 'CONTAINER',
+            label: container.name,
+            status,
+            source: 'AGENT',
+            state: 'PENDING',
+            reportingSource: report.reportingSource,
+            externalId,
+            lastReportedAt: now,
+            agentVersion: report.agentVersion,
+            ...childPolicyFields,
+            specs: specs as unknown as Prisma.InputJsonValue,
+          },
+          select: { id: true },
+        });
+      } catch (err) {
+        // The same concurrent-report race the host path has handled since #1012, one level down: a
+        // second report from this host inserted the child between our prefix read and this create.
+        // The loser must fall through to the refresh and KEEP GOING — a throw here would abandon
+        // every child after this one (no heartbeat, no edge self-heal) and skip the vanished sweep,
+        // and it would do so on every report for as long as the collision repeats.
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          const raced = await this.prisma.infraNode.findFirst({
+            where: { reportingSource: report.reportingSource, externalId },
+            select: { id: true, specs: true, assetId: true },
+          });
+          if (raced) {
+            // No auto-confirm offer: the report that WON the race made it for this child already.
+            await this.refreshContainerChild(
+              raced,
+              specs,
+              status,
+              report,
+              now,
+              samePolicyGeneration,
+              childPolicyFields,
+            );
+            childIds.push(raced.id);
+            void this.syncNodeToSearch(raced.id);
+            continue;
+          }
+        }
+        throw err;
+      }
       childIds.push(created.id);
       void this.syncNodeToSearch(created.id);
       // The child half of #1145. A container child is offered to the matcher under its CONTAINER
@@ -2101,6 +2391,10 @@ export class InfraService {
           hostname: container.name,
           ipAddress: null,
           kind: 'CONTAINER',
+          // A child's blob is `{ container, reportedAt }` — no `host` key at all (#1139) — so it has
+          // no form factor of its own, and offering its HOST's would let a chassis rule confirm
+          // containers on the strength of the box they happen to run on. Stated, not omitted.
+          chassis: null,
           isContainerChild: true,
         },
         // The CHILD's own key — a container the operator discarded is as durable a decision as a
@@ -2134,6 +2428,787 @@ export class InfraService {
       });
       for (const id of vanished) void this.syncNodeToSearch(id);
     }
+  }
+
+  /**
+   * The known-container refresh — facts + liveness only, exactly the rule `refreshKnownNode`
+   * applies to hosts, and since #1153 the same write rule too: the `specs` column is touched only
+   * when the container's facts actually changed, while the heartbeat columns are written on every
+   * report because that is what a check-in is. Extracted so the ordinary known-child branch and the
+   * per-child P2002 race fallback are ONE code path — two copies of this block would drift.
+   *
+   * `kind`/`label`/`state`/position stay the human's. The fact-change rows (#1143) are computed off
+   * the SAME comparison the write rule makes, before the update, because `storedSpecs` is about to
+   * be replaced; runtime `state` is deliberately not recorded (it is liveness, it already drives
+   * `status`, and a nightly restart would write two rows a day forever). The linked-Asset sync
+   * (#1157) follows the host discipline: agent-owned keys replaced, human-owned columns untouched,
+   * a soft-deleted asset skipped, and no write at all when nothing moved — `effective` is the
+   * stored collection time when the write was skipped, so the node and its Asset never disagree
+   * about when these facts were gathered.
+   */
+  private async refreshContainerChild(
+    child: { id: string; specs: Prisma.JsonValue; assetId: string | null },
+    specs: ContainerSpecsBlob,
+    status: InfraNodeStatus,
+    report: AgentReport,
+    now: Date,
+    samePolicyGeneration: boolean,
+    childPolicyFields: { policyStaleAfterSeconds?: number },
+  ): Promise<void> {
+    const storedSpecs = (child.specs ?? {}) as Record<string, unknown>;
+    const unchanged = isDeepStrictEqual(
+      withoutVolatileReportFacts(storedSpecs),
+      withoutVolatileReportFacts(specs),
+    );
+    const effective: ContainerSpecsBlob = unchanged
+      ? {
+          container: specs.container,
+          ...(typeof storedSpecs.reportedAt === 'string'
+            ? { reportedAt: storedSpecs.reportedAt }
+            : { reportedAt: specs.reportedAt }),
+        }
+      : specs;
+    const childChanges = unchanged
+      ? []
+      : diffContainerFacts(storedSpecs.container, specs.container, {
+          samePolicyGeneration,
+        });
+    await this.prisma.infraNode.update({
+      where: { id: child.id },
+      data: {
+        ...(unchanged ? {} : { specs: specs }),
+        status,
+        lastReportedAt: now,
+        agentVersion: report.agentVersion,
+        ...childPolicyFields,
+      },
+    });
+    await this.recordFactChanges(child.id, childChanges);
+    if (child.assetId) {
+      await this.syncAssetSpecs(child.assetId, { ...effective }, [
+        'container',
+        'reportedAt',
+      ]);
+    }
+  }
+
+  /**
+   * The hypervisor-guest reconcile (ADR-0095 §5) — {@link applyContainerTopology} one level up, a
+   * deliberate MIRROR rather than a parameterization of it. The two loops share their hard-won
+   * properties (reported-set diff computed before anything is written, skip-when-unchanged,
+   * enrollment charged per new child with skip-don't-break, vanished→OFFLINE never deleted,
+   * self-healing `RUNS_ON` via the SAME {@link openMissingRunsOnEdges}) but differ on almost every
+   * axis a shared core would have to parameterize: the key helper, the child `kind` (derived from the
+   * guest's own nature, never a hardcode), the status vocabulary, the specs blob key, the fact-change
+   * diff (containers have one; guests record none — see below), the auto-confirm offer, and the
+   * absorbed-child handling that only guests have. Threading seven parameters through one loop would
+   * contort the working container path to save sixty lines; the container semantics are load-bearing
+   * (ADR-0095's own words) and stay untouched.
+   *
+   * Child key: `guestExternalId(host, ref)` — the platform's STABLE ref (PVE vmid, Hyper-V GUID,
+   * libvirt domain UUID), scoped to the host, on the same `(reportingSource, externalId)` partial
+   * unique index. `kind` is `lxc → CONTAINER`, everything else `VM`. Chassis is NEVER written for a
+   * child (ADR-0093 §2): a guest's form factor arrives when its own agent reports.
+   *
+   * WHAT IS DELIBERATELY NOT HERE:
+   *  - **No auto-confirm offer.** The #1145 rule vocabulary is `HOST`/`CONTAINER`, written for
+   *    reporting hosts and Docker children. A hypervisor-proposed guest is honestly neither — offering
+   *    it as a host would let a hostname glob meant for agent-carrying servers confirm machines that
+   *    have never reported for themselves, and offering it as a container would be a lie about what it
+   *    is. Guests land PENDING for the tray (bulk confirm exists); a rules vocabulary for guests is a
+   *    contract change that belongs to shared, not a default smuggled in here.
+   *  - **No fact-change rows.** There is no `diffGuestFacts` in the shared contract yet; recording
+   *    nothing is honest, recording an ad-hoc server-side diff would fork the #1143 vocabulary.
+   *
+   * THE ABSORBED CASE (ADR-0095 §6). A guest whose child was absorbed into its own in-guest agent's
+   * node leaves an ARCHIVED row carrying the merge marker AND its reporting key (see
+   * {@link absorbGuestChild} for why the key stays, unlike a human merge). This method reads those
+   * rows back (the one `includeSoftDeleted` read) so an absorbed guest is not re-proposed — it
+   * resolves to its LIVE canonical node, which only rides the edge self-heal: its facts, status and
+   * liveness belong to its own agent. When that canonical node has itself been DISCARDED, the ref
+   * falls back to unknown and is re-proposed PENDING — the same rule every other discarded reporting
+   * key follows, because a VM the hypervisor still runs must never become silently unrepresentable.
+   */
+  private async applyGuestTopology(
+    hostNodeId: string,
+    guests: readonly AgentGuest[],
+    report: AgentReport,
+    now: Date,
+    principal?: Principal,
+    policy?: AgentPolicy,
+  ): Promise<void> {
+    // A child's liveness follows its HOST's cadence (#1140) — same rule, same echo gate, same
+    // reasoning as the container path: a host whose agent predates the policy channel is not running
+    // a served threshold, and its children must not be swept dark against one it never applied.
+    const childPolicyFields =
+      policy !== undefined && report.policyRevision !== undefined
+        ? { policyStaleAfterSeconds: policy.staleAfterSeconds }
+        : {};
+    // DEDUPE BY KEY, FIRST OCCURRENCE WINS. The shared schema does not dedupe refs, and two list
+    // elements sharing one ref would race the same unique key inside one report: the second create
+    // throws P2002, and although the report survives, the throw would abandon everything after it —
+    // heartbeats, edge self-heals, the vanished sweep — on EVERY report for as long as the
+    // duplicate repeats. The P2002 guard below still covers the cross-report race; this removes the
+    // in-report one at the source.
+    const seenKeys = new Set<string>();
+    const uniqueGuests: AgentGuest[] = [];
+    const duplicateRefs: string[] = [];
+    for (const guest of guests) {
+      const key = guestExternalId(report.externalId, guest.ref);
+      if (seenKeys.has(key)) {
+        duplicateRefs.push(guest.ref);
+        continue;
+      }
+      seenKeys.add(key);
+      uniqueGuests.push(guest);
+    }
+    if (duplicateRefs.length) {
+      // One bounded warning, not one per duplicate: the list is attacker-influenced.
+      this.logger.warn(
+        `${report.host.hostname} listed ${duplicateRefs.length} duplicate guest ref(s) (${duplicateRefs
+          .slice(0, 5)
+          .join(
+            ', ',
+          )}${duplicateRefs.length > 5 ? ', …' : ''}) — the first occurrence of each won; the rest were ignored.`,
+      );
+    }
+    // Every guest child this reporter has for THIS host — INCLUDING archived rows, which is the one
+    // read the container path does not make: an absorbed child is soft-deleted but must keep
+    // resolving its ref to the canonical node, or the hypervisor would re-propose the same guest
+    // every fifteen minutes and the join would re-absorb it — churning one archived row per report.
+    // Scoped by the prefix because refs are only unique per hypervisor (two PVE nodes both run
+    // VMID 101).
+    const known =
+      ((await this.prisma.infraNode.findMany({
+        where: {
+          reportingSource: report.reportingSource,
+          externalId: {
+            startsWith: escapeLikePrefix(
+              guestExternalIdPrefix(report.externalId),
+            ),
+          },
+        },
+        select: {
+          id: true,
+          externalId: true,
+          specs: true,
+          assetId: true,
+          deletedAt: true,
+        },
+        includeSoftDeleted: true,
+      } as Prisma.InfraNodeFindManyArgs)) as unknown as {
+        id: string;
+        externalId: string | null;
+        specs: Prisma.JsonValue;
+        assetId: string | null;
+        deletedAt: Date | null;
+      }[]) ?? [];
+    const liveByExternalId = new Map<string, (typeof known)[number]>();
+    /** ref key → the CANONICAL node an earlier §6 absorb resolved that guest to. */
+    const absorbedInto = new Map<string, string>();
+    for (const row of known) {
+      if (!row.externalId) continue;
+      if (row.deletedAt === null) {
+        liveByExternalId.set(row.externalId, row);
+        continue;
+      }
+      const marker = (row.specs as Record<string, unknown> | null)?.[
+        INFRA_MERGED_INTO_MARKER
+      ];
+      if (
+        typeof marker === 'object' &&
+        marker !== null &&
+        !Array.isArray(marker) &&
+        typeof (marker as Record<string, unknown>).nodeId === 'string' &&
+        !absorbedInto.has(row.externalId)
+      ) {
+        absorbedInto.set(
+          row.externalId,
+          (marker as Record<string, unknown>).nodeId as string,
+        );
+      }
+      // An archived row WITHOUT the marker is an operator's discard — ignored here, so a still-listed
+      // guest under a discarded key is re-proposed PENDING, exactly as a discarded container is.
+    }
+
+    // WHAT THE AGENT REPORTED — the whole (deduped) list, before anything is written, so the retire
+    // sweep can never read "the budget refused this one" as "this one vanished" (#1139's rule).
+    const reported = seenKeys;
+    // A canonical node an absorbed guest resolves to must be LIVE before the edge self-heal may wire
+    // it: creating a RUNS_ON from a node the operator discarded would put an archived row back on the
+    // map. One soft-delete-scoped read, only when an absorbed ref is actually still being reported.
+    const absorbedReported = [
+      ...new Set(
+        uniqueGuests
+          .map((g) =>
+            absorbedInto.get(guestExternalId(report.externalId, g.ref)),
+          )
+          .filter((id): id is string => id !== undefined),
+      ),
+    ];
+    const liveCanonicalIds = new Set(
+      absorbedReported.length
+        ? (
+            await this.prisma.infraNode.findMany({
+              where: { id: { in: absorbedReported } },
+              select: { id: true },
+            })
+          ).map((n) => n.id)
+        : [],
+    );
+
+    const childIds: string[] = [];
+    let budgetSpent = false;
+    for (const guest of uniqueGuests) {
+      const externalId = guestExternalId(report.externalId, guest.ref);
+      // The child's whole inventory blob — `{ guest, reportedAt }`, mirroring the container blob
+      // shape clause for clause: no `host` key, because a guest is not the reporting host, and
+      // written wholesale when it is written at all (#1153).
+      const specs: GuestSpecsBlob = {
+        guest,
+        reportedAt: report.reportedAt,
+      };
+      const status = guestNodeStatus(guest.state);
+
+      const child = liveByExternalId.get(externalId);
+      if (child !== undefined) {
+        await this.refreshGuestChild(
+          child,
+          specs,
+          status,
+          report,
+          now,
+          childPolicyFields,
+        );
+        childIds.push(child.id);
+        void this.syncNodeToSearch(child.id);
+        continue;
+      }
+
+      const canonicalId = absorbedInto.get(externalId);
+      if (canonicalId !== undefined && liveCanonicalIds.has(canonicalId)) {
+        // Absorbed (§6): the guest IS the canonical node now. Only the RUNS_ON self-heal below may
+        // touch it — its status, facts and liveness belong to its own reporting agent, and writing
+        // any of them from the hypervisor's view would have two agents fighting over one row.
+        childIds.push(canonicalId);
+        continue;
+      }
+      // An absorbed ref whose canonical node was DISCARDED falls through and is RE-PROPOSED: the
+      // file's own discard semantics, applied consistently (a discarded host that keeps reporting
+      // re-proposes PENDING, and a discarded marker-less guest child does too). Skipping it forever
+      // would make a VM the hypervisor still runs permanently unrepresentable, with no signal — the
+      // tray is where "the operator discarded its agent's node but the machine still exists" belongs.
+
+      // A child row costs the same enrollment slot a host does (#1134), and a spent budget SKIPS
+      // WITHOUT BREAKING: refusal must never invent a false outage, so the rest of the list keeps
+      // refreshing and the retire sweep keeps reading the full reported set. A 200-VM host against
+      // the 100/hour window enrols gradually over two windows — accepted and documented (ADR-0095 §5).
+      if (budgetSpent || !this.enrollment.tryCharge(principal)) {
+        budgetSpent = true;
+        continue;
+      }
+      let created: { id: string };
+      try {
+        created = await this.prisma.infraNode.create({
+          data: {
+            // The guest's own nature, never a hardcode: qemu/hyperv/libvirt/other → VM, lxc →
+            // CONTAINER — the same answer the in-guest probe would give (ADR-0095 §5).
+            kind: guestNodeKind(guest.kind),
+            label: guest.name,
+            status,
+            source: 'AGENT',
+            state: 'PENDING',
+            reportingSource: report.reportingSource,
+            externalId,
+            lastReportedAt: now,
+            agentVersion: report.agentVersion,
+            ...childPolicyFields,
+            // NO `chassis` (ADR-0093 §2) and no auto-confirm offer — see the method JSDoc.
+            specs: specs as unknown as Prisma.InputJsonValue,
+          },
+          select: { id: true },
+        });
+      } catch (err) {
+        // The concurrent-report race, one level down from the host's #1012 handling: the loser must
+        // fall through to the refresh and KEEP GOING — a throw here would abandon every guest after
+        // this one and skip the vanished sweep, on every report the race repeats.
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          const raced = await this.prisma.infraNode.findFirst({
+            where: { reportingSource: report.reportingSource, externalId },
+            select: { id: true, specs: true, assetId: true },
+          });
+          if (raced) {
+            await this.refreshGuestChild(
+              raced,
+              specs,
+              status,
+              report,
+              now,
+              childPolicyFields,
+            );
+            childIds.push(raced.id);
+            void this.syncNodeToSearch(raced.id);
+            continue;
+          }
+        }
+        throw err;
+      }
+      childIds.push(created.id);
+      void this.syncNodeToSearch(created.id);
+    }
+    if (budgetSpent) {
+      this.logger.warn(
+        `Enrollment budget spent while reconciling ${report.host.hostname}'s guests — guests with no node yet are NOT enrolled until a later report. Known children were still refreshed and none was retired.`,
+      );
+    }
+
+    await this.openMissingRunsOnEdges(childIds, hostNodeId, now);
+
+    // A guest the hypervisor no longer lists goes OFFLINE — never deleted, same rule and same
+    // reasoning as the container sweep: deleting is the human's call, and the §4 staleness sweeper
+    // independently agrees once `lastReportedAt` stops advancing. Live children only: an archived
+    // absorbed row is already off the map, and the canonical node's liveness is its own agent's.
+    const vanished = [...liveByExternalId.values()]
+      .filter((n) => n.externalId !== null && !reported.has(n.externalId))
+      .map((n) => n.id);
+    if (vanished.length) {
+      await this.prisma.infraNode.updateMany({
+        where: { id: { in: vanished } },
+        data: { status: 'OFFLINE' },
+      });
+      for (const id of vanished) void this.syncNodeToSearch(id);
+    }
+  }
+
+  /**
+   * The known-guest refresh — {@link refreshContainerChild}'s guest twin, extracted for the same
+   * reason: the ordinary known-child branch and the per-child P2002 race fallback must be ONE code
+   * path. Facts + liveness only (curation stays the human's), the specs column touched only when
+   * the guest's facts actually moved (#1153), and the linked-Asset sync on the #1157 discipline —
+   * `effective` keeps the stored collection time on a skipped write so the node and its Asset never
+   * disagree. No fact-change rows: there is no `diffGuestFacts` in the shared contract yet (see
+   * {@link applyGuestTopology}).
+   */
+  private async refreshGuestChild(
+    child: { id: string; specs: Prisma.JsonValue; assetId: string | null },
+    specs: GuestSpecsBlob,
+    status: InfraNodeStatus,
+    report: AgentReport,
+    now: Date,
+    childPolicyFields: { policyStaleAfterSeconds?: number },
+  ): Promise<void> {
+    const storedSpecs = (child.specs ?? {}) as Record<string, unknown>;
+    const unchanged = isDeepStrictEqual(
+      withoutVolatileReportFacts(storedSpecs),
+      withoutVolatileReportFacts(specs),
+    );
+    const effective: GuestSpecsBlob = unchanged
+      ? {
+          guest: specs.guest,
+          ...(typeof storedSpecs.reportedAt === 'string'
+            ? { reportedAt: storedSpecs.reportedAt }
+            : { reportedAt: specs.reportedAt }),
+        }
+      : specs;
+    await this.prisma.infraNode.update({
+      where: { id: child.id },
+      data: {
+        ...(unchanged ? {} : { specs: specs }),
+        status,
+        lastReportedAt: now,
+        agentVersion: report.agentVersion,
+        ...childPolicyFields,
+      },
+    });
+    if (child.assetId) {
+      await this.syncAssetSpecs(child.assetId, { ...effective }, [
+        'guest',
+        'reportedAt',
+      ]);
+    }
+  }
+
+  /**
+   * The ADR-0095 §6 identity join: absorb any live `/guest/` child that IS the machine this report's
+   * own agent runs on — corroborated SMBIOS UUID + at least one MAC, never a single-signal merge.
+   *
+   * THE REPORTING AGENT'S NODE IS CANONICAL. It has the machine-id, the software inventory, the real
+   * identity evidence; the host-proposed child has a config read. So the child is absorbed into the
+   * reporting node — see {@link absorbGuestChild} for why that is a minimal variant rather than
+   * {@link mergeNodeInto}.
+   *
+   * BOUNDED, BY CONSTRUCTION (the ADR-0093 "indexed lookup, `findIdentityMatches` deliberately not
+   * called" discipline, taken as far as the data allows). The gate is the report itself: no
+   * `smbios-uuid` in `host.identifiers[]` — every pre-0095 agent, every unprivileged collector —
+   * means NO query at all. When it runs, it is ONE raw query with an equality predicate on
+   * `specs->'guest'->>'smbiosUuid'` narrowed to `/guest/` keys and capped at
+   * {@link GUEST_ABSORB_CANDIDATES_MAX} rows — a sequential filter over the node table (the same
+   * class of cost `findIdentityMatches` documents), but scoped to a handful of matched rows, gated
+   * on evidence the report actually carries, and self-extinguishing: once the child is absorbed the
+   * predicate matches nothing. A GIN index is the recorded escalation if a fleet ever makes this the
+   * slow part; hostExternalIdOfGuestChild is deliberately not involved because the in-guest agent
+   * does not know which host key proposed it.
+   *
+   * UUID WITHOUT MAC CORROBORATION NEVER MERGES (clones demonstrably duplicate BIOS UUIDs): it
+   * surfaces once through the existing duplicate-suspicion channel — the same
+   * `infra.identity_conflict` bell nudge #1141 uses, deduped per (child, uuid) — and leaves the
+   * operator the call. A candidate flagged with an identity conflict, or a reporting node carrying
+   * one, is never merged at all.
+   *
+   * AND NO SMBIOS UUID IS NOT A NO-OP — IT IS A FINDING (#1227). This used to be a bare `return`,
+   * and in the field that produced two permanent nodes and total silence: a Windows 11 guest on
+   * Proxmox whose `Win32_ComputerSystemProduct` returns no instance at all (QEMU 8.1 defaulted
+   * `pc-*` to the 64-bit SMBIOS 3.0 entry point, which Windows cannot locate; Proxmox pins the
+   * machine version at creation for Windows guests only, so the Linux VMs beside it converged).
+   * There is no in-guest source to fall back to — but the hypervisor-assigned MAC is on BOTH sides,
+   * matching, and nothing was looking at it. So the gate now falls through to
+   * {@link nudgeGuestChildrenMatchingMac}, which is HINT-ONLY by construction.
+   */
+  private async absorbCorroboratedGuestChildren(
+    nodeId: string,
+    report: AgentReport,
+    now: Date,
+  ): Promise<void> {
+    const uuids = smbiosUuidsOf(report.host);
+    if (uuids.length === 0) {
+      await this.nudgeGuestChildrenMatchingMac(nodeId, report);
+      return;
+    }
+    const candidates = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        externalId: string | null;
+        label: string | null;
+        reportingSource: string | null;
+        specs: unknown;
+      }>
+    >(
+      Prisma.sql`SELECT "id", "externalId", "label", "reportingSource", "specs"
+                   FROM "infra_nodes"
+                  WHERE "deletedAt" IS NULL
+                    AND "id" <> ${nodeId}
+                    AND "externalId" LIKE ${`%${guestExternalIdPrefix('')}%`}
+                    AND lower("specs"->'guest'->>'smbiosUuid') IN (${Prisma.join(uuids)})
+                  ORDER BY "id"
+                  LIMIT ${GUEST_ABSORB_CANDIDATES_MAX}`,
+    );
+    if (candidates.length === 0) return;
+    if (candidates.length >= GUEST_ABSORB_CANDIDATES_MAX) {
+      // A clone farm sharing one baked UUID can fill the LIMIT with impostors and push the true
+      // child outside the set — the absorb then silently never fires. The ORDER BY above makes the
+      // kept set deterministic across replicas; this line makes the truncation visible.
+      this.logger.warn(
+        `The guest identity join for ${report.host.hostname} hit the candidate cap (${GUEST_ABSORB_CANDIDATES_MAX} children share this SMBIOS UUID) — the matching child may be outside the set and the absorb may not fire this report. This estate is likely running cloned templates with duplicated BIOS UUIDs.`,
+      );
+    }
+    const reportedMacs = hostIdentityEvidence(report.host).macs;
+    // Resolved lazily, once, and only because a candidate matched: a node under an active #1141
+    // collision (or still carrying its marker) never absorbs anything — suspicion disqualifies both
+    // directions of a merge.
+    let nodeFlagged: boolean | undefined;
+    for (const candidate of candidates) {
+      // Defensive re-checks over a jsonb the query matched: the key really is a guest child's, the
+      // blob really is a guest blob, and the child is not itself under an identity conflict.
+      if (!isGuestChildExternalId(candidate.externalId)) continue;
+      const candidateSpecs = (candidate.specs ?? {}) as Record<string, unknown>;
+      if (
+        candidateSpecs.identityConflict !== undefined &&
+        candidateSpecs.identityConflict !== null
+      ) {
+        continue;
+      }
+      const macs = guestChildMacs(candidateSpecs.guest);
+      const corroborated = reportedMacs.some((mac) => macs.includes(mac));
+      if (!corroborated) {
+        // One fact is a hint, never a merge (ADR-0093's discipline). Deduped per (child, uuid), so a
+        // clone checking in every 15 minutes nudges once. Best-effort like every emit on this path.
+        this.logger.warn(
+          `"${report.host.hostname}" reports the SMBIOS UUID of guest child "${candidate.label ?? candidate.externalId}" (${candidate.id}) but no network card corroborates — nothing was merged. Clones duplicate BIOS UUIDs; if these really are one machine, merge them from the tray.`,
+        );
+        await this.notifications.emit({
+          type: 'infra.identity_conflict',
+          dedupeKey: `infra.guest_uuid_suspicion:${candidate.id}:${uuids[0]}`,
+          severity: 'warning',
+          title: `Is "${report.host.hostname}" guest "${candidate.label ?? candidate.externalId}"? UUID matches, no NIC corroborates`,
+          summary:
+            `Review before merging — "${report.host.hostname}" reports the same SMBIOS UUID as the ` +
+            `hypervisor-proposed guest "${candidate.label ?? candidate.externalId}", but none of its network ` +
+            `cards match. Cloned templates duplicate BIOS UUIDs, so lazyit did NOT merge them. If they are ` +
+            `one machine, merge the guest into the reporting node from the topology view.`,
+          metadata: {
+            nodeId,
+            hostname: report.host.hostname,
+            guestNodeId: candidate.id,
+            guestLabel: candidate.label,
+            smbiosUuid: uuids[0],
+          },
+        });
+        continue;
+      }
+      nodeFlagged ??=
+        (await this.storedConflictDetectedAt(nodeId)) !== undefined;
+      if (nodeFlagged) {
+        this.logger.warn(
+          `Guest child ${candidate.id} corroborates node ${nodeId}, but that node carries an identity-conflict marker — nothing was merged.`,
+        );
+        continue;
+      }
+      await this.absorbGuestChild(
+        {
+          id: candidate.id,
+          externalId: candidate.externalId,
+          label: candidate.label,
+          reportingSource: candidate.reportingSource,
+          specs: candidateSpecs,
+        },
+        nodeId,
+        now,
+      );
+    }
+  }
+
+  /**
+   * The #1227 fallback: this report carries NO `smbios-uuid`, so the §6 join has no key to run on —
+   * surface any `/guest/` child the reported MACs match, and let the operator decide.
+   *
+   * HINT-ONLY, ALWAYS. It emits the existing `infra.identity_conflict` nudge and NOTHING else: no
+   * transaction, no absorb, no write of any kind. ADR-0095 §6's rule is that one fact is never a
+   * merge, and a MAC is one fact — weaker than a UUID, not stronger. Wrong merges are expensive and
+   * irreversible in practice; a nudge with a one-click merge behind it is cheap. The operator gets
+   * one bell and one click instead of two permanent nodes and no explanation.
+   *
+   * WHO THIS ACTUALLY FIRES ON — stated honestly, because the copy depends on it. The gate is "no
+   * `smbios-uuid` + has MACs", and that population is NOT dominated by #1227's Windows-on-QEMU case.
+   * Two much larger groups live inside it permanently:
+   *
+   *  (a) UNPRIVILEGED LINUX AGENTS. `/sys/class/dmi/id/product_uuid` is mode 0400, so an
+   *      unprivileged run omits the identifier — and unprivileged is a first-class documented
+   *      posture (ADR-0074), not a misconfiguration.
+   *  (b) EVERY PVE LXC CONTAINER RUNNING ITS OWN AGENT. `parsePveConfig` reads `smbios1`, which an
+   *      LXC config does not have, so every LXC `/guest/` child carries macs and no `smbiosUuid`,
+   *      and the in-container agent reports a MAC and no `smbios-uuid`. On an LXC estate that is a
+   *      guaranteed, permanent match — every container, every report, forever.
+   *
+   * So the nudge BRANCHES its cause and its repair on the two facts already in hand (the child's
+   * `kind`, the report's `diagnostics.privileged`). Telling a container operator to raise a QEMU
+   * machine version is telling them to do something that cannot help: a container has no SMBIOS.
+   *
+   * THE COST BOUND, which is the real risk here and is why this is not simply "also query by MAC".
+   * The UUID query is safe partly because most reports carry no `smbios-uuid` and it self-extinguishes
+   * once the child is absorbed. Almost every report DOES carry a `mac`, so an unguarded MAC lookup
+   * would turn a rare scan into a per-report one across the whole fleet. Three things hold it:
+   *
+   *  1. It runs ONLY when the report has no `smbios-uuid` at all — the UUID path did not merely
+   *     return zero candidates, it never ran. That is a REAL bound but not a small population: on an
+   *     estate of unprivileged agents or LXC containers this query runs on every report of theirs,
+   *     forever, and never self-extinguishes. The GIN-index escalation below is the answer if it
+   *     ever becomes the slow part; the cap and the narrowing are what hold it until then.
+   *  2. Same narrowing as its sibling: `/guest/` keys only, `ORDER BY "id"`, capped at
+   *     {@link GUEST_ABSORB_CANDIDATES_MAX}.
+   *  3. It is not self-extinguishing (nothing is merged), so the `dedupeKey` carries the child AND
+   *     the MAC — a 20-guest host rings once per pair, not twenty times per tick. For the same
+   *     reason the LOG speaks only when a candidate actually came back: a WARN on every report of
+   *     every unprivileged host says nothing, and a log that always fires is not a signal.
+   *
+   * The reporting node's own conflict marker is deliberately NOT read here: that read exists to
+   * disqualify a MERGE, and this path cannot merge — paying a query per report to suppress a hint
+   * would cost more than the hint. A node under an active #1141 collision therefore still receives
+   * hints, which is safe precisely because a hint writes nothing.
+   */
+  private async nudgeGuestChildrenMatchingMac(
+    nodeId: string,
+    report: AgentReport,
+  ): Promise<void> {
+    const macs = hostIdentityEvidence(report.host).macs;
+    if (macs.length === 0) return;
+    const candidates = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        externalId: string | null;
+        label: string | null;
+        specs: unknown;
+      }>
+    >(
+      // The CASE is what makes this safe on ANY blob: `jsonb_array_elements_text` throws on a
+      // non-array, and Postgres is free to reorder a bare `jsonb_typeof(...) = 'array' AND …` guard.
+      // `lower()` tolerates CASE skew only, in a hand-edited or pre-sanitize blob — NOT separator
+      // skew (`AA-BB-…`, `aabb.ccdd…`), which `guestChildMacs` below does tolerate. This predicate
+      // is deliberately the narrower of the two: it is only a prefilter, `guestChildMacs` is the
+      // authority, and a prefilter that misses a hand-mangled blob costs a hint, not a merge.
+      Prisma.sql`SELECT "id", "externalId", "label", "specs"
+                   FROM "infra_nodes"
+                  WHERE "deletedAt" IS NULL
+                    AND "id" <> ${nodeId}
+                    AND "externalId" LIKE ${`%${guestExternalIdPrefix('')}%`}
+                    AND EXISTS (
+                          SELECT 1
+                            FROM jsonb_array_elements_text(
+                                   CASE WHEN jsonb_typeof("specs"->'guest'->'macs') = 'array'
+                                        THEN "specs"->'guest'->'macs'
+                                        ELSE '[]'::jsonb END) AS m(mac)
+                           WHERE lower(m.mac) IN (${Prisma.join(macs)}))
+                  ORDER BY "id"
+                  LIMIT ${GUEST_ABSORB_CANDIDATES_MAX}`,
+    );
+    if (candidates.length === 0) return;
+    // BELOW the empty check on purpose (see 3. above): this used to fire before the query, on every
+    // report of every unprivileged host and every LXC container, and never matched anything.
+    this.logger.warn(
+      `"${report.host.hostname}" reports no SMBIOS UUID, so the guest identity join has no key to run on — falling back to its ${macs.length} reported MAC(s) as a HINT over ${candidates.length} candidate guest child(ren).`,
+    );
+    for (const candidate of candidates) {
+      // The same defensive re-checks the UUID path makes over a jsonb the query matched.
+      if (!isGuestChildExternalId(candidate.externalId)) continue;
+      const candidateSpecs = (candidate.specs ?? {}) as Record<string, unknown>;
+      if (
+        candidateSpecs.identityConflict !== undefined &&
+        candidateSpecs.identityConflict !== null
+      ) {
+        continue;
+      }
+      const matched = guestChildMacs(candidateSpecs.guest).find((mac) =>
+        macs.includes(mac),
+      );
+      if (!matched) continue;
+      const label = candidate.label ?? candidate.externalId;
+      // The cause and the repair, chosen from what is already known rather than assumed. Order
+      // matters: a container has no firmware to read, so `root` would not help it either.
+      const cause =
+        guestChildKind(candidateSpecs.guest) === 'lxc'
+          ? `Containers do not have an SMBIOS UUID of their own, so lazyit can never confirm this ` +
+            `pair automatically. If they are one machine, merge the guest into the reporting node ` +
+            `from the topology view.`
+          : report.diagnostics?.privileged === false
+            ? `That agent is running unprivileged, and the firmware UUID is root-only ` +
+              `(/sys/class/dmi/id/product_uuid is mode 0400): run it as root or Administrator and ` +
+              `the two converge on their own from the next report. Otherwise, if they are one ` +
+              `machine, merge the guest into the reporting node from the topology view.`
+            : `On a virtual machine that usually means the hypervisor exposes only the 64-bit ` +
+              `SMBIOS entry point, which Windows cannot read (Proxmox/QEMU machine types ` +
+              `pc-*-8.1 and pc-*-8.2 do this): setting the VM's machine version newer, or ` +
+              `-machine smbios-entry-point-type=32, makes them converge on their own. If they are ` +
+              `one machine, merge the guest into the reporting node from the topology view.`;
+      this.logger.warn(
+        `"${report.host.hostname}" shares network card ${matched} with guest child "${label}" (${candidate.id}) but reports no SMBIOS UUID to corroborate it — nothing was merged. If these are one machine, merge them from the tray.`,
+      );
+      await this.notifications.emit({
+        type: 'infra.identity_conflict',
+        dedupeKey: `infra.guest_mac_suspicion:${candidate.id}:${matched}`,
+        severity: 'warning',
+        title: `Is "${report.host.hostname}" guest "${label}"? A network card matches, no UUID to confirm`,
+        summary:
+          `Review before merging — "${report.host.hostname}" uses network card ${matched}, which the ` +
+          `hypervisor-proposed guest "${label}" also reports, but its agent reported no SMBIOS UUID ` +
+          `to corroborate it, so lazyit has only one fact and did NOT merge them. ${cause}`,
+        metadata: {
+          nodeId,
+          hostname: report.host.hostname,
+          guestNodeId: candidate.id,
+          guestLabel: candidate.label,
+          mac: matched,
+        },
+      });
+    }
+  }
+
+  /**
+   * Absorb one corroborated `/guest/` child into the canonical (in-guest agent's) node — the MINIMAL
+   * variant ADR-0095 §6 needs, and deliberately NOT {@link mergeNodeInto}, whose contract points the
+   * wrong way three times over for this case:
+   *
+   *  1. It TRANSPLANTS the source's reporting key onto the target — correct for a re-image, fatal
+   *     here: the canonical node's own key is its live agent's, and overwriting it would orphan that
+   *     agent (its next report would mint a fresh PENDING duplicate — the exact fork §6 closes).
+   *  2. It moves the AGENT-OWNED specs keys from source to target, DELETING target keys the source
+   *     lacks — and a guest child carries no `host`/`software`, so the canonical node's whole
+   *     inventory would be erased by its own absorption.
+   *  3. It CLEARS the archived row's key so the pair can move — but here the pair must NOT move, and
+   *     the archived row must KEEP its `/guest/` key: that key is how {@link applyGuestTopology}
+   *     recognises an absorbed guest and resolves it to the canonical node instead of re-proposing
+   *     it every report. The partial unique index covers live rows only, so a soft-deleted holder is
+   *     legal — the same shape an operator's discard already leaves.
+   *
+   * What it DOES: archives the child under the same {@link INFRA_MERGED_INTO_MARKER} provenance a
+   * human merge stamps (who is absent — this is a machine-corroborated action), re-points the
+   * `RUNS_ON` edge — the child's active edge is closed and, when the canonical node has no active
+   * `RUNS_ON` of its own, one is opened to the same host (close-before-open, one-active-per-source) —
+   * and leaves the child's linked Asset alone, exactly as {@link mergeNodeInto} and `removeNode` do.
+   * Curation on the archived row survives for restore. The canonical node's own row is not written at
+   * all: its facts arrived on this very report through the ordinary refresh.
+   */
+  private async absorbGuestChild(
+    child: {
+      id: string;
+      externalId: string | null;
+      label: string | null;
+      reportingSource: string | null;
+      specs: Record<string, unknown>;
+    },
+    canonicalNodeId: string,
+    now: Date,
+  ): Promise<void> {
+    const childEdge = await this.prisma.infraEdge.findFirst({
+      where: { sourceId: child.id, kind: 'RUNS_ON', endedAt: null },
+      select: { id: true, targetId: true },
+    });
+    const canonicalEdge = await this.prisma.infraEdge.findFirst({
+      where: { sourceId: canonicalNodeId, kind: 'RUNS_ON', endedAt: null },
+      select: { id: true },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.infraNode.update({
+        where: { id: child.id },
+        data: {
+          deletedAt: now,
+          // The reporting key is deliberately KEPT (see the JSDoc, point 3).
+          specs: {
+            ...child.specs,
+            [INFRA_MERGED_INTO_MARKER]: {
+              nodeId: canonicalNodeId,
+              externalId: child.externalId,
+              reportingSource: child.reportingSource,
+              at: now.toISOString(),
+            },
+          },
+        },
+      });
+      if (childEdge) {
+        // Close BEFORE opening — the one-active-RUNS_ON-per-source partial unique index.
+        await tx.infraEdge.updateMany({
+          where: { id: childEdge.id },
+          data: { endedAt: now },
+        });
+        if (!canonicalEdge) {
+          try {
+            await tx.infraEdge.create({
+              data: {
+                sourceId: canonicalNodeId,
+                targetId: childEdge.targetId,
+                kind: 'RUNS_ON',
+              },
+            });
+          } catch (err) {
+            // A concurrent report opened it first — the invariant held; not a failure.
+            if (
+              !(
+                err instanceof Prisma.PrismaClientKnownRequestError &&
+                err.code === 'P2002'
+              )
+            ) {
+              throw err;
+            }
+          }
+        }
+      }
+    });
+    this.logger.log(
+      `Absorbed guest child "${child.label ?? child.externalId}" (${child.id}) into its own agent's node ${canonicalNodeId} — corroborated SMBIOS UUID + MAC (ADR-0095 §6). The RUNS_ON edge now belongs to the canonical node.`,
+    );
+    this.search.remove('infra', child.id);
+    void this.syncNodeToSearch(canonicalNodeId);
   }
 
   /**
@@ -2403,41 +3478,30 @@ export class InfraService {
       // rather than fail the confirm. `modelId` is deliberately left null (no AssetModel auto-create).
       const host = (hostSpecs.host ?? {}) as AgentReportHost;
       const serial = sanitizeSerial(host);
-      const assetSpecs: Record<string, unknown> = {
-        ...hostSpecs,
-        [INFRA_AUTO_ASSET_MARKER]: true,
-      };
-      // Same rule as the repeat-report refresh (#1138/#1142): the report diagnostics and the software
-      // fingerprint stay on the node. This is the path that mints the Asset, so without the strip the
-      // very first thing a confirmed host's inventory snapshot carries is a diagnostic about a report
-      // the server half-understood — and unlike the node's blob, an Asset's specs are MERGED, so it
-      // would never clear itself.
-      for (const key of NODE_ONLY_SPECS_KEYS) delete assetSpecs[key];
-      let created: { id: string };
-      try {
-        created = await this.assets.create(
-          {
-            name: label,
-            status: 'UNKNOWN',
-            ...(serial !== undefined ? { serial } : {}),
-            specs: assetSpecs,
-          },
+
+      // ADOPTION (ADR-0093 §3), BEFORE minting anything: if this report's serial corroborates a live
+      // Asset, LINK that Asset instead of manufacturing a second row for one physical machine.
+      const adopted = await this.adoptableAsset(hostSpecs, serial);
+      if (adopted) {
+        // No Asset is created, `modelId` is untouched (an adopted row may already carry a human's),
+        // and `Asset.serial` is NOT written — adoption is KEYED on the serial, so the row provably
+        // already carries it. The node's label/kind/state transitions below are unchanged.
+        //
+        // AND THE PROVENANCE MARKER IS NOT STAMPED. That is the load-bearing safety rule of this
+        // whole feature: `detachAsset` SOFT-DELETES an asset carrying `_infraAutoCreated`, so
+        // stamping it here would mean a later detach silently deleted the operator's curated
+        // inventory row — the opposite of what the #1117 error message promises ("a pre-existing one
+        // is left intact and merely un-linked"). See {@link detachAsset}.
+        await this.recordAgentLink(adopted.id, node, principal);
+        assetId = adopted.id;
+      } else {
+        assetId = await this.mintBackingAsset(
+          hostSpecs,
+          serial,
+          label,
           principal,
         );
-      } catch (err) {
-        // A discovered serial that collides with an existing LIVE asset's serial (P2002 on
-        // `assets_serial_active_key`) must NOT fail the confirm — retry without it (the serial stays
-        // in specs). Any other error propagates unchanged.
-        if (serial !== undefined && isSerialUniqueCollision(err)) {
-          created = await this.assets.create(
-            { name: label, status: 'UNKNOWN', specs: assetSpecs },
-            principal,
-          );
-        } else {
-          throw err;
-        }
       }
-      assetId = created.id;
     }
 
     const updated = await this.prisma.infraNode.update({
@@ -2452,6 +3516,131 @@ export class InfraService {
     // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
     void this.syncNodeToSearch(updated.id);
     return this.getNodeDetail(id, principal);
+  }
+
+  /**
+   * The live Asset a confirm should ADOPT for this node (ADR-0093 §3), or `null` to mint as before.
+   *
+   * ONE INDEXED LOOKUP, and `findIdentityMatches` is deliberately NOT called. That helper asks *"which
+   * other NODES look like this node?"* over an un-indexed jsonb containment scan — a different question
+   * on the wrong side of the join, whose sequential scan is tolerable only because it is a per-UI-read
+   * cost. Adoption asks *"which ASSET carries this serial?"*, which the `assets_serial_active_key`
+   * partial unique index answers as an index lookup. The soft-delete extension scopes `findFirst`, so
+   * the `deletedAt IS NULL` half of that index is enforced for free and an archived asset is never
+   * adopted. Everything before the lookup is a pure, query-free computation over the blob in memory.
+   *
+   * This matters because with an auto-confirm rule saved (#1145) `confirmNode` runs INSIDE the report
+   * request — but only ever once per node, since confirm is a one-way transition.
+   *
+   * Two guards, both fail-closed toward MINTING, which is recoverable by hand where a mis-link is not:
+   * no sanitized serial at all (absent, or an OEM placeholder), and the §3a corroboration gate.
+   */
+  private async adoptableAsset(
+    hostSpecs: Record<string, unknown>,
+    serial: string | undefined,
+  ): Promise<{ id: string } | null> {
+    if (serial === undefined) return null;
+    if (!corroboratesAdoption(hostSpecs, serial)) return null;
+    return this.prisma.asset.findFirst({
+      where: { serial },
+      select: { id: true },
+    });
+  }
+
+  /**
+   * Mint a brand-new backing Asset for a confirmed node — the pre-ADR-0093 path, now reached only when
+   * adoption found nothing to adopt. Returns the new asset's id.
+   *
+   * The serial promotion (#1081) and its collision retry both survive, but the retry's ROLE has
+   * changed: under §3 a serial that would collide is a serial that corroborates, and a corroborating
+   * serial adopts, so this catch is no longer the designed path — it is a RACE BACKSTOP for two
+   * confirms landing at once. Retrying without the serial remains strictly better than failing an
+   * operator's confirm, and the raw value still survives in `specs.host.hardware.serial`.
+   */
+  private async mintBackingAsset(
+    hostSpecs: Record<string, unknown>,
+    serial: string | undefined,
+    label: string,
+    principal?: Principal,
+  ): Promise<string> {
+    const assetSpecs: Record<string, unknown> = {
+      ...hostSpecs,
+      // The provenance marker, on the MINT branch ONLY (ADR-0093 §4). It is what makes a later detach
+      // soft-delete a row lazyit invented, and what must never be written onto a row it merely adopted.
+      [INFRA_AUTO_ASSET_MARKER]: true,
+    };
+    // Same rule as the repeat-report refresh (#1138/#1142): the report diagnostics and the software
+    // fingerprint stay on the node. This is the path that mints the Asset, so without the strip the
+    // very first thing a confirmed host's inventory snapshot carries is a diagnostic about a report
+    // the server half-understood — and unlike the node's blob, an Asset's specs are MERGED, so it
+    // would never clear itself.
+    for (const key of NODE_ONLY_SPECS_KEYS) delete assetSpecs[key];
+    let created: { id: string };
+    try {
+      created = await this.assets.create(
+        {
+          name: label,
+          status: 'UNKNOWN',
+          ...(serial !== undefined ? { serial } : {}),
+          specs: assetSpecs,
+        },
+        principal,
+      );
+    } catch (err) {
+      // A discovered serial that collides with an existing LIVE asset's serial (P2002 on
+      // `assets_serial_active_key`) must NOT fail the confirm — retry without it (the serial stays
+      // in specs). Any other error propagates unchanged.
+      if (serial !== undefined && isSerialUniqueCollision(err)) {
+        created = await this.assets.create(
+          { name: label, status: 'UNKNOWN', specs: assetSpecs },
+          principal,
+        );
+      } else {
+        throw err;
+      }
+    }
+    return created.id;
+  }
+
+  /**
+   * The ONE `AssetHistory` event an adoption emits (ADR-0093 §4) — `AGENT_LINKED`, at the moment of the
+   * link and never again.
+   *
+   * It answers the only question a human reading a curated Asset's history will actually ask: *when did
+   * a machine start writing to this row, and which one?* The recurring path stays silent by design —
+   * `syncAssetSpecs` writes `specs` on every check-in with no `SPECS_CHANGED`, because an event per
+   * report at a five-minute cadence would drown every human edit this row ever received. What MOVED is
+   * audited on the NODE instead ([[infra-node-fact-change]], #1143), one join away.
+   *
+   * BEST-EFFORT, never fatal. The link itself is the operator's action and it has already been decided
+   * by the time this runs; losing the audit row would be a real loss, but failing the confirm over it
+   * would be a worse one — and on the auto-confirm path (#1145) it would fail a REPORT.
+   */
+  private async recordAgentLink(
+    assetId: string,
+    node: {
+      id: string;
+      reportingSource: string | null;
+      externalId: string | null;
+    },
+    principal?: Principal,
+  ): Promise<void> {
+    try {
+      await this.assetHistory.record(this.prisma, {
+        assetId,
+        eventType: 'AGENT_LINKED',
+        payload: {
+          nodeId: node.id,
+          reportingSource: node.reportingSource,
+          externalId: node.externalId,
+        },
+        actor: this.actor.resolveActor(principal),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Could not record the AGENT_LINKED event for asset ${assetId} — node ${node.id} was still linked to it. ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**
@@ -2583,7 +3772,36 @@ export class InfraService {
   }
 
   /**
-   * A page-less list of nodes, newest first, filtered; soft-deleted nodes excluded by the extension.
+   * `GET /infra/nodes` — the deprecated compatibility array retained until v2.0. It intentionally
+   * remains unbounded and accepts only the historical `kind` / `status` / `state` filters. The row
+   * projection and privacy mapper are shared with the first-party page, so compatibility does not
+   * preserve the archived-Asset disclosure bug.
+   */
+  async listNodes(filters: LegacyInfraNodeFilters) {
+    const rows = await this.prisma.infraNode.findMany({
+      where: this.buildNodeListWhere(filters),
+      orderBy: INFRA_NODE_DEFAULT_ORDER,
+      select: INFRA_NODE_LIST_SELECT,
+    });
+    return rows.map(projectInfraNodeListRow);
+  }
+
+  /**
+   * `GET /infra/nodes/page` — a PAGED list of nodes (#1152), on the house ADR-0030 `Page<T>` contract:
+   * `{ items, total, limit, offset }`, default page 50, hard max 200, an over-max `limit` rejected
+   * rather than clamped. Soft-deleted nodes are excluded by the extension.
+   *
+   * This first-party route closes the unbounded poll without changing the historical endpoint's wire
+   * shape: the PENDING tray hits this every 40s and the create-agent wizard every 5s, and an ADR-0095
+   * hypervisor host can enrol 500 guest nodes in one report.
+   *
+   * `total` is a `count` over the SAME `where` as `items`, both inside ONE RepeatableRead transaction,
+   * so the number a caller displays cannot describe a different snapshot than the rows beside it.
+   *
+   * There is deliberately no `deleted` slice here (ADR-0030 §7). The web has no archived-nodes view,
+   * so the param would be contract surface nothing consumes; the controller does not accept it, so
+   * nothing is silently ignored either. Add it with the view that needs it.
+   *
    * Each row carries the Servers-list payoff (ADR-0070 §6, issue #750): the linked Asset's inventory
    * `assetName` and its active `owners` — joined in ONE query (a single relation join, NOT an
    * N+1 per-row detail fetch), then flattened to the lean `InfraNodeListItem` wire shape. Mirrors the
@@ -2604,81 +3822,193 @@ export class InfraService {
    * NOT nested relation reads (verified against the Prisma query-extension docs). And a `where` filter
    * is NOT allowed on a to-ONE relation include (`asset` is to-one) — Prisma only filters to-MANY
    * relation lists inside `include`/`select`. So we select the asset's `deletedAt` alongside `name`
-   * and gate the name in app code: a soft-deleted (detached/archived) Asset never leaks its name
-   * (`assetName: null`), exactly as `getNodeDetail`'s soft-delete-filtered `findFirst` already honours.
-   * Owners mirror `resolveOwners` exactly: ACTIVE assignments only (`releasedAt: null`), newest first,
-   * with the owner user inlined — a departed (soft-deleted) USER still surfaces with its `deletedAt`
-   * set, so the UI renders the same "left the company" affordance (history kept, ADR-0019).
+   * and gate the whole relation in app code: a soft-deleted (detached/archived) Asset yields
+   * `assetName: null` and `owners: []`. Owners on a live Asset mirror `resolveOwners`: ACTIVE
+   * assignments only (`releasedAt: null`), newest first, with the owner user inlined — a departed
+   * (soft-deleted) USER still surfaces with its `deletedAt` set, so the UI renders the same "left the
+   * company" affordance (history kept, ADR-0019).
    */
-  async listNodes(filters: InfraNodeFilters = {}) {
-    const rows = await this.prisma.infraNode.findMany({
-      where: {
-        ...(filters.kind ? { kind: filters.kind } : {}),
-        ...(filters.status ? { status: filters.status } : {}),
-        ...(filters.state ? { state: filters.state } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        kind: true,
-        label: true,
-        status: true,
-        assetId: true,
-        ipAddress: true,
-        ipAddressSource: true,
-        shortcuts: true, // bounded by INFRA_SHORTCUTS_MAX — unlike `specs`, safe to carry per row
-        x: true,
-        y: true,
-        source: true,
-        state: true,
-        reportingSource: true,
-        externalId: true,
-        lastReportedAt: true,
-        agentVersion: true,
-        createdAt: true,
-        updatedAt: true,
-        deletedAt: true,
-        // NOTE: `specs` is deliberately absent (#1135) — see the doc comment.
-        asset: {
-          // `deletedAt` is selected (not filterable on a to-one relation) so the flatten can gate the
-          // name — a soft-deleted asset must NOT leak its name through the list.
-          select: {
-            name: true,
-            deletedAt: true,
-            assignments: {
-              where: { releasedAt: null },
-              orderBy: { assignedAt: 'desc' },
-              select: {
-                id: true,
-                user: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    deletedAt: true,
+  async listNodePage(filters: InfraNodeFilters, page: PageQuery) {
+    const where = this.buildNodeListWhere(filters);
+    const { take, skip } = offsetOf(page);
+    // An allowlisted sort still gets the unique `id` appended. Sorting by `label` re-opens exactly
+    // the tie the default order closed — two hosts can share a label — and under a window a partial
+    // order is silent row loss, not a cosmetic wobble. So the tiebreaker is unconditional.
+    const sorted =
+      resolveSortOrBadRequest<Prisma.InfraNodeOrderByWithRelationInput>(
+        page,
+        INFRA_NODE_SORT_ALLOWLIST,
+      );
+    const orderBy = sorted
+      ? [sorted, INFRA_NODE_TIEBREAKER]
+      : INFRA_NODE_DEFAULT_ORDER;
+
+    // findMany + count over ONE `where` and one RepeatableRead snapshot, so `total` cannot drift from
+    // the rows it describes when a concurrent report inserts or updates a node between statements.
+    const [rows, total] = await this.prisma.$transaction(
+      [
+        this.prisma.infraNode.findMany({
+          where,
+          orderBy,
+          take,
+          skip,
+          select: INFRA_NODE_LIST_SELECT,
+        }),
+        this.prisma.infraNode.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    const items = rows.map(projectInfraNodeListRow);
+    return pageOf(items, total, page);
+  }
+
+  /**
+   * The ONE `where` behind both halves of the page — the rows and the `count`. Sharing it is not
+   * tidiness: a `total` computed over a different predicate than `items` is a number that lies, and
+   * the PENDING tray renders that number as its badge.
+   */
+  private buildNodeListWhere(
+    filters: InfraNodeFilters,
+  ): Prisma.InfraNodeWhereInput {
+    const q = filters.q?.trim();
+    return {
+      ...(filters.kind ? { kind: filters.kind } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.state ? { state: filters.state } : {}),
+      ...(filters.source ? { source: filters.source } : {}),
+      ...(filters.role ? { AND: [infraNodeRoleWhere(filters.role)] } : {}),
+      ...(filters.ids?.length ? { id: { in: filters.ids } } : {}),
+      ...(filters.assetIds?.length
+        ? { assetId: { in: filters.assetIds } }
+        : {}),
+      ...(q
+        ? {
+            OR: [
+              { label: { contains: q, mode: 'insensitive' as const } },
+              { ipAddress: { contains: q, mode: 'insensitive' as const } },
+              // The two JOINED facts the Servers row displays. They were searchable client-side
+              // before the page (#750); dropping them here would quietly shrink what the search box
+              // matches, which is a worse regression than the truncation the page fixes.
+              {
+                asset: {
+                  is: {
+                    deletedAt: null,
+                    name: { contains: q, mode: 'insensitive' as const },
                   },
                 },
               },
-            },
-          },
-        },
-      },
-    });
+              {
+                asset: {
+                  is: {
+                    deletedAt: null,
+                    assignments: {
+                      some: {
+                        releasedAt: null,
+                        user: {
+                          OR: [
+                            {
+                              firstName: {
+                                contains: q,
+                                mode: 'insensitive' as const,
+                              },
+                            },
+                            {
+                              lastName: {
+                                contains: q,
+                                mode: 'insensitive' as const,
+                              },
+                            },
+                            {
+                              email: {
+                                contains: q,
+                                mode: 'insensitive' as const,
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+  }
 
-    return rows.map(({ asset, ...node }) => ({
-      ...node,
-      // Gate the name on the asset being live (the to-one relation can't be where-filtered).
-      assetName: asset && asset.deletedAt === null ? asset.name : null,
-      owners: (asset?.assignments ?? []).map((a) => ({
-        assignmentId: a.id,
-        userId: a.user.id,
-        firstName: a.user.firstName,
-        lastName: a.user.lastName,
-        email: a.user.email,
-        deletedAt: a.user.deletedAt,
-      })),
-    }));
+  /**
+   * `GET /infra/graph/nodes` — the topology canvas's own read (#1152).
+   *
+   * The canvas is the one surface that must stay COMPLETE. A node missing from a page is a shorter
+   * list an operator can page through; a node missing from the map takes its edges with it and reads
+   * as "nothing runs on this host" — a wrong answer with no cue that it is wrong. That is why the
+   * canvas was NOT simply pointed at `?limit=200`: one ADR-0095 hypervisor host can enrol 500 guests,
+   * so the house page cap sits below what a single ordinary host produces.
+   *
+   * Bounded anyway, at `INFRA_GRAPH_NODES_MAX`, and HONEST about it: the envelope carries `truncated`
+   * so the last unpaginated surface has a ceiling the operator can see rather than one that shows up
+   * as a missing box. `total` is what exists, so the UI can name the gap.
+   *
+   * PROJECTED, and this is where it gets cheaper than the list read it replaced: the board draws
+   * `id`/`label`/`kind`/`status`/`ipAddress`/`x`/`y` and filters endpoints on `chassis` — that is
+   * all. The `owners` + `assetName` enrichment costs an Asset → active AssetAssignment → User join
+   * PER ROW and the canvas has never rendered either; `shortcuts` is drill-in-only. Dropping them
+   * means the unpaginated read is now the LIGHTEST of the three, not the heaviest.
+   *
+   * The return type is inferred rather than pinned to `InfraGraphSchema`, exactly as `listNodePage` is:
+   * Prisma types `chassis` as a bare `String?` while the wire schema narrows it to a vocabulary with
+   * `.catch(null)` read-tolerance (ADR-0093), so pinning here would fight a degradation the contract
+   * is deliberately built to absorb. The spec asserts `select` ≡ `InfraGraphNodeSchema` instead,
+   * which is the drift that would actually hurt.
+   */
+  async listGraphNodes() {
+    const [items, total] = await this.prisma.$transaction(
+      [
+        this.prisma.infraNode.findMany({
+          orderBy: INFRA_NODE_DEFAULT_ORDER,
+          take: INFRA_GRAPH_NODES_MAX,
+          select: INFRA_GRAPH_NODE_SELECT,
+        }),
+        this.prisma.infraNode.count({}),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    return {
+      items,
+      total,
+      limit: INFRA_GRAPH_NODES_MAX,
+      // `total > items.length`, not `items.length === MAX`: an estate whose node count lands exactly
+      // on the cap is COMPLETE, and flagging it would be a permanent false alarm.
+      truncated: total > items.length,
+    };
+  }
+
+  /** `GET /infra/graph/edges` — one bounded read of the live graph's active relationships. */
+  async listGraphEdges() {
+    const where = {
+      endedAt: null,
+      source: { deletedAt: null },
+      target: { deletedAt: null },
+    } satisfies Prisma.InfraEdgeWhereInput;
+    const [items, total] = await this.prisma.$transaction(
+      [
+        this.prisma.infraEdge.findMany({
+          where,
+          orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+          take: INFRA_GRAPH_EDGES_MAX,
+        }),
+        this.prisma.infraEdge.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    return {
+      items,
+      total,
+      limit: INFRA_GRAPH_EDGES_MAX,
+      truncated: total > items.length,
+    };
   }
 
   /** A single live node by id (the lean row); 404 if missing or soft-deleted. */
@@ -2721,12 +4051,26 @@ export class InfraService {
     let assetName: string | null = null;
     let owners: Awaited<ReturnType<typeof this.resolveOwners>> = [];
     let articleLinks: Awaited<ReturnType<typeof this.resolveArticleLinks>> = [];
+    // WHICH detach a `PATCH { assetId: null }` would run (#1202) — the §5/ADR-0093 §4 marker, as a
+    // boolean. The drill-in has to say "this archives the asset" or "this only un-links it" BEFORE
+    // the operator commits, and those two sentences are not interchangeable: one soft-deletes a real
+    // inventory row. Read off the SAME row the inventory name already fetches (`specs` widens the
+    // existing select — no extra query), and left NULL when there is no link or the row is gone, so
+    // an unknown provenance degrades to the cautious wording client-side rather than to a false
+    // "nothing will be deleted". Display-only: `detachAsset` re-derives its own answer when it runs.
+    let assetAutoCreated: boolean | null = null;
     if (node.assetId) {
       const asset = await this.prisma.asset.findFirst({
         where: { id: node.assetId },
-        select: { name: true },
+        select: { name: true, specs: true },
       });
       assetName = asset?.name ?? null;
+      if (asset) {
+        const assetSpecs = (asset.specs ?? {}) as Record<string, unknown>;
+        // `=== true` exactly as `detachAsset` tests it — a looser check here would let the dialog
+        // promise an outcome the detach does not perform.
+        assetAutoCreated = assetSpecs[INFRA_AUTO_ASSET_MARKER] === true;
+      }
       owners = await this.resolveOwners(node.assetId);
       articleLinks = await this.resolveArticleLinks(node.assetId, principal);
     }
@@ -2741,15 +4085,100 @@ export class InfraService {
     // (no DB uniqueness). Empty when the node has no IP or no peer shares it.
     const ipConflict = await this.resolveIpConflict(node.id, node.ipAddress);
 
+    // The two ADR-0093 display-only hints, on the same ADR-0090 `ipConflict` mold: computed per read,
+    // never a gate. They are MUTUALLY EXCLUSIVE by construction — `assetCandidate` asks what a confirm
+    // WOULD link (so it needs a node with no asset), `duplicateAssetSuspicion` asks whether an already
+    // -linked auto-created asset duplicates a curated one — so a drill-in costs at most ONE extra
+    // indexed `assets_serial_active_key` lookup, never two.
+    const assetCandidate = await this.resolveAssetCandidate(node);
+    const duplicateAssetSuspicion =
+      await this.resolveDuplicateAssetSuspicion(node);
+
     return {
       ...node,
       assetName,
+      assetAutoCreated,
       owners,
       articleLinks,
       secretRefs,
       children,
       ipConflict,
+      assetCandidate,
+      duplicateAssetSuspicion,
     };
+  }
+
+  /**
+   * FORESIGHT for the confirm gate (ADR-0093 §7): the live Asset a confirm would ADOPT rather than
+   * mint, so the tray can say *"Confirm will link **Dell-XPS-7490** (existing)"* instead of *"will
+   * create"*. `null` means a confirm mints.
+   *
+   * Answered ONLY for a node that is PENDING and carries no Asset — the one state in which a confirm
+   * can still adopt. A CONFIRMED graph-only node (`trackAsAsset: false`) also has no Asset, but its
+   * confirm is an idempotent no-op, so naming a candidate there would promise something no button
+   * does. It runs the SAME {@link adoptableAsset} the confirm runs, so the hint and the action cannot
+   * drift; the confirm still re-derives its own answer, which is why a stale hint can only mislead a
+   * human, never mis-link a machine.
+   */
+  private async resolveAssetCandidate(node: {
+    assetId: string | null;
+    state: string;
+    specs: Prisma.JsonValue | null;
+  }): Promise<InfraAssetCandidate | null> {
+    if (node.assetId || node.state !== 'PENDING') return null;
+    const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
+    const host = (hostSpecs.host ?? {}) as AgentReportHost;
+    const adopted = await this.adoptableAsset(hostSpecs, sanitizeSerial(host));
+    if (!adopted) return null;
+    const asset = await this.prisma.asset.findFirst({
+      where: { id: adopted.id },
+      select: { id: true, name: true, serial: true },
+    });
+    return asset ?? null;
+  }
+
+  /**
+   * DUPLICATE SUSPICION (ADR-0093 §8.5) — the remediation hint for installs that already duplicated
+   * before adoption existed.
+   *
+   * The #1081 collision retry answered *"this serial already exists"* with *"then make a second Asset
+   * without one"*, and its outcome is recognisable by construction: this node's linked Asset was
+   * auto-created (`_infraAutoCreated`), carries a NULL serial, and the node's reported serial belongs
+   * to a DIFFERENT live Asset. That other Asset is what this returns.
+   *
+   * A HINT, NEVER A MERGE. Machine-merging two inventory rows — assignments, history, tags,
+   * attachments — is not something an upgrade does while nobody is looking, and this ADR does not
+   * retroactively re-link anything. The remedy is the deliberate two-step (§7) the operator performs:
+   * `assetId: null` (the auto-created row carries the marker, so it is soft-deleted) then a second
+   * patch carrying the curated id. The #1117 re-point 400 is untouched.
+   *
+   * Deliberately NOT gated on corroboration. This is not deciding to link anything — it is asking a
+   * human to look at two rows — and the very estate it serves is one where the evidence may predate
+   * contract v2 and so carry no `identifiers[]` at all.
+   */
+  private async resolveDuplicateAssetSuspicion(node: {
+    assetId: string | null;
+    specs: Prisma.JsonValue | null;
+  }): Promise<InfraAssetCandidate | null> {
+    if (!node.assetId) return null;
+    const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
+    const host = (hostSpecs.host ?? {}) as AgentReportHost;
+    const serial = sanitizeSerial(host);
+    if (serial === undefined) return null;
+    const linked = await this.prisma.asset.findFirst({
+      where: { id: node.assetId },
+      select: { serial: true, specs: true },
+    });
+    // Only the collision-retry shape is suspicious. A linked asset that carries a serial is either the
+    // one this node's serial minted or one a human attached; either way there is nothing to suspect.
+    if (!linked || linked.serial !== null) return null;
+    const specs = (linked.specs ?? {}) as Record<string, unknown>;
+    if (specs[INFRA_AUTO_ASSET_MARKER] !== true) return null;
+    const peer = await this.prisma.asset.findFirst({
+      where: { serial },
+      select: { id: true, name: true, serial: true },
+    });
+    return peer && peer.id !== node.assetId ? peer : null;
   }
 
   /**
@@ -2953,6 +4382,27 @@ export class InfraService {
    * Detach an asset from a node (ADR-0070 §5). Soft-delete it IFF it was auto-created by a node (the
    * provenance marker in `specs`); otherwise leave it intact (the node update nulls `assetId`). Reuses
    * AssetsService.remove so the soft-delete emits its DELETED history event + drops from search.
+   *
+   * **The archiving branch ALSO costs `asset:delete` (issue #1202).** The route is
+   * `@RequirePermission('infra:manage')`, and its siblings that merely create or link an Asset already
+   * AND-check `asset:write` at the decorator (`POST /nodes`, `POST /nodes/:id/confirm`). This branch
+   * does something strictly heavier — it archives an inventory row, which every other route in the app
+   * charges `asset:delete` for (`DELETE /assets/:id`), and whose undo (`POST /assets/:id/restore`) is
+   * gated the same way. Leaving it on `infra:manage` alone made the map a cheaper door to the same
+   * destructive operation.
+   *
+   * **Why the check is here and not on the decorator.** `@RequirePermission` is static metadata read
+   * before the handler runs, so it cannot see the one fact that decides whether anything is destroyed:
+   * the provenance marker on the CURRENTLY linked Asset. AND-checking `asset:delete` at the decorator
+   * would tax the un-link branch too — detaching a curated Asset destroys nothing, and charging a
+   * delete permission for dropping a column would be a regression dressed as caution. So the check
+   * fires from the exact branch that calls `AssetsService.remove`, which makes it impossible for the
+   * archive to happen without it, and impossible for it to fire when nothing is archived. This mirrors
+   * `WorkflowConnectionsService.assertMaySetCredentialBinding` — the house pattern for a permission
+   * whose applicability depends on row state.
+   *
+   * It throws BEFORE any write: the node's `assetId` is still set when the 403 lands, so a retry after
+   * the grant starts from the state the operator was looking at rather than from a half-done detach.
    */
   private async detachAsset(assetId: string, principal?: Principal) {
     const asset = await this.prisma.asset.findFirst({
@@ -2962,8 +4412,30 @@ export class InfraService {
     if (!asset) return; // already gone — nothing to detach (the node update still nulls assetId).
     const specs = (asset.specs ?? {}) as Record<string, unknown>;
     if (specs[INFRA_AUTO_ASSET_MARKER] === true) {
+      if (!(await this.principalHoldsAssetDelete(principal))) {
+        throw new ForbiddenException(INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR);
+      }
       await this.assets.remove(assetId, principal);
     }
+  }
+
+  /**
+   * Whether the caller holds `asset:delete`, for BOTH principal kinds (ADR-0048): a human resolves via
+   * the RolePermission matrix (DB-first, ADMIN is full), a service account via its direct grants — it
+   * has no Role, so asking the matrix would be a category error. A missing principal holds nothing →
+   * false (fail-closed): treating "no principal" as "not gated" would make the check bypassable by the
+   * one caller least entitled to bypass it.
+   */
+  private async principalHoldsAssetDelete(
+    principal?: Principal,
+  ): Promise<boolean> {
+    if (!principal) {
+      return false;
+    }
+    if (isServicePrincipal(principal)) {
+      return principal.permissions.has('asset:delete');
+    }
+    return this.permissions.hasAll(principal.user.role, ['asset:delete']);
   }
 
   /** PATCH a node's canvas position (x/y). Cheap + debounce-friendly (ADR-0070 MVP). 404 if missing. */
@@ -3336,7 +4808,8 @@ export class InfraService {
   /**
    * List a node's edges (ADR-0070 v1 edge history). `activeOnly` (default) returns only open edges
    * (endedAt null); pass false for the full history including closed ones (migrations). Covers edges
-   * where the node is EITHER endpoint (source or target), newest first.
+   * where the node is EITHER endpoint (source or target), newest first with a deterministic
+   * tiebreaker (see the `orderBy` note).
    */
   async listEdgesForNode(nodeId: string, activeOnly = true) {
     await this.getNode(nodeId);
@@ -3345,7 +4818,16 @@ export class InfraService {
         OR: [{ sourceId: nodeId }, { targetId: nodeId }],
         ...(activeOnly ? { endedAt: null } : {}),
       },
-      orderBy: { startedAt: 'desc' },
+      // TOTAL order, not just newest-first (#1152) — the same reasoning as `listNodePage`. `startedAt`
+      // is `@default(now())` with no unique tiebreaker, and a hypervisor report writes its guests'
+      // RUNS_ON edges back to back in one report, so same-millisecond ties are routine, not rare.
+      // It matters MORE here than on the node list: the Connections drill-in
+      // (`node-edges-manager.tsx`) renders this array in SERVER order — it filters on `endedAt` and
+      // never sorts — and every infra mutation invalidates `infraKeys.all`, so it re-fetches often.
+      // With a partial order, an invalidation mid-review swaps two tied rows and the operator's
+      // click lands on a DIFFERENT edge than the one they read. Closing an edge is a write, so that
+      // mis-click is a real state change, not a display glitch. The unique `id` makes it stable.
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
     });
   }
 
@@ -3518,6 +5000,90 @@ type ContainerSpecsBlob = {
   container: AgentContainer;
   reportedAt: string;
 };
+
+/**
+ * A GUEST child's inventory blob (ADR-0095 §5) — {@link ContainerSpecsBlob} one level up, mirroring
+ * it clause for clause: no `host` key, because a hypervisor-proposed guest is not the reporting
+ * host. The `guest` key carries the platform's config read (ref, name, kind, state, smbiosUuid,
+ * macs, cores, memoryBytes, osHint); `smbiosUuid` and `macs` exist for exactly one purpose — the §6
+ * identity join reads them back out of this blob.
+ */
+type GuestSpecsBlob = {
+  guest: AgentGuest;
+  reportedAt: string;
+};
+
+/**
+ * Escape the LIKE metacharacters (`\`, `%`, `_`) in a child-key prefix before it reaches a Prisma
+ * `startsWith` — Prisma emits the value into a raw LIKE pattern (verified empirically), so a
+ * wildcard inside a host's reported `externalId` would widen the prefix match to other hosts'
+ * children. Contained today by the `reportingSource` equality on the same query; the escape makes
+ * that containment structural rather than incidental. Postgres's default LIKE escape character is
+ * the backslash, so `\\` before each metacharacter is the whole rule.
+ */
+function escapeLikePrefix(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * How many `/guest/` children one report's identity join may even consider (ADR-0095 §6). A report
+ * carries at most a handful of `smbios-uuid` identifiers (one, in every real case) and a UUID
+ * resolves to at most one machine per hypervisor — the cap is a defence against a hand-edited blob
+ * or a hostile reporter turning the join query into a large result set, not a tunable.
+ */
+const GUEST_ABSORB_CANDIDATES_MAX = 8;
+
+/**
+ * The `smbios-uuid` values a report's identity evidence carries (ADR-0095 §6), lowercased for the
+ * `lower(...)` SQL comparison — the guest blob's `smbiosUuid` is stored lowercased by the shared
+ * schema, and re-lowering both sides means a legacy or hand-edited blob can never miss on case.
+ * Empty for every pre-0095 agent and every unprivileged collector, which is the join's whole gate.
+ */
+function smbiosUuidsOf(host: AgentReportHost): string[] {
+  const out: string[] = [];
+  for (const entry of host.identifiers ?? []) {
+    if (entry.kind !== 'smbios-uuid') continue;
+    const value = entry.value.trim().toLowerCase();
+    if (value.length > 0 && !out.includes(value)) out.push(value);
+  }
+  return out;
+}
+
+/**
+ * The corroborating MACs stored on a guest child's blob, re-sanitized on read (ADR-0095 §6) — the
+ * same posture `hostIdentityEvidence` takes over `host.identifiers`, for the same reason: the blob
+ * may predate a sanitize rule or have been hand-edited, and junk that cannot corroborate must never
+ * be compared as if it could. Degrades to an empty set on any malformed shape, never throws.
+ */
+/**
+ * The `kind` a guest child's blob records (`qemu` | `lxc` | `hyperv` | `other` | …), read defensively
+ * (#1227). It is the difference between advice an operator can act on and advice that cannot help:
+ * an LXC container has no SMBIOS UUID to read at ANY privilege level, so telling its operator to
+ * raise a machine version or run as root would be a wild-goose chase. Unknown shape → `undefined`,
+ * which lands on the general advice rather than inventing a platform.
+ */
+function guestChildKind(guest: unknown): string | undefined {
+  if (typeof guest !== 'object' || guest === null || Array.isArray(guest)) {
+    return undefined;
+  }
+  const kind = (guest as Record<string, unknown>).kind;
+  return typeof kind === 'string' ? kind : undefined;
+}
+
+function guestChildMacs(guest: unknown): string[] {
+  if (typeof guest !== 'object' || guest === null || Array.isArray(guest)) {
+    return [];
+  }
+  const macs = (guest as Record<string, unknown>).macs;
+  if (!Array.isArray(macs)) return [];
+  const kept: string[] = [];
+  for (const raw of macs) {
+    if (typeof raw !== 'string') continue;
+    const mac = sanitizeIdentifierValue('mac', raw);
+    if (mac && !kept.includes(mac)) kept.push(mac);
+  }
+  return kept;
+}
 
 /**
  * Why this node exists as a SEPARATE row from the one that owns its reported `externalId` (#1141).

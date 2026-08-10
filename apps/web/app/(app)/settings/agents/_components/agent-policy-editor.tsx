@@ -49,13 +49,14 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 import { reseedAction } from "./agent-policy-reseed";
 
-/** The five collectors, in the order the policy schema declares them. */
+/** The six collectors, in the order the policy schema declares them. */
 const COLLECTORS: readonly (keyof AgentPolicyCollect)[] = [
   "hardware",
   "disks",
   "nics",
   "software",
   "containers",
+  "hypervisor",
 ];
 
 /**
@@ -152,7 +153,11 @@ function seedFrom(effective: {
     intervalMinutes: String(Math.round(effective.intervalSeconds / 60)),
     staleAfterMinutes: String(Math.round(effective.staleAfterSeconds / 60)),
     softwareMax: String(effective.softwareMax),
-    collect: { ...effective.collect },
+    // Layered over the shared defaults, not spread bare: an API predating a collect key (an operator
+    // who updated web before api — ADR-0095 added `hypervisor`) serves five keys, and seeding the
+    // sixth as `undefined` would render an OFF switch and then SAVE that false — a silent narrowing
+    // of the policy nobody asked for. The shared default is the value such a server would resolve.
+    collect: { ...AGENT_POLICY_DEFAULT.collect, ...effective.collect },
     nicNames: toText(effective.exclude.nicNames),
     mountpoints: toText(effective.exclude.mountpoints),
     softwareNames: toText(effective.exclude.softwareNames),

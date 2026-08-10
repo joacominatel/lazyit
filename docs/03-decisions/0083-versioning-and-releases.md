@@ -252,6 +252,11 @@ minimum-supported-version gate is future work).
 - **Same build stamp.** Both binaries bake `APP_VERSION` at compile time via `bun build --define`
   (`process.env.APP_VERSION` ⇐ `git describe --tags --always`, env-overridable by the release build),
   mirroring the api/web `--build-arg APP_VERSION`. An unstamped/source build reports `"dev"`.
+  **The stage that compiles the binary must declare the ARG itself** (#1203): a build arg is scoped to
+  the declaring stage, and `.dockerignore` excludes `.git`, so an `agent-builder` stage without
+  `ARG APP_VERSION` has neither the env var nor a tag to `git describe` and stamps every shipped agent
+  `dev` — which makes the skew rule below permanently silent. `apps/agent/src/version-stamp.test.ts`
+  pins the whole chain that is checkable without a Docker daemon.
 - **Agent → server.** The agent already carries `agentVersion` in its check-in (`POST /infra/report`);
   the server now persists it to a first-class **`InfraNode.agentVersion`** column (migration
   `20260702010000_infra_node_agent_version`, backfilled from the prior `specs.agentVersion`). Topology
