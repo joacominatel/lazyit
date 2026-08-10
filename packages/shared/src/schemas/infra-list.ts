@@ -1,6 +1,15 @@
 import { z } from "zod";
-import { InfraNodeListItemSchema, InfraNodeSchema } from "./infra";
+import {
+  InfraEdgeSchema,
+  InfraNodeListItemSchema,
+  InfraNodeSchema,
+} from "./infra";
 import { pageSchema } from "./pagination";
+
+/** Identity role used by the reporting-agent wizard; independent of the node's `kind`. */
+export const InfraNodeListRoleSchema = z.enum(["HOST", "CHILD"]);
+
+export type InfraNodeListRole = z.infer<typeof InfraNodeListRoleSchema>;
 
 /**
  * The two READ contracts `GET /infra/nodes` was split into (issue #1152).
@@ -106,3 +115,16 @@ export const InfraGraphSchema = z.object({
 });
 
 export type InfraGraph = z.infer<typeof InfraGraphSchema>;
+
+/** Hard cap for the canvas's active-edge read. */
+export const INFRA_GRAPH_EDGES_MAX = 10_000;
+
+/** `GET /infra/graph/edges` — active edges between live nodes, bounded without pagination. */
+export const InfraGraphEdgesSchema = z.object({
+  items: z.array(InfraEdgeSchema),
+  total: z.number().int().min(0),
+  limit: z.number().int().min(1),
+  truncated: z.boolean(),
+});
+
+export type InfraGraphEdges = z.infer<typeof InfraGraphEdgesSchema>;
