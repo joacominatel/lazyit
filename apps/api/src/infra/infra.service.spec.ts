@@ -3757,7 +3757,7 @@ describe('InfraService', () => {
       expect(countWhere).toEqual(listWhere);
     });
 
-    it("counts the FILTERED set, not the table — a filter narrows `total` too", async () => {
+    it('counts the FILTERED set, not the table — a filter narrows `total` too', async () => {
       // The tray shows `total` as its pending badge. If `total` counted the whole table, a 3-pending
       // estate would advertise every node it has ever seen as awaiting review.
       prisma.infraNode.findMany.mockResolvedValue([]);
@@ -3924,7 +3924,10 @@ describe('InfraService', () => {
     });
 
     it('reports truncated: false when the whole estate fits', async () => {
-      prisma.infraNode.findMany.mockResolvedValue([{ id: 'n-1' }, { id: 'n-2' }]);
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'n-1' },
+        { id: 'n-2' },
+      ]);
       prisma.infraNode.count.mockResolvedValue(2);
 
       await expect(service.listGraphNodes()).resolves.toEqual({
@@ -3965,7 +3968,7 @@ describe('InfraService', () => {
       });
     });
 
-    it('cannot be starved by the ADR-0030 page cap (the rejected Option 2)', async () => {
+    it('cannot be starved by the ADR-0030 page cap (the rejected Option 2)', () => {
       // Letting the canvas ask the paged list for `limit=200` was the cheap option. It is wrong:
       // one ADR-0095 hypervisor host can enrol 500 guests, so 200 drops nodes off a normal map.
       expect(INFRA_GRAPH_NODES_MAX).toBeGreaterThan(MAX_PAGE_LIMIT);
