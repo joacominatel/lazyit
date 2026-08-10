@@ -111,9 +111,10 @@ What is missing is only their picture: they are not drawn, and neither are the c
 through them.
 
 That last part is the reason the banner never goes away on its own. A node that isn't drawn takes its
-lines with it, so **a blast radius read off a truncated map is incomplete** — the highlighted set and
-the count are the answer for the part of the estate the board is showing, not for all of it. Treat it
-as a floor, not a total, and check the affected servers on the Servers list when the answer matters.
+card, lines and on-canvas highlight with it, so **the picture of a blast radius can be incomplete**.
+The blast-radius query itself is separate from the canvas limit: its summary count and affected-node
+list come from the impact API and remain authoritative for the whole topology. When the warning is
+present, use that list as the answer; use the highlights only as a partial visual guide.
 
 Relationships have their own, much higher ceiling: **10,000 active connections**. If that ceiling is
 reached, a second persistent warning names how many relationships are shown and how many exist. The
@@ -361,8 +362,8 @@ An **empty result is good news** — it means nothing depends on this node, so i
 down. lazyit shows that as reassurance, not as an error.
 
 > [!IMPORTANT]
-> If the board is showing the *"this map is incomplete"* banner, the blast radius is answered over
-> what is drawn, so it can be smaller than the truth. See
+> If the board is showing the *"this map is incomplete"* banner, some affected nodes may be absent
+> from the drawn highlights. The blast-radius summary count and list remain authoritative. See
 > [If the map says it is incomplete](#if-the-map-says-it-is-incomplete).
 
 ## What's next

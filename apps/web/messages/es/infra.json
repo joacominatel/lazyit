@@ -325,7 +325,7 @@
   },
   "graph": {
     "truncated": "Se muestran {shown} de {total} nodos: este mapa está incompleto.",
-    "truncatedHint": "El mapa dibuja como máximo {shown} nodos. Los que quedaron afuera siguen en tu inventario, en la lista de servidores y en la búsqueda, pero sus conexiones no se dibujan acá: tenelo en cuenta al leer un radio de impacto.",
+    "truncatedHint": "El mapa dibuja como máximo {shown} nodos. Pueden faltar nodos, conexiones y resaltados en el lienzo, pero el total y la lista de nodos afectados del radio vienen de la API de impacto y siguen siendo autoritativos.",
     "edgesTruncated": "Se muestran {shown} de {total} relaciones: algunas conexiones no están dibujadas.",
     "edgesTruncatedHint": "Se alcanzó el límite de relaciones. El mapa sigue disponible, pero la imagen de sus conexiones está incompleta."
   },

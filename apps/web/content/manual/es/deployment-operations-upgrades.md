@@ -51,6 +51,14 @@ sigue funcionando hasta entonces. Solo **se elimina en la siguiente versión may
 nunca elimina algo de lo que dependes; vigila las notas de versión para detectar obsolescencias y planifica
 el cambio antes de la siguiente mayor.
 
+#### Retiro de la API de lista de nodos de infraestructura en v2.0
+
+`GET /infra/nodes` está obsoleto y se eliminará en **v2.0**. Durante la línea de versiones v1 sigue
+disponible únicamente como respuesta legacy de arreglo plano para integraciones externas. Migrá las
+consultas de lista, búsqueda y resolución por ids exactos a `GET /infra/nodes/page`, que devuelve
+`{ items, total, limit, offset }`. El lienzo de topología usa un contrato distinto y debe seguir
+consultando `GET /infra/graph/nodes`; no reemplaces el mapa por la lista paginada.
+
 ## Nuevos ajustes obligatorios tras una descarga
 
 Una versión que añade una función puede introducir un **nuevo valor de entorno obligatorio**. El arranque

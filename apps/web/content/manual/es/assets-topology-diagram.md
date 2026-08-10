@@ -118,10 +118,11 @@ antes. Lo único que falta es su dibujo: no se los dibuja a ellos, ni a las cone
 ellos.
 
 Esa última parte es la razón por la que el aviso no se va solo. Un nodo que no está dibujado se lleva
-sus líneas, así que **un radio de afectación leído sobre un mapa truncado está incompleto**: el
-conjunto resaltado y el número son la respuesta para la parte del parque que el tablero está
-mostrando, no para todo. Tomalo como un piso, no como un total, y verificá los servidores afectados en
-la lista de servidores cuando la respuesta importe.
+su tarjeta, sus líneas y su resaltado en el lienzo, así que **la imagen de un radio de afectación puede
+estar incompleta**. La consulta del radio es independiente del límite del lienzo: el total del resumen
+y la lista de nodos afectados vienen de la API de impacto y siguen siendo autoritativos para toda la
+topología. Cuando aparezca el aviso, usá esa lista como respuesta y los resaltados solo como guía visual
+parcial.
 
 Las relaciones tienen su propio techo, mucho más alto: **10.000 conexiones activas**. Si se alcanza,
 un segundo aviso persistente indica cuántas relaciones se muestran y cuántas existen. Los nodos siguen
@@ -389,8 +390,8 @@ Un **resultado vacío es buena noticia** — significa que nada depende de este 
 darlo de baja. lazyit lo muestra como tranquilidad, no como un error.
 
 > [!IMPORTANT]
-> Si el tablero muestra el aviso de *"este mapa está incompleto"*, el radio de afectación se calcula
-> sobre lo que está dibujado, así que puede ser más chico que la realidad. Ver
+> Si el tablero muestra el aviso de *"este mapa está incompleto"*, pueden faltar nodos afectados en
+> los resaltados dibujados. El total y la lista del resumen del radio siguen siendo autoritativos. Ver
 > [Si el mapa avisa que está incompleto](#si-el-mapa-avisa-que-está-incompleto).
 
 ## Qué sigue

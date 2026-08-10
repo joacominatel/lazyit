@@ -325,7 +325,7 @@
   },
   "graph": {
     "truncated": "Showing {shown} of {total} nodes — this map is incomplete.",
-    "truncatedHint": "The map draws at most {shown} nodes. The ones left out are still in your inventory, on the Servers list and in search, but their connections are not drawn here — read a blast radius with that in mind.",
+    "truncatedHint": "The map draws at most {shown} nodes. Nodes, connections and highlights may be missing from the canvas, but the blast-radius count and affected-node list come from the impact API and remain authoritative.",
     "edgesTruncated": "Showing {shown} of {total} relationships — some connections are not drawn.",
     "edgesTruncatedHint": "The relationship limit was reached. The map stays usable, but its connection picture is incomplete."
   },
