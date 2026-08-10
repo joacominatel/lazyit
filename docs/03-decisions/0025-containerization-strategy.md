@@ -3,7 +3,7 @@ title: "ADR-0025: Containerization & image strategy"
 tags: [adr, infra, docker]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-08-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -32,6 +32,9 @@ Constraints discovered in the repo:
 - The seed is `bun prisma/seed.ts` → seeding **requires Bun**, even though the API runtime is Node.
 - Workspaces use `workspace:*`; both apps depend on `@lazyit/shared`, which builds to `dist/`.
 - Next.js can emit a self-contained server with `output: 'standalone'` (needs a one-line app config).
+- Next.js 16.3 completes route generation under Bun 1.3.14 but Bun can crash with `SIGILL` during
+  process teardown. The web production build therefore needs the real Node executable while Bun
+  remains the pinned package manager and workspace tooling runtime.
 
 ## Considered options
 
@@ -39,17 +42,23 @@ Constraints discovered in the repo:
   contradicting [[0009-bun-first-vs-app-stack]] and [[0002-nestjs-backend]]. Rejected.
 - **Node for both build and runtime** — workable, but loses Bun's faster, repo-pinned install and
   the `bun test`/tooling parity used elsewhere. Build would drift from how developers build locally.
-- **Multi-stage: Bun builder → Node runtime** *(chosen)* — build (`bun install`, `prisma generate`,
-  `nest build` / `next build`) on the repo-pinned `oven/bun:1.3.14`; copy only built artifacts +
-  production deps into a minimal `node:26-alpine` runtime. Matches the scoped Bun decision exactly.
+- **Multi-stage: Bun tooling → application build → Node runtime** *(chosen)* — use the repo-pinned
+  `oven/bun:1.3.14` for install and workspace tooling. API compilation remains on that stage; the web
+  runs the Next.js CLI in a `node:26-trixie-slim` stage. Copy only built artifacts + production deps
+  into a minimal `node:26-alpine` runtime. This preserves the scoped Bun decision without executing
+  Next.js under Bun's Node compatibility runtime.
 
 ## Decision
 
 - **Per-app multi-stage Dockerfiles** in `infra/docker/` (`api.Dockerfile`, `web.Dockerfile`,
   `migrate.Dockerfile`), built with **context = repo root** and `-f infra/docker/<x>.Dockerfile .`
   (workspaces need the whole monorepo). Dockerfiles **read** app code via `COPY`; they never modify it.
-- **Builder stage:** `oven/bun:1.3.14` (Debian/glibc). Installs with `bun install --frozen-lockfile`,
-  builds `@lazyit/shared`, runs `prisma generate`, then `nest build` (api) / `next build` (web).
+- **Tooling stage:** `oven/bun:1.3.14` (Debian/glibc). Installs with
+  `bun install --frozen-lockfile`, builds `@lazyit/shared`, and runs `prisma generate` / `nest build`
+  for the API.
+- **Web build stage:** `node:26-trixie-slim` (Debian/glibc), matching the tooling stage's OS family.
+  It receives the installed workspace and invokes the Next.js CLI explicitly with `node`, producing
+  the standalone bundle without placing the Next build lifecycle under Bun.
 - **API runtime:** `node:26-alpine`, runs `node apps/api/dist/main` as a non-root user. Carries the
   built `dist/`, the generated Prisma client, `packages/shared/dist`, and **production** node_modules.
 - **Web runtime:** `node:26-alpine`, runs the Next.js **standalone** server (`output: 'standalone'`).
@@ -76,10 +85,11 @@ appears, fall back to `node:lts-alpine`; the runtime client is portable JS eithe
 
 ## Consequences
 
-- **Positive:** small runtime images; build matches local dev (Bun); honours the Bun-scoped rule;
-  migrations/seed are explicit, idempotent and ordered; no query-engine binary to ship for the API.
+- **Positive:** small runtime images; pinned Bun installs and workspace tooling remain consistent
+  with local development; the Next build and production server both use Node; migrations/seed are
+  explicit, idempotent and ordered; no query-engine binary to ship for the API.
 - **Trade-offs:** the web image depends on a one-line app-lane change (`output: 'standalone'`);
-  two base families in play (Bun-Debian for build/migrate, Node-Alpine for runtime); Node 26 is
+  the web build adds a Node-Debian stage between Bun tooling and Node-Alpine runtime; Node 26 is
   Current-not-yet-LTS until Oct 2026.
 - **Follow-ups:** pin base images by digest as a future hardening; image **publishing** to a registry
   (GHCR) is deferred with CD ([[0027-ci-pipeline]]). The reverse proxy / routing is

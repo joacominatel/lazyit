@@ -3,7 +3,7 @@ title: Docker Build & Boot Troubleshooting
 tags: [runbook, docker, troubleshooting]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-08-09
 ---
 
 # Runbook — Docker build & boot troubleshooting
@@ -54,6 +54,12 @@ stops emitting standalone, confirm `output: 'standalone'` is still set.
 
 `NEXT_PUBLIC_API_URL` is baked at **build** time (default `/api`, a build ARG). To point the web
 app elsewhere, rebuild with `--build-arg NEXT_PUBLIC_API_URL=…` — it cannot be changed at runtime.
+
+The workspace install and `@lazyit/shared` build use the pinned Bun 1.3.14 tooling stage, but the
+Dockerfile copies that workspace into a `node:26-trixie-slim` stage and invokes the Next.js CLI with
+`node`. Do not replace that command with `bun run --filter @lazyit/web build`: with Next.js 16.3,
+Bun can finish route generation and then crash during process teardown with `SIGILL` / exit 132.
+The failure is in the build runtime, not in route generation or the standalone output.
 
 ## API exits immediately: `DATABASE_URL is not set`
 
