@@ -53,6 +53,39 @@ export function graphTruncationNotice(graph: {
   return { shown: graph.limit, total: graph.total };
 }
 
+/** The edge-read state the canvas needs to avoid presenting an unknown relationship set as complete. */
+export interface GraphEdgeLoadState {
+  /** Present only when the server says its bounded edge read hit the cap. */
+  truncation: { shown: number; total: number } | null;
+  /** A failed read is retryable and leaves the relationship map explicitly incomplete. */
+  failure: { incomplete: true; retryable: true } | null;
+  /** The empty-estate hero is honest only after a successful, non-truncated edge read. */
+  canShowEmpty: boolean;
+}
+
+/**
+ * Compose edge truncation and failure without re-deriving the server's `truncated` decision.
+ * A background failure may coexist with a previous truncated response, so these are separate fields.
+ */
+export function graphEdgeLoadState(
+  graph: {
+    items: readonly unknown[];
+    total: number;
+    truncated: boolean;
+  } | undefined,
+  failed: boolean,
+): GraphEdgeLoadState {
+  const truncation = graph?.truncated
+    ? { shown: graph.items.length, total: graph.total }
+    : null;
+  const failure = failed ? { incomplete: true as const, retryable: true as const } : null;
+  return {
+    truncation,
+    failure,
+    canShowEmpty: graph !== undefined && !failed && truncation === null,
+  };
+}
+
 /**
  * What the PENDING review tray must tell the operator about the batch it is showing, or `null` when
  * it is showing all of them.
