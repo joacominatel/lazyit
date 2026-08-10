@@ -18,9 +18,17 @@
  * (`total === limit`, `truncated: false`) must stay SILENT, or the notice becomes noise an operator
  * learns to ignore — at which point the real one no longer works either.
  */
-import { INFRA_GRAPH_NODES_MAX, MAX_PAGE_LIMIT } from "@lazyit/shared";
+import {
+  INFRA_GRAPH_EDGES_MAX,
+  INFRA_GRAPH_NODES_MAX,
+  MAX_PAGE_LIMIT,
+} from "@lazyit/shared";
 import { describe, expect, test } from "bun:test";
-import { graphTruncationNotice, pendingBatchNotice } from "./node-page-state";
+import {
+  graphEdgeLoadState,
+  graphTruncationNotice,
+  pendingBatchNotice,
+} from "./node-page-state";
 
 describe("graphTruncationNotice (#1152)", () => {
   test("a complete map says nothing", () => {
@@ -110,5 +118,70 @@ describe("pendingBatchNotice (#1152)", () => {
     // previous page (keepPreviousData) beside a fresher count while proposals are being confirmed.
     // Announcing "showing 200 of 3" would be worse than saying nothing for one poll interval.
     expect(pendingBatchNotice({ total: 3, shown: 200 })).toBeNull();
+  });
+});
+
+describe("graphEdgeLoadState", () => {
+  const edges = (count: number) => Array.from({ length: count }, (_, id) => ({ id }));
+
+  test("a complete edge set has no warning and may prove an empty map", () => {
+    expect(
+      graphEdgeLoadState(
+        { items: edges(12), total: 12, truncated: false },
+        false,
+      ),
+    ).toEqual({ truncation: null, failure: null, canShowEmpty: true });
+  });
+
+  test("an exact-cap fit with truncated=false has no warning", () => {
+    const state = graphEdgeLoadState(
+      {
+        items: edges(INFRA_GRAPH_EDGES_MAX),
+        total: INFRA_GRAPH_EDGES_MAX,
+        truncated: false,
+      },
+      false,
+    );
+    expect(state.truncation).toBeNull();
+    expect(state.canShowEmpty).toBe(true);
+  });
+
+  test("one edge over the cap names the shown and total counts", () => {
+    const state = graphEdgeLoadState(
+      {
+        items: edges(INFRA_GRAPH_EDGES_MAX),
+        total: INFRA_GRAPH_EDGES_MAX + 1,
+        truncated: true,
+      },
+      false,
+    );
+    expect(state.truncation).toEqual({
+      shown: INFRA_GRAPH_EDGES_MAX,
+      total: INFRA_GRAPH_EDGES_MAX + 1,
+    });
+    expect(state.canShowEmpty).toBe(false);
+  });
+
+  test("the server truncation flag is authoritative", () => {
+    expect(
+      graphEdgeLoadState(
+        { items: edges(2), total: 2, truncated: true },
+        false,
+      ).truncation,
+    ).toEqual({ shown: 2, total: 2 });
+    expect(
+      graphEdgeLoadState(
+        { items: edges(2), total: 20, truncated: false },
+        false,
+      ).truncation,
+    ).toBeNull();
+  });
+
+  test("an edge failure is retryable and never an empty or complete map", () => {
+    expect(graphEdgeLoadState(undefined, true)).toEqual({
+      truncation: null,
+      failure: { incomplete: true, retryable: true },
+      canShowEmpty: false,
+    });
   });
 });
