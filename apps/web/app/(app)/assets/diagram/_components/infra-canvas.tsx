@@ -47,7 +47,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   INFRA_LIVE_POLL_MS,
-  useInfraEdges,
+  useInfraGraphEdges,
   useInfraGraphNodes,
   useUpdateInfraNodePosition,
 } from "@/lib/api/hooks/use-infra-nodes";
@@ -64,6 +64,7 @@ import { edgesBetweenVisible, partitionEndpoints } from "@/lib/infra/endpoints";
 import { cn } from "@/lib/utils";
 import {
   type GraphTruncationNotice,
+  graphEdgeLoadState,
   graphTruncationNotice,
 } from "./node-page-state";
 import { type ImpactSummaryPlan, planImpactSummary } from "./impact-summary-plan";
@@ -104,8 +105,8 @@ export interface InfraCanvasApi {
  * The infra topology board (ADR-0070 §6, issue #741). Renders nodes from `GET /infra/graph/nodes` —
  * the board's OWN read since #1152, a narrow projection that is complete by default, bounded at
  * `INFRA_GRAPH_NODES_MAX`, and says so via `truncated` when the bound bites (the Servers table's
- * `GET /infra/nodes` is a page, and a paged map would drop boxes and their edges in silence) — and
- * the graph's edges (fanned out per-node), styled by status/kind. Nodes are draggable; a settled drag
+ * `GET /infra/nodes` is a page, and a paged map would drop boxes and their edges in silence) — plus
+ * one bounded `GET /infra/graph/edges` read, styled by status/kind. Nodes are draggable; a settled drag
  * trailing-debounces a `PATCH /infra/nodes/:id/position`. Pan/zoom + fit-view on load come from
  * React Flow. Hover shows quick facts AND spotlights the node's neighbourhood; click selects a node
  * and bubbles up via `onSelectNode` — the SEAM for #742's drill-in, which since #1182 is the tabbed
@@ -207,21 +208,21 @@ export function InfraCanvas({
   } = useInfraGraphNodes({ refetchInterval: INFRA_LIVE_POLL_MS });
   const rawNodes = useMemo(() => graph?.items ?? [], [graph]);
   const truncation = graph ? graphTruncationNotice(graph) : null;
-  const nodeIds = useMemo(() => rawNodes.map((n) => n.id), [rawNodes]);
   const {
-    edges: rawEdges,
+    data: edgeGraph,
+    isLoading: edgesLoading,
     isError: edgesError,
     refetch: refetchEdges,
-  } = useInfraEdges(nodeIds);
+  } = useInfraGraphEdges({ refetchInterval: INFRA_LIVE_POLL_MS });
+  const rawEdges = useMemo(() => edgeGraph?.items ?? [], [edgeGraph]);
+  const edgeState = graphEdgeLoadState(edgeGraph, edgesError);
 
   // Endpoint routing (ADR-0093 §5) — the ONE place the canvas narrows what it draws.
   //
   // Client-side over the rows already fetched: `chassis` rides the graph projection deliberately (it
   // is a scalar and this filter is the reason it is there), so the toggle costs no request and is
-  // instant. The queries above are left alone — the graph read still asks for every node and
-  // `useInfraEdges(nodeIds)` still fans out over every one of them — so the graph the API serves
-  // never learns that a surface is hiding something, and toggling back on redraws from cache. That is
-  // what "the canvas filters; the graph does not" means in code.
+  // instant. Both graph queries remain complete-by-default; filtering returned edges only here means
+  // toggling endpoints back on redraws from cache without another request.
   const { visible: visibleNodes, endpointCount } = useMemo(
     () => partitionEndpoints(rawNodes, showEndpoints),
     [rawNodes, showEndpoints],
@@ -232,8 +233,12 @@ export function InfraCanvas({
     [rawEdges, visibleNodes],
   );
 
-  if (isLoading) return <CanvasSkeleton label={t("loading")} />;
-  if (isError) {
+  // The first paint waits for BOTH bounded graph reads. Once data exists, React Query retains it
+  // during background polls/retries, so a transient refetch never blanks the board.
+  if ((!graph && isLoading) || (!edgeGraph && edgesLoading)) {
+    return <CanvasSkeleton label={t("loading")} />;
+  }
+  if (isError && !graph) {
     return (
       <div className="rounded-lg border border-border p-6">
         <ErrorState
@@ -250,7 +255,9 @@ export function InfraCanvas({
   // whose every node is a hidden endpoint renders as an empty canvas carrying the "N endpoints
   // hidden" control instead — "you have nothing yet" would be a lie, and the wrong lie: it would read
   // as the data loss ADR-0093 §8.3 is at pains to say this is not.
-  if (rawNodes.length === 0) return <InfraEmptyState action={emptyAction} />;
+  if (rawNodes.length === 0 && edgeState.canShowEmpty) {
+    return <InfraEmptyState action={emptyAction} />;
+  }
 
   return (
     <ReactFlowProvider>
@@ -258,10 +265,11 @@ export function InfraCanvas({
         nodes={visibleNodes}
         edges={visibleEdges}
         truncation={truncation}
+        edgeTruncation={edgeState.truncation}
         endpointCount={endpointCount}
         showEndpoints={showEndpoints}
         onToggleEndpoints={onToggleEndpoints}
-        edgesError={edgesError}
+        edgesError={edgeState.failure !== null}
         onRetryEdges={refetchEdges}
         onSelectNode={onSelectNode}
         selectedId={selectedId}
@@ -278,11 +286,12 @@ export function InfraCanvas({
   );
 }
 
-/** The mounted board — data is loaded and non-empty by the time we reach here. */
+/** The mounted board — both initial requests settled; it may be node-empty only when edges failed. */
 function CanvasBoard({
   nodes: infraNodes,
   edges: infraEdges,
   truncation,
+  edgeTruncation,
   endpointCount,
   showEndpoints,
   onToggleEndpoints,
@@ -310,13 +319,15 @@ function CanvasBoard({
    * banner below states both numbers. Null on every normal estate.
    */
   truncation: GraphTruncationNotice | null;
+  /** Set when the bounded edge read hit its server-reported cap. */
+  edgeTruncation: { shown: number; total: number } | null;
   /** How many endpoints the estate reports, drawn or not — the toolbar states the number (§5). */
   endpointCount: number;
   showEndpoints: boolean;
   onToggleEndpoints?: () => void;
-  /** At least one per-node edge fetch failed — some relationships are missing from the graph (#778). */
+  /** The graph-edge request failed — the retained/empty relationship set is explicitly incomplete. */
   edgesError: boolean;
-  /** Re-run the per-node edge fetches; on success the inline notice auto-clears. */
+  /** Re-run the graph-edge request; on success the inline notice auto-clears. */
   onRetryEdges: () => void;
   onSelectNode?: (nodeId: string | null) => void;
   selectedId: string | null;
@@ -807,11 +818,10 @@ function CanvasBoard({
           </Panel>
         ) : null}
 
-        {/* The two "this map is not the whole truth" banners, stacked in ONE top-centre panel so they
-            can never land on top of each other — an operator whose graph is BOTH truncated and missing
-            edges is the one who most needs to read both sentences. Same visual treatment for both:
-            subtle, non-blocking, persistent (NOT a toast — these states last as long as the cause). */}
-        {truncation || edgesError ? (
+        {/* Completeness warnings share ONE stack so node truncation, edge truncation and an edge-read
+            failure can all remain visible without covering each other. These are persistent map state,
+            never transient toasts. */}
+        {truncation || edgeTruncation || edgesError ? (
           <Panel position="top-center" className="flex flex-col items-center gap-2">
             {/* Truncated graph (#1152) — the read hit `INFRA_GRAPH_NODES_MAX`, so nodes (and the
                 edges they carry) are simply not on the board. There is no Retry to offer: refetching
@@ -838,9 +848,26 @@ function CanvasBoard({
               </Callout>
             ) : null}
 
-            {/* Partial edge-fetch notice (issue #778) — a per-node edge fetch failed, so some
-                relationships are missing from the graph, with a Retry that re-runs the fetches; it
-                auto-clears the moment a retry succeeds. */}
+            {edgeTruncation ? (
+              <Callout
+                tone="warning"
+                icon={<ExclamationTriangleIcon />}
+                className="items-center py-2 shadow-md backdrop-blur-sm"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-sm font-medium">
+                    {t("graph.edgesTruncated", {
+                      shown: edgeTruncation.shown,
+                      total: edgeTruncation.total,
+                    })}
+                  </span>
+                  <span className="text-xs">{t("graph.edgesTruncatedHint")}</span>
+                </div>
+              </Callout>
+            ) : null}
+
+            {/* A failed edge read never becomes an empty relationship set. Retained data stays drawn,
+                this warning persists, and Retry re-runs the one bounded request. */}
             {edgesError ? (
               <Callout
                 tone="warning"
