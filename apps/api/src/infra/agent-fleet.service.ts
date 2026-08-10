@@ -48,8 +48,8 @@ const AGENT_IDENTITY_WHERE = {
  *  - **It does not define "behind".** `agentVersionBucket` in `@lazyit/shared` is a pure
  *    re-expression of `isNewerVersion`/`isMajorBehind`, fail-soft posture and all. This service
  *    supplies the two version strings and nothing more.
- *  - **It does not touch `listNodes`.** `GET /infra/nodes` is polled every 5–40s by the review tray
- *    and the wizard, which is why #1135 took `specs` off it; adding a jsonb projection there would
+ *  - **It does not touch `listNodePage`.** `GET /infra/nodes/page` is polled every 5–40s by the review
+ *    tray and the wizard, which is why #1135 took `specs` off it; adding a jsonb projection there would
  *    walk that back for a surface that never renders it. The `specs` projection lives HERE, on a read
  *    an admin navigates to.
  *  - **It does not count container children.** A CONTAINER node is stamped with its HOST's
@@ -120,7 +120,7 @@ export class AgentFleetService {
         lastReportedAt: true,
         // Gated in app code on the asset being live: a to-one relation cannot be `where`-filtered, and
         // a soft-deleted (detached/archived) Asset must never leak its name — the same rule
-        // `listNodes` follows.
+        // `listNodePage` follows.
         asset: { select: { name: true, deletedAt: true } },
         // NOTE: `specs` is deliberately absent — the two values this view needs come out of the
         // narrow jsonb projection below, never the whole blob.

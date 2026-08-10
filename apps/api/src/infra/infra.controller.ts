@@ -12,6 +12,7 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -22,7 +23,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import {
   AgentFleetViewSchema,
   AgentPolicyOverrideSchema,
@@ -46,6 +47,7 @@ import {
   InfraNodeDetailSchema,
   InfraNodeFactChangeListSchema,
   InfraNodeKindSchema,
+  InfraNodeListItemSchema,
   InfraNodeListRoleSchema,
   InfraNodeListPageSchema,
   InfraNodeSchema,
@@ -74,6 +76,7 @@ import { AgentFleetService } from './agent-fleet.service';
 
 class InfraNodeDto extends createZodDto(InfraNodeSchema) {}
 class AgentFleetViewDto extends createZodDto(AgentFleetViewSchema) {}
+class InfraNodeListItemDto extends createZodDto(InfraNodeListItemSchema) {}
 class InfraNodeListPageDto extends createZodDto(InfraNodeListPageSchema) {}
 class InfraGraphDto extends createZodDto(InfraGraphSchema) {}
 class InfraGraphEdgesDto extends createZodDto(InfraGraphEdgesSchema) {}
@@ -127,7 +130,9 @@ const PatchPositionSchema = z.strictObject({
 });
 class PatchPositionDto extends createZodDto(PatchPositionSchema) {}
 
-const INFRA_NODE_LIST_QUERY_KEYS = new Set([
+const LEGACY_INFRA_NODE_LIST_QUERY_KEYS = new Set(['kind', 'status', 'state']);
+
+const INFRA_NODE_PAGE_QUERY_KEYS = new Set([
   'kind',
   'status',
   'state',
@@ -306,8 +311,49 @@ export class InfraController {
   @Get('nodes')
   @RequirePermission('infra:read')
   @ApiOperation({
+    deprecated: true,
     summary:
-      'List topology nodes, PAGED on the house Page<T> contract (ADR-0030): { items, total, limit, offset }, default 50, hard max 200 (an over-max limit is a 400, never clamped). Filter by kind/status/state/source/role/assetIds, search with q (label / IP / live linked asset name / owner name+email), sort on the allowlist. Unknown query keys are rejected. `total` counts the FILTERED set. Excludes archived/soft-deleted. Default order: newest first with a unique id tiebreaker. BREAKING (#1152): this returned a bare array before — the topology canvas moved to GET /infra/graph/nodes.',
+      'Deprecated compatibility list: unbounded InfraNodeListItem[] with only the historical kind/status/state filters. Retained until v2.0; use GET /infra/nodes/page.',
+  })
+  @ApiQuery({
+    name: 'kind',
+    required: false,
+    enum: [...InfraNodeKindSchema.options],
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...InfraNodeStatusSchema.options],
+  })
+  @ApiQuery({
+    name: 'state',
+    required: false,
+    enum: [...InfraNodeStateSchema.options],
+  })
+  @ApiOkResponse({ type: [InfraNodeListItemDto] })
+  listNodes(
+    @Query() query: Record<string, unknown>,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    this.assertAllowedQueryKeys(query, LEGACY_INFRA_NODE_LIST_QUERY_KEYS);
+    res.setHeader('Deprecation', 'true');
+    res.setHeader('Link', '</infra/nodes/page>; rel="successor-version"');
+
+    const kind = this.parseStringQuery(query.kind, 'kind');
+    const status = this.parseStringQuery(query.status, 'status');
+    const state = this.parseStringQuery(query.state, 'state');
+    return this.infra.listNodes({
+      kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
+      status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
+      state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
+    });
+  }
+
+  @Get('nodes/page')
+  @RequirePermission('infra:read')
+  @ApiOperation({
+    summary:
+      'First-party topology node list, PAGED on the house Page<T> contract (ADR-0030): { items, total, limit, offset }, default 50, hard max 200. Filter by kind/status/state/source/role/ids/assetIds, search with q, and sort on the allowlist. Unknown query keys are rejected.',
   })
   @ApiQuery({
     name: 'kind',
@@ -373,8 +419,8 @@ export class InfraController {
     description: 'Sort direction (default asc when sort is set).',
   })
   @ApiOkResponse({ type: InfraNodeListPageDto })
-  listNodes(@Query() query: Record<string, unknown>) {
-    this.assertAllowedQueryKeys(query, INFRA_NODE_LIST_QUERY_KEYS);
+  listNodePage(@Query() query: Record<string, unknown>) {
+    this.assertAllowedQueryKeys(query, INFRA_NODE_PAGE_QUERY_KEYS);
     const kind = this.parseStringQuery(query.kind, 'kind');
     const status = this.parseStringQuery(query.status, 'status');
     const state = this.parseStringQuery(query.state, 'state');
@@ -387,7 +433,7 @@ export class InfraController {
     const sort = this.parseStringQuery(query.sort, 'sort');
     const dir = this.parseStringQuery(query.dir, 'dir');
 
-    return this.infra.listNodes(
+    return this.infra.listNodePage(
       {
         kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
         status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),

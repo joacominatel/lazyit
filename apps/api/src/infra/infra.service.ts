@@ -469,6 +469,12 @@ export interface InfraNodeFilters {
   q?: string;
 }
 
+/** The only filters exposed by the deprecated, unbounded `GET /infra/nodes` compatibility route. */
+export type LegacyInfraNodeFilters = Pick<
+  InfraNodeFilters,
+  'kind' | 'status' | 'state'
+>;
+
 /** Child identity is namespaced in `externalId`; it is deliberately independent of node `kind`. */
 const INFRA_CHILD_IDENTITY_WHERE = {
   OR: [
@@ -487,7 +493,7 @@ function infraNodeRoleWhere(
 }
 
 /**
- * Sortable fields for `GET /infra/nodes` (ADR-0030 §1) — public `?sort=` key → Prisma column. An
+ * Sortable fields for `GET /infra/nodes/page` (ADR-0030 §1) — public `?sort=` key → Prisma column. An
  * unknown key is a 400, never a silent no-op, so a sort always means what it says.
  *
  * Bounded to real columns on the node itself. The Servers table's `asset` and `owner` columns are
@@ -521,7 +527,7 @@ const INFRA_NODE_DEFAULT_ORDER = [
 ] satisfies Prisma.InfraNodeOrderByWithRelationInput[];
 
 /**
- * The `GET /infra/nodes` row projection (#1135) — an explicit `select`, never `include`.
+ * The shared node-list row projection (#1135) — an explicit `select`, never `include`.
  *
  * `specs` is the ONE column left out, and that is the whole point: on an agent-reported host it is
  * the entire inventory blob (~1500 software entries on a real Linux box), and a bare `include`
@@ -549,7 +555,7 @@ const INFRA_NODE_LIST_SELECT = {
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
-  // NOTE: `specs` is deliberately absent (#1135) — see listNodes' doc comment.
+  // NOTE: `specs` is deliberately absent (#1135) — see listNodePage's doc comment.
   asset: {
     // `deletedAt` is selected (not filterable on a to-one relation) so the flatten can gate the
     // name — a soft-deleted asset must NOT leak its name through the list.
@@ -575,6 +581,27 @@ const INFRA_NODE_LIST_SELECT = {
     },
   },
 } satisfies Prisma.InfraNodeSelect;
+
+type InfraNodeListRow = Prisma.InfraNodeGetPayload<{
+  select: typeof INFRA_NODE_LIST_SELECT;
+}>;
+
+/** Privacy-safe flattening shared by the compatibility array and the first-party page. */
+function projectInfraNodeListRow({ asset, ...node }: InfraNodeListRow) {
+  const liveAsset = asset?.deletedAt === null ? asset : null;
+  return {
+    ...node,
+    assetName: liveAsset?.name ?? null,
+    owners: (liveAsset?.assignments ?? []).map((assignment) => ({
+      assignmentId: assignment.id,
+      userId: assignment.user.id,
+      firstName: assignment.user.firstName,
+      lastName: assignment.user.lastName,
+      email: assignment.user.email,
+      deletedAt: assignment.user.deletedAt,
+    })),
+  };
+}
 
 /**
  * The `GET /infra/graph/nodes` projection (#1152) — exactly what the React Flow board draws, and
@@ -3745,18 +3772,31 @@ export class InfraService {
   }
 
   /**
-   * `GET /infra/nodes` — a PAGED list of nodes (#1152), on the house ADR-0030 `Page<T>` contract:
+   * `GET /infra/nodes` — the deprecated compatibility array retained until v2.0. It intentionally
+   * remains unbounded and accepts only the historical `kind` / `status` / `state` filters. The row
+   * projection and privacy mapper are shared with the first-party page, so compatibility does not
+   * preserve the archived-Asset disclosure bug.
+   */
+  async listNodes(filters: LegacyInfraNodeFilters) {
+    const rows = await this.prisma.infraNode.findMany({
+      where: this.buildNodeListWhere(filters),
+      orderBy: INFRA_NODE_DEFAULT_ORDER,
+      select: INFRA_NODE_LIST_SELECT,
+    });
+    return rows.map(projectInfraNodeListRow);
+  }
+
+  /**
+   * `GET /infra/nodes/page` — a PAGED list of nodes (#1152), on the house ADR-0030 `Page<T>` contract:
    * `{ items, total, limit, offset }`, default page 50, hard max 200, an over-max `limit` rejected
    * rather than clamped. Soft-deleted nodes are excluded by the extension.
    *
-   * This is a BREAKING wire-shape change — the endpoint used to return a bare array — following the
-   * precedent ADR-0030 §4 set for `GET /assets/:id/articles` (#220). It closes the last unbounded
-   * poll on this module: the PENDING tray hits this every 40s and the create-agent wizard every 5s,
-   * and an ADR-0095 hypervisor host can enrol 500 guest nodes in one report, so "the estate is small
-   * by design" stopped being true the moment hypervisor ingest shipped.
+   * This first-party route closes the unbounded poll without changing the historical endpoint's wire
+   * shape: the PENDING tray hits this every 40s and the create-agent wizard every 5s, and an ADR-0095
+   * hypervisor host can enrol 500 guest nodes in one report.
    *
-   * `total` is a `count` over the SAME `where` as `items`, both inside ONE `$transaction`, so the
-   * number a caller displays can never describe a different set than the rows beside it.
+   * `total` is a `count` over the SAME `where` as `items`, both inside ONE RepeatableRead transaction,
+   * so the number a caller displays cannot describe a different snapshot than the rows beside it.
    *
    * There is deliberately no `deleted` slice here (ADR-0030 §7). The web has no archived-nodes view,
    * so the param would be contract surface nothing consumes; the controller does not accept it, so
@@ -3782,13 +3822,13 @@ export class InfraService {
    * NOT nested relation reads (verified against the Prisma query-extension docs). And a `where` filter
    * is NOT allowed on a to-ONE relation include (`asset` is to-one) — Prisma only filters to-MANY
    * relation lists inside `include`/`select`. So we select the asset's `deletedAt` alongside `name`
-   * and gate the name in app code: a soft-deleted (detached/archived) Asset never leaks its name
-   * (`assetName: null`), exactly as `getNodeDetail`'s soft-delete-filtered `findFirst` already honours.
-   * Owners mirror `resolveOwners` exactly: ACTIVE assignments only (`releasedAt: null`), newest first,
-   * with the owner user inlined — a departed (soft-deleted) USER still surfaces with its `deletedAt`
-   * set, so the UI renders the same "left the company" affordance (history kept, ADR-0019).
+   * and gate the whole relation in app code: a soft-deleted (detached/archived) Asset yields
+   * `assetName: null` and `owners: []`. Owners on a live Asset mirror `resolveOwners`: ACTIVE
+   * assignments only (`releasedAt: null`), newest first, with the owner user inlined — a departed
+   * (soft-deleted) USER still surfaces with its `deletedAt` set, so the UI renders the same "left the
+   * company" affordance (history kept, ADR-0019).
    */
-  async listNodes(filters: InfraNodeFilters, page: PageQuery) {
+  async listNodePage(filters: InfraNodeFilters, page: PageQuery) {
     const where = this.buildNodeListWhere(filters);
     const { take, skip } = offsetOf(page);
     // An allowlisted sort still gets the unique `id` appended. Sorting by `label` re-opens exactly
@@ -3803,32 +3843,23 @@ export class InfraService {
       ? [sorted, INFRA_NODE_TIEBREAKER]
       : INFRA_NODE_DEFAULT_ORDER;
 
-    // findMany + count over ONE `where`, in ONE transaction — the ADR-0030 shape every other list
-    // uses, and the only way `total` cannot drift from the rows it is describing.
-    const [rows, total] = await this.prisma.$transaction([
-      this.prisma.infraNode.findMany({
-        where,
-        orderBy,
-        take,
-        skip,
-        select: INFRA_NODE_LIST_SELECT,
-      }),
-      this.prisma.infraNode.count({ where }),
-    ]);
+    // findMany + count over ONE `where` and one RepeatableRead snapshot, so `total` cannot drift from
+    // the rows it describes when a concurrent report inserts or updates a node between statements.
+    const [rows, total] = await this.prisma.$transaction(
+      [
+        this.prisma.infraNode.findMany({
+          where,
+          orderBy,
+          take,
+          skip,
+          select: INFRA_NODE_LIST_SELECT,
+        }),
+        this.prisma.infraNode.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
 
-    const items = rows.map(({ asset, ...node }) => ({
-      ...node,
-      // Gate the name on the asset being live (the to-one relation can't be where-filtered).
-      assetName: asset && asset.deletedAt === null ? asset.name : null,
-      owners: (asset?.assignments ?? []).map((a) => ({
-        assignmentId: a.id,
-        userId: a.user.id,
-        firstName: a.user.firstName,
-        lastName: a.user.lastName,
-        email: a.user.email,
-        deletedAt: a.user.deletedAt,
-      })),
-    }));
+    const items = rows.map(projectInfraNodeListRow);
     return pageOf(items, total, page);
   }
 
@@ -3870,6 +3901,7 @@ export class InfraService {
               {
                 asset: {
                   is: {
+                    deletedAt: null,
                     assignments: {
                       some: {
                         releasedAt: null,
@@ -3925,21 +3957,24 @@ export class InfraService {
    * PER ROW and the canvas has never rendered either; `shortcuts` is drill-in-only. Dropping them
    * means the unpaginated read is now the LIGHTEST of the three, not the heaviest.
    *
-   * The return type is inferred rather than pinned to `InfraGraphSchema`, exactly as `listNodes` is:
+   * The return type is inferred rather than pinned to `InfraGraphSchema`, exactly as `listNodePage` is:
    * Prisma types `chassis` as a bare `String?` while the wire schema narrows it to a vocabulary with
    * `.catch(null)` read-tolerance (ADR-0093), so pinning here would fight a degradation the contract
    * is deliberately built to absorb. The spec asserts `select` ≡ `InfraGraphNodeSchema` instead,
    * which is the drift that would actually hurt.
    */
   async listGraphNodes() {
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.infraNode.findMany({
-        orderBy: INFRA_NODE_DEFAULT_ORDER,
-        take: INFRA_GRAPH_NODES_MAX,
-        select: INFRA_GRAPH_NODE_SELECT,
-      }),
-      this.prisma.infraNode.count({}),
-    ]);
+    const [items, total] = await this.prisma.$transaction(
+      [
+        this.prisma.infraNode.findMany({
+          orderBy: INFRA_NODE_DEFAULT_ORDER,
+          take: INFRA_GRAPH_NODES_MAX,
+          select: INFRA_GRAPH_NODE_SELECT,
+        }),
+        this.prisma.infraNode.count({}),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
     return {
       items,
       total,
@@ -3957,14 +3992,17 @@ export class InfraService {
       source: { deletedAt: null },
       target: { deletedAt: null },
     } satisfies Prisma.InfraEdgeWhereInput;
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.infraEdge.findMany({
-        where,
-        orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
-        take: INFRA_GRAPH_EDGES_MAX,
-      }),
-      this.prisma.infraEdge.count({ where }),
-    ]);
+    const [items, total] = await this.prisma.$transaction(
+      [
+        this.prisma.infraEdge.findMany({
+          where,
+          orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+          take: INFRA_GRAPH_EDGES_MAX,
+        }),
+        this.prisma.infraEdge.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
     return {
       items,
       total,
@@ -4780,7 +4818,7 @@ export class InfraService {
         OR: [{ sourceId: nodeId }, { targetId: nodeId }],
         ...(activeOnly ? { endedAt: null } : {}),
       },
-      // TOTAL order, not just newest-first (#1152) — the same reasoning as `listNodes`. `startedAt`
+      // TOTAL order, not just newest-first (#1152) — the same reasoning as `listNodePage`. `startedAt`
       // is `@default(now())` with no unique tiebreaker, and a hypervisor report writes its guests'
       // RUNS_ON edges back to back in one report, so same-millisecond ties are routine, not rare.
       // It matters MORE here than on the node list: the Connections drill-in

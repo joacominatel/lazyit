@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { Test, TestingModule } from '@nestjs/testing';
 // The controller imports InfraService, which transitively pulls the generated Prisma client and the
 // ESM `meilisearch` package (via AssetsService → SearchService); stub both so jest can load the file.
 jest.mock('../../generated/prisma/client', () => ({
@@ -7,9 +8,16 @@ jest.mock('../../generated/prisma/client', () => ({
 }));
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, INestApplication } from '@nestjs/common';
 import type { Permission } from '@lazyit/shared';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import request from 'supertest';
+import type { Server } from 'node:http';
 import { InfraController } from './infra.controller';
+import { InfraService } from './infra.service';
+import { InfraAutoConfirmService } from './infra-auto-confirm.service';
+import { AgentPolicyService } from './agent-policy.service';
+import { AgentFleetService } from './agent-fleet.service';
 import { PERMISSION_KEY } from '../auth/require-permission.decorator';
 import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 
@@ -33,6 +41,7 @@ function guardsOf(method: keyof InfraController): unknown[] {
 describe('InfraController — permission gating (ADR-0070 §8)', () => {
   it('gates every READ route on infra:read', () => {
     expect(permsOf('listNodes')).toEqual(['infra:read']);
+    expect(permsOf('listNodePage')).toEqual(['infra:read']);
     expect(permsOf('getNode')).toEqual(['infra:read']);
     expect(permsOf('getImpact')).toEqual(['infra:read']);
     expect(permsOf('listEdges')).toEqual(['infra:read']);
@@ -51,12 +60,12 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     expect(permsOf('listGraphEdges')).toEqual(['infra:read']);
   });
 
-  describe('the node list page params (#1152)', () => {
+  describe('the first-party node page params (#1152)', () => {
     // A real (stubbed) service, so a params failure can only ever be a 400 from the parsing — never a
     // "not a function" from an empty stand-in that would pass the assertion for the wrong reason.
-    const listNodes = jest.fn().mockReturnValue('page');
+    const listNodePage = jest.fn().mockReturnValue('page');
     const controller = new InfraController(
-      { listNodes } as never,
+      { listNodePage } as never,
       {} as never,
       {} as never,
       {} as never,
@@ -64,10 +73,10 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
 
     /** Named call-through, so adding a filter param never silently re-points these positionals. */
     function list(params: Record<string, string>) {
-      return controller.listNodes(params);
+      return controller.listNodePage(params);
     }
 
-    beforeEach(() => listNodes.mockClear());
+    beforeEach(() => listNodePage.mockClear());
 
     // ADR-0030: an over-max `limit` is REJECTED, never clamped — so a client can never believe it
     // asked for more than it got. A clamp is the failure mode this contract exists to forbid.
@@ -75,14 +84,14 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       'rejects limit=%p with a 400 rather than clamping it',
       (limit) => {
         expect(() => list({ limit })).toThrow(BadRequestException);
-        expect(listNodes).not.toHaveBeenCalled();
+        expect(listNodePage).not.toHaveBeenCalled();
       },
     );
 
     it('accepts the hard maximum page size (200) — the PENDING tray asks for exactly this', () => {
       void list({ state: 'PENDING', limit: '200' });
 
-      expect(listNodes).toHaveBeenCalledWith(
+      expect(listNodePage).toHaveBeenCalledWith(
         expect.objectContaining({ state: 'PENDING' }),
         expect.objectContaining({ limit: 200, offset: 0 }),
       );
@@ -91,7 +100,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     it('defaults to the house page size when no window is asked for', () => {
       void list({});
 
-      expect(listNodes).toHaveBeenCalledWith(
+      expect(listNodePage).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ limit: 50, offset: 0 }),
       );
@@ -126,7 +135,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       // looking at 50 rows.
       void list({ q: 'web-01', source: 'AGENT', limit: '1' });
 
-      expect(listNodes).toHaveBeenCalledWith(
+      expect(listNodePage).toHaveBeenCalledWith(
         expect.objectContaining({ q: 'web-01', source: 'AGENT' }),
         expect.objectContaining({ limit: 1 }),
       );
@@ -137,7 +146,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       (role) => {
         void list({ role });
 
-        expect(listNodes).toHaveBeenCalledWith(
+        expect(listNodePage).toHaveBeenCalledWith(
           expect.objectContaining({ role }),
           expect.anything(),
         );
@@ -148,7 +157,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       'rejects invalid role=%p',
       (role) => {
         expect(() => list({ role })).toThrow(BadRequestException);
-        expect(listNodes).not.toHaveBeenCalled();
+        expect(listNodePage).not.toHaveBeenCalled();
       },
     );
 
@@ -156,7 +165,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       'rejects unknown query key %s before dispatch',
       (key) => {
         expect(() => list({ [key]: 'active' })).toThrow(BadRequestException);
-        expect(listNodes).not.toHaveBeenCalled();
+        expect(listNodePage).not.toHaveBeenCalled();
       },
     );
 
@@ -176,7 +185,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       ['dir', 'desc'],
     ])('accepts documented query key %s', (key, value) => {
       expect(() => list({ [key]: value })).not.toThrow();
-      expect(listNodes).toHaveBeenCalledTimes(1);
+      expect(listNodePage).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -271,6 +280,104 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       new Set<Permission>(['infra:manage', 'secret:read']),
     );
     expect(permsOf('detachSecret')).toEqual(['infra:manage']);
+  });
+});
+
+describe('InfraController — legacy and page route contracts', () => {
+  let app: INestApplication;
+  const listNodes = jest.fn();
+  const listNodePage = jest.fn();
+  const getNodeDetail = jest.fn();
+
+  beforeAll(async () => {
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      controllers: [InfraController],
+      providers: [
+        {
+          provide: InfraService,
+          useValue: { listNodes, listNodePage, getNodeDetail },
+        },
+        { provide: InfraAutoConfirmService, useValue: {} },
+        { provide: AgentPolicyService, useValue: {} },
+        { provide: AgentFleetService, useValue: {} },
+      ],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    listNodes.mockReset().mockResolvedValue([{ id: 'legacy-node' }]);
+    listNodePage.mockReset().mockResolvedValue({
+      items: [{ id: 'paged-node' }],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    });
+    getNodeDetail.mockReset().mockResolvedValue({ id: 'detail-node' });
+  });
+
+  it('keeps GET /infra/nodes as an array with only historical filters and deprecation headers', async () => {
+    const res = await request(app.getHttpServer() as Server).get(
+      '/infra/nodes?kind=VM&status=ONLINE&state=CONFIRMED',
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ id: 'legacy-node' }]);
+    expect(res.headers.deprecation).toBe('true');
+    expect(res.headers.link).toBe(
+      '</infra/nodes/page>; rel="successor-version"',
+    );
+    expect(res.headers.sunset).toBeUndefined();
+    expect(listNodes).toHaveBeenCalledWith({
+      kind: 'VM',
+      status: 'ONLINE',
+      state: 'CONFIRMED',
+    });
+  });
+
+  it.each(['source=AGENT', 'limit=1', 'q=web'])(
+    'rejects a page-only legacy query (%s)',
+    async (query) => {
+      const res = await request(app.getHttpServer() as Server).get(
+        `/infra/nodes?${query}`,
+      );
+      expect(res.status).toBe(400);
+      expect(listNodes).not.toHaveBeenCalled();
+    },
+  );
+
+  it('routes the static /nodes/page path before :id and returns the Page<T> shape', async () => {
+    const res = await request(app.getHttpServer() as Server).get(
+      '/infra/nodes/page?source=AGENT&q=web&limit=25&sort=label&dir=asc',
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      items: [{ id: 'paged-node' }],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    });
+    expect(listNodePage).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'AGENT', q: 'web' }),
+      expect.objectContaining({ limit: 25, sort: 'label', dir: 'asc' }),
+    );
+    expect(getNodeDetail).not.toHaveBeenCalled();
+  });
+
+  it('marks only the compatibility operation deprecated in OpenAPI', () => {
+    const document = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().setTitle('test').setVersion('1').build(),
+    );
+
+    expect(document.paths['/infra/nodes']?.get?.deprecated).toBe(true);
+    expect(document.paths['/infra/nodes/page']?.get?.deprecated).not.toBe(true);
   });
 });
 
