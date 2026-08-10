@@ -2,7 +2,6 @@ import {
   keepPreviousData,
   useInfiniteQuery,
   useMutation,
-  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -43,11 +42,11 @@ import {
   detachInfraNodeSecret,
   getInfraNodeChanges,
   getInfraNodeDetail,
-  getInfraNodeEdges,
   getInfraNodeEdgesHistory,
   getInfraNodeIdentityMatches,
   getInfraNodeImpact,
   getInfraNodes,
+  getInfraGraphEdges,
   getInfraGraphNodes,
   type InfraNodeListParams,
   mergeInfraNodeInto,
@@ -61,9 +60,9 @@ import {
  * #741 + #742).
  *
  * Hand-written (not `createQueryKeys`) for the canvas's bespoke shapes: a PAGED node list, the
- * canvas's own whole-graph read, an exact asset→node batch resolve, a PER-NODE edge list (the API has
- * no global edges endpoint), the enriched per-node `detail`, and a per-node edge `history` (active +
- * closed). Every mutation invalidates `infraKeys.all`, which prefix-matches all `["infra", …]` keys —
+ * canvas's two whole-graph reads, an exact asset→node batch resolve, the enriched per-node `detail`,
+ * and a per-node edge `history` (active + closed). Every mutation invalidates `infraKeys.all`, which
+ * prefix-matches all `["infra", …]` keys —
  * so a create/edit/delete/edge write refreshes every node page, the graph, the open panel's detail
  * and its edge lists in one call (TanStack Query v5 prefix match). That prefix match is why
  * `infraKeys.graph()` and `infraKeys.assetNodes()` are built from `infraKeys.all` rather than being
@@ -89,6 +88,8 @@ export const infraKeys = {
    * matches it and the board refreshes with everything else.
    */
   graph: () => [...infraKeys.all, "graph"] as const,
+  /** One bounded active-edge read for the canvas; a sibling of the graph-node cache entry. */
+  graphEdges: () => [...infraKeys.all, "graphEdges"] as const,
   /**
    * The exact asset→node resolve behind the Assets screen's "On topology" affordances (#765/#1152).
    * Its OWN key, never the canvas's: these are `?assetIds=` batch reads whose result set is a handful
@@ -97,7 +98,6 @@ export const infraKeys = {
    */
   assetNodes: (assetIds: string[]) =>
     [...infraKeys.all, "assetNodes", assetIds] as const,
-  edges: (nodeId: string) => [...infraKeys.all, "edges", nodeId] as const,
   detail: (nodeId: string) => [...infraKeys.all, "detail", nodeId] as const,
   edgeHistory: (nodeId: string) =>
     [...infraKeys.all, "edgeHistory", nodeId] as const,
@@ -151,6 +151,22 @@ export function useInfraGraphNodes(options?: {
   return useQuery({
     queryKey: infraKeys.graph(),
     queryFn: ({ signal }) => getInfraGraphNodes(signal),
+    ...options,
+  });
+}
+
+/**
+ * The canvas's active relationships in one bounded request (`GET /infra/graph/edges`). Like the
+ * graph-node read, the caller must render the required `truncated` flag rather than treating a cap as
+ * a complete map. A stable query key keeps prior data on screen during background polls and retries.
+ */
+export function useInfraGraphEdges(options?: {
+  enabled?: boolean;
+  refetchInterval?: number | false;
+}) {
+  return useQuery({
+    queryKey: infraKeys.graphEdges(),
+    queryFn: ({ signal }) => getInfraGraphEdges(signal),
     ...options,
   });
 }
@@ -220,53 +236,6 @@ export function useAssetsOnTopology(
 }
 
 /**
- * Assemble the whole graph's edges from the loaded nodes. The API exposes edges only per-node
- * (`GET /infra/nodes/:id/edges`), so we fan one query out per node via `useQueries` and dedupe by
- * edge id (an edge touching two loaded nodes is returned by both).
- *
- * ponytail: a per-node fan-out, not a bespoke batch endpoint — the estate is small by design
- * (ADR-0070), each query is individually cached/invalidated, and `useQueries` already shares the
- * one client. `enabled` gates each on its node id so nothing fires before the node list resolves.
- *
- * Surfaces `isError` (true if ANY per-node edge query failed) and an aggregate `refetch` so the
- * canvas can flag — and retry — a partial fetch instead of silently dropping relationships: a failed
- * edge fetch would otherwise render the touched nodes as "disconnected" with no cue (issue #778).
- */
-export function useInfraEdges(nodeIds: string[]): {
-  edges: InfraEdge[];
-  isLoading: boolean;
-  isError: boolean;
-  refetch: () => void;
-} {
-  const results = useQueries({
-    queries: nodeIds.map((nodeId) => ({
-      queryKey: infraKeys.edges(nodeId),
-      queryFn: ({ signal }: { signal: AbortSignal }) =>
-        getInfraNodeEdges(nodeId, signal),
-      enabled: Boolean(nodeId),
-    })),
-  });
-
-  const byId = new Map<string, InfraEdge>();
-  for (const result of results) {
-    for (const edge of result.data ?? []) byId.set(edge.id, edge);
-  }
-
-  return {
-    edges: [...byId.values()],
-    // Loading only matters before the first paint; once nodes exist we render edges as they arrive.
-    isLoading: nodeIds.length > 0 && results.some((r) => r.isLoading),
-    // Any per-node failure means some relationships are missing from the graph above.
-    isError: results.some((r) => r.isError),
-    // Re-run every per-node edge query; a successful retry flips `isError` back to false (the canvas
-    // notice auto-clears). Fresh closure per render is fine — it's only called from the retry click.
-    refetch: () => {
-      for (const result of results) void result.refetch();
-    },
-  };
-}
-
-/**
  * Persist a node's canvas position after a drag settles (debounced by the caller). Optimistic by
  * design: the canvas already holds the dragged position in React Flow's local state, so on success
  * we only need to keep the cached node list in step (no refetch flash). On error the next list
@@ -328,8 +297,8 @@ export function useInfraNodeDetail(nodeId: string | null) {
 
 /**
  * A node's full edge history (active + closed) for the panel's edge manager (`?active=false`). The
- * canvas's `useInfraEdges` reads active-only to draw the live graph; this read shows migrations (a
- * closed RUNS_ON) so an operator understands the host history. `enabled` gates it on a selected node.
+ * canvas's graph-edge read is active-only; this per-node read shows migrations (a closed RUNS_ON) so
+ * an operator understands the host history. `enabled` gates it on a selected node.
  */
 export function useInfraNodeEdgesHistory(nodeId: string | null) {
   return useQuery({
