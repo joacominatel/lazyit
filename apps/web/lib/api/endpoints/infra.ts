@@ -19,11 +19,14 @@ import type {
   InfraNodeDetail,
   InfraNodeFactChangeList,
   InfraGraph,
+  InfraGraphEdges,
   InfraNodeListPage,
+  InfraNodeListRole,
   InfraSecretRef,
   MergeInfraNode,
   UpdateInfraNode,
 } from "@lazyit/shared";
+import { InfraGraphEdgesSchema } from "@lazyit/shared";
 import { apiFetch } from "../client";
 
 /**
@@ -32,8 +35,8 @@ import { apiFetch } from "../client";
  * flows (issue #742) are wired below — the panel + write surface that makes this beat a Draw.io
  * diagram.
  *
- * Edges are read PER-NODE (`GET /infra/nodes/:id/edges`) — the API has no global edges list. The
- * canvas fans those reads out across the loaded nodes and dedupes by edge id (see `use-infra-nodes`).
+ * The canvas reads active edges once from `GET /infra/graph/edges`. The per-node endpoint remains the
+ * detail/history read, where closed relationships matter.
  *
  * ## The node read is TWO endpoints now (issue #1152)
  *
@@ -71,6 +74,8 @@ export interface InfraNodeFilters {
   status?: InfraNode["status"];
   state?: InfraNode["state"];
   source?: InfraNode["source"];
+  /** Reporting identity role; HOST excludes container and hypervisor-guest child namespaces. */
+  role?: InfraNodeListRole;
   /** Exact node cuids — comma-encoded on the wire. */
   ids?: string[];
   /** Exact linked-Asset cuids — comma-encoded on the wire. */
@@ -111,6 +116,7 @@ export function getInfraNodes(
   if (params.status) qs.set("status", params.status);
   if (params.state) qs.set("state", params.state);
   if (params.source) qs.set("source", params.source);
+  if (params.role) qs.set("role", params.role);
   if (params.ids && params.ids.length > 0) qs.set("ids", params.ids.join(","));
   if (params.assetIds && params.assetIds.length > 0)
     qs.set("assetIds", params.assetIds.join(","));
@@ -143,14 +149,15 @@ export function getInfraGraphNodes(signal?: AbortSignal): Promise<InfraGraph> {
 }
 
 /**
- * A node's edges (`GET /infra/nodes/:id/edges`), active (open) only by default. The canvas calls
- * this once per node and dedupes by edge id to assemble the whole graph's edge set.
+ * The canvas's active relationships (`GET /infra/graph/edges`) in one bounded-complete envelope.
+ * Runtime parsing keeps the required `truncated` signal from being accidentally treated as optional.
  */
-export function getInfraNodeEdges(
-  nodeId: string,
+export async function getInfraGraphEdges(
   signal?: AbortSignal,
-): Promise<InfraEdge[]> {
-  return apiFetch<InfraEdge[]>(`${BASE}/nodes/${nodeId}/edges`, { signal });
+): Promise<InfraGraphEdges> {
+  return InfraGraphEdgesSchema.parse(
+    await apiFetch<unknown>(`${BASE}/graph/edges`, { signal }),
+  );
 }
 
 /**
