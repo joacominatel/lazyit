@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import {
   agentReportSkewPaths,
+  CONTAINER_ID_SEPARATOR,
   containerExternalId,
   containerExternalIdPrefix,
   containerNodeStatus,
@@ -18,6 +19,7 @@ import {
   disambiguateExternalId,
   guestExternalId,
   guestExternalIdPrefix,
+  GUEST_ID_SEPARATOR,
   guestNodeKind,
   guestNodeStatus,
   hostIdentityEvidence,
@@ -57,6 +59,7 @@ import {
   type InfraImpactResponse,
   type InfraNodeChild,
   type InfraNodeKind,
+  type InfraNodeListRole,
   type InfraAssetCandidate,
   type InfraAutoConfirmCandidate,
   type InfraNodeFactChangeList,
@@ -69,6 +72,7 @@ import {
   INFRA_FACT_CHANGE_FACT_MAX,
   INFRA_FACT_CHANGE_PAGE_SIZE,
   INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
+  INFRA_GRAPH_EDGES_MAX,
   INFRA_GRAPH_NODES_MAX,
   offsetOf,
   pageOf,
@@ -439,6 +443,8 @@ export interface InfraNodeFilters {
    * filter it is `?source=AGENT&limit=1` and a look at `total`.
    */
   source?: InfraNodeSource;
+  /** HOST excludes both child identity namespaces; CHILD includes either namespace. */
+  role?: InfraNodeListRole;
   /**
    * Restrict to the nodes backing these Asset ids. The batch-resolver shape ADR-0030 §6 (#961) set
    * for `GET /users?ids=` : the Assets list shows an "on topology" glyph per row, and under a page it
@@ -461,6 +467,23 @@ export interface InfraNodeFilters {
    * anything outside the window (the exact bug ADR-0030 §2 fixed for four other lists).
    */
   q?: string;
+}
+
+/** Child identity is namespaced in `externalId`; it is deliberately independent of node `kind`. */
+const INFRA_CHILD_IDENTITY_WHERE = {
+  OR: [
+    { externalId: { contains: CONTAINER_ID_SEPARATOR } },
+    { externalId: { contains: GUEST_ID_SEPARATOR } },
+  ],
+} satisfies Prisma.InfraNodeWhereInput;
+
+function infraNodeRoleWhere(
+  role: InfraNodeListRole,
+): Prisma.InfraNodeWhereInput {
+  if (role === 'CHILD') return INFRA_CHILD_IDENTITY_WHERE;
+  return {
+    OR: [{ externalId: null }, { NOT: INFRA_CHILD_IDENTITY_WHERE }],
+  };
 }
 
 /**
@@ -3823,6 +3846,7 @@ export class InfraService {
       ...(filters.status ? { status: filters.status } : {}),
       ...(filters.state ? { state: filters.state } : {}),
       ...(filters.source ? { source: filters.source } : {}),
+      ...(filters.role ? { AND: [infraNodeRoleWhere(filters.role)] } : {}),
       ...(filters.ids?.length ? { id: { in: filters.ids } } : {}),
       ...(filters.assetIds?.length
         ? { assetId: { in: filters.assetIds } }
@@ -3837,7 +3861,10 @@ export class InfraService {
               // matches, which is a worse regression than the truncation the page fixes.
               {
                 asset: {
-                  is: { name: { contains: q, mode: 'insensitive' as const } },
+                  is: {
+                    deletedAt: null,
+                    name: { contains: q, mode: 'insensitive' as const },
+                  },
                 },
               },
               {
@@ -3919,6 +3946,29 @@ export class InfraService {
       limit: INFRA_GRAPH_NODES_MAX,
       // `total > items.length`, not `items.length === MAX`: an estate whose node count lands exactly
       // on the cap is COMPLETE, and flagging it would be a permanent false alarm.
+      truncated: total > items.length,
+    };
+  }
+
+  /** `GET /infra/graph/edges` — one bounded read of the live graph's active relationships. */
+  async listGraphEdges() {
+    const where = {
+      endedAt: null,
+      source: { deletedAt: null },
+      target: { deletedAt: null },
+    } satisfies Prisma.InfraEdgeWhereInput;
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.infraEdge.findMany({
+        where,
+        orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+        take: INFRA_GRAPH_EDGES_MAX,
+      }),
+      this.prisma.infraEdge.count({ where }),
+    ]);
+    return {
+      items,
+      total,
+      limit: INFRA_GRAPH_EDGES_MAX,
       truncated: total > items.length,
     };
   }
