@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-08-02
+updated: 2026-08-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -152,7 +152,38 @@ projection precisely because the tray polls it, and nothing here re-fattens it �
 `label`, `kind`, `ipAddress`, `createdAt` and `externalId`, all of which the list already carries. The
 subnet box uses the **same** `ipInCidr` the saved rules use, so *"which hosts would this rule have
 caught"* and *"which hosts does this filter show"* can never be answered by two implementations.
-Server-side paging of `GET /infra/nodes` is **out of scope** and tracked separately (#1152).
+~~Server-side paging of `GET /infra/nodes` is **out of scope** and tracked separately (#1152).~~
+
+> **Corrected 2026-08-07 and 2026-08-09 (#1152) — the first-party list pages, while compatibility
+> stays an array.** `GET /infra/nodes/page` is the house `Page<T>`
+> ([[0030-list-pagination-contract]] §9): default 50, hard
+> max 200, `total` over the filtered set. The paragraph above still describes the tray correctly —
+> its filter, sort, grouping and bulk selection are all still client-side over the loaded lean list —
+> but that list is now **one batch, not the queue**. The tray requests the maximum page (200) of
+> `state=PENDING` in the list's default `createdAt desc` order, so a host that just checked in is
+> always in the window, which is what an onboarding operator is waiting for.
+>
+> The constraint the #1145 text named — *"whatever bounds this list must surface a `total` and a
+> truncation cue, never a quiet partial view"* — is met, and it is met exactly because
+> [[0095-hypervisor-guest-inventory]] made 200 a routine outcome here rather than a theoretical one:
+> one hypervisor report enrols up to `AGENT_GUESTS_MAX` = 500 guests at once. So the header badge
+> counts **`total`**, never `items.length`, and whenever the two differ the tray states it in plain
+> language — *"Showing 200 of 431 pending nodes, most recently discovered first. Confirm or discard
+> these to reveal the rest."* An operator who clears the screen must not be able to conclude *done*
+> while 231 are still queued. The 200-item cap on a single bulk action was already the tray's rule;
+> the batch is now the same size, so a full screen is exactly one bulk pass.
+>
+> The historical `GET /infra/nodes` remains an unbounded, deprecated `InfraNodeListItem[]` accepting
+> only `kind` / `status` / `state` until v2.0. It is a compatibility route, not a first-party agent
+> poll; successful responses point to `/infra/nodes/page`, with no Sunset date.
+>
+> **Follow-up (2026-08-09) — a bounded HOST filter for the wizard.**
+> `GET /infra/nodes/page` exposes `role=HOST` for the create-agent poll. Role is derived from `externalId`:
+> `/container/` and `/guest/` are CHILD identities; everything else, including null, is HOST. It is
+> deliberately not derived from `kind` — a host can legitimately be a VM or container, while a
+> hypervisor guest may also be `VM` or `CONTAINER`. The role predicate runs in Prisma before the
+> page `take` and in the paired count, so one report enrolling 500 newer children cannot hide the
+> reporting host behind the 200-row page ceiling.
 
 **What a bulk action touches is the VISIBLE selection, and one function decides that for every
 surface.** The ticked-ids set outlives a filter change, and no action and no count is derived from it:
@@ -2302,7 +2333,10 @@ would be a separate ADR and arguably a separate product).
   operator-authored auto-confirm rules): §1 Amendment (2026-08-01), issue #1145 — the ergonomics debt
   the #1139 container amendment named as it created it. It moves *when* the human decides, so it
   carries a paired **§8 Amendment (2026-08-01)** stating the widened `infra:report` blast radius.
-  Server-side paging of `GET /infra/nodes` is tracked separately (#1152).
+  ~~Server-side paging of `GET /infra/nodes` is tracked separately (#1152).~~ **Landed 2026-08-07
+  (#1152, corrected 2026-08-09):** `/infra/nodes/page` is the house `Page<T>` and the tray works the
+  queue in batches of 200; deprecated `/infra/nodes` retains the legacy array until v2.0 — see the
+  §1 correction above and [[0030-list-pagination-contract]] §§9–12.
 - Server-driven agent policy (the ack as the config channel, the fixed-tick interval inversion, the
   local veto, the three scopes): §7 Amendment (2026-08-01), issue #1140 — the consumer of contract
   v2's reserved `policyRevision`, with a §4 amendment making the staleness threshold per node.

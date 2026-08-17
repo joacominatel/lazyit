@@ -3,7 +3,7 @@ title: Deployment
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-08-09
 ---
 
 # Deployment
@@ -41,9 +41,11 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   **Valkey** (the BullMQ broker for the async `.docx` import + the Applications Workflow Engine —
   [[stack]]). With the bundled IdP, a **Zitadel** server + DB + one-shot bootstrap sidecar also run
   ([[auth-zitadel-sot]]).
-- **Images:** multi-stage, built with Bun, run on Node (`node:26-alpine`); the API runs
-  `node dist/src/main`, the web runs the Next.js standalone server. The migrate job runs on Bun
-  (the seed needs it). Details: [[0025-containerization-strategy]].
+- **Images:** multi-stage, with dependencies installed and shared tooling run on Bun 1.3.14, and
+  application runtimes on Node (`node:26-alpine`). The API compiles in its Bun builder and runs
+  `node dist/src/main`; the web runs `next build` under a real Node 26 Debian build stage and serves
+  the resulting standalone bundle on Node. The migrate job runs on Bun (the seed needs it). Details:
+  [[0025-containerization-strategy]].
 - **Reporting-agent binaries:** the API image bakes the Bun-compiled Linux collector
   (`apps/agent`, `x64` + `x64-baseline` + `arm64`) into `AGENT_BIN_DIR` (`/app/agent/bin`) via an
   extra build stage, and serves the right one over the token-gated `GET /api/agent/download`; the

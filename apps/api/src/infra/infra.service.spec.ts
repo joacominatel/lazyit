@@ -11,7 +11,15 @@ import {
   AGENT_POLICY_DEFAULT,
   AGENT_SOFTWARE_HASH_MAX,
   AgentReportSchema,
+  CONTAINER_ID_SEPARATOR,
+  DEFAULT_PAGE_LIMIT,
+  GUEST_ID_SEPARATOR,
+  INFRA_GRAPH_EDGES_MAX,
+  INFRA_GRAPH_NODES_MAX,
+  InfraGraphNodeSchema,
   InfraNodeListItemSchema,
+  MAX_PAGE_LIMIT,
+  type PageQuery,
   softwareFingerprint,
 } from '@lazyit/shared';
 import {
@@ -51,6 +59,7 @@ jest.mock('../../generated/prisma/client', () => ({
     // `Prisma.join` builds the IN-list fragment of the ADR-0095 §6 candidate query. The real helper
     // returns a Sql instance; the test only needs the call not to throw and the values to survive.
     join: (values: unknown[]) => ({ values }),
+    TransactionIsolationLevel: { RepeatableRead: 'RepeatableRead' },
     PrismaClientKnownRequestError: class extends Error {
       constructor(
         public code: string,
@@ -92,6 +101,9 @@ interface PrismaMock {
   infraNode: {
     findFirst: Mock;
     findMany: Mock;
+    // The paired `count` of the ADR-0030 page (#1152): findMany + count over ONE `where`, so the
+    // envelope's `total` can never drift from the rows it describes.
+    count: Mock;
     create: Mock;
     update: Mock;
     updateMany: Mock;
@@ -99,6 +111,7 @@ interface PrismaMock {
   infraEdge: {
     findFirst: Mock;
     findMany: Mock;
+    count: Mock;
     findUnique: Mock;
     create: Mock;
     update: Mock;
@@ -206,6 +219,7 @@ describe('InfraService', () => {
       infraNode: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -213,6 +227,7 @@ describe('InfraService', () => {
       infraEdge: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
@@ -231,13 +246,21 @@ describe('InfraService', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       asset: { findFirst: jest.fn(), update: jest.fn() },
+      // Two call shapes, because the service uses both: the interactive form (a callback handed a tx
+      // client — the merge/RUNS_ON writes) and the BATCH form (an array of operations — the ADR-0030
+      // `findMany` + `count` page, #1152). Dispatch on the argument so neither idiom needs its own mock.
       $transaction: jest.fn(
         (
-          cb: (tx: {
-            infraEdge: typeof txEdge;
-            infraNode: typeof txNode;
-          }) => unknown,
-        ) => cb({ infraEdge: txEdge, infraNode: txNode }),
+          arg:
+            | Promise<unknown>[]
+            | ((tx: {
+                infraEdge: typeof txEdge;
+                infraNode: typeof txNode;
+              }) => unknown),
+        ) =>
+          Array.isArray(arg)
+            ? Promise.all(arg)
+            : arg({ infraEdge: txEdge, infraNode: txNode }),
       ),
       $queryRaw: jest.fn().mockResolvedValue([]),
     };
@@ -3523,10 +3546,82 @@ describe('InfraService', () => {
     });
   });
 
-  // ── listNodes — the Servers-list enrichment (ADR-0070 §6, #750) ─────────────
+  describe('listNodes — deprecated compatibility array', () => {
+    it('stays unbounded, preserves the historical filters, and returns a bare array', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-1', label: 'web-01', assetId: null, asset: null },
+      ]);
 
-  describe('listNodes — asset name + owners enrichment', () => {
+      const rows = await service.listNodes({
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+      });
+
+      const arg = firstArg<{
+        where: Record<string, unknown>;
+        take?: number;
+        skip?: number;
+        select: Record<string, unknown>;
+      }>(prisma.infraNode.findMany);
+      expect(arg.where).toMatchObject({
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+      });
+      expect(arg.take).toBeUndefined();
+      expect(arg.skip).toBeUndefined();
+      expect(arg.select.asset).toBeDefined();
+      expect(rows).toEqual([
+        expect.objectContaining({ id: 'node-1', assetName: null, owners: [] }),
+      ]);
+      expect(rows).not.toHaveProperty('items');
+      expect(prisma.infraNode.count).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('uses the shared privacy mapper for an archived linked Asset', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-1',
+          asset: {
+            name: 'archived-secret-name',
+            deletedAt: new Date('2026-01-01T00:00:00.000Z'),
+            assignments: [
+              {
+                id: 'as-1',
+                user: {
+                  id: 'u-1',
+                  firstName: 'Archived',
+                  lastName: 'Owner',
+                  email: 'archived@example.com',
+                  deletedAt: null,
+                },
+              },
+            ],
+          },
+        },
+      ]);
+
+      await expect(service.listNodes({})).resolves.toEqual([
+        expect.objectContaining({ assetName: null, owners: [] }),
+      ]);
+    });
+  });
+
+  // ── listNodePage — the Servers-list enrichment (ADR-0070 §6, #750) ─────────
+
+  describe('listNodePage — asset name + owners enrichment', () => {
+    /** What the controller hands the service for a bare `GET /infra/nodes/page`. */
+    const FIRST_PAGE = {
+      limit: DEFAULT_PAGE_LIMIT,
+      offset: 0,
+      deleted: 'active',
+    } as const satisfies PageQuery;
+
     it('flattens assetName + owners from ONE include (no N+1), via the active assignments + user', async () => {
+      const departedAt = new Date('2026-01-02T00:00:00.000Z');
+      prisma.infraNode.count.mockResolvedValue(1);
       prisma.infraNode.findMany.mockResolvedValue([
         {
           id: 'node-1',
@@ -3543,7 +3638,7 @@ describe('InfraService', () => {
                   firstName: 'Ada',
                   lastName: 'Lovelace',
                   email: 'ada@example.com',
-                  deletedAt: null,
+                  deletedAt: departedAt,
                 },
               },
             ],
@@ -3551,7 +3646,7 @@ describe('InfraService', () => {
         },
       ]);
 
-      const rows = await service.listNodes();
+      const { items: rows } = await service.listNodePage({}, FIRST_PAGE);
 
       // The enrichment came from ONE query — a relation include, NOT a per-row detail fetch.
       expect(assignments.findAll).not.toHaveBeenCalled();
@@ -3570,14 +3665,14 @@ describe('InfraService', () => {
           firstName: 'Ada',
           lastName: 'Lovelace',
           email: 'ada@example.com',
-          deletedAt: null,
+          deletedAt: departedAt,
         },
       ]);
       // The flattened row must NOT carry the raw relation object.
       expect((rows[0] as unknown as { asset?: unknown }).asset).toBeUndefined();
     });
 
-    it('does NOT leak a soft-deleted asset name (deletedAt set → assetName null), keeping the node', async () => {
+    it('does NOT leak a soft-deleted asset name or owners, keeping the node', async () => {
       // The soft-delete extension only filters the TOP-LEVEL findMany, not the nested asset include —
       // a soft-deleted asset still arrives through the relation, so the name MUST be gated in app code.
       prisma.infraNode.findMany.mockResolvedValue([
@@ -3588,15 +3683,27 @@ describe('InfraService', () => {
           asset: {
             name: 'should-not-leak',
             deletedAt: new Date('2026-01-01T00:00:00.000Z'),
-            assignments: [],
+            assignments: [
+              {
+                id: 'as-archived',
+                user: {
+                  id: 'u-archived',
+                  firstName: 'Should',
+                  lastName: 'Not leak',
+                  email: 'hidden@example.com',
+                  deletedAt: null,
+                },
+              },
+            ],
           },
         },
       ]);
 
-      const rows = await service.listNodes();
+      const { items: rows } = await service.listNodePage({}, FIRST_PAGE);
 
       expect(rows).toHaveLength(1); // the NODE still surfaces…
       expect(rows[0].assetName).toBeNull(); // …but the archived asset's name is withheld.
+      expect(rows[0].owners).toEqual([]);
     });
 
     it('returns null assetName + empty owners for a graph-only node (no linked asset)', async () => {
@@ -3604,7 +3711,7 @@ describe('InfraService', () => {
         { id: 'node-1', label: 'redis', assetId: null, asset: null },
       ]);
 
-      const rows = await service.listNodes();
+      const { items: rows } = await service.listNodePage({}, FIRST_PAGE);
 
       expect(rows[0].assetName).toBeNull();
       expect(rows[0].owners).toEqual([]);
@@ -3619,7 +3726,7 @@ describe('InfraService', () => {
     it('SELECTS an explicit column list that excludes `specs` (never the full inventory blob)', async () => {
       prisma.infraNode.findMany.mockResolvedValue([]);
 
-      await service.listNodes();
+      await service.listNodePage({}, FIRST_PAGE);
 
       const arg = firstArg<{
         select?: Record<string, unknown>;
@@ -3636,7 +3743,7 @@ describe('InfraService', () => {
     it('still selects every OTHER wire field, so the projection cannot silently starve the list', async () => {
       prisma.infraNode.findMany.mockResolvedValue([]);
 
-      await service.listNodes();
+      await service.listNodePage({}, FIRST_PAGE);
 
       const arg = firstArg<{ select: Record<string, unknown> }>(
         prisma.infraNode.findMany,
@@ -3666,7 +3773,7 @@ describe('InfraService', () => {
     it('orders by createdAt desc with a UNIQUE `id` tiebreaker (a total order, not just newest-first)', async () => {
       prisma.infraNode.findMany.mockResolvedValue([]);
 
-      await service.listNodes();
+      await service.listNodePage({}, FIRST_PAGE);
 
       const arg = firstArg<{ orderBy: unknown }>(prisma.infraNode.findMany);
       expect(arg.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
@@ -3676,7 +3783,7 @@ describe('InfraService', () => {
       // A hypervisor report writing its guest children in one transaction: identical `createdAt`.
       prisma.infraNode.findMany.mockResolvedValue([]);
 
-      await service.listNodes();
+      await service.listNodePage({}, FIRST_PAGE);
 
       const arg = firstArg<{ orderBy: Array<Record<string, unknown>> }>(
         prisma.infraNode.findMany,
@@ -3685,6 +3792,508 @@ describe('InfraService', () => {
       // partial and ties remain free to move. `id` is the cuid primary key.
       const tiebreaker = arg.orderBy[arg.orderBy.length - 1];
       expect(Object.keys(tiebreaker)).toEqual(['id']);
+    });
+
+    // ── The page window (#1152) ─────────────────────────────────────────────
+    // The ordering half of #1152 shipped first (PR #1234) precisely so this half would be safe: an
+    // unstable sort under LIMIT/OFFSET duplicates a row onto one page and drops it from another with
+    // nothing to signal the loss. These pin the window itself.
+
+    it('applies the page window and returns the house Page<T> envelope', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-1', label: 'web-01', assetId: null, asset: null },
+      ]);
+      prisma.infraNode.count.mockResolvedValue(137);
+
+      const page = await service.listNodePage(
+        {},
+        { limit: 25, offset: 50, deleted: 'active' },
+      );
+
+      const arg = firstArg<{ take: number; skip: number }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.take).toBe(25);
+      expect(arg.skip).toBe(50);
+      expect(page).toEqual({
+        items: [expect.objectContaining({ id: 'node-1' })],
+        total: 137,
+        limit: 25,
+        offset: 50,
+      });
+    });
+
+    it('runs findMany + count in ONE transaction over the SAME where (total cannot drift)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraNode.count.mockResolvedValue(0);
+
+      await service.listNodePage({ state: 'PENDING' }, FIRST_PAGE);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), {
+        isolationLevel: 'RepeatableRead',
+      });
+      const listWhere = firstArg<{ where: unknown }>(
+        prisma.infraNode.findMany,
+      ).where;
+      const countWhere = firstArg<{ where: unknown }>(
+        prisma.infraNode.count,
+      ).where;
+      expect(countWhere).toEqual(listWhere);
+    });
+
+    it('propagates a RepeatableRead transaction rejection', async () => {
+      const failure = new Error('page snapshot failed');
+      prisma.$transaction.mockRejectedValueOnce(failure);
+
+      await expect(
+        service.listNodePage({ state: 'PENDING' }, FIRST_PAGE),
+      ).rejects.toBe(failure);
+    });
+
+    it('counts the FILTERED set, not the table — a filter narrows `total` too', async () => {
+      // The tray shows `total` as its pending badge. If `total` counted the whole table, a 3-pending
+      // estate would advertise every node it has ever seen as awaiting review.
+      prisma.infraNode.findMany.mockResolvedValue([]);
+      prisma.infraNode.count.mockResolvedValue(3);
+
+      const page = await service.listNodePage({ state: 'PENDING' }, FIRST_PAGE);
+
+      const countArg = firstArg<{ where: { state?: string } }>(
+        prisma.infraNode.count,
+      );
+      expect(countArg.where.state).toBe('PENDING');
+      expect(page.total).toBe(3);
+    });
+
+    it('keeps every legacy filter (kind / status / state) working under the page', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage(
+        { kind: 'VM', status: 'ONLINE', state: 'CONFIRMED' },
+        FIRST_PAGE,
+      );
+
+      const arg = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where).toMatchObject({
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+      });
+    });
+
+    it('filters by `source`, so "does this estate have any agent node?" is one bounded ask', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage(
+        { source: 'AGENT' },
+        { ...FIRST_PAGE, limit: 1 },
+      );
+
+      const arg = firstArg<{ where: Record<string, unknown>; take: number }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where.source).toBe('AGENT');
+      expect(arg.take).toBe(1);
+    });
+
+    it('filters CHILD by either child identity namespace, independent of node kind', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ role: 'CHILD', kind: 'VM' }, FIRST_PAGE);
+
+      const listWhere = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      ).where;
+      expect(listWhere).toMatchObject({ kind: 'VM' });
+      expect(listWhere.AND).toEqual([
+        {
+          OR: [
+            { externalId: { contains: CONTAINER_ID_SEPARATOR } },
+            { externalId: { contains: GUEST_ID_SEPARATOR } },
+          ],
+        },
+      ]);
+      expect(firstArg<{ where: unknown }>(prisma.infraNode.count).where).toBe(
+        listWhere,
+      );
+    });
+
+    it('filters HOST as null or outside both child namespaces, independent of node kind', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage(
+        { role: 'HOST', kind: 'CONTAINER' },
+        FIRST_PAGE,
+      );
+
+      const listWhere = firstArg<{ where: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      ).where;
+      expect(listWhere).toMatchObject({ kind: 'CONTAINER' });
+      expect(listWhere.AND).toEqual([
+        {
+          OR: [
+            { externalId: null },
+            {
+              NOT: {
+                OR: [
+                  { externalId: { contains: CONTAINER_ID_SEPARATOR } },
+                  { externalId: { contains: GUEST_ID_SEPARATOR } },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+      expect(firstArg<{ where: unknown }>(prisma.infraNode.count).where).toBe(
+        listWhere,
+      );
+    });
+
+    it('applies HOST in Prisma before the page window, so 500 newer children cannot starve one host', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'host-1', label: 'pve-1', assetId: null, asset: null },
+      ]);
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      const page = await service.listNodePage(
+        { role: 'HOST' },
+        { ...FIRST_PAGE, limit: MAX_PAGE_LIMIT },
+      );
+
+      const listArg = firstArg<{
+        where: { AND?: unknown[] };
+        take: number;
+      }>(prisma.infraNode.findMany);
+      expect(listArg.where.AND).toBeDefined();
+      expect(listArg.take).toBe(MAX_PAGE_LIMIT);
+      expect(firstArg<{ where: unknown }>(prisma.infraNode.count).where).toBe(
+        listArg.where,
+      );
+      expect(page).toMatchObject({
+        items: [expect.objectContaining({ id: 'host-1' })],
+        total: 1,
+      });
+    });
+
+    it('filters by `ids`, so a label lookup asks for exactly the nodes it needs', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ ids: ['n-1', 'n-2'] }, FIRST_PAGE);
+
+      const arg = firstArg<{ where: { id?: { in: string[] } } }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where.id).toEqual({ in: ['n-1', 'n-2'] });
+    });
+
+    it('filters by `assetIds`, so the Assets list can ask only about the rows it is showing', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ assetIds: ['a-1', 'a-2'] }, FIRST_PAGE);
+
+      const arg = firstArg<{ where: { assetId?: { in: string[] } } }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.where.assetId).toEqual({ in: ['a-1', 'a-2'] });
+    });
+
+    it('searches server-side over label / IP / linked asset name / owner name+email', async () => {
+      // The Servers table used to filter the loaded array in memory. Under a page that would be a
+      // FALSE "no results" for anything past the window, so `q` has to reach the database.
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ q: 'ada' }, FIRST_PAGE);
+
+      const arg = firstArg<{ where: { OR?: unknown[] } }>(
+        prisma.infraNode.findMany,
+      );
+      const or = JSON.stringify(arg.where.OR);
+      expect(arg.where.OR).toBeDefined();
+      expect(or).toContain('label');
+      expect(or).toContain('ipAddress');
+      // The linked Asset's inventory name and its ACTIVE owners — the two joined facts the row shows.
+      expect(or).toContain('asset');
+      expect(or).toContain('email');
+      // Case-insensitive, or a search box would only match the operator's exact capitalization.
+      expect(or).toContain('insensitive');
+    });
+
+    it('matches a linked Asset name only when that Asset is live', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ q: 'archive' }, FIRST_PAGE);
+
+      const where = firstArg<{
+        where: {
+          OR: Array<{ asset?: { is?: Record<string, unknown> } }>;
+        };
+      }>(prisma.infraNode.findMany).where;
+      const assetNameBranch = where.OR.find(
+        (branch) => branch.asset?.is?.name !== undefined,
+      );
+      expect(assetNameBranch).toEqual({
+        asset: {
+          is: {
+            deletedAt: null,
+            name: { contains: 'archive', mode: 'insensitive' },
+          },
+        },
+      });
+    });
+
+    it('cannot match owners through an archived linked Asset', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({ q: 'hidden-owner' }, FIRST_PAGE);
+
+      const where = firstArg<{
+        where: {
+          OR: Array<{ asset?: { is?: Record<string, unknown> } }>;
+        };
+      }>(prisma.infraNode.findMany).where;
+      const ownerBranch = where.OR.find(
+        (branch) => branch.asset?.is?.assignments !== undefined,
+      );
+      expect(ownerBranch?.asset?.is).toMatchObject({
+        deletedAt: null,
+        assignments: {
+          some: { releasedAt: null },
+        },
+      });
+    });
+
+    it('sorts by an allowlisted field and STILL appends the id tiebreaker', async () => {
+      // Sorting by `label` re-opens the tie problem the default order closed: labels are not unique
+      // (two hosts named `web-01` in different sites), so without `id` the page window is unstable
+      // again — which is a silent row loss, not a cosmetic wobble.
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage(
+        {},
+        { ...FIRST_PAGE, sort: 'label', dir: 'asc' },
+      );
+
+      const arg = firstArg<{ orderBy: Array<Record<string, unknown>> }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.orderBy[0]).toEqual({ label: 'asc' });
+      expect(arg.orderBy[arg.orderBy.length - 1]).toEqual({ id: 'desc' });
+    });
+
+    it('rejects a sort field outside the allowlist with 400 (never silently ignored)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.listNodePage({}, { ...FIRST_PAGE, sort: 'specs', dir: 'asc' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+    });
+
+    it('keeps the lean projection under the page (no `specs`, still one join)', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listNodePage({}, FIRST_PAGE);
+
+      const arg = firstArg<{ select: Record<string, unknown> }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.select).not.toHaveProperty('specs');
+      expect(arg.select.asset).toBeDefined();
+    });
+  });
+
+  // ── listGraphNodes — the canvas's own bounded read (#1152) ──────────────────
+  //
+  // The map is the one surface that must stay COMPLETE: a node dropped from a page is a shorter
+  // list, but a node dropped from the map takes its edges with it and reads as "nothing runs here".
+  // So it gets its own endpoint — bounded, but bounded HONESTLY.
+
+  describe('listGraphNodes', () => {
+    it('projects ONLY what the board draws — no owners/assetName join, no specs', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listGraphNodes();
+
+      const arg = firstArg<{
+        select: Record<string, unknown>;
+        include?: unknown;
+      }>(prisma.infraNode.findMany);
+      expect(Object.keys(arg.select).sort()).toEqual(
+        Object.keys(InfraGraphNodeSchema.shape).sort(),
+      );
+      // The joins the canvas never rendered. Each one costs a relation read PER ROW on an
+      // unpaginated, polled endpoint — the whole point of giving the canvas its own projection.
+      expect(arg.select).not.toHaveProperty('asset');
+      expect(arg.select).not.toHaveProperty('shortcuts');
+      expect(arg.select).not.toHaveProperty('specs');
+      expect(arg.include).toBeUndefined();
+    });
+
+    it('caps the read at INFRA_GRAPH_NODES_MAX and orders it totally', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([]);
+
+      await service.listGraphNodes();
+
+      const arg = firstArg<{ take: number; orderBy: unknown; skip?: number }>(
+        prisma.infraNode.findMany,
+      );
+      expect(arg.take).toBe(INFRA_GRAPH_NODES_MAX);
+      expect(arg.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
+      // No window to address: this is a complete read with a ceiling, not page one of many.
+      expect(arg.skip).toBeUndefined();
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), {
+        isolationLevel: 'RepeatableRead',
+      });
+    });
+
+    it('propagates a RepeatableRead transaction rejection', async () => {
+      const failure = new Error('graph-node snapshot failed');
+      prisma.$transaction.mockRejectedValueOnce(failure);
+
+      await expect(service.listGraphNodes()).rejects.toBe(failure);
+    });
+
+    it('reports truncated: false when the whole estate fits', async () => {
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'n-1' },
+        { id: 'n-2' },
+      ]);
+      prisma.infraNode.count.mockResolvedValue(2);
+
+      await expect(service.listGraphNodes()).resolves.toEqual({
+        items: [{ id: 'n-1' }, { id: 'n-2' }],
+        total: 2,
+        limit: INFRA_GRAPH_NODES_MAX,
+        truncated: false,
+      });
+    });
+
+    it('reports truncated: true the moment the cap bites — the map is never quietly short', async () => {
+      const capped = Array.from({ length: INFRA_GRAPH_NODES_MAX }, (_, i) => ({
+        id: `n-${i}`,
+      }));
+      prisma.infraNode.findMany.mockResolvedValue(capped);
+      prisma.infraNode.count.mockResolvedValue(INFRA_GRAPH_NODES_MAX + 1);
+
+      const graph = await service.listGraphNodes();
+
+      expect(graph.truncated).toBe(true);
+      // `total` is what EXISTS, not what was returned, so the UI can say "2000 of 2001".
+      expect(graph.total).toBe(INFRA_GRAPH_NODES_MAX + 1);
+      expect(graph.items).toHaveLength(INFRA_GRAPH_NODES_MAX);
+    });
+
+    it('is exactly at the boundary: total === cap is COMPLETE, not truncated', async () => {
+      // An off-by-one here is the difference between a permanent false alarm on a full estate and a
+      // silent loss on an over-full one.
+      const capped = Array.from({ length: INFRA_GRAPH_NODES_MAX }, (_, i) => ({
+        id: `n-${i}`,
+      }));
+      prisma.infraNode.findMany.mockResolvedValue(capped);
+      prisma.infraNode.count.mockResolvedValue(INFRA_GRAPH_NODES_MAX);
+
+      await expect(service.listGraphNodes()).resolves.toMatchObject({
+        truncated: false,
+        total: INFRA_GRAPH_NODES_MAX,
+      });
+    });
+
+    it('cannot be starved by the ADR-0030 page cap (the rejected Option 2)', () => {
+      // Letting the canvas ask the paged list for `limit=200` was the cheap option. It is wrong:
+      // one ADR-0095 hypervisor host can enrol 500 guests, so 200 drops nodes off a normal map.
+      expect(INFRA_GRAPH_NODES_MAX).toBeGreaterThan(MAX_PAGE_LIMIT);
+    });
+  });
+
+  describe('listGraphEdges', () => {
+    it('reads only active edges whose source and target nodes are live, using the same where for count', async () => {
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listGraphEdges();
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), {
+        isolationLevel: 'RepeatableRead',
+      });
+      const listWhere = firstArg<{ where: unknown }>(
+        prisma.infraEdge.findMany,
+      ).where;
+      expect(listWhere).toEqual({
+        endedAt: null,
+        source: { deletedAt: null },
+        target: { deletedAt: null },
+      });
+      expect(firstArg<{ where: unknown }>(prisma.infraEdge.count).where).toBe(
+        listWhere,
+      );
+    });
+
+    it('propagates a RepeatableRead transaction rejection', async () => {
+      const failure = new Error('graph-edge snapshot failed');
+      prisma.$transaction.mockRejectedValueOnce(failure);
+
+      await expect(service.listGraphEdges()).rejects.toBe(failure);
+    });
+
+    it('orders newest-first with a unique tiebreaker, caps at 10,000, and has no skip', async () => {
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+
+      await service.listGraphEdges();
+
+      const arg = firstArg<{
+        orderBy: unknown;
+        take: number;
+        skip?: number;
+      }>(prisma.infraEdge.findMany);
+      expect(arg.orderBy).toEqual([{ startedAt: 'desc' }, { id: 'desc' }]);
+      expect(arg.take).toBe(INFRA_GRAPH_EDGES_MAX);
+      expect(arg.skip).toBeUndefined();
+    });
+
+    it('returns an untruncated zero envelope', async () => {
+      prisma.infraEdge.findMany.mockResolvedValue([]);
+      prisma.infraEdge.count.mockResolvedValue(0);
+
+      await expect(service.listGraphEdges()).resolves.toEqual({
+        items: [],
+        total: 0,
+        limit: INFRA_GRAPH_EDGES_MAX,
+        truncated: false,
+      });
+    });
+
+    it('reports exact-cap as complete', async () => {
+      const items = Array.from({ length: INFRA_GRAPH_EDGES_MAX }, (_, id) => ({
+        id: `edge-${id}`,
+      }));
+      prisma.infraEdge.findMany.mockResolvedValue(items);
+      prisma.infraEdge.count.mockResolvedValue(INFRA_GRAPH_EDGES_MAX);
+
+      await expect(service.listGraphEdges()).resolves.toMatchObject({
+        items,
+        total: INFRA_GRAPH_EDGES_MAX,
+        limit: INFRA_GRAPH_EDGES_MAX,
+        truncated: false,
+      });
+    });
+
+    it('reports one-over-cap as truncated', async () => {
+      const items = Array.from({ length: INFRA_GRAPH_EDGES_MAX }, (_, id) => ({
+        id: `edge-${id}`,
+      }));
+      prisma.infraEdge.findMany.mockResolvedValue(items);
+      prisma.infraEdge.count.mockResolvedValue(INFRA_GRAPH_EDGES_MAX + 1);
+
+      await expect(service.listGraphEdges()).resolves.toMatchObject({
+        items,
+        total: INFRA_GRAPH_EDGES_MAX + 1,
+        limit: INFRA_GRAPH_EDGES_MAX,
+        truncated: true,
+      });
     });
   });
 

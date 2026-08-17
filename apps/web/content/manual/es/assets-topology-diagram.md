@@ -102,6 +102,39 @@ botones: **Mostrar radio de afectación** (lo vemos abajo; dibuja su respuesta s
 de detalle directamente. El clic selecciona en lugar de abrir para que el mapa siga visible: la
 ventana de detalle es grande, y taparlo en cada clic escondería justo lo que viniste a mirar.
 
+### Si el mapa avisa que está incompleto
+
+El mapa dibuja tu parque entero, hasta un techo de **2000 nodos**. Por encima de eso aparece un aviso
+arriba del tablero, y se queda ahí:
+
+> Se muestran 2000 de 2431 nodos: este mapa está incompleto.
+
+No es un error y no hay nada que reintentar: significa que tu parque creció más allá de lo que un
+tablero puede dibujar de forma útil. **No hay ninguna opción para subir ese techo.**
+
+Lo importante es lo que *no* significa. Los nodos que quedaron afuera **siguen en lazyit**: están en
+tu inventario, en la [lista de servidores](/help/assets-topology-servers) y en la búsqueda, igual que
+antes. Lo único que falta es su dibujo: no se los dibuja a ellos, ni a las conexiones que pasan por
+ellos.
+
+Esa última parte es la razón por la que el aviso no se va solo. Un nodo que no está dibujado se lleva
+su tarjeta, sus líneas y su resaltado en el lienzo, así que **la imagen de un radio de afectación puede
+estar incompleta**. La consulta del radio es independiente del límite del lienzo: el total del resumen
+y la lista de nodos afectados vienen de la API de impacto y siguen siendo autoritativos para toda la
+topología. Cuando aparezca el aviso, usá esa lista como respuesta y los resaltados solo como guía visual
+parcial.
+
+Las relaciones tienen su propio techo, mucho más alto: **10.000 conexiones activas**. Si se alcanza,
+un segundo aviso persistente indica cuántas relaciones se muestran y cuántas existen. Los nodos siguen
+disponibles, pero faltan algunas líneas; llegar exactamente a 10.000 no muestra el aviso salvo que el
+servidor indique que quedaron más relaciones afuera.
+
+Si las relaciones no se pueden cargar, el tablero conserva en pantalla el último mapa que pudo cargar
+y muestra un aviso persistente **No se pudieron cargar las relaciones** con **Reintentar**. Mientras
+aparezca, no interpretes la falta de líneas como "estos nodos están desconectados". Una consulta de
+relaciones fallida nunca se presenta como un mapa vacío y completo, y este aviso se apila con los de
+truncamiento en lugar de taparlos.
+
 ## Agregar al mapa
 
 Con los permisos correspondientes verás un botón **Agregar** en el encabezado de la página, con dos
@@ -355,6 +388,11 @@ respaldo no tumba al primario, y una conexión de red simple no tiene dirección
 
 Un **resultado vacío es buena noticia** — significa que nada depende de este nodo, así que es seguro
 darlo de baja. lazyit lo muestra como tranquilidad, no como un error.
+
+> [!IMPORTANT]
+> Si el tablero muestra el aviso de *"este mapa está incompleto"*, pueden faltar nodos afectados en
+> los resaltados dibujados. El total y la lista del resumen del radio siguen siendo autoritativos. Ver
+> [Si el mapa avisa que está incompleto](#si-el-mapa-avisa-que-está-incompleto).
 
 ## Qué sigue
 

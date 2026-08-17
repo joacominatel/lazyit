@@ -49,6 +49,14 @@ then. It is **removed only in the next major**, listed in that major's **⚠️ 
 already read before upgrading). So a minor upgrade never removes something you depend on; watch the release
 notes for deprecations and plan the swap before the next major.
 
+#### Infra node-list API removal in v2.0
+
+`GET /infra/nodes` is deprecated and will be removed in **v2.0**. It remains available during the
+v1 release line only as the legacy bare-array response for external integrations. Migrate list,
+search and exact-id resolver calls to `GET /infra/nodes/page`, which returns
+`{ items, total, limit, offset }`. The topology canvas is a different contract and should continue to
+use `GET /infra/graph/nodes`; do not substitute the paged list for the map.
+
 ## New required settings after a pull
 
 A version that adds a feature may introduce a **new required environment value**. The guided bootstrap
