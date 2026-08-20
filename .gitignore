@@ -43,3 +43,6 @@ video/
 infra/.local-ca/
 
 .playwright-mcp/
+
+# project-local git worktrees (.worktrees/<branch-slug>/)
+.worktrees/
