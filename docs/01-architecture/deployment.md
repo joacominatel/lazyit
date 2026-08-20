@@ -27,6 +27,8 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   browser ──HTTPS:443──▶  │  Caddy  (TLS, reverse proxy)│
                           │    │ /            ─▶ web :3000 (Next.js standalone, Node)
                           │    │ /api/*       ─▶ api :3001 (NestJS, Node)  [prefix stripped]
+                          │    │ /api/auth/*  Auth.js actions → web :3000 (ADR-0039); API's
+                          │    │              password endpoints → api :3001 (ADR-0086, #1250)
                           │    │ /api/docs*   ─▶ NOT proxied in prod (SEC-009; internal/dev only)
                           │   api ──▶ db :5432 (Postgres 18)               │
                           │   api ──▶ meilisearch :7700 (search, no published port)
