@@ -154,6 +154,14 @@ jobs:
         working-directory: apps/agent
         run: bun test
 
+      # Caddy routing regression (#1250): the API's local-auth password endpoints under
+      # /api/auth/* must reach the API, Auth.js's action paths (/api/auth/*) the web app. Runs
+      # `caddy adapt` on the real Caddyfile with the digest-pinned image from compose.yaml and
+      # asserts first-match routing for a request-path corpus. Docker (preinstalled on the
+      # ubuntu-latest runner) is the only dependency — no build artifacts involved.
+      - name: Test Caddy routing
+        run: sh infra/test/caddy-routing.sh
+
       # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
       # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three
       # workspaces; on a cache hit unchanged ones are replayed instead of recompiled.
