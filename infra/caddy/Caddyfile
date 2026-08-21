@@ -114,17 +114,34 @@ import sites/*.caddy
 	# @api below, which strips /api -> /docs* and the API does not serve that path (Swagger mounts at
 	# /api/docs, unstripped) -> 404, never a docs page.
 
-	# /api/* -> API, stripping the /api prefix (e.g. /api/users -> /users), EXCEPT Auth.js
-	# routes (/api/auth/*) which the Next.js web app owns (ADR-0039). They are excluded here
-	# and fall through to the catch-all below -> web:3000.
+	# /api/* -> API, stripping the /api prefix (e.g. /api/users -> /users), EXCEPT Auth.js's own
+	# action paths (/api/auth/*) owned by the Next.js web app (ADR-0039). The exclusion used to
+	# be a broad `not path /api/auth/*`; that wrongly sent the API's local-auth password
+	# endpoints (/api/auth/change-password | forgot-password | reset-password — ADR-0086 §F4b) to
+	# Auth.js, which 400s "Bad request." on the unknown action (issue #1250). They reach the
+	# browser at the same /api/auth/* prefix (NEXT_PUBLIC_API_URL=/api), so only Auth.js's action
+	# paths are excluded — everything else under /api/* is the API's by construction (the web app
+	# serves nothing else there), including any future /api/auth/* API route.
 	#
-	# Why not a dedicated `handle @authjs { reverse_proxy web:3000 }`? It would be byte-identical
-	# to the catch-all, and Caddy's Caddyfile adapter MERGES identical handle blocks — silently
-	# dropping the /api/auth/* matcher, so those requests fall to @api and hit the API as 404.
-	# Verified with `caddy adapt`. Excluding the path from @api is the reliable construction.
+	# Action list mirrors @auth/core `isAuthAction` (providers, session, csrf, signin, signout,
+	# callback, verify-request, error, webauthn-options) + webauthn-verify; /signin/* and
+	# /callback/* cover the per-provider paths. Re-check on an @auth/core upgrade.
+	# Single handle on purpose: a dedicated `handle @authjs { reverse_proxy web:3000 }` is
+	# byte-identical to the catch-all below and the adapter has been observed to merge identical
+	# handle blocks (git history); the in-@api exclusion is immune to that.
 	@api {
 		path /api/*
-		not path /api/auth/*
+		not path /api/auth/providers
+		not path /api/auth/session
+		not path /api/auth/csrf
+		not path /api/auth/signin
+		not path /api/auth/signin/*
+		not path /api/auth/signout
+		not path /api/auth/callback/*
+		not path /api/auth/verify-request
+		not path /api/auth/error
+		not path /api/auth/webauthn-options
+		not path /api/auth/webauthn-verify
 	}
 	handle @api {
 		uri strip_prefix /api
