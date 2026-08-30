@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@lazyit/shared": "workspace:*",
-    "@nestjs/bullmq": "^11.0.3",
+    "@nestjs/bullmq": "^12.0.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
