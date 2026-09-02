@@ -44,8 +44,9 @@ Indexes: `(userId, id)` (the per-user timeline) and `(createdAt)` (powers the [[
 [[0058-user-manager-and-clone-actions]]) · `DELETED` · `RESTORED` · `PASSWORD_RESET_SENT` ·
 `PASSWORD_RESET_BY_ADMIN` · `PASSWORD_CHANGED` · `PASSWORD_RESET_REQUESTED` · `PASSWORD_RESET_COMPLETED`. The
 `CREATED/UPDATED/DELETED/RESTORED` set mirrors [[asset-history]]; the rest are user-specific. `PASSWORD_RESET_SENT`
-records an IdP reset **link** request (OIDC mode); `PASSWORD_RESET_BY_ADMIN` records an admin minting a **local
-temp-password** (`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5); `PASSWORD_CHANGED`,
+records a reset **link** being sent to the subject — by the IdP in OIDC mode, or by lazyit's own SMTP when an
+admin picks the `email` delivery in local mode ([[0086-local-authentication-mode]] §5, amended by #1268);
+`PASSWORD_RESET_BY_ADMIN` records the other local delivery, an admin minting a **temp-password**; `PASSWORD_CHANGED`,
 `PASSWORD_RESET_REQUESTED` and `PASSWORD_RESET_COMPLETED` record the **self-service** local flows (the user changed
 their own password, a forgot-password reset link was **issued** for them, or they reset it via that email token —
 [[0086-local-authentication-mode]] §F4), actor == subject. `PASSWORD_RESET_REQUESTED` is written **only** for a
@@ -62,9 +63,11 @@ all from the [[user]] service:
 - `update` → `UPDATED` on a name/email edit (payload `{ fields }`) and/or `ROLE_CHANGED` on a role
   change (payload `{ from, to }`) — both only **after** any IdP mirror commits (a reverted update never logs).
 - `requestPasswordReset` → in OIDC mode, `PASSWORD_RESET_SENT` **after** the IdP call succeeds (422/501/503
-  never logs). In local mode (`AUTH_MODE=local`), `PASSWORD_RESET_BY_ADMIN` after the credential is reset —
-  the admin mints a temp-password, `sessionEpoch` is bumped (existing sessions revoked) and the temp password
-  is returned once ([[0086-local-authentication-mode]] §5).
+  never logs). In local mode (`AUTH_MODE=local`) the admin picks the delivery (#1268), and the event follows
+  the choice: `email` → `PASSWORD_RESET_SENT` after the mail is actually accepted by the relay (a 409/503
+  never logs), with `sessionEpoch` bumped only if the admin opted in; `temporary-password` →
+  `PASSWORD_RESET_BY_ADMIN` after the credential is reset, `sessionEpoch` **always** bumped (the stored hash
+  was just replaced) and the plaintext returned once ([[0086-local-authentication-mode]] §5).
 - Self-service local flows (`PasswordLifecycleService`, [[0086-local-authentication-mode]] §F4) → `PASSWORD_CHANGED`
   on `POST /auth/change-password` and `PASSWORD_RESET_COMPLETED` on `POST /auth/reset-password` (via a
   forgot-password email token) — each after the credential write, actor == subject, `sessionEpoch` bumped.
