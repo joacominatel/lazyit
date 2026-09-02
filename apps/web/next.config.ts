@@ -52,6 +52,19 @@ const nextConfig: NextConfig = {
   // runtime image small. Authorized cross-lane DevOps edit — see ADR-0025.
   output: "standalone",
 
+  // Next's tracer copies only the CJS half of `@swc/helpers` into `.next/standalone`, but since the
+  // next 16.3.1 / @swc/helpers 0.5.23 pairing the server's own require-hook loads the ESM one
+  // (`@swc/helpers/esm/_interop_require_default.js`) at startup — so the image crashed on boot with
+  // MODULE_NOT_FOUND before serving a single request (#1274). The tracer cannot see it because the
+  // hook resolves that path dynamically, so it has to be declared.
+  //
+  // The glob is ROOT-relative on purpose: `outputFileTracingIncludes` resolves against this app
+  // directory, while Bun's isolated store lives at the workspace root. A glob starting at
+  // `node_modules/...` matches nothing here AND still builds green — do not "simplify" it back.
+  outputFileTracingIncludes: {
+    "/*": ["../../node_modules/.bun/next@*/node_modules/@swc/helpers/**/*"],
+  },
+
   // Don't advertise the framework (#501); removes the `x-powered-by` response header.
   poweredByHeader: false,
 
