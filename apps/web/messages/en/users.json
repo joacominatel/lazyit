@@ -230,7 +230,7 @@
       "title": "Sign-in credential",
       "description": "Set a temporary password so they can sign in. They'll be asked to choose their own at first login.",
       "passwordLabel": "Temporary password",
-      "passwordHelp": "One-time, for hand-off only. lazyit never stores it — it's set on the identity provider and replaced when the user signs in.",
+      "passwordHelp": "One-time, for hand-off only. lazyit never keeps it in readable form — it's stored only as a hash, or set on your identity provider — and it's replaced the first time the user signs in.",
       "passwordRequired": "Set a temporary password so the new user can sign in.",
       "generate": "Generate",
       "show": "Show password",

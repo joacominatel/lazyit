@@ -230,7 +230,7 @@
       "title": "Credencial de inicio de sesión",
       "description": "Define una contraseña temporal para que pueda iniciar sesión. Se le pedirá que elija la suya en el primer ingreso.",
       "passwordLabel": "Contraseña temporal",
-      "passwordHelp": "De un solo uso, solo para entregar. lazyit nunca la almacena — se configura en el proveedor de identidad y se reemplaza cuando el usuario inicia sesión.",
+      "passwordHelp": "De un solo uso, solo para entregar. lazyit nunca la conserva de forma legible — solo guarda un hash, o la define en tu proveedor de identidad — y se reemplaza la primera vez que el usuario inicia sesión.",
       "passwordRequired": "Define una contraseña temporal para que el usuario nuevo pueda iniciar sesión.",
       "generate": "Generar",
       "show": "Mostrar contraseña",
