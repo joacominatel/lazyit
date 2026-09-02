@@ -3,7 +3,7 @@ title: "ADR-0086: Local (first-party) authentication mode — make Zitadel/OIDC 
 tags: [adr, auth, security, deployment, data-model]
 status: accepted
 created: 2026-07-03
-updated: 2026-07-03
+updated: 2026-09-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -203,6 +203,48 @@ exist. Two existing guards actively break local mode and are fixed:
   method 400s in OIDC/BYOI (where `provisionAccount` / the foreign IdP own onboarding), so the invariant is
   unchanged there. INV-10 is untouched: onboarding grants **zero** additional Secret-Manager crypto access
   (the vault passphrase is a separate credential, §7).
+- **Amendment (issue #1268) — the admin reset gains a SECOND delivery, and the UI finally reaches it.**
+  Two problems, one root. First, the Users page gated its reset action on `externalId == null`, which is
+  true for **every** local-mode user by construction — so the local admin reset built above shipped
+  unreachable, and an operator on a local instance could not reset anyone from the UI at all. Second,
+  minting a temp password was the *only* delivery this ADR contemplated, because at the time lazyit had no
+  outbound email; [[0079-instance-smtp-outbound-email]] has since shipped, and the self-service
+  forgot-password flow (§F4) already mints a single-use, ≤1h `PasswordResetToken` and emails the link. An
+  admin had no way to trigger that same, better path for someone else.
+  **The admin now chooses the delivery explicitly** (`POST /users/:id/reset-password`, body
+  `{ delivery, revokeSessions? }`, `user:manage`):
+  - `email` — mint a reset link and send it through the instance SMTP. The subject sets their own
+    password; lazyit never learns it. Preferred when the mailbox is reachable.
+  - `temporary-password` — the original behavior above, unchanged. It stays available **even when email
+    works**, because it is the escape hatch for a subject who cannot reach their mailbox (wrong address,
+    locked out of email, no SMTP), and removing it would recreate the lockout this ADR exists to prevent.
+  **Honest reporting is the deliberate divergence from §F4.** The public forgot flow is uniform-by-design
+  so it cannot be used as an account-enumeration oracle, and it fails soft. Neither property is worth
+  anything here: the caller is an authenticated admin who already knows the account exists, so a silent
+  no-op would deceive only the person who needs the truth. This path therefore reports synchronously —
+  **409** (`reason: smtp-not-configured | origin-unknown`) when the link cannot be sent, **503** when the
+  relay refuses — and the per-account token cap does not silently skip. §F4's own semantics are untouched.
+  **Session revocation splits by delivery, and the asymmetry is not an oversight.** `temporary-password`
+  **always** bumps `sessionEpoch`: it replaces `passwordHash` on the spot, so a surviving session would
+  hold a credential that no longer exists. `email` revokes **only** when the admin opts in
+  (`revokeSessions`, default off): sending a link changes no credential, so the subject's live sessions are
+  still legitimately theirs, and killing them is a deliberate "I believe this account is compromised" act
+  rather than a side effect of routine help-desk work. The send happens **before** any revocation, so a
+  failed send leaves the account completely untouched and retryable.
+  **Link origin.** `WEB_ORIGIN` when pinned. When it is unset **and** `AUTH_TRUST_HOST=true` — the
+  host-agnostic LAN deploy of [[0087-plain-http-lan-deployment-axis]], where unset is *correct*, not a
+  mistake — the origin is derived from the requesting admin's own request host, which is the only reason
+  the email delivery is available on that deployment shape at all. That derivation is confined to this
+  authenticated `user:manage` route: a `Host` header shapes a URL landing in someone else's mailbox
+  (classic reset poisoning), and it is defensible here only because the header comes from an authenticated
+  admin's browser through the terminating proxy. It is **never** wired into the anonymous forgot flow,
+  which stays `WEB_ORIGIN`-only. Otherwise → `origin-unknown`.
+  **Upgrade-safety.** The request body is optional and the response is a superset of the old one, so an
+  API updated ahead of the web build keeps today's exact behavior (CLAUDE.md §8). OIDC/BYOI are byte-
+  identical; an explicit `delivery` there is a 400 rather than a silently ignored field. Availability is
+  published on a new `GET /users/password-reset-capabilities` behind `user:manage` — deliberately **not**
+  on the `@Public` `GET /config/status`, since whether an instance has working outbound email is not
+  anonymous-readable operational detail.
 - **Escape hatch:** a one-shot **recovery CLI** (`bun` script) resets a named admin's `passwordHash`
   directly against the DB — the only recovery when the last admin forgets their password and no SMTP
   exists ([[0079-instance-smtp-outbound-email]] pending).
