@@ -112,6 +112,7 @@ ZITADEL_DB_PASSWORD=""
 MEILI_MASTER_KEY=""
 AUTH_SECRET=""
 WORKFLOW_SECRET_KEY=""
+SMTP_SECRET_KEY=""                # instance SMTP password at-rest key (ADR-0079); own axis, never reuse another key
 SESSION_SIGNING_SECRET=""         # local-mode HMAC session key (ADR-0086); generated always, written in local mode
 ZITADEL_ADMIN_PASSWORD=""
 DATABASE_URL_VAL=""
@@ -376,6 +377,19 @@ generate_secrets() {
   fi
   ok "WORKFLOW_SECRET_KEY generated (exactly 64 hex chars — verified)"
 
+  # SMTP_SECRET_KEY — AES-256-GCM master key for the instance SMTP PASSWORD at rest (SmtpSettings,
+  # ADR-0079). Its OWN key axis, never WORKFLOW_SECRET_KEY reused ("one key per subsystem"). Must decode
+  # to EXACTLY 32 bytes -> 64 hex chars (openssl rand -hex 32). Unlike WORKFLOW_SECRET_KEY it is OPTIONAL
+  # at boot (the API starts fine without it and outbound email is simply unavailable) — but a guided
+  # install that omits it 409s the FIRST time an admin saves an authenticated SMTP password, forcing a
+  # hand-edit + api recreate. So we mint it up front. NOT a DR linchpin: losing it costs one re-typed
+  # SMTP password, no data loss. See docs/05-runbooks/backups.md.
+  SMTP_SECRET_KEY=$(openssl rand -hex 32)
+  if [ "${#SMTP_SECRET_KEY}" -ne 64 ]; then
+    die "internal error: generated SMTP_SECRET_KEY is ${#SMTP_SECRET_KEY} chars, expected exactly 64 (32 hex bytes). Aborting (a wrong length makes every SMTP password write fail with a 409)."
+  fi
+  ok "SMTP_SECRET_KEY generated (exactly 64 hex chars — verified)"
+
   # SESSION_SIGNING_SECRET — HMAC key the API signs/verifies the first-party local session token with
   # (ADR-0086 §4). Required ONLY in local mode; the boot-config refine demands >= 32 chars and fails loud
   # at boot otherwise (mirrors WORKFLOW_SECRET_KEY). openssl rand -hex 32 -> 64 hex chars. Generated in
@@ -420,6 +434,10 @@ render_env_file() {
   # Track whether the template carried an AUTH_TRUST_HOST line; if not (a file predating ADR-0087) and we
   # need it active (lan mode), append it after the loop so lan reconfigure of an OLD file still works.
   _saw_auth_trust=0
+
+  # Same trick for SMTP_SECRET_KEY (ADR-0079): a .env.prod written before this key was generated has no
+  # line to rewrite, so append it after the loop. Fresh renders take the loop branch (the example ships it).
+  _saw_smtp_key=0
 
   # Create the temp file with mode 600 FROM CREATION — BEFORE a single secret is written.
   # A plain `: >"$_tmp"` honours the shell umask (022 -> 644), leaving the full secret set
@@ -499,6 +517,12 @@ render_env_file() {
         else printf 'AUTH_ISSUER=%s\n' "$ISSUER_URL" >>"$_tmp"; fi ;;
       AUTH_SECRET=*)            printf 'AUTH_SECRET=%s\n'            "$AUTH_SECRET"         >>"$_tmp" ;;
       WORKFLOW_SECRET_KEY=*)    printf 'WORKFLOW_SECRET_KEY=%s\n'    "$WORKFLOW_SECRET_KEY" >>"$_tmp" ;;
+      # SMTP_SECRET_KEY (ADR-0079) — always written ACTIVE. On --reconfigure the value comes from
+      #     load_existing_env, which PRESERVES an already-present key verbatim (regenerating it would
+      #     orphan the SMTP password already encrypted under it) and only mints one when absent.
+      "# SMTP_SECRET_KEY="*|SMTP_SECRET_KEY=*)
+        _saw_smtp_key=1
+        printf 'SMTP_SECRET_KEY=%s\n' "$SMTP_SECRET_KEY" >>"$_tmp" ;;
       *) printf '%s\n' "$line" >>"$_tmp" ;;
     esac
   done <"$_template"
@@ -508,6 +532,16 @@ render_env_file() {
   # so a fresh render always takes the loop branch and never reaches here.
   if [ "$DEPLOY_MODE" = "lan" ] && [ "$_saw_auth_trust" -eq 0 ]; then
     printf 'AUTH_TRUST_HOST=true\n' >>"$_tmp"
+  fi
+
+  # Reconfigure of a file predating SMTP_SECRET_KEY (ADR-0079): the loop had no line to rewrite, so append
+  # the key now. The value is whatever load_existing_env resolved — a preserved hand-added key, or a fresh
+  # one when the file carried none. Never regenerated over a present value.
+  if [ "$_saw_smtp_key" -eq 0 ]; then
+    printf '\n# --- Instance SMTP password at-rest key (ADR-0079) — added by start.sh ---\n' >>"$_tmp"
+    printf '# AES-256-GCM master key for the SMTP password stored in Settings -> Instance -> SMTP. Its OWN\n' >>"$_tmp"
+    printf '# key axis. Losing it costs only a re-typed SMTP password (not a DR linchpin).\n' >>"$_tmp"
+    printf 'SMTP_SECRET_KEY=%s\n' "$SMTP_SECRET_KEY" >>"$_tmp"
   fi
 
   # BYOI: append explicit OIDC/AUTH client overrides (explicit env always wins over the file).
@@ -579,6 +613,17 @@ render_env_file() {
   # WORKFLOW_SECRET_KEY must be 64 hex chars (32 bytes) — a wrong length fails the engine's boot check.
   _wsk=$(grep -E '^WORKFLOW_SECRET_KEY=' "$_tmp" | head -n1 | cut -d= -f2-)
   [ "${#_wsk}" -eq 64 ] || die "render check failed: WORKFLOW_SECRET_KEY in the file is ${#_wsk} chars, not 64 (32 hex bytes)."
+  # SMTP_SECRET_KEY must be an ACTIVE line — an absent key 409s the first authenticated SMTP password save.
+  # On a FRESH render it is ours (openssl rand -hex 32) so we assert the exact 64 chars. On --reconfigure it
+  # may be an operator's hand-added key, and the API accepts three encodings (64 hex, base64 of 32 bytes, or
+  # a 32-char raw string) — asserting 64 there would refuse to reconfigure a perfectly working install, so
+  # we only require it to be present and let the API do the decode-length check at write time.
+  _ssk=$(grep -E '^SMTP_SECRET_KEY=' "$_tmp" | head -n1 | cut -d= -f2-)
+  if [ "$RECONFIGURE" -eq 1 ]; then
+    [ -n "$_ssk" ] || die "render check failed: SMTP_SECRET_KEY is missing/empty in the rendered file."
+  else
+    [ "${#_ssk}" -eq 64 ] || die "render check failed: SMTP_SECRET_KEY in the file is ${#_ssk} chars, not 64 (32 hex bytes)."
+  fi
   if [ "$PG_MODE" = "internal" ]; then
     _du=$(grep -E '^DATABASE_URL=' "$_tmp" | head -n1 | cut -d= -f2-)
     case "$_du" in
@@ -586,7 +631,7 @@ render_env_file() {
       *) die "render check failed: DATABASE_URL password does not match POSTGRES_PASSWORD." ;;
     esac
   fi
-  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, ports numeric, DB password matches)"
+  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, SMTP_SECRET_KEY present, ports numeric, DB password matches)"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "DRY RUN: NOT writing $ENV_FILE and NOT running docker."
@@ -644,6 +689,7 @@ load_existing_env() {
   AUTH_SECRET=$(_read_env AUTH_SECRET)
   WORKFLOW_SECRET_KEY=$(_read_env WORKFLOW_SECRET_KEY)
   SESSION_SIGNING_SECRET=$(_read_env SESSION_SIGNING_SECRET)
+  SMTP_SECRET_KEY=$(_read_env SMTP_SECRET_KEY)
 
   # Postgres topology from the DATABASE_URL host (internal `@db:5432` vs an external/managed URL).
   case "$DATABASE_URL_VAL" in
@@ -658,6 +704,21 @@ load_existing_env() {
   [ -n "$MEILI_MASTER_KEY" ]       || die "MEILI_MASTER_KEY missing from $ENV_FILE — refusing to reconfigure."
   if [ "$PG_MODE" = "internal" ]; then
     [ -n "$POSTGRES_PASSWORD" ]    || die "POSTGRES_PASSWORD missing from $ENV_FILE — refusing to reconfigure."
+  fi
+
+  # SMTP_SECRET_KEY (ADR-0079) is the one key we may MINT here: a .env.prod rendered before it existed
+  # carries none, and without it the first authenticated SMTP password save 409s. Present => PRESERVE it
+  # verbatim (regenerating would orphan the SMTP password already encrypted under it — the operator would
+  # have to re-enter it with no warning). Absent => nothing can be encrypted under it yet, so a fresh key
+  # is free. Never validated for length here: the API accepts 64-hex, base64-of-32 and 32-char raw keys.
+  if [ -n "$SMTP_SECRET_KEY" ]; then
+    ok "SMTP_SECRET_KEY found in $ENV_FILE — PRESERVED verbatim (never regenerated; it decrypts the stored SMTP password)"
+  else
+    SMTP_SECRET_KEY=$(openssl rand -hex 32)
+    if [ "${#SMTP_SECRET_KEY}" -ne 64 ]; then
+      die "internal error: generated SMTP_SECRET_KEY is ${#SMTP_SECRET_KEY} chars, expected exactly 64 (32 hex bytes)."
+    fi
+    info "SMTP_SECRET_KEY was absent from $ENV_FILE (file predates ADR-0079 wiring) — a fresh 64-hex key was generated. Nothing was encrypted under it, so nothing is lost; an SMTP password saved earlier could never have been stored."
   fi
 
   ok "preserved secrets loaded (WORKFLOW_SECRET_KEY, AUTH_SECRET, SESSION_SIGNING_SECRET, MEILI_MASTER_KEY, DB creds) — none regenerated"
@@ -1135,6 +1196,16 @@ EOF
       warn "this $ENV_FILE predates ADR-0086 (no AUTH_MODE line). AUTH_MODE is now EXPLICIT-REQUIRED — the API refuses to boot without it. Add 'AUTH_MODE=oidc' to $ENV_FILE BEFORE upgrading (detected mode: $IDP_MODE)."
     fi
     info "existing deploy auth mode: $IDP_MODE (AUTH_MODE=${_am:-<unset>})"
+    # SMTP_SECRET_KEY upgrade awareness (ADR-0079). This branch NEVER writes $ENV_FILE, so we cannot add
+    # the key here — but an operator whose file predates it hits a bare 409 the first time they save an
+    # authenticated SMTP password, with nothing explaining why. Say it out loud instead. (The key itself is
+    # never printed — there is none to print, and none of this branch's output ever carries a secret.)
+    if ! grep -qE '^SMTP_SECRET_KEY=' "$ENV_FILE"; then
+      warn "this $ENV_FILE has no SMTP_SECRET_KEY (ADR-0079). Outbound email works with an UNAUTHENTICATED relay, but saving an SMTP PASSWORD in Settings -> Instance -> SMTP fails with a 409 until the key exists. Fix it either way:"
+      info "    ./infra/start.sh --reconfigure     # adds the key, preserves every other secret"
+      info "    # or by hand, then recreate the api container:"
+      info "    printf 'SMTP_SECRET_KEY=%s\\n' \"\$(openssl rand -hex 32)\" >> $ENV_FILE"
+    fi
     # We cannot recover the operator's earlier port/domain answers from the file reliably for the
     # guidance banner; read back the browser origin so the CTA is accurate.
     _wo=$(grep -E '^WEB_ORIGIN=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)
