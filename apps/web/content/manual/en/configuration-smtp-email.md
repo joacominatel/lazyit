@@ -31,8 +31,11 @@ The SMTP editor has these fields:
   self-signed certificate you trust.
 
 > The password is stored **encrypted at rest**. Saving a password requires the server key
-> `SMTP_SECRET_KEY` to be set; if it isn't, lazyit saves the rest of the settings and tells you to set the
-> key first. See your deployment's environment configuration.
+> `SMTP_SECRET_KEY` to be set. If it isn't, the **whole save is rejected** — nothing is stored, not even
+> the other fields — and lazyit tells you to set the key first. A guided install creates that key for you;
+> on an older deployment your administrator adds it to the server environment and restarts the API. Until
+> then you can still save every other setting by leaving **Password** blank (an unauthenticated relay
+> works normally).
 
 ## Sending a test email
 
