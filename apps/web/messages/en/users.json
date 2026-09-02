@@ -112,12 +112,7 @@
       "success": "{name} can now sign in. Give them the temporary password below.",
       "error": "Couldn't onboard this person. Try again.",
       "reveal": {
-        "message": "Give this one-time password to <b>{name}</b>. They must change it the first time they sign in, and it keeps their current role — onboarding never grants extra access.",
-        "warning": "This password is shown only once. Copy it now — you won't be able to see it again.",
-        "copyAria": "Copy the temporary password",
-        "copyUnavailable": "Couldn't copy automatically. Select the password and copy it by hand.",
-        "acknowledge": "I've copied the temporary password and handed it to the person.",
-        "done": "Done"
+        "message": "Give this one-time password to <b>{name}</b>. They must change it the first time they sign in, and it keeps their current role — onboarding never grants extra access."
       }
     }
   },
@@ -235,7 +230,7 @@
       "title": "Sign-in credential",
       "description": "Set a temporary password so they can sign in. They'll be asked to choose their own at first login.",
       "passwordLabel": "Temporary password",
-      "passwordHelp": "One-time, for hand-off only. lazyit never stores it — it's set on the identity provider and replaced when the user signs in.",
+      "passwordHelp": "One-time, for hand-off only. lazyit never keeps it in readable form — it's stored only as a hash, or set on your identity provider — and it's replaced the first time the user signs in.",
       "passwordRequired": "Set a temporary password so the new user can sign in.",
       "generate": "Generate",
       "show": "Show password",
@@ -357,9 +352,10 @@
     "inactive": "Inactive"
   },
   "passwordReset": {
-    "button": "Send password reset",
+    "button": "Reset password",
     "disabledNoIdp": "This account has no identity-provider link, so password reset is managed by your identity provider.",
-    "disabledInactive": "This user is inactive — reactivate them before sending a password reset.",
+    "disabledInactive": "This user is inactive — reactivate them before resetting their password.",
+    "disabledDirectoryOnly": "This person has no login account yet. Onboard them with a temporary password first.",
     "confirmTitle": "Send a password reset?",
     "confirmBody": "Your identity provider will email <strong>{email}</strong> a link to reset their password. lazyit never sees or sets the password; delivery depends on the provider's SMTP being configured.",
     "send": "Send reset email",
@@ -369,9 +365,59 @@
       "managedTitle": "Password reset is managed by your identity provider",
       "managedDescription": "lazyit can't drive a reset for this account — manage the password in your IdP.",
       "inactiveTitle": "This user is inactive",
-      "inactiveDescription": "Reactivate them before sending a password reset.",
+      "inactiveDescription": "Reactivate them before resetting their password.",
       "error": "Couldn't send the password reset"
+    },
+    "local": {
+      "title": "Reset the password for {name}",
+      "intro": "lazyit manages passwords on this instance, so choose how the reset reaches this person.",
+      "deliveryLabel": "How the reset is delivered",
+      "email": {
+        "title": "Send a reset link by email",
+        "description": "{email} gets a single-use link and chooses their own password — lazyit never sees it.",
+        "unavailable": {
+          "smtp-not-configured": "Outbound email isn't configured on this instance. Set it up in Settings → Instance → SMTP to use this option.",
+          "origin-unknown": "This instance has no public URL, so lazyit can't build a link that points back to it. Ask your administrator to set the instance URL, then try again.",
+          "generic": "Sending a reset link isn't available on this instance right now."
+        },
+        "revokeSessions": "Sign this user out everywhere",
+        "revokeSessionsHint": "Off by default: a link doesn't change their current password, so their open sessions are still legitimately theirs. Turn this on if you think the account is compromised.",
+        "submit": "Send reset link"
+      },
+      "temporary": {
+        "title": "Generate a temporary password",
+        "description": "You hand the password over yourself — the way out when the person can't reach their mailbox. It's shown once and they must change it at their next sign-in.",
+        "revokesAlways": "This always signs the user out everywhere: it replaces their password immediately, so their open sessions can no longer be trusted.",
+        "submit": "Generate password"
+      },
+      "success": {
+        "emailTitle": "Reset link sent",
+        "emailBody": "A single-use reset link is on its way to <strong>{email}</strong>. It expires in {minutes, plural, one {# minute} other {# minutes}}.",
+        "emailSessionsRevoked": "This user was signed out everywhere, so they'll need the link to get back in.",
+        "emailSessionsKept": "Their open sessions were left alone — only the link changes their password.",
+        "temporaryTitle": "Temporary password ready",
+        "temporaryMessage": "Give this one-time password to <b>{name}</b>. It replaces their old password immediately — every session of theirs has been signed out — and they must change it at their next sign-in."
+      },
+      "errors": {
+        "emailUnavailable": {
+          "smtp-not-configured": "Outbound email isn't configured on this instance, so the link couldn't be sent. Set it up in Settings → Instance → SMTP, or generate a temporary password instead.",
+          "origin-unknown": "This instance has no public URL, so lazyit can't build a reset link. Ask your administrator to set the instance URL, or generate a temporary password instead.",
+          "generic": "A reset link can't be sent from this instance right now. Generate a temporary password instead."
+        },
+        "sendFailed": "The reset email couldn't be sent. Check Settings → Instance → SMTP and try again, or generate a temporary password instead.",
+        "inactive": "This user is inactive, or has no login account, so there's no password to reset.",
+        "managed": "This account's password is managed by your identity provider — lazyit can't reset it.",
+        "notFound": "This user no longer exists.",
+        "generic": "Couldn't reset this password."
+      }
     }
+  },
+  "temporaryPasswordReveal": {
+    "warning": "This password is shown only once. Copy it now — you won't be able to see it again.",
+    "copyAria": "Copy the temporary password",
+    "copyUnavailable": "Couldn't copy automatically. Select the password and copy it by hand.",
+    "acknowledge": "I've copied the temporary password and handed it to the person.",
+    "done": "Done"
   },
   "offboarding": {
     "title": "Offboard {name}",

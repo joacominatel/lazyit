@@ -10,6 +10,8 @@ import {
 } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type {
+  AdminPasswordResetDelivery,
+  AdminPasswordResetOutcome,
   AdminPasswordResetResult,
   CloneUser,
   CloneUserResult,
@@ -17,6 +19,7 @@ import type {
   ManagerDescriptor,
   ManagerInput,
   PageQuery,
+  PasswordResetCapabilities,
   UpdateUser,
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
@@ -40,6 +43,10 @@ import {
   type IdentityProvider,
 } from '../auth/identity/identity-provider.interface';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
+import {
+  AdminResetLinkError,
+  PasswordLifecycleService,
+} from '../auth/local/password-lifecycle.service';
 
 /**
  * The reserved, non-routable email DOMAIN the bulk import synthesizes for a directory person identified
@@ -177,6 +184,10 @@ export class UsersService {
     // branches of create() + requestPasswordReset() to hash/store passwords and mint temp-passwords —
     // no IdP mirror. Global (AuthModule), so no module import is needed here.
     private readonly provisioning: LocalProvisioningService,
+    // Local password-lifecycle machinery (ADR-0086 §F4). Issue #1268 reuses its PasswordResetToken +
+    // reset-mail path for the admin `email` delivery rather than growing a second copy of it. Injected
+    // via LocalAuthModule (imported by UsersModule); it self-gates on local mode.
+    private readonly passwordLifecycle: PasswordLifecycleService,
     @InjectPinoLogger(UsersService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -1160,16 +1171,33 @@ export class UsersService {
    * (PASSWORD_RESET_SENT) emitted only after the IdP call SUCCEEDS — so a 422/501/503 never logs a
    * reset that did not go out.
    *
-   * LOCAL mode (ADR-0086 §5) diverges: there is no IdP to email a link. Instead an admin reset mints a
-   * one-time temp-password LOCALLY, hashes it to `passwordHash`, sets `mustChangePassword`, BUMPS the
-   * subject's `sessionEpoch` (killing their existing sessions), and audits `PASSWORD_RESET_BY_ADMIN`. The
-   * plaintext is RETURNED to the admin (shown once) — the only path that does so, and the reason the
-   * return type is `AdminPasswordResetResult | null` (OIDC returns null; the controller keeps its 204).
+   * LOCAL mode (ADR-0086 §5, amended by issue #1268) diverges: there is no IdP to email a link, so the
+   * ADMIN picks the delivery explicitly and lazyit performs it:
+   *   - `temporary-password` (and the DEFAULT when no body is sent) — mint a one-time temp-password
+   *     LOCALLY, hash it to `passwordHash`, set `mustChangePassword`, BUMP the subject's `sessionEpoch`
+   *     and audit `PASSWORD_RESET_BY_ADMIN`. The plaintext is RETURNED to the admin (shown once).
+   *   - `email` — mint a single-use reset link and send it through the instance SMTP (ADR-0079), audit
+   *     `PASSWORD_RESET_SENT`, and revoke sessions only if the admin asked. See {@link sendResetLink}.
+   *
+   * BACK-COMPAT (CLAUDE.md §8). `options` is OPTIONAL and omitting it reproduces the pre-#1268 behavior
+   * exactly, so an operator who updates the API before the web build keeps a working Users page. The
+   * temp-password outcome is a strict SUPERSET of the old body — `.temporaryPassword` is still there.
+   *
+   * OIDC/BYOI is UNCHANGED (204 / 501 / 503) with one addition: a `delivery` choice is meaningless there
+   * (the IdP owns the mail), so passing one is a 400 rather than a silently ignored field that would lie
+   * to the caller about what happened.
    */
   async requestPasswordReset(
     id: string,
     actorId?: string,
-  ): Promise<AdminPasswordResetResult | null> {
+    options?: {
+      delivery?: AdminPasswordResetDelivery;
+      /** `email` delivery only; the temp-password path always revokes. Defaults to false. */
+      revokeSessions?: boolean;
+      /** Pre-resolved link origin (see `./reset-link-origin`); null → the `origin-unknown` 409. */
+      linkOrigin?: string | null;
+    },
+  ): Promise<AdminPasswordResetOutcome | null> {
     const user = await this.findOne(id); // 404 if missing or already soft-deleted
 
     if (!user.isActive) {
@@ -1178,13 +1206,16 @@ export class UsersService {
       );
     }
 
-    // LOCAL mode: mint a temp-password directly (no IdP). Reject a directory-only person (no login by
+    // LOCAL mode: lazyit owns the credential (no IdP). Reject a directory-only person (no login by
     // construction — INV: a directoryOnly row never gets a credential via any path, ADR-0086 §5 / #989).
     if (this.isLocalMode()) {
       if (user.directoryOnly) {
         throw new UnprocessableEntityException(
           'This is a directory-only person with no login, so a password cannot be set.',
         );
+      }
+      if (options?.delivery === 'email') {
+        return this.sendResetLink(user, actorId, options);
       }
       const temporaryPassword = this.provisioning.generateTempPassword();
       const credential = await this.provisioning.credentialFields(
@@ -1194,6 +1225,8 @@ export class UsersService {
       // Set the credential AND bump sessionEpoch atomically: the epoch bump revokes every existing session
       // the subject holds (the guard's handleLocal rejects any token minted at a lower epoch), so an admin
       // reset immediately invalidates a possibly-compromised session (ADR-0086 §3 revocation).
+      // `revokeSessions` is deliberately NOT honoured here: this path REPLACES passwordHash, so a
+      // surviving session would be holding a credential that no longer exists. Revocation is unconditional.
       await this.prisma.user.update({
         where: { id },
         data: { ...credential, sessionEpoch: { increment: 1 } },
@@ -1207,7 +1240,20 @@ export class UsersService {
         'PASSWORD_RESET_BY_ADMIN',
         actorId,
       );
-      return { temporaryPassword };
+      return {
+        delivery: 'temporary-password',
+        temporaryPassword,
+        sessionsRevoked: true,
+      };
+    }
+
+    // OIDC / BYOI: the IdP owns the credential AND the mail, so there is no delivery to choose. Reject an
+    // explicit choice instead of dropping it — a 2xx over an ignored `delivery: 'email'` would tell the
+    // admin lazyit sent something it never sent.
+    if (options?.delivery) {
+      throw new BadRequestException(
+        'A password-reset delivery method can only be chosen in local authentication mode; your identity provider owns the reset here.',
+      );
     }
 
     if (!user.externalId) {
@@ -1225,6 +1271,128 @@ export class UsersService {
     // a failed/unsupported reset above already threw, so this only ever records a reset that went out.
     await this.recordHistory(this.prisma, id, 'PASSWORD_RESET_SENT', actorId);
     return null;
+  }
+
+  /**
+   * The local-mode `email` delivery of {@link requestPasswordReset} (issue #1268): mint a single-use
+   * reset link and send it through the instance SMTP (ADR-0079), so the SUBJECT chooses their own
+   * password and lazyit never sees a plaintext at all.
+   *
+   * FAILS LOUDLY, on purpose. The public forgot-password flow is uniform-by-design so it cannot be an
+   * account-enumeration oracle; this caller is an authenticated `user:manage` admin who already knows the
+   * account exists, so there is no oracle to protect and a silent no-op would deceive the only person who
+   * needs the truth. A missing SMTP config or an unresolvable link origin is a 409 carrying the machine-
+   * readable `reason` (two different operator fixes), and a relay failure is a 503.
+   *
+   * ORDERING. The mail is sent BEFORE any write to the user row, so a failed send leaves the account
+   * exactly as it was — no half-applied "logged everyone out but sent nothing". Session revocation is
+   * therefore only ever reported when it actually happened.
+   */
+  private async sendResetLink(
+    user: User,
+    actorId: string | undefined,
+    options: { revokeSessions?: boolean; linkOrigin?: string | null },
+  ): Promise<AdminPasswordResetOutcome> {
+    let sent: { sentTo: string; expiresInMinutes: number };
+    try {
+      sent = await this.passwordLifecycle.sendAdminResetLink(
+        user,
+        options.linkOrigin ?? null,
+      );
+    } catch (err) {
+      if (err instanceof AdminResetLinkError) {
+        if (err.reason === 'send-failed') {
+          // The configuration was there and the relay refused — a transient/operational fault, not a
+          // misconfiguration the admin can fix in the dialog. Same 503 class as an IdP write failure.
+          throw new ServiceUnavailableException(err.message);
+        }
+        // `smtp-not-configured` / `origin-unknown`: the instance is not in a state where this delivery
+        // can work. 409 with the reason so the UI can point at the exact setting to fix.
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'Conflict',
+          message: err.message,
+          reason: err.reason,
+        });
+      }
+      throw err;
+    }
+
+    // Opt-in revocation (default false). Sending a link does not change the stored credential, so the
+    // subject's live sessions are still legitimately theirs — killing them is a deliberate "I think this
+    // account is compromised" act, not a side effect of helping someone back in.
+    const sessionsRevoked = options.revokeSessions === true;
+    if (sessionsRevoked) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { sessionEpoch: { increment: 1 } },
+      });
+    }
+
+    this.auditWriteBack('resetPasswordLinkByAdmin', actorId, user.id, {
+      local: true,
+      sessionsRevoked,
+    });
+    // Append-only audit: PASSWORD_RESET_SENT (the existing event type — the OIDC branch already emits it
+    // for the same meaning: "a reset link went out"), actor = admin, subject = user. Written only AFTER a
+    // successful send, so a 409/503 never records a reset that did not happen. No raw token, no plaintext.
+    await this.recordHistory(
+      this.prisma,
+      user.id,
+      'PASSWORD_RESET_SENT',
+      actorId,
+    );
+
+    return {
+      delivery: 'email',
+      sentTo: sent.sentTo,
+      expiresInMinutes: sent.expiresInMinutes,
+      sessionsRevoked,
+    };
+  }
+
+  /**
+   * What the admin reset dialog may offer on THIS instance (`GET /users/password-reset-capabilities`,
+   * `user:manage`, issue #1268). Resolved server-side so the UI never has to guess from `externalId`
+   * (which is null for every local-mode user by construction — the #1268 bug).
+   *
+   * In OIDC/BYOI everything is false and NO reason is set: emailing a reset link is the identity
+   * provider's job, not a lazyit capability that happens to be switched off, so naming an "unavailable
+   * reason" would invite an operator to go fix an SMTP setting that would change nothing.
+   *
+   * `linkOrigin` is resolved by the caller from `WEB_ORIGIN` or (in ADR-0087 LAN mode) the request host —
+   * see `./reset-link-origin`.
+   */
+  async passwordResetCapabilities(
+    linkOrigin: string | null,
+  ): Promise<PasswordResetCapabilities> {
+    if (!this.isLocalMode()) {
+      return {
+        canResetLocally: false,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: false,
+      };
+    }
+
+    const smtpReady = await this.passwordLifecycle.isOutboundEmailReady();
+    if (!smtpReady || !linkOrigin) {
+      return {
+        canResetLocally: true,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: true,
+        // SMTP first: with email off, the origin is moot and telling the admin to set WEB_ORIGIN would
+        // send them to the wrong setting.
+        emailUnavailableReason: !smtpReady
+          ? 'smtp-not-configured'
+          : 'origin-unknown',
+      };
+    }
+
+    return {
+      canResetLocally: true,
+      canEmailResetLink: true,
+      canMintTemporaryPassword: true,
+    };
   }
 
   /**

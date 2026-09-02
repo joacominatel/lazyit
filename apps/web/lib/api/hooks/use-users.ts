@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import {
   getCurrentUser,
+  getPasswordResetCapabilities,
   getUser,
   getUserAssignments,
   getUserGrants,
@@ -27,6 +28,13 @@ export const userKeys = {
   me: () => [...baseUserKeys.all, "me"] as const,
   /** Per-role LIVE counts (`GET /users/role-counts`, #693) for the Settings → Roles cards. */
   roleCounts: () => [...baseUserKeys.all, "role-counts"] as const,
+  /**
+   * What the admin password-reset action may offer on this instance
+   * (`GET /users/password-reset-capabilities`, #1268). Instance-wide, not per-user, so it is keyed off
+   * `all` rather than any `detail(id)`.
+   */
+  passwordResetCapabilities: () =>
+    [...baseUserKeys.all, "password-reset-capabilities"] as const,
   /** A parameterized (search/sort/paged) list page — distinct from the bare directory `lists()`. */
   list: (params: UserListParams) => [...baseUserKeys.all, "list", params] as const,
   /**
@@ -127,6 +135,31 @@ export function useCurrentUser() {
   return useQuery({
     queryKey: userKeys.me(),
     queryFn: getCurrentUser,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * What the admin password-reset action may offer on this instance
+ * (`GET /users/password-reset-capabilities`, `user:manage` — ADR-0086 §5, issue #1268): whether lazyit
+ * owns the credential at all (`canResetLocally`), whether a reset LINK can actually be built and sent
+ * right now (`canEmailResetLink`, with the operator-actionable `emailUnavailableReason` when it can't),
+ * and whether a one-time temporary password can be minted.
+ *
+ * `enabled` gates the fetch on the caller holding `user:manage` (it would otherwise 403). Cached like
+ * the caller's own role: this is instance config an operator changes rarely, and a stale read only
+ * enables/disables a dialog option the API still gates for real.
+ *
+ * Deliberately fails SOFT: a rejected query (403, or a 404 from an API older than #1268) leaves `data`
+ * undefined, and every consumer treats that as "no local reset" — i.e. the pre-#1268 OIDC behavior.
+ */
+export function usePasswordResetCapabilities({
+  enabled = true,
+}: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: userKeys.passwordResetCapabilities(),
+    queryFn: ({ signal }) => getPasswordResetCapabilities(signal),
+    enabled,
     staleTime: 5 * 60 * 1000,
   });
 }

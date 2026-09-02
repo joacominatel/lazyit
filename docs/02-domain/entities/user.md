@@ -38,8 +38,9 @@ the reverse.
   **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit,
   `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
   each side a user-id / external-name / null — [[0058-user-manager-and-clone-actions]]) on a manager
-  change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when an IdP reset link is
-  requested (OIDC mode), `PASSWORD_RESET_BY_ADMIN` when an admin mints a local temp-password
+  change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when a reset link is sent to the
+  subject (by the IdP in OIDC mode, or by lazyit's SMTP on the local `email` delivery),
+  `PASSWORD_RESET_BY_ADMIN` when an admin mints a local temp-password instead
   (`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5), and — self-service in local mode ([[0086-local-authentication-mode]] §F4) — `PASSWORD_CHANGED` when the user changes their own password and
   `PASSWORD_RESET_COMPLETED` when they reset it via a forgot-password email token. This supersedes the fire-and-forget IdP write-back log lines for *durability*: those
   structured logs remain, but the queryable trail now lives in the DB and surfaces in the
@@ -259,11 +260,23 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > ZITADEL's SMTP**. It is refused for an **inactive** user (**422**), returns **204**, and surfaces an
 > honest **501** ("managed by your identity provider") under BYOI / generic OIDC or for a user with no
 > IdP link ([[INVARIANTS]] INV-4) — never a misleading success. In **`AUTH_MODE=local`** mode
-> ([[0086-local-authentication-mode]] §5) the same endpoint instead mints a **one-time local temp-password**,
-> hashes it (argon2id), sets `mustChangePassword`, **bumps `sessionEpoch`** (revoking the subject's existing
-> sessions), audits `PASSWORD_RESET_BY_ADMIN` and returns **200** with `{ temporaryPassword }` (shown once —
-> no IdP, no SMTP). It is refused for an inactive user or a **directory-only** person (**422**). Directory-only
-> rows never receive a credential via any path.
+> ([[0086-local-authentication-mode]] §5, amended by #1268) the admin instead chooses the **delivery** on an
+> optional body `{ delivery, revokeSessions? }` — the body is optional so a pre-#1268 caller keeps today's
+> behavior:
+> - `temporary-password` (also the no-body default) mints a **one-time local temp-password**, hashes it
+>   (argon2id), sets `mustChangePassword`, **always bumps `sessionEpoch`** (the stored hash was just
+>   replaced, so a surviving session holds a dead credential), audits `PASSWORD_RESET_BY_ADMIN` and returns
+>   **200** with `{ temporaryPassword }` (shown once).
+> - `email` mints a single-use ≤1h `PasswordResetToken` and sends the link over the **instance SMTP**
+>   ([[0079-instance-smtp-outbound-email]]), audits `PASSWORD_RESET_SENT`, and bumps `sessionEpoch` **only**
+>   when `revokeSessions` is set (sending a link changes no credential). Unlike the enumeration-safe public
+>   forgot flow this path reports honestly: **409** (`reason: smtp-not-configured | origin-unknown`) when the
+>   link cannot be built or sent, **503** when the relay refuses.
+>
+> Both are refused for an inactive user or a **directory-only** person (**422**); directory-only rows never
+> receive a credential via any path. An explicit `delivery` under OIDC/BYOI is a **400** — the choice is
+> local-mode only. `GET /users/password-reset-capabilities` (`user:manage`) publishes which deliveries are
+> actually available, deliberately kept off the `@Public` `GET /config/status`.
 
 > [!note] Create accepts an optional temporary password ([[0064-admin-user-provisioning-credentials]], #411)
 > `POST /users` accepts an **optional** `password` on `CreateUserSchema` — a **temporary** credential for

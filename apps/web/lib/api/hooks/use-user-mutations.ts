@@ -1,5 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { CloneUser, CreateUser, Role, UpdateUser } from "@lazyit/shared";
+import type {
+  AdminPasswordResetOutcome,
+  AdminPasswordResetRequest,
+  CloneUser,
+  CreateUser,
+  Role,
+  UpdateUser,
+} from "@lazyit/shared";
 import { applicationKeys } from "./use-applications";
 import { assetKeys } from "./use-assets";
 import { invalidateDashboard } from "./use-dashboard";
@@ -133,14 +140,21 @@ export function useRestoreUser() {
 }
 
 /**
- * Trigger an IdP-driven password reset for a user (`POST /users/:id/reset-password`, `user:manage`).
- * The IdP (Zitadel) emails the reset link via its own SMTP — lazyit never sets the password, so there
- * is nothing in our cache to invalidate. Toasts and the honest 501/422/404 handling are owned by the
- * calling component (mapped on the {@link ApiError}'s `.status`); this only wraps the request.
+ * Trigger an admin password reset for a user (`POST /users/:id/reset-password`, `user:manage`).
+ * Mode-dependent (ADR-0086 §5, issue #1268): in OIDC mode the IdP emails the link and the call resolves
+ * with nothing (204); in local mode the caller passes a `delivery` and gets an
+ * {@link AdminPasswordResetOutcome} back — either the address the link went to, or a one-time temporary
+ * password. Nothing here touches cached user rows (a reset changes no field the UI reads), so there is
+ * no invalidation — and the temp password rides ONLY the mutation result, deliberately never the cache.
+ * Toasts, the reveal, and the honest 409/422/501/503/404 mapping are owned by the calling component.
  */
 export function useResetUserPassword() {
-  return useMutation({
-    mutationFn: (id: string) => resetUserPassword(id),
+  return useMutation<
+    AdminPasswordResetOutcome | void,
+    unknown,
+    { id: string; body?: AdminPasswordResetRequest }
+  >({
+    mutationFn: ({ id, body }) => resetUserPassword(id, body),
   });
 }
 

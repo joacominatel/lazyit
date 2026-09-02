@@ -294,6 +294,7 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
 describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
   let app: INestApplication;
   const requestPasswordReset = jest.fn();
+  const passwordResetCapabilities = jest.fn();
   const VALID_ID = '11111111-1111-4111-8111-111111111111';
 
   beforeAll(async () => {
@@ -311,6 +312,7 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
             update: jest.fn(),
             remove: jest.fn(),
             requestPasswordReset,
+            passwordResetCapabilities,
           },
         },
         { provide: AssetAssignmentsService, useValue: { findAll: jest.fn() } },
@@ -333,7 +335,12 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
     await app.close();
   });
 
-  beforeEach(() => requestPasswordReset.mockReset());
+  beforeEach(() => {
+    requestPasswordReset.mockReset();
+    passwordResetCapabilities.mockReset();
+    delete process.env.WEB_ORIGIN;
+    delete process.env.AUTH_TRUST_HOST;
+  });
 
   it('returns 204 and calls the service when the reset is triggered', async () => {
     requestPasswordReset.mockResolvedValue(undefined);
@@ -341,16 +348,25 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
       `/users/${VALID_ID}/reset-password`,
     );
     expect(res.status).toBe(204);
-    expect(requestPasswordReset).toHaveBeenCalledWith(VALID_ID, 'actor-1');
+    // Issue #1268 added the options argument; with NO body it carries no delivery choice, so the
+    // service takes exactly the pre-#1268 path.
+    expect(requestPasswordReset).toHaveBeenCalledWith(VALID_ID, 'actor-1', {
+      linkOrigin: null,
+    });
   });
 
   it('returns 200 with the temp password when the service mints one (local mode — ADR-0086 §5)', async () => {
-    requestPasswordReset.mockResolvedValue({ temporaryPassword: 'Temp-9xZ!' });
+    requestPasswordReset.mockResolvedValue({
+      delivery: 'temporary-password',
+      temporaryPassword: 'Temp-9xZ!',
+      sessionsRevoked: true,
+    });
     const res = await request(app.getHttpServer()).post(
       `/users/${VALID_ID}/reset-password`,
     );
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ temporaryPassword: 'Temp-9xZ!' });
+    // A superset of the pre-#1268 body: an older web build reading `.temporaryPassword` still works.
+    expect(res.body).toMatchObject({ temporaryPassword: 'Temp-9xZ!' });
   });
 
   it('maps PasswordResetUnsupportedError (BYOI / no IdP link) to 501, not a 2xx', async () => {
@@ -367,5 +383,94 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
     );
     expect(res.status).toBe(400);
     expect(requestPasswordReset).not.toHaveBeenCalled();
+  });
+
+  // ---- issue #1268: the optional delivery body + the link origin ------------
+
+  it('forwards an explicit delivery + revokeSessions choice', async () => {
+    process.env.WEB_ORIGIN = 'https://lazyit.example.com';
+    requestPasswordReset.mockResolvedValue({
+      delivery: 'email',
+      sentTo: 'a@b.com',
+      expiresInMinutes: 60,
+      sessionsRevoked: true,
+    });
+
+    const res = await request(app.getHttpServer())
+      .post(`/users/${VALID_ID}/reset-password`)
+      .send({ delivery: 'email', revokeSessions: true });
+
+    expect(res.status).toBe(200);
+    expect(requestPasswordReset).toHaveBeenCalledWith(VALID_ID, 'actor-1', {
+      delivery: 'email',
+      revokeSessions: true,
+      linkOrigin: 'https://lazyit.example.com',
+    });
+  });
+
+  it('treats an EMPTY body as no choice (the pre-#1268 request an older web build still sends)', async () => {
+    requestPasswordReset.mockResolvedValue(undefined);
+
+    const res = await request(app.getHttpServer())
+      .post(`/users/${VALID_ID}/reset-password`)
+      .send({});
+
+    expect(res.status).toBe(204);
+    expect(requestPasswordReset).toHaveBeenCalledWith(VALID_ID, 'actor-1', {
+      linkOrigin: null,
+    });
+  });
+
+  it('400s a malformed delivery instead of silently falling through to the temp-password path', async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/users/${VALID_ID}/reset-password`)
+      .send({ delivery: 'carrier-pigeon' });
+
+    expect(res.status).toBe(400);
+    expect(requestPasswordReset).not.toHaveBeenCalled();
+  });
+
+  it('derives the link origin from the request host ONLY under AUTH_TRUST_HOST (ADR-0087 LAN mode)', async () => {
+    requestPasswordReset.mockResolvedValue(undefined);
+
+    await request(app.getHttpServer())
+      .post(`/users/${VALID_ID}/reset-password`)
+      .set('Host', '192.168.1.40:3000')
+      .send({});
+    expect(requestPasswordReset).toHaveBeenLastCalledWith(VALID_ID, 'actor-1', {
+      linkOrigin: null,
+    });
+
+    process.env.AUTH_TRUST_HOST = 'true';
+    await request(app.getHttpServer())
+      .post(`/users/${VALID_ID}/reset-password`)
+      .set('Host', '192.168.1.40:3000')
+      .send({});
+    expect(requestPasswordReset).toHaveBeenLastCalledWith(VALID_ID, 'actor-1', {
+      linkOrigin: 'http://192.168.1.40:3000',
+    });
+  });
+
+  it('GET /users/password-reset-capabilities resolves as a literal route, not as :id', async () => {
+    passwordResetCapabilities.mockResolvedValue({
+      canResetLocally: true,
+      canEmailResetLink: false,
+      canMintTemporaryPassword: true,
+      emailUnavailableReason: 'smtp-not-configured',
+    });
+
+    const res = await request(app.getHttpServer()).get(
+      '/users/password-reset-capabilities',
+    );
+
+    // A 400 here would mean the uuid pipe on GET /users/:id swallowed the literal path.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      canResetLocally: true,
+      canEmailResetLink: false,
+      canMintTemporaryPassword: true,
+      emailUnavailableReason: 'smtp-not-configured',
+    });
+    expect(passwordResetCapabilities).toHaveBeenCalledWith(null);
   });
 });

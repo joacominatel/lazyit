@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Logger as NestLogger,
   UnauthorizedException,
 } from '@nestjs/common';
 
@@ -481,7 +482,195 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       expect(tokFindFirst).not.toHaveBeenCalled();
     });
   });
+
+  // ---------- 5. admin-initiated reset link (issue #1268) -------------------
+
+  describe('isOutboundEmailReady', () => {
+    it('is true when SMTP resolves an enabled, complete config', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await expect(service.isOutboundEmailReady()).resolves.toBe(true);
+      expect(resolveConfig).toHaveBeenCalledWith(true);
+    });
+
+    it('is false when SMTP is off or incomplete', async () => {
+      resolveConfig.mockResolvedValue(null);
+      await expect(service.isOutboundEmailReady()).resolves.toBe(false);
+    });
+
+    it('is false (not a throw) when the config cannot be decrypted', async () => {
+      resolveConfig.mockRejectedValue(new Error('bad SMTP_SECRET_KEY'));
+      await expect(service.isOutboundEmailReady()).resolves.toBe(false);
+    });
+  });
+
+  describe('sendAdminResetLink', () => {
+    const subject = { id: VALID_ID, email: 'alice@example.com' };
+
+    it('mints a token, emails the RAW token in the link, and stores ONLY its hash', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+
+      const result = await service.sendAdminResetLink(
+        subject,
+        'https://lazyit.example.com',
+      );
+
+      expect(result).toEqual({
+        sentTo: 'alice@example.com',
+        expiresInMinutes: 60,
+      });
+
+      // The row persisted carries a hash, never the raw token.
+      const created = firstArg<CreateTokenArg>(tokCreate).data;
+      expect(created.userId).toBe(VALID_ID);
+      expect(created.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+      // The emailed link carries the RAW token, and hashing it yields exactly the stored value.
+      const url = renderedResetUrl();
+      expect(
+        url.startsWith('https://lazyit.example.com/reset-password?token='),
+      ).toBe(true);
+      const raw = decodeURIComponent(new URL(url).searchParams.get('token')!);
+      expect(raw.length).toBeGreaterThan(20);
+      expect(created.tokenHash).toBe(hashResetToken(raw));
+      expect(created.tokenHash).not.toBe(raw);
+
+      // The mail actually went out, to the subject's mailbox.
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      expect(firstArg<{ to: string }>(sendMail)).toMatchObject({
+        to: 'alice@example.com',
+      });
+    });
+
+    it('throws origin-unknown and mints NOTHING when no link origin resolved', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await expect(
+        service.sendAdminResetLink(subject, null),
+      ).rejects.toMatchObject({ reason: 'origin-unknown' });
+      expect(tokCreate).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('throws smtp-not-configured and mints NOTHING when email is off (no orphan token)', async () => {
+      resolveConfig.mockResolvedValue(null);
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toMatchObject({ reason: 'smtp-not-configured' });
+      expect(tokCreate).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('throws smtp-not-configured when the stored config cannot be decrypted', async () => {
+      resolveConfig.mockRejectedValue(new Error('bad SMTP_SECRET_KEY'));
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toMatchObject({ reason: 'smtp-not-configured' });
+      expect(tokCreate).not.toHaveBeenCalled();
+    });
+
+    it('throws send-failed when the relay refuses (never a silent success)', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      sendMail.mockRejectedValueOnce(new Error('relay refused'));
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toMatchObject({ reason: 'send-failed' });
+    });
+
+    it('does NOT apply the public per-account cap: an admin can issue past 3 outstanding tokens', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      tokCount.mockResolvedValue(99); // way past MAX_ACTIVE_TOKENS_PER_USER
+
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).resolves.toMatchObject({ sentTo: 'alice@example.com' });
+      expect(tokCreate).toHaveBeenCalledTimes(1);
+      expect(sendMail).toHaveBeenCalledTimes(1);
+    });
+
+    it("opportunistically GCs the subject's used/expired tokens", async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await service.sendAdminResetLink(subject, 'https://lazyit.example.com');
+      const where = firstArg<WhereArg>(tokDeleteMany).where;
+      expect(where.userId).toBe(VALID_ID);
+      expect(where.OR).toEqual([
+        { usedAt: { not: null } },
+        { expiresAt: { lt: expect.any(Date) as unknown } },
+      ]);
+    });
+
+    it('still sends when the GC sweep fails (best-effort, never blocking)', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      tokDeleteMany.mockRejectedValueOnce(new Error('db hiccup'));
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).resolves.toMatchObject({ expiresInMinutes: 60 });
+      expect(sendMail).toHaveBeenCalledTimes(1);
+    });
+
+    it('normalizes a trailing slash on the origin (no // in the link)', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await service.sendAdminResetLink(subject, 'https://lazyit.example.com/');
+      const url = renderedResetUrl();
+      expect(url).toContain('https://lazyit.example.com/reset-password?token=');
+    });
+
+    it('never lets the raw token reach the logger, even on a send failure', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      const warn = jest
+        .spyOn(NestLogger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const error = jest
+        .spyOn(NestLogger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      sendMail.mockRejectedValueOnce(new Error('relay refused'));
+
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toMatchObject({ reason: 'send-failed' });
+
+      // The raw token DID exist (it went into the link) — assert it appears in NOTHING that was logged.
+      const url = renderedResetUrl();
+      const raw = decodeURIComponent(new URL(url).searchParams.get('token')!);
+      const logged = [...warn.mock.calls, ...error.mock.calls]
+        .flat()
+        .map((a) => String(a))
+        .join(' | ');
+      expect(logged).not.toContain(raw);
+      expect(logged).not.toContain(url);
+      warn.mockRestore();
+      error.mockRestore();
+    });
+
+    it('fails closed outside local mode (no token, no mail)', async () => {
+      process.env.AUTH_MODE = 'oidc';
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toBeInstanceOf(Error);
+      expect(tokCreate).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+  });
 });
+
+/** A minimal resolved SMTP config — enough for buildTransport (mocked) and formatFrom (mocked). */
+const SMTP_CONFIG = {
+  host: 'smtp.example.com',
+  port: 587,
+  security: 'starttls',
+  username: null,
+  password: null,
+  fromAddress: 'noreply@lazyit.local',
+  fromName: null,
+  rejectUnauthorized: true,
+};
+
+/** The `resetUrl` the (mocked) renderer was handed — the one place the RAW token is allowed to appear. */
+function renderedResetUrl(call = 0): string {
+  return firstArg<{ resetUrl: string }>(
+    renderPasswordResetEmail as jest.Mock,
+    call,
+  ).resetUrl;
+}
 
 /** Flush the microtask/immediate queue so a fire-and-forget email send completes before assertions. */
 function flush(): Promise<void> {
