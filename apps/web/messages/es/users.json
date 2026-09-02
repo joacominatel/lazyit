@@ -112,12 +112,7 @@
       "success": "{name} ya puede iniciar sesión. Entrégale la contraseña temporal de abajo.",
       "error": "No se pudo dar de alta a esta persona. Inténtalo de nuevo.",
       "reveal": {
-        "message": "Entrega esta contraseña de un solo uso a <b>{name}</b>. Deberá cambiarla la primera vez que inicie sesión, y conserva su rol actual — dar de alta nunca otorga acceso adicional.",
-        "warning": "Esta contraseña se muestra una sola vez. Cópiala ahora — no podrás volver a verla.",
-        "copyAria": "Copiar la contraseña temporal",
-        "copyUnavailable": "No se pudo copiar automáticamente. Selecciona la contraseña y cópiala a mano.",
-        "acknowledge": "Copié la contraseña temporal y se la entregué a la persona.",
-        "done": "Listo"
+        "message": "Entrega esta contraseña de un solo uso a <b>{name}</b>. Deberá cambiarla la primera vez que inicie sesión, y conserva su rol actual — dar de alta nunca otorga acceso adicional."
       }
     }
   },
@@ -357,9 +352,10 @@
     "inactive": "Inactivo"
   },
   "passwordReset": {
-    "button": "Enviar restablecimiento de contraseña",
+    "button": "Restablecer contraseña",
     "disabledNoIdp": "Esta cuenta no tiene vínculo con un proveedor de identidad, por lo que el restablecimiento de contraseña lo gestiona tu proveedor de identidad.",
-    "disabledInactive": "Este usuario está inactivo — reactívalo antes de enviar un restablecimiento de contraseña.",
+    "disabledInactive": "Este usuario está inactivo — reactívalo antes de restablecer su contraseña.",
+    "disabledDirectoryOnly": "Esta persona todavía no tiene cuenta de inicio de sesión. Primero dale de alta con una contraseña temporal.",
     "confirmTitle": "¿Enviar un restablecimiento de contraseña?",
     "confirmBody": "Tu proveedor de identidad enviará a <strong>{email}</strong> un enlace para restablecer su contraseña. lazyit nunca ve ni establece la contraseña; la entrega depende de que el SMTP del proveedor esté configurado.",
     "send": "Enviar correo de restablecimiento",
@@ -369,9 +365,59 @@
       "managedTitle": "El restablecimiento de contraseña lo gestiona tu proveedor de identidad",
       "managedDescription": "lazyit no puede ejecutar un restablecimiento para esta cuenta — gestiona la contraseña en tu proveedor de identidad.",
       "inactiveTitle": "Este usuario está inactivo",
-      "inactiveDescription": "Reactívalo antes de enviar un restablecimiento de contraseña.",
+      "inactiveDescription": "Reactívalo antes de restablecer su contraseña.",
       "error": "No se pudo enviar el restablecimiento de contraseña"
+    },
+    "local": {
+      "title": "Restablecer la contraseña de {name}",
+      "intro": "lazyit gestiona las contraseñas en esta instancia, así que elige cómo le llega el restablecimiento a esta persona.",
+      "deliveryLabel": "Cómo se entrega el restablecimiento",
+      "email": {
+        "title": "Enviar un enlace de restablecimiento por correo",
+        "description": "{email} recibe un enlace de un solo uso y elige su propia contraseña — lazyit nunca la ve.",
+        "unavailable": {
+          "smtp-not-configured": "El correo saliente no está configurado en esta instancia. Configúralo en Ajustes → Instancia → SMTP para usar esta opción.",
+          "origin-unknown": "Esta instancia no tiene una URL pública, así que lazyit no puede construir un enlace que apunte a ella. Pide a tu administrador que configure la URL de la instancia y vuelve a intentarlo.",
+          "generic": "Ahora mismo no se puede enviar un enlace de restablecimiento desde esta instancia."
+        },
+        "revokeSessions": "Cerrar la sesión de este usuario en todas partes",
+        "revokeSessionsHint": "Desactivado por defecto: un enlace no cambia su contraseña actual, así que sus sesiones abiertas siguen siendo legítimamente suyas. Actívalo si crees que la cuenta está comprometida.",
+        "submit": "Enviar enlace de restablecimiento"
+      },
+      "temporary": {
+        "title": "Generar una contraseña temporal",
+        "description": "Tú mismo entregas la contraseña — la salida cuando la persona no puede acceder a su correo. Se muestra una sola vez y deberá cambiarla en su próximo inicio de sesión.",
+        "revokesAlways": "Esto siempre cierra la sesión del usuario en todas partes: reemplaza su contraseña de inmediato, así que ya no se puede confiar en sus sesiones abiertas.",
+        "submit": "Generar contraseña"
+      },
+      "success": {
+        "emailTitle": "Enlace de restablecimiento enviado",
+        "emailBody": "Un enlace de restablecimiento de un solo uso va camino a <strong>{email}</strong>. Caduca en {minutes, plural, one {# minuto} other {# minutos}}.",
+        "emailSessionsRevoked": "Se cerró la sesión de este usuario en todas partes, así que necesitará el enlace para volver a entrar.",
+        "emailSessionsKept": "Sus sesiones abiertas se mantuvieron — solo el enlace cambia su contraseña.",
+        "temporaryTitle": "Contraseña temporal lista",
+        "temporaryMessage": "Entrega esta contraseña de un solo uso a <b>{name}</b>. Reemplaza su contraseña anterior de inmediato — se cerraron todas sus sesiones — y deberá cambiarla en su próximo inicio de sesión."
+      },
+      "errors": {
+        "emailUnavailable": {
+          "smtp-not-configured": "El correo saliente no está configurado en esta instancia, así que no se pudo enviar el enlace. Configúralo en Ajustes → Instancia → SMTP, o genera una contraseña temporal en su lugar.",
+          "origin-unknown": "Esta instancia no tiene una URL pública, así que lazyit no puede construir un enlace de restablecimiento. Pide a tu administrador que configure la URL de la instancia, o genera una contraseña temporal en su lugar.",
+          "generic": "Ahora mismo no se puede enviar un enlace de restablecimiento desde esta instancia. Genera una contraseña temporal en su lugar."
+        },
+        "sendFailed": "No se pudo enviar el correo de restablecimiento. Revisa Ajustes → Instancia → SMTP e inténtalo de nuevo, o genera una contraseña temporal en su lugar.",
+        "inactive": "Este usuario está inactivo, o no tiene cuenta de inicio de sesión, así que no hay contraseña que restablecer.",
+        "managed": "La contraseña de esta cuenta la gestiona tu proveedor de identidad — lazyit no puede restablecerla.",
+        "notFound": "Este usuario ya no existe.",
+        "generic": "No se pudo restablecer esta contraseña."
+      }
     }
+  },
+  "temporaryPasswordReveal": {
+    "warning": "Esta contraseña se muestra una sola vez. Cópiala ahora — no podrás volver a verla.",
+    "copyAria": "Copiar la contraseña temporal",
+    "copyUnavailable": "No se pudo copiar automáticamente. Selecciona la contraseña y cópiala a mano.",
+    "acknowledge": "He copiado la contraseña temporal y se la he entregado a la persona.",
+    "done": "Hecho"
   },
   "offboarding": {
     "title": "Dar de baja a {name}",
