@@ -22,6 +22,10 @@ import {
 } from '../auth/identity/identity-provider.interface';
 import type { IdentityProvider } from '../auth/identity/identity-provider.interface';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
+import {
+  AdminResetLinkError,
+  PasswordLifecycleService,
+} from '../auth/local/password-lifecycle.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -91,6 +95,13 @@ describe('UsersService', () => {
   let provisioning: {
     credentialFields: jest.Mock;
     generateTempPassword: jest.Mock;
+  };
+  // Issue #1268: the local password-lifecycle machinery the `email` delivery delegates the token + mail
+  // to. Its own token/SMTP behaviour is covered in password-lifecycle.service.spec.ts; here it stands in
+  // so the ORCHESTRATION (status mapping, audit, session revocation) is what gets asserted.
+  let passwordLifecycle: {
+    sendAdminResetLink: jest.Mock;
+    isOutboundEmailReady: jest.Mock;
   };
   // DEBT-2 (issue #185): the append-only UserHistory emitter. Mocked so each write-path assertion can
   // check WHICH event was recorded (and with which payload/actor) without a DB.
@@ -234,6 +245,13 @@ describe('UsersService', () => {
       }),
       generateTempPassword: jest.fn().mockReturnValue('Temp-Pass-9xZ!'),
     };
+    passwordLifecycle = {
+      sendAdminResetLink: jest.fn().mockResolvedValue({
+        sentTo: 'user@example.com',
+        expiresInMinutes: 60,
+      }),
+      isOutboundEmailReady: jest.fn().mockResolvedValue(true),
+    };
     // A no-op PinoLogger stand-in (the service uses it for structured write-back audit lines).
     const logger = {
       info: jest.fn(),
@@ -274,6 +292,7 @@ describe('UsersService', () => {
         { provide: AccessGrantsService, useValue: accessGrants },
         { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
         { provide: LocalProvisioningService, useValue: provisioning },
+        { provide: PasswordLifecycleService, useValue: passwordLifecycle },
         { provide: getLoggerToken(UsersService.name), useValue: logger },
       ],
     }).compile();
@@ -2255,6 +2274,15 @@ describe('UsersService', () => {
       };
     }
 
+    /** A LOCAL-mode subject: no IdP link by construction (the #1268 bug was gating the UI on this). */
+    function localUser(overrides: Record<string, unknown> = {}) {
+      return linkedActiveUser({
+        externalId: null,
+        directoryOnly: false,
+        ...overrides,
+      });
+    }
+
     it('calls idp.requestPasswordReset with the externalId for a linked, active user', async () => {
       user.findFirst.mockResolvedValue(linkedActiveUser());
 
@@ -2358,8 +2386,14 @@ describe('UsersService', () => {
             sessionEpoch: { increment: 1 },
           },
         });
-        // The plaintext is returned to the admin ONCE.
-        expect(result).toEqual({ temporaryPassword: 'Temp-Pass-9xZ!' });
+        // The plaintext is returned to the admin ONCE. Issue #1268 widened this into the delivery
+        // outcome; `.temporaryPassword` is still there, so a pre-#1268 web build reading only that field
+        // keeps working against a newer API (CLAUDE.md §8).
+        expect(result).toEqual({
+          delivery: 'temporary-password',
+          temporaryPassword: 'Temp-Pass-9xZ!',
+          sessionsRevoked: true,
+        });
         // NO IdP call in local mode.
         expect(idp.requestPasswordReset).not.toHaveBeenCalled();
         // Append-only audit: PASSWORD_RESET_BY_ADMIN, actor + subject.
@@ -2393,6 +2427,252 @@ describe('UsersService', () => {
         ).rejects.toBeInstanceOf(UnprocessableEntityException);
         expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
       });
+
+      // ---- issue #1268: the admin picks the delivery ------------------------
+
+      it('an explicit temporary-password delivery takes the SAME path as no body at all', async () => {
+        user.findFirst.mockResolvedValue(localUser());
+        user.update.mockResolvedValue(localUser());
+
+        const result = await service.requestPasswordReset('user-1', 'actor-1', {
+          delivery: 'temporary-password',
+        });
+
+        expect(result).toEqual({
+          delivery: 'temporary-password',
+          temporaryPassword: 'Temp-Pass-9xZ!',
+          sessionsRevoked: true,
+        });
+        expect(passwordLifecycle.sendAdminResetLink).not.toHaveBeenCalled();
+      });
+
+      it('ignores revokeSessions:false on the temp-password path — the hash was replaced, so sessions MUST die', async () => {
+        user.findFirst.mockResolvedValue(localUser());
+        user.update.mockResolvedValue(localUser());
+
+        const result = await service.requestPasswordReset('user-1', 'actor-1', {
+          delivery: 'temporary-password',
+          revokeSessions: false,
+        });
+
+        expect(user.update).toHaveBeenCalledWith({
+          where: { id: 'user-1' },
+          data: expect.objectContaining({
+            sessionEpoch: { increment: 1 },
+          }) as unknown,
+        });
+        expect(result).toMatchObject({ sessionsRevoked: true });
+      });
+
+      describe('email delivery', () => {
+        it('sends the link, audits PASSWORD_RESET_SENT (actor=admin, subject=user), and does NOT revoke by default', async () => {
+          user.findFirst.mockResolvedValue(localUser());
+          passwordLifecycle.sendAdminResetLink.mockResolvedValue({
+            sentTo: 'a@b.com',
+            expiresInMinutes: 60,
+          });
+
+          const result = await service.requestPasswordReset(
+            'user-1',
+            'actor-1',
+            { delivery: 'email', linkOrigin: 'https://lazyit.example.com' },
+          );
+
+          expect(result).toEqual({
+            delivery: 'email',
+            sentTo: 'a@b.com',
+            expiresInMinutes: 60,
+            sessionsRevoked: false,
+          });
+          expect(passwordLifecycle.sendAdminResetLink).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'user-1', email: 'a@b.com' }),
+            'https://lazyit.example.com',
+          );
+          // Sending a link does not change the stored credential, so live sessions stay valid.
+          expect(user.update).not.toHaveBeenCalled();
+          // No credential is minted at all on this path — the SUBJECT chooses their own password.
+          expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+          expect(history.record).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+              userId: 'user-1',
+              eventType: 'PASSWORD_RESET_SENT',
+              actor: { userId: 'actor-1' },
+            }),
+          );
+        });
+
+        it('bumps sessionEpoch and reports it when revokeSessions is true', async () => {
+          user.findFirst.mockResolvedValue(localUser());
+          user.update.mockResolvedValue(localUser());
+
+          const result = await service.requestPasswordReset(
+            'user-1',
+            'actor-1',
+            {
+              delivery: 'email',
+              revokeSessions: true,
+              linkOrigin: 'https://lazyit.example.com',
+            },
+          );
+
+          expect(user.update).toHaveBeenCalledWith({
+            where: { id: 'user-1' },
+            data: { sessionEpoch: { increment: 1 } },
+          });
+          expect(result).toMatchObject({ sessionsRevoked: true });
+        });
+
+        it.each([
+          ['smtp-not-configured' as const],
+          ['origin-unknown' as const],
+        ])('409s with reason %s and audits NOTHING', async (reason) => {
+          user.findFirst.mockResolvedValue(localUser());
+          passwordLifecycle.sendAdminResetLink.mockRejectedValue(
+            new AdminResetLinkError(reason, 'nope'),
+          );
+
+          const err = await service
+            .requestPasswordReset('user-1', 'actor-1', { delivery: 'email' })
+            .catch((e: unknown) => e);
+
+          expect(err).toBeInstanceOf(ConflictException);
+          expect((err as ConflictException).getResponse()).toMatchObject({
+            reason,
+          });
+          // A reset that did not go out is never recorded as one, and nothing is written to the user.
+          expect(history.record).not.toHaveBeenCalled();
+          expect(user.update).not.toHaveBeenCalled();
+        });
+
+        it('503s when the relay refuses, and leaves the account untouched', async () => {
+          user.findFirst.mockResolvedValue(localUser());
+          passwordLifecycle.sendAdminResetLink.mockRejectedValue(
+            new AdminResetLinkError('send-failed', 'relay refused'),
+          );
+
+          await expect(
+            service.requestPasswordReset('user-1', 'actor-1', {
+              delivery: 'email',
+              revokeSessions: true,
+            }),
+          ).rejects.toBeInstanceOf(ServiceUnavailableException);
+          // Ordering matters: a failed send must not leave the subject logged out for nothing.
+          expect(user.update).not.toHaveBeenCalled();
+          expect(history.record).not.toHaveBeenCalled();
+        });
+
+        it('422s a directory-only person before any mail is attempted', async () => {
+          user.findFirst.mockResolvedValue(localUser({ directoryOnly: true }));
+          await expect(
+            service.requestPasswordReset('user-1', 'actor-1', {
+              delivery: 'email',
+            }),
+          ).rejects.toBeInstanceOf(UnprocessableEntityException);
+          expect(passwordLifecycle.sendAdminResetLink).not.toHaveBeenCalled();
+        });
+
+        it('422s an inactive user before any mail is attempted', async () => {
+          user.findFirst.mockResolvedValue(localUser({ isActive: false }));
+          await expect(
+            service.requestPasswordReset('user-1', 'actor-1', {
+              delivery: 'email',
+            }),
+          ).rejects.toBeInstanceOf(UnprocessableEntityException);
+          expect(passwordLifecycle.sendAdminResetLink).not.toHaveBeenCalled();
+        });
+      });
+    });
+
+    // OIDC/BYOI is unchanged EXCEPT that a delivery choice is now an honest 400 (issue #1268).
+    it('400s when a delivery is chosen in OIDC mode (never a 2xx over an ignored choice)', async () => {
+      user.findFirst.mockResolvedValue(linkedActiveUser());
+
+      await expect(
+        service.requestPasswordReset('user-1', 'actor-1', {
+          delivery: 'email',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(idp.requestPasswordReset).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('keeps the OIDC path byte-identical when only a linkOrigin rides along (no delivery)', async () => {
+      user.findFirst.mockResolvedValue(linkedActiveUser());
+
+      const result = await service.requestPasswordReset('user-1', 'actor-1', {
+        linkOrigin: 'https://lazyit.example.com',
+      });
+
+      expect(result).toBeNull();
+      expect(idp.requestPasswordReset).toHaveBeenCalledWith('zitadel-user-9');
+    });
+  });
+
+  // Issue #1268 — what the reset dialog may offer, resolved server-side (GET /users/password-reset-capabilities).
+  describe('passwordResetCapabilities', () => {
+    it('local + SMTP ready + a known origin: every capability is available, no reason', async () => {
+      idp.kind = 'local';
+      passwordLifecycle.isOutboundEmailReady.mockResolvedValue(true);
+
+      await expect(
+        service.passwordResetCapabilities('https://lazyit.example.com'),
+      ).resolves.toEqual({
+        canResetLocally: true,
+        canEmailResetLink: true,
+        canMintTemporaryPassword: true,
+      });
+    });
+
+    it('local + SMTP off: email is unavailable with smtp-not-configured, temp-password still offered', async () => {
+      idp.kind = 'local';
+      passwordLifecycle.isOutboundEmailReady.mockResolvedValue(false);
+
+      await expect(
+        service.passwordResetCapabilities('https://lazyit.example.com'),
+      ).resolves.toEqual({
+        canResetLocally: true,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: true,
+        emailUnavailableReason: 'smtp-not-configured',
+      });
+    });
+
+    it('local + SMTP ready but no resolvable origin: origin-unknown', async () => {
+      idp.kind = 'local';
+      passwordLifecycle.isOutboundEmailReady.mockResolvedValue(true);
+
+      await expect(service.passwordResetCapabilities(null)).resolves.toEqual({
+        canResetLocally: true,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: true,
+        emailUnavailableReason: 'origin-unknown',
+      });
+    });
+
+    it('names SMTP first when BOTH are missing — the operator should not be sent to the wrong setting', async () => {
+      idp.kind = 'local';
+      passwordLifecycle.isOutboundEmailReady.mockResolvedValue(false);
+
+      await expect(
+        service.passwordResetCapabilities(null),
+      ).resolves.toMatchObject({
+        emailUnavailableReason: 'smtp-not-configured',
+      });
+    });
+
+    it('OIDC/BYOI: everything false and NO reason — the IdP owns resets, there is nothing to fix here', async () => {
+      idp.kind = 'zitadel';
+
+      await expect(
+        service.passwordResetCapabilities('https://lazyit.example.com'),
+      ).resolves.toEqual({
+        canResetLocally: false,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: false,
+      });
+      // Not even probed: SMTP readiness is irrelevant when the IdP sends the mail.
+      expect(passwordLifecycle.isOutboundEmailReady).not.toHaveBeenCalled();
     });
   });
 
