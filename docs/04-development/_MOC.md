@@ -13,6 +13,9 @@ Everything a developer needs to work on lazyit.
 - [[claude-workflow]] — **how we develop** (context-first, ask-don't-assume, subagents,
   commits, docs-sync). The default operating procedure for every change.
 - [[setup]] — get the repo running locally (Bun, Docker, Prisma).
+- [[cloud-agents]] — bringing lazyit up in a **fresh disposable VM** (Cursor Cloud and similar):
+  services and ports, Docker without systemd, the three env files, the `OIDC_ISSUER` boot
+  gotcha, Prisma first boot, shim auth and the smoke test.
 - [[workflows]] — day-to-day: dev servers, migrations, building, linting.
 - [[code-conventions]] — language, structure, testing, and the Bun-first boundary.
 - [[i18n]] — **how to translate a section** (next-intl, cookie-mode, en + es). The operating

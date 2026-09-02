@@ -1,0 +1,25 @@
+---
+description: Where lazyit's instructions actually live — read AGENTS.md and the charter, not a copy
+alwaysApply: true
+---
+
+# Read the canonical sources
+
+This repository keeps **one** copy of its instructions. Do not look for them here.
+
+1. **`AGENTS.md`** — what lazyit is, how we work, delivery, philosophy. Read it first.
+2. **`.claude/charter.md`** — the operational facts: base and protected branches, commit
+   prefixes, lanes and the files each may write, shared critical files, the exact validation
+   commands, and the three review dimensions every PR must clear.
+3. **`.claude/rules/`** — area conventions. `backend.md`, `frontend.md`, `contracts.md`,
+   `agent.md`, and `docs.md` each carry a `paths:` glob; read the one covering the files you are
+   about to change.
+4. **`docs/`** — the source of truth for domain rules, decisions, and operations. When it and
+   the code disagree, it wins, and then both are corrected.
+
+`.claude/skills/` holds the project skills: `lazyit-navigator` for where things live,
+`lazyit-decisions` for the ADR index, and the CTO, sentinel, remediator, and devops methods.
+
+Previously this directory held four rule files that restated the Git workflow, the development
+workflow, and the skill catalog. They are gone: a rule written twice is two rules that will
+disagree.
