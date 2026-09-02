@@ -102,7 +102,7 @@ Every change rides a GitHub branch+PR flow. Full runbook: `docs/05-runbooks/git-
 | Runtime / package manager | Bun | 1.3.14 |
 | Monorepo orchestration | Turborepo | ^2.9 |
 | Frontend | Next.js (App Router) + React + Tailwind v4 | 16.2.12 / 19.2.8 |
-| Backend | NestJS (Express), strict TypeScript | 11.0.1 |
+| Backend | NestJS (Express), strict TypeScript | 12.0.1 |
 | ORM | Prisma | 7.8.0 |
 | Database | PostgreSQL (Docker Compose for dev) | 18-alpine |
 | Queue/cache | Valkey (Redis-compatible) — backs BullMQ async workers | 8-alpine |
