@@ -29,5 +29,10 @@ import { PasswordResetRateLimitGuard } from './password-reset-rate-limit.guard';
     PasswordLifecycleService,
     PasswordResetRateLimitGuard,
   ],
+  // EXPORTED for the ADMIN-initiated reset (issue #1268): `UsersService.requestPasswordReset`'s local
+  // `email` delivery reuses this service's token + mail machinery instead of growing a second, divergent
+  // copy of it. This module is registered unconditionally in AppModule, so the injection resolves in every
+  // AUTH_MODE — the service itself gates on local mode.
+  exports: [PasswordLifecycleService],
 })
 export class LocalAuthModule {}
