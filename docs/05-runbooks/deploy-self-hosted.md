@@ -125,7 +125,7 @@ To change the port or switch modes later (or after an IP change on a **hostname*
 ```
 
 `--reconfigure` re-asks the network mode / host / ports, keeps every secret (`WORKFLOW_SECRET_KEY`,
-`SESSION_SIGNING_SECRET`, `AUTH_SECRET`, DB creds — never regenerated) and the auth mode + Postgres
+`SESSION_SIGNING_SECRET`, `AUTH_SECRET`, `SMTP_SECRET_KEY`, DB creds — never regenerated) and the auth mode + Postgres
 topology, touches **no** volumes, and brings the stack back up. It is supported for **local-auth installs
 only** (an OIDC deploy's IdP `externalDomain` is baked at first boot and can't be re-homed by re-rendering
 env — edit `.env.prod` by hand and re-provision Zitadel instead). Existing browser sessions from before
@@ -347,6 +347,24 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > Treat this key like `ZITADEL_MASTERKEY`: it is **unrotatable and irreplaceable** — a DB restore
 > without the *matching* key yields undecryptable connector credentials. Back it up off-host (it lives
 > in `.env.prod`; see **[[backups]]**). Do **not** generate a fresh one on a restore.
+
+> **Upgrade note — `SMTP_SECRET_KEY` on a `.env.prod` that predates it (ADR-0079, issue #1269).**
+> The instance SMTP password is encrypted at rest under this key. It is **optional at boot** — the API
+> starts fine without it and an *unauthenticated* relay keeps working — but saving an SMTP **password**
+> returns a clean **409 and stores nothing at all** (the encrypt runs *before* the upsert, so the whole
+> save is rejected, not partially applied). A guided install now generates the key, and `--reconfigure`
+> adds it to a file that lacks one while preserving every other secret. To do it by hand instead:
+>
+> ```sh
+> grep -q '^SMTP_SECRET_KEY=' infra/env/.env.prod \
+>   || echo "SMTP_SECRET_KEY=$(openssl rand -hex 32)" >> infra/env/.env.prod   # 32 bytes -> 64 hex chars
+> docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+>   --env-file infra/env/.env.prod up -d api
+> ```
+>
+> The `grep -q` guard is the point: an **already-present** key must never be replaced — it decrypts the
+> SMTP password already stored, and a fresh one silently orphans it (re-enter the password to recover).
+> Unlike `WORKFLOW_SECRET_KEY` this is **not** a DR linchpin: the worst case is one re-typed password.
 
 > **Upgrade note — attachments storage: fix a pre-existing root-owned volume (#1019).** The api
 > image now creates `/app/attachments` owned by `node` before the runtime `USER node` switch, so

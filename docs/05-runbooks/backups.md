@@ -24,7 +24,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 
 | # | Item | Where | Back up? | How to recover if lost |
 | - | --- | --- | --- | --- |
-| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
+| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY` (low-DR — see below), OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
 | 2 | **App database** | `db` (Postgres 18, `db_data` volume) | **YES — `pg_dump`** | Restore from dump. In **local-auth mode** this also carries the user **password hashes** (argon2id `passwordHash`) — no separate auth store to back up. |
 | 3 | **Zitadel database** (OIDC mode only) | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`**, when `AUTH_MODE=oidc` | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. **Absent in local-auth mode** — there is no `zitadel_db`, and the backup sidecar's cron skips this dump (ADR-0086). |
 | 4 | Meilisearch index | `meili_data` volume | No (rebuildable) | Re-run `reindex:all` — it rebuilds the index from the DBs ([[0035-search-architecture]]). |
@@ -54,6 +54,14 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > and the loss is **cheap to recover** (one field, re-typed by an admin) — so it is a "nice to back up
 > alongside `.env.prod`", not a DR linchpin. Keep it with the same off-host copy of `.env.prod` for
 > zero-touch restores; regenerating it just means re-entering one SMTP password.
+>
+> A guided install **generates this key** (`infra/start.sh`, issue #1269) — so it is in `.env.prod` from
+> day one and an admin can save an authenticated SMTP password without hand-editing anything.
+> `--reconfigure` **preserves an already-present key verbatim** and only mints one when the file carries
+> none (nothing can be encrypted under a key that was never there). A `.env.prod` predating that change
+> has no key: `./infra/start.sh --reconfigure` adds it, or append one by hand and recreate the api
+> container — see **[[deploy-self-hosted]]**. Never regenerate a key that is already in the file: the
+> stored SMTP password becomes undecryptable and must be re-typed.
 
 > [!warning] Attachments are NOT backed up yet (item #7) — an accepted, LOUD gap
 > [[0082-attachments-storage]] puts uploaded files (warranty PDFs, receipts, damage photos, KB
