@@ -3,7 +3,7 @@ title: "ADR-0012: Testing strategy"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-09-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -34,6 +34,8 @@ policy is part of how we work; see [[claude-workflow]].
   **application core** (domain rules, services), not scaffolding or presentational UI.
 - **Runners:**
   - **API (`apps/api`):** Jest — already the stack ([[0002-nestjs-backend]], [[0009-bun-first-vs-app-stack]]).
+    Still Jest, and still CommonJS, after NestJS 12 shipped the framework as ESM — how that suite is
+    configured (and why Vitest was declined) lives in [[0096-jest-commonjs-against-esm-nestjs]].
   - **`packages/shared`:** `bun test` (pure, framework-agnostic logic — see [[shared-package]]).
   - **Frontend (`apps/web`):** a full component/DOM runner (Vitest, React Testing Library) stays
     **deferred** — presentational UI isn't unit-tested yet. But **pure, framework-agnostic logic**

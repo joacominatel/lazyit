@@ -5,6 +5,15 @@
   "testRegex": ".e2e-spec.ts$",
   "setupFiles": ["<rootDir>/jest.env-setup.ts"],
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
-  }
+    "^.+\\.ts$": "ts-jest",
+    "^.+\\.js$": [
+      "@swc/jest",
+      {
+        "sourceMaps": true,
+        "module": { "type": "commonjs" },
+        "jsc": { "target": "es2023", "parser": { "syntax": "ecmascript" } }
+      }
+    ]
+  },
+  "transformIgnorePatterns": ["/node_modules/(?!.*@nestjs)"]
 }
