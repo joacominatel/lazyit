@@ -411,6 +411,12 @@ export class PasswordLifecycleService {
       );
     }
 
+    // NOTE: MAX_ACTIVE_TOKENS_PER_USER is deliberately NOT applied here. That cap exists so an anonymous
+    // stranger cannot email-bomb one mailbox through the PUBLIC forgot flow, where skipping silently is
+    // safe precisely because that flow's response is uniform anyway. Neither half holds on this path: the
+    // caller is an authenticated `user:manage` admin (not the threat the cap models), and this endpoint
+    // reports honestly — so a silent skip would answer "sent" for a mail that was never attempted, which
+    // is the exact deception the rest of this method is built to avoid.
     // Opportunistic GC (same as the public path): drop this user's used/expired tokens so the table stays
     // bounded. Best-effort — a failure never blocks the send.
     try {
