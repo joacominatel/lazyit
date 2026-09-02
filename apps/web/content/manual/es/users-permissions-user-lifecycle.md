@@ -27,11 +27,16 @@ Elige **Nuevo usuario** y completa la identidad de la persona:
   credencial.
 - **Responsable** (opcional) — un usuario de lazyit existente **o** un nombre de texto libre, no ambos.
 
-**Credencial de inicio de sesión.** Cuando lazyit gestiona las credenciales (el proveedor de identidad
-incluido), defines una **contraseña temporal** para que la persona pueda iniciar sesión; ella elige la
-suya en el primer inicio. lazyit nunca guarda esta contraseña — se define en el proveedor de identidad
-y se reemplaza cuando el usuario inicia sesión, y se muestra una sola vez para la entrega. Si usas tu
-propio proveedor de identidad, este paso no aparece — gestiona la credencial en tu proveedor.
+**Credencial de inicio de sesión.** Cuando lazyit puede definir la credencial — el proveedor de identidad
+incluido, o una instancia en la que lazyit gestiona las contraseñas por su cuenta — defines una
+**contraseña temporal** para que la persona pueda iniciar sesión; deberá elegir la suya en el primer
+inicio, y se muestra una sola vez para la entrega. Dónde acaba esa contraseña depende de quién gestiona
+las contraseñas: con el proveedor de identidad incluido se define en el proveedor y lazyit no guarda
+nada, mientras que en una instancia que gestiona lazyit se guarda solo como **hash** — nunca la
+contraseña que escribiste, así que nadie, ni siquiera un administrador, puede volver a leerla. En
+cualquiera de los dos casos, perder la entrega no es un callejón sin salida: restablece la contraseña
+(más abajo) en lugar de intentar consultarla. Si usas tu propio proveedor de identidad, este paso no
+aparece — gestiona la credencial en tu proveedor.
 
 **Punto de partida (opcional).** Puedes asignar un activo y conceder acceso a una aplicación desde el
 mismo formulario de creación, para que la persona empiece con lo que necesita.

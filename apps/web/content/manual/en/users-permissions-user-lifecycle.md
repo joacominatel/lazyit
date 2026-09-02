@@ -25,11 +25,15 @@ Choose **New user** and fill in the person's identity:
   handle, never a credential.
 - **Manager** (optional) — either an existing lazyit user **or** a free-text name, not both.
 
-**Sign-in credential.** When lazyit manages credentials (the bundled identity provider), you set a
-**temporary password** so the person can sign in; they choose their own at first login. lazyit never
-stores this password — it is set on the identity provider and replaced when the user signs in, and it
-is shown only once for hand-off. If you bring your own identity provider, this step does not appear —
-manage the credential in your IdP.
+**Sign-in credential.** When lazyit can set the credential — the bundled identity provider, or an
+instance where lazyit manages passwords itself — you set a **temporary password** so the person can
+sign in; they must choose their own at first login, and it is shown only once for hand-off. Where that
+password ends up depends on who owns passwords: with the bundled identity provider it is set on the
+provider and lazyit stores nothing at all, while on an instance lazyit manages itself it is stored only
+as a **hash** — never the password you typed, so nobody, an administrator included, can read it back.
+Either way, a lost hand-off is not a dead end: reset the password (see below) rather than trying to look
+it up. If you bring your own identity provider, this step does not appear — manage the credential in
+your IdP.
 
 **Head start (optional).** You can assign one asset and grant one application access right from the
 create form, so the new person starts with what they need.
