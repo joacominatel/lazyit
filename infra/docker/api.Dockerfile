@@ -10,7 +10,7 @@
 
 # ---- Builder: Bun builds @lazyit/shared, generates the Prisma client, builds the API ----
 # oven/bun:1.3.14
-FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS builder
+FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS builder
 WORKDIR /app
 
 # All workspace manifests + lockfile first, so the install layer is cached until they change.
@@ -73,7 +73,7 @@ RUN bun run --filter @lazyit/agent compile
 # --filter keeps the lockfile intact (so --production's implicit frozen check passes) while
 # excluding the web app's deps; --linker hoisted gives a flat node_modules for plain Node resolution.
 # oven/bun:1.3.14
-FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS prod-deps
+FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS prod-deps
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
