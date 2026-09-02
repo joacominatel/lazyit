@@ -1,10 +1,13 @@
 import type {
   AccessGrant,
+  AdminPasswordResetOutcome,
+  AdminPasswordResetRequest,
   AdminPasswordResetResult,
   AssetAssignment,
   CloneUser,
   CloneUserResult,
   CreateUser,
+  PasswordResetCapabilities,
   Role,
   RoleCounts,
   UpdateUser,
@@ -212,18 +215,54 @@ export function provisionLocalUserAccount(
 }
 
 /**
- * Trigger a password reset for a user (`POST /users/:id/reset-password`, `user:manage`). The IdP
- * (Zitadel) emails the reset link via ITS SMTP — lazyit never sees or sets the password. Resolves on
- * 204 (no body). The honest non-success cases come back as an {@link ApiError} the caller maps on its
- * `.status`:
+ * Trigger a password reset for a user (`POST /users/:id/reset-password`, `user:manage`). What this does
+ * depends on the instance auth mode, so the result type is a union (ADR-0086 §5, issue #1268):
+ *   - **OIDC / bundled Zitadel** — the IdP emails the reset link via ITS SMTP; lazyit never sees or sets
+ *     the password. Resolves on **204** with no body (`void`). Send NO `body` here.
+ *   - **AUTH_MODE=local** — lazyit owns the credential, so the admin picks the delivery explicitly in
+ *     `body`: `"email"` sends a single-use reset link through the INSTANCE SMTP, `"temporary-password"`
+ *     mints a one-time password returned ONCE. Resolves **200** with an {@link AdminPasswordResetOutcome}.
+ *
+ * `body` is optional so omitting it keeps the pre-#1268 behavior byte-identical on both paths (an older
+ * web build against a newer API still works — upgrade-safety, CLAUDE.md §8). Ask
+ * {@link getPasswordResetCapabilities} which deliveries the instance can actually offer before choosing.
+ *
+ * The honest non-success cases come back as an {@link ApiError} the caller maps on its `.status`:
  *   - **501** — managed by the identity provider: BYOI (generic-oidc) or a user with no IdP link
- *     (`externalId == null`); lazyit cannot drive a reset for them.
- *   - **422** — the user is inactive (offboarded), so a reset is meaningless.
+ *     (`externalId == null`) in OIDC mode; lazyit cannot drive a reset for them.
+ *   - **422** — the user is inactive (offboarded) or directory-only, so a reset is meaningless.
+ *   - **409** — the `email` delivery is unavailable right now; the body carries a
+ *     `PasswordResetEmailUnavailableReason` (`smtp-not-configured` / `origin-unknown`).
+ *   - **503** — the reset email failed to send (this path never fakes a cheerful success).
  *   - **404** — the user is missing or soft-deleted.
- * Delivery still depends on the IdP's SMTP being configured.
  */
-export function resetUserPassword(id: string): Promise<void> {
-  return apiFetch<void>(`${BASE}/${id}/reset-password`, { method: "POST" });
+export function resetUserPassword(
+  id: string,
+  body?: AdminPasswordResetRequest,
+): Promise<AdminPasswordResetOutcome | void> {
+  return apiFetch<AdminPasswordResetOutcome | void>(
+    `${BASE}/${id}/reset-password`,
+    { method: "POST", body },
+  );
+}
+
+/**
+ * What the admin password-reset action may offer on THIS instance
+ * (`GET /users/password-reset-capabilities`, `user:manage`). Resolved server-side so the dialog can
+ * enable/disable each delivery honestly instead of guessing from `externalId` (issue #1268).
+ *
+ * It deliberately does NOT ride the `@Public` `GET /config/status`: whether the instance has working
+ * outbound email is operational detail an anonymous visitor has no business reading, so it sits behind
+ * the same permission that owns the action. A **404** here means an API older than #1268 — callers must
+ * fall back to the pre-#1268 (OIDC-only) behavior rather than breaking the Users page.
+ */
+export function getPasswordResetCapabilities(
+  signal?: AbortSignal,
+): Promise<PasswordResetCapabilities> {
+  return apiFetch<PasswordResetCapabilities>(
+    `${BASE}/password-reset-capabilities`,
+    { signal },
+  );
 }
 
 /**
