@@ -60,6 +60,8 @@
     "@nestjs/cli": "^12.0.0",
     "@nestjs/schematics": "^12.0.0",
     "@nestjs/testing": "^12.0.1",
+    "@swc/core": "^1.15.40",
+    "@swc/jest": "^0.2.39",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/multer": "^2.1.0",
@@ -77,7 +79,7 @@
     "prisma": "^7.8.0",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
-    "ts-jest": "^29.2.5",
+    "ts-jest": "^29.4.0",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
@@ -96,8 +98,26 @@
       "<rootDir>/../test/jest.env-setup.ts"
     ],
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.ts$": "ts-jest",
+      "^.+\\.js$": [
+        "@swc/jest",
+        {
+          "sourceMaps": true,
+          "module": {
+            "type": "commonjs"
+          },
+          "jsc": {
+            "target": "es2023",
+            "parser": {
+              "syntax": "ecmascript"
+            }
+          }
+        }
+      ]
     },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!.*@nestjs)"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],
