@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-09-07
 ---
 
 # Code Conventions
@@ -159,6 +159,20 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
 >
 > Don't "fix" Express→`Bun.serve` or Prisma→`Bun.sql` to match the old blanket Bun-first
 > wording; that divergence is deliberate and now documented in `CLAUDE.md`.
+
+## Dependency ranges
+
+Every dependency in every `package.json` declares a **semver range**, never a dist-tag. `"latest"`
+and `"*"` are resolved against the registry on each install, so they make `bun.lock` go stale on
+somebody else's release: `bun install --frozen-lockfile` — which is what the three Dockerfiles and
+CI run — then fails on a tree nobody changed, and an operator's in-place upgrade fails with it.
+A caret range stays satisfiable by the committed lockfile across patch releases, so the build keeps
+resolving to exactly what CI tested.
+
+A manifest change and its regenerated `bun.lock` belong in the **same commit**, produced with the
+Bun version pinned in `packageManager` (`1.3.14`) — the one the Dockerfiles and CI use.
+
+Symptoms and recovery: [[docker-build-troubleshooting]] § `error: lockfile had changes`.
 
 ## Testing
 
