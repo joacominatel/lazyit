@@ -249,9 +249,49 @@
     "childFolderCount": "{count, plural, one {# sub-folder} other {# sub-folders}}",
     "articleCount": "{count, plural, one {# article} other {# articles}}",
     "emptyFolder": "Empty folder",
-    "delete": {
+    "actions": {
       "menuTitle": "Folder actions",
       "menuAriaLabel": "Actions for {name}",
+      "newChild": "New sub-folder here",
+      "rename": "Rename",
+      "move": "Move to…"
+    },
+    "form": {
+      "newRoot": "New folder",
+      "createRootTitle": "New folder",
+      "createRootDescription": "A top-level folder in the Knowledge Base.",
+      "createInTitle": "New folder in {name}",
+      "createDescription": "It is created inside the folder you picked. Folders can be nested as deeply as you like.",
+      "renameTitle": "Rename folder",
+      "renameDescription": "Renaming a folder does not move it and does not change who can read it.",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. Firewalls",
+      "nameRequired": "Enter a folder name",
+      "create": "Create folder",
+      "save": "Save",
+      "created": "Folder created",
+      "renamed": "Folder renamed",
+      "createError": "Couldn't create the folder",
+      "renameError": "Couldn't rename the folder"
+    },
+    "move": {
+      "title": "Move folder",
+      "description": "Choose where {name} should live. Its sub-folders and its articles move with it.",
+      "parentLabel": "New parent folder",
+      "parentPlaceholder": "Choose a folder",
+      "root": "Top level (no parent)",
+      "confirm": "Move folder",
+      "unchanged": "That folder is already here.",
+      "moved": "Moved {name}",
+      "error": "Couldn't move the folder"
+    },
+    "errors": {
+      "cycle": "A folder can't be moved into itself or into one of its own sub-folders.",
+      "deadParent": "That folder no longer exists — someone may have deleted it. Reload the page and try again.",
+      "duplicateName": "A folder with this name already exists here. Pick a different name.",
+      "duplicateInDestination": "The destination already has a folder with this name. Rename one of them first."
+    },
+    "delete": {
       "action": "Delete folder",
       "title": "Delete this folder?",
       "warning": "<b>{name}</b> and everything inside it will be removed from the Knowledge Base.",

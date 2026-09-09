@@ -4,6 +4,7 @@ import {
   ancestorFolderIds,
   buildFolderTree,
   descendantFolderCount,
+  folderPathOptions,
   restrictedAncestorOf,
 } from "./folder-tree";
 
@@ -101,5 +102,40 @@ describe("tree/ancestor helpers still hold", () => {
       "docs",
       "lazyit",
     ]);
+  });
+});
+
+describe("folderPathOptions", () => {
+  test("labels every folder by its full path so repeated leaf names stay unambiguous", () => {
+    const repeated: Folder[] = [
+      folder("Servers"),
+      folder("Workstations"),
+      { ...folder("linux-a", "Servers"), name: "Linux" },
+      { ...folder("linux-b", "Workstations"), name: "Linux" },
+    ];
+    expect(folderPathOptions(repeated)).toEqual([
+      { id: "Servers", label: "Servers" },
+      { id: "linux-a", label: "Servers / Linux" },
+      { id: "Workstations", label: "Workstations" },
+      { id: "linux-b", label: "Workstations / Linux" },
+    ]);
+  });
+
+  test("orders by the full path label, case-insensitively", () => {
+    const labels = folderPathOptions(FOLDERS).map((o) => o.label);
+    expect(labels).toEqual([
+      "lazyit",
+      "lazyit / docs",
+      "lazyit / docs / arch",
+      "lazyit / docs / overview",
+      "other",
+    ]);
+  });
+
+  test("returns every folder — descendants included, for the caller to narrow", () => {
+    // The move picker drops only the folder being moved; its descendants stay offerable so an
+    // attempted cycle reaches the server's guard instead of a second, drifting client-side copy.
+    const ids = folderPathOptions(FOLDERS).map((o) => o.id);
+    expect(ids.sort()).toEqual(FOLDERS.map((f) => f.id).sort());
   });
 });
