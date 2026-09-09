@@ -3,7 +3,7 @@ title: "ADR-0092: The Reading Room — KB reading & browsing redesign"
 tags: [adr, knowledge-base, kb, frontend, ux, markdown, search, information-architecture]
 status: accepted
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-09-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -91,9 +91,28 @@ editor. Exactly **one net-new dependency** across the whole redesign: `rehype-sl
   and the per-folder counts — a count never reveals articles a viewer can't see. A create-on-click 409
   (slug already taken by a live-but-unseen row) surfaces a specific "name already exists" message rather
   than a generic error.
-- **Known cosmetic (accepted):** on `xl`, a reader-facing article with *no headings and no connections*
-  leaves the reserved right rail empty (whitespace, no visible panel). Rare (most articles have headings);
-  deferred rather than refactor the rail-visibility gate up the tree.
+- **Known cosmetic (accepted):** on the three-column tier, a reader-facing article with *no headings and
+  no connections* leaves the reserved right rail empty (whitespace, no visible panel). Rare (most articles
+  have headings); deferred rather than refactor the rail-visibility gate up the tree.
+
+## Amendment — 2026-09-09: the rail splits on available width, not on `xl` (#1292)
+
+Phase 2 shipped the three-column split at Tailwind's `xl` (1280px) with the prose capped at `max-w-3xl`
+and the block at `max-w-6xl`. That gates on the viewport, which says nothing about the room the split
+actually has: outside this view the app sidebar (`w-60`), the shell padding (`md:p-6`) and the KB folder
+rail (`lg:w-64` + `gap-6`) cost a fixed 568px, and the split itself costs another 328px (`gap-x-10` +
+`w-72`). At 1440px the prose was therefore squeezed to ~544px and its cap never engaged; at 1920px
+`max-w-6xl` stopped the block ~200px short of the available width while the prose stopped 56px short of
+the rail. The CEO's complaint — *"el espacio para ver la info es medio chico"* — is that arithmetic.
+
+The split now happens at **1800px** (an arbitrary Tailwind variant: 872px measure + 328px + 568px chrome,
+rounded up), and the block caps at exactly measure + 328px above it. Below 1800px the right rail stacks
+under the prose and the TOC falls back to the `<details>` disclosure that Phase 2 already built — so the
+reading measure is a continuous 872px on both sides of the breakpoint instead of jumping. The geometry and
+its invariants live in `apps/web/lib/utils/kb-reading-layout.ts`.
+
+Everything else in the Phase-2 decision stands: no collapse toggle, no persisted panel state, no
+resizable-panel dependency, and the rail's content is unchanged. Render-time only; nothing stored.
 
 ## Alternatives considered
 

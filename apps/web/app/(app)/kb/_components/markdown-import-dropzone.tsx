@@ -20,6 +20,10 @@ import {
  * the parsed payload to `onImport` — NO upload, no server round-trip, no new dependency. The caller
  * decides how to apply it (fill the empty editor, or confirm before replacing typed content).
  *
+ * Plain text is all it CAN take, since nothing is uploaded — so the hint also points at the Import
+ * dialog for `.docx` and `.zip` (#1292). Those have worked since ADR-0021 but were invisible here,
+ * which is the surface a user with an existing Word runbook reaches for first.
+ *
  * Scoped to the CREATE screen by its caller: the edit form's editor owns image drag/drop, so this is
  * only mounted for a brand-new article where there's no image-upload target yet.
  *
@@ -99,10 +103,17 @@ export function MarkdownImportDropzone({
     >
       {/* Discoverability + a11y affordance: a visible hint and a real, focusable file picker. */}
       <div className="mb-4 flex flex-col gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between">
-        <span className="flex items-center gap-2 text-muted-foreground">
-          <DocumentArrowDownIcon className="size-4 shrink-0" aria-hidden="true" />
-          {t("hint")}
-        </span>
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="flex items-center gap-2 text-muted-foreground">
+            <DocumentArrowDownIcon className="size-4 shrink-0" aria-hidden="true" />
+            {t("hint")}
+          </span>
+          {/* #1292: this dropzone reads the file in the BROWSER, so it can only take plain text —
+              but `.docx` and `.zip` have been importable since ADR-0021, through the server-side
+              Import dialog. Naming them here is the whole point: this is where someone with a Word
+              document to bring in lands first, and the silence read as "not supported". */}
+          <p className="pl-6 text-xs text-muted-foreground">{t("uploadOnly")}</p>
+        </div>
         <Button
           type="button"
           variant="outline"

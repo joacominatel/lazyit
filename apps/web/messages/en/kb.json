@@ -107,8 +107,9 @@
     }
   },
   "mdImport": {
-    "hint": "Drag a .md file here to fill the content",
+    "hint": "Drag a .md, .markdown or .txt file here to fill the content",
     "choose": "Choose a .md file",
+    "uploadOnly": "Importing a Word document (.docx) or a .zip? Use Import from the Knowledge Base.",
     "overlay": "Drop to import its content",
     "toast": {
       "imported": "Markdown imported into the editor",
@@ -200,7 +201,7 @@
     "title": "Import an article",
     "description": "Upload a Markdown, plain-text, Word (.docx) or ZIP (.zip) file. Only the text is imported — the original file is not stored.",
     "fileLabel": "File",
-    "fileHint": "Accepts .md, .txt, .docx and .zip (bulk import).",
+    "fileHint": "Word documents (.docx), Markdown (.md, .markdown), plain text (.txt), or a .zip of Markdown for bulk import.",
     "categoryLabel": "Category",
     "categorySelect": "Select a category",
     "categoryNone": "No categories yet",

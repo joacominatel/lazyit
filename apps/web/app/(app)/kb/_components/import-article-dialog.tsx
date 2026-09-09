@@ -40,9 +40,8 @@ import {
 } from "@/lib/api/hooks/use-articles";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
-
-/** Accepted upload types — the backend extracts markdown from each (ADR-0021, ADR-0059 §5). */
-const ACCEPT = ".md,.markdown,.txt,.docx,.zip";
+// Accepted upload types — the backend extracts markdown from each (ADR-0021, ADR-0059 §5).
+import { ARTICLE_IMPORT_ACCEPT } from "@/lib/utils/kb-article-import-formats";
 
 /** How many items to show per group before offering "Show all". */
 const COLLAPSED_LIMIT = 5;
@@ -396,7 +395,7 @@ export function ImportArticleDialog({
                 <Input
                   id="import-file"
                   type="file"
-                  accept={ACCEPT}
+                  accept={ARTICLE_IMPORT_ACCEPT}
                   disabled={isImporting}
                   onChange={(event) =>
                     dispatchForm({
