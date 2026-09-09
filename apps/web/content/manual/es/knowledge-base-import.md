@@ -18,6 +18,9 @@ en uno, o todo un árbol de Markdown a la vez. Usa **Importar** desde la Base de
 | `.docx` (Word) | Un artículo — el texto se extrae a Markdown |
 | `.zip` | **Importación en lote** — varios artículos, ver abajo |
 
+**Los archivos de Word (`.docx`) son compatibles**: no hace falta convertir un documento de Word a
+Markdown antes. El PDF no lo es: exporta o copia el texto del PDF e impórtalo así.
+
 Se importa el **texto**, y las **imágenes incrustadas en el documento se trasladan** como adjuntos del
 artículo (consulta [Imágenes incrustadas](#imagenes-incrustadas) más abajo). El archivo original en sí
 **no se almacena**, y los binarios que no sean imágenes no se conservan.
@@ -34,6 +37,11 @@ como una cuenta de servicio.
 
 Elige un archivo `.md`, `.txt` o `.docx`, escoge una categoría y un estado, e **Importar**. El archivo
 se procesa y vas directamente al nuevo artículo. Los archivos grandes tardan un momento.
+
+> [!NOTE]
+> La pantalla **Nuevo artículo** también te deja arrastrar un archivo sobre el formulario, pero ese
+> atajo lee el archivo en tu navegador, así que solo admite `.md`, `.markdown` y `.txt`. **Los
+> documentos de Word y los archivos `.zip` se importan desde Importar**, en esta página.
 
 ## Importación en lote desde un `.zip`
 
