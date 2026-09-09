@@ -20,10 +20,18 @@ from the folder sidebar in the Knowledge Base.
   the articles **you can actually see** (published articles, plus your own drafts), so it never
   reveals more than the folder's list would. A **restricted folder you cannot read shows no number**,
   and folders on an older server simply show none until it is updated.
-- **Create a folder** from the **+** button on the article form (or where folders are managed) —
-  give it a name and, optionally, a parent.
+- **Create a top-level folder** with **New folder** at the top of the folder sidebar.
+- **Create a sub-folder** from the **⋯** menu on the folder you want it inside → **New sub-folder
+  here**. There is no depth limit — nest as deeply as your documentation needs. The new folder opens
+  as soon as it is created.
+- **Rename or move a folder** from that same **⋯** menu. **Move to…** lets you pick any other folder
+  as the new parent, or **Top level (no parent)** to pull it back out to the root; the folder's
+  sub-folders and its articles move with it.
 - **Names are unique within their parent.** `Servers / Linux` and `Workstations / Linux` can both
-  exist; two folders named `Linux` under the *same* parent cannot.
+  exist; two folders named `Linux` under the *same* parent cannot. If a name is already taken where
+  you are creating or moving to, the app says so and nothing is changed.
+- **A folder cannot be moved inside itself** or inside one of its own sub-folders — that would
+  detach the branch from the tree. The move is refused with an explanation.
 - **Delete a folder** removes it and everything inside it — its sub-folders and all of their
   articles — from the Knowledge Base. The confirmation tells you exactly how many folders and
   articles are affected. The articles are soft-deleted (recoverable by an administrator from the
@@ -67,6 +75,12 @@ A sub-folder is **at least as restricted as its parent**. If a parent folder is 
 children inherit that restriction; an administrator can add a rule on a child to narrow it *further*,
 but never to widen it past the parent. A folder that has no rule of its own but sits under a
 restricted parent shows as **Restricted (inherited from …)**, not Public.
+
+**Moving a folder changes what it inherits.** Drop a folder under a restricted parent and it — plus
+everything inside it — becomes at least as restricted as that parent, immediately. Pull it back out
+to the top level and only its *own* rule remains. A move never grants access the Knowledge Base did
+not already allow, but it can widen a folder back to its own rule, so check the destination before
+moving a folder that was relying on a parent's restriction.
 
 ## What restricted means for readers
 

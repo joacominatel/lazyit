@@ -44,8 +44,11 @@ export function KbShell({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // ADR-0060: ADMIN-only access-rule editor affordance; #415: ADMIN-only folder cascade-delete.
+  // ADR-0060: ADMIN-only access-rule editor affordance; #415: ADMIN-only folder cascade-delete;
+  // #1291: the create / rename / move affordances, on the same gate the API enforces on the write
+  // endpoints (`category:write`).
   const canManageSettings = useCan("settings:manage");
+  const canWriteFolder = useCan("category:write");
   const canDeleteFolder = useCan("category:delete");
 
   const { data: categories } = useArticleCategories();
@@ -111,6 +114,7 @@ export function KbShell({ children }: { children: React.ReactNode }) {
                 selectedFolderId={selectedFolderId}
                 onSelect={handleSelect}
                 isAdmin={canManageSettings}
+                canWrite={canWriteFolder}
                 canDelete={canDeleteFolder}
               />
             ) : (

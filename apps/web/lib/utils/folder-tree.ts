@@ -164,3 +164,28 @@ export function restrictedAncestorOf(
   }
   return null;
 }
+
+/** One selectable folder in a flat picker: its id and its full breadcrumb path label. */
+export interface FolderPathOption {
+  id: string;
+  label: string;
+}
+
+/**
+ * Project the flat folder list into picker options labelled by their FULL path ("Servers / Linux"),
+ * sorted by that label (case-insensitive, locale-aware) so a picker reads as a stable outline and a
+ * leaf name that repeats across the tree stays unambiguous. Used by the "Move to…" parent picker
+ * (#1291).
+ *
+ * Every live folder is returned — the caller narrows. In particular the "Move to…" picker keeps a
+ * folder's own DESCENDANTS in the list and only drops the folder itself: the cycle rule is the
+ * server's (ADR-0059 §1), and re-deriving it here would create a second copy of it that could drift.
+ */
+export function folderPathOptions(folders: Folder[]): FolderPathOption[] {
+  const folderById = new Map(folders.map((f) => [f.id, f]));
+  return folders
+    .map((f) => ({ id: f.id, label: folderPathLabel(f, folderById) }))
+    .sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
+    );
+}
