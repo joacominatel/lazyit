@@ -437,8 +437,9 @@
     }
   }
 
-  /* Infra topology — the DEPENDS_ON dash flow (ADR-0070 UX, issue #767). The ONE animated edge
-     kind: a slow, subtle march of the dash pattern along the path, reading as the direction of
+  /* Infra topology — the DEPENDS_ON dash flow (ADR-0070 UX, issue #767). No longer the only edge
+     motion (#1295 gave every edge a decorative packet flow), but still the only one that is a
+     MEANING: the kind's own dash pattern marches along the path, reading as the direction of
      "need". Applied via `.infra-edge-flow` on the edge's <path>; the dash pattern itself comes from
      `edgeStyle('DEPENDS_ON').dashArray` ("6 4" → period 10), so the offset cycles exactly one
      period. It is a continuous ambient loop (not a ≤220ms UI transition) — a low-salience cue, not
@@ -447,6 +448,22 @@
   @keyframes infra-dash-flow {
     to {
       stroke-dashoffset: -10;
+    }
+  }
+
+  /* Infra topology — the decorative packet flow (issue #1295). A SECOND path drawn on the same `d`
+     as the edge, in the kind's own stroke at low opacity, carrying a short dash ("2 14" → period
+     16) that marches source→target. It is ornament and nothing else: it says "this map is of a live
+     estate", never "this link is carrying traffic". It rides its own path precisely so the base
+     line's per-kind `stroke-dasharray` — one of ADR-0070's four redundant, colour-blind-safe
+     encoders — is left completely untouched underneath it. The canvas gates it on both endpoints
+     being non-OFFLINE and on an edge-count cutoff (`lib/infra/edge-flow.ts`); this block only has to
+     make it move. A continuous ambient loop like the DEPENDS_ON march above, and frozen by the same
+     consolidated reduced-motion block below — which is the whole reason it is CSS and not SMIL,
+     since `prefers-reduced-motion` reaches a keyframe animation and does not reach `<animate>`. */
+  @keyframes infra-edge-packets {
+    to {
+      stroke-dashoffset: -16;
     }
   }
 
@@ -470,6 +487,12 @@
 
   .infra-edge-flow {
     animation: infra-dash-flow 0.9s linear infinite;
+  }
+
+  .infra-edge-packet {
+    /* Slower than the DEPENDS_ON march on purpose: the two are meant to read as different things
+       when they appear on the same line, and the semantic one should be the busier of the two. */
+    animation: infra-edge-packets 1.6s linear infinite;
   }
 
   .infra-focus-pulse {

@@ -60,6 +60,7 @@ import {
   placementOffset,
   statusTone,
 } from "@/lib/infra/canvas";
+import { edgeFlowEnabled, edgeFlows } from "@/lib/infra/edge-flow";
 import { edgesBetweenVisible, partitionEndpoints } from "@/lib/infra/endpoints";
 import { cn } from "@/lib/utils";
 import {
@@ -467,6 +468,14 @@ function CanvasBoard({
     focusPulseId,
   ]);
 
+  // The drawn nodes' liveness, by id — the input to the decorative packet flow's gate (#1295). Built
+  // once per node change instead of scanned per edge, since a dense board asks this question twice
+  // for every line it draws.
+  const statusById = useMemo(
+    () => new Map(infraNodes.map((node) => [node.id, node.status])),
+    [infraNodes],
+  );
+
   // Sync edges from the query, styled by kind via the per-kind `edgeStyle` descriptor (issue #767).
   // In impact mode an edge stays full-strength only when both endpoints are inside the blast radius;
   // the hover spotlight dims any edge with neither endpoint in the hovered neighbourhood. The kind
@@ -487,6 +496,10 @@ function CanvasBoard({
       pairCount.set(key, (pairCount.get(key) ?? 0) + 1);
     }
     const pairSlot = new Map<string, number>();
+    // The decorative packet flow (#1295), decided ONCE for the whole board: over the cutoff nothing
+    // moves at all, because `stroke-dashoffset` repaints on the main thread and a board that
+    // stutters under a drag is a worse map than a still one.
+    const flowAllowed = edgeFlowEnabled(infraEdges.length);
     setRfEdges(
       infraEdges.map((edge) => {
         const style = edgeStyle(edge.kind);
@@ -525,6 +538,15 @@ function CanvasBoard({
             showLabel,
             parallelIndex: slot,
             parallelCount: pairCount.get(key) ?? 1,
+            // Ornament, gated on the liveness the cards already show: a positively OFFLINE endpoint
+            // stills its lines, and `UNKNOWN` — every hand-added node, and every node on an estate
+            // that runs no agents — keeps flowing.
+            flow:
+              flowAllowed &&
+              edgeFlows(
+                statusById.get(edge.sourceId),
+                statusById.get(edge.targetId),
+              ),
           },
         };
       }),
@@ -540,6 +562,9 @@ function CanvasBoard({
     spotlightNeighbourhood,
     hovered,
     selectedEdgeId,
+    // A node flipping to OFFLINE on a poll has to still its lines without waiting for an edge
+    // change, so the liveness map is a real input to this sync.
+    statusById,
   ]);
 
   // One trailing-debounced persister, holding the latest position per node id. ponytail: a single
