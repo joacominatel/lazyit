@@ -319,9 +319,9 @@
   },
   "endpoints": {
     "show": "{count, plural, one {Show # endpoint} other {Show # endpoints}}",
-    "showHint": "Laptops and desktops are kept off the map so the estate stays readable. They are still in your inventory, on the Servers list and in search — this only changes what the map draws.",
+    "showHint": "Put laptops and desktops back on the map. They were never removed from anything else — this only changes what the map draws.",
     "hide": "{count, plural, one {Hide # endpoint} other {Hide # endpoints}}",
-    "hideHint": "Take laptops and desktops back off the map. Nothing is removed — they stay in your inventory, on the Servers list and in search."
+    "hideHint": "Clear laptops and desktops off the map so the estate topology stays readable. Nothing is removed — they stay in your inventory, on the Servers list and in search."
   },
   "graph": {
     "truncated": "Showing {shown} of {total} nodes — this map is incomplete.",

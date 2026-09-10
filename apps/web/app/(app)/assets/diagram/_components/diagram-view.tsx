@@ -10,8 +10,8 @@ import { useInfraImpact } from "@/lib/api/hooks/use-infra-nodes";
 import { buildNextUrl } from "@/lib/hooks/list-params-url";
 import { useCan } from "@/lib/hooks/use-permissions";
 import {
+  HIDE_ENDPOINTS_VALUE,
   SHOW_ENDPOINTS_PARAM,
-  SHOW_ENDPOINTS_VALUE,
   showEndpointsFromParam,
 } from "@/lib/infra/endpoints";
 import {
@@ -102,11 +102,12 @@ export function DiagramView() {
   // The `?node=` the URL carries right now. Read on every render (not once): it is what both the
   // initial state below and the deep-link effect further down are driven by.
   const nodeParam = searchParams.get("node");
-  // "Show endpoints" (ADR-0093 §5). URL-backed like `?view`, and for the same reason: the canvas
-  // hides laptops and desktops by DEFAULT, so the one click that brings them back has to survive a
-  // reload and a Map↔Table switch — a hidden-by-default treatment an operator cannot keep undone is
-  // one they have to undo every single time. The param is dropped on the default (hidden) to keep
-  // URLs clean, and `buildNextUrl` preserves every other param across the write.
+  // The endpoints control (ADR-0093 §5, amended 2026-09-09). URL-backed like `?view`, and for the
+  // same reason: the canvas now draws laptops and desktops by DEFAULT, so the one click that clears
+  // a board of 400 workstations has to survive a reload and a Map↔Table switch — a filter an
+  // operator cannot keep applied is one they re-apply every single time. The param is dropped on the
+  // default (shown) to keep URLs clean, and `buildNextUrl` preserves every other param across the
+  // write.
   const showEndpoints = showEndpointsFromParam(
     searchParams.get(SHOW_ENDPOINTS_PARAM),
   );
@@ -116,8 +117,8 @@ export function DiagramView() {
         [SHOW_ENDPOINTS_PARAM]: showEndpointsFromParam(
           searchParams.get(SHOW_ENDPOINTS_PARAM),
         )
-          ? undefined
-          : SHOW_ENDPOINTS_VALUE,
+          ? HIDE_ENDPOINTS_VALUE
+          : undefined,
       }),
       { scroll: false },
     );

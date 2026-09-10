@@ -127,13 +127,18 @@ export interface InfraCanvasApi {
  * nothing more — the detail modal is one deliberate click (or a double-click) away, so the map is
  * never covered by a surface the operator did not ask for.
  *
- * **Endpoints are off the board by default** (ADR-0093 §5). A representative estate is ~180 reported
- * laptops and desktops against ~65 servers, and drawing all 245 is what made this canvas unusable —
- * so a node whose agent reports `chassis: laptop|desktop` is not drawn unless the toolbar's toggle
- * says otherwise. It is a treatment of THIS SURFACE and nothing else: the node is still in the CMDB,
- * still on the Servers table, still reachable by search, still counted by a blast radius. The filter
- * lives in `lib/infra/endpoints.ts`, the queries above are untouched, and the count of what is
- * missing is on the board rather than left to be inferred.
+ * **Endpoints are ON the board by default** (ADR-0093 §5, amended 2026-09-09). The original release
+ * hid reported laptops and desktops until asked; that default is inverted — a first visit draws the
+ * whole estate, and the toolbar's control is what an operator whose ~180 workstations drown ~65
+ * servers uses to clear the board. Hiding remains a treatment of THIS SURFACE and nothing else: a
+ * hidden node is still in the CMDB, still on the Servers table, still reachable by search, still
+ * counted by a blast radius. The filter lives in `lib/infra/endpoints.ts`, the queries above are
+ * untouched, and the count the control acts on is on the board rather than left to be inferred.
+ *
+ * **Edges carry a decorative packet flow** (issue #1295). A second, low-opacity dashed path marches
+ * along each edge whose two endpoints are both non-`OFFLINE`, purely as motion — see
+ * `lib/infra/edge-flow.ts` for the gate, the edge-count cutoff and why this is not a liveness
+ * readout.
  */
 export function InfraCanvas({
   onSelectNode,
@@ -145,7 +150,7 @@ export function InfraCanvas({
   impactOn = false,
   onToggleImpact,
   onRetryImpact,
-  showEndpoints = false,
+  showEndpoints = true,
   onToggleEndpoints,
   onApiReady,
   emptyAction,
@@ -180,13 +185,13 @@ export function InfraCanvas({
   /** Re-run the blast-radius query after it failed (the summary's Retry). */
   onRetryImpact?: () => void;
   /**
-   * Draw reported laptops and desktops too (ADR-0093 §5). OFF by default — that default IS the
-   * feature, because a representative estate is ~180 endpoints against ~65 servers and drawing all
-   * of them is what makes the board unusable. Owned by `diagram-view` as `?endpoints=1` so the
-   * choice is URL-backed and survives a reload.
+   * Draw reported laptops and desktops (ADR-0093 §5, amended 2026-09-09). ON by default: the
+   * estate an operator arrives at is the whole estate, and hiding ~180 workstations is the opt-in
+   * for a board they drown. Owned by `diagram-view` as `?endpoints=0` so the choice is URL-backed
+   * and survives a reload.
    */
   showEndpoints?: boolean;
-  /** Flip {@link showEndpoints} — the toolbar's one-click undo of the default. */
+  /** Flip {@link showEndpoints} — the toolbar's one-click clearing of the workstations. */
   onToggleEndpoints?: () => void;
   /** Receives the canvas's imperative API once mounted (issue #765 — diagram-view's `?focus=1`). */
   onApiReady?: (api: InfraCanvasApi) => void;
@@ -217,7 +222,8 @@ export function InfraCanvas({
   const rawEdges = useMemo(() => edgeGraph?.items ?? [], [edgeGraph]);
   const edgeState = graphEdgeLoadState(edgeGraph, edgesError);
 
-  // Endpoint routing (ADR-0093 §5) — the ONE place the canvas narrows what it draws.
+  // Endpoint routing (ADR-0093 §5, amended) — the ONE place the canvas narrows what it draws, and
+  // it narrows nothing until the operator asks it to.
   //
   // Client-side over the rows already fetched: `chassis` rides the graph projection deliberately (it
   // is a scalar and this filter is the reason it is there), so the toggle costs no request and is
@@ -251,10 +257,11 @@ export function InfraCanvas({
     );
   }
 
-  // The onboarding hero belongs to a genuinely EMPTY estate, so it is gated on the raw rows. A board
-  // whose every node is a hidden endpoint renders as an empty canvas carrying the "N endpoints
-  // hidden" control instead — "you have nothing yet" would be a lie, and the wrong lie: it would read
-  // as the data loss ADR-0093 §8.3 is at pains to say this is not.
+  // The onboarding hero belongs to a genuinely EMPTY estate, so it is gated on the RAW rows, not on
+  // what survived the filter. That distinction outlives the inverted default: an operator who hides
+  // an estate of nothing but workstations gets an empty canvas still carrying its control, never
+  // "you have nothing yet" — which would be a lie, and the wrong lie, since it reads as exactly the
+  // data loss ADR-0093 §8.3 is at pains to say this is not.
   if (rawNodes.length === 0 && edgeState.canShowEmpty) {
     return <InfraEmptyState action={emptyAction} />;
   }
@@ -777,12 +784,13 @@ function CanvasBoard({
             EITHER has something to offer. */}
         {canManage || endpointCount > 0 ? (
           <Panel position="top-right" className="flex items-center gap-2">
-            {/* Show / hide endpoints (ADR-0093 §5). Shown to EVERY reader, not just managers: hiding
-                is a rendering preference, not a mutation, and a viewer looking at a map that is
-                quietly missing 142 machines needs the undo more than anyone. The count is on the
-                control rather than implied, because "the map got smaller" must never be something an
-                operator has to infer. Rendered only when the estate actually reports endpoints —
-                explaining a filter that removes nothing is just noise on the board. */}
+            {/* Show / hide endpoints (ADR-0093 §5, amended). Shown to EVERY reader, not just
+                managers: it is a rendering preference, not a mutation, and a viewer whose board is
+                a wall of laptops needs the filter as much as a manager does. The count is on the
+                control rather than implied, because neither "the map got smaller" nor "these 142
+                boxes are workstations" should be something an operator has to infer. Rendered only
+                when the estate actually reports endpoints — explaining a filter that would remove
+                nothing is just noise on the board. */}
             {endpointCount > 0 && onToggleEndpoints ? (
               <Button
                 type="button"

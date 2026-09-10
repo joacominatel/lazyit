@@ -319,9 +319,9 @@
   },
   "endpoints": {
     "show": "{count, plural, one {Mostrar # equipo de usuario} other {Mostrar # equipos de usuario}}",
-    "showHint": "Las notebooks y los equipos de escritorio se mantienen fuera del mapa para que el parque siga siendo legible. Siguen en tu inventario, en la lista de servidores y en la búsqueda: esto solo cambia lo que el mapa dibuja.",
+    "showHint": "Volvé a poner en el mapa las notebooks y los equipos de escritorio. Nunca salieron de ningún otro lado: esto solo cambia lo que el mapa dibuja.",
     "hide": "{count, plural, one {Ocultar # equipo de usuario} other {Ocultar # equipos de usuario}}",
-    "hideHint": "Volvé a sacar del mapa las notebooks y los equipos de escritorio. No se elimina nada: siguen en tu inventario, en la lista de servidores y en la búsqueda."
+    "hideHint": "Sacá del mapa las notebooks y los equipos de escritorio para que la topología del parque siga siendo legible. No se elimina nada: siguen en tu inventario, en la lista de servidores y en la búsqueda."
   },
   "graph": {
     "truncated": "Se muestran {shown} de {total} nodos: este mapa está incompleto.",
