@@ -70,7 +70,9 @@ export class ArticleCategoriesController {
   @ApiOkResponse({ type: [ArticleCategoryDto] })
   // The folder `accessRules` (ADR-0060 §3) is returned ONLY to a `settings:manage` caller (the web
   // rule-editor), stripped for an ordinary `category:read` reader (INV-9 / #554) — the service resolves
-  // the caller's permission DB-first from this principal.
+  // the caller's permission DB-first from this principal. Every reader, VIEWER included, gets the
+  // DERIVED `hasAccessRules` boolean instead (#1299): whether the folder carries a restriction, never
+  // its content — the signal the move-widens-access confirmation needs (ADR-0060 §3 carve-out / §9).
   findAll(@CurrentPrincipal() principal?: Principal) {
     return this.categories.findAll(principal);
   }
@@ -79,7 +81,8 @@ export class ArticleCategoriesController {
   @RequirePermission('category:read')
   @ApiOperation({ summary: 'Get an article category by id' })
   @ApiOkResponse({ type: ArticleCategoryDto })
-  // Same accessRules gating as findAll (INV-9 / #554): rules included only for a `settings:manage` caller.
+  // Same accessRules gating as findAll (INV-9 / #554): rules included only for a `settings:manage` caller;
+  // the derived `hasAccessRules` boolean (#1299) is returned to every reader.
   findOne(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
     return this.categories.findOne(id, principal);
   }
@@ -124,7 +127,9 @@ export class ArticleCategoriesController {
   remove(
     @Param('id') id: string,
     @Query() query: DeleteFolderQueryDto,
-  ): Promise<CascadeDeleteResult> | ReturnType<ArticleCategoriesService['remove']> {
+  ):
+    | Promise<CascadeDeleteResult>
+    | ReturnType<ArticleCategoriesService['remove']> {
     if (query.cascade) {
       return this.categories.removeCascade(id);
     }
