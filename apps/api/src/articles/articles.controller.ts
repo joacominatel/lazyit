@@ -427,7 +427,7 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Update an article (author, admins, or article:manage holders; never changes status) (ADMIN or MEMBER)',
+      'Update an article (author, admins, or article:manage holders; never changes status) (ADMIN or MEMBER). A categoryId in the body MOVES the article between folders: the destination must be a live folder the caller can READ (ADR-0060 §4/§9) — an unreadable destination is rejected with the same 400 as a non-existent one, so it never leaks a restricted folder. Moving OUT of a restricted folder into a more permissive one is allowed and appends an ArticleVersion.',
   })
   @ApiOkResponse({ type: ArticleDto })
   update(

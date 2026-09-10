@@ -901,6 +901,151 @@ describe('ArticlesService', () => {
     });
   });
 
+  // --- article MOVE: the folder destination guard (ADR-0060 §9, #1296) -----
+  //
+  // An article carries NO access rule of its own — it inherits its home folder's wholesale
+  // (ADR-0060 §1), so `PATCH /articles/:id` with a `categoryId` is an AUTHORIZATION write. Moving
+  // INTO a folder the actor cannot read is refused; moving OUT of a restricted folder into a more
+  // permissive one stays allowed by decision (the widening is confirmed in the UI, not blocked).
+  describe('article move — folder destination guard (ADR-0060 §9, #1296)', () => {
+    const inFolder = (categoryId: string, authorId = AUTHOR) => ({
+      id: 'a',
+      status: 'PUBLISHED' as const,
+      authorId,
+      categoryId,
+      title: 't',
+      content: 'body',
+      excerpt: null,
+    });
+
+    it("REFUSES the AUTHOR moving their OWN article into a folder they cannot read (loadOwned's author early-return must not bypass the destination check)", async () => {
+      // The author owns the article, so loadOwned returns before any ACL check — the guard has to
+      // live in update() itself or this move goes through unchecked.
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['home']));
+      article.findFirst.mockResolvedValue(inFolder('home'));
+      await expect(
+        service.update('a', { categoryId: 'secret' }, AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(article.update).not.toHaveBeenCalled();
+    });
+
+    it('hides the destination folder: an INVISIBLE folder fails with the SAME 400 as a NON-EXISTENT one (no 403/404 existence leak)', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['home']));
+      article.findFirst.mockResolvedValue(inFolder('home'));
+      const hidden = await service
+        .update('a', { categoryId: 'secret' }, AUTHOR_PRINCIPAL)
+        .catch((e: Error) => e.message);
+      // Same actor, same call shape, but the folder row simply does not exist.
+      articleCategory.findFirst.mockResolvedValueOnce(null);
+      const missing = await service
+        .update('a', { categoryId: 'secret' }, AUTHOR_PRINCIPAL)
+        .catch((e: Error) => e.message);
+      expect(hidden).toBe(missing);
+    });
+
+    it('ALLOWS a move between two folders the actor can read', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['home', 'dest']),
+      );
+      article.findFirst.mockResolvedValue(inFolder('home'));
+      await service.update('a', { categoryId: 'dest' }, AUTHOR_PRINCIPAL);
+      expect(lastUpdate().categoryId).toBe('dest');
+    });
+
+    it('ALLOWS the WIDENING move — out of a restricted folder into a public one (never refused; the UI confirms it)', async () => {
+      // `restricted` is visible to this author (they match one of its OR rules); `public-folder` is
+      // visible to everyone. The move widens the audience and is deliberately NOT blocked (ADR-0060 §9).
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['restricted', 'public-folder']),
+      );
+      article.findFirst.mockResolvedValue(inFolder('restricted'));
+      await service.update(
+        'a',
+        { categoryId: 'public-folder' },
+        AUTHOR_PRINCIPAL,
+      );
+      expect(lastUpdate().categoryId).toBe('public-folder');
+    });
+
+    it('APPENDS an ArticleVersion for a categoryId-ONLY move, so the access change is on the append-only timeline (ADR-0006)', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['restricted', 'public-folder']),
+      );
+      article.findFirst.mockResolvedValue(inFolder('restricted'));
+      // The prisma update returns the moved row; nothing versioned (title/content/excerpt/status) changed.
+      article.update.mockResolvedValueOnce({
+        ...inFolder('public-folder'),
+        lastEditedById: AUTHOR,
+      });
+      await service.update(
+        'a',
+        { categoryId: 'public-folder' },
+        AUTHOR_PRINCIPAL,
+      );
+      expect(articleVersion.create).toHaveBeenCalledTimes(1);
+      expect(lastVersion()).toMatchObject({
+        articleId: 'a',
+        version: 1,
+        editedById: AUTHOR,
+      });
+    });
+
+    it('still appends NO version when the PATCH does not move the article and changes nothing versioned', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['home']));
+      article.findFirst.mockResolvedValue(inFolder('home'));
+      article.update.mockResolvedValueOnce({
+        ...inFolder('home'),
+        lastEditedById: AUTHOR,
+      });
+      await service.update('a', { title: 't' }, AUTHOR_PRINCIPAL);
+      expect(articleVersion.create).not.toHaveBeenCalled();
+    });
+
+    it('lets an ADMIN move an article into ANY folder — god-mode is deliberate (ADR-0060 §5, visibleFolderIds = ALL)', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue('ALL');
+      article.findFirst.mockResolvedValue(inFolder('home'));
+      await service.update('a', { categoryId: 'secret' }, ADMIN_PRINCIPAL);
+      expect(lastUpdate().categoryId).toBe('secret');
+    });
+
+    it("REFUSES a non-admin article:manage holder moving someone else's article into a folder they cannot read", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['shared']));
+      article.findFirst.mockResolvedValue(inFolder('shared'));
+      await expect(
+        service.update('a', { categoryId: 'secret' }, MANAGER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(article.update).not.toHaveBeenCalled();
+    });
+
+    // --- write-path only: no retro-validation of where an article ALREADY sits -----------------
+    it('NEVER retro-validates an existing placement: a non-move PATCH on an article in a folder the author cannot read still succeeds', async () => {
+      // The legacy row this guard must not break: the article already lives in a folder outside the
+      // author's visible set. A title edit is not a move and must not resolve folder access at all.
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['elsewhere']));
+      article.findFirst.mockResolvedValue(inFolder('legacy-restricted'));
+      await service.update('a', { title: 'Renamed' }, AUTHOR_PRINCIPAL);
+      expect(lastUpdate().title).toBe('Renamed');
+      expect(folderAccess.visibleFolderIds).not.toHaveBeenCalled();
+    });
+
+    it('treats a no-op categoryId (the folder it is already in) as NOT a move — no destination check, no version', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['elsewhere']));
+      article.findFirst.mockResolvedValue(inFolder('legacy-restricted'));
+      article.update.mockResolvedValueOnce({
+        ...inFolder('legacy-restricted'),
+        lastEditedById: AUTHOR,
+      });
+      await service.update(
+        'a',
+        { categoryId: 'legacy-restricted' },
+        AUTHOR_PRINCIPAL,
+      );
+      expect(folderAccess.visibleFolderIds).not.toHaveBeenCalled();
+      expect(articleVersion.create).not.toHaveBeenCalled();
+    });
+  });
+
   // --- #877: admins & article:manage holders edit ANY article --------------
   describe('manage-any authorization (#877)', () => {
     it("lets an ADMIN edit another author's PUBLISHED article; records the editor, never rewrites authorId", async () => {
