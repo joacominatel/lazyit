@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   FolderAccessRuleSchema,
   FolderAccessRulesSchema,
+  FolderSchema,
   isPublicAccessRules,
   UpdateFolderAccessRulesSchema,
 } from "./folder";
@@ -131,5 +132,61 @@ describe("UpdateFolderAccessRulesSchema — the PUT body (set/clear a folder's r
 
   test("rejects a missing accessRules key (strict body)", () => {
     expect(() => UpdateFolderAccessRulesSchema.parse({})).toThrow();
+  });
+});
+
+/**
+ * The DERIVED `hasAccessRules` flag (#1299, ADR-0060 §3 carve-out). It is the wire answer to the same
+ * public-vs-restricted question {@link isPublicAccessRules} answers, computed by the api at read time
+ * from `accessRules` — never stored, never carrying the rule CONTENT. It is `.optional()` so a server
+ * that predates it simply omits it and an older client ignores it (upgrade-safe both ways).
+ */
+describe("FolderSchema.hasAccessRules — the derived restriction flag (#1299)", () => {
+  const base = {
+    id: "clw0000000000000000000000",
+    name: "Runbooks",
+    description: null,
+    icon: null,
+    order: null,
+    parentId: null,
+    createdAt: "2026-09-10T00:00:00.000Z",
+    updatedAt: "2026-09-10T00:00:00.000Z",
+    deletedAt: null,
+  };
+
+  test("accepts true for a restricted folder", () => {
+    const parsed = FolderSchema.parse({ ...base, hasAccessRules: true });
+    expect(parsed.hasAccessRules).toBe(true);
+  });
+
+  test("accepts false for a public folder", () => {
+    const parsed = FolderSchema.parse({ ...base, hasAccessRules: false });
+    expect(parsed.hasAccessRules).toBe(false);
+  });
+
+  test("accepts a folder from a server that predates the field (absent = unknown, not public)", () => {
+    const parsed = FolderSchema.parse(base);
+    expect(parsed.hasAccessRules).toBeUndefined();
+  });
+
+  test("rejects a non-boolean (it is a flag, never the rule content)", () => {
+    expect(
+      FolderSchema.safeParse({
+        ...base,
+        hasAccessRules: [{ kind: "role", role: "ADMIN" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("agrees with isPublicAccessRules: the flag is its inverse", () => {
+    for (const rules of [
+      null,
+      [],
+      [{ kind: "role" as const, role: "ADMIN" as const }],
+    ]) {
+      const flag = !isPublicAccessRules(rules);
+      expect(FolderSchema.parse({ ...base, hasAccessRules: flag })
+        .hasAccessRules).toBe(flag);
+    }
   });
 });
