@@ -100,8 +100,10 @@ export class ArticleCategoriesService {
    */
   async findAll(principal?: Principal) {
     const withRules = await this.canSeeAccessRules(principal);
-    // One request-scoped folder-tree load shared by both folder-access lookups below (#599), so
-    // adding `hasAccessRules` costs ZERO extra queries: the tree is read once and answered twice.
+    // One request-scoped folder-tree load shared by both folder-access lookups below (#599): the tree
+    // is read once and answers both questions, so `hasAccessRules` costs a non-admin NO extra query.
+    // An ADMIN short-circuits `visibleFolderIds` to 'ALL' without loading the tree, so for them the
+    // flag adds exactly one folder scan — the same scan every non-admin read already pays.
     const tree: FolderTreeCache = {};
     // Which folders may this caller read (ADR-0060 §4)? ADMIN → 'ALL' (every count shown); a non-admin
     // gets the explicit visible set; a no-principal internal caller fails closed to public folders.
