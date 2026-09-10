@@ -46,6 +46,13 @@ this runbook say last quarter?"). A bad edit no longer destroys the prior body.
   - `create` / `import` → **version 1**;
   - `PATCH` (`update`) → only when `title`/`content`/`excerpt` actually change (a metadata-only or
     no-op edit writes **no** version; `PATCH` never touches `status`);
+  - `PATCH` that **moves the article to another folder** (`categoryId`) → snapshot, even though no
+    versioned field changed (#1296, [[0060-kb-folder-access-control]] §9). The home [[folder]] **is**
+    the article's access rule, so a move can change who may read the document and must not be the one
+    write that leaves no append-only trace. The snapshot's body is **identical to the previous
+    revision by design** — it dates the *move* and names its actor, it is not a content diff. It does
+    **not** record the source/destination folder: there is no `categoryId` column here, and adding one
+    is an open, undecided schema change (ADR-0060 §9).
   - `publish` / `unpublish` → snapshot (they change `status`); an idempotent no-op does not.
 - **Visibility mirrors the article reads.** A DRAFT's history is visible only to its author (404 to
   anyone else), so a private draft's snapshots never leak ([[0022-draft-visibility-auth-shim]]).
