@@ -99,6 +99,18 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
 - **Setting/clearing a folder's rules is `settings:manage`-gated** (ADMIN-only, `PUT
   /article-categories/:id/access-rules`) — re-scoping WHO may read a folder is an authorization-
   management action, distinct from `category:write` (authoring the folder itself).
+- **The rule CONTENT is gated; the rule's EXISTENCE is not** (#1299, [[0060-kb-folder-access-control]]
+  §3 amendment). `accessRules` itself is returned **only** to a `settings:manage` reader (#554);
+  beside it, every folder read carries a **derived `hasAccessRules` boolean** readable by **any**
+  `category:read` caller, VIEWER included. It is **computed at read time** from `accessRules` through
+  the same `FolderAccessService` resolution the §4 evaluator uses — **no column, no migration, no
+  stored value** — and it says only **that** the folder carries a restriction: never the rule kinds,
+  the user list, the role, or any count. It is a fact about the **folder**, not about the reader:
+  `true` is not "you cannot see this" (a caller inside the rule reads the folder normally and still
+  sees `true`). It exists so the web can warn that **moving an article into or out of a restricted
+  folder changes who may read it** (§9's widening confirmation, which cannot be rendered without it).
+  On the wire the field is **optional**: a server that predates it omits it, and an absent value means
+  *unknown*, never *public*.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
 ## Conventions
@@ -114,7 +126,10 @@ root, a cuid = reparent). A reparent that would create a cycle is **400**; a del
 live sub-folders is **409** (non-cascade). **`DELETE /article-categories/:id?cascade=true`** (`category:delete`,
 ADMIN-only) performs the cascade delete described above and returns `{ deletedFolders, deletedArticles }`.
 **`PUT /article-categories/:id/access-rules`** (`settings:manage`, ADMIN-only) sets or clears the
-folder's access rules (body `{ accessRules: <rule list> | null }`).
+folder's access rules (body `{ accessRules: <rule list> | null }`). Both folder reads (`GET /article-categories`
+and `GET /article-categories/:id`) carry the derived **`hasAccessRules`** boolean for every
+`category:read` caller, plus `accessRules` itself only for a `settings:manage` one; the list read also
+carries the per-folder `articleCount` (`null` for a folder the caller cannot read).
 
 ## Implemented in #392 + #404 + #415; still deferred
 
@@ -136,6 +151,10 @@ folder's access rules (body `{ accessRules: <rule list> | null }`).
   soft-delete of all descendant folders + articles, hard-delete of all alias rows in the subtree
   (folder-side and article-side), ADMIN-only (same `category:delete` gate), returns
   `{ deletedFolders, deletedArticles }`.
+- **Built (#1299, ADR-0060 §3/§9 amendment):** the derived **`hasAccessRules`** flag on both folder
+  reads — an additive, read-only, computed field (`FolderAccessService.restrictedFolderIds`) that
+  shares the request-scoped folder-tree load with the §4 evaluation, so the list read pays no extra
+  query. The `settings:manage` gate on `accessRules` itself is unchanged.
 - **Still deferred:** the `ArticleCategory` → `Folder` model/table **rename** is a follow-up (a
   separate migration); a guided-reparent UX on delete (the rule is "no silent orphaning"; the mechanism
   is the 409 today); the Phase-2 alias-as-share (§7, reserved).
