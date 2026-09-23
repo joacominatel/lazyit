@@ -35,6 +35,8 @@ S_SESSION="2222222222222222222222222222222222222222222222222222222222222222"  # 
 # hand-added one before start.sh generated it must not have it rejected — or silently replaced, which
 # would orphan the SMTP password already encrypted under it (issue #1269, ADR-0079).
 S_SMTP="SMTPsentinelRAWkey32charsLong!!!"
+# Same reasoning for the AI provider key's at-rest key (ADR-0097, issue #1322).
+S_AI="AIsentinelRAWkey32charsLongxxxxx"
 
 # A pre-existing local-auth install pinned to localhost (the "before").
 cat >"$ENVF" <<EOF
@@ -46,6 +48,7 @@ AUTH_SECRET=${S_AUTH}
 WORKFLOW_SECRET_KEY=${S_WORKFLOW}
 SESSION_SIGNING_SECRET=${S_SESSION}
 SMTP_SECRET_KEY=${S_SMTP}
+AI_SECRET_KEY=${S_AI}
 LAZYIT_SITE_ADDRESS=localhost
 LAZYIT_HTTP_PORT=8080
 LAZYIT_HTTPS_PORT=8443
@@ -73,6 +76,7 @@ assert_kv AUTH_SECRET            "$S_AUTH"
 assert_kv WORKFLOW_SECRET_KEY    "$S_WORKFLOW"
 assert_kv SESSION_SIGNING_SECRET "$S_SESSION"
 assert_kv SMTP_SECRET_KEY        "$S_SMTP"
+assert_kv AI_SECRET_KEY          "$S_AI"
 assert_kv AUTH_MODE              "local"
 
 # ---------------------------------------------------------------------------
@@ -104,9 +108,42 @@ case "$_minted" in
   [0-9a-f]*) [ "${#_minted}" -eq 64 ] || { echo "FAIL: minted SMTP_SECRET_KEY is ${#_minted} chars, not 64"; fail=1; } ;;
   *) echo "FAIL: no SMTP_SECRET_KEY was added to a legacy .env.prod (got '${_minted:-<missing>}')"; fail=1 ;;
 esac
+# AI_SECRET_KEY (ADR-0097) is absent from the same legacy file, so it is minted the same way.
+_minted_ai=$(grep -E '^AI_SECRET_KEY=' "$ENVF2" | head -n1 | cut -d= -f2- || true)
+case "$_minted_ai" in
+  [0-9a-f]*) [ "${#_minted_ai}" -eq 64 ] || { echo "FAIL: minted AI_SECRET_KEY is ${#_minted_ai} chars, not 64"; fail=1; } ;;
+  *) echo "FAIL: no AI_SECRET_KEY was added to a legacy .env.prod (got '${_minted_ai:-<missing>}')"; fail=1 ;;
+esac
+[ "$_minted_ai" != "$_minted" ] || { echo "FAIL: AI_SECRET_KEY reuses SMTP_SECRET_KEY's value"; fail=1; }
 # The other secrets must survive the same render untouched.
 _w2=$(grep -E '^WORKFLOW_SECRET_KEY=' "$ENVF2" | head -n1 | cut -d= -f2- || true)
 [ "$_w2" = "$S_WORKFLOW" ] || { echo "FAIL: WORKFLOW_SECRET_KEY changed while adding SMTP_SECRET_KEY"; fail=1; }
 
+
+# ---------------------------------------------------------------------------
+# Scenario 3 — a FRESH guided install (issue #1322). AI_SECRET_KEY is optional and must never become an
+# active key in the example (infra/update.sh would stop every existing instance), yet a fresh render must
+# still write it ACTIVE (64 hex), exactly once, distinct from the other keys, and leave
+# AI_WORKER_CONCURRENCY at its default (not active).
+# ---------------------------------------------------------------------------
+ENVF3="$WORK/.env.prod.fresh"
+LAZYIT_ENV_FILE="$ENVF3" LAZYIT_SKIP_DOCKER=1 LAZYIT_SKIP_BRINGUP=1 \
+  sh infra/start.sh --yes >/dev/null 2>&1 \
+  || { echo "FAIL: start.sh --yes (fresh render) exited non-zero"; exit 1; }
+_fresh_ai=$(grep -E '^AI_SECRET_KEY=' "$ENVF3" | head -n1 | cut -d= -f2- || true)
+case "$_fresh_ai" in
+  [0-9a-f]*) [ "${#_fresh_ai}" -eq 64 ] || { echo "FAIL: fresh AI_SECRET_KEY is ${#_fresh_ai} chars, not 64"; fail=1; } ;;
+  *) echo "FAIL: a fresh render has no active AI_SECRET_KEY (got '${_fresh_ai:-<missing>}')"; fail=1 ;;
+esac
+[ "$(grep -cE '^AI_SECRET_KEY=' "$ENVF3")" -eq 1 ] || { echo "FAIL: a fresh render has more than one AI_SECRET_KEY line"; fail=1; }
+for _k in SMTP_SECRET_KEY WORKFLOW_SECRET_KEY SESSION_SIGNING_SECRET; do
+  [ "$(grep -E "^$_k=" "$ENVF3" | head -n1 | cut -d= -f2-)" != "$_fresh_ai" ] \
+    || { echo "FAIL: AI_SECRET_KEY reuses $_k's value"; fail=1; }
+done
+if grep -qE '^AI_WORKER_CONCURRENCY=' "$ENVF3"; then echo "FAIL: AI_WORKER_CONCURRENCY must stay at its default (commented)"; fail=1; fi
+if grep -qE '^(AI_SECRET_KEY|AI_WORKER_CONCURRENCY)=' infra/env/.env.prod.example; then
+  echo "FAIL: .env.prod.example carries an ACTIVE AI key — infra/update.sh would stop every existing instance"; fail=1
+fi
+
 [ "$fail" -eq 0 ] || { echo "reconfigure-preserves-secrets: FAILED"; exit 1; }
-echo "reconfigure-preserves-secrets: OK — all secrets preserved across --reconfigure (and SMTP_SECRET_KEY added when absent)"
+echo "reconfigure-preserves-secrets: OK — all secrets preserved across --reconfigure (SMTP_SECRET_KEY and AI_SECRET_KEY added when absent; AI_SECRET_KEY written on a fresh render)"
