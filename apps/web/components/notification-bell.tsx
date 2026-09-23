@@ -239,7 +239,12 @@ export function NotificationBell() {
             {items.length > 0 && (
               <button
                 type="button"
-                onClick={() => {
+                onClick={(event) => {
+                  // The rows and this button are about to unmount: park focus on the dropdown so a
+                  // keyboard user is not dropped onto <body> (the per-row X does the same).
+                  event.currentTarget
+                    .closest<HTMLElement>('[data-slot="popover-content"]')
+                    ?.focus();
                   // Only the rows shown here: anything that arrived since stays in the bell.
                   dismissAll.mutate(items, {
                     onError: (error) => notifyError(error, t("clearAllFailed")),
