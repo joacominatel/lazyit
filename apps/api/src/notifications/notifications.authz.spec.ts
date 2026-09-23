@@ -209,7 +209,8 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
       'n1',
     );
 
-    // `dismiss-all` is its own route, never captured as `:id` by the per-item route.
+    // `dismiss-all` reaches its own handler. The two routes cannot collide: `/notifications/dismiss-all`
+    // has one segment after the prefix, while `:id/dismiss` needs two.
     const all = await request(app.getHttpServer())
       .patch('/notifications/dismiss-all')
       .set('X-Test-Role', 'ADMIN')
@@ -256,6 +257,19 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
       .set('X-Test-Role', 'ADMIN')
       .set('X-Test-User', 'admin-uuid');
     expect(repeated.status).toBe(400);
+    expect(dismissAll).not.toHaveBeenCalled();
+  });
+
+  it('an anonymous caller (no principal) cannot dismiss (403, never reaches the service)', async () => {
+    const one = await request(app.getHttpServer()).patch(
+      '/notifications/n1/dismiss',
+    );
+    const all = await request(app.getHttpServer()).patch(
+      '/notifications/dismiss-all',
+    );
+    expect(one.status).toBe(403);
+    expect(all.status).toBe(403);
+    expect(dismiss).not.toHaveBeenCalled();
     expect(dismissAll).not.toHaveBeenCalled();
   });
 
