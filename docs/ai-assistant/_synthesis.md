@@ -285,6 +285,15 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
   "redirect_uri", pattern } }` (`ai-settings.ts`). The policy toggle `mcpAllowAnyHttpsClient` (off by
   default) accepts any client whose redirect URIs are HTTPS and non-loopback, and the consent screen then
   shows a warning; the default policy is the curated list.
+- **Redirect schemes** (ADR-0097 decision 13, amended 2026-09-23 — CEO: "Permitir solo en la
+  allowlist"): a `redirect_uri` pattern is an exact URI that is HTTPS, loopback `http`
+  (`127.0.0.1` / `localhost` / `[::1]`, port-agnostic), or a **private-use native-app scheme**
+  (RFC 8252 §7.1) — reverse-domain (`com.example.app:`) or a vetted editor scheme (`cursor`, `vscode`,
+  `vscode-insiders`, `windsurf`, `MCP_VENDOR_REDIRECT_SCHEMES`). A private-use redirect is admitted
+  **only by an explicit entry** (a curated default or an admin's); `mcpAllowAnyHttpsClient` never admits
+  one. Plain `http` off loopback and the browser-interpreted schemes (SEC-051's
+  `BROWSER_INTERPRETED_SCHEMES`: `javascript`, `data`, `file`, `blob`, …) are always refused. The pure
+  helper `isMcpRedirectUriAllowed` in `ai-settings.ts` states the rule for the authorization server.
 
 ### 4.9 Skill distribution (R8)
 

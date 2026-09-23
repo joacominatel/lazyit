@@ -691,7 +691,8 @@ while MCP is enabled. On an HTTPS instance with MCP enabled, the public
 - `Scope` is a closed enum — `lazyit.read`, `lazyit.write`, `lazyit.admin` — localized by the web.
 
 **K9 — Permissions** `ai:use` and `ai:connect` in `PermissionSchema` + `PERMISSION_META`; their
-ADMIN + MEMBER defaults ship as a one-time migration after #1314.
+ADMIN + MEMBER defaults are applied by the #1314 seed-once ledger on the next deploy, with no data
+migration.
 
 ---
 

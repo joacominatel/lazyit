@@ -875,8 +875,9 @@ model AiActionLog {
   PostgreSQL, no rewrite, no index). Existing rows are untouched; `recent_activity` is unaffected [R15].
 - **`ai:use`.**
   - ADMIN resolves it from code immediately [R10].
-  - MEMBER gets it — and `ai:connect` — through a **one-time migration insert** (`ON CONFLICT DO
-    NOTHING`), shipped after #1314 fixes the seed so it inserts defaults only into an empty table [R11].
+  - MEMBER gets it — and `ai:connect` — from the **#1314 seed-once ledger** on the next deploy, with
+    no data migration: each default grant is applied once and never re-applied after an admin removes
+    it [R11].
   - No behavior change until an admin enables the capability (off by default).
 - **Read tolerance.**
   - A pending action whose tool changed shape across an upgrade → `EXPIRED` via `schemaHash`.
@@ -914,7 +915,7 @@ secondary archive/restore, infra writes, workflows and the `elevated` configurat
 v1.1 or later.
 
 **Q3 — Seed re-grant defect → prerequisite #1314.** It is fixed before `ai:use` ships; each new
-permission's default rows ship as a one-time migration insert.
+permission's default rows are applied by the seed-once ledger, with no data migration.
 
 **Q4 — Retention default → 90 days, configurable 7–3650, no "forever"** (adopted by default).
 

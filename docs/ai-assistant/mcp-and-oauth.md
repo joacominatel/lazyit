@@ -655,8 +655,8 @@ model OAuthAuditLog {
 **Upgrade safety [C]:** five **new** tables and no change to any existing column. A `User` back-relation adds
 no column. A populated database gets empty tables; nothing is backfilled; rollback of the app leaves inert
 tables. The only cross-cutting data change is the `ai:connect` catalog entry and its `RolePermission` seed rows
-(ADMIN implicit via the resolver short-circuit; MEMBER inserted `ON CONFLICT DO NOTHING`), shipped together with `ai:use` as a
-one-time migration after #1314 (the seed re-grant fix) lands. Because the capability is off by default at instance level,
+(ADMIN implicit via the resolver short-circuit; MEMBER granted by default), applied together with `ai:use` by
+the #1314 seed-once ledger on the next deploy, with no data migration. Because the capability is off by default at instance level,
 granting MEMBER the permission on upgrade exposes nothing until an admin enables MCP. Sweeper: expired
 codes/tokens and DCR clients unused for 24 h with no grant are hard-deleted (protocol/credential state, not
 domain data — `PasswordResetToken` precedent); grants are soft-deleted.
@@ -772,6 +772,19 @@ reconciliation; [[ai-assistant/_synthesis|the synthesis]] §2 quotes them.
 Q-7: an admin-configurable allowlist in Settings → AI, pre-seeded with the well-known clients, matched on
 the CIMD URL or redirect-URI pattern (never `client_name`) →
 [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13.
+
+**Native-app redirect schemes → allowlist only (CEO, 2026-09-23: "Permitir solo en la allowlist").**
+Some clients redirect to a private-use scheme (RFC 8252 §7.1): Cursor to `cursor://…`, VS Code to
+`vscode://…`. The MCP text quoted in §3 ("localhost or HTTPS") is relaxed for these **only on an explicit
+allowlist entry** — a curated default or an admin's. The scheme must be reverse-domain
+(`com.example.app:`) or a vetted editor scheme (`cursor`, `vscode`, `vscode-insiders`, `windsurf`); the
+single-label list is kept short because RFC 8252 asks for reverse-domain names and any other single-label
+scheme (`mailto`, `ms-settings`) could hand the code to an unrelated handler. `mcpAllowAnyHttpsClient`
+admits HTTPS on a non-loopback host and nothing else. Plain `http` off loopback and every
+browser-interpreted scheme (`javascript`, `data`, `file`, `blob`, `about`, `view-source`, `vbscript`,
+`filesystem`) are always refused. Matching stays exact, with only the loopback `http` port excepted. The
+contract is `classifyMcpRedirectUri` / `isMcpRedirectUriAllowed` in `ai-settings.ts`;
+[[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13 (amended).
 
 The durable decisions (F1, F3, F4, the F8 outcome, INV-MCP-*) are recorded in
 [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] (proposed).

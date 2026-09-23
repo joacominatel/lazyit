@@ -190,6 +190,15 @@ The key forks only; each links its analysis.
     redirect-URI pattern, **never on `client_name`**; the consent screen still shows the client
     identity. → [[ai-assistant/mcp-and-oauth|MCP]] §4 F2, §10; [[ai-assistant/security|security]] §6.3.
 
+    > Amended 2026-09-23 (#1315, PR #1332): native-app redirect schemes. The CEO, on review: "Permitir
+    > solo en la allowlist". A private-use URI scheme (RFC 8252 §7.1, e.g. `cursor://…`, `vscode://…`)
+    > is accepted as a redirect URI **only on an explicit allowlist entry** — a curated default or one an
+    > admin adds. The scheme must be reverse-domain (`com.example.app:`) or one of a vetted list of
+    > editor schemes (`cursor`, `vscode`, `vscode-insiders`, `windsurf`). The "allow any HTTPS client"
+    > toggle never admits one, and browser-interpreted schemes (`javascript`, `data`, `file`, `blob`,
+    > `about`, `view-source`, `vbscript`, `filesystem` — the SEC-051 list) and plain `http` off loopback
+    > are always refused. The rest of the decision is unchanged.
+
 ## Consequences
 
 **Positive**
