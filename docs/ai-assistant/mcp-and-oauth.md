@@ -161,10 +161,32 @@ updated: 2026-09-23
 
 **Official TypeScript SDK** (npm registry, checked 2026-09-23)
 
-- **[E]** v2 is stable: `@modelcontextprotocol/server@2.0.0`, `@modelcontextprotocol/node@2.0.0`,
-  `@modelcontextprotocol/express@2.0.0` (published 2026-07-27); dual `import`/`require` exports; `zod ^4.2.0`;
-  Node ≥ 20. v1 line: `@modelcontextprotocol/sdk@1.30.0` (legacy, fixes only).
+- **[E]** v2 is stable. It was first released 2026-07-27 as 2.0.0. **W1-B pinned
+  `@modelcontextprotocol/server@2.1.0` and `@modelcontextprotocol/node@2.1.0`** (PR #1331); the current
+  `@modelcontextprotocol/express` is 2.0.1. Exports are dual `import`/`require`, so no Jest lookahead
+  entry is needed. It needs `zod ^4.2.0` and Node ≥ 20. `hono` is only an optional peer of `/node`. The
+  v1 line is `@modelcontextprotocol/sdk@1.30.0` (legacy, fixes only).
   <https://github.com/modelcontextprotocol/typescript-sdk>
+- **[E] Compatibility spike (W1-B, PR #1331)** — `apps/api/src/ai/providers/__compat__/mcp-server-load.spec.ts`.
+  The MCP-server unit (W3-2) must know:
+  - **A modern request needs more than the version header.** `LATEST_PROTOCOL_VERSION` still reports
+    `2025-11-25`; the 2026-07-28 revision is served only on `createMcpHandler`'s *modern* path. A
+    request reaches that path only if it carries:
+    - the `mcp-protocol-version: 2026-07-28` and `mcp-method: <method>` headers (and `mcp-name` where
+      the method names a target);
+    - `params._meta` keys `io.modelcontextprotocol/protocolVersion`, `io.modelcontextprotocol/clientInfo`
+      and `io.modelcontextprotocol/clientCapabilities`.
+
+    Anything else is classified 2025-era and served by the stateless legacy leg (`legacy: 'stateless'`,
+    the default). Golden tests must send the full envelope, or they silently test the legacy leg.
+  - **`createMcpHandler` performs no Origin or Host validation**, and no token verification either:
+    `authInfo` is pure pass-through. The MCP route must validate `Origin` (403 on an invalid present
+    `Origin`, per the spec) and `Host` before the handler. Use the `@modelcontextprotocol/node` helpers
+    `originValidation` / `hostHeaderValidation` with the instance's public origin, not the localhost
+    variants.
+  - **Wiring verified.** `toNodeHandler(handler)` over `node:http` forwards `req.auth` as `authInfo`
+    to the per-request factory, and `fromJsonSchema(schema)` accepts the catalog's JSON Schema as a
+    tool's `inputSchema`. Both were checked in-process.
 - **[E]** `createMcpHandler(factory)` builds a fresh `McpServer` per request, serves the 2026 era and, by
   default, 2025-era traffic statelessly (`legacy: 'stateless'`); the factory receives `authInfo`, so it can
   register a different tool set per caller. `toNodeHandler(handler)(req, res, req.body)` adapts to
