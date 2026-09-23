@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PASSWORD_MAX_LENGTH } from "../constants/local-auth";
+import { SessionExpiresAtSchema } from "./auth-login";
 import { ZitadelPasswordSchema } from "./primitives";
 
 /**
@@ -32,9 +33,12 @@ export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
 /**
  * The change-password response: a FRESH session token minted at the new `sessionEpoch`, so the caller who
  * just changed their own password stays logged in even though the epoch bump revoked their prior token.
+ * The new token keeps the calling session's "keep me signed in" choice (ADR-0086 §8), and `expiresAt`
+ * reports its expiry exactly as the login response does (`null` = no time-based expiry).
  */
 export const ChangePasswordResponseSchema = z.object({
   token: z.string().min(1),
+  expiresAt: SessionExpiresAtSchema,
 });
 export type ChangePasswordResponse = z.infer<
   typeof ChangePasswordResponseSchema

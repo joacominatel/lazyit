@@ -32,6 +32,10 @@ export const PASSWORD_MAX_LENGTH = 1024;
 /**
  * Local session token (first-party JWT) lifetime, in seconds. Short by design (12h): the guard's
  * `sessionEpoch` check is the real revocation mechanism, and a short TTL is belt-and-suspenders on top.
+ *
+ * Applies to a DEFAULT sign-in only. A "keep me signed in" sign-in (`rememberMe: true`, #1307) mints a
+ * token with NO time-based expiry; it ends only through a `sessionEpoch` bump (sign-out, password change,
+ * admin reset, deactivation, offboarding). See ADR-0086 §8.
  */
 export const SESSION_TOKEN_TTL_SECONDS = 12 * 60 * 60;
 

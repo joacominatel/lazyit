@@ -12,10 +12,16 @@ import { RoleSchema } from "./user";
  * LIVE-filtered user table). Both are normalized (trim + lowercase) server-side before lookup — email is
  * citext and username is stored lowercased, so a single lowercase lookup matches either. `password` is
  * bounded by {@link PASSWORD_MAX_LENGTH} so an oversized body is rejected (400) BEFORE argon2 runs.
+ *
+ * `rememberMe` ("keep me signed in", #1307, ADR-0086 §8) is OPTIONAL and defaults to `false`, so a client
+ * that omits it keeps the default 12h session. `true` asks for a session with NO time-based expiry that
+ * ends only through a `sessionEpoch` bump. A strict boolean — a form string like `"true"` is rejected, so
+ * a caller must convert its checkbox value before parsing.
  */
 export const LoginRequestSchema = z.object({
   identifier: z.string().trim().min(1).max(320),
   password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+  rememberMe: z.boolean().default(false),
 });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
@@ -35,11 +41,21 @@ export const LoginUserSchema = z.object({
 export type LoginUser = z.infer<typeof LoginUserSchema>;
 
 /**
+ * When a local session token stops being accepted by time, in SECONDS since the Unix epoch (the token's
+ * `exp`), or `null` when it has no time-based expiry ("keep me signed in", ADR-0086 §8). Exposed so the web
+ * can end its own session once the token is dead instead of carrying it past expiry (#1307). Revocation
+ * through `sessionEpoch` can still end a session earlier; this is an upper bound, never a guarantee.
+ */
+export const SessionExpiresAtSchema = z.number().int().positive().nullable();
+
+/**
  * The login response: the first-party session token (HS256 JWT) to present as a Bearer on later requests,
- * plus the safe user projection. The token carries only `sub` + `sessionEpoch` — no role/permissions.
+ * its expiry, and the safe user projection. The token carries only `sub` + `sessionEpoch` (plus the
+ * remember-me marker when asked for) — no role/permissions.
  */
 export const LoginResponseSchema = z.object({
   token: z.string().min(1),
+  expiresAt: SessionExpiresAtSchema,
   user: LoginUserSchema,
 });
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
