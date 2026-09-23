@@ -455,7 +455,8 @@ export class UsersController {
     @CurrentUser() actor?: User,
   ) {
     // Pass the actor so the service can enforce the RBAC self-role-change guard (no self-escalation/
-    // demotion → 403) and the last-admin guard (refuse to demote the final ADMIN → 409). ADR-0040.
+    // demotion → 403) and the last-admin guard (refuse to demote or deactivate the final active ADMIN
+    // → 409). ADR-0040, SEC-021.
     return this.users.update(id, dto, this.actor.resolve(actor));
   }
 

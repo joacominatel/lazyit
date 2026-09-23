@@ -166,6 +166,8 @@ already-ADMIN-gated Users API and adds the safety guards the original ADR deferr
   admins only (soft-deleted admins don't count). The check-then-act window is the same bounded race
   the first-user-ADMIN rule already accepts; worst case over-protects (two near-simultaneous
   demotions both pass), never under-protects.
+  *Amended 2026-09-23 (SEC-021, #1319):* deactivation (`isActive=false`) is also guarded, and the count
+  is live **and active** ADMINs — an inactive account cannot authenticate, so it never counts.
 - **No self-role-change** (`users.service.ts`) — an ADMIN cannot change their OWN role (**403
   Forbidden**, "You cannot change your own role"). Privilege changes must be made by one admin on
   another, so a single admin can never quietly elevate/strip their own role. The controller passes

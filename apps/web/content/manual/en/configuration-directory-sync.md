@@ -83,6 +83,11 @@ what happened:
   sign in again once it reactivates them.
 - **Skipped** — entries left untouched (for example an entry that can't be identified, or one whose email
   collides with a real login account).
+- **The last active admin is never offboarded by the sync.** If the only remaining active administrator is
+  missing from the directory past the grace window, lazyit keeps them active until another admin exists, so
+  the instance is never left without anyone who can manage it. They are counted under **Skipped**, and the
+  server log records a `directory.offboard_skipped … reason=last-active-admin` warning each sync. Promote
+  another user to admin and the next sync offboards them as usual.
 
 ## Reviewing imported people
 

@@ -66,10 +66,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 1 |
+| Medium | 0 |
 | Low | 11 |
 | Info | 0 |
-| **Total open** | **12** |
+| **Total open** | **11** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -78,7 +78,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 | ID | Sev | Module | Title |
 | --- | --- | --- | --- |
-| [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] | 🟠 Medium | users | Last-admin lockout via `PATCH {isActive:false}` (skips `assertNotLastAdmin`) |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
 | [[SEC-012-oidc-audience-not-validated\|SEC-012]] | 🟡 Low | auth | OIDC token audience unvalidated when `OIDC_CLIENT_ID` unset (audience confusion under BYOI) |
@@ -100,7 +99,10 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    value. Re-closes the SEC-008 class on create and update.
 3. **SEC-011 ✅ Closed.** Moved to `closed/` (SA coarse-permission escalation fixed).
 4. **SEC-031 ✅ Closed.** Moved to `closed/` (assignment release TOCTOU fixed).
-5. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
+5. **SEC-021 ✅ Closed.** Moved to `closed/` (deactivating the last active ADMIN now 409s, and the
+   last-admin guard counts only active admins; the directory sync skips the last active ADMIN instead
+   of offboarding them).
+6. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
    A recurring pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach
    nested relations, FK guards don't check for a *live* parent, and `SetNull` only fires on
    hard-delete. One architectural fix (filter nested includes + a shared live-parent guard + register
@@ -108,7 +110,7 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    (`ConsumableCategory` registered) and its consumable half by guarding the explicit
    `findOne`/`assertExists`/movement paths (the model deliberately stays out of the set for its
    archived-view slice).
-5. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
+7. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
    (PR #251, on `feat/issue-247-async-workers-bullmq-valkey`): the parse runs in a heap-capped forked
    child, so a bomb OOMs the child, not the API. Moved to `closed/`; closes on promotion to `dev`.
 

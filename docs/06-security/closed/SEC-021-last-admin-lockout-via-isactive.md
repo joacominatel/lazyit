@@ -2,7 +2,7 @@
 id: SEC-021
 title: Last-admin guard bypassed by isActive=false — permanent un-administrable lockout
 severity: medium
-status: open
+status: fixed
 cwe: CWE-1390
 discovered: 2026-06-06
 module: users
@@ -99,3 +99,72 @@ asserting `PATCH {isActive:false}` on the last ADMIN 409s, alongside the existin
 - CWE-1390 (Weak Authentication — here, loss of the recovery path) / CWE-285 (Improper Authorization).
 - ADR-0040 (RBAC + last-admin guard) · INVARIANTS INV-7 (first/last ADMIN) ·
   ADR-0041 (restore does not reactivate).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `5892a13c` (`fix(api): guard deactivation and count only active admins in the last-admin guard (#1319)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-23
+
+### Changes
+- `apps/api/src/users/users.service.ts`: `update` now runs `assertNotLastAdmin(id)` when the PATCH
+  deactivates a currently-active ADMIN (`isActive: false`), in addition to a demotion away from ADMIN —
+  one guard for both power-removing transitions. `assertNotLastAdmin` now counts only live **and active**
+  admins (`role: 'ADMIN', isActive: true`), so an already-deactivated admin no longer satisfies the
+  guard. That closes the class across every path that calls it: deactivation, demotion, and
+  offboard/delete (`remove`).
+- `apps/api/src/users/users.controller.ts`: comment only (the guard now covers deactivation too).
+- **Directory-sync offboard (added 2026-09-23, CEO decision "protect and skip"):** the predicate is
+  extracted as the public `UsersService.hasAnotherActiveAdmin(userId)` (the single definition of a
+  usable admin; `assertNotLastAdmin` now calls it). `DirectoryReconcileService`'s offboard sweep
+  (`apps/api/src/directory/directory-reconcile.service.ts`) calls it for an active ADMIN past grace and,
+  when no other active ADMIN exists, **skips** that person: nothing is written, the run counts it as
+  `skipped`, logs `directory.offboard_skipped user=<id> reason=last-active-admin` (id only, no PII), and
+  carries on. The next run re-evaluates, so the offboard happens once another active ADMIN exists. The
+  reconcile reads `role` for this (read-only; it still never writes it). No admin notification is
+  emitted: no existing `NotificationType` (ADR-0056) fits, and adding one needs `packages/shared` plus
+  the web bell's closed icon/copy set, both outside this change.
+
+### Tests added
+- `apps/api/src/users/users.service.spec.ts` › `last-admin guard vs isActive (SEC-021)`:
+  - `refuses to deactivate the LAST active ADMIN (409), including yourself`: fails without the fix
+    because `update` wrote `isActive: false` with no guard (the PoC); passes with it.
+  - `refuses to deactivate an admin whose only fellow admin is already inactive (409)`,
+    `refuses to demote an admin whose only fellow admin is inactive (409)` and
+    `refuses to offboard an admin whose only fellow admin is inactive (409)`: fail without the fix
+    because the count included the inactive admin; pass with it.
+  - Controls that pass both before and after: deactivating an admin while another active admin remains
+    is allowed; deactivating a non-admin, or re-sending `isActive: false` for an already-inactive admin,
+    never consults the guard.
+- The existing `refuses to demote the LAST remaining ADMIN (409)` now asserts the `isActive: true`
+  filter on the count.
+- `apps/api/src/directory/directory-reconcile.service.spec.ts` › `last-admin protection on offboard
+  (SEC-021)`:
+  - `skips the LAST active ADMIN, warns, and still offboards everyone else`: fails without the guard
+    because the sweep deactivated the admin (1 failed / 17 passed against the unguarded service); passes
+    with it.
+  - Controls: an ADMIN is offboarded normally when another active ADMIN remains; the predicate is never
+    consulted for a non-admin or an already-inactive admin.
+
+### Verification
+Against the `origin/dev` service with the new spec: 5 failed / 8 passed in the ADR-0040 guard block.
+With the fix: 13 passed. Full API suite (`node node_modules/.bin/jest`): 174 suites, 2918 tests passed.
+`tsc --noEmit` green for shared, api, web and agent; changed-files eslint clean.
+
+### Residual risk
+- **No self-deactivation guard.** The finding also suggested forbidding an admin from deactivating
+  themselves. Not added: the last-admin guard alone closes the lockout (a sole active admin gets a 409
+  on themselves too, and with a second active admin the change is recoverable), while ADR-0040's
+  addendum and the Manual both state that self-edits other than the role stay allowed. Adding it would
+  reverse a recorded decision.
+- **Directory sync keeps a departed last admin active.** By CEO decision, an ADMIN who left the
+  directory stays active (and able to sign in) while they are the last active ADMIN. That is the accepted
+  trade-off against locking the instance; the operator sees it only in the logs and the run's `skipped`
+  count until an admin notification type exists.
+- **Instances already locked out** stay locked out after the update: no admin can authenticate, and
+  `POST /config/setup` stays closed because it counts ADMIN rows regardless of `isActive` (correctly —
+  opening it would let anyone claim admin). Recovery is a direct DB update that sets `isActive = true`
+  on an ADMIN row. The existing CLIs (`set-role`, `reset-admin-password`) do not reactivate.
+- The check-then-act window is unchanged: the same bounded race ADR-0040 already accepts.
+

@@ -982,11 +982,20 @@ export class UsersService {
       if (actorId !== undefined && actorId === id) {
         throw new ForbiddenException('You cannot change your own role');
       }
-      // Never strip the LAST remaining ADMIN of its role — that would leave the instance with no
-      // administrator and no way to recover from the UI (409). Demoting any other admin is fine.
-      if (current.role === 'ADMIN' && data.role !== 'ADMIN') {
-        await this.assertNotLastAdmin(id);
-      }
+    }
+
+    // Never strip the LAST usable ADMIN of its administrator powers — that would leave the instance with
+    // no administrator and no way to recover from the UI (409). Both a demotion away from ADMIN and a
+    // deactivation do that: an inactive account cannot authenticate (JwtAuthGuard), so disabling the
+    // only active ADMIN — including yourself — bricks administration exactly like demoting it (SEC-021).
+    // Demoting or deactivating any other admin is fine.
+    const deactivating = data.isActive === false && current.isActive;
+    const demotingAdmin =
+      current.role === 'ADMIN' &&
+      data.role !== undefined &&
+      data.role !== 'ADMIN';
+    if (demotingAdmin || (deactivating && current.role === 'ADMIN')) {
+      await this.assertNotLastAdmin(id);
     }
 
     const roleChanged = data.role !== undefined && data.role !== current.role;
@@ -1018,7 +1027,6 @@ export class UsersService {
     // Deactivating revokes every local session (ADR-0086 §3/§8): the guard already refuses an inactive
     // account, but without the epoch bump a later REACTIVATION would revive every token minted before it —
     // including a "keep me signed in" token that never expires by time. Harmless outside local mode.
-    const deactivating = data.isActive === false && current.isActive;
     const user = await this.prisma.user.update({
       where: { id },
       data: {
@@ -1404,19 +1412,30 @@ export class UsersService {
   }
 
   /**
-   * Throws 409 Conflict if `userId` is the only remaining live ADMIN. Used before any action that
-   * would remove their administrator powers (role demotion, offboarding, delete), so a fresh install
-   * — or any instance — is never left without an administrator. Counts LIVE admins only (the read
-   * filter already excludes soft-deleted users), so an offboarded admin doesn't count toward the
-   * total. The check-then-act window is acceptable for a 5–20-person single-org tool: the worst case
-   * is two near-simultaneous demotions both passing, which is the same class of race ADR-0040 already
-   * accepts for first-user-ADMIN, and strictly safer than locking everyone out.
+   * The last-admin predicate (ADR-0040, SEC-021): true when at least one live, active ADMIN OTHER than
+   * `userId` exists, i.e. removing `userId`'s administrator powers still leaves the instance
+   * administrable. The single definition of "usable admin" — the 409 guard below and the directory-sync
+   * offboard skip (ADR-0091) both call it, so the count is never duplicated.
+   */
+  async hasAnotherActiveAdmin(userId: string): Promise<boolean> {
+    const otherAdmins = await this.prisma.user.count({
+      where: { role: 'ADMIN', isActive: true, id: { not: userId } },
+    });
+    return otherAdmins > 0;
+  }
+
+  /**
+   * Throws 409 Conflict if `userId` is the only remaining usable ADMIN. Used before any action that
+   * would remove their administrator powers (role demotion, deactivation, offboarding, delete), so a
+   * fresh install — or any instance — is never left without an administrator. Counts LIVE and ACTIVE
+   * admins only: the read filter already excludes soft-deleted users, and `isActive: true` excludes
+   * deactivated ones, since neither can authenticate to administer anything (SEC-021). The
+   * check-then-act window is acceptable for a 5–20-person single-org tool: the worst case is two
+   * near-simultaneous demotions both passing, which is the same class of race ADR-0040 already accepts
+   * for first-user-ADMIN, and strictly safer than locking everyone out.
    */
   private async assertNotLastAdmin(userId: string) {
-    const otherAdmins = await this.prisma.user.count({
-      where: { role: 'ADMIN', id: { not: userId } },
-    });
-    if (otherAdmins === 0) {
+    if (!(await this.hasAnotherActiveAdmin(userId))) {
       throw new ConflictException(
         'Cannot remove the last administrator. Promote another user to ADMIN first.',
       );

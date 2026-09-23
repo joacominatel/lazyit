@@ -202,6 +202,13 @@ always leave exactly one administrator.
 - `apps/api/src/auth/jwt-auth.guard.ts` — JIT insert uses `userCount === 0 ? ADMIN : VIEWER` (explicit
   ADMIN for the first user overrides the column default).
 - `apps/api/src/config/config.service.ts` — `setup()` locks the first-run bootstrap role to ADMIN.
+- `apps/api/src/users/users.service.ts` — the other half, never leaving **zero usable** ADMINs:
+  `assertNotLastAdmin` runs before a demotion away from ADMIN, a deactivation (`isActive=false`) and an
+  offboard/delete, and counts only live (`deletedAt: null`) **and active** (`isActive: true`) ADMINs —
+  an inactive account cannot authenticate, so it never keeps the instance administrable (SEC-021).
+- `apps/api/src/directory/directory-reconcile.service.ts` — the AD/LDAP offboard sweep calls the same
+  predicate (`UsersService.hasAnotherActiveAdmin`) and **skips** the last active ADMIN instead of
+  deactivating them ([[0091-on-prem-ad-ldap-directory-source]], SEC-021).
 
 ## INV-8 — Permissions resolve from `RolePermission` DB rows, never a token claim; the ADMIN set is immutable/full
 
@@ -543,8 +550,8 @@ rotation; the API imports no crypto capable of exploiting it.
 3. **Excluded from the bootstrap first-user→ADMIN count** and the **last-admin guard count.**
    - `jwt-auth.guard.ts` bootstrap count: `where: { directoryOnly: false, includeSoftDeleted: true }`.
      Importing 200 directory persons cannot hand ADMIN to the first OIDC login.
-   - `users.service.ts` last-admin guard: filters `role: ADMIN`. A VIEWER directory person is already
-     excluded by the role filter — no extra clause needed.
+   - `users.service.ts` last-admin guard: filters `role: ADMIN, isActive: true`. A VIEWER directory
+     person is already excluded by the role filter — no extra clause needed.
    - `config.service.ts` setup path: filters `role: ADMIN` — same reasoning.
 
 **Why.** The "is User" shortcut (no `Person` model) means directory persons sit in the `users` table
