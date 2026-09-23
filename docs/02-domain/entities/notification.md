@@ -166,8 +166,8 @@ The topbar bell (`apps/web/components/notification-bell.tsx`, mounted in `app/(a
 consumable / the manual-task inbox / `/secrets` for the vault-setup nudge). Mark-read on click + "mark all
 read". The bell renders for **every authenticated human** and no longer self-gates on
 `useCan('notification:read')` — the API scopes what each caller sees ([[0056-in-app-notification-bell]]
-amendment, #453; the `/secrets` banner was dropped). The per-item dismiss and "clear all" controls are the
-frontend half of #1309.
+amendment, #453; the `/secrets` banner was dropped). Each row carries a per-user dismiss (X) and the header a
+"Clear all" action, both optimistic ([[0056-in-app-notification-bell]] #1309 amendment §D, "Bell UI").
 
 ## Related
 
