@@ -26,7 +26,13 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.61",
+    "@ai-sdk/google": "^4.0.78",
+    "@ai-sdk/openai": "^4.0.73",
+    "@ai-sdk/openai-compatible": "^3.0.54",
     "@lazyit/shared": "workspace:*",
+    "@modelcontextprotocol/node": "^2.1.0",
+    "@modelcontextprotocol/server": "^2.1.0",
     "@nestjs/bullmq": "^12.0.0",
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
@@ -35,6 +41,7 @@
     "@node-rs/argon2": "2.1.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "ai": "^7.0.112",
     "bullmq": "^5.81.3",
     "csv-parse": "^7.0.0",
     "ioredis": "^6.0.0",
@@ -116,7 +123,7 @@
       ]
     },
     "transformIgnorePatterns": [
-      "/node_modules/(?!.*@nestjs)"
+      "/node_modules/(?!.*@nestjs|.*@ai-sdk|.*@workflow|(?:.*/)?ai/)"
     ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
