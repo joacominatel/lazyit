@@ -66,10 +66,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 2 |
+| Medium | 1 |
 | Low | 11 |
 | Info | 0 |
-| **Total open** | **13** |
+| **Total open** | **12** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -79,7 +79,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | ID | Sev | Module | Title |
 | --- | --- | --- | --- |
 | [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] | 🟠 Medium | users | Last-admin lockout via `PATCH {isActive:false}` (skips `assertNotLastAdmin`) |
-| [[SEC-051-application-url-scheme-guard-port-carveout-bypass\|SEC-051]] | 🟠 Medium | applications | URL `host:port` carve-out accepts `javascript:1/…` → re-opens the SEC-008 XSS class |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
 | [[SEC-012-oidc-audience-not-validated\|SEC-012]] | 🟡 Low | auth | OIDC token audience unvalidated when `OIDC_CLIENT_ID` unset (audience confusion under BYOI) |
@@ -95,10 +94,10 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 ## Top findings
 
 1. **SEC-020 ✅ Closed.** Moved to `closed/` (fixed: JIT email-link now checks `email_verified`).
-2. **SEC-051 (Medium) — SEC-008 XSS class re-opened.** The `^\d+(\/.*)?$` host:port carve-out in
-   `isSafeApplicationUrl` accepts `javascript:1/alert(document.cookie)` (the `1/…` is valid JS division),
-   evading the SEC-008 fix on both create and update. The predicate is exported for frontend reuse →
-   escalates to High once a renderer exists.
+2. **SEC-051 ✅ Closed.** Moved to `closed/` (fixed 2026-09-23, #1320): the `host:port` carve-out in
+   `isSafeApplicationUrl` no longer reads a browser-interpreted scheme (`javascript`, `vbscript`,
+   `data`, `file`, …) as a host, and the check also runs on the character-reference / percent-decoded
+   value. Re-closes the SEC-008 class on create and update.
 3. **SEC-011 ✅ Closed.** Moved to `closed/` (SA coarse-permission escalation fixed).
 4. **SEC-031 ✅ Closed.** Moved to `closed/` (assignment release TOCTOU fixed).
 5. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
