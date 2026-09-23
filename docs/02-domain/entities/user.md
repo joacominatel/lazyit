@@ -144,7 +144,10 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > `isActive = false` means the person is **offboarded/disabled but retained** (past
 > assignments and access grants still reference them) — this is the offboarding rule above. `deletedAt` means the
 > record is **soft-deleted** (hidden from normal queries). A user can be inactive yet not
-> deleted. Creation always starts active; deactivation is a `PATCH`.
+> deleted. Creation always starts active; deactivation is a `PATCH`. An inactive account cannot
+> authenticate, so deactivation strips administrator powers like a demotion does: deactivating the
+> **last active ADMIN** is refused (409), and the last-admin guard counts only live, active ADMINs
+> ([[0040-rbac-roles]], SEC-021).
 
 > [!note] Directory mode — `directoryOnly = true` ([[0069-migrator-import]] §A.3 / [[INVARIANTS]] INV-DIR)
 >
