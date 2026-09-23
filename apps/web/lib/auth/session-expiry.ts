@@ -20,8 +20,8 @@ export const AUTH_ROUTE_PREFIXES = ["/login", "/api/auth"];
 
 /**
  * Where the 401 handler sends a visitor whose session is dead: `/login` with the marker, plus the page
- * they were on as `callbackUrl`, so a fresh sign-in lands them back there — the same destination the
- * proxy carries for a signed-out visitor. Relative on purpose (#1052).
+ * they were on as `callbackUrl`, so a fresh sign-in lands them back there, as the proxy does for a
+ * signed-out visitor. Relative on purpose (#1052).
  *
  * The destination goes through the open-redirect guard (#495), and an auth route is never carried: a
  * `callbackUrl` pointing at `/login` would only nest the sign-in screen inside itself. `/login` applies

@@ -30,7 +30,6 @@ describe("mayBounceSignedInVisitor", () => {
     expect(mayBounceSignedInVisitor({ expired: "" })).toBe(false);
     expect(mayBounceSignedInVisitor({ expired: ["1", "1"] })).toBe(false);
   });
-
 });
 
 // The 401 fallback keeps the page the user was on, so signing in again returns them to it.

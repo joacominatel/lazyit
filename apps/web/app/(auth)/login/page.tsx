@@ -34,10 +34,11 @@ import { LocalLoginForm } from "./local-login-form";
  * The (auth) layout provides the shared AuthShell (centered card + wordmark + theme toggle).
  *
  * Redirect handling: `proxy.ts` sends unauthenticated visitors here with a `callbackUrl` query param
- * (their intended destination), and so does the global 401 handler for the page a dead session was on. We forward that to `signIn` via `redirectTo` so a successful login
- * lands in the app, and we bounce already-authenticated visitors straight there (default
- * `/dashboard`) — except a visitor the global 401 handler sent here with `?expired`, whose cookie may
- * still read as valid while its token is dead; bouncing them is the reload loop of #1307.
+ * (their intended destination), and so does the global 401 handler for the page a dead session was on.
+ * We forward that to `signIn` via `redirectTo` so a successful login lands in the app, and we bounce
+ * already-authenticated visitors straight there (default `/dashboard`) — except a visitor the global 401
+ * handler sent here with `?expired`, whose cookie may still read as valid while its token is dead;
+ * bouncing them is the reload loop of #1307.
  *
  * Recourse (ADR-0043 §7): when the IdP bounces a user back unauthenticated, Auth.js redirects here
  * with `?error=<code>`. We translate that into a clear, IT-native explanation instead of a silent
