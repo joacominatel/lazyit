@@ -154,11 +154,14 @@ jobs:
         working-directory: apps/agent
         run: bun test
 
-      # Caddy routing regression (#1250): the API's local-auth password endpoints under
-      # /api/auth/* must reach the API, Auth.js's action paths (/api/auth/*) the web app. Runs
-      # `caddy adapt` on the real Caddyfile with the digest-pinned image from compose.yaml and
-      # asserts first-match routing for a request-path corpus. Docker (preinstalled on the
-      # ubuntu-latest runner) is the only dependency — no build artifacts involved.
+      # Caddy routing + streaming regression (#1250, #1322), on the real Caddyfile with the
+      # digest-pinned image from compose.yaml. Static: `caddy adapt` in each network mode (local,
+      # real, lan) and asserts first-match routing, the path the upstream receives and the encode
+      # decision — the API's /api/auth/* password endpoints reach the API while Auth.js's action
+      # paths reach web, the MCP/OAuth paths reach the API unstripped, and streams skip encode.
+      # Live: runs the pinned Caddy in front of a scripted SSE upstream (busybox nc, same image) and
+      # asserts the header flushes at once and events arrive incrementally and uncompressed.
+      # Docker and python3 (preinstalled on the ubuntu-latest runner) are the only dependencies.
       - name: Test Caddy routing
         run: sh infra/test/caddy-routing.sh
 
