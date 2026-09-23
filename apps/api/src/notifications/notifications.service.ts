@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   offsetOf,
   pageOf,
+  type DismissNotificationsResult,
   type MarkReadResult,
   type Notification as NotificationWire,
   type NotificationEntityType,
@@ -74,7 +75,7 @@ export interface NotificationViewer {
  *   (b) the BROADCAST set (`recipientUserId IS NULL`) — ONLY IF the caller's role holds
  *       `notification:read` (ADMIN-only by default).
  * This is enforced in ONE place — the service — so the controller can stay open to any authenticated
- * human and the scope can never be bypassed. Mark-read/unread-count reuse the SAME `where`, so they are
+ * human and the scope can never be bypassed. Mark-read/dismiss/unread-count reuse the SAME `where`, so they are
  * IDOR-safe by construction: a caller can never mark or count a row they cannot see (notably another
  * user's targeted notification, or — for a non-admin — any broadcast row).
  */
@@ -121,15 +122,21 @@ export class NotificationsService {
    * the caller's own targeted rows always, plus the broadcast set only if they hold `notification:read`.
    * The read flag is folded in by LEFT-joining the caller's NotificationRead rows (Prisma `include`
    * filtered to `userId`), so the web never stitches two lists. `total` is the count over the caller's
-   * VISIBLE (retained) set. Runs the page + count in one transaction so the total can't drift from the
-   * page.
+   * VISIBLE (retained) set minus the rows THEY dismissed (#1309 — another user's dismiss never hides a row
+   * from this caller). Runs the page + count in one transaction so the total can't drift from the page.
    */
   async findPage(
     viewer: NotificationViewer,
     page: PageQuery,
   ): Promise<Page<NotificationWire>> {
     const { take, skip } = offsetOf(page);
-    const where = await this.visibilityWhere(viewer);
+    // The caller's DISMISSED rows are hidden from their own feed and from `total` (#1309).
+    const where: Prisma.NotificationWhereInput = {
+      AND: [
+        await this.visibilityWhere(viewer),
+        this.notDismissedBy(viewer.userId),
+      ],
+    };
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.notification.findMany({
         where,
@@ -156,6 +163,8 @@ export class NotificationsService {
    * visible set ({@link visibilityWhere}): notifications the caller can SEE with NO NotificationRead row
    * for them. Combining the visibility `where` with `reads: { none }` is what makes the count IDOR-safe
    * — a non-admin can never count broadcast rows, and no caller can count another user's targeted rows.
+   * A DISMISSED row is excluded by the same anti-join: dismiss always leaves a NotificationRead row for
+   * the caller (dismiss implies read, #1309), so it can never be counted as unread.
    */
   async unreadCount(viewer: NotificationViewer): Promise<number> {
     const where = await this.visibilityWhere(viewer);
@@ -230,6 +239,135 @@ export class NotificationsService {
     });
     const unread = await this.unreadCount(viewer);
     return { marked: result.count, unread };
+  }
+
+  /**
+   * DISMISS one notification from the caller's OWN bell (ADR-0056 §7 amendment, #1309). Per-user: the
+   * shared `Notification` row is never mutated or deleted, so another user (another admin on a broadcast)
+   * still sees it. Dismiss implies read — it writes the caller's NotificationRead row if absent (fresh
+   * `readAt`) or stamps `dismissedAt` on the existing one (keeping its original `readAt`).
+   *
+   * Same IDOR-safe gate as {@link markRead}: an id outside the caller's visible scope (another user's
+   * targeted notification, or — for a non-admin — any broadcast row) or a missing/pruned id is a clean
+   * no-op (`dismissed: 0`), never written and never disclosed. Idempotent: a re-dismiss keeps the first
+   * `dismissedAt` and reports `dismissed: 0`.
+   */
+  async dismiss(
+    viewer: NotificationViewer,
+    notificationId: string,
+  ): Promise<DismissNotificationsResult> {
+    const where = await this.visibilityWhere(viewer);
+    const visible = await this.prisma.notification.findFirst({
+      where: { AND: [where, { id: notificationId }] },
+      select: { id: true },
+    });
+    if (!visible) {
+      return { dismissed: 0, unread: await this.unreadCount(viewer) };
+    }
+
+    const now = new Date();
+    let dismissed = 0;
+    try {
+      // No read row yet → one insert makes it read AND dismissed.
+      await this.prisma.notificationRead.create({
+        data: { notificationId, userId: viewer.userId, dismissedAt: now },
+      });
+      dismissed = 1;
+    } catch (err) {
+      if (!this.isAlreadyReadOrAbsent(err)) {
+        throw err;
+      }
+      // P2002 (already read): stamp dismissedAt only if not yet dismissed — keeps readAt, and a re-dismiss
+      // is a no-op that preserves the original stamp. P2003 (a racing retention delete removed the
+      // event): the update matches nothing, so the dismiss is a clean no-op.
+      const { count } = await this.prisma.notificationRead.updateMany({
+        where: { notificationId, userId: viewer.userId, dismissedAt: null },
+        data: { dismissedAt: now },
+      });
+      dismissed = count;
+    }
+    return { dismissed, unread: await this.unreadCount(viewer) };
+  }
+
+  /**
+   * DISMISS every notification currently in the caller's bell (ADR-0056 §7 amendment, #1309) — the
+   * visible set ({@link visibilityWhere}) minus what they already dismissed. Scoped exactly like
+   * {@link markAllRead}, so it can never touch another user's targeted row or (for a non-admin) a
+   * broadcast row, and it never touches the shared events. Only the rows that exist NOW are dismissed: a
+   * notification emitted afterwards has no read row for the caller, so it shows up normally.
+   *
+   * `upTo` bounds the dismiss to what the caller has SEEN: only notifications created at or before it
+   * (the web sends the newest `createdAt` it rendered), so one that arrived after the bell loaded stays,
+   * unread. `createdAt` is `TIMESTAMP(3)`, so the millisecond value the web echoes back matches exactly.
+   * Without `upTo` every visible notification is dismissed — the behavior an older web client relies on.
+   *
+   * Insert-then-stamp, in one transaction: `createMany(skipDuplicates)` writes a read+dismissed row for
+   * every id with no read row yet; `updateMany(dismissedAt: null)` then stamps the ids that already had
+   * one (keeping their `readAt`) — including a row a concurrent mark-read inserted between the two
+   * statements. Returns how many were newly dismissed + the fresh unread count.
+   *
+   * A racing retention sweep can delete a target between the read and the insert: the insert then fails
+   * the FK (P2003) and the transaction rolls back whole. As in {@link dismiss}, a pruned row is a no-op,
+   * not an error — the pass is retried once against a fresh target list, which no longer holds it.
+   */
+  async dismissAll(
+    viewer: NotificationViewer,
+    upTo?: Date,
+  ): Promise<DismissNotificationsResult> {
+    const where = await this.visibilityWhere(viewer);
+    try {
+      return await this.dismissAllOnce(viewer, where, upTo);
+    } catch (err) {
+      if (!this.isForeignKeyViolation(err)) {
+        throw err;
+      }
+      return this.dismissAllOnce(viewer, where, upTo);
+    }
+  }
+
+  /** One {@link dismissAll} pass: read the targets, then insert-then-stamp them in one transaction. */
+  private async dismissAllOnce(
+    viewer: NotificationViewer,
+    where: Prisma.NotificationWhereInput,
+    upTo: Date | undefined,
+  ): Promise<DismissNotificationsResult> {
+    const targets = await this.prisma.notification.findMany({
+      where: {
+        AND: [
+          where,
+          this.notDismissedBy(viewer.userId),
+          ...(upTo ? [{ createdAt: { lte: upTo } }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    if (targets.length === 0) {
+      return { dismissed: 0, unread: await this.unreadCount(viewer) };
+    }
+    const ids = targets.map((n) => n.id);
+    const now = new Date();
+    const [created, stamped] = await this.prisma.$transaction([
+      this.prisma.notificationRead.createMany({
+        data: ids.map((notificationId) => ({
+          notificationId,
+          userId: viewer.userId,
+          dismissedAt: now,
+        })),
+        skipDuplicates: true,
+      }),
+      this.prisma.notificationRead.updateMany({
+        where: {
+          notificationId: { in: ids },
+          userId: viewer.userId,
+          dismissedAt: null,
+        },
+        data: { dismissedAt: now },
+      }),
+    ]);
+    return {
+      dismissed: created.count + stamped.count,
+      unread: await this.unreadCount(viewer),
+    };
   }
 
   /**
@@ -350,11 +488,27 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * The "not dismissed by this user" filter (#1309): no NotificationRead row for the user that carries a
+   * `dismissedAt`. Resolved through the (notificationId, userId) unique index — at most one row per pair.
+   */
+  private notDismissedBy(userId: string): Prisma.NotificationWhereInput {
+    return { reads: { none: { userId, dismissedAt: { not: null } } } };
+  }
+
   /** True when an error is the expected dedupeKey-unique collision (P2002) — the idempotent no-op. */
   private isDuplicateDedupe(err: unknown): boolean {
     return (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === 'P2002'
+    );
+  }
+
+  /** True when a read-join insert hit the FK to a notification a racing retention sweep removed. */
+  private isForeignKeyViolation(err: unknown): boolean {
+    return (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2003'
     );
   }
 

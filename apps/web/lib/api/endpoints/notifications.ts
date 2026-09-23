@@ -1,4 +1,5 @@
 import type {
+  DismissNotificationsResult,
   MarkReadResult,
   Notification,
   Page,
@@ -13,7 +14,9 @@ import { apiFetch } from "../client";
  *
  * Backend contract (ADR-0056 §2): `GET /notifications?limit=&offset=` → `Page<Notification>` (each item
  * carrying its per-caller `read` flag); `GET /notifications/unread-count` → `{ unread }`;
- * `PATCH /notifications/:id/read` and `PATCH /notifications/read-all` → `{ marked, unread }`.
+ * `PATCH /notifications/:id/read` and `PATCH /notifications/read-all` → `{ marked, unread }`;
+ * `PATCH /notifications/:id/dismiss` and `PATCH /notifications/dismiss-all?upTo=` → `{ dismissed, unread }`
+ * (ADR-0056 §7 amendment, #1309 — per-user, hides the row from the caller's bell only).
  *
  * SSE is a Phase-2 upgrade behind these SAME endpoints — these functions do not change when it lands.
  */
@@ -51,4 +54,31 @@ export function markNotificationRead(id: string): Promise<MarkReadResult> {
 /** Mark all of the caller's unread notifications read (`PATCH /notifications/read-all`). */
 export function markAllNotificationsRead(): Promise<MarkReadResult> {
   return apiFetch<MarkReadResult>(`${BASE}/read-all`, { method: "PATCH" });
+}
+
+/**
+ * Dismiss one notification from the caller's own bell (`PATCH /notifications/:id/dismiss`). Per user —
+ * the shared event is never deleted. Implies read. Idempotent: a re-dismiss, or an id the caller cannot
+ * see, answers `{ dismissed: 0 }` rather than a 404.
+ */
+export function dismissNotification(
+  id: string,
+): Promise<DismissNotificationsResult> {
+  return apiFetch<DismissNotificationsResult>(`${BASE}/${id}/dismiss`, {
+    method: "PATCH",
+  });
+}
+
+/**
+ * Dismiss the caller's visible notifications (`PATCH /notifications/dismiss-all`). `upTo` (an ISO
+ * datetime — the newest `createdAt` the bell rendered) limits it to notifications created at or before
+ * it, so one that arrived after the bell loaded stays. Without it the server dismisses everything visible.
+ */
+export function dismissAllNotifications(
+  upTo?: string,
+): Promise<DismissNotificationsResult> {
+  const q = upTo === undefined ? "" : `?${new URLSearchParams({ upTo })}`;
+  return apiFetch<DismissNotificationsResult>(`${BASE}/dismiss-all${q}`, {
+    method: "PATCH",
+  });
 }
