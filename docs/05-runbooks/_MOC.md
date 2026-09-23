@@ -3,7 +3,7 @@ title: Runbooks — MOC
 tags: [moc, runbook]
 status: draft
 created: 2026-05-25
-updated: 2026-07-03
+updated: 2026-09-23
 ---
 
 # Runbooks — Map of Content
@@ -30,7 +30,10 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
   bootstrap ([[0047-guided-first-deploy-bootstrap]]), env/secrets, Let's Encrypt, bring-up, updates, the
   bundled-Zitadel vs BYOI fork. Also covers **LAN / bare-IP deploys** (§1a): `default_sni` (issue
   #1010) makes bare-IP HTTPS work, and trusting Caddy's internal CA on each reporting-agent host via
-  `infra/trust-local-ca.sh` before running the agent installer.
+  `infra/trust-local-ca.sh` before running the agent installer. §7 covers the optional **AI assistant and
+  MCP**: the unprefixed agent routes, SSE through Caddy, `AI_SECRET_KEY` / `AI_WORKER_CONCURRENCY`,
+  which MCP clients work in which network mode, and trusting an internal CA (`NODE_EXTRA_CA_CERTS`)
+  ([[0097-ai-assistant-mcp-and-headless-api]]).
 - **[[releasing]]** — cut a version: release = a `dev → master` promotion (auto-tagged by
   `release.yml`), the one-time signed `v1.0.0` seed, support/deprecation policy, and the guided
   host update. [[0083-versioning-and-releases]] · [[0084-update-awareness-and-guided-update]].
@@ -41,7 +44,8 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
   non-human API credential): the token is shown **once**, scoping by direct permission grants, rotation
   and revocation. [[0048-service-accounts]].
 - **[[backups]]** — backups & disaster recovery: the full DR inventory (app DB + Zitadel DB +
-  `.env.prod`/masterkey; Meili/Caddy rebuildable), the opt-in backup sidecar (cron + `pg_dump` for
+  `.env.prod`/masterkey, with the low-DR `SMTP_SECRET_KEY` / `AI_SECRET_KEY` alongside; Meili/Caddy
+  rebuildable), the opt-in backup sidecar (cron + `pg_dump` for
   both DBs, retention, optional offsite), and the correct restore order (env → zitadel → app → up →
   reindex) with targeted volume removal instead of the destructive `down -v`.
 - **[[docker-build-troubleshooting]]** — symptoms & fixes for building/booting the images.

@@ -88,7 +88,13 @@ Backups: `docs/05-runbooks/backups.md`.
   the prefix). `/api/docs*` (Swagger) is **not** forwarded on the public origin — it falls through
   the `/api` strip to `/docs*`, which the API doesn't serve, so a public `/api/docs` returns **404**
   (SEC-009); the docs stay reachable on the internal Docker network and in local dev. The web image
-  bakes `NEXT_PUBLIC_API_URL=/api`, so one image works on any domain — ADR-0026.
+  bakes `NEXT_PUBLIC_API_URL=/api`, so one image works on any domain — ADR-0026. A short allowlist of
+  **unprefixed** paths for external AI agents — `/mcp`, `/.well-known/oauth-protected-resource*`,
+  `/.well-known/oauth-authorization-server*`, `/oauth/{token,register,revoke}` — also reaches the API,
+  unstripped (ADR-0097); the API answers 404 there until MCP is enabled.
+- **Streams skip compression.** `encode` wraps every response except streamed ones (the AI run event
+  stream, `/mcp`, any `Accept: text/event-stream` request): the pinned Caddy withholds and compresses
+  SSE otherwise. `test/caddy-routing.sh` asserts the routing and runs a live SSE probe (ADR-0097).
 - **Least exposure.** Only Caddy publishes ports. Postgres/API/Web are on the internal network;
   Postgres is never reachable from the host — ADR-0028 / SEC-005.
 - **Secrets** live in the gitignored `env/.env.prod` (copied from the example). Never committed,

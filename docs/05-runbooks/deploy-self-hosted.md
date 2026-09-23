@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-07-03
+updated: 2026-09-23
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -125,7 +125,7 @@ To change the port or switch modes later (or after an IP change on a **hostname*
 ```
 
 `--reconfigure` re-asks the network mode / host / ports, keeps every secret (`WORKFLOW_SECRET_KEY`,
-`SESSION_SIGNING_SECRET`, `AUTH_SECRET`, `SMTP_SECRET_KEY`, DB creds — never regenerated) and the auth mode + Postgres
+`SESSION_SIGNING_SECRET`, `AUTH_SECRET`, `SMTP_SECRET_KEY`, `AI_SECRET_KEY`, DB creds — never regenerated) and the auth mode + Postgres
 topology, touches **no** volumes, and brings the stack back up. It is supported for **local-auth installs
 only** (an OIDC deploy's IdP `externalDomain` is baked at first boot and can't be re-homed by re-rendering
 env — edit `.env.prod` by hand and re-provision Zitadel instead). Existing browser sessions from before
@@ -366,6 +366,16 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > SMTP password already stored, and a fresh one silently orphans it (re-enter the password to recover).
 > Unlike `WORKFLOW_SECRET_KEY` this is **not** a DR linchpin: the worst case is one re-typed password.
 
+> **Upgrade note — the AI assistant keys are optional; nothing to do on update (ADR-0097, issue #1322).**
+> This release adds two **optional** env keys, `AI_SECRET_KEY` and `AI_WORKER_CONCURRENCY`. Both ship
+> **commented** in `.env.prod.example` — a deliberate difference from `SMTP_SECRET_KEY` — so
+> `infra/update.sh` does **not** stop on them and an instance that never enables AI needs no change at
+> all. Add `AI_SECRET_KEY` only when an admin is about to store an AI provider API key (without it that
+> save is a clean 409): `./infra/start.sh --reconfigure` writes it, or add it by hand with the same
+> `grep -q` guard as above (`AI_SECRET_KEY=$(openssl rand -hex 32)`) and recreate the api container.
+> Caddy now also routes the external-agent paths to the API and streams SSE uncompressed (§7); the
+> update applies that with no action.
+
 > **Upgrade note — attachments storage: fix a pre-existing root-owned volume (#1019).** The api
 > image now creates `/app/attachments` owned by `node` before the runtime `USER node` switch, so
 > Docker seeds the `*_attachments_data` named volume with the right ownership on first mount. A
@@ -415,6 +425,111 @@ service is constrained.
 > `backup` sidecar only dumps the two Postgres DBs (see [[backups]]).
 
 Build/boot problems → [[docker-build-troubleshooting]].
+
+## 7. AI assistant and external agents (MCP) — optional
+
+The AI assistant — the in-app chat, headless prompts from a Service Account, and the MCP server that
+lets Claude Code, Cursor and similar agents act as a user — is **off until an admin enables it** in
+Settings → AI ([[0097-ai-assistant-mcp-and-headless-api]]). An operator who never enables it has
+nothing to do: no required env key, no new container, no new port.
+
+### 7a. What the stack already provides
+
+- **Routes.** Caddy sends these **unprefixed** paths to the API, without the `/api` strip — MCP clients
+  and OAuth discovery address the bare origin:
+
+  | Path | Purpose | Answers |
+  | --- | --- | --- |
+  | `/mcp` | the MCP endpoint | 404 while MCP is off |
+  | `/.well-known/oauth-protected-resource[/mcp]` | where to authorize (RFC 9728) | 404 while MCP is off, and always on `lan` |
+  | `/.well-known/oauth-authorization-server` | the authorization server's metadata (RFC 8414) | 404 while MCP is off, and always on `lan` |
+  | `/oauth/token`, `/oauth/register`, `/oauth/revoke` | OAuth protocol endpoints | 404 while MCP is off, and always on `lan` |
+
+  `/oauth/authorize` is the consent page and belongs to the web app. Everything the chat uses stays under
+  `/api/*`.
+- **Streaming.** The chat follows a run over Server-Sent Events. Caddy passes streams **unbuffered and
+  uncompressed** ([[deployment]] explains the `encode` carve-out). If you run **another reverse
+  proxy or load balancer in front of Caddy**, it must not buffer or compress `text/event-stream` either
+  (nginx: `proxy_buffering off;` on the lazyit location) — otherwise the chat shows each reply only once
+  it is complete.
+- **Env** (`infra/env/.env.prod`, both optional):
+  - `AI_SECRET_KEY` — encrypts the AI provider's API key at rest. `start.sh` writes it on a fresh install
+    and on `--reconfigure`; to add it by hand, see the upgrade note in §4. Back it up with `.env.prod`
+    ([[backups]]).
+  - `AI_WORKER_CONCURRENCY` — how many AI runs execute at once inside the `api` container (default 4).
+    Runs mostly wait on the provider; raise it only with memory and CPU headroom (§6).
+
+Check the routes after an update (expect `404` until an admin enables MCP; on `lan` the OAuth rows stay
+`404` for good):
+
+```sh
+curl -so /dev/null -w "mcp:      %{http_code}\n" -X POST https://lazyit.example.com/mcp
+curl -so /dev/null -w "metadata: %{http_code}\n" https://lazyit.example.com/.well-known/oauth-authorization-server
+```
+
+> [!note] A local LLM on the Docker host (Ollama) — operator option, not shipped
+> An OpenAI-compatible provider running **on the lazyit host itself** is not reachable as `localhost`
+> from inside the `api` container. To reach it, add `extra_hosts: ["host.docker.internal:host-gateway"]`
+> to the `api` service in a compose override of your own, point the provider's base URL at
+> `http://host.docker.internal:<port>`, and allow that private host in Settings → AI (the egress guard
+> denies private addresses unless an admin allows that one host). lazyit does not ship this in
+> `compose.yaml`; loopback and cloud metadata addresses stay denied regardless.
+
+### 7b. Which clients work in which network mode
+
+The MCP specification requires HTTPS for OAuth, so the network mode (§1a) decides how an agent connects:
+
+| Client | `lan` (plain HTTP) | `local` (localhost + internal CA) | `real` (FQDN; Let's Encrypt or internal CA) |
+| --- | --- | --- | --- |
+| Claude Code (CLI / IDE) | personal token | OAuth, from the lazyit host only; trust the CA (7c) | OAuth; with an internal CA, trust it (7c) |
+| Cursor, VS Code (desktop) | personal token | OAuth, from the lazyit host only; trust the CA | OAuth; with an internal CA, trust it |
+| claude.ai, Claude Desktop connectors | not possible | not possible | only if the instance is **publicly reachable** with a Let's Encrypt certificate |
+| ChatGPT developer mode | not possible | not possible | only if the instance is **publicly reachable** |
+
+- **`lan` — personal tokens.** Each user creates a **personal MCP token** (`lzit_pat_…`, mandatory
+  expiry, revocable) in their account's AI page and configures the agent with a static
+  `Authorization: Bearer` header. There is no OAuth on plain HTTP: the OAuth metadata and endpoints
+  answer 404. The token travels unencrypted over the LAN — the same trade the login session already makes
+  in `lan` mode ([[0087-plain-http-lan-deployment-axis]]).
+- **HTTPS (`local`, `real`) — OAuth.** The agent discovers the authorization server from the instance,
+  the user signs in and approves the connection in the browser, and it appears under their connected
+  apps. Personal tokens are not offered on HTTPS instances.
+- **Cloud-hosted clients** (claude.ai, Claude Desktop connectors, ChatGPT) connect **from the vendor's
+  cloud**, not from the user's machine. They need a public DNS name, a globally routable address and a
+  publicly trusted certificate — a LAN-only instance can never serve them. Exposing lazyit to the
+  internet is an organizational decision; if you make it, use a real domain with Let's Encrypt and HSTS
+  (§1).
+
+### 7c. Internal CA — trust it on each agent's machine
+
+With an internal CA (`local`, or `real` without Let's Encrypt), every machine that runs an agent must
+trust Caddy's root, or the agent refuses the TLS connection before OAuth starts.
+
+1. **Export the root** on the lazyit host (it changes after a `caddy_data` volume reset — export again
+   then):
+
+   ```sh
+   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+     --env-file infra/env/.env.prod cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-local-root.crt
+   ```
+
+2. **Copy `caddy-local-root.crt` to the agent's machine** — it is a public certificate, not a secret.
+3. **Claude Code** trusts the operating system's store by default (the native installer; npm installs
+   need Node 22.15 or later), so adding the root to the OS trust store is enough — on the lazyit host
+   itself, `./infra/trust-local-ca.sh` does that. To trust it for Claude Code only, point
+   `NODE_EXTRA_CA_CERTS` at the file before launching `claude`, or set it in the `env` block of
+   `~/.claude/settings.json` so background sessions get it too:
+
+   ```sh
+   export NODE_EXTRA_CA_CERTS=/path/to/caddy-local-root.crt
+   ```
+
+   Other Node-based agents honor `NODE_EXTRA_CA_CERTS` the same way; desktop editors (Cursor, VS Code)
+   use the OS trust store.
+
+> [!note] Being verified end to end
+> The client × mode table and the CA steps follow each client's current documentation. The end-to-end
+> runs on every mode (issue #1315, wave 4) record the results here once the MCP server ships.
 
 Related: [[deployment]] · [[docker-prod-like-first-boot]] · [[backups]] · [[prisma-migrations]] ·
 [[0015-deployment-model]] · [[0026-reverse-proxy-tls]] · [[0028-secrets-and-config]] ·

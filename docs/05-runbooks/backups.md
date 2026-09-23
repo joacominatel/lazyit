@@ -3,7 +3,7 @@ title: Backups & Disaster Recovery
 tags: [runbook, database, backups, disaster-recovery]
 status: accepted
 created: 2026-05-25
-updated: 2026-07-01
+updated: 2026-09-23
 ---
 
 # Runbook — backups & disaster recovery
@@ -24,7 +24,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 
 | # | Item | Where | Back up? | How to recover if lost |
 | - | --- | --- | --- | --- |
-| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY` (low-DR — see below), OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
+| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY` and `AI_SECRET_KEY` (both optional and low-DR — see below), OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
 | 2 | **App database** | `db` (Postgres 18, `db_data` volume) | **YES — `pg_dump`** | Restore from dump. In **local-auth mode** this also carries the user **password hashes** (argon2id `passwordHash`) — no separate auth store to back up. |
 | 3 | **Zitadel database** (OIDC mode only) | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`**, when `AUTH_MODE=oidc` | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. **Absent in local-auth mode** — there is no `zitadel_db`, and the backup sidecar's cron skips this dump (ADR-0086). |
 | 4 | Meilisearch index | `meili_data` volume | No (rebuildable) | Re-run `reindex:all` — it rebuilds the index from the DBs ([[0035-search-architecture]]). |
@@ -62,6 +62,23 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > has no key: `./infra/start.sh --reconfigure` adds it, or append one by hand and recreate the api
 > container — see **[[deploy-self-hosted]]**. Never regenerate a key that is already in the file: the
 > stored SMTP password becomes undecryptable and must be re-typed.
+
+> [!info] `AI_SECRET_KEY` — the AI provider key's at-rest key: OPTIONAL and low-DR, like `SMTP_SECRET_KEY` (ADR-0097)
+> When an admin configures the AI assistant (Settings → AI), the provider's API key is stored encrypted
+> (AES-256-GCM) under `AI_SECRET_KEY` — its own key axis, separate from `SMTP_SECRET_KEY` and
+> `WORKFLOW_SECRET_KEY`. **Back it up alongside `SMTP_SECRET_KEY`**, in the same off-host copy of
+> `.env.prod`. A DB restore **without the matching key** leaves the stored provider key undecryptable:
+> the assistant stops reaching its provider until an admin re-enters the API key — nothing else is lost
+> (conversations, the AI action ledger and MCP connections live in the app DB, item #2). The key is
+> **optional** (unset ⇒ the app boots unchanged and only saving a provider API key 409s), so it is not a
+> DR linchpin. A guided install and `./infra/start.sh --reconfigure` write it; `--reconfigure` preserves a
+> present key verbatim. Never regenerate a key that is already in the file.
+>
+> **AI conversations outlive their retention in your dumps.** The app deletes a conversation for good
+> after the retention an admin sets (default 90 days) or when its owner deletes it — but a dump taken
+> before that still holds it until the dump itself is pruned (`BACKUP_RETENTION_DAYS`, or your off-host
+> copy's own retention). Restoring an old dump brings those transcripts back until the next retention
+> sweep. Keep backup retention in line with what your organization expects of AI transcripts.
 
 > [!warning] Attachments are NOT backed up yet (item #7) — an accepted, LOUD gap
 > [[0082-attachments-storage]] puts uploaded files (warranty PDFs, receipts, damage photos, KB
