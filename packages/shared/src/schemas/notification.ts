@@ -236,7 +236,8 @@ export type MarkReadResult = z.infer<typeof MarkReadResultSchema>;
  * own bell only — the shared event is never deleted, and other users (e.g. another admin on a broadcast)
  * still see it. Dismiss implies read, so the fresh `unread` count drops accordingly. Idempotent:
  * re-dismissing succeeds with `dismissed: 0`; an id the caller cannot see is also `dismissed: 0` (never a
- * 404, so existence is not disclosed). Neither endpoint takes a request body.
+ * 404, so existence is not disclosed). Neither endpoint takes a request body; dismiss-all takes an
+ * optional `upTo` query ({@link DismissAllNotificationsQuerySchema}).
  */
 export const DismissNotificationsResultSchema = z.object({
   /** How many notifications this action newly hid from the caller's bell (idempotent: may be 0). */
@@ -246,6 +247,20 @@ export const DismissNotificationsResultSchema = z.object({
 });
 export type DismissNotificationsResult = z.infer<
   typeof DismissNotificationsResultSchema
+>;
+
+/**
+ * Query params for `PATCH /notifications/dismiss-all` (issue #1309). `upTo` bounds "Clear all" to what
+ * the caller has SEEN: only notifications created at or before it are dismissed, so one that arrives
+ * after the bell loaded stays, unread. The web sends the newest `createdAt` among the rows it rendered.
+ * Optional so an older client without it keeps the unbounded behavior (every visible notification).
+ * An ISO 8601 UTC datetime, the same form `Notification.createdAt` is serialized in.
+ */
+export const DismissAllNotificationsQuerySchema = z.object({
+  upTo: z.iso.datetime().optional(),
+});
+export type DismissAllNotificationsQuery = z.infer<
+  typeof DismissAllNotificationsQuerySchema
 >;
 
 /**

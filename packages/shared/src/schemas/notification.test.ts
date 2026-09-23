@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DismissAllNotificationsQuerySchema,
   DismissNotificationsResultSchema,
   MarkReadResultSchema,
   NOTIFICATION_TYPES,
@@ -187,6 +188,37 @@ describe("envelope + count shapes", () => {
     expect(
       DismissNotificationsResultSchema.safeParse({ marked: 1, unread: 0 })
         .success,
+    ).toBe(false);
+  });
+});
+
+describe("DismissAllNotificationsQuerySchema (#1309)", () => {
+  test("accepts a createdAt as the API serializes it", () => {
+    expect(
+      DismissAllNotificationsQuerySchema.parse({
+        upTo: "2026-09-23T10:00:00.000Z",
+      }),
+    ).toEqual({ upTo: "2026-09-23T10:00:00.000Z" });
+  });
+
+  test("upTo is optional, so an older client without it still validates", () => {
+    expect(DismissAllNotificationsQuerySchema.parse({})).toEqual({});
+    expect(
+      DismissAllNotificationsQuerySchema.parse({ upTo: undefined }),
+    ).toEqual({});
+  });
+
+  test("rejects anything that is not an ISO datetime", () => {
+    for (const upTo of ["", "yesterday", "2026-09-23", "1727085600000"]) {
+      expect(DismissAllNotificationsQuerySchema.safeParse({ upTo }).success).toBe(
+        false,
+      );
+    }
+    // A repeated query param arrives as an array.
+    expect(
+      DismissAllNotificationsQuerySchema.safeParse({
+        upTo: ["2026-09-23T10:00:00.000Z", "2026-09-23T11:00:00.000Z"],
+      }).success,
     ).toBe(false);
   });
 });
