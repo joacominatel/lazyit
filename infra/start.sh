@@ -113,6 +113,7 @@ MEILI_MASTER_KEY=""
 AUTH_SECRET=""
 WORKFLOW_SECRET_KEY=""
 SMTP_SECRET_KEY=""                # instance SMTP password at-rest key (ADR-0079); own axis, never reuse another key
+AI_SECRET_KEY=""                  # AI provider API key at-rest key (ADR-0097); optional, own axis, never reuse another key
 SESSION_SIGNING_SECRET=""         # local-mode HMAC session key (ADR-0086); generated always, written in local mode
 ZITADEL_ADMIN_PASSWORD=""
 DATABASE_URL_VAL=""
@@ -390,6 +391,17 @@ generate_secrets() {
   fi
   ok "SMTP_SECRET_KEY generated (exactly 64 hex chars — verified)"
 
+  # AI_SECRET_KEY — AES-256-GCM master key for the AI provider API KEY at rest (Settings -> AI, ADR-0097).
+  # Its OWN key axis, like SMTP_SECRET_KEY, and OPTIONAL at boot the same way: without it the API runs
+  # unchanged and only saving a provider API key 409s. The example ships it COMMENTED (so infra/update.sh
+  # never stops an instance that does not use AI); a guided install still mints it so enabling AI later
+  # needs no hand-edit. NOT a DR linchpin: losing it costs one re-entered API key.
+  AI_SECRET_KEY=$(openssl rand -hex 32)
+  if [ "${#AI_SECRET_KEY}" -ne 64 ]; then
+    die "internal error: generated AI_SECRET_KEY is ${#AI_SECRET_KEY} chars, expected exactly 64 (32 hex bytes). Aborting (a wrong length makes every AI provider key save fail with a 409)."
+  fi
+  ok "AI_SECRET_KEY generated (exactly 64 hex chars — verified)"
+
   # SESSION_SIGNING_SECRET — HMAC key the API signs/verifies the first-party local session token with
   # (ADR-0086 §4). Required ONLY in local mode; the boot-config refine demands >= 32 chars and fails loud
   # at boot otherwise (mirrors WORKFLOW_SECRET_KEY). openssl rand -hex 32 -> 64 hex chars. Generated in
@@ -438,6 +450,10 @@ render_env_file() {
   # Same trick for SMTP_SECRET_KEY (ADR-0079): a .env.prod written before this key was generated has no
   # line to rewrite, so append it after the loop. Fresh renders take the loop branch (the example ships it).
   _saw_smtp_key=0
+
+  # And for AI_SECRET_KEY (ADR-0097): the example ships it commented (the loop activates that line), while a
+  # .env.prod written before it has no line at all (appended after the loop).
+  _saw_ai_key=0
 
   # Create the temp file with mode 600 FROM CREATION — BEFORE a single secret is written.
   # A plain `: >"$_tmp"` honours the shell umask (022 -> 644), leaving the full secret set
@@ -523,6 +539,12 @@ render_env_file() {
       "# SMTP_SECRET_KEY="*|SMTP_SECRET_KEY=*)
         _saw_smtp_key=1
         printf 'SMTP_SECRET_KEY=%s\n' "$SMTP_SECRET_KEY" >>"$_tmp" ;;
+      # AI_SECRET_KEY (ADR-0097) — written ACTIVE even though the example ships it commented. On
+      #     --reconfigure the value comes from load_existing_env: an already-present key is PRESERVED
+      #     verbatim (it decrypts the stored provider API key) and one is minted only when absent.
+      "# AI_SECRET_KEY="*|AI_SECRET_KEY=*)
+        _saw_ai_key=1
+        printf 'AI_SECRET_KEY=%s\n' "$AI_SECRET_KEY" >>"$_tmp" ;;
       *) printf '%s\n' "$line" >>"$_tmp" ;;
     esac
   done <"$_template"
@@ -542,6 +564,15 @@ render_env_file() {
     printf '# AES-256-GCM master key for the SMTP password stored in Settings -> Instance -> SMTP. Its OWN\n' >>"$_tmp"
     printf '# key axis. Losing it costs only a re-typed SMTP password (not a DR linchpin).\n' >>"$_tmp"
     printf 'SMTP_SECRET_KEY=%s\n' "$SMTP_SECRET_KEY" >>"$_tmp"
+  fi
+
+  # A template with no AI_SECRET_KEY line (a .env.prod predating ADR-0097): append the key now, with the
+  # value load_existing_env resolved — a preserved hand-added key, or a fresh one. Never regenerated.
+  if [ "$_saw_ai_key" -eq 0 ]; then
+    printf '\n# --- AI provider API key at-rest key (ADR-0097) — added by start.sh ---\n' >>"$_tmp"
+    printf '# AES-256-GCM master key for the provider API key stored in Settings -> AI. Its OWN key axis;\n' >>"$_tmp"
+    printf '# optional at boot. Losing it costs only a re-entered API key (not a DR linchpin).\n' >>"$_tmp"
+    printf 'AI_SECRET_KEY=%s\n' "$AI_SECRET_KEY" >>"$_tmp"
   fi
 
   # BYOI: append explicit OIDC/AUTH client overrides (explicit env always wins over the file).
@@ -624,6 +655,14 @@ render_env_file() {
   else
     [ "${#_ssk}" -eq 64 ] || die "render check failed: SMTP_SECRET_KEY in the file is ${#_ssk} chars, not 64 (32 hex bytes)."
   fi
+  # AI_SECRET_KEY: same rule as SMTP_SECRET_KEY — exactly 64 hex on a fresh render (ours), merely present on
+  # --reconfigure (an operator's hand-added key may use another encoding the API accepts).
+  _aik=$(grep -E '^AI_SECRET_KEY=' "$_tmp" | head -n1 | cut -d= -f2-)
+  if [ "$RECONFIGURE" -eq 1 ]; then
+    [ -n "$_aik" ] || die "render check failed: AI_SECRET_KEY is missing/empty in the rendered file."
+  else
+    [ "${#_aik}" -eq 64 ] || die "render check failed: AI_SECRET_KEY in the file is ${#_aik} chars, not 64 (32 hex bytes)."
+  fi
   if [ "$PG_MODE" = "internal" ]; then
     _du=$(grep -E '^DATABASE_URL=' "$_tmp" | head -n1 | cut -d= -f2-)
     case "$_du" in
@@ -631,7 +670,7 @@ render_env_file() {
       *) die "render check failed: DATABASE_URL password does not match POSTGRES_PASSWORD." ;;
     esac
   fi
-  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, SMTP_SECRET_KEY present, ports numeric, DB password matches)"
+  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, SMTP_SECRET_KEY + AI_SECRET_KEY present, ports numeric, DB password matches)"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "DRY RUN: NOT writing $ENV_FILE and NOT running docker."
@@ -690,6 +729,7 @@ load_existing_env() {
   WORKFLOW_SECRET_KEY=$(_read_env WORKFLOW_SECRET_KEY)
   SESSION_SIGNING_SECRET=$(_read_env SESSION_SIGNING_SECRET)
   SMTP_SECRET_KEY=$(_read_env SMTP_SECRET_KEY)
+  AI_SECRET_KEY=$(_read_env AI_SECRET_KEY)
 
   # Postgres topology from the DATABASE_URL host (internal `@db:5432` vs an external/managed URL).
   case "$DATABASE_URL_VAL" in
@@ -719,6 +759,18 @@ load_existing_env() {
       die "internal error: generated SMTP_SECRET_KEY is ${#SMTP_SECRET_KEY} chars, expected exactly 64 (32 hex bytes)."
     fi
     info "SMTP_SECRET_KEY was absent from $ENV_FILE (file predates ADR-0079 wiring) — a fresh 64-hex key was generated. Nothing was encrypted under it, so nothing is lost; an SMTP password saved earlier could never have been stored."
+  fi
+
+  # AI_SECRET_KEY (ADR-0097) — exactly the SMTP_SECRET_KEY rule: present => PRESERVED verbatim (it decrypts
+  # the stored AI provider API key); absent => nothing can be encrypted under it yet, so a fresh key is free.
+  if [ -n "$AI_SECRET_KEY" ]; then
+    ok "AI_SECRET_KEY found in $ENV_FILE — PRESERVED verbatim (never regenerated; it decrypts the stored AI provider key)"
+  else
+    AI_SECRET_KEY=$(openssl rand -hex 32)
+    if [ "${#AI_SECRET_KEY}" -ne 64 ]; then
+      die "internal error: generated AI_SECRET_KEY is ${#AI_SECRET_KEY} chars, expected exactly 64 (32 hex bytes)."
+    fi
+    info "AI_SECRET_KEY was absent from $ENV_FILE — a fresh 64-hex key was generated (optional; only needed to store an AI provider API key). Nothing was encrypted under it, so nothing is lost."
   fi
 
   ok "preserved secrets loaded (WORKFLOW_SECRET_KEY, AUTH_SECRET, SESSION_SIGNING_SECRET, MEILI_MASTER_KEY, DB creds) — none regenerated"
