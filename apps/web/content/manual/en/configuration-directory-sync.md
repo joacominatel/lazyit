@@ -78,6 +78,9 @@ what happened:
 - **Updated** — existing people whose mapped fields were refreshed.
 - **Offboarded** — people **deactivated** because they had been missing from the directory past the grace
   window. This is a **soft deactivation** (they become inactive, keeping their history), never a hard delete.
+  If a person reappears in a later sync, lazyit reactivates them automatically. On an instance with **local
+  accounts**, a person who had a login is signed out on every device when the sync offboards them, and must
+  sign in again once it reactivates them.
 - **Skipped** — entries left untouched (for example an entry that can't be identified, or one whose email
   collides with a real login account).
 

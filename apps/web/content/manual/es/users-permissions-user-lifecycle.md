@@ -109,6 +109,10 @@ los **activos a devolver** y el **acceso a aplicaciones a revocar** — y luego,
 Todo ocurre junto: si algún paso falla, la baja completa se revierte, de modo que una persona nunca queda
 a medio dar de baja (archivada pero conservando acceso).
 
+**Se cierra su sesión en todas partes.** En una instancia con **cuentas locales**, dar de baja termina las
+sesiones de la persona en todos sus dispositivos a la vez — también aquella en la que marcó **Mantener la
+sesión iniciada**. Desactivarla (desmarcar **Activo** al editarla) hace lo mismo.
+
 **Rota los secretos que pudo leer.** Si la persona era miembro de alguna bóveda de secretos, la
 confirmación lista esas bóvedas (con cuántos secretos tiene cada una) como recordatorio para **rotar esos
 secretos a mano**. Quitar su membresía detiene cualquier lectura *nueva*, pero como ya pudo leer esas
@@ -163,6 +167,9 @@ iniciar sesión.
 
 Los usuarios dados de baja quedan archivados, no eliminados. Para recuperar uno, muestra los usuarios
 archivados en la lista de Usuarios y elige **Restaurar**. Restaurar es solo para administradores.
+
+Restaurar a alguien — o reactivar a quien desactivaste — nunca recupera una sesión anterior: en una
+instancia con **cuentas locales**, la persona debe volver a iniciar sesión.
 
 > Dar de baja (y cualquier desactivación) libera los recursos que tenía una persona pero conserva todo
 > el historial —quién tuvo qué activo y cuándo, y qué acceso tenía— porque lazyit está construido para
