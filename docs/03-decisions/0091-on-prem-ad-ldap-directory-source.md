@@ -3,7 +3,7 @@ title: "ADR-0091: On-prem AD/LDAP as a read-only directory source"
 tags: [adr, directory, ldap, active-directory, users, provisioning, security, data-model]
 status: accepted
 created: 2026-07-19
-updated: 2026-07-19
+updated: 2026-09-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -15,6 +15,10 @@ deciders: [Joaquín Minatel]
 built 2026-07-19 (shared contracts + the `apps/api/src/directory` module + the additive migration + this
 ADR + the dev-`docs/` notes); the Settings → Instance → Directory screen and the public `/help` Manual
 pages ship in the frontend lane per CLAUDE.md #3/#7.
+**Amended** — 2026-09-23 (issue [#1308](https://github.com/joacominatel/lazyit/issues/1308)): the soft
+offboard of an **active** person now bumps `User.sessionEpoch`, revoking their local sessions — the
+reconcile's one sanctioned `sessionEpoch` write (see Hard invariants and
+[[0086-local-authentication-mode]] §8).
 
 ## Context
 
@@ -77,13 +81,23 @@ uniques.
   since" is the person's `directoryAttrs.lastSeenAt` heartbeat (bumped every run they're present), so the
   grace is per-person and a single dropped run can't mass-deactivate the directory. A reappearance clears
   the offboard — but only when *we* set it (a manual deactivation is never auto-reactivated).
+  Offboarding a person who was **active** also bumps `sessionEpoch` (#1308), exactly as a manual
+  deactivation does, so every local session they held — a "keep me signed in" token included — is
+  revoked and does **not** revive when a later run reactivates them; they sign in again. Offboarding an
+  already-inactive person does not bump (their sessions died when they were deactivated), and a person we
+  already offboarded is skipped on every later run, so repeated runs never bump twice. The reactivation
+  itself never writes the epoch. The bump runs whatever the `AUTH_MODE`; outside local mode no token
+  carries the epoch, so it is inert.
 
 ### Hard invariants (enforced in code, asserted by a jest test)
 
 The reconcile **NEVER** changes `role` (stays VIEWER), **NEVER** sets `passwordHash`, **NEVER** sets
 `externalId`, **NEVER** flips `directoryOnly` to `false`, **NEVER** grants a login, and **NEVER**
-hard-deletes. New AD persons are created `directoryOnly` so the first-user→ADMIN bootstrap (which excludes
-`directoryOnly` rows, `jwt-auth.guard.ts`) can never hand ADMIN to an unauthenticated directory row.
+hard-deletes. Its **only** `sessionEpoch` write is the revoking increment on an active→offboarded
+transition (#1308) — never on a create, a refresh, or a reactivation; the jest guard forbids the key on
+every other path. New AD persons are created `directoryOnly` so the first-user→ADMIN bootstrap (which
+excludes `directoryOnly` rows, `jwt-auth.guard.ts`) can never hand ADMIN to an unauthenticated directory
+row.
 
 ### Credential storage
 

@@ -65,8 +65,9 @@ the reverse.
   "keep me signed in" sign-in (`rememberMe`) has **no time-based expiry**. Login and change-password report
   the token's `expiresAt` (`null` for no expiry). Either kind ends when `sessionEpoch` is bumped — sign-out
   (`POST /auth/logout`, which ends the user's sessions on every device), password change or reset, admin
-  reset, **deactivation** (an active→inactive update) and **offboarding** — so reactivating or restoring a
-  user never revives an old session. The guard also refuses an inactive, soft-deleted or `directoryOnly`
+  reset, **deactivation** (an active→inactive update), **offboarding**, and the AD/LDAP sync's **soft
+  offboard** of an active person (#1308) — so reactivating or restoring a user, by hand or by the sync,
+  never revives an old session. The guard also refuses an inactive, soft-deleted or `directoryOnly`
   row on every request.
 - **Authorization (Roles & Permissions v2):** the three roles stay **fixed** —
   `enum Role { ADMIN MEMBER VIEWER }` is unchanged ([[0040-rbac-roles]]) — but what each role *grants*
@@ -121,7 +122,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. The AD/LDAP reconcile ([[0091-on-prem-ad-ldap-directory-source]]) also stashes `mail`/`username` **hints**, the entry's `memberOf` group DNs **inert** (#846), and a `lastSeenAt` heartbeat here. |
 | `directorySource` | `string?` | AD/LDAP directory-source discriminator ([[0091-on-prem-ad-ldap-directory-source]]): `"ad"` for a person reconciled from an on-prem AD/LDAP directory; `null` for a login user or an import-sourced directory person. Mirrors infra `reportingSource` (a string, not a bool) so a second source can coexist additively. |
 | `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
-| `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Cleared if the person reappears in a later sync ([[0091-on-prem-ad-ldap-directory-source]]). |
+| `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Offboarding a person who was active also bumps `sessionEpoch`, revoking their local sessions (#1308). Cleared if the person reappears in a later sync, which reactivates them without restoring any session ([[0091-on-prem-ad-ldap-directory-source]]). |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
 > The read `UserSchema` resolves the manager FK to a **redaction-safe descriptor** —
@@ -200,9 +201,11 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > read-only, subtree-searches, and **upserts** persons keyed on `directorySourceId` (AD `objectGUID`) — via
 > a `setInterval` sweeper and an ADMIN `POST /directory/sync` ("Sync now"). NEW → the PENDING tray (a
 > `directoryOnly` VIEWER); MATCHED → refresh mapped profile fields + `directoryAttrs` (a fixed allowlist);
-> DISAPPEARED past a grace threshold → soft offboard. **Hard invariants:** the sync never changes `role`,
-> never sets `passwordHash`/`externalId`, never flips `directoryOnly`→false, never grants a login, never
-> hard-deletes. `provisionAccount`/`provisionLocalAccount` stay the ONLY login-granting paths.
+> DISAPPEARED past a grace threshold → soft offboard (bumping `sessionEpoch` when the person was active,
+> #1308). **Hard invariants:** the sync never changes `role`, never sets `passwordHash`/`externalId`,
+> never flips `directoryOnly`→false, never grants a login, never hard-deletes, and writes `sessionEpoch`
+> only as that offboard's revoking increment. `provisionAccount`/`provisionLocalAccount` stay the ONLY
+> login-granting paths.
 
 ## Endpoints
 

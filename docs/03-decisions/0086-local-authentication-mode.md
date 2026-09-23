@@ -15,6 +15,8 @@ deciders: [Joaquín Minatel]
 proceeds in phases F1–F4.
 **Amended** — 2026-09-23 (issue #1307): §8 session lifetime — an opt-in "keep me signed in" session with
 no time-based expiry, server-side sign-out, and the web ending a session whose token has expired.
+**Amended** — 2026-09-23 (issue #1308): §8 open item resolved — the directory sync revokes local sessions
+when it offboards an active person.
 **Supersedes** the "no first-party auth" posture of [[0016-auth-strategy-deferred]].
 **Amends** [[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]],
 [[0039-authjs-v5-frontend-oidc]], [[0043-zitadel-source-of-truth]],
@@ -331,11 +333,15 @@ the CEO asked for. A per-device session table stays rejected for the reason §3 
 - **Rotating `SESSION_SIGNING_SECRET`** ends every session on the instance, remember-me included — the
   operator's instance-wide lever (see §4 and the backups runbook).
 
-**Open item.** The directory sync ([[0091-on-prem-ad-ldap-directory-source]]) soft-offboards with
-`isActive = false` and **re-activates automatically** when the person reappears. Its reconcile is barred
-(by a jest invariant) from writing `sessionEpoch`, so it does not bump it. The guard refuses the person
-while inactive; a remember-me token held by an onboarded directory person would come back if they
-reappear. Whether the reconcile may revoke sessions is a separate decision, not taken here.
+**Directory sync — resolved 2026-09-23 (issue #1308, CEO decision).** The directory sync
+([[0091-on-prem-ad-ldap-directory-source]]) soft-offboards with `isActive = false` and **re-activates
+automatically** when the person reappears. It was barred (by a jest invariant) from writing
+`sessionEpoch`, so a remember-me token held by an onboarded directory person revived on reappearance. The
+sync **now bumps `sessionEpoch` on the active→offboarded transition**, matching the manual deactivation
+path. Reactivation does not bump it — the person signs in again — and neither does offboarding an
+already-inactive person or a repeated run over one already offboarded. The bump is not gated on
+`AUTH_MODE`; outside local mode it is inert. The jest invariant still forbids `sessionEpoch` on every
+other reconcile write.
 
 **Web enforcement (`apps/web`).** How the web holds up its half:
 
