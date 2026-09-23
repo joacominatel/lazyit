@@ -3,7 +3,7 @@ title: Prisma Migrations
 tags: [runbook, database]
 status: accepted
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-09-23
 ---
 
 # Runbook — Prisma migrations
@@ -185,7 +185,24 @@ bunx prisma migrate diff \
 Expected after a successful migration: `migrate status` reports the DB is up to date, and the
 `--exit-code` diff prints **"No difference detected."** (exit 0).
 
-## 7. Commit convention — one commit per migration
+## 7. The seed runs on every deploy — keep it seed-once
+
+`prisma db seed` runs after `migrate deploy` on **every** deploy (the `migrate` job's default command),
+against a populated database. Anything it writes must be written **once**, or it will overwrite what
+operators changed since:
+
+- **Reference sets** (the category tables) are created only when their table is empty
+  (`seedCategoriesOnce`, #321).
+- **Default role→permission grants** are applied once per (role, permission) pair, tracked in the
+  `applied_role_permission_defaults` ledger (#1314, [[role-permission]]). To give a new permission a
+  default, add it to the catalog and `DEFAULT_ROLE_PERMISSIONS` in `@lazyit/shared` — **no data
+  migration**; the next deploy grants it once, and an admin can revoke it for good. Never delete ledger
+  rows: that re-grants the default on the next deploy.
+
+Apart from the opt-in dev admin (`SEED_ADMIN_EMAIL`, unset in production), never add a seed write
+that re-asserts a value an operator can edit.
+
+## 8. Commit convention — one commit per migration
 
 A migration is **atomic**: the generated `migration.sql` **and** the `schema.prisma` change are
 meaningless apart, so they go in **one commit** together (the only sanctioned exception to

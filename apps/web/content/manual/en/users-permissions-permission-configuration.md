@@ -59,6 +59,20 @@ Saving replaces the chosen role's permission set as a whole. The change:
   does not have general per-record permissions. The two deliberate exceptions are Knowledge Base
   folders and Secret Manager vaults, where access is scoped to a folder or a vault.
 
+## Your changes survive updates
+
+What you save here stays in place when lazyit is updated. A permission you removed from Member or Viewer
+is not given back by a later update.
+
+When an update adds a **new** permission, each role receives that permission's shipped default **once**,
+on the first update that includes it. After that it behaves like any other permission: if you remove it,
+it stays removed through every later update.
+
+> [!IMPORTANT]
+> Before this behavior shipped, an update could silently give back a default permission you had removed.
+> After the update that introduces it, open this screen once and check that Member and Viewer hold only
+> what you intend. From then on, your changes are kept.
+
 ## Permissions stay inside lazyit
 
 These permissions are **lazyit-only**. They are never written to your identity provider — the IdP

@@ -269,6 +269,22 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+/// The seed-once ledger for the default role→permission grants (issue #1314, ADR-0046 §4 note). A row
+/// means the (role, permission) pair is SETTLED: its default grant from `DEFAULT_ROLE_PERMISSIONS` has
+/// been applied once, or the pair already existed / had been revoked when the ledger was introduced.
+/// The seed runs on every deploy and grants a default pair ONLY when no row exists here, then records
+/// it — so a new catalog permission receives its defaults exactly once, and an admin revocation
+/// (which deletes the `RolePermission` row, never this one) survives every later deploy.
+/// Append-only (ADR-0006): `createdAt` only; nothing updates or deletes these rows.
+model AppliedRolePermissionDefault {
+  role       Role
+  permission String
+  createdAt  DateTime @default(now())
+
+  @@id([role, permission])
+  @@map("applied_role_permission_defaults")
+}
+
 /// Roles & Permissions v2 (ADR-0046, P5) — the append-only audit trail of every per-role permission
 /// edit made through the ADMIN config surface (PUT /config/permissions). One row per permission
 /// GRANTED or REVOKED on a role, so the matrix's full edit history is reconstructable. Auditability
