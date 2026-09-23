@@ -1412,6 +1412,19 @@ export class UsersService {
   }
 
   /**
+   * The last-admin predicate (ADR-0040, SEC-021): true when at least one live, active ADMIN OTHER than
+   * `userId` exists, i.e. removing `userId`'s administrator powers still leaves the instance
+   * administrable. The single definition of "usable admin" — the 409 guard below and the directory-sync
+   * offboard skip (ADR-0091) both call it, so the count is never duplicated.
+   */
+  async hasAnotherActiveAdmin(userId: string): Promise<boolean> {
+    const otherAdmins = await this.prisma.user.count({
+      where: { role: 'ADMIN', isActive: true, id: { not: userId } },
+    });
+    return otherAdmins > 0;
+  }
+
+  /**
    * Throws 409 Conflict if `userId` is the only remaining usable ADMIN. Used before any action that
    * would remove their administrator powers (role demotion, deactivation, offboarding, delete), so a
    * fresh install — or any instance — is never left without an administrator. Counts LIVE and ACTIVE
@@ -1422,10 +1435,7 @@ export class UsersService {
    * for first-user-ADMIN, and strictly safer than locking everyone out.
    */
   private async assertNotLastAdmin(userId: string) {
-    const otherAdmins = await this.prisma.user.count({
-      where: { role: 'ADMIN', isActive: true, id: { not: userId } },
-    });
-    if (otherAdmins === 0) {
+    if (!(await this.hasAnotherActiveAdmin(userId))) {
       throw new ConflictException(
         'Cannot remove the last administrator. Promote another user to ADMIN first.',
       );
