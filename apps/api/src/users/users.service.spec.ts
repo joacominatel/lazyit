@@ -1267,7 +1267,7 @@ describe('UsersService', () => {
         service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(user.count).toHaveBeenCalledWith({
-        where: { role: 'ADMIN', id: { not: 'admin-1' } },
+        where: { role: 'ADMIN', isActive: true, id: { not: 'admin-1' } },
       });
       expect(user.update).not.toHaveBeenCalled();
     });
@@ -1390,6 +1390,119 @@ describe('UsersService', () => {
         userId: 'admin-1',
       });
       expect(tx.user.update).toHaveBeenCalledTimes(1);
+    });
+
+    // SEC-021: an inactive account cannot authenticate, so deactivating an ADMIN strips its
+    // administrator powers exactly like a demotion — and an inactive ADMIN never counts as the admin
+    // that keeps the instance administrable.
+    describe('last-admin guard vs isActive (SEC-021)', () => {
+      // Simulates an instance where one OTHER admin row exists but is deactivated: a count that does not
+      // filter on isActive sees it (1); a count restricted to active admins does not (0).
+      const onlyAnInactiveOtherAdmin = ({
+        where,
+      }: {
+        where: Record<string, unknown>;
+      }) => Promise.resolve(where.isActive === true ? 0 : 1);
+
+      it('refuses to deactivate the LAST active ADMIN (409), including yourself', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockResolvedValue(0); // no other admin at all
+
+        await expect(
+          service.update('admin-1', { isActive: false }, 'admin-1'),
+        ).rejects.toBeInstanceOf(ConflictException);
+        await expect(
+          service.update('admin-1', { isActive: false }, 'actor-99'),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(user.update).not.toHaveBeenCalled();
+      });
+
+      it('allows deactivating an admin when another active admin remains', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockResolvedValue(1);
+        user.update.mockResolvedValue({ id: 'admin-1', isActive: false });
+
+        await service.update('admin-1', { isActive: false }, 'actor-99');
+        expect(user.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('never consults the guard when deactivating a non-admin or re-sending isActive=false', async () => {
+        user.update.mockResolvedValue({ id: 'u' });
+
+        user.findFirst.mockResolvedValue({
+          id: 'member-1',
+          role: 'MEMBER',
+          isActive: true,
+          deletedAt: null,
+        });
+        await service.update('member-1', { isActive: false }, 'actor-99');
+
+        user.findFirst.mockResolvedValue({
+          id: 'admin-2',
+          role: 'ADMIN',
+          isActive: false,
+          deletedAt: null,
+        });
+        await service.update('admin-2', { isActive: false }, 'actor-99');
+
+        expect(user.count).not.toHaveBeenCalled();
+        expect(user.update).toHaveBeenCalledTimes(2);
+      });
+
+      it('refuses to deactivate an admin whose only fellow admin is already inactive (409)', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockImplementation(onlyAnInactiveOtherAdmin);
+
+        await expect(
+          service.update('admin-1', { isActive: false }, 'actor-99'),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(user.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses to demote an admin whose only fellow admin is inactive (409)', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockImplementation(onlyAnInactiveOtherAdmin);
+
+        await expect(
+          service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(user.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses to offboard an admin whose only fellow admin is inactive (409)', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockImplementation(onlyAnInactiveOtherAdmin);
+
+        await expect(
+          service.remove('admin-1', { userId: 'actor-99' }),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(tx.user.update).not.toHaveBeenCalled();
+      });
     });
   });
 
