@@ -87,6 +87,12 @@ ejecución** y un recuento de lo ocurrido:
   reactiva.
 - **Omitidas** — entradas que quedaron sin tocar (por ejemplo una entrada que no se puede identificar, o una
   cuyo correo coincide con una cuenta con inicio de sesión real).
+- **La sincronización nunca da de baja al último administrador activo.** Si el único administrador activo
+  que queda falta en el directorio más allá del margen, lazyit lo mantiene activo hasta que exista otro
+  administrador, para que la instancia nunca quede sin nadie que pueda gestionarla. Se cuenta en
+  **Omitidas**, y el log del servidor registra en cada sincronización una advertencia
+  `directory.offboard_skipped … reason=last-active-admin`. Promueve a otro usuario a administrador y la
+  siguiente sincronización lo dará de baja como siempre.
 
 ## Revisar las personas importadas
 
