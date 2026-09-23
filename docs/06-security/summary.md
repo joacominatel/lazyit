@@ -100,7 +100,8 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 3. **SEC-011 ✅ Closed.** Moved to `closed/` (SA coarse-permission escalation fixed).
 4. **SEC-031 ✅ Closed.** Moved to `closed/` (assignment release TOCTOU fixed).
 5. **SEC-021 ✅ Closed.** Moved to `closed/` (deactivating the last active ADMIN now 409s, and the
-   last-admin guard counts only active admins).
+   last-admin guard counts only active admins; the directory sync skips the last active ADMIN instead
+   of offboarding them).
 6. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
    A recurring pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach
    nested relations, FK guards don't check for a *live* parent, and `SetNull` only fires on
