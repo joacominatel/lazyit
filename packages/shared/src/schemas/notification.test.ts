@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DismissNotificationsResultSchema,
   MarkReadResultSchema,
   NOTIFICATION_TYPES,
   NotificationPageSchema,
@@ -165,6 +166,27 @@ describe("envelope + count shapes", () => {
     ).toBe(true);
     expect(
       MarkReadResultSchema.safeParse({ marked: -1, unread: 0 }).success,
+    ).toBe(false);
+  });
+
+  test("DismissNotificationsResultSchema carries dismissed + the fresh unread count", () => {
+    expect(
+      DismissNotificationsResultSchema.safeParse({ dismissed: 3, unread: 0 })
+        .success,
+    ).toBe(true);
+    // Idempotent / invisible id: dismissed: 0 is a valid, non-error result.
+    expect(
+      DismissNotificationsResultSchema.safeParse({ dismissed: 0, unread: 2 })
+        .success,
+    ).toBe(true);
+    expect(
+      DismissNotificationsResultSchema.safeParse({ dismissed: -1, unread: 0 })
+        .success,
+    ).toBe(false);
+    // The mark-read field name is NOT accepted in place of `dismissed`.
+    expect(
+      DismissNotificationsResultSchema.safeParse({ marked: 1, unread: 0 })
+        .success,
     ).toBe(false);
   });
 });
