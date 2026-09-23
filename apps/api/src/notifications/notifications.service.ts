@@ -305,12 +305,32 @@ export class NotificationsService {
    * every id with no read row yet; `updateMany(dismissedAt: null)` then stamps the ids that already had
    * one (keeping their `readAt`) — including a row a concurrent mark-read inserted between the two
    * statements. Returns how many were newly dismissed + the fresh unread count.
+   *
+   * A racing retention sweep can delete a target between the read and the insert: the insert then fails
+   * the FK (P2003) and the transaction rolls back whole. As in {@link dismiss}, a pruned row is a no-op,
+   * not an error — the pass is retried once against a fresh target list, which no longer holds it.
    */
   async dismissAll(
     viewer: NotificationViewer,
     upTo?: Date,
   ): Promise<DismissNotificationsResult> {
     const where = await this.visibilityWhere(viewer);
+    try {
+      return await this.dismissAllOnce(viewer, where, upTo);
+    } catch (err) {
+      if (!this.isForeignKeyViolation(err)) {
+        throw err;
+      }
+      return this.dismissAllOnce(viewer, where, upTo);
+    }
+  }
+
+  /** One {@link dismissAll} pass: read the targets, then insert-then-stamp them in one transaction. */
+  private async dismissAllOnce(
+    viewer: NotificationViewer,
+    where: Prisma.NotificationWhereInput,
+    upTo: Date | undefined,
+  ): Promise<DismissNotificationsResult> {
     const targets = await this.prisma.notification.findMany({
       where: {
         AND: [
@@ -481,6 +501,14 @@ export class NotificationsService {
     return (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === 'P2002'
+    );
+  }
+
+  /** True when a read-join insert hit the FK to a notification a racing retention sweep removed. */
+  private isForeignKeyViolation(err: unknown): boolean {
+    return (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2003'
     );
   }
 

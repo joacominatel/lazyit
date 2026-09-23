@@ -567,6 +567,40 @@ describe('NotificationsService — per-user dismiss (#1309)', () => {
       expect(await ids(ADMIN_A_VIEWER)).toEqual([]);
     });
 
+    it('a racing retention delete (FK violation) is retried once without the pruned row, and the rest are dismissed', async () => {
+      // The first target read still sees a row the sweep then removes; the insert hits the FK (P2003).
+      // It is listed first so the double fails before writing anything, as the rolled-back transaction would.
+      const findMany = client.notification.findMany;
+      jest
+        .spyOn(client.notification, 'findMany')
+        .mockImplementationOnce(async (args) => [
+          { id: 'pruned' },
+          ...((await findMany(args)) as { id: string }[]),
+        ]);
+
+      const result = await service.dismissAll(ADMIN_A_VIEWER);
+
+      expect(result).toEqual({ dismissed: 3, unread: 0 });
+      expect(await ids(ADMIN_A_VIEWER)).toEqual([]);
+      expect(db.reads.some((r) => r.notificationId === 'pruned')).toBe(false);
+    });
+
+    it('retries a racing retention delete only once — a second FK violation propagates', async () => {
+      const findMany = client.notification.findMany;
+      const withPruned = async (args: Parameters<typeof findMany>[0]) => [
+        { id: 'pruned' },
+        ...((await findMany(args)) as { id: string }[]),
+      ];
+      jest
+        .spyOn(client.notification, 'findMany')
+        .mockImplementationOnce(withPruned)
+        .mockImplementationOnce(withPruned);
+
+      await expect(service.dismissAll(ADMIN_A_VIEWER)).rejects.toMatchObject({
+        code: 'P2003',
+      });
+    });
+
     it('is idempotent: with nothing left to dismiss it reports 0 and writes nothing', async () => {
       await service.dismissAll(ADMIN_A_VIEWER);
       const readsBefore = db.reads.map((r) => ({ ...r }));
