@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-20
+updated: 2026-09-23
 ---
 
 # User
@@ -60,7 +60,14 @@ the reverse.
   and `POST /auth/reset-password` (consumes the token, sets the new password, bumps the epoch, invalidates
   sibling tokens). A `mustChangePassword=true` user is **walled off** from every non-exempt route with a
   `403 { code: 'PASSWORD_CHANGE_REQUIRED' }` until they change it (exempt: change-password, `GET /users/me`,
-  public routes).
+  `POST /auth/logout`, public routes).
+  **Session lifetime (local mode, [[0086-local-authentication-mode]] §8):** a default sign-in lasts 12h; a
+  "keep me signed in" sign-in (`rememberMe`) has **no time-based expiry**. Login and change-password report
+  the token's `expiresAt` (`null` for no expiry). Either kind ends when `sessionEpoch` is bumped — sign-out
+  (`POST /auth/logout`, which ends the user's sessions on every device), password change or reset, admin
+  reset, **deactivation** (an active→inactive update) and **offboarding** — so reactivating or restoring a
+  user never revives an old session. The guard also refuses an inactive, soft-deleted or `directoryOnly`
+  row on every request.
 - **Authorization (Roles & Permissions v2):** the three roles stay **fixed** —
   `enum Role { ADMIN MEMBER VIEWER }` is unchanged ([[0040-rbac-roles]]) — but what each role *grants*
   is now a configurable set of **fine-grained permissions** ([[0046-roles-permissions-v2]]). A privilege
