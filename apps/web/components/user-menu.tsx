@@ -7,7 +7,6 @@ import {
   UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
-import { signOut } from "next-auth/react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useSecretSession } from "@/app/(app)/secrets/_components/secret-session";
@@ -24,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { avatarColorFor } from "@/lib/avatar-color";
+import { signOutAndRevoke } from "@/lib/auth/sign-out";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 
@@ -74,13 +74,9 @@ export function UserMenu() {
     // sign-out, or a `signOut` that errors before navigating, can never leave the unlocked private key
     // and cached DEKs resident in memory (notably on shared workstations). Safe to call when locked.
     lock();
-    // #1052: sign out WITHOUT letting Auth.js follow the server-resolved absolute URL, then navigate
-    // client-side to a RELATIVE path (mirrors the local login's `router.push`). In host-agnostic LAN
-    // mode (AUTH_URL unset) the server origin is the Next standalone bind host `0.0.0.0`, so a
-    // `callbackUrl` redirect lands on `http://0.0.0.0:3000/login`. A relative navigation stays on the
-    // current LAN host and remains correct with a pinned origin and behind Caddy/TLS.
-    await signOut({ redirect: false });
-    window.location.assign("/login");
+    // Revoke the session server-side (#1307 — in local mode this signs the user out on every device),
+    // then drop the cookie and navigate to a RELATIVE /login (#1052). See signOutAndRevoke.
+    await signOutAndRevoke();
   }
 
   return (
