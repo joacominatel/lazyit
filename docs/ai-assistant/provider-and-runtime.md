@@ -408,7 +408,8 @@ fallback for replay. A Valkey Streams implementation replaces it only when the A
 > builder lives in `ai/prompt/` (shared with the MCP `instructions` and the skill); the `ChatModelPort`,
 > `RunEventBus` and settings-reader ports are declared up front in `ai/core/ports/` so the provider,
 > runtime and settings units can run in parallel; and the principal re-load (`principal-context.ts`)
-> becomes an `auth/principal-loader.service.ts` shared with the delegated-identity branch.
+> becomes an `auth/principal-loader.service.ts` shared with the delegated-identity branch (built by the
+> core unit: `loadHuman(userId, sessionEpoch)`, `loadServiceAccount(id)`).
 
 ```
 apps/api/src/ai/

@@ -65,7 +65,9 @@ Authorization and principal:
 - **[R5]** `JwtAuthGuard` resolves the principal DB-first on **every** request. Local mode re-loads the
   live user row and rejects on `sessionEpoch` mismatch, `!isActive` or `directoryOnly`. The SA branch
   runs first and rejects revoked, inactive or expired accounts (`auth/jwt-auth.guard.ts`, `handleLocal`,
-  `handleServiceAccount`).
+  `handleServiceAccount`). Since the core unit, both re-loads live in `auth/principal-loader.service.ts`
+  and the SA bearer verification in `auth/service-account-authenticator.ts`, shared with the delegated
+  branch and `/mcp`.
 
 Controllers, services and validation:
 
@@ -494,22 +496,33 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 
 ### 8.1 Layout
 
-All under `apps/api/src/ai/` (backend lane):
+All under `apps/api/src/ai/` (backend lane). As built by the core unit (W1-C, #1315):
 
 - `core/`
-  - `ai-core.module.ts`
-  - `tool-descriptor.ts` — the types
-  - `tool-registry.ts` — collects `ALL_TOOLSETS`; compiles JSON Schemas once at boot
+  - `ai-core.module.ts` — provides and exports the registry, dispatcher, executor and `AiToolService`
+  - `tool-descriptor.ts` — the types (`AiToolDescriptor`, `AiToolset`, `AiExecutionContext`,
+    `AiToolRuntime`, `RegisteredAiTool`, `AiToolListing`) and the `bind` / `defineTool` / `unexposed` helpers
+  - `route-metadata.ts` — reads the route, permission, guard, interceptor and parameter metadata Nest
+    itself routes by
+  - `boot-validation.ts` — the fail-loud checks of §8.3 (`validateToolsets`)
+  - `exclusions.ts` — the structural exclusions (INV-AI-14), by route prefix and by handler
+  - `tool-registry.ts` — validates `ALL_TOOLSETS` at boot and resolves every binding against the running
+    application
   - `tool-dispatcher.ts` — the C3 bridge
-  - `tool-executor.ts` — invoke / propose / approve / reject
+  - `tool-executor.ts` — validate, run inside the invocation context, shape the result; `preview`
+  - `ai-tool.service.ts` — the façade: `list` and `invoke`
   - `invocation-context.ts` — AsyncLocalStorage
-  - `error-mapper.ts` — reuses the `PrismaExceptionFilter` mapping
-  - `result-shaper.ts` — projection, truncation, untrusted wrapping
-  - `reference-resolver.ts`
-  - `action-log.service.ts`
+  - `error-mapper.ts` — the HTTP-status and `PrismaExceptionFilter` mapping, as tool error codes
+  - `result-shaper.ts` — call kinds, truncation, `untrusted()` wrapping
+  - `ports/` — `chat-model.port.ts`, `run-event-bus.port.ts`, `ai-settings.port.ts`
+  - Not built yet: `reference-resolver.ts`, `action-log.service.ts`, and `propose` / `approve` / `reject`
+    (§9). Until the ledger-backed write path exists, `invoke` refuses every write on every channel.
 - `tools/index.ts` — imports every per-domain file (pre-wired once)
-- `tools/<domain>.tools.ts` — each exports `tools: AiToolDescriptor[]` and
-  `unexposed: UnexposedHandler[]` (handler + reason)
+- `tools/<domain>.tools.ts` — each exports an `AiToolset`: `tools` and `unexposed` (handlers + reason).
+  `context.tools.ts` holds the reference tools (`session_context`, `lazyit_search`; `navigate_to` is not
+  built yet);
+  `platform.tools.ts` lists the surfaces no domain owns (authentication, instance configuration, the
+  Secret Manager, Service Account management, the Migrator, the workflow engine, the probes)
 - `prompt/` — domain primer and system-prompt builder (§12)
 - channel surfaces — reconciled in [[ai-assistant/_synthesis|the synthesis]] §5 (R5): chat and headless
   live in `ai/conversations/` and `ai/runs/`; MCP is its own module at `apps/api/src/mcp/`, and the OAuth
@@ -526,9 +539,11 @@ A tool declares (R4):
 - `run(input, rt)`
 - `preview(input, rt)` — mandatory for `write` and `elevated`; server-resolved, never model prose
 
-The descriptor does **not** hand-declare permissions. Its `permission` (an R4 field) is derived at boot
-from the primary binding's `@RequirePermission` metadata and exposed on the manifest, so it cannot drift
-from the route. The
+The descriptor does **not** hand-declare permissions. Its permission (an R4 field) is derived at boot
+from the primary binding's `@RequirePermission` metadata and exposed on the listing, so it cannot drift
+from the route. It is a list: a route may require several permissions (AND), or none — an ungated route
+admits any authenticated human and refuses a Service Account (INV-8, INV-SA-2), and the listing filters
+it the same way. The
 only way to execute is `rt.call(Controller, 'method', { params, query, body })`, which:
 
 1. rejects any handler not listed in `bindings`;
@@ -541,16 +556,24 @@ only way to execute is `rt.call(Controller, 'method', { params, query, body })`,
 ### 8.3 Boot-time registry validation (fail loud)
 
 Every binding must:
-- be a real route (`PATH_METADATA`/`METHOD_METADATA` present);
-- have no `@Res`/`@Next`/`@UploadedFile` params [R19];
+- be a real route (`PATH_METADATA`/`METHOD_METADATA` present) on a controller the application registers
+  (resolved at boot; a request-scoped controller is refused);
+- not be `@Public()` — a tool always acts as a principal;
+- have no `@Res`/`@Next`/`@UploadedFile`/raw-body/session params and no interceptor (the upload
+  handlers) [R19];
 - have only allowlisted guards. `ServicePrincipalForbiddenGuard`, `HumanOnlyGuard` and
-  `ServiceOnlyGuard` are allowed; rate-limit guards keyed by IP are not.
+  `ServiceOnlyGuard` are allowed; rate-limit guards keyed by IP are not;
+- not be a structural exclusion (`core/exclusions.ts`): the `secret-manager`, `secret-vaults`,
+  `secret-fetch`, `workflow-secrets`, `auth`, `config/ai`, `ai`, `oauth`, `mcp` and `.well-known` route
+  prefixes, and the cleartext-credential handlers (Service Account token create/rotate,
+  `provision-local-account`, the admin password reset).
 
 In addition:
 - every `input` must convert with `z.toJSONSchema(input, { io: 'input', unrepresentable: 'throw' })`;
 - names must be unique and match `^[a-z][a-z0-9_]{0,39}$` (R4);
 - a `write` or `elevated` tool without `preview` fails;
-- a nesting-depth cap applies to tool arguments until SEC-072/SEC-032 close (prerequisite).
+- a nesting-depth cap applies to tool arguments until SEC-072/SEC-032 close (prerequisite) — both closed
+  before the core unit, so no separate cap is applied;
 - a controller handler neither bound nor listed in some `unexposed` fails the **coverage test** (not
   boot). This keeps "most functions" honest and forces a decision for every new endpoint.
 
@@ -570,15 +593,19 @@ In addition:
   Order is deterministic.
 - `invoke(name, input, ctx)` → `AiToolResult`. Reads on every channel; writes **only** when
   `ctx.channel ∈ {mcp, headless}`. **The executor refuses a chat-channel write outside the approve path**,
-  so a chat-loop bug cannot skip confirmation.
+  so a chat-loop bug cannot skip confirmation. As built by the core unit, `invoke` refuses writes on
+  every channel (`NOT_AVAILABLE`) until the `AiActionLog`-backed write path lands; there is no write tool
+  yet.
 - `propose(name, input, ctx)` → `AiPendingAction` (chat writes, §9).
 - `approve(id, ctx)` / `reject(id, ctx)`.
 
 Per-call AI-specific checks, in addition to the Nest pipeline:
+- the principal is re-loaded from the database (`PrincipalLoaderService`) — a revoked identity is refused;
 - `ai:use` (chat, headless) or `ai:connect` (MCP) is held (re-checked per call);
 - the channel is allowed;
 - the class is within the ceiling;
-- a per-principal rate limit [E2] (in-memory token bucket; lazyit runs one API instance per install).
+- a per-principal rate limit [E2] (in-memory token bucket; lazyit runs one API instance per install) —
+  not in the core unit; the runtime and `/mcp` apply their limits before calling `invoke`.
 
 Mapping per channel:
 - **Chat loop:** read → `invoke`; write → `propose`, and the run pauses as `AWAITING_APPROVAL`.
@@ -979,13 +1006,11 @@ the primer):
 
 ```ts
 export interface AiExecutionContext {
-  principal: Principal;                         // apps/api/src/auth/principal.ts, from the authenticated request
+  identity: DelegatedIdentity;                  // ids only — re-loaded DB-first on every call
   channel: AiChannel;
   conversationId?: string; runId?: string;
-  mcp?: { grantId: string; clientId: string; clientName: string; scopes: readonly string[] };
-  ceiling?: { classes: readonly AiToolClass[] }; // MCP scope (R7) or the SA's AI access setting
-  sessionEpoch?: number;                        // human chat: logout kills in-flight calls
-  locale?: "en" | "es";
+  mcp?: { grantId: string; clientId: string };
+  ceiling?: readonly AiToolClass[];             // MCP scope (R7) or the SA's AI access setting
 }
 
 export interface HandlerRef<C = unknown> { controller: Type<C>; method: keyof C & string }
@@ -995,7 +1020,7 @@ export interface AiToolRuntime {
   readonly ctx: Readonly<AiExecutionContext & { invocationId: string }>;
   call<C, M extends keyof C & string>(controller: Type<C>, method: M, req?: HttpShape):
     Promise<Awaited<ReturnType<Extract<C[M], (...a: never[]) => unknown>>>>; // full Nest guard+pipe pipeline
-  resolve: ReferenceResolver; // id|tag|serial|email|username|slug|name → id, via bound read handlers
+  // resolve: ReferenceResolver — not built yet (id|tag|serial|email|… → id via bound read handlers)
 }
 
 export interface AiToolDescriptor<S extends z.ZodType = z.ZodType, D = unknown> {
@@ -1011,22 +1036,27 @@ export interface AiToolDescriptor<S extends z.ZodType = z.ZodType, D = unknown> 
       precondition?: { entity: AiEntityRef; updatedAt: string } }>; // required for write and elevated
 }
 
-export interface AiToolManifest { name: string; title: string; description: string;
-  inputSchema: Record<string, unknown>; class: AiToolClass; permission: Permission;
+// API-internal as built: `permissions` is a list — a route may require several (AND) or none (an
+// ungated route: any authenticated human, never a Service Account). The shared wire `AiToolManifestSchema`
+// still carries a single `permission`; the channel that serializes the listing (MCP, the skill) needs it
+// reconciled.
+export interface AiToolListing { name: string; title: string; description: string;
+  inputSchema: Record<string, unknown>; class: AiToolClass; permissions: readonly Permission[];
   annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } }
 
 export interface AiToolService {                 // the only façade channels may use
-  list(ctx: AiExecutionContext): Promise<AiToolManifest[]>;
+  list(ctx: AiExecutionContext): Promise<AiToolListing[]>;
   invoke(name: string, input: unknown, ctx: AiExecutionContext): Promise<AiToolResult>; // chat writes refused
   propose(name: string, input: unknown, ctx: AiExecutionContext): Promise<AiPendingAction>;
   approve(id: string, ctx: AiExecutionContext, stepUp?: { password: string }): Promise<AiPendingAction>;
   reject(id: string, ctx: AiExecutionContext, reason?: string): Promise<AiPendingAction>;
 }
 
-// apps/api/src/auth/delegated-identity.ts — only the dispatcher sets it
-export const DELEGATED_IDENTITY: unique symbol;
+// apps/api/src/auth/delegated-identity.ts — the symbol itself is NOT exported: only
+// attachDelegatedIdentity (the dispatcher) and hasDelegatedIdentity/readDelegatedIdentity (the guard)
+// touch it, and a spec fails if any other production file value-imports the module.
 export type DelegatedIdentity =
-  | { kind: "human"; userId: string; sessionEpoch?: number }
+  | { kind: "human"; userId: string; sessionEpoch: number } // required: the chat session's or the grant's
   | { kind: "service"; serviceAccountId: string };
 ```
 
@@ -1037,16 +1067,28 @@ Rules every channel follows:
 - The skill and the MCP `instructions` are generated from `LAZYIT_DOMAIN_PRIMER`.
 - No channel calls domain services directly for AI purposes.
 
-## 17. Assumptions to verify in the core unit (spike tests)
+## 17. Assumptions verified in the core unit
 
-- **A1.** `ExternalContextCreator` runs `APP_GUARD` global guards and the global `APP_PIPE` for handlers
-  invoked through it. This is how `@nestjs/graphql` behaves; not yet tested here.
-- **A2.** Custom `createParamDecorator` decorators (`@CurrentPrincipal`) resolve from the synthetic request
-  when `contextType` is `'http'`.
-- **A3.** Prisma interactive transactions keep the AsyncLocalStorage context (standard Node behavior).
-- **A4.** nestjs-zod DTO classes expose `.schema`, which the parity tests would read.
-- **A5.** Revoking a grant and offboarding a user fire the workflow outbox (external deprovisioning).
-  Inferred from the `app.module.ts` comment and the users clone description, not from tracing the code.
+The core unit (W1-C, #1315) verified these against NestJS 12.0.1; `ai/core/tool-route-parity.spec.ts`
+pins them.
+
+- **A1 — holds, with one caveat the dispatcher handles.** `ExternalContextCreator` runs the `APP_GUARD`
+  global guards and the global `APP_PIPE` for a handler invoked through it. **Caveat:** it finds the
+  handler's host module by scanning module *providers*; a controller is not a provider, so it falls back
+  to no module and **silently drops every guard and pipe referenced by class** — `@UseGuards(
+  ServicePrincipalForbiddenGuard)`, `@Param('id', ParseUUIDPipe)` — because those resolve from the host
+  module's injectables. The dispatcher finds the controller's module in `ModulesContainer` itself and pins
+  that key (an own `getContextModuleKey` on a per-handler object whose prototype is the injected creator).
+  Without the pin, 10 of the parity cases fail (Service Accounts pass `ServicePrincipalForbiddenGuard` and
+  `HumanOnlyGuard`, humans pass `ServiceOnlyGuard`, a malformed uuid reaches the handler).
+- **A2 — holds.** `createParamDecorator` decorators (`@CurrentPrincipal`, `@CurrentUser`) resolve from the
+  synthetic request with `contextType 'http'`.
+- **A3 — holds for the async flow the history writers run in.** The stamp survives awaits, a deferred
+  callback and a transaction-style callback (`*.ai-invocation.spec.ts`); Prisma's interactive transaction
+  invokes its callback inside the caller's async context.
+- **A4 — not needed.** The parity golden compares outcomes over real HTTP and in-process dispatch instead
+  of reading DTO schemas.
+- **A5** — unchanged; it concerns the write tools.
 
 ## 18. Risks
 
@@ -1058,8 +1100,9 @@ Rules every channel follows:
   documentation in the Manual.
 - **`UNKNOWN_OUTCOME` after a crash.** Only asset and user writes can be verified through the
   `aiInvocationId` stamp.
-- **`ExternalContextCreator` dependency.** Nest major upgrades could change it. The boot test and the
-  spike test cover this.
+- **`ExternalContextCreator` dependency.** Nest major upgrades could change it — including the host-module
+  lookup the dispatcher pins (§17 A1). The boot resolution and the route-parity spec cover this: a change
+  that drops a class-referenced guard or pipe fails the parity golden.
 
 ## 19. Implementation units (superseded)
 

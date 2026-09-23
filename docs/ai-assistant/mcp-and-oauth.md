@@ -63,7 +63,10 @@ updated: 2026-09-23
   `JwtAuthGuard` → `MustChangePasswordGuard` → `RolesGuard`.
 - **[R] Service-account branch runs first, in every mode.** `apps/api/src/auth/jwt-auth.guard.ts`
   `canActivate` routes a `Bearer lzit_sa_…` to `handleServiceAccount` (lookup incl. soft-deleted,
-  constant-time compare, generic 401), then dispatches `shim | local | oidc` by `AUTH_MODE`.
+  constant-time compare, generic 401), then dispatches `shim | local | oidc` by `AUTH_MODE`. The
+  verification itself is `ServiceAccountAuthenticator` (`apps/api/src/auth/service-account-authenticator.ts`,
+  extracted by the core unit, R10) — the `/mcp` guard reuses it. Only the in-process delegated-identity
+  branch (R1) runs before it.
 - **[R] Local human auth is DB-first with an epoch.** `JwtAuthGuard.handleLocal` verifies the HS256 session
   via `LocalCredentialService.verifySession` (`apps/api/src/auth/local/local-credential.service.ts`,
   hand-rolled on `node:crypto`, alg-pinned), then re-loads the `User` every request and rejects on
