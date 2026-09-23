@@ -27,6 +27,30 @@ including read-only (**Viewer**) accounts — you never need elevated permission
 - **Past access** — a history of applications you *used* to have access to, showing when each grant
   started and when it was revoked. This section appears only if you have any past access.
 
+## Signing in and out
+
+**Signing out.** Click your **avatar** in the top-right corner and choose **Sign out**.
+
+If your instance uses **local accounts** (a lazyit email/username and password):
+
+- **A normal sign-in lasts 12 hours.** After that, lazyit takes you back to the sign-in screen and you
+  sign in again. Anything you opened in the meantime (a bookmark, a link) waits behind the sign-in
+  screen and opens once you're back in.
+- **Keep me signed in.** Tick **Keep me signed in** on the sign-in screen and your session **does not
+  expire** — you stay signed in on that browser until you sign out. It is off by default and you choose
+  it on every sign-in.
+- **Only use it on a personal device you trust.** Because the session never times out, anyone who can
+  use that browser is signed in as you until you sign out. Never tick it on a shared, public or borrowed
+  computer. The sign-in screen shows this warning when you tick the box.
+- **Signing out ends your sessions on every device.** Choosing **Sign out** signs you out everywhere you
+  are signed in — this browser, your other computers and your phone — including sessions kept with
+  **Keep me signed in**. That is also how you end a session you left open somewhere else.
+- A kept session also ends when you change your password (other devices only), when an administrator
+  resets your password, or when your account is deactivated or offboarded.
+
+> **On single sign-on (SSO)**, there is no **Keep me signed in** box — how long you stay signed in is
+> governed by your identity provider, and signing out ends your session in this browser.
+
 ## Changing your password
 
 If your instance uses **local accounts** (a lazyit email/username and password, rather than your

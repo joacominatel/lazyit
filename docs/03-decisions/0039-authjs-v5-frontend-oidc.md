@@ -3,7 +3,7 @@ title: "ADR-0039: Auth.js v5 for frontend OIDC login"
 tags: [adr, auth, frontend, oidc]
 status: accepted
 created: 2026-05-27
-updated: 2026-06-23
+updated: 2026-09-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -18,6 +18,11 @@ accepted — 2026-05-27. Implements Phase 3 of the auth plan outlined in
 session cookie's `Secure` flag is keyed to the real origin scheme (`AUTH_URL`/`NEXTAUTH_URL`/`WEB_ORIGIN`)
 instead of `NODE_ENV`, so a prod-over-HTTP LAN deploy doesn't silently drop the cookie. The OIDC flow
 described below is unchanged.
+**Amended by [[0086-local-authentication-mode]] §8 (issue #1307):** an access token that has expired and
+cannot be renewed (no refresh token, or the refresh failed) now **ends the session server-side** — the `jwt`
+callback returns `null` — instead of riding to a client-side 401 (§10). In local mode the session cookie
+lives 400 days (the browser cap) so a "keep me signed in" session outlives it; OIDC keeps Auth.js's 30-day
+default.
 
 ## Context
 
@@ -247,8 +252,9 @@ OIDC provider. No new dependency — plain `fetch` against the IdP token endpoin
 - **Docker.** The refresh discovery + token POST run server-side through the same
   external→internal origin rewrite (`AUTH_INTERNAL_ISSUER`) used by the rest of the OIDC flow,
   so the token endpoint is reachable from inside the container network.
-- **Graceful degradation + fallback (the safety net is kept).** Three paths fall back to the
-  issue-#657 global-401 handler rather than crashing the session:
+- **Graceful degradation + fallback (the safety net is kept).** *Superseded in part by the #1307
+  amendment below.* Three paths fall back to the issue-#657 global-401 handler rather than crashing the
+  session:
   - the IdP returned **no `refresh_token`** (no `offline_access`) → the stale token rides until
     it 401s;
   - the IdP returned **no `expires_at`** → refresh can't be timed; the token behaves as pre-#658;
@@ -266,6 +272,17 @@ OIDC provider. No new dependency — plain `fetch` against the IdP token endpoin
   `/api/auth/session` serially, so this is rare; when it does happen the #657 fallback recovers
   it. A server-side session store would eliminate it but was rejected in this ADR (no session DB)
   — not worth a lock for a 5–20-person single-org app.
+- **Amendment — issue #1307 (2026-09-23).** Carrying a dead Bearer to the client let `/login` bounce a
+  still-valid cookie back into the app, a reload loop ([[0086-local-authentication-mode]] §8). Now, once
+  the access token has **actually expired** and cannot be renewed — no `refresh_token`, or the refresh
+  failed — the `jwt` callback returns `null`: Auth.js drops the cookie and `proxy.ts` redirects to `/login`
+  before anything renders. A refresh that fails while the token is still inside the 30s skew window keeps
+  the valid token, sets `error`, and retries on the next read. A token with **no `expires_at`** is still
+  never ended by time. The #657 handler stays as the safety net for a token the API rejects early; it now
+  lands on `/login?expired=1`, which `/login` never bounces back into the app. The successful-refresh
+  path is unchanged. In the concurrent-refresh race above, a losing request after expiry now ends the
+  session instead of setting `error` — the cost of this amendment. Before, the same race usually ended in
+  a #657 sign-out one request later.
 - **Not user-facing.** The session simply stays alive silently; there is no new setting or UI.
   Per CLAUDE.md #7 this requires **no Manual change** (the public `/help` surface is unchanged).
 

@@ -63,6 +63,12 @@ After you sign in, you hold a session in your browser. Signing out ends it. Day-
 is what proves who you are to lazyit; the heavy lifting of *proving identity* already happened at your
 provider.
 
+On an instance with **local accounts**, a session lasts 12 hours unless the person ticks **Keep me
+signed in**, which keeps it until they sign out. Such a session has no time limit behind it, so it is
+meant for personal, trusted devices only. Signing out ends a person's sessions on **every** device, and
+so do a password change or reset, deactivation and offboarding. See
+[Your profile](/help/getting-started-your-profile) for what people see.
+
 The **Secret Manager** has its own, separate unlock on top of your sign-in: it is end-to-end
 encrypted, so even when you're signed in you must unlock it with a password that is specific to the
 Secret Manager and never leaves your browser. See [Secret Manager](/help/secret-manager) for how that

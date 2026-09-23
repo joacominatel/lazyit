@@ -337,6 +337,36 @@ the CEO asked for. A per-device session table stays rejected for the reason §3 
 while inactive; a remember-me token held by an onboarded directory person would come back if they
 reappear. Whether the reconcile may revoke sessions is a separate decision, not taken here.
 
+**Web enforcement (`apps/web`).** How the web holds up its half:
+
+- **Ending a dead session.** A credentials sign-in records `expiresAt` on the Auth.js JWT (`token.expiresAt`,
+  the field the OIDC refresh cycle already uses). Once it has passed, the `jwt` callback returns `null`;
+  Auth.js then drops the cookie and every `auth()` — `proxy.ts`, the `(app)` layout, `/login` — reads "no
+  session", so the visitor is sent to `/login?callbackUrl=…` before anything renders. A remember-me session
+  records no expiry and is never ended by time. The change-password flow passes the re-minted token's
+  `expiresAt` through `useSession().update(...)`. The same rule ends an **OIDC** session whose access token
+  has expired and cannot be renewed (no refresh token, or the refresh failed) — see
+  [[0039-authjs-v5-frontend-oidc]] §10.
+- **Cookie lifetime.** In local mode `session.maxAge` is **400 days**, the ceiling browsers put on a cookie,
+  so the cookie outlives a remember-me session. Under the JWT strategy Auth.js re-issues the cookie with a
+  fresh `maxAge` on every session read, so an active user's cookie never lapses (`updateAge` applies only
+  to database sessions). The 12h of a default session is enforced by the `jwt` callback, not the cookie. An
+  OIDC deploy (an issuer is configured; the installer refuses one in local mode) keeps Auth.js's 30-day
+  default, unchanged.
+- **No bounce loop on a rejected token.** A token the API rejects while the cookie still reads as valid —
+  revoked from another device, a cookie issued before #1307, a clock disagreement — still reaches the
+  global 401 handler. It signs out and lands on `/login?expired=1`, and `/login` never bounces a visitor
+  carrying that marker back into the app, so a lingering or re-set cookie cannot restart the loop.
+- **Where sign-out revokes.** The user menu's **Sign out** calls `POST /auth/logout` with the session's
+  Bearer, then drops the cookie. The call is bounded by a short timeout and any failure (a `401` included)
+  falls through to the local sign-out, so the API can never keep a user signed in. The global 401 handler
+  deliberately does **not** revoke: it acts on a token the API already rejected, and revoking there would
+  let one spurious 401 end the user's sessions on every device. Auth.js `events.signOut` was not used for
+  the same reason — it fires for both paths.
+- **The checkbox.** Unchecked by default on the local form only; its warning is shown while it is checked.
+  The form posts it as the string `"true"`/`"false"`, which `authorize` converts to the contract's
+  boolean.
+
 **Risk acceptance (CEO, 2026-09-23, #1307).** A remember-me token that leaks — a stolen or shared device, a
 copied cookie, a sniffed request on a plain-HTTP `lan` deployment ([[0087-plain-http-lan-deployment-axis]])
 — stays valid until the user signs out, changes their password, or an admin resets, deactivates or
@@ -348,7 +378,9 @@ lever above ends it immediately.
 **Upgrade-safety.** No schema change. Tokens already issued all carry `exp` and keep working until it
 passes. A client that never sends `rememberMe` gets the 12h session. `expiresAt` is an additive response
 field. Rolling the API back leaves any remember-me token without `exp`, which the older verifier rejects —
-fail-closed, one re-login.
+fail-closed, one re-login. On the web, a session cookie issued before the upgrade carries no `expiresAt`,
+so it is not ended by time: it keeps working until its token's own `exp` (at most 12h later), when the API
+401s and the marked `/login` landing ends it once, without a loop. Nobody is signed out by the deploy.
 
 ## Consequences
 
