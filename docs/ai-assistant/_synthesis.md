@@ -275,6 +275,16 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
   bump (password change, sign-out-everywhere, admin reset), deactivation, offboarding. Open PR #1313
   amends ADR-0086's session expiry; the grant binding follows whatever "all prior sessions die" means
   after it.
+- **Client allowlist** ([[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13): every OAuth
+  client is checked against an admin-configurable allowlist, matched on its CIMD `client_id` URL or a
+  redirect-URI pattern, **never on `client_name`**. The curated defaults (the usual clients) live in code
+  and ship with W2-4/W3-3; `ai_settings` stores only an **overlay** on them —
+  `mcpClientAllowlistAdded` (the admin's own entries) and `mcpClientAllowlistRemovedDefaults` (the ids of
+  the defaults the admin removed) — so a later release can correct a default's identifier without
+  undoing the admin's choices. An entry is `{ id, label, match: { kind: "cimd_url", url } | { kind:
+  "redirect_uri", pattern } }` (`ai-settings.ts`). The policy toggle `mcpAllowAnyHttpsClient` (off by
+  default) accepts any client whose redirect URIs are HTTPS and non-loopback, and the consent screen then
+  shows a warning; the default policy is the curated list.
 
 ### 4.9 Skill distribution (R8)
 
@@ -410,20 +420,22 @@ infra/  caddy/Caddyfile · test/caddy-routing.sh · env/.env.prod.example · sta
 
 ## 6. Consolidated data model
 
-**One DDL migration** creates every table below and the two columns; a separate one-time data
-migration inserts the MEMBER default rows for `ai:use` and `ai:connect` after #1314. Status, channel,
+**One DDL migration** creates every table below and the two columns. There is **no data migration**
+for the MEMBER default rows of `ai:use` and `ai:connect`: #1314's seed-once ledger grants a permission
+new to `DEFAULT_ROLE_PERMISSIONS` exactly once on the next deploy's seed, and a revoke stays revoked.
+Status, channel,
 class and provider columns are **text validated on write** (zod), not Prisma enums, so a value added by
 a newer build degrades gracefully on an older one. IDs follow [[0005-id-strategy]]; integers are
 bounded per [[0036-int4-bounded-integers]].
 
 | Table (model) | Kind · ID | Holds | Lifecycle | Source |
 | --- | --- | --- | --- | --- |
-| `ai_settings` (`AiSettings`) | singleton, CHECK `id = 'singleton'` | enabled, provider, model, baseUrl, the key envelope (`apiKeyCiphertext`/`Iv`/`AuthTag`/`KeyVersion`), `allowPrivateNetwork`, effort, provider options, admin instructions, step/output/context limits, `dailyTokenLimitPerPrincipal` (2M), `retentionDays` (90, 7–3650), `approvalTtlMinutes` (30), `mcpEnabled`, the disclosure acknowledgement, `verifiedAt` | mutable config, no `deletedAt`; an absent row reads as the disabled default | provider §7 |
+| `ai_settings` (`AiSettings`) | singleton, CHECK `id = 'singleton'` | enabled, provider, model, baseUrl, the key envelope (`apiKeyCiphertext`/`Iv`/`AuthTag`/`KeyVersion`), `allowPrivateNetwork`, effort, provider options, admin instructions, step/output/context limits, `dailyTokenLimitPerPrincipal` (2M), `retentionDays` (90, 7–3650), `approvalTtlMinutes` (30), `mcpEnabled`, the MCP client allowlist overlay (`mcpClientAllowlistAdded` jsonb `[]`, `mcpClientAllowlistRemovedDefaults` text[] `{}`) and `mcpAllowAnyHttpsClient` (false) — §4.8, the disclosure acknowledgement, `verifiedAt` | mutable config, no `deletedAt`; an absent row reads as the disabled default | provider §7 |
 | `ai_conversations` (`AiConversation`) | `cuid()` | owner (exactly one of user / SA — CHECK), channel (`CHAT` \| `HEADLESS`), title, pinned provider/model/`promptVersion`/`toolsetHash`/tool names, `closedReason`, `lastActivityAt` | transcript container; **hard-deleted** by retention, by its owner, and on offboarding | provider §7, tools §11 |
 | `ai_messages` (`AiMessage`) | `BigInt` autoincrement | ordered, provider-replayable messages (`content` + `format`), `@@unique(conversationId, seq)` | append-only; cascades with its conversation | provider §7 |
 | `ai_runs` (`AiRun`) | `cuid()` | channel, acting principal (CHECK), status, approval policy, provider/model, step count, token counts, finish reason, redacted error, `idempotencyKey` (partial unique per principal, raw SQL), cancel request, timestamps | mutable lifecycle row, **no content**; conversation FK `SetNull`; kept | provider §7 |
 | `ai_tool_invocations` (`AiToolInvocation`) | `cuid()` = `invocationId` | every tool call on every channel: tool, class, actor (at most one — CHECK), MCP client/grant, input + hashes, status, preview, precondition, expiry, result, entity refs, error, duration | the approval unit; **retention-bound** (cascades with its conversation; conversation-less MCP rows pruned after `retentionDays`) — this is also the metadata access log for MCP and headless reads | tools §11 |
-| `ai_action_log` (`AiActionLog`) | `Int` autoincrement | one row per write lifecycle event: invocation id, event, channel, tool, class, actor (at most one — CHECK), conversation/run/MCP client/grant ids as plain strings, redacted input, entity refs, approver, step-up flag, untrusted sources, provider/model, request id, error | **permanent, append-only**; a trigger blocks `UPDATE`/`DELETE`; no FK to pruned rows; actor FKs `SetNull` | tools §10–11, security §6.7 |
+| `ai_action_log` (`AiActionLog`) | `Int` autoincrement | one row per write lifecycle event: invocation id, event, channel, tool, class, actor (at most one — CHECK), conversation/run/MCP client/grant ids as plain strings, redacted input, entity refs, approver, step-up flag, untrusted sources, provider/model, request id, error | **permanent, append-only**; a trigger blocks `DELETE` and every `UPDATE` except the one the actor FKs' own `ON DELETE SET NULL` performs (only `userId` / `serviceAccountId` may become NULL, nothing else may change); no FK to pruned rows; actor FKs `SetNull` | tools §10–11, security §6.7 |
 | `ai_usage` (`AiUsage`) | `BigInt` autoincrement | per model step: principal, provider, model, input/output/cached/reasoning tokens | append-only; kept (budgets and the usage view) | provider §7 |
 | `ai_service_account_settings` (`AiServiceAccountSettings`) | PK = `serviceAccountId` | `access` (`off` \| `read-only` \| `read-write`), `maxMutationsPerRun` | mutable config; an absent row reads as `read-write` | §2 decision 13 (editorial, §8.2) |
 | `ai_config_audit_log` (`AiConfigAuditLog`) | `Int` autoincrement | who changed AI settings or a per-SA setting, what (redacted), the disclosure acknowledgement | append-only | security §6.4–6.5 (editorial, §8.2) |
@@ -437,7 +449,7 @@ bounded per [[0036-int4-bounded-integers]].
 **Upgrade safety.** Every change is additive: new tables and two nullable columns. A populated database
 gets empty tables; nothing is backfilled. With no `ai_settings` row and no `AI_SECRET_KEY`, the API
 boots and behaves exactly as before. `ai:use` and `ai:connect` reach ADMIN through the resolver's
-full-catalog short-circuit and MEMBER through the one-time insert (`ON CONFLICT DO NOTHING`); because
+full-catalog short-circuit and MEMBER through the seed-once ledger on the next deploy (#1314); because
 the capability is off at instance level, granting them exposes nothing until an admin enables it. The
 retention sweeper's hard deletion of transcripts is a deliberate, ADR-recorded exception to "never
 hard-delete": conversations are not the system of record ([[0056-in-app-notification-bell]] §7
@@ -647,7 +659,7 @@ Order: W1-A → W1-B → W1-C; W1-D runs in parallel with W1-B and W1-C once W1-
 
 | Unit | Lane | Owns | Depends on | Shared critical | Merge |
 | --- | --- | --- | --- | --- | --- |
-| **W1-A** Contracts + schema | backend (+ web permission labels, authorized) | `packages/shared/src/schemas/{permission,permission-meta,ai-provider,ai-settings,ai-tools,ai-run,oauth}.ts` + tests, `packages/shared/src/index.ts`; `apps/api/prisma/schema.prisma`; the DDL migration (all §6 tables, the two columns, CHECKs, partial uniques, the ledger trigger); the default-grant migration; the permission golden specs; `apps/web/app/(app)/settings/_lib/permission-labels.ts` + `messages/{en,es}/settings.json` `permissionMeta` (so web `tsc` stays green) | W0-1 | **barrel** | **CEO** (catalog + migrations) |
+| **W1-A** Contracts + schema | backend (+ web permission labels, authorized) | `packages/shared/src/schemas/{permission,permission-meta,ai-provider,ai-settings,ai-tools,ai-run,oauth}.ts` + tests, `packages/shared/src/index.ts`; `apps/api/prisma/schema.prisma`; the DDL migration (all §6 tables, the two columns, CHECKs, partial uniques, the ledger trigger); no default-grant migration (the #1314 seed-once ledger applies the MEMBER defaults); the permission golden specs; `apps/web/app/(app)/settings/_lib/permission-labels.ts` + `messages/{en,es}/settings.json` `permissionMeta` (so web `tsc` stays green) | W0-1 | **barrel** | **CEO** (catalog + migrations) |
 | **W1-B** Dependencies + spike | backend | `apps/api/package.json` (`ai`, `@ai-sdk/anthropic`, `/openai`, `/google`, `/openai-compatible`, `@modelcontextprotocol/server`, `/node`; the Jest `transformIgnorePatterns` lookahead), `apps/api/test/jest-e2e.json`, root `bun.lock`, the spike specs. **Go/no-go:** Jest loads the SDK's mocks; the Nest build loads `ai` via `require(esm)` on Node 26; tools without `execute` + one step return tool calls; reasoning replay round-trips through persisted messages; `guardedFetch` works as the SDK `fetch`; the MCP SDK loads under CommonJS Jest | W1-A | **`bun.lock`** | standing; the verdict is reported to the CEO |
 | **W1-C** AI core | backend | `apps/api/src/ai/ai.module.ts`, `ai.constants.ts`, `ai/core/**` (incl. `ports/`), `ai/tools/index.ts` + every pre-created `ai/tools/*.tools.ts` (the reference toolset `session_context`, `lazyit_search` filled), stub module files for every `ai/*` submodule, `oauth/oauth.module.ts` and `mcp/mcp.module.ts` stubs; `auth/delegated-identity.ts`, `auth/principal-loader.service.ts`, `auth/service-account-authenticator.ts`, `auth/jwt-auth.guard.ts`, `auth/auth.module.ts`; the ALS stamp in `asset-history.service.ts` and `user-history.service.ts`; tests: network-unreachability of the branch, DB-reload parity, boot validation, coverage, tool↔route parity golden; the nesting cap if W0-4 did not land; the single `app.module.ts` edit | W1-A (W1-B not required) | **`app.module.ts`** | **CEO** (authentication). Gate G2 (partial) |
 | **W1-D** Web shell foundation | frontend (+ Manual manifest, authorized) | the `app/(app)/layout.tsx` edit; `components/ai/{ai-assistant-root,ai-chat-launcher,ai-chat-panel-slot}.tsx`; `lib/api/client.ts` (`apiFetchStream`); `lib/api/endpoints/ai.ts` (status only) + `lib/api/hooks/use-ai-status.ts`; `messages/{en,es}/_all.ts` + skeleton `ai.json`, `aiSettings.json`, `oauth.json`; `content/manual/_nav.ts` + `messages/{en,es}/help.json` labels | W1-A | **`layout.tsx`, `_nav.ts`** | standing (renders nothing until `/ai/status` exists) |

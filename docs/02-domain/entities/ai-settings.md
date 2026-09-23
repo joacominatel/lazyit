@@ -31,6 +31,13 @@ switch. It is **off by default** and an admin enables it through the Settings �
 - **Enabling** needs a passing connection test (`verifiedAt`) and the acknowledged egress disclosure
   (`disclosureAcknowledgedAt`, also recorded in [[ai-config-audit-log]]).
 - **`mcpEnabled` is independent** of the provider: MCP works without an LLM (CEO, round 2).
+- **The MCP client allowlist is an overlay** ([[0097-ai-assistant-mcp-and-headless-api]] decision 13).
+  The curated defaults (the usual clients) live in code; this row stores only the admin's own entries
+  (`mcpClientAllowlistAdded`) and the ids of the defaults the admin removed
+  (`mcpClientAllowlistRemovedDefaults`), so a later release can correct a default's identifier without
+  undoing the admin's choices. Entries match on a CIMD URL or a redirect-URI pattern, never on
+  `client_name`. `mcpAllowAnyHttpsClient` (off by default) accepts any client whose redirect URIs are
+  HTTPS and non-loopback, with a warning on the consent screen.
 - **Text columns, validated on write.** `provider` and `effort` are text checked by the zod vocabularies
   in `@lazyit/shared` (`ai-provider.ts`), so a newer value degrades to "not configured" on an older build.
 - Mutable config: `createdAt` + `updatedAt`, **no `deletedAt`**.
@@ -54,6 +61,9 @@ Prisma model `AiSettings` → table `ai_settings`.
 | `retentionDays` | `int` | default 90 (zod 7–3650) — conversation retention. |
 | `approvalTtlMinutes` | `int` | default 30 — how long a chat approval stays open. |
 | `mcpEnabled` | `bool` | default `false` — the MCP switch. |
+| `mcpClientAllowlistAdded` | `json` | default `[]` — the admin's own allowlist entries. |
+| `mcpClientAllowlistRemovedDefaults` | `text[]` | default `{}` — the ids of the curated defaults the admin removed. |
+| `mcpAllowAnyHttpsClient` | `bool` | default `false` — accept any HTTPS (non-loopback) client, with a consent warning. |
 | `disclosureAcknowledgedAt` / `disclosureAcknowledgedById` | `datetime?` / `uuid?` | the egress-disclosure acknowledgement. |
 | `verifiedAt` | `datetime?` | last passing connection test of the current connection fields. |
 | `updatedById` | `uuid?` | FK → [[user]], `onDelete: SetNull`. |

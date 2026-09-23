@@ -3,7 +3,7 @@ title: The @lazyit/shared Package
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-14
+updated: 2026-09-23
 ---
 
 # The `@lazyit/shared` Package
@@ -78,6 +78,26 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
 > - the **entity wire DTOs**. **Secrets never appear on a wire shape** — the read side exposes only a
 >   redacted `configured` descriptor (the [[service-account]] `tokenPrefix` pattern). Like the rest of
 >   `shared` it stays a framework-agnostic leaf: no Prisma, no NestJS, no React.
+
+> [!note] The AI assistant, MCP and OAuth contract (ADR-0097, epic #1315)
+> [[0097-ai-assistant-mcp-and-headless-api]] adds the `ai` permission domain (`ai:use`, `ai:connect` —
+> `MEMBER_DEFAULT_CAPABILITIES` in `schemas/permission.ts`) and five contract files, consumed by `api` (the
+> AI, OAuth and MCP modules) and `web` (the chat, Settings → AI, `/account/ai`, the consent page). The
+> reconciled shapes are [[ai-assistant/_synthesis|synthesis]] §4.
+> - `schemas/ai-provider.ts` — the provider kinds, the wizard descriptors, the per-provider extras.
+> - `schemas/ai-settings.ts` — `AiSettings` (the provider key is **write-only**: `apiKeySet` only), the
+>   `PUT /config/ai` shape, the connection test, `GET /ai/status`, the per-service-account AI access, and
+>   the MCP client allowlist (entry shape, the admin overlay, `resolveMcpClientAllowlist`).
+> - `schemas/ai-tools.ts` — channels, tool classes, call kinds, the tool-name rule, entity refs, the tool
+>   result, the server-built approval preview, the tool manifest.
+> - `schemas/ai-run.ts` — run / invocation / ledger status sets, run error codes, the conversation, run
+>   and approval requests and read shapes, and the versioned run event union (`v: 1`).
+> - `schemas/oauth.ts` — scopes and scope-parameter parsing, token prefixes, connected apps, personal
+>   tokens, the consent validate / decision shapes.
+>
+> Read shapes are tolerant where a newer API may send more than an older web knows: an unknown event or
+> part `type` fails its own parse and is skipped, and entity refs and allowlist entries of an unknown kind
+> are dropped from their list instead of failing the whole payload.
 
 > [!note] Secret Manager shared material — as-built (#366, ADR-0061)
 > [[0061-secret-manager-zero-knowledge]] added two layers of shared Secret Manager material, both
