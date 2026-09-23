@@ -88,6 +88,12 @@ uniques.
   already offboarded is skipped on every later run, so repeated runs never bump twice. The reactivation
   itself never writes the epoch. The bump runs whatever the `AUTH_MODE`; outside local mode no token
   carries the epoch, so it is inert.
+  *Amended 2026-09-23 (SEC-021, #1319):* the sweep **never offboards the last active ADMIN**. A person who
+  is past grace but is an active ADMIN with no other live, active ADMIN is **skipped** — nothing written,
+  counted as `skipped`, a `directory.offboard_skipped … reason=last-active-admin` warning logged — and the
+  rest of the sweep continues. The next run re-evaluates, so they are offboarded as soon as another active
+  ADMIN exists. The predicate is the same one the `PATCH /users` last-admin guard uses
+  (`UsersService.hasAnotherActiveAdmin`, [[0040-rbac-roles]]).
 
 ### Hard invariants (enforced in code, asserted by a jest test)
 

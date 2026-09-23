@@ -206,6 +206,9 @@ always leave exactly one administrator.
   `assertNotLastAdmin` runs before a demotion away from ADMIN, a deactivation (`isActive=false`) and an
   offboard/delete, and counts only live (`deletedAt: null`) **and active** (`isActive: true`) ADMINs —
   an inactive account cannot authenticate, so it never keeps the instance administrable (SEC-021).
+- `apps/api/src/directory/directory-reconcile.service.ts` — the AD/LDAP offboard sweep calls the same
+  predicate (`UsersService.hasAnotherActiveAdmin`) and **skips** the last active ADMIN instead of
+  deactivating them ([[0091-on-prem-ad-ldap-directory-source]], SEC-021).
 
 ## INV-8 — Permissions resolve from `RolePermission` DB rows, never a token claim; the ADMIN set is immutable/full
 

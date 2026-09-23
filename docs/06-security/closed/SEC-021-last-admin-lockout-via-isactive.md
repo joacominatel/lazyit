@@ -115,6 +115,16 @@ asserting `PATCH {isActive:false}` on the last ADMIN 409s, alongside the existin
   guard. That closes the class across every path that calls it: deactivation, demotion, and
   offboard/delete (`remove`).
 - `apps/api/src/users/users.controller.ts`: comment only (the guard now covers deactivation too).
+- **Directory-sync offboard (added 2026-09-23, CEO decision "protect and skip"):** the predicate is
+  extracted as the public `UsersService.hasAnotherActiveAdmin(userId)` (the single definition of a
+  usable admin; `assertNotLastAdmin` now calls it). `DirectoryReconcileService`'s offboard sweep
+  (`apps/api/src/directory/directory-reconcile.service.ts`) calls it for an active ADMIN past grace and,
+  when no other active ADMIN exists, **skips** that person: nothing is written, the run counts it as
+  `skipped`, logs `directory.offboard_skipped user=<id> reason=last-active-admin` (id only, no PII), and
+  carries on. The next run re-evaluates, so the offboard happens once another active ADMIN exists. The
+  reconcile reads `role` for this (read-only; it still never writes it). No admin notification is
+  emitted: no existing `NotificationType` (ADR-0056) fits, and adding one needs `packages/shared` plus
+  the web bell's closed icon/copy set, both outside this change.
 
 ### Tests added
 - `apps/api/src/users/users.service.spec.ts` › `last-admin guard vs isActive (SEC-021)`:
@@ -129,6 +139,13 @@ asserting `PATCH {isActive:false}` on the last ADMIN 409s, alongside the existin
     never consults the guard.
 - The existing `refuses to demote the LAST remaining ADMIN (409)` now asserts the `isActive: true`
   filter on the count.
+- `apps/api/src/directory/directory-reconcile.service.spec.ts` › `last-admin protection on offboard
+  (SEC-021)`:
+  - `skips the LAST active ADMIN, warns, and still offboards everyone else`: fails without the guard
+    because the sweep deactivated the admin (1 failed / 17 passed against the unguarded service); passes
+    with it.
+  - Controls: an ADMIN is offboarded normally when another active ADMIN remains; the predicate is never
+    consulted for a non-admin or an already-inactive admin.
 
 ### Verification
 Against the `origin/dev` service with the new spec: 5 failed / 8 passed in the ADR-0040 guard block.
@@ -141,11 +158,10 @@ With the fix: 13 passed. Full API suite (`node node_modules/.bin/jest`): 174 sui
   on themselves too, and with a second active admin the change is recoverable), while ADR-0040's
   addendum and the Manual both state that self-edits other than the role stay allowed. Adding it would
   reverse a recorded decision.
-- **Directory sync offboard is unguarded.** `DirectoryReconcileService.offboard` sets `isActive=false`
-  on an AD-sourced person who disappeared from the directory, with no last-admin check. It only matters
-  when a directory person was promoted to a login account, then to ADMIN, and is the last active admin.
-  Guarding it is a product call (keep a departed person's admin access vs. lock the instance), so it is
-  left for a decision rather than folded into this fix.
+- **Directory sync keeps a departed last admin active.** By CEO decision, an ADMIN who left the
+  directory stays active (and able to sign in) while they are the last active ADMIN. That is the accepted
+  trade-off against locking the instance; the operator sees it only in the logs and the run's `skipped`
+  count until an admin notification type exists.
 - **Instances already locked out** stay locked out after the update: no admin can authenticate, and
   `POST /config/setup` stays closed because it counts ADMIN rows regardless of `isActive` (correctly —
   opening it would let anyone claim admin). Recovery is a direct DB update that sets `isActive = true`
