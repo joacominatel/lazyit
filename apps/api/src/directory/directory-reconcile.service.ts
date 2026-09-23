@@ -28,6 +28,8 @@ interface LocalAdPerson {
   id: string;
   directorySourceId: string | null;
   isActive: boolean;
+  // Read-only: the offboard sweep needs it for the last-admin skip. The reconcile NEVER writes `role`.
+  role: string;
   directoryOffboardedAt: Date | null;
   firstName: string;
   lastName: string;
@@ -44,7 +46,8 @@ interface LocalAdPerson {
  * HARD INVARIANTS (enforced in code, asserted by the spec): the reconcile NEVER changes `role`, NEVER sets
  * `passwordHash`, NEVER sets `externalId`, NEVER flips `directoryOnly` to false, NEVER grants a login, and
  * NEVER hard-deletes (a disappeared person is SOFT-offboarded past the grace threshold — isActive=false +
- * directoryOffboardedAt). Its ONLY `sessionEpoch` write is the revoking bump on an active→offboarded
+ * directoryOffboardedAt), and NEVER offboards the last active ADMIN — that person is skipped with a warning
+ * until another active ADMIN exists (SEC-021). Its ONLY `sessionEpoch` write is the revoking bump on an active→offboarded
  * transition (#1308); a reactivation never touches it. New persons land in the PENDING review tray (they
  * simply exist as directoryOnly VIEWER rows). `memberOf` group DNs are stored INERT in directoryAttrs (#846). Every meaningful change
  * appends a UserHistory row (attributed to the configured directory ServiceAccount, else system). Logs
@@ -131,6 +134,7 @@ export class DirectoryReconcileService {
           id: true,
           directorySourceId: true,
           isActive: true,
+          role: true,
           directoryOffboardedAt: true,
           firstName: true,
           lastName: true,
@@ -191,6 +195,22 @@ export class DirectoryReconcileService {
         const lastSeen = lastSeenMs(p.directoryAttrs);
         if (lastSeen != null && lastSeen > cutoff) {
           // Still within grace — leave as-is; a later run offboards it if it stays gone.
+          counts.skipped += 1;
+          continue;
+        }
+        // Last-admin protection (SEC-021, ADR-0040): deactivating the last live, active ADMIN would leave
+        // the instance with nobody able to sign in and administer it. Skip that person instead — nothing
+        // is written, so the next run re-evaluates and offboards them once another active ADMIN exists —
+        // warn, and carry on with the rest of the sweep. Same predicate as the PATCH /users guard.
+        if (
+          p.isActive &&
+          p.role === 'ADMIN' &&
+          !(await this.users.hasAnotherActiveAdmin(p.id))
+        ) {
+          this.logger.warn(
+            `directory.offboard_skipped user=${p.id} reason=last-active-admin: absent from the directory ` +
+              `past grace but is the last active ADMIN; left active until another active ADMIN exists.`,
+          );
           counts.skipped += 1;
           continue;
         }
