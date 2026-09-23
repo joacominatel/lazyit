@@ -72,7 +72,8 @@ age out:
 
 - **Dismiss one** — hover a row and select the **×** at its right edge. On a phone or tablet the × is
   always shown; with a keyboard, tab to it. Dismissing does not open the notification.
-- **Clear all** — in the bell's header, removes the notifications currently shown, all at once. Anything
+- **Clear all** — in the bell's header, removes every notification up to the newest one shown, all at once —
+  including older ones further down the list than the bell loads. Anything
   newer stays: a notification that arrived after you opened the bell is not cleared, and it stays unread.
   When the bell is empty it reads "You're all caught up."
 

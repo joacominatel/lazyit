@@ -78,8 +78,8 @@ caduque:
 - **Descartar una** — pasa el cursor sobre una fila y selecciona la **×** de su borde derecho. En un
   teléfono o una tableta la × se muestra siempre; con el teclado, llega a ella con Tab. Descartar no abre
   la notificación.
-- **Descartar todas** — en la cabecera de la campana, quita de una vez las notificaciones que se muestran
-  en ese momento. Lo más reciente se queda: una notificación que llegó después de abrir la campana no se
+- **Descartar todas** — en la cabecera de la campana, quita de una vez todas las notificaciones hasta la
+  más reciente que se muestra, incluidas las más antiguas que la campana no llega a cargar. Lo más reciente se queda: una notificación que llegó después de abrir la campana no se
   descarta y sigue sin leer. Cuando la campana queda vacía muestra «Estás al día.»
 
 Descartar también marca la notificación como leída, así que el indicador baja con ella. Una notificación
