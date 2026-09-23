@@ -3,7 +3,7 @@ title: Deployment
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-08-09
+updated: 2026-09-23
 ---
 
 # Deployment
@@ -30,6 +30,8 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
                           │    │ /api/auth/*  Auth.js actions → web :3000 (ADR-0039); API's
                           │    │              password endpoints → api :3001 (ADR-0086, #1250)
                           │    │ /api/docs*   ─▶ NOT proxied in prod (SEC-009; internal/dev only)
+                          │    │ /mcp, /.well-known/oauth-*, /oauth/{token,register,revoke}
+                          │    │              ─▶ api :3001 unstripped (AI agents, ADR-0097)
                           │   api ──▶ db :5432 (Postgres 18)               │
                           │   api ──▶ meilisearch :7700 (search, no published port)
                           │   api ──▶ valkey :6379 (BullMQ broker, AOF)    │
@@ -71,6 +73,21 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   the web image is domain-portable (`NEXT_PUBLIC_API_URL=/api`, baked at build). The single
   `{$LAZYIT_SITE_ADDRESS}` site block already covers all three (a port-only value disables auto-TLS —
   verified with `caddy validate`); no per-mode Caddy block. Details: [[0026-reverse-proxy-tls]].
+  - **External AI agents** ([[0097-ai-assistant-mcp-and-headless-api]]): a short allowlist of
+    **unprefixed** paths also reaches the API, without the `/api` strip — `/mcp` (the MCP resource),
+    `/.well-known/oauth-protected-resource*` and `/.well-known/oauth-authorization-server*` (RFC 9728 /
+    RFC 8414 metadata) and `/oauth/token`, `/oauth/register`, `/oauth/revoke`. MCP clients and OAuth
+    discovery address the bare origin, so these cannot live under `/api`. `/oauth/authorize` is the web
+    consent page and stays on web. The API answers 404 on all of them while MCP is off; on a `lan`
+    instance the OAuth rows stay 404 (OAuth needs HTTPS — `lan` uses personal tokens on `/mcp`).
+  - **Streaming (SSE):** Caddy's `encode` wraps every response **except** streamed ones — the AI run
+    event stream (`/api/ai/runs/*/events`), `/mcp`, and any request with `Accept: text/event-stream`. The
+    pinned Caddy (v2.11.3) otherwise withholds an SSE response's header until the first event and
+    compresses the stream (caddyserver/caddy#6293; the fix, PR #7905, is in no release yet), so the
+    carve-out is keyed on the request. `reverse_proxy` flushes `text/event-stream` immediately. No
+    stream timeout is set; a Caddy restart drops open streams and the client resumes with
+    `Last-Event-ID`. `infra/test/caddy-routing.sh` checks the routing in all three modes and runs the
+    pinned Caddy live against a scripted SSE upstream.
 - **Migrations in prod:** the `migrate` job runs `prisma migrate deploy` (never `migrate dev`/
   `reset`) then the idempotent seed, before the API starts. → [[prisma-migrations]].
 - **Async substrate (Valkey):** a **Valkey** container (`valkey:8-alpine`, the Redis-compatible BSD
@@ -93,6 +110,12 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   Docker secrets block or external manager (YAGNI). New scoped env: **`REDIS_URL`** (the Valkey URL,
   e.g. `redis://valkey:6379`) and **`WORKFLOW_SECRET_KEY`** (the AES-256-GCM key for the workflow
   secret store — 32 bytes / 64 hex via `openssl rand -hex 32`, fail-loud at boot if missing).
+  Two **optional** keys for the AI assistant ([[0097-ai-assistant-mcp-and-headless-api]]):
+  `AI_SECRET_KEY` (the AES-256-GCM key for the AI provider's API key at rest — its own axis, like
+  `SMTP_SECRET_KEY`; without it the API boots unchanged and only saving a provider key 409s) and
+  `AI_WORKER_CONCURRENCY` (concurrent AI runs, default 4). Both ship **commented** in the example so the
+  guided update never stops an instance that does not use AI; `infra/start.sh` generates `AI_SECRET_KEY`
+  on a fresh install and on `--reconfigure`. No new container: AI runs execute in the `api` container.
   → [[0028-secrets-and-config]].
 - **Exposure:** only Caddy publishes ports; Postgres, Meilisearch, Valkey, the API and web stay on the
   internal network. The dev DB, Meilisearch and Valkey bind loopback only.
@@ -100,7 +123,8 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
 - **Backups:** manual `pg_dump`/`pg_restore` now, automation deferred. **`WORKFLOW_SECRET_KEY` is a
   third unrotatable DR linchpin** (alongside `POSTGRES_PASSWORD` and `ZITADEL_MASTERKEY`): losing it
   makes every stored connector credential undecryptable, so back it up off-host with the *matching*
-  DB dump. → [[backups]].
+  DB dump. `SMTP_SECRET_KEY` and `AI_SECRET_KEY` are low-DR (losing one costs a re-typed password or
+  API key) but ride the same `.env.prod` copy. → [[backups]].
 
 ## Deployment levels
 
@@ -165,4 +189,4 @@ Related: [[stack]] · [[monorepo]] · [[setup]] · [[authorization]] · [[auth-z
 [[0026-reverse-proxy-tls]] · [[0027-ci-pipeline]] · [[0028-secrets-and-config]] ·
 [[0035-search-architecture]] · [[0043-zitadel-source-of-truth]] ·
 [[0047-guided-first-deploy-bootstrap]] · [[0053-async-workers-bullmq-valkey]] ·
-[[0054-applications-workflow-engine]]
+[[0054-applications-workflow-engine]] · [[0097-ai-assistant-mcp-and-headless-api]]
