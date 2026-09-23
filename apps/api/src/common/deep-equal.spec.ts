@@ -54,4 +54,35 @@ describe('jsonDeepEqual', () => {
     expect(jsonDeepEqual(1, 1)).toBe(true);
     expect(jsonDeepEqual(true, false)).toBe(false);
   });
+
+  // SEC-032 / SEC-072: the diff runs on specs ALREADY in the database, so it must not depend on the
+  // write-time bound in the shared schema. A nesting deep enough to blow a recursive walk's call stack
+  // has to be compared, not thrown on.
+  describe('pathologically deep values (SEC-032)', () => {
+    const DEPTH = 100_000;
+    const chain = (leaf: unknown): unknown => {
+      let node: unknown = leaf;
+      for (let i = 0; i < DEPTH; i++) node = { a: node };
+      return node;
+    };
+    const arrayChain = (leaf: unknown): unknown => {
+      let node: unknown = leaf;
+      for (let i = 0; i < DEPTH; i++) node = [node];
+      return node;
+    };
+
+    it('compares two equal deep object chains without throwing', () => {
+      expect(() => jsonDeepEqual(chain(1), chain(1))).not.toThrow();
+      expect(jsonDeepEqual(chain(1), chain(1))).toBe(true);
+    });
+
+    it('detects a change at the bottom of a deep object chain', () => {
+      expect(jsonDeepEqual(chain(1), chain(2))).toBe(false);
+    });
+
+    it('compares deep array chains without throwing', () => {
+      expect(jsonDeepEqual(arrayChain('x'), arrayChain('x'))).toBe(true);
+      expect(jsonDeepEqual(arrayChain('x'), arrayChain('y'))).toBe(false);
+    });
+  });
 });

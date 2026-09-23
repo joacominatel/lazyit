@@ -3,7 +3,7 @@ title: "ADR-0069: Migrator — guided bulk import (phase 1: Asset slice, JSON + 
 tags: [adr, migrator, import, asset, backend, frontend, shared, settings]
 status: accepted
 created: 2026-06-17
-updated: 2026-07-18
+updated: 2026-09-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -336,9 +336,10 @@ written to `Asset.specs` (jsonb). The mapping step exposes them as a separate `c
   any prototype-pollution sentinel (`__proto__`, `constructor`, `prototype`) is rejected at mapping
   time (400). Duplicate custom keys are also rejected.
 - **Session cap:** ≤64 custom keys per session (enforced by the `superRefine`). The global structural
-  bound on `AssetSpecsSchema` (depth/key count/scalar caps) is **not yet enforced globally** — it is
-  tracked as [[SEC-072]] (an independent finding), and that finding also covers the `jsonDeepEqual`
-  depth guard.
+  bound on `Asset.specs` (depth/key count/scalar caps) was tracked as [[SEC-072]], which also covered
+  the `jsonDeepEqual` depth guard. **Resolved 2026-09-23 (#1321):** `CreateAssetSchema` /
+  `UpdateAssetSchema` enforce the `ASSET_SPECS_MAX_*` bound, which applies to every import row through
+  the per-row `CreateAssetSchema` re-validation, and `jsonDeepEqual` is iterative.
 - **Defense-in-depth:** the backend's coerce-row path builds the `specs` object with `Object.create(null)`
   and skips the same reserved keys during write, so a persisted/corrupt mapping cannot bypass the
   refine at commit time.

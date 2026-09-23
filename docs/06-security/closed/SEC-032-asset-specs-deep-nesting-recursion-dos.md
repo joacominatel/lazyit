@@ -2,7 +2,7 @@
 id: SEC-032
 title: Deeply-nested asset specs trigger unbounded recursion in jsonDeepEqual on update (stack-overflow 500)
 severity: low
-status: open
+status: fixed
 cwe: CWE-674
 discovered: 2026-06-06
 module: assets
@@ -97,3 +97,45 @@ throwing.
 
 - CWE-674: Uncontrolled Recursion. CWE-400: Uncontrolled Resource Consumption.
 - ADR-0007 (flexible specs jsonb), `docs/06-security/deferred.md` DEF-004 (unvalidated jsonb — storage angle).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `f1b7a3c4` (`fix(api): compare asset specs iteratively in jsonDeepEqual (#1321)`)
+and commit `b16128cc` (`fix(shared): bound asset specs structure on write (#1321)`), PR #1326 (#1321)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-23
+
+Closed together with [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard|SEC-072]], which
+extends this finding. The full rationale and the bound values are in that Resolution.
+
+### Changes
+
+- `apps/api/src/common/deep-equal.ts`: `jsonDeepEqual` is iterative, with an explicit stack and no
+  recursion. It is exact at any depth, so a legacy deep row neither 500s nor emits a spurious
+  `SPECS_CHANGED`.
+- `packages/shared/src/schemas/asset.ts`: `CreateAssetSchema` and `UpdateAssetSchema` cap `specs` at
+  32 levels of nesting, 256 keys per object, 10 000 array items, and 10 000-character strings. The
+  check is iterative. The read shape is unchanged.
+
+### Tests added
+
+- `apps/api/src/common/deep-equal.spec.ts`::`pathologically deep values (SEC-032)`: **failed on `dev`**
+  with `RangeError: Maximum call stack size exceeded`, which confirms the bug was live. It passes with
+  the fix.
+- `apps/api/src/assets/assets.service.spec.ts`::`updates an asset whose STORED specs predate the write
+  bound without failing (SEC-032 upgrade path)`: **failed on `dev`** with `RangeError`. It passes with
+  the fix.
+- `packages/shared/src/schemas/asset.test.ts`::`rejects the SEC-032 reproduction (a 20 000-level chain)
+  without throwing`: failed on `dev`, where the payload was accepted. It passes with the fix.
+
+### Verification
+
+The PoC is now rejected at the edge as a 400. The same shape at 1 000 000 levels, about 6 MB and under
+the 8 MB body limit, is parsed, then rejected by the schema in about 1 ms. Stored rows of any depth
+diff without error.
+
+### Residual risk
+
+None for the recursion class on `Asset.specs`. For existing over-bound rows, see the SEC-072
+Resolution.

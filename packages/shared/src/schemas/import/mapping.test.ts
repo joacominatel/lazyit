@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { ASSET_SPECS_MAX_STRING_LENGTH, CreateAssetSchema } from "../asset";
+import { coerceRow } from "./coerce-row";
+import { assetImportDescriptor } from "./descriptor";
 import { ImportMappingSchema } from "./mapping";
 
 /**
@@ -136,3 +139,37 @@ describe("ImportMappingSchema — person mapping targets (E2-AUTH-01)", () => {
     },
   );
 });
+
+/**
+ * Custom (specs) fields vs the global specs write bound (SEC-072). A custom cell always lands in specs
+ * as a STRING (never parsed as JSON), so the mapping cannot deepen specs; what it can do is carry a
+ * long cell or many keys. Both the dry-run and the commit re-validate each coerced row with
+ * `CreateAssetSchema`, so the global bound applies to imported rows with no mapping-specific cap.
+ */
+describe("ImportMappingSchema — custom fields under the global specs bound (SEC-072)", () => {
+  const desc = assetImportDescriptor as Parameters<typeof coerceRow>[2];
+  const rowPayload = (cell: string, customCount = 1) => {
+    const m = ImportMappingSchema.parse({
+      ...base,
+      custom: Array.from({ length: customCount }, (_, i) => ({ column: `C${i}`, key: `k${i}` })),
+    });
+    const raw: Record<string, string> = { Name: "PC" };
+    for (let i = 0; i < customCount; i++) raw[`C${i}`] = cell;
+    const { payload, specs } = coerceRow(raw, m, desc);
+    return { ...payload, status: "OPERATIONAL", specs };
+  };
+
+  test("a custom cell past the string bound fails the per-row create validation on specs", () => {
+    const r = CreateAssetSchema.safeParse(rowPayload("x".repeat(ASSET_SPECS_MAX_STRING_LENGTH + 1)));
+    expect(r.success).toBe(false);
+    expect(r.success === false && r.error.issues[0]?.path[0]).toBe("specs");
+  });
+
+  test("a cell that looks like nested JSON stays a string, and the maximum custom-field count fits", () => {
+    const deepJson = `${'{"a":'.repeat(500)}1${"}".repeat(500)}`;
+    const payload = rowPayload(deepJson, 64);
+    expect(typeof (payload.specs as Record<string, unknown>).k0).toBe("string");
+    expect(CreateAssetSchema.safeParse(payload).success).toBe(true);
+  });
+});
+

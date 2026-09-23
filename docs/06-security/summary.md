@@ -53,7 +53,8 @@ Snapshot of the security review. Updated each sweep. Method:
    [[INVARIANTS]] INV-DIR-1/2 directory-person invariants and filed
    [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard\|SEC-072]] (the global structural
    bound on `AssetSpecsSchema` + the `jsonDeepEqual` depth guard, extending SEC-032 and now
-   import-reachable). The #555 fast-follow made `secret:*` / `import:run` **SA-ungrantable**
+   import-reachable; **closed 2026-09-23** with SEC-032 by #1321 — a structural write bound on
+   `specs` in the shared schema plus an iterative `jsonDeepEqual`). The #555 fast-follow made `secret:*` / `import:run` **SA-ungrantable**
    (added to `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS`), **reserved the engine service-account
    name**, and **generalised the parity test** so the ungrantable set stays enforced.
 
@@ -65,10 +66,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 1 |
-| Low | 12 |
+| Medium | 0 |
+| Low | 11 |
 | Info | 0 |
-| **Total open** | **13** |
+| **Total open** | **11** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -77,13 +78,11 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 | ID | Sev | Module | Title |
 | --- | --- | --- | --- |
-| [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard\|SEC-072]] | 🟠 Medium | assets/import | `AssetSpecsSchema` has no global structural bound + `jsonDeepEqual` has no depth guard — extends SEC-032, now import-reachable |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
 | [[SEC-012-oidc-audience-not-validated\|SEC-012]] | 🟡 Low | auth | OIDC token audience unvalidated when `OIDC_CLIENT_ID` unset (audience confusion under BYOI) |
 | [[SEC-022-isactive-not-rolled-back-on-idp-revert\|SEC-022]] | 🟡 Low | users | `isActive` not reverted on a Zitadel write-back 503 (bounded INV-5 divergence) |
 | [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] | 🟡 Low | assets | Asset create/update accept a soft-deleted `modelId`/`locationId` (no live-parent guard) |
-| [[SEC-032-asset-specs-deep-nesting-recursion-dos\|SEC-032]] | 🟡 Low | assets | Deeply-nested `specs` jsonb → unbounded recursion in `jsonDeepEqual` (stack-overflow 500) |
 | [[SEC-040-soft-deleted-parent-leaks-via-asset-includes\|SEC-040]] | 🟡 Low | transversal | Soft-deleted model/location/category leaks via nested asset includes |
 | [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] | 🟡 Low | transversal | Soft-delete doesn't reconcile children (dangling FK to invisible parent; `SetNull` only on hard-delete) |
 | [[SEC-052-catalog-attach-to-soft-deleted-category\|SEC-052]] | 🟡 Low | applications | App/consumable create/update attach to a soft-deleted `categoryId` (no `assertCategoryUsable`) |
