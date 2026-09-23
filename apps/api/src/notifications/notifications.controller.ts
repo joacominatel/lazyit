@@ -13,6 +13,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type {
+  DismissNotificationsResult,
   MarkReadResult,
   Notification,
   Page,
@@ -39,7 +40,7 @@ import { parsePageQuery } from '../common/parse-page-query';
  *   - own targeted rows (`recipientUserId == caller`) — ALWAYS visible; PLUS
  *   - the broadcast set (`recipientUserId IS NULL`) — only if the role holds `notification:read`.
  * The permission is resolved INSIDE the service, so the controller carries no authZ logic beyond
- * forwarding the caller; mark-read/unread-count reuse the same scope, so they are IDOR-safe.
+ * forwarding the caller; mark-read/dismiss/unread-count reuse the same scope, so they are IDOR-safe.
  *
  * Read state is a per-USER join (`NotificationRead.userId`), so the bell is a HUMAN surface: a handler
  * here resolves the caller to a human `{ userId, role }` and 403s a service-account principal (which has
@@ -58,7 +59,9 @@ export class NotificationsController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiOkResponse({ description: 'A page of notifications (Page<Notification>).' })
+  @ApiOkResponse({
+    description: 'A page of notifications (Page<Notification>).',
+  })
   findAll(
     @CurrentPrincipal() principal?: Principal,
     @Query('limit') limit?: string,
@@ -72,7 +75,10 @@ export class NotificationsController {
   }
 
   @Get('unread-count')
-  @ApiOperation({ summary: "The caller's unread notification count (the bell badge), scoped to what they can see." })
+  @ApiOperation({
+    summary:
+      "The caller's unread notification count (the bell badge), scoped to what they can see.",
+  })
   @ApiOkResponse({ description: 'The unread count: { unread: number }.' })
   async unreadCount(
     @CurrentPrincipal() principal?: Principal,
@@ -106,6 +112,35 @@ export class NotificationsController {
     @CurrentPrincipal() principal?: Principal,
   ): Promise<MarkReadResult> {
     return this.notifications.markAllRead(this.requireViewer(principal));
+  }
+
+  @Patch('dismiss-all')
+  @ApiOperation({
+    summary:
+      "Dismiss every notification currently in the caller's bell — per user only: the shared events are kept and other users still see them. Dismiss implies read. Returns the rows dismissed + the fresh unread count.",
+  })
+  @ApiOkResponse({
+    description: 'The dismiss result: { dismissed, unread }.',
+  })
+  dismissAll(
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<DismissNotificationsResult> {
+    return this.notifications.dismissAll(this.requireViewer(principal));
+  }
+
+  @Patch(':id/dismiss')
+  @ApiOperation({
+    summary:
+      "Dismiss one notification from the caller's bell (per user, implies read, idempotent, IDOR-safe: an id the caller cannot see is a no-op). Returns the rows dismissed + the fresh unread count.",
+  })
+  @ApiOkResponse({
+    description: 'The dismiss result: { dismissed, unread }.',
+  })
+  dismiss(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<DismissNotificationsResult> {
+    return this.notifications.dismiss(this.requireViewer(principal), id);
   }
 
   /**

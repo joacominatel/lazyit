@@ -76,6 +76,8 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
   const unreadCount = jest.fn();
   const markRead = jest.fn();
   const markAllRead = jest.fn();
+  const dismiss = jest.fn();
+  const dismissAll = jest.fn();
 
   const findMany = jest.fn(({ where }: { where: { role: Role } }) =>
     Promise.resolve(
@@ -95,7 +97,14 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
         Reflector,
         {
           provide: NotificationsService,
-          useValue: { findPage, unreadCount, markRead, markAllRead },
+          useValue: {
+            findPage,
+            unreadCount,
+            markRead,
+            markAllRead,
+            dismiss,
+            dismissAll,
+          },
         },
         { provide: PrismaService, useValue: prisma },
         PermissionResolverService,
@@ -116,6 +125,8 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
     unreadCount.mockReset();
     markRead.mockReset();
     markAllRead.mockReset();
+    dismiss.mockReset();
+    dismissAll.mockReset();
   });
 
   it('a MEMBER now REACHES the service (200) and is forwarded as { userId, role: MEMBER } for scoping', async () => {
@@ -181,6 +192,47 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
       userId: 'admin-uuid',
       role: 'ADMIN',
     });
+  });
+
+  it('dismiss-one and dismiss-all are open to any human and forward the caller as the viewer (#1309)', async () => {
+    dismiss.mockResolvedValue({ dismissed: 1, unread: 0 });
+    dismissAll.mockResolvedValue({ dismissed: 2, unread: 0 });
+
+    const one = await request(app.getHttpServer())
+      .patch('/notifications/n1/dismiss')
+      .set('X-Test-Role', 'VIEWER')
+      .set('X-Test-User', 'viewer-uuid');
+    expect(one.status).toBe(200);
+    expect(one.body).toEqual({ dismissed: 1, unread: 0 });
+    expect(dismiss).toHaveBeenCalledWith(
+      { userId: 'viewer-uuid', role: 'VIEWER' },
+      'n1',
+    );
+
+    // `dismiss-all` is its own route, never captured as `:id` by the per-item route.
+    const all = await request(app.getHttpServer())
+      .patch('/notifications/dismiss-all')
+      .set('X-Test-Role', 'ADMIN')
+      .set('X-Test-User', 'admin-uuid');
+    expect(all.status).toBe(200);
+    expect(dismissAll).toHaveBeenCalledWith({
+      userId: 'admin-uuid',
+      role: 'ADMIN',
+    });
+    expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('a SERVICE-ACCOUNT principal cannot dismiss (403, never reaches the service)', async () => {
+    const one = await request(app.getHttpServer())
+      .patch('/notifications/n1/dismiss')
+      .set('X-Test-Service', '1');
+    const all = await request(app.getHttpServer())
+      .patch('/notifications/dismiss-all')
+      .set('X-Test-Service', '1');
+    expect(one.status).toBe(403);
+    expect(all.status).toBe(403);
+    expect(dismiss).not.toHaveBeenCalled();
+    expect(dismissAll).not.toHaveBeenCalled();
   });
 
   it('a SERVICE-ACCOUNT principal is 403 — the bell is a human per-user surface (never reaches the service)', async () => {
