@@ -362,7 +362,9 @@ other reconcile write.
 - **No bounce loop on a rejected token.** A token the API rejects while the cookie still reads as valid —
   revoked from another device, a cookie issued before #1307, a clock disagreement — still reaches the
   global 401 handler. It signs out and lands on `/login?expired=1`, and `/login` never bounces a visitor
-  carrying that marker back into the app, so a lingering or re-set cookie cannot restart the loop.
+  carrying that marker back into the app, so a lingering or re-set cookie cannot restart the loop. The
+  handler also carries the page the user was on as `callbackUrl` (through the #495 open-redirect guard,
+  never an auth route), so signing in again lands back there, as it does after a proxy redirect.
 - **Where sign-out revokes.** The user menu's **Sign out** calls `POST /auth/logout` with the session's
   Bearer, then drops the cookie. The call is bounded by a short timeout and any failure (a `401` included)
   falls through to the local sign-out, so the API can never keep a user signed in. The global 401 handler

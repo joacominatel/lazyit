@@ -279,10 +279,11 @@ OIDC provider. No new dependency — plain `fetch` against the IdP token endpoin
   before anything renders. A refresh that fails while the token is still inside the 30s skew window keeps
   the valid token, sets `error`, and retries on the next read. A token with **no `expires_at`** is still
   never ended by time. The #657 handler stays as the safety net for a token the API rejects early; it now
-  lands on `/login?expired=1`, which `/login` never bounces back into the app. The successful-refresh
-  path is unchanged. In the concurrent-refresh race above, a losing request after expiry now ends the
-  session instead of setting `error` — the cost of this amendment. Before, the same race usually ended in
-  a #657 sign-out one request later.
+  lands on `/login?expired=1` with the current page as `callbackUrl`, which `/login` never bounces back
+  into the app and returns to after a fresh sign-in. The successful-refresh path is unchanged. In the
+  concurrent-refresh race above, a losing request after expiry now ends the session instead of setting
+  `error` — the cost of this amendment. Before, the same race usually ended in a #657 sign-out one
+  request later.
 - **Not user-facing.** The session simply stays alive silently; there is no new setting or UI.
   Per CLAUDE.md #7 this requires **no Manual change** (the public `/help` surface is unchanged).
 
