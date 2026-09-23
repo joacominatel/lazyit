@@ -364,6 +364,7 @@ apps/api/
     │   ├── tools/
     │   │   ├── index.ts                       imports every domain file (pre-wired once)
     │   │   ├── context.tools.ts               session_context, lazyit_search, navigate_to
+    │   │   ├── platform.tools.ts              `unexposed` only: surfaces no domain owns (auth, config, secrets…)
     │   │   ├── assets.tools.ts · reference.tools.ts
     │   │   ├── access.tools.ts                applications, access grants, access requests
     │   │   ├── consumables.tools.ts · kb.tools.ts

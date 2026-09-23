@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -20,11 +21,14 @@ import {
 import { IS_PUBLIC_KEY } from './public.decorator';
 import type { Principal } from './principal';
 import {
-  isServiceAccountToken,
-  parseToken,
-  verifySecret,
-} from '../service-accounts/service-account-token';
-import { resolveServiceAccountPermissions } from '../service-accounts/service-account-permissions';
+  hasDelegatedIdentity,
+  readDelegatedIdentity,
+} from './delegated-identity';
+import {
+  PrincipalLoaderService,
+  type PrincipalLoadFailure,
+} from './principal-loader.service';
+import { ServiceAccountAuthenticator } from './service-account-authenticator';
 import {
   LocalCredentialService,
   type LocalSessionContext,
@@ -33,6 +37,16 @@ import {
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The 401 messages `handleLocal` has always answered with, per shared re-load refusal. */
+const LOCAL_REFUSAL_MESSAGES: Record<PrincipalLoadFailure, string> = {
+  not_found: 'Account not found',
+  session_revoked: 'Session has been revoked',
+  inactive: 'Account disabled',
+  directory_only: 'Account cannot log in',
+  revoked: 'Account not found',
+  expired: 'Account not found',
+};
 
 /** The subset of OIDC userinfo / standard claims used for JIT provisioning. */
 interface ProfileClaims {
@@ -44,15 +58,25 @@ interface ProfileClaims {
 }
 
 /**
- * Global auth guard (ADR-0038, extended for service accounts by ADR-0048).
+ * Global auth guard (ADR-0038, extended for service accounts by ADR-0048 and for AI delegation by
+ * ADR-0097).
  *
- * SERVICE-ACCOUNT branch (ADR-0048) — runs FIRST, in every mode: a `Bearer lzit_sa_<id>_<secret>`
- *   token authenticates a NON-HUMAN principal. The id is looked up in the DB (including soft-deleted
- *   rows so a revoked account is detected), the secret is constant-time-compared to the stored SHA-256
- *   `tokenHash`, and a revoked / inactive / expired account is rejected — all as a generic 401. On
- *   success it sets `request.serviceAccount` + `request.principal = {kind:'service', …}` (with the
- *   direct grants resolved DB-first) and leaves `request.user` undefined (a service account is never a
- *   human). Any other bearer (or none) falls through to the unchanged human auth below.
+ * DELEGATED-IDENTITY branch (ADR-0097, R1) — runs FIRST, in every mode, and ONLY for an in-process AI
+ *   tool call: the AI tool dispatcher builds a synthetic request carrying a module-private symbol
+ *   (`delegated-identity.ts`) naming the invoking principal. The principal is RE-LOADED from the DB with
+ *   the same {@link PrincipalLoaderService} the network branches use, so a tool call is refused exactly
+ *   when that principal's own request would be: a soft-deleted, inactive or directory-only user, a
+ *   `sessionEpoch` mismatch, a revoked, inactive or expired service account — all a generic 401. A network
+ *   request cannot carry a symbol-keyed property, so this branch is unreachable over HTTP.
+ *
+ * SERVICE-ACCOUNT branch (ADR-0048) — runs next, in every mode: a `Bearer lzit_sa_<id>_<secret>`
+ *   token authenticates a NON-HUMAN principal through the {@link ServiceAccountAuthenticator} (shared
+ *   with `/mcp`, R10): the id is looked up in the DB (including soft-deleted rows so a revoked account is
+ *   detected), the secret is constant-time-compared to the stored SHA-256 `tokenHash`, and a revoked /
+ *   inactive / expired account is rejected — all as a generic 401. On success it sets
+ *   `request.serviceAccount` + `request.principal = {kind:'service', …}` (with the direct grants resolved
+ *   DB-first) and leaves `request.user` undefined (a service account is never a human). Any other bearer
+ *   (or none) falls through to the unchanged human auth below.
  *
  * AUTH_MODE=shim (dev/test) — reads X-User-Id header; resolves user by UUID; never 401s.
  *   Present + valid UUID → user set on request; absent → request.user = undefined (anonymous).
@@ -80,11 +104,23 @@ export class JwtAuthGuard implements CanActivate {
   // JIT provisions do not re-run discovery. Null = not yet resolved (or last resolution failed).
   private userinfoEndpoint: string | null = null;
 
+  private readonly principals: PrincipalLoaderService;
+  private readonly serviceAccounts: ServiceAccountAuthenticator;
+
+  // The two collaborators are provided by AuthModule. They are @Optional with an equivalent default so a
+  // guard built by hand from the three original dependencies (the existing auth specs) behaves the same.
   constructor(
     private readonly prisma: PrismaService,
     private readonly reflector: Reflector,
     private readonly localCredentials: LocalCredentialService,
-  ) {}
+    @Optional() principals?: PrincipalLoaderService,
+    @Optional() serviceAccounts?: ServiceAccountAuthenticator,
+  ) {
+    this.principals = principals ?? new PrincipalLoaderService(prisma);
+    this.serviceAccounts =
+      serviceAccounts ??
+      new ServiceAccountAuthenticator(prisma, this.principals);
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     // Routes flagged with @Public() bypass auth entirely (e.g. the health probes). A method-level
@@ -105,12 +141,19 @@ export class JwtAuthGuard implements CanActivate {
       }
     >();
 
+    // DELEGATED-IDENTITY branch (ADR-0097, R1) — an in-process AI tool call. Checked before anything that
+    // reads headers: the synthetic request's identity is the symbol, never a bearer. Unreachable from
+    // HTTP (a network request cannot own a symbol-keyed property).
+    if (hasDelegatedIdentity(request)) {
+      return this.handleDelegated(request);
+    }
+
     // SERVICE-ACCOUNT branch (ADR-0048) — runs BEFORE the human modes. A lazyit-native token
     // (`Authorization: Bearer lzit_sa_...`) authenticates a non-human principal in EVERY mode (it has
     // no IdP dependency, BYOI-safe), so it is checked first. Any other bearer (or none) falls through
     // to the unchanged human auth (shim or OIDC). The SA branch sets request.principal itself.
     const bearer = this.extractBearer(request);
-    if (bearer && isServiceAccountToken(bearer)) {
+    if (bearer && this.serviceAccounts.isServiceAccountToken(bearer)) {
       return this.handleServiceAccount(request, bearer);
     }
 
@@ -150,24 +193,68 @@ export class JwtAuthGuard implements CanActivate {
     return authHeader.slice(7);
   }
 
+  // ---------- delegated identity (ADR-0097, R1) ----------------------------
+
+  /**
+   * Authenticate an in-process AI tool call from its delegated identity. DB-FIRST (INV-1) and through the
+   * SAME {@link PrincipalLoaderService} as `handleLocal` and the service-account branch, so the refusals
+   * are identical: a human is re-loaded live and refused on a `sessionEpoch` mismatch, when inactive or
+   * when directory-only; a service account is refused when revoked, inactive or expired, and its grants
+   * are re-resolved. A malformed identity is refused (fail closed). Every refusal is a generic 401 — the
+   * AI layer maps it to a tool error; it never reaches a network client.
+   *
+   * Sets exactly what the network branches set: `request.user` + a human principal, or
+   * `request.serviceAccount` + a service principal with `request.user` undefined. The guards that follow
+   * (MustChangePasswordGuard, RolesGuard, handler guards) then run unchanged.
+   */
+  private async handleDelegated(
+    request: Request & {
+      user?: User;
+      serviceAccount?: ServiceAccount;
+      principal?: Principal;
+    },
+  ): Promise<boolean> {
+    const invalid = () =>
+      new UnauthorizedException('Delegated principal is no longer valid');
+
+    const identity = readDelegatedIdentity(request);
+    if (!identity) {
+      throw invalid();
+    }
+
+    if (identity.kind === 'human') {
+      const loaded = await this.principals.loadHuman(
+        identity.userId,
+        identity.sessionEpoch,
+      );
+      if (!loaded.ok) {
+        throw invalid();
+      }
+      request.user = loaded.principal.user;
+      request.serviceAccount = undefined;
+      request.principal = loaded.principal;
+      return true;
+    }
+
+    const loaded = await this.principals.loadServiceAccount(
+      identity.serviceAccountId,
+    );
+    if (!loaded.ok) {
+      throw invalid();
+    }
+    request.serviceAccount = loaded.principal.serviceAccount;
+    request.principal = loaded.principal;
+    request.user = undefined;
+    return true;
+  }
+
   // ---------- service-account mode (ADR-0048) -------------------------------
 
   /**
-   * Authenticate a service account from a lazyit-native token (ADR-0048). DB-FIRST (INV-1): everything
-   * is verified against the DB row, never a token claim.
-   *   1. Parse `lzit_sa_<id>_<secret>`; a malformed token → 401.
-   *   2. Look the ServiceAccount up BY ID, INCLUDING soft-deleted rows (the escape hatch), so a
-   *      revoked (deletedAt) account is detected and REJECTED rather than silently re-provisioned.
-   *   3. Constant-time compare SHA-256(secret) to the row's `tokenHash`. A wrong secret → 401. The
-   *      lookup-then-compare order means a token with a real id but wrong secret still 401s, and a
-   *      token for an unknown id 401s without a compare.
-   *   4. Reject (401) a revoked (deletedAt), inactive (isActive=false) or expired (expiresAt past) account.
-   *   5. Resolve its direct permission grants DB-first into a Set and set `request.principal`
-   *      (kind:'service') + `request.serviceAccount`. `request.user` stays undefined — a service
-   *      account is NEVER a human (it never enters the user directory, JIT or last-admin logic).
-   *
-   * Every rejection is a generic 401 ("Invalid service-account token") — it never reveals WHICH check
-   * failed (unknown id vs. wrong secret vs. revoked), avoiding an account-enumeration oracle.
+   * Authenticate a service account from a lazyit-native token (ADR-0048) through the shared
+   * {@link ServiceAccountAuthenticator} (DB-first; every refusal a generic 401), then set
+   * `request.principal` (kind:'service') + `request.serviceAccount`. `request.user` stays undefined — a
+   * service account is NEVER a human (it never enters the user directory, JIT or last-admin logic).
    */
   private async handleServiceAccount(
     request: Request & {
@@ -177,67 +264,10 @@ export class JwtAuthGuard implements CanActivate {
     },
     bearer: string,
   ): Promise<boolean> {
-    const invalid = () =>
-      new UnauthorizedException('Invalid service-account token');
-
-    const parsed = parseToken(bearer);
-    if (!parsed) {
-      throw invalid();
-    }
-
-    // Look up INCLUDING soft-deleted rows: a revoked account must be SEEN here (so we 401), not missed
-    // by the read filter. The flag is the ADR-0032 escape hatch the soft-delete extension strips.
-    const account = await this.prisma.serviceAccount.findFirst({
-      where: { id: parsed.serviceAccountId },
-      includeSoftDeleted: true,
-    } as Prisma.ServiceAccountFindFirstArgs);
-
-    // No row for that id → 401 WITHOUT a secret compare. (We still parsed a well-formed token.)
-    if (!account) {
-      throw invalid();
-    }
-
-    // Constant-time secret check FIRST (before leaking state via the revoked/expired branches): a
-    // caller who doesn't hold the secret can't distinguish "wrong secret" from "revoked" — both 401.
-    if (!verifySecret(parsed.secret, account.tokenHash)) {
-      throw invalid();
-    }
-
-    // Account-state gates (all 401, generic): revoked (soft-deleted), disabled, or expired.
-    if (account.deletedAt !== null) {
-      throw invalid();
-    }
-    if (!account.isActive) {
-      throw invalid();
-    }
-    if (
-      account.expiresAt !== null &&
-      account.expiresAt.getTime() <= Date.now()
-    ) {
-      throw invalid();
-    }
-
-    // Resolve the direct grants DB-first (INV-1) into a clean catalog Set — never a token claim.
-    const grantRows = await this.prisma.serviceAccountPermission.findMany({
-      where: { serviceAccountId: account.id },
-      select: { permission: true },
-    });
-    const permissions = resolveServiceAccountPermissions(grantRows);
-
-    request.serviceAccount = account;
-    request.principal = {
-      kind: 'service',
-      serviceAccount: account,
-      permissions,
-    };
+    const principal = await this.serviceAccounts.authenticate(bearer);
+    request.serviceAccount = principal.serviceAccount;
+    request.principal = principal;
     request.user = undefined;
-
-    // Best-effort last-used stamp (fire-and-forget): never blocks or fails the request. Uses the base
-    // client; a write failure is swallowed (the audit/auth decision is already made).
-    void this.prisma.serviceAccount
-      .update({ where: { id: account.id }, data: { lastUsedAt: new Date() } })
-      .catch(() => undefined);
-
     return true;
   }
 
@@ -306,26 +336,15 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid session token');
     }
 
-    // LIVE-filtered read: the soft-delete extension hides deleted rows, so an offboarded user 401s here.
-    const user = await this.prisma.user.findFirst({
-      where: { id: claims.sub },
-    });
-    if (!user) {
-      throw new UnauthorizedException('Account not found');
-    }
-    // Revocation: any epoch bump (logout / password change / deactivate / offboard) invalidates old tokens.
-    if (user.sessionEpoch !== claims.epoch) {
-      throw new UnauthorizedException('Session has been revoked');
-    }
-    if (!user.isActive) {
-      throw new UnauthorizedException('Account disabled');
-    }
-    // A directory-only person has no login capability by construction — never authenticate one.
-    if (user.directoryOnly) {
-      throw new UnauthorizedException('Account cannot log in');
+    // The shared DB-first re-load (also the delegated branch's): a LIVE-filtered read (an offboarded user
+    // is invisible → 401), then revocation (any epoch bump — logout / password change / deactivate /
+    // offboard — invalidates old tokens), then inactive, then directory-only (no login capability).
+    const loaded = await this.principals.loadHuman(claims.sub, claims.epoch);
+    if (!loaded.ok) {
+      throw new UnauthorizedException(LOCAL_REFUSAL_MESSAGES[loaded.reason]);
     }
 
-    request.user = user;
+    request.user = loaded.principal.user;
     request.localSession = { rememberMe: claims.rememberMe };
     return true;
   }

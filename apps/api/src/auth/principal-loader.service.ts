@@ -1,0 +1,134 @@
+import { Injectable } from '@nestjs/common';
+import type {
+  Prisma,
+  ServiceAccount,
+  User,
+} from '../../generated/prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { resolveServiceAccountPermissions } from '../service-accounts/service-account-permissions';
+import type { HumanPrincipal, ServicePrincipal } from './principal';
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Why a principal could not be loaded. Callers map it to their own (usually generic) 401. */
+export type PrincipalLoadFailure =
+  | 'not_found'
+  | 'session_revoked'
+  | 'inactive'
+  | 'directory_only'
+  | 'revoked'
+  | 'expired';
+
+export type PrincipalLoadResult<P> =
+  | { ok: true; principal: P }
+  | { ok: false; reason: PrincipalLoadFailure };
+
+/**
+ * DB-FIRST principal re-load (INV-1), shared by every path that turns an identity into a principal:
+ *   - `JwtAuthGuard.handleLocal` — a local session token's `sub` + `epoch`;
+ *   - the {@link ServiceAccountAuthenticator} — a verified `lzit_sa_` token's account row;
+ *   - `JwtAuthGuard`'s delegated-identity branch — an in-process AI tool call (ADR-0097, R1).
+ *
+ * Sharing one implementation is what makes the delegated branch refuse EXACTLY what the network
+ * branches refuse (route equivalence, INV-AI-2): a soft-deleted, inactive or directory-only user, a
+ * `sessionEpoch` mismatch, and a revoked, inactive or expired service account.
+ */
+@Injectable()
+export class PrincipalLoaderService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Re-load a human by id on the LIVE-filtered client (an offboarded, soft-deleted row is invisible →
+   * `not_found`), then refuse, in this order: a `sessionEpoch` other than `expectedEpoch` (revocation —
+   * logout, password change, deactivation and admin reset bump it), an inactive account, and a
+   * directory-only person (no login capability by construction).
+   */
+  async loadHuman(
+    userId: string,
+    expectedEpoch: number,
+  ): Promise<PrincipalLoadResult<HumanPrincipal>> {
+    // A non-uuid id must never reach the uuid column (a would-be 500); it cannot name a user anyway.
+    if (!UUID_REGEX.test(userId)) {
+      return { ok: false, reason: 'not_found' };
+    }
+    const user: User | null = await this.prisma.user.findFirst({
+      where: { id: userId },
+    });
+    if (!user) {
+      return { ok: false, reason: 'not_found' };
+    }
+    if (user.sessionEpoch !== expectedEpoch) {
+      return { ok: false, reason: 'session_revoked' };
+    }
+    if (!user.isActive) {
+      return { ok: false, reason: 'inactive' };
+    }
+    if (user.directoryOnly) {
+      return { ok: false, reason: 'directory_only' };
+    }
+    return { ok: true, principal: { kind: 'human', user } };
+  }
+
+  /**
+   * Re-load a service account by id, INCLUDING soft-deleted rows so a revoked account is seen and
+   * refused rather than missed, then apply {@link serviceAccountPrincipal}.
+   */
+  async loadServiceAccount(
+    serviceAccountId: string,
+  ): Promise<PrincipalLoadResult<ServicePrincipal>> {
+    const account =
+      await this.findServiceAccountIncludingRevoked(serviceAccountId);
+    if (!account) {
+      return { ok: false, reason: 'not_found' };
+    }
+    return this.serviceAccountPrincipal(account);
+  }
+
+  /**
+   * Look a service account up by id including soft-deleted rows (the ADR-0032 escape hatch the
+   * soft-delete extension strips), so revocation is detected, never mistaken for "unknown".
+   */
+  findServiceAccountIncludingRevoked(
+    serviceAccountId: string,
+  ): Promise<ServiceAccount | null> {
+    return this.prisma.serviceAccount.findFirst({
+      where: { id: serviceAccountId },
+      includeSoftDeleted: true,
+    } as Prisma.ServiceAccountFindFirstArgs);
+  }
+
+  /**
+   * The account-state gates and the grant resolution for an already-identified account row: refuse a
+   * revoked (soft-deleted), inactive or expired account, then resolve its DIRECT grants DB-first into
+   * the principal's permission set — never a token claim, never a role.
+   */
+  async serviceAccountPrincipal(
+    account: ServiceAccount,
+  ): Promise<PrincipalLoadResult<ServicePrincipal>> {
+    if (account.deletedAt !== null) {
+      return { ok: false, reason: 'revoked' };
+    }
+    if (!account.isActive) {
+      return { ok: false, reason: 'inactive' };
+    }
+    if (
+      account.expiresAt !== null &&
+      account.expiresAt.getTime() <= Date.now()
+    ) {
+      return { ok: false, reason: 'expired' };
+    }
+    const grantRows = await this.prisma.serviceAccountPermission.findMany({
+      where: { serviceAccountId: account.id },
+      select: { permission: true },
+    });
+    return {
+      ok: true,
+      principal: {
+        kind: 'service',
+        serviceAccount: account,
+        permissions: resolveServiceAccountPermissions(grantRows),
+      },
+    };
+  }
+}

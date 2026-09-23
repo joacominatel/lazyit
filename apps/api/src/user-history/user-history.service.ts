@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { UserHistoryEventType } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import type { ActorAttribution } from '../common/actor.service';
+import { currentAiInvocationId } from '../ai/core/invocation-context';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -52,6 +53,10 @@ export class UserHistoryService {
     // at-most-one-actor CHECK on user_history is always satisfied (ADR-0048). `actor.userId` is the
     // ACTOR's id — distinct from `event.userId`, the SUBJECT whose history this row belongs to.
     const actor = event.actor ?? {};
+    // AI provenance (ADR-0097, R6): a row written while an AI tool call executes is stamped with that
+    // call's invocation id, read from the AsyncLocalStorage context the AI executor runs every dispatch in.
+    // Outside an AI call the column stays null. The actor above is unchanged — the AI acts AS the principal.
+    const aiInvocationId = currentAiInvocationId();
     return client.userHistory.create({
       data: {
         userId: event.userId,
@@ -61,6 +66,7 @@ export class UserHistoryService {
         ...(actor.serviceAccountId != null
           ? { serviceAccountId: actor.serviceAccountId }
           : {}),
+        ...(aiInvocationId !== undefined ? { aiInvocationId } : {}),
       },
     });
   }
