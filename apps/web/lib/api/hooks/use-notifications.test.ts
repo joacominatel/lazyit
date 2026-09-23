@@ -10,6 +10,7 @@ import {
   dismissAllNotificationsOptions,
   dismissNotificationOptions,
   NOTIFICATION_PAGE_SIZE,
+  newestCreatedAt,
   notificationKeys,
 } from "./use-notifications";
 
@@ -21,7 +22,11 @@ import {
 
 const LIST_KEY = notificationKeys.list({ limit: NOTIFICATION_PAGE_SIZE });
 
-function notification(id: string, read: boolean): Notification {
+function notification(
+  id: string,
+  read: boolean,
+  createdAt = "2026-09-23T10:00:00.000Z",
+): Notification {
   return {
     id,
     type: "low_stock",
@@ -33,7 +38,7 @@ function notification(id: string, read: boolean): Notification {
     targetUserId: null,
     recipientUserId: null,
     metadata: null,
-    createdAt: "2026-09-23T10:00:00.000Z",
+    createdAt,
     read,
   };
 }
@@ -183,7 +188,60 @@ describe("dismiss one notification", () => {
   });
 });
 
+const cachedItems = (qc: QueryClient) =>
+  qc.getQueryData<Page<Notification>>(LIST_KEY)!.items;
+
 describe("Clear all", () => {
+  test("sends the newest createdAt among the rendered rows as `upTo`", async () => {
+    const qc = seededClient();
+    const sent: Array<string | undefined> = [];
+    const observer = new MutationObserver(
+      qc,
+      dismissAllNotificationsOptions(qc, async (upTo) => {
+        sent.push(upTo);
+        return { dismissed: 3, unread: 0 };
+      }),
+    );
+
+    await observer.mutate([
+      notification("x", false, "2026-09-23T09:00:00.000Z"),
+      notification("y", false, "2026-09-23T11:30:00.250Z"),
+      notification("z", true, "2026-09-23T10:00:00.000Z"),
+    ]);
+
+    expect(sent).toEqual(["2026-09-23T11:30:00.250Z"]);
+  });
+
+  test("keeps a cached row newer than `upTo` — only the rendered rows leave, matching the server", async () => {
+    const qc = seededClient();
+    const rendered = cachedItems(qc);
+    // A poll landed after the bell rendered: "d" is newer than anything the user saw.
+    qc.setQueryData<Page<Notification>>(LIST_KEY, {
+      items: [notification("d", false, "2026-09-23T10:00:00.001Z"), ...rendered],
+      total: 4,
+      limit: NOTIFICATION_PAGE_SIZE,
+      offset: 0,
+    });
+    qc.setQueryData<UnreadCount>(notificationKeys.unreadCount(), { unread: 3 });
+    const request = deferred();
+    const observer = new MutationObserver(
+      qc,
+      dismissAllNotificationsOptions(qc, () => request.promise),
+    );
+
+    const pending = observer.mutate(rendered);
+    await Bun.sleep(0);
+
+    expect(listIds(qc)).toEqual(["d"]);
+    expect(qc.getQueryData<Page<Notification>>(LIST_KEY)?.total).toBe(1);
+    // "d" is unread and was not dismissed.
+    expect(badge(qc)).toBe(1);
+
+    request.resolve({ dismissed: 3, unread: 1 });
+    await pending;
+    expect(badge(qc)).toBe(1);
+  });
+
   test("empties the list and zeroes the badge optimistically", async () => {
     const qc = seededClient();
     const request = deferred();
@@ -192,7 +250,7 @@ describe("Clear all", () => {
       dismissAllNotificationsOptions(qc, () => request.promise),
     );
 
-    const pending = observer.mutate();
+    const pending = observer.mutate(cachedItems(qc));
     await Bun.sleep(0);
 
     expect(listIds(qc)).toEqual([]);
@@ -214,9 +272,27 @@ describe("Clear all", () => {
       }),
     );
 
-    await expect(observer.mutate()).rejects.toThrow("server error");
+    await expect(observer.mutate(cachedItems(qc))).rejects.toThrow(
+      "server error",
+    );
 
     expect(listIds(qc)).toEqual(["a", "b", "c"]);
     expect(badge(qc)).toBe(2);
+  });
+});
+
+describe("newestCreatedAt", () => {
+  test("is undefined for no rows", () => {
+    expect(newestCreatedAt([])).toBeUndefined();
+  });
+
+  test("compares instants, not list order", () => {
+    expect(
+      newestCreatedAt([
+        notification("a", false, "2026-09-23T10:00:00.000Z"),
+        notification("b", false, "2026-09-24T08:00:00.000Z"),
+        notification("c", false, "2026-09-23T23:59:59.999Z"),
+      ]),
+    ).toBe("2026-09-24T08:00:00.000Z");
   });
 });

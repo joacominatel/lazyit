@@ -50,8 +50,9 @@ import { cn } from "@/lib/utils";
  * of the app — but it is backed by the `Notification` store, not the `recent_activity` view. A row click
  * marks it read and deep-links to its target; "Mark all read" clears the badge. The per-row X and
  * "Clear all" DISMISS from the caller's own bell only (ADR-0056 §7 amendment, #1309) — optimistic, with a
- * rollback + toast on failure. There is no undo in v1 (an accepted trade-off), so neither asks to confirm:
- * the effect is per user and never deletes the shared event.
+ * rollback + toast on failure. "Clear all" is bounded to the rows shown: a notification that arrived after
+ * the list loaded stays. Neither asks to confirm and neither can be undone — a CEO decision (ADR-0056
+ * amendment §D): the effect is per user and never deletes the shared event.
  *
  * When SSE lands (Phase 2) the same hooks push live behind the same endpoints — this component does not
  * change shape.
@@ -238,11 +239,12 @@ export function NotificationBell() {
             {items.length > 0 && (
               <button
                 type="button"
-                onClick={() =>
-                  dismissAll.mutate(undefined, {
+                onClick={() => {
+                  // Only the rows shown here: anything that arrived since stays in the bell.
+                  dismissAll.mutate(items, {
                     onError: (error) => notifyError(error, t("clearAllFailed")),
-                  })
-                }
+                  });
+                }}
                 disabled={dismissAll.isPending}
                 className="rounded-sm text-xs font-medium text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:text-foreground focus-visible:underline disabled:opacity-50"
               >

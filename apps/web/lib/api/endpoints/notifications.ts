@@ -15,7 +15,7 @@ import { apiFetch } from "../client";
  * Backend contract (ADR-0056 §2): `GET /notifications?limit=&offset=` → `Page<Notification>` (each item
  * carrying its per-caller `read` flag); `GET /notifications/unread-count` → `{ unread }`;
  * `PATCH /notifications/:id/read` and `PATCH /notifications/read-all` → `{ marked, unread }`;
- * `PATCH /notifications/:id/dismiss` and `PATCH /notifications/dismiss-all` → `{ dismissed, unread }`
+ * `PATCH /notifications/:id/dismiss` and `PATCH /notifications/dismiss-all?upTo=` → `{ dismissed, unread }`
  * (ADR-0056 §7 amendment, #1309 — per-user, hides the row from the caller's bell only).
  *
  * SSE is a Phase-2 upgrade behind these SAME endpoints — these functions do not change when it lands.
@@ -69,9 +69,16 @@ export function dismissNotification(
   });
 }
 
-/** Dismiss every notification currently visible to the caller (`PATCH /notifications/dismiss-all`). */
-export function dismissAllNotifications(): Promise<DismissNotificationsResult> {
-  return apiFetch<DismissNotificationsResult>(`${BASE}/dismiss-all`, {
+/**
+ * Dismiss the caller's visible notifications (`PATCH /notifications/dismiss-all`). `upTo` (an ISO
+ * datetime — the newest `createdAt` the bell rendered) limits it to notifications created at or before
+ * it, so one that arrived after the bell loaded stays. Without it the server dismisses everything visible.
+ */
+export function dismissAllNotifications(
+  upTo?: string,
+): Promise<DismissNotificationsResult> {
+  const q = upTo === undefined ? "" : `?${new URLSearchParams({ upTo })}`;
+  return apiFetch<DismissNotificationsResult>(`${BASE}/dismiss-all${q}`, {
     method: "PATCH",
   });
 }

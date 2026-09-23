@@ -104,9 +104,27 @@ export function useMarkAllNotificationsRead() {
 /** Shared by both dismiss mutations so concurrent ones can see each other (see `onSettled`). */
 const DISMISS_MUTATION_KEY = [...notificationKeys.all, "dismiss"] as const;
 
-/** The dismiss-all target: every notification the caller can currently see. */
-const ALL = Symbol("all");
-type DismissTarget = string | typeof ALL;
+/**
+ * What a dismiss hides: one notification by id, or — for "Clear all" — every row created at or before
+ * `upTo`, the same bound the server applies (every row when `upTo` is absent).
+ */
+type DismissTarget = string | { upTo: string | undefined };
+
+/**
+ * The newest `createdAt` among the rows the bell rendered — the `upTo` "Clear all" sends, so it only
+ * dismisses what the user has seen. `undefined` for no rows.
+ */
+export function newestCreatedAt(
+  items: readonly Notification[],
+): string | undefined {
+  let newest: string | undefined;
+  for (const n of items) {
+    if (newest === undefined || Date.parse(n.createdAt) > Date.parse(newest)) {
+      newest = n.createdAt;
+    }
+  }
+  return newest;
+}
 
 /** The pre-mutation cache a dismiss restores on error: every cached list page + the badge count. */
 interface DismissSnapshot {
@@ -116,8 +134,9 @@ interface DismissSnapshot {
 
 /**
  * Optimistically hide notifications from every cached list page and drop the badge by the unread ones
- * hidden (dismiss implies read, ADR-0056 §7 amendment). `ALL` empties the lists and zeroes the
- * badge — dismiss-all hides everything the caller can see. Returns the snapshot to roll back to.
+ * hidden (dismiss implies read, ADR-0056 §7 amendment). "Clear all" hides the rows at or before its
+ * `upTo` and sets the badge to the unread rows it kept — none when every rendered row is cleared, since
+ * the server also dismisses the older rows beyond the loaded page. Returns the snapshot to roll back to.
  */
 async function hideFromCache(
   queryClient: QueryClient,
@@ -132,9 +151,15 @@ async function hideFromCache(
     count: queryClient.getQueryData<UnreadCount>(notificationKeys.unreadCount()),
   };
 
-  const hidden = (n: Notification) => target === ALL || n.id === target;
+  const hidden =
+    typeof target === "string"
+      ? (n: Notification) => n.id === target
+      : (n: Notification) =>
+          target.upTo === undefined ||
+          Date.parse(n.createdAt) <= Date.parse(target.upTo);
   // The list caches the `Page<Notification>` ENVELOPE (ADR-0030), not a bare array — preserve it.
   let unreadHidden = 0;
+  let unreadKept = 0;
   let counted = false;
   queryClient.setQueriesData<Page<Notification>>(
     { queryKey: notificationKeys.lists() },
@@ -144,6 +169,7 @@ async function hideFromCache(
       // Several list pages may hold the same row; count its unread once for the badge.
       if (!counted) {
         unreadHidden = removed.filter((n) => !n.read).length;
+        unreadKept = page.items.filter((n) => !hidden(n) && !n.read).length;
         counted = removed.length > 0;
       }
       return {
@@ -156,7 +182,9 @@ async function hideFromCache(
   if (snapshot.count) {
     queryClient.setQueryData<UnreadCount>(notificationKeys.unreadCount(), {
       unread:
-        target === ALL ? 0 : Math.max(0, snapshot.count.unread - unreadHidden),
+        typeof target === "string"
+          ? Math.max(0, snapshot.count.unread - unreadHidden)
+          : unreadKept,
     });
   }
   return snapshot;
@@ -219,12 +247,22 @@ export function dismissNotificationOptions(
   return dismissMutationOptions(queryClient, mutationFn, (id) => id);
 }
 
-/** Options for dismissing EVERYTHING visible ("Clear all"). Exported for the same reason. */
+/**
+ * Options for "Clear all". The variables are the rows the bell rendered: the request sends the newest
+ * of their `createdAt` as `upTo`, and the optimistic removal hides exactly the rows the server will
+ * dismiss — in practice every rendered row. Exported for the same reason.
+ */
 export function dismissAllNotificationsOptions(
   queryClient: QueryClient,
-  mutationFn: () => Promise<DismissNotificationsResult> = dismissAllNotifications,
+  mutationFn: (
+    upTo: string | undefined,
+  ) => Promise<DismissNotificationsResult> = dismissAllNotifications,
 ) {
-  return dismissMutationOptions<void>(queryClient, mutationFn, () => ALL);
+  return dismissMutationOptions<readonly Notification[]>(
+    queryClient,
+    (items) => mutationFn(newestCreatedAt(items)),
+    (items) => ({ upTo: newestCreatedAt(items) }),
+  );
 }
 
 /** Dismiss one notification from the caller's own bell (the per-row X, #1309). Optimistic. */
@@ -233,7 +271,10 @@ export function useDismissNotification() {
   return useMutation(dismissNotificationOptions(queryClient));
 }
 
-/** Dismiss every visible notification from the caller's own bell ("Clear all", #1309). Optimistic. */
+/**
+ * Dismiss the rendered notifications from the caller's own bell ("Clear all", #1309) — pass the rows
+ * the bell shows; anything newer stays. Optimistic.
+ */
 export function useDismissAllNotifications() {
   const queryClient = useQueryClient();
   return useMutation(dismissAllNotificationsOptions(queryClient));
