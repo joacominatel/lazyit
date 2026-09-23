@@ -982,6 +982,10 @@ describe('UsersService', () => {
     >;
     expect(updateCalls[0][0].where).toEqual({ id: 'uuid-1' });
     expect(updateCalls[0][0].data.deletedAt).toBeInstanceOf(Date);
+    // Offboarding revokes every local session, so a later restore() cannot revive one (ADR-0086 §8).
+    expect(updateCalls[0][0].data).toHaveProperty('sessionEpoch', {
+      increment: 1,
+    });
 
     // Active grants are revoked inline (revokedAt + actor + audit note).
     const grantCalls = tx.accessGrant.updateMany.mock.calls as Array<
@@ -1166,6 +1170,53 @@ describe('UsersService', () => {
     expect(tx.accessGrant.updateMany).not.toHaveBeenCalled();
     expect(assignments.releaseAllForUser).not.toHaveBeenCalled();
     expect(search.remove).not.toHaveBeenCalled();
+  });
+
+  // ADR-0086 §8 (#1307): deactivation revokes every local session, so a later reactivation cannot revive a
+  // token minted before it (a "keep me signed in" token never expires by time).
+  describe('session revocation on deactivation (ADR-0086 §8)', () => {
+    type UpdateCall = [{ data: Record<string, unknown> }];
+
+    it('bumps sessionEpoch when an active user is deactivated', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: false });
+
+      await service.update('uuid-1', { isActive: false });
+
+      const [[arg]] = user.update.mock.calls as UpdateCall[];
+      expect(arg.data).toMatchObject({
+        isActive: false,
+        sessionEpoch: { increment: 1 },
+      });
+    });
+
+    it('does not bump sessionEpoch on reactivation, a repeat deactivation, or a profile edit', async () => {
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: false,
+        deletedAt: null,
+      });
+      await service.update('uuid-1', { isActive: true });
+      await service.update('uuid-1', { isActive: false });
+
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        lastName: 'Lovelace',
+        deletedAt: null,
+      });
+      await service.update('uuid-1', { lastName: 'Byron' });
+
+      for (const [arg] of user.update.mock.calls as UpdateCall[]) {
+        expect(arg.data).not.toHaveProperty('sessionEpoch');
+      }
+    });
   });
 
   it('re-indexes the user on update (upsert with the updated row)', async () => {
