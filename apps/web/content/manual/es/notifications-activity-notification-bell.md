@@ -78,8 +78,9 @@ caduque:
 - **Descartar una** — pasa el cursor sobre una fila y selecciona la **×** de su borde derecho. En un
   teléfono o una tableta la × se muestra siempre; con el teclado, llega a ella con Tab. Descartar no abre
   la notificación.
-- **Descartar todas** — en la cabecera de la campana, quita de una vez todas las notificaciones que hay
-  en tu campana. Cuando la campana queda vacía muestra «Estás al día.»
+- **Descartar todas** — en la cabecera de la campana, quita de una vez las notificaciones que se muestran
+  en ese momento. Lo más reciente se queda: una notificación que llegó después de abrir la campana no se
+  descarta y sigue sin leer. Cuando la campana queda vacía muestra «Estás al día.»
 
 Descartar también marca la notificación como leída, así que el indicador baja con ella. Una notificación
 que llega después de seleccionar **Descartar todas** aparece con normalidad.
@@ -89,8 +90,9 @@ campana: el evento en sí no se borra, y los demás administradores que ven la m
 teniendo en sus campanas. El registro duradero del historial de actividad no se toca.
 
 > [!IMPORTANT]
-> **No se puede deshacer** y no hay una vista de notificaciones descartadas. Una vez descartada, una
-> notificación queda fuera de tu campana hasta que se poda con las demás a los 90 días. Descarta lo que
+> Ninguna de las dos acciones pide confirmación, **no se puede deshacer** y no hay una vista de
+> notificaciones descartadas. Una vez descartada, una notificación queda fuera de tu campana hasta que
+> se pode con las demás a los 90 días. Descarta lo que
 > ya resolviste; deja lo que todavía tengas que atender.
 
 ## Qué contiene una notificación

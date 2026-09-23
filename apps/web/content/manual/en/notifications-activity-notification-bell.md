@@ -72,8 +72,9 @@ age out:
 
 - **Dismiss one** — hover a row and select the **×** at its right edge. On a phone or tablet the × is
   always shown; with a keyboard, tab to it. Dismissing does not open the notification.
-- **Clear all** — in the bell's header, removes every notification currently in your bell at once. When
-  the bell is empty it reads "You're all caught up."
+- **Clear all** — in the bell's header, removes the notifications currently shown, all at once. Anything
+  newer stays: a notification that arrived after you opened the bell is not cleared, and it stays unread.
+  When the bell is empty it reads "You're all caught up."
 
 Dismissing also marks the notification read, so the badge drops with it. A notification that arrives
 after you select **Clear all** shows up normally.
@@ -83,9 +84,9 @@ event itself is not deleted, and other administrators who see the same broadcast
 own bells. The durable record in the activity history is untouched.
 
 > [!IMPORTANT]
-> There is **no undo** and no view of dismissed notifications. Once dismissed, a notification stays out
-> of your bell until it is pruned with the rest after 90 days. Dismiss what you have handled; leave in
-> place anything you still need to act on.
+> Neither action asks for confirmation, there is **no undo**, and there is no view of dismissed
+> notifications. Once dismissed, a notification stays out of your bell until it is pruned with the rest
+> after 90 days. Dismiss what you have handled; leave in place anything you still need to act on.
 
 ## What a notification carries
 
