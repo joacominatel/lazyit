@@ -1416,9 +1416,10 @@ export class UsersService {
    * would remove their administrator powers (role demotion, deactivation, offboarding, delete), so a
    * fresh install — or any instance — is never left without an administrator. Counts LIVE and ACTIVE
    * admins only: the read filter already excludes soft-deleted users, and `isActive: true` excludes
-   * deactivated ones, since neither can authenticate to administer anything (SEC-021). The check-then-act window is acceptable for a 5–20-person single-org tool: the worst case
-   * is two near-simultaneous demotions both passing, which is the same class of race ADR-0040 already
-   * accepts for first-user-ADMIN, and strictly safer than locking everyone out.
+   * deactivated ones, since neither can authenticate to administer anything (SEC-021). The
+   * check-then-act window is acceptable for a 5–20-person single-org tool: the worst case is two
+   * near-simultaneous demotions both passing, which is the same class of race ADR-0040 already accepts
+   * for first-user-ADMIN, and strictly safer than locking everyone out.
    */
   private async assertNotLastAdmin(userId: string) {
     const otherAdmins = await this.prisma.user.count({
