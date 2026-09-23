@@ -123,7 +123,7 @@
       ]
     },
     "transformIgnorePatterns": [
-      "/node_modules/(?!.*@nestjs)"
+      "/node_modules/(?!.*@nestjs|.*@ai-sdk|.*@workflow|(?:.*/)?ai/)"
     ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"

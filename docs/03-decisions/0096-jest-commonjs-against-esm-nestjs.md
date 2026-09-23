@@ -3,7 +3,7 @@ title: "ADR-0096: The api Jest suite stays CommonJS and transpiles the ESM-only 
 tags: [adr, backend, testing, tooling]
 status: accepted
 created: 2026-09-02
-updated: 2026-09-02
+updated: 2026-09-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -102,3 +102,31 @@ changing transform semantics under all 171 of them.
 - **Follow-ups:** none required. Revisit only if `apps/api` itself moves to `"type": "module"`, or
   if the frontend/e2e runner decision deferred in [[0012-testing-strategy]] is taken up and makes a
   single runner attractive.
+
+## Amendment — 2026-09-23: the AI SDK joins the lookahead (#1315)
+
+The AI assistant (ADR-0097) adds the Vercel AI SDK 7 (`ai`, `@ai-sdk/*`), which is ESM-only, so the
+lookahead is extended exactly as **Preserve this** above prescribes. Both `apps/api/package.json` and
+`apps/api/test/jest-e2e.json` now read:
+
+```json
+"transformIgnorePatterns": ["/node_modules/(?!.*@nestjs|.*@ai-sdk|.*@workflow|(?:.*/)?ai/)"]
+```
+
+| Alternative | Why it is needed |
+| --- | --- |
+| `.*@ai-sdk` | `@ai-sdk/anthropic`, `/openai`, `/google`, `/openai-compatible`, `/provider`, `/provider-utils`, `/gateway` — all `"type": "module"` with import-only code |
+| `.*@workflow` | `@workflow/serde`, imported by `@ai-sdk/provider-utils`; ESM-only (`Unexpected token 'export'` without it) |
+| `(?:.*/)?ai/` | the `ai` package itself. Written this way so it matches at **every** `/node_modules/` in Bun's isolated store path (`.bun/ai@7…/node_modules/ai/…`) as well as a hoisted layout, and never matches `openai/` |
+
+Each alternative was measured necessary by removing it and watching the compatibility specs die at
+parse time. The rest of the AI SDK graph ships a CommonJS build and stays untransformed:
+`eventsource-parser`, `@standard-schema/spec`, `undici`, `@vercel/oidc`, `json-schema` (types only).
+The MCP SDK v2 (`@modelcontextprotocol/server`, `/node`, `/core`) is dual-published with a `require`
+build and needs **no** entry. The regression tests that pin all of this live in
+`apps/api/src/ai/providers/__compat__/`.
+
+This remains a test-time concern: at runtime the compiled CommonJS `dist/` loads the AI SDK through
+Node's `require(esm)`, which `__compat__/aisdk-require-esm.spec.ts` checks on the Node running the
+suite.
+
