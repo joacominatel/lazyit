@@ -21,6 +21,10 @@ import {
 import { IS_PUBLIC_KEY } from './public.decorator';
 import type { Principal } from './principal';
 import {
+  hasDelegatedIdentity,
+  readDelegatedIdentity,
+} from './delegated-identity';
+import {
   PrincipalLoaderService,
   type PrincipalLoadFailure,
 } from './principal-loader.service';
@@ -54,9 +58,18 @@ interface ProfileClaims {
 }
 
 /**
- * Global auth guard (ADR-0038, extended for service accounts by ADR-0048).
+ * Global auth guard (ADR-0038, extended for service accounts by ADR-0048 and for AI delegation by
+ * ADR-0097).
  *
- * SERVICE-ACCOUNT branch (ADR-0048) — runs FIRST, in every mode: a `Bearer lzit_sa_<id>_<secret>`
+ * DELEGATED-IDENTITY branch (ADR-0097, R1) — runs FIRST, in every mode, and ONLY for an in-process AI
+ *   tool call: the AI tool dispatcher builds a synthetic request carrying a module-private symbol
+ *   (`delegated-identity.ts`) naming the invoking principal. The principal is RE-LOADED from the DB with
+ *   the same {@link PrincipalLoaderService} the network branches use, so a tool call is refused exactly
+ *   when that principal's own request would be: a soft-deleted, inactive or directory-only user, a
+ *   `sessionEpoch` mismatch, a revoked, inactive or expired service account — all a generic 401. A network
+ *   request cannot carry a symbol-keyed property, so this branch is unreachable over HTTP.
+ *
+ * SERVICE-ACCOUNT branch (ADR-0048) — runs next, in every mode: a `Bearer lzit_sa_<id>_<secret>`
  *   token authenticates a NON-HUMAN principal through the {@link ServiceAccountAuthenticator} (shared
  *   with `/mcp`, R10): the id is looked up in the DB (including soft-deleted rows so a revoked account is
  *   detected), the secret is constant-time-compared to the stored SHA-256 `tokenHash`, and a revoked /
@@ -128,6 +141,13 @@ export class JwtAuthGuard implements CanActivate {
       }
     >();
 
+    // DELEGATED-IDENTITY branch (ADR-0097, R1) — an in-process AI tool call. Checked before anything that
+    // reads headers: the synthetic request's identity is the symbol, never a bearer. Unreachable from
+    // HTTP (a network request cannot own a symbol-keyed property).
+    if (hasDelegatedIdentity(request)) {
+      return this.handleDelegated(request);
+    }
+
     // SERVICE-ACCOUNT branch (ADR-0048) — runs BEFORE the human modes. A lazyit-native token
     // (`Authorization: Bearer lzit_sa_...`) authenticates a non-human principal in EVERY mode (it has
     // no IdP dependency, BYOI-safe), so it is checked first. Any other bearer (or none) falls through
@@ -171,6 +191,61 @@ export class JwtAuthGuard implements CanActivate {
       return undefined;
     }
     return authHeader.slice(7);
+  }
+
+  // ---------- delegated identity (ADR-0097, R1) ----------------------------
+
+  /**
+   * Authenticate an in-process AI tool call from its delegated identity. DB-FIRST (INV-1) and through the
+   * SAME {@link PrincipalLoaderService} as `handleLocal` and the service-account branch, so the refusals
+   * are identical: a human is re-loaded live and refused on a `sessionEpoch` mismatch, when inactive or
+   * when directory-only; a service account is refused when revoked, inactive or expired, and its grants
+   * are re-resolved. A malformed identity is refused (fail closed). Every refusal is a generic 401 — the
+   * AI layer maps it to a tool error; it never reaches a network client.
+   *
+   * Sets exactly what the network branches set: `request.user` + a human principal, or
+   * `request.serviceAccount` + a service principal with `request.user` undefined. The guards that follow
+   * (MustChangePasswordGuard, RolesGuard, handler guards) then run unchanged.
+   */
+  private async handleDelegated(
+    request: Request & {
+      user?: User;
+      serviceAccount?: ServiceAccount;
+      principal?: Principal;
+    },
+  ): Promise<boolean> {
+    const invalid = () =>
+      new UnauthorizedException('Delegated principal is no longer valid');
+
+    const identity = readDelegatedIdentity(request);
+    if (!identity) {
+      throw invalid();
+    }
+
+    if (identity.kind === 'human') {
+      const loaded = await this.principals.loadHuman(
+        identity.userId,
+        identity.sessionEpoch,
+      );
+      if (!loaded.ok) {
+        throw invalid();
+      }
+      request.user = loaded.principal.user;
+      request.serviceAccount = undefined;
+      request.principal = loaded.principal;
+      return true;
+    }
+
+    const loaded = await this.principals.loadServiceAccount(
+      identity.serviceAccountId,
+    );
+    if (!loaded.ok) {
+      throw invalid();
+    }
+    request.serviceAccount = loaded.principal.serviceAccount;
+    request.principal = loaded.principal;
+    request.user = undefined;
+    return true;
   }
 
   // ---------- service-account mode (ADR-0048) -------------------------------
@@ -261,7 +336,7 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid session token');
     }
 
-    // The shared DB-first re-load: a LIVE-filtered read (an offboarded user
+    // The shared DB-first re-load (also the delegated branch's): a LIVE-filtered read (an offboarded user
     // is invisible → 401), then revocation (any epoch bump — logout / password change / deactivate /
     // offboard — invalidates old tokens), then inactive, then directory-only (no login capability).
     const loaded = await this.principals.loadHuman(claims.sub, claims.epoch);
