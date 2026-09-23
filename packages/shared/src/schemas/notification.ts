@@ -200,7 +200,8 @@ export type Notification = z.infer<typeof NotificationSchema>;
 /**
  * Paginated `GET /notifications` envelope: `{ items: Notification[], total, limit, offset }`. Offset
  * pagination per ADR-0030 — NOT a bare array. Newest-first; `total` is the count over the caller's
- * whole (retained) notification set. Each item carries its per-caller `read` flag.
+ * whole (retained) notification set, excluding the rows the caller has DISMISSED from their own bell
+ * (issue #1309). Each item carries its per-caller `read` flag.
  */
 export const NotificationPageSchema = pageSchema(NotificationSchema);
 export type NotificationPage = z.infer<typeof NotificationPageSchema>;
@@ -228,6 +229,39 @@ export const MarkReadResultSchema = z.object({
   unread: z.number().int().min(0),
 });
 export type MarkReadResult = z.infer<typeof MarkReadResultSchema>;
+
+/**
+ * The result of a dismiss action (`PATCH /notifications/:id/dismiss` and `PATCH /notifications/dismiss-all`,
+ * ADR-0056 §7 amendment, issue #1309). Dismiss is PER USER: it hides the notification from the caller's
+ * own bell only — the shared event is never deleted, and other users (e.g. another admin on a broadcast)
+ * still see it. Dismiss implies read, so the fresh `unread` count drops accordingly. Idempotent:
+ * re-dismissing succeeds with `dismissed: 0`; an id the caller cannot see is also `dismissed: 0` (never a
+ * 404, so existence is not disclosed). Neither endpoint takes a request body; dismiss-all takes an
+ * optional `upTo` query ({@link DismissAllNotificationsQuerySchema}).
+ */
+export const DismissNotificationsResultSchema = z.object({
+  /** How many notifications this action newly hid from the caller's bell (idempotent: may be 0). */
+  dismissed: z.number().int().min(0),
+  /** The caller's unread count AFTER the action — drives the badge without a refetch. */
+  unread: z.number().int().min(0),
+});
+export type DismissNotificationsResult = z.infer<
+  typeof DismissNotificationsResultSchema
+>;
+
+/**
+ * Query params for `PATCH /notifications/dismiss-all` (issue #1309). `upTo` bounds "Clear all" to what
+ * the caller has SEEN: only notifications created at or before it are dismissed, so one that arrives
+ * after the bell loaded stays, unread. The web sends the newest `createdAt` among the rows it rendered.
+ * Optional so an older client without it keeps the unbounded behavior (every visible notification).
+ * An ISO 8601 UTC datetime, the same form `Notification.createdAt` is serialized in.
+ */
+export const DismissAllNotificationsQuerySchema = z.object({
+  upTo: z.iso.datetime().optional(),
+});
+export type DismissAllNotificationsQuery = z.infer<
+  typeof DismissAllNotificationsQuerySchema
+>;
 
 /**
  * Per-user, per-type EMAIL notification preferences (issue #879). A user can opt OUT of receiving
