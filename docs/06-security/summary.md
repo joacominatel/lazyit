@@ -65,10 +65,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 2 |
+| Medium | 1 |
 | Low | 12 |
 | Info | 0 |
-| **Total open** | **14** |
+| **Total open** | **13** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -77,7 +77,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 | ID | Sev | Module | Title |
 | --- | --- | --- | --- |
-| [[SEC-051-application-url-scheme-guard-port-carveout-bypass\|SEC-051]] | 🟠 Medium | applications | URL `host:port` carve-out accepts `javascript:1/…` → re-opens the SEC-008 XSS class |
 | [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard\|SEC-072]] | 🟠 Medium | assets/import | `AssetSpecsSchema` has no global structural bound + `jsonDeepEqual` has no depth guard — extends SEC-032, now import-reachable |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
@@ -95,15 +94,15 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 ## Top findings
 
 1. **SEC-020 ✅ Closed.** Moved to `closed/` (fixed: JIT email-link now checks `email_verified`).
-2. **SEC-051 (Medium) — SEC-008 XSS class re-opened.** The `^\d+(\/.*)?$` host:port carve-out in
-   `isSafeApplicationUrl` accepts `javascript:1/alert(document.cookie)` (the `1/…` is valid JS division),
-   evading the SEC-008 fix on both create and update. The predicate is exported for frontend reuse →
-   escalates to High once a renderer exists.
+2. **SEC-051 ✅ Closed.** Moved to `closed/` (fixed 2026-09-23, #1320): the `host:port` carve-out in
+   `isSafeApplicationUrl` no longer reads a browser-interpreted scheme (`javascript`, `vbscript`,
+   `data`, `file`, …) as a host, and the check also runs on the character-reference / percent-decoded
+   value. Re-closes the SEC-008 class on create and update.
 3. **SEC-011 ✅ Closed.** Moved to `closed/` (SA coarse-permission escalation fixed).
 4. **SEC-031 ✅ Closed.** Moved to `closed/` (assignment release TOCTOU fixed).
-4. **SEC-021 ✅ Closed.** Moved to `closed/` (deactivating the last active ADMIN now 409s, and the
+5. **SEC-021 ✅ Closed.** Moved to `closed/` (deactivating the last active ADMIN now 409s, and the
    last-admin guard counts only active admins).
-5. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
+6. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
    A recurring pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach
    nested relations, FK guards don't check for a *live* parent, and `SetNull` only fires on
    hard-delete. One architectural fix (filter nested includes + a shared live-parent guard + register
@@ -111,7 +110,7 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    (`ConsumableCategory` registered) and its consumable half by guarding the explicit
    `findOne`/`assertExists`/movement paths (the model deliberately stays out of the set for its
    archived-view slice).
-5. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
+7. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
    (PR #251, on `feat/issue-247-async-workers-bullmq-valkey`): the parse runs in a heap-capped forked
    child, so a bomb OOMs the child, not the API. Moved to `closed/`; closes on promotion to `dev`.
 

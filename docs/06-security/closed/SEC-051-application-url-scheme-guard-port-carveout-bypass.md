@@ -2,7 +2,7 @@
 id: SEC-051
 title: isSafeApplicationUrl host:port carve-out is bypassable — "javascript:1/<payload>" passes the SEC-008 scheme guard
 severity: medium
-status: open
+status: fixed
 cwe: CWE-79
 discovered: 2026-06-06
 module: applications
@@ -109,3 +109,87 @@ SEC-008), and make the shared predicate the single tested source of truth for bo
 
 - CWE-79: Improper Neutralization of Input During Web Page Generation (XSS) · CWE-84.
 - OWASP XSS Prevention Cheat Sheet (URL contexts) · SEC-008 (closed) · SEC-003 (open) · ADR-0023.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `856b4a6d` (`fix(shared): close the host:port carve-out bypass in isSafeApplicationUrl (#1320)`), tests in `3dd1c420`
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-23
+
+### Confirmed live
+
+On `dev` at `cef9f2d8`, `isSafeApplicationUrl` returned `true` for every vector in this finding and
+its siblings: `javascript:1/alert(document.cookie)`, `javascript:0//x`, `vbscript:1/msgbox(1)`,
+`data:1/…`, `file:1/…`, the same shapes with mixed case / embedded TAB / leading whitespace / a
+leading control byte, and percent- or character-reference-encoded schemes (`javascript%3A…`,
+`%6Aavascript:…`, `&#106;avascript:…`, `javascript&#58;…`, `javascript&colon;…`, `java&Tab;script:…`).
+
+### Why not the host-grammar check the Recommendation suggests
+
+`javascript` **is** a valid single-label host and `1` a valid port, so "valid host label + `^\d{1,5}(\/|$)`"
+still accepts `javascript:1/alert(1)`. Requiring a dotted host instead would reject legitimate
+single-label internal hosts (`jenkins:8080`) that existing rows may hold, and those would lose their
+link in the web. The ambiguity only exists when the "host" token is itself a scheme a browser gives
+meaning to, so that is what the carve-out now refuses. Everything outside the carve-out is still an
+allow-list (`http`/`https` or no scheme).
+
+### Changes
+
+- `packages/shared/src/schemas/application.ts`:
+  - The `host:port` carve-out never applies when the pre-colon token is a browser-interpreted scheme
+    (`javascript`, `vbscript`, `data`, `file`, `blob`, `filesystem`, `about`, `view-source`), so those
+    are rejected regardless of what follows the colon.
+  - `isSafeApplicationUrl` runs the scheme check on the raw value **and** on a decoded form (HTML
+    numeric character references with or without `;`, `&colon;` / `&tab;` / `&newline;`, and `%XX`
+    escapes), so a scheme only revealed by a decoding sink (an HTML attribute, a markdown link
+    destination) is rejected too.
+  - Create and update both go through `ApplicationUrlSchema`, so both are covered. The read schema
+    (`ApplicationSchema.url`) is unchanged: `z.string().nullable()`.
+
+### Tests added
+
+`packages/shared/src/schemas/application.test.ts`:
+
+- `isSafeApplicationUrl — host:port carve-out bypass (SEC-051)` › rejects a dangerous scheme shaped
+  like host:port/path; › rejects the same shape under case, whitespace and control-char obfuscation;
+  › rejects percent- and character-reference-encoded dangerous schemes — all three fail on `dev`
+  (every listed value returned `true`), pass with the fix.
+- › still allows scheme-less host:port (single-label and dotted) and encoded http(s) urls — the
+  no-regression guard (`jenkins:8080`, `localhost:3000`, `javascript.corp.local:8080`, `%20` paths,
+  `https://…?q=a%3Ab`).
+- `Application url schemas — SEC-051 on write, tolerant on read` › `CreateApplicationSchema` and
+  `UpdateApplicationSchema` reject the bypass (both fail on `dev`); › `ApplicationSchema` still loads a
+  legacy row holding `javascript:1/alert(document.cookie)` (upgrade-safety).
+
+### Verification
+
+`bun test src/schemas/application.test.ts` in `packages/shared`: 14 pass / 5 fail on `dev`, 19 pass /
+0 fail with the fix. Full charter validation (shared build, the four `tsc --noEmit`, shared/web/agent
+`bun test`, api jest) green — numbers in PR #1320's body.
+
+### Render sink
+
+The only href sink is `apps/web/app/(app)/applications/[id]/_components/application-detail-view.tsx`,
+which gates the link on `isSafeApplicationUrl` (imported from the built `@lazyit/shared`, so it picks up
+this fix with no web change) and then prefixes any non-`http(s)` value with `https://` before using it
+as `href`. So even before this fix the detail view emitted `https://javascript:1/alert(1)`, not a
+`javascript:` href, and React 19 additionally blocks `javascript:` hrefs. The quick-view presenter
+(`apps/web/components/quick-view-fields.ts`) renders the url as plain text only.
+
+### Existing data
+
+Write-only validation. A row already holding a now-rejected value still loads (read schema
+unchanged; covered by a test); the detail view shows it as plain text instead of a link and the
+quick view omits it. A `PATCH` that does not include `url` is unaffected; saving the edit form, which
+re-sends `url`, surfaces a field error until the value is corrected. No migration.
+
+### Residual risk
+
+- The deny set inside the carve-out is closed-world: a new browser-executable scheme would need to be
+  added. Outside the carve-out the policy remains an allow-list.
+- Sibling, out of scope here: `InfraShortcutSchema.url` (`packages/shared/src/schemas/infra.ts`) is
+  `z.url()`, which accepts `javascript:alert(1)`, and
+  `apps/web/app/(app)/assets/diagram/_components/node-detail-modal.tsx` renders it as a raw `href`.
+  React 19 blocks `javascript:` hrefs at render, but there is no write-side scheme allow-list. Flagged
+  for a sentinel finding of its own; not fixed here.

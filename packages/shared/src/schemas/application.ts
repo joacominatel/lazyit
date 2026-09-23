@@ -24,14 +24,39 @@ const ApplicationMetadataSchema = z.record(z.string(), z.unknown());
  */
 
 /**
- * True when `value` is safe to store as an `Application.url`: a scheme-less host/path (including
- * `host:port`) or an `http`/`https` url. Any other scheme — notably `javascript:`, `data:`,
- * `vbscript:`, `file:` — is rejected. Robust to whitespace/control-char obfuscation: TAB/LF/CR are
- * stripped anywhere and any leading non-alphanumeric run is dropped (browsers ignore leading control
- * chars and strip TAB/LF/CR before parsing the scheme), so `java\tscript:` and a leading control
- * byte can't hide the scheme. Render-time code should additionally allow-list the href scheme.
+ * Schemes a browser gives its own meaning to. A value like `javascript:1/alert(1)` looks like
+ * `host:port/path` to the carve-out below, but a browser reads it as the `javascript:` scheme and
+ * evaluates `1 / alert(1)` — which calls `alert` (SEC-051). None of these is a plausible internal
+ * host name, so the carve-out never treats them as one.
  */
-export function isSafeApplicationUrl(value: string): boolean {
+const BROWSER_INTERPRETED_SCHEMES = new Set([
+  "javascript",
+  "vbscript",
+  "data",
+  "file",
+  "blob",
+  "filesystem",
+  "about",
+  "view-source",
+]);
+
+/**
+ * Decodes the encodings that can reveal a scheme once the value reaches a decoding sink: HTML
+ * character references (numeric, with or without `;`, plus `&colon;` / `&tab;` / `&newline;`), as an
+ * HTML attribute or a markdown link destination would decode them, and `%XX` percent-escapes.
+ */
+function decodeSchemeEncodings(value: string): string {
+  const fromCodePoint = (code: number) =>
+    code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+  const named: Record<string, string> = { colon: ":", tab: "\t", newline: "\n" };
+  return value
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) => fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_, dec: string) => fromCodePoint(parseInt(dec, 10)))
+    .replace(/&(colon|tab|newline);/gi, (_, name: string) => named[name.toLowerCase()]!)
+    .replace(/%([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+function hasSafeScheme(value: string): boolean {
   const normalized = value
     .replace(/[\t\n\r]/g, "")
     .replace(/^[^a-zA-Z0-9]+/, "");
@@ -39,10 +64,27 @@ export function isSafeApplicationUrl(value: string): boolean {
   if (!match) return true; // scheme-less host/path, e.g. vpn.corp.local
   const scheme = match[1]!.toLowerCase();
   if (scheme === "http" || scheme === "https") return true;
-  // A scheme-less host with a port (vpn.corp.local:8080) is read as scheme=host by the regex above;
-  // allow it when what follows the first colon is only a port (+ optional path).
+  if (BROWSER_INTERPRETED_SCHEMES.has(scheme)) return false;
+  // A scheme-less host with a port (vpn.corp.local:8080, jenkins:8080) is read as scheme=host by the
+  // regex above; allow it when what follows the first colon is only a port (+ optional path). A
+  // browser treats such a value as an unknown scheme, which never executes.
   const afterColon = normalized.slice(match[0].length);
   return /^\d+(\/.*)?$/.test(afterColon);
+}
+
+/**
+ * True when `value` is safe to store as an `Application.url`: a scheme-less host/path (including
+ * `host:port`) or an `http`/`https` url. Any other scheme — notably `javascript:`, `data:`,
+ * `vbscript:`, `file:` — is rejected, including when shaped like `host:port` (`javascript:1/…`,
+ * SEC-051). Robust to whitespace/control-char obfuscation: TAB/LF/CR are stripped anywhere and any
+ * leading non-alphanumeric run is dropped (browsers ignore leading control chars and strip TAB/LF/CR
+ * before parsing the scheme), so `java\tscript:` and a leading control byte can't hide the scheme.
+ * The check runs on the raw value and again on its decoded form, so a scheme hidden behind a
+ * character reference (`javascript&#58;…`) or a percent-escape (`%6Aavascript:…`) is rejected too.
+ * Render-time code should additionally allow-list the href scheme.
+ */
+export function isSafeApplicationUrl(value: string): boolean {
+  return hasSafeScheme(value) && hasSafeScheme(decodeSchemeEncodings(value));
 }
 
 const ApplicationUrlSchema = z
