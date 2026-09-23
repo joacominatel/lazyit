@@ -559,7 +559,8 @@
           "notification": "Notifications",
           "secret": "Secret Manager",
           "import": "Imports",
-          "infra": "Server map"
+          "infra": "Server map",
+          "ai": "AI assistant"
         }
       },
       "segmented": {
@@ -778,6 +779,10 @@
       "automation": {
         "label": "Automation",
         "description": "The Applications Workflow Engine — workflow definitions, runs, manual tasks and connector credentials."
+      },
+      "ai": {
+        "label": "AI",
+        "description": "The AI assistant chat, the headless API and external agents over MCP — each acts with the user's own permissions."
       }
     },
     "permissions": {
@@ -830,7 +835,9 @@
       "notification:read": { "label": "View notifications" },
       "secret:read": { "label": "View the Secret Manager" },
       "secret:manage": { "label": "Manage vaults & memberships" },
-      "secret:fetch": { "label": "Fetch secrets programmatically (service account)" }
+      "secret:fetch": { "label": "Fetch secrets programmatically (service account)" },
+      "ai:use": { "label": "Use the AI assistant" },
+      "ai:connect": { "label": "Connect external AI agents (MCP)" }
     },
     "capabilities": {
       "inventory:view": {
@@ -948,6 +955,14 @@
       "workflow:secrets": {
         "label": "Manage connector credentials",
         "description": "Configure, enter and rotate per-app connector credentials — kept separate from authoring the workflow logic."
+      },
+      "ai:use": {
+        "label": "Use the AI assistant",
+        "description": "Chat with the in-app AI assistant, and let a service account send prompts over the headless API. The assistant acts with this role's own permissions and asks before changing anything. Needs AI to be enabled for the instance."
+      },
+      "ai:connect": {
+        "label": "Connect external AI agents (MCP)",
+        "description": "Connect tools such as Claude Code or Cursor to lazyit over MCP. The agent acts with this role's own permissions. Needs MCP to be enabled for the instance."
       },
       "notifications:view": {
         "label": "View notifications",

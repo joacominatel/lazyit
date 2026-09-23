@@ -234,6 +234,16 @@ model User {
   // ledger survives the requester's deletion, mirroring importRuns). ADR-0084, #904.
   updateRunsRequested UpdateRun[] @relation("UpdateRunRequestedBy")
 
+  // AI assistant, MCP and OAuth (ADR-0097). This user's AI conversations (Cascade — transcripts are not
+  // a system of record), the AI ledger rows they acted in and the AI config changes they made (SetNull —
+  // the append-only rows survive), the AI settings they last saved (SetNull) and their connected apps
+  // (OAuthGrant.userId, Cascade — a grant is meaningless without its user; revoke is a soft delete).
+  aiConversations    AiConversation[]   @relation("AiConversationOwner")
+  aiActionLogActed   AiActionLog[]      @relation("AiActionActor")
+  aiConfigAuditActed AiConfigAuditLog[] @relation("AiConfigAuditActor")
+  aiSettingsUpdated  AiSettings[]       @relation("AiSettingsUpdatedBy")
+  oauthGrants        OAuthGrant[]       @relation("OAuthGrantUser")
+
   @@map("users")
 }
 
@@ -415,6 +425,13 @@ model ServiceAccount {
   // deleting the SA never blocks it and simply reverts the config to a system actor (soft delete, the
   // norm, keeps the reference). A directory connection is config, not an audit row, so no at-most-one CHECK.
   directoryConnections DirectoryConnection[] @relation("DirectorySyncSaActor")
+
+  // AI assistant (ADR-0097). The headless conversations this SA owns (Cascade), the AI ledger rows it
+  // acted in (SetNull — the append-only rows survive) and its per-SA AI access setting (1:1, Cascade;
+  // an absent row reads as read-write).
+  aiConversations  AiConversation[]          @relation("AiConversationSaOwner")
+  aiActionLogActed AiActionLog[]             @relation("AiActionSaActor")
+  aiSettings       AiServiceAccountSettings?
 
   @@index([isActive])
   @@map("service_accounts")
@@ -1012,6 +1029,10 @@ model AssetHistory {
   // so the log survives a (never-issued) hard delete of the account. Plain String (cuid → text).
   serviceAccountId String?
   serviceAccount   ServiceAccount?       @relation("AssetHistorySaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  // The AI tool invocation that caused this event (ADR-0097 decision 11), stamped from the invocation
+  // context; null for every non-AI write and every pre-existing row. No FK and no index: invocations are
+  // retention-pruned, while the permanent record is ai_action_log (which carries the same id).
+  aiInvocationId   String?
   createdAt        DateTime              @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (assetId, id) serves the per-asset timeline
@@ -1075,6 +1096,9 @@ model UserHistory {
   // so the log survives a (never-issued) hard delete of the account. Plain String (cuid → text).
   serviceAccountId String?
   serviceAccount   ServiceAccount?      @relation("UserHistorySaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  // The AI tool invocation that caused this event (ADR-0097 decision 11); null otherwise. No FK, no
+  // index — see AssetHistory.aiInvocationId.
+  aiInvocationId   String?
   createdAt        DateTime             @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (userId, id) serves the per-user timeline query
@@ -2994,4 +3018,488 @@ model Attachment {
   @@index([entityType, entityId])
   @@index([sha256])
   @@map("attachments")
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// AI assistant, MCP server and headless API (ADR-0097, epic #1315). The consolidated data model is
+// docs/ai-assistant/_synthesis.md §6. Everything below is ADDITIVE: new tables only (plus the two
+// nullable `aiInvocationId` columns on asset_history / user_history). A populated database gets empty
+// tables; with no ai_settings row the capability reads as OFF and nothing behaves differently.
+//
+// Status, channel, class and provider columns are TEXT validated on write by the zod vocabularies in
+// @lazyit/shared (`ai-run.ts`, `ai-tools.ts`, `ai-provider.ts`, `oauth.ts`), NOT Prisma enums, so a
+// value added by a newer build degrades gracefully on an older one and never needs ALTER TYPE.
+// Structural invariants Prisma cannot express live as raw SQL in the migration
+// (20260806000000_add_ai_assistant_and_oauth): the singleton CHECK, the owner/actor CHECKs, the
+// idempotency partial uniques, and the append-only trigger on ai_action_log.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Instance-wide AI configuration — the singleton config row (SmtpSettings / UpdateSettings precedent).
+/// `settings:manage` only, OFF by default; an ABSENT row reads as the disabled default. The provider key
+/// is an AES-256-GCM envelope under its own optional key axis `AI_SECRET_KEY` and is WRITE-ONLY on the
+/// wire (INV-AI-6); changing the provider or base URL clears it (destination binding).
+/// See docs/02-domain/entities/ai-settings.md
+model AiSettings {
+  /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it).
+  id                                String    @id @default("singleton")
+  /// The in-app chat and headless master switch. Enabling needs a passing connection test and the
+  /// acknowledged egress disclosure (enforced by the API).
+  enabled                           Boolean   @default(false)
+  /// anthropic | openai | google | openai-compatible (AiProviderKind). null until configured.
+  provider                          String?
+  model                             String?
+  /// OpenAI-compatible base URL; null for the hosted providers (their SDK default).
+  baseUrl                           String?
+  /// Encrypted key envelope. All four are null when no key is stored. Never returned on the wire.
+  apiKeyCiphertext                  String?
+  apiKeyIv                          String?
+  apiKeyAuthTag                     String?
+  apiKeyKeyVersion                  Int?
+  /// OpenAI-compatible only: allow a private-network host, scoped to the base URL's host (INV-AI-7).
+  allowPrivateNetwork               Boolean   @default(false)
+  /// low | medium | high (AiEffort); null = the provider's default.
+  effort                            String?
+  /// Per-provider extras (AI_PROVIDER_OPTIONS_SCHEMAS), e.g. the OpenAI-compatible temperature.
+  providerOptions                   Json?
+  /// Admin addendum to the frozen system prompt (≤ 4000 characters, zod).
+  instructions                      String?
+  maxStepsPerRun                    Int       @default(20)
+  maxOutputTokens                   Int       @default(16000)
+  contextTokenLimit                 Int       @default(150000)
+  /// Rolling 24 h budget per principal; null = no budget.
+  dailyTokenLimitPerPrincipal       Int?      @default(2000000)
+  /// Transcript retention in days (zod range 7–3650). Ledgers are never pruned.
+  retentionDays                     Int       @default(90)
+  approvalTtlMinutes                Int       @default(30)
+  /// The MCP switch — independent of the provider configuration (CEO, round 2).
+  mcpEnabled                        Boolean   @default(false)
+  /// MCP client allowlist (ADR-0097 decision 13), stored as an OVERLAY on the curated defaults that
+  /// live in code: the admin's own entries (McpClientAllowlistEntry[]) and the ids of the defaults the
+  /// admin removed. Corrected default identifiers in a later release still reach an instance whose
+  /// admin edited the list, and a removed default stays removed. Matching is on the CIMD URL or a
+  /// redirect-URI pattern, never on client_name.
+  mcpClientAllowlistAdded           Json      @default("[]")
+  mcpClientAllowlistRemovedDefaults String[]  @default([])
+  /// Accept ANY client whose redirect URIs are HTTPS (non-loopback), with a consent-screen warning.
+  /// Off by default, so the default policy is the curated list.
+  mcpAllowAnyHttpsClient            Boolean   @default(false)
+  /// The egress-disclosure acknowledgement, required before the first enable. The author is also
+  /// recorded in ai_config_audit_log, which survives this row's edits.
+  disclosureAcknowledgedAt          DateTime?
+  disclosureAcknowledgedById        String?   @db.Uuid
+  /// When the current connection fields last passed a connection test.
+  verifiedAt                        DateTime?
+  /// The admin who last saved the settings. SetNull: config outlives its editor.
+  updatedById                       String?   @db.Uuid
+  updatedBy                         User?     @relation("AiSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt                         DateTime  @default(now())
+  updatedAt                         DateTime  @updatedAt
+
+  // No deletedAt: mutable instance config, never soft-deleted (SmtpSettings posture).
+  @@map("ai_settings")
+}
+
+/// A chat thread (CHAT) or a headless session (HEADLESS). A transcript container, NOT a system of record:
+/// hard-deleted by the retention sweep, by its owner and on offboarding (ADR-0097 decision 11 — the
+/// ADR-0056 §7 precedent). Pinned at creation to its provider, model, prompt version and tool set; a
+/// change makes it read-only (`closedReason`). The owner is exactly one of user / service account (CHECK).
+/// See docs/02-domain/entities/ai-conversation.md
+model AiConversation {
+  id               String          @id @default(cuid())
+  /// CHAT | HEADLESS (AiConversationChannel). MCP keeps no server-side conversation.
+  channel          String
+  /// Owner — exactly one of userId / serviceAccountId (CHECK ai_conversations_exactly_one_owner).
+  /// Cascade: a (rare) hard delete of the owner drops its transcripts.
+  userId           String?         @db.Uuid
+  user             User?           @relation("AiConversationOwner", fields: [userId], references: [id], onDelete: Cascade)
+  serviceAccountId String?
+  serviceAccount   ServiceAccount? @relation("AiConversationSaOwner", fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  title            String?
+  /// Pinned at creation (synthesis §8.1 item 7).
+  provider         String
+  model            String
+  promptVersion    Int
+  toolsetHash      String
+  toolNames        String[]
+  /// CONTEXT_LIMIT | CONFIG_CHANGED | VERSION_CHANGED; null while the conversation is writable.
+  closedReason     String?
+  lastActivityAt   DateTime        @default(now())
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  messages    AiMessage[]
+  runs        AiRun[]
+  invocations AiToolInvocation[]
+
+  @@index([userId, lastActivityAt])
+  @@index([serviceAccountId, lastActivityAt])
+  @@index([lastActivityAt])
+  @@map("ai_conversations")
+}
+
+/// One ordered, provider-replayable message of a conversation. Append-only; it cascades with its
+/// conversation (retention is the only deleter). `content` is the exact provider message; `format` names
+/// the converter so a future SDK major can still read old rows.
+/// See docs/02-domain/entities/ai-conversation.md
+model AiMessage {
+  // BigInt autoincrement: an append-only, high-volume row never exposed by id outside the API (ADR-0005).
+  id             BigInt         @id @default(autoincrement())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// The run that produced it. SetNull keeps the message if the run row were ever removed.
+  runId          String?
+  run            AiRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  seq            Int
+  /// user | assistant | tool (AiMessageRole).
+  role           String
+  content        Json
+  format         String         @default("aisdk-v7")
+  createdAt      DateTime       @default(now())
+
+  @@unique([conversationId, seq])
+  @@index([runId])
+  @@map("ai_messages")
+}
+
+/// One agent-loop execution: a chat turn or a headless prompt. A mutable lifecycle row with NO content
+/// (the ManualTask precedent); it survives transcript retention (conversation FK SetNull) because budgets,
+/// usage and the ledger refer to it. The acting principal is exactly one of user / service account
+/// (CHECK). `idempotencyKey` is unique per principal via two partial unique indexes (raw SQL).
+/// See docs/02-domain/entities/ai-run.md
+model AiRun {
+  id                String          @id @default(cuid())
+  conversationId    String?
+  conversation      AiConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  /// CHAT | HEADLESS.
+  channel           String
+  /// Acting principal — exactly one (CHECK ai_runs_exactly_one_principal). Plain columns: the row is
+  /// a durable record that must not follow a principal's (never-issued) hard delete.
+  userId            String?         @db.Uuid
+  serviceAccountId  String?
+  /// QUEUED | RUNNING | AWAITING_APPROVAL | SUCCEEDED | FAILED | CANCELLED | EXPIRED (AiRunStatus).
+  status            String
+  /// REQUIRE_APPROVAL_FOR_WRITES (humans) | AUTONOMOUS (service accounts).
+  approvalPolicy    String
+  provider          String
+  model             String
+  stepCount         Int             @default(0)
+  inputTokens       Int             @default(0)
+  outputTokens      Int             @default(0)
+  cachedInputTokens Int             @default(0)
+  finishReason      String?
+  /// Redacted `{ code, message }` — never a provider body or credential.
+  error             Json?
+  idempotencyKey    String?
+  cancelRequestedAt DateTime?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  messages AiMessage[]
+
+  @@index([status, updatedAt])
+  @@index([conversationId])
+  @@index([userId, createdAt])
+  @@index([serviceAccountId, createdAt])
+  @@map("ai_runs")
+}
+
+/// Every tool call on every channel — the approval unit for chat writes (the pending action) and the
+/// metadata access log for MCP and headless reads. RETENTION-BOUND: cascades with its conversation, and
+/// conversation-less (MCP) rows are pruned after `retentionDays`. Its id is the `invocationId` stamped on
+/// asset_history / user_history and recorded in the permanent ai_action_log. The actor is at most one of
+/// user / service account (CHECK).
+/// See docs/02-domain/entities/ai-tool-invocation.md
+model AiToolInvocation {
+  id               String          @id @default(cuid())
+  /// CHAT | MCP | HEADLESS.
+  channel          String
+  conversationId   String?
+  conversation     AiConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  runId            String?
+  /// The provider's tool-use block id, to answer the call when the loop resumes.
+  toolUseId        String?
+  toolName         String
+  /// read | write | elevated | navigate (AiToolClass).
+  toolClass        String
+  /// Actor — at most one (CHECK ai_tool_invocations_one_actor).
+  userId           String?         @db.Uuid
+  serviceAccountId String?
+  /// MCP only: the OAuthClient.clientId and the OAuthGrant.id the call came through.
+  mcpClientId      String?
+  oauthGrantId     String?
+  /// The canonical, validated input; `inputHash` binds an approval to exactly these arguments.
+  input            Json
+  inputHash        String
+  /// The tool's input-schema hash at proposal time; a changed tool expires the approval.
+  schemaHash       String
+  /// AiToolInvocationStatus.
+  status           String
+  /// The server-built AiActionPreview (write and elevated tools).
+  preview          Json?
+  /// `{ entity, updatedAt }` re-checked at execute (STALE on mismatch).
+  precondition     Json?
+  expiresAt        DateTime?
+  decidedAt        DateTime?
+  /// The AiToolResult as written (truncated once, at write time).
+  result           Json?
+  entityRefs       Json?
+  errorCode        String?
+  durationMs       Int?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([conversationId, createdAt])
+  @@index([runId])
+  @@index([status, expiresAt])
+  @@index([createdAt])
+  @@map("ai_tool_invocations")
+}
+
+/// The single, PERMANENT, append-only ledger of AI-initiated mutations on every channel (R6, INV-AI-10):
+/// one row per write lifecycle event. Never pruned; it holds no FK to retention-bound rows (conversation,
+/// run, invocation, MCP client and grant ids are plain strings). A trigger rejects UPDATE and DELETE at
+/// the database — except the actor FKs' own ON DELETE SET NULL. The actor is at most one (CHECK).
+/// See docs/02-domain/entities/ai-action-log.md
+model AiActionLog {
+  // autoincrement: a log table, never exposed externally (ADR-0005).
+  id               Int             @id @default(autoincrement())
+  invocationId     String
+  /// PROPOSED | APPROVED | REJECTED | EXPIRED | CANCELLED | ATTEMPTED | EXECUTED | FAILED | DENIED.
+  event            String
+  /// CHAT | MCP | HEADLESS.
+  channel          String
+  toolName         String
+  toolClass        String
+  /// Actor — at most one (CHECK ai_action_log_one_actor). SetNull keeps the row if the actor is ever
+  /// hard-deleted (the only UPDATE the append-only trigger allows).
+  userId           String?         @db.Uuid
+  user             User?           @relation("AiActionActor", fields: [userId], references: [id], onDelete: SetNull)
+  serviceAccountId String?
+  serviceAccount   ServiceAccount? @relation("AiActionSaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  conversationId   String?
+  runId            String?
+  mcpClientId      String?
+  oauthGrantId     String?
+  /// Redacted canonical input — never a secret.
+  input            Json?
+  entityRefs       Json?
+  /// Approval provenance (chat): the approving human and whether a password step-up was verified.
+  approverUserId   String?         @db.Uuid
+  stepUp           Boolean         @default(false)
+  /// Refs of the other-authored content the turn had read (the untrusted-source banner).
+  untrustedSources Json?
+  provider         String?
+  model            String?
+  requestId        String?
+  errorCode        String?
+  errorStatus      Int?
+  errorMessage     String?
+  createdAt        DateTime        @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006), enforced by a trigger.
+  @@index([invocationId])
+  @@index([createdAt])
+  @@index([userId, id])
+  @@index([serviceAccountId, id])
+  @@map("ai_action_log")
+}
+
+/// Token usage per model step — append-only and kept (budgets and the usage view). No content.
+/// See docs/02-domain/entities/ai-run.md
+model AiUsage {
+  // BigInt autoincrement: append-only and high-volume (ADR-0005).
+  id                BigInt   @id @default(autoincrement())
+  runId             String
+  userId            String?  @db.Uuid
+  serviceAccountId  String?
+  provider          String
+  model             String
+  inputTokens       Int
+  outputTokens      Int
+  cachedInputTokens Int      @default(0)
+  reasoningTokens   Int?
+  createdAt         DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([serviceAccountId, createdAt])
+  @@map("ai_usage")
+}
+
+/// A Service Account's AI access for headless runs (CEO round 2, ADR-0097 decision 4): off | read-only |
+/// read-write, plus an optional per-run mutation cap. An ABSENT row reads as read-write. Its own table so
+/// service_accounts gains no column. Mutable config, no deletedAt.
+/// See docs/02-domain/entities/ai-service-account-settings.md
+model AiServiceAccountSettings {
+  serviceAccountId   String         @id
+  /// Cascade: the setting is meaningless without its account (which only ever soft-deletes).
+  serviceAccount     ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  /// off | read-only | read-write (AiServiceAccountAccess).
+  access             String         @default("read-write")
+  maxMutationsPerRun Int?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@map("ai_service_account_settings")
+}
+
+/// Append-only audit of AI configuration changes: settings edits (redacted — never the key), per-SA AI
+/// access changes, and the egress-disclosure acknowledgement (security.md §6.4–6.5).
+/// See docs/02-domain/entities/ai-config-audit-log.md
+model AiConfigAuditLog {
+  // autoincrement: a log table, never exposed externally (ADR-0005).
+  id                     Int      @id @default(autoincrement())
+  /// What changed (the vocabulary is owned by the settings module).
+  action                 String
+  /// The admin who acted — always a human (the config routes are human-only). SetNull.
+  actorId                String?  @db.Uuid
+  actor                  User?    @relation("AiConfigAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  /// The service account whose AI access changed, for per-SA events.
+  targetServiceAccountId String?
+  /// Redacted before/after — never a key or ciphertext.
+  detail                 Json?
+  createdAt              DateTime @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006).
+  @@index([createdAt])
+  @@map("ai_config_audit_log")
+}
+
+/// An OAuth client of lazyit's authorization server: DCR-registered, a cached CIMD document, or a bundled
+/// known client. Public clients only. Unused DCR clients without grants are hard-deleted after 24 h.
+/// See docs/02-domain/entities/oauth-client.md
+model OAuthClient {
+  id           String    @id @default(cuid())
+  /// A random "lzc_…" id for DCR; the https metadata-document URL for CIMD.
+  clientId     String    @unique
+  /// dcr | cimd | known (OAuthClientKind).
+  kind         String
+  name         String
+  clientUri    String?
+  logoUri      String?
+  redirectUris String[]
+  /// The sanitized registration request or CIMD document.
+  metadata     Json
+  /// CIMD cache freshness.
+  fetchedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  grants OAuthGrant[]
+  codes  OAuthAuthorizationCode[]
+
+  @@index([kind, lastUsedAt])
+  @@map("oauth_clients")
+}
+
+/// A "connected app": one user's delegation to one client, or a personal MCP token (`lan` only).
+/// SOFT DELETE = REVOKED (ADR-0006/0032). Bound to the user's `sessionEpoch` at issuance: a password
+/// change, "sign out everywhere" or an admin reset kills it.
+/// See docs/02-domain/entities/oauth-grant.md
+model OAuthGrant {
+  id           String       @id @default(cuid())
+  userId       String       @db.Uuid
+  user         User         @relation("OAuthGrantUser", fields: [userId], references: [id], onDelete: Cascade)
+  /// oauth | personal (OAuthGrantKind).
+  kind         String       @default("oauth")
+  /// null for personal tokens.
+  clientRefId  String?
+  client       OAuthClient? @relation(fields: [clientRefId], references: [id], onDelete: SetNull)
+  /// The personal token's name.
+  label        String?
+  /// A subset of lazyit.read / lazyit.write / lazyit.admin.
+  scopes       String[]
+  /// The canonical MCP resource URI at issuance (RFC 8707).
+  resource     String
+  /// Snapshot of User.sessionEpoch; a mismatch means the grant is dead (R7).
+  sessionEpoch Int
+  /// Personal tokens only — mandatory there.
+  expiresAt    DateTime?
+  lastUsedAt   DateTime?
+  /// user | admin | refresh_reuse | revocation_endpoint | client_deleted (OAuthGrantRevokeReason).
+  revokeReason String?
+  revokedById  String?      @db.Uuid
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  /// Soft delete = revoked.
+  deletedAt    DateTime?
+
+  tokens OAuthToken[]
+
+  @@index([userId])
+  @@index([clientRefId])
+  @@map("oauth_grants")
+}
+
+/// A single-use authorization code (60 s). Credential material: only the hash is stored, and the sweeper
+/// hard-deletes expired or used rows (the PasswordResetToken precedent).
+/// See docs/02-domain/entities/oauth-grant.md
+model OAuthAuthorizationCode {
+  id            String      @id @default(cuid())
+  /// SHA-256 hex of the code.
+  codeHash      String      @unique
+  userId        String      @db.Uuid
+  clientRefId   String
+  client        OAuthClient @relation(fields: [clientRefId], references: [id], onDelete: Cascade)
+  redirectUri   String
+  /// The PKCE S256 challenge (plain is refused).
+  codeChallenge String
+  scopes        String[]
+  resource      String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@index([clientRefId])
+  @@index([expiresAt])
+  @@map("oauth_authorization_codes")
+}
+
+/// An access, refresh or personal token of a grant. Only the SHA-256 hash is stored; rows are
+/// hard-deleted on expiry or revocation (credential material, not domain data).
+/// See docs/02-domain/entities/oauth-grant.md
+model OAuthToken {
+  id        String     @id @default(cuid())
+  grantId   String
+  grant     OAuthGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  /// access | refresh | personal (OAuthTokenKind).
+  kind      String
+  /// SHA-256 hex of the secret.
+  tokenHash String     @unique
+  expiresAt DateTime
+  /// Refresh rotation and reuse detection.
+  usedAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([grantId])
+  @@index([expiresAt])
+  @@map("oauth_tokens")
+}
+
+/// Append-only security audit of the authorization server (ADR-0081 source `oauth`). Never records a
+/// secret. Plain ids: the rows outlive the clients, grants and users they mention.
+/// See docs/02-domain/entities/oauth-grant.md
+model OAuthAuditLog {
+  // autoincrement: a log table, never exposed externally (ADR-0005).
+  id        Int      @id @default(autoincrement())
+  /// OAuthAuditAction.
+  action    String
+  /// The subject user.
+  userId    String?  @db.Uuid
+  /// Who acted (the user or an admin); null for protocol events.
+  actorId   String?  @db.Uuid
+  grantId   String?
+  /// OAuthClient.clientId (a string, so it survives client garbage collection).
+  clientId  String?
+  ip        String?
+  /// Scopes, redirect host, reason — no secrets.
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  // No updatedAt / deletedAt: append-only (ADR-0006).
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("oauth_audit_log")
 }

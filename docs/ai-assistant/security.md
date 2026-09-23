@@ -469,7 +469,10 @@ the **exfiltration leg** and the **consequential-action leg**.
   - DCR is rate-limited, capped, unused registrations expire, and a registration is never treated as
     trusted: the consent page labels it "self-declared, unverified".
   - **Trust policy (resolved, §11 Q-7):** an admin-configurable client allowlist, pre-seeded with the
-    well-known clients — [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13.
+    well-known clients — [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13. A private-use
+    redirect scheme (`cursor://`, `vscode://`, reverse-domain) is accepted **only on an explicit
+    allowlist entry**, never through the "allow any HTTPS client" toggle; browser-interpreted schemes
+    (the SEC-051 list) and plain `http` off loopback are always refused (CEO, 2026-09-23).
   - CIMD fetches go through `guardedFetch`: HTTPS only, no internal allowlist, small size cap,
     short timeout, cached.
 - **Authorize and consent.**

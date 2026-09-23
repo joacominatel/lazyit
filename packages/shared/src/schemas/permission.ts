@@ -47,6 +47,7 @@ export const PERMISSION_DOMAINS = [
   // default, plus the machine-only `secret:fetch` for programmatic retrieval by a service account (ADR-0080)
   "import", // the guided bulk Migrator (ADR-0069) — a single coarse `:run` verb; ADMIN-only by default
   "infra", // the infra topology graph (ADR-0070) — the generic visual CMDB of the server estate
+  "ai", // the AI assistant, MCP server and headless API (ADR-0097) — `ai:use` and `ai:connect`
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
 
@@ -208,6 +209,18 @@ export const PERMISSIONS = [
   // MEMBER/VIEWER default sets — but in practice it is granted ONLY to the agent SA, never a human
   // role. Worst case on a leaked token is PENDING spam a human discards (ADR-0074 §5/§8).
   "infra:report",
+  // ai (the AI assistant, MCP server and headless API, ADR-0097 decision 1) — two ACCESS verbs, split by
+  // channel so an operator can allow one without the other:
+  //   - `ai:use`     — the in-app chat and the headless API (`POST /ai/runs` with a Service Account).
+  //   - `ai:connect` — external agents over MCP (OAuth 2.1 grants, personal tokens on `lan`, and SA
+  //     tokens on `/mcp`, R10).
+  // Neither verb grants any domain capability: the AI always acts AS the principal with exactly its own
+  // permissions (INV-AI-1), so holding `ai:use` adds a channel, not a power. That is why both are seeded
+  // to MEMBER (see MEMBER_DEFAULT_CAPABILITIES) and carry the within-default `edit` tier, and why both
+  // stay grantable to a service account. The capability is also gated by instance switches that are
+  // OFF by default, so the grant exposes nothing until an admin enables AI or MCP.
+  "ai:use",
+  "ai:connect",
 ] as const;
 
 /**
@@ -279,6 +292,21 @@ export const SELF_SERVICE_CAPABILITIES = [
 ] as const satisfies readonly Permission[];
 
 /**
+ * MEMBER-default capabilities — non-`:read`/`:write` verbs seeded to ADMIN + MEMBER but NOT to VIEWER
+ * (CEO decision, ADR-0097 decision 1). Unlike {@link SELF_SERVICE_CAPABILITIES} they are not granted to
+ * every role; unlike the coarse verbs they are part of the MEMBER default, so granting one is never an
+ * escalation (the `edit` tier in `permission-meta.ts`).
+ *   - `ai:use` / `ai:connect` — the AI channels. The AI acts as the principal with exactly its own
+ *     permissions, so the grant adds a channel, not a capability.
+ * The seed applies them ONCE per (role, permission) through the seed-once ledger (#1314): a new instance
+ * and an upgraded one both receive them on the next deploy, and an admin who revokes one keeps it revoked.
+ */
+export const MEMBER_DEFAULT_CAPABILITIES = [
+  "ai:use",
+  "ai:connect",
+] as const satisfies readonly Permission[];
+
+/**
  * The reads that are ADMIN-ONLY by default — strictly MORE restrictive than {@link VIEWER_DENIED_READS}.
  * Where the pre-tightened reads stay open to ADMIN + MEMBER (only VIEWER loses them), an admin-only read
  * is excluded from BOTH MEMBER and VIEWER seed defaults; only ADMIN holds it (via the complete-catalog
@@ -323,9 +351,10 @@ export const ADMIN_ONLY_READS = [
  * never hand-list, so the two can never drift. Built 1:1 from the ADR-0040 capability matrix with the
  * CEO's read pre-tightening:
  *   - ADMIN  = ALL permissions (the complete catalog) — immutable/full (never editable).
- *   - MEMBER = all `:read` + all `:write`, MINUS the admin-only reads ({@link ADMIN_ONLY_READS}). The
- *     MEMBER-tier capability-verb set is EMPTY: every coarse verb — accessGrant:grant, user:manage,
- *     settings:manage — and every `:delete` is ADMIN-only per ADR-0040.
+ *   - MEMBER = all `:read` + all `:write`, MINUS the admin-only reads ({@link ADMIN_ONLY_READS}), PLUS
+ *     the self-service and MEMBER-default capabilities ({@link MEMBER_DEFAULT_CAPABILITIES}: the AI
+ *     channels). Every coarse verb — accessGrant:grant, user:manage, settings:manage — and every
+ *     `:delete` stays ADMIN-only per ADR-0040.
  *   - VIEWER = all `:read` EXCEPT the pre-tightened reads ({@link VIEWER_DENIED_READS}) AND the
  *     admin-only reads ({@link ADMIN_ONLY_READS}).
  *
@@ -366,6 +395,7 @@ export function buildDefaultRolePermissions(): RolePermissionMatrix {
       ...memberReads,
       ...WRITE_PERMISSIONS,
       ...SELF_SERVICE_CAPABILITIES,
+      ...MEMBER_DEFAULT_CAPABILITIES,
     ]),
     VIEWER: sorted([...viewerReads, ...SELF_SERVICE_CAPABILITIES]),
   };
