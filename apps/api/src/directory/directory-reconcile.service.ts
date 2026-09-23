@@ -44,8 +44,9 @@ interface LocalAdPerson {
  * HARD INVARIANTS (enforced in code, asserted by the spec): the reconcile NEVER changes `role`, NEVER sets
  * `passwordHash`, NEVER sets `externalId`, NEVER flips `directoryOnly` to false, NEVER grants a login, and
  * NEVER hard-deletes (a disappeared person is SOFT-offboarded past the grace threshold — isActive=false +
- * directoryOffboardedAt). New persons land in the PENDING review tray (they simply exist as directoryOnly
- * VIEWER rows). `memberOf` group DNs are stored INERT in directoryAttrs (#846). Every meaningful change
+ * directoryOffboardedAt). Its ONLY `sessionEpoch` write is the revoking bump on an active→offboarded
+ * transition (#1308); a reactivation never touches it. New persons land in the PENDING review tray (they
+ * simply exist as directoryOnly VIEWER rows). `memberOf` group DNs are stored INERT in directoryAttrs (#846). Every meaningful change
  * appends a UserHistory row (attributed to the configured directory ServiceAccount, else system). Logs
  * carry REDACTED COUNTS only — never the bind password, DNs, or attribute PII.
  */
@@ -193,7 +194,7 @@ export class DirectoryReconcileService {
           counts.skipped += 1;
           continue;
         }
-        await this.offboard(p.id, startedAt, actor, counts);
+        await this.offboard(p, startedAt, actor, counts);
       }
 
       const finishedAt = new Date();
@@ -236,8 +237,9 @@ export class DirectoryReconcileService {
    * Refresh a MATCHED person. FIXED ALLOWLIST (mass-assignment-proof): only firstName/lastName (when
    * mapped + changed), directoryAttrs (always — bumps lastSeenAt), and a re-activation (isActive=true +
    * clear directoryOffboardedAt) IFF WE previously offboarded them. NEVER role/externalId/passwordHash/
-   * directoryOnly. A UserHistory row is written ONLY on a MEANINGFUL change (not a bare lastSeenAt bump),
-   * so a steady directory doesn't spam the audit log; the count follows the same rule (idempotent re-run).
+   * directoryOnly/sessionEpoch — a reactivated person signs in again (their sessions died at the
+   * offboard). A UserHistory row is written ONLY on a MEANINGFUL change (not a bare lastSeenAt bump), so a
+   * steady directory doesn't spam the audit log; the count follows the same rule (idempotent re-run).
    */
   private async refreshMatched(
     person: LocalAdPerson,
@@ -362,20 +364,29 @@ export class DirectoryReconcileService {
    * directoryOffboardedAt (NEVER hard-delete, ADR-0006; NEVER touches role/credentials). A UserHistory
    * row records it, attributed to the directory ServiceAccount (else system). A later reappearance clears
    * the offboard (refreshMatched).
+   *
+   * An ACTIVE person also has `sessionEpoch` bumped (#1308, ADR-0086 §8), matching the manual deactivation
+   * path: the guard already refuses the inactive row, but refreshMatched's automatic reactivation would
+   * otherwise revive every token minted before — including a "keep me signed in" token with no time-based
+   * expiry. An already-inactive person was revoked when they were deactivated, so there is nothing to bump.
    */
   private async offboard(
-    userId: string,
+    person: LocalAdPerson,
     at: Date,
     actor: ActorAttribution,
     counts: DirectorySyncCounts,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
-        where: { id: userId },
-        data: { isActive: false, directoryOffboardedAt: at },
+        where: { id: person.id },
+        data: {
+          isActive: false,
+          directoryOffboardedAt: at,
+          ...(person.isActive ? { sessionEpoch: { increment: 1 } } : {}),
+        },
       });
       await this.history.record(tx, {
-        userId,
+        userId: person.id,
         eventType: 'UPDATED',
         payload: { action: 'directorySync', reason: 'offboarded' },
         actor,

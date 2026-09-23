@@ -31,6 +31,12 @@ import { UserHistoryService } from '../../user-history/user-history.service';
 import { WorkflowTriggerService } from '../../workflow-engine/run/workflow-trigger.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
 import { IDENTITY_PROVIDER } from '../identity/identity-provider.interface';
+import { DirectoryReconcileService } from '../../directory/directory-reconcile.service';
+import type { DirectoryConnectionService } from '../../directory/directory-connection.service';
+import type {
+  DirectoryEntry,
+  DirectoryLdapClient,
+} from '../../directory/directory-ldap.client';
 
 /**
  * "Keep me signed in" end to end (ADR-0086 §8, #1307). A remember-me token never expires by time, so the
@@ -60,11 +66,16 @@ interface Row {
   mustChangePassword: boolean;
   sessionEpoch: number;
   deletedAt: Date | null;
+  directorySource: string | null;
+  directorySourceId: string | null;
+  directoryOffboardedAt: Date | null;
+  directoryAttrs: Record<string, unknown> | null;
 }
 
 type Where = {
   id?: string;
   sessionEpoch?: number;
+  directorySource?: string;
   OR?: Array<{ email?: string; username?: string }>;
 };
 
@@ -119,6 +130,10 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
       mustChangePassword: false,
       sessionEpoch: 0,
       deletedAt: null,
+      directorySource: null,
+      directorySourceId: null,
+      directoryOffboardedAt: null,
+      directoryAttrs: null,
     };
 
     // A LIVE-filtered view of the single row, mirroring the soft-delete extension (includeSoftDeleted is
@@ -129,6 +144,11 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
       if (
         where.sessionEpoch !== undefined &&
         where.sessionEpoch !== row.sessionEpoch
+      )
+        return false;
+      if (
+        where.directorySource !== undefined &&
+        where.directorySource !== row.directorySource
       )
         return false;
       if (where.OR) {
@@ -167,7 +187,14 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
         },
       ),
       count: jest.fn().mockResolvedValue(1),
-      findMany: jest.fn().mockResolvedValue([]),
+      // Only the directory reconcile lists users here: it loads the live 'ad'-sourced cohort.
+      findMany: jest.fn(({ where }: { where: Where }) =>
+        Promise.resolve(
+          where.directorySource !== undefined && matches(where)
+            ? [{ ...row }]
+            : [],
+        ),
+      ),
     };
     prisma = {
       user,
@@ -354,6 +381,78 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
     await users.restore(USER_ID, { userId: ADMIN_ID });
     expect(row.deletedAt).toBeNull();
     await expect(authenticate(token)).rejects.toThrow(UnauthorizedException);
+  });
+
+  describe('directory sync (ADR-0091, #1308)', () => {
+    const GUID = '33333333-3333-4333-8333-333333333333';
+    let entries: DirectoryEntry[];
+    let sync: DirectoryReconcileService;
+
+    beforeEach(() => {
+      // An onboarded directory person: AD-sourced, but granted a local login (#1072 flips directoryOnly off).
+      // Last seen long ago, so the first run without them is past the 7-day grace.
+      row.directorySource = 'ad';
+      row.directorySourceId = GUID;
+      row.directoryAttrs = { lastSeenAt: '2020-01-01T00:00:00.000Z' };
+      entries = [];
+      const attributeMap = { firstName: 'givenName', lastName: 'sn' };
+      const config = {
+        resolveConfig: jest.fn().mockResolvedValue({ host: 'dc' }),
+        getAttributeMap: jest.fn().mockResolvedValue(attributeMap),
+        getOffboardGraceDays: jest.fn().mockResolvedValue(7),
+        getServiceAccountId: jest.fn().mockResolvedValue(null),
+        recordRun: jest.fn().mockResolvedValue(undefined),
+      } as unknown as DirectoryConnectionService;
+      const ldap = {
+        fetchEntries: jest.fn(() => Promise.resolve(entries)),
+      } as unknown as DirectoryLdapClient;
+      sync = new DirectoryReconcileService(
+        prisma as never,
+        config,
+        ldap,
+        users,
+        { record: jest.fn().mockResolvedValue({}) } as never,
+      );
+    });
+
+    const present = (): DirectoryEntry[] => [
+      {
+        objectGUID: GUID,
+        attributes: { givenName: 'Alice', sn: 'Smith' },
+        memberOf: [],
+      },
+    ];
+
+    it('a sync offboard kills a remember-me token once, and a sync reactivation does not revive it', async () => {
+      const token = await rememberMeLogin();
+
+      // AD no longer lists the person: the sync soft-offboards them and revokes their sessions.
+      const offboarded = await sync.reconcile();
+      expect(offboarded.counts.offboarded).toBe(1);
+      expect(row.isActive).toBe(false);
+      expect(row.sessionEpoch).toBe(1);
+      await expect(authenticate(token)).rejects.toThrow(UnauthorizedException);
+
+      // Still absent on the next run: already offboarded, so nothing is written and the epoch holds.
+      const repeat = await sync.reconcile();
+      expect(repeat.counts.offboarded).toBe(0);
+      expect(row.sessionEpoch).toBe(1);
+
+      // The person reappears: the sync reactivates them without bumping, and the old token stays dead.
+      entries = present();
+      const back = await sync.reconcile();
+      expect(back.counts.updated).toBe(1);
+      expect(row.isActive).toBe(true);
+      expect(row.directoryOffboardedAt).toBeNull();
+      expect(row.sessionEpoch).toBe(1);
+      await expect(authenticate(token)).rejects.toThrow(UnauthorizedException);
+
+      // They sign in again.
+      const fresh = await rememberMeLogin();
+      await expect(authenticate(fresh)).resolves.toMatchObject({
+        user: { id: USER_ID },
+      });
+    });
   });
 
   it('is refused for a directory-only row', async () => {
