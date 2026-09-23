@@ -559,7 +559,8 @@
           "notification": "Notificaciones",
           "secret": "Gestor de Secretos",
           "import": "Importaciones",
-          "infra": "Mapa de servidores"
+          "infra": "Mapa de servidores",
+          "ai": "Asistente de IA"
         }
       },
       "segmented": {
@@ -778,6 +779,10 @@
       "automation": {
         "label": "Automatización",
         "description": "El motor de flujos de trabajo de Aplicaciones — definiciones de flujos, ejecuciones, tareas manuales y credenciales de conectores."
+      },
+      "ai": {
+        "label": "IA",
+        "description": "El chat del asistente de IA, la API headless y los agentes externos por MCP — cada uno actúa con los permisos del propio usuario."
       }
     },
     "permissions": {
@@ -830,7 +835,9 @@
       "notification:read": { "label": "Ver notificaciones" },
       "secret:read": { "label": "Ver el Gestor de Secretos" },
       "secret:manage": { "label": "Gestionar bóvedas y membresías" },
-      "secret:fetch": { "label": "Obtener secretos de forma programática (cuenta de servicio)" }
+      "secret:fetch": { "label": "Obtener secretos de forma programática (cuenta de servicio)" },
+      "ai:use": { "label": "Usar el asistente de IA" },
+      "ai:connect": { "label": "Conectar agentes de IA externos (MCP)" }
     },
     "capabilities": {
       "inventory:view": {
@@ -948,6 +955,14 @@
       "workflow:secrets": {
         "label": "Gestionar credenciales de conectores",
         "description": "Configurar, introducir y rotar las credenciales de conectores por aplicación — separado de la autoría de la lógica del flujo."
+      },
+      "ai:use": {
+        "label": "Usar el asistente de IA",
+        "description": "Chatear con el asistente de IA de la app y permitir que una cuenta de servicio envíe prompts por la API headless. El asistente actúa con los permisos de este rol y pide confirmación antes de cambiar algo. Requiere que la IA esté habilitada en la instancia."
+      },
+      "ai:connect": {
+        "label": "Conectar agentes de IA externos (MCP)",
+        "description": "Conectar herramientas como Claude Code o Cursor a lazyit por MCP. El agente actúa con los permisos de este rol. Requiere que MCP esté habilitado en la instancia."
       },
       "notifications:view": {
         "label": "Ver notificaciones",
