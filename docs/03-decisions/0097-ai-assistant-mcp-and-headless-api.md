@@ -234,9 +234,14 @@ invocations, the action ledger, usage, per-SA settings, AI config audit, and fiv
 database gets empty tables and nothing is backfilled. With no settings row and no `AI_SECRET_KEY`, the
 API boots and behaves exactly as today. `AI_SECRET_KEY` ships commented in `.env.prod.example`, so
 guided updates do not stop. Status, channel and provider values are text validated on write, so a
-newer value degrades gracefully on an older build. `ai:use` and `ai:connect` reach MEMBER through a
-one-time insert after #1314; because the capability is off at instance level, the grant exposes nothing
-until an admin enables it. Downgrading leaves inert tables. → [[ai-assistant/_synthesis|synthesis]] §6.
+newer value degrades gracefully on an older build. `ai:use` and `ai:connect` reach MEMBER through the
+seed-once ledger from #1314 on the next deploy, with no data migration; because the capability is off at
+instance level, the grant exposes nothing until an admin enables it. Downgrading leaves inert tables.
+→ [[ai-assistant/_synthesis|synthesis]] §6.
+
+> Amended 2026-09-23 (#1315, PR #1332): default grants for `ai:use` / `ai:connect` are applied by the
+> seed-once ledger from #1314; no data migration. This corrects the mechanism only; the decision is
+> unchanged.
 
 ## Prerequisites
 
@@ -277,7 +282,12 @@ adopted so the design is complete. Each can be reversed without reshaping the re
 9. **Private-network LLMs:** the OpenAI-compatible provider may target a private host through an admin
    `allowPrivateNetwork` toggle scoped to that host; loopback and IMDS never.
 10. **The v1 tool catalog** is the 44-tool cut.
-11. **`ai:use` / `ai:connect` default grants** ship as a one-time migration after #1314.
+11. **`ai:use` / `ai:connect` default grants** are applied by the seed-once ledger from #1314 on the next
+    deploy; no data migration.
+
+    > Amended 2026-09-23 (#1315, PR #1332): default grants for `ai:use` / `ai:connect` are applied by the
+    > seed-once ledger from #1314; no data migration. This corrects the mechanism only; the decision is
+    > unchanged.
 12. **SA tokens on `/mcp`** only when the SA holds `ai:connect`, fail-closed.
 13. **The headless setting lives per Service Account** (off / read-only / read-write, default
     read-write, optional mutation cap) — the CTO's interpretation of "Autonomo total, pero configurable

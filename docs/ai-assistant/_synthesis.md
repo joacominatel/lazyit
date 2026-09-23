@@ -334,7 +334,6 @@ apps/api/
 ├── test/jest-e2e.json                         (edit) Jest lookahead — W1-B
 ├── prisma/schema.prisma                       (edit) — W1-A only
 ├── prisma/migrations/<ts>_add_ai_assistant_and_oauth/      one DDL migration (§6) — W1-A
-├── prisma/migrations/<ts>_grant_ai_permission_defaults/    one-time MEMBER rows — W1-A (after #1314)
 └── src/
     ├── app.module.ts                          (edit) registers AiModule, OAuthModule, McpModule — W1-C only
     ├── auth/
@@ -538,7 +537,8 @@ reshaping the rest.
 9. **Private-network LLMs:** the OpenAI-compatible provider may target a private-network host through
    an admin `allowPrivateNetwork` toggle scoped to that host; loopback and IMDS never.
 10. **v1 tool catalog:** the tools note's 44-tool cut.
-11. **Default grants:** `ai:use` / `ai:connect` for MEMBER ship as a one-time migration after #1314.
+11. **Default grants:** `ai:use` / `ai:connect` for MEMBER are applied by #1314's seed-once ledger on the
+    next deploy — no data migration; an admin who revokes one keeps it revoked.
 12. **SA tokens on `/mcp`** only when the SA holds `ai:connect`, fail-closed (R10).
 13. **Headless per-SA setting placement** — the CTO's interpretation of "configurable in-app"
     (§2 decision 13).
@@ -601,7 +601,8 @@ change behavior an operator would notice and are also listed in ADR-0097's to-co
 ### 9.1 Prerequisites
 
 - **#1314** — the seed re-grants revoked default permissions on every deploy. Without the fix an admin
-  cannot durably withdraw `ai:use` or `ai:connect`. Blocks the default-grant migration.
+  cannot durably withdraw `ai:use` or `ai:connect`. Its seed-once ledger also delivers their MEMBER
+  defaults, so no data migration is needed (merged, PR #1325).
 - **SEC-021** — last-admin lockout via `isActive`. Before the user-management tools.
 - **SEC-051** — `javascript:` URL bypass on `Application.url`. Before the application write tools.
 - **SEC-072 / SEC-032** — deeply nested `specs`. Closed first, or a nesting cap in tool argument
