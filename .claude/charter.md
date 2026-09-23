@@ -89,6 +89,8 @@ A unit touching any of these forces serial execution. No exceptions for convenie
 - `package.json` and `bun.lock` at the root
 - `compose.yaml`
 - `docs/03-decisions/_MOC.md` — ADR numbering collides here
+- `docs/06-security/summary.md` — every finding closure edits its counters and open-findings table;
+  parallel remediation units conflict here, so one unit (or a final serial step) owns it per batch
 
 **Group parallel work by file ownership, not by subject.** When two items in a batch — two
 security findings, two fixes — would touch the same file or the same shared module, one agent
