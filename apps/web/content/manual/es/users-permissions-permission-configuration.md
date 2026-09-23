@@ -64,6 +64,20 @@ Guardar reemplaza por completo el conjunto de permisos del rol elegido. El cambi
   son las carpetas de la Base de Conocimiento y las bóvedas del Gestor de Secretos, donde el acceso se
   acota a una carpeta o a una bóveda.
 
+## Tus cambios se mantienen tras las actualizaciones
+
+Lo que guardas aquí se mantiene cuando lazyit se actualiza. Un permiso que quitaste a Miembro o a Lector
+no vuelve a otorgarse con una actualización posterior.
+
+Cuando una actualización añade un permiso **nuevo**, cada rol recibe el valor por defecto de ese permiso
+**una sola vez**, en la primera actualización que lo incluye. A partir de ahí se comporta como cualquier
+otro permiso: si lo quitas, sigue quitado en todas las actualizaciones siguientes.
+
+> [!IMPORTANT]
+> Antes de este comportamiento, una actualización podía devolver en silencio un permiso por defecto que
+> habías quitado. Después de la actualización que lo incorpora, abre esta pantalla una vez y comprueba
+> que Miembro y Lector tienen solo lo que pretendes. A partir de entonces, tus cambios se conservan.
+
 ## Los permisos se quedan dentro de lazyit
 
 Estos permisos son **solo de lazyit**. Nunca se escriben en tu proveedor de identidad — el proveedor no

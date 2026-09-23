@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-22
+updated: 2026-09-23
 ---
 
 # Security invariants — auth & authorization
@@ -223,7 +223,11 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   permission]) }`: permissions are DB rows keyed by `(role, permission)`.
 - `packages/shared/src/schemas/permission.ts` — the frozen catalog (`PermissionSchema`) + the
   `DEFAULT_ROLE_PERMISSIONS` single source of truth in which `ADMIN` is the **complete** catalog.
-- `apps/api/prisma/seed.ts` — seeds the matrix 1:1 from `DEFAULT_ROLE_PERMISSIONS` (idempotent upsert).
+- `apps/api/prisma/seed.ts` — seeds the matrix 1:1 from `DEFAULT_ROLE_PERMISSIONS`, **seed-once per
+  (role, permission) pair**: a default is granted only when the append-only `applied_role_permission_defaults`
+  ledger has never recorded it (`src/prisma/seed-role-permissions.ts`, #1314). The seed never deletes a
+  grant, and an admin revocation (which deletes the `RolePermission` row, never the ledger row) survives
+  every deploy.
 - `apps/api/src/auth/role-permissions.golden.spec.ts` — golden test: a wrong/edited matrix (e.g. an
   incomplete ADMIN set, the pre-tightening drifting, or an admin-only read — `ADMIN_ONLY_READS`, today
   `logs:read` — leaking into MEMBER/VIEWER) fails CI.
