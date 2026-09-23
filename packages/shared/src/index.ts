@@ -60,6 +60,12 @@ export * from "./schemas/agent-policy";
 // The agent fleet read surface + the version buckets (ADR-0094 §3/§4, #1206). A read and a pure
 // classifier over `utils/semver` — no second notion of "behind", no schema change.
 export * from "./schemas/agent-fleet";
+// AI assistant, MCP server and headless API (ADR-0097): provider kinds, AI settings and status, the tool
+// contract, runs and the run event stream, and the OAuth 2.1 / personal-token shapes.
+export * from "./schemas/ai-provider";
+export * from "./schemas/ai-run";
+export * from "./schemas/ai-settings";
+export * from "./schemas/ai-tools";
 export * from "./schemas/infra";
 export * from "./schemas/infra-fact-change";
 export * from "./schemas/infra-list";
@@ -68,6 +74,7 @@ export * from "./schemas/instance";
 export * from "./schemas/location";
 export * from "./schemas/location-list";
 export * from "./schemas/notification";
+export * from "./schemas/oauth";
 export * from "./schemas/pagination";
 export * from "./schemas/permission";
 export * from "./schemas/permission-meta";
