@@ -9,6 +9,8 @@ import { IDENTITY_PROVIDER } from './identity/identity-provider.interface';
 import { createIdentityProvider } from './identity/identity-provider.factory';
 import { LocalCredentialService } from './local/local-credential.service';
 import { LocalProvisioningService } from './local/local-provisioning.service';
+import { PrincipalLoaderService } from './principal-loader.service';
+import { ServiceAccountAuthenticator } from './service-account-authenticator';
 
 /**
  * Global auth module. Registers the application-wide guards via APP_GUARD, IN ORDER:
@@ -37,8 +39,13 @@ import { LocalProvisioningService } from './local/local-provisioning.service';
  * is Phase-1 SCAFFOLDING: nothing injects it yet and authorization stays DB-first (the RolesGuard
  * never reads a role from the token); Phase 2 wires the Zitadel write-back through this token.
  *
- * See ADR-0038 (auth / JIT provisioning), ADR-0040 (RBAC roles), ADR-0043 (Zitadel source-of-truth)
- * and ADR-0046 (Roles & Permissions v2).
+ * It also provides the DB-first {@link PrincipalLoaderService} and the {@link ServiceAccountAuthenticator}
+ * (ADR-0097): the guard's local, service-account and delegated-identity branches share them, and they are
+ * exported so the AI layer and the MCP resource server (`/mcp`, R10) re-load and verify principals with
+ * the very same code.
+ *
+ * See ADR-0038 (auth / JIT provisioning), ADR-0040 (RBAC roles), ADR-0043 (Zitadel source-of-truth),
+ * ADR-0046 (Roles & Permissions v2) and ADR-0097 (AI delegated execution).
  */
 @Global()
 @Module({
@@ -56,6 +63,10 @@ import { LocalProvisioningService } from './local/local-provisioning.service';
     // ConfigService.setup + UsersService.create/requestPasswordReset in their local branches. Global so
     // both feature modules inject it without importing the local module.
     LocalProvisioningService,
+    // DB-first principal re-load + SA bearer verification (ADR-0097, R1/R10), shared by the guard's
+    // branches, the AI tool layer and `/mcp`.
+    PrincipalLoaderService,
+    ServiceAccountAuthenticator,
     // Authentication first: populate request.user.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // Forced password change (ADR-0086 §F4) second: a local user who still owes a one-time-credential
@@ -89,6 +100,8 @@ import { LocalProvisioningService } from './local/local-provisioning.service';
     IDENTITY_PROVIDER,
     LocalCredentialService,
     LocalProvisioningService,
+    PrincipalLoaderService,
+    ServiceAccountAuthenticator,
   ],
 })
 export class AuthModule {}
