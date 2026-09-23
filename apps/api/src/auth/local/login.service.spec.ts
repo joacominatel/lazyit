@@ -9,6 +9,7 @@ jest.mock('../../../generated/prisma/client', () => ({
 }));
 
 import { hash as argon2Hash } from '@node-rs/argon2';
+import { SESSION_TOKEN_TTL_SECONDS } from '@lazyit/shared';
 import { LoginService } from './login.service';
 import { LocalCredentialService } from './local-credential.service';
 
@@ -101,6 +102,84 @@ describe('LoginService', () => {
     await expect(credentials.verifySession(res.token)).resolves.toEqual({
       sub: VALID_ID,
       epoch: 0,
+      rememberMe: false,
+    });
+  });
+
+  describe('session lifetime (ADR-0086 §8, #1307)', () => {
+    const decodePayload = (token: string): Record<string, unknown> =>
+      JSON.parse(
+        Buffer.from(token.split('.')[1], 'base64url').toString(),
+      ) as Record<string, unknown>;
+
+    it('by default mints a 12h token and returns its exp as expiresAt', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
+      const before = Math.floor(Date.now() / 1000);
+
+      const res = await service.login('alice@example.com', 's3cret-pw');
+
+      const payload = decodePayload(res.token);
+      expect(typeof payload.exp).toBe('number');
+      expect(res.expiresAt).toBe(payload.exp);
+      expect(res.expiresAt).toBeGreaterThanOrEqual(
+        before + SESSION_TOKEN_TTL_SECONDS,
+      );
+      await expect(credentials.verifySession(res.token)).resolves.toMatchObject(
+        { rememberMe: false },
+      );
+    });
+
+    it('rememberMe mints a token with no time-based expiry and expiresAt null', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
+
+      const res = await service.login('alice@example.com', 's3cret-pw', true);
+
+      expect(res.expiresAt).toBeNull();
+      expect(decodePayload(res.token)).not.toHaveProperty('exp');
+      await expect(credentials.verifySession(res.token)).resolves.toEqual({
+        sub: VALID_ID,
+        epoch: 0,
+        rememberMe: true,
+      });
+    });
+
+    it('rememberMe changes nothing about a failed login (same generic 401)', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
+      await expect(
+        service.login('alice@example.com', 'wrong', true),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('logout (server-side revocation, ADR-0086 §8)', () => {
+    const originalMode = process.env.AUTH_MODE;
+    let updateMany: jest.Mock;
+
+    beforeEach(() => {
+      updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      (prisma.user as Record<string, jest.Mock>).updateMany = updateMany;
+    });
+
+    afterEach(() => {
+      process.env.AUTH_MODE = originalMode;
+    });
+
+    it('bumps sessionEpoch, conditional on the epoch the caller authenticated with', async () => {
+      process.env.AUTH_MODE = 'local';
+      await service.logout(makeUser({ sessionEpoch: 5 }) as never);
+      expect(updateMany).toHaveBeenCalledWith({
+        where: { id: VALID_ID, sessionEpoch: 5 },
+        data: { sessionEpoch: { increment: 1 } },
+      });
+    });
+
+    it('is a no-op outside local mode (no lazyit-minted session to revoke)', async () => {
+      process.env.AUTH_MODE = 'oidc';
+      await service.logout(makeUser() as never);
+      expect(updateMany).not.toHaveBeenCalled();
     });
   });
 

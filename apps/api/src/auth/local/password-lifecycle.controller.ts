@@ -3,9 +3,11 @@ import {
   Controller,
   HttpCode,
   Post,
+  Req,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
@@ -25,6 +27,7 @@ import { CurrentUser } from '../current-user.decorator';
 import { AllowPasswordChangeRequired } from '../allow-password-change-required.decorator';
 import { ServicePrincipalForbiddenGuard } from '../service-principal-forbidden.guard';
 import { PasswordLifecycleService } from './password-lifecycle.service';
+import type { LocalSessionContext } from './local-credential.service';
 import { PasswordResetRateLimitGuard } from './password-reset-rate-limit.guard';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe) + TS types + OpenAPI schema.
@@ -78,12 +81,14 @@ export class PasswordLifecycleController {
     summary: 'Change your own password (authenticated, local mode)',
     description:
       'Verifies the current password, sets the new one (strength-enforced), revokes all OTHER sessions ' +
-      '(session-epoch bump) and clears any forced-change flag. Returns a fresh session token so the ' +
-      'caller stays logged in. Only functional in AUTH_MODE=local.',
+      '(session-epoch bump) and clears any forced-change flag. Returns a fresh session token (and its ' +
+      '`expiresAt`) so the caller stays logged in; a "keep me signed in" session keeps that property. ' +
+      'Only functional in AUTH_MODE=local.',
   })
   @ApiOkResponse({ type: ChangePasswordResponseDto })
   async changePassword(
     @Body() dto: ChangePasswordRequestDto,
+    @Req() req: Request & { localSession?: LocalSessionContext },
     @CurrentUser() user?: User,
   ): Promise<ChangePasswordResponse> {
     // Non-@Public route: the guard guarantees a human user in local mode. Surface an anonymous/edge caller
@@ -91,10 +96,13 @@ export class PasswordLifecycleController {
     if (!user) {
       throw new UnauthorizedException('Not authenticated');
     }
+    // The re-minted token inherits the CALLING session's "keep me signed in" choice, as the guard read it
+    // from the verified token — never from the request body (ADR-0086 §8).
     return this.passwords.changePassword(
       user,
       dto.currentPassword,
       dto.newPassword,
+      req.localSession?.rememberMe === true,
     );
   }
 

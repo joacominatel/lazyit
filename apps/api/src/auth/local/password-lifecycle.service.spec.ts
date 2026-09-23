@@ -179,10 +179,32 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         actor: { userId: VALID_ID },
       });
 
-      // A fresh token minted at the NEW epoch (1) so the caller stays logged in.
+      // A fresh token minted at the NEW epoch (1) so the caller stays logged in — a default session
+      // stays a default (12h) session, and the response reports its expiry.
       await expect(credentials.verifySession(res.token)).resolves.toEqual({
         sub: VALID_ID,
         epoch: 1,
+        rememberMe: false,
+      });
+      expect(typeof res.expiresAt).toBe('number');
+    });
+
+    it('keeps a "keep me signed in" session: the re-minted token has no time expiry (ADR-0086 §8)', async () => {
+      const hash = await credentials.hash('old-pw-123');
+      const user = makeUser({ passwordHash: hash });
+
+      const res = await service.changePassword(
+        user as never,
+        'old-pw-123',
+        'NewPass1!',
+        true,
+      );
+
+      expect(res.expiresAt).toBeNull();
+      await expect(credentials.verifySession(res.token)).resolves.toEqual({
+        sub: VALID_ID,
+        epoch: 1,
+        rememberMe: true,
       });
     });
 

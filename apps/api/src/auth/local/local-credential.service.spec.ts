@@ -1,6 +1,10 @@
 import { createHmac } from 'node:crypto';
 import { hash as argon2Hash } from '@node-rs/argon2';
-import { ARGON2ID_PARAMS, SESSION_TOKEN_ALG } from '@lazyit/shared';
+import {
+  ARGON2ID_PARAMS,
+  SESSION_TOKEN_ALG,
+  SESSION_TOKEN_TTL_SECONDS,
+} from '@lazyit/shared';
 import { LocalCredentialService } from './local-credential.service';
 
 /**
@@ -131,7 +135,7 @@ describe('LocalCredentialService', () => {
 
   describe('session token (mint / verify)', () => {
     it('round-trips sub + epoch and carries nothing authorization-bearing', async () => {
-      const token = await service.mintSession({
+      const { token } = await service.mintSession({
         id: '11111111-1111-1111-1111-111111111111',
         sessionEpoch: 7,
       });
@@ -139,6 +143,7 @@ describe('LocalCredentialService', () => {
       expect(claims).toEqual({
         sub: '11111111-1111-1111-1111-111111111111',
         epoch: 7,
+        rememberMe: false,
       });
       // Decode the payload and assert no role/permissions leaked into the token.
       const payload = decodeSeg(token, 1);
@@ -151,7 +156,7 @@ describe('LocalCredentialService', () => {
     });
 
     it('mints an HS256-headed token', async () => {
-      const token = await service.mintSession({ id: 'u', sessionEpoch: 0 });
+      const { token } = await service.mintSession({ id: 'u', sessionEpoch: 0 });
       const header = decodeSeg(token, 0);
       expect(header.alg).toBe(SESSION_TOKEN_ALG); // 'HS256'
     });
@@ -211,6 +216,137 @@ describe('LocalCredentialService', () => {
         SECRET,
       );
       await expect(service.verifySession(token)).rejects.toThrow(/epoch/);
+    });
+
+    it('a default token expires 12h out and reports that expiry as expiresAt', async () => {
+      const before = Math.floor(Date.now() / 1000);
+      const { token, expiresAt } = await service.mintSession({
+        id: 'u',
+        sessionEpoch: 0,
+      });
+      const payload = decodeSeg(token, 1);
+      expect(payload.exp).toBe(expiresAt);
+      expect(expiresAt).toBeGreaterThanOrEqual(
+        before + SESSION_TOKEN_TTL_SECONDS,
+      );
+      expect(expiresAt).toBeLessThanOrEqual(
+        Math.floor(Date.now() / 1000) + SESSION_TOKEN_TTL_SECONDS,
+      );
+      expect(payload.rememberMe).toBeUndefined();
+    });
+
+    it('REJECTS an HS256-signed token with neither exp nor the remember-me marker', async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const token = forgeToken(
+        { alg: 'HS256', typ: 'JWT' },
+        { sub: '11111111-1111-1111-1111-111111111111', epoch: 0, iat: now },
+        SECRET,
+      );
+      await expect(service.verifySession(token)).rejects.toThrow(/expiry/);
+    });
+
+    it('REJECTS a missing exp when the marker is anything but exactly true', async () => {
+      const now = Math.floor(Date.now() / 1000);
+      for (const marker of [false, 'true', 1, null]) {
+        const token = forgeToken(
+          { alg: 'HS256', typ: 'JWT' },
+          {
+            sub: '11111111-1111-1111-1111-111111111111',
+            epoch: 0,
+            iat: now,
+            rememberMe: marker,
+          },
+          SECRET,
+        );
+        await expect(service.verifySession(token)).rejects.toThrow(/expiry/);
+      }
+    });
+
+    it('REJECTS an explicit non-numeric exp even on a remember-me token', async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const token = forgeToken(
+        { alg: 'HS256', typ: 'JWT' },
+        {
+          sub: '11111111-1111-1111-1111-111111111111',
+          epoch: 0,
+          iat: now,
+          exp: null,
+          rememberMe: true,
+        },
+        SECRET,
+      );
+      await expect(service.verifySession(token)).rejects.toThrow(/expired/);
+    });
+
+    describe('remember-me ("keep me signed in", ADR-0086 §8)', () => {
+      const SUB = '11111111-1111-1111-1111-111111111111';
+
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      it('mints a token with NO exp, the signed marker, and expiresAt null', async () => {
+        const { token, expiresAt } = await service.mintSession(
+          { id: SUB, sessionEpoch: 4 },
+          { rememberMe: true },
+        );
+        expect(expiresAt).toBeNull();
+        const payload = decodeSeg(token, 1);
+        expect(payload).not.toHaveProperty('exp');
+        expect(payload.rememberMe).toBe(true);
+        // Still nothing authorization-bearing, still HS256.
+        expect(payload.role).toBeUndefined();
+        expect(decodeSeg(token, 0).alg).toBe(SESSION_TOKEN_ALG);
+        await expect(service.verifySession(token)).resolves.toEqual({
+          sub: SUB,
+          epoch: 4,
+          rememberMe: true,
+        });
+      });
+
+      it('is still accepted long after a default token would have expired', async () => {
+        const { token } = await service.mintSession(
+          { id: SUB, sessionEpoch: 0 },
+          { rememberMe: true },
+        );
+        const { token: shortToken } = await service.mintSession({
+          id: SUB,
+          sessionEpoch: 0,
+        });
+        // Jump 30 days ahead: the 12h token is dead, the remember-me token is not.
+        const future = Date.now() + 30 * 24 * 60 * 60 * 1000;
+        jest.spyOn(Date, 'now').mockReturnValue(future);
+        await expect(service.verifySession(shortToken)).rejects.toThrow(
+          /expired/,
+        );
+        await expect(service.verifySession(token)).resolves.toMatchObject({
+          rememberMe: true,
+        });
+      });
+
+      it('the marker cannot be grafted onto a token without the secret (signature breaks)', async () => {
+        const { token } = await service.mintSession({
+          id: SUB,
+          sessionEpoch: 0,
+        });
+        const [header, , signature] = token.split('.');
+        const now = Math.floor(Date.now() / 1000);
+        const tampered = `${header}.${b64url({ sub: SUB, epoch: 0, iat: now, rememberMe: true })}.${signature}`;
+        await expect(service.verifySession(tampered)).rejects.toThrow(
+          /signature/,
+        );
+      });
+
+      it('an alg:none remember-me token is still refused by the alg-pin', async () => {
+        const forged =
+          b64url({ alg: 'none', typ: 'JWT' }) +
+          '.' +
+          b64url({ sub: SUB, epoch: 0, rememberMe: true }) +
+          '.';
+        await expect(service.verifySession(forged)).rejects.toThrow(
+          /algorithm/,
+        );
+      });
     });
 
     it('throws when the signing secret is unset/too short (fail-loud)', async () => {

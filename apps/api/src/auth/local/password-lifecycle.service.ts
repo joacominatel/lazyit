@@ -94,6 +94,9 @@ export class PasswordLifecycleService {
    * hash, BUMPS `sessionEpoch` (revoking every OTHER session the user holds), clears `mustChangePassword`,
    * and stamps `passwordUpdatedAt`. Audits PASSWORD_CHANGED. Returns a FRESH session token minted at the
    * new epoch so the caller who just changed their password stays logged in (their old token is now dead).
+   * `rememberMe` is the CALLING session's choice (read from the verified token by the guard, never from the
+   * body): a "keep me signed in" session stays one, so changing a password never silently shortens it
+   * (ADR-0086 §8). The response carries the new token's `expiresAt`, like the login response.
    *
    * The `user` is the row the guard loaded THIS request (@CurrentUser) — already live, active and not
    * directoryOnly (handleLocal rejects those). Defensive re-checks are kept fail-closed regardless.
@@ -102,6 +105,7 @@ export class PasswordLifecycleService {
     user: User,
     currentPassword: string,
     newPassword: string,
+    rememberMe = false,
   ): Promise<ChangePasswordResponse> {
     if (!this.isLocalMode()) {
       // Not applicable outside local mode — OIDC users have no lazyit-owned password to change.
@@ -166,11 +170,10 @@ export class PasswordLifecycleService {
     });
 
     // Mint a fresh token at the NEW epoch so the caller stays authenticated (their prior token just died).
-    const token = await this.credentials.mintSession({
-      id: updated.id,
-      sessionEpoch: updated.sessionEpoch,
-    });
-    return { token };
+    return this.credentials.mintSession(
+      { id: updated.id, sessionEpoch: updated.sessionEpoch },
+      { rememberMe },
+    );
   }
 
   // ---------- 3. forgot-password (public, enumeration-safe) ------------------
