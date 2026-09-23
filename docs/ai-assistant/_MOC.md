@@ -16,7 +16,7 @@ updated: 2026-09-23
 >
 > **Start here:** read [[ai-assistant/_synthesis|the synthesis]] first — it is the binding
 > architecture; the five area notes below are its depth. The decision record is
-> [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] (proposed).
+> [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] (accepted).
 
 ## The synthesis (read first)
 
