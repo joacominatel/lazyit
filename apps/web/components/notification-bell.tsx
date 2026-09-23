@@ -13,11 +13,12 @@ import {
   ShieldExclamationIcon,
   SignalSlashIcon,
   UserPlusIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import type { Notification, NotificationType } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState, type ComponentType } from "react";
+import { useState, type ComponentType, type MouseEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,11 +28,14 @@ import {
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  useDismissAllNotifications,
+  useDismissNotification,
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
   useNotifications,
   useUnreadNotificationCount,
 } from "@/lib/api/hooks/use-notifications";
+import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +48,10 @@ import { cn } from "@/lib/utils";
  * page for the dropdown. Each row reuses the dashboard recent-activity visual grammar (a pillar-tinted
  * icon chip + a single-line title + relative time) so the bell reads as one visual family with the rest
  * of the app — but it is backed by the `Notification` store, not the `recent_activity` view. A row click
- * marks it read and deep-links to its target; "Mark all read" clears the badge.
+ * marks it read and deep-links to its target; "Mark all read" clears the badge. The per-row X and
+ * "Clear all" DISMISS from the caller's own bell only (ADR-0056 §7 amendment, #1309) — optimistic, with a
+ * rollback + toast on failure. There is no undo in v1 (an accepted trade-off), so neither asks to confirm:
+ * the effect is per user and never deletes the shared event.
  *
  * When SSE lands (Phase 2) the same hooks push live behind the same endpoints — this component does not
  * change shape.
@@ -186,6 +193,8 @@ export function NotificationBell() {
   const { data: page, isLoading } = useNotifications(open);
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
+  const dismiss = useDismissNotification();
+  const dismissAll = useDismissAllNotifications();
 
   const unread = count?.unread ?? 0;
   const items = page?.items ?? [];
@@ -215,16 +224,32 @@ export function NotificationBell() {
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
           <p className="text-sm font-medium">{t("title")}</p>
-          {hasUnread && (
-            <button
-              type="button"
-              onClick={() => markAll.mutate()}
-              disabled={markAll.isPending}
-              className="rounded-sm text-xs font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:underline disabled:opacity-50"
-            >
-              {t("markAllRead")}
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {hasUnread && (
+              <button
+                type="button"
+                onClick={() => markAll.mutate()}
+                disabled={markAll.isPending}
+                className="rounded-sm text-xs font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:underline disabled:opacity-50"
+              >
+                {t("markAllRead")}
+              </button>
+            )}
+            {items.length > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  dismissAll.mutate(undefined, {
+                    onError: (error) => notifyError(error, t("clearAllFailed")),
+                  })
+                }
+                disabled={dismissAll.isPending}
+                className="rounded-sm text-xs font-medium text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:text-foreground focus-visible:underline disabled:opacity-50"
+              >
+                {t("clearAll")}
+              </button>
+            )}
+          </div>
         </div>
         <div className="max-h-96 overflow-y-auto overscroll-contain">
           {isLoading ? (
@@ -243,6 +268,11 @@ export function NotificationBell() {
                     if (!n.read) markRead.mutate(n.id);
                     setOpen(false);
                   }}
+                  onDismiss={() =>
+                    dismiss.mutate(n.id, {
+                      onError: (error) => notifyError(error, t("dismissFailed")),
+                    })
+                  }
                 />
               ))}
             </ul>
@@ -257,13 +287,20 @@ export function NotificationBell() {
  * One bell row — the activity-row grammar adapted: a type-tinted icon chip, a single-line title, an
  * optional one-line summary, the relative time, and an unread dot. The whole row is a deep-link that
  * marks the notification read on activation. All text is server-built + escaped (INV-6 / SEC-A5).
+ *
+ * The dismiss X is a SIBLING of the link, never nested in it (a button inside an `<a>` is invalid and
+ * would bubble into the click-through), so dismissing never navigates or closes the dropdown. It follows
+ * the `rowActionsReveal` a11y contract of `components/resource-table.tsx`: shown on row hover, on keyboard
+ * focus anywhere in the row, and ALWAYS on touch devices, which cannot hover.
  */
-function NotificationListItem({
+export function NotificationListItem({
   notification: n,
   onActivate,
+  onDismiss,
 }: {
   notification: Notification;
   onActivate: () => void;
+  onDismiss: () => void;
 }) {
   const t = useTranslations("notifications");
   const { dateTime, relative } = useFormatters();
@@ -271,12 +308,27 @@ function NotificationListItem({
   const Icon = meta.icon;
   const absolute = dateTime(n.createdAt);
 
+  const handleDismiss = (event: MouseEvent<HTMLButtonElement>) => {
+    // The row is about to disappear: hand focus to a neighbouring row (or the dropdown itself when this
+    // was the last one) so a keyboard user is not dropped onto <body>.
+    const button = event.currentTarget;
+    if (button === document.activeElement) {
+      const row = button.closest("li");
+      const neighbour = row?.nextElementSibling ?? row?.previousElementSibling;
+      const target =
+        neighbour?.querySelector<HTMLElement>("a") ??
+        button.closest<HTMLElement>('[data-slot="popover-content"]');
+      target?.focus();
+    }
+    onDismiss();
+  };
+
   return (
-    <li className={cn("relative", !n.read && "bg-primary/[0.03]")}>
+    <li className={cn("group/item relative", !n.read && "bg-primary/[0.03]")}>
       <Link
         href={meta.href(n)}
         onClick={onActivate}
-        className="flex gap-3 px-4 py-3 outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60"
+        className="flex gap-3 py-3 pl-4 pr-10 outline-none transition-colors group-hover/item:bg-muted/60 focus-visible:bg-muted/60"
       >
         <span
           className={cn(
@@ -317,6 +369,16 @@ function NotificationListItem({
           />
         )}
       </Link>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        onClick={handleDismiss}
+        aria-label={t("dismiss", { title: n.title })}
+        className="absolute right-2 top-2.5 text-muted-foreground opacity-0 transition-opacity duration-[var(--dur-fast)] group-hover/item:opacity-100 group-focus-within/item:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
+      >
+        <XMarkIcon className="size-3.5" aria-hidden />
+      </Button>
     </li>
   );
 }
