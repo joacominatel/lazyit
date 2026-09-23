@@ -17,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getConfigStatus } from "@/lib/api/endpoints/config";
+import { mayBounceSignedInVisitor } from "@/lib/auth/session-expiry";
 import { safeInternalPath } from "@/lib/utils/safe-redirect";
 
 import { LocalLoginForm } from "./local-login-form";
@@ -35,7 +36,8 @@ import { LocalLoginForm } from "./local-login-form";
  * Redirect handling: `proxy.ts` sends unauthenticated visitors here with a `callbackUrl` query param
  * (their intended destination). We forward that to `signIn` via `redirectTo` so a successful login
  * lands in the app, and we bounce already-authenticated visitors straight there (default
- * `/dashboard`).
+ * `/dashboard`) — except a visitor the global 401 handler sent here with `?expired`, whose cookie may
+ * still read as valid while its token is dead; bouncing them is the reload loop of #1307.
  *
  * Recourse (ADR-0043 §7): when the IdP bounces a user back unauthenticated, Auth.js redirects here
  * with `?error=<code>`. We translate that into a clear, IT-native explanation instead of a silent
@@ -81,16 +83,21 @@ async function resolveLoginContext(): Promise<{
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{
+    callbackUrl?: string;
+    error?: string;
+    expired?: string | string[];
+  }>;
 }) {
-  const { callbackUrl, error } = await searchParams;
+  const params = await searchParams;
+  const { callbackUrl, error } = params;
   // Open-redirect guard (#495): `callbackUrl` is attacker-controllable, so collapse it to a
   // guaranteed same-origin path. Applied to BOTH the authenticated `redirect()` below (the unsafe
   // branch) and — defensively — the `redirectTo` handed to `signIn`.
   const destination = safeInternalPath(callbackUrl);
 
-  // Already signed in → skip the login screen.
-  if (await auth()) {
+  // Already signed in → skip the login screen, unless the 401 handler sent the visitor here (#1307).
+  if (mayBounceSignedInVisitor(params) && (await auth())) {
     redirect(destination);
   }
 

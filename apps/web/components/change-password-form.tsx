@@ -87,8 +87,9 @@ export function ChangePasswordForm({
         onSuccess: async (result) => {
           // Swap to the fresh token BEFORE anything else so no client request races the dead one.
           setSessionToken(result.token);
-          // Persist it into the Auth.js session cookie (jwt callback honours a trigger:"update").
-          await update({ accessToken: result.token });
+          // Persist it into the Auth.js session cookie (jwt callback honours a trigger:"update"), with its
+          // expiry so the session still ends when the new token does (`null` = keep me signed in, #1307).
+          await update({ accessToken: result.token, expiresAt: result.expiresAt });
           form.reset();
           if (!forced) toast.success(t("success"));
           onSuccess?.();
