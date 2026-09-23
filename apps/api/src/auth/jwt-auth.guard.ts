@@ -25,7 +25,11 @@ import {
   verifySecret,
 } from '../service-accounts/service-account-token';
 import { resolveServiceAccountPermissions } from '../service-accounts/service-account-permissions';
-import { LocalCredentialService } from './local/local-credential.service';
+import {
+  LocalCredentialService,
+  type LocalSessionContext,
+  type SessionClaims,
+} from './local/local-credential.service';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -268,7 +272,9 @@ export class JwtAuthGuard implements CanActivate {
    * Authenticate a HUMAN from a first-party local session token (ADR-0086 §3). DB-FIRST (INV-1), mirroring
    * handleOidc but with a stateless-JWT revocation via `sessionEpoch`:
    *   1. Require a Bearer token; verify it with the LocalCredentialService — HS256 PINNED (rejects
-   *      `alg:none` / an RS256-forged token) + `exp` enforced. A bad/expired token → generic 401.
+   *      `alg:none` / an RS256-forged token) + `exp` enforced. A bad/expired token → generic 401. A
+   *      "keep me signed in" token (signed remember-me marker, ADR-0086 §8) has no `exp`, so steps 2–3
+   *      are the ONLY things that end it.
    *   2. Re-load the User by `sub` on the LIVE-filtered client EVERY request (a soft-deleted row is
    *      invisible here → 401), so offboarding/deletion takes effect immediately.
    *   3. Reject (401) when: the token's `epoch` ≠ the row's `sessionEpoch` (REVOCATION — logout /
@@ -276,17 +282,18 @@ export class JwtAuthGuard implements CanActivate {
    *      or it is `directoryOnly` (a login-incapable directory person must never authenticate).
    *
    * A local token is only accepted in local mode; in oidc mode it falls to handleOidc and is rejected
-   * (cross-mode rejection, asserted in tests). Sets request.user; the principal mirror happens in canActivate.
+   * (cross-mode rejection, asserted in tests). Sets request.user and `request.localSession` (whether the
+   * session is remember-me, for a route that re-mints the token); the principal mirror happens in canActivate.
    */
   private async handleLocal(
-    request: Request & { user?: User },
+    request: Request & { user?: User; localSession?: LocalSessionContext },
   ): Promise<boolean> {
     const bearer = this.extractBearer(request);
     if (!bearer) {
       throw new UnauthorizedException('Missing Bearer token');
     }
 
-    let claims: { sub: string; epoch: number };
+    let claims: SessionClaims;
     try {
       claims = await this.localCredentials.verifySession(bearer);
     } catch {
@@ -319,6 +326,7 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     request.user = user;
+    request.localSession = { rememberMe: claims.rememberMe };
     return true;
   }
 

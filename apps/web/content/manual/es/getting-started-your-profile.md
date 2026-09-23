@@ -29,6 +29,32 @@ incluidas las cuentas de solo lectura (**Viewer**): nunca necesitás permisos el
 - **Accesos anteriores** — un historial de las aplicaciones a las que *tenías* acceso, con cuándo
   empezó cada concesión y cuándo se revocó. Esta sección aparece solo si tenés accesos pasados.
 
+## Iniciar y cerrar sesión
+
+**Cerrar sesión.** Hacé clic en tu **avatar**, en la esquina superior derecha, y elegí **Cerrar sesión**.
+
+Si tu instancia usa **cuentas locales** (un email/nombre de usuario y contraseña de lazyit):
+
+- **Un inicio de sesión normal dura 12 horas.** Pasado ese tiempo, lazyit te lleva de vuelta a la
+  pantalla de inicio de sesión y volvés a iniciarla. Lo que hayas abierto mientras tanto (un marcador,
+  un enlace) espera detrás de la pantalla de inicio de sesión y se abre cuando volvés a entrar.
+- **Mantener la sesión iniciada.** Marcá **Mantener la sesión iniciada** en la pantalla de inicio de
+  sesión y tu sesión **no vence**: seguís con la sesión iniciada en ese navegador hasta que la cierres.
+  Está desactivado por defecto y lo elegís en cada inicio de sesión.
+- **Usalo solo en un dispositivo personal y de confianza.** Como la sesión nunca vence, cualquiera que
+  pueda usar ese navegador queda conectado como vos hasta que cierres sesión. Nunca lo marques en una
+  computadora compartida, pública o prestada. La pantalla de inicio de sesión muestra esta advertencia
+  cuando marcás la casilla.
+- **Cerrar sesión cierra tus sesiones en todos los dispositivos.** Al elegir **Cerrar sesión** se cierran
+  todas tus sesiones: este navegador, tus otras computadoras y tu teléfono, incluidas las que mantuviste
+  con **Mantener la sesión iniciada**. Así también cerrás una sesión que dejaste abierta en otro lado.
+- Una sesión mantenida también termina cuando cambiás tu contraseña (solo en los otros dispositivos),
+  cuando un administrador restablece tu contraseña o cuando tu cuenta se desactiva o se da de baja.
+
+> **Con inicio de sesión único (SSO)** no hay casilla **Mantener la sesión iniciada**: cuánto tiempo
+> seguís con la sesión iniciada lo define tu proveedor de identidad, y cerrar sesión termina tu sesión
+> en este navegador.
+
 ## Cambiar tu contraseña
 
 Si tu instancia usa **cuentas locales** (un email/nombre de usuario y contraseña de lazyit, en lugar del

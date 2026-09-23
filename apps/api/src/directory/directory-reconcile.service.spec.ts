@@ -31,7 +31,12 @@ import type {
 import type { UsersService } from '../users/users.service';
 import type { UserHistoryService } from '../user-history/user-history.service';
 
-/** The keys the reconcile may NEVER write onto a matched/offboarded person (mass-assignment / escalation). */
+/**
+ * The keys the reconcile may NEVER write onto a matched/reactivated person (mass-assignment / escalation /
+ * credentials). `sessionEpoch` is deliberately listed: the sync's ONE sanctioned epoch write is the revoking
+ * bump on an active→offboarded transition (#1308, ADR-0086 §8), so the offboard assertions use
+ * {@link FORBIDDEN_OFFBOARD_KEYS} and check the bump explicitly instead.
+ */
 const FORBIDDEN_WRITE_KEYS = [
   'role',
   'externalId',
@@ -40,6 +45,10 @@ const FORBIDDEN_WRITE_KEYS = [
   'sessionEpoch',
   'mustChangePassword',
 ];
+/** The offboard path's guard: everything above except `sessionEpoch`, which it may only ever increment. */
+const FORBIDDEN_OFFBOARD_KEYS = FORBIDDEN_WRITE_KEYS.filter(
+  (key) => key !== 'sessionEpoch',
+);
 
 interface LocalPerson {
   id: string;
@@ -174,8 +183,11 @@ function makeService(opts: {
 }
 
 /** Assert an update `data` object never carries a forbidden (escalation / credential / login) key. */
-function assertNoForbiddenKeys(data: Record<string, unknown>): void {
-  for (const key of FORBIDDEN_WRITE_KEYS) {
+function assertNoForbiddenKeys(
+  data: Record<string, unknown>,
+  keys: string[] = FORBIDDEN_WRITE_KEYS,
+): void {
+  for (const key of keys) {
     expect(Object.prototype.hasOwnProperty.call(data, key)).toBe(false);
   }
 }
@@ -314,9 +326,104 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
     expect(data.isActive).toBe(false);
     expect(data.directoryOffboardedAt).toBeInstanceOf(Date);
-    assertNoForbiddenKeys(data);
+    assertNoForbiddenKeys(data, FORBIDDEN_OFFBOARD_KEYS);
     const event = nthCall<[unknown, HistoryEvent]>(historyRecord, 0)[1];
     expect(event.payload.reason).toBe('offboarded');
+  });
+
+  it('offboarding an ACTIVE person revokes their local sessions (sessionEpoch +1, #1308)', async () => {
+    const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { service, txUserUpdate } = makeService({
+      graceDays: 7,
+      localPeople: [
+        {
+          id: 'u2',
+          directorySourceId: 'G2',
+          isActive: true,
+          directoryOffboardedAt: null,
+          firstName: 'Gone',
+          lastName: 'Person',
+          directoryAttrs: { lastSeenAt: stale },
+        },
+      ],
+      entries: [],
+    });
+    await service.reconcile();
+    expect(txUserUpdate).toHaveBeenCalledTimes(1);
+    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
+    expect(data.sessionEpoch).toEqual({ increment: 1 });
+  });
+
+  it('offboarding an ALREADY-INACTIVE person does not bump sessionEpoch (revoked at deactivation)', async () => {
+    const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { service, txUserUpdate } = makeService({
+      graceDays: 7,
+      localPeople: [
+        {
+          id: 'u4',
+          directorySourceId: 'G4',
+          isActive: false, // deactivated by hand before AD dropped them
+          directoryOffboardedAt: null,
+          firstName: 'Manually',
+          lastName: 'Deactivated',
+          directoryAttrs: { lastSeenAt: stale },
+        },
+      ],
+      entries: [],
+    });
+    const result = await service.reconcile();
+    expect(result.counts.offboarded).toBe(1);
+    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
+    assertNoForbiddenKeys(data);
+  });
+
+  it('an already-offboarded person still absent → no write at all (repeated runs never bump again)', async () => {
+    const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { service, userUpdate, txUserUpdate, historyRecord } = makeService({
+      graceDays: 7,
+      localPeople: [
+        {
+          id: 'u2',
+          directorySourceId: 'G2',
+          isActive: false,
+          directoryOffboardedAt: new Date(stale),
+          firstName: 'Gone',
+          lastName: 'Person',
+          directoryAttrs: { lastSeenAt: stale },
+        },
+      ],
+      entries: [],
+    });
+    const result = await service.reconcile();
+    expect(result.counts.offboarded).toBe(0);
+    expect(userUpdate).not.toHaveBeenCalled();
+    expect(txUserUpdate).not.toHaveBeenCalled();
+    expect(historyRecord).not.toHaveBeenCalled();
+  });
+
+  it('REAPPEARED after our offboard → reactivates WITHOUT touching sessionEpoch (the person signs in again)', async () => {
+    const { service, txUserUpdate, historyRecord } = makeService({
+      localPeople: [
+        {
+          id: 'u2',
+          directorySourceId: 'G2',
+          isActive: false,
+          directoryOffboardedAt: new Date('2020-01-01T00:00:00.000Z'),
+          firstName: 'Back',
+          lastName: 'Again',
+          directoryAttrs: { lastSeenAt: '2020-01-01T00:00:00.000Z' },
+        },
+      ],
+      entries: [makeEntry('G2', { givenName: 'Back', sn: 'Again' })],
+    });
+    const result = await service.reconcile();
+    expect(result.counts.updated).toBe(1);
+    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
+    expect(data.isActive).toBe(true);
+    expect(data.directoryOffboardedAt).toBeNull();
+    assertNoForbiddenKeys(data);
+    const event = nthCall<[unknown, HistoryEvent]>(historyRecord, 0)[1];
+    expect(event.payload.fields).toContain('reactivated');
   });
 
   it('DISAPPEARED within grace → NOT offboarded (a single dropped run cannot mass-deactivate)', async () => {

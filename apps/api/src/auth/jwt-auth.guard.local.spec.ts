@@ -88,6 +88,32 @@ describe('JwtAuthGuard — handleLocal (AUTH_MODE=local, ADR-0086)', () => {
     expect(findFirst).toHaveBeenCalledWith({ where: { id: VALID_ID } });
   });
 
+  it('records whether the session is "keep me signed in" on request.localSession (ADR-0086 §8)', async () => {
+    findFirst.mockResolvedValue(DB_USER);
+
+    verifySession.mockResolvedValue({
+      sub: VALID_ID,
+      epoch: 3,
+      rememberMe: true,
+    });
+    const remembered = bearer('remember-me-token');
+    await guard.canActivate(makeCtx(remembered));
+    expect((remembered as { localSession?: unknown }).localSession).toEqual({
+      rememberMe: true,
+    });
+
+    verifySession.mockResolvedValue({
+      sub: VALID_ID,
+      epoch: 3,
+      rememberMe: false,
+    });
+    const regular = bearer('regular-token');
+    await guard.canActivate(makeCtx(regular));
+    expect((regular as { localSession?: unknown }).localSession).toEqual({
+      rememberMe: false,
+    });
+  });
+
   it('rejects a missing Bearer token', async () => {
     await expect(guard.canActivate(makeCtx({ headers: {} }))).rejects.toThrow(
       UnauthorizedException,

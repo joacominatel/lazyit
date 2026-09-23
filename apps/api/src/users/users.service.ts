@@ -1015,9 +1015,17 @@ export class UsersService {
     // schema); they pass through. `manager` is voided so the rest-destructure isn't flagged unused.
     const { manager, ...scalarData } = data;
     void manager;
+    // Deactivating revokes every local session (ADR-0086 §3/§8): the guard already refuses an inactive
+    // account, but without the epoch bump a later REACTIVATION would revive every token minted before it —
+    // including a "keep me signed in" token that never expires by time. Harmless outside local mode.
+    const deactivating = data.isActive === false && current.isActive;
     const user = await this.prisma.user.update({
       where: { id },
-      data: { ...scalarData, ...(managerWrite ?? {}) },
+      data: {
+        ...scalarData,
+        ...(managerWrite ?? {}),
+        ...(deactivating ? { sessionEpoch: { increment: 1 } } : {}),
+      },
     });
 
     // Mirror role and/or profile CHANGES to the IdP (ADR-0043 §3, issue #149). Only when the user is
@@ -1543,8 +1551,13 @@ export class UsersService {
         actor,
       );
 
-      // 3. Soft-delete the user.
-      await tx.user.update({ where: { id }, data: { deletedAt: now } });
+      // 3. Soft-delete the user, revoking every local session (ADR-0086 §3/§8): the live-filtered guard
+      // already refuses a soft-deleted row, but a later restore() would otherwise revive every token minted
+      // before the offboarding — including a "keep me signed in" token that never expires by time.
+      await tx.user.update({
+        where: { id },
+        data: { deletedAt: now, sessionEpoch: { increment: 1 } },
+      });
 
       // 4. Append the DELETED history row (DEBT-2, issue #185) inside the SAME transaction, atomic with
       // the soft-delete (ADR-0033). Unlike create/update/reset (human-only @CurrentUser), offboarding

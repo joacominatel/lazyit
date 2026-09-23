@@ -48,15 +48,21 @@ declare module "next-auth" {
      * sign-ins never set this — they carry the token via `account.access_token`.
      */
     accessToken?: string;
+    /**
+     * Set ONLY on a local (Credentials) sign-in (#1307, ADR-0086 §8): when the API-minted token stops
+     * being accepted by time, in SECONDS since the epoch, or `null` for a "keep me signed in" token with
+     * no time-based expiry. The `jwt` callback moves it onto `token.expiresAt`.
+     */
+    expiresAt?: number | null;
   }
   interface Session {
     /** IdP access token, forwarded as `Authorization: Bearer` on API calls. */
     accessToken: string;
     /**
-     * Set to `"RefreshAccessTokenError"` when a silent refresh failed (issue #658).
-     * The stale `accessToken` is still attached, so the next API call 401s and the
-     * existing global-401 handler (issue #657) signs the user out — this field is the
-     * declared signal of that fallback, surfaced for any future proactive handling.
+     * Set to `"RefreshAccessTokenError"` when a silent refresh failed (issue #658) while the
+     * access token was still inside its skew window, so it is still valid and the refresh is
+     * retried on the next read. A failure after expiry ends the session instead (#1307).
+     * Surfaced for any future proactive handling.
      */
     error?: "RefreshAccessTokenError";
   }
@@ -75,8 +81,11 @@ declare module "next-auth/jwt" {
     accessToken?: string;
     /**
      * Absolute access-token expiry, **seconds** since epoch (the OIDC `expires_at`
-     * convention). Drives the refresh decision in the `jwt` callback. Absent when the
-     * IdP returned no expiry — refresh is then skipped and the token behaves as before.
+     * convention). Drives the refresh decision in the `jwt` callback, and — once it has
+     * passed and the token cannot be renewed — ends the session (#1307). A local sign-in
+     * records the API-minted token's expiry here too (ADR-0086 §8). Absent when there is no
+     * time-based expiry: an IdP that returned none, a "keep me signed in" local session, or a
+     * cookie issued before #1307. Such a session is never ended by time here.
      */
     expiresAt?: number;
     /**
@@ -97,6 +106,33 @@ declare module "next-auth/jwt" {
  * very short-lived tokens or refresh storms appear.
  */
 const REFRESH_SKEW_SECONDS = 30;
+
+/**
+ * Auth.js session-cookie lifetime (`session.maxAge`, seconds) — #1307, ADR-0086 §8.
+ *
+ * Local mode: 400 days, the ceiling browsers enforce on a cookie's lifetime (RFC 6265bis; Chromium
+ * clamps anything longer). A "keep me signed in" session has no time-based expiry, so the cookie must
+ * outlive it; under the JWT strategy Auth.js re-issues the cookie with a fresh `maxAge` on every session
+ * read (each proxied request, each `/api/auth/session` poll — `updateAge` only applies to database
+ * sessions), so an active user's cookie never lapses. The 12h limit of a default local session is NOT
+ * the cookie's job: the `jwt` callback ends the session once the recorded `expiresAt` passes.
+ *
+ * OIDC mode (an issuer is configured): Auth.js's own 30-day default, unchanged. An IdP session is renewed
+ * through the refresh token, and a longer cookie would silently change how long an idle OIDC session
+ * survives. Local mode never sets an issuer (the installer refuses one — infra/start.sh), so the issuer
+ * is a reliable mode signal at config time.
+ */
+const LOCAL_SESSION_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
+const OIDC_SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * The login form posts every field as a string (`application/x-www-form-urlencoded`), but the shared
+ * `LoginRequest.rememberMe` is a strict boolean. Only an explicit `"true"` (or a real `true`) opts in;
+ * anything else — absent, `"false"`, garbage — keeps the default 12h session (#1307).
+ */
+function parseRememberMe(raw: unknown): boolean {
+  return raw === true || raw === "true";
+}
 
 /**
  * Whether the session cookie carries the `Secure` flag / `__Secure-` prefix (ADR-0086 §6, security).
@@ -176,7 +212,7 @@ const oidcServerFetch: typeof fetch = internalIssuer ? forwardedFetch : fetch;
  * this matches the confidential web client the provider is already configured as.
  *
  * Returns the refreshed token fields on success, or `{ error }` on any failure so the
- * caller can mark the JWT and let the #657 fallback take over. Never throws.
+ * caller can end the session (expired) or retry on the next read (#1307). Never throws.
  */
 async function refreshAccessToken(refreshToken: string): Promise<
   | { accessToken: string; expiresAt: number; refreshToken: string }
@@ -302,10 +338,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         identifier: { label: "Email or username", type: "text" },
         password: { label: "Password", type: "password" },
+        rememberMe: { label: "Keep me signed in", type: "checkbox" },
       },
       async authorize(rawCredentials) {
         // Validate against the SHARED login contract before touching the network (never trust the form).
-        const parsed = LoginRequestSchema.safeParse(rawCredentials);
+        // `rememberMe` arrives as a form string and is converted to the contract's boolean first.
+        const parsed = LoginRequestSchema.safeParse({
+          identifier: rawCredentials?.identifier,
+          password: rawCredentials?.password,
+          rememberMe: parseRememberMe(rawCredentials?.rememberMe),
+        });
         if (!parsed.success) return null;
         try {
           const result = await apiFetch<LoginResponse>("/auth/login", {
@@ -325,6 +367,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             email: result.user.email,
             // Carried onto the JWT in the `jwt` callback (a Credentials sign-in has no `account.access_token`).
             accessToken: result.token,
+            expiresAt: result.expiresAt,
           };
         } catch {
           // Any failure (incl. the API's uniform 401) → null → Auth.js reports a generic CredentialsSignin
@@ -352,6 +395,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: {
     /** Stateless JWT session — no session DB required (ADR-0039). */
     strategy: "jwt",
+    // Cookie lifetime by mode (#1307) — see LOCAL_SESSION_MAX_AGE_SECONDS.
+    maxAge: externalIssuer
+      ? OIDC_SESSION_MAX_AGE_SECONDS
+      : LOCAL_SESSION_MAX_AGE_SECONDS,
   },
 
   callbacks: {
@@ -365,9 +412,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * - Subsequent calls, token still valid (allowing for clock skew): return as-is.
      * - Subsequent calls, token expired/near-expiry AND we hold a refresh_token: refresh it
      *   against the IdP token endpoint and rotate the refresh_token if a new one is returned.
-     * - No refresh_token (IdP didn't grant offline_access) or refresh failed: leave the stale
-     *   token in place (and set `error` on failure). The next API call 401s and the existing
-     *   global-401 handler (issue #657) signs the user out — the intended safety net.
+     * - The token cannot be renewed — no refresh_token (a local session, or an IdP that didn't grant
+     *   offline_access) or the refresh failed — and it HAS expired: return `null`, which makes Auth.js
+     *   drop the cookie and report "no session" to `proxy.ts`, the (app) layout and `/login` alike, so
+     *   the visitor is redirected to sign in before any page renders (#1307). Inside the skew window
+     *   the still-valid token is kept (a failed refresh is retried on the next read).
+     * - No `expiresAt` (remember-me, an IdP without expiry, a pre-#1307 cookie): never ended by time
+     *   here. If the API rejects the token anyway, the global-401 handler (issue #657) signs out.
      */
     async jwt({ token, account, user, trigger, session }) {
       // `user` is only present on the initial sign-in; persist identity on the token.
@@ -382,9 +433,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // would re-seed the dead token. Guarded to a well-typed string; nothing else about the token
       // changes, so the OIDC refresh cycle below is untouched.
       if (trigger === "update") {
-        const next = (session as { accessToken?: unknown } | undefined)?.accessToken;
+        const payload = session as
+          | { accessToken?: unknown; expiresAt?: unknown }
+          | undefined;
+        const next = payload?.accessToken;
         if (typeof next === "string" && next.length > 0) {
           token.accessToken = next;
+          // The re-minted token's expiry (#1307): a number, or `null` for a remember-me session with no
+          // time-based expiry. Anything else leaves the recorded expiry as it was.
+          const nextExpiresAt = payload?.expiresAt;
+          if (nextExpiresAt === null) {
+            token.expiresAt = undefined;
+          } else if (
+            typeof nextExpiresAt === "number" &&
+            Number.isFinite(nextExpiresAt)
+          ) {
+            token.expiresAt = nextExpiresAt;
+          }
         }
         return token;
       }
@@ -392,12 +457,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // Initial sign-in: snapshot the tokens from the provider's response.
       if (account) {
         // Local (Credentials) sign-in (ADR-0086 §6): there is no IdP token exchange — the API already
-        // minted the session token and `authorize` returned it on `user`. There is no OIDC refresh cycle
-        // for a local session (no `expiresAt`/`refreshToken`), so the refresh block below is skipped and
-        // session lifetime is governed API-side (the `sessionEpoch` re-check + short token TTL).
+        // minted the session token and `authorize` returned it on `user`. There is no refresh cycle for a
+        // local session (no `refreshToken`): the token's `expiresAt` is recorded so the session ends once
+        // it passes (#1307, ADR-0086 §8); a "keep me signed in" token (`null`) records none and is ended
+        // only by revocation (the API's `sessionEpoch` re-check).
         if (account.type === "credentials") {
           token.accessToken = user?.accessToken ?? token.accessToken;
-          token.expiresAt = undefined;
+          token.expiresAt =
+            typeof user?.expiresAt === "number" ? user.expiresAt : undefined;
           token.refreshToken = undefined;
           delete token.error;
           return token;
@@ -413,7 +480,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return token;
       }
 
-      // No expiry recorded → we can't time a refresh; behave as before (stale → #657).
+      // No expiry recorded → nothing to time; the session is not ended by time (remember-me, an IdP
+      // without expiry, a pre-#1307 cookie). A dead token still 401s and #657 signs out.
       if (typeof token.expiresAt !== "number") return token;
 
       // Access token still valid (minus skew) → reuse it.
@@ -421,12 +489,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return token;
       }
 
-      // Expired/near-expiry. Without a refresh_token we can't renew → let it 401 (#657).
-      if (!token.refreshToken) return token;
+      const expired = Date.now() >= token.expiresAt * 1000;
+
+      // Expired/near-expiry and no refresh_token → it cannot be renewed. Once it has actually expired,
+      // end the session server-side (#1307) instead of carrying a dead Bearer into the app.
+      if (!token.refreshToken) return expired ? null : token;
 
       const refreshed = await refreshAccessToken(token.refreshToken);
       if ("error" in refreshed) {
-        // Keep the stale accessToken so the next API call still 401s and #657 fires.
+        // Expired and unrenewable → end the session (#1307). Still inside the skew window → keep the
+        // valid token, mark the failure, and retry on the next read.
+        if (expired) return null;
         token.error = "RefreshAccessTokenError";
         return token;
       }

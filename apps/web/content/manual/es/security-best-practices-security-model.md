@@ -66,6 +66,13 @@ Después de iniciar sesión, mantienes una sesión en tu navegador. Cerrar sesi�
 a día, esa sesión es lo que prueba ante lazyit quién eres; el trabajo pesado de *probar tu identidad*
 ya ocurrió en tu proveedor.
 
+En una instancia con **cuentas locales**, una sesión dura 12 horas salvo que la persona marque
+**Mantener la sesión iniciada**, que la conserva hasta que cierre sesión. Esa sesión no tiene ningún
+límite de tiempo detrás, así que está pensada solo para dispositivos personales y de confianza. Cerrar
+sesión termina las sesiones de la persona en **todos** sus dispositivos, y lo mismo ocurre al cambiar o
+restablecer la contraseña, al desactivar la cuenta o al darla de baja. Consulta
+[Tu perfil](/help/getting-started-your-profile) para ver lo que ve cada persona.
+
 El **Gestor de Secretos** tiene su propio desbloqueo, separado de tu inicio de sesión: está cifrado
 de extremo a extremo, así que, aunque hayas iniciado sesión, debes desbloquearlo con una contraseña
 específica del Gestor de Secretos que nunca sale de tu navegador. Consulta

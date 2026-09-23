@@ -1,5 +1,6 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import type { LoginResponse } from '@lazyit/shared';
+import type { User } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalCredentialService } from './local-credential.service';
 
@@ -24,10 +25,11 @@ interface AttemptRecord {
 }
 
 /**
- * LoginService — the `POST /auth/login` flow for AUTH_MODE=local (ADR-0086 §3). Owns the security-critical
- * login sequence: live-filtered lookup by email OR username, constant-time / no-enumeration verify (via
- * LocalCredentialService's dummy-hash path), the fail-closed state gates (directoryOnly / inactive /
- * soft-deleted), rehash-on-login, session mint, and per-account backoff.
+ * LoginService — the `POST /auth/login` and `POST /auth/logout` flows for AUTH_MODE=local (ADR-0086 §3/§8).
+ * Owns the security-critical login sequence: live-filtered lookup by email OR username, constant-time /
+ * no-enumeration verify (via LocalCredentialService's dummy-hash path), the fail-closed state gates
+ * (directoryOnly / inactive / soft-deleted), rehash-on-login, session mint (default 12h or "keep me signed
+ * in"), and per-account backoff. Logout is the server-side revocation: a `sessionEpoch` bump.
  *
  * PER-REPLICA CAVEAT: the backoff map is in-memory (per-instance), same posture as the rate-limit guards.
  * Accepted for the single-org / few-replica target; the argon2 cost + per-IP cap are the primary defenses.
@@ -43,11 +45,17 @@ export class LoginService {
   ) {}
 
   /**
-   * Authenticate an `identifier` (email OR username) + password. Returns the session token + safe user on
-   * success; throws the SAME generic 401 for EVERY failure mode (unknown user, wrong password, null hash,
-   * directory-only, inactive, soft-deleted, backed-off) so nothing distinguishes them (no oracle).
+   * Authenticate an `identifier` (email OR username) + password. Returns the session token, its expiry and
+   * the safe user on success; throws the SAME generic 401 for EVERY failure mode (unknown user, wrong
+   * password, null hash, directory-only, inactive, soft-deleted, backed-off) so nothing distinguishes them
+   * (no oracle). `rememberMe` mints a token with no time-based expiry (`expiresAt: null`, ADR-0086 §8); it
+   * is applied only AFTER every check has passed, so it never changes what a failure looks like.
    */
-  async login(identifier: string, password: string): Promise<LoginResponse> {
+  async login(
+    identifier: string,
+    password: string,
+    rememberMe = false,
+  ): Promise<LoginResponse> {
     const invalid = () => new UnauthorizedException('Invalid credentials');
 
     // Normalize for lookup: email is citext (case-insensitive) and username is stored lowercased, so a
@@ -112,13 +120,14 @@ export class LoginService {
       }
     }
 
-    const token = await this.credentials.mintSession({
-      id: user!.id,
-      sessionEpoch: user!.sessionEpoch,
-    });
+    const { token, expiresAt } = await this.credentials.mintSession(
+      { id: user!.id, sessionEpoch: user!.sessionEpoch },
+      { rememberMe },
+    );
 
     return {
       token,
+      expiresAt,
       user: {
         id: user!.id,
         email: user!.email,
@@ -128,6 +137,26 @@ export class LoginService {
         role: user!.role,
       },
     };
+  }
+
+  /**
+   * Sign the caller out SERVER-SIDE (local mode, ADR-0086 §8): bump `sessionEpoch` so the presented token —
+   * and, by construction of the epoch model, EVERY other session this user holds — stops authenticating.
+   * Mandatory now that a "keep me signed in" token never expires by time: dropping the web cookie alone
+   * would leave a live bearer behind.
+   *
+   * IDEMPOTENT. The bump is conditional on the epoch the guard just validated, so two concurrent sign-outs
+   * with the same token advance the epoch once; a repeat with the now-revoked token never reaches here (the
+   * guard 401s it). Outside local mode there is no lazyit-minted session to revoke, so it is a no-op.
+   */
+  async logout(user: User): Promise<void> {
+    if (process.env.AUTH_MODE !== 'local') {
+      return;
+    }
+    await this.prisma.user.updateMany({
+      where: { id: user.id, sessionEpoch: user.sessionEpoch },
+      data: { sessionEpoch: { increment: 1 } },
+    });
   }
 
   // ---------- per-account backoff (in-memory, per-replica) ------------------

@@ -1,6 +1,13 @@
 /**
  * Global reaction to an expired/invalid session (issue #600).
  *
+ * Since #1307 the server ends a session whose token has expired before any page renders (the `jwt`
+ * callback in auth.ts returns `null`), so this handler is the fallback for a token the API rejects
+ * while the Auth.js cookie still reads as valid: revoked from another device, a cookie issued before
+ * #1307, a clock disagreement. It lands on /login with the `expired` marker so /login never bounces
+ * the visitor back into the app (see lib/auth/session-expiry.ts) — the reload loop of #1307 — and with
+ * the current page as `callbackUrl`, so signing in again returns the visitor to it.
+ *
  * The Auth.js JWT stores the IdP access token once at sign-in and never refreshes it
  * (no `offline_access`, no rotating-refresh — that is the DEFERRED follow-up). Once the
  * IdP access token expires the app cookie is still valid (default 30-day maxAge), so the
@@ -23,14 +30,18 @@
  */
 
 import { signOut } from "next-auth/react";
+
+import {
+  AUTH_ROUTE_PREFIXES,
+  expiredSessionLoginPath,
+} from "@/lib/auth/session-expiry";
+
 import { ApiError } from "./client";
 
 /** Latch so concurrent 401s from a batch of queries trigger exactly one sign-out. */
 let signingOut = false;
 
-/** Route prefixes where a 401 must NOT trigger a redirect (avoid a sign-out loop). */
-const AUTH_ROUTE_PREFIXES = ["/login", "/api/auth"];
-
+/** Whether we are on a route where a 401 must NOT trigger a redirect (avoid a sign-out loop). */
 function onAuthRoute(): boolean {
   if (typeof window === "undefined") return true; // never act server-side
   return AUTH_ROUTE_PREFIXES.some((p) => window.location.pathname.startsWith(p));
@@ -50,8 +61,11 @@ export function handleAuthExpiry(error: unknown): boolean {
   // RELATIVE path (mirrors the UserMenu sign-out). In host-agnostic LAN mode (AUTH_URL unset) a
   // `callbackUrl` redirect resolves against the Next standalone bind host and lands on
   // `http://0.0.0.0:3000/login`; a relative navigation stays on the current host in every mode.
+  // The `expired` marker stops /login from bouncing a still-present cookie back into the app (#1307).
+  // The destination is read before signing out, while the location is still the page the user was on.
+  const loginPath = expiredSessionLoginPath(window.location);
   void signOut({ redirect: false }).then(() => {
-    window.location.assign("/login");
+    window.location.assign(loginPath);
   });
   return true;
 }

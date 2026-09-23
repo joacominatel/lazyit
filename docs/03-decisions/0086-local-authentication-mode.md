@@ -3,7 +3,7 @@ title: "ADR-0086: Local (first-party) authentication mode — make Zitadel/OIDC 
 tags: [adr, auth, security, deployment, data-model]
 status: accepted
 created: 2026-07-03
-updated: 2026-09-02
+updated: 2026-09-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -13,6 +13,10 @@ deciders: [Joaquín Minatel]
 
 **accepted** — 2026-07-03 (issue #989). CEO ratified the direction and the resolved decisions; build
 proceeds in phases F1–F4.
+**Amended** — 2026-09-23 (issue #1307): §8 session lifetime — an opt-in "keep me signed in" session with
+no time-based expiry, server-side sign-out, and the web ending a session whose token has expired.
+**Amended** — 2026-09-23 (issue #1308): §8 open item resolved — the directory sync revokes local sessions
+when it offboards an active person.
 **Supersedes** the "no first-party auth" posture of [[0016-auth-strategy-deferred]].
 **Amends** [[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]],
 [[0039-authjs-v5-frontend-oidc]], [[0043-zitadel-source-of-truth]],
@@ -152,7 +156,8 @@ exists, **`AUTH_MODE` has no implicit default**: an unset value is a hard boot f
 - **Session revocation:** the guard's `handleLocal` re-loads the `User` every request and rejects when
   `token.sessionEpoch ≠ user.sessionEpoch` or `!isActive` or soft-deleted. Password change, admin reset,
   deactivate, and "sign out everywhere" **bump `sessionEpoch`** → all prior tokens die. Short token TTL is
-  belt-and-suspenders on top of the epoch check.
+  belt-and-suspenders on top of the epoch check — for a default sign-in only; a "keep me signed in"
+  session has no TTL at all, and sign-out became a server-side epoch bump (§8, #1307).
 - **Guard dispatch order** is unchanged: `@Public` → SA-token branch (unambiguous `lzit_sa_` prefix, no
   namespace overlap) → `handleLocal` / `handleOidc` by mode. A local token is rejected in OIDC mode and
   vice-versa (asserted in tests).
@@ -277,6 +282,113 @@ receives a login password on every login. This ADR amends both:
 - **UX** presents the two as distinct credentials and **discourages reuse** (reusing the login password as
   the vault passphrase erodes INV-10's "survives full-server-compromise" guarantee in practice — worse over
   HTTP). Users in local mode therefore juggle two passwords by design; this is accepted.
+
+### 8. Session lifetime and "keep me signed in" — amendment (issue #1307, 2026-09-23)
+
+**The bug that forced the decision.** Two session clocks disagreed in local mode: the Auth.js cookie lives
+30 days (its default; no `maxAge` set), the API-minted token 12 hours. A user returning after 12h carried a
+live cookie holding a dead Bearer: `proxy.ts` admitted the request, every query 401'd, the client-side
+401 handler signed out and hard-navigated to `/login`, and `/login` — still seeing the not-yet-cleared
+cookie — bounced back into the app. The cycle ran for seconds of full-page reloads. Expiry was detected
+client-side, after render, instead of before the request was admitted.
+
+**Decision (CEO).** Two parts, one contract change:
+
+1. **The web ends a session whose token is dead.** `POST /auth/login` (and `POST /auth/change-password`)
+   now return **`expiresAt`** — the token's `exp` in seconds since the epoch, or `null` when it has no
+   time-based expiry. The web records it in the Auth.js JWT and invalidates the session server-side once
+   it passes, so `proxy.ts` and `/login` see "no session" and redirect cleanly. That enforcement lives in
+   `apps/web`; the API's part is only to report the expiry truthfully. `expiresAt` is an upper bound: a
+   `sessionEpoch` bump can still end the session earlier, and the guard stays the authority.
+2. **An opt-in "keep me signed in" on the local login form.** `LoginRequest` gains `rememberMe: boolean`,
+   optional, **default `false`**. Unchecked is exactly the 12h session this ADR always had. Checked mints a
+   token with **no time-based expiry**. Local mode only — the OIDC login and the OIDC path of the guard are
+   untouched.
+
+**Encoding.** A remember-me token omits `exp` and carries a signed `rememberMe: true` claim. The verifier
+accepts a missing `exp` **only** when that claim is exactly `true`; a marker-less token without a valid
+future `exp` is rejected, and a present `exp` is always enforced. Everything §3 pinned is unchanged: HS256
+on sign and verify, `sub` + `sessionEpoch`, nothing authorization-bearing (INV-1). The marker is covered by
+the HMAC, so it cannot be grafted onto an existing token without `SESSION_SIGNING_SECRET`. A very long
+`exp` (years) was considered and rejected: it is the same risk with a misleading bound, and it is not what
+the CEO asked for. A per-device session table stays rejected for the reason §3 gives.
+
+**Revocation is now the only thing that ends a remember-me session**, so every lever had to be real:
+
+- **Sign-out is server-side.** It used to be client-only (Auth.js dropped the cookie; the token lived on
+  until `exp`). `POST /auth/logout` — authenticated, `204`, exempt from the `mustChangePassword` wall —
+  bumps `sessionEpoch`, conditional on the epoch the caller authenticated with, so a repeat or a
+  concurrent duplicate changes nothing (a repeat with the revoked token is a `401`). Because the epoch is
+  per user, **signing out ends that user's sessions on every device**. That is the epoch model's inherent
+  granularity, accepted here rather than building the session table §3 declined.
+- **Password change** bumps the epoch as before; the re-minted token **keeps the calling session's
+  remember-me choice**, read by the guard from the verified token (never from the request body), so
+  changing a password never silently shortens a session.
+- **Admin reset** (`temporary-password` always; `email` only with `revokeSessions`) and the recovery CLI
+  bump the epoch as before.
+- **Deactivation and offboarding now bump the epoch.** §3 always listed deactivation, but the code only
+  relied on the guard refusing an inactive or soft-deleted row — so a reactivation or a restore revived
+  every earlier token. With a 12h token that window was short; with a remember-me token it is permanent.
+  `UsersService.update` (on an active→inactive transition) and `UsersService.remove` now bump it.
+- **Rotating `SESSION_SIGNING_SECRET`** ends every session on the instance, remember-me included — the
+  operator's instance-wide lever (see §4 and the backups runbook).
+
+**Directory sync — resolved 2026-09-23 (issue #1308, CEO decision).** The directory sync
+([[0091-on-prem-ad-ldap-directory-source]]) soft-offboards with `isActive = false` and **re-activates
+automatically** when the person reappears. It was barred (by a jest invariant) from writing
+`sessionEpoch`, so a remember-me token held by an onboarded directory person revived on reappearance. The
+sync **now bumps `sessionEpoch` on the active→offboarded transition**, matching the manual deactivation
+path. Reactivation does not bump it — the person signs in again — and neither does offboarding an
+already-inactive person or a repeated run over one already offboarded. The bump is not gated on
+`AUTH_MODE`; outside local mode it is inert. The jest invariant still forbids `sessionEpoch` on every
+other reconcile write.
+
+**Web enforcement (`apps/web`).** How the web holds up its half:
+
+- **Ending a dead session.** A credentials sign-in records `expiresAt` on the Auth.js JWT (`token.expiresAt`,
+  the field the OIDC refresh cycle already uses). Once it has passed, the `jwt` callback returns `null`;
+  Auth.js then drops the cookie and every `auth()` — `proxy.ts`, the `(app)` layout, `/login` — reads "no
+  session", so the visitor is sent to `/login?callbackUrl=…` before anything renders. A remember-me session
+  records no expiry and is never ended by time. The change-password flow passes the re-minted token's
+  `expiresAt` through `useSession().update(...)`. The same rule ends an **OIDC** session whose access token
+  has expired and cannot be renewed (no refresh token, or the refresh failed) — see
+  [[0039-authjs-v5-frontend-oidc]] §10.
+- **Cookie lifetime.** In local mode `session.maxAge` is **400 days**, the ceiling browsers put on a cookie,
+  so the cookie outlives a remember-me session. Under the JWT strategy Auth.js re-issues the cookie with a
+  fresh `maxAge` on every session read, so an active user's cookie never lapses (`updateAge` applies only
+  to database sessions). The 12h of a default session is enforced by the `jwt` callback, not the cookie. An
+  OIDC deploy (an issuer is configured; the installer refuses one in local mode) keeps Auth.js's 30-day
+  default, unchanged.
+- **No bounce loop on a rejected token.** A token the API rejects while the cookie still reads as valid —
+  revoked from another device, a cookie issued before #1307, a clock disagreement — still reaches the
+  global 401 handler. It signs out and lands on `/login?expired=1`, and `/login` never bounces a visitor
+  carrying that marker back into the app, so a lingering or re-set cookie cannot restart the loop. The
+  handler also carries the page the user was on as `callbackUrl` (through the #495 open-redirect guard,
+  never an auth route), so signing in again lands back there, as it does after a proxy redirect.
+- **Where sign-out revokes.** The user menu's **Sign out** calls `POST /auth/logout` with the session's
+  Bearer, then drops the cookie. The call is bounded by a short timeout and any failure (a `401` included)
+  falls through to the local sign-out, so the API can never keep a user signed in. The global 401 handler
+  deliberately does **not** revoke: it acts on a token the API already rejected, and revoking there would
+  let one spurious 401 end the user's sessions on every device. Auth.js `events.signOut` was not used for
+  the same reason — it fires for both paths.
+- **The checkbox.** Unchecked by default on the local form only; its warning is shown while it is checked.
+  The form posts it as the string `"true"`/`"false"`, which `authorize` converts to the contract's
+  boolean.
+
+**Risk acceptance (CEO, 2026-09-23, #1307).** A remember-me token that leaks — a stolen or shared device, a
+copied cookie, a sniffed request on a plain-HTTP `lan` deployment ([[0087-plain-http-lan-deployment-axis]])
+— stays valid until the user signs out, changes their password, or an admin resets, deactivates or
+offboards them. There is no time bound behind it. The CEO accepted this explicitly for the target segment,
+with these mitigations: it is opt-in on every sign-in, never the default; the login form warns next to the
+checkbox to use it only on a trusted, personal device; it exists in local mode only; and every revocation
+lever above ends it immediately.
+
+**Upgrade-safety.** No schema change. Tokens already issued all carry `exp` and keep working until it
+passes. A client that never sends `rememberMe` gets the 12h session. `expiresAt` is an additive response
+field. Rolling the API back leaves any remember-me token without `exp`, which the older verifier rejects —
+fail-closed, one re-login. On the web, a session cookie issued before the upgrade carries no `expiresAt`,
+so it is not ended by time: it keeps working until its token's own `exp` (at most 12h later), when the API
+401s and the marked `/login` landing ends it once, without a loop. Nobody is signed out by the deploy.
 
 ## Consequences
 

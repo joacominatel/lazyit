@@ -103,6 +103,10 @@ When someone leaves, open them and choose **Offboard**. lazyit shows the full im
 It all happens together: if any step fails, the whole offboarding is rolled back, so a departing person
 is never left half-offboarded (archived but still holding access).
 
+**They are signed out everywhere.** On an instance with **local accounts**, offboarding ends the person's
+sessions on every device at once — including one where they ticked **Keep me signed in**. Deactivating
+someone (clearing **Active** when you edit them) does the same.
+
 **Rotate the secrets they could read.** If the person was a member of any Secret vault, the confirmation
 lists those vaults (with how many secrets each holds) as a reminder to **rotate those secrets by hand**.
 Removing their membership stops any *new* reads, but because they could already read those vaults, the
@@ -151,6 +155,9 @@ record before that owner can sign in.
 
 Offboarded users are archived, not deleted. To bring one back, show archived users in the Users list
 and choose **Restore**. Restoring is admin-only.
+
+Restoring — or reactivating someone you deactivated — never brings back an old session: on an instance
+with **local accounts**, the person must sign in again.
 
 > Offboarding (and any deactivation) frees the resources a person held but keeps the full history —
 > who held which asset and when, and what access they had — because lazyit is built so that people
