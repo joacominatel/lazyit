@@ -21,6 +21,7 @@ jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 // transform it. The reconcile only uses the fake UsersService below, so a bare stub is enough.
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
+import { Logger } from '@nestjs/common';
 import { DirectoryReconcileService } from './directory-reconcile.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { DirectoryConnectionService } from './directory-connection.service';
@@ -54,6 +55,7 @@ interface LocalPerson {
   id: string;
   directorySourceId: string | null;
   isActive: boolean;
+  role?: string;
   directoryOffboardedAt: Date | null;
   firstName: string;
   lastName: string;
@@ -102,6 +104,8 @@ function makeService(opts: {
   disabled?: boolean;
   resolveThrows?: boolean;
   attributeMap?: Record<string, string>;
+  /** The UsersService last-admin predicate's answer (default: another active ADMIN exists). */
+  anotherActiveAdmin?: boolean;
 }) {
   const attributeMap = opts.attributeMap ?? {
     firstName: 'givenName',
@@ -160,7 +164,13 @@ function makeService(opts: {
   const ldap = { fetchEntries } as unknown as DirectoryLdapClient;
 
   const usersCreate = jest.fn().mockResolvedValue({ id: 'new-person' });
-  const users = { create: usersCreate } as unknown as UsersService;
+  const hasAnotherActiveAdmin = jest
+    .fn()
+    .mockResolvedValue(opts.anotherActiveAdmin ?? true);
+  const users = {
+    create: usersCreate,
+    hasAnotherActiveAdmin,
+  } as unknown as UsersService;
 
   const historyRecord = jest.fn().mockResolvedValue({});
   const history = { record: historyRecord } as unknown as UserHistoryService;
@@ -177,6 +187,7 @@ function makeService(opts: {
     userUpdate,
     txUserUpdate,
     usersCreate,
+    hasAnotherActiveAdmin,
     historyRecord,
     recordRun,
   };
@@ -375,6 +386,100 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     expect(result.counts.offboarded).toBe(1);
     const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
     assertNoForbiddenKeys(data);
+  });
+
+  // SEC-021: the offboard sweep must never deactivate the last active ADMIN — that locks the instance with
+  // nobody able to sign in and administer it. The person is skipped (nothing written), a warning is logged,
+  // and the rest of the sweep carries on.
+  describe('last-admin protection on offboard (SEC-021)', () => {
+    const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const goneAdmin: LocalPerson = {
+      id: 'u-admin',
+      directorySourceId: 'GA',
+      isActive: true,
+      role: 'ADMIN',
+      directoryOffboardedAt: null,
+      firstName: 'Last',
+      lastName: 'Admin',
+      directoryAttrs: { lastSeenAt: stale },
+    };
+    const goneMember: LocalPerson = {
+      id: 'u-member',
+      directorySourceId: 'GM',
+      isActive: true,
+      role: 'MEMBER',
+      directoryOffboardedAt: null,
+      firstName: 'Gone',
+      lastName: 'Member',
+      directoryAttrs: { lastSeenAt: stale },
+    };
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('skips the LAST active ADMIN, warns, and still offboards everyone else', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const { service, txUserUpdate, historyRecord, hasAnotherActiveAdmin } =
+        makeService({
+          graceDays: 7,
+          localPeople: [goneAdmin, goneMember],
+          entries: [],
+          anotherActiveAdmin: false,
+        });
+
+      const result = await service.reconcile();
+
+      expect(result.ok).toBe(true);
+      expect(hasAnotherActiveAdmin).toHaveBeenCalledWith('u-admin');
+      expect(result.counts.offboarded).toBe(1);
+      expect(result.counts.skipped).toBe(1);
+      // Only the member is written; the admin row is untouched (no isActive flip, no history).
+      expect(txUserUpdate).toHaveBeenCalledTimes(1);
+      expect(
+        nthCall<[{ where: { id: string } }]>(txUserUpdate, 0)[0].where.id,
+      ).toBe('u-member');
+      expect(historyRecord).toHaveBeenCalledTimes(1);
+      const warned = warn.mock.calls.map((c) => String(c[0]));
+      expect(
+        warned.some(
+          (m) => m.includes('last-active-admin') && m.includes('u-admin'),
+        ),
+      ).toBe(true);
+      // The warning carries the id only — never the person's name (logs stay PII-free).
+      expect(
+        warned.some((m) => m.includes('Last') || m.includes('Admin ')),
+      ).toBe(false);
+    });
+
+    it('offboards an ADMIN normally when another active ADMIN remains', async () => {
+      const { service, txUserUpdate } = makeService({
+        graceDays: 7,
+        localPeople: [goneAdmin],
+        entries: [],
+        anotherActiveAdmin: true,
+      });
+
+      const result = await service.reconcile();
+
+      expect(result.counts.offboarded).toBe(1);
+      const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
+      expect(data.isActive).toBe(false);
+    });
+
+    it('never consults the predicate for a non-admin or an already-inactive admin', async () => {
+      const { service, hasAnotherActiveAdmin } = makeService({
+        graceDays: 7,
+        localPeople: [goneMember, { ...goneAdmin, isActive: false }],
+        entries: [],
+        anotherActiveAdmin: false,
+      });
+
+      const result = await service.reconcile();
+
+      expect(result.counts.offboarded).toBe(2);
+      expect(hasAnotherActiveAdmin).not.toHaveBeenCalled();
+    });
   });
 
   it('an already-offboarded person still absent → no write at all (repeated runs never bump again)', async () => {
