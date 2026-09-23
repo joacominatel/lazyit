@@ -3041,49 +3041,59 @@ model Attachment {
 /// See docs/02-domain/entities/ai-settings.md
 model AiSettings {
   /// Fixed singleton key — the only valid value is "singleton" (a migration CHECK pins it).
-  id                          String    @id @default("singleton")
+  id                                String    @id @default("singleton")
   /// The in-app chat and headless master switch. Enabling needs a passing connection test and the
   /// acknowledged egress disclosure (enforced by the API).
-  enabled                     Boolean   @default(false)
+  enabled                           Boolean   @default(false)
   /// anthropic | openai | google | openai-compatible (AiProviderKind). null until configured.
-  provider                    String?
-  model                       String?
+  provider                          String?
+  model                             String?
   /// OpenAI-compatible base URL; null for the hosted providers (their SDK default).
-  baseUrl                     String?
+  baseUrl                           String?
   /// Encrypted key envelope. All four are null when no key is stored. Never returned on the wire.
-  apiKeyCiphertext            String?
-  apiKeyIv                    String?
-  apiKeyAuthTag               String?
-  apiKeyKeyVersion            Int?
+  apiKeyCiphertext                  String?
+  apiKeyIv                          String?
+  apiKeyAuthTag                     String?
+  apiKeyKeyVersion                  Int?
   /// OpenAI-compatible only: allow a private-network host, scoped to the base URL's host (INV-AI-7).
-  allowPrivateNetwork         Boolean   @default(false)
+  allowPrivateNetwork               Boolean   @default(false)
   /// low | medium | high (AiEffort); null = the provider's default.
-  effort                      String?
+  effort                            String?
   /// Per-provider extras (AI_PROVIDER_OPTIONS_SCHEMAS), e.g. the OpenAI-compatible temperature.
-  providerOptions             Json?
+  providerOptions                   Json?
   /// Admin addendum to the frozen system prompt (≤ 4000 characters, zod).
-  instructions                String?
-  maxStepsPerRun              Int       @default(20)
-  maxOutputTokens             Int       @default(16000)
-  contextTokenLimit           Int       @default(150000)
+  instructions                      String?
+  maxStepsPerRun                    Int       @default(20)
+  maxOutputTokens                   Int       @default(16000)
+  contextTokenLimit                 Int       @default(150000)
   /// Rolling 24 h budget per principal; null = no budget.
-  dailyTokenLimitPerPrincipal Int?      @default(2000000)
+  dailyTokenLimitPerPrincipal       Int?      @default(2000000)
   /// Transcript retention in days (zod range 7–3650). Ledgers are never pruned.
-  retentionDays               Int       @default(90)
-  approvalTtlMinutes          Int       @default(30)
+  retentionDays                     Int       @default(90)
+  approvalTtlMinutes                Int       @default(30)
   /// The MCP switch — independent of the provider configuration (CEO, round 2).
-  mcpEnabled                  Boolean   @default(false)
+  mcpEnabled                        Boolean   @default(false)
+  /// MCP client allowlist (ADR-0097 decision 13), stored as an OVERLAY on the curated defaults that
+  /// live in code: the admin's own entries (McpClientAllowlistEntry[]) and the ids of the defaults the
+  /// admin removed. Corrected default identifiers in a later release still reach an instance whose
+  /// admin edited the list, and a removed default stays removed. Matching is on the CIMD URL or a
+  /// redirect-URI pattern, never on client_name.
+  mcpClientAllowlistAdded           Json      @default("[]")
+  mcpClientAllowlistRemovedDefaults String[]  @default([])
+  /// Accept ANY client whose redirect URIs are HTTPS (non-loopback), with a consent-screen warning.
+  /// Off by default, so the default policy is the curated list.
+  mcpAllowAnyHttpsClient            Boolean   @default(false)
   /// The egress-disclosure acknowledgement, required before the first enable. The author is also
   /// recorded in ai_config_audit_log, which survives this row's edits.
-  disclosureAcknowledgedAt    DateTime?
-  disclosureAcknowledgedById  String?   @db.Uuid
+  disclosureAcknowledgedAt          DateTime?
+  disclosureAcknowledgedById        String?   @db.Uuid
   /// When the current connection fields last passed a connection test.
-  verifiedAt                  DateTime?
+  verifiedAt                        DateTime?
   /// The admin who last saved the settings. SetNull: config outlives its editor.
-  updatedById                 String?   @db.Uuid
-  updatedBy                   User?     @relation("AiSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  createdAt                   DateTime  @default(now())
-  updatedAt                   DateTime  @updatedAt
+  updatedById                       String?   @db.Uuid
+  updatedBy                         User?     @relation("AiSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt                         DateTime  @default(now())
+  updatedAt                         DateTime  @updatedAt
 
   // No deletedAt: mutable instance config, never soft-deleted (SmtpSettings posture).
   @@map("ai_settings")
