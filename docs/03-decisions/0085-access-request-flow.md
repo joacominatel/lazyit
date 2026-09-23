@@ -131,8 +131,9 @@ Indexes: `applicationId`, `requesterId`, `status`, and the raw **partial unique*
 Propagation to existing installs is the established mechanism (as for `import:run` / `infra:read`): the
 matrix source of truth is `DEFAULT_ROLE_PERMISSIONS`; ADMIN holds the new verbs automatically (the
 complete-catalog short-circuit in the resolver), and the **migrate+seed job re-runs the idempotent seed on
-every deploy** (`infra/docker/migrate.Dockerfile`), upserting the new MEMBER/VIEWER default rows. No
-per-permission data migration.
+every deploy** (`infra/docker/migrate.Dockerfile`), granting the new MEMBER/VIEWER default rows. No
+per-permission data migration. (Since #1314 the seed applies each default pair once per instance, so a
+later admin revocation is not undone — [[0046-roles-permissions-v2]] §4.)
 
 ### 4. Endpoints (`/access-requests`)
 

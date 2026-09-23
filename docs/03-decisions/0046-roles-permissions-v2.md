@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-06-20
+updated: 2026-09-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -172,6 +172,21 @@ seeded rows can never drift (a wrong seed fails CI).
 > this wave only adds the catalog entry + the ADMIN-only default. **No endpoint is gated yet** (the
 > `logs` GET annotation is a later wave, 3c-1b), so this is purely additive: the only thing that
 > changes today is the seeded matrix. This extends §4 without a new ADR.
+
+> **Note (issue #1314) — default grants are applied once per instance.** The seed runs on every
+> deploy (the `migrate` job), and it used to upsert every pair of `DEFAULT_ROLE_PERMISSIONS`. Because
+> the config endpoint revokes by deleting the `RolePermission` row, every default an admin had revoked
+> came back on the next update. The seed now consults an append-only ledger,
+> `AppliedRolePermissionDefault` (`applied_role_permission_defaults`): a default (role, permission)
+> pair is granted only when the ledger has no row for it, and the ledger row is written in the same
+> transaction. A revocation deletes the grant and never the ledger row, so it survives every deploy; a
+> permission newly added to the catalog has no ledger row, so each instance receives its defaults
+> exactly once, on the first deploy that ships it — still with no per-permission data migration. The
+> seed never deletes a grant. The migration that introduced the ledger backfilled it with every pair
+> an instance held at that point plus every pair `PermissionAuditLog` records as revoked, so existing
+> instances kept every grant they had. A revocation that an older seed had already silently undone
+> cannot be told apart from a deliberate re-grant (the old seed wrote no audit row), so operators were
+> advised to review the permission matrix once after that update. Mechanics: [[role-permission]].
 
 ### 5. ADMIN is immutable/full; permissions never touch the IdP
 

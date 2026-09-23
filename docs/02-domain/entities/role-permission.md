@@ -3,7 +3,7 @@ title: RolePermission
 tags: [domain, entity, auth, authz, permissions]
 status: accepted
 created: 2026-06-03
-updated: 2026-06-03
+updated: 2026-09-23
 ---
 
 # RolePermission
@@ -66,6 +66,14 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   role matrix (`PUT /config/permissions`) — but it is never *seeded* to them. This closed the
   long-standing read-authz gap (the old DEF-001 residual). See [[user]] and
   [[0046-roles-permissions-v2]] §4.
+- **Default grants are applied once per instance; revocations are durable** (issue #1314). The seed
+  runs on every deploy, but it grants a default pair only when the seed-once ledger
+  (`AppliedRolePermissionDefault`, below) has never recorded it, and it records the pair in the same
+  transaction. A revoke through `PUT /config/permissions` deletes the `RolePermission` row and leaves
+  the ledger alone, so the next deploy does not bring it back. A permission newly added to the catalog
+  has no ledger row, so every instance receives its defaults exactly once, on the first deploy that
+  ships it — no per-permission data migration. The seed never deletes a grant: admin-added rows and
+  rows for permissions that left the defaults stay as they are.
 - **Permissions are lazyit-local.** They are NEVER mirrored to the IdP (BYOI-safe); only the three
   coarse roles keep their `grantRole` write-back ([[0043-zitadel-source-of-truth]] §3).
 
@@ -92,6 +100,30 @@ wire shape + `DEFAULT_ROLE_PERMISSIONS` live in `@lazyit/shared`
 > The closed catalog lives as zod in `@lazyit/shared`; the DB stays a flat key/value the seed and the
 > config endpoint write 1:1. A catalog-foreign row is *ignored* by the resolver, so a stray/typo row
 > can never confer a power — and the catalog can grow without an enum migration.
+
+## Seed-once ledger — `AppliedRolePermissionDefault`
+
+Prisma model `AppliedRolePermissionDefault` → table `applied_role_permission_defaults`. One row per
+(role, permission) pair whose default grant is **settled**: the seed applied it, or the pair already
+existed or had been revoked when the ledger was introduced. The seed consults it; nothing else reads
+or writes it — the config endpoint never touches it.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `role` | `Role` | Part of the composite PK. |
+| `permission` | `string` | A permission literal; part of the composite PK. |
+| `createdAt` | `DateTime` | When the pair was settled. |
+
+Append-only ([[0006-soft-delete-and-auditing]]): `createdAt` only, never updated or deleted. Deleting
+a row would make the next deploy re-grant that default.
+
+**Upgrade backfill.** The `add_applied_role_permission_defaults` migration filled the ledger with every
+pair in `role_permissions` plus every pair [[permission-audit-log]] records as `REVOKE`d. Existing
+instances therefore kept every grant they had, and revocations still in effect stayed revoked. A default
+pair in neither set had never been applied on that instance, so the next seed applied it once — what the
+old upsert would have done on that deploy anyway. What the backfill cannot recover: a revocation that an
+older seed had already silently undone looks like any other held grant, because the old seed wrote no
+audit row. Operators should review the permission matrix once after the update that ships this ledger.
 
 ## Endpoints
 
