@@ -131,7 +131,8 @@ the tool registry but not the loop.
 - **[R] Testing** ([[0012-testing-strategy]], [[0096-jest-commonjs-against-esm-nestjs]]): api tests
   are CommonJS Jest under Node. `transformIgnorePatterns: ["/node_modules/(?!.*@nestjs)"]` with
   `@swc/jest` for `.js`. "If another ESM-only dependency lands in the runtime import graph it must be
-  added to the same negative lookahead."
+  added to the same negative lookahead." W1-B (PR #1331) extended it for the AI SDK; see §3,
+  "Compatibility spike findings".
 - **[R] Runtime.** The api runs `node:26-alpine` from a CommonJS `dist/` that loads ESM through
   `require(esm)` (`infra/docker/api.Dockerfile`, ADR-0096). tsconfig uses `module: nodenext`
   (`apps/api/tsconfig.json`).
@@ -161,7 +162,7 @@ the tool registry but not the loop.
 
 | Package | Version | Module format | Node | License | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `ai` (Vercel AI SDK) | 7.0.112 | **ESM-only** (`type: module`, import-only exports) | ≥ 22 | Apache-2.0 | deps: `@ai-sdk/gateway`, `@ai-sdk/provider`, `@ai-sdk/provider-utils` (→ `undici`, `eventsource-parser`, `@workflow/serde`); ~7.7 MB unpacked |
+| `ai` (Vercel AI SDK) | 7.0.112 | **ESM-only** (`type: module`, import-only exports) | ≥ 22 | Apache-2.0 | deps: `@ai-sdk/gateway` 4.0.90 (→ `@vercel/oidc`), `@ai-sdk/provider` 4.0.18, `@ai-sdk/provider-utils` 5.0.46 (→ `undici`, `eventsource-parser`, `@workflow/serde`); ~7.7 MB unpacked. Of the transitive deps only `@workflow/serde` is ESM-only; the others ship CommonJS |
 | `@ai-sdk/anthropic` · `openai` · `google` · `openai-compatible` | 4.0.61 · 4.0.73 · 4.0.78 · 3.0.54 | ESM-only | ≥ 22 | Apache-2.0 | |
 | `@anthropic-ai/sdk` | 0.128.0 | dual (CJS `require` export) | — | MIT | |
 | `openai` | 7.23.0 | dual (CJS) | ≥ 22 | Apache-2.0 | |
@@ -169,7 +170,8 @@ the tool registry but not the loop.
 | `langchain` / `@langchain/core` | 1.5.12 / 1.2.12 | dual (`.cjs` main) | ≥ 20 | MIT | deps include `langsmith`, `@langchain/langgraph`, `-checkpoint` |
 | `@mastra/core` | 1.69.0 | ESM-only | ≥ 22.13 | Apache-2.0 | deps include `hono`, `execa`, `posthog-node`, A2A SDKs, **three** AI SDK provider majors |
 
-Source: npm registry `https://registry.npmjs.org/<pkg>/latest`.
+Source: npm registry `https://registry.npmjs.org/<pkg>/latest`. The five AI SDK rows are the versions
+W1-B pinned in `bun.lock` (PR #1331); `apps/api/package.json` carries caret ranges.
 
 ### Vercel AI SDK 7 specifics
 
@@ -246,6 +248,61 @@ Source: npm registry `https://registry.npmjs.org/<pkg>/latest`.
   release tag is shown. <https://github.com/caddyserver/caddy/issues/6293>,
   <https://github.com/caddyserver/caddy/pull/7905>
 
+### Compatibility spike findings (W1-B, PR #1331)
+
+[E] measured against the pinned versions above. The regression specs live in
+`apps/api/src/ai/providers/__compat__/`. Verdict: **go** on every item. Jest loads the SDK and its
+mocks; the compiled `require(esm)` path works on `node:26-alpine`; a tool without `execute` plus one
+step returns tool calls; reasoning replays on all three providers; `guardedFetch` serves as the SDK
+`fetch`.
+
+- **Jest lookahead.** ADR-0096's pattern is now
+  `"/node_modules/(?!.*@nestjs|.*@ai-sdk|.*@workflow|(?:.*/)?ai/)"` in `apps/api/package.json` and
+  `test/jest-e2e.json`. Each alternative is required. `eventsource-parser`, `@standard-schema/spec`,
+  `undici` and `@vercel/oidc` ship CommonJS and need no entry.
+
+Findings the provider layer (W2-1) must act on:
+
+1. **v7 API renames.**
+   - Pass the frozen system prompt as `instructions`; `system` is a deprecated fallback.
+   - v7 **rejects `role: 'system'` messages inside `messages`** unless `allowSystemInMessages` is set.
+     Persisted history must therefore never contain a system message.
+   - Other renames: `fullStream` → `stream`, `stepCountIs` → `isStepCount`,
+     `createGoogleGenerativeAI` → `createGoogle`.
+   - Persist from `result.responseMessages`. In v7 it holds only this call's messages, which is one
+     step for us.
+2. **A bare `jsonSchema()` does not validate tool input.** A call that violates the schema comes back
+   with `invalid: false`. Only an unknown tool name is flagged `invalid: true`. The loop must validate
+   every call against the tool's JSON Schema itself (§6.4), or pass a `validate` function to
+   `jsonSchema(schema, { validate })`.
+3. **An error after the headers loses the egress reason.** When the transport cuts a stream
+   mid-body, the SDK surfaces `APICallError` with cause `Error('aborted')`, not
+   `EgressError('deadline-exceeded')`. `classifyError` must treat a mid-stream `aborted` as a
+   transport cut, and cannot rely on the `EgressError` reason once the response has started.
+   `provider-fetch.ts` must always pass **both** `timeoutMs` and `deadlineMs` (§9.2): without
+   `deadlineMs`, the node transport's deadline falls back to the idle timeout (30 s by default) and
+   kills long generations. The SDK's `abortSignal` does reach the socket and closes the upstream.
+4. **OpenAI capabilities are keyed on the model id.** The SDK treats `gpt-5+` and `o*` ids as
+   reasoning models (the `gpt-6-*` ids are recognised). Only for those does `store: false`
+   automatically add `include: ['reasoning.encrypted_content']` and send the system prompt as a
+   `developer` message. For any other id, including a custom or aliased one, set
+   `providerOptions.openai.forceReasoning: true`, or reasoning replay silently degrades.
+5. **Gemini 3 hides dropped signatures.** If a `functionCall` is replayed without its
+   `thoughtSignature`, the SDK injects the `skip_thought_signature_validator` sentinel and only emits
+   a warning. Persist `ModelMessage[]` with `providerOptions` intact, byte for byte, and treat that
+   warning as a bug. Anthropic replays `{ type: 'thinking', thinking, signature }` from
+   `providerOptions.anthropic.signature`. OpenAI with `store: false` replays a `reasoning` item with
+   `encrypted_content` and no `item_reference`.
+6. **Choose one way to set reasoning per provider.** v7 adds a portable top-level
+   `reasoning` option (`'none' … 'xhigh'`). It is **ignored** whenever reasoning keys are present in
+   `providerOptions` (`effort`, `thinking`, `reasoningEffort`, …); the two are never merged. Choose
+   one mechanism per provider definition. Also, since v7 any OpenAI reasoning effort other than
+   `'none'` defaults `reasoningSummary` to `'detailed'`.
+7. **Never pass a model as a string id.** `ai` hard-depends on `@ai-sdk/gateway` (and
+   `@vercel/oidc`), which routes a string model id to the Vercel AI Gateway. Always pass the model
+   instance built by the provider definition. Telemetry stays off because no integration is registered
+   (`@ai-sdk/otel` is not installed).
+
 ## 4. What must change, and what must not
 
 **Must change [C]:**
@@ -276,7 +333,7 @@ Source: npm registry `https://registry.npmjs.org/<pkg>/latest`.
 
 | Option | Provider parity and tool calling | Pause/resume | OpenAI-compat base URL | Model listing | Caching and usage | Jest (ADR-0096) | Weight and maintenance |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **A1. AI SDK 7 as the model-call layer only; lazyit owns the loop** | Best: one normalized message/tool/stream/usage model over all four providers, including provider-specific reasoning replay through provider metadata | Ours (Postgres state machine); SDK approval API unused | `createOpenAICompatible` + custom `fetch` | Not provided → own thin `listModels()` per provider | `usage` normalized incl. cache reads; Anthropic `cacheControl` through `providerOptions` | ESM-only → extend the lookahead (`@ai-sdk`, `ai`, `@workflow`, `eventsource-parser`); loop specs never import it | ~10 MB; a new major roughly yearly, with churn (v7 deprecated `needsApproval`, removed UI helpers) |
+| **A1. AI SDK 7 as the model-call layer only; lazyit owns the loop** | Best: one normalized message/tool/stream/usage model over all four providers, including provider-specific reasoning replay through provider metadata | Ours (Postgres state machine); SDK approval API unused | `createOpenAICompatible` + custom `fetch` | Not provided → own thin `listModels()` per provider | `usage` normalized incl. cache reads; Anthropic `cacheControl` through `providerOptions` | ESM-only → extend the lookahead (`@ai-sdk`, `@workflow`, `ai/`; measured in W1-B); loop specs never import it | ~10 MB; a new major roughly yearly, with churn (v7 deprecated `needsApproval`, removed UI helpers) |
 | A2. AI SDK 7 end to end (`ToolLoopAgent` + `toolApproval` + UI message stream + `useChat`) | Same | SDK-native, but durability, TTL, re-authorization and headless autonomy still have to be built around it | Same | Same | Same | Same, plus the web depends on the SDK stream protocol | Couples api **and** web to the SDK's most volatile surfaces |
 | A3. Thin own adapters over official SDKs (`@anthropic-ai/sdk`, `openai`, `@google/genai`) | Must hand-write three translators (messages, tool calls, streaming deltas, usage, errors, reasoning replay: Anthropic thinking signatures, OpenAI encrypted reasoning items, Gemini thought signatures) | Ours | `openai` SDK `baseURL` | Each SDK can list | Manual per provider | Dual CJS → zero Jest friction | Roughly 2k LOC plus tests to keep in step with monthly API drift; `@google/genai` ~12 MB |
 | A4. LangChain.js v1 | Good via `@langchain/*` | HITL requires a LangGraph **checkpointer**, a second persistence model outside Prisma migrations | Yes | Partial | Via callbacks | Dual → OK | Heavy (`langsmith`, `langgraph`); abstraction-heavy |
@@ -457,7 +514,7 @@ official SDK (the A3 escape hatch) without touching the runtime.
 guardrails():  AI enabled? principal still active? holds ai:use? cancel requested?
                conversation open (not closed / version-pinned mismatch)? daily token budget left?
                stepCount < maxStepsPerRun? lastInputTokens < contextTokenLimit?
-step():        streamText(system = conversation.frozenSystem, tools = conversation.frozenToolset,
+step():        streamText(instructions = conversation.frozenSystem, tools = conversation.frozenToolset,
                           messages = persisted history (append-only), toolChoice = auto | none(last),
                           maxOutputTokens, providerOptions, abortSignal)
                → emit message.delta … ; persist assistant ModelMessage + AiUsage row (one tx)

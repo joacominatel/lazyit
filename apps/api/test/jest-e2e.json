@@ -15,5 +15,5 @@
       }
     ]
   },
-  "transformIgnorePatterns": ["/node_modules/(?!.*@nestjs)"]
+  "transformIgnorePatterns": ["/node_modules/(?!.*@nestjs|.*@ai-sdk|.*@workflow|(?:.*/)?ai/)"]
 }

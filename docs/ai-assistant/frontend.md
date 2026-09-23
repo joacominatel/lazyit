@@ -256,7 +256,7 @@ updated: 2026-09-23
 
 **(C)** B3, with an event vocabulary deliberately **isomorphic to the AI SDK UI parts** (text
 delta, tool call, tool result, approval request) so the backend may still use AI SDK *Core* for the
-four providers and map `fullStream` → our events trivially. Owning the wire shape is the cheaper
+four providers and map `stream` (v7's rename of `fullStream`) → our events trivially. Owning the wire shape is the cheaper
 long-term position given the measured churn.
 
 ### Fork C — The UI-effects consumer (tool result → query invalidation)
