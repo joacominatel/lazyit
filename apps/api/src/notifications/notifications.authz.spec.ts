@@ -215,11 +215,48 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
       .set('X-Test-Role', 'ADMIN')
       .set('X-Test-User', 'admin-uuid');
     expect(all.status).toBe(200);
-    expect(dismissAll).toHaveBeenCalledWith({
-      userId: 'admin-uuid',
-      role: 'ADMIN',
-    });
+    // No `upTo` (an older web client): the service gets no bound and dismisses everything visible.
+    expect(dismissAll).toHaveBeenCalledWith(
+      { userId: 'admin-uuid', role: 'ADMIN' },
+      undefined,
+    );
     expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismiss-all forwards a valid `upTo` to the service as a Date (#1309)', async () => {
+    dismissAll.mockResolvedValue({ dismissed: 2, unread: 1 });
+
+    const res = await request(app.getHttpServer())
+      .patch('/notifications/dismiss-all')
+      .query({ upTo: '2026-09-23T10:00:00.123Z' })
+      .set('X-Test-Role', 'MEMBER')
+      .set('X-Test-User', 'member-uuid');
+
+    expect(res.status).toBe(200);
+    expect(dismissAll).toHaveBeenCalledWith(
+      { userId: 'member-uuid', role: 'MEMBER' },
+      new Date('2026-09-23T10:00:00.123Z'),
+    );
+  });
+
+  it('dismiss-all rejects an invalid `upTo` with 400 and never reaches the service (#1309)', async () => {
+    for (const upTo of ['', 'yesterday', '2026-09-23', '1727085600000']) {
+      const res = await request(app.getHttpServer())
+        .patch('/notifications/dismiss-all')
+        .query({ upTo })
+        .set('X-Test-Role', 'ADMIN')
+        .set('X-Test-User', 'admin-uuid');
+      expect(res.status).toBe(400);
+    }
+    // A repeated param arrives as an array — also rejected.
+    const repeated = await request(app.getHttpServer())
+      .patch(
+        '/notifications/dismiss-all?upTo=2026-09-23T10:00:00.000Z&upTo=2026-09-23T11:00:00.000Z',
+      )
+      .set('X-Test-Role', 'ADMIN')
+      .set('X-Test-User', 'admin-uuid');
+    expect(repeated.status).toBe(400);
+    expect(dismissAll).not.toHaveBeenCalled();
   });
 
   it('a SERVICE-ACCOUNT principal cannot dismiss (403, never reaches the service)', async () => {

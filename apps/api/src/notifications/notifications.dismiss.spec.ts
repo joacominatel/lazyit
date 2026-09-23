@@ -114,8 +114,16 @@ class InMemoryNotificationsDb {
         case 'id':
         case 'recipientUserId':
           return n[key] === value;
-        case 'createdAt':
-          return n.createdAt < (value as { lt: Date }).lt;
+        case 'createdAt': {
+          const { lt, lte, ...rest } = value as { lt?: Date; lte?: Date };
+          if (
+            Object.keys(rest).length > 0 ||
+            (lt === undefined) === (lte === undefined)
+          ) {
+            throw new Error('in-memory double: unsupported createdAt filter');
+          }
+          return lt ? n.createdAt < lt : n.createdAt <= lte!;
+        }
         case 'reads': {
           const { none } = value as { none: Where };
           return !this.reads.some(
@@ -525,6 +533,38 @@ describe('NotificationsService — per-user dismiss (#1309)', () => {
 
       expect(await ids(ADMIN_A_VIEWER)).toEqual([newId]);
       expect(await service.unreadCount(ADMIN_A_VIEWER)).toBe(1);
+    });
+
+    it('with upTo, a notification created after it survives — still in the bell and still unread', async () => {
+      // The bell loaded n1, n2 and t-a; `upTo` is the newest of them. t-late arrived after the load.
+      const upTo = db.notifications.find((n) => n.id === 't-a')!.createdAt;
+      db.seed({
+        id: 't-late',
+        recipientUserId: ADMIN_A,
+        createdAt: new Date(upTo.getTime() + 1),
+      });
+
+      const result = await service.dismissAll(ADMIN_A_VIEWER, upTo);
+
+      // The row created exactly AT upTo is included (lte); the later one is not.
+      expect(result).toEqual({ dismissed: 3, unread: 1 });
+      const page = await service.findPage(ADMIN_A_VIEWER, PAGE);
+      expect(page.items.map((n) => n.id)).toEqual(['t-late']);
+      expect(page.items[0].read).toBe(false);
+      expect(db.readOf('t-late', ADMIN_A)).toBeUndefined();
+    });
+
+    it('without upTo, keeps the unbounded behavior: every visible row is dismissed, however new', async () => {
+      db.seed({
+        id: 't-late',
+        recipientUserId: ADMIN_A,
+        createdAt: new Date(Date.now() + 60_000),
+      });
+
+      const result = await service.dismissAll(ADMIN_A_VIEWER);
+
+      expect(result).toEqual({ dismissed: 4, unread: 0 });
+      expect(await ids(ADMIN_A_VIEWER)).toEqual([]);
     });
 
     it('is idempotent: with nothing left to dismiss it reports 0 and writes nothing', async () => {

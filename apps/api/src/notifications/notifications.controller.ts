@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   ForbiddenException,
   Get,
@@ -12,12 +13,13 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
-import type {
-  DismissNotificationsResult,
-  MarkReadResult,
-  Notification,
-  Page,
-  UnreadCount,
+import {
+  DismissAllNotificationsQuerySchema,
+  type DismissNotificationsResult,
+  type MarkReadResult,
+  type Notification,
+  type Page,
+  type UnreadCount,
 } from '@lazyit/shared';
 import {
   NotificationsService,
@@ -117,15 +119,34 @@ export class NotificationsController {
   @Patch('dismiss-all')
   @ApiOperation({
     summary:
-      "Dismiss every notification currently in the caller's bell — per user only: the shared events are kept and other users still see them. Dismiss implies read. Returns the rows dismissed + the fresh unread count.",
+      "Dismiss every notification currently in the caller's bell, up to `upTo` when given — per user only: the shared events are kept and other users still see them. Dismiss implies read. Returns the rows dismissed + the fresh unread count.",
+  })
+  @ApiQuery({
+    name: 'upTo',
+    required: false,
+    type: String,
+    description:
+      'ISO 8601 UTC datetime. Only notifications created at or before it are dismissed, so one that arrived after the bell loaded stays unread. Omitted = every visible notification, the behavior an older web client relies on.',
   })
   @ApiOkResponse({
     description: 'The dismiss result: { dismissed, unread }.',
   })
   dismissAll(
     @CurrentPrincipal() principal?: Principal,
+    @Query('upTo') upTo?: string,
   ): Promise<DismissNotificationsResult> {
-    return this.notifications.dismissAll(this.requireViewer(principal));
+    const viewer = this.requireViewer(principal);
+    // The global ZodValidationPipe only validates @Body() DTOs, so the raw query is checked here.
+    const parsed = DismissAllNotificationsQuerySchema.safeParse({ upTo });
+    if (!parsed.success) {
+      throw new BadRequestException(
+        'Invalid upTo: expected an ISO 8601 UTC datetime',
+      );
+    }
+    return this.notifications.dismissAll(
+      viewer,
+      parsed.data.upTo === undefined ? undefined : new Date(parsed.data.upTo),
+    );
   }
 
   @Patch(':id/dismiss')

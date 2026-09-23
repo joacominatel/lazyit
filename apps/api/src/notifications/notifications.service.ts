@@ -296,6 +296,11 @@ export class NotificationsService {
    * broadcast row, and it never touches the shared events. Only the rows that exist NOW are dismissed: a
    * notification emitted afterwards has no read row for the caller, so it shows up normally.
    *
+   * `upTo` bounds the dismiss to what the caller has SEEN: only notifications created at or before it
+   * (the web sends the newest `createdAt` it rendered), so one that arrived after the bell loaded stays,
+   * unread. `createdAt` is `TIMESTAMP(3)`, so the millisecond value the web echoes back matches exactly.
+   * Without `upTo` every visible notification is dismissed — the behavior an older web client relies on.
+   *
    * Insert-then-stamp, in one transaction: `createMany(skipDuplicates)` writes a read+dismissed row for
    * every id with no read row yet; `updateMany(dismissedAt: null)` then stamps the ids that already had
    * one (keeping their `readAt`) — including a row a concurrent mark-read inserted between the two
@@ -303,10 +308,17 @@ export class NotificationsService {
    */
   async dismissAll(
     viewer: NotificationViewer,
+    upTo?: Date,
   ): Promise<DismissNotificationsResult> {
     const where = await this.visibilityWhere(viewer);
     const targets = await this.prisma.notification.findMany({
-      where: { AND: [where, this.notDismissedBy(viewer.userId)] },
+      where: {
+        AND: [
+          where,
+          this.notDismissedBy(viewer.userId),
+          ...(upTo ? [{ createdAt: { lte: upTo } }] : []),
+        ],
+      },
       select: { id: true },
     });
     if (targets.length === 0) {
