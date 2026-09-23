@@ -147,7 +147,7 @@ constraint that should be tightened to also validate value depth once the schema
 
 **Status**: fixed
 **Fixed in**: commit `b16128cc` (`fix(shared): bound asset specs structure on write (#1321)`) and commit
-`f1b7a3c4` (`fix(api): compare asset specs iteratively in jsonDeepEqual (#1321)`), PR for #1321
+`f1b7a3c4` (`fix(api): compare asset specs iteratively in jsonDeepEqual (#1321)`), PR #1326 (#1321)
 **Fixed by**: lazyit-remediator
 **Date**: 2026-09-23
 
