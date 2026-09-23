@@ -27,7 +27,8 @@ export interface ManualNavCategory {
 
 /**
  * The frozen, importance-ordered IA tree (ADR-0062 §5). Transcribe EXACTLY — this same tree feeds
- * the parallel content agents. 13 categories; order is meaning (most important first).
+ * the parallel content agents. Order is meaning (most important first). The 13 ratified categories
+ * plus `ai-assistant` (ADR-0097; docs/ai-assistant/frontend.md §8.2), which renders once its pages land.
  */
 export const MANUAL_NAV: readonly ManualNavCategory[] = [
   {
@@ -107,6 +108,18 @@ export const MANUAL_NAV: readonly ManualNavCategory[] = [
       "manual-tasks",
       "testing-observability",
       "permissions",
+      "troubleshooting",
+    ],
+  },
+  {
+    category: "ai-assistant",
+    subcategories: [
+      "overview",
+      "setup",
+      "using-the-chat",
+      "approvals",
+      "claude-code-mcp",
+      "connected-apps",
       "troubleshooting",
     ],
   },

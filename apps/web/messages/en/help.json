@@ -35,6 +35,7 @@
     "secret-manager": "Secret Manager",
     "consumables": "Consumables",
     "access-automation": "Access Automation",
+    "ai-assistant": "AI Assistant",
     "notifications-activity": "Notifications & Activity",
     "configuration": "Configuration & Settings",
     "deployment-operations": "Deployment & Operations",
@@ -96,6 +97,15 @@
       "manual-tasks": "Manual tasks",
       "testing-observability": "Testing & observability",
       "permissions": "Permissions",
+      "troubleshooting": "Troubleshooting"
+    },
+    "ai-assistant": {
+      "overview": "Overview",
+      "setup": "Setup",
+      "using-the-chat": "Using the chat",
+      "approvals": "Approvals",
+      "claude-code-mcp": "Claude Code & MCP",
+      "connected-apps": "Connected apps",
       "troubleshooting": "Troubleshooting"
     },
     "notifications-activity": {
