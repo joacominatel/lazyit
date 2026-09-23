@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { AssetHistoryEventType } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import type { ActorAttribution } from '../common/actor.service';
+import { currentAiInvocationId } from '../ai/core/invocation-context';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -48,6 +49,10 @@ export class AssetHistoryService {
     // system/unknown → neither (both FKs stay null). resolveActor guarantees at most one is set, so the
     // at-most-one-actor CHECK on asset_history is always satisfied (ADR-0048).
     const actor = event.actor ?? {};
+    // AI provenance (ADR-0097, R6): a row written while an AI tool call executes is stamped with that
+    // call's invocation id, read from the AsyncLocalStorage context the AI executor runs every dispatch in.
+    // Outside an AI call the column stays null. The actor above is unchanged — the AI acts AS the principal.
+    const aiInvocationId = currentAiInvocationId();
     return client.assetHistory.create({
       data: {
         assetId: event.assetId,
@@ -57,6 +62,7 @@ export class AssetHistoryService {
         ...(actor.serviceAccountId != null
           ? { serviceAccountId: actor.serviceAccountId }
           : {}),
+        ...(aiInvocationId !== undefined ? { aiInvocationId } : {}),
       },
     });
   }
