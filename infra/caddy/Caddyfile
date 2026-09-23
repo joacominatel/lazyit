@@ -7,6 +7,8 @@
 # Automatic HTTPS: Caddy's INTERNAL CA for `localhost` (local prod-like), and Let's Encrypt
 # for a real domain. Routing is SAME-ORIGIN: the browser calls /api/* and Caddy forwards it
 # to the API, so the web image is domain-portable (NEXT_PUBLIC_API_URL=/api, baked at build).
+# A short allowlist of UNPREFIXED paths (/mcp, OAuth metadata and protocol endpoints) also reaches
+# the API, for external AI agents (ADR-0097).
 {
 	admin off
 	# Real domain (Let's Encrypt): set an ACME contact email. Leave commented for local.
@@ -96,7 +98,19 @@ import sites/*.caddy
 # The @api/handle routing below is scheme-agnostic, and default_sni/trusted_proxies are no-ops
 # without TLS — so this single block serves all three unchanged (verified with `caddy validate`).
 {$LAZYIT_SITE_ADDRESS:localhost} {
-	encode zstd gzip
+	# Compression for every response EXCEPT streamed ones (ADR-0097, issue #1322). The pinned Caddy
+	# (v2.11.3) `encode` withholds the response header until the first body write and compresses
+	# `text/event-stream` (the default match includes text/*), so an SSE response reaches the client
+	# late and possibly gzip-buffered (caddyserver/caddy#6293; the fix, PR #7905, is in no release as of
+	# v2.11.4). Streams therefore skip `encode` entirely, keyed on the REQUEST — the response content
+	# type is only known after the wrapper is already in place: the run event stream, the MCP endpoint
+	# (whose POST may answer as SSE), and any request that asks for an event stream. reverse_proxy
+	# flushes `text/event-stream` immediately on its own. Re-check when the Caddy pin moves past #7905.
+	@compressible {
+		not path /mcp /api/ai/runs/*/events
+		not header Accept *text/event-stream*
+	}
+	encode @compressible zstd gzip
 
 	import security_headers
 	import access_log
@@ -148,7 +162,21 @@ import sites/*.caddy
 		reverse_proxy api:3001
 	}
 
-	# Everything else — the web UI AND Auth.js's /api/auth/* — -> the Next.js web app.
+	# Public, UNPREFIXED API paths for external AI agents (ADR-0097 §8–9, issue #1322). MCP clients and
+	# OAuth discovery address the bare origin — `{origin}/mcp` is the resource, the issuer is `{origin}`,
+	# and RFC 8414 / RFC 9728 put the metadata under `/.well-known/` — so these reach the API WITHOUT the
+	# /api strip. A short allowlist on purpose: `/oauth/authorize` is the web consent page and stays on
+	# the catch-all below, and nothing else under /oauth/* or /.well-known/* is the API's (ACME's
+	# /.well-known/acme-challenge/* is answered by Caddy itself, before any route). The API answers 404
+	# on all of these while MCP is off, on a `lan` instance (the OAuth rows), or before it ships them.
+	@agent_api {
+		path /mcp /.well-known/oauth-protected-resource* /.well-known/oauth-authorization-server* /oauth/token /oauth/register /oauth/revoke
+	}
+	handle @agent_api {
+		reverse_proxy api:3001
+	}
+
+	# Everything else — the web UI, Auth.js's /api/auth/* and /oauth/authorize — -> the Next.js web app.
 	handle {
 		reverse_proxy web:3000
 	}
