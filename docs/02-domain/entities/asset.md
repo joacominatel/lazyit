@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-16
+updated: 2026-09-23
 ---
 
 # Asset
@@ -79,6 +79,23 @@ concrete instance of a generic [[asset-model]].
 > string values** (one `{ name, value }` row each); pre-existing non-scalar entries (arrays/objects) are
 > **preserved untouched** on edit — they round-trip and render as compact JSON, just not editable inline.
 
+> [!note] `specs` structural write bound (2026-09-23, SEC-072 / SEC-032, #1321)
+> The shape stays open, but a **write** (`POST /assets`, `PATCH /assets/:id`, an import row, anything
+> validated by `CreateAssetSchema` / `UpdateAssetSchema`) is rejected with a `400` pointing at the
+> offending path when its `specs` exceeds: **32 levels of nesting** (the specs object is level 1),
+> **256 keys** in any one object, **10 000 items** in any one array, or **10 000 characters** in any
+> string, keys included (`ASSET_SPECS_MAX_*` in `@lazyit/shared`). Each cap sits well above every
+> legitimate writer: the custom-fields editor writes flat rows, an import writes ≤64 string cells, and
+> the reporting agent's facts nest ~6 levels with ≤5000 `software` entries and strings ≤1024 chars.
+> **Reads stay tolerant**: `AssetSchema` keeps the unbounded record, so a row stored before the bound
+> still loads, lists and exports, and a `PATCH` that omits `specs` still succeeds on it. Re-sending an
+> over-bound `specs` is a `400`; replacing it with a compliant object heals the row. The web edit form
+> re-sends `specs` on every save, so an over-long scalar value is fixed by editing that row, while an
+> over-bound non-scalar entry (only writable through the API) is fixed with a `PATCH` that replaces
+> `specs`. The server-side
+> `SPECS_CHANGED` diff (`jsonDeepEqual`) is iterative, so it compares any stored depth exactly.
+> The bound covers `Asset.specs` only; [[asset-model]]`.specs` is still unbounded.
+
 > [!note] Expanded read shape (reads only)
 > `GET /assets` and `GET /assets/:id` return an **`AssetWithRelations`**: the asset plus its `model`
 > (with the model's `category` nested), its `location`, and `activeAssignments` — the **active**
@@ -113,7 +130,7 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `serial` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted serial is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
 | `assetTag` | `string?` | Optional human-facing company label (the physical sticker; distinct from the internal `id`). Same live-only PARTIAL unique index as `serial` ([[0041-soft-delete-reuse-and-restore]]). **Auto-assigned** on create when the opt-in `AssetTagScheme` is enabled and no explicit value is supplied ([[0063-configurable-asset-tag-scheme]]); OFF by default. |
 | `status` | `AssetStatus` | required enum, **no default**. |
-| `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object for now (see debt note). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows). On create, selecting a model with default specs pre-fills those rows; the operator can change them before saving. Detail renders specs as a label-cased key/value list, not raw JSON. |
+| `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object within the structural write bound (see the notes above). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows). On create, selecting a model with default specs pre-fills those rows; the operator can change them before saving. Detail renders specs as a label-cased key/value list, not raw JSON. |
 | `notes` | `string?` | optional. |
 | `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + autocomplete over already-used values (`GET /assets/companies`); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |

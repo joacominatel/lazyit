@@ -3,7 +3,7 @@ title: "ADR-0078: Advisory per-category specs dictionary (extends ADR-0007)"
 tags: [adr, asset, asset-category, specs, governance]
 status: accepted
 created: 2026-06-30
-updated: 2026-06-30
+updated: 2026-09-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -40,6 +40,7 @@ flexibility** and **without breaking existing rows**.
   list of `{ key, code }` warnings (`missingRequired` | `wrongType` | `notInEnum` | `unknownKey`).
   Extra keys are allowed (just flagged); the wire schema for `Asset.specs` stays the open
   `z.record(z.string(), z.unknown())` — it never narrows, so legacy data keeps validating.
+  **Amended 2026-09-23 (SEC-072, #1321):** reads stay unbounded and tolerant (`AssetSchema`); writes (`CreateAssetSchema` / `UpdateAssetSchema`) carry the structural `ASSET_SPECS_MAX_*` bound — depth 32, 256 keys per object, 10 000 array items, 10 000-char strings.
 - **Lenient type checks.** The web custom-fields editor stores every spec value as a **string**
   (ADR-0007), so the `number`/`boolean` checks accept numeric/boolean-looking strings (`"16"`,
   `"true"`); `string` never mismatches; `enum` checks membership against `enumValues`. Otherwise every

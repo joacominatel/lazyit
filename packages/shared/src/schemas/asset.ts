@@ -39,9 +39,89 @@ export const AssetWarrantyFilterSchema = z.enum(["expiring90d", "expired"]);
 // specs stays an OPEN record here on purpose. Per-category governance (ADR-0007 amendment, #851) is
 // ADVISORY: an AssetCategory can declare a `specsSchema` dictionary, but it drives soft warnings +
 // hints via `validateSpecsAgainstDictionary` (asset-specs-dictionary.ts) — NOT hard validation. The
-// wire schema never narrows, so legacy rows keep validating. Distinct from AssetModel.specs (per-unit
-// vs type-level). See docs/03-decisions/0007-flexible-asset-specs-jsonb.md.
+// shape never narrows, so legacy rows keep validating; writes add only the structural size bound below.
+// Distinct from AssetModel.specs (per-unit vs type-level). See
+// docs/03-decisions/0007-flexible-asset-specs-jsonb.md.
 const AssetSpecsSchema = z.record(z.string(), z.unknown());
+
+/*
+ * Structural WRITE bound on `Asset.specs` (SEC-072 / SEC-032). The shape stays open — any JSON object —
+ * but its size is capped so no unbounded structure reaches a recursive consumer or the database. Each
+ * cap sits well above the largest specs any legitimate writer produces: the web editor writes flat
+ * string rows, an import writes at most 64 string cells, and the reporting agent's facts (written
+ * server-side, but re-sent by the web form on every edit) nest about 6 levels, carry up to 5000
+ * `software` entries, and no string past 1024 characters (`AgentReportSchema`). Total size is bounded
+ * separately by the JSON body limit.
+ *
+ * Applied to the create/update schemas ONLY. `AssetSchema` (the read shape) keeps the unbounded record,
+ * so a row stored before this bound still loads, lists, and exports.
+ */
+
+/** Maximum nesting depth; the specs object itself is level 1. */
+export const ASSET_SPECS_MAX_DEPTH = 32;
+/** Maximum keys in any one object, the top-level specs object included. */
+export const ASSET_SPECS_MAX_KEYS = 256;
+/** Maximum elements in any one array. */
+export const ASSET_SPECS_MAX_ARRAY_LENGTH = 10_000;
+/** Maximum length of any string, object keys included. */
+export const ASSET_SPECS_MAX_STRING_LENGTH = 10_000;
+
+/**
+ * The first bound violation in `specs`, or `null`. Iterative on purpose: this runs on untrusted input,
+ * so it must not recurse, and it never descends past {@link ASSET_SPECS_MAX_DEPTH}.
+ */
+function specsBoundViolation(
+  specs: Record<string, unknown>,
+): { path: (string | number)[]; message: string } | null {
+  type Frame = { value: unknown; depth: number; key: string | number | null; parent: Frame | null };
+  const pathOf = (frame: Frame) => {
+    const path: (string | number)[] = [];
+    for (let f: Frame | null = frame; f !== null && f.key !== null; f = f.parent) path.unshift(f.key);
+    return path;
+  };
+  const stack: Frame[] = [{ value: specs, depth: 1, key: null, parent: null }];
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    const { value, depth } = frame;
+    if (typeof value === "string") {
+      if (value.length > ASSET_SPECS_MAX_STRING_LENGTH) {
+        const message = `must be at most ${ASSET_SPECS_MAX_STRING_LENGTH} characters`;
+        return { path: pathOf(frame), message };
+      }
+      continue;
+    }
+    if (value === null || typeof value !== "object") continue;
+    if (depth > ASSET_SPECS_MAX_DEPTH) {
+      const message = `must nest at most ${ASSET_SPECS_MAX_DEPTH} levels deep`;
+      return { path: pathOf(frame), message };
+    }
+    if (Array.isArray(value)) {
+      if (value.length > ASSET_SPECS_MAX_ARRAY_LENGTH) {
+        const message = `must have at most ${ASSET_SPECS_MAX_ARRAY_LENGTH} items`;
+        return { path: pathOf(frame), message };
+      }
+      value.forEach((item, i) => stack.push({ value: item, depth: depth + 1, key: i, parent: frame }));
+      continue;
+    }
+    const keys = Object.keys(value);
+    if (keys.length > ASSET_SPECS_MAX_KEYS) {
+      return { path: pathOf(frame), message: `must have at most ${ASSET_SPECS_MAX_KEYS} keys` };
+    }
+    for (const key of keys) {
+      if (key.length > ASSET_SPECS_MAX_STRING_LENGTH) {
+        const message = `keys must be at most ${ASSET_SPECS_MAX_STRING_LENGTH} characters`;
+        return { path: pathOf(frame), message };
+      }
+      stack.push({ value: (value as Record<string, unknown>)[key], depth: depth + 1, key, parent: frame });
+    }
+  }
+  return null;
+}
+
+const AssetSpecsWriteSchema = AssetSpecsSchema.superRefine((specs, ctx) => {
+  const violation = specsBoundViolation(specs);
+  if (violation) ctx.addIssue({ code: "custom", path: violation.path, message: violation.message });
+});
 
 /** The full persisted Asset entity (API representation of the `assets` row). */
 export const AssetSchema = z.object({
@@ -84,7 +164,7 @@ export const CreateAssetSchema = z.strictObject({
   serial: z.string().trim().min(1).max(200).optional(),
   assetTag: z.string().trim().min(1).max(200).optional(),
   status: AssetStatusSchema,
-  specs: AssetSpecsSchema.optional(),
+  specs: AssetSpecsWriteSchema.optional(),
   notes: optionalText(2000),
   // Optional grouping value (ADR-0076). Mirrors `notes` — optional free text, empty coerced to absent.
   company: optionalText(200),
@@ -106,7 +186,7 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
       serial: z.string().trim().min(1).max(200),
       assetTag: z.string().trim().min(1).max(200),
       status: AssetStatusSchema,
-      specs: AssetSpecsSchema,
+      specs: AssetSpecsWriteSchema,
       notes: z.string().trim().min(1).max(2000),
       // Optional grouping value (ADR-0076) — mirrors `notes` in the partial update shape.
       company: z.string().trim().min(1).max(200),

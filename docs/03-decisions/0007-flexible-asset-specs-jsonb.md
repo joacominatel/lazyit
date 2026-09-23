@@ -3,7 +3,7 @@ title: "ADR-0007: Flexible asset specs via jsonb"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-09-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -53,12 +53,14 @@ to existing assets.
   `Asset.specs` (via the pure `validateSpecsAgainstDictionary` helper) — resolved through
   `Asset → model → category`. It is **not** executable zod and **not** hard-blocking: the wire schema
   below stays the open `z.record(...)`, so legacy rows keep validating.
+  **Amended 2026-09-23 (SEC-072, #1321):** reads stay unbounded and tolerant (`AssetSchema`); writes (`CreateAssetSchema` / `UpdateAssetSchema`) carry the structural `ASSET_SPECS_MAX_*` bound — depth 32, 256 keys per object, 10 000 array items, 10 000-char strings.
 - **Web (delivered):** the asset create/edit form authors `specs` through a **custom-fields
   editor** — a dynamic list of `{ name, value }` string rows (keys validated non-empty + unique)
   that serialize into the `specs` object; the asset detail renders `specs` as a label-cased
   key/value list. The editor handles **scalar string** values only (per "se envie en json y
   listo"); pre-existing non-scalar entries are preserved untouched. The shared schema stays the
   open `z.record(z.string(), z.unknown())` — no narrowing — so legacy data keeps validating.
+  **Amended 2026-09-23 (SEC-072, #1321):** reads stay unbounded and tolerant (`AssetSchema`); writes (`CreateAssetSchema` / `UpdateAssetSchema`) carry the structural `ASSET_SPECS_MAX_*` bound — depth 32, 256 keys per object, 10 000 array items, 10 000-char strings.
 - **Model defaults UI (delivered):** Settings → Taxonomies → Asset models uses the same key/value
   editor for `AssetModel.specs`. Selecting a model in the asset create form copies those defaults
   into the editable asset specs rows; user-entered asset values still win.

@@ -2,7 +2,7 @@
 id: SEC-072
 title: AssetSpecsSchema has no global structural bound (depth/key-count/scalar) and jsonDeepEqual has no depth guard
 severity: medium
-status: open
+status: fixed
 cwe: CWE-674
 discovered: 2026-06-20
 module: assets / import
@@ -142,3 +142,107 @@ constraint that should be tightened to also validate value depth once the schema
 - ADR-0007 (flexible specs jsonb — per-category validation deferred).
 - [[0069-migrator-import]] §A.1 (import MVP specs passthrough + session-local cap).
 - `docs/06-security/deferred.md` DEF-004 (unvalidated jsonb — storage angle).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `b16128cc` (`fix(shared): bound asset specs structure on write (#1321)`) and commit
+`f1b7a3c4` (`fix(api): compare asset specs iteratively in jsonDeepEqual (#1321)`), PR #1326 (#1321)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-23
+
+Both gaps are closed together, as the finding asked. One deliberate change from the recommendation: the
+comparator is made **iterative** instead of getting a depth cutoff. A cutoff that returns "changed"
+past a depth would emit a spurious `SPECS_CHANGED` on every edit of a legacy deep row; an explicit
+stack compares exactly at any depth, so the comparator no longer needs to match the schema's depth
+cap at all.
+
+### Changes
+
+- `packages/shared/src/schemas/asset.ts`: a structural write bound on `specs`. `CreateAssetSchema` and
+  `UpdateAssetSchema` use `AssetSpecsWriteSchema` (the open record plus a `superRefine`); `AssetSchema`,
+  the read shape, keeps the unbounded record. The walk is iterative and never descends past the depth
+  cap. It reports the first violation with its path under `specs`. Exported bounds:
+  - `ASSET_SPECS_MAX_DEPTH = 32` (the specs object is level 1; arrays count as levels)
+  - `ASSET_SPECS_MAX_KEYS = 256` (per object, the top level included)
+  - `ASSET_SPECS_MAX_ARRAY_LENGTH = 10_000`
+  - `ASSET_SPECS_MAX_STRING_LENGTH = 10_000` (string values and object keys)
+- `apps/api/src/common/deep-equal.ts`: `jsonDeepEqual` walks with an explicit stack. The semantics
+  are unchanged: null and undefined are equivalent, object keys are compared order-insensitively, and
+  arrays are compared order-sensitively.
+- `packages/shared/src/schemas/import/mapping.ts`: **no change needed**. A custom field's value is
+  always the raw cell **string** (`coerceRow` never parses it as JSON), so an import cannot deepen
+  `specs`. The finding's step 1 assumed otherwise. The dry-run and the commit both re-validate every
+  coerced row with `CreateAssetSchema.safeParse`, so the global bound applies to import rows
+  automatically: a cell past 10 000 characters fails that row on `specs`, and the ≤64-custom-field
+  session cap already sits under the per-object key cap. The re-import UPDATE path writes the same
+  validated data, and it replaces `specs` rather than merging it, so keys do not accumulate across
+  sessions.
+- `apps/api/src/assets/assets.service.ts`: no change. The `changeEvents` call site is safe now that
+  the comparator is safe.
+
+### Why these bounds
+
+Every legitimate writer sits well under each cap:
+
+- **Web custom-fields editor**: flat string rows, depth 1.
+- **Import**: at most 64 string cells per row.
+- **Reporting agent**: its facts reach `Asset.specs` server-side, bypassing the schema. The web edit
+  form re-sends every preserved non-scalar entry on each save, so an agent-backed asset must still
+  pass the bound. `AgentReportSchema` caps them at about 6 levels of nesting
+  (`host.nics[].ipv6[].address`), 5000 `software` entries, 256 disks, 64 NICs × 64 addresses, and
+  strings of at most 1024 characters.
+
+Against those writers:
+
+- **Depth 32** is 5× the deepest legitimate shape, and still trivially safe for any recursive
+  consumer.
+- **10 000 array items** is 2× the agent's `software` cap.
+- **256 keys per object** is 4× the import's per-session custom-field cap. No agent object comes
+  close.
+- **10 000 characters** is 5× the longest string cap in the asset contract (`notes` 2000) and 10× the
+  agent's longest string. It also fits a pasted PEM certificate chain.
+
+Total size stays bounded by the JSON body limit (`JSON_BODY_LIMIT`, 8 MB by default).
+
+### Tests added
+
+- `apps/api/src/common/deep-equal.spec.ts`::`pathologically deep values (SEC-032)`: three cases on
+  100 000-level object and array chains, covering equal chains, a changed leaf, and array chains.
+  **Failed on `dev`** with `RangeError: Maximum call stack size exceeded`. They pass with the fix.
+- `apps/api/src/assets/assets.service.spec.ts`::`updates an asset whose STORED specs predate the write
+  bound without failing (SEC-032 upgrade path)`: a status-only `update()` on a row whose stored specs
+  are 100 000 levels deep. **Failed on `dev`** with `RangeError`. It passes with the fix, emitting only
+  `STATUS_CHANGED` and no spurious `SPECS_CHANGED`.
+- `packages/shared/src/schemas/asset.test.ts` (new): the SEC-032 reproduction (a 20 000-level chain)
+  is rejected without throwing on create and update. It also checks the exact limit and one past it
+  for depth (objects and arrays), keys, array length, and string values and keys; that the issue path
+  starts at `specs`; that an agent-backed specs at every `AgentReportSchema` cap is accepted; and that
+  `AssetSchema` still accepts a stored over-bound row. **7 of 10 failed on `dev`** (every rejection
+  case; the 3 acceptance cases are regression guards). All 10 pass with the fix.
+- `packages/shared/src/schemas/import/mapping.test.ts`::`custom fields under the global specs bound
+  (SEC-072)`: a custom cell past the string bound fails the per-row `CreateAssetSchema` on `specs`.
+  A cell that looks like 500-level JSON stays a string, and 64 custom fields validate.
+
+### Verification
+
+- A 6 MB body with 1 000 000 levels (under the 8 MB limit) is parsed by `JSON.parse` in about 90 ms.
+  `UpdateAssetSchema` then rejects it in about 1 ms with `must nest at most 32 levels deep`, which the
+  global zod pipe returns as a 400, not a 500.
+- The full API Jest suite passes: 174 suites, 2916 tests.
+- `packages/shared`: 1243 pass. `apps/web`: 1017 pass.
+- `tsc --noEmit` is clean for shared, api, web and agent.
+
+### Residual risk
+
+- **Existing over-bound rows are tolerated, not rewritten.** They still read and list. A `PATCH`
+  without `specs` still succeeds, and the diff is now exact. Re-sending the over-bound `specs` is a
+  400 until it is replaced with a compliant object. Only a hand-crafted API payload could have
+  produced such a row; an over-bound non-scalar entry is fixed through the API, since the web editor
+  cannot remove non-scalar entries.
+- **`AssetModel.specs` is not bounded.** Its defaults are merged into a new asset's specs on create
+  after validation. The merge is shallow and nothing downstream recurses over it now, but the bound
+  does not cover it. The model schema was out of this unit's scope.
+- **Agent-written specs bypass the schema by design.** They stay under the bound because
+  `AgentReportSchema` caps them. If an agent contract cap is ever raised past these bounds,
+  agent-backed assets would stop being editable in the web form.
