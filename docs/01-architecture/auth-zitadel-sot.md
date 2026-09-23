@@ -604,8 +604,9 @@ points that bind *this* epic:
   `fallback` / local-only), part of the unified `StatusBadge` vocabulary alongside the *role* badge
   (ADMIN/MEMBER/VIEWER), using the locked semantic palette
   (emerald/amber/sky/rose/gray/indigo) so the same hue means the same thing across entities.
-- **Last-admin guard surfaced** — the backend's last-admin-guard **409** (you cannot demote/offboard
-  the final ADMIN) is surfaced as an **explained toast** (the guard message verbatim), not a raw error.
+- **Last-admin guard surfaced** — the backend's last-admin-guard **409** (you cannot demote, deactivate
+  or offboard the final active ADMIN; inactive admins don't count — SEC-021, #1319) is surfaced as an
+  **explained toast** (the guard message verbatim), not a raw error.
 - **Self-role-change disabled** — an ADMIN cannot change their *own* role; the control is **disabled
   with an explanatory tooltip** rather than silently rejected, matching the backend no-self-role guard.
 - **BYOI graceful-degradation banner** — on the Users page, when the IdP emits no role claim and
