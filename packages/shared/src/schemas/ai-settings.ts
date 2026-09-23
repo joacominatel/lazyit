@@ -5,6 +5,7 @@ import {
   AiProviderKindSchema,
   AiProviderOptionsSchema,
 } from "./ai-provider";
+import { BROWSER_INTERPRETED_SCHEMES } from "./application";
 import { int4 } from "./primitives";
 
 /**
@@ -43,13 +44,54 @@ export const McpClientAllowlistEntryIdSchema = z
   .regex(/^[a-z0-9][a-z0-9._-]{0,99}$/, "Allowlist ids are lower-case letters, digits, '.', '_' or '-'");
 
 const HTTPS_URL = /^https:\/\/\S+$/i;
-const LOOPBACK_HTTP_URL = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])([:/]\S*)?$/i;
+const LOOPBACK_URL = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])([:/]\S*)?$/i;
+const URI_WITH_SCHEME = /^([a-z][a-z0-9+.-]*):\S+$/i;
+/** RFC 8252 §7.1 style: a reverse domain name, so at least one `.` (`com.example.app`). */
+const REVERSE_DOMAIN_SCHEME = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+$/;
+
+/**
+ * Single-label private-use schemes of vetted MCP clients. RFC 8252 §7.1 asks native apps for a
+ * reverse-domain scheme, but the editors operators actually run register short vendor schemes; only
+ * these are accepted without a `.`. Anything else single-label (`mailto`, `ms-settings`, …) is refused.
+ */
+export const MCP_VENDOR_REDIRECT_SCHEMES: readonly string[] = [
+  "cursor",
+  "vscode",
+  "vscode-insiders",
+  "windsurf",
+];
+
+/** What kind of redirect URI a value is, for the allowlist policy (ADR-0097 decision 13). */
+export type McpRedirectUriKind = "https" | "loopback" | "private-use";
+
+/**
+ * Classifies a redirect URI, or returns `null` when it may never be one:
+ *   - `https`       — https on a non-loopback host;
+ *   - `loopback`    — http(s) on 127.0.0.1, localhost or [::1] (OAuth's only plain-http redirects);
+ *   - `private-use` — a native-app scheme (RFC 8252 §7.1): reverse-domain, or a vetted vendor scheme.
+ * Plain http on any other host and every browser-interpreted scheme (SEC-051: `javascript`, `data`,
+ * `file`, …) are refused.
+ */
+export function classifyMcpRedirectUri(value: string): McpRedirectUriKind | null {
+  const scheme = URI_WITH_SCHEME.exec(value)?.[1]?.toLowerCase();
+  if (scheme === undefined) return null;
+  if (scheme === "http" || scheme === "https") {
+    if (LOOPBACK_URL.test(value)) return "loopback";
+    return scheme === "https" && HTTPS_URL.test(value) ? "https" : null;
+  }
+  if (BROWSER_INTERPRETED_SCHEMES.has(scheme)) return null;
+  if (MCP_VENDOR_REDIRECT_SCHEMES.includes(scheme) || REVERSE_DOMAIN_SCHEME.test(scheme)) {
+    return "private-use";
+  }
+  return null;
+}
 
 /**
  * How an entry recognizes a client, discriminated on `kind`:
  *   - `cimd_url`     — the client's https Client ID Metadata Document URL (its `client_id`).
- *   - `redirect_uri` — a redirect-URI pattern: an https URI, or a loopback `http://` URI (the only
- *     plain-http redirects OAuth allows). The matching rules are the authorization server's.
+ *   - `redirect_uri` — an exact redirect URI: https, loopback http, or a private-use scheme
+ *     (`classifyMcpRedirectUri`). A private-use redirect is admitted ONLY through an explicit entry,
+ *     never by `mcpAllowAnyHttpsClient` (CEO, 2026-09-23).
  */
 export const McpClientAllowlistMatchSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -63,8 +105,8 @@ export const McpClientAllowlistMatchSchema = z.discriminatedUnion("kind", [
       .trim()
       .max(2048)
       .refine(
-        (value) => HTTPS_URL.test(value) || LOOPBACK_HTTP_URL.test(value),
-        "A redirect URI must be https://, or http:// on a loopback address",
+        (value) => classifyMcpRedirectUri(value) !== null,
+        "A redirect URI must be https://, http:// on a loopback address, or a private-use scheme (reverse-domain such as com.example.app:, or a vetted editor scheme such as cursor:)",
       ),
   }),
 ]);
@@ -126,6 +168,33 @@ export function resolveMcpClientAllowlist(
   return effective;
 }
 
+/** Loopback http redirects match on any port (RFC 8252 §7.3); every other part matches exactly. */
+const LOOPBACK_HTTP_PORT = /^(http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])):\d+(?=\/|$)/i;
+const withoutLoopbackPort = (uri: string) => uri.replace(LOOPBACK_HTTP_PORT, "$1");
+
+/**
+ * The redirect-URI half of the client trust policy: whether `redirectUri` may be used, given the
+ * EFFECTIVE allowlist (`resolveMcpClientAllowlist`) and the `mcpAllowAnyHttpsClient` toggle.
+ *   - An explicit `redirect_uri` entry admits its exact URI (loopback http on any port).
+ *   - The toggle admits only https on a non-loopback host; it never admits a loopback or private-use
+ *     redirect, which need an explicit entry.
+ * `cimd_url` entries identify a client by its `client_id`, which the authorization server checks.
+ */
+export function isMcpRedirectUriAllowed(
+  redirectUri: string,
+  allowlist: readonly McpClientAllowlistEntry[],
+  allowAnyHttpsClient: boolean,
+): boolean {
+  const kind = classifyMcpRedirectUri(redirectUri);
+  if (kind === null) return false;
+  if (allowAnyHttpsClient && kind === "https") return true;
+  const candidate = withoutLoopbackPort(redirectUri);
+  return allowlist.some(
+    (entry) =>
+      entry.match.kind === "redirect_uri" && withoutLoopbackPort(entry.match.pattern) === candidate,
+  );
+}
+
 /**
  * The defaults an absent settings row reads as. They mirror the column defaults of the `ai_settings`
  * table, so "no row" and "a row nobody edited" behave the same.
@@ -181,7 +250,7 @@ export const AiSettingsSchema = z.object({
   mcpClientAllowlistAdded: McpClientAllowlistAddedReadSchema,
   /** The ids of the curated defaults the admin removed. */
   mcpClientAllowlistRemovedDefaults: z.array(z.string()),
-  /** Accept any client with https (non-loopback) redirect URIs; the consent screen warns. */
+  /** Accept any client with https (non-loopback) redirect URIs, never private-use ones; consent warns. */
   mcpAllowAnyHttpsClient: z.boolean(),
   /** When an admin acknowledged the egress disclosure; required before the first enable. */
   disclosureAcknowledgedAt: z.iso.datetime().nullable(),

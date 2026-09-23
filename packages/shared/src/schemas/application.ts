@@ -27,9 +27,10 @@ const ApplicationMetadataSchema = z.record(z.string(), z.unknown());
  * Schemes a browser gives its own meaning to. A value like `javascript:1/alert(1)` looks like
  * `host:port/path` to the carve-out below, but a browser reads it as the `javascript:` scheme and
  * evaluates `1 / alert(1)` — which calls `alert` (SEC-051). None of these is a plausible internal
- * host name, so the carve-out never treats them as one.
+ * host name, so the carve-out never treats them as one. Also refused as MCP redirect-URI schemes
+ * (ADR-0097 decision 13, ai-settings.ts).
  */
-const BROWSER_INTERPRETED_SCHEMES = new Set([
+export const BROWSER_INTERPRETED_SCHEMES: ReadonlySet<string> = new Set([
   "javascript",
   "vbscript",
   "data",

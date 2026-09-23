@@ -12,6 +12,8 @@ import {
   McpClientAllowlistMatchSchema,
   McpClientAllowlistRemovedDefaultsSchema,
   UpdateAiSettingsSchema,
+  classifyMcpRedirectUri,
+  isMcpRedirectUriAllowed,
   resolveMcpClientAllowlist,
   type McpClientAllowlistEntry,
 } from "./ai-settings";
@@ -247,10 +249,49 @@ describe("MCP client allowlist (ADR-0097 decision 13)", () => {
         true,
       );
     }
-    for (const pattern of ["http://evil.example.com/cb", "cursor://x/cb", "http://127.0.0.1.evil.com/cb"]) {
+    for (const pattern of ["http://evil.example.com/cb", "http://127.0.0.1.evil.com/cb", "https:cb"]) {
       expect(McpClientAllowlistMatchSchema.safeParse({ kind: "redirect_uri", pattern }).success).toBe(
         false,
       );
+    }
+  });
+
+  test("a redirect pattern may use a vetted vendor or a reverse-domain private-use scheme", () => {
+    for (const pattern of [
+      "cursor://anysphere.cursor-mcp/oauth/callback",
+      "vscode://vscode.github-authentication/did-authenticate",
+      "VSCode-Insiders://x/cb",
+      "windsurf://oauth/callback",
+      "com.example.agent:/oauth2redirect",
+      "io.github.team.cli://callback",
+    ]) {
+      expect(McpClientAllowlistMatchSchema.safeParse({ kind: "redirect_uri", pattern }).success).toBe(
+        true,
+      );
+      expect(classifyMcpRedirectUri(pattern)).toBe("private-use");
+    }
+  });
+
+  test("dangerous and unvetted schemes are never a redirect", () => {
+    for (const pattern of [
+      "javascript:alert(1)",
+      "JavaScript://x/%0aalert(1)",
+      "data:text/html,<script>",
+      "file:///etc/passwd",
+      "blob:https://example.com/x",
+      "about:blank",
+      "view-source:https://example.com",
+      "vbscript:msgbox",
+      "filesystem:https://example.com/x",
+      "mailto:a@example.com",
+      "myapp://callback",
+      "cursor:",
+      "%6Aavascript:alert(1)",
+    ]) {
+      expect(McpClientAllowlistMatchSchema.safeParse({ kind: "redirect_uri", pattern }).success).toBe(
+        false,
+      );
+      expect(classifyMcpRedirectUri(pattern)).toBeNull();
     }
   });
 
@@ -306,5 +347,62 @@ describe("MCP client allowlist (ADR-0097 decision 13)", () => {
       match: { kind: "cimd_url", url: "https://attacker.example.com/client.json" },
     };
     expect(resolveMcpClientAllowlist([claudeCode], [hijack], [])).toEqual([claudeCode]);
+  });
+
+  describe("isMcpRedirectUriAllowed", () => {
+    const entry = (id: string, pattern: string): McpClientAllowlistEntry => ({
+      id,
+      label: id,
+      match: { kind: "redirect_uri", pattern },
+    });
+    const allowlist = [
+      claudeCode,
+      entry("cursor", "cursor://anysphere.cursor-mcp/oauth/callback"),
+      entry("zed", "http://127.0.0.1/callback"),
+      entry("web", "https://chat.example.com/oauth/redirect"),
+    ];
+
+    test("an explicit entry admits its exact URI, including a private-use one", () => {
+      expect(isMcpRedirectUriAllowed("cursor://anysphere.cursor-mcp/oauth/callback", allowlist, false)).toBe(
+        true,
+      );
+      expect(isMcpRedirectUriAllowed("https://chat.example.com/oauth/redirect", allowlist, false)).toBe(true);
+      expect(isMcpRedirectUriAllowed("cursor://anysphere.cursor-mcp/other", allowlist, false)).toBe(false);
+      expect(isMcpRedirectUriAllowed("https://chat.example.com/oauth/redirect/x", allowlist, false)).toBe(
+        false,
+      );
+    });
+
+    test("a loopback http entry matches on any port, and only on the same path", () => {
+      expect(isMcpRedirectUriAllowed("http://127.0.0.1:53124/callback", allowlist, false)).toBe(true);
+      expect(isMcpRedirectUriAllowed("http://127.0.0.1:53124/other", allowlist, false)).toBe(false);
+      expect(isMcpRedirectUriAllowed("http://localhost:53124/callback", allowlist, false)).toBe(false);
+    });
+
+    test("the any-https toggle admits https on a non-loopback host only", () => {
+      expect(isMcpRedirectUriAllowed("https://new.example.com/cb", allowlist, true)).toBe(true);
+      expect(isMcpRedirectUriAllowed("https://new.example.com/cb", allowlist, false)).toBe(false);
+      expect(isMcpRedirectUriAllowed("https://localhost:8443/cb", allowlist, true)).toBe(false);
+      expect(isMcpRedirectUriAllowed("http://new.example.com/cb", allowlist, true)).toBe(false);
+    });
+
+    test("the any-https toggle never admits a private-use redirect", () => {
+      for (const uri of ["cursor://other/cb", "vscode://x/cb", "com.example.agent:/oauth2redirect"]) {
+        expect(isMcpRedirectUriAllowed(uri, allowlist, true)).toBe(false);
+        expect(isMcpRedirectUriAllowed(uri, [], true)).toBe(false);
+      }
+    });
+
+    test("a dangerous URI is refused whatever the allowlist or toggle say", () => {
+      // Defaults live in code, not behind the schema: the helper re-checks the URI itself.
+      const poisoned = [entry("bad", "javascript:alert(1)")];
+      expect(isMcpRedirectUriAllowed("javascript:alert(1)", poisoned, true)).toBe(false);
+      expect(isMcpRedirectUriAllowed("data:text/html,x", allowlist, true)).toBe(false);
+    });
+
+    test("a CIMD entry does not admit a redirect URI by itself", () => {
+      const cimdUrl = "https://claude-code.example.com/client-metadata.json";
+      expect(isMcpRedirectUriAllowed(cimdUrl, allowlist, false)).toBe(false);
+    });
   });
 });
