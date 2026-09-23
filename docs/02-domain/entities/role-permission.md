@@ -51,8 +51,14 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   | Role | Seeded permissions |
   | --- | --- |
   | **ADMIN** | the COMPLETE catalog (immutable/full) |
-  | **MEMBER** | every `:read` (minus the admin-only reads) + every `:write` (no `:delete`, no coarse verb) |
-  | **VIEWER** | every `:read` **except** `accessGrant:read`, `user:read` **and** the admin-only reads |
+  | **MEMBER** | every `:read` (minus the admin-only reads) + every `:write` + `accessRequest:create` + the AI channel verbs `ai:use` / `ai:connect` (no `:delete`, no coarse verb) |
+  | **VIEWER** | every `:read` **except** `accessGrant:read`, `user:read` **and** the admin-only reads, + `accessRequest:create` |
+
+  `ai:use` and `ai:connect` ([[0097-ai-assistant-mcp-and-headless-api]] decision 1) are the
+  `MEMBER_DEFAULT_CAPABILITIES`: channel verbs, not capabilities — the AI acts with the principal's own
+  permissions — so they are seeded to ADMIN + MEMBER, carry the within-default `edit` tier, and expose
+  nothing until an admin enables AI or MCP for the instance. They reach existing instances through the
+  seed-once ledger below, not a data migration.
 
   So every `<domain>:read` is open to all three roles **except** two tighter tiers: the two
   **pre-tightened reads** (`accessGrant:read`, `user:read`) are ADMIN + MEMBER only — VIEWER can no

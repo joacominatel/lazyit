@@ -3,7 +3,7 @@ title: AssetHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-26
+updated: 2026-09-23
 ---
 
 # AssetHistory
@@ -33,6 +33,12 @@ the "what changed, when, by whom?" trail that auditing requires ([[problem-space
   when a service account performed the action ([[0048-service-accounts]]). A DB **CHECK** enforces
   *at most one* of (`performedById`, `serviceAccountId`) per row — honest attribution, never a fake human
   ([[INVARIANTS]] INV-SA-4). `ActorService.resolveActor(principal)` picks the right column.
+- `aiInvocationId` — optional plain string (no FK, no index): the [[ai-tool-invocation]] that caused
+  the event, stamped from the AI invocation context when an AI tool performed the write
+  ([[0097-ai-assistant-mcp-and-headless-api]] decision 11). `null` for every other write and every row
+  that existed before the column. The actor columns still name the real principal — the AI acts *as* it;
+  this column only adds provenance. The permanent record of the AI action is [[ai-action-log]], which
+  carries the same id after the invocation row is retention-pruned.
 - `createdAt` only — append-only ([[0006-soft-delete-and-auditing]]).
 
 ## Events (`AssetHistoryEventType`)

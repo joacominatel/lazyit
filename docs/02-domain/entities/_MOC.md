@@ -3,7 +3,7 @@ title: Entities — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-07-01
+updated: 2026-09-23
 ---
 
 # Entities — Map of Content
@@ -76,6 +76,23 @@ access changes — fired **after** the [[access-grant]] commits, decoupled (the 
 - 🟢 [[workflow-step-run]] — append-only, one row per step attempt.
 - 🟢 [[manual-task]] — the human-in-the-loop pause (`AWAITING_INPUT`); statuses, no soft-delete.
 - 🟢 [[workflow-secret]] — the engine's own AES-256-GCM, write-only credential store; soft-delete.
+
+## AI assistant, MCP and OAuth
+
+The opt-in AI capability ([[0097-ai-assistant-mcp-and-headless-api]], epic #1315): the in-app chat and
+the headless API run lazyit's own agent loop; external agents connect over MCP through lazyit's own
+OAuth 2.1 server. The AI always acts **as** its principal. Transcripts are retention-bound; the mutation
+ledger is permanent. Design: [[ai-assistant/_synthesis|synthesis]].
+
+- 🟢 [[ai-settings]] — singleton instance config: provider, model, write-only encrypted key, limits, retention, the MCP switch; off by default.
+- 🟢 [[ai-conversation]] — a chat or headless transcript and its provider-replayable messages (`AiMessage`); owner-only, hard-deleted by retention.
+- 🟢 [[ai-run]] — one agent-loop execution (status, approval policy, token counts, no content) and the per-step `AiUsage`; kept.
+- 🟢 [[ai-tool-invocation]] — every tool call; the pending action a chat write waits on; retention-bound.
+- 🟢 [[ai-action-log]] — the permanent, append-only ledger of AI mutations, blocked against UPDATE/DELETE by a trigger.
+- 🟢 [[ai-service-account-settings]] — a service account's headless AI access (off / read-only / read-write, optional mutation cap).
+- 🟢 [[ai-config-audit-log]] — append-only trail of AI configuration changes and the egress disclosure.
+- 🟢 [[oauth-client]] — a DCR, CIMD or bundled OAuth client of the MCP authorization server.
+- 🟢 [[oauth-grant]] — a connected app or personal token (soft delete = revoked), its hashed codes and tokens, and the OAuth audit log.
 
 ## Consumables
 
