@@ -1739,6 +1739,29 @@ describe('AssetsService', () => {
     expect(history.record).not.toHaveBeenCalled();
   });
 
+  it('updates an asset whose STORED specs predate the write bound without failing (SEC-032 upgrade path)', async () => {
+    // A row written before the shared schema bounded specs can hold any nesting. The write bound does
+    // not re-validate what is stored, so an edit that leaves specs alone must still succeed — and the
+    // before/after diff must neither overflow the stack nor report a change that did not happen.
+    const deepSpecs = () => {
+      let node: unknown = 'leaf';
+      for (let i = 0; i < 100_000; i++) node = { a: node };
+      return { legacy: node };
+    };
+    asset.findFirst.mockResolvedValue(beforeRow({ specs: deepSpecs() }));
+    tx.update.mockResolvedValue(
+      beforeRow({ status: 'IN_STORAGE', specs: deepSpecs() }),
+    );
+
+    await service.update('a1', { status: 'IN_STORAGE' });
+
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      expect.objectContaining({ eventType: 'STATUS_CHANGED' }),
+    );
+  });
+
   // --- remove -------------------------------------------------------------
   it('soft-deletes by setting deletedAt inside a transaction (never hard delete)', async () => {
     asset.findFirst.mockResolvedValue({ id: 'a1' });
