@@ -469,6 +469,21 @@ existence is not disclosed. No new permission is added.
 The 90-day sweep (§7) still deletes the read joins of expired events first, then the events —
 regardless of `dismissedAt`. A dismissed notification is forgotten on the same schedule as any other.
 
+### D. Bell UI
+
+- **Per-row ×** beside (never inside) the row's deep-link, so dismissing never navigates. It is revealed
+  on row hover and on keyboard focus, and is always shown on touch devices — the `rowActionsReveal`
+  contract of the list tables. Its accessible name carries the notification title.
+- **"Clear all"** is a text action in the dropdown header next to "Mark all read", shown only while the
+  list has rows. The empty state is the existing "You're all caught up."
+- **No confirmation dialog** for either action, although neither can be undone: the effect is limited to
+  the caller's own bell, the event and the audit history are untouched, and the bell is a nudge surface
+  that already forgets on its own after 90 days. A confirm step would tax the common case to guard a
+  low-stakes one.
+- **Optimistic.** The rows leave the list at once and the badge drops by the unread ones removed; a
+  failure rolls both back and shows an error toast. On success the badge takes the response's `unread`
+  (no count refetch) and the list is reconciled with the server.
+
 ### Amendment consequences
 
 - **Positive:** the bell can be cleared of handled entries without touching the shared, append-only

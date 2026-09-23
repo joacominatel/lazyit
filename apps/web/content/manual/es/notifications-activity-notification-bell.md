@@ -56,7 +56,7 @@ esfuerzo**: una notificación que no se logra enviar nunca bloquea ni deshace el
 disparos repetidos del mismo evento se agrupan en una sola notificación, así que un consumible que
 oscila alrededor de su umbral no inunda la campana.
 
-## Leer y limpiar
+## Leer notificaciones
 
 Abre la campana para ver las notificaciones más recientes, las más nuevas primero. Cada fila lleva un
 icono, un título corto, un resumen opcional de una línea y una hora relativa.
@@ -69,6 +69,29 @@ icono, un título corto, un resumen opcional de una línea y una hora relativa.
 
 El estado de lectura es por persona: marcar como leída una difusión la limpia solo para ti, no para los
 demás administradores.
+
+## Descartar notificaciones
+
+Cuando ya te ocupaste de una notificación, puedes quitarla de tu campana en lugar de esperar a que
+caduque:
+
+- **Descartar una** — pasa el cursor sobre una fila y selecciona la **×** de su borde derecho. En un
+  teléfono o una tableta la × se muestra siempre; con el teclado, llega a ella con Tab. Descartar no abre
+  la notificación.
+- **Descartar todas** — en la cabecera de la campana, quita de una vez todas las notificaciones que hay
+  en tu campana. Cuando la campana queda vacía muestra «Estás al día.»
+
+Descartar también marca la notificación como leída, así que el indicador baja con ella. Una notificación
+que llega después de seleccionar **Descartar todas** aparece con normalidad.
+
+Descartar es **por persona**, igual que el estado de lectura. Oculta la notificación solo de **tu**
+campana: el evento en sí no se borra, y los demás administradores que ven la misma difusión la siguen
+teniendo en sus campanas. El registro duradero del historial de actividad no se toca.
+
+> [!IMPORTANT]
+> **No se puede deshacer** y no hay una vista de notificaciones descartadas. Una vez descartada, una
+> notificación queda fuera de tu campana hasta que se poda con las demás a los 90 días. Descarta lo que
+> ya resolviste; deja lo que todavía tengas que atender.
 
 ## Qué contiene una notificación
 
