@@ -18,10 +18,10 @@ mock.module("next-auth/react", () => ({ signOut }));
 
 const assign = mock(() => undefined);
 
-// `handleAuthExpiry` reads window.location.pathname and calls window.location.assign; stub both.
-function setPathname(pathname: string): void {
+// `handleAuthExpiry` reads window.location.pathname/search and calls window.location.assign; stub them.
+function setPathname(pathname: string, search = ""): void {
   // @ts-expect-error — minimal window stub for the guard under test.
-  globalThis.window = { location: { pathname, assign } };
+  globalThis.window = { location: { pathname, search, assign } };
 }
 
 import { ApiError } from "./client";
@@ -60,7 +60,20 @@ test("a 401 signs out exactly once and redirects to a relative, marked /login (#
   // ...and once the cookie is cleared we navigate client-side to the RELATIVE /login, carrying the
   // `expired` marker so /login cannot bounce a lingering cookie back into the app (#1307).
   await Promise.resolve();
-  expect(assign).toHaveBeenCalledWith("/login?expired=1");
+  expect(assign).toHaveBeenCalledTimes(1);
+  const [target] = assign.mock.calls[0] as unknown as [string];
+  expect(target).toStartWith("/login?");
+  expect(new URL(target, "http://lazyit.test").searchParams.get("expired")).toBe("1");
+});
+
+test("a 401 carries the page the user was on as callbackUrl (#1307)", async () => {
+  setPathname("/assets/abc", "?tab=history");
+  handleAuthExpiry(new ApiError(401, "unauthorized"));
+  await Promise.resolve();
+  const [target] = assign.mock.calls[0] as unknown as [string];
+  const params = new URL(target, "http://lazyit.test").searchParams;
+  expect(params.get("expired")).toBe("1");
+  expect(params.get("callbackUrl")).toBe("/assets/abc?tab=history");
 });
 
 test("concurrent 401s only trigger one sign-out (latch)", () => {

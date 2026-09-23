@@ -10,11 +10,38 @@
  * that carries it. The worst case is showing the sign-in form to someone who is still signed in.
  */
 
+import { safeInternalPath } from "@/lib/utils/safe-redirect";
+
 /** Query parameter the 401 handler adds when it sends a visitor to /login. */
 export const SESSION_EXPIRED_PARAM = "expired";
 
-/** Where the 401 handler sends a visitor whose session is dead. Relative on purpose (#1052). */
-export const EXPIRED_SESSION_LOGIN_PATH = `/login?${SESSION_EXPIRED_PARAM}=1`;
+/** Route prefixes that are the sign-in flow itself: never a 401 target, never a destination to return to. */
+export const AUTH_ROUTE_PREFIXES = ["/login", "/api/auth"];
+
+/**
+ * Where the 401 handler sends a visitor whose session is dead: `/login` with the marker, plus the page
+ * they were on as `callbackUrl`, so a fresh sign-in lands them back there — the same destination the
+ * proxy carries for a signed-out visitor. Relative on purpose (#1052).
+ *
+ * The destination goes through the open-redirect guard (#495), and an auth route is never carried: a
+ * `callbackUrl` pointing at `/login` would only nest the sign-in screen inside itself. `/login` applies
+ * the same guard again when it reads the parameter.
+ */
+export function expiredSessionLoginPath(location: {
+  pathname: string;
+  search: string;
+}): string {
+  const params = new URLSearchParams({ [SESSION_EXPIRED_PARAM]: "1" });
+  const raw = `${location.pathname}${location.search}`;
+  const destination = safeInternalPath(raw);
+  if (
+    destination === raw &&
+    !AUTH_ROUTE_PREFIXES.some((prefix) => destination.startsWith(prefix))
+  ) {
+    params.set("callbackUrl", destination);
+  }
+  return `/login?${params.toString()}`;
+}
 
 /**
  * Whether `/login` may send a signed-in visitor straight into the app. False when the visitor arrived
