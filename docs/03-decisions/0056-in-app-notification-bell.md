@@ -3,6 +3,7 @@ title: "ADR-0056: In-app notification bell — append-only Notification + per-ad
 tags: [adr, notifications, frontend, rbac, workflow-engine, data-model]
 status: accepted
 created: 2026-06-09
+updated: 2026-09-23
 deciders: [Joaquín Minatel]
 ---
 
@@ -177,6 +178,9 @@ a web `tsc` pass against the exhaustive permission maps** (project memory:
   ([[0033-asset-history-event-model]] / [[0034-consumables-design]] / [[0023-access-management-design]] /
   the workflow run ledger) remain the durable record. The bell is allowed to forget; the ledgers are
   not.
+
+> **Amended 2026-09-23 (#1309):** a user can also **dismiss** a notification from their own bell — a
+> per-user `NotificationRead.dismissedAt`, never a delete of the shared event. See the amendment below.
 
 ### 8. Frontend — the topbar bell, gated by `notification:read`
 
@@ -420,7 +424,64 @@ Related: #852 · #615 (per-user overrides — the only thing that would add a "s
 [[0074-server-reporting-agent]] (the staleness sweeper) · [[0061-secret-manager-zero-knowledge]] (INV-10 —
 why the secret-failure alert is deferred) ·
 
-Related: #313 · #248 · #453 · #470 · [[0054-applications-workflow-engine]] · [[0048-service-accounts]] ·
+## Amendment (2026-09-23) — per-user dismiss (§7, issue #1309)
+
+**Status: accepted (CEO decision on #1309).** §7 only offered mark-as-read, so a handled notification
+stayed in the bell until the 90-day sweep pruned it. Users can now **dismiss** notifications from their
+own bell.
+
+### A. Dismiss is per user, never a delete
+
+`Notification` stays append-only (§1, [[0006-soft-delete-and-auditing]]) and many rows are **broadcasts**
+shared by every `notification:read` holder, so deleting or mutating the event would remove it for every
+admin. Dismiss is instead recorded on the caller's own **`NotificationRead`** join:
+
+- **Data:** one additive, nullable **`dismissedAt DateTime?`** on `NotificationRead`
+  (`notification_reads`, migration `20260804000000_notification_read_dismissed_at`). No new table, no
+  backfill, no index — the "not dismissed by me" anti-join resolves through the existing
+  `(notificationId, userId)` unique index, which yields at most one row per pair.
+- **Dismiss implies read.** Dismissing upserts the caller's read join: a missing row is created with a
+  fresh `readAt` and `dismissedAt`; an existing row keeps its original `readAt` and gets `dismissedAt`.
+  A re-dismiss keeps the first stamp (idempotent). Nothing un-dismisses a row in v1.
+- **Only the caller's bell changes.** The event row and other users' views are untouched: another admin
+  still sees a broadcast that one admin dismissed.
+
+### B. API
+
+- `PATCH /notifications/:id/dismiss` — dismiss one → `{ dismissed, unread }`
+  (`DismissNotificationsResult` in `@lazyit/shared`). No request body.
+- `PATCH /notifications/dismiss-all` — dismiss every notification **currently visible** to the caller
+  and not yet dismissed → `{ dismissed, unread }`. A notification emitted afterwards has no read row for
+  the caller and shows up normally.
+- `GET /notifications` (items and `total`) excludes the caller's dismissed rows. `GET
+  /notifications/unread-count` needs no change: a dismissed row always has a read join, so the existing
+  anti-join already excludes it.
+
+**Authorization is exactly mark-read's** (the #453 amendment): both routes are open to any
+authenticated human (a service-account principal is 403'd), and the service applies the same visibility
+scope — own targeted rows always, the broadcast set only with `notification:read`. A caller can only
+dismiss what they can see. An invisible id (another user's targeted row, or a broadcast for a non-admin)
+and a nonexistent id both answer `dismissed: 0` with the caller's unread count, never a 404, so
+existence is not disclosed. No new permission is added.
+
+### C. Retention is unchanged
+
+The 90-day sweep (§7) still deletes the read joins of expired events first, then the events —
+regardless of `dismissedAt`. A dismissed notification is forgotten on the same schedule as any other.
+
+### Amendment consequences
+
+- **Positive:** the bell can be cleared of handled entries without touching the shared, append-only
+  event store or any other user's view; the change is one nullable column and two endpoints behind the
+  existing visibility gate.
+- **Negative / trade-offs (accepted):** no "undo" or "show dismissed" view in v1 — a dismissed row is
+  hidden for good from that user's bell until retention prunes it (it stays in the database and in every
+  other user's bell). Dismiss-all takes a snapshot of the visible set; a notification that arrives while it
+  runs is not dismissed.
+- **Upgrade safety:** existing `notification_reads` rows get `dismissedAt = NULL`, so every existing
+  notification stays visible exactly as before until a user dismisses it.
+
+Related: #313 · #248 · #453 · #470 · #1309 · [[0054-applications-workflow-engine]] · [[0048-service-accounts]] ·
 [[0046-roles-permissions-v2]] · [[0044-recent-activity-view]] · [[0034-consumables-design]] ·
 [[0033-asset-history-event-model]] · [[0031-logging-strategy]] · [[0030-list-pagination-contract]] ·
 [[0023-access-management-design]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
