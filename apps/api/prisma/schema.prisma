@@ -2131,8 +2131,15 @@ model NotificationRead {
   user           User         @relation("NotificationReader", fields: [userId], references: [id], onDelete: Cascade)
   // When the admin marked it read (the lazy first mark; idempotent re-marks keep the original).
   readAt         DateTime     @default(now())
+  // When this user DISMISSED it from their own bell (ADR-0056 §7 amendment, #1309). Per-user: the event
+  // row is never touched and other users still see it. Dismiss implies read (the row exists, readAt is
+  // kept). NULL = not dismissed — every row that predates the column. Idempotent re-dismiss keeps the
+  // original stamp.
+  dismissedAt    DateTime?
 
   // One read row per (notification, admin) — the upsert target + the anti-join's uniqueness guarantee.
+  // The dismissed anti-join (`reads: none { userId, dismissedAt not null }`) is served by this unique
+  // index: it resolves at most one row per (notification, user), so dismissedAt needs no index of its own.
   @@unique([notificationId, userId])
   // Per-admin unread anti-join scans by user; per-notification cleanup scans by notification.
   @@index([userId])
