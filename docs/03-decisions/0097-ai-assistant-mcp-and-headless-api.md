@@ -1,7 +1,7 @@
 ---
 title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
-status: proposed
+status: accepted
 created: 2026-09-23
 updated: 2026-09-23
 deciders: [Joaquín Minatel]
@@ -11,7 +11,7 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-09-23 (epic #1315). Design only; no code is built until this ADR is accepted.
+**accepted** — 2026-09-23 (CEO review of PR #1317; epic #1315). The build follows the wave plan.
 The depth lives in the design vault [[ai-assistant/_MOC|docs/ai-assistant/]], whose
 [[ai-assistant/_synthesis|synthesis]] is binding.
 
@@ -177,6 +177,19 @@ The key forks only; each links its analysis.
 12. **Fourteen invariants** (INV-AI-1…14) formalize the above and join [[INVARIANTS]] on acceptance.
     → [[ai-assistant/_synthesis|synthesis]] §7.
 
+13. **MCP client trust policy: a configurable allowlist, pre-seeded.** The CEO, on review: "Revise el
+    adr, esta ok, lo unico del mcp que daria es que haya una allowlist configurable, pero por defecto
+    todos o los que tengamos en cuenta, https, claude code, codex, opencode, pi, y algun otro que me
+    este olvidando, los de siempre basicamente." Every MCP client that connects through OAuth is
+    checked against an **admin-configurable allowlist in Settings → AI**, pre-seeded with the
+    well-known clients: Claude Code, Claude Desktop / claude.ai, OpenAI Codex, ChatGPT, OpenCode, Pi,
+    Cursor, VS Code / GitHub Copilot, Gemini CLI, Windsurf and Zed. The seed list lives in code as a
+    curated default; its exact identifiers (CIMD `client_id` URLs and/or redirect-URI patterns) are
+    verified during W2-4 and W3-3. Admins can add or remove entries. Non-loopback redirect URIs must be
+    HTTPS. DCR-registered client names are self-asserted, so matching relies on the CIMD URL or the
+    redirect-URI pattern, **never on `client_name`**; the consent screen still shows the client
+    identity. → [[ai-assistant/mcp-and-oauth|MCP]] §4 F2, §10; [[ai-assistant/security|security]] §6.3.
+
 ## Consequences
 
 **Positive**
@@ -247,8 +260,8 @@ other people's conversations; a per-request headless tool allowlist. →
 
 ## Adopted by default — CEO to confirm on review
 
-These were recommended by the analysts and adopted so the design is complete. Each can be reversed
-without reshaping the rest.
+**Confirmed by the CEO on review of PR #1317 ("esta ok").** These were recommended by the analysts and
+adopted so the design is complete. Each can be reversed without reshaping the rest.
 
 1. **AI SDK 7** as the model-call layer only, behind `ChatModelPort`, gated by a go/no-go ESM/Jest
    spike; the fallback is own adapters over the official SDKs.
@@ -275,5 +288,4 @@ without reshaping the rest.
 16. **No AI access for an SA that holds `infra:report`** (the fleet-wide agent token).
 17. **Turning AI off keeps conversations and connected apps dormant** until re-enabled.
 
-Still open (not blocking acceptance of the rest): the MCP client trust policy — an admin-picked
-allowlist versus any HTTPS CIMD client with warnings ([[ai-assistant/_synthesis|synthesis]] §11).
+The MCP client trust policy, the one open item at proposal time, is resolved by decision 13.

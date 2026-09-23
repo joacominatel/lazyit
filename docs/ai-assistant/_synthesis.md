@@ -1,7 +1,7 @@
 ---
 title: "AI Assistant, MCP Server and Headless API — Architecture Synthesis"
 tags: [ai-assistant, architecture, synthesis, mcp, oauth, llm, security, adr-candidate]
-status: draft
+status: accepted
 created: 2026-09-23
 updated: 2026-09-23
 authors: [cto]
@@ -19,7 +19,7 @@ reconciles:
 > coherent picture: the three channels, the CEO's decisions, the cross-slice contracts, one directory
 > tree, one data model, the invariants, the defaults adopted pending review, and one implementation
 > plan in waves. The decision record is [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]]
-> (proposed).
+> (accepted 2026-09-23).
 >
 > **Source of truth precedence:** the area notes are the depth; this file is the binding summary.
 > Where this file and an area note disagree, this file wins — then the area note is corrected.
@@ -107,6 +107,10 @@ Quoted verbatim in Spanish where the CEO's words are the decision.
     mutation cap per run. **The per-SA placement is a CTO interpretation — to confirm on review.**
 14. **A separate permission `ai:connect` for MCP** (ADMIN + MEMBER by default). MCP can be enabled
     without configuring an LLM provider — an independent switch.
+15. **MCP client trust policy** (on review of PR #1317, accepting ADR-0097): "Revise el adr, esta ok,
+    lo unico del mcp que daria es que haya una allowlist configurable, pero por defecto todos o los que
+    tengamos en cuenta, https, claude code, codex, opencode, pi, y algun otro que me este olvidando, los
+    de siempre basicamente." Recorded in [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13.
 
 ---
 
@@ -696,9 +700,9 @@ cross-cutting pages and the edits to existing ones.
 
 ## 11. Still open
 
-1. **Client trust policy** — an admin-picked client allowlist (the security note's recommendation) or
-   any HTTPS CIMD client with warnings ([[ai-assistant/security|security]] §11 Q-7). Needed before W2-4
-   finishes consent.
+1. ~~**Client trust policy**~~ — **resolved** (CEO, 2026-09-23): an admin-configurable allowlist in
+   Settings → AI, pre-seeded with the well-known clients, matched on the CIMD URL or redirect-URI
+   pattern, never `client_name`. → [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13.
 2. **Session semantics after PR #1313** — the grant's `sessionEpoch` binding follows ADR-0086 as amended;
    re-check when #1313 merges.
 3. **External facts to verify during the build** (not decisions): Claude Code's behavior against an

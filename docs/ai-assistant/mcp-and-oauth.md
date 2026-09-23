@@ -746,8 +746,10 @@ reconciliation; [[ai-assistant/_synthesis|the synthesis]] §2 quotes them.
 8. **Q8 — Read-only at consent → offered.** Read only / Read & write (preselected); `lazyit.admin` is
    never preselected and requires step-up (R7).
 
-**Still open.** The client trust policy — an admin-picked client allowlist versus any HTTPS CIMD client
-with warnings — is raised by [[ai-assistant/security|security]] §11 Q-7 and is not yet decided.
+**Client trust policy → resolved (CEO, 2026-09-23).** Raised by [[ai-assistant/security|security]] §11
+Q-7: an admin-configurable allowlist in Settings → AI, pre-seeded with the well-known clients, matched on
+the CIMD URL or redirect-URI pattern (never `client_name`) →
+[[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13.
 
 The durable decisions (F1, F3, F4, the F8 outcome, INV-MCP-*) are recorded in
 [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] (proposed).

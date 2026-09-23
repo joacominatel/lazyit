@@ -334,7 +334,7 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 | T-24 | MCP | E | The client auto-approves mutations, or combines lazyit with other MCP servers (web fetch, email). That completes the trifecta outside lazyit. | Scopes `lazyit.read` / `lazyit.write` / `lazyit.admin`, with `admin` never preselected and gated by step-up (R7); honest annotations; operator disclosure (§11 E3) | v1 |
 | T-25 | MCP | R | Reads over MCP leave no in-app trace (no lazyit-side conversation). | A metadata-only MCP access log, retention-bound | v1 (minimal) |
 | T-26 | AS | S | Open redirect or code interception: loose redirect matching, missing PKCE, PKCE downgrade. | Exact match; PKCE S256 mandatory; `plain` rejected; downgrade blocked; `iss` in responses | v1 |
-| T-27 | AS | S | Consent phishing: a lookalike client ("Claude") through CIMD or DCR, or localhost-redirect impersonation. | Hostname display; "verified domain" vs "self-declared" badge; warnings; consent always shown; step-up for the `admin` scope; an admin client allowlist is still open (§11 Q-7) | v1 |
+| T-27 | AS | S | Consent phishing: a lookalike client ("Claude") through CIMD or DCR, or localhost-redirect impersonation. | Hostname display; "verified domain" vs "self-declared" badge; warnings; consent always shown; step-up for the `admin` scope; an admin-configurable client allowlist, pre-seeded (§11 Q-7, resolved) | v1 |
 | T-28 | AS | I, D | SSRF through a CIMD `client_id` fetch. | Egress guard with HTTPS only, **no** private allowlist, size and time caps, caching | v1 |
 | T-29 | AS | S | Refresh-token theft or replay; a persistent grant outlives the user's intent. | Rotation with reuse detection (revoke the grant); `sessionEpoch` binding; revocation UI. No absolute cap in v1 (reconciled, [[ai-assistant/_synthesis|synthesis]] §8) | v1 |
 | T-30 | AS | S, T | Issuer or metadata poisoning through a `Host`-derived origin (`AUTH_TRUST_HOST`) [R]. | Issuer is pinned configuration; the authorization server is disabled without a pinned HTTPS origin | v1 |
@@ -468,8 +468,8 @@ the **exfiltration leg** and the **consequential-action leg**.
   direction [E].
   - DCR is rate-limited, capped, unused registrations expire, and a registration is never treated as
     trusted: the consent page labels it "self-declared, unverified".
-  - **Trust policy (still open, §11 Q-7):** whether an admin picks the allowed client hosts (pre-filled
-    suggestions) or any HTTPS CIMD client is accepted with warnings.
+  - **Trust policy (resolved, §11 Q-7):** an admin-configurable client allowlist, pre-seeded with the
+    well-known clients — [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13.
   - CIMD fetches go through `guardedFetch`: HTTPS only, no internal allowlist, small size cap,
     short timeout, cached.
 - **Authorize and consent.**
@@ -688,7 +688,7 @@ These are recommended defaults; the numbers are tunable.
 | T3/T4 elevated cards with step-up; AI configuration excluded | MCP elicitation-based server-side confirmation for T3/T4 (§11 E3 option) |
 | Sanitized renderer reuse; external links not auto-linked | Taint *tracking* (beyond listing the sources read) |
 | Egress guard for provider and CIMD; AI internal-host allowlist | `AI_SECRET_KEY` rotation runbook |
-| Own key axis, write-only, destination binding, log redaction | An admin client allowlist (§11 Q-7, still open) |
+| Own key axis, write-only, destination binding, log redaction | — |
 | Opaque, audience-bound OAuth tokens; rotation plus reuse detection; revocation UI | A per-user email opt-out for "new client connected" |
 | Consent page requirements; `lazyit.admin` never preselected, with step-up | |
 | Per-SA AI access setting, optional mutation cap, `infra:report` refusal | |
@@ -799,8 +799,9 @@ permanent write ledger and usage, not transcripts. Retention defaults to 90 days
 **Q-6 — OIDC instances before #1310 → resolved.** The authorization server accepts any valid lazyit web
 session and stays mode-agnostic; it adds no OIDC dependency.
 
-**Still open — Q-7, the client trust policy.** An admin-picked client allowlist (this note's
-recommendation) or any HTTPS CIMD client with warnings. Not answered; the synthesis lists it as open.
+**Q-7 — Client trust policy → resolved (CEO, 2026-09-23).** An admin-configurable allowlist in
+Settings → AI, pre-seeded with the well-known clients, matched on the CIMD URL or the redirect-URI
+pattern, never `client_name` → [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13.
 
 ---
 
