@@ -4,6 +4,8 @@
 // Section agents edit the per-area JSON files (e.g. `assets.json`) — NEVER this
 // barrel. Adding a brand-new namespace is the only reason to touch this file.
 import account from "./account.json";
+import ai from "./ai.json";
+import aiSettings from "./aiSettings.json";
 import applications from "./applications.json";
 import assets from "./assets.json";
 import attachments from "./attachments.json";
@@ -21,6 +23,7 @@ import locations from "./locations.json";
 import marketing from "./marketing.json";
 import nav from "./nav.json";
 import notifications from "./notifications.json";
+import oauth from "./oauth.json";
 import profile from "./profile.json";
 import settings from "./settings.json";
 import setup from "./setup.json";
@@ -55,6 +58,9 @@ const messages = {
   imports,
   infra,
   profile,
+  ai,
+  aiSettings,
+  oauth,
 };
 
 export default messages;
