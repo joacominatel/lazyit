@@ -132,8 +132,10 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
 - `PATCH /notifications/read-all` — mark all the caller's unread read → `{ marked, unread }`.
 - `PATCH /notifications/:id/dismiss` — dismiss one from the caller's bell (implies read, idempotent) →
   `{ dismissed, unread }` (#1309).
-- `PATCH /notifications/dismiss-all` — dismiss everything currently visible to the caller →
-  `{ dismissed, unread }` (#1309). A notification emitted afterwards shows up normally.
+- `PATCH /notifications/dismiss-all?upTo=<ISO datetime>` — dismiss everything visible to the caller and
+  created at or before `upTo` → `{ dismissed, unread }` (#1309). The web sends the newest `createdAt` it
+  rendered, so a notification that arrived after the bell loaded stays, unread. `upTo` is optional (an
+  older client without it dismisses everything visible); a malformed value is a 400.
 
 The feed and its `total` exclude the caller's dismissed rows; the unread count excludes them by
 construction (a dismissed row always has a read join).
@@ -167,7 +169,8 @@ consumable / the manual-task inbox / `/secrets` for the vault-setup nudge). Mark
 read". The bell renders for **every authenticated human** and no longer self-gates on
 `useCan('notification:read')` — the API scopes what each caller sees ([[0056-in-app-notification-bell]]
 amendment, #453; the `/secrets` banner was dropped). Each row carries a per-user dismiss (X) and the header a
-"Clear all" action, both optimistic ([[0056-in-app-notification-bell]] #1309 amendment §D, "Bell UI").
+"Clear all" action that removes the rows currently shown, both optimistic, with no confirmation and no
+undo — a CEO decision of 2026-09-23 ([[0056-in-app-notification-bell]] #1309 amendment §D, "Bell UI").
 
 ## Related
 

@@ -450,9 +450,15 @@ admin. Dismiss is instead recorded on the caller's own **`NotificationRead`** jo
 
 - `PATCH /notifications/:id/dismiss` — dismiss one → `{ dismissed, unread }`
   (`DismissNotificationsResult` in `@lazyit/shared`). No request body.
-- `PATCH /notifications/dismiss-all` — dismiss every notification **currently visible** to the caller
-  and not yet dismissed → `{ dismissed, unread }`. A notification emitted afterwards has no read row for
-  the caller and shows up normally.
+- `PATCH /notifications/dismiss-all?upTo=<ISO datetime>` — dismiss the notifications visible to the
+  caller, not yet dismissed, and **created at or before `upTo`** → `{ dismissed, unread }`. The web sends
+  the newest `createdAt` among the rows the bell rendered, so "Clear all" removes only what the user has
+  seen: a notification that arrived after the list loaded stays, unread. `upTo` is optional and validated
+  by `DismissAllNotificationsQuerySchema` in `@lazyit/shared` (a malformed value is a 400); without it the
+  endpoint dismisses every visible notification — the behavior an older web client relies on. A
+  notification emitted after the request has no read row for the caller and shows up normally either
+  way. A retention sweep that removes a target mid-request (an FK violation on the read-join insert) is
+  a no-op for that row, as for a single dismiss: the pass is retried once without it.
 - `GET /notifications` (items and `total`) excludes the caller's dismissed rows. `GET
   /notifications/unread-count` needs no change: a dismissed row always has a read join, so the existing
   anti-join already excludes it.
@@ -475,14 +481,21 @@ regardless of `dismissedAt`. A dismissed notification is forgotten on the same s
   on row hover and on keyboard focus, and is always shown on touch devices — the `rowActionsReveal`
   contract of the list tables. Its accessible name carries the notification title.
 - **"Clear all"** is a text action in the dropdown header next to "Mark all read", shown only while the
-  list has rows. The empty state is the existing "You're all caught up."
-- **No confirmation dialog** for either action, although neither can be undone: the effect is limited to
-  the caller's own bell, the event and the audit history are untouched, and the bell is a nudge surface
-  that already forgets on its own after 90 days. A confirm step would tax the common case to guard a
-  low-stakes one.
-- **Optimistic.** The rows leave the list at once and the badge drops by the unread ones removed; a
-  failure rolls both back and shows an error toast. On success the badge takes the response's `unread`
-  (no count refetch) and the list is reconciled with the server.
+  list has rows. It removes the notifications **currently shown** — it sends the newest rendered
+  `createdAt` as `upTo` (§B) — and anything newer stays. The empty state is the existing "You're all
+  caught up." Before the request it moves focus to the dropdown, so a keyboard user is not dropped onto
+  `<body>` when the button unmounts.
+- **No confirmation dialog and no undo — CEO decision, 2026-09-23.** The CEO confirmed on 2026-09-23
+  that both the per-row × and "Clear all" act immediately, with no confirm step and no undo, as built.
+  **Accepted cost:** a mis-click cannot be reverted — a notification dismissed by mistake is gone from
+  that user's bell until retention prunes it. **Mitigations:** the effect is limited to the caller's own
+  bell; nothing is deleted (the event, other users' bells and the audit history are untouched); and
+  "Clear all" is bounded by `upTo`, so it can never take a notification the user has not seen. A confirm
+  step would tax the common case to guard a low-stakes one.
+- **Optimistic.** The rows leave the list at once — for "Clear all", exactly the cached rows at or before
+  `upTo`, the same set the server dismisses — and the badge drops by the unread ones removed; a failure
+  rolls both back and shows an error toast. On success the badge takes the response's `unread` (no count
+  refetch) and the list is reconciled with the server.
 
 ### Amendment consequences
 
@@ -491,8 +504,10 @@ regardless of `dismissedAt`. A dismissed notification is forgotten on the same s
   existing visibility gate.
 - **Negative / trade-offs (accepted):** no "undo" or "show dismissed" view in v1 — a dismissed row is
   hidden for good from that user's bell until retention prunes it (it stays in the database and in every
-  other user's bell). Dismiss-all takes a snapshot of the visible set; a notification that arrives while it
-  runs is not dismissed.
+  other user's bell); a mis-click cannot be reverted (§D, CEO decision 2026-09-23). "Clear all" is
+  bounded by `upTo`, so a notification that arrived after the bell loaded, or while the request runs, is
+  not dismissed. The bound is a time, not a list of ids, so visible rows older than the loaded page (the
+  bell loads the newest 20) are dismissed too — they predate what the user saw.
 - **Upgrade safety:** existing `notification_reads` rows get `dismissedAt = NULL`, so every existing
   notification stays visible exactly as before until a user dismisses it.
 
