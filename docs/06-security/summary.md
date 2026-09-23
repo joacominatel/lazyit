@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-06-20
+updated: 2026-09-23
 ---
 
 # Security summary
@@ -65,10 +65,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 3 |
+| Medium | 2 |
 | Low | 12 |
 | Info | 0 |
-| **Total open** | **15** |
+| **Total open** | **14** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -77,7 +77,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 | ID | Sev | Module | Title |
 | --- | --- | --- | --- |
-| [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] | 🟠 Medium | users | Last-admin lockout via `PATCH {isActive:false}` (skips `assertNotLastAdmin`) |
 | [[SEC-051-application-url-scheme-guard-port-carveout-bypass\|SEC-051]] | 🟠 Medium | applications | URL `host:port` carve-out accepts `javascript:1/…` → re-opens the SEC-008 XSS class |
 | [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard\|SEC-072]] | 🟠 Medium | assets/import | `AssetSpecsSchema` has no global structural bound + `jsonDeepEqual` has no depth guard — extends SEC-032, now import-reachable |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
@@ -102,6 +101,8 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    escalates to High once a renderer exists.
 3. **SEC-011 ✅ Closed.** Moved to `closed/` (SA coarse-permission escalation fixed).
 4. **SEC-031 ✅ Closed.** Moved to `closed/` (assignment release TOCTOU fixed).
+4. **SEC-021 ✅ Closed.** Moved to `closed/` (deactivating the last active ADMIN now 409s, and the
+   last-admin guard counts only active admins).
 5. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
    A recurring pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach
    nested relations, FK guards don't check for a *live* parent, and `SetNull` only fires on

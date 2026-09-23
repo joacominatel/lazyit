@@ -2,7 +2,7 @@
 id: SEC-021
 title: Last-admin guard bypassed by isActive=false — permanent un-administrable lockout
 severity: medium
-status: open
+status: fixed
 cwe: CWE-1390
 discovered: 2026-06-06
 module: users
@@ -99,3 +99,56 @@ asserting `PATCH {isActive:false}` on the last ADMIN 409s, alongside the existin
 - CWE-1390 (Weak Authentication — here, loss of the recovery path) / CWE-285 (Improper Authorization).
 - ADR-0040 (RBAC + last-admin guard) · INVARIANTS INV-7 (first/last ADMIN) ·
   ADR-0041 (restore does not reactivate).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `5892a13c` (`fix(api): guard deactivation and count only active admins in the last-admin guard (#1319)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-23
+
+### Changes
+- `apps/api/src/users/users.service.ts`: `update` now runs `assertNotLastAdmin(id)` when the PATCH
+  deactivates a currently-active ADMIN (`isActive: false`), in addition to a demotion away from ADMIN —
+  one guard for both power-removing transitions. `assertNotLastAdmin` now counts only live **and active**
+  admins (`role: 'ADMIN', isActive: true`), so an already-deactivated admin no longer satisfies the
+  guard. That closes the class across every path that calls it: deactivation, demotion, and
+  offboard/delete (`remove`).
+- `apps/api/src/users/users.controller.ts`: comment only (the guard now covers deactivation too).
+
+### Tests added
+- `apps/api/src/users/users.service.spec.ts` › `last-admin guard vs isActive (SEC-021)`:
+  - `refuses to deactivate the LAST active ADMIN (409), including yourself`: fails without the fix
+    because `update` wrote `isActive: false` with no guard (the PoC); passes with it.
+  - `refuses to deactivate an admin whose only fellow admin is already inactive (409)`,
+    `refuses to demote an admin whose only fellow admin is inactive (409)` and
+    `refuses to offboard an admin whose only fellow admin is inactive (409)`: fail without the fix
+    because the count included the inactive admin; pass with it.
+  - Controls that pass both before and after: deactivating an admin while another active admin remains
+    is allowed; deactivating a non-admin, or re-sending `isActive: false` for an already-inactive admin,
+    never consults the guard.
+- The existing `refuses to demote the LAST remaining ADMIN (409)` now asserts the `isActive: true`
+  filter on the count.
+
+### Verification
+Against the `origin/dev` service with the new spec: 5 failed / 8 passed in the ADR-0040 guard block.
+With the fix: 13 passed. Full API suite (`node node_modules/.bin/jest`): 174 suites, 2918 tests passed.
+`tsc --noEmit` green for shared, api, web and agent; changed-files eslint clean.
+
+### Residual risk
+- **No self-deactivation guard.** The finding also suggested forbidding an admin from deactivating
+  themselves. Not added: the last-admin guard alone closes the lockout (a sole active admin gets a 409
+  on themselves too, and with a second active admin the change is recoverable), while ADR-0040's
+  addendum and the Manual both state that self-edits other than the role stay allowed. Adding it would
+  reverse a recorded decision.
+- **Directory sync offboard is unguarded.** `DirectoryReconcileService.offboard` sets `isActive=false`
+  on an AD-sourced person who disappeared from the directory, with no last-admin check. It only matters
+  when a directory person was promoted to a login account, then to ADMIN, and is the last active admin.
+  Guarding it is a product call (keep a departed person's admin access vs. lock the instance), so it is
+  left for a decision rather than folded into this fix.
+- **Instances already locked out** stay locked out after the update: no admin can authenticate, and
+  `POST /config/setup` stays closed because it counts ADMIN rows regardless of `isActive` (correctly —
+  opening it would let anyone claim admin). Recovery is a direct DB update that sets `isActive = true`
+  on an ADMIN row. The existing CLIs (`set-role`, `reset-admin-password`) do not reactivate.
+- The check-then-act window is unchanged: the same bounded race ADR-0040 already accepts.
+
