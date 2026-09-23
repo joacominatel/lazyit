@@ -1,0 +1,11 @@
+{
+  "launcher": {
+    "open": "Open the AI assistant",
+    "close": "Close the AI assistant"
+  },
+  "panel": {
+    "title": "AI assistant",
+    "close": "Close",
+    "placeholder": "The assistant is not available in this version yet."
+  }
+}

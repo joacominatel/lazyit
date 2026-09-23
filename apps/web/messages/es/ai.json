@@ -1,0 +1,11 @@
+{
+  "launcher": {
+    "open": "Abrir el asistente de IA",
+    "close": "Cerrar el asistente de IA"
+  },
+  "panel": {
+    "title": "Asistente de IA",
+    "close": "Cerrar",
+    "placeholder": "El asistente todavía no está disponible en esta versión."
+  }
+}

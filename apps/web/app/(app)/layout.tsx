@@ -1,6 +1,9 @@
 import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { AiAssistantRoot } from "@/components/ai/ai-assistant-root";
+import { AiChatLauncher } from "@/components/ai/ai-chat-launcher";
+import { AiChatPanelSlot } from "@/components/ai/ai-chat-panel-slot";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { GlobalSearch } from "@/components/global-search";
 import { MobileNav } from "@/components/mobile-nav";
@@ -47,36 +50,48 @@ export default async function AppLayout({
         own `secret:read` access gate; it no longer needs to mount the provider itself.
       */}
       <AppSecretProvider>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 items-center gap-2 border-b border-border px-4">
-            <MobileNav />
-            <GlobalSearch />
-            <div className="ml-auto flex items-center gap-2">
-              <ModeBanner />
-              {/* In-app notification bell (ADR-0056, amended #453) — rendered for all
-                  authenticated humans; the API scopes feed visibility per recipient (a
-                  non-admin sees only their own targeted rows, e.g. the vault-setup nudge). */}
-              <NotificationBell />
-              <ThemeToggle />
-              <UserMenu />
+        {/*
+          AI assistant (ADR-0097): the root adds no element, so the inner column and the panel slot stay
+          direct children of the flex row — the slot docks there at `xl`. Launcher and slot render
+          nothing until `GET /ai/status` says the caller may use the chat (fails closed: loading, errors
+          and a 404 from an older API all read as off). Mounted here, not in template.tsx, so an open
+          panel survives navigation.
+        */}
+        <AiAssistantRoot>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header className="flex h-14 items-center gap-2 border-b border-border px-4">
+              <MobileNav />
+              <GlobalSearch />
+              <div className="ml-auto flex items-center gap-2">
+                {/* First in the right-aligned cluster, so its late appearance moves nothing beside it. */}
+                <AiChatLauncher />
+                <ModeBanner />
+                {/* In-app notification bell (ADR-0056, amended #453) — rendered for all
+                    authenticated humans; the API scopes feed visibility per recipient (a
+                    non-admin sees only their own targeted rows, e.g. the vault-setup nudge). */}
+                <NotificationBell />
+                <ThemeToggle />
+                <UserMenu />
+              </div>
+            </header>
+            {/* Syncs Auth.js access token into the client-side store so apiFetch sends Bearer automatically. */}
+            <SessionTokenSync />
+            {/* Layout-level breadcrumb bar: route-driven, renders nothing on top-level
+                pages (e.g. /dashboard). Retires the per-page "Back to X" buttons.
+                `data-app-chrome` lets the print stylesheet strip it when a print-document
+                (e.g. the Reports/Informes table) owns the page. */}
+            <div
+              data-app-chrome
+              className="border-b border-border px-4 py-2 empty:hidden md:px-6"
+            >
+              <Breadcrumb />
             </div>
-          </header>
-          {/* Syncs Auth.js access token into the client-side store so apiFetch sends Bearer automatically. */}
-          <SessionTokenSync />
-          {/* Layout-level breadcrumb bar: route-driven, renders nothing on top-level
-              pages (e.g. /dashboard). Retires the per-page "Back to X" buttons.
-              `data-app-chrome` lets the print stylesheet strip it when a print-document
-              (e.g. the Reports/Informes table) owns the page. */}
-          <div
-            data-app-chrome
-            className="border-b border-border px-4 py-2 empty:hidden md:px-6"
-          >
-            <Breadcrumb />
+            <main id="main-content" className="flex-1 p-4 md:p-6">
+              {children}
+            </main>
           </div>
-          <main id="main-content" className="flex-1 p-4 md:p-6">
-            {children}
-          </main>
-        </div>
+          <AiChatPanelSlot />
+        </AiAssistantRoot>
       </AppSecretProvider>
     </div>
   );
