@@ -9,6 +9,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { CardContent, CardFooter } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
   FieldGroup,
@@ -24,12 +25,18 @@ import { Input } from "@/components/ui/input";
  * shows ONE generic "invalid credentials" message inline (the backend returns a uniform 401 — no
  * enumeration, so the UI must not distinguish "unknown user" from "wrong password"). On success we push
  * to the same-origin `destination` the server already sanitized (open-redirect guard, #495).
+ *
+ * "Keep me signed in" (#1307, ADR-0086 §8) is unchecked by default. Checked, the API mints a session with
+ * no time-based expiry, so a warning appears beside it while it is checked: the risk only exists once the
+ * user opts in, and a warning shown on every sign-in would soon go unread. It is posted as the string
+ * `"true"`/`"false"` (a form field); `authorize` in auth.ts converts it to the contract's boolean.
  */
 export function LocalLoginForm({ destination }: { destination: string }) {
   const t = useTranslations("auth");
   const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState(false);
   const [pending, setPending] = useState(false);
 
@@ -41,6 +48,7 @@ export function LocalLoginForm({ destination }: { destination: string }) {
       const result = await signIn("credentials", {
         identifier,
         password,
+        rememberMe: rememberMe ? "true" : "false",
         redirect: false,
       });
       if (!result || result.error) {
@@ -107,15 +115,40 @@ export function LocalLoginForm({ destination }: { destination: string }) {
           </Field>
         </FieldGroup>
 
-        {/* Self-service recovery (ADR-0086 §F4b) — local mode only; this form only mounts in local mode. */}
-        <div className="text-right">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <Field orientation="horizontal" className="w-auto">
+            <Checkbox
+              id="rememberMe"
+              checked={rememberMe}
+              onCheckedChange={(checked) => setRememberMe(checked === true)}
+              aria-describedby={rememberMe ? "rememberMe-warning" : undefined}
+            />
+            <FieldLabel htmlFor="rememberMe" className="font-normal">
+              {t("login.rememberMeLabel")}
+            </FieldLabel>
+          </Field>
+          {/* Self-service recovery (ADR-0086 §F4b) — local mode only; this form only mounts in local mode. */}
           <Link
             href="/forgot-password"
-            className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            className="ml-auto text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
           >
             {t("login.forgotPassword")}
           </Link>
         </div>
+
+        {rememberMe && (
+          <div
+            id="rememberMe-warning"
+            role="status"
+            className="flex gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm"
+          >
+            <ExclamationTriangleIcon
+              className="size-5 shrink-0 text-warning-text"
+              aria-hidden="true"
+            />
+            <p className="text-foreground">{t("login.rememberMeWarning")}</p>
+          </div>
+        )}
       </CardContent>
       <CardFooter>
         <Button type="submit" className="w-full" disabled={pending}>

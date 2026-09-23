@@ -81,6 +81,66 @@ describe("cookie lifetime", () => {
   });
 });
 
+describe("Credentials authorize", () => {
+  const authorize = (raw: Record<string, unknown>) => {
+    const provider = config().providers.find((p) => p.id === "credentials");
+    if (!provider?.authorize) throw new Error("no credentials provider");
+    return provider.authorize(raw);
+  };
+
+  const loginResponse = (expiresAt: number | null) => ({
+    token: "local-token",
+    expiresAt,
+    user: {
+      id: "11111111-1111-4111-8111-111111111111",
+      email: "alice@example.com",
+      firstName: "Alice",
+      lastName: "Smith",
+      username: "alice",
+      role: "MEMBER",
+    },
+  });
+
+  /** Answer `POST /auth/login` with `response` and record what was sent. */
+  function stubLogin(response: unknown): Array<{ url: string; body: unknown }> {
+    const sent: Array<{ url: string; body: unknown }> = [];
+    fetchImpl = (input, init) => {
+      sent.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      return Promise.resolve(Response.json(response));
+    };
+    return sent;
+  }
+
+  test('maps the checkbox string "true" to rememberMe: true and forwards it to the API', async () => {
+    const sent = stubLogin(loginResponse(null));
+    const user = await authorize({
+      identifier: "alice",
+      password: "pw",
+      rememberMe: "true",
+      csrfToken: "ignored",
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.url.endsWith("/auth/login")).toBe(true);
+    expect(sent[0]?.body).toEqual({ identifier: "alice", password: "pw", rememberMe: true });
+    expect(user).toMatchObject({ accessToken: "local-token", expiresAt: null });
+  });
+
+  test('"false", garbage or a missing value all fall back to the default 12h session', async () => {
+    for (const rememberMe of ["false", "on", "1", undefined]) {
+      const sent = stubLogin(loginResponse(1_900_000_000));
+      const user = await authorize({ identifier: "alice", password: "pw", rememberMe });
+      expect(sent[0]?.body).toMatchObject({ rememberMe: false });
+      expect(user).toMatchObject({ expiresAt: 1_900_000_000 });
+    }
+  });
+
+  test("invalid credentials never reach the API", async () => {
+    const sent = stubLogin(loginResponse(null));
+    expect(await authorize({ identifier: "", password: "pw", rememberMe: "true" })).toBeNull();
+    expect(sent).toHaveLength(0);
+  });
+});
+
 describe("jwt callback — local sessions", () => {
   const signIn = (expiresAt: number | null) =>
     jwt({

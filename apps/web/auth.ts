@@ -126,6 +126,15 @@ const LOCAL_SESSION_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
 const OIDC_SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 /**
+ * The login form posts every field as a string (`application/x-www-form-urlencoded`), but the shared
+ * `LoginRequest.rememberMe` is a strict boolean. Only an explicit `"true"` (or a real `true`) opts in;
+ * anything else — absent, `"false"`, garbage — keeps the default 12h session (#1307).
+ */
+function parseRememberMe(raw: unknown): boolean {
+  return raw === true || raw === "true";
+}
+
+/**
  * Whether the session cookie carries the `Secure` flag / `__Secure-` prefix (ADR-0086 §6, security).
  *
  * Auth.js defaults this to `NODE_ENV === "production"`. That default is WRONG for a self-hosted
@@ -329,10 +338,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         identifier: { label: "Email or username", type: "text" },
         password: { label: "Password", type: "password" },
+        rememberMe: { label: "Keep me signed in", type: "checkbox" },
       },
       async authorize(rawCredentials) {
         // Validate against the SHARED login contract before touching the network (never trust the form).
-        const parsed = LoginRequestSchema.safeParse(rawCredentials);
+        // `rememberMe` arrives as a form string and is converted to the contract's boolean first.
+        const parsed = LoginRequestSchema.safeParse({
+          identifier: rawCredentials?.identifier,
+          password: rawCredentials?.password,
+          rememberMe: parseRememberMe(rawCredentials?.rememberMe),
+        });
         if (!parsed.success) return null;
         try {
           const result = await apiFetch<LoginResponse>("/auth/login", {
