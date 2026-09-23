@@ -7,7 +7,13 @@ import {
   AiServiceAccountSettingsSchema,
   AiSettingsSchema,
   AiStatusSchema,
+  McpClientAllowlistAddedSchema,
+  McpClientAllowlistEntrySchema,
+  McpClientAllowlistMatchSchema,
+  McpClientAllowlistRemovedDefaultsSchema,
   UpdateAiSettingsSchema,
+  resolveMcpClientAllowlist,
+  type McpClientAllowlistEntry,
 } from "./ai-settings";
 
 // AI settings, status and per-SA access (ADR-0097 decisions 1, 4, 7). The most important guard here is
@@ -29,6 +35,9 @@ const baseUpdate = {
   retentionDays: 90,
   approvalTtlMinutes: 30,
   mcpEnabled: false,
+  mcpClientAllowlistAdded: [],
+  mcpClientAllowlistRemovedDefaults: [],
+  mcpAllowAnyHttpsClient: false,
 } as const;
 
 describe("AiSettings read shape is write-only for the key", () => {
@@ -187,5 +196,115 @@ describe("Per-service-account AI access", () => {
       AiServiceAccountSettingsSchema.safeParse({ access: "read-write", maxMutationsPerRun: 0 })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("MCP client allowlist (ADR-0097 decision 13)", () => {
+  const claudeCode: McpClientAllowlistEntry = {
+    id: "claude-code",
+    label: "Claude Code",
+    match: { kind: "cimd_url", url: "https://claude-code.example.com/client-metadata.json" },
+  };
+  const cursor: McpClientAllowlistEntry = {
+    id: "cursor",
+    label: "Cursor",
+    match: { kind: "redirect_uri", pattern: "https://cursor.example.com/oauth/callback" },
+  };
+
+  test("a match is either a CIMD URL or a redirect-URI pattern; unknown kinds are rejected", () => {
+    expect(McpClientAllowlistMatchSchema.safeParse(claudeCode.match).success).toBe(true);
+    expect(
+      McpClientAllowlistMatchSchema.safeParse({
+        kind: "redirect_uri",
+        pattern: "https://chat.example.com/oauth/redirect",
+      }).success,
+    ).toBe(true);
+    expect(
+      McpClientAllowlistMatchSchema.safeParse({ kind: "client_name", name: "Claude Code" }).success,
+    ).toBe(false);
+  });
+
+  test("an entry can never match on the client name", () => {
+    expect(
+      McpClientAllowlistEntrySchema.safeParse({
+        id: "fake",
+        label: "Claude Code",
+        match: { kind: "client_name", value: "Claude Code" },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("a CIMD client id must be https", () => {
+    expect(
+      McpClientAllowlistMatchSchema.safeParse({ kind: "cimd_url", url: "http://example.com/c.json" })
+        .success,
+    ).toBe(false);
+  });
+
+  test("a redirect pattern must be https, or plain http only on a loopback address", () => {
+    for (const pattern of ["http://127.0.0.1/callback", "http://localhost:33418/cb", "http://[::1]/cb"]) {
+      expect(McpClientAllowlistMatchSchema.safeParse({ kind: "redirect_uri", pattern }).success).toBe(
+        true,
+      );
+    }
+    for (const pattern of ["http://evil.example.com/cb", "cursor://x/cb", "http://127.0.0.1.evil.com/cb"]) {
+      expect(McpClientAllowlistMatchSchema.safeParse({ kind: "redirect_uri", pattern }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  test("the admin's entries have unique ids and are bounded", () => {
+    expect(McpClientAllowlistAddedSchema.safeParse([claudeCode, cursor]).success).toBe(true);
+    expect(McpClientAllowlistAddedSchema.safeParse([cursor, cursor]).success).toBe(false);
+    const many = Array.from({ length: 101 }, (_, i) => ({ ...cursor, id: `c${i}` }));
+    expect(McpClientAllowlistAddedSchema.safeParse(many).success).toBe(false);
+  });
+
+  test("removed-default ids are de-duplicated", () => {
+    expect(McpClientAllowlistRemovedDefaultsSchema.parse(["cursor", "cursor"])).toEqual(["cursor"]);
+  });
+
+  test("the settings read drops an entry this build cannot parse instead of failing", () => {
+    const parsed = AiSettingsSchema.parse({
+      ...baseUpdate,
+      apiKeySet: false,
+      keyConfigured: false,
+      disclosureAcknowledgedAt: null,
+      verifiedAt: null,
+      updatedAt: null,
+      mcpClientAllowlistAdded: [cursor, { id: "newer", label: "x", match: { kind: "spiffe" } }],
+    });
+    expect(parsed.mcpClientAllowlistAdded).toEqual([cursor]);
+  });
+
+  test("the any-https-client policy is off by default", () => {
+    expect(AI_SETTINGS_DEFAULTS.mcpAllowAnyHttpsClient).toBe(false);
+  });
+
+  test("the effective list is the defaults minus the removed ones, plus the admin's entries", () => {
+    const zed: McpClientAllowlistEntry = {
+      id: "zed",
+      label: "Zed",
+      match: { kind: "redirect_uri", pattern: "http://127.0.0.1/callback" },
+    };
+    const internal: McpClientAllowlistEntry = {
+      id: "internal-agent",
+      label: "Our agent",
+      match: { kind: "cimd_url", url: "https://agent.example.com/client.json" },
+    };
+    expect(resolveMcpClientAllowlist([claudeCode, cursor, zed], [internal], ["cursor"])).toEqual([
+      claudeCode,
+      zed,
+      internal,
+    ]);
+  });
+
+  test("an admin entry cannot overwrite a default with the same id", () => {
+    const hijack: McpClientAllowlistEntry = {
+      ...claudeCode,
+      match: { kind: "cimd_url", url: "https://attacker.example.com/client.json" },
+    };
+    expect(resolveMcpClientAllowlist([claudeCode], [hijack], [])).toEqual([claudeCode]);
   });
 });

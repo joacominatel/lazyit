@@ -24,6 +24,108 @@ export const AI_RETENTION_DAYS_MAX = 3650;
 /** The admin addendum to the frozen system prompt is capped (provider-and-runtime.md §7). */
 export const AI_INSTRUCTIONS_MAX_LENGTH = 4000;
 
+/* ──────────────────────────────────────────────────────────────────────────────────────────────
+ * MCP client allowlist (ADR-0097 decision 13)
+ *
+ * Which OAuth clients may connect over MCP. The curated defaults (Claude Code, Codex, Cursor, …) live in
+ * code and ship with the authorization server; `ai_settings` stores only an OVERLAY on them — the
+ * admin's own entries and the ids of the defaults the admin removed — so a later release can correct a
+ * default's identifier without overwriting what the admin chose. A client is matched on its CIMD
+ * `client_id` URL or a redirect-URI pattern, NEVER on its self-declared `client_name`.
+ * ────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** Upper bound on the admin's own entries and on the removed-default ids. */
+export const MCP_CLIENT_ALLOWLIST_MAX_ENTRIES = 100;
+
+/** A stable entry id: a curated default's key, or the id the API assigns to an admin entry. */
+export const McpClientAllowlistEntryIdSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9._-]{0,99}$/, "Allowlist ids are lower-case letters, digits, '.', '_' or '-'");
+
+const HTTPS_URL = /^https:\/\/\S+$/i;
+const LOOPBACK_HTTP_URL = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])([:/]\S*)?$/i;
+
+/**
+ * How an entry recognizes a client, discriminated on `kind`:
+ *   - `cimd_url`     — the client's https Client ID Metadata Document URL (its `client_id`).
+ *   - `redirect_uri` — a redirect-URI pattern: an https URI, or a loopback `http://` URI (the only
+ *     plain-http redirects OAuth allows). The matching rules are the authorization server's.
+ */
+export const McpClientAllowlistMatchSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("cimd_url"),
+    url: z.string().trim().max(2048).regex(HTTPS_URL, "A CIMD client id must be an https:// URL"),
+  }),
+  z.object({
+    kind: z.literal("redirect_uri"),
+    pattern: z
+      .string()
+      .trim()
+      .max(2048)
+      .refine(
+        (value) => HTTPS_URL.test(value) || LOOPBACK_HTTP_URL.test(value),
+        "A redirect URI must be https://, or http:// on a loopback address",
+      ),
+  }),
+]);
+export type McpClientAllowlistMatch = z.infer<typeof McpClientAllowlistMatchSchema>;
+
+/** One allowlist entry. `label` is the operator's name for it; it never takes part in matching. */
+export const McpClientAllowlistEntrySchema = z.object({
+  id: McpClientAllowlistEntryIdSchema,
+  label: z.string().trim().min(1).max(120),
+  match: McpClientAllowlistMatchSchema,
+});
+export type McpClientAllowlistEntry = z.infer<typeof McpClientAllowlistEntrySchema>;
+
+const hasUniqueIds = (ids: readonly string[]) => new Set(ids).size === ids.length;
+
+/** The admin's own entries, as written (`ai_settings.mcpClientAllowlistAdded`). Ids are unique. */
+export const McpClientAllowlistAddedSchema = z
+  .array(McpClientAllowlistEntrySchema)
+  .max(MCP_CLIENT_ALLOWLIST_MAX_ENTRIES)
+  .refine((entries) => hasUniqueIds(entries.map((entry) => entry.id)), "Allowlist ids must be unique");
+
+/** The ids of the curated defaults the admin removed (`ai_settings.mcpClientAllowlistRemovedDefaults`). */
+export const McpClientAllowlistRemovedDefaultsSchema = z
+  .array(McpClientAllowlistEntryIdSchema)
+  .max(MCP_CLIENT_ALLOWLIST_MAX_ENTRIES)
+  .transform((ids) => [...new Set(ids)]);
+
+/**
+ * The READ-TOLERANT form of the admin's entries: an entry this build cannot parse (a newer match kind)
+ * is dropped instead of failing the whole settings read.
+ */
+export const McpClientAllowlistAddedReadSchema = z
+  .array(z.unknown())
+  .transform((items) =>
+    items.flatMap((item) => {
+      const parsed = McpClientAllowlistEntrySchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  );
+
+/**
+ * The EFFECTIVE allowlist: the curated defaults minus the removed ids, then the admin's entries. An
+ * admin entry whose id collides with a default already in the list is ignored, so the overlay can never
+ * silently rewrite a default — the admin removes it and adds their own instead.
+ */
+export function resolveMcpClientAllowlist(
+  defaults: readonly McpClientAllowlistEntry[],
+  added: readonly McpClientAllowlistEntry[],
+  removedDefaults: readonly string[],
+): McpClientAllowlistEntry[] {
+  const removed = new Set(removedDefaults);
+  const effective = defaults.filter((entry) => !removed.has(entry.id));
+  const ids = new Set(effective.map((entry) => entry.id));
+  for (const entry of added) {
+    if (ids.has(entry.id)) continue;
+    ids.add(entry.id);
+    effective.push(entry);
+  }
+  return effective;
+}
+
 /**
  * The defaults an absent settings row reads as. They mirror the column defaults of the `ai_settings`
  * table, so "no row" and "a row nobody edited" behave the same.
@@ -38,6 +140,9 @@ export const AI_SETTINGS_DEFAULTS = {
   approvalTtlMinutes: 30,
   mcpEnabled: false,
   allowPrivateNetwork: false,
+  mcpClientAllowlistAdded: [],
+  mcpClientAllowlistRemovedDefaults: [],
+  mcpAllowAnyHttpsClient: false,
 } as const;
 
 /**
@@ -72,6 +177,12 @@ export const AiSettingsSchema = z.object({
   approvalTtlMinutes: int4({ min: 1 }),
   /** The independent MCP switch — usable without an LLM provider (CEO, round 2). */
   mcpEnabled: z.boolean(),
+  /** The admin's own MCP allowlist entries (the overlay on the curated defaults). */
+  mcpClientAllowlistAdded: McpClientAllowlistAddedReadSchema,
+  /** The ids of the curated defaults the admin removed. */
+  mcpClientAllowlistRemovedDefaults: z.array(z.string()),
+  /** Accept any client with https (non-loopback) redirect URIs; the consent screen warns. */
+  mcpAllowAnyHttpsClient: z.boolean(),
   /** When an admin acknowledged the egress disclosure; required before the first enable. */
   disclosureAcknowledgedAt: z.iso.datetime().nullable(),
   /** When the current connection fields last passed a connection test. */
@@ -121,6 +232,9 @@ export const UpdateAiSettingsSchema = z
     retentionDays: int4({ min: AI_RETENTION_DAYS_MIN, max: AI_RETENTION_DAYS_MAX }),
     approvalTtlMinutes: int4({ min: 1 }),
     mcpEnabled: z.boolean(),
+    mcpClientAllowlistAdded: McpClientAllowlistAddedSchema,
+    mcpClientAllowlistRemovedDefaults: McpClientAllowlistRemovedDefaultsSchema,
+    mcpAllowAnyHttpsClient: z.boolean(),
     acknowledgeDisclosure: z.boolean().optional(),
   })
   .refine((value) => !value.allowPrivateNetwork || value.provider === "openai-compatible", {
