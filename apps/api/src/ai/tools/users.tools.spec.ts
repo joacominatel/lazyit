@@ -1,4 +1,4 @@
-import type { INestApplication } from '@nestjs/common';
+import { NotFoundException, type INestApplication } from '@nestjs/common';
 import { APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -44,6 +44,9 @@ import { IDENTITY_PROVIDER } from '../../auth/identity/identity-provider.interfa
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mintToken } from '../../service-accounts/service-account-token';
+import { ApplicationsController } from '../../applications/applications.controller';
+import { ApplicationsService } from '../../applications/applications.service';
+import { ArticlesService } from '../../articles/articles.service';
 import { UsersController } from '../../users/users.controller';
 import { UsersService } from '../../users/users.service';
 import { SearchService } from '../../search/search.service';
@@ -478,6 +481,17 @@ const assignments = {
     ),
   ),
 };
+/** The applications the grants point at; a test flips `isCritical` or removes one (archived → 404). */
+const APP_ID = 'ckapp0000000000000000001';
+let apps: Record<string, { id: string; name: string; isCritical: boolean }>;
+const applications = {
+  findOne: jest.fn((id: string) =>
+    apps[id]
+      ? Promise.resolve({ ...apps[id], deletedAt: null })
+      : Promise.reject(new NotFoundException(`Application ${id} not found`)),
+  ),
+};
+
 const grants = {
   findAll: jest.fn(({ userId }: { userId: string }) =>
     Promise.resolve(GRANTS[userId] ?? []),
@@ -655,6 +669,7 @@ const ROUTES: RouteCase[] = [
 ];
 
 function resetState() {
+  apps = { [APP_ID]: { id: APP_ID, name: 'Payroll', isCritical: false } };
   users = freshUsers();
   history = [];
   invocations = new Map();
@@ -680,7 +695,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       debug: jest.fn(),
     };
     const moduleRef = await Test.createTestingModule({
-      controllers: [UsersController],
+      controllers: [UsersController, ApplicationsController],
       providers: [
         { provide: PrismaService, useValue: prisma },
         {
@@ -713,6 +728,8 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         },
         { provide: AssetAssignmentsService, useValue: assignments },
         { provide: AccessGrantsService, useValue: grants },
+        { provide: ApplicationsService, useValue: applications },
+        { provide: ArticlesService, useValue: {} },
         { provide: AssetHistoryService, useValue: { record: jest.fn() } },
         { provide: WorkflowTriggerService, useValue: {} },
         { provide: IDENTITY_PROVIDER, useValue: idp },
@@ -1777,6 +1794,200 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       );
       expect(result).toMatchObject({ ok: true, mutated: true });
       expect(users.get(ID.viewer)!.deletedAt).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('user_offboard across critical applications (CEO decision, #1349)', () => {
+    const REFUSAL =
+      'This application is critical; do it from the lazyit chat, where it is confirmed with your password.';
+
+    it('chat: a grant on a critical application adds CRITICAL_APPLICATION — the approval needs the password', async () => {
+      apps[APP_ID].isCritical = true;
+      const proposal = await tools.propose(
+        'user_offboard',
+        { user: ID.member },
+        chat(ADMIN),
+      );
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      const preview = proposal.action.preview!;
+      expect(preview.warnings).toContain('CRITICAL_APPLICATION');
+      // The tool leaves it false; core derives it from CRITICAL_APPLICATION.
+      expect(preview.stepUpRequired).toBe(true);
+      expect(preview.changes).toContainEqual({
+        field: 'criticalApplicationAccess',
+        before: 'Payroll',
+        after: 'revoked',
+      });
+      await expect(
+        tools.approve(proposal.action.id, chat(ADMIN)),
+      ).rejects.toMatchObject({ response: { code: 'STEP_UP_REQUIRED' } });
+      expect(users.get(ID.member)!.deletedAt).toBeNull();
+      const approved = await tools.approve(proposal.action.id, chat(ADMIN), {
+        stepUpVerified: true,
+      });
+      expect(approved.status).toBe('SUCCEEDED');
+      expect(users.get(ID.member)!.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('chat: no critical application, no CRITICAL_APPLICATION and no password', async () => {
+      const proposal = await tools.propose(
+        'user_offboard',
+        { user: ID.member },
+        chat(ADMIN),
+      );
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      expect(proposal.action.preview!.warnings).not.toContain(
+        'CRITICAL_APPLICATION',
+      );
+      expect(proposal.action.preview!.stepUpRequired).toBe(false);
+    });
+
+    it('MCP: refused with the standard message before anything is offboarded; a non-critical one runs', async () => {
+      apps[APP_ID].isCritical = true;
+      const refused = await tools.invoke(
+        'user_offboard',
+        { user: ID.member },
+        mcp(ADMIN, ['read', 'write']),
+      );
+      expect(refused).toMatchObject({
+        ok: false,
+        mutated: false,
+        error: { code: 'FORBIDDEN', status: 403, message: REFUSAL },
+      });
+      expect(users.get(ID.member)!.deletedAt).toBeNull();
+      expect(assignments.releaseAllForUser).not.toHaveBeenCalled();
+      expect(prisma.accessGrant.updateMany).not.toHaveBeenCalled();
+      expect(ledger.map((e) => e.event)).toEqual(['ATTEMPTED', 'FAILED']);
+
+      apps[APP_ID].isCritical = false;
+      const ok = await tools.invoke(
+        'user_offboard',
+        { user: ID.member },
+        mcp(ADMIN, ['read', 'write']),
+      );
+      expect(ok).toMatchObject({ ok: true, mutated: true });
+    });
+
+    /** An operator gave MEMBER `user:manage` but not `drop` (ADMIN always holds everything, INV-8). */
+    function memberManagerWithout(drop: Permission) {
+      roleMatrix = {
+        ...DEFAULT_ROLE_PERMISSIONS,
+        MEMBER: [
+          ...DEFAULT_ROLE_PERMISSIONS.MEMBER.filter((p) => p !== drop),
+          'user:manage',
+        ],
+      };
+      resolver.invalidate();
+    }
+
+    afterEach(() => {
+      delete GRANTS[ID.viewer];
+    });
+
+    it('fails closed: an application the caller cannot read, or an archived one, counts as critical', async () => {
+      GRANTS[ID.viewer] = [{ ...GRANTS[ID.member][0], userId: ID.viewer }];
+      memberManagerWithout('application:read');
+      const proposal = await tools.propose(
+        'user_offboard',
+        { user: ID.viewer },
+        chat(MEMBER),
+      );
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      expect(proposal.action.preview).toMatchObject({ stepUpRequired: true });
+      expect(proposal.action.preview!.warnings).toContain(
+        'CRITICAL_APPLICATION',
+      );
+      expect(proposal.action.preview!.changes).toContainEqual({
+        field: 'criticalApplicationAccess',
+        after:
+          'unknown for 1 application(s) you cannot read — treated as critical',
+      });
+      expect(applications.findOne).not.toHaveBeenCalled();
+      const mcpRefused = await tools.invoke(
+        'user_offboard',
+        { user: ID.viewer },
+        mcp(MEMBER, ['read', 'write']),
+      );
+      expect(mcpRefused).toMatchObject({
+        ok: false,
+        error: { code: 'FORBIDDEN', message: REFUSAL },
+      });
+      expect(users.get(ID.viewer)!.deletedAt).toBeNull();
+
+      roleMatrix = { ...DEFAULT_ROLE_PERMISSIONS };
+      resolver.invalidate();
+      delete apps[APP_ID];
+      const archived = await tools.invoke(
+        'user_offboard',
+        { user: ID.member },
+        mcp(ADMIN, ['read', 'write']),
+      );
+      expect(archived).toMatchObject({
+        ok: false,
+        error: { code: 'FORBIDDEN', message: REFUSAL },
+      });
+      expect(users.get(ID.member)!.deletedAt).toBeNull();
+    });
+
+    it('fails closed: grants the caller cannot list count as critical', async () => {
+      memberManagerWithout('accessGrant:read');
+      const proposal = await tools.propose(
+        'user_offboard',
+        { user: ID.viewer },
+        chat(MEMBER),
+      );
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      expect(proposal.action.preview!.warnings).toContain(
+        'CRITICAL_APPLICATION',
+      );
+      expect(proposal.action.preview!.changes).toContainEqual({
+        field: 'criticalApplicationAccess',
+        after:
+          'unknown: you cannot list this person’s grants, so they are treated as critical',
+      });
+      const mcpRefused = await tools.invoke(
+        'user_offboard',
+        { user: ID.viewer },
+        mcp(MEMBER, ['read', 'write']),
+      );
+      expect(mcpRefused).toMatchObject({
+        ok: false,
+        error: { code: 'FORBIDDEN', message: REFUSAL },
+      });
+    });
+  });
+
+  describe('SEC-073 at the tool level (#1350)', () => {
+    it('a headless Service Account with a legacy user:manage row is refused on user_create, like the route', async () => {
+      const result = await tools.invoke(
+        'user_create',
+        { email: 'sa-made@example.com', firstName: 'S', lastName: 'A' },
+        headless(SA_MANAGER),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        mutated: false,
+        error: { code: 'FORBIDDEN', status: 403 },
+      });
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(
+        await viaNetwork(SA_MANAGER, {
+          method: 'create',
+          verb: 'post',
+          url: '/users',
+          shape: {
+            body: {
+              email: 'sa-made@example.com',
+              firstName: 'S',
+              lastName: 'A',
+            },
+          },
+        }),
+      ).toBe(403);
+      // …and the listing never offers it the user writes.
+      expect(
+        (await tools.list(headless(SA_MANAGER))).map((t) => t.name),
+      ).not.toContain('user_create');
     });
   });
 
