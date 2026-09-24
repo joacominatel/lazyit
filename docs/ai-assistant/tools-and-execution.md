@@ -563,41 +563,64 @@ path unit (W2-0, #1315):
   auto-confirm rules reads (v1.1), the canvas bulk reads, the fleet view, agent policy, the `@Res` list,
   `report`, the secret link and the agent binary distribution.
 
-**KB tools as built (W2-8).** `kb.tools.ts` binds only `ArticlesController` handlers; the folder ACL
-(ADR-0060, INV-9) and draft privacy (ADR-0022) stay in `ArticlesService`, and the tools neither filter
-nor widen what it returns. The spec runs the real controller, service and `FolderAccessService` over an
-in-memory Prisma, so a leak through a tool would be a leak in the test.
+**KB tools as built (W2-8).** `kb.tools.ts` binds `ArticlesController` handlers and, for the folder
+shown on a card, `ArticleCategoriesController.findAll`. The folder ACL (ADR-0060, INV-9) and draft
+privacy (ADR-0022) stay in `ArticlesService`, and the tools neither filter nor widen what it returns.
+The spec runs the real controllers, services and `FolderAccessService` over an in-memory Prisma, so a
+leak through a tool would be a leak in the test.
 - `kb_search` (`read`) — input `query`, `folderIds`, `status`, `authorId`, `mine` (people only),
   `assetIds`, `applicationIds`, `detail`, `limit` (default 20, max 50), `offset`; returns
   `{ total, offset, items }` (never a body; `full` adds the excerpt) with `truncated`/`nextOffset`.
 - `kb_get_article` (`read`) — input `article` (id | slug), `contentOffset`, `maxChars` (default 8,000,
-  max 15,000), `detail`; the body is paged by characters with `content.nextOffset`. A folder-hidden
-  article or someone else's draft is the route's 404, identical to a missing one.
+  max 15,000), `detail`. The body is paged by characters **and** by serialized size (11,000 serialized
+  characters per page), so JSON escaping (quotes, backslashes, control characters) never pushes a result
+  past the 20,000-character cap and `content.nextOffset` and the closing delimiter always survive; a page
+  never splits a surrogate pair; `full` metadata is clipped to 1,500 characters. A folder-hidden article
+  or someone else's draft is the route's 404, identical to a missing one.
 - `kb_create_article` (`write`) — always a `DRAFT` authored by the caller; `status` is not an input.
-  Preview: title, folder (a `category` entity value), status, excerpt, slug and the body (clipped).
-- `kb_update_article` (`write`·D) — title, slug, excerpt, the whole body, and `folderId` (a MOVE). A raw
-  id goes straight to the write handler; a slug is resolved through `findOne`/`findBySlug`, so a draft
-  the caller cannot read is `NOT_FOUND` by slug.
+- `kb_update_article` (`write`·D) — title, slug, excerpt, the whole body, and `folderId` (a MOVE).
 - `kb_set_publication` (`write`, idempotent) — `publish` | `unpublish`.
-- Untrusted content: titles, excerpts, bodies and metadata in results are wrapped with `untrusted()`;
-  preview bodies are clipped to 4,000 characters each, before and after.
-- Preview escalation: a preview on **another person's article** (the `article:manage` bypass, T3) is
-  `elevated` and names the article in `untrustedSources`; **every folder move** is `elevated` with
-  `VISIBILITY_CHANGE`, because an ordinary author cannot tell whether the destination is more visible
-  (folder rules are readable only with `settings:manage`, [[0060-kb-folder-access-control]] §9). Neither
-  needs step-up. Other warnings: `PUBLISHES_TO_READERS` (publishing, or editing a published article),
-  `VISIBILITY_CHANGE` (unpublishing). Every write on an existing article carries a precondition on its
-  `updatedAt`.
-- Route behaviour the tools inherit, unchanged: a Service Account is admitted by the guards and refused
-  by the service (R25), so the write tools list for an SA holding `article:write` and answer 403; a
-  member without `article:manage` gets the elevated card for someone else's article and the route's 403
-  at approve; creating into a folder the caller cannot read is still unguarded at the route
-  ([[0060-kb-folder-access-control]] §9, open). Folder labels on the preview need
-  `ArticleCategoriesController.findOne`, which the reference toolset (W2-5) decides — until a KB tool can
-  bind it, the preview carries the folder id only.
+- **One reference rule.** An article reference is an id or a slug, and a cuid-shaped reference is
+  **always** an id — never retried as a slug — in the preview and in `run` alike, so the card and the
+  execution name the same article (a slug planted to equal another article's id cannot redirect a write).
+  A raw id goes straight to the write handler; a slug is resolved through `findOne`/`findBySlug`. A chat
+  approval re-runs the preview, whose precondition must name the same article id, so a slug re-pointed
+  after the card was shown is `STALE`; what remains is the core's TOCTOU window (§9).
+- **What the card shows** (security.md §6.1 chain 4, visibility laundering): the folder **by name** (a
+  `category` entity value with its path as the label) and its **audience** — summarized from the folder's
+  and its ancestors' access rules when the caller may read them (`settings:manage`, #554), from the
+  derived `hasAccessRules` flag if the API exposes it (#1299), and otherwise stated as *unknown to you* —
+  never guessed as public. A create, a publish and a move show the folder and audience; an edit of a
+  published article shows the audience it goes live to. The body is shown **whole**: a body the tool
+  writes is bounded by its input schema to 200,000 characters, the card's own limit; only a legacy body
+  past that is clipped, marked as such, and the approval is elevated.
+- **Refused before a card:** a create or a move into a missing folder (the route's own 400), a move into a
+  folder the caller cannot read (the route's 400, same message), and a **create into a folder the caller
+  cannot read** — `POST /articles` still accepts it ([[0060-kb-folder-access-control]] §9, open), but the
+  assistant does not offer that blind write: the tool refuses it on every channel with a message saying
+  why. The folder read needs `category:read` (held by every default role).
+- **Escalation to `elevated`** (none needs step-up): publishing (`PUBLISHES_TO_READERS`); editing a
+  published article (`PUBLISHES_TO_READERS`); every folder move (`VISIBILITY_CHANGE`, plus
+  `PUBLISHES_TO_READERS` for a published article), because an ordinary author cannot tell whether the
+  destination is more visible; any action on **another person's article** (the `article:manage` bypass,
+  T3), which also names it in `untrustedSources`. Unpublishing your own article is a standard card with
+  `VISIBILITY_CHANGE`. Every write on an existing article carries a precondition on its `updatedAt`.
+- Untrusted content: titles, excerpts, bodies and metadata in results are wrapped with `untrusted()`.
+- Route behaviour the tools inherit, unchanged: a Service Account is admitted by the guards and refused by
+  the service (R25), so the write tools list for an SA holding `article:write` and answer 403.
 - Unexposed with reasons: versions, links, backlinks, aliases and their writes (v1.1), archive and
   restore (v1.1), the attachments list and removal (v1.1), the `.docx` import and binary attachment
   transfer (no file tools).
+- **Follow-ups (recorded by the G2 review, not fixed here):**
+  - `loadOwned` answers 403 for another person's *published* article and 404 for their draft over HTTP —
+    a pre-existing existence signal (a security finding is to be opened);
+  - entity-ref labels (article titles) and author names in results are not wrapped as untrusted;
+  - the folder is an entity of type `category`, which the web cannot tell apart from the other
+    category kinds (no `articleFolder` entity type yet);
+  - a member without `article:manage` gets the elevated card for someone else's published article, and
+    the route's 403 at approve — the core dry-check sees only `article:write`;
+  - the folder audience for a non-`settings:manage` caller stays *unknown* until the derived
+    restricted flag (#1299) lands.
 
 ### 8.2 Descriptor
 
