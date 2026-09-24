@@ -3,7 +3,7 @@ title: "AI Assistant — Security & Threat Model"
 tags: [ai-assistant, security, threat-model, prompt-injection, mcp, oauth, ssrf, secrets, audit, privacy]
 status: draft
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # AI Assistant — Security & Threat Model
@@ -566,6 +566,15 @@ the **exfiltration leg** and the **consequential-action leg**.
 - **Backups.** Losing `AI_SECRET_KEY` means re-entering the provider key. It is cheap to recover and
   not a disaster-recovery linchpin. Record it in [[backups]].
 - **Permissions.** Only `settings:manage`, plus `ServicePrincipalForbiddenGuard`. Never a tool (T-38).
+- **As built (W2-2, #1315).** The read shape carries `apiKeySet` only — no last-4 hint. Without
+  `AI_SECRET_KEY` the API boots, a key cannot be stored (409), and a key-bearing provider cannot be
+  enabled (409); a keyless OpenAI-compatible server can (there is nothing to protect). A stored key that
+  no longer decrypts makes the assistant unavailable, not an error. The envelope binds its purpose as GCM
+  additional data, and the connection test never sends the saved key to a changed provider or base URL.
+  The config audit records only what happened to the key (`set` / `cleared` /
+  `cleared-destination-changed`). A base URL may not carry userinfo, a query or a fragment, and the
+  save is a conditional write, so concurrent saves cannot pair the stored key with another destination
+  (review of PR #1338, F1/F5). → [[ai-assistant/provider-and-runtime|provider]] §9.1.
 
 ### 6.6 Headless SA runs
 

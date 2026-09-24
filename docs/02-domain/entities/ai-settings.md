@@ -3,12 +3,12 @@ title: AiSettings
 tags: [domain, entity, ai-assistant, config, security]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # AiSettings
 
-> 馃煝 implemented (schema) 路 Area: AI assistant 路 see [[0097-ai-assistant-mcp-and-headless-api]] 路
+> 馃煝 implemented (schema; `/config/ai`, the reader port and `/ai/status`, W2-2) 路 Area: AI assistant 路 see [[0097-ai-assistant-mcp-and-headless-api]] 路
 > [[ai-assistant/_synthesis|synthesis]] 搂6
 
 ## Purpose
@@ -29,7 +29,13 @@ switch. It is **off by default** and an admin enables it through the Settings 鈫
   axis `AI_SECRET_KEY`; the read shape exposes only `apiKeySet`. Changing `provider` or `baseUrl` clears
   it (destination binding).
 - **Enabling** needs a passing connection test (`verifiedAt`) and the acknowledged egress disclosure
-  (`disclosureAcknowledgedAt`, also recorded in [[ai-config-audit-log]]).
+  (`disclosureAcknowledgedAt`, also recorded in [[ai-config-audit-log]]). As built: any change to the
+  connection fields (`provider`, `model`, `baseUrl`, the key, `allowPrivateNetwork`, `effort`,
+  `providerOptions`) clears `verifiedAt`, and `enabled: true` then runs the test inline before saving.
+  A provider that takes a key, or any stored key, needs a usable `AI_SECRET_KEY` to enable; a keyless
+  OpenAI-compatible server does not. Never enabled in shim mode. The acknowledgement is recorded once.
+- **A plain `http://` base URL** is accepted only for the OpenAI-compatible provider with
+  `allowPrivateNetwork` on (INV-AI-7); the egress guard still decides at call time.
 - **`mcpEnabled` is independent** of the provider: MCP works without an LLM (CEO, round 2).
 - **The MCP client allowlist is an overlay** ([[0097-ai-assistant-mcp-and-headless-api]] decision 13).
   The curated defaults (the usual clients) live in code; this row stores only the admin's own entries

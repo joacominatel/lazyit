@@ -3,7 +3,7 @@ title: "AI Assistant — Provider layer, agent runtime, configuration lifecycle,
 tags: [design, ai-assistant, backend, llm, providers, agent-loop, bullmq, sse, infra, security]
 status: draft
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # AI Assistant — Provider layer, agent runtime, configuration lifecycle, infrastructure
@@ -417,10 +417,13 @@ apps/api/src/ai/
 ├── ai.constants.ts                   # queue/job names, limits, AI_PROMPT_VERSION
 ├── settings/
 │   ├── ai-settings.controller.ts     # GET/PUT /config/ai · POST /config/ai/test · POST /config/ai/models
-│   ├── ai-settings.service.ts        # singleton read/upsert, write-only key, enable gate
+│   ├── ai-settings.service.ts        # singleton read/upsert, write-only key, enable gate, config audit; AI_SETTINGS_READER
+│   ├── ai-settings.constants.ts      # AI_SECRET_KEY name, audit actions, test bounds
+│   ├── ai-provider-override.ts       # the connection test's draft, answered by the reader (ALS)
 │   └── ai-connection-tester.ts       # auth → model → tool-calling round trip
 ├── status/
-│   └── ai-status.controller.ts       # GET /ai/status (any authenticated principal)
+│   ├── ai-status.controller.ts       # GET /ai/status (any authenticated principal)
+│   └── ai-status.service.ts          # per-caller availability, MCP auth mode
 ├── providers/                        # THE EXTENSION POINT — only place that imports `ai` / `@ai-sdk/*`
 │   ├── provider.types.ts             # LlmProviderDefinition, ResolvedAiConfig, ModelInfo, AiErrorClass
 │   ├── provider.registry.ts          # static map kind → definition (one line per provider)
@@ -783,11 +786,76 @@ Invariants [C]:
   catches local models that do not support tools.
 - `POST /config/ai/models` lists models for a draft or saved config.
 
+> **As built (W2-2, #1315)** — `apps/api/src/ai/settings/`, `apps/api/src/common/crypto/envelope-cipher.ts`:
+>
+> - **Gate.** `settings:manage` at class level plus `ServicePrincipalForbiddenGuard`: a service account
+>   is refused even if it holds the permission (ADR-0048). The key never appears in a response, an
+>   error, a log line or the audit.
+> - **Key custody.** `EnvelopeCipher` is a generic AES-256-GCM envelope keyed by an env var name (the
+>   `smtp.crypto.ts` / `directory.crypto.ts` shape, generalized; SMTP and directory are not migrated).
+>   The key is read lazily on every call, so the API boots without it; the envelope binds the purpose
+>   `ai_settings.apiKey` as GCM additional data. A key write without a usable `AI_SECRET_KEY` → 409.
+> - **Destination binding** also applies to the test: `POST /config/ai/test` uses the SAVED key only
+>   while the draft keeps the saved provider and base URL; otherwise only an inline key is sent.
+> - **`verifiedAt`** is cleared by any change to a connection field — provider, model, base URL, the
+>   key, `allowPrivateNetwork`, `effort` or `providerOptions`. `PUT` never stamps it for a disabled
+>   save; `enabled: true` runs the inline test when it is null and stamps it on a pass. `POST /test`
+>   persists nothing.
+> - **Enable gate order** (a refused save persists nothing): shim mode → 409; no disclosure → 422
+>   `DISCLOSURE_REQUIRED`; no provider/model (or base URL for OpenAI-compatible) → 422
+>   `PROVIDER_NOT_CONFIGURED`; a provider that takes a key, or any stored key, without a usable
+>   `AI_SECRET_KEY` → 409; no key for a key-requiring provider → 422 `API_KEY_REQUIRED`; a failing
+>   inline test → 422 `CONNECTION_TEST_FAILED` with `test`. The 422 body is `{ code, message, test? }`.
+> - **Disclosure** is recorded once (`acknowledgeDisclosure: true` while none is stored), with its
+>   author on the row and a `disclosure.acknowledged` audit row.
+> - **Base URL checks beyond zod** (400, on save and on test): no userinfo, query string or fragment;
+>   `http://` only for `openai-compatible` with `allowPrivateNetwork`, and never to a public IP literal;
+>   loopback, link-local, metadata and reserved IP literals and `localhost` / `*.localhost` names are
+>   refused for every scheme; a private or ULA literal needs `allowPrivateNetwork`. A **name** cannot be
+>   classified without DNS, so it is saved and the **provider layer's egress guard enforces the
+>   resolved-address check at call time** (INV-AI-7; W2-1). Provider options are re-checked per provider.
+> - **Concurrent saves.** The save is a conditional write on the `updatedAt` it read (`updateMany`), and
+>   a first save that races another creation fails on the singleton id; either answers **409** and
+>   writes neither the row nor audit rows. The destination check that decides whether the stored key
+>   survives therefore always sees the row it replaces. No lock is held across the inline test.
+> - **Shim mode.** `POST /config/ai/test` answers 409 without a provider call, and the reader ignores a
+>   test override.
+> - **Allowlist admin surface:** the overlay (`mcpClientAllowlistAdded`, `mcpClientAllowlistRemovedDefaults`,
+>   `mcpAllowAnyHttpsClient`) is saved wholesale through `PUT /config/ai`, validated by the shared
+>   schema (the private-use-scheme amendment included), and read back read-tolerant. The curated
+>   defaults and enforcement at registration/authorize belong to the OAuth units (W2-4/W3-3).
+> - **Connection tester.** One `ChatModelPort.step()` with a dummy `ping` tool. The port names only
+>   `{ provider, modelId }`, so the draft reaches the provider layer through the settings reader: the
+>   step runs inside an `AsyncLocalStorage` override (`ai-provider-override.ts`) and
+>   `resolveProviderConfig()` answers the draft in that async context only. **The provider layer must
+>   therefore resolve its configuration through `AI_SETTINGS_READER` on every `step()`, never cache it.**
+>   `CHAT_MODEL_PORT` is resolved lazily from the container (`ModuleRef`, non-strict) rather than by
+>   importing `AiProvidersModule`, because the provider layer imports `AiSettingsModule` for the reader.
+>   Failures are classified from the thrown error's `code` (a run error code) or `errorClass`
+>   (`AiErrorClass`) and the egress guard's `EgressError`; the message is fixed per code and never
+>   echoes the upstream text. A 60 s deadline aborts the step.
+> - **`POST /config/ai/models`** answers the provider descriptor's `suggestedModel` until the port
+>   gains a listing call (the port has none today); free text stays allowed.
+> - **Reader port.** `AiSettingsModule` binds and exports `AI_SETTINGS_READER` (`useExisting:
+>   AiSettingsService`). `resolveProviderConfig()` is null when disabled, in shim mode, without a known
+>   provider or a model, or when the stored key cannot be decrypted.
+
 **Status** — any authenticated principal:
 
 - `GET /ai/status` returns the reconciled per-caller shape `{ chat: { available }, mcp: { available,
   auth: "oauth" | "personal-token" }, configRevision, retentionDays }` — no secrets
   ([[ai-assistant/_synthesis|synthesis]] §4.5).
+
+> **As built (W2-2)** — `apps/api/src/ai/status/`: `@RequirePermission()` with no arguments, so every
+> authenticated human passes. **Deliberate deviation (CTO, 2026-09-24):** a service account is
+> refused (403) by the RolesGuard's fail-closed rule for ungated routes (INV-SA-2), although the
+> contract reads "any authenticated principal"; a headless script calls `POST /ai/runs` directly and
+> learns availability from its answer. The service still computes an SA's answer from its direct grants
+> should that decision change. `chat.available` asks the reader's `resolveProviderConfig()` — the same
+> check the runtime makes — so a stored key that no longer decrypts reads as unavailable; a
+> key-requiring provider must also have a key. Both are `false` in shim mode. `auth` is `oauth` only when
+> `WEB_ORIGIN` is pinned to `https://`, else `personal-token`. `configRevision` is the row's `updatedAt`
+> (`"0"` with no row); `retentionDays` is sent only while the chat is available to the caller.
 
 **In-app** — `ai:use`; owner only:
 
@@ -874,7 +942,9 @@ Reasoning text is not streamed in v1.
   6. the client reloads.
 - **What "reload" means [C].** The server needs no restart: every run reads `AiSettings` at start
   and re-checks `enabled` at every step boundary. Other users' shells pick the change up on their
-  next `GET /ai/status` (`configRevision` = `updatedAt`).
+  next `GET /ai/status` (`configRevision` = `updatedAt`, `"0"` while no row exists).
+- **No row is created on boot** (as built): the first `PUT /config/ai` creates the singleton; until
+  then every read answers the disabled default.
 - **Modify.** Changing the provider, model, base URL or key while enabled re-runs the inline test
   before persisting. Existing conversations whose pinned provider or model no longer match become
   read-only (adopted by default, §14).
@@ -916,9 +986,12 @@ Reasoning text is not streamed in v1.
 ## 12. Infrastructure and operations impact
 
 - **Env.**
-  - `AI_SECRET_KEY`: optional; AES-256-GCM, 32 bytes (`openssl rand -hex 32`); its own axis; low-DR
-    like `SMTP_SECRET_KEY`. Required only to store an API key (Ollama without a key works without
-    it).
+  - `AI_SECRET_KEY`: optional; AES-256-GCM, 32 bytes (`openssl rand -hex 32`, or base64 of 32 bytes,
+    or a raw 32-character string); its own axis; low-DR like `SMTP_SECRET_KEY`. Required only to store
+    an API key — and so to enable any provider that takes one (Ollama without a key works without it).
+    A malformed value counts as unset. Read on every use, so setting it needs an api restart only for
+    the env to reach the process, never a re-save. Losing or changing it makes the stored key
+    undecryptable: the chat reads as unavailable (never a crash) until an admin re-enters the key.
   - `AI_WORKER_CONCURRENCY`: optional, default 4.
   - The example file ships `AI_SECRET_KEY` **commented out**, so `infra/update.sh` does not
     fail-loud on existing installs (adopted by default, §14). `infra/start.sh` generates it on fresh install and on

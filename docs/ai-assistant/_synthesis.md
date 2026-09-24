@@ -292,7 +292,9 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
   `vscode-insiders`, `windsurf`, `MCP_VENDOR_REDIRECT_SCHEMES`). A private-use redirect is admitted
   **only by an explicit entry** (a curated default or an admin's); `mcpAllowAnyHttpsClient` never admits
   one. Plain `http` off loopback and the browser-interpreted schemes (SEC-051's
-  `BROWSER_INTERPRETED_SCHEMES`: `javascript`, `data`, `file`, `blob`, …) are always refused. The pure
+  `BROWSER_INTERPRETED_SCHEMES`: `javascript`, `data`, `file`, `blob`, …) are always refused, and so is
+  any redirect URI with userinfo (`user@host`) — the host is read from the parsed authority, so
+  `http://localhost:80@evil.com/` is never loopback (PR #1338 review F2). The pure
   helper `isMcpRedirectUriAllowed` in `ai-settings.ts` states the rule for the authorization server.
 
 ### 4.9 Skill distribution (R8)
