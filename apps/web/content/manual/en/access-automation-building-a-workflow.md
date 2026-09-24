@@ -53,8 +53,10 @@ Each API or Webhook step has a **Data mapping**: a list of external fields and t
 takes. A value can be a fixed literal, a single **token** from the grant context, or several tokens
 and text **composed** together. Tokens are inserted from a picker grouped by source:
 
-- **Trigger event**, **Grantee** (email, first name, last name, id), **Application**, **Grant**, and
-  the outputs of earlier **steps**.
+- **Trigger event**, **Grantee** (email, first name, last name, id, employee number, username, and
+  their manager's name and email), **Application**, **Grant**, and the outputs of earlier **steps**.
+  The manager tokens render blank when the person has no manager, or when their manager has been
+  offboarded.
 
 You map by picking a context field, composing one, or — via **Advanced** — editing the raw JSON
 mapping directly. Tokens are written like `{{ grantee.email }}`. Mapping is **values only**: you wire

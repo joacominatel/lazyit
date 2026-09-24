@@ -59,8 +59,10 @@ cada uno. Un valor puede ser un literal fijo, un único **token** del contexto d
 varios tokens y texto **compuestos** juntos. Los tokens se insertan desde un selector agrupado por
 origen:
 
-- **Evento disparador**, **Beneficiario** (correo, nombre, apellido, id), **Aplicación**,
-  **Concesión** y las salidas de pasos anteriores.
+- **Evento disparador**, **Beneficiario** (correo, nombre, apellido, id, legajo, nombre de usuario,
+  y el nombre y correo de su responsable), **Aplicación**, **Concesión** y las salidas de pasos
+  anteriores. Los tokens del responsable quedan vacíos cuando la persona no tiene responsable o
+  cuando su responsable fue desvinculado.
 
 Mapeas eligiendo un campo de contexto, componiéndolo, o — mediante **Avanzado** — editando
 directamente el JSON del mapeo. Los tokens se escriben así: `{{ grantee.email }}`. El mapeo es **solo
