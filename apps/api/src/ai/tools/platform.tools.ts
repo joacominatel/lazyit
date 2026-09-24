@@ -26,7 +26,10 @@ import { WorkflowsController } from '../../workflow-engine/definitions/workflows
 import { WorkflowDryRunController } from '../../workflow-engine/dry-run/workflow-dry-run.controller';
 import { WorkflowRunsController } from '../../workflow-engine/runs/workflow-runs.controller';
 import { ManualTasksController } from '../../workflow-engine/tasks/manual-tasks.controller';
+import { AiConversationsController } from '../conversations/ai-conversations.controller';
 import { unexposed, type AiToolset } from '../core/tool-descriptor';
+import { AiServiceAccountAccessController } from '../headless/ai-service-account-access.controller';
+import { AiRunsController } from '../runs/ai-runs.controller';
 import { AiSettingsController } from '../settings/ai-settings.controller';
 import { AiStatusController } from '../status/ai-status.controller';
 
@@ -122,6 +125,21 @@ export const platformToolset: AiToolset = {
       AI_OWN_SURFACE,
     ),
     unexposed(AiStatusController, ['get'], AI_OWN_SURFACE),
+    unexposed(
+      AiConversationsController,
+      ['create', 'list', 'detail', 'remove', 'send'],
+      AI_OWN_SURFACE,
+    ),
+    unexposed(
+      AiRunsController,
+      ['create', 'get', 'cancel', 'decide', 'stream'],
+      AI_OWN_SURFACE,
+    ),
+    unexposed(
+      AiServiceAccountAccessController,
+      ['get', 'update'],
+      AI_OWN_SURFACE,
+    ),
     unexposed(DirectoryController, ['get', 'update', 'sync'], INSTANCE_CONFIG),
     unexposed(
       AssetTagSchemeController,
