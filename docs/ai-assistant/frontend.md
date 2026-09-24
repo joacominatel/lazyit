@@ -126,7 +126,7 @@ updated: 2026-09-24
 - **(R)** `apps/web/proxy.ts`: unauthenticated visitors of non-public paths are redirected to
   `/login` with `callbackUrl = pathname` — **the query string is dropped**
   (`loginUrl.searchParams.set("callbackUrl", pathname)`). `apps/web/lib/utils/safe-redirect.ts`
-  `safeInternalPath` already accepts a path **with** a query.
+  `safeInternalPath` already accepts a path **with** a query. *(Fixed in W3-9 — §5.8: the query is kept.)*
 - **(R)** `apps/web/app/(auth)/layout.tsx` renders `AuthShell` (wordmark + theme toggle + centered
   column, no app chrome) and does **not** itself require a session.
 - **(R)** `apps/web/next.config.ts` sets `X-Frame-Options: DENY` and
@@ -595,6 +595,60 @@ text.
 - The role editor needs `permissionMeta` copy for `ai:use` and `ai:connect` in both locales or it shows
   a raw key.
 
+### 5.8 As built — `/account/ai` and the consent page (W3-9, #1315)
+
+Code: `apps/web/app/(app)/account/ai/**`, `apps/web/app/(auth)/oauth/authorize/**`,
+`lib/api/endpoints/oauth.ts`, `lib/api/hooks/use-oauth-grants.ts`, `lib/auth/login-callback.ts`,
+`messages/{en,es}/oauth.json`. §5.3 holds, with these concrete choices:
+
+- **Mode detection** (`account/ai/_lib/mcp-snippets.ts` `detectMcpConnectMode`, bun-tested): from
+  `GET /ai/status` `mcp` plus the page's own protocol. `unknown` (loading, error, 404, unrecognized body)
+  offers nothing; `unavailable` (switch off or no `ai:connect`) explains that existing connections are
+  paused; `oauth` adds a warning when the page itself was opened over `http:`; `personal-token` explains
+  *plain HTTP* (OAuth needs HTTPS) or, when the page is on `https:`, that the instance has no HTTPS
+  `WEB_ORIGIN`. Every mode also states what cloud connectors (claude.ai, ChatGPT) need; `oauth` adds the
+  internal-CA note (`NODE_EXTRA_CA_CERTS`).
+- **Install panel** — `account/ai/_components/mcp-install-panel.tsx` `McpInstallPanel({ auth })`, the
+  component Settings → AI embeds. HTTPS: the two marketplace commands (the marketplace name mirrors the
+  API's `marketplaceName`), `/mcp` to sign in, and how to enable auto-update. Every mode: the authenticated
+  zip download (`ORIGIN_UNKNOWN` and 404 explained), unzip commands, `--plugin-dir` for one session.
+  "Other MCP clients": Claude Code (`claude mcp add --transport http`), Cursor (`mcp.json` `mcpServers`),
+  VS Code (`.vscode/mcp.json`; on `lan` a `promptString` password input, so the token is not written to
+  the file), generic. Snippets carry the placeholder `YOUR_PERSONAL_TOKEN`, never a token. Copy works on
+  plain HTTP (legacy `execCommand` fallback).
+- **Connected apps** — one list from `GET /oauth/grants/mine` (it returns both kinds, as an array, not a
+  `Page`); revoke through `DELETE /oauth/grants/:id` for both kinds. Personal tokens: create only in
+  `personal-token` mode with MCP on; expiry 30/90/180/365 (default 90); read or read & write; the token
+  lives only in the dialog's state (never the query cache), the dialog is locked until "I've saved it"
+  (the #813 pattern). The live cap (20) is not in `@lazyit/shared`; the web mirrors it as guidance and the
+  API's 409 is the gate.
+- **User menu** — "AI & connected apps" for `ai:connect` holders whenever `GET /ai/status` succeeds (so an
+  older API hides it), even with MCP off, so paused connections stay revocable. The layout breadcrumb
+  labels the `ai` segment ("AI" / "IA").
+- **Consent page** — a Server Component validates with the session token (`POST /oauth/authorize/validate`)
+  and renders an explanation for every stop: refusal, 404 (no authorization server: `lan` or no HTTPS
+  origin), malformed or repeated parameters, a 401 (→ `/login?expired=1&callbackUrl=<this URL>`), a forced
+  password change (→ `/change-password`). A client-owned `400 { error, redirectTo }` from validate is
+  **offered** as a "Return to <host>" link, never followed automatically. The decision is a browser
+  `fetch` with the Bearer (TanStack mutation; its 403 refusals and step-up codes are handled inline and are
+  never a logout). The page follows a redirect only when `isRedirectToClient` accepts it: same scheme, host
+  and path as the registered `redirect_uri`, no userinfo or fragment, never a script-capable scheme —
+  **custom schemes are allowed** (Cursor registers `cursor://…`), which replaces §5.3's "http/https only".
+  The trust signal is the redirect host in large mono type, then the full URI; `client_uri` is plain
+  unlinked text labelled "not checked". Unverified clients get a warning callout **and** a second
+  confirmation dialog before the approval is sent. `lazyit.admin` is a separate checkbox, never
+  preselected, with a password field; `STEP_UP_UNAVAILABLE` unticks it. Nothing is remembered. Framing is
+  already denied app-wide (`next.config.ts` `frame-ancestors 'none'` + `X-Frame-Options: DENY`, Caddy),
+  so no header change was needed.
+- **`proxy.ts`** — the one-line change: the login redirect is built by `loginCallbackPath(nextUrl)`, which
+  keeps `pathname + search` as `callbackUrl` (bun-tested; `/login` still applies `safeInternalPath`). It
+  adds no OIDC-specific path (#1310).
+
+**Found while building (for the backend lane).** In local mode `POST /auth/logout` bumps the user's
+`sessionEpoch`, and grants snapshot the epoch — so a user who signs out of the web app silently loses
+every OAuth connection **and every personal token**. The Manual states it; whether a browser sign-out
+should end MCP connections is a product call.
+
 ---
 
 ## 6. Permission gating (UI only — the API decides)
@@ -788,8 +842,8 @@ Edits to existing pages (en + es):
 1. **Streaming through Caddy `encode zstd gzip`** — Caddy flushes SSE, but its docs are silent on
    the compressor. Infra must verify, or exclude `text/event-stream` from `encode`. Local
    `next dev` talks to `:3001` directly and would hide it.
-2. **Consent after login is broken today** — `proxy.ts` drops the query from `callbackUrl`, so
-   `/oauth/authorize?…` would lose its OAuth parameters. Must be fixed (auth-sensitive → CEO merge).
+2. ~~**Consent after login is broken today**~~ — fixed in W3-9 (§5.8): `proxy.ts` keeps the query in
+   `callbackUrl` (auth-sensitive → CEO merge).
 3. **Model prose ≠ executed action** — mitigated by rendering the card only from the server preview.
 4. **Prompt-injection exfiltration via markdown images** — mitigated by the chat renderer.
 5. **Unsaved edits lost to AI navigation** — mitigated by D3 + the dirty registry.
