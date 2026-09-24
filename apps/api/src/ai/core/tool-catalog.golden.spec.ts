@@ -55,6 +55,16 @@ const GOLDEN = {
     class: 'read',
     channels: ['CHAT', 'MCP', 'HEADLESS'],
   },
+  // ── interaction (#1388): chat-only, waits on the user; no gate beyond ai:use ──
+  request_input: {
+    route: 'GET /users/me',
+    permissions: [],
+    roles: ['ADMIN', 'MEMBER', 'VIEWER'],
+    humans: true,
+    serviceAccounts: false,
+    class: 'navigate',
+    channels: ['CHAT'],
+  },
   // ── assets + reference (W2-5) ──
   asset_archive: {
     route: 'DELETE /assets/:id',
