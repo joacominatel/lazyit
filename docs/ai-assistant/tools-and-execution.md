@@ -1005,6 +1005,19 @@ resuming the loop with the stored result, the expiry sweeper, and finalizing stu
 The HTTP decision endpoint builds the approve context from the human session (`channel: CHAT`, the
 session's `sessionEpoch`, the run id) and maps the thrown `{ code, message }` exceptions as they are.
 
+As built (W2-3), the runtime side is `ai/runtime/` ([[ai-assistant/provider-and-runtime|provider]] §8.1):
+the loop calls `propose(name, input, ctx, { toolUseId })` for every chat write (reads and navigation go to
+`invoke`; headless writes to `invoke` after the per-run mutation cap), passing `ctx.provenance`
+`{ provider, model }` and `ctx.untrustedSources` (the refs of read results that carried
+`<untrusted_content>` earlier in the run). `AiApprovalService.decide` is what the decision endpoint calls:
+it resolves the invocation by run and tool-use id, verifies the password with
+`LocalCredentialService.verify` (rate-limited per user) when the stored preview requires step-up, and only
+then calls `approve(…, { stepUpVerified: true })`; a missing, wrong or rate-limited password never reaches
+core, so the action stays pending. The sweeper calls `expireDue` (the run ends EXPIRED), `cancel` through
+every terminal transition, and `markOutcomeUnknown` for an `EXECUTING` row whose run died (a crashed run
+is never resumed). Every call of a step — refused, expired, cancelled or interrupted ones included — is
+answered in the step's single tool message.
+
 Scope: each `tool_use` gets its own card; parallel proposals are decided independently. No
 edit-before-approve in v1 — the user rejects and says what to change. **MCP:** no server-side
 confirmation — the client owns it; annotations inform it, and `elevated` tools are listed only under the
@@ -1275,7 +1288,10 @@ model AiActionLog {
 - For the runtime (W2-3): build the system prompt once at conversation creation from the frozen
   `AiToolService.list` output and store `version` as `AiConversation.promptVersion`; prepend
   `buildTurnContext` to each user message; neutralize a literal `<turn_context>` typed by the user the
-  way `untrusted()` neutralizes its delimiter.
+  way `untrusted()` neutralizes its delimiter. As built (W2-3), the built text is stored as the
+  conversation's first `ai_messages` row (`format = lazyit-system-prompt-v1`) and sent unchanged on every
+  step, so a later role, permission or `instructions` change never alters an existing conversation's
+  prompt ([[ai-assistant/provider-and-runtime|provider]] §8.1).
 
 ## 13. Upgrade safety
 
