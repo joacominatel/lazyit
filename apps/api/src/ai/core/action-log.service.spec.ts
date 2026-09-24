@@ -121,16 +121,45 @@ describe('redactInput', () => {
     'authorization',
     'otp',
     'credentials',
+    'pass',
+    'PASS',
+    'pwd',
+    'db_pwd',
+    'auth',
+    'Authorization',
+    'bearer',
+    'bearerToken',
+    'jwt',
+    'accessKey',
+    'aws_access_key_id',
+    'encryptionKey',
+    'encryption-key',
+    'licenseKey',
+    'LICENSE_KEY',
+    'sshKey',
+    'ssh_key',
+    'private_key',
+    'recoveryCode',
+    'recovery-code',
   ])('treats %s as sensitive', (key) => {
     expect(isSensitiveKey(key)).toBe(true);
   });
 
-  it.each(['name', 'assetTag', 'serial', 'email', 'notes', 'keyboardLayout'])(
-    'keeps %s',
-    (key) => {
-      expect(isSensitiveKey(key)).toBe(false);
-    },
-  );
+  it.each([
+    'name',
+    'assetTag',
+    'serial',
+    'email',
+    'notes',
+    'keyboardLayout',
+    'authorId',
+    'author',
+    'passenger',
+    'compassHeading',
+    'spinCount',
+  ])('keeps %s', (key) => {
+    expect(isSensitiveKey(key)).toBe(false);
+  });
 
   it('redacts at any depth, inside arrays, without mutating the input', () => {
     const input = {
@@ -143,6 +172,21 @@ describe('redactInput', () => {
       deep: { a: { b: { secret: REDACTED } } },
     });
     expect(input).toEqual(copy);
+  });
+
+  it('masks credentials embedded in URLs, in any string', () => {
+    expect(
+      redactInput({
+        webhook: 'https://svc:hunter2@hooks.example.com/x?y=1',
+        notes:
+          'repo at git+ssh://deploy@git.example.com/r.git, see https://example.com/a@b',
+        list: ['postgres://app:s3cr3t@db:5432/lazyit'],
+      }),
+    ).toEqual({
+      webhook: `https://${REDACTED}@hooks.example.com/x?y=1`,
+      notes: `repo at git+ssh://${REDACTED}@git.example.com/r.git, see https://example.com/a@b`,
+      list: [`postgres://${REDACTED}@db:5432/lazyit`],
+    });
   });
 
   it('clips long strings and bounds the depth', () => {
