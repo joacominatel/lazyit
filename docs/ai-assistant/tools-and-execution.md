@@ -495,6 +495,11 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 - **EXCL** (CEO round 2): SA token create/rotate, `provision-local-account`, the AI's own configuration.
 - **EXCL** (settled): Secret Manager.
 - The 44-tool v1 cut is adopted by default (CEO to confirm on review).
+- **Access tools follow-ups (W2-6, see §8.1 "Access tools as built"):** user references by email /
+  username once the users toolset binds `UsersController.findAll`; a by-id access-request read (the
+  decide preview scans the guarded list today); the `CRITICAL_APPLICATION` step-up warning (CEO decision,
+  added to shared and core by W2-12) is emitted by the grant, revoke and decide previews once it exists —
+  each already loads the application's `isCritical`.
 
 ## 8. Registry and execution design
 
