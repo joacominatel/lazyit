@@ -36,6 +36,18 @@ export interface AiActionLogEntry {
   error?: { code: string; status?: number; message: string } | null;
 }
 
+/**
+ * A client able to insert a ledger row — the `PrismaService` or an interactive-transaction client, so a
+ * ledger event can commit atomically with the invocation row it records. Insert only, by type.
+ */
+export interface AiActionLogWriter {
+  aiActionLog: {
+    create: (args: {
+      data: Prisma.AiActionLogUncheckedCreateInput;
+    }) => Promise<unknown>;
+  };
+}
+
 /** The ledger actor columns for a delegated identity. */
 export function actorOf(
   identity: DelegatedIdentity,
@@ -60,7 +72,10 @@ const ERROR_MESSAGE_MAX = 500;
 export class AiActionLogService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async append(entry: AiActionLogEntry): Promise<void> {
+  async append(
+    entry: AiActionLogEntry,
+    client: AiActionLogWriter = this.prisma,
+  ): Promise<void> {
     const userId = entry.actor.userId ?? null;
     // At most one actor, by construction (the CHECK would refuse both).
     const serviceAccountId = userId
@@ -98,7 +113,7 @@ export class AiActionLogService {
     if (entry.untrustedSources && entry.untrustedSources.length > 0) {
       data.untrustedSources = toJson(entry.untrustedSources);
     }
-    await this.prisma.aiActionLog.create({ data });
+    await client.aiActionLog.create({ data });
   }
 }
 

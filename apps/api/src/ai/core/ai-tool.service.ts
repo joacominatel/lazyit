@@ -5,13 +5,16 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import {
   AI_SETTINGS_DEFAULTS,
+  AiActionPreviewSchema,
   type AiActionLogEvent,
   type AiActionPreview,
   type AiChannel,
+  type AiToolClass,
   type AiToolErrorCode,
   type AiToolInvocationStatus,
   type AiToolResult,
@@ -34,6 +37,7 @@ import { mapToolError } from './error-mapper';
 import {
   inputHashOf,
   mergeRefs,
+  requiresStepUp,
   toPendingAction,
   type AiApproveOptions,
   type AiPendingAction,
@@ -64,6 +68,16 @@ type ToolError = {
   hint?: string;
 };
 
+/**
+ * The class ceiling that applies to a call. MCP ALWAYS has one — the token's scopes (R7) — so a missing
+ * ceiling on the MCP channel fails closed to `read` instead of meaning "no ceiling".
+ */
+function effectiveCeiling(
+  ctx: AiExecutionContext,
+): readonly AiToolClass[] | undefined {
+  return ctx.ceiling ?? (ctx.channel === 'MCP' ? ['read'] : undefined);
+}
+
 /** The error a refused decision carries, for the decision endpoint to answer as is. */
 function decisionError(code: string, message: string) {
   return { code, message };
@@ -92,6 +106,7 @@ function decisionError(code: string, message: string) {
 @Injectable()
 export class AiToolService {
   private readonly logger = new Logger(AiToolService.name);
+  private readonly actionLog: AiActionLogService;
 
   constructor(
     private readonly registry: AiToolRegistry,
@@ -99,9 +114,13 @@ export class AiToolService {
     private readonly principals: PrincipalLoaderService,
     private readonly permissions: PermissionResolverService,
     private readonly prisma: PrismaService,
-    private readonly actionLog: AiActionLogService,
     private readonly moduleRef: ModuleRef,
-  ) {}
+    // Optional so a spec that assembles the core by hand (the tool units' parity specs) keeps working;
+    // the ledger writer is then built over the same PrismaService.
+    @Optional() actionLog?: AiActionLogService,
+  ) {
+    this.actionLog = actionLog ?? new AiActionLogService(prisma);
+  }
 
   /**
    * The tools this principal may call through this channel, in a deterministic order. Filtered by the
@@ -165,7 +184,8 @@ export class AiToolService {
       }
       return this.invokeWrite(tool, input, ctx);
     }
-    if (ctx.ceiling && !ctx.ceiling.includes(tool.descriptor.class)) {
+    const ceiling = effectiveCeiling(ctx);
+    if (ceiling && !ceiling.includes(tool.descriptor.class)) {
       return errorResult(kind, this.ceilingError(name));
     }
     const principal = await this.loadPrincipal(ctx);
@@ -231,10 +251,10 @@ export class AiToolService {
       return refuse(kind, denial);
     }
 
-    let preview: AiActionPreview;
+    let built: AiActionPreview;
     try {
       // The preview only reads; its dispatches run under a throwaway invocation id (no row exists yet).
-      preview = await this.executor.preview(
+      built = await this.executor.preview(
         tool,
         checked.input,
         ctx,
@@ -243,35 +263,47 @@ export class AiToolService {
     } catch (err) {
       return refuse(kind, mapToolError(err));
     }
-    preview = {
-      ...preview,
-      untrustedSources: mergeRefs(
-        preview.untrustedSources,
-        ctx.untrustedSources,
-      ),
-    };
+    const shaped = this.shapePreview(tool, built, ctx);
+    if (!shaped.ok) {
+      this.logger.error(
+        `AI tool ${tool.descriptor.name} built an unusable preview: ${shaped.reason}`,
+      );
+      return refuse(kind, {
+        code: 'INTERNAL',
+        status: 500,
+        message: 'This action cannot be proposed: its preview is invalid.',
+      });
+    }
+    const preview = shaped.preview;
 
     const expiresAt = new Date(
       Date.now() + (await this.approvalTtlMinutes()) * 60_000,
     );
-    const row = await this.prisma.aiToolInvocation.create({
-      data: {
-        ...this.invocationBase(tool, checked.input, ctx),
-        toolUseId: options.toolUseId ?? null,
-        status: 'AWAITING_APPROVAL',
-        preview: json(preview),
-        ...(preview.precondition
-          ? { precondition: json(preview.precondition) }
-          : {}),
-        expiresAt,
-      },
-    });
-    await this.actionLog.append({
-      ...this.ledgerBase(row, ctx),
-      event: 'PROPOSED',
-      input: checked.input,
-      entityRefs: preview.target ? [preview.target] : [],
-      untrustedSources: preview.untrustedSources,
+    // The pending action and its PROPOSED event commit together: no approvable row without its record.
+    const row = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.aiToolInvocation.create({
+        data: {
+          ...this.invocationBase(tool, checked.input, ctx),
+          toolUseId: options.toolUseId ?? null,
+          status: 'AWAITING_APPROVAL',
+          preview: json(preview),
+          ...(preview.precondition
+            ? { precondition: json(preview.precondition) }
+            : {}),
+          expiresAt,
+        },
+      });
+      await this.actionLog.append(
+        {
+          ...this.ledgerBase(created, ctx),
+          event: 'PROPOSED',
+          input: checked.input,
+          entityRefs: preview.target ? [preview.target] : [],
+          untrustedSources: preview.untrustedSources,
+        },
+        tx,
+      );
+      return created;
     });
     return { ok: true, action: toPendingAction(row) };
   }
@@ -294,9 +326,14 @@ export class AiToolService {
     const userId = this.requireHumanSession(ctx);
     const row = await this.findOwned(invocationId, userId, ctx);
 
-    if (row.status === 'AWAITING_APPROVAL' && !options.stepUpVerified) {
-      const preview = toPendingAction(row).preview;
-      if (!preview || preview.stepUpRequired) {
+    const storedPreview = toPendingAction(row).preview;
+    // A missing or unreadable preview is not stopped here: the claim below fails it closed (FAILED).
+    if (
+      row.status === 'AWAITING_APPROVAL' &&
+      !options.stepUpVerified &&
+      storedPreview
+    ) {
+      if (requiresStepUp(storedPreview)) {
         // Refused BEFORE the claim: the action stays pending so the user can retry with the step-up.
         throw new ForbiddenException(
           decisionError(
@@ -379,7 +416,12 @@ export class AiToolService {
     });
     const now = new Date();
     const claim = await this.prisma.aiToolInvocation.updateMany({
-      where: { id: row.id, status: 'AWAITING_APPROVAL', userId },
+      where: {
+        id: row.id,
+        status: 'AWAITING_APPROVAL',
+        userId,
+        expiresAt: { gt: now },
+      },
       data: {
         status: 'REJECTED',
         decidedAt: now,
@@ -496,16 +538,22 @@ export class AiToolService {
 
     let row: AiToolInvocation;
     try {
-      row = await this.prisma.aiToolInvocation.create({
-        data: {
-          ...this.invocationBase(tool, checked.input, ctx),
-          status: 'EXECUTING',
-        },
-      });
-      await this.actionLog.append({
-        ...this.ledgerBase(row, ctx),
-        event: 'ATTEMPTED',
-        input: checked.input,
+      row = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.aiToolInvocation.create({
+          data: {
+            ...this.invocationBase(tool, checked.input, ctx),
+            status: 'EXECUTING',
+          },
+        });
+        await this.actionLog.append(
+          {
+            ...this.ledgerBase(created, ctx),
+            event: 'ATTEMPTED',
+            input: checked.input,
+          },
+          tx,
+        );
+        return created;
       });
     } catch (err) {
       // Write-ahead: a write that cannot be recorded is not executed.
@@ -561,6 +609,24 @@ export class AiToolService {
       return toPendingAction(await this.reload(row.id));
     };
 
+    // Integrity of the stored action, fail-closed: what runs is exactly what was shown and approved.
+    const stored = toPendingAction(row).preview;
+    if (!stored) {
+      return fail('FAILED', {
+        code: 'INTERNAL',
+        status: 500,
+        message:
+          'The stored preview of this action is unreadable; it was not executed',
+      });
+    }
+    if (inputHashOf(row.input) !== row.inputHash) {
+      return fail('FAILED', {
+        code: 'INTERNAL',
+        status: 500,
+        message:
+          'The stored input of this action does not match what was approved; it was not executed',
+      });
+    }
     const tool = this.registry.get(row.toolName);
     if (!tool || tool.schemaHash !== row.schemaHash) {
       return fail(
@@ -593,8 +659,7 @@ export class AiToolService {
           : checked.result.error,
       );
     }
-    const stored = toPendingAction(row).preview;
-    if (stored?.precondition) {
+    if (stored.precondition) {
       let fresh: AiActionPreview;
       try {
         fresh = await this.executor.preview(
@@ -654,6 +719,7 @@ export class AiToolService {
   ): Promise<void> {
     const event: AiActionLogEvent =
       extra.event ?? (result.ok ? 'EXECUTED' : 'FAILED');
+    // The two writes are independent: a failed status update must not cost the permanent record.
     try {
       await this.prisma.aiToolInvocation.updateMany({
         where: { id: row.id, status: 'EXECUTING' },
@@ -667,6 +733,12 @@ export class AiToolService {
             : {}),
         },
       });
+    } catch (err) {
+      this.logger.error(
+        `AI invocation ${row.id} (${row.toolName}) finished ${status} but its row could not be updated: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
       await this.actionLog.append({
         ...this.ledgerBase(row, ctx),
         event,
@@ -677,7 +749,7 @@ export class AiToolService {
       });
     } catch (err) {
       this.logger.error(
-        `AI invocation ${row.id} (${row.toolName}) finished ${status} but its outcome could not be recorded: ${err instanceof Error ? err.message : String(err)}`,
+        `AI invocation ${row.id} (${row.toolName}) finished ${status} but its ledger event could not be written: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -744,7 +816,7 @@ export class AiToolService {
       return { ...action, replayed: true };
     }
     if (action.status === 'AWAITING_APPROVAL') {
-      // Only an approve can miss a still-pending row, and only because it expired.
+      // A decision misses a still-pending row only because it expired: expire it now, refuse.
       await this.expire(id);
       throw new ConflictException(
         decisionError('EXPIRED', 'This action has expired'),
@@ -802,8 +874,17 @@ export class AiToolService {
     ctx: AiExecutionContext,
     options: { routeStatic: boolean },
   ): Promise<ToolError | null> {
-    if (ctx.ceiling && !ctx.ceiling.includes(tool.descriptor.class)) {
+    const ceiling = effectiveCeiling(ctx);
+    if (ceiling && !ceiling.includes(tool.descriptor.class)) {
       return this.ceilingError(tool.descriptor.name);
+    }
+    // Headless is the Service Account API (synthesis §1): a human never writes through it.
+    if (ctx.channel === 'HEADLESS' && principal.kind !== 'service') {
+      return {
+        code: 'FORBIDDEN',
+        status: 403,
+        message: 'Headless writes run only as a Service Account',
+      };
     }
     const gate = channelPermission(ctx.channel);
     if (!(await this.holds(principal, [gate]))) {
@@ -854,6 +935,47 @@ export class AiToolService {
     }
   }
 
+  /**
+   * Validate and complete a tool-built preview (review fixes; CEO decision 2026-09-24 on step-up):
+   *   - it must parse as an `AiActionPreview`;
+   *   - a preview that names a `target` must carry its `precondition` (the version checked at execute);
+   *   - an `elevated` preview must carry at least one warning, so a new elevated tool cannot skip
+   *     classification;
+   *   - core DERIVES `stepUpRequired` from the closed warning list (`AI_STEP_UP_WARNINGS`): the tool may
+   *     add step-up, never remove it;
+   *   - the turn's untrusted sources are merged in.
+   */
+  private shapePreview(
+    tool: RegisteredAiTool,
+    built: AiActionPreview,
+    ctx: AiExecutionContext,
+  ): { ok: true; preview: AiActionPreview } | { ok: false; reason: string } {
+    const parsed = AiActionPreviewSchema.safeParse({
+      ...built,
+      untrustedSources: mergeRefs(built.untrustedSources, ctx.untrustedSources),
+    });
+    if (!parsed.success) {
+      return { ok: false, reason: parsed.error.message.slice(0, 500) };
+    }
+    const preview = parsed.data;
+    if (
+      preview.toolName !== tool.descriptor.name ||
+      preview.class !== tool.descriptor.class
+    ) {
+      return { ok: false, reason: 'tool name or class mismatch' };
+    }
+    if (preview.target && !preview.precondition) {
+      return { ok: false, reason: 'a target without a precondition' };
+    }
+    if (preview.elevated && preview.warnings.length === 0) {
+      return { ok: false, reason: 'an elevated preview without a warning' };
+    }
+    return {
+      ok: true,
+      preview: { ...preview, stepUpRequired: requiresStepUp(preview) },
+    };
+  }
+
   private ceilingError(name: string): ToolError {
     return {
       code: 'FORBIDDEN',
@@ -864,7 +986,8 @@ export class AiToolService {
 
   private reachable(tool: RegisteredAiTool, ctx: AiExecutionContext): boolean {
     if (!tool.channels.includes(ctx.channel)) return false;
-    return !ctx.ceiling || ctx.ceiling.includes(tool.descriptor.class);
+    const ceiling = effectiveCeiling(ctx);
+    return !ceiling || ceiling.includes(tool.descriptor.class);
   }
 
   private admitsKind(tool: RegisteredAiTool, principal: Principal): boolean {
@@ -905,6 +1028,9 @@ export class AiToolService {
     ctx: AiExecutionContext,
   ): Prisma.AiToolInvocationUncheckedCreateInput {
     const actor = actorOf(ctx.identity);
+    // Hash exactly what is stored (the JSON form), so the approve-time integrity check compares like
+    // with like.
+    const canonical = json(input);
     return {
       channel: ctx.channel,
       conversationId: ctx.conversationId ?? null,
@@ -915,8 +1041,8 @@ export class AiToolService {
       serviceAccountId: actor.serviceAccountId ?? null,
       mcpClientId: ctx.mcp?.clientId ?? null,
       oauthGrantId: ctx.mcp?.grantId ?? null,
-      input: json(input),
-      inputHash: inputHashOf(input),
+      input: canonical,
+      inputHash: inputHashOf(canonical),
       schemaHash: tool.schemaHash,
       status: 'EXECUTING',
     };

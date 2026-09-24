@@ -12,7 +12,12 @@ import { APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { createZodDto, ZodValidationPipe } from 'nestjs-zod';
 import { z } from 'zod';
-import { AiToolResultSchema, type Permission, type Role } from '@lazyit/shared';
+import {
+  AiToolResultSchema,
+  type AiActionPreview,
+  type Permission,
+  type Role,
+} from '@lazyit/shared';
 
 jest.mock('../../../generated/prisma/client', () => {
   const enums: Record<string, unknown> = jest.requireActual(
@@ -269,9 +274,68 @@ const writeToolset: AiToolset = {
           stepUpRequired: true,
         }),
     }),
+    // Elevated tools whose previews do NOT ask for step-up: core derives it from the warnings.
+    previewFixture('thing_set_role', 'elevated', {
+      warnings: ['ROLE_CHANGE'],
+      elevated: true,
+    }),
+    previewFixture('thing_set_email', 'elevated', {
+      warnings: ['IDENTITY_CHANGE'],
+      elevated: true,
+    }),
+    previewFixture('thing_notify', 'elevated', {
+      warnings: ['NOTIFIES_USERS'],
+      elevated: true,
+    }),
+    previewFixture('thing_unclassified', 'elevated', {
+      warnings: [],
+      elevated: true,
+    }),
+    // Tool bugs core must refuse at propose.
+    previewFixture('thing_bad_preview', 'write', {
+      warnings: 'not-a-list' as unknown as string[],
+    }),
+    previewFixture('thing_no_precondition', 'write', {
+      target: { type: 'asset', id: 't1', op: 'updated' },
+    }),
   ],
   unexposed: [],
 };
+
+/** A fixture write whose run renames `t1` and whose preview is exactly `preview` (defaults: no warning). */
+function previewFixture(
+  name: string,
+  toolClass: 'write' | 'elevated',
+  preview: Partial<AiActionPreview>,
+) {
+  return defineTool({
+    name,
+    title: name,
+    description: `Fixture ${name}.`,
+    domain: 'platform',
+    class: toolClass,
+    input: thingInput,
+    bindings: [bind(ThingsController, 'update')],
+    async run(input, rt) {
+      return {
+        data: await rt.call(ThingsController, 'update', {
+          params: { id: input.id },
+          body: { name: input.name },
+        }),
+      };
+    },
+    preview: () =>
+      Promise.resolve({
+        changes: [],
+        warnings: [],
+        impacted: [],
+        untrustedSources: [],
+        elevated: false,
+        stepUpRequired: false,
+        ...preview,
+      }),
+  });
+}
 
 // ─── An in-memory Prisma for the two AI tables ───────────────────────────────────────────────────────
 
@@ -407,7 +471,26 @@ const prisma = {
   },
   aiToolInvocation,
   aiActionLog,
+  /** An interactive transaction: all or nothing over the in-memory tables. */
+  $transaction: jest.fn(
+    async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
+      const snapshot = new Map(
+        [...invocations].map(([id, row]) => [id, { ...row }]),
+      );
+      const ledgerLength = ledger.length;
+      try {
+        return await fn(prisma);
+      } catch (err) {
+        invocations = snapshot;
+        ledger.splice(ledgerLength);
+        throw err;
+      }
+    },
+  ),
 };
+
+/** An MCP token holding `lazyit.read` + `lazyit.write` (R7). */
+const WRITE_SCOPE = ['read', 'write'] as const;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -511,7 +594,10 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
             identity,
             channel,
             ...(channel === 'MCP'
-              ? { mcp: { grantId: 'grant1', clientId: 'client1' } }
+              ? {
+                  mcp: { grantId: 'grant1', clientId: 'client1' },
+                  ceiling: WRITE_SCOPE,
+                }
               : { runId: 'ckheadlessrun00000000000001' }),
             provenance: { provider: 'anthropic', model: 'm1', requestId: 'r1' },
           },
@@ -588,7 +674,7 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
       const conflict = await tools.invoke(
         'thing_rename',
         { id: 't1', name: 'taken' },
-        { identity: human(ID.member), channel: 'MCP' },
+        { identity: human(ID.member), channel: 'MCP', ceiling: WRITE_SCOPE },
       );
       expect(conflict).toMatchObject({
         ok: false,
@@ -599,7 +685,7 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
       const crash = await tools.invoke(
         'thing_rename',
         { id: 't1', name: 'crash' },
-        { identity: human(ID.member), channel: 'MCP' },
+        { identity: human(ID.member), channel: 'MCP', ceiling: WRITE_SCOPE },
       );
       expect(crash).toMatchObject({ ok: false, error: { code: 'INTERNAL' } });
       expect(spy).toHaveBeenCalledTimes(2);
@@ -622,7 +708,7 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
       const result = await tools.invoke(
         'thing_rename',
         { id: 't1', name: 'x' },
-        { identity: human(ID.viewer), channel: 'MCP' },
+        { identity: human(ID.viewer), channel: 'MCP', ceiling: WRITE_SCOPE },
       );
       expect(result).toMatchObject({
         ok: false,
@@ -668,7 +754,7 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
       const invalid = await tools.invoke(
         'thing_rename',
         { id: 't1' },
-        { identity: human(ID.member), channel: 'MCP' },
+        { identity: human(ID.member), channel: 'MCP', ceiling: WRITE_SCOPE },
       );
       expect(invalid).toMatchObject({
         ok: false,
@@ -695,7 +781,7 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
       const result = await tools.invoke(
         'thing_rename',
         { id: 't1', name: 'x' },
-        { identity: human(ID.member), channel: 'MCP' },
+        { identity: human(ID.member), channel: 'MCP', ceiling: WRITE_SCOPE },
       );
       expect(result).toMatchObject({ ok: false, error: { code: 'INTERNAL' } });
       expect(updates).toBe(0);
@@ -705,7 +791,7 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
       await tools.invoke(
         'thing_rename',
         { id: 't1', name: 'x', apiToken: 'lzit_sa_supersecret' },
-        { identity: human(ID.member), channel: 'MCP' },
+        { identity: human(ID.member), channel: 'MCP', ceiling: WRITE_SCOPE },
       );
       expect(ledger[0].input).toEqual({
         id: 't1',
@@ -1099,6 +1185,202 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
         errorCode: 'UNKNOWN_OUTCOME',
       });
       expect(updates).toBe(0);
+    });
+  });
+
+  // ─── Review fixes (#1337) ─────────────────────────────────────────────────────────────────────────
+
+  describe('review fixes', () => {
+    async function proposeOk(
+      name: string,
+      input: unknown = { id: 't1', name: 'x' },
+    ) {
+      const proposal = await tools.propose(name, input, chat(human(ID.member)));
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      return proposal.action;
+    }
+
+    it('refuses a HEADLESS write by a human (headless is the Service Account API) as DENIED', async () => {
+      const spy = jest.spyOn(dispatcher, 'dispatch');
+      const result = await tools.invoke(
+        'thing_rename',
+        { id: 't1', name: 'x' },
+        { identity: human(ID.member), channel: 'HEADLESS' },
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'FORBIDDEN', status: 403 },
+      });
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+      expect(ledger.map((e) => e.event)).toEqual(['ATTEMPTED', 'DENIED']);
+    });
+
+    it('fails an MCP call with no ceiling closed to read: writes are denied and not listed', async () => {
+      const result = await tools.invoke(
+        'thing_rename',
+        { id: 't1', name: 'x' },
+        { identity: human(ID.member), channel: 'MCP' },
+      );
+      expect(result).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+      expect(updates).toBe(0);
+      expect(ledger.map((e) => e.event)).toEqual(['ATTEMPTED', 'DENIED']);
+      const listed = await tools.list({
+        identity: human(ID.member),
+        channel: 'MCP',
+      });
+      expect(listed).toEqual([]);
+      const scoped = await tools.list({
+        identity: human(ID.member),
+        channel: 'MCP',
+        ceiling: WRITE_SCOPE,
+      });
+      expect(scoped.map((t) => t.name)).toContain('thing_rename');
+    });
+
+    it('refuses a preview that does not parse, storing nothing', async () => {
+      const proposal = await tools.propose(
+        'thing_bad_preview',
+        { id: 't1', name: 'x' },
+        chat(human(ID.member)),
+      );
+      expect(proposal).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INTERNAL' } },
+      });
+      expect(invocations.size).toBe(0);
+    });
+
+    it('refuses a preview with a target but no precondition', async () => {
+      const proposal = await tools.propose(
+        'thing_no_precondition',
+        { id: 't1', name: 'x' },
+        chat(human(ID.member)),
+      );
+      expect(proposal).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INTERNAL' } },
+      });
+      expect(invocations.size).toBe(0);
+    });
+
+    it('fails closed at approve when the stored preview is unreadable', async () => {
+      const action = await proposeOk('thing_rename');
+      invocations.get(action.id)!.preview = { garbage: true };
+      const approved = await tools.approve(action.id, chat(human(ID.member)));
+      expect(approved).toMatchObject({
+        status: 'FAILED',
+        result: { error: { code: 'INTERNAL' } },
+      });
+      expect(updates).toBe(0);
+      expect(events(action.id)).toEqual(['PROPOSED', 'APPROVED', 'FAILED']);
+    });
+
+    it('refuses to execute a stored input that no longer matches its hash, and ledgers it', async () => {
+      const action = await proposeOk('thing_rename');
+      invocations.get(action.id)!.input = { id: 't1', name: 'Tampered' };
+      const approved = await tools.approve(action.id, chat(human(ID.member)));
+      expect(approved).toMatchObject({
+        status: 'FAILED',
+        result: { error: { code: 'INTERNAL' } },
+      });
+      expect(updates).toBe(0);
+      expect(things.t1.name).toBe('Laptop');
+      expect(events(action.id)).toEqual(['PROPOSED', 'APPROVED', 'FAILED']);
+    });
+
+    it('stores no approvable row when the PROPOSED event cannot be written (atomic)', async () => {
+      aiActionLog.create.mockRejectedValueOnce(new Error('db down'));
+      await expect(
+        tools.propose(
+          'thing_rename',
+          { id: 't1', name: 'x' },
+          chat(human(ID.member)),
+        ),
+      ).rejects.toThrow('db down');
+      expect(invocations.size).toBe(0);
+      expect(ledger).toEqual([]);
+    });
+
+    it('does not execute when the APPROVED event cannot be written, and closes the claim FAILED', async () => {
+      const action = await proposeOk('thing_rename');
+      aiActionLog.create.mockRejectedValueOnce(new Error('db down'));
+      await expect(
+        tools.approve(action.id, chat(human(ID.member))),
+      ).rejects.toThrow('db down');
+      expect(updates).toBe(0);
+      expect(invocations.get(action.id)).toMatchObject({
+        status: 'FAILED',
+        errorCode: 'INTERNAL',
+      });
+      expect(events(action.id)).toEqual(['PROPOSED']);
+    });
+
+    it('still appends the outcome to the ledger when the invocation row cannot be updated', async () => {
+      aiToolInvocation.updateMany.mockRejectedValueOnce(new Error('db blip'));
+      const result = await tools.invoke(
+        'thing_rename',
+        { id: 't1', name: 'x' },
+        { identity: service(SA.writer), channel: 'HEADLESS' },
+      );
+      expect(result.ok).toBe(true);
+      expect(ledger.map((e) => e.event)).toEqual(['ATTEMPTED', 'EXECUTED']);
+    });
+
+    it('refuses a reject past expiry and marks the action EXPIRED', async () => {
+      const action = await proposeOk('thing_rename');
+      invocations.get(action.id)!.expiresAt = new Date(Date.now() - 1000);
+      await expect(
+        tools.reject(action.id, chat(human(ID.member))),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(invocations.get(action.id)!.status).toBe('EXPIRED');
+      expect(events(action.id)).toEqual(['PROPOSED', 'EXPIRED']);
+    });
+
+    describe('step-up derived by core (CEO decision 2026-09-24)', () => {
+      it.each(['thing_set_role', 'thing_set_email'])(
+        '%s: a role or identity change requires step-up though the tool did not ask',
+        async (name) => {
+          const action = await proposeOk(name);
+          expect(action.preview?.stepUpRequired).toBe(true);
+          await expect(
+            tools.approve(action.id, chat(human(ID.member))),
+          ).rejects.toMatchObject({
+            status: 403,
+            response: { code: 'STEP_UP_REQUIRED' },
+          });
+          // Re-derived at approve even if the stored flag was lowered.
+          const row = invocations.get(action.id)!;
+          row.preview = {
+            ...(row.preview as Record<string, unknown>),
+            stepUpRequired: false,
+          };
+          await expect(
+            tools.approve(action.id, chat(human(ID.member))),
+          ).rejects.toMatchObject({ status: 403 });
+          expect(updates).toBe(0);
+        },
+      );
+
+      it('an elevated action with a warning outside the list needs no step-up', async () => {
+        const action = await proposeOk('thing_notify');
+        expect(action.preview?.stepUpRequired).toBe(false);
+        const approved = await tools.approve(action.id, chat(human(ID.member)));
+        expect(approved.status).toBe('SUCCEEDED');
+      });
+
+      it('refuses an elevated preview that carries no warning (unclassified)', async () => {
+        const proposal = await tools.propose(
+          'thing_unclassified',
+          { id: 't1', name: 'x' },
+          chat(human(ID.member)),
+        );
+        expect(proposal).toMatchObject({
+          ok: false,
+          result: { error: { code: 'INTERNAL' } },
+        });
+        expect(invocations.size).toBe(0);
+      });
     });
   });
 

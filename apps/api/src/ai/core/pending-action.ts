@@ -6,6 +6,7 @@ import {
   type AiActionPreview,
   type AiChannel,
   type AiEntityRef,
+  type AiPreviewWarningCode,
   type AiToolClass,
   type AiToolInvocationStatus,
   type AiToolResult,
@@ -51,6 +52,34 @@ export interface AiApproveOptions {
    * when this is not set, and records the flag in the ledger.
    */
   stepUpVerified?: boolean;
+}
+
+/**
+ * The CLOSED list of preview warnings that make an `elevated` action require a password step-up (CEO
+ * decision 2026-09-24, #1315, "Opción 2": step-up for privilege grants and credential delivery only —
+ * ADR-0097 decision 4 — enforced by core, not left to each tool). A tool may still ask for step-up on
+ * its own (`stepUpRequired: true`); it can never switch it off for these warnings.
+ *
+ * Covered with the shared vocabulary as it stands: role changes and identity changes. The access-grant /
+ * privilege-grant and credential-delivery cases have no warning code in `AI_PREVIEW_WARNING_CODES` yet
+ * (escalated) — until they do, those tools must set `stepUpRequired` themselves.
+ */
+export const AI_STEP_UP_WARNINGS: readonly AiPreviewWarningCode[] = [
+  'ROLE_CHANGE',
+  'IDENTITY_CHANGE',
+];
+
+/** Whether an action needs the password step-up: the tool asked, or an elevated preview carries a listed warning. */
+export function requiresStepUp(
+  preview: Pick<AiActionPreview, 'elevated' | 'stepUpRequired' | 'warnings'>,
+): boolean {
+  if (preview.stepUpRequired) return true;
+  return (
+    preview.elevated &&
+    preview.warnings.some((w) =>
+      (AI_STEP_UP_WARNINGS as readonly string[]).includes(w),
+    )
+  );
 }
 
 /** JSON with object keys sorted, so equal inputs hash equally whatever their key order. */
