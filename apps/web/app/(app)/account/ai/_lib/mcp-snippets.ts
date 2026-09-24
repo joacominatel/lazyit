@@ -51,12 +51,17 @@ export function marketplaceName(origin: string): string {
 }
 
 /** The two commands of the one-step Claude Code install (HTTPS + OAuth instances only). */
-export function claudePluginCommands(origin: string): {
+export function claudePluginCommands(
+  origin: string,
+  /** The server-known marketplace URL (`GET /ai/status` `mcp.marketplaceUrl`), when it reports one. */
+  serverMarketplaceUrl?: string | null,
+): {
   marketplaceAdd: string;
   pluginInstall: string;
 } {
+  const url = parseHttpsUrl(serverMarketplaceUrl) ?? marketplaceUrl(origin);
   return {
-    marketplaceAdd: `claude plugin marketplace add ${marketplaceUrl(origin)}`,
+    marketplaceAdd: `claude plugin marketplace add ${url}`,
     pluginInstall: `claude plugin install ${MCP_SERVER_NAME}@${marketplaceName(origin)}`,
   };
 }
@@ -211,15 +216,31 @@ export type SnippetOrigin =
   /** The server's address could not be read: built from the page, warn, not copy-ready. */
   | { origin: string; check: "unverified" };
 
-/**
- * Parse the address the server knows for itself (the OAuth issuer, an `https:` origin). Anything else —
- * absent, not a URL, not `https:` — is null.
- */
-export function parseServerOrigin(value: unknown): string | null {
+/** An `https:` URL, normalized, or null (a Claude Code URL marketplace must be https). */
+function parseHttpsUrl(value: unknown): string | null {
   if (typeof value !== "string" || value.length === 0) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" ? url.origin : null;
+    return url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The origin of an address the server knows for itself — `GET /ai/status` `mcp.endpoint`
+ * (`<WEB_ORIGIN>/mcp`) or, as a fallback, the OAuth issuer. Only `https:` unless `allowHttp` (a `lan`
+ * instance with a pinned plain-HTTP `WEB_ORIGIN`). Absent, null or unparseable → null.
+ */
+export function parseServerOrigin(
+  value: unknown,
+  { allowHttp = false }: { allowHttp?: boolean } = {},
+): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:") return url.origin;
+    return allowHttp && url.protocol === "http:" ? url.origin : null;
   } catch {
     return null;
   }

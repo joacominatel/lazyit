@@ -31,6 +31,26 @@ describe("endpoints", () => {
     expect(marketplaceName("https://it.acme.io:443")).toBe("lazyit-it-acme-io");
   });
 
+  test("the server-reported marketplace URL wins when present and https", () => {
+    expect(
+      claudePluginCommands(
+        "https://it.acme.io",
+        "https://it.acme.io/api/ai/claude-code/marketplace.json",
+      ).marketplaceAdd,
+    ).toBe(
+      "claude plugin marketplace add https://it.acme.io/api/ai/claude-code/marketplace.json",
+    );
+    expect(
+      claudePluginCommands("https://it.acme.io", "https://other.example/m.json")
+        .marketplaceAdd,
+    ).toBe("claude plugin marketplace add https://other.example/m.json");
+    for (const bad of [null, undefined, "", "http://it.acme.io/m.json", "nope"]) {
+      expect(claudePluginCommands("https://it.acme.io", bad).marketplaceAdd).toBe(
+        "claude plugin marketplace add https://it.acme.io/api/ai/claude-code/marketplace.json",
+      );
+    }
+  });
+
   test("the plugin commands name the marketplace the instance serves", () => {
     expect(claudePluginCommands("https://it.acme.io")).toEqual({
       marketplaceAdd:
@@ -162,6 +182,16 @@ describe("detectMcpConnectMode", () => {
 });
 
 describe("server origin", () => {
+  test("parseServerOrigin reads the origin of the server-known endpoint", () => {
+    expect(parseServerOrigin("https://it.acme.io/mcp")).toBe("https://it.acme.io");
+    expect(parseServerOrigin(null)).toBeNull();
+    expect(parseServerOrigin("http://10.0.0.5:8080/mcp")).toBeNull();
+    expect(
+      parseServerOrigin("http://10.0.0.5:8080/mcp", { allowHttp: true }),
+    ).toBe("http://10.0.0.5:8080");
+    expect(parseServerOrigin("ftp://x/mcp", { allowHttp: true })).toBeNull();
+  });
+
   test("parseServerOrigin keeps only an https origin", () => {
     expect(parseServerOrigin("https://it.acme.io")).toBe("https://it.acme.io");
     expect(parseServerOrigin("https://it.acme.io/")).toBe("https://it.acme.io");

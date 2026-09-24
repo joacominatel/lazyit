@@ -21,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError } from "@/lib/api/client";
 import { downloadClaudeCodePlugin } from "@/lib/api/endpoints/oauth";
+import { useAiStatus } from "@/lib/api/hooks/use-ai-status";
 import { useOAuthIssuer } from "@/lib/api/hooks/use-oauth-grants";
 import { notifyError } from "@/lib/api/notify-error";
 import {
@@ -56,11 +57,22 @@ const code = (chunks: ReactNode) => (
 export function McpInstallPanel({ auth }: { auth: AiMcpAuthMode }) {
   const t = useTranslations("oauth.install");
   const location = usePageLocation();
-  // OAuth clients must use the address the server knows for itself (the issuer tokens are bound to),
-  // not whatever address this page was opened at.
-  const issuer = useOAuthIssuer({ enabled: auth === "oauth" });
+  // Clients must use the address the server knows for itself — `GET /ai/status` `mcp.endpoint`
+  // (`<WEB_ORIGIN>/mcp`) — not whatever address this page was opened at. The status query is shared
+  // (cached) with the page. On an older API without the field, OAuth mode falls back to the issuer of
+  // the public OAuth metadata.
+  const status = useAiStatus();
+  const mcp = status.data?.mcp;
+  const endpointOrigin = parseServerOrigin(mcp?.endpoint, {
+    allowHttp: auth === "personal-token",
+  });
+  const issuer = useOAuthIssuer({
+    enabled: auth === "oauth" && status.isSuccess && endpointOrigin === null,
+  });
 
-  if (!location || (auth === "oauth" && issuer.isPending)) {
+  const waitingForIssuer =
+    auth === "oauth" && endpointOrigin === null && issuer.fetchStatus === "fetching";
+  if (!location || status.isPending || waitingForIssuer) {
     return (
       <Card>
         <CardContent className="space-y-3 pt-6">
@@ -72,14 +84,16 @@ export function McpInstallPanel({ auth }: { auth: AiMcpAuthMode }) {
   }
 
   const resolved: SnippetOrigin =
-    auth === "oauth"
-      ? resolveSnippetOrigin(location.origin, parseServerOrigin(issuer.data))
-      : // Personal tokens (plain HTTP, host-agnostic): the address the reader reached is the one to use.
-        { origin: location.origin, check: "match" };
+    endpointOrigin !== null
+      ? resolveSnippetOrigin(location.origin, endpointOrigin)
+      : auth === "oauth"
+        ? resolveSnippetOrigin(location.origin, parseServerOrigin(issuer.data))
+        : // A host-agnostic `lan` instance pins no address: the one the reader reached is the one to use.
+          { origin: location.origin, check: "match" };
   const { origin } = resolved;
   const copyable = resolved.check === "match";
   const snippets = buildMcpClientSnippets(origin, auth);
-  const plugin = claudePluginCommands(origin);
+  const plugin = claudePluginCommands(origin, mcp?.marketplaceUrl);
   const marketplace = marketplaceName(origin);
 
   return (
