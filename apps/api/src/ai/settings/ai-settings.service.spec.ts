@@ -737,6 +737,108 @@ describe('AiSettingsService — shape checks', () => {
   });
 });
 
+describe('AiSettingsService — base URL checks (review F3, F5)', () => {
+  const compatible = (baseUrl: string, allowPrivateNetwork = true) =>
+    body({
+      provider: 'openai-compatible',
+      model: 'm',
+      baseUrl,
+      allowPrivateNetwork,
+    });
+
+  it.each([
+    ['userinfo', 'https://user:secret@llm.example/v1'],
+    ['a bare username', 'https://token@llm.example/v1'],
+    ['a query string', 'https://llm.example/v1?api_key=abc'],
+    ['an empty query', 'https://llm.example/v1?'],
+    ['a fragment', 'https://llm.example/v1#x'],
+  ])(
+    'refuses a base URL with %s, on save and on test',
+    async (_label, baseUrl) => {
+      const { service, tester, prisma } = setup();
+      await expect(
+        service.updateSettings(compatible(baseUrl), 'a'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.testConnection({
+          provider: 'openai-compatible',
+          model: 'm',
+          baseUrl,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tester.test).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['plain http to a public literal', 'http://8.8.8.8/v1'],
+    ['a loopback literal', 'https://127.0.0.1:11434/v1'],
+    ['an IPv6 loopback literal', 'http://[::1]:11434/v1'],
+    ['localhost', 'http://localhost:11434/v1'],
+    ['a *.localhost name', 'https://ollama.localhost/v1'],
+    ['the metadata address', 'http://169.254.169.254/latest'],
+    ['a link-local literal', 'http://169.254.10.10/v1'],
+  ])('refuses %s', async (_label, baseUrl) => {
+    const { service } = setup();
+    await expect(
+      service.updateSettings(compatible(baseUrl), 'a'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('refuses a private literal without the private-network option', async () => {
+    const { service } = setup();
+    await expect(
+      service.updateSettings(compatible('https://10.0.0.5/v1', false), 'a'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it.each([
+    ['http to a private literal', 'http://192.168.1.20:11434/v1'],
+    ['http to a ULA literal', 'http://[fd00::20]:11434/v1'],
+    [
+      'http to a name (resolved and checked by the provider layer)',
+      'http://ollama.lan:11434/v1',
+    ],
+    ['https to a public literal', 'https://8.8.8.8/v1'],
+  ])('accepts %s with the private-network option', async (_label, baseUrl) => {
+    const { service } = setup();
+    await expect(
+      service.updateSettings(compatible(baseUrl), 'a'),
+    ).resolves.toMatchObject({ baseUrl });
+  });
+});
+
+describe('AiSettingsService — shim mode (review F6)', () => {
+  it('the connection test makes no provider call', async () => {
+    process.env.AUTH_MODE = 'shim';
+    const { service, tester } = setup({ row: enabledRow() });
+    await expect(service.testConnection({})).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(tester.test).not.toHaveBeenCalled();
+  });
+
+  it('the reader ignores a test override', async () => {
+    process.env.AUTH_MODE = 'shim';
+    const { service } = setup();
+    await expect(
+      withProviderOverride(
+        {
+          provider: 'openai',
+          model: 'gpt-6-sol',
+          baseUrl: null,
+          apiKey: 'draft',
+          allowPrivateNetwork: false,
+          effort: null,
+          providerOptions: null,
+        },
+        () => service.resolveProviderConfig(),
+      ),
+    ).resolves.toBeNull();
+  });
+});
+
 describe('AiSettingsService — config audit', () => {
   it('writes one redacted settings.updated row per changing write', async () => {
     const { service, audits } = setup({ row: enabledRow() });
@@ -744,7 +846,7 @@ describe('AiSettingsService — config audit', () => {
       body({
         provider: 'openai-compatible',
         model: 'llama',
-        baseUrl: 'https://user:hunter2@llm.example/v1?token=abc',
+        baseUrl: 'https://llm.example/v1',
         apiKey: 'sk-new-secret',
         instructions: 'Be terse.',
         retentionDays: 30,
@@ -760,8 +862,6 @@ describe('AiSettingsService — config audit', () => {
     const detail = JSON.stringify(rows[0].detail);
     expect(detail).not.toContain('sk-new-secret');
     expect(detail).not.toContain(PROVIDER_KEY);
-    expect(detail).not.toContain('hunter2');
-    expect(detail).not.toContain('token=abc');
     expect(detail).not.toContain('Be terse.');
     expect(rows[0].detail).toMatchObject({
       changes: {

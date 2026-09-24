@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import {
   BadRequestException,
   ConflictException,
@@ -32,6 +33,11 @@ import {
   EnvelopeCipher,
   type SecretEnvelope,
 } from '../../common/crypto/envelope-cipher';
+import {
+  classifyIp,
+  isAllowlistableCategory,
+  isPublicCategory,
+} from '../../common/egress/ip-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import type {
   AiSettingsReader,
@@ -94,6 +100,8 @@ export function isShimMode(env: NodeJS.ProcessEnv = process.env): boolean {
 @Injectable()
 export class AiSettingsService implements AiSettingsReader {
   private readonly logger = new Logger(AiSettingsService.name);
+  /** The ciphertext last reported as undecryptable, so the warning is not repeated per request. */
+  private undecryptableWarned: string | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -109,11 +117,11 @@ export class AiSettingsService implements AiSettingsReader {
   }
 
   async resolveProviderConfig(): Promise<ResolvedAiProviderConfig | null> {
+    // Never in shim mode — not even a connection-test draft (review F6).
+    if (isShimMode()) return null;
     // A connection test in progress answers its draft, in its own async context only.
     const override = currentProviderOverride();
     if (override) return override;
-
-    if (isShimMode()) return null;
     const row = await this.findRow();
     if (!row || !row.enabled) return null;
     const provider = parseProvider(row.provider);
@@ -125,10 +133,14 @@ export class AiSettingsService implements AiSettingsReader {
       try {
         apiKey = this.cipher.decrypt(envelope);
       } catch {
-        // Wrong or missing AI_SECRET_KEY: the assistant is unavailable, not crashed. No detail logged.
-        this.logger.warn(
-          'AI provider key could not be decrypted; the assistant is unavailable until the key is re-entered.',
-        );
+        // Wrong or missing AI_SECRET_KEY: the assistant is unavailable, not crashed. No detail logged,
+        // and once per stored envelope — the status endpoint asks on every shell refresh.
+        if (this.undecryptableWarned !== envelope.ciphertext) {
+          this.undecryptableWarned = envelope.ciphertext;
+          this.logger.warn(
+            'AI provider key could not be decrypted; the assistant is unavailable until the key is re-entered.',
+          );
+        }
         return null;
       }
     }
@@ -162,11 +174,18 @@ export class AiSettingsService implements AiSettingsReader {
   /**
    * `POST /config/ai/test` — test a DRAFT: each given field overrides the saved one and the key may be
    * typed inline. The saved key is used only when the draft keeps the saved provider AND base URL, so a
-   * test can never send the stored key to a new destination (INV-AI-6). Persists nothing.
+   * test can never send the stored key to a new destination (INV-AI-6). Persists nothing. 409 in shim
+   * mode: no provider call is ever made there.
    */
   async testConnection(
     draft: AiConnectionDraft,
   ): Promise<AiConnectionTestResult> {
+    if (isShimMode()) {
+      // No real provider call while authentication is disabled (review F6).
+      throw new ConflictException(
+        'The AI assistant is unavailable while authentication is disabled (AUTH_MODE=shim).',
+      );
+    }
     const row = await this.findRow();
     const provider = draft.provider ?? parseProvider(row?.provider ?? null);
     const model = draft.model ?? row?.model ?? null;
@@ -622,13 +641,7 @@ function assertConnectionShape(value: {
   allowPrivateNetwork: boolean;
   providerOptions: AiProviderOptions | null;
 }): void {
-  if (value.baseUrl && /^http:\/\//i.test(value.baseUrl.trim())) {
-    if (value.provider !== 'openai-compatible' || !value.allowPrivateNetwork) {
-      throw new BadRequestException(
-        'A plain http:// base URL is allowed only for the OpenAI-compatible provider on a private network (enable the private-network option).',
-      );
-    }
-  }
+  if (value.baseUrl) assertBaseUrl(value.baseUrl, value);
   if (value.allowPrivateNetwork && value.provider !== 'openai-compatible') {
     throw new BadRequestException(
       'A private-network host is allowed only for the OpenAI-compatible provider.',
@@ -643,6 +656,77 @@ function assertConnectionShape(value: {
   ) {
     throw new BadRequestException(
       'These options are not supported by the selected provider.',
+    );
+  }
+}
+
+/**
+ * Save-time checks on a base URL (review F3, F5). The egress guard in the provider layer still decides
+ * at CALL time against the RESOLVED address (INV-AI-7); this refuses early what can be judged from the
+ * text alone:
+ *   - no userinfo, query or fragment — the key must travel only in the provider's own header, and a
+ *     secret in the URL would reach logs and the audit;
+ *   - `http://` only for the OpenAI-compatible provider with `allowPrivateNetwork` on;
+ *   - a host that is a LITERAL IP must be a public address, or a private/ULA one with
+ *     `allowPrivateNetwork` on — loopback, link-local, IMDS and the other hard-denied ranges never, and
+ *     plain http never to a public literal. `localhost` names are loopback. Any other name cannot be
+ *     classified without DNS and is left to the provider layer's resolved-address check.
+ */
+function assertBaseUrl(
+  raw: string,
+  value: { provider: AiProviderKind | null; allowPrivateNetwork: boolean },
+): void {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    throw new BadRequestException('The base URL is not a valid URL.');
+  }
+  if (url.username || url.password) {
+    throw new BadRequestException(
+      'The base URL may not carry credentials — put the key in the API key field.',
+    );
+  }
+  if (url.search || url.hash || /[?#]/.test(raw)) {
+    throw new BadRequestException(
+      'The base URL may not carry a query string or a fragment.',
+    );
+  }
+  const isHttp = url.protocol === 'http:';
+  if (url.protocol !== 'https:' && !isHttp) {
+    throw new BadRequestException('The base URL must be http:// or https://.');
+  }
+  const privateAllowed =
+    value.provider === 'openai-compatible' && value.allowPrivateNetwork;
+  if (isHttp && !privateAllowed) {
+    throw new BadRequestException(
+      'A plain http:// base URL is allowed only for the OpenAI-compatible provider on a private network (enable the private-network option).',
+    );
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost')) {
+    throw new BadRequestException(
+      "A loopback base URL is never allowed; use the host's LAN address.",
+    );
+  }
+  if (isIP(host) === 0) return; // a name: judged on its resolved address by the provider layer
+  const category = classifyIp(host);
+  if (isPublicCategory(category)) {
+    if (isHttp) {
+      throw new BadRequestException(
+        'A plain http:// base URL must point at a private-network address, never a public one.',
+      );
+    }
+    return;
+  }
+  if (!isAllowlistableCategory(category)) {
+    throw new BadRequestException(
+      'This address range is never reachable (loopback, link-local, metadata or reserved).',
+    );
+  }
+  if (!privateAllowed) {
+    throw new BadRequestException(
+      'A private-network base URL needs the OpenAI-compatible provider with the private-network option on.',
     );
   }
 }
