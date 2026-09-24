@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { afterStreamEnded, eventSeq, isTerminalRunStatus, parseRunEvent, streamClosesOn } from "./run-events";
+import {
+  afterStreamEnded,
+  eventSeq,
+  isTerminalRunStatus,
+  isWaitingRunStatus,
+  parseRunEvent,
+  streamClosesOn,
+} from "./run-events";
 import { createSseParser } from "./sse-parser";
 
 describe("parseRunEvent", () => {
@@ -70,12 +77,23 @@ describe("stream closing", () => {
     expect(isTerminalRunStatus("AWAITING_APPROVAL")).toBe(false);
     expect(isTerminalRunStatus("SUCCEEDED")).toBe(true);
   });
+
+  test("an input form (#1388) closes the stream like an approval, and is not terminal", () => {
+    expect(streamClosesOn("AWAITING_INPUT")).toBe(true);
+    expect(isTerminalRunStatus("AWAITING_INPUT")).toBe(false);
+    expect(isWaitingRunStatus("AWAITING_INPUT")).toBe(true);
+    expect(isWaitingRunStatus("AWAITING_APPROVAL")).toBe(true);
+    expect(isWaitingRunStatus("RUNNING")).toBe(false);
+  });
 });
 
 describe("afterStreamEnded", () => {
   test("stops when the run waits or is over — even with no event, from the seeded status", () => {
     expect(afterStreamEnded("AWAITING_APPROVAL", 0)).toBe("stop");
     expect(afterStreamEnded("SUCCEEDED", 3)).toBe("stop");
+    // #1388: a run paused on a form must not reconnect into "connection lost".
+    expect(afterStreamEnded("AWAITING_INPUT", 0)).toBe("stop");
+    expect(afterStreamEnded("AWAITING_INPUT", 2)).toBe("stop");
   });
   test("resumes at once after a connection that delivered events", () => {
     expect(afterStreamEnded("RUNNING", 4)).toBe("resume");

@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { AiConversationDetail } from "@lazyit/shared";
-import { approval, ev, RUN } from "./test-fixtures";
+import { approval, ev, inputRequest, RUN } from "./test-fixtures";
 import {
   chatReducer,
   initialChatState,
   isAwaitingApproval,
+  isAwaitingInput,
   isRunActive,
+  pendingInput,
+  runStatusOfConversation,
   type ChatAction,
   type ChatState,
 } from "./stream-reducer";
@@ -340,5 +343,157 @@ describe("chatReducer — snapshot, hydrate, local messages", () => {
     let s = chatReducer(started(), { type: "navigated", toolCallId: "n1" });
     s = chatReducer(s, { type: "navigated", toolCallId: "n1" });
     expect(s.navigated).toEqual(["n1"]);
+  });
+});
+
+describe("chatReducer — input forms (#1388)", () => {
+  const toolLine = ev("tool.call", {
+    toolCallId: "tc-in",
+    name: "request_input",
+    kind: "navigate",
+    class: "navigate",
+    status: "AWAITING_INPUT",
+  });
+
+  function asked(): ChatState {
+    return apply(
+      started(),
+      { type: "event", runId: RUN, eventId: at(1), event: ev("run.status", { status: "RUNNING" }) },
+      { type: "event", runId: RUN, eventId: at(2), event: toolLine },
+      {
+        type: "event",
+        runId: RUN,
+        eventId: at(3),
+        event: ev("input.required", inputRequest("tc-in")),
+      },
+      { type: "event", runId: RUN, eventId: at(4), event: ev("run.status", { status: "AWAITING_INPUT" }) },
+    );
+  }
+
+  test("input.required puts the form after its tool line; the run waits for input, not a decision", () => {
+    const s = asked();
+    const parts = s.messages.at(-1)!.parts;
+    expect(parts.map((p) => p.type)).toEqual(["tool", "input"]);
+    expect(parts[1]).toMatchObject({ type: "input", outcome: null, request: { toolCallId: "tc-in" } });
+    expect(isAwaitingInput(s)).toBe(true);
+    expect(isAwaitingApproval(s)).toBe(false);
+    expect(isRunActive(s)).toBe(false);
+    expect(pendingInput(s.messages)?.request.toolCallId).toBe("tc-in");
+  });
+
+  test("the answer is kept on the card; input.resolved sets the outcome; a replayed input.required keeps both", () => {
+    const answer = { values: { site: "loc1" }, groups: { items: [{ serial: "SN1" }] } };
+    let s = apply(
+      asked(),
+      { type: "inputAnswered", toolCallId: "tc-in", answer },
+      { type: "runStarted", runId: RUN, status: "QUEUED" },
+      {
+        type: "event",
+        runId: RUN,
+        eventId: at(6),
+        event: ev("input.resolved", { toolCallId: "tc-in", outcome: "submitted" }),
+      },
+    );
+    let part = s.messages.at(-1)!.parts[1]!;
+    expect(part).toMatchObject({ type: "input", outcome: "submitted", answer });
+    expect(pendingInput(s.messages)).toBeNull();
+    expect(isRunActive(s)).toBe(true);
+
+    s = chatReducer(s, {
+      type: "event",
+      runId: RUN,
+      eventId: null,
+      event: ev("input.required", inputRequest("tc-in")),
+    });
+    part = s.messages.at(-1)!.parts[1]!;
+    expect(part).toMatchObject({ outcome: "submitted", answer });
+    expect(s.messages.at(-1)!.parts).toHaveLength(2);
+  });
+
+  test("a snapshot's pendingInputs restores the form on reload", () => {
+    let s = chatReducer(initialChatState("ckconv"), {
+      type: "runStarted",
+      runId: RUN,
+      status: "AWAITING_INPUT",
+    });
+    s = chatReducer(s, {
+      type: "event",
+      runId: RUN,
+      eventId: at(9),
+      event: ev("run.snapshot", {
+        seq: 9,
+        status: "AWAITING_INPUT",
+        messages: [
+          {
+            id: "m1",
+            role: "assistant",
+            createdAt: "2026-09-24T10:00:00.000Z",
+            parts: [
+              { type: "tool", toolCallId: "tc-in", name: "request_input", class: "navigate", status: "AWAITING_INPUT" },
+            ],
+          },
+        ],
+        pendingApprovals: [],
+        pendingInputs: [inputRequest("tc-in")],
+      }),
+    });
+    expect(s.messages).toHaveLength(1);
+    expect(s.messages[0]!.parts.map((p) => p.type)).toEqual(["tool", "input"]);
+    expect(isAwaitingInput(s)).toBe(true);
+  });
+
+  test("a snapshot without pendingInputs (an older API) and a persisted input part merge without duplicates", () => {
+    const persisted = {
+      id: "m1",
+      role: "assistant" as const,
+      createdAt: "2026-09-24T10:00:00.000Z",
+      parts: [
+        { type: "tool" as const, toolCallId: "tc-in", name: "request_input", class: "navigate" as const, status: "AWAITING_INPUT" as const },
+        { type: "input" as const, request: inputRequest("tc-in"), outcome: null },
+      ],
+    };
+    const s = chatReducer(asked(), {
+      type: "event",
+      runId: RUN,
+      eventId: at(10),
+      event: ev("run.snapshot", { seq: 10, status: "AWAITING_INPUT", messages: [persisted], pendingApprovals: [] }),
+    });
+    const inputs = s.messages.flatMap((m) => m.parts).filter((p) => p.type === "input");
+    expect(inputs).toHaveLength(1);
+  });
+
+  test("a conversation opened while awaiting input seeds AWAITING_INPUT", () => {
+    expect(runStatusOfConversation("awaiting-input")).toBe("AWAITING_INPUT");
+    const detail: AiConversationDetail = {
+      id: "ckconv",
+      title: null,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      status: "awaiting-input",
+      readOnly: false,
+      activeRunId: RUN,
+      messages: [],
+    };
+    const s = chatReducer(initialChatState(null), { type: "hydrate", detail });
+    expect(s.run?.status).toBe("AWAITING_INPUT");
+  });
+
+  test("expiry resolves the card and ends the run", () => {
+    const s = apply(
+      asked(),
+      {
+        type: "event",
+        runId: RUN,
+        eventId: at(7),
+        event: ev("input.resolved", { toolCallId: "tc-in", outcome: "expired" }),
+      },
+      {
+        type: "event",
+        runId: RUN,
+        eventId: at(8),
+        event: ev("run.finished", { status: "EXPIRED", finishReason: "input_expired", usage }),
+      },
+    );
+    expect(s.messages.at(-1)!.parts[1]).toMatchObject({ outcome: "expired" });
+    expect(isAwaitingInput(s)).toBe(false);
   });
 });
