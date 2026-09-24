@@ -272,8 +272,8 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
 > [[ai-assistant/provider-and-runtime|provider]] §9.1 and §9.3 *As built (W3-1)*. In short: every route
 > is owner-only with a 404 for anyone else (admins included); the channel follows the principal (a human's
 > `POST /ai/runs` is `CHAT`, a Service Account's `HEADLESS`); `/ai/conversations` is human-only (a Service
-> Account gets 403 and uses `POST /ai/runs`); `DELETE /ai/conversations/:id` answers 204, or 409
-> `RUN_IN_PROGRESS` while a run is active; the decision answers `{ runId, status }` and its `STEP_UP_*` 403s
+> Account gets 403 and uses `POST /ai/runs`); `DELETE /ai/conversations/:id` is a follow-up that calls
+> W3-6's purge service; the decision answers `{ runId, status }` and its `STEP_UP_*` 403s
 > (`REQUIRED`, `FAILED`, `UNAVAILABLE`) are about the password, **never a logout signal for the web**; 429
 > `STEP_UP_RATE_LIMITED` carries `retryAfterSec`; per-SA changes are audited in `ai_config_audit_log`
 > (`service_account.ai_access.updated`).

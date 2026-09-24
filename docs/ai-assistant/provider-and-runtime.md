@@ -991,8 +991,8 @@ the creating transaction, so simultaneous submissions to different conversations
 and the token budget is checked before each step, so the step that crosses it completes (a run can
 overshoot by one step's tokens). Both fail closed on the next check.
 
-**Not built here.** The HTTP endpoints and the SSE controller (W3-1, as built in §9.1 and §9.3); owner
-deletion of a conversation (W3-1, §9.1) and retention (W3-6); the MCP stale-`EXECUTING` sweep (W3-2). The sweeper's lost-resume threshold means a
+**Not built here.** The HTTP endpoints and the SSE controller (W3-1, as built in §9.1 and §9.3);
+per-conversation deletion and retention (W3-6); the MCP stale-`EXECUTING` sweep (W3-2). The sweeper's lost-resume threshold means a
 decision made while Valkey is down resumes within about a minute of its return.
 
 ## 9. HTTP surfaces and the stream contract
@@ -1135,7 +1135,7 @@ decision made while Valkey is down resumes within about a minute of its return.
 >   holds `infra:report` is refused **403 `FORBIDDEN`** at creation; `read-only` freezes a conversation
 >   without write tools.
 > - **Owner only, 404 for everyone else** — another user, an admin (ADR-0097 default 3) or a Service
->   Account — on a conversation (read, send, delete), a run (read, cancel, events) and a decision. A
+>   Account — on a conversation (read, send), a run (read, cancel, events) and a decision. A
 >   malformed id is the same 404. The SSE endpoint checks ownership **before** `subscribe`, `replay` or
 >   `lastSeq`.
 > - **`POST /ai/conversations`** → 201 `{ id }` (the frozen prompt's locale is the first tag of
@@ -1154,9 +1154,9 @@ decision made while Valkey is down resumes within about a minute of its return.
 >   once decided and executed). A run's redacted error becomes a `notice` part after its last message.
 >   Message ids are `<conversationId>:<seq>` — the `messageId` of `message.delta`. Every part is validated
 >   against the shared schema; what fails is dropped (read-tolerant).
-> - **`DELETE /ai/conversations/:id`** → 204. Hard delete (ADR-0097): messages and invocations cascade,
->   the run rows stay with `conversationId = null`, `ai_action_log` is untouched. **409 `RUN_IN_PROGRESS`**
->   while a run of the conversation is active (its approvals and resume live in it). Reads and deletes keep
+> - **`DELETE /ai/conversations/:id` is not exposed yet (follow-up).** It will call the retention unit's
+>   purge service (W3-6, `AiConversationPurgeService.deleteOwned`: 404 for non-owners, 409
+>   `RUN_IN_PROGRESS` while a run is active), the one place that hard-deletes a transcript. Reads keep
 >   working while AI is off (conversations stay dormant, [[ai-assistant/frontend|frontend]] §11 item 4);
 >   create and send answer **409 `AI_DISABLED`**.
 > - **`POST /ai/runs`** → 202 `{ runId, status }`; an `Idempotency-Key` (1–255 printable ASCII, else 400)
