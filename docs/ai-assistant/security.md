@@ -688,12 +688,26 @@ secret-bearing connection or attaching a secret needs `workflow:secrets` on top 
 - The behaviour rules tell the model never to propose sending data to a destination the user did not
   name (primer, `AI_PROMPT_VERSION` 2).
 
+**As built (W2-14, `ai/tools/workflow-authoring.tools.ts`).** Nine chat-only `elevated` tools
+(tools-and-execution §7 W10–W16; the standalone dry-run is folded into the enable card). On top of the
+mitigations above: every destination is checked with the runtime egress guard before a card is shown;
+`workflow_connection_update` refuses before the card what CSEC-1 refuses at execution; the AI cannot
+set connection `defaultHeaders` and an update keeps the existing ones; URLs on cards and results show
+origin + path and query parameter names only (no userinfo, no query values, no header values, no secret
+placeholders); every card's precondition is anchored on the application, the workflow, its latest version
+and the connections it describes, so any change in between — the application turning critical included
+— ends the approval as `STALE`.
+
 **Residual risk.** An admin who approves an injected proposal without reading the host list still
 creates the channel; the controls make it visible, not impossible. An `ACCESS_GRANTED` workflow on a
 non-critical application needs no password. The MCP/headless refusal on critical applications depends on
 each tool detecting `isCritical` and calling `assertChannelAllows` in `run`; the G2 review checks every
 write tool that can reach an application does. When ADR-0055's internal allowlist ships, its entries must
-be an excluded or elevated AI operation.
+be an excluded or elevated AI operation. Found while building W2-14 (a route-level gap, not an AI one):
+CSEC-1 guards only `secretId`, so a `workflow:manage`-only principal can re-point a connection whose
+`defaultHeaders` hold a pasted token (the field is documented "never a credential" but not validated) and
+the headers follow to the new host. The AI card names those headers on a re-point; the route fix is a
+sentinel follow-up.
 
 **Proposed invariants** (join §7 on the W4-2 security re-review):
 - **INV-AI-15 — No unattended outbound integration.** A workflow, a workflow version or a workflow
