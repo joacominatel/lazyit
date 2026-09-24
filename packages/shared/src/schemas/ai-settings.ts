@@ -1,6 +1,9 @@
 import { z } from "zod";
 import {
   AI_PROVIDER_OPTIONS_SCHEMAS,
+  AI_WEB_SEARCH_MAX_USES_DEFAULT,
+  AI_WEB_SEARCH_MAX_USES_MAX,
+  AI_WEB_SEARCH_MAX_USES_MIN,
   AiEffortSchema,
   AiProviderKindSchema,
   AiProviderOptionsSchema,
@@ -386,7 +389,13 @@ export const AI_SETTINGS_DEFAULTS = {
   mcpClientAllowlistRemovedDefaults: [],
   /** On by default (ADR-0097 decision 13, amended 2026-09-24 — CEO: "Sí, cualquier HTTPS"). */
   mcpAllowAnyHttpsClient: true,
+  /** Provider-native web search (#1389): off until an admin turns it on. */
+  webSearchEnabled: false,
+  webSearchMaxUses: AI_WEB_SEARCH_MAX_USES_DEFAULT,
 } as const;
+
+/** The admin's cap on provider searches per model call (#1389). */
+const webSearchMaxUses = int4({ min: AI_WEB_SEARCH_MAX_USES_MIN, max: AI_WEB_SEARCH_MAX_USES_MAX });
 
 /**
  * The REDACTED read shape of `GET /config/ai`. Never carries the key: `apiKeySet` says whether an
@@ -426,6 +435,15 @@ export const AiSettingsSchema = z.object({
   mcpClientAllowlistRemovedDefaults: z.array(z.string()),
   /** Accept any client with https (non-loopback) redirect URIs, never private-use ones; consent warns. */
   mcpAllowAnyHttpsClient: z.boolean(),
+  /**
+   * Provider-native web search for the chat (#1389; ADR-0097 decision 3 as amended 2026-09-24): the
+   * provider searches on its own servers, lazyit makes no request of its own. Off by default. It takes
+   * effect only where `aiWebSearchSupported(provider, model)` holds, and only for conversations started
+   * while it is on. Defaulted so an older API's answer still parses.
+   */
+  webSearchEnabled: z.boolean().default(AI_SETTINGS_DEFAULTS.webSearchEnabled),
+  /** The cap on searches per model call, where the provider takes one (Anthropic `max_uses`). */
+  webSearchMaxUses: webSearchMaxUses.default(AI_SETTINGS_DEFAULTS.webSearchMaxUses),
   /** When an admin acknowledged the egress disclosure; required before the first enable. */
   disclosureAcknowledgedAt: z.iso.datetime().nullable(),
   /** When the current connection fields last passed a connection test. */
@@ -518,6 +536,13 @@ export const UpdateAiSettingsSchema = z
     mcpClientAllowlistAdded: McpClientAllowlistAddedSchema,
     mcpClientAllowlistRemovedDefaults: McpClientAllowlistRemovedDefaultsSchema,
     mcpAllowAnyHttpsClient: z.boolean(),
+    /**
+     * Provider-native web search (#1389). Optional so a caller written before it keeps working: omitted
+     * keeps the stored value. `true` is accepted for any provider; it only takes effect where
+     * `aiWebSearchSupported` holds.
+     */
+    webSearchEnabled: z.boolean().optional(),
+    webSearchMaxUses: webSearchMaxUses.optional(),
     acknowledgeDisclosure: z.boolean().optional(),
   })
   .refine((value) => !value.allowPrivateNetwork || value.provider === "openai-compatible", {

@@ -14,6 +14,8 @@ import {
   AiConversationModelIdSchema,
   AiMessagePartSchema,
   AiRunEventSchema,
+  AiWebSourceListSchema,
+  isWebSourceUrl,
   CreateAiConversationSchema,
   CreateAiRunSchema,
   SendAiMessageSchema,
@@ -502,5 +504,50 @@ describe("Input requests (#1388)", () => {
     const checked = checkAiInputAnswer(FORM, submitted as never);
     expect(checked.ok).toBe(false);
     if (!checked.ok) expect(checked.issues).toContainEqual({ path, message });
+  });
+});
+
+describe("Web search sources (#1389)", () => {
+  test("only absolute http(s) URLs are sources", () => {
+    expect(isWebSourceUrl("https://example.com/docs?a=1#b")).toBe(true);
+    expect(isWebSourceUrl("http://example.com")).toBe(true);
+    for (const bad of [
+      "javascript:alert(1)",
+      "data:text/html,<b>x</b>",
+      "ftp://example.com",
+      "//example.com",
+      "/relative",
+      "https://",
+      "https://exa mple.com",
+      "https://example.com/\nx",
+      `https://example.com/${"a".repeat(2100)}`,
+    ]) {
+      expect(isWebSourceUrl(bad)).toBe(false);
+    }
+  });
+
+  test("the list drops what it cannot read and duplicates, and caps", () => {
+    const parsed = AiWebSourceListSchema.parse([
+      { url: "https://a.example/x", title: "A" },
+      { url: "javascript:alert(1)", title: "evil" },
+      { url: "https://a.example/x", title: "dup" },
+      { url: "https://b.example", title: null },
+      "garbage",
+    ]);
+    expect(parsed).toEqual([
+      { url: "https://a.example/x", title: "A" },
+      { url: "https://b.example", title: null },
+    ]);
+    const many = Array.from({ length: 80 }, (_, i) => ({ url: `https://s${i}.example`, title: null }));
+    expect(AiWebSourceListSchema.parse(many)).toHaveLength(50);
+  });
+
+  test("a sources part and a message.sources event parse", () => {
+    const sources = [{ url: "https://docs.example/redmine", title: "Easy Redmine docs" }];
+    expect(AiMessagePartSchema.safeParse({ type: "sources", sources, queries: ["easy redmine workflow"] }).success).toBe(
+      true,
+    );
+    const event = AiRunEventSchema.safeParse({ v: 1, type: "message.sources", messageId: "c:3", sources });
+    expect(event.success).toBe(true);
   });
 });

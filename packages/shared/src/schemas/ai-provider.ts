@@ -50,6 +50,12 @@ export const AiProviderDescriptorSchema = z.object({
    * for it on write (#1373).
    */
   supportsEffort: z.boolean(),
+  /**
+   * Whether the provider has a NATIVE web search the assistant may use (#1389; ADR-0097 decision 3 as
+   * amended 2026-09-24): the provider runs the search on its own servers, lazyit makes no request of its
+   * own. Some providers support it only on some models — {@link aiWebSearchSupported} is the full rule.
+   */
+  supportsWebSearch: z.boolean(),
 });
 export type AiProviderDescriptor = z.infer<typeof AiProviderDescriptorSchema>;
 
@@ -69,6 +75,7 @@ export const AI_PROVIDER_DESCRIPTORS: Readonly<
     suggestedModel: "claude-opus-5",
     supportsModelListing: true,
     supportsEffort: true,
+    supportsWebSearch: true,
   },
   openai: {
     kind: "openai",
@@ -79,6 +86,7 @@ export const AI_PROVIDER_DESCRIPTORS: Readonly<
     suggestedModel: "gpt-6-sol",
     supportsModelListing: true,
     supportsEffort: true,
+    supportsWebSearch: true,
   },
   google: {
     kind: "google",
@@ -89,6 +97,7 @@ export const AI_PROVIDER_DESCRIPTORS: Readonly<
     suggestedModel: "gemini-3.8-flash",
     supportsModelListing: true,
     supportsEffort: true,
+    supportsWebSearch: true,
   },
   "openai-compatible": {
     kind: "openai-compatible",
@@ -99,8 +108,36 @@ export const AI_PROVIDER_DESCRIPTORS: Readonly<
     suggestedModel: null,
     supportsModelListing: true,
     supportsEffort: false,
+    supportsWebSearch: false,
   },
 };
+
+/**
+ * PROVIDER-NATIVE WEB SEARCH (#1389; ADR-0097 decision 3 as amended 2026-09-24). Whether the assistant
+ * can be given the provider's own search tool for this provider and model:
+ *   - Anthropic — the `web_search` server tool, every model;
+ *   - OpenAI — the Responses API `web_search` tool, every model (a model without it answers 400);
+ *   - Google — `google_search` grounding, only on Gemini 3 and later: an older Gemini cannot combine it
+ *     with lazyit's own tools (the SDK would drop them), so it is left out there;
+ *   - OpenAI-compatible — never: there is no common search API.
+ * The rule mirrors the SDK's own model detection (the Google provider package's `getGoogleModelCapabilities`).
+ */
+export function aiWebSearchSupported(provider: AiProviderKind, modelId: string): boolean {
+  if (!AI_PROVIDER_DESCRIPTORS[provider].supportsWebSearch) return false;
+  if (provider !== "google") return true;
+  const id = modelId.trim().toLowerCase();
+  if (!/(^|\/)gemini-/.test(id)) return false;
+  return (
+    !/(^|\/)gemini-(1|2)(?:[.-]|$)/.test(id) &&
+    !/(^|\/)gemini-pro(?:-vision)?$/.test(id) &&
+    !/(^|\/)gemini-robotics-er-1\.5(?:[.-]|$)/.test(id)
+  );
+}
+
+/** The per-turn cap on provider searches an admin may set (Settings → AI), and its default. */
+export const AI_WEB_SEARCH_MAX_USES_MIN = 1;
+export const AI_WEB_SEARCH_MAX_USES_MAX = 20;
+export const AI_WEB_SEARCH_MAX_USES_DEFAULT = 5;
 
 /**
  * Per-provider extras stored in `AiSettings.providerOptions` (jsonb). Strict objects, so an extra that a
