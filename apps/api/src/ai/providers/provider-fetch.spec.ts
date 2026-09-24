@@ -11,10 +11,18 @@ import {
   privateHostScope,
   PROVIDER_DEADLINE_MS,
   PROVIDER_IDLE_TIMEOUT_MS,
+  PROVIDER_RESPONSE_MAX_BYTES,
+  ProviderResponseTooLargeError,
   type ProviderEgressTarget,
 } from './provider-fetch';
+import { AiSdkChatModel } from './aisdk-chat-model';
 import { classifyProviderError } from './provider-errors';
-import { SECRET_KEY } from './provider.harness-spec';
+import {
+  providerConfig,
+  readerFor,
+  SECRET_KEY,
+  stepRequest,
+} from './provider.harness-spec';
 
 /**
  * INV-AI-7 / security.md §6.4, G1 "Egress": every provider request goes through the egress guard with
@@ -310,5 +318,111 @@ describe('privateHostScope', () => {
         allowPrivateNetwork: true,
       }),
     ).toEqual({ hostname: 'llm.lan', port: 80 });
+  });
+});
+
+describe('provider fetch — the response-size cap (security.md §6.4)', () => {
+  const lookup: DnsLookup = () =>
+    Promise.resolve([{ address: '93.184.216.34', family: 4 }]);
+
+  /** An upstream answering `status` with a 4 MiB body; records how much was pulled and a cancel. */
+  function endlessUpstream(status: number) {
+    const state = { pulled: 0, cancelled: false };
+    const transport: EgressTransport = () =>
+      Promise.resolve({
+        status,
+        statusText: '',
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        toResponse: () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                state.pulled += 1;
+                if (state.pulled > 64) {
+                  controller.close();
+                  return;
+                }
+                controller.enqueue(new Uint8Array(64 * 1024).fill(0x61));
+              },
+              cancel() {
+                state.cancelled = true;
+              },
+            }),
+            { status },
+          ),
+        discard: () => undefined,
+      });
+    return { transport, state };
+  }
+
+  it('is a few tens of MiB by default', () => {
+    expect(PROVIDER_RESPONSE_MAX_BYTES).toBe(32 * 1024 * 1024);
+  });
+
+  it.each([200, 500])(
+    'errors a %i body past the cap and cancels the upstream',
+    async (status) => {
+      const { transport, state } = endlessUpstream(status);
+      const fetch = createProviderFetch(
+        { kind: 'openai', baseUrl: null, allowPrivateNetwork: false },
+        { lookup, transport, maxResponseBytes: 256 * 1024 },
+      );
+
+      const res = await fetch('https://api.openai.com/v1/responses');
+      const err = await res.text().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+
+      expect(err).toBeInstanceOf(ProviderResponseTooLargeError);
+      expect(state.pulled).toBeLessThan(16);
+      expect(state.cancelled).toBe(true);
+      expect(classifyProviderError(err, { contextLimit: /x/ }).code).toBe(
+        'PROVIDER_UNAVAILABLE',
+      );
+    },
+  );
+
+  it('passes a body under the cap through untouched', async () => {
+    const transport: EgressTransport = () =>
+      Promise.resolve({
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'x-request-id': 'r1' }),
+        toResponse: () => new Response('{"ok":true}', { status: 200 }),
+        discard: () => undefined,
+      });
+    const fetch = createProviderFetch(
+      { kind: 'openai', baseUrl: null, allowPrivateNetwork: false },
+      { lookup, transport, maxResponseBytes: 1024 },
+    );
+
+    const res = await fetch('https://api.openai.com/v1/models');
+
+    await expect(res.json()).resolves.toEqual({ ok: true });
+    expect(res.status).toBe(200);
+  });
+
+  it('fails a model step whose stream exceeds the cap, classified and without buffering the rest', async () => {
+    const { transport, state } = endlessUpstream(200);
+    const config = providerConfig({
+      provider: 'openai-compatible',
+      model: 'm',
+      baseUrl: 'https://llm.example/v1',
+    });
+    const port = new AiSdkChatModel(readerFor(config), {
+      fetchFactory: (target) =>
+        createProviderFetch(target, {
+          lookup,
+          transport,
+          maxResponseBytes: 256 * 1024,
+        }),
+      maxRetries: 0,
+    });
+
+    await expect(
+      port.step(stepRequest(config, { maxOutputTokens: 10 })),
+    ).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+    expect(state.pulled).toBeLessThan(16);
   });
 });

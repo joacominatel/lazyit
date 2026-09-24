@@ -6,7 +6,11 @@ import {
 } from 'ai';
 
 import { EgressError } from '../../common/egress';
-import { AiProviderError } from './ai-provider.error';
+import {
+  AiProviderError,
+  ProviderDownloadRefusedError,
+} from './ai-provider.error';
+import { ProviderResponseTooLargeError } from './provider-fetch';
 import type { ProviderErrorPatterns } from './provider.types';
 
 /**
@@ -67,11 +71,14 @@ function isAbort(err: unknown): boolean {
   );
 }
 
-/** The innermost egress refusal, if the error chain carries one. */
-function findEgressError(err: unknown): EgressError | undefined {
+/** The first error of a given class in the error's `cause` chain (the SDK wraps transport errors). */
+function findInChain<T>(
+  err: unknown,
+  type: abstract new (...args: never[]) => T,
+): T | undefined {
   let current: unknown = err;
   for (let depth = 0; depth < 5 && current; depth += 1) {
-    if (current instanceof EgressError) {
+    if (current instanceof type) {
       return current;
     }
     current = (current as { cause?: unknown }).cause;
@@ -129,7 +136,15 @@ export function classifyProviderError(
   }
 
   // A refusal before any byte (the guard) keeps its reason; a timeout is an unavailable provider.
-  const egress = findEgressError(err);
+  // A file URL the SDK wanted to fetch outside the egress guard: refused by policy.
+  if (findInChain(err, ProviderDownloadRefusedError)) {
+    return new AiProviderError('EGRESS_DENIED');
+  }
+  // An oversized body (the provider-fetch cap) is a provider misbehaving, not a policy refusal.
+  if (findInChain(err, ProviderResponseTooLargeError)) {
+    return new AiProviderError('PROVIDER_UNAVAILABLE');
+  }
+  const egress = findInChain(err, EgressError);
   if (egress) {
     return egress.reason === 'request-timeout' ||
       egress.reason === 'deadline-exceeded'

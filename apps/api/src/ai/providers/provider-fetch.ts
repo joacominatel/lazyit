@@ -27,6 +27,10 @@ import type { FetchLike } from './provider.types';
  *   private address. Loopback, IMDS, link-local and the other hard-denied ranges stay unreachable: the
  *   guard never routes them through the allowlist seam.
  *
+ * - Every response body is capped at {@link PROVIDER_RESPONSE_MAX_BYTES}, 2xx streams and error bodies
+ *   alike (security.md §6.4): past it the body stream errors with {@link ProviderResponseTooLargeError}
+ *   and the upstream is cancelled, so a hostile or broken endpoint cannot make the api buffer without end.
+ *
  * Nothing here logs, and the request headers (which carry the key) are never copied anywhere.
  */
 
@@ -34,6 +38,54 @@ import type { FetchLike } from './provider.types';
 export const PROVIDER_IDLE_TIMEOUT_MS = 120_000;
 /** Total budget for one model step, connect to last byte. */
 export const PROVIDER_DEADLINE_MS = 600_000;
+
+/**
+ * The largest response body read from a provider, per request. A step's SSE stream is the big case: the
+ * framing costs roughly 100–200 bytes per delta event, so 32 MiB covers well over 100k streamed output
+ * tokens (more than any `maxOutputTokens` lazyit sends), while bounding the api's memory at the ai-run
+ * worker concurrency (4 × 32 MiB against the 768 MiB container).
+ */
+export const PROVIDER_RESPONSE_MAX_BYTES = 32 * 1024 * 1024;
+
+/** The body of a provider response exceeded {@link PROVIDER_RESPONSE_MAX_BYTES}. */
+export class ProviderResponseTooLargeError extends Error {
+  readonly maxBytes: number;
+
+  constructor(maxBytes: number) {
+    super(`The provider response exceeded ${maxBytes} bytes`);
+    this.name = 'ProviderResponseTooLargeError';
+    this.maxBytes = maxBytes;
+    Object.setPrototypeOf(this, ProviderResponseTooLargeError.prototype);
+  }
+}
+
+/** The same response, its body counted and errored past `maxBytes` (the upstream is then cancelled). */
+export function capResponseBody(
+  response: Response,
+  maxBytes: number,
+): Response {
+  if (!response.body) {
+    return response;
+  }
+  let received = 0;
+  const counted = response.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        received += chunk.byteLength;
+        if (received > maxBytes) {
+          controller.error(new ProviderResponseTooLargeError(maxBytes));
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    }),
+  );
+  return new Response(counted, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
 
 /** Where a provider is allowed to go, derived from the settings. */
 export interface ProviderEgressTarget {
@@ -46,6 +98,8 @@ export interface ProviderEgressTarget {
 export interface ProviderFetchOverrides {
   lookup?: DnsLookup;
   transport?: EgressTransport;
+  /** Response cap (default {@link PROVIDER_RESPONSE_MAX_BYTES}). */
+  maxResponseBytes?: number;
 }
 
 /** Builds the `fetch` for one provider target (injectable so specs can script the upstream). */
@@ -149,6 +203,10 @@ export const createProviderFetch: ProviderFetchFactory = (
       options = { ...cleartext, lookup: () => Promise.resolve(pinned) };
     }
 
-    return guardedFetch(url, init ?? {}, options);
+    const response = await guardedFetch(url, init ?? {}, options);
+    return capResponseBody(
+      response,
+      overrides.maxResponseBytes ?? PROVIDER_RESPONSE_MAX_BYTES,
+    );
   };
 };
