@@ -41,6 +41,9 @@ function ownRoute(ref: { type: string; id: string; slug?: string }): string | nu
       return `/assets/diagram?node=${seg(ref.id)}&focus=1`;
     case "manualTask":
       return `/settings/integrations/tasks/${seg(ref.id)}`;
+    case "assetTagScheme":
+      // The single instance-wide scheme (#1394): its editor lives on the instance settings page.
+      return "/settings/instance";
     default:
       return null;
   }

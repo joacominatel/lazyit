@@ -18,6 +18,12 @@ describe("entityHref", () => {
     expect(entityHref(ref({ type: "infraNode", id: "n1" }))).toBe("/assets/diagram?node=n1&focus=1");
   });
 
+  test("the asset tag scheme opens the instance settings page, whatever its id (#1394)", () => {
+    expect(entityHref(ref({ type: "assetTagScheme", id: "singleton" }))).toBe("/settings/instance");
+    expect(entityHref(ref({ type: "assetTagScheme", id: "../x" }))).toBe("/settings/instance");
+    expect(entityHref(ref({ type: "assetTagScheme", id: "" }))).toBeNull();
+  });
+
   test("routes articles by slug, and none without one", () => {
     expect(entityHref(ref({ type: "article", id: "a1", slug: "vpn-setup" }))).toBe("/kb/vpn-setup");
     expect(entityHref(ref({ type: "article", id: "a1" }))).toBeNull();
