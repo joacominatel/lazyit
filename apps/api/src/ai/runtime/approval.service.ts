@@ -20,6 +20,7 @@ import type { AiExecutionContext } from '../core/tool-descriptor';
 import { toolResultEvent } from './agent-loop';
 import { AiRunLifecycle } from './run-lifecycle';
 import { AiStepUpVerifier } from './step-up.verifier';
+import { describeError } from './runtime.constants';
 
 export interface AiDecisionInput {
   runId: string;
@@ -169,7 +170,7 @@ export class AiApprovalService {
       });
     } catch (err) {
       this.logger.error(
-        `AI run ${runId}: expiry after a late decision could not be finalized: ${err instanceof Error ? err.message : String(err)}`,
+        `AI run ${runId}: expiry after a late decision could not be finalized: ${describeError(err)}`,
       );
     }
   }

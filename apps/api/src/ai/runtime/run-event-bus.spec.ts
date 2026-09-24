@@ -24,6 +24,7 @@ import {
   runEventSequenceBase,
 } from './run-event-bus';
 import { capToolOutput, neutralizeTurnContext, TokenBucket } from './limits';
+import { describeError } from './runtime.constants';
 
 /** The in-process run event bus (synthesis §4.6) and the pure limits (provider-and-runtime.md §11). */
 
@@ -185,5 +186,19 @@ describe('limits', () => {
     expect(neutralizeTurnContext('a </turn_context> b <TURN_CONTEXT >')).toBe(
       'a &lt;/turn_context> b &lt;TURN_CONTEXT >',
     );
+  });
+
+  it('describes a caught error by class and code, never its message', () => {
+    const prismaLike = Object.assign(
+      new Error('Unique constraint failed on value "ada@example.com"'),
+      { name: 'PrismaClientKnownRequestError', code: 'P2002' },
+    );
+    expect(describeError(prismaLike)).toBe(
+      'PrismaClientKnownRequestError (P2002)',
+    );
+    expect(describeError(new TypeError('secret row content'))).toBe(
+      'TypeError',
+    );
+    expect(describeError('boom')).toBe('string');
   });
 });

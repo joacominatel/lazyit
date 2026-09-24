@@ -66,3 +66,15 @@ export const AI_STEP_UP_RESET_AFTER_MS = 60 * 60 * 1000;
 export function aiRunJobId(...parts: Array<string | number>): string {
   return parts.map((part) => String(part).replace(/:/g, '-')).join('-');
 }
+
+/**
+ * A log-safe description of a caught error: its class and code only. A Prisma or driver message can
+ * carry query values (row content, ids, input) and must not reach the logs (ADR-0031).
+ */
+export function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return typeof err;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' || typeof code === 'number'
+    ? `${err.name} (${code})`
+    : err.name;
+}

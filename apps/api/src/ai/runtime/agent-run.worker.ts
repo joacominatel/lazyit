@@ -8,7 +8,7 @@ import {
 } from '../ai.constants';
 import { AgentLoop } from './agent-loop';
 import type { AiRunJobData } from './run-queue';
-import { aiWorkerConcurrency } from './runtime.constants';
+import { aiWorkerConcurrency, describeError } from './runtime.constants';
 
 /**
  * The IN-PROCESS `ai-run` worker (ADR-0053; provider-and-runtime.md Fork B). In-process like the
@@ -45,7 +45,7 @@ export class AgentRunWorker extends WorkerHost {
       // `advance` finalizes its own faults; this is a last resort (e.g. the database is unreachable).
       // The sweeper finalizes a run left RUNNING. Never rethrown.
       this.logger.error(
-        `ai-run job ${job.name} for run ${runId} threw: ${err instanceof Error ? err.message : String(err)}`,
+        `ai-run job ${job.name} for run ${runId} threw: ${describeError(err)}`,
       );
     }
   }

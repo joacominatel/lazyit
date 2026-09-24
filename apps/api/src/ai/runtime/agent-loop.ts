@@ -63,6 +63,7 @@ import {
 import {
   AI_MAX_PENDING_PER_STEP,
   AI_MAX_TOOL_CALLS_PER_RUN,
+  describeError,
 } from './runtime.constants';
 
 /** The frozen toolset of a conversation, as the model sees it and as the loop dispatches it. */
@@ -226,7 +227,7 @@ export class AgentLoop {
       await this.drive(runId, controller.signal);
     } catch (err) {
       this.logger.error(
-        `AI run ${runId} failed unexpectedly: ${err instanceof Error ? err.message : String(err)}`,
+        `AI run ${runId} failed unexpectedly: ${describeError(err)}`,
       );
       await this.lifecycle
         .finalize(runId, 'FAILED', {

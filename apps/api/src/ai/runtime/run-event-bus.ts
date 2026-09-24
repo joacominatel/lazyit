@@ -4,6 +4,7 @@ import type {
   RunEventBus,
   RunEventEnvelope,
 } from '../core/ports/run-event-bus.port';
+import { describeError } from './runtime.constants';
 
 /** Events kept per run. Deltas are small; past this, a late replay is answered with a snapshot. */
 export const RUN_EVENT_BUFFER_CAPACITY = 2_000;
@@ -109,7 +110,7 @@ export class InProcessRunEventBus implements RunEventBus {
         listener(envelope);
       } catch (err) {
         this.logger.warn(
-          `run event listener failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
+          `run event listener failed for run ${runId}: ${describeError(err)}`,
         );
       }
     }

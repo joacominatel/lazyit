@@ -47,7 +47,10 @@ import {
   AI_RUNTIME_RECORD_ROLE,
   roleOf,
 } from './run-records';
-import { AI_MAX_ACTIVE_RUNS_PER_PRINCIPAL } from './runtime.constants';
+import {
+  AI_MAX_ACTIVE_RUNS_PER_PRINCIPAL,
+  describeError,
+} from './runtime.constants';
 
 /** A refused request: the HTTP status and the `{ code, message }` body the endpoints answer as is. */
 function refusal(
@@ -211,7 +214,7 @@ export class AgentRunOrchestrator {
     // active run's open step is the one its approvals are waiting on.)
     await this.lifecycle.answerOpenStep(conversation.id, null).catch((err) => {
       this.logger.error(
-        `AI conversation ${conversation.id}: the open step could not be answered: ${err instanceof Error ? err.message : String(err)}`,
+        `AI conversation ${conversation.id}: the open step could not be answered: ${describeError(err)}`,
       );
       throw refusal(
         HttpStatus.CONFLICT,

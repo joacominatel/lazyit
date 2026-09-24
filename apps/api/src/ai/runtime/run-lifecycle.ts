@@ -34,6 +34,7 @@ import {
   type StepRecord,
 } from './run-records';
 import { AiRunQueue } from './run-queue';
+import { describeError } from './runtime.constants';
 
 /** Distributive omit, so each member of the event union keeps its own fields. */
 type WithoutVersion<T> = T extends unknown ? Omit<T, 'v'> : never;
@@ -119,7 +120,7 @@ export class AiRunLifecycle {
       this.bus.publish(runId, parsed.data);
     } catch (err) {
       this.logger.warn(
-        `ai.run.event_failed run=${runId} type=${event.type}: ${err instanceof Error ? err.message : String(err)}`,
+        `ai.run.event_failed run=${runId} type=${event.type}: ${describeError(err)}`,
       );
     }
   }
@@ -305,7 +306,7 @@ export class AiRunLifecycle {
         .cancel(row.id, options.fallback?.message ?? 'The run ended')
         .catch((err: unknown) => {
           this.logger.error(
-            `AI run ${runId}: invocation ${row.id} could not be cancelled: ${err instanceof Error ? err.message : String(err)}`,
+            `AI run ${runId}: invocation ${row.id} could not be cancelled: ${describeError(err)}`,
           );
           return null;
         });
@@ -327,7 +328,7 @@ export class AiRunLifecycle {
       } catch (err) {
         // The next submission in this conversation answers it (the repair in the orchestrator).
         this.logger.error(
-          `AI run ${runId} finalized ${to} but its open step could not be answered: ${err instanceof Error ? err.message : String(err)}`,
+          `AI run ${runId} finalized ${to} but its open step could not be answered: ${describeError(err)}`,
         );
       }
       await this.prisma.aiConversation

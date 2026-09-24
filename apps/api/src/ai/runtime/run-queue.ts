@@ -7,7 +7,7 @@ import {
   AI_RUN_JOB_START,
   AI_RUN_QUEUE,
 } from '../ai.constants';
-import { aiRunJobId } from './runtime.constants';
+import { aiRunJobId, describeError } from './runtime.constants';
 
 /** The payload of every `ai-run` job: the run id and nothing else (ADR-0097 decision 5). */
 export interface AiRunJobData {
@@ -79,7 +79,7 @@ export class AiRunQueue {
       return ids;
     } catch (err) {
       this.logger.warn(
-        `ai-run in-flight scan failed; skipping this pass: ${err instanceof Error ? err.message : String(err)}`,
+        `ai-run in-flight scan failed; skipping this pass: ${describeError(err)}`,
       );
       return null;
     }
@@ -100,7 +100,7 @@ export class AiRunQueue {
         );
       } else {
         this.logger.error(
-          `ai-run ${name} enqueue failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}; the sweeper recovers it.`,
+          `ai-run ${name} enqueue failed for run ${runId}: ${describeError(err)}; the sweeper recovers it.`,
         );
       }
       return false;

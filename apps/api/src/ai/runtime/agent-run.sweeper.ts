@@ -25,6 +25,7 @@ import {
   AI_RUN_SWEEP_INTERVAL_MS,
   AI_SWEEP_BATCH,
   aiRunJobId,
+  describeError,
 } from './runtime.constants';
 
 /** What one sweep pass did, per reconciler (for tests and logs). */
@@ -327,9 +328,7 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
     try {
       return await fn();
     } catch (err) {
-      this.logger.error(
-        `ai-run sweep (${name}) failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      this.logger.error(`ai-run sweep (${name}) failed: ${describeError(err)}`);
       return 0;
     }
   }
