@@ -170,15 +170,17 @@ Legend:
 | asset / article attachments | upload, content stream | *:write / *:read | W / R | EXCL (binary, [R19]) |
 | asset-models | list / get | assetModel:read | R | v1 `reference_lookup` (built, W2-5) |
 | asset-models | create | assetModel:write | W | v1 `asset_model_create` (built, W2-5) |
-| asset-models | update | assetModel:write | W | v1.1 |
-| asset-models | delete / restore | assetModel:delete | D | v1.1 |
+| asset-models | update | assetModel:write | W | v1 `asset_model_update` (built, #1390) |
+| asset-models | delete / restore | assetModel:delete | D | v1 `asset_model_archive` / `asset_model_restore` (built, #1390) |
 | asset / application / consumable / article categories | list / get | category:read | R | v1 `reference_lookup` (built, W2-5) |
-| (same) | create / update / delete / restore | category:write / delete | W / D | v1.1 |
+| asset / application / consumable categories | create / update / delete | category:write / delete | W / D | v1 `category_create` / `category_update` / `category_archive` (built, #1390) |
+| asset / application / consumable categories | restore | category:delete | W | not exposed: no route lists archived categories, so a card could not name or version the target (#1390) |
+| article categories (KB folders) | create / rename; delete / restore | category:write / delete | W / D | `kb_folder_create` / `kb_folder_rename` (#1378); delete and restore v1.1 |
 | article-categories | `PUT :id/access-rules` | settings:manage | W | v1.1, `elevated` (authz config) |
 | locations | list / get | location:read | R | v1 `reference_lookup` (built, W2-5) |
 | locations | create | location:write | W | v1 `location_create` (built, W2-5) |
-| locations | update | location:write | W | v1.1 |
-| locations | delete / restore | location:delete | D | v1.1 |
+| locations | update | location:write | W | v1 `location_update` (built, #1390) |
+| locations | delete / restore | location:delete | D | v1 `location_archive` / `location_restore` (built, #1390) |
 | applications | list / get | application:read | R | v1 |
 | applications | `:id/access-grants`, `:id/articles` | accessGrant:read, article:read | R | v1 facets |
 | applications | create / update | application:write | W | v1 |
@@ -465,6 +467,15 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 14 | `asset_check_in` ✅ built (W2-5) | AssetAssignmentsController.release (+AssetsController.findAssignments) | asset:write | write | assetAssignment updated (parent asset), asset updated, user updated |
 | 15 | `asset_model_create` ✅ built (W2-5) | AssetModelsController.create (+AssetCategoriesController.findAll) | assetModel:write | write | assetModel created |
 | 16 | `location_create` ✅ built (W2-5) | LocationsController.create (+findAll / findOne for the parent) | location:write | write | location created |
+| 16a | `category_create` ✅ built (#1390; kind: assetCategory, applicationCategory, consumableCategory) | AssetCategoriesController.create (primary), the other two kinds' `create`, the three `findAll` | category:write | write | category created |
+| 16b | `category_update` ✅ built (#1390; rename, description, order, the asset-category attribute dictionary) | AssetCategoriesController.update (primary), the other two kinds' `update`, the three `findAll` | category:write | write·D | category updated |
+| 16c | `category_archive` ✅ built (#1390) | AssetCategoriesController.remove (primary), the other two kinds' `remove`, the three `findAll`; impact from AssetModelsController / AssetsController / ApplicationsController / ConsumablesController `findAll` | category:delete | write·D | category archived |
+| 16d | `asset_model_update` ✅ built (#1390) | AssetModelsController.update (+findOne / findAll, AssetCategoriesController.findAll) | assetModel:write | write·D | assetModel updated |
+| 16e | `asset_model_archive` ✅ built (#1390) | AssetModelsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | assetModel:delete | write·D | assetModel archived |
+| 16f | `asset_model_restore` ✅ built (#1390) | AssetModelsController.restore (+findAll `deleted=only`) | assetModel:delete | write (idempotent) | assetModel restored |
+| 16g | `location_update` ✅ built (#1390; also the move under another parent) | LocationsController.update (+findOne / findAll) | location:write | write·D | location updated |
+| 16h | `location_archive` ✅ built (#1390) | LocationsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | location:delete | write·D | location archived |
+| 16i | `location_restore` ✅ built (#1390) | LocationsController.restore (+findAll `deleted=only`) | location:delete | write (idempotent) | location restored |
 | 17 | `application_search` ✅ built (W2-6) | ApplicationsController.findAll | application:read | read | — |
 | 18 | `application_get` ✅ built (W2-6) | ApplicationsController.findOne (+grants, articles facets) | application:read | read | — |
 | 19 | `application_create` ✅ built (W2-6) | ApplicationsController.create | application:write | write | application created |
@@ -503,8 +514,8 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 - If the catalog grows past about 60, adopt deferred tool loading [E8]. Do not split into multiple
   servers.
 - **v1.1:** batch asset operations other than the batch create (`asset_create_batch`, #1387, is
-  built), bulk receive, model/location/category update (the KB folder
-  rename is built, #1378) and archive,
+  built), bulk receive, KB folder delete and restore (model / location / category update, archive and
+  restore are built, #1390; the KB folder rename, #1378),
   application/consumable/article archive and restore, grant notes/expiry/batch revoke, article
   links/aliases/versions, user clone, attachments list, notifications, security audit logs, infra
   writes.
@@ -674,7 +685,9 @@ path unit (W2-0, #1315):
   `workflows.tools.ts` (W2-13) holds the ten workflow operation tools — see *Workflow operations tools
   as built* below; `workflow-authoring.tools.ts` (W2-14) holds authoring, pre-created by W2-12;
   `assets.tools.ts` and `reference.tools.ts` (W2-5) hold the asset, ownership and reference-data tools —
-  see *Assets and reference tools as built* below;
+  see *Assets and reference tools as built* below; `taxonomy.tools.ts` (#1390) holds the category,
+  model and location update / archive / restore tools and `category_create` — see *Taxonomy tools as
+  built* below;
   `users.tools.ts` and `activity.tools.ts` (W2-9) hold the six `user_*` tools, `dashboard_summary` and
   `activity_list` — see *Users and activity tools as built* below;
   `consumables.tools.ts` (W2-7) holds the five consumables tools and leaves archive / restore unexposed
@@ -911,9 +924,63 @@ Accounts holding the route's permission.
   `asset_create_batch` over the single create route), the CSV export, the
   companies autocomplete, the `/asset-assignments` reads (served as facets), assignment notes (v1.1),
   acknowledge (the holder's own act, v1.1), attachments (list/remove v1.1; binary upload/content never),
-  model/location/category update, archive and restore and every category create (v1.1) — except the KB
-  folder create and rename, which are `kb_folder_create` / `kb_folder_rename` (#1378) — folder access
-  rules (`elevated`, after v1).
+  folder delete and restore (v1.1; create and rename are `kb_folder_create` / `kb_folder_rename`, #1378),
+  category restore (no route lists archived categories — see *Taxonomy tools as built*), folder access
+  rules (`elevated`, after v1). Model, location and category update, archive and restore, and category
+  create, are the taxonomy tools (#1390).
+
+**Taxonomy tools as built (#1390).** `taxonomy.tools.ts` (domain `reference`) adds the rest of the
+lifecycle of the reference data assets, applications and consumables hang off — nine tools, all `write`,
+none `elevated`, none with a step-up warning (they grant no access or privilege); humans and Service
+Accounts holding the route's permission are admitted, exactly as over HTTP.
+- **Categories are one tool per verb with a `kind`** (`assetCategory` · `applicationCategory` ·
+  `consumableCategory`): the three controllers share `category:write` / `category:delete`, so one listing
+  permission is exact. `category_create`, `category_update`·D (rename, description, `order` — application
+  and consumable only — and `specsSchema`, asset only; a field of another kind is `INVALID_INPUT`) and
+  `category_archive`·D. KB folders are categories too but stay with the KB toolset (a folder carries an
+  audience; its delete cascades).
+- **Models and locations:** `asset_model_update`·D (name, manufacturer, SKU, description, category by id
+  or exact name, `specs` merged over the attributes read at execute — a `null` value removes a key; the
+  route replaces `specs` whole), `asset_model_archive`·D, `asset_model_restore`; `location_update`·D
+  (name, type, description, address, floor, notes, and `parent` by id or exact name — `null` makes it
+  top-level), `location_archive`·D, `location_restore`. The manufacturer is a free-text column of
+  `AssetModel`, not an entity: `asset_model_create` takes it as text, so there is no manufacturer to
+  resolve or create; a missing category is created with `category_create` first (its description says so).
+- **References:** a category by id or exact name, read from its unpaged route list (no partial page); a
+  model or location by id or exact name through the W2-5 resolvers (a partial page never decides). An
+  ARCHIVED model or location (restore) is found through the list's `deleted=only` slice — a name is a `q`
+  search under the partial-page rule; an id scans at most five pages (1,000 rows) and past that is refused
+  as `AMBIGUOUS_REFERENCE` asking for the name. In `run` a raw id goes straight to the write handler.
+- **Previews.** Every write on an existing row names its target and carries `precondition { entity,
+  updatedAt }`, so an edit between the card and the approval is `STALE`. Updates show only the fields that
+  change (a no-op is `INVALID_INPUT`); a category, a parent or a model's category is an entity value; the
+  attribute dictionary is shown before → after as one readable line. Refused before a card: a live name
+  another category of the same kind holds (`CONFLICT`, the partial unique index), and a location move under
+  itself or one of its own descendants (the route's 400 text).
+- **Archive = soft delete with its impact on the card** (`SOFT_DELETE`): an asset category counts its
+  models and its assets (through the models' category), an application category its applications, a
+  consumable category its consumables, a model its assets, a location its assets and its child locations —
+  each with up to five named samples. The counts are read through the lists the caller may read: a list the
+  caller may not read (403), or a scan past its bound (the applications list and the child locations have
+  no filter, so they are scanned, at most 1,000 rows), is shown as a `usedBy` row "Unknown to you: …" —
+  never as zero. Archiving does not detach anything: dependents keep pointing at the archived row
+  (ADR-0041; the nested-include exposure of an archived parent is SEC-040).
+- **Restore** is `idempotent`, shows `archived: true → false`, and exists for models and locations only.
+  The archived list it resolves through is ADMIN-only by **role** (`assertCanListDeleted`) while the route
+  needs only `*:delete`, so a Service Account or a non-ADMIN role granted it is refused by the lookup —
+  the same parity gap as `asset_restore` (F5). Category restore is **not exposed**: the category routes
+  list no archived rows, so a card could not name or version the one restored; it stays in the lazyit UI.
+- **Taxonomy configuration.** The only per-taxonomy setting that bears on validation is the asset
+  category's `specsSchema` (ADR-0007 amendment, #851): an ADVISORY attribute dictionary that drives hints
+  and soft warnings in the asset form and never blocks a write. `reference_lookup` returns it with
+  `detail: "full"` (wrapped as untrusted); `category_create` / `category_update` set or replace it — a
+  non-destructive change (no stored attribute is touched). Application and consumable categories expose
+  their `order`. Nothing else is taxonomy configuration: location types are a fixed enum; the asset tag
+  scheme is instance configuration (platform toolset, deferred — its backfill rewrites tags); KB folder
+  access rules are authorization configuration (`elevated`, after v1).
+- **Untrusted content:** descriptions, notes, attribute dictionaries and model specs in results, and the
+  names in summaries, are wrapped with `untrusted()`; entity-ref labels are not (the follow-up already
+  recorded for the KB tools).
 
 **Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so
 the RBAC guards stay in `UsersService`, in one place: the self-role-change refusal (403), the last-admin
