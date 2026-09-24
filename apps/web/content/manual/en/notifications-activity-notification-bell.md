@@ -46,6 +46,7 @@ The set of triggers is fixed and deliberately small — the bell is a curated nu
 | **Warranty expiring** | An asset's warranty is within its look-ahead window (the last 90 days before it ends) and has not yet lapsed. One heads-up per asset, so you can renew or replace before the deadline instead of finding out after. Links to the asset. |
 | **Access expiring** | An active access grant is within two weeks of its expiry date and will be auto-revoked when it passes. One heads-up per grant so you can re-grant before a contractor or temp silently loses access. Links to the application. |
 | **Receipt acknowledged** | (Targeted) Someone confirmed receipt of an asset you assigned to them. Lands in your bell — and inbox, unless you opt out — so you know the handover is complete without asking. Links to the asset. |
+| **New AI agent connected** | (Targeted, security) An external AI agent — Claude Code, Cursor or another MCP client, or a personal MCP token — was used on your account for the first time. One per connection. Lands in your bell — and inbox, unless you opt out. If it wasn't you, revoke the connection in your AI connections and change your password. |
 
 Notifications are emitted **after** the originating action completes and are **best-effort**: a
 notification that fails to send never blocks or undoes the underlying change. Repeated triggers for
