@@ -569,7 +569,8 @@
       "skipped": "Omitido",
       "declined": "Rechazado",
       "expired": "Vencido",
-      "cancelled": "Cancelado"
+      "cancelled": "Cancelado",
+      "sent": "Enviado"
     },
     "importance": {
       "required": "obligatorio",
@@ -633,6 +634,8 @@
       "forbidden": "No podés responder este formulario.",
       "notFound": "Este formulario ya no existe.",
       "unknown": "No se pudo enviar tu respuesta. Intentá de nuevo."
-    }
+    },
+    "sentNote": "Enviado. Esperando que el asistente continúe…",
+    "expiredLocally": "Se terminó el tiempo para responder este formulario. El asistente se detiene en breve; enviá un mensaje nuevo para continuar."
   }
 }

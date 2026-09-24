@@ -42,9 +42,18 @@ interface AiMessageProps {
   onDecide: (toolCallId: string, decision: "approve" | "reject", password?: string) => Promise<DecisionResult>;
   /** Answers an input form the assistant asked for (#1388). */
   onAnswerInput: AnswerInput;
+  /** An input form's time ran out in this browser. */
+  onInputExpired?: (toolCallId: string) => void;
 }
 
-export function AiMessage({ message, tools, navigated, onDecide, onAnswerInput }: AiMessageProps) {
+export function AiMessage({
+  message,
+  tools,
+  navigated,
+  onDecide,
+  onAnswerInput,
+  onInputExpired,
+}: AiMessageProps) {
   const t = useTranslations("ai.message");
 
   if (message.role === "user") {
@@ -116,6 +125,7 @@ export function AiMessage({ message, tools, navigated, onDecide, onAnswerInput }
                 key={`input-${part.request.toolCallId}`}
                 part={part}
                 onAnswer={onAnswerInput}
+                onExpired={onInputExpired}
               />
             );
           case "notice":
