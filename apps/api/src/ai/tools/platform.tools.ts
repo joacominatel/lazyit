@@ -20,12 +20,7 @@ import { VaultsController } from '../../secret-manager/vaults.controller';
 import { ServiceAccountsController } from '../../service-accounts/service-accounts.controller';
 import { NotificationPreferencesController } from '../../smtp/notification-preferences.controller';
 import { SmtpController } from '../../smtp/smtp.controller';
-import { WorkflowConnectionsController } from '../../workflow-engine/definitions/workflow-connections.controller';
 import { WorkflowSecretsController } from '../../workflow-engine/definitions/workflow-secrets.controller';
-import { WorkflowsController } from '../../workflow-engine/definitions/workflows.controller';
-import { WorkflowDryRunController } from '../../workflow-engine/dry-run/workflow-dry-run.controller';
-import { WorkflowRunsController } from '../../workflow-engine/runs/workflow-runs.controller';
-import { ManualTasksController } from '../../workflow-engine/tasks/manual-tasks.controller';
 import { unexposed, type AiToolset } from '../core/tool-descriptor';
 import { AiSettingsController } from '../settings/ai-settings.controller';
 import { AiStatusController } from '../status/ai-status.controller';
@@ -41,7 +36,7 @@ const INSTANCE_CONFIG =
 
 /**
  * The PLATFORM surfaces no domain toolset owns: authentication, instance configuration, the Secret
- * Manager, Service Account management, the Migrator, the workflow engine and the probes. Nothing here is a
+ * Manager, Service Account management, the Migrator, workflow secrets and the probes. Nothing here is a
  * tool in v1; each handler carries the reason. Owned by the AI core unit; a later unit that brings one of
  * these surfaces into the catalog moves its handlers into its own toolset.
  */
@@ -158,33 +153,10 @@ export const platformToolset: AiToolset = {
       ],
       'Excluded in v1: the Migrator is a multi-step file upload (tools-and-execution.md §3).',
     ),
-    unexposed(
-      WorkflowRunsController,
-      ['findAll', 'findOne', 'retry', 'replayLatest'],
-      'Deferred: workflow runs are v1.1 (tools-and-execution.md §3).',
-    ),
-    unexposed(
-      ManualTasksController,
-      ['findAll', 'findOne', 'submit', 'skip', 'fail'],
-      'Deferred: workflow manual tasks are v1.1 (tools-and-execution.md §3).',
-    ),
-    unexposed(
-      WorkflowsController,
-      // `findAll` (headers only) is bound by the access toolset (W2-6) so a grant or revoke preview can
-      // say whether an automatic (de)provisioning workflow runs — never a tool of its own.
-      ['findOne', 'create', 'update', 'remove', 'authorVersion'],
-      'Deferred: workflow authoring is elevated and needs its own design, later (tools-and-execution.md §3).',
-    ),
-    unexposed(
-      WorkflowConnectionsController,
-      ['findAll', 'findOne', 'create', 'update', 'test', 'remove'],
-      'Deferred: workflow connections are elevated configuration with egress, later (tools-and-execution.md §3).',
-    ),
-    unexposed(
-      WorkflowDryRunController,
-      ['run'],
-      'Deferred: the workflow dry-run is part of authoring, later (tools-and-execution.md §3).',
-    ),
+    // The rest of the workflow engine lives in `workflows.tools.ts` (W2-13) and
+    // `workflow-authoring.tools.ts` (W2-14); its secrets stay here, a structural exclusion.
+    // `WorkflowsController.findAll` (headers only) is bound by the access toolset (W2-6) for the grant,
+    // revoke and approve previews.
     unexposed(
       WorkflowSecretsController,
       ['findAll', 'findOne', 'create', 'rotate', 'remove'],

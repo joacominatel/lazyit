@@ -85,6 +85,7 @@ const ID = {
 const SA = {
   writer: 'ckwritersa0000000000000001',
   noAi: 'cknoaisa00000000000000002',
+  legacy: 'cklegacysa0000000000000003',
 };
 
 const ROLE_GRANTS: Record<Role, Permission[]> = {
@@ -95,6 +96,8 @@ const ROLE_GRANTS: Record<Role, Permission[]> = {
 const SA_GRANTS: Record<string, Permission[]> = {
   [SA.writer]: ['ai:use', 'asset:read', 'asset:write'],
   [SA.noAi]: ['asset:read', 'asset:write'],
+  // SEC-073: `user:manage` granted before SEC-011 and never re-saved — must be inert at principal load.
+  [SA.legacy]: ['ai:use', 'asset:read', 'asset:write', 'user:manage'],
 };
 
 type UserRow = {
@@ -191,6 +194,16 @@ class ThingsController {
     });
     return { ...things[id] };
   }
+
+  /** A `user:manage` write (the shape of `POST /users` with `role: ADMIN`), for SEC-073. */
+  @Patch(':id/admin')
+  @RequirePermission('user:manage')
+  makeAdmin(@Param('id') id: string): Thing {
+    const thing = things[id];
+    if (!thing) throw new NotFoundException('Thing not found');
+    updates += 1;
+    return { ...thing };
+  }
 }
 
 const thingInput = z.strictObject({
@@ -274,6 +287,31 @@ const writeToolset: AiToolset = {
           stepUpRequired: true,
         }),
     }),
+    defineTool({
+      name: 'thing_make_admin',
+      title: 'Make a thing an admin',
+      description: 'An elevated fixture write gated by user:manage (SEC-073).',
+      domain: 'platform',
+      class: 'elevated',
+      input: z.strictObject({ id: z.string().min(1) }),
+      bindings: [bind(ThingsController, 'makeAdmin')],
+      async run(input, rt) {
+        return {
+          data: await rt.call(ThingsController, 'makeAdmin', {
+            params: { id: input.id },
+          }),
+        };
+      },
+      preview: () =>
+        Promise.resolve({
+          changes: [],
+          warnings: ['ROLE_CHANGE'],
+          impacted: [],
+          untrustedSources: [],
+          elevated: true,
+          stepUpRequired: true,
+        }),
+    }),
     // Elevated tools whose previews do NOT ask for step-up: core derives it from the warnings.
     previewFixture('thing_set_role', 'elevated', {
       warnings: ['ROLE_CHANGE'],
@@ -294,6 +332,20 @@ const writeToolset: AiToolset = {
     previewFixture('thing_notify', 'elevated', {
       warnings: ['NOTIFIES_USERS'],
       elevated: true,
+    }),
+    // ADR-0097 decision 3 as amended 2026-09-24: a workflow write on a critical application needs step-up,
+    // an outbound integration on a non-critical one does not.
+    previewFixture('thing_enable_critical_workflow', 'elevated', {
+      warnings: ['OUTBOUND_INTEGRATION', 'CRITICAL_APPLICATION'],
+      elevated: true,
+    }),
+    previewFixture('thing_create_outbound', 'elevated', {
+      warnings: ['OUTBOUND_INTEGRATION'],
+      elevated: true,
+    }),
+    // A `write`-class tool (like an access revoke) on a critical application: step-up without escalating.
+    previewFixture('thing_revoke_critical', 'write', {
+      warnings: ['EXTERNAL_DEPROVISIONING', 'CRITICAL_APPLICATION'],
     }),
     previewFixture('thing_unclassified', 'elevated', {
       warnings: [],
@@ -756,6 +808,30 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
         'DENIED',
         'DENIED',
       ]);
+    });
+
+    it('refuses a headless user:manage write by an SA holding only a legacy (pre-SEC-011) grant (SEC-073)', async () => {
+      const result = await tools.invoke(
+        'thing_make_admin',
+        { id: 't1' },
+        {
+          identity: service(SA.legacy),
+          channel: 'HEADLESS',
+          runId: 'ckheadlessrun00000000000002',
+        },
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'FORBIDDEN', status: 403 },
+      });
+      expect(updates).toBe(0);
+      // The same SA still runs a grantable headless write: only the ungrantable verb was stripped.
+      const allowed = await tools.invoke(
+        'thing_rename',
+        { id: 't1', name: 'Still works' },
+        { identity: service(SA.legacy), channel: 'HEADLESS' },
+      );
+      expect(allowed).toMatchObject({ ok: true, mutated: true });
     });
 
     it('writes nothing for an invalid input or an invalid principal (nothing was attempted)', async () => {
@@ -1351,8 +1427,10 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
         'thing_set_email',
         'thing_grant',
         'thing_send_invite',
+        'thing_enable_critical_workflow',
+        'thing_revoke_critical',
       ])(
-        '%s: a role/identity change, privilege grant or credential delivery requires step-up though the tool did not ask',
+        '%s: a role/identity change, privilege grant, credential delivery or critical-application action requires step-up though the tool did not ask',
         async (name) => {
           const action = await proposeOk(name);
           expect(action.preview?.stepUpRequired).toBe(true);
@@ -1375,12 +1453,18 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
         },
       );
 
-      it('an elevated action with a warning outside the list needs no step-up', async () => {
-        const action = await proposeOk('thing_notify');
-        expect(action.preview?.stepUpRequired).toBe(false);
-        const approved = await tools.approve(action.id, chat(human(ID.member)));
-        expect(approved.status).toBe('SUCCEEDED');
-      });
+      it.each(['thing_notify', 'thing_create_outbound'])(
+        '%s: an elevated action with a warning outside the list (incl. OUTBOUND_INTEGRATION) needs no step-up',
+        async (name) => {
+          const action = await proposeOk(name);
+          expect(action.preview?.stepUpRequired).toBe(false);
+          const approved = await tools.approve(
+            action.id,
+            chat(human(ID.member)),
+          );
+          expect(approved.status).toBe('SUCCEEDED');
+        },
+      );
 
       it('refuses an elevated preview that carries no warning (unclassified)', async () => {
         const proposal = await tools.propose(

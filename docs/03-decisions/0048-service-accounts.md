@@ -98,8 +98,14 @@ The CEO's framing (quoted, do not re-litigate):
     also strips them defensively for any non-DTO path.
   - **Layer 2 — runtime principal guard (backstop):** `ServicePrincipalForbiddenGuard` (`apps/api/src/auth/`)
     refuses a service principal outright (`403`) on all `ServiceAccountsController` routes (class-level)
-    and on `GET`/`PUT /config/permissions` (method-level). This neutralises any pre-existing grant: Layer 1
-    only blocks *new* grants; Layer 2 stops *use* of a grant that may have existed before Layer 1 was added.
+    and on `GET`/`PUT /config/permissions` (method-level). Layer 1 only blocks *new* grants; Layer 2 stops
+    *use* of a pre-existing grant on the routes it guards.
+  - **Principal-load strip (SEC-073 — added 2026-09-24):** Layer 2 is per route and missed routes that
+    reuse a meta verb (`UsersController`, the KB folder ACL, the update settings). So
+    `resolveServiceAccountPermissions` also drops every `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` literal
+    when the principal is built: a grant persisted before Layer 1 is inert on every route and channel.
+    The row is kept (no migration); the read shape hides it and the next admin save of the grant set
+    removes it through the audited `PERMISSION_CHANGE` path.
   - `accessGrant:grant` and the `:delete` family are **not** in the ceiling — they are legitimate for
     automation bots and do not enable self-escalation. Widening the set is a separate product call.
   - If a new principal/authz-management endpoint is ever added (a new SA-management route, a new authz

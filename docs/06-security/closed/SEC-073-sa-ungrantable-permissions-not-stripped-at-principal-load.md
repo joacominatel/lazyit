@@ -2,7 +2,7 @@
 id: SEC-073
 title: A service account keeps SA-ungrantable permissions (user:manage, settings:manage) granted before SEC-011 — the principal loader never strips them
 severity: medium
-status: open
+status: fixed
 cwe: CWE-269
 discovered: 2026-09-24
 module: auth / service-accounts (authz) · ai (headless)
@@ -175,3 +175,67 @@ At `origin/dev` 84bd521d.
 - [[INVARIANTS]] INV-1, INV-SA-2, INV-SA-3 · [[SEC-011-service-account-coarse-meta-permission-escalation|SEC-011]]
   (Layer 1/2) · [[0048-service-accounts]] · [[ai-assistant/security|AI security]] §6.2, §6.6, T-34 ·
   epic #1315, PR #1343 · issue #141 (SA actor audit column).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `d4fb99d9` (`fix(api): strip SA-ungrantable permissions at principal load (SEC-073, #1315)`)
+and commit `30f6e34e` (`fix(api): hide inert SA-ungrantable grants in the service account read shape (SEC-073, #1315)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-24
+
+The root fix is recommendation (1): the ungrantable set is stripped where the service principal is
+**built**, so it no longer depends on each controller carrying a Layer-2 guard. Every service-principal
+path goes through `PrincipalLoaderService.serviceAccountPrincipal` (the `JwtAuthGuard` SA-token branch,
+the delegated-identity branch, and the AI core's `loadPrincipal` for MCP and headless runs), so one
+change covers HTTP, MCP and headless. Resolution stays DB-first on every request (INV-1); nothing is
+cached.
+
+### Changes
+- `apps/api/src/service-accounts/service-account-permissions.ts`: `resolveServiceAccountPermissions`
+  drops every `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` literal (imported from `@lazyit/shared`, the
+  single source of truth) as well as catalog-foreign ones. New `ungrantableServiceAccountGrants` helper.
+- `apps/api/src/auth/principal-loader.service.ts`: logs a warning once per account per process when an
+  SA carries inert ungrantable grants (account id, name and the verbs; no secret). Recommendation (2).
+- `apps/api/src/service-accounts/service-accounts.service.ts`: the wire shape uses `cleanPermissions`,
+  so the SA detail no longer shows a verb the account does not hold. Saving the set the UI shows removes
+  the legacy row through the audited `PERMISSION_CHANGE` path. Recommendation (3).
+- `packages/shared/src/schemas/service-account.ts`: doc comment only (the backstop wording).
+- Docs: [[INVARIANTS]] INV-SA-3 (Layer 0), [[0048-service-accounts]] (principal-load strip),
+  `docs/02-domain/entities/service-account-permission.md`, [[ai-assistant/security|AI security]] §6.6
+  (recommendation 4).
+
+### Tests added
+- `apps/api/src/service-accounts/service-account-permissions.spec.ts`::"strips a legacy SA-ungrantable
+  grant (user:manage) and keeps the grantable ones" and "never resolves ANY member of
+  SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS (parity with the shared list)": fail without the fix because
+  the resolver kept every catalog literal.
+- `apps/api/src/users/users.sa-ungrantable.authz.spec.ts` (real `JwtAuthGuard` + `RolesGuard` over the
+  real `UsersController`, SA token with a legacy `user:manage` row): `POST /users` with `role: ADMIN`
+  and `PATCH /users/:id` with `role: ADMIN` both return 403 and never reach the service. Without the fix
+  they returned 201 / 200. A control test proves the token authenticates and `user:read` still works.
+- `apps/api/src/ai/core/ai-tool.write-path.spec.ts`::"refuses a headless user:manage write by an SA
+  holding only a legacy (pre-SEC-011) grant (SEC-073)": a headless `invoke` of an elevated fixture tool
+  bound to a `user:manage` route returns FORBIDDEN 403 and executes nothing; the same SA still runs a
+  grantable write. Fails without the fix (the route executed). The `user_create` tool itself is in
+  PR #1343, not yet on `dev`, so the vector is covered at the permission-resolution level and through
+  the real dispatcher and guard chain.
+- `apps/api/src/service-accounts/service-accounts.service.spec.ts`::"hides the inert verb on read and
+  drops the row on the next permission save": the read shape omits the legacy row and saving it back
+  removes the row with a `PERMISSION_CHANGE { removed: ['user:manage'] }` audit entry.
+
+### Verification
+Charter validation block: shared / api / web / agent `tsc --noEmit` clean; api Jest 218 suites,
+3837 tests passed; `packages/shared` and `apps/web` `bun test` 0 fail; `apps/agent` has 2 pre-existing
+failures that need `pwsh` (unrelated to this change). Changed-file eslint in `apps/api` clean.
+
+### Residual risk
+- **Existing data**: legacy rows stay in `service_account_permissions` until an admin re-saves that
+  account's grants (no destructive migration, audit trail intact). They confer nothing in the meantime.
+  The operator sees a warning in the API log.
+- **Follow-up (defense in depth, not needed for the fix)**: add `ServicePrincipalForbiddenGuard` to the
+  `user:manage` routes of `UsersController`, `PUT /article-categories/:id/access-rules` and
+  `PUT /instance/update-settings`, so AI boot validation marks those tools human-only; and the
+  Prevention item for an AI-core boot check refusing an `elevated` tool whose route permission is
+  SA-ungrantable.
+- The SA-actor audit gap (issue #141) is unchanged.
