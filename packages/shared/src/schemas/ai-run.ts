@@ -245,8 +245,9 @@ const conversationSettingsFields = {
   providerOptions: AiProviderOptionsSchema.nullable(),
   /**
    * Auto-approve mode (#1376): ordinary chat writes (`write` class, preview not elevated) whose fresh
-   * preview needs no password step-up run without a card. Elevated actions and step-up writes
-   * (`AI_STEP_UP_WARNINGS`) always stop for the user. Off by default.
+   * preview needs no password step-up and names no untrusted source run without a card. Elevated
+   * actions, step-up writes (`AI_STEP_UP_WARNINGS`) and writes in a turn that read other-authored
+   * content always stop for the user. Off by default.
    */
   autoApprove: z.boolean(),
 };

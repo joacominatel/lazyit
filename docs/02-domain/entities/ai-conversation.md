@@ -43,8 +43,8 @@ permanent [[ai-action-log]].
     admin's default (`modelChosen = false`) is still closed by a change of the default model; one whose
     model was chosen is not. A provider change closes both.
 - **Auto-approve** (#1376, ADR-0097 decision 4 as amended 2026-09-24): off by default; its owner may switch
-  it on or off at any time (audited). While on, ordinary chat writes (not elevated, no step-up warning)
-  run without a card, recorded in the [[ai-action-log]] with `approvalMode = AUTO`.
+  it on or off at any time (audited). While on, ordinary chat writes (not elevated, no step-up warning,
+  not in a turn that read other-authored content) run without a card, recorded in the [[ai-action-log]] with `approvalMode = AUTO`.
 - **One active run** at a time (409 `RUN_IN_PROGRESS`, enforced by the runtime).
 - MCP keeps **no** server-side conversation.
 

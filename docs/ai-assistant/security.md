@@ -466,19 +466,24 @@ the **exfiltration leg** and the **consequential-action leg**.
   conversation's owner may switch on a mode in which ordinary writes (T1/T2: a `write`-class tool whose
   stored and fresh previews are not elevated and carry no step-up warning) execute without a card. The
   CEO: "activar el modo skip permissions por ahora es funcion y consentimiento del usuario, el sabe lo
-  que esta haciendo." What it gives up, deliberately: in that conversation **an injected instruction in
-  content the model reads (§6.1) can chain ordinary writes with no human looking at each one** — rename,
-  retire, move or edit records, post KB content, adjust stock — up to the per-run tool-call cap
-  (`AI_MAX_TOOL_CALLS_PER_RUN`) and the per-principal tool-call rate limit, all within the user's own
-  permissions. What still holds: T3/T4 (every `elevated` action) and every step-up write keep the card
+  que esta haciendo." **Within a turn, injected content cannot chain an unattended write:** a write
+  proposed in a turn that read other-authored content (its preview carries `untrustedSources`, the
+  untrusted-source banner) always shows the card. What it gives up, deliberately: other-authored text
+  read in an **earlier** turn is still in the model's context but no longer in the new turn's untrusted
+  set, and the user's own instructions may be ambiguous — in that conversation the model can chain
+  ordinary writes with no human looking at each one (rename, retire, move or edit records, post KB
+  content, adjust stock), up to the per-run tool-call cap (`AI_MAX_TOOL_CALLS_PER_RUN`) and the
+  per-principal tool-call rate limit, all within the user's own permissions. What still holds: T3/T4 (every `elevated` action) and every step-up write keep the card
   and the password; the mode is off by default, per conversation, switchable only by the owner from a
   human session (the toggle routes are `unexposed`, so the model cannot turn it on), and every change is
   audited (`ai_config_audit_log`, `CONVERSATION_AUTO_APPROVE_CHANGED`); every automatic write goes
   through the same claim, re-authorization, `STALE` check and ledger, with `approvalMode = AUTO`, the
   owner as `approverUserId` and the enable time, so each one is attributable and can be undone from
-  history. MCP and headless are unaffected. Not built (candidates if the residual proves too wide): an
-  instance-wide admin switch, an expiry of the mode, a cap on automatic writes per turn, and excluding
-  destructive (T2) writes.
+  history. The mode is re-checked in the claim's transaction under the conversation row's lock, and it is
+  not applied while the run is being cancelled or the assistant is off. MCP and headless are unaffected.
+  Not built (candidates if the residual proves too wide): an instance-wide admin switch, an expiry of the
+  mode, a cap on automatic writes per turn, treating earlier turns' untrusted reads as tainting the whole
+  conversation, and excluding destructive (T2) writes.
 
 ### 6.3 OAuth authorization server and MCP resource server
 

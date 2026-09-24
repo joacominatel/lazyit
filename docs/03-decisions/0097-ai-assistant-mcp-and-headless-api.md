@@ -190,12 +190,16 @@ The key forks only; each links its analysis.
    >   `CRITICAL_APPLICATION`) and no `stepUpRequired`. Every `elevated` action (privilege, identity,
    >   credentials, configuration, outbound integrations — security.md §6.2 T3/T4 and INV-AI-15) and every
    >   step-up write still stops for the card and, where required, the password. A preview that changed
-   >   since propose (`PREVIEW_CHANGED`) also falls back to the card.
+   >   since propose (`PREVIEW_CHANGED`) also falls back to the card, and so does **any write in a turn
+   >   that read other-authored content** (a preview with `untrustedSources`, the untrusted-source
+   >   banner): injected text never chains an unattended write within its turn.
    > - **Same path, no bypass.** The runtime calls core's own `approve(…, { auto: true })` right after
    >   `propose`: the atomic claim, the re-authorization, the tool-schema and input-hash checks, the
-   >   target's version (`STALE`) and the ledger are unchanged. Core re-reads the conversation and refuses
-   >   (`AUTO_APPROVE_OFF`) unless its owner has the mode on at that moment; `auto` never combines with a
-   >   verified step-up.
+   >   target's version (`STALE`) and the ledger are unchanged. Core re-checks the mode inside the claim's
+   >   transaction, holding the conversation row's lock, and refuses (`AUTO_APPROVE_OFF`) unless its owner
+   >   has it on at that moment; `auto` never combines with a verified step-up. The runtime applies it only
+   >   while the run is running, not being cancelled, and the assistant is on — the kill switches a manual
+   >   decision honours.
    > - **Provenance.** `ai_tool_invocations.approvalMode` and the `APPROVED` / `EXECUTED` / `FAILED` ledger
    >   events carry `approvalMode` `AUTO` (a click is `USER`), `approverUserId` = the owner who enabled
    >   the mode, and `autoApproveEnabledAt`. The stream emits `tool.approval_resolved` with `auto: true`
@@ -206,8 +210,8 @@ The key forks only; each links its analysis.
    >   (`CONVERSATION_AUTO_APPROVE_CHANGED`, `{ conversationId, before, after }`). Off by default.
    > - **Scope.** Chat only. MCP (the client confirms) and headless (autonomous within the SA's grants)
    >   are unchanged. The prompt-injection residual this accepts is in security.md §6.2.
-   > - **Not in this amendment:** an admin switch to disable the mode instance-wide, an expiry, or a cap on
-   >   automatic writes per turn beyond the per-run tool-call cap — candidates if the CEO wants them.
+   > - **Not in this amendment** (follow-ups if the CEO wants them): an admin switch to disable the mode
+   >   instance-wide, an expiry, and a cap on automatic writes per turn beyond the per-run tool-call cap.
 
 5. **Lazyit owns the agent loop; providers sit behind a port.** Each model step is one call through
    `ChatModelPort`, implemented over AI SDK 7 in `ai/providers/` — the only code that imports it. Adding
@@ -236,6 +240,9 @@ The key forks only; each links its analysis.
    >   run on the default (`modelChosen = false`, every conversation created before this change); a
    >   conversation whose user chose its model keeps it.
    > - **Budget.** Unchanged: the per-principal daily token budget applies whatever the model or effort.
+   > - **Follow-ups, not in v1:** an admin allow-list of the models users may pick and a per-model cost
+   >   view (the issue's "admin controls which models"); a provider-aware model-id rule for Google, whose
+   >   SDK puts the id in the URL path, where the shared charset still admits `/`.
 
 6. **The browser follows a run over SSE.** `POST` creates the run; the browser reads
    `GET /ai/runs/:id/events` with `fetch`, a Bearer header and `Last-Event-ID`. The event union is

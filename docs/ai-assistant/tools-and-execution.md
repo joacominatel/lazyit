@@ -1332,9 +1332,11 @@ token, never a tool. The request carries only the pending-action id, plus the pa
 > { auto: true })` right after `propose`, with the run's delegated human identity — the same steps below,
 > no other path. Core adds three checks before the claim: the conversation (owned by the approver, `CHAT`)
 > has `autoApprove = true` **now** (else 409 `AUTO_APPROVE_OFF`, also when combined with
-> `stepUpVerified`); the action is a `write`-class tool whose stored **and** fresh previews are not
-> elevated and need no step-up (else 409 `AUTO_APPROVE_NOT_ELIGIBLE`); and the new-warnings rule of step 0
-> applies unchanged (`PREVIEW_CHANGED` / `STEP_UP_REQUIRED`). Every refusal leaves the action
+> `stepUpVerified`) — checked first, and again inside the claim's transaction under the conversation row's
+> lock (a no-op `updateMany … where autoApprove = true`); the action is a `write`-class tool whose stored
+> **and** fresh previews are not elevated, need no step-up and carry no `untrustedSources` (else 409
+> `AUTO_APPROVE_NOT_ELIGIBLE`); and the new-warnings rule of step 0 applies unchanged (`PREVIEW_CHANGED` /
+> `STEP_UP_REQUIRED`). Every refusal leaves the action
 > `AWAITING_APPROVAL`, and the runtime shows the card (reloaded, since core may have added warnings). The
 > claim records `approvalMode = 'AUTO'` on the invocation; `APPROVED`, `EXECUTED` and `FAILED` carry
 > `approvalMode` (`USER` for a click), `approverUserId` (the owner who enabled the mode) and

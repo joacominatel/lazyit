@@ -1310,11 +1310,17 @@ decision made while Valkey is down resumes within about a minute of its return.
 > - **Runtime.** Each step sends the conversation's own `effort` / `providerOptions` (read tolerantly: a value
 >   the provider no longer takes falls back to the admin's) as `ChatModelStepRequest.effort` /
 >   `providerOptions`; `AiSdkChatModel` overlays them on the resolved configuration for that call only.
+> - **Run model under the lock.** `submit` writes the run's provider and model from the conversation row
+>   re-read inside its locking transaction, so a model change racing the first message is exactly what the
+>   run records and uses.
 > - **Auto-approve.** In `AgentLoop.resolveCall`, after a successful chat `propose`, the conversation's
->   `autoApprove` is re-read; when on, `AiToolService.approve(id, ctx, { auto: true })` runs (tools §9). On
+>   `autoApprove` is re-read, together with the run (still `RUNNING`, no cancel requested) and the provider
+>   configuration (the assistant still on); when all hold, `AiToolService.approve(id, ctx, { auto: true })`
+>   runs (tools §9). On
 >   success the call is answered at once — events `tool.call` (`EXECUTING`), `tool.approval_resolved
 >   { decision: "approved", auto: true, preview }`, `tool.result` — and the run does not pause. A core
->   refusal (`AUTO_APPROVE_NOT_ELIGIBLE`, `AUTO_APPROVE_OFF`, `PREVIEW_CHANGED`, `STEP_UP_REQUIRED`) leaves the
+>   refusal (`AUTO_APPROVE_NOT_ELIGIBLE` — incl. a turn that read untrusted content —, `AUTO_APPROVE_OFF`,
+>   `PREVIEW_CHANGED`, `STEP_UP_REQUIRED`) leaves the
 >   action pending and the normal card path runs; any other fault propagates like any write fault. The
 >   transcript's approval part carries `auto: true` for an `AUTO` approval. `/ai/conversations` `PATCH` and
 >   `/ai/models` are listed `unexposed` (INV-AI-14): the model cannot switch the mode on.
