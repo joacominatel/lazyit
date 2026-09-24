@@ -836,11 +836,19 @@ Edits to existing pages (en + es):
   `settings/ai/_lib/ai-settings-form.ts`, pure and `bun test`ed); the key is never part of it unless typed.
 - **Wizard.** Provider (radio cards from `AI_PROVIDER_DESCRIPTORS`) → credentials → model (+ effort; a
   temperature for OpenAI-compatible only) → test → enable. Credentials and model each save a disabled
-  draft, so the typed key leaves the page at once and is never held in state; a saved draft reopens at the
-  first step that still needs the admin (`initialWizardStep`). The test runs against the saved
+  draft, so the typed key is sent at the step it was typed on; a saved draft reopens at the first step that still needs the admin (`initialWizardStep`). The test runs against the saved
   configuration (`POST /config/ai/test {}`); Continue stays disabled until it passes. Enable sends
   `acknowledgeDisclosure: true` (only while none is recorded) and then **hard-reloads** to
   `/settings/ai?enabled=1` (Fork E). The launcher shortcut is not named in the copy — the chat owns it.
+- **Key hygiene (G4 F1) — what is actually true.** A typed key lives in the form's React state (the
+  `apiKey` field of the draft) from the keystroke until the save or test that sends it; it is never
+  pre-filled, never read back, never written to storage or the URL. The key-bearing requests go through
+  `useAiConfigSave` / `useAiConnectionTest` (`use-ai-config.ts`): the underlying mutations have
+  `gcTime: 0`, and the wrappers copy only the error or the test result into component state and `reset()`
+  the mutation as soon as it settles, so the request body (which carries the key) does not stay in the
+  TanStack mutation cache. After a successful save the draft's `apiKey` is cleared (the wizard's steps and
+  the editor, which re-seeds from the saved read). A failed save or test keeps the typed key in the field
+  so the admin can correct and retry; navigating away drops it with the component.
 - **Editor.** A provider select plus the same credentials/model fields; **Test these settings** posts the
   DRAFT (the typed key inline; the saved key is used by the API only for the same destination). Changing
   the provider or base URL flips the key field to "required" (the server clears the stored key —
@@ -857,10 +865,14 @@ Edits to existing pages (en + es):
   rendered code has copy in both catalogs.
 - **Behaviour & limits** (react-hook-form with rule validation mirroring the shared bounds — `apps/web`
   has no direct `zod` dependency): retention 7–3650, the daily budget as a switch + value (off = `null`),
-  approval expiry, output/step/context limits, and the instructions (≤ 4000). Available on and off.
+  approval expiry, output/step/context limits, and the instructions (≤ 4000). Available on and off. The
+  form re-seeds only when the limit fields themselves change in the read (its own save, another admin's),
+  not on saves from the other cards; any edit clears a stale save error (the same in the other editors).
 - **MCP card.** The switch saves immediately and passes no gate. The connection mode comes from
-  `/ai/status` `mcp.auth`; when the status cannot be read, it falls back to the page's own scheme and says
-  so. OAuth (HTTPS): consent in the browser, the `NODE_EXTRA_CA_CERTS` note for an internal CA, and that
+  `/ai/status` `mcp.auth`, which is `oauth` only when the API's `WEB_ORIGIN` is pinned to `https://` (a TLS
+  proxy in front of an unpinned instance still means personal tokens — the copy and the Manual say so).
+  While the status is loading the card shows a neutral placeholder; only when the read FAILED does it fall
+  back to the page's own scheme, and say so. OAuth (HTTPS): consent in the browser, the `NODE_EXTRA_CA_CERTS` note for an internal CA, and that
   cloud connectors (claude.ai, ChatGPT) need a publicly reachable HTTPS instance. Personal tokens (`lan`):
   why OAuth is unavailable on plain HTTP, and that cloud connectors cannot connect. The endpoint is
   `window.location.origin + "/mcp"` (read after hydration) with a copy button; "Install in Claude Code"
@@ -875,7 +887,8 @@ Edits to existing pages (en + es):
 - **Per-SA AI access.** There is no Service Account detail page, so the control is an **AI access** row
   action on Settings → Service accounts opening a dialog (`ai-access-dialog.tsx`): off / read-only /
   read-write, and for read-write an optional cap described as "per headless run; over MCP, per rolling
-  hour" (mcp-and-oauth.md §14). Notes derived from the account's permissions (`ai-access.ts`, tested):
+  hour" (mcp-and-oauth.md §14). The cap is kept when the access level changes (it only bites on
+  read-write), and a disabled Save says why (an unusable cap). Notes derived from the account's permissions (`ai-access.ts`, tested):
   an `infra:report` account is refused whatever is chosen; a missing `ai:use` blocks headless runs; a
   missing `ai:connect` blocks MCP. The setting is saved as chosen — the API allows it and the runtime
   refuses.
