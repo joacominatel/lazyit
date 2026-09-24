@@ -779,7 +779,8 @@
         "description": "Cap the changes the assistant may make for this account: per headless run, and — since MCP has no runs — per rolling hour over MCP.",
         "label": "Maximum writes",
         "hint": "Per headless run; over MCP, per rolling hour.",
-        "invalid": "Enter a whole number, at least 1."
+        "invalid": "Enter a whole number, at least 1 — or turn off “Limit writes”.",
+        "saveBlocked": "Save is disabled until the write cap is a whole number of at least 1."
       },
       "notes": {
         "infraReport": "This account holds “Report server inventory (agent)”, the agents' reporting credential. lazyit refuses AI use for such an account whatever is chosen here — create a separate account for AI.",

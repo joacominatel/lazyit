@@ -118,7 +118,8 @@ function AiAccessForm({
 
   const body = aiAccessBody(access, capOn, cap);
   const notes = aiAccessNotes(account.permissions, access);
-  const capInvalid = access === "read-write" && capOn && body === undefined && cap !== "";
+  // `body` is undefined only for read-write with an unusable cap: the one state that blocks Save.
+  const saveBlocked = body === undefined;
 
   function onSave() {
     if (!body) return;
@@ -171,7 +172,7 @@ function AiAccessForm({
               <Switch id={`${id}-cap-on`} checked={capOn} onCheckedChange={setCapOn} />
             </Field>
             {capOn ? (
-              <Field data-invalid={capInvalid || undefined}>
+              <Field data-invalid={saveBlocked || undefined}>
                 <FieldLabel htmlFor={`${id}-cap`}>{t("cap.label")}</FieldLabel>
                 <Input
                   id={`${id}-cap`}
@@ -180,10 +181,10 @@ function AiAccessForm({
                   min={1}
                   value={cap}
                   onChange={(event) => setCap(event.target.value)}
-                  aria-invalid={capInvalid || undefined}
+                  aria-invalid={saveBlocked || undefined}
                   className="w-32 font-mono tabular-nums"
                 />
-                {capInvalid ? (
+                {saveBlocked ? (
                   <FieldError>{t("cap.invalid")}</FieldError>
                 ) : (
                   <FieldDescription>{t("cap.hint")}</FieldDescription>
@@ -203,7 +204,12 @@ function AiAccessForm({
           </Callout>
         ) : null}
       </div>
-      <DialogFooter>
+      <DialogFooter className="items-center">
+        {saveBlocked ? (
+          <p className="mr-auto text-sm text-muted-foreground" role="status">
+            {t("cap.saveBlocked")}
+          </p>
+        ) : null}
         <Button type="button" variant="outline" onClick={onDone} disabled={save.isPending}>
           {tc("cancel")}
         </Button>

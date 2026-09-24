@@ -779,7 +779,8 @@
         "description": "Limita los cambios que el asistente puede hacer para esta cuenta: por ejecución sin interfaz y — como MCP no tiene ejecuciones — por hora móvil en MCP.",
         "label": "Máximo de escrituras",
         "hint": "Por ejecución sin interfaz; en MCP, por hora móvil.",
-        "invalid": "Escribe un número entero, al menos 1."
+        "invalid": "Escribe un número entero, al menos 1 — o desactiva “Limitar escrituras”.",
+        "saveBlocked": "Guardar está desactivado hasta que el límite de escrituras sea un número entero de al menos 1."
       },
       "notes": {
         "infraReport": "Esta cuenta tiene “Reportar inventario de servidores (agente)”, la credencial de reporte de los agentes. lazyit rechaza el uso de IA para una cuenta así elijas lo que elijas aquí — crea una cuenta aparte para IA.",

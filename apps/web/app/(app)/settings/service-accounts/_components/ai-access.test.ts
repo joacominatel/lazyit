@@ -21,8 +21,13 @@ describe("aiAccessNotes", () => {
 });
 
 describe("aiAccessBody", () => {
-  test("the cap only applies to read-write with limiting on", () => {
+  test("the cap is kept across access levels, and dropped only when limiting is off", () => {
     expect(aiAccessBody("read-only", true, "5")).toEqual({
+      access: "read-only",
+      maxMutationsPerRun: 5,
+    });
+    expect(aiAccessBody("off", true, "5")).toEqual({ access: "off", maxMutationsPerRun: 5 });
+    expect(aiAccessBody("read-only", true, "")).toEqual({
       access: "read-only",
       maxMutationsPerRun: null,
     });

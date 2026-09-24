@@ -34,20 +34,29 @@ export function aiAccessNotes(
   return notes;
 }
 
+/** A positive int4 typed into the cap field, or null when it is not one. */
+function parseCap(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const cap = Number(trimmed);
+  return Number.isSafeInteger(cap) && cap >= 1 && cap <= 2_147_483_647 ? cap : null;
+}
+
 /**
- * The `PUT` body for the dialog's state: the cap only when limiting writes is on and the typed value is
- * a positive integer — `null` otherwise, or `undefined` when the cap is on but unusable (the dialog
- * blocks the save). A cap means nothing with access `off` or `read-only`, so it is sent as null.
+ * The `PUT` body for the dialog's state. The cap is KEPT whatever the access level, so switching an
+ * account to read-only (or off) and back does not silently erase it — it only bites on read-write.
+ *   - limiting off → `maxMutationsPerRun: null`;
+ *   - limiting on with a usable value → that value;
+ *   - limiting on with an unusable value → `undefined` on read-write (the dialog blocks the save and
+ *     says why); on the other levels the hidden, unusable cap is sent as null.
  */
 export function aiAccessBody(
   access: AiServiceAccountAccess,
   capOn: boolean,
   capRaw: string,
 ): AiServiceAccountSettings | undefined {
-  if (access !== "read-write" || !capOn) return { access, maxMutationsPerRun: null };
-  const trimmed = capRaw.trim();
-  if (!/^\d+$/.test(trimmed)) return undefined;
-  const cap = Number(trimmed);
-  if (!Number.isSafeInteger(cap) || cap < 1 || cap > 2_147_483_647) return undefined;
-  return { access, maxMutationsPerRun: cap };
+  if (!capOn) return { access, maxMutationsPerRun: null };
+  const cap = parseCap(capRaw);
+  if (cap !== null) return { access, maxMutationsPerRun: cap };
+  return access === "read-write" ? undefined : { access, maxMutationsPerRun: null };
 }
