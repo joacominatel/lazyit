@@ -6,7 +6,7 @@ import { approval } from "@/lib/ai/test-fixtures";
 import en from "@/messages/en/ai.json";
 import es from "@/messages/es/ai.json";
 import shared from "@/messages/en/shared.json";
-import { AiApprovalCard, approvalStage } from "./ai-approval-card";
+import { AiApprovalCard, approvalStage, isPasswordSubmitKey } from "./ai-approval-card";
 
 type ApprovalPart = Extract<AiMessagePart, { type: "approval" }>;
 
@@ -112,5 +112,14 @@ describe("approvalStage", () => {
     expect(approvalStage("approved", "FAILED", null)).toBe("failed");
     expect(approvalStage("approved", "OUTCOME_UNKNOWN", null)).toBe("failed");
     expect(approvalStage("expired", undefined, null)).toBe("expired");
+  });
+});
+
+describe("isPasswordSubmitKey", () => {
+  test("Enter submits once; auto-repeat, IME composition and other keys never do", () => {
+    expect(isPasswordSubmitKey({ key: "Enter", repeat: false })).toBe(true);
+    expect(isPasswordSubmitKey({ key: "Enter", repeat: true })).toBe(false);
+    expect(isPasswordSubmitKey({ key: "Enter", repeat: false, nativeEvent: { isComposing: true } })).toBe(false);
+    expect(isPasswordSubmitKey({ key: "a", repeat: false })).toBe(false);
   });
 });

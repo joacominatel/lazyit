@@ -72,6 +72,18 @@ export function approvalStage(
   return outcome;
 }
 
+/**
+ * Enter in the password field approves THIS card — once: a held key's auto-repeat and an IME composition
+ * never submit (a repeat would send the same password again after a refusal cleared it).
+ */
+export function isPasswordSubmitKey(e: {
+  key: string;
+  repeat: boolean;
+  nativeEvent?: { isComposing?: boolean };
+}): boolean {
+  return e.key === "Enter" && !e.repeat && e.nativeEvent?.isComposing !== true;
+}
+
 function Value({ value }: { value: PreviewValue | null }) {
   const t = useTranslations("ai.approval");
   const format = useFormatter();
@@ -174,16 +186,16 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
   async function decide(decision: "approve" | "reject") {
     setBusy(decision);
     setError(null);
-    const result = await onDecide(
-      request.toolCallId,
-      decision,
-      decision === "approve" && stepUp ? password : undefined,
-    );
-    setBusy(null);
-    if (result.ok) {
-      setPassword("");
-      return;
+    const typed = decision === "approve" && stepUp ? password : undefined;
+    // The password is used for exactly one attempt: cleared now, whatever the answer.
+    setPassword("");
+    let result: DecisionResult;
+    try {
+      result = await onDecide(request.toolCallId, decision, typed);
+    } finally {
+      setBusy(null);
     }
+    if (result.ok) return;
     const kind = result.error;
     setError(kind);
     if (kind.kind === "stepUpRequired") {
@@ -193,7 +205,6 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
     if (kind.kind === "previewChanged") {
       setAddedWarnings((prev) => [...prev, ...kind.addedWarnings]);
     }
-    if (kind.kind === "stepUpFailed") setPassword("");
     if (kind.kind === "stepUpRateLimited") {
       setSecondsLeft(Math.max(1, Math.ceil(kind.retryAfterSec ?? 30)));
     }
@@ -365,7 +376,7 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => {
                 // Enter inside the password field is an explicit action on THIS card only.
-                if (e.key === "Enter" && canApprove) {
+                if (isPasswordSubmitKey(e) && canApprove) {
                   e.preventDefault();
                   void decide("approve");
                 }
