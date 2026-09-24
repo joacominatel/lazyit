@@ -6,6 +6,12 @@ import { DirectoryController } from '../../directory/directory.controller';
 import { HealthController } from '../../health/health.controller';
 import { ImportController } from '../../import/import.controller';
 import { UpdateController } from '../../instance/update.controller';
+import { AuthorizeController } from '../../oauth/authorize.controller';
+import { GrantsController } from '../../oauth/grants.controller';
+import { MetadataController } from '../../oauth/metadata.controller';
+import { RegisterController } from '../../oauth/register.controller';
+import { RevokeController } from '../../oauth/revoke.controller';
+import { TokenController } from '../../oauth/token.controller';
 import { ItemsController } from '../../secret-manager/items.controller';
 import { KeypairController } from '../../secret-manager/keypair.controller';
 import { SecretFetchController } from '../../secret-manager/secret-fetch.controller';
@@ -24,6 +30,8 @@ import { unexposed, type AiToolset } from '../core/tool-descriptor';
 
 const SECRET_MANAGER =
   'Excluded: the Secret Manager is zero-knowledge (ADR-0061, INV-10; structural exclusion).';
+const OAUTH_SERVER =
+  'Excluded: the OAuth authorization server mints and verifies credentials (INV-AI-5; structural exclusion).';
 const INSTANCE_CONFIG =
   'Deferred: instance configuration is elevated and comes later; secret-bearing fields are never tool inputs (tools-and-execution.md §3, INV-AI-5).';
 
@@ -169,6 +177,23 @@ export const platformToolset: AiToolset = {
       WorkflowSecretsController,
       ['findAll', 'findOne', 'create', 'rotate', 'remove'],
       'Excluded: a workflow secret value would enter model context (INV-AI-5; structural exclusion).',
+    ),
+    // The OAuth authorization server for MCP (W2-4): protocol endpoints for external clients and the
+    // consent/connected-apps surface. None of it is ever a tool — it mints credentials and governs the
+    // AI's own access (ADR-0097 decision 3; INV-AI-5, INV-AI-14).
+    unexposed(
+      MetadataController,
+      ['authorizationServer', 'protectedResource'],
+      OAUTH_SERVER,
+    ),
+    unexposed(TokenController, ['token'], OAUTH_SERVER),
+    unexposed(RegisterController, ['register'], OAUTH_SERVER),
+    unexposed(RevokeController, ['revoke'], OAUTH_SERVER),
+    unexposed(AuthorizeController, ['validate', 'decision'], OAUTH_SERVER),
+    unexposed(
+      GrantsController,
+      ['listMine', 'list', 'revoke'],
+      'Excluded: connected apps govern the access of external agents, i.e. the AI configuration (structural exclusion).',
     ),
   ],
 };
