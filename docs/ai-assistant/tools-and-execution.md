@@ -1245,9 +1245,27 @@ token, never a tool. The request carries only the pending-action id, plus the pa
 
 0. As built, before the claim: the context must be a human identity on the `CHAT` channel with no MCP
    grant (else 403 `FORBIDDEN`); the row must be a chat invocation owned by that user and, when
-   `ctx.runId` is given, in that run (else **404** — never a hint that another user's action exists). A
-   preview that requires step-up (re-derived, see above) needs `stepUpVerified` from the caller, else 403
-   `STEP_UP_REQUIRED` **without consuming the claim** — the user retries with the password.
+   `ctx.runId` is given, in that run (else **404** — never a hint that another user's action exists).
+   **The tool's `preview()` then runs again, before the claim** (through the guards, as the approver), so
+   the decision is taken on what is true now, not only on what the card showed (G2 finding, #1315: step-up
+   used to be derived from the stored preview only, so an application that became critical between
+   propose and approve executed without the password):
+   - **New warnings.** If the fresh preview carries a warning the stored one does not, the stored preview
+     gains it (warnings are only ever added — one that disappeared stays, so step-up never relaxes —
+     and `stepUpRequired` is re-derived over the union) and the action **stays pending**:
+     - a new step-up warning without `stepUpVerified` → 403 `STEP_UP_REQUIRED`;
+     - any other new warning, or a new step-up warning after the user already entered the password →
+       409 `PREVIEW_CHANGED` — the user saw a card without that warning, so they review it again.
+     Both bodies carry `addedWarnings`; the decision endpoint re-renders the card from the stored
+     preview. Updating the stored preview is not a ledger event (nothing was decided or executed).
+     *Choice:* the least invasive way to surface the change that also terminates — returning the
+     warnings only in the error would re-detect them on every retry.
+   - A target whose version changed is **not** reported as `PREVIEW_CHANGED`: it is `STALE` (step 3),
+     terminal, which wins over a refusal that would only defer it.
+   - A preview that requires step-up (the union, re-derived) needs `stepUpVerified` from the caller, else
+     403 `STEP_UP_REQUIRED` **without consuming the claim** — the user retries with the password.
+   - A fresh preview that cannot be built (the tool changed, the input no longer parses, the target is
+     gone or unreadable) does not stop the claim here; step 3 finalizes it.
 1. Atomic claim: `updateMany where {id, status: AWAITING_APPROVAL, userId: caller, expiresAt > now}` →
    `EXECUTING`, `decidedAt = now`.
    - count 0 → read the row. `SUCCEEDED`/`FAILED`/`OUTCOME_UNKNOWN` returns the stored action with
@@ -1266,8 +1284,9 @@ token, never a tool. The request carries only the pending-action id, plus the pa
    - `ai:use`, the admitted principal kind and the route's `@RequirePermission` still held, else
      `FORBIDDEN` 403 (a role demoted after the proposal);
    - re-parse the stored input;
-   - when the stored preview has a `precondition`, the tool's `preview()` runs again (through the guards)
-     and its precondition must name the same entity with the same `updatedAt`, else `STALE` (409), and
+   - the fresh preview (built in step 0, or now when it could not be then) must build — its error
+     finalizes the action `FAILED` — and, when the stored preview has a `precondition`, its precondition
+     must name the same entity with the same `updatedAt`, else `STALE` (409), and
      the model is told to re-read and re-propose. **This narrows the TOCTOU window; it does not close
      it**: a change committed between this check and the handler's own write is not detected, because
      the domain handlers do not yet take an expected version. Closing it needs each write handler to
