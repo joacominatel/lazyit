@@ -538,8 +538,9 @@ lazyit-plugin.zip
   available while MCP is enabled; it is the only path on `lan`, where the plugin carries
   `userConfig.token`. The public `marketplace.json` + archive exist only when MCP is enabled on an HTTPS
   instance, because Claude Code's `archive` source is HTTPS-only.
-- **As built (W3-5):** §13. Two deviations from the sketch above: the **public** archive leaves
-  `reference/tools.md` out (it ships only in the authenticated download), and the public routes answer
+- **As built (W3-5):** §13. The marketplace is named `lazyit-<host>` (install `lazyit@lazyit-<host>`)
+  so two instances never replace each other. Other deviations from the sketch above: the **public**
+  archive leaves `reference/tools.md` out (it ships only in the authenticated download), and the public routes answer
   `Cache-Control: no-cache` + a strong `ETag` (the archive's SHA-256) instead of `no-store`, so clients
   revalidate cheaply and a switched-off instance stops answering at once. `reference/domain.md` is the
   whole MCP `instructions` text (`buildMcpInstructions()`), not the domain part alone.
@@ -1010,8 +1011,24 @@ build or prompt version, internal hostnames (only the public origin). The render
 the origin, the auth mode and the code-owned catalog. The tool index is left out of the public archive
 because the exact catalog fingerprints the build (the ADR-0083 posture keeps the version
 non-anonymous); a connected client gets the live list from `tools/list`, filtered to the person's
-permissions ∩ granted scopes. Residual: the public digest changes when the primer or templates change,
-which reveals "a different build" but not which one.
+permissions ∩ granted scopes.
+
+**G3 residuals (accepted, low impact).**
+- *Coarse version fingerprint.* The renderer is deterministic and the repository is public, so anyone can
+  render the public archive of each release for a given origin and match the published digest (or the
+  primer text inside the archive) against those renders. That narrows the instance to the releases that
+  share a primer and template version: a coarse version fingerprint, available only while MCP is on over
+  HTTPS, where the OAuth metadata already announces the capability.
+- *The instance is the plugin's code-signing root.* The plugin is code Claude Code loads on the user's
+  machine (a skill, an MCP server config). Whoever controls the instance or its TLS can change what the
+  next install or update receives — for example, point `.mcp.json` elsewhere or add a component. The
+  `sha256` in `marketplace.json` checks integrity against that same instance, not against a third party.
+  Mitigations: Claude Code's third-party marketplaces do not auto-update by default, so a change reaches
+  a user at their next explicit install or update (or at the next auto-update, if they enabled it); the
+  authenticated download is a manual install.
+- *Service-account refusal message.* `plugin.zip` reuses the shared `ServicePrincipalForbiddenGuard`,
+  whose 403 message mentions service-account and permission-matrix management. It is not specific to this
+  route and reveals nothing about it; it is left shared rather than forked.
 
 **Determinism and versioning.** `plugin-renderer.ts` is pure: fixed entry order, entry timestamps fixed
 at the DOS epoch (jszip encodes them in UTC), DEFLATE level 9. The same input gives the same bytes, so the
@@ -1021,14 +1038,20 @@ SHA-256 is the marketplace's update signal and the ETag. Renders are cached per 
 
 **Fail-closed content guard.** Claude Code pre-processes plugin files: `${…}` is substituted in skill
 markdown and MCP configs — including **sensitive** `${user_config.*}` values, which in a skill would put
-the personal token into model context — `$ARGUMENTS`/`$N` are argument placeholders, and `` !`…` `` runs a
-shell command when a skill loads. The renderer refuses to build an archive in which any of those appears,
-except the one header placeholder it writes into `.mcp.json`. `plugin-catalog.spec.ts` renders the shipped
+the personal token into model context — `$ARGUMENTS`/`$N` are argument placeholders, and a skill can run
+shell commands when it loads. The renderer refuses all of these: the substitutions and placeholders,
+and shell injection in both of its forms — inline `` !`…` `` and a fenced block whose opening line starts
+with ```` ```! ```` (any fence length, optional indentation). It refuses to build an archive in which any of
+those appears, except the one header placeholder it writes into `.mcp.json`. Tool-index cells are
+flattened to one line (whitespace collapsed, pipes escaped), so catalog text cannot open a block or a row. `plugin-catalog.spec.ts` renders the shipped
 catalog so a tool description that would trip the guard fails CI, not the download.
 
 **Install paths.**
 - HTTPS + MCP on: `claude plugin marketplace add <origin>/api/ai/claude-code/marketplace.json`, then
-  `claude plugin install lazyit@lazyit`. Third-party marketplaces do **not** auto-update by default; the
+  `claude plugin install lazyit@lazyit-<host>` — the marketplace is named after the host
+  (`marketplaceName`: `lazyit-` + the host in kebab-case, port included), because Claude Code keys added
+  marketplaces by name and a second marketplace with an existing name silently **replaces** the first.
+  Third-party marketplaces do **not** auto-update by default; the
   user enables it in `/plugin` → Marketplaces (or an admin sets `autoUpdate` in managed
   `extraKnownMarketplaces`). An install with `@lazyit` always refreshes the marketplace first.
 - Any instance (the only path on `lan`): download `plugin.zip`, unzip it into `~/.claude/skills/lazyit/`
@@ -1048,9 +1071,11 @@ catalog so a tool description that would trip the guard fails CI, not the downlo
 | Local install | `--plugin-dir` accepts a `.zip`; a folder with `.claude-plugin/plugin.json` under `~/.claude/skills/` loads as `<name>@skills-dir`. [E] plugins |
 
 **Debt and follow-ups.**
-1. The marketplace and plugin are both named `lazyit`, so one Claude Code user cannot add two lazyit
-   instances (e.g. staging and production) as marketplaces at once. Deriving the marketplace name from the
-   host would fix it; decide with the `/account/ai` install page (W3-x frontend).
+1. Marketplaces no longer collide (named after the host, above), but the **plugin** is still `lazyit` in
+   every marketplace, so two instances installed side by side share the skill namespace `/lazyit:` and
+   the MCP server key `lazyit`. Enable one at a time, or decide on a per-host plugin name with the
+   `/account/ai` install page (W3-9) — a rename changes every installed plugin's id, so decide it before
+   release.
 2. The public routes have no dedicated rate limit: they serve a cached render (no DB work beyond the MCP
    switch read). Revisit if the switch read ever becomes expensive.
 3. Re-verify Claude Code's behavior with an `http://` MCP URL and the `@skills-dir` `userConfig` prompt in

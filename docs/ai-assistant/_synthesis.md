@@ -316,7 +316,7 @@ A Claude Code plugin rendered per request from in-repo templates, the **live too
 download is always available while MCP is enabled — on `lan` it declares `userConfig.token` for the
 personal token. On an HTTPS instance with MCP enabled, a public `marketplace.json` (no `version`; the
 archive's `sha256` is the update signal) enables `claude plugin marketplace add … && claude plugin
-install lazyit@lazyit` and auto-update. The MCP server's `instructions` carry the same primer.
+install lazyit@lazyit-<host>` and auto-update (once the user enables it for the marketplace). The MCP server's `instructions` carry the same primer.
 As built (W3-5): the public archive omits the generated tool index, which ships only in the
 authenticated download — [[ai-assistant/mcp-and-oauth|MCP]] §13 records what is public and why.
 
