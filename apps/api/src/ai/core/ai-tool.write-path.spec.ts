@@ -358,9 +358,29 @@ const writeToolset: AiToolset = {
     previewFixture('thing_no_precondition', 'write', {
       target: { type: 'asset', id: 't1', op: 'updated' },
     }),
+    // A write whose warnings depend on state that can change between propose and approve without
+    // touching the target's version (e.g. the application becoming critical).
+    {
+      ...previewFixture('thing_app_write', 'write', {}),
+      preview: () =>
+        Promise.resolve({
+          changes: [],
+          warnings: [
+            ...(appState.critical ? ['CRITICAL_APPLICATION'] : []),
+            ...(appState.notifies ? ['NOTIFIES_USERS'] : []),
+          ],
+          impacted: [],
+          untrustedSources: [],
+          elevated: false,
+          stepUpRequired: false,
+        }),
+    },
   ],
   unexposed: [],
 };
+
+/** Mutable fixture state read by `thing_app_write`'s preview. */
+const appState = { critical: false, notifies: false };
 
 /** A fixture write whose run renames `t1` and whose preview is exactly `preview` (defaults: no warning). */
 function previewFixture(
@@ -622,6 +642,8 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
   });
 
   beforeEach(() => {
+    appState.critical = false;
+    appState.notifies = false;
     users = {
       [ID.member]: user(ID.member, 'MEMBER'),
       [ID.other]: user(ID.other, 'MEMBER'),
@@ -1419,6 +1441,103 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
       ).rejects.toMatchObject({ status: 409 });
       expect(invocations.get(action.id)!.status).toBe('EXPIRED');
       expect(events(action.id)).toEqual(['PROPOSED', 'EXPIRED']);
+    });
+
+    describe('the fresh preview at approve (G2 finding: step-up from the stored preview only)', () => {
+      it('a step-up warning that appears after propose requires the password, without consuming the action', async () => {
+        const action = await proposeOk('thing_app_write');
+        expect(action.preview).toMatchObject({
+          warnings: [],
+          stepUpRequired: false,
+        });
+        appState.critical = true;
+        await expect(
+          tools.approve(action.id, chat(human(ID.member))),
+        ).rejects.toMatchObject({
+          status: 403,
+          response: {
+            code: 'STEP_UP_REQUIRED',
+            addedWarnings: ['CRITICAL_APPLICATION'],
+          },
+        });
+        expect(updates).toBe(0);
+        const row = invocations.get(action.id)!;
+        expect(row.status).toBe('AWAITING_APPROVAL');
+        // The card re-renders from the stored preview, which now carries the new warning.
+        expect(row.preview).toMatchObject({
+          warnings: ['CRITICAL_APPLICATION'],
+          stepUpRequired: true,
+        });
+        expect(events(action.id)).toEqual(['PROPOSED']);
+        // Still refused without the password on retry.
+        await expect(
+          tools.approve(action.id, chat(human(ID.member))),
+        ).rejects.toMatchObject({ status: 403 });
+        const approved = await tools.approve(
+          action.id,
+          chat(human(ID.member)),
+          { stepUpVerified: true },
+        );
+        expect(approved.status).toBe('SUCCEEDED');
+        expect(updates).toBe(1);
+        expect(ledger.find((e) => e.event === 'APPROVED')).toMatchObject({
+          stepUp: true,
+        });
+      });
+
+      it('a step-up warning that appears after the user entered the password asks for a new review', async () => {
+        const action = await proposeOk('thing_app_write');
+        appState.critical = true;
+        await expect(
+          tools.approve(action.id, chat(human(ID.member)), {
+            stepUpVerified: true,
+          }),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: {
+            code: 'PREVIEW_CHANGED',
+            addedWarnings: ['CRITICAL_APPLICATION'],
+          },
+        });
+        expect(updates).toBe(0);
+        expect(invocations.get(action.id)!.status).toBe('AWAITING_APPROVAL');
+        const approved = await tools.approve(
+          action.id,
+          chat(human(ID.member)),
+          { stepUpVerified: true },
+        );
+        expect(approved.status).toBe('SUCCEEDED');
+      });
+
+      it('any other new warning asks for a new review (PREVIEW_CHANGED), then the action can be approved', async () => {
+        const action = await proposeOk('thing_app_write');
+        appState.notifies = true;
+        await expect(
+          tools.approve(action.id, chat(human(ID.member))),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: {
+            code: 'PREVIEW_CHANGED',
+            addedWarnings: ['NOTIFIES_USERS'],
+          },
+        });
+        expect(updates).toBe(0);
+        const approved = await tools.approve(action.id, chat(human(ID.member)));
+        expect(approved.status).toBe('SUCCEEDED');
+      });
+
+      it('a step-up warning that disappears after propose still requires the password', async () => {
+        appState.critical = true;
+        const action = await proposeOk('thing_app_write');
+        appState.critical = false;
+        await expect(
+          tools.approve(action.id, chat(human(ID.member))),
+        ).rejects.toMatchObject({
+          status: 403,
+          response: { code: 'STEP_UP_REQUIRED' },
+        });
+        expect(updates).toBe(0);
+      });
     });
 
     describe('step-up derived by core (CEO decision 2026-09-24)', () => {

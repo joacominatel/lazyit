@@ -315,6 +315,10 @@ export class AiToolService {
    * principal, `ai:use` and the route permission, the tool's schema hash, the stored input and the
    * target's version (`STALE`), execute through the same dispatcher and record the outcome.
    *
+   * Before the claim the tool's preview runs again: a warning that appeared since propose is added to the
+   * stored preview and the action stays pending (`STEP_UP_REQUIRED` or `PREVIEW_CHANGED`, with
+   * `addedWarnings`), and step-up is derived over the stored and fresh warnings together.
+   *
    * A second approve of a finished action returns the stored outcome (`replayed`) and executes nothing.
    * Refusals throw Nest HTTP exceptions (`{ code, message }` bodies) for the decision endpoint.
    */
@@ -327,13 +331,48 @@ export class AiToolService {
     const row = await this.findOwned(invocationId, userId, ctx);
 
     const storedPreview = toPendingAction(row).preview;
-    // A missing or unreadable preview is not stopped here: the claim below fails it closed (FAILED).
-    if (
-      row.status === 'AWAITING_APPROVAL' &&
-      !options.stepUpVerified &&
-      storedPreview
-    ) {
-      if (requiresStepUp(storedPreview)) {
+    // The FRESH preview, built before the claim (tools-and-execution.md §9, step 0): step-up and "the card
+    // changed" are decided on what is true NOW, not only on what was true at propose. A missing or
+    // unreadable stored preview is not stopped here: the claim below fails it closed (FAILED).
+    let fresh: FreshPreview | null = null;
+    if (row.status === 'AWAITING_APPROVAL' && storedPreview) {
+      fresh = await this.freshPreview(row, ctx);
+      // A target that changed version is STALE (decided after the claim, terminal): that outcome wins
+      // over "the card changed", which would only defer the same refusal.
+      const added =
+        fresh?.ok === true && !isStale(storedPreview, fresh.preview)
+          ? fresh.preview.warnings.filter(
+              (w) => !storedPreview.warnings.includes(w),
+            )
+          : [];
+      if (added.length > 0) {
+        // The situation changed since the user saw the card (e.g. the application became critical):
+        // the stored preview gains the new warnings and the action stays pending, so the card
+        // re-renders and the user decides again — with the password if a step-up warning appeared.
+        const updated = await this.addPreviewWarnings(
+          row,
+          storedPreview,
+          added,
+        );
+        const stepUpAdded = !options.stepUpVerified && requiresStepUp(updated);
+        if (stepUpAdded) {
+          throw new ForbiddenException({
+            ...decisionError(
+              'STEP_UP_REQUIRED',
+              'This action now requires your password to be confirmed',
+            ),
+            addedWarnings: added,
+          });
+        }
+        throw new ConflictException({
+          ...decisionError(
+            'PREVIEW_CHANGED',
+            'This action changed since it was proposed; review it again',
+          ),
+          addedWarnings: added,
+        });
+      }
+      if (!options.stepUpVerified && requiresStepUp(storedPreview)) {
         // Refused BEFORE the claim: the action stays pending so the user can retry with the step-up.
         throw new ForbiddenException(
           decisionError(
@@ -393,7 +432,7 @@ export class AiToolService {
         .catch(() => undefined);
       throw err;
     }
-    return this.executeApproved(claimed, ctx, userId, stepUp);
+    return this.executeApproved(claimed, ctx, userId, stepUp, fresh);
   }
 
   /**
@@ -588,6 +627,7 @@ export class AiToolService {
     ctx: AiExecutionContext,
     approverUserId: string,
     stepUp: boolean,
+    precomputed: FreshPreview | null = null,
   ): Promise<AiPendingAction> {
     const provenance = { approverUserId, stepUp };
     const execCtx: AiExecutionContext = {
@@ -659,31 +699,21 @@ export class AiToolService {
           : checked.result.error,
       );
     }
-    if (stored.precondition) {
-      let fresh: AiActionPreview;
-      try {
-        fresh = await this.executor.preview(
-          tool,
-          checked.input,
-          execCtx,
-          row.id,
-        );
-      } catch (err) {
-        return fail('FAILED', mapToolError(err));
-      }
-      if (
-        !fresh.precondition ||
-        fresh.precondition.entity.type !== stored.precondition.entity.type ||
-        fresh.precondition.entity.id !== stored.precondition.entity.id ||
-        fresh.precondition.updatedAt !== stored.precondition.updatedAt
-      ) {
-        return fail('FAILED', {
-          code: 'STALE',
-          status: 409,
-          message:
-            'The target changed after this action was proposed; read it again and propose a new action',
-        });
-      }
+    // The fresh preview built before the claim (or now, when it could not be built then).
+    const freshOutcome =
+      precomputed ??
+      (await this.buildFreshPreview(tool, checked.input, execCtx, row.id));
+    if (!freshOutcome.ok) {
+      return fail('FAILED', freshOutcome.error);
+    }
+    const fresh = freshOutcome.preview;
+    if (isStale(stored, fresh)) {
+      return fail('FAILED', {
+        code: 'STALE',
+        status: 409,
+        message:
+          'The target changed after this action was proposed; read it again and propose a new action',
+      });
     }
 
     const started = Date.now();
@@ -936,6 +966,82 @@ export class AiToolService {
   }
 
   /**
+   * The fresh preview of a pending action, for the pre-claim checks in `approve`. `null` when it cannot be
+   * built yet because the tool changed or the stored input no longer parses — the post-claim checks
+   * finalize those (`EXPIRED`, `FAILED`).
+   */
+  private async freshPreview(
+    row: AiToolInvocation,
+    ctx: AiExecutionContext,
+  ): Promise<FreshPreview | null> {
+    const tool = this.registry.get(row.toolName);
+    if (!tool || tool.schemaHash !== row.schemaHash) return null;
+    const checked = this.executor.validate(tool, row.input);
+    if (!checked.ok) return null;
+    return this.buildFreshPreview(
+      tool,
+      checked.input,
+      {
+        ...ctx,
+        channel: 'CHAT',
+        conversationId: row.conversationId ?? undefined,
+        runId: row.runId ?? undefined,
+      },
+      row.id,
+    );
+  }
+
+  /** Run the tool's preview again (through the guards) and validate it like `propose` does. */
+  private async buildFreshPreview(
+    tool: RegisteredAiTool,
+    input: unknown,
+    ctx: AiExecutionContext,
+    invocationId: string,
+  ): Promise<FreshPreview> {
+    try {
+      const built = await this.executor.preview(tool, input, ctx, invocationId);
+      const parsed = AiActionPreviewSchema.safeParse(built);
+      if (!parsed.success) {
+        return {
+          ok: false,
+          error: {
+            code: 'INTERNAL',
+            status: 500,
+            message:
+              'The preview of this action is invalid; it was not executed',
+          },
+        };
+      }
+      return { ok: true, preview: parsed.data };
+    } catch (err) {
+      return { ok: false, error: mapToolError(err) };
+    }
+  }
+
+  /**
+   * Add warnings to a pending action's stored preview, re-deriving `stepUpRequired` over the union
+   * (warnings are only ever added: one that disappeared stays, so step-up never relaxes). Conditional on
+   * the row still being pending; not a ledger event — nothing was decided or executed.
+   */
+  private async addPreviewWarnings(
+    row: AiToolInvocation,
+    stored: AiActionPreview,
+    added: readonly string[],
+  ): Promise<AiActionPreview> {
+    const warnings = [...stored.warnings, ...added];
+    const updated: AiActionPreview = {
+      ...stored,
+      warnings,
+      stepUpRequired: requiresStepUp({ ...stored, warnings }),
+    };
+    await this.prisma.aiToolInvocation.updateMany({
+      where: { id: row.id, status: 'AWAITING_APPROVAL' },
+      data: { preview: json(updated) },
+    });
+    return updated;
+  }
+
+  /**
    * Validate and complete a tool-built preview (review fixes; CEO decision 2026-09-24 on step-up):
    *   - it must parse as an `AiActionPreview`;
    *   - a preview that names a `target` must carry its `precondition` (the version checked at execute);
@@ -1086,6 +1192,25 @@ export class AiToolService {
     return AI_SETTINGS_DEFAULTS.approvalTtlMinutes;
   }
 }
+
+/**
+ * Whether the target changed version since the stored preview: the fresh precondition must name the same
+ * entity with the same `updatedAt`. A preview without a precondition is never stale.
+ */
+function isStale(stored: AiActionPreview, fresh: AiActionPreview): boolean {
+  if (!stored.precondition) return false;
+  return (
+    !fresh.precondition ||
+    fresh.precondition.entity.type !== stored.precondition.entity.type ||
+    fresh.precondition.entity.id !== stored.precondition.entity.id ||
+    fresh.precondition.updatedAt !== stored.precondition.updatedAt
+  );
+}
+
+/** A fresh preview built at approve, or the tool error that building it produced. */
+type FreshPreview =
+  | { ok: true; preview: AiActionPreview }
+  | { ok: false; error: ToolError };
 
 const PRINCIPAL_INVALID: ToolError = {
   code: 'FORBIDDEN',
