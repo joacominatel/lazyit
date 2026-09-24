@@ -83,16 +83,18 @@ configured. Turning it off disconnects every client at once; their authorization
 turn it back on.
 
 The card shows the **MCP endpoint** — your instance's address followed by `/mcp` — and explains how
-clients sign in on **this** instance, which depends on how lazyit is served:
+clients sign in on **this** instance. That depends on the API's `WEB_ORIGIN` setting — the public
+address lazyit is pinned to — not merely on whether the page is shown over HTTPS:
 
-- **Over HTTPS: OAuth.** The client opens a lazyit page in the browser where the person reviews the
+- **`WEB_ORIGIN` is an `https://` address: OAuth.** The client opens a lazyit page in the browser where the person reviews the
   access and approves it. If your certificate comes from an **internal certificate authority**, Claude
   Code and other Node.js clients must be started with it, for example
   `export NODE_EXTRA_CA_CERTS=/path/to/internal-ca.pem`.
-- **Over plain HTTP (the `lan` mode): personal tokens.** OAuth sign-in requires HTTPS — otherwise the
-  sign-in codes and tokens would travel unencrypted — so it is not available. Each person creates a
-  personal MCP token instead, and gives it to their client. Serving lazyit over HTTPS switches to OAuth
-  automatically.
+- **No `https://` `WEB_ORIGIN` (for example the plain-HTTP `lan` mode): personal tokens.** OAuth
+  sign-in requires HTTPS and a fixed public address — otherwise the sign-in codes and tokens could travel
+  unencrypted or to the wrong host — so it is not available. Each person creates a personal MCP token
+  instead, and gives it to their client. Putting a TLS proxy in front of lazyit is **not** enough on its
+  own: set `WEB_ORIGIN` to the `https://` address people use and restart the API to switch to OAuth.
 - **Cloud connectors** — claude.ai, Claude Desktop connectors and ChatGPT — connect from the provider's
   servers, not from the person's computer, so they only work when your instance is reachable from the
   internet over HTTPS with a publicly trusted certificate.

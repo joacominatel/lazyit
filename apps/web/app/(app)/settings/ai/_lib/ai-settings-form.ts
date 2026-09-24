@@ -297,16 +297,19 @@ export function mcpEndpointUrl(origin: string): string {
 
 /**
  * How MCP clients authenticate on this instance, and how we know. `/ai/status` is authoritative
- * (`mcp.auth`: OAuth on an HTTPS issuer, personal tokens on a plain-HTTP `lan` instance); when it cannot
- * be read (an older API, an error) the page falls back to the scheme it was loaded over, and says so.
+ * (`mcp.auth`: OAuth when the API's `WEB_ORIGIN` is pinned to https://, personal tokens otherwise).
+ * While the status is still loading the answer is `null` — the card shows a neutral placeholder rather
+ * than a guess. Only when the read FAILED (an older API, an error) does the page fall back to the scheme
+ * it was loaded over, and say so: a TLS proxy in front of an unpinned instance still means tokens.
  */
 export function mcpConnectionMode(
-  statusAuth: AiMcpAuthMode | undefined,
-  protocol: string,
-): { mode: AiMcpAuthMode; source: "status" | "browser" } {
-  if (statusAuth === "oauth" || statusAuth === "personal-token") {
-    return { mode: statusAuth, source: "status" };
+  status: { state: "pending" | "error" | "success"; auth?: unknown },
+  protocol: string | null,
+): { mode: AiMcpAuthMode; source: "status" | "browser" } | null {
+  if (status.state === "success" && (status.auth === "oauth" || status.auth === "personal-token")) {
+    return { mode: status.auth, source: "status" };
   }
+  if (status.state === "pending" || protocol === null) return null;
   return {
     mode: protocol === "https:" ? "oauth" : "personal-token",
     source: "browser",

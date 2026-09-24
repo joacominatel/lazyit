@@ -87,16 +87,19 @@ configurado. Desactivarlo desconecta todos los clientes a la vez; sus autorizaci
 reactivarlo.
 
 La tarjeta muestra el **endpoint MCP** — la dirección de tu instancia seguida de `/mcp` — y explica cómo
-inician sesión los clientes en **esta** instancia, lo que depende de cómo se sirve lazyit:
+inician sesión los clientes en **esta** instancia. Eso depende de la opción `WEB_ORIGIN` de la API — la
+dirección pública a la que está fijado lazyit —, no solo de si la página se muestra por HTTPS:
 
-- **Por HTTPS: OAuth.** El cliente abre una página de lazyit en el navegador donde la persona revisa el
+- **`WEB_ORIGIN` es una dirección `https://`: OAuth.** El cliente abre una página de lazyit en el navegador donde la persona revisa el
   acceso y lo aprueba. Si tu certificado lo emite una **autoridad de certificación interna**, Claude Code y
   otros clientes Node.js deben iniciarse con ella, por ejemplo
   `export NODE_EXTRA_CA_CERTS=/ruta/a/ca-interna.pem`.
-- **Por HTTP sin cifrar (el modo `lan`): tokens personales.** El inicio de sesión con OAuth requiere HTTPS
-  — si no, los códigos y tokens viajarían sin cifrar —, así que no está disponible. Cada persona crea en su
-  lugar un token MCP personal y se lo da a su cliente. Servir lazyit por HTTPS pasa a OAuth
-  automáticamente.
+- **Sin un `WEB_ORIGIN` `https://` (por ejemplo, el modo `lan` por HTTP sin cifrar): tokens personales.**
+  El inicio de sesión con OAuth requiere HTTPS y una dirección pública fija — si no, los códigos y tokens
+  podrían viajar sin cifrar o a otro host —, así que no está disponible. Cada persona crea en su lugar un
+  token MCP personal y se lo da a su cliente. Poner un proxy TLS delante de lazyit **no** alcanza por sí
+  solo: define `WEB_ORIGIN` con la dirección `https://` que usan las personas y reinicia la API para pasar
+  a OAuth.
 - **Los conectores en la nube** — claude.ai, los conectores de Claude Desktop y ChatGPT — se conectan desde
   los servidores del proveedor, no desde la computadora de la persona, así que solo funcionan si tu
   instancia es alcanzable desde internet por HTTPS con un certificado de confianza pública.

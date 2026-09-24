@@ -21,9 +21,10 @@ import {
 } from "@/components/ui/card";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
-import { useUpdateAiConfig } from "@/lib/api/hooks/use-ai-config";
+import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config";
 import { useAiStatus } from "@/lib/api/hooks/use-ai-status";
 import {
   buildUpdate,
@@ -55,13 +56,15 @@ function useLocationPart(part: "origin" | "protocol"): string | null {
  */
 export function AiMcpSection({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.mcp");
-  const save = useUpdateAiConfig();
+  const save = useAiConfigSave();
   const status = useAiStatus();
   const origin = useLocationPart("origin");
   const protocol = useLocationPart("protocol");
 
-  const statusAuth = status.data?.mcp?.auth;
-  const { mode, source } = mcpConnectionMode(statusAuth, protocol ?? "");
+  const connection = mcpConnectionMode(
+    { state: status.status, auth: status.data?.mcp?.auth },
+    protocol,
+  );
   const endpoint = origin ? mcpEndpointUrl(origin) : null;
 
   return (
@@ -91,42 +94,55 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
             checked={settings.mcpEnabled}
             disabled={save.isPending}
             onCheckedChange={(checked) =>
-              save.mutate(buildUpdate(settings, { mcpEnabled: checked }))
+              save.save(buildUpdate(settings, { mcpEnabled: checked }))
             }
           />
         </Field>
         <AiErrorNotice error={save.error} />
 
-        <Callout tone="info" icon={<InformationCircleIcon />}>
-          <div className="space-y-2 text-sm">
-            <p className="font-medium">
-              {mode === "oauth" ? t("mode.oauth.title") : t("mode.personalToken.title")}
-            </p>
-            {mode === "oauth" ? (
-              <>
-                <p>{t("mode.oauth.body")}</p>
-                <p>{t("mode.oauth.internalCa")}</p>
-                <pre className="overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">
-                  export NODE_EXTRA_CA_CERTS=/path/to/internal-ca.pem
-                </pre>
-              </>
-            ) : (
-              <>
-                <p>{t("mode.personalToken.body")}</p>
-                <p>{t("mode.personalToken.whyNoOauth")}</p>
-              </>
-            )}
-            <p className="flex items-start gap-1.5">
-              <GlobeAltIcon className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
-              <span>
-                {mode === "oauth" ? t("mode.oauth.cloud") : t("mode.personalToken.cloud")}
-              </span>
-            </p>
-            {source === "browser" ? (
-              <p className="text-muted-foreground">{t("mode.detectedFromBrowser")}</p>
-            ) : null}
+        {connection ? (
+          <Callout tone="info" icon={<InformationCircleIcon />}>
+            <div className="space-y-2 text-sm">
+              <p className="font-medium">
+                {connection.mode === "oauth" ? t("mode.oauth.title") : t("mode.personalToken.title")}
+              </p>
+              {connection.mode === "oauth" ? (
+                <>
+                  <p>{t("mode.oauth.body")}</p>
+                  <p>{t("mode.oauth.internalCa")}</p>
+                  <pre className="overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">
+                    export NODE_EXTRA_CA_CERTS=/path/to/internal-ca.pem
+                  </pre>
+                </>
+              ) : (
+                <>
+                  <p>{t("mode.personalToken.body")}</p>
+                  <p>{t("mode.personalToken.whyNoOauth")}</p>
+                </>
+              )}
+              <p className="flex items-start gap-1.5">
+                <GlobeAltIcon className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
+                <span>
+                  {connection.mode === "oauth" ? t("mode.oauth.cloud") : t("mode.personalToken.cloud")}
+                </span>
+              </p>
+              {connection.source === "browser" ? (
+                <p className="text-muted-foreground">{t("mode.detectedFromBrowser")}</p>
+              ) : null}
+            </div>
+          </Callout>
+        ) : (
+          <div
+            className="space-y-2 rounded-md border p-3"
+            aria-busy="true"
+            role="status"
+          >
+            <span className="sr-only">{t("mode.loading")}</span>
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-5/6" />
           </div>
-        </Callout>
+        )}
 
         <div className="space-y-2">
           <p className="text-sm font-medium">{t("endpoint.label")}</p>

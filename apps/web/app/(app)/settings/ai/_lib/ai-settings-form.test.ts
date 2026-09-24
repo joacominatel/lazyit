@@ -266,17 +266,36 @@ describe("MCP", () => {
     expect(mcpEndpointUrl("http://10.0.0.4/")).toBe("http://10.0.0.4/mcp");
   });
 
-  test("the status decides the mode; the browser scheme is only the fallback", () => {
-    expect(mcpConnectionMode("personal-token", "https:")).toEqual({
+  test("the status decides the mode", () => {
+    expect(mcpConnectionMode({ state: "success", auth: "personal-token" }, "https:")).toEqual({
       mode: "personal-token",
       source: "status",
     });
-    expect(mcpConnectionMode("oauth", "http:")).toEqual({ mode: "oauth", source: "status" });
-    expect(mcpConnectionMode(undefined, "http:")).toEqual({
+    expect(mcpConnectionMode({ state: "success", auth: "oauth" }, "http:")).toEqual({
+      mode: "oauth",
+      source: "status",
+    });
+  });
+
+  test("no guess while the status is loading", () => {
+    expect(mcpConnectionMode({ state: "pending" }, "https:")).toBeNull();
+    expect(mcpConnectionMode({ state: "pending" }, "http:")).toBeNull();
+  });
+
+  test("the browser scheme is the fallback only when the status failed", () => {
+    expect(mcpConnectionMode({ state: "error" }, "http:")).toEqual({
       mode: "personal-token",
       source: "browser",
     });
-    expect(mcpConnectionMode(undefined, "https:")).toEqual({ mode: "oauth", source: "browser" });
+    expect(mcpConnectionMode({ state: "error" }, "https:")).toEqual({
+      mode: "oauth",
+      source: "browser",
+    });
+    expect(mcpConnectionMode({ state: "success", auth: "newer-mode" }, "https:")).toEqual({
+      mode: "oauth",
+      source: "browser",
+    });
+    expect(mcpConnectionMode({ state: "error" }, null)).toBeNull();
   });
 });
 

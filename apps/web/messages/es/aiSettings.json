@@ -250,18 +250,19 @@
     },
     "mode": {
       "oauth": {
-        "title": "Esta instancia se sirve por HTTPS: los clientes inician sesión con OAuth",
-        "body": "Cuando una persona agrega lazyit a su cliente, el cliente abre una página de lazyit en el navegador donde revisa el acceso y lo aprueba. No hay nada que copiar a mano, y cada conexión se puede revocar en Cuenta → IA y aplicaciones conectadas.",
+        "title": "La dirección pública de esta instancia es https://: los clientes inician sesión con OAuth",
+        "body": "Cuando una persona agrega lazyit a su cliente, el cliente abre una página de lazyit en el navegador donde revisa el acceso y lo aprueba. No hay nada que copiar a mano, y cada conexión se puede revocar en Cuenta → IA y aplicaciones conectadas. (OAuth está disponible porque la opción WEB_ORIGIN de la API es una dirección https://.)",
         "internalCa": "Si tu certificado lo emite una autoridad de certificación interna, Claude Code (y otros clientes Node.js) no confiarán en él hasta que se inicien con el certificado de esa autoridad:",
         "cloud": "Los conectores en la nube — claude.ai, los conectores de Claude Desktop y ChatGPT — se conectan desde los servidores del proveedor, no desde la computadora de la persona. Solo funcionan si esta instancia es alcanzable desde internet por HTTPS con un certificado de confianza pública."
       },
       "personalToken": {
-        "title": "Esta instancia se sirve por HTTP sin cifrar: los clientes usan tokens personales",
+        "title": "Esta instancia no tiene una dirección pública https://: los clientes usan tokens personales",
         "body": "Cada persona crea un token MCP personal en Cuenta → IA y aplicaciones conectadas y se lo da a su cliente (Claude Code lo pide al activar el plugin de lazyit). Los tokens vencen y se pueden revocar allí en cualquier momento.",
-        "whyNoOauth": "El inicio de sesión con OAuth no está disponible aquí: requiere HTTPS, porque si no los códigos y tokens de inicio de sesión viajarían sin cifrar. Sirve lazyit por HTTPS para pasar a OAuth automáticamente.",
+        "whyNoOauth": "El inicio de sesión con OAuth necesita HTTPS y una dirección pública fija, así que la API lo ofrece solo cuando su opción WEB_ORIGIN es una dirección https://. Un proxy TLS delante de lazyit no alcanza por sí solo: define WEB_ORIGIN con la dirección https:// que usan las personas y reinicia la API para pasar a OAuth.",
         "cloud": "Los conectores en la nube (claude.ai, ChatGPT) no pueden conectarse a esta instancia: necesitan una dirección HTTPS alcanzable públicamente."
       },
-      "detectedFromBrowser": "La respuesta del servidor no estaba disponible, así que esto se dedujo de la dirección en tu navegador."
+      "detectedFromBrowser": "La respuesta del servidor no estaba disponible, así que esto se dedujo de la dirección en tu navegador. El modo real depende de la opción WEB_ORIGIN de la API.",
+      "loading": "Comprobando cómo se conectan los clientes a esta instancia…"
     },
     "endpoint": {
       "label": "Endpoint MCP",

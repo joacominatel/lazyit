@@ -250,18 +250,19 @@
     },
     "mode": {
       "oauth": {
-        "title": "This instance is served over HTTPS: clients sign in with OAuth",
-        "body": "When a person adds lazyit to their client, the client opens a lazyit page in the browser where they review the access and approve it. Nothing to copy by hand, and each connection can be revoked from Account → AI & connected apps.",
+        "title": "This instance's public address is https://: clients sign in with OAuth",
+        "body": "When a person adds lazyit to their client, the client opens a lazyit page in the browser where they review the access and approve it. Nothing to copy by hand, and each connection can be revoked from Account → AI & connected apps. (OAuth is available because the API's WEB_ORIGIN setting is an https:// address.)",
         "internalCa": "If your certificate comes from an internal certificate authority, Claude Code (and other Node.js clients) will not trust it until they are started with the authority's certificate:",
         "cloud": "Cloud connectors — claude.ai, Claude Desktop connectors and ChatGPT — connect from the provider's servers, not from the person's computer. They only work if this instance is reachable from the internet over HTTPS with a publicly trusted certificate."
       },
       "personalToken": {
-        "title": "This instance is served over plain HTTP: clients use personal tokens",
+        "title": "This instance has no https:// public address: clients use personal tokens",
         "body": "Each person creates a personal MCP token in Account → AI & connected apps and gives it to their client (Claude Code asks for it when the lazyit plugin is enabled). Tokens expire and can be revoked there at any time.",
-        "whyNoOauth": "OAuth sign-in is not available here: it requires HTTPS, because the sign-in codes and tokens would otherwise travel unencrypted. Serve lazyit over HTTPS to switch to OAuth automatically.",
+        "whyNoOauth": "OAuth sign-in needs HTTPS and a fixed public address, so the API offers it only when its WEB_ORIGIN setting is an https:// address. A TLS proxy in front of lazyit is not enough on its own: set WEB_ORIGIN to the https:// address people use and restart the API to switch to OAuth.",
         "cloud": "Cloud connectors (claude.ai, ChatGPT) cannot connect to this instance: they need a publicly reachable HTTPS address."
       },
-      "detectedFromBrowser": "The server's answer was not available, so this was worked out from the address in your browser."
+      "detectedFromBrowser": "The server's answer was not available, so this was guessed from the address in your browser. The real mode depends on the API's WEB_ORIGIN setting.",
+      "loading": "Checking how clients connect to this instance…"
     },
     "endpoint": {
       "label": "MCP endpoint",
