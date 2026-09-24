@@ -36,6 +36,8 @@ describe("AI provider descriptors", () => {
       const compatible = kind === "openai-compatible";
       expect(descriptor.requiresBaseUrl).toBe(compatible);
       expect(descriptor.requiresApiKey).toBe(!compatible);
+      // #1373: the OpenAI-compatible definition sends no reasoning effort, so a conversation cannot set one.
+      expect(descriptor.supportsEffort).toBe(!compatible);
     }
   });
 });

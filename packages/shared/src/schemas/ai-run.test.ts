@@ -6,10 +6,13 @@ import {
   AI_RUN_TERMINAL_STATUSES,
   AI_TOOL_INVOCATION_STATUSES,
   AiApprovalDecisionSchema,
+  AiConversationModelIdSchema,
   AiMessagePartSchema,
   AiRunEventSchema,
+  CreateAiConversationSchema,
   CreateAiRunSchema,
   SendAiMessageSchema,
+  UpdateAiConversationSchema,
 } from "./ai-run";
 
 // Runs, approvals and the versioned run event stream (ADR-0097 decisions 4–6; synthesis §4.4, §4.6).
@@ -269,5 +272,74 @@ describe("Requests", () => {
         .success,
     ).toBe(false);
     expect(AiApprovalDecisionSchema.safeParse({ decision: "maybe" }).success).toBe(false);
+  });
+});
+
+describe("per-conversation settings (#1373, #1376)", () => {
+  test("a user model id: listed or custom ids pass, anything that could steer a provider URL does not", () => {
+    for (const id of [
+      "claude-opus-5",
+      "gpt-6-sol",
+      "models/gemini-3.8-flash",
+      "meta-llama/Llama-3.3-70B-Instruct",
+      "llama3:8b",
+      "my-deploy@2026-09",
+    ]) {
+      expect(AiConversationModelIdSchema.safeParse(id).success).toBe(true);
+    }
+    for (const id of [
+      "",
+      "../v1/files",
+      "a/../b",
+      "x?key=1",
+      "x#frag",
+      "x%2F",
+      "two words",
+      "/leading",
+      "a".repeat(201),
+    ]) {
+      expect(AiConversationModelIdSchema.safeParse(id).success).toBe(false);
+    }
+  });
+
+  test("create: everything optional, strict", () => {
+    expect(CreateAiConversationSchema.safeParse({}).success).toBe(true);
+    expect(
+      CreateAiConversationSchema.safeParse({
+        model: "claude-haiku-5",
+        effort: "high",
+        providerOptions: null,
+        autoApprove: true,
+      }).success,
+    ).toBe(true);
+    expect(CreateAiConversationSchema.safeParse({ effort: "max" }).success).toBe(false);
+    expect(CreateAiConversationSchema.safeParse({ stepUp: false }).success).toBe(false);
+  });
+
+  test("update: at least one field", () => {
+    expect(UpdateAiConversationSchema.safeParse({}).success).toBe(false);
+    expect(UpdateAiConversationSchema.safeParse({ autoApprove: false }).success).toBe(true);
+    expect(UpdateAiConversationSchema.safeParse({ effort: null }).success).toBe(true);
+  });
+
+  test("the approval resolution and the card carry an optional auto flag (additive)", () => {
+    expect(
+      AiRunEventSchema.safeParse({
+        v: 1,
+        type: "tool.approval_resolved",
+        toolCallId: "call_1",
+        decision: "approved",
+        auto: true,
+        preview,
+      }).success,
+    ).toBe(true);
+    expect(
+      AiRunEventSchema.safeParse({
+        v: 1,
+        type: "tool.approval_resolved",
+        toolCallId: "call_1",
+        decision: "approved",
+      }).success,
+    ).toBe(true);
   });
 });
