@@ -162,6 +162,69 @@ describe("chatReducer — approvals", () => {
     expect(tool!.type === "tool" && tool.status).toBe("SUCCEEDED");
   });
 
+  test("an automatic approval (#1376) adds an applied-automatically record after the call, never a pending card", () => {
+    const s = apply(
+      started(),
+      { type: "event", runId: RUN, eventId: at(1), event: call },
+      {
+        type: "event",
+        runId: RUN,
+        eventId: at(2),
+        event: ev("tool.approval_resolved", {
+          toolCallId: "w1",
+          decision: "approved",
+          auto: true,
+          preview: approval("w1").preview,
+        }),
+      },
+      {
+        type: "event",
+        runId: RUN,
+        eventId: at(3),
+        event: ev("tool.result", { toolCallId: "w1", kind: "mutation", status: "ok", mutated: true, entityRefs: [] }),
+      },
+    );
+    const [tool, record] = s.messages.at(-1)!.parts;
+    expect(tool!.type === "tool" && tool.status).toBe("SUCCEEDED");
+    expect(record!.type).toBe("approval");
+    if (record!.type !== "approval") return;
+    expect(record.auto).toBe(true);
+    expect(record.outcome).toBe("approved");
+    expect(record.request.preview.target?.label).toBe("MBP-042");
+    expect(record.request.untrustedSources).toEqual([]);
+    expect(isAwaitingApproval(s)).toBe(false);
+  });
+
+  test("an automatic approval without a preview adds nothing; a known card is marked automatic", () => {
+    const bare = apply(
+      started(),
+      { type: "event", runId: RUN, eventId: at(1), event: call },
+      { type: "event", runId: RUN, eventId: at(2), event: ev("tool.approval_resolved", { toolCallId: "w1", decision: "approved", auto: true }) },
+    );
+    expect(bare.messages.at(-1)!.parts.map((p) => p.type)).toEqual(["tool"]);
+
+    const known = apply(
+      started(),
+      { type: "event", runId: RUN, eventId: at(1), event: call },
+      { type: "event", runId: RUN, eventId: at(2), event: ev("tool.approval_required", approval("w1")) },
+      { type: "event", runId: RUN, eventId: at(3), event: ev("tool.approval_resolved", { toolCallId: "w1", decision: "approved", auto: true }) },
+    );
+    const card = known.messages.at(-1)!.parts[1]!;
+    expect(card.type === "approval" && card.auto).toBe(true);
+    expect(known.messages.at(-1)!.parts).toHaveLength(2);
+  });
+
+  test("a click approval is not marked automatic", () => {
+    const s = apply(
+      started(),
+      { type: "event", runId: RUN, eventId: at(1), event: call },
+      { type: "event", runId: RUN, eventId: at(2), event: ev("tool.approval_required", approval("w1")) },
+      { type: "event", runId: RUN, eventId: at(3), event: ev("tool.approval_resolved", { toolCallId: "w1", decision: "approved" }) },
+    );
+    const card = s.messages.at(-1)!.parts[1]!;
+    expect(card.type === "approval" && card.auto).toBeUndefined();
+  });
+
   test("a snapshot re-renders a changed card (PREVIEW_CHANGED) without duplicating it", () => {
     let s = apply(
       started(),

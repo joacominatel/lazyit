@@ -84,7 +84,8 @@ export function isPasswordSubmitKey(e: {
   return e.key === "Enter" && !e.repeat && e.nativeEvent?.isComposing !== true;
 }
 
-function Value({ value }: { value: PreviewValue | null }) {
+/** One before or after value of a preview row, as plain escaped text. */
+export function ApprovalValue({ value }: { value: PreviewValue | null }) {
   const t = useTranslations("ai.approval");
   const format = useFormatter();
   if (value === null || value.kind === "empty") {
@@ -295,13 +296,13 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
                     <>
                       <span className="sr-only">{t("before")}: </span>
                       <span className="text-muted-foreground line-through decoration-muted-foreground/50">
-                        <Value value={row.before} />
+                        <ApprovalValue value={row.before} />
                       </span>
                       <span aria-hidden className="px-1 text-muted-foreground">→</span>
                       <span className="sr-only">{t("after")}: </span>
                     </>
                   )}
-                  <Value value={row.after} />
+                  <ApprovalValue value={row.after} />
                 </dd>
               </div>
             ))}

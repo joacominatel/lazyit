@@ -7,6 +7,7 @@ import type { ChatMessage } from "@/lib/ai/stream-reducer";
 import { groupMessageParts } from "@/lib/ai/tool-groups";
 import type { DecisionResult } from "@/lib/api/hooks/use-ai-turn";
 import { AiApprovalCard } from "./ai-approval-card";
+import { AiAutoAppliedCard } from "./ai-auto-applied-card";
 import { AiMarkdown } from "./ai-markdown";
 import { AiRunNotice } from "./ai-run-notice";
 import { AiToolActivity } from "./ai-tool-activity";
@@ -86,6 +87,16 @@ export function AiMessage({ message, tools, navigated, onDecide }: AiMessageProp
             );
           case "approval": {
             const tool = tools.get(part.request.toolCallId);
+            if (part.auto === true) {
+              return (
+                <AiAutoAppliedCard
+                  key={`approval-${part.request.toolCallId}`}
+                  part={part}
+                  callStatus={tool?.status}
+                  failureMessage={tool?.result?.error?.message}
+                />
+              );
+            }
             return (
               <AiApprovalCard
                 key={`approval-${part.request.toolCallId}`}

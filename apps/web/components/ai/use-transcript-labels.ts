@@ -44,8 +44,11 @@ export function useTranscriptLabels(): TranscriptLabels {
         const model = presentPreview(preview);
         const elevated = part.request.elevated || preview.elevated;
         const stage = approvalStage(part.outcome, callStatus, null);
+        const kind = part.auto === true
+          ? t("approval.auto.title")
+          : t(`approval.classes.${elevated ? "elevated" : "write"}`);
         const lines = [
-          `**${t(`approval.classes.${elevated ? "elevated" : "write"}`)}** · ${t(`approval.states.${stage}`)}`,
+          `**${kind}** · ${t(`approval.states.${stage}`)}`,
           model.action ? model.action.text : t("approval.noAction"),
         ];
         for (const row of model.rows) {
