@@ -1170,7 +1170,9 @@ decision made while Valkey is down resumes within about a minute of its return.
 >   Service Account; 409 `RUN_NOT_AWAITING_APPROVAL`; 409 `AI_DISABLED` (an approval while off; the action
 >   stays pending); **403 `STEP_UP_REQUIRED` / `STEP_UP_FAILED` / `STEP_UP_UNAVAILABLE`** and **429
 >   `STEP_UP_RATE_LIMITED` + `retryAfterSec`**; core's own refusals pass through (409 `EXPIRED`, `STALE`, an
->   already-decided action). **The `STEP_UP_*` 403s are about the password confirmation, never the session:
+>   already-decided action), including **409 `PREVIEW_CHANGED`** and a `STEP_UP_REQUIRED` raised by a new
+>   warning, both with **`addedWarnings`** (#1357: the fresh preview gained warnings, the stored card was
+>   updated, nothing executed, the action stays pending for a new decision). **The `STEP_UP_*` 403s are about the password confirmation, never the session:
 >   the web must not treat them as a logout** (nor any 403 from this endpoint).
 > - **Per-SA AI access** (`headless/`): the account must be live (a revoked or unknown one is 404). No row
 >   reads `read-write` with no cap; a stored value this build does not know reads `read-only`, a malformed
