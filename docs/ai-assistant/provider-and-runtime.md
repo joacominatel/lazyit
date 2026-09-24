@@ -1112,6 +1112,46 @@ decision made while Valkey is down resumes within about a minute of its return.
 > - **Reader port.** `AiSettingsModule` binds and exports `AI_SETTINGS_READER` (`useExisting:
 >   AiSettingsService`). `resolveProviderConfig()` is null when disabled, in shim mode, without a known
 >   provider or a model, or when the stored key cannot be decrypted.
+>
+> **Refusal codes (#1315 follow-up).** Every `/config/ai` refusal carries a stable machine `code` next
+> to its human `message`; the web matches the code, never the sentence. The list is
+> `AI_SETTINGS_ERROR_CODES` in `@lazyit/shared` (`schemas/ai-settings.ts`), the body shape
+> `AiSettingsErrorSchema`. It only grows: a web treats an unknown code as a generic refusal and shows
+> `message`. 400 and 409 bodies are `{ statusCode, error, message, code }`; the 422 enable-gate body is
+> `{ code, message, reason?, test? }`.
+>
+> | Status | Code | When | Routes |
+> | --- | --- | --- | --- |
+> | 409 | `AI_SETTINGS_CONCURRENT_SAVE` | the row changed between the read and the conditional write — reload and save again | `PUT` |
+> | 409 | `AI_SECRET_KEY_MISSING` | a key write, or enabling a key-bearing provider (or with a stored key), without a usable `AI_SECRET_KEY` | `PUT` |
+> | 409 | `AI_SHIM_MODE` | `AUTH_MODE=shim`: no test, no enable | `PUT`, `POST /test` |
+> | 400 | `BASE_URL_INVALID` | not a parseable URL | `PUT`, `POST /test` |
+> | 400 | `BASE_URL_CREDENTIALS` | userinfo in the URL | `PUT`, `POST /test` |
+> | 400 | `BASE_URL_QUERY_OR_FRAGMENT` | a query string (even empty) or a fragment | `PUT`, `POST /test` |
+> | 400 | `BASE_URL_SCHEME` | neither `http:` nor `https:` | `PUT`, `POST /test` |
+> | 400 | `BASE_URL_HTTP_NOT_ALLOWED` | `http://` outside OpenAI-compatible + `allowPrivateNetwork` | `PUT`, `POST /test` |
+> | 400 | `BASE_URL_LOOPBACK` | a `localhost` / `*.localhost` name | `PUT`, `POST /test` |
+> | 400 | `BASE_URL_HTTP_PUBLIC` | `http://` to a public IP literal | `PUT`, `POST /test` |
+> | 400 | `BASE_URL_UNREACHABLE_RANGE` | a loopback, link-local, metadata or reserved IP literal | `PUT`, `POST /test` |
+> | 400 | `BASE_URL_PRIVATE_NOT_ALLOWED` | a private/ULA literal without OpenAI-compatible + `allowPrivateNetwork` | `PUT`, `POST /test` |
+> | 400 | `PRIVATE_NETWORK_PROVIDER_MISMATCH` | `allowPrivateNetwork` on a provider other than OpenAI-compatible | `POST /test` (on `PUT` the schema refuses first) |
+> | 400 | `PROVIDER_OPTIONS_UNSUPPORTED` | provider options the selected provider does not take | `POST /test` (on `PUT` the schema refuses first) |
+> | 400 | `PROVIDER_NOT_CONFIGURED` | a test with no provider or model to test | `POST /test` |
+> | 422 | `DISCLOSURE_REQUIRED` | enable before the egress disclosure is acknowledged | `PUT` |
+> | 422 | `PROVIDER_NOT_CONFIGURED` | enable without a provider, a model, or a required base URL | `PUT` |
+> | 422 | `API_KEY_REQUIRED` | enable a key-requiring provider with no key; `reason: "DESTINATION_CHANGED"` when the stored key was cleared by this save's provider or base-URL change | `PUT` |
+> | 422 | `CONNECTION_TEST_FAILED` | the inline connection test failed; `test` carries the result | `PUT` |
+>
+> A request body the zod schema refuses (the global validation pipe) keeps the pipe's generic 400 shape
+> and no `code`. The connection-test *result* codes (`PROVIDER_AUTH`, `EGRESS_DENIED`, …) are the run
+> error codes inside a 200 `AiConnectionTestResult`, not refusals.
+>
+> **Curated MCP client defaults.** The list is data in `@lazyit/shared`
+> (`MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS`, schema `McpClientAllowlistDefaultSchema`): each entry is
+> `{ id, label, match: { kind: "cimd_url", url } | { kind: "redirect_uri", pattern }, verification:
+> "verified" | "vendor-docs", source }`. Settings → AI lists it and removes a built-in client by writing
+> its id to `mcpClientAllowlistRemovedDefaults`; the authorization server enforces the same entries
+> without the display metadata ([[ai-assistant/mcp-and-oauth|MCP]] §12). `GET /config/ai` is unchanged.
 
 **Status** — any authenticated principal:
 
