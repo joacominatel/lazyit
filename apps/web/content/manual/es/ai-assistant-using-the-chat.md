@@ -115,6 +115,45 @@ te recuerda que está activada.
 Cuando aprobás, el cambio se hace con tu cuenta, como cualquier otro cambio tuyo, y la página que tenés
 abierta se actualiza sola — un activo nuevo aparece en la lista que estás mirando.
 
+## Cuando el asistente te pide datos
+
+A veces el asistente necesita información que no encuentra en lazyit — el sitio adonde van las laptops
+nuevas, sus números de serie, una fecha. En lugar de adivinar, muestra un **formulario** corto en el chat,
+con el encabezado **El asistente pregunta**, un título y una línea que explica para qué necesita los datos.
+El asistente arma el formulario él mismo, así que las preguntas cambian según lo que le pediste.
+
+- Los campos marcados con **\*** son **obligatorios**: el asistente no puede seguir sin ellos.
+- Los campos con la etiqueta **Recomendado** lo ayudan a hacer un mejor trabajo.
+- Los campos **Opcionales** quedan guardados en **Más detalles** — abrilo solo si querés completarlos.
+- Algunos formularios piden una lista, una **fila** por elemento (una por laptop, por ejemplo). Usá
+  **Agregar una fila** y el ícono de la **papelera** de cada fila, dentro de la cantidad de filas que pide
+  el formulario.
+- Las listas de ubicaciones, categorías, modelos o fabricantes vienen de lazyit y solo muestran lo que vos
+  podés ver.
+
+Después elegí uno de tres botones:
+
+| Botón | Qué pasa |
+| --- | --- |
+| **Enviar** | Tu respuesta va al asistente y sigue con ella. Si falta algo o algo no corresponde, el campo se marca y no se envía nada. |
+| **Continuar sin esto** | Omitís el formulario esta vez. El asistente sigue sin los datos — puede hacer menos, o preguntarte con palabras. |
+| **No preguntar** | Lo rechazás. Se le indica al asistente que no vuelva a pedir estos datos en este chat. |
+
+Mientras un formulario espera, el cuadro de mensaje queda en pausa y muestra lo que preguntó el asistente,
+con un botón **Ir al formulario**. El historial marca el chat con **Espera tu respuesta**. Podés cerrar el
+chat y volver más tarde — el formulario sigue ahí.
+
+Un formulario espera lo mismo que una tarjeta de cambio (30 minutos por defecto; el formulario muestra
+**Respondé antes de las …**). Si nadie responde a tiempo, el formulario **vence** y el asistente se detiene;
+enviá un mensaje nuevo para continuar.
+
+Una vez respondido, el formulario queda en la conversación en modo de solo lectura, con lo que enviaste (o
+indicando que lo omitiste o lo rechazaste).
+
+> [!WARNING]
+> El asistente nunca pide contraseñas, claves ni otros secretos en un formulario, y lazyit rechaza un
+> formulario que lo haga. Tampoco escribas secretos en los campos de texto de un formulario.
+
 ## Enlaces y apertura de páginas
 
 Cuando el asistente crea o cambia algo, el chat muestra un botón **Abrir ‹elemento›** que te lleva ahí. Si le
