@@ -581,7 +581,9 @@ a separate remediation, not a supported path here.
   email; a Service Account asking for `"me"` gets 400. Resolution reads `GET /users` as the caller: a
   reference containing `@` is matched as an email through the route's `q`, and every reference is also
   matched exactly against username and legajo — which `q` does not search — by scanning at most 5 pages
-  of 200 (a username may contain `@`; two different matches are `AMBIGUOUS_REFERENCE`). `user_restore`
+  of 200 (a username may contain `@`; two different matches are `AMBIGUOUS_REFERENCE`). A partial scan
+  never decides (the W2-7 rule): on a directory larger than the scan, a username or legajo reference is
+  refused as `AMBIGUOUS_REFERENCE` ("use the id or email"); an exact email match stays decisive. `user_restore`
   resolves in the archived slice (`deleted=only`, ADMIN-only on the route). The target is pinned by the
   preview's `precondition` (a re-resolution to another user is `STALE`).
 - **Manager input (pinned).** A manager (`user_create`, `user_update`) is `{ userId }` — a lazyit user by

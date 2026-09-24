@@ -15,9 +15,10 @@ import {
   AI_TOOL_LIST_DEFAULT_LIMIT,
   AI_TOOL_LIST_MAX_LIMIT,
 } from '../ai.constants';
-import type {
-  AiReferenceCandidate,
-  AiResolvedReference,
+import {
+  AiReferenceError,
+  type AiReferenceCandidate,
+  type AiResolvedReference,
 } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
 import {
@@ -175,6 +176,11 @@ type DirectorySlice = 'active' | 'only';
  * matched as an email through the route's search; every reference is ALSO matched exactly against the
  * username and legajo — which the route does not search — by scanning a bounded number of pages (a
  * username may itself contain `@`). Two different users matching is reported as ambiguous by the resolver.
+ *
+ * A partial scan never decides (the W2-7 rule): when the directory is larger than the scan, a username or
+ * legajo match in the pages read could have a twin beyond them, so the reference is refused as
+ * `AMBIGUOUS_REFERENCE` ("use the id or email"). An exact email match stays decisive — emails are unique
+ * among live users.
  */
 async function lookupUsers(
   rt: AiToolRuntime,
@@ -187,6 +193,7 @@ async function lookupUsers(
     label: userLabel(row),
   });
   const found: AiReferenceCandidate[] = [];
+  let emailMatched = false;
   if (reference.includes('@')) {
     const page = await rt.call(UsersController, 'findAll', {
       query: { q: reference, deleted: slice, limit: String(DIRECTORY_PAGE) },
@@ -196,7 +203,9 @@ async function lookupUsers(
         .filter((row) => str(row.email)?.toLowerCase() === wanted)
         .map(candidate),
     );
+    emailMatched = found.length > 0;
   }
+  let complete = false;
   for (let pageNo = 0; pageNo < DIRECTORY_SCAN_PAGES; pageNo += 1) {
     const offset = pageNo * DIRECTORY_PAGE;
     const page = await rt.call(UsersController, 'findAll', {
@@ -218,7 +227,17 @@ async function lookupUsers(
       }
     }
     const total = typeof page.total === 'number' ? page.total : 0;
-    if (rows.length === 0 || offset + rows.length >= total) break;
+    if (rows.length === 0 || offset + rows.length >= total) {
+      complete = true;
+      break;
+    }
+  }
+  if (!complete && !emailMatched) {
+    throw new AiReferenceError(
+      'AMBIGUOUS_REFERENCE',
+      `The directory is too large to resolve "${reference}" by username or legajo; use the user's id or email`,
+      found.slice(0, 5).map((c) => ({ type: 'user' as const, ...c })),
+    );
   }
   return found;
 }

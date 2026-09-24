@@ -905,6 +905,37 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       });
     });
 
+    it('a partial directory scan never decides a username or legajo; an exact email still does', async () => {
+      for (let n = 0; n < 1000; n += 1) {
+        const id = `cccccccc-0000-4000-8000-${String(n).padStart(12, '0')}`;
+        users.set(
+          id,
+          userRow(id, 'VIEWER', {
+            email: `bulk${n}@example.com`,
+            createdAt: new Date(T0.getTime() - 1000 * (n + 1)),
+          }),
+        );
+      }
+      const byLegajo = await tools.invoke(
+        'user_get',
+        { user: 'L-100' },
+        chat(ADMIN),
+      );
+      expect(byLegajo).toMatchObject({
+        ok: false,
+        error: { code: 'AMBIGUOUS_REFERENCE' },
+      });
+      const byEmail = await tools.invoke(
+        'user_get',
+        { user: 'ana@example.com' },
+        chat(ADMIN),
+      );
+      expect(byEmail).toMatchObject({
+        ok: true,
+        data: { user: { id: ID.member } },
+      });
+    });
+
     it('a username containing "@" resolves by username, not only as an email', async () => {
       users.set(ID.viewer, {
         ...users.get(ID.viewer)!,
