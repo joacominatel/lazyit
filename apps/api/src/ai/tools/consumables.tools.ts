@@ -27,6 +27,7 @@ import {
   type AiToolRuntime,
   type AiToolset,
 } from '../core/tool-descriptor';
+import { searchText } from './search-text';
 
 /**
  * The CONSUMABLES toolset (W2-7; tools-and-execution.md §7 rows 27–31): consumables and their stock
@@ -228,8 +229,8 @@ const consumableSearch = defineTool({
   name: 'consumable_search',
   title: 'Search consumables',
   description:
-    'Search the stock-counted supplies (cables, adapters, toner…). `query` matches the name, SKU and ' +
-    'description; `lowStock` keeps only items at or below their reorder threshold; `categoryId` restricts ' +
+    'Search or list the stock-counted supplies (cables, adapters, toner…). `query` matches the name, ' +
+    'SKU and description (omit it to list by the other filters alone); `lowStock` keeps only items at or below their reorder threshold; `categoryId` restricts ' +
     'to one consumable category (find it with reference_lookup). Returns a page of consumables with their ' +
     'ids, current stock and threshold, and the total; detail "full" adds the description and notes. ' +
     'Archived consumables are not listed.',
@@ -237,13 +238,7 @@ const consumableSearch = defineTool({
   class: 'read',
   idempotent: true,
   input: z.strictObject({
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('Case-insensitive text to look for.'),
+    query: searchText('Case-insensitive text to look for.'),
     lowStock: z
       .boolean()
       .optional()

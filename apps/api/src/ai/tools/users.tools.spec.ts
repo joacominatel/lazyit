@@ -862,6 +862,56 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       );
     });
 
+    it('lists every administrator in ONE call with no text — an empty query is "no text filter", like the route (#1374)', async () => {
+      const second = 'bbbbbbbb-0000-4000-8000-00000000a002';
+      users.set(
+        second,
+        userRow(second, 'ADMIN', { email: 'second-admin@example.com' }),
+      );
+      const http = await request(app.getHttpServer())
+        .get('/users?role=ADMIN')
+        .set('authorization', `Bearer ${ADMIN.bearer}`);
+      expect(http.status).toBe(200);
+      const routeIds = (http.body as { items: Array<{ id: string }> }).items
+        .map((u) => u.id)
+        .sort();
+      expect(routeIds).toEqual([ID.admin, second].sort());
+
+      // What the model sent in the report ("query": "") and its variants: each one call, never a retry.
+      for (const input of [
+        { role: 'ADMIN' },
+        { query: '', role: 'ADMIN' },
+        { query: '   ', role: 'ADMIN' },
+      ]) {
+        const result = await tools.invoke('user_search', input, chat(ADMIN));
+        expect(result).toMatchObject({ ok: true, data: { total: 2 } });
+        expect(result).not.toHaveProperty('truncated');
+        const ids = (
+          result as { data: { items: Array<{ id: string }> } }
+        ).data.items
+          .map((u) => u.id)
+          .sort();
+        expect(ids).toEqual(routeIds);
+      }
+      // The route never saw a blank `q`: absent, exactly as the HTTP list above.
+      for (const call of prisma.user.findMany.mock.calls) {
+        expect(JSON.stringify(call[0])).not.toMatch(/"contains":""/);
+      }
+    });
+
+    it('a blank query with no filter lists the whole directory, bounded by the page with the partial-page marker', async () => {
+      const result = await tools.invoke(
+        'user_search',
+        { query: '', limit: 2 },
+        chat(ADMIN),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: { total: 4, offset: 0 },
+        truncated: { shown: 2, total: 4, nextOffset: 2 },
+      });
+    });
+
     it('maps its filters onto the route query', async () => {
       const result = await tools.invoke(
         'user_search',

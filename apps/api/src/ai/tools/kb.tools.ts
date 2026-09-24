@@ -24,6 +24,7 @@ import {
   type AiToolRuntime,
   type AiToolset,
 } from '../core/tool-descriptor';
+import { searchText } from './search-text';
 
 /**
  * The KNOWLEDGE BASE toolset (W2-8; tools-and-execution.md §7 rows 32–36): search, read, create (as a
@@ -479,7 +480,8 @@ const kbSearch = defineTool({
   name: 'kb_search',
   title: 'Search knowledge-base articles',
   description:
-    'Search the knowledge base. `query` matches the title and excerpt (case-insensitive substring). ' +
+    'Search or list the knowledge base. `query` matches the title and excerpt (case-insensitive ' +
+    'substring); omit it to list by the other filters alone (e.g. every article in a folder). ' +
     'Filter by folder, status (PUBLISHED, or DRAFT — only your own drafts ever appear), author, or the ' +
     'Assets/Applications the article is linked to; `mine: true` keeps only articles you wrote. Returns a ' +
     'page of articles (never the body) with ids, slugs and the total. Read one with kb_get_article. ' +
@@ -488,13 +490,7 @@ const kbSearch = defineTool({
   class: 'read',
   idempotent: true,
   input: z.strictObject({
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('Text to look for in the title and excerpt.'),
+    query: searchText('Text to look for in the title and excerpt.'),
     folderIds: z
       .array(z.cuid())
       .min(1)
