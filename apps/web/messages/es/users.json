@@ -521,6 +521,7 @@
     "consumableOutstanding": "{outstanding} de {quantity} {unit} a devolver · entregado el {date}",
     "consumableDelivered": "{quantity} {unit} · entregado el {date}",
     "consumablesMore": "…y {count, plural, =1 {# entrega pendiente más} other {# entregas pendientes más}} que no se listan en esta acta.",
-    "consumablesMoreDelivered": "…y {count, plural, =1 {# entrega anterior} other {# entregas anteriores}} que no se listan en esta acta."
+    "consumablesMoreDelivered": "…y {count, plural, =1 {# entrega anterior} other {# entregas anteriores}} que no se listan en esta acta.",
+    "consumablesUnavailable": "Los consumibles no figuran en esta acta: no tienes permiso para verlos."
   }
 }

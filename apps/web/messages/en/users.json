@@ -521,6 +521,7 @@
     "consumableOutstanding": "{outstanding} of {quantity} {unit} to return · delivered {date}",
     "consumableDelivered": "{quantity} {unit} · delivered {date}",
     "consumablesMore": "…and {count, plural, =1 {# more outstanding delivery} other {# more outstanding deliveries}} not listed on this act.",
-    "consumablesMoreDelivered": "…and {count, plural, =1 {# older delivery} other {# older deliveries}} not listed on this act."
+    "consumablesMoreDelivered": "…and {count, plural, =1 {# older delivery} other {# older deliveries}} not listed on this act.",
+    "consumablesUnavailable": "Consumables are not listed on this act — you don't have permission to view them."
   }
 }

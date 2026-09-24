@@ -295,13 +295,22 @@ export default function OffboardingActPage() {
 
       {/* Consumables (ADR-0098) — exactly the rows the offboarding sheet kept. Omitted when the section
           is toggled off, when the operator may not read consumables, or when nothing was kept. */}
+      {showConsumables && consumablesUnavailable && !isLoading ? (
+        <p className="mt-7 text-xs text-muted-foreground">
+          {t("consumablesUnavailable")}
+        </p>
+      ) : null}
       {showConsumables &&
       !consumablesUnavailable &&
       !isLoading &&
       (selectedConsumables.toReturn.length > 0 ||
-        selectedConsumables.delivered.length > 0) ? (
+        selectedConsumables.delivered.length > 0 ||
+        consumables.toReturnMore > 0 ||
+        consumables.deliveredMore > 0) ? (
         <section className="mt-7 space-y-5">
-          {selectedConsumables.toReturn.length > 0 ? (
+          {/* A group also shows when only unfetched rows remain, so its "…and N more" is never lost. */}
+          {selectedConsumables.toReturn.length > 0 ||
+          consumables.toReturnMore > 0 ? (
             <div>
               <h2 className="text-label uppercase text-muted-foreground">
                 {t("consumablesToReturn")}
@@ -334,7 +343,8 @@ export default function OffboardingActPage() {
               ) : null}
             </div>
           ) : null}
-          {selectedConsumables.delivered.length > 0 ? (
+          {selectedConsumables.delivered.length > 0 ||
+          consumables.deliveredMore > 0 ? (
             <div>
               <h2 className="text-label uppercase text-muted-foreground">
                 {t("consumablesDelivered")}
