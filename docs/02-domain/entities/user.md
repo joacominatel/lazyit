@@ -45,8 +45,8 @@ the reverse.
 - Offboarding a user must not erase history: assignments and grants are *released*, not
   deleted (soft delete + lifecycle timestamps).
 - **Auditable lifecycle (DEBT-2, #185):** every User write emits an append-only [[user-history]] row
-  **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit,
-  `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
+  **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit (name, email,
+  legajo, username), `DEACTIVATED` / `REACTIVATED` on a real `isActive` flip (issue #1375), `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
   each side a user-id / external-name / null — [[0058-user-manager-and-clone-actions]]) on a manager
   change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when a reset link is sent to the
   subject (by the IdP in OIDC mode, or by lazyit's SMTP on the local `email` delivery),

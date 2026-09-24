@@ -3,7 +3,7 @@ title: UserHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-06-04
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # UserHistory
@@ -48,7 +48,8 @@ Indexes: `(userId, id)` (the per-user timeline) and `(createdAt)` (powers the [[
 
 `CREATED` · `UPDATED` · `ROLE_CHANGED` (payload `{ from, to }`) · `MANAGER_CHANGED` (payload `{ from, to }`,
 [[0058-user-manager-and-clone-actions]]) · `DELETED` · `RESTORED` · `PASSWORD_RESET_SENT` ·
-`PASSWORD_RESET_BY_ADMIN` · `PASSWORD_CHANGED` · `PASSWORD_RESET_REQUESTED` · `PASSWORD_RESET_COMPLETED`. The
+`PASSWORD_RESET_BY_ADMIN` · `PASSWORD_CHANGED` · `PASSWORD_RESET_REQUESTED` · `PASSWORD_RESET_COMPLETED` ·
+`DEACTIVATED` · `REACTIVATED` (no payload — an `isActive` flip, issue #1375). The
 `CREATED/UPDATED/DELETED/RESTORED` set mirrors [[asset-history]]; the rest are user-specific. `PASSWORD_RESET_SENT`
 records a reset **link** being sent to the subject — by the IdP in OIDC mode, or by lazyit's own SMTP when an
 admin picks the `email` delivery in local mode ([[0086-local-authentication-mode]] §5, amended by #1268);
@@ -66,8 +67,14 @@ all from the [[user]] service:
 
 - `create` → `CREATED` — emitted only on the **success path** (after the IdP mirror can no longer fail
   and trigger the compensating hard-delete; the `Restrict` FK would otherwise block that rollback).
-- `update` → `UPDATED` on a name/email edit (payload `{ fields }`) and/or `ROLE_CHANGED` on a role
-  change (payload `{ from, to }`) — both only **after** any IdP mirror commits (a reverted update never logs).
+- `update` → `UPDATED` on a name / email / legajo / username edit (payload `{ fields }`, field names only),
+  `DEACTIVATED` / `REACTIVATED` when `isActive` actually flips (a resend of the stored value logs nothing),
+  `ROLE_CHANGED` on a role change (payload `{ from, to }`) and `MANAGER_CHANGED` on a manager change — each
+  that fired, all only **after** any IdP mirror commits (a reverted update never logs). The web UI, the API
+  and an AI tool call (`user_update` dispatches to the same `PATCH /users/:id`) share this one emitter, so an
+  AI-made change carries its `aiInvocationId`. Until issue #1375 an activation flip and a legajo/username
+  edit wrote **no** row, so they never reached Reports; changes made before that release stay absent (no
+  backfill — there is no trustworthy source).
 - `requestPasswordReset` → in OIDC mode, `PASSWORD_RESET_SENT` **after** the IdP call succeeds (422/501/503
   never logs). In local mode (`AUTH_MODE=local`) the admin picks the delivery (#1268), and the event follows
   the choice: `email` → `PASSWORD_RESET_SENT` after the mail is actually accepted by the relay (a 409/503
