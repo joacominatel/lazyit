@@ -44,7 +44,33 @@ export const McpClientAllowlistEntryIdSchema = z
   .regex(/^[a-z0-9][a-z0-9._-]{0,99}$/, "Allowlist ids are lower-case letters, digits, '.', '_' or '-'");
 
 const HTTPS_URL = /^https:\/\/\S+$/i;
-const LOOPBACK_URL = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])([:/]\S*)?$/i;
+/** `scheme://authority[/path?query#fragment]` for http(s); the authority is everything up to `/ ? #`. */
+const HTTP_URI = /^(https?):\/\/([^/?#]*)([/?#]\S*)?$/i;
+/** An authority without userinfo: a bracketed IPv6 literal or a name/IPv4, and an optional port. */
+const HOST_PORT = /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::(\d{1,5}))?$/i;
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/**
+ * The HOST of an http(s) URI, parsed from its authority — never pattern-matched on the whole string, so
+ * `http://localhost:80@evil.com/` is not mistaken for loopback. Userinfo (`@`), whitespace and
+ * backslashes (which WHATWG parsers treat as a path separator) make the URI unusable: `null`. The shared
+ * lib has no `URL` (ES2023 lib only), hence the explicit parse.
+ */
+function httpUriHost(value: string): { scheme: "http" | "https"; host: string } | null {
+  if (/[\s\\]/.test(value)) return null;
+  const match = HTTP_URI.exec(value);
+  if (!match) return null;
+  const authority = match[2] ?? "";
+  if (authority.includes("@")) return null;
+  const hostPort = HOST_PORT.exec(authority);
+  if (!hostPort) return null;
+  const port = hostPort[2];
+  if (port !== undefined && Number(port) > 65535) return null;
+  return {
+    scheme: match[1]!.toLowerCase() as "http" | "https",
+    host: hostPort[1]!.toLowerCase(),
+  };
+}
 const URI_WITH_SCHEME = /^([a-z][a-z0-9+.-]*):\S+$/i;
 /** RFC 8252 §7.1 style: a reverse domain name, so at least one `.` (`com.example.app`). */
 const REVERSE_DOMAIN_SCHEME = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+$/;
@@ -70,16 +96,22 @@ export type McpRedirectUriKind = "https" | "loopback" | "private-use";
  *   - `loopback`    — http(s) on 127.0.0.1, localhost or [::1] (OAuth's only plain-http redirects);
  *   - `private-use` — a native-app scheme (RFC 8252 §7.1): reverse-domain, or a vetted vendor scheme.
  * Plain http on any other host and every browser-interpreted scheme (SEC-051: `javascript`, `data`,
- * `file`, …) are refused.
+ * `file`, …) are refused, and so is any URI with userinfo (`user@host`): the host is read from the parsed
+ * authority, so `http://localhost:80@evil.com/` is an `evil.com` URI with userinfo, not loopback.
  */
 export function classifyMcpRedirectUri(value: string): McpRedirectUriKind | null {
   const scheme = URI_WITH_SCHEME.exec(value)?.[1]?.toLowerCase();
   if (scheme === undefined) return null;
   if (scheme === "http" || scheme === "https") {
-    if (LOOPBACK_URL.test(value)) return "loopback";
-    return scheme === "https" && HTTPS_URL.test(value) ? "https" : null;
+    const parsed = httpUriHost(value);
+    if (!parsed) return null;
+    if (LOOPBACK_HOSTS.has(parsed.host)) return "loopback";
+    return parsed.scheme === "https" ? "https" : null;
   }
   if (BROWSER_INTERPRETED_SCHEMES.has(scheme)) return null;
+  // A private-use URI with an authority (`com.example.app://host/cb`) may not carry userinfo either.
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(value)?.[1];
+  if (authority?.includes("@")) return null;
   if (MCP_VENDOR_REDIRECT_SCHEMES.includes(scheme) || REVERSE_DOMAIN_SCHEME.test(scheme)) {
     return "private-use";
   }
