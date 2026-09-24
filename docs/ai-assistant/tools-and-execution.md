@@ -499,7 +499,8 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 
 ### 8.1 Layout
 
-All under `apps/api/src/ai/` (backend lane). As built by the core unit (W1-C, #1315):
+All under `apps/api/src/ai/` (backend lane). As built by the core unit (W1-C, #1315) and the core write
+path unit (W2-0, #1315):
 
 - `core/`
   - `ai-core.module.ts` — provides and exports the registry, dispatcher, executor and `AiToolService`
@@ -512,14 +513,25 @@ All under `apps/api/src/ai/` (backend lane). As built by the core unit (W1-C, #1
   - `tool-registry.ts` — validates `ALL_TOOLSETS` at boot and resolves every binding against the running
     application
   - `tool-dispatcher.ts` — the C3 bridge
-  - `tool-executor.ts` — validate, run inside the invocation context, shape the result; `preview`
-  - `ai-tool.service.ts` — the façade: `list` and `invoke`
+  - `tool-executor.ts` — validate, run inside the invocation context, shape the result; `preview` (the
+    class is a floor: `elevated` is forced on for an `elevated` tool)
+  - `ai-tool.service.ts` — the façade: `list`, `invoke` (reads; MCP and headless writes through the
+    ledger), `propose`, `approve`, `reject`, and the runtime's primitives `expire`, `expireDue`, `cancel`,
+    `markOutcomeUnknown` (§9)
+  - `action-log.service.ts` — `AiActionLogService`, the single, insert-only writer of `AiActionLog`
+    (§10); it redacts the input itself
+  - `redaction.ts` — the ledger's input redaction: credential-looking keys at any depth → `[redacted]`,
+    URL-embedded credentials masked, long strings clipped, depth bounded
+  - `pending-action.ts` — the internal `AiPendingAction` / `AiProposal` / `AiApproveOptions` types, the
+    canonical input hash, the read-tolerant row projection
+  - `reference-resolver.ts` — `rt.resolve(spec)`: a human-readable reference (id, tag, serial, email,
+    slug, exact name) → exactly one entity through the tool's bound read handlers, or `NOT_FOUND` /
+    `AMBIGUOUS_REFERENCE` (up to five candidates in the error `hint`); `entityRefOf` builds the labelled
+    ref (§7 "References", §8.5)
   - `invocation-context.ts` — AsyncLocalStorage
   - `error-mapper.ts` — the HTTP-status and `PrismaExceptionFilter` mapping, as tool error codes
   - `result-shaper.ts` — call kinds, truncation, `untrusted()` wrapping
   - `ports/` — `chat-model.port.ts`, `run-event-bus.port.ts`, `ai-settings.port.ts`
-  - Not built yet: `reference-resolver.ts`, `action-log.service.ts`, and `propose` / `approve` / `reject`
-    (§9). Until the ledger-backed write path exists, `invoke` refuses every write on every channel.
 - `tools/index.ts` — imports every per-domain file (pre-wired once)
 - `tools/<domain>.tools.ts` — each exports an `AiToolset`: `tools` and `unexposed` (handlers + reason).
   `context.tools.ts` holds the reference tools (`session_context`, `lazyit_search`; `navigate_to` is not
@@ -614,12 +626,36 @@ In addition:
     `lazyit.admin` adds `elevated`, R7) or the SA's AI access setting (read-only → `read`) [E3].
   Order is deterministic.
 - `invoke(name, input, ctx)` → `AiToolResult`. Reads on every channel; writes **only** when
-  `ctx.channel ∈ {mcp, headless}`. **The executor refuses a chat-channel write outside the approve path**,
-  so a chat-loop bug cannot skip confirmation. As built by the core unit, `invoke` refuses writes on
-  every channel (`NOT_AVAILABLE`) until the `AiActionLog`-backed write path lands; there is no write tool
-  yet.
-- `propose(name, input, ctx)` → `AiPendingAction` (chat writes, §9).
-- `approve(id, ctx)` / `reject(id, ctx)`.
+  `ctx.channel ∈ {MCP, HEADLESS}`. **`invoke` refuses a chat-channel write** (`NOT_AVAILABLE`, nothing
+  dispatched or recorded): only `approve` executes a chat write, so a chat-loop bug cannot skip
+  confirmation. As built (W2-0), an MCP or headless write:
+  1. re-loads the principal (invalid → `FORBIDDEN` 401) and validates the input (invalid →
+     `INVALID_INPUT`) — nothing is recorded for either: nothing was attempted;
+  2. creates the `ai_tool_invocations` row (`EXECUTING`, canonical input, `inputHash`, `schemaHash`) and
+     appends `ATTEMPTED`, in one transaction — **write-ahead**: if it fails, the tool is not executed
+     (`INTERNAL`);
+  3. checks the class ceiling — **on MCP a missing ceiling fails closed to `read`** (the MCP channel always
+     carries the token's scopes) — that a `HEADLESS` write runs as a **Service Account** (headless is the
+     SA API; a human is refused), and the channel gate (`ai:connect` / `ai:use`) — a refusal is `DENIED`,
+     with nothing dispatched;
+  4. executes once through the executor, inside the invocation context whose id is the row's id (so the
+     history rows carry it, §10), and records `SUCCEEDED` + `EXECUTED` or `FAILED` + `FAILED` with the
+     mapped error (a route 403 is `FAILED`/`FORBIDDEN`; a 5xx never exposes its message). It is never
+     retried. The row update and the outcome's ledger event are written **independently**, so a failed
+     row update never costs the permanent record; a failure of either is logged, never re-executed. A
+     row left `EXECUTING` that way is finalized by the runtime's sweeper for chat and headless runs; an
+     MCP row has no run, so its stale-`EXECUTING` sweep (`markOutcomeUnknown`) is a follow-up for the MCP
+     unit (W3-2).
+  So every MCP or headless write past authentication and validation leaves exactly `ATTEMPTED` and one
+  outcome. Reads are not yet written to `ai_tool_invocations` (the MCP/headless metadata access log is
+  the channel units' follow-up).
+- `propose(name, input, ctx, { toolUseId? })` → `AiProposal` = `{ ok: true, action: AiPendingAction }` or
+  `{ ok: false, result: AiToolResult }` (the result to hand the model instead of a card) — chat writes,
+  §9. Refused on any channel but `CHAT`, for a Service Account, and for a read tool.
+- `approve(id, ctx, { stepUpVerified? })` / `reject(id, ctx, reason?)` → `AiPendingAction`; a refused
+  decision throws a Nest HTTP exception with a `{ code, message }` body (§9).
+- `expire(id)`, `expireDue(limit?)`, `cancel(id, reason?)`, `markOutcomeUnknown(id)` — system primitives
+  for the runtime (§9 "Boundary"); never exposed to a client or a tool.
 
 Per-call AI-specific checks, in addition to the Nest pipeline:
 - the principal is re-loaded from the database (`PrincipalLoaderService`) — a revoked identity is refused;
@@ -659,24 +695,47 @@ Mapping per channel:
 
 ## 9. Confirmation contract (chat)
 
-**Propose.** Validate input → full authorization dry-check through the dispatcher's guard phase (a card
-is never shown for an action that would 403) → `preview()` builds a **server-side, deterministic**
-preview:
+**Propose.** Validate input → authorization dry-check (a card is never shown for an action that would
+403) → `preview()` builds a **server-side, deterministic** preview. As built, the dry-check is the
+channel gate `ai:use`, the principal kind the route's guards admit and the primary route's
+`@RequirePermission` — the decision `RolesGuard` makes; the preview's own reads run through the full
+guard chain. A refused dry-check stores a `DENIED` row and ledger event and answers a `FORBIDDEN` result;
+an invalid input or a failing preview (the target is missing or unreadable) stores nothing. Core then
+**validates the tool-built preview** and refuses the proposal (`INTERNAL`, nothing stored — a tool bug,
+never a card) when it does not parse as an `AiActionPreview`, names another tool or class, has a
+`target` without a `precondition`, or is `elevated` with **no warning at all** (an elevated tool may not
+skip classification). The preview carries:
 - `target` ref;
 - `changes[] {field, before, after}`;
 - `warnings[]` codes: `EXTERNAL_PROVISIONING`, `EXTERNAL_DEPROVISIONING`, `CASCADE_RELEASES_ASSIGNMENTS`,
-  `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`, `LEDGER_APPEND`, `SOFT_DELETE`,
-  `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`, `IRREVERSIBLE` (the last four merge the
-  frontend's `notes` vocabulary and the security note's destination-visibility requirement);
+  `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`,
+  `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
+  `IRREVERSIBLE` (the last four merge the frontend's `notes` vocabulary and the security note's
+  destination-visibility requirement; `PRIVILEGE_GRANT` and `CREDENTIAL_DELIVERY` were added by W2-0 for
+  the step-up rule below);
 - `impacted[]` — entity type and count, with a short sample, for cascading or bulk effects;
-- `elevated` and `stepUpRequired` — `elevated` is the tool's class or an escalation decided here;
+- `elevated` and `stepUpRequired` — `elevated` is the tool's class or an escalation decided here.
+  **`stepUpRequired` is derived by core** (CEO decision 2026-09-24, #1315, "Opción 2"): step-up only for
+  privilege grants and credential delivery, per [[0097-ai-assistant-mcp-and-headless-api]] decision 4 —
+  but enforced by core, not left to each tool. An `elevated` preview carrying any warning of the closed
+  list `AI_STEP_UP_WARNINGS` (`core/pending-action.ts`) requires step-up whatever the tool said; the
+  tool may add step-up, never remove it. It is derived at propose and **re-derived at approve** from the
+  stored preview. The list is the CEO's closed list: `ROLE_CHANGE`, `IDENTITY_CHANGE`,
+  `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`. **Tool units granting access or privilege (access grants,
+  approving an access request, …) MUST emit `PRIVILEGE_GRANT`; tools delivering a credential MUST emit
+  `CREDENTIAL_DELIVERY`** — that is what makes core require the step-up. An elevated action with only
+  other warnings (e.g. `NOTIFIES_USERS`) needs no step-up;
 - `untrustedSources[]` — refs of the other-authored content read in this turn (the banner source);
 - `precondition {entity, updatedAt}`.
 
 Storage and display:
-- The invocation row is stored as `AWAITING_APPROVAL` with `input`, `inputHash`, `schemaHash`, and
-  `expiresAt = now + 30 min` (the reconciled default; `AiSettings.approvalTtlMinutes`).
-- `AiActionLog` gets a `PROPOSED` event.
+- The invocation row is stored as `AWAITING_APPROVAL` with `input` (the canonical, parsed input),
+  `inputHash` (SHA-256 of its key-sorted JSON), `schemaHash`, `toolUseId`, the preview, its
+  `precondition`, and `expiresAt = now + approvalTtlMinutes` — read through `AI_SETTINGS_READER` when the
+  settings unit binds it, else the shared default (30 min, `AI_SETTINGS_DEFAULTS`). The turn's
+  `ctx.untrustedSources` are merged into the preview's `untrustedSources`.
+- `AiActionLog` gets a `PROPOSED` event (redacted input, the target ref, the untrusted sources). The row
+  and the event commit in **one transaction**: there is never an approvable row without its record.
 - The card renders **the stored input and the preview, never the model's narrative**. Labels and warning
   codes are localized on the web ([[0051-i18n-next-intl]]).
 
@@ -684,31 +743,64 @@ Storage and display:
 token, never a tool. The request carries only the pending-action id, plus the password step-up when
 `stepUpRequired` (INV-AI-3).
 
+0. As built, before the claim: the context must be a human identity on the `CHAT` channel with no MCP
+   grant (else 403 `FORBIDDEN`); the row must be a chat invocation owned by that user and, when
+   `ctx.runId` is given, in that run (else **404** — never a hint that another user's action exists). A
+   preview that requires step-up (re-derived, see above) needs `stepUpVerified` from the caller, else 403
+   `STEP_UP_REQUIRED` **without consuming the claim** — the user retries with the password.
 1. Atomic claim: `updateMany where {id, status: AWAITING_APPROVAL, userId: caller, expiresAt > now}` →
-   `EXECUTING`.
-   - count 0 → read the row. `EXECUTED`/`FAILED` returns the stored result (an **idempotent replay** —
-     a double-click is safe). `EXECUTING` → 409 in progress. `REJECTED`/`EXPIRED` → 409 with status.
-2. Write the `APPROVED` event (**write-ahead**, before any side effect).
+   `EXECUTING`, `decidedAt = now`.
+   - count 0 → read the row. `SUCCEEDED`/`FAILED`/`OUTCOME_UNKNOWN` returns the stored action with
+     `replayed: true` (an **idempotent replay** — a double-click is safe, nothing executes twice).
+     `EXECUTING` → 409 `IN_PROGRESS`. Still `AWAITING_APPROVAL` (it expired) → it is expired now
+     (`EXPIRED` event) and 409 `EXPIRED`. `REJECTED`/`EXPIRED`/`CANCELLED` → 409 with the status.
+2. Write the `APPROVED` event (**write-ahead**, before any side effect) with `approverUserId` and the
+   `stepUp` flag. If it cannot be written the row is closed `FAILED` (`INTERNAL`) and nothing executes.
 3. Re-validate against the current state:
-   - principal fresh from the approve request plus the dispatcher's DB reload;
-   - `ai:use` still held;
-   - the step-up verified when required;
-   - the tool still registered with the same `schemaHash`, else `EXPIRED` ("tool changed");
+   - **integrity, fail-closed**: the stored preview must still parse, and `inputHashOf(input)` must equal
+     the stored `inputHash` — else `FAILED` (`INTERNAL`), ledgered, nothing executes;
+   - the tool still registered with the same `schemaHash`, else `EXPIRED` ("tool changed" / "no longer
+     available") and an `EXPIRED` event;
+   - principal fresh from the approve request (`FORBIDDEN` 401 when the session was revoked) plus the
+     dispatcher's DB reload;
+   - `ai:use`, the admitted principal kind and the route's `@RequirePermission` still held, else
+     `FORBIDDEN` 403 (a role demoted after the proposal);
    - re-parse the stored input;
-   - the precondition `updatedAt` still matches, else `STALE`, and the model is told to re-read and
-     re-propose.
+   - when the stored preview has a `precondition`, the tool's `preview()` runs again (through the guards)
+     and its precondition must name the same entity with the same `updatedAt`, else `STALE` (409), and
+     the model is told to re-read and re-propose. **This narrows the TOCTOU window; it does not close
+     it**: a change committed between this check and the handler's own write is not detected, because
+     the domain handlers do not yet take an expected version. Closing it needs each write handler to
+     accept an expected `updatedAt` (a conditional update) — a follow-up for the tool units.
+   Every refusal here finalizes the row `FAILED` (or `EXPIRED`) with the matching ledger event.
 4. Execute through the dispatcher; the guards run again.
-5. Persist the result and effects → `EXECUTED` or `FAILED`, plus the matching `AiActionLog` event.
+5. Persist the result, entity refs and duration → `SUCCEEDED` or `FAILED`, plus the matching
+   `AiActionLog` event (`EXECUTED` | `FAILED`, with the approver and step-up flag).
 
-**Reject** → `REJECTED` event. The loop resumes with a tool result saying the user declined.
+**Reject** → owner-only from a human session, like approve; `REJECTED` row and event. The stored result
+(`FORBIDDEN`, "the user declined this action: ‹reason›") is what the loop hands the model. A second
+reject replays; a reject after a decision is 409, and so is a reject past expiry (the action is marked
+`EXPIRED` then, like an approve).
 
-**Expiry** is enforced lazily at approve time. A periodic pass marks stale `AWAITING_APPROVAL` rows as
-`EXPIRED` for the UI.
+**Expiry** is enforced lazily at approve time. A periodic pass (the runtime's sweeper calling
+`expireDue`) marks stale `AWAITING_APPROVAL` rows as `EXPIRED` (row, stored `EXPIRED` result, ledger
+event) for the UI. `cancel(id)` does the same with `CANCELLED` when a run is cancelled.
 
 **Crash recovery:** a row stuck in `EXECUTING` when the runtime sweeper finalizes its run
 (`engine-restart`, [[ai-assistant/provider-and-runtime|provider]] §8) becomes `OUTCOME_UNKNOWN` (tool error
-code `UNKNOWN_OUTCOME`) and is never retried. The `aiInvocationId` stamp (§10) lets an operator check whether the asset or user
-mutation committed.
+code `UNKNOWN_OUTCOME`) and is never retried — core's `markOutcomeUnknown(id)`, which records a `FAILED`
+ledger event with that code. The `aiInvocationId` stamp (§10) lets an operator check whether the asset or
+user mutation committed.
+
+**Boundary between core and the runtime (as built, W2-0 / W2-3).** Core (`ai/core/`) owns the
+invocation lifecycle **primitives** and the ledger: `propose`, `approve`, `reject`, `expire`,
+`expireDue`, `cancel`, `markOutcomeUnknown`, each an atomic status transition plus its `AiActionLog`
+event. The runtime (`ai/runtime/`, W2-3) owns everything around them: pausing the run as
+`AWAITING_APPROVAL` after `propose`, the SSE events (`tool.approval_required`, `tool.approval_resolved`,
+`tool.result`), **verifying the password step-up** before calling `approve(…, { stepUpVerified: true })`,
+resuming the loop with the stored result, the expiry sweeper, and finalizing stuck `EXECUTING` rows.
+The HTTP decision endpoint builds the approve context from the human session (`channel: CHAT`, the
+session's `sessionEpoch`, the run id) and maps the thrown `{ code, message }` exceptions as they are.
 
 Scope: each `tool_use` gets its own card; parallel proposals are decided independently. No
 edit-before-approve in v1 — the user rejects and says what to change. **MCP:** no server-side
@@ -721,19 +813,34 @@ confirmation — the client owns it; annotations inform it, and `elevated` tools
   [R12]: the AI acts **as** the user or SA, so every existing history row is already correctly
   attributed.
 - **Provenance.** The executor runs every dispatch inside an AsyncLocalStorage
-  `AiInvocationContext {invocationId, channel, conversationId?, runId?}`.
+  `AiInvocationContext {invocationId, channel, conversationId?, runId?}`. For a write, `invocationId` is
+  the `ai_tool_invocations` row's id — the same id the ledger records — so a history row, its invocation
+  and its ledger events join on it.
   `AssetHistoryService.record` and `UserHistoryService` stamp `aiInvocationId` when it is present
   (additive, nullable, no FK — the log row is written separately and invocations are retention-pruned).
 - **Permanent record.** `AiActionLog`, append-only ([[0006-soft-delete-and-auditing]]), autoincrement
-  ([[0005-id-strategy]]):
-  - one row per lifecycle event: `PROPOSED` / `APPROVED` / `REJECTED` / `EXPIRED` / `ATTEMPTED` /
-    `EXECUTED` / `FAILED` / `DENIED` (MCP and headless write `ATTEMPTED` → outcome);
+  ([[0005-id-strategy]]), written only by `AiActionLogService.append` (insert-only; a spec fails if any
+  other production file reaches the table):
+  - one row per lifecycle event: `PROPOSED` / `APPROVED` / `REJECTED` / `EXPIRED` / `CANCELLED` /
+    `ATTEMPTED` / `EXECUTED` / `FAILED` / `DENIED`. As built, the sequences are — MCP and headless:
+    `ATTEMPTED` → `EXECUTED` | `FAILED` | `DENIED`; chat: `PROPOSED` → `APPROVED` → `EXECUTED` |
+    `FAILED` | `EXPIRED` (tool changed), or `PROPOSED` → `REJECTED` | `EXPIRED` | `CANCELLED`; a chat
+    proposal refused by the authorization dry-check is a lone `DENIED`; an interrupted execution ends in
+    `FAILED` with `UNKNOWN_OUTCOME`;
   - actor `userId` | `serviceAccountId` with the at-most-one CHECK (INV-SA-4 pattern);
   - `channel` (`CHAT` | `MCP` | `HEADLESS`), `conversationId` / `runId` / `mcpClientId` / `oauthGrantId` as
     plain strings (they survive retention);
-  - `toolName`, `toolClass`, **redacted** canonical `input`, `entityRefs`, error code/status/message;
+  - `toolName`, `toolClass`, **redacted** canonical `input` (`redaction.ts`: credential-looking keys become
+    `[redacted]` at any depth — fragments such as `password`, `passwd`, `secret`, `token`, `credential`,
+    `authorization`, `bearer`, `jwt`, `apiKey`, `accessKey`, `privateKey`, `encryptionKey`, `licenseKey`,
+    `sshKey`, `recoveryCode` anywhere in the name, and the whole words `pass`, `pwd`, `auth`, `otp`,
+    `pin`, `key`; credentials embedded in URLs (`scheme://user:pw@host`) are masked in every string;
+    strings past 2 000 characters are clipped), `entityRefs`, error code/status/message (bounded to 500
+    characters; a 5xx is always the generic message);
   - approval provenance: `approverUserId`, `stepUp`, `untrustedSources`; plus `provider`, `model` and the
-    request id ([[ai-assistant/security|security]] §6.7).
+    request id ([[ai-assistant/security|security]] §6.7) — taken from `ctx.provenance`, which the runtime
+    and `/mcp` supply.
+  - The actor is the invocation row's (the principal the call ran as), never re-derived per event.
   - It is the **single** permanent AI mutation ledger for all three channels (R6): MCP writes use the same
     writer with channel `MCP`. An additive migration blocks `UPDATE` and `DELETE` on it at the database
     (INV-AI-10).
@@ -1082,6 +1189,8 @@ export interface AiExecutionContext {
   conversationId?: string; runId?: string;
   mcp?: { grantId: string; clientId: string };
   ceiling?: readonly AiToolClass[];             // MCP scope (R7) or the SA's AI access setting
+  provenance?: { provider?: string; model?: string; requestId?: string }; // recorded in the ledger
+  untrustedSources?: readonly AiEntityRef[];    // chat: merged into a proposal's preview
 }
 
 export interface HandlerRef<C = unknown> { controller: Type<C>; method: keyof C & string }
@@ -1091,7 +1200,7 @@ export interface AiToolRuntime {
   readonly ctx: Readonly<AiExecutionContext & { invocationId: string }>;
   call<C, M extends keyof C & string>(controller: Type<C>, method: M, req?: HttpShape):
     Promise<Awaited<ReturnType<Extract<C[M], (...a: never[]) => unknown>>>>; // full Nest guard+pipe pipeline
-  // resolve: ReferenceResolver — not built yet (id|tag|serial|email|… → id via bound read handlers)
+  resolve(spec: AiReferenceSpec): Promise<AiResolvedReference>; // id|tag|serial|email|… → one entity via bound read handlers
 }
 
 export interface AiToolDescriptor<S extends z.ZodType = z.ZodType, D = unknown> {
@@ -1118,9 +1227,16 @@ export interface AiToolListing { name: string; title: string; description: strin
 export interface AiToolService {                 // the only façade channels may use
   list(ctx: AiExecutionContext): Promise<AiToolListing[]>;
   invoke(name: string, input: unknown, ctx: AiExecutionContext): Promise<AiToolResult>; // chat writes refused
-  propose(name: string, input: unknown, ctx: AiExecutionContext): Promise<AiPendingAction>;
-  approve(id: string, ctx: AiExecutionContext, stepUp?: { password: string }): Promise<AiPendingAction>;
+  // As built (W2-0): a refused proposal is the tool result for the model, not an exception.
+  propose(name: string, input: unknown, ctx: AiExecutionContext, opts?: { toolUseId?: string }):
+    Promise<{ ok: true; action: AiPendingAction } | { ok: false; result: AiToolResult }>;
+  // Core never sees the password: the runtime verifies the step-up and passes the flag.
+  approve(id: string, ctx: AiExecutionContext, opts?: { stepUpVerified?: boolean }): Promise<AiPendingAction>;
   reject(id: string, ctx: AiExecutionContext, reason?: string): Promise<AiPendingAction>;
+  expire(id: string): Promise<AiPendingAction | null>;          // runtime primitives (§9 "Boundary")
+  expireDue(limit?: number): Promise<AiPendingAction[]>;
+  cancel(id: string, reason?: string): Promise<AiPendingAction | null>;
+  markOutcomeUnknown(id: string): Promise<AiPendingAction | null>;
 }
 
 // apps/api/src/auth/delegated-identity.ts — the symbol itself is NOT exported: only
@@ -1160,6 +1276,13 @@ pins them.
 - **A4 — not needed.** The parity golden compares outcomes over real HTTP and in-process dispatch instead
   of reading DTO schemas.
 - **A5** — unchanged; it concerns the write tools.
+
+The core write path unit (W2-0, #1315) proves the write path with a test-only toolset over a fixture
+controller (`ai/core/ai-tool.write-path.spec.ts`, real guards and pipes, an in-memory Prisma whose
+`updateMany` applies the conditional claim): MCP/headless ledger sequences, route and AI-level refusals,
+write-ahead, redaction, the chat propose/approve/reject contract including concurrency, non-owner,
+Service Account, MCP, expiry, revoked permission, revoked session, `STALE`, schema change and step-up,
+and the `aiInvocationId` stamp on asset and user history. No shipped tool writes yet.
 
 ## 18. Risks
 

@@ -1,11 +1,14 @@
 import { HttpException } from '@nestjs/common';
 import type { AiToolErrorCode } from '@lazyit/shared';
+import { AiReferenceError } from './reference-resolver';
 
 /** A tool-level error, ready for an `AiToolResult`. */
 export interface MappedToolError {
   code: AiToolErrorCode;
   status: number;
   message: string;
+  /** A next step for the model (the candidates of an ambiguous reference). */
+  hint?: string;
 }
 
 const GENERIC_INTERNAL = 'The tool failed unexpectedly.';
@@ -73,6 +76,15 @@ function prismaCode(err: unknown): string | undefined {
  * as tool error codes). A 5xx or an unknown error never exposes its message: it may carry internals.
  */
 export function mapToolError(err: unknown): MappedToolError {
+  if (err instanceof AiReferenceError) {
+    const hint = err.hint;
+    return {
+      code: err.code,
+      status: err.code === 'NOT_FOUND' ? 404 : 409,
+      message: err.message,
+      ...(hint !== undefined ? { hint } : {}),
+    };
+  }
   if (err instanceof HttpException) {
     const status = err.getStatus();
     const code = statusToCode(status);

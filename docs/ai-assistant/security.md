@@ -425,10 +425,12 @@ the **exfiltration leg** and the **consequential-action leg**.
 - **Single use.** The transition PENDING → APPROVED → EXECUTED is an atomic conditional update
   (`updateMany … where status = PENDING`, the SEC-031 pattern), so a double click executes once.
   Pending actions expire (reconciled default 30 minutes, admin-editable; the target-version check at
-  execute closes the TOCTOU window regardless).
+  execute narrows the TOCTOU window regardless of expiry).
 - **Re-check at execute.** Authorization is re-evaluated DB-first (the role may have been demoted or
   the folder ACL may have changed). The target version must still match; on a mismatch, return 409
-  and re-preview. That closes the TOCTOU window.
+  and re-preview. That narrows the TOCTOU window but does not close it: a change committed between the
+  check and the handler's own write is not detected until the domain write handlers accept an expected
+  version (a follow-up; [[ai-assistant/tools-and-execution|tools]] §9).
 - **Tool classes** (the constraint is on handling, not on catalog contents):
   - **T0** reads: free, never previewed. Output size is capped.
   - **T1** ordinary writes (assets, consumables, KB, locations): standard card.
@@ -732,7 +734,10 @@ Tests are behaviour-focused, under Jest (api) and `bun test` (web/shared), per
 7. Approve does not accept arguments. A pending action cannot be approved with an MCP or SA token.
    No tool can approve.
 8. Target changed after preview → 409. Role demoted after preview → 403 at execute.
-9. T3/T4 without step-up → rejected. A batch approval of T3 → rejected.
+9. A privilege grant or credential delivery (an `elevated` action whose preview carries a core-listed
+   step-up warning, or whose tool asks for step-up) without step-up → rejected; an `elevated` action
+   outside that list needs none, and an `elevated` preview with no warning is refused at propose (CEO
+   decision 2026-09-24, #1315). A batch approval of T3 → rejected.
 
 **Injection and output handling (INV-AI-4/5/8)**
 10. **Injection fixtures:** an access-request justification, a KB body, an agent package name and an

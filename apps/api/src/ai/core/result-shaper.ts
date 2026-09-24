@@ -64,7 +64,12 @@ export function successResult(
 /** A failed result. A failure never mutated anything. */
 export function errorResult(
   kind: AiCallKind,
-  error: { code: AiToolErrorCode; status?: number; message: string },
+  error: {
+    code: AiToolErrorCode;
+    status?: number;
+    message: string;
+    hint?: string;
+  },
 ): AiToolResult {
   return {
     ok: false,
@@ -73,6 +78,7 @@ export function errorResult(
       code: error.code,
       ...(error.status !== undefined ? { status: error.status } : {}),
       message: error.message,
+      ...(error.hint !== undefined ? { hint: error.hint } : {}),
     },
     mutated: false,
     entityRefs: [],
