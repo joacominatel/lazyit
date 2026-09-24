@@ -3,6 +3,7 @@ import { Hanken_Grotesk } from "next/font/google";
 import localFont from "next/font/local";
 import { getLocale, getMessages } from "next-intl/server";
 import { auth } from "@/auth";
+import { hasSession } from "@/lib/auth/has-session";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -72,7 +73,13 @@ export default async function RootLayout({
       className={`${hankenGrotesk.variable} ${commitMono.variable} ${redaction.variable}`}
     >
       <body className="min-h-svh antialiased">
-        <Providers locale={locale} messages={messages} now={now} session={session}>
+        {/* Seed only a real session: a truthy error object would read as `authenticated` (#1399). */}
+        <Providers
+          locale={locale}
+          messages={messages}
+          now={now}
+          session={hasSession(session) ? session : null}
+        >
           {children}
         </Providers>
       </body>
