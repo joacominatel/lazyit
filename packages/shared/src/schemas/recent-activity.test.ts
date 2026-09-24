@@ -161,6 +161,9 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       // ADR-0086 §F4 / issue #1006 — forgot-password issuance audit.
       "password_reset_requested",
       "password_reset_completed",
+      // Issue #1375 — activation flips.
+      "deactivated",
+      "reactivated",
     ]);
   });
 
