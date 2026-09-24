@@ -17,6 +17,7 @@ import {
   unexposed,
   type AiToolset,
 } from '../core/tool-descriptor';
+import { searchText } from './search-text';
 
 /**
  * The ACTIVITY toolset (W2-9; tools-and-execution.md §7 rows 5–6): the dashboard summary and the unified
@@ -115,7 +116,8 @@ const activityList = defineTool({
     'The unified activity feed, newest first: asset changes, check-outs and check-ins, access granted ' +
     'and revoked, stock movements and user lifecycle events (created, role changed, offboarded…). ' +
     'Filter by entity type and id, by actor (a user id or "me"), by action, by a time window ' +
-    '[from, to) or by text matched against the summary and the actor name. Returns a page and the ' +
+    '[from, to) or by text matched against the summary and the actor name (omit `query` to list by the ' +
+    'other filters alone). Returns a page and the ' +
     'total. Requires the logs:read permission (administrators by default).',
   domain: 'activity',
   class: 'read',
@@ -142,13 +144,7 @@ const activityList = defineTool({
       .datetime()
       .optional()
       .describe('Exclusive upper bound (ISO-8601).'),
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('Text matched against the summary and the actor name.'),
+    query: searchText('Text matched against the summary and the actor name.'),
     limit: z
       .number()
       .int()
