@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { ForbiddenException } from '@nestjs/common';
 import {
   AiActionPreviewSchema,
   AiToolInvocationStatusSchema,
@@ -55,33 +56,93 @@ export interface AiApproveOptions {
 }
 
 /**
- * The CLOSED list of preview warnings that make an `elevated` action require a password step-up (CEO
+ * The CLOSED list of preview warnings that make a write — `write` or `elevated`, whatever the tool's
+ * class — require a password step-up (CEO
  * decision 2026-09-24, #1315, "Opción 2": step-up for privilege grants and credential delivery only —
  * ADR-0097 decision 4 — enforced by core, not left to each tool). A tool may still ask for step-up on
  * its own (`stepUpRequired: true`); it can never switch it off for these warnings.
  *
- * The list is the CEO's closed list: role and identity changes, access or privilege grants, and
- * credential delivery. A tool that grants access MUST emit `PRIVILEGE_GRANT`; one that delivers a
- * credential MUST emit `CREDENTIAL_DELIVERY`.
+ * The list is the CEO's closed list: role and identity changes, access or privilege grants,
+ * credential delivery, and — since the ADR-0097 decision 3 amendment (2026-09-24, #1315) — actions on
+ * a critical application. A tool that grants access MUST emit `PRIVILEGE_GRANT`; one that delivers a
+ * credential MUST emit `CREDENTIAL_DELIVERY`; a workflow write, access grant or revoke on an application
+ * with `isCritical = true` MUST emit `CRITICAL_APPLICATION`. `OUTBOUND_INTEGRATION` is deliberately NOT
+ * listed (CEO: "que no pida contraseña, que sea flexible, excepto que la aplicacion sea critica").
  */
 export const AI_STEP_UP_WARNINGS: readonly AiPreviewWarningCode[] = [
   'ROLE_CHANGE',
   'IDENTITY_CHANGE',
   'PRIVILEGE_GRANT',
   'CREDENTIAL_DELIVERY',
+  'CRITICAL_APPLICATION',
 ];
 
-/** Whether an action needs the password step-up: the tool asked, or an elevated preview carries a listed warning. */
+/**
+ * Whether an action needs the password step-up: the tool asked, or its preview carries a listed warning.
+ * Derived from the warnings on ANY write preview, `write` or `elevated` (ADR-0097 decision 3 as amended
+ * 2026-09-24): a `write`-class tool such as an access revoke on a critical application needs step-up
+ * too, whether or not it escalated the invocation to `elevated`.
+ */
 export function requiresStepUp(
-  preview: Pick<AiActionPreview, 'elevated' | 'stepUpRequired' | 'warnings'>,
+  preview: Pick<AiActionPreview, 'stepUpRequired' | 'warnings'>,
 ): boolean {
   if (preview.stepUpRequired) return true;
-  return (
-    preview.elevated &&
-    preview.warnings.some((w) =>
-      (AI_STEP_UP_WARNINGS as readonly string[]).includes(w),
-    )
+  return preview.warnings.some((w) =>
+    (AI_STEP_UP_WARNINGS as readonly string[]).includes(w),
   );
+}
+
+/**
+ * Preview warnings whose action a channel refuses outright. CEO decision 2026-09-24 (#1315, ADR-0097
+ * decision 3 as amended), on MCP and headless writes over critical applications: "Rechazar". Step-up is
+ * a chat control, and over MCP and headless no preview is built and nothing asks for a password, so an
+ * AI write on an application with `isCritical = true` is refused there and happens only in the chat.
+ * A tool that detects such a condition in `run` calls {@link assertChannelAllows} with the warnings it
+ * would have emitted, before any side effect.
+ */
+export const AI_CHANNEL_REFUSED_WARNINGS: Readonly<
+  Record<AiChannel, readonly AiPreviewWarningCode[]>
+> = {
+  CHAT: [],
+  MCP: ['CRITICAL_APPLICATION'],
+  HEADLESS: ['CRITICAL_APPLICATION'],
+};
+
+/** What the refused caller (and the model) is told, per refused warning. */
+const CHANNEL_REFUSAL_MESSAGES: Partial<Record<AiPreviewWarningCode, string>> =
+  {
+    CRITICAL_APPLICATION:
+      'This application is critical; do it from the lazyit chat, where it is confirmed with your password.',
+  };
+
+/** The first warning this channel refuses, if any. */
+export function channelRefusal(
+  channel: AiChannel,
+  warnings: readonly string[],
+  refused: Readonly<
+    Record<AiChannel, readonly AiPreviewWarningCode[]>
+  > = AI_CHANNEL_REFUSED_WARNINGS,
+): AiPreviewWarningCode | undefined {
+  const list = refused[channel] ?? [];
+  return list.find((code) => warnings.includes(code));
+}
+
+/**
+ * Refuse cleanly, as a FORBIDDEN tool error (the error mapper's 403), when the channel refuses one of the
+ * warnings. A tool calls it from `run` before any side effect.
+ */
+export function assertChannelAllows(
+  channel: AiChannel,
+  warnings: readonly string[],
+  refused?: Readonly<Record<AiChannel, readonly AiPreviewWarningCode[]>>,
+): void {
+  const code = channelRefusal(channel, warnings, refused);
+  if (code) {
+    throw new ForbiddenException(
+      CHANNEL_REFUSAL_MESSAGES[code] ??
+        `This action (${code}) is not available on the ${channel} channel; do it from the lazyit chat.`,
+    );
+  }
 }
 
 /** JSON with object keys sorted, so equal inputs hash equally whatever their key order. */

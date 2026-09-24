@@ -3,7 +3,7 @@ title: "AI Assistant, MCP Server and Headless API — Architecture Synthesis"
 tags: [ai-assistant, architecture, synthesis, mcp, oauth, llm, security, adr-candidate]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 authors: [cto]
 reconciles:
   - "[[ai-assistant/mcp-and-oauth]]"
@@ -161,6 +161,16 @@ another author's article, a move into a more visible folder). Excluded outright,
 Secret Manager, cleartext-credential operations, the AI's own configuration, and any generic egress
 (fetch, email compose, raw query).
 
+> Amended 2026-09-24 ([[0097-ai-assistant-mcp-and-headless-api]] decision 3, #1315): the **workflow
+> engine** is in the catalog. Reads, run retry/replay and manual tasks run on every channel
+> (`workflows.tools.ts`, W2-13); authoring — workflows, versions, connections, connection test, dry-run,
+> enable/disable — is `elevated` and **chat only** (`channels: ['CHAT']`, `workflow-authoring.tools.ts`,
+> W2-14); MCP and headless authoring are deferred (#1344), and a Service Account never authors,
+> connects or enables. Workflow secrets stay a structural exclusion. The step-up list gains **every
+> write on a critical application** (`CRITICAL_APPLICATION`), and core derives step-up from the closed
+> list on any write preview, `write` or `elevated`; MCP and headless refuse writes on critical
+> applications (no step-up exists there).
+
 ### 4.2 Execution (R1)
 
 `AiToolService` is the only façade channels use: `list(ctx)`, `invoke(name, input, ctx)`,
@@ -182,7 +192,8 @@ cap (headless), and a per-principal rate limit. Each dispatch runs inside an `As
   valueKind }`, `warnings[]` (codes: `EXTERNAL_PROVISIONING`, `EXTERNAL_DEPROVISIONING`,
   `CASCADE_RELEASES_ASSIGNMENTS`, `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`,
   `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`, `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
-  `IRREVERSIBLE`), `impacted[]`, `untrustedSources[]`, `elevated`, `stepUpRequired`, and a
+  `IRREVERSIBLE`, `OUTBOUND_INTEGRATION`, `CRITICAL_APPLICATION` — the last two added 2026-09-24 for
+  the workflow engine), `impacted[]`, `untrustedSources[]`, `elevated`, `stepUpRequired`, and a
   `precondition { entity, updatedAt }` checked at execute.
 - **Pagination inside tools:** `limit` default 20, max 50, with `nextOffset`; the MCP layer adds a
   ~100 KB serialized backstop.
@@ -651,6 +662,8 @@ change behavior an operator would notice and are also listed in ADR-0097's to-co
 - A "via AI" badge in the activity feed; stamping ledgers beyond asset and user history; a hash-chained
   audit.
 - Admins reading other people's conversations.
+- Workflow authoring over MCP or headless (chat only in v1; deferred, #1344); any tool over workflow
+  secrets (structural exclusion).
 
 ---
 
@@ -702,6 +715,9 @@ Order: W1-A → W1-B → W1-C; W1-D runs in parallel with W1-B and W1-C once W1-
 | **W2-9** Tools — users + activity | backend | `ai/tools/users.tools.ts`, `activity.tools.ts` + specs | W1-C, W0-2 | **CEO** (privilege and identity); **G2** |
 | **W2-10** Tools — infra (read) | backend | `ai/tools/infra.tools.ts` + spec | W1-C | standing; **G2** |
 | **W2-11** Primer + system prompt | backend | `apps/api/src/ai/prompt/**` | W1-C | standing |
+| **W2-12** Workflow engine contract | backend + docs | ADR-0097 decision 3 amendment; `OUTBOUND_INTEGRATION` / `CRITICAL_APPLICATION` in `ai-tools.ts`; `AI_STEP_UP_WARNINGS`; the two pre-created workflow toolsets; primer (`AI_PROMPT_VERSION` 2) | W2-0, W2-11 | **CEO** (amends ADR-0097; step-up) |
+| **W2-13** Tools — workflow operations | backend | `ai/tools/workflows.tools.ts` + spec (reads, retry/replay, manual tasks; every channel) | W2-12 | **CEO** (workflow runs re-provision); **G2** |
+| **W2-14** Tools — workflow authoring | backend | `ai/tools/workflow-authoring.tools.ts` + spec (chat only) | W2-12, W2-13 | **CEO** (egress configuration); **G2** |
 
 ### Wave 3 — surfaces (parallel)
 
