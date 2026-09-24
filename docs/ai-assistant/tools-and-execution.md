@@ -192,8 +192,8 @@ Legend:
 | access-requests | create | accessRequest:create, human-only | W | v1 |
 | access-requests | approve / deny | accessGrant:grant, human-only | W (+ext) | v1 `access_request_decide` |
 | access-requests | `mine` | human-only | R | v1 facet |
-| consumables | list / get / movements | consumable:read | R | v1 |
-| consumables | create / update / movement | consumable:write | W | v1 |
+| consumables | list / get / movements | consumable:read | R | v1 `consumable_search` / `consumable_get` (built, W2-7) |
+| consumables | create / update / movement | consumable:write | W | v1 `consumable_create` / `consumable_update` / `consumable_record_movement` (built, W2-7) |
 | consumables | delete / restore | consumable:delete | D | v1.1 |
 | articles | list / by-slug / get | article:read | R | v1 |
 | articles | versions / links / backlinks / aliases | article:read | R | v1.1 |
@@ -415,6 +415,7 @@ Rejected alternatives are covered in §5.
   - `asset`: id | asset tag | serial
   - `user`: id | email | username | legajo | `"me"`
   - `application`, `location`, `model`: id | exact name
+  - `consumable`: id | SKU | exact name (case-insensitive; W2-7)
   - `article`: id | slug
 - References are resolved **through bound read handlers**, so a resolution the caller may not read
   fails as FORBIDDEN. Raw ids pass straight to the write handler, so an SA with write-only grants still
@@ -461,11 +462,11 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 24 | `access_request_list` ✅ built (W2-6) | AccessRequestsController.findAll / .mine | accessRequest:read / human | read | — |
 | 25 | `access_request_create` ✅ built (W2-6) | AccessRequestsController.create | accessRequest:create, human-only | write | accessRequest created |
 | 26 | `access_request_decide` (approve\|deny) ✅ built (W2-6) | AccessRequestsController.approve / .deny | accessGrant:grant, human-only | elevated (ext on approve) | accessRequest updated (+accessGrant) |
-| 27 | `consumable_search` | ConsumablesController.findAll | consumable:read | read | — |
-| 28 | `consumable_get` | ConsumablesController.findOne (+movements) | consumable:read | read | — |
-| 29 | `consumable_create` | ConsumablesController.create | consumable:write | write | consumable created |
-| 30 | `consumable_update` | ConsumablesController.update | consumable:write | write·D | consumable updated |
-| 31 | `consumable_record_movement` | ConsumablesController.createMovement (the handler behind `POST :id/movements`) | consumable:write | write (ledger, not idempotent) | consumable updated |
+| 27 | `consumable_search` ✅ built (W2-7) | ConsumablesController.findAll | consumable:read | read | — |
+| 28 | `consumable_get` ✅ built (W2-7) | ConsumablesController.findOne (primary), .findMovements, .findAll (reference lookup) | consumable:read | read | — |
+| 29 | `consumable_create` ✅ built (W2-7) | ConsumablesController.create | consumable:write | write | consumable created |
+| 30 | `consumable_update` ✅ built (W2-7) | ConsumablesController.update | consumable:write | write·D | consumable updated |
+| 31 | `consumable_record_movement` ✅ built (W2-7) | ConsumablesController.createMovement (the handler behind `POST :id/movements`) | consumable:write | write (ledger, not idempotent) | consumable updated |
 | 32 | `kb_search` | ArticlesController.findAll | article:read | read | — |
 | 33 | `kb_get_article` | ArticlesController.findBySlug / .findOne (content paged by chars) | article:read | read | — |
 | 34 | `kb_create_article` (as DRAFT) | ArticlesController.create | article:write | write | article created |
@@ -544,6 +545,8 @@ path unit (W2-0, #1315):
   built yet);
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
+  `consumables.tools.ts` (W2-7) holds the five consumables tools and leaves archive / restore unexposed
+  (v1.1) — see *Consumables tools as built* below;
   `platform.tools.ts` lists the surfaces no domain owns (authentication, instance configuration, the
   Secret Manager, Service Account management, the Migrator, the workflow engine, the probes)
 - `prompt/` — domain primer and system-prompt builder (§12)
@@ -618,6 +621,55 @@ actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) un
     `NOTIFIES_USERS`. `application_create` / `application_update` — `write` (update `destructive`,
     target + precondition the application); neither accepts `metadata`.
 - **Unexposed:** application archive / restore, grant batch revoke, notes and expiry (v1.1).
+
+**Consumables tools as built (W2-7).** All five admit humans and Service Accounts holding the route's
+permission (`consumable:read` for the reads, `consumable:write` for the writes; no human-only guard).
+A consumable reference is its id (a Prisma cuid, passed straight through — so a Service Account with
+`consumable:write` but no `consumable:read` can still write by id), or its SKU or exact name,
+case-insensitive, looked up through the bound list route (`GET /consumables?q=…&limit=200`; only exact
+matches count, more than one is `AMBIGUOUS_REFERENCE`). **A partial page never decides**: when more rows
+match the substring than the one page read holds, the reference is refused as `AMBIGUOUS_REFERENCE`
+("use the consumable's id") instead of resolved — an MCP or headless write has no preview card on which a
+person could catch a wrong target. A category is taken by id (`categoryId`, from `reference_lookup`).
+- `consumable_search` (read) — input `query`, `lowStock`, `categoryId`, `sort` (the route's allowlist),
+  `dir`, `detail`, `limit` (default 20, max 50), `offset`; returns `{ total, offset, items }` with
+  identifiers, stock, threshold and a computed `lowStock`; `full` adds the timestamps and the description
+  and notes (untrusted). The archived slice (`deleted=only`) is not
+  offered (it belongs with archive / restore, v1.1).
+- `consumable_get` (read) — input `consumable`, `detail`, `movementType`, `from`, `to`, `movementLimit`
+  (default 20, max 50, `0` = none); returns the consumable (description and notes untrusted) and the
+  newest movements with their total (reason untrusted; `full` adds the notes, untrusted). The actor of a
+  movement is the id pair `performedById` / `serviceAccountId`.
+- `consumable_create` (write) — the route's create fields; stock starts at 0 and is not an input. The
+  preview has no target (nothing exists yet), so no precondition; it lists the fields and
+  `currentStock: 0`. Ref: `consumable created`.
+- `consumable_update` (write·D) — `consumable` plus any of name, sku, categoryId, description, minStock,
+  unit, notes (at least one; never the stock) — the fields are taken from the route's own
+  `UpdateConsumableSchema`, so they cannot drift. Preview: target + `before → after` per sent field,
+  precondition `{ consumable, updatedAt }`. Ref: `consumable updated`.
+- `consumable_record_movement` (write, not idempotent) — `consumable`, `type` (`IN` | `OUT` |
+  `ADJUSTMENT`), `quantity` (positive int4), `reason`, `notes`. The preview shows `currentStock`
+  before → after and **refuses, as the route would, a movement it can already see failing** (an `OUT`
+  past the stock, an `IN` past int4 → `CONFLICT`; a missing or archived consumable → `NOT_FOUND`), so no
+  card is shown for it; the route re-checks atomically at execute. Warnings: always `LEDGER_APPEND` (the
+  movement is permanent; a mistake is corrected by another movement), plus `NOTIFIES_USERS` when it
+  crosses the reorder threshold downwards (the low-stock bell, [[0056-in-app-notification-bell]] §3).
+  Precondition `{ consumable, updatedAt }`: every movement bumps the consumable's `updatedAt`, so any
+  stock change between the card and the approval is `STALE`. The result re-reads the consumable for the
+  new stock (best effort: skipped when the caller lacks `consumable:read`). Refs: `consumable updated`
+  and `consumableMovement created` with `parent: consumable` (§8.5).
+- Unexposed: `remove` / `restore` (archive and restore, v1.1).
+- Follow-ups (G2 review of #1341):
+  - the update preview's `before` values of `description` / `notes` are other-authored text and are not
+    `untrusted()`-wrapped (the card renders them to the person). The runtime (W2-3) must wrap preview
+    free text when it projects a pending action back to the model;
+  - `consumable_get` loads the whole movement ledger through the unpaged `GET /consumables/:id/movements`
+    and slices it in the tool; a paged movements route (or a `limit` on the existing one) would bound it;
+  - whether an in-app notification (the low-stock bell a movement can ring) counts as an external effect
+    (`externalEffects` → MCP `openWorldHint`) is undecided; `consumable_record_movement` does not set it
+    today and signals the bell with `NOTIFIES_USERS` on the card only;
+  - the TOCTOU window between the approve-time precondition and the handler's write (§9, step 3) stays
+    until the consumable write handlers accept an expected `updatedAt`.
 
 ### 8.2 Descriptor
 
