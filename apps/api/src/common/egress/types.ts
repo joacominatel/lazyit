@@ -109,8 +109,9 @@ export interface EgressGuardOptions {
   lookup?: DnsLookup;
   /**
    * Refuse a URL that carries userinfo (`user:pass@host`) with `userinfo-not-allowed` (SEC-076). Node's
-   * http client would send it as `Authorization: Basic …`. Opt-in so an existing caller whose stored URL
-   * legitimately embeds it (none known) is not changed silently; the workflow engine always sets it.
+   * http client would send it as `Authorization: Basic …`. Opt-in and currently unused by the workflow
+   * run path: a stored legacy connection URL with userinfo must keep working after an in-place upgrade
+   * (write-only validation). Available for a caller that validates a NEW destination.
    */
   refuseUserinfo?: boolean;
 }

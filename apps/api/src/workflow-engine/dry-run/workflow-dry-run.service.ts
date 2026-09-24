@@ -369,7 +369,8 @@ export class WorkflowDryRunService {
     if (step.kind === 'REST') {
       const config = conn.config as RestConnectionConfig;
       const renderedPath = renderTemplate(step.path, ctx, 'url');
-      // SEC-076: a legacy URL's userinfo is masked (the live call refuses it — egress `userinfo-not-allowed`).
+      // SEC-076: a legacy URL's userinfo is masked in the preview (the live call still sends it —
+      // upgrade-safe; the connection read flags it with `legacyUserinfo`).
       const url = redactUrlUserinfo(joinUrl(config.baseUrl, renderedPath));
 
       // Default headers first (VALUES redacted — one may be a pasted credential, SEC-075), then the auth

@@ -114,11 +114,10 @@ export async function assertUrlAllowed(
     );
   }
 
-  // (1b) No userinfo, when the caller asks (SEC-076 — the workflow engine always does): Node's http
-  // client turns `user:pass@` into `Authorization: Basic …`, a credential stored in plain connection
-  // config outside the secret store. Fail closed — including a legacy row saved before write validation
-  // refused it, and a relative redirect that inherits it. The error carries NO url (its href would echo
-  // the credential).
+  // (1b) No userinfo, when the caller asks (SEC-076 — e.g. the AI tools' pre-check of a NEW
+  // destination): Node's http client turns `user:pass@` into `Authorization: Basic …`, a credential in
+  // plain config outside the secret store. The error carries NO url (its href would echo the
+  // credential). The workflow run path does not opt in, so legacy rows keep working.
   if (opts.refuseUserinfo && (url.username !== '' || url.password !== '')) {
     throw new EgressError(
       'userinfo-not-allowed',
