@@ -251,6 +251,20 @@ The key forks only; each links its analysis.
     > `about`, `view-source`, `vbscript`, `filesystem` — the SEC-051 list) and plain `http` off loopback
     > are always refused. The rest of the decision is unchanged.
 
+    > Amended 2026-09-24 (#1315): any HTTPS client is accepted by default. Asked whether the "https" in
+    > "por defecto todos o los que tengamos en cuenta, https, claude code, …" means any MCP client with
+    > HTTPS redirects is accepted by default, the CEO answered: "Sí, cualquier HTTPS". The "allow any
+    > HTTPS client" toggle (`mcpAllowAnyHttpsClient`) is therefore **on by default**: with no settings
+    > row, and on a row created from now on, a client whose redirect URIs are all HTTPS on a non-loopback
+    > host is admitted without an allowlist entry. An admin can still switch it off, leaving only the
+    > curated list and their own entries. The curated list keeps governing loopback and private-use
+    > redirects; the toggle still never admits a loopback redirect, a private-use scheme or plain `http`
+    > off loopback (the 2026-09-23 amendment is unchanged). Consent is always shown, with the redirect
+    > host, the "self-declared, unverified" label for a DCR client, and `lazyit.admin` never preselected.
+    > A settings row that already exists keeps its stored value — a row saved before this change may
+    > hold `false` because that was the default then, and nothing distinguishes it from an admin's
+    > choice, so it is not rewritten.
+
 ## Consequences
 
 **Positive**

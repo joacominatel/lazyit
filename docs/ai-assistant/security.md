@@ -480,6 +480,15 @@ the **exfiltration leg** and the **consequential-action leg**.
     redirect scheme (`cursor://`, `vscode://`, reverse-domain) is accepted **only on an explicit
     allowlist entry**, never through the "allow any HTTPS client" toggle; browser-interpreted schemes
     (the SEC-051 list) and plain `http` off loopback are always refused (CEO, 2026-09-23).
+  - **Any HTTPS client is admitted by default** (CEO, 2026-09-24: "Sí, cualquier HTTPS"):
+    `mcpAllowAnyHttpsClient` defaults to on, both for an absent settings row and as the column default;
+    an existing row keeps its stored value. **Residual risk:** a wider consent-phishing surface — any
+    party can register a client with an HTTPS redirect it controls and send a user a link to the consent
+    page. Mitigations: consent is mandatory and never remembered and shows the redirect **host**; a DCR
+    client is labelled "self-declared, unverified" and never auto-approved; `lazyit.admin` is never
+    preselected and needs a password step-up; a new connection notifies the user (below). An admin who
+    wants the curated list only switches the toggle off. Loopback and private-use redirects still need an
+    explicit entry.
   - CIMD fetches go through `guardedFetch`: HTTPS only, no internal allowlist, small size cap,
     short timeout, cached.
 - **Authorize and consent.**
