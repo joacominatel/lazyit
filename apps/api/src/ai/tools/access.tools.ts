@@ -18,8 +18,8 @@ export const accessToolset: AiToolset = {
     unexposed(
       ApplicationsController,
       [
-        // `findAll` and `findOne` are bound by the workflow operations toolset (W2-13) for application
-        // names and criticality; W2-6 binds them too (several tools may bind one handler).
+        // `findAll` and `findOne` are bound elsewhere: `findOne` by user_offboard and the workflow
+        // operations toolset (W2-13), `findAll` by the latter (several tools may bind one handler).
         'findGrants',
         'findArticles',
         'create',
