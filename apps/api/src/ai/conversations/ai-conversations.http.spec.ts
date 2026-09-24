@@ -223,6 +223,75 @@ describe('create, send and read', () => {
     });
   });
 
+  it('shows an input form (#1388) as awaiting-input, then the answer', async () => {
+    const id = await newConversation();
+    h.rt.model.push(
+      {
+        toolCalls: [
+          {
+            toolCallId: 'ask1',
+            toolName: TOOLS.input.descriptor.name,
+            input: {},
+          },
+        ],
+      },
+      { text: 'Thanks.' },
+    );
+    const { body } = await say(id, 'Add the new laptops');
+    await h.rt.drain();
+
+    let res = await http()
+      .get(`/ai/conversations/${id}`)
+      .set('X-Test-Principal', 'A');
+    expect(res.body).toMatchObject({
+      status: 'awaiting-input',
+      activeRunId: body.runId,
+    });
+    const parts = res.body.messages[1].parts;
+    expect(parts[0]).toMatchObject({
+      type: 'tool',
+      toolCallId: 'ask1',
+      class: 'navigate',
+      status: 'AWAITING_INPUT',
+    });
+    expect(parts[1]).toMatchObject({
+      type: 'input',
+      outcome: null,
+      request: { toolCallId: 'ask1', form: { title: 'Laptop details' } },
+    });
+    const list = await http()
+      .get('/ai/conversations')
+      .set('X-Test-Principal', 'A');
+    expect(list.body.items[0].status).toBe('awaiting-input');
+
+    await http()
+      .post(`/ai/runs/${body.runId}/tool-calls/ask1/input`)
+      .set('X-Test-Principal', 'A')
+      .send({
+        action: 'submit',
+        values: { manufacturer: 'Dell' },
+        groups: { models: [{ name: 'Latitude' }] },
+      })
+      .expect(200);
+    await h.rt.drain();
+    res = await http()
+      .get(`/ai/conversations/${id}`)
+      .set('X-Test-Principal', 'A');
+    expect(res.body.status).toBe('idle');
+    expect(res.body.messages[1].parts[1]).toMatchObject({
+      type: 'input',
+      outcome: 'submitted',
+      answer: {
+        values: { manufacturer: 'Dell' },
+        groups: { models: [{ name: 'Latitude' }] },
+      },
+    });
+    expect(res.body.messages[1].parts[0]).toMatchObject({
+      status: 'SUCCEEDED',
+      result: { status: 'ok', mutated: false, kind: 'navigate' },
+    });
+  });
+
   it('shows a failed run as a notice', async () => {
     const id = await newConversation();
     h.rt.model.push({

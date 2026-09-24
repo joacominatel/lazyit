@@ -761,6 +761,31 @@ is always `window.location.origin + "/mcp"`.
 - `POST /ai/runs` with an `Idempotency-Key` reused for another prompt or conversation answers `422
   IDEMPOTENCY_KEY_MISMATCH` — use a new key per request.
 
+**K5b — Input forms (#1388; backend as built — [[ai-assistant/provider-and-runtime|provider]] §8.2).**
+The assistant can ask for missing data with a form it builds (`request_input`, chat only). The contract,
+all in `packages/shared/src/schemas/ai-run.ts`:
+- The run pauses with status `AWAITING_INPUT` (the stream closes after `run.status AWAITING_INPUT`, like
+  after `AWAITING_APPROVAL`; the conversation state is `awaiting-input`).
+- `input.required { toolCallId, form: AiInputForm, expiresAt }` announces it; `run.snapshot` carries
+  `pendingInputs: AiInputRequest[]` (optional: absent from an older API); the transcript carries a part
+  `{ type: "input", request, outcome: null | submitted | skipped | declined | expired | cancelled,
+  answer? }` after the call's `tool` part (status `AWAITING_INPUT`, class `navigate`).
+- `AiInputForm = { title, reason, fields: AiInputField[], groups: AiInputGroup[] }`; a field `{ key,
+  label, kind: text | textarea | number | date | select | multiselect | checkbox, importance: required |
+  recommended | optional, required, placeholder?, help?, options?: { value, label }[], optionsFrom?:
+  manufacturers | assetCategories | locations | assetModels, min?, max? }`; a group `{ key, label, help?,
+  minRows, maxRows, fields }` (rows of the same columns). Caps in `AI_INPUT_LIMITS` (20 fields in total,
+  3 groups, 50 rows, 100 options). **Every string is model-authored or lazyit data: render it as plain
+  text** — never Markdown or HTML — and present the form as the assistant's request.
+- Answer: `POST /ai/runs/:id/tool-calls/:toolCallId/input { action: "submit" | "skip" | "cancel",
+  values?: { [key]: value }, groups?: { [groupKey]: Array<{ [key]: value }> } }` (value: string | number |
+  boolean | string[] | null; a date is `YYYY-MM-DD`, a select the option's `value`). Returns `{ runId,
+  status }`; re-subscribe. `400 INVALID_INPUT` with `issues: [{ path, message }]` (`values.<key>`,
+  `groups.<key>`, `groups.<key>.<row>.<key>`) — `checkAiInputAnswer(form, answer)` gives the same issues
+  client-side; `409 RUN_NOT_AWAITING_INPUT` (already answered / not waiting), `409 EXPIRED` (the run ended),
+  `409 AI_DISABLED`; `404` for anyone but the run's owner; `403` for a Service Account.
+  `input.resolved { toolCallId, outcome }` then `tool.result` follow on the stream.
+
 **K6 — Stop** `POST /ai/runs/:id/cancel` → the run is cancelled at the next step boundary; partial
 output is persisted.
 

@@ -32,7 +32,8 @@ export type AiToolDomain =
   | 'users'
   | 'activity'
   | 'infra'
-  | 'platform';
+  | 'platform'
+  | 'interaction';
 
 /** One controller handler: the class and the method name of a Nest route. */
 export interface HandlerRef {
@@ -142,6 +143,12 @@ export interface AiToolDescriptor<
   idempotent?: boolean;
   /** Default: every channel; a `navigate` tool is chat-only. */
   channels?: readonly AiChannel[];
+  /**
+   * An interaction tool (#1388, `request_input`): its `run` only validates and builds a form; the chat
+   * runtime then pauses the run `AWAITING_INPUT` and answers the call with the user's submission. Only a
+   * `navigate` (chat-only) tool may set it.
+   */
+  awaitsInput?: boolean;
   /** Validated by the executor before any dispatch; its JSON Schema (`io: "input"`) is what channels list. */
   input: S;
   /** The handlers `run`/`preview` may call. `[0]` is primary: its `@RequirePermission` is the tool's. */

@@ -5,6 +5,7 @@ import { assetsToolset } from './assets.tools';
 import { consumablesToolset } from './consumables.tools';
 import { contextToolset } from './context.tools';
 import { infraToolset } from './infra.tools';
+import { interactionToolset } from './input-request.tools';
 import { kbToolset } from './kb.tools';
 import { platformToolset } from './platform.tools';
 import { referenceToolset } from './reference.tools';
@@ -31,4 +32,5 @@ export const ALL_TOOLSETS: readonly AiToolset[] = [
   activityToolset,
   infraToolset,
   platformToolset,
+  interactionToolset,
 ];

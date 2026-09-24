@@ -347,6 +347,7 @@ export class AiConversationsService {
 
 function stateOf(status: string | undefined): AiConversationState {
   if (status === 'AWAITING_APPROVAL') return 'awaiting-approval';
+  if (status === 'AWAITING_INPUT') return 'awaiting-input';
   if (status === 'QUEUED' || status === 'RUNNING') return 'running';
   return 'idle';
 }

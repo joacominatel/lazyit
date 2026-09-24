@@ -48,8 +48,8 @@ import {
  * `ai.constants.ts`, then record the new version and hash here.
  */
 const PINNED = {
-  version: 3,
-  sha256: '1706136d4f29b5c164d6a4f4eccc2fd96be42dcac86a50eed66a8449b21f75a5',
+  version: 4,
+  sha256: '86d0a7bdb9b62b7c00a84d1c945cc8ef9ae7f2870d8b7285c3cce36a5635b2c5',
 };
 
 const tools = (...classes: AiPromptTool['class'][]): AiPromptTool[] =>
@@ -289,7 +289,7 @@ describe('buildSystemPrompt', () => {
 
   it('summarizes the frozen tool listing by class, never by name', () => {
     expect(buildSystemPrompt(CHAT).text).toContain(
-      '- Tools in this conversation: 5 (2 read, 1 change data, 1 change data with elevated confirmation, 1 navigation).',
+      '- Tools in this conversation: 5 (2 read, 1 change data, 1 change data with elevated confirmation, 1 navigation or input forms).',
     );
     const readOnly = buildSystemPrompt({ ...CHAT, tools: tools('read') }).text;
     expect(readOnly).toContain('- No tool here changes data.');

@@ -181,7 +181,7 @@ export class AiRunLimits {
     return (await this.tokensUsed(owner)) >= limit;
   }
 
-  /** The principal's runs still QUEUED, RUNNING or AWAITING_APPROVAL. */
+  /** The principal's active runs (QUEUED, RUNNING, AWAITING_APPROVAL or AWAITING_INPUT). */
   async activeRuns(owner: {
     userId?: string | null;
     serviceAccountId?: string | null;

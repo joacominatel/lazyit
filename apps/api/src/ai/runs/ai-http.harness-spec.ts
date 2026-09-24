@@ -37,6 +37,7 @@ import { AiServiceAccountAccessService } from '../headless/ai-service-account-ac
 import { AiConversationPurgeService } from '../retention/ai-conversation-purge.service';
 import { AgentRunOrchestrator } from '../runtime/agent-run.orchestrator';
 import { AiApprovalService } from '../runtime/approval.service';
+import { AiInputService } from '../runtime/input.service';
 import { InProcessRunEventBus } from '../runtime/run-event-bus';
 import {
   buildRuntime,
@@ -351,6 +352,7 @@ export async function buildHttp(
       { provide: PrismaService, useValue: prisma },
       { provide: AgentRunOrchestrator, useValue: rt.orchestrator },
       { provide: AiApprovalService, useValue: rt.approvals },
+      { provide: AiInputService, useValue: rt.inputs },
       { provide: InProcessRunEventBus, useValue: rt.bus },
       { provide: AiToolRegistry, useValue: rt.registry },
       { provide: AI_SETTINGS_READER, useValue: rt.settings },

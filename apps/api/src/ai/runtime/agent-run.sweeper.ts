@@ -5,15 +5,21 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import type { AiConversationChannel } from '@lazyit/shared';
+import {
+  AI_RUN_WAITING_STATUSES,
+  type AiConversationChannel,
+} from '@lazyit/shared';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiToolService } from '../core/ai-tool.service';
+import { errorResult } from '../core/result-shaper';
 import {
   AI_SETTINGS_READER,
   type AiSettingsReader,
 } from '../core/ports/ai-settings.port';
 import { AgentLoop } from './agent-loop';
+import { AiInputRequests } from './input-requests';
+import { INPUT_EXPIRED } from './input.service';
 import { AiRunPrincipals } from './principal-context';
 import { AiRunLifecycle } from './run-lifecycle';
 import { AiRunQueue } from './run-queue';
@@ -31,13 +37,13 @@ import {
 
 /** What one sweep pass did, per reconciler (for tests and logs). */
 export interface AiRunSweepResult {
-  /** Approvals past their TTL expired (and their runs finalized EXPIRED). */
+  /** Approvals and input requests past their TTL expired (and their runs finalized EXPIRED). */
   expired: number;
   /** Invocations interrupted while EXECUTING, marked OUTCOME_UNKNOWN (never retried). */
   outcomeUnknown: number;
-  /** AWAITING_APPROVAL runs whose decided step was re-enqueued (lost resumes). */
+  /** Waiting runs whose decided step was re-enqueued (lost resumes). */
   resumed: number;
-  /** AWAITING_APPROVAL runs cancelled because AI was turned off or the principal lost `ai:use`. */
+  /** Waiting runs cancelled because AI was turned off or the principal lost `ai:use`. */
   cancelled: number;
   /** QUEUED runs whose lost job was re-enqueued. */
   requeued: number;
@@ -59,12 +65,13 @@ const EMPTY: AiRunSweepResult = {
  * workflow-run sweeper precedent). A periodic pass that heals what the happy path lost, each reconciler
  * independent and best-effort:
  *
- *  1. Expiry: `expireDue` marks pending approvals past their TTL EXPIRED; each affected run ends EXPIRED
- *     with every call answered.
+ *  1. Expiry: `expireDue` marks pending approvals past their TTL EXPIRED, and input requests (#1388)
+ *     past theirs are expired the same way; each affected run ends EXPIRED with every call answered.
  *  2. Interrupted executions: an approved write still EXECUTING long after its claim (the process died
  *     mid-`approve`) becomes OUTCOME_UNKNOWN — never retried.
- *  3. AWAITING_APPROVAL: a run is cancelled when AI was turned off or its principal lost `ai:use`; a run
- *     whose calls are all decided but that was never resumed is re-enqueued (a rotating job id).
+ *  3. AWAITING_APPROVAL | AWAITING_INPUT: a run is cancelled when AI was turned off or its principal lost
+ *     `ai:use`; a run whose calls are all decided but that was never resumed is re-enqueued (a rotating
+ *     job id).
  *  4. QUEUED with no job on the queue: re-enqueued.
  *  5. RUNNING with no job on the queue past the stall threshold: its EXECUTING writes become
  *     OUTCOME_UNKNOWN and the run ends FAILED `ENGINE_RESTART`. It is NEVER resumed — a restarted step
@@ -87,6 +94,7 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
     private readonly lifecycle: AiRunLifecycle,
     private readonly queue: AiRunQueue,
     private readonly loop: AgentLoop,
+    private readonly inputs: AiInputRequests,
   ) {}
 
   onModuleInit(): void {
@@ -109,9 +117,13 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
     if (this.running) return { ...EMPTY };
     this.running = true;
     try {
-      const expired = await this.guarded('expiry', () =>
+      const expiredApprovals = await this.guarded('expiry', () =>
         this.expireApprovals(now),
       );
+      const expiredInputs = await this.guarded('input-expiry', () =>
+        this.expireInputs(now),
+      );
+      const expired = expiredApprovals + expiredInputs;
       const outcomeUnknown = await this.guarded('executing', () =>
         this.interruptedExecutions(now),
       );
@@ -165,6 +177,34 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
     return expired.length;
   }
 
+  /** 1b — input requests past their TTL (#1388); their runs end EXPIRED like an expired approval. */
+  async expireInputs(now: Date): Promise<number> {
+    const due = await this.inputs.due(AI_SWEEP_BATCH, now);
+    const runs = new Set<string>();
+    let expired = 0;
+    for (const row of due) {
+      const closed = await this.inputs.close(
+        row.id,
+        'EXPIRED',
+        errorResult('navigate', INPUT_EXPIRED),
+      );
+      if (!closed) continue;
+      expired += 1;
+      if (row.runId && row.toolUseId) {
+        this.lifecycle.emitInputResolved(row.runId, row.toolUseId, 'expired');
+      }
+      if (row.runId) runs.add(row.runId);
+    }
+    for (const runId of runs) {
+      await this.lifecycle.finalize(runId, 'EXPIRED', {
+        from: ['AWAITING_INPUT'],
+        finishReason: 'input_expired',
+        fallback: INPUT_EXPIRED,
+      });
+    }
+    return expired;
+  }
+
   /** 2 — approved writes interrupted mid-execution (their run is still waiting on them). */
   async interruptedExecutions(now: Date): Promise<number> {
     const cutoff = new Date(now.getTime() - AI_EXECUTING_STALE_AFTER_MS);
@@ -191,13 +231,16 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
     return marked;
   }
 
-  /** 3 — AWAITING_APPROVAL runs: cancel when AI is off or the principal lost `ai:use`; resume lost ones. */
+  /** 3 — waiting runs: cancel when AI is off or the principal lost `ai:use`; resume lost ones. */
   async reconcileAwaiting(
     now: Date,
   ): Promise<{ resumed: number; cancelled: number }> {
     const cutoff = new Date(now.getTime() - AI_AWAITING_SWEEP_AFTER_MS);
     const runs = await this.prisma.aiRun.findMany({
-      where: { status: 'AWAITING_APPROVAL', updatedAt: { lt: cutoff } },
+      where: {
+        status: { in: [...AI_RUN_WAITING_STATUSES] },
+        updatedAt: { lt: cutoff },
+      },
       take: AI_SWEEP_BATCH,
     });
     if (runs.length === 0) return { resumed: 0, cancelled: 0 };
@@ -210,7 +253,7 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
         : { code: 'AI_DISABLED', message: 'The AI assistant is turned off.' };
       if (refusal) {
         const done = await this.lifecycle.finalize(run.id, 'CANCELLED', {
-          from: ['AWAITING_APPROVAL'],
+          from: [...AI_RUN_WAITING_STATUSES],
           finishReason: 'cancelled',
           error: refusal,
           fallback: {

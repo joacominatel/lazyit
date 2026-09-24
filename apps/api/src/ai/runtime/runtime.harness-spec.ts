@@ -47,6 +47,8 @@ import { AgentLoop } from './agent-loop';
 import { AgentRunOrchestrator } from './agent-run.orchestrator';
 import { AgentRunSweeper } from './agent-run.sweeper';
 import { AiApprovalService } from './approval.service';
+import { AiInputRequests } from './input-requests';
+import { AiInputService } from './input.service';
 import { AiRunLimits } from './limits';
 import { AiRunPrincipals } from './principal-context';
 import { InProcessRunEventBus } from './run-event-bus';
@@ -439,11 +441,82 @@ export function fakeTool(
   };
 }
 
+/** The chat-only input request tool (#1388), as `request_input` registers. */
+function fakeInputTool(): RegisteredAiTool {
+  const tool = fakeTool('ask_user', 'navigate', ['CHAT']);
+  return {
+    ...tool,
+    descriptor: { ...tool.descriptor, awaitsInput: true },
+  };
+}
+
 export const TOOLS = {
   read: fakeTool('find_assets', 'read'),
   untrustedRead: fakeTool('read_article', 'read'),
   write: fakeTool('update_asset', 'write'),
   elevated: fakeTool('grant_access', 'elevated'),
+  input: fakeInputTool(),
+};
+
+/** The form the fake `ask_user` builds (a real `request_input` resolves it from the model's input). */
+export const FAKE_FORM = {
+  title: 'Laptop details',
+  reason: 'I need the make of the new laptops to create them.',
+  fields: [
+    {
+      key: 'manufacturer',
+      label: 'Manufacturer',
+      kind: 'select',
+      importance: 'required',
+      required: true,
+      options: [
+        { value: 'Dell', label: 'Dell' },
+        { value: 'Lenovo', label: 'Lenovo' },
+      ],
+      optionsFrom: 'manufacturers',
+    },
+    {
+      key: 'site',
+      label: 'Site',
+      kind: 'select',
+      importance: 'optional',
+      required: false,
+      options: [{ value: 'cloc0000000000000000000001', label: 'HQ' }],
+      optionsFrom: 'locations',
+    },
+    {
+      key: 'notes',
+      label: 'Notes',
+      kind: 'textarea',
+      importance: 'optional',
+      required: false,
+    },
+  ],
+  groups: [
+    {
+      key: 'models',
+      label: 'Models',
+      minRows: 1,
+      maxRows: 5,
+      fields: [
+        {
+          key: 'name',
+          label: 'Model',
+          kind: 'text',
+          importance: 'required',
+          required: true,
+        },
+        {
+          key: 'count',
+          label: 'How many',
+          kind: 'number',
+          importance: 'recommended',
+          required: false,
+          min: 1,
+        },
+      ],
+    },
+  ],
 };
 
 export class FakeRegistry {
@@ -557,6 +630,21 @@ export class FakeTools {
         status: 403,
         message: `${name} is outside the access granted to this session`,
       });
+    }
+    if (tool.descriptor.awaitsInput) {
+      if ((input as { secret?: unknown } | null)?.secret) {
+        return errorResult('navigate', {
+          code: 'INVALID_INPUT',
+          message: 'This form looks like it asks for a password',
+        });
+      }
+      return {
+        ok: true,
+        kind: 'navigate',
+        data: { form: FAKE_FORM },
+        mutated: false,
+        entityRefs: [],
+      };
     }
     if (cls === 'read' || cls === 'navigate') return readResult(name, input);
     if (ctx.channel === 'CHAT') {
@@ -965,6 +1053,7 @@ export function buildRuntime() {
   const p = prisma as any;
   const principals = new AiRunPrincipals(loader as any, permissions as any, p);
   const limits = new AiRunLimits(p);
+  const inputRequests = new AiInputRequests(p, settings);
   const lifecycle = new AiRunLifecycle(
     p,
     bus,
@@ -972,6 +1061,7 @@ export function buildRuntime() {
     tools as unknown as AiToolService,
     registry as unknown as AiToolRegistry,
     queue as unknown as AiRunQueue,
+    inputRequests,
   );
   const loop = new AgentLoop(
     p,
@@ -982,6 +1072,7 @@ export function buildRuntime() {
     principals,
     limits,
     lifecycle,
+    inputRequests,
   );
   const orchestrator = new AgentRunOrchestrator(
     p,
@@ -1013,7 +1104,9 @@ export function buildRuntime() {
     lifecycle,
     queue as unknown as AiRunQueue,
     loop,
+    inputRequests,
   );
+  const inputs = new AiInputService(p, inputRequests, lifecycle, settings);
 
   /** Simulate a process restart: forget the runs this "process" was driving (their promises never settle). */
   function restart(): void {
@@ -1072,6 +1165,8 @@ export function buildRuntime() {
     loop,
     orchestrator,
     approvals,
+    inputs,
+    inputRequests,
     sweeper,
     stepUp,
     drain,

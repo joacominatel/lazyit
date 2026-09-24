@@ -157,6 +157,11 @@ function channelsFor(
   tool: AiToolDescriptor,
   problems: string[],
 ): readonly AiChannel[] {
+  if (tool.awaitsInput === true && tool.class !== 'navigate') {
+    problems.push(
+      `tool ${tool.name}: only a navigate (chat-only) tool may await input`,
+    );
+  }
   if (tool.class === 'navigate') {
     const channels = tool.channels ?? ['CHAT'];
     if (channels.some((c) => c !== 'CHAT')) {

@@ -127,7 +127,13 @@ describe('text-only turn', () => {
     });
     expect(request.toolChoice).toBe('auto');
     expect(request.tools.map((t) => t.name)).toEqual(
-      [READ, UNTRUSTED_READ, WRITE, TOOLS.elevated.descriptor.name].sort(),
+      [
+        READ,
+        UNTRUSTED_READ,
+        WRITE,
+        TOOLS.elevated.descriptor.name,
+        TOOLS.input.descriptor.name,
+      ].sort(),
     );
     const user = request.messages[0] as { role: string; content: string };
     expect(user.role).toBe('user');

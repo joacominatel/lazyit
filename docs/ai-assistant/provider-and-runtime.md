@@ -651,6 +651,10 @@ Rules [C]:
     quick-form tool only when one is registered — the prompt describes it in words, never by name),
     and propose a change that depends on another (assets needing a new model) after that one is
     approved;
+  - the input-form rule (#1388, `AI_PROMPT_VERSION` 4, chat only): ask for data you cannot find or
+    safely infer with the form tool — one short form with only what is missing, each field marked
+    required, recommended or optional, choices when the answer is one of known values, never a secret
+    (§8.2); the tool summary line counts `navigate` tools as "navigation or input forms";
   - the principal block: display name, kind, role, sorted permission list, channel, locale;
   - an optional admin-authored `instructions` text from `AiSettings`.
 - **Max steps.** When `maxStepsPerRun − 1` is reached, the last step runs with `toolChoice: 'none'`
@@ -1045,6 +1049,82 @@ overshoot by one step's tokens). Both fail closed on the next check.
 per-conversation deletion and retention (W3-6, §7 "As built"); the MCP stale-`EXECUTING` sweep (W3-2). The sweeper's lost-resume threshold means a
 decision made while Valkey is down resumes within about a minute of its return.
 
+### 8.2 As built — input requests (#1388) — `runtime/input-requests.ts`, `runtime/input.service.ts`
+
+The assistant can ask the person for data it is missing with a small form it designs — the CEO: "es como
+si la ia desarrollara su propio form en base a lo que necesita, de esa forma el usuario no responde una
+pregunta como tal, si no que interactua con lo que la ia necesita" (ADR-0097 decision 3, amended
+2026-09-24). It is a second kind of pause, next to the approval, and reuses its machinery.
+
+**The tool.** `request_input` (`tools/input-request.tools.ts`, the `interaction` toolset) is class
+`navigate` with `awaitsInput: true`: chat-only (boot validation refuses `awaitsInput` on any other class,
+and a `navigate` tool is never listed on MCP or headless), no domain write, no approval card, no ledger
+event. Its primary binding is the permission-free `GET /users/me`, so any human holding `ai:use` has it.
+Input: `title` (≤ 120), `reason` (≤ 500, why it is needed), `fields[]` and optional `groups[]` (repeat
+groups: rows of the same columns, `minRows` 0–50, default 1, `maxRows` 1–50; at most 3 groups). A field is
+`{ key, label, kind: text | textarea | number | date | select | multiselect | checkbox, importance:
+required | recommended | optional, placeholder?, help?, options? | optionsFrom?, min?, max? }`; at most
+**20 fields in total** (top-level plus every group's columns), unique keys, a select has exactly one of
+`options` (≤ 100, strings or `{ value, label }`) or `optionsFrom`, `min`/`max` on numbers only.
+`optionsFrom` is a closed list — `manufacturers` (the distinct `AssetModel.manufacturer` names, up to three
+pages of models), `assetCategories`, `locations`, `assetModels` (ids, labelled "name (manufacturer)") —
+resolved at call time through the list routes **as the user** (`rt.call`, so a list they cannot read
+refuses the call with the route's 403; an empty list asks the model to use a text field).
+
+**No secrets.** The tool refuses (`INVALID_INPUT`, with a message telling the model never to ask for
+secrets) any form whose field or group key looks like a credential (`isSensitiveKey`, the ledger's
+redaction list), or whose title, reason, label, placeholder or help names one — word-based, English and
+Spanish (`password`, `passphrase`, `pwd`, `secret`, `token`, `credential`, `otp`, `mfa`, `2fa`, `pin`,
+`cvv`, `contraseña`, `clave`, …, and the pairs `api key`, `private key`, `secret key`, `access key`,
+`license key`, `ssh key`, `recovery code`, `security code`, `card number`). `secretary` or `passenger` pass.
+
+**The pause.** The loop invokes the tool like a read (validation, the class ceiling, `ai:use` held now,
+the option lists through the guards), then stores the form on an `ai_tool_invocations` row — status
+`AWAITING_INPUT`, `toolUseId` = the call id, `input` = the model's arguments, `preview` = `{ kind:
+"input_request", form }` (never an `AiActionPreview`, so no approval path reads it), `expiresAt` = now +
+`approvalTtlMinutes` — and pauses the run `RUNNING → AWAITING_INPUT` exactly like an approval (the step
+record first, then the compare-and-set, then the announcement: `tool.call` with status `AWAITING_INPUT`,
+`input.required { toolCallId, form, expiresAt }`, `run.status AWAITING_INPUT`). Two limits keep the pause
+unambiguous: **one form per step** (a second `request_input` in the step is answered `INVALID_INPUT`), and
+**never in a step that changes data** (a `request_input` in a step that also calls a write is answered
+`INVALID_INPUT` — "ask in a step of its own, before proposing any change" — and the writes pause for their
+cards as usual). So a run waits either for approvals or for one form, never both.
+
+**The answer.** `POST /ai/runs/:id/tool-calls/:toolCallId/input { action: submit | skip | cancel, values?,
+groups? }` (`ai:use`; `AiInputService.submit`): a Service Account → 403; not the caller's own chat run or
+form → 404; the run or the form not waiting → 409 `RUN_NOT_AWAITING_INPUT` (a double submit answers once);
+past its expiry → the form and the run end EXPIRED, 409 `EXPIRED`; AI switched off → 409 `AI_DISABLED`
+(the sweeper then cancels the run). `submit` is validated against the **stored** form by the shared
+`checkAiInputAnswer` — unknown field or group, a required field left blank, a wrong type, an option that was
+not offered, an impossible date, a number out of `min`/`max`, a row count outside `minRows..maxRows`, text
+over 500 (`text`) or 4000 (`textarea`) characters → 400 `INVALID_INPUT` with `issues: [{ path, message }]`
+(`values.<key>`, `groups.<key>`, `groups.<key>.<row>.<key>`) and the form keeps waiting. The answer is
+normalized (text trimmed, numbers sent as text parsed, multiselect de-duplicated, blanks dropped) and
+becomes the call's result (`kind: navigate`, `mutated: false`): `{ outcome: "submitted", providedBy:
+"user", answer: { values, groups }, labels? }` (`labels` names the chosen options of an `optionsFrom`
+select, whose values are ids; those names come from lazyit records, so each is wrapped as
+`<untrusted_content>`). `skip` → `{ outcome: "skipped", note }` (continue without it); `cancel` →
+`{ outcome: "declined", note }` (do not ask again). The answer is **user-provided**: the owner typed it
+for their own run, so it is not wrapped as `<untrusted_content>` — except lazyit text in the model's copy:
+the `labels` taken from lazyit records, and a value picked from a list whose values are names
+(`manufacturers`; ids stay plain). The row's `preview` keeps the user's answer as given (`{ kind, form,
+answer }`), which is what the transcript shows. Row status `SUCCEEDED` (submitted) or
+`REJECTED` (skipped, declined); `input.resolved { toolCallId, outcome }` and `tool.result` are emitted and
+the run resumes (`AWAITING_INPUT → QUEUED`, the same `resumeIfDecided` as an approval).
+
+**Expiry, cancel, kill switch** — as for approvals: the sweeper expires forms past `expiresAt` (row
+`EXPIRED`, `input.resolved expired`, the run EXPIRED with `finishReason: input_expired`, the call answered
+`EXPIRED`); cancelling the run, or any finalization, closes a waiting form `CANCELLED` (`input.resolved
+cancelled`); an AWAITING_INPUT run is cancelled by the sweeper when AI is turned off or the principal lost
+`ai:use`, and a lost resume is re-enqueued. `AWAITING_INPUT` counts as an active run (one per conversation,
+three per principal), and a conversation holding one is never purged. The stream closes after `run.status
+AWAITING_INPUT` like after `AWAITING_APPROVAL`; `run.snapshot` carries `pendingInputs`; the conversation
+state is `awaiting-input`; the transcript part `{ type: "input", request, outcome, answer? }` follows the
+call's tool part.
+
+**MCP elicitation is not built.** The tool is chat-only; over MCP the client's own elicitation would be
+the equivalent, and lazyit does not use it yet (§13).
+
 ## 9. HTTP surfaces and the stream contract
 
 ### 9.1 Endpoints
@@ -1387,6 +1467,8 @@ message protocol.
 | `tool.call` | `{ toolCallId, name, kind: read \| mutation \| navigate, class, status, args? }` — `args` is a flat, redacted summary |
 | `tool.approval_required` | `{ toolCallId, preview, elevated, stepUpRequired, untrustedSources, expiresAt }` — the preview is server-built |
 | `tool.approval_resolved` | `{ toolCallId, decision: approved \| rejected \| expired \| cancelled }` |
+| `input.required` | `{ toolCallId, form, expiresAt }` — a form the assistant asked for (#1388, §8.2) |
+| `input.resolved` | `{ toolCallId, outcome: submitted \| skipped \| declined \| expired \| cancelled }` (#1388) |
 | `tool.result` | `{ toolCallId, kind, status: ok \| error, summary?, mutated, entityRefs: { type, id, op, label?, slug? }[], error?, requestId? }` — a `navigate`-kind result carries the target ref; relayed on the CHAT channel only, where the web decides whether to navigate (R3) |
 | `step.finished` | `{ stepIndex, usage }` |
 | `run.finished` | `{ status, finishReason, usage, error?: { code, message, retryAfterSec?, requestId? } }` |

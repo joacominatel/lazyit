@@ -44,7 +44,7 @@ const SKIPPED: AiRetentionSweepResult = {
  *     (`isActive = false` + `directoryOffboardedAt`) follows normal retention (CEO decision 2026-09-24);
  *  3. conversation-less MCP invocations older than the window and no longer in flight.
  *
- * A conversation with a QUEUED, RUNNING or AWAITING_APPROVAL run, or an in-flight tool invocation, is skipped and retried next pass. It runs
+ * A conversation with an active run (QUEUED, RUNNING, AWAITING_APPROVAL or AWAITING_INPUT), or an in-flight tool invocation, is skipped and retried next pass. It runs
  * whether or not the assistant is enabled (frontend.md §11 item 4: turning AI off keeps conversations
  * dormant and retention keeps running); with no settings row the default window applies. A failed settings
  * read skips the whole pass rather than guess a window. `AiRun`, `AiUsage` and `AiActionLog` are never

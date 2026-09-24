@@ -22,7 +22,7 @@ import { get, type ClientRequest, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import request from 'supertest';
 import { AiRunEventSchema } from '@lazyit/shared';
-import { HUMAN, TOOLS } from '../runtime/runtime.harness-spec';
+import { FAKE_FORM, HUMAN, TOOLS } from '../runtime/runtime.harness-spec';
 import {
   buildHttp,
   parseSse,
@@ -311,6 +311,82 @@ describe('live delivery', () => {
     const second = parseSse((await events(runId, 'A', last.id)).body);
     const types = second.map((f) => f.event);
     expect(types).toContain('tool.approval_resolved');
+    expect(types[types.length - 1]).toBe('run.finished');
+  });
+});
+
+describe('input requests (#1388)', () => {
+  it('snapshots a run waiting for input with its stored form, then closes', async () => {
+    await setup();
+    const runId = await startRun([
+      {
+        toolCalls: [
+          {
+            toolCallId: 'ask1',
+            toolName: TOOLS.input.descriptor.name,
+            input: {},
+          },
+        ],
+      },
+    ]);
+    await h.rt.drain();
+    const frames = parseSse((await events(runId)).body);
+    expect(frames).toHaveLength(1);
+    expect(AiRunEventSchema.safeParse(frames[0].data).success).toBe(true);
+    expect(frames[0].data).toMatchObject({
+      status: 'AWAITING_INPUT',
+      pendingApprovals: [],
+      pendingInputs: [{ toolCallId: 'ask1', form: FAKE_FORM }],
+    });
+  });
+
+  it('closes live after AWAITING_INPUT; the client re-subscribes after answering', async () => {
+    await setup();
+    const runId = await startRun([
+      {
+        toolCalls: [
+          {
+            toolCallId: 'ask1',
+            toolName: TOOLS.input.descriptor.name,
+            input: {},
+          },
+        ],
+      },
+      { text: 'Thanks.' },
+    ]);
+    const subscribe = h.rt.bus.subscribe.bind(h.rt.bus);
+    const spy = jest
+      .spyOn(h.rt.bus, 'subscribe')
+      .mockImplementation((id, listener) => {
+        const off = subscribe(id, listener);
+        setTimeout(() => void h.rt.drain(), 10);
+        return off;
+      });
+    const first = parseSse((await events(runId)).body);
+    const last = first[first.length - 1];
+    expect(last).toMatchObject({
+      event: 'run.status',
+      data: { status: 'AWAITING_INPUT' },
+    });
+    expect(first.find((f) => f.event === 'input.required')?.data).toMatchObject(
+      { toolCallId: 'ask1', form: FAKE_FORM },
+    );
+
+    await http()
+      .post(`/ai/runs/${runId}/tool-calls/ask1/input`)
+      .set('X-Test-Principal', 'A')
+      .send({ action: 'skip' })
+      .expect(200);
+    spy.mockRestore();
+    const subscribe2 = h.rt.bus.subscribe.bind(h.rt.bus);
+    jest.spyOn(h.rt.bus, 'subscribe').mockImplementation((id, listener) => {
+      const off = subscribe2(id, listener);
+      setTimeout(() => void h.rt.drain(), 10);
+      return off;
+    });
+    const second = parseSse((await events(runId, 'A', last.id)).body);
+    const types = second.map((f) => f.event);
+    expect(types).toContain('input.resolved');
     expect(types[types.length - 1]).toBe('run.finished');
   });
 });

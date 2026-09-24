@@ -31,11 +31,15 @@ import { int4 } from "./primitives";
  * Status sets (synthesis §4.4)
  * ────────────────────────────────────────────────────────────────────────────────────────────── */
 
-/** `AiRun.status`: QUEUED → RUNNING → AWAITING_APPROVAL → … → a terminal status. */
+/**
+ * `AiRun.status`: QUEUED → RUNNING → AWAITING_APPROVAL | AWAITING_INPUT → … → a terminal status.
+ * AWAITING_INPUT (#1388) is a chat run paused on a form the assistant asked the user to fill.
+ */
 export const AI_RUN_STATUSES = [
   "QUEUED",
   "RUNNING",
   "AWAITING_APPROVAL",
+  "AWAITING_INPUT",
   "SUCCEEDED",
   "FAILED",
   "CANCELLED",
@@ -57,6 +61,13 @@ export const AI_RUN_ACTIVE_STATUSES = [
   "QUEUED",
   "RUNNING",
   "AWAITING_APPROVAL",
+  "AWAITING_INPUT",
+] as const satisfies readonly AiRunStatus[];
+
+/** The statuses of a run paused on the user: a pending approval, or a pending input form (#1388). */
+export const AI_RUN_WAITING_STATUSES = [
+  "AWAITING_APPROVAL",
+  "AWAITING_INPUT",
 ] as const satisfies readonly AiRunStatus[];
 
 /** Humans approve every write; Service Accounts run autonomously within their grants. */
@@ -68,9 +79,12 @@ export type AiApprovalPolicy = z.infer<typeof AiApprovalPolicySchema>;
  * `AiToolInvocation.status`. Reads and autonomous writes: EXECUTING → SUCCEEDED | FAILED | DENIED.
  * Interactive writes: AWAITING_APPROVAL → REJECTED | EXPIRED | CANCELLED, or the atomic approve claim
  * AWAITING_APPROVAL → EXECUTING → SUCCEEDED | FAILED | OUTCOME_UNKNOWN. OUTCOME_UNKNOWN is never retried.
+ * An input request (#1388): AWAITING_INPUT → SUCCEEDED (submitted) | REJECTED (skipped or declined) |
+ * EXPIRED | CANCELLED.
  */
 export const AI_TOOL_INVOCATION_STATUSES = [
   "AWAITING_APPROVAL",
+  "AWAITING_INPUT",
   "EXECUTING",
   "SUCCEEDED",
   "FAILED",
@@ -347,6 +361,314 @@ export const AiApprovalOutcomeSchema = z.enum(AI_APPROVAL_OUTCOMES);
 export type AiApprovalOutcome = z.infer<typeof AiApprovalOutcomeSchema>;
 
 /* ──────────────────────────────────────────────────────────────────────────────────────────────
+ * Input requests (#1388; ADR-0097 decision 3 as amended 2026-09-24) — a form the assistant builds
+ * to ask the user for data it is missing. Chat only; the run pauses AWAITING_INPUT until the owner
+ * submits, skips or declines it, and the answer becomes the tool result (user-provided).
+ * ────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** Hard caps on a form the model builds and on the answer the user sends back. */
+export const AI_INPUT_LIMITS = {
+  /** Fields across the whole form: top-level plus every repeat group's columns. */
+  fields: 20,
+  /** Repeat groups per form. */
+  groups: 3,
+  /** Rows a repeat group may hold. */
+  rows: 50,
+  /** Options of one select or multiselect. */
+  options: 100,
+  titleLength: 120,
+  reasonLength: 500,
+  labelLength: 120,
+  helpLength: 300,
+  placeholderLength: 120,
+  optionLength: 200,
+  /** A `text` answer. */
+  textLength: 500,
+  /** A `textarea` answer. */
+  textareaLength: 4000,
+} as const;
+
+/** What a field asks for. Rendered as plain text: nothing the model writes is HTML or Markdown. */
+export const AI_INPUT_FIELD_KINDS = [
+  "text",
+  "textarea",
+  "number",
+  "date",
+  "select",
+  "multiselect",
+  "checkbox",
+] as const;
+export const AiInputFieldKindSchema = z.enum(AI_INPUT_FIELD_KINDS);
+export type AiInputFieldKind = z.infer<typeof AiInputFieldKindSchema>;
+
+/**
+ * How much the assistant needs a field: `required` (it cannot continue without it; the form cannot be
+ * submitted empty), `recommended` (it would help), `optional` (nice to have).
+ */
+export const AI_INPUT_IMPORTANCE = ["required", "recommended", "optional"] as const;
+export const AiInputImportanceSchema = z.enum(AI_INPUT_IMPORTANCE);
+export type AiInputImportance = z.infer<typeof AiInputImportanceSchema>;
+
+/**
+ * The lazyit reference lists a select may take its options from, resolved server-side through the
+ * list routes as the user (a list they cannot read refuses the whole request). Values are ids, except
+ * `manufacturers` (a free-text attribute of asset models: the distinct names).
+ */
+export const AI_INPUT_OPTION_SOURCES = [
+  "manufacturers",
+  "assetCategories",
+  "locations",
+  "assetModels",
+] as const;
+export const AiInputOptionSourceSchema = z.enum(AI_INPUT_OPTION_SOURCES);
+export type AiInputOptionSource = z.infer<typeof AiInputOptionSourceSchema>;
+
+/** A field or group key: an identifier the answer is keyed by. */
+export const AiInputKeySchema = z
+  .string()
+  .regex(/^[a-z][a-zA-Z0-9_]{0,39}$/, "A key is a short identifier (letters, digits, _)");
+
+export const AiInputOptionSchema = z.object({
+  value: z.string().min(1).max(AI_INPUT_LIMITS.optionLength),
+  label: z.string().min(1).max(AI_INPUT_LIMITS.optionLength),
+});
+export type AiInputOption = z.infer<typeof AiInputOptionSchema>;
+
+/** One field of a stored form, options resolved. `required` is `importance === "required"`. */
+export const AiInputFieldSchema = z.object({
+  key: AiInputKeySchema,
+  label: z.string().min(1).max(AI_INPUT_LIMITS.labelLength),
+  kind: AiInputFieldKindSchema,
+  importance: AiInputImportanceSchema,
+  required: z.boolean(),
+  placeholder: z.string().max(AI_INPUT_LIMITS.placeholderLength).optional(),
+  help: z.string().max(AI_INPUT_LIMITS.helpLength).optional(),
+  /** select / multiselect only: the choices (resolved from `optionsFrom` when it is set). */
+  options: z.array(AiInputOptionSchema).max(AI_INPUT_LIMITS.options).optional(),
+  /** Where the options came from, when lazyit supplied them. */
+  optionsFrom: AiInputOptionSourceSchema.optional(),
+  /** number only: inclusive bounds. */
+  min: z.number().finite().optional(),
+  max: z.number().finite().optional(),
+});
+export type AiInputField = z.infer<typeof AiInputFieldSchema>;
+
+/** A repeat group: rows of the same columns (one row per model, per site…). */
+export const AiInputGroupSchema = z.object({
+  key: AiInputKeySchema,
+  label: z.string().min(1).max(AI_INPUT_LIMITS.labelLength),
+  help: z.string().max(AI_INPUT_LIMITS.helpLength).optional(),
+  minRows: int4({ min: 0, max: AI_INPUT_LIMITS.rows }),
+  maxRows: int4({ min: 1, max: AI_INPUT_LIMITS.rows }),
+  fields: z.array(AiInputFieldSchema).min(1).max(AI_INPUT_LIMITS.fields),
+});
+export type AiInputGroup = z.infer<typeof AiInputGroupSchema>;
+
+/** The stored form, as the web renders it. */
+export const AiInputFormSchema = z.object({
+  title: z.string().min(1).max(AI_INPUT_LIMITS.titleLength),
+  /** Why the assistant needs this — shown above the fields. */
+  reason: z.string().min(1).max(AI_INPUT_LIMITS.reasonLength),
+  fields: z.array(AiInputFieldSchema).max(AI_INPUT_LIMITS.fields),
+  groups: z.array(AiInputGroupSchema).max(AI_INPUT_LIMITS.groups),
+});
+export type AiInputForm = z.infer<typeof AiInputFormSchema>;
+
+/** A pending input request (`input.required`, the `run.snapshot` pending list, the transcript part). */
+export const AiInputRequestSchema = z.object({
+  toolCallId: z.string().min(1),
+  form: AiInputFormSchema,
+  expiresAt: z.iso.datetime(),
+});
+export type AiInputRequest = z.infer<typeof AiInputRequestSchema>;
+
+/** One answered value: text, number, date (`YYYY-MM-DD`) and select are strings or numbers. */
+export const AiInputValueSchema = z.union([
+  z.string().max(AI_INPUT_LIMITS.textareaLength),
+  z.number().finite(),
+  z.boolean(),
+  z.array(z.string().max(AI_INPUT_LIMITS.optionLength)).max(AI_INPUT_LIMITS.options),
+  z.null(),
+]);
+export type AiInputValue = z.infer<typeof AiInputValueSchema>;
+
+const AiInputValuesSchema = z.record(AiInputKeySchema, AiInputValueSchema);
+
+/** What the user answered: top-level values and, per repeat group, its rows. */
+export const AiInputAnswerSchema = z.object({
+  values: AiInputValuesSchema,
+  groups: z.record(AiInputKeySchema, z.array(AiInputValuesSchema).max(AI_INPUT_LIMITS.rows)),
+});
+export type AiInputAnswer = z.infer<typeof AiInputAnswerSchema>;
+
+/**
+ * What the user does with a form: `submit` it, `skip` it (the assistant continues without the data) or
+ * `cancel` it (declines: the assistant is told not to ask again). Ending the whole run is the run's own
+ * cancel endpoint.
+ */
+export const AI_INPUT_ACTIONS = ["submit", "skip", "cancel"] as const;
+export const AiInputActionSchema = z.enum(AI_INPUT_ACTIONS);
+export type AiInputAction = z.infer<typeof AiInputActionSchema>;
+
+/**
+ * `POST /ai/runs/:id/tool-calls/:toolCallId/input`. `values` and `groups` are read on `submit` only and
+ * validated against the STORED form (unknown keys, a missing required field, a wrong type, an option
+ * that is not offered, a row count out of bounds → 400 `INVALID_INPUT` with `issues`).
+ */
+export const AiInputSubmissionSchema = z.strictObject({
+  action: AiInputActionSchema,
+  values: AiInputValuesSchema.optional(),
+  groups: z
+    .record(AiInputKeySchema, z.array(AiInputValuesSchema).max(AI_INPUT_LIMITS.rows))
+    .optional(),
+});
+export type AiInputSubmission = z.infer<typeof AiInputSubmissionSchema>;
+
+/** How an input request ended, as the stream and the transcript report it. */
+export const AI_INPUT_OUTCOMES = ["submitted", "skipped", "declined", "expired", "cancelled"] as const;
+export const AiInputOutcomeSchema = z.enum(AI_INPUT_OUTCOMES);
+export type AiInputOutcome = z.infer<typeof AiInputOutcomeSchema>;
+
+/** One problem with a submitted answer: where (`values.<key>`, `groups.<key>.<row>.<key>`) and what. */
+export interface AiInputIssue {
+  path: string;
+  message: string;
+}
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+function isBlank(value: AiInputValue | undefined): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && value.trim().length === 0) ||
+    (Array.isArray(value) && value.length === 0)
+  );
+}
+
+function checkValue(
+  field: AiInputField,
+  value: AiInputValue | undefined,
+  path: string,
+  issues: AiInputIssue[],
+): AiInputValue | undefined {
+  if (isBlank(value)) {
+    if (field.required && field.kind !== "checkbox") {
+      issues.push({ path, message: "This field is required" });
+    }
+    return undefined;
+  }
+  const offered = new Set((field.options ?? []).map((option) => option.value));
+  switch (field.kind) {
+    case "text":
+    case "textarea": {
+      const max =
+        field.kind === "text" ? AI_INPUT_LIMITS.textLength : AI_INPUT_LIMITS.textareaLength;
+      if (typeof value !== "string") break;
+      const text = value.trim();
+      if (text.length > max) {
+        issues.push({ path, message: `At most ${max} characters` });
+        return undefined;
+      }
+      return text;
+    }
+    case "number": {
+      const n = typeof value === "string" ? Number(value.trim()) : value;
+      if (typeof n !== "number" || !Number.isFinite(n)) break;
+      if (field.min !== undefined && n < field.min) {
+        issues.push({ path, message: `At least ${field.min}` });
+        return undefined;
+      }
+      if (field.max !== undefined && n > field.max) {
+        issues.push({ path, message: `At most ${field.max}` });
+        return undefined;
+      }
+      return n;
+    }
+    case "date": {
+      if (typeof value !== "string" || !DATE_ONLY.test(value)) break;
+      const date = new Date(`${value}T00:00:00Z`);
+      if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) break;
+      return value;
+    }
+    case "select": {
+      if (typeof value !== "string") break;
+      if (!offered.has(value)) {
+        issues.push({ path, message: "Not one of the offered options" });
+        return undefined;
+      }
+      return value;
+    }
+    case "multiselect": {
+      if (!Array.isArray(value)) break;
+      const unique = [...new Set(value)];
+      if (unique.some((item) => !offered.has(item))) {
+        issues.push({ path, message: "Not one of the offered options" });
+        return undefined;
+      }
+      return unique;
+    }
+    case "checkbox": {
+      if (typeof value !== "boolean") break;
+      return value;
+    }
+  }
+  issues.push({ path, message: `Not a valid ${field.kind} value` });
+  return undefined;
+}
+
+function checkValues(
+  fields: readonly AiInputField[],
+  values: Readonly<Record<string, AiInputValue>>,
+  prefix: string,
+  issues: AiInputIssue[],
+): Record<string, AiInputValue> {
+  const known = new Set(fields.map((field) => field.key));
+  for (const key of Object.keys(values)) {
+    if (!known.has(key)) issues.push({ path: `${prefix}.${key}`, message: "Unknown field" });
+  }
+  const out: Record<string, AiInputValue> = {};
+  for (const field of fields) {
+    const checked = checkValue(field, values[field.key], `${prefix}.${field.key}`, issues);
+    if (checked !== undefined) out[field.key] = checked;
+  }
+  return out;
+}
+
+/**
+ * Validate a submitted answer against the stored form — the API's check, exported so the web can show
+ * the same problems before sending. Text is trimmed, numbers sent as text are parsed, a multiselect is
+ * deduplicated and blank values are dropped from the normalized answer.
+ */
+export function checkAiInputAnswer(
+  form: AiInputForm,
+  submitted: { values?: Record<string, AiInputValue>; groups?: Record<string, Record<string, AiInputValue>[]> },
+): { ok: true; answer: AiInputAnswer } | { ok: false; issues: AiInputIssue[] } {
+  const issues: AiInputIssue[] = [];
+  const values = checkValues(form.fields, submitted.values ?? {}, "values", issues);
+  const groups: Record<string, Record<string, AiInputValue>[]> = {};
+  const knownGroups = new Set(form.groups.map((group) => group.key));
+  for (const key of Object.keys(submitted.groups ?? {})) {
+    if (!knownGroups.has(key)) issues.push({ path: `groups.${key}`, message: "Unknown group" });
+  }
+  for (const group of form.groups) {
+    const rows = submitted.groups?.[group.key] ?? [];
+    if (rows.length < group.minRows || rows.length > group.maxRows) {
+      issues.push({
+        path: `groups.${group.key}`,
+        message: `Between ${group.minRows} and ${group.maxRows} rows`,
+      });
+      continue;
+    }
+    groups[group.key] = rows.map((row, index) =>
+      checkValues(group.fields, row, `groups.${group.key}.${index}`, issues),
+    );
+  }
+  if (issues.length > 0) return { ok: false, issues: issues.slice(0, 50) };
+  return { ok: true, answer: { values, groups } };
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────────────────────
  * Event payloads shared by the stream and the persisted transcript
  * ────────────────────────────────────────────────────────────────────────────────────────────── */
 
@@ -403,6 +725,14 @@ export const AiMessagePartSchema = z.discriminatedUnion("type", [
     auto: z.boolean().optional(),
   }),
   z.object({ type: z.literal("notice"), error: AiRunErrorSchema }),
+  z.object({
+    type: z.literal("input"),
+    request: AiInputRequestSchema,
+    /** null while the user has not answered. */
+    outcome: AiInputOutcomeSchema.nullable(),
+    /** The user's own answer, once submitted. */
+    answer: AiInputAnswerSchema.optional(),
+  }),
 ]);
 export type AiMessagePart = z.infer<typeof AiMessagePartSchema>;
 
@@ -423,7 +753,12 @@ export type AiPersistedMessage = z.infer<typeof AiPersistedMessageSchema>;
  * ────────────────────────────────────────────────────────────────────────────────────────────── */
 
 /** What the chat shows for a conversation's state. */
-export const AI_CONVERSATION_STATES = ["idle", "running", "awaiting-approval"] as const;
+export const AI_CONVERSATION_STATES = [
+  "idle",
+  "running",
+  "awaiting-approval",
+  "awaiting-input",
+] as const;
 export const AiConversationStateSchema = z.enum(AI_CONVERSATION_STATES);
 export type AiConversationState = z.infer<typeof AiConversationStateSchema>;
 
@@ -494,6 +829,8 @@ export const AiRunEventSchema = z.discriminatedUnion("type", [
     status: AiRunStatusSchema,
     messages: z.array(AiPersistedMessageSchema),
     pendingApprovals: z.array(AiApprovalRequestSchema),
+    /** The pending input forms (#1388). Absent from an older API. */
+    pendingInputs: z.array(AiInputRequestSchema).optional(),
   }),
   z.object({ v, type: z.literal("run.status"), status: AiRunStatusSchema }),
   z.object({
@@ -527,6 +864,14 @@ export const AiRunEventSchema = z.discriminatedUnion("type", [
     preview: AiActionPreviewSchema.optional(),
   }),
   AiToolResultSummarySchema.extend({ v, type: z.literal("tool.result") }),
+  /** The assistant asked the user to fill a form (#1388); the run pauses AWAITING_INPUT. */
+  AiInputRequestSchema.extend({ v, type: z.literal("input.required") }),
+  z.object({
+    v,
+    type: z.literal("input.resolved"),
+    toolCallId: z.string().min(1),
+    outcome: AiInputOutcomeSchema,
+  }),
   z.object({
     v,
     type: z.literal("step.finished"),

@@ -1,11 +1,13 @@
 import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
-import type {
-  AiConversationChannel,
-  AiProviderKind,
-  AiEntityRef,
-  AiRunError,
-  AiSettings,
-  AiToolResult,
+import {
+  AiInputFormSchema,
+  type AiConversationChannel,
+  type AiInputRequest,
+  type AiProviderKind,
+  type AiEntityRef,
+  type AiRunError,
+  type AiSettings,
+  type AiToolResult,
 } from '@lazyit/shared';
 import type { AiConversation, AiRun } from '../../../generated/prisma/client';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
@@ -47,6 +49,7 @@ import {
   principalKey,
   toolsetHashOf,
 } from './limits';
+import { AiInputRequests, toInputRequest } from './input-requests';
 import { AiRunPrincipals, type AiRunPrincipal } from './principal-context';
 import {
   AiRunLifecycle,
@@ -175,10 +178,18 @@ function untrustedRefsOf(result: AiToolResult): AiEntityRef[] {
   return serialized.includes(UNTRUSTED_TAG) ? result.entityRefs : [];
 }
 
-/** How one call of a step was resolved. */
+/**
+ * How one call of a step was resolved. A pending call waits for the user: a write's approval card, or —
+ * with `input` — a form the assistant asked them to fill (#1388).
+ */
 type CallResolution =
   | { kind: 'answered'; outcome: StepOutcome }
-  | { kind: 'pending'; toolCallId: string; action: AiPendingAction };
+  | {
+      kind: 'pending';
+      toolCallId: string;
+      action: AiPendingAction;
+      input?: AiInputRequest;
+    };
 
 interface RunScope {
   run: AiRun;
@@ -221,6 +232,7 @@ export class AgentLoop {
     private readonly principals: AiRunPrincipals,
     private readonly limits: AiRunLimits,
     private readonly lifecycle: AiRunLifecycle,
+    private readonly inputs: AiInputRequests,
   ) {}
 
   /** Whether this process is driving the run right now (the sweeper never finalizes such a run). */
@@ -446,7 +458,13 @@ export class AgentLoop {
       };
       const resolutions: CallResolution[] = [];
       let pendingCount = 0;
+      let inputCount = 0;
       let stepUntrusted: AiEntityRef[] = [];
+      // An input request pauses on its own: never in a step that also proposes a change (#1388).
+      const stepWrites = result.toolCalls.some((call) => {
+        const called = toolset.byName.get(call.toolName);
+        return !!called && callKindOf(called.descriptor.class) === 'mutation';
+      });
       for (const call of result.toolCalls) {
         const resolution = await this.resolveCall(call, {
           ctx: {
@@ -457,10 +475,13 @@ export class AgentLoop {
           toolset,
           toolCallsSoFar: toolCalls,
           pendingCount,
+          inputCount,
+          stepWrites,
         });
         toolCalls += 1;
         if (resolution.kind === 'pending') {
           pendingCount += 1;
+          if (resolution.input) inputCount += 1;
         } else if ('output' in resolution.outcome) {
           stepUntrusted = mergeRefs(stepUntrusted, resolution.untrusted ?? []);
         }
@@ -769,6 +790,10 @@ export class AgentLoop {
       toolset: FrozenToolset;
       toolCallsSoFar: number;
       pendingCount: number;
+      /** Input requests already pending in this step (at most one). */
+      inputCount?: number;
+      /** Whether this step also calls a tool that changes data. */
+      stepWrites?: boolean;
     },
   ): Promise<CallResolution & { untrusted?: AiEntityRef[] }> {
     const runId = state.ctx.runId!;
@@ -821,6 +846,10 @@ export class AgentLoop {
       });
     }
 
+    if (tool.descriptor.awaitsInput === true) {
+      return this.requestInput(call, tool, state, refuse, answer);
+    }
+
     if (kind === 'mutation' && state.ctx.channel === 'CHAT') {
       if (state.pendingCount >= AI_MAX_PENDING_PER_STEP) {
         return refuse({
@@ -866,6 +895,87 @@ export class AgentLoop {
     const result = await this.tools.invoke(name, call.input, state.ctx);
     this.emitResult(runId, call.toolCallId, result);
     return answer(result, untrustedRefsOf(result));
+  }
+
+  /**
+   * An input request (#1388): the tool validates the form and resolves its `optionsFrom` lists through
+   * the routes, as the user (`invoke`); the call then waits AWAITING_INPUT on a stored form, answered by
+   * the owner through `POST /ai/runs/:id/tool-calls/:toolCallId/input`. Chat and a human only; one form
+   * per step, and never in a step that also changes data (the pause is for the input alone).
+   */
+  private async requestInput(
+    call: ChatModelToolCall,
+    tool: RegisteredAiTool,
+    state: {
+      ctx: AiExecutionContext;
+      pendingCount: number;
+      inputCount?: number;
+      stepWrites?: boolean;
+    },
+    refuse: (error: Parameters<typeof errorResult>[1]) => CallResolution,
+    answer: (result: AiToolResult) => CallResolution,
+  ): Promise<CallResolution> {
+    const runId = state.ctx.runId!;
+    if (state.ctx.channel !== 'CHAT' || state.ctx.identity.kind !== 'human') {
+      return refuse({
+        code: 'NOT_AVAILABLE',
+        message: 'Nobody can answer a form on this channel',
+      });
+    }
+    if (state.stepWrites) {
+      return refuse({
+        code: 'INVALID_INPUT',
+        message:
+          'Ask for missing data in a step of its own, before proposing any change',
+        hint: 'Call only this tool (and reads) now; propose the changes after the answer.',
+      });
+    }
+    if ((state.inputCount ?? 0) > 0) {
+      return refuse({
+        code: 'INVALID_INPUT',
+        message: 'Ask with one form at a time; put every question in it',
+      });
+    }
+    const result = await this.tools.invoke(
+      tool.descriptor.name,
+      call.input,
+      state.ctx,
+    );
+    if (!result.ok) {
+      this.emitCall(runId, call, tool, 'FAILED');
+      this.emitResult(runId, call.toolCallId, result);
+      return answer(result);
+    }
+    const form = AiInputFormSchema.safeParse(
+      (result.data as { form?: unknown } | null)?.form,
+    );
+    if (!form.success) {
+      return refuse({
+        code: 'INTERNAL',
+        message: 'The form could not be built',
+      });
+    }
+    const row = await this.inputs.open({
+      ctx: state.ctx,
+      toolCallId: call.toolCallId,
+      tool,
+      input: call.input,
+      form: form.data,
+    });
+    const request = toInputRequest(row);
+    if (!request) {
+      return refuse({
+        code: 'INTERNAL',
+        message: 'The form could not be stored',
+      });
+    }
+    this.emitCall(runId, call, tool, 'AWAITING_INPUT');
+    return {
+      kind: 'pending',
+      toolCallId: call.toolCallId,
+      action: toPendingAction(row),
+      input: request,
+    };
   }
 
   /**
@@ -966,9 +1076,11 @@ export class AgentLoop {
   }
 
   /**
-   * Pause for approval: record the step with the answers known so far and the pending invocations, then
-   * compare-and-set RUNNING → AWAITING_APPROVAL, and only then announce the cards — so a decision can
-   * never race a run that is not yet waiting. A decision that already landed resumes at once.
+   * Pause for the user: record the step with the answers known so far and the pending invocations, then
+   * compare-and-set RUNNING → AWAITING_APPROVAL (pending writes) or AWAITING_INPUT (a pending form,
+   * #1388 — never both: a form is refused in a step that changes data), and only then announce the cards
+   * or the form — so a decision can never race a run that is not yet waiting. A decision that already
+   * landed resumes at once.
    */
   private async pause(
     run: AiRun,
@@ -976,6 +1088,11 @@ export class AgentLoop {
     record: StepRecord,
     resolutions: CallResolution[],
   ): Promise<void> {
+    const waiting = resolutions.some(
+      (resolution) => resolution.kind === 'pending' && resolution.input,
+    )
+      ? ('AWAITING_INPUT' as const)
+      : ('AWAITING_APPROVAL' as const);
     const paused = await this.prisma.$transaction(async (tx) => {
       await this.lifecycle.append(tx, conversationId, run.id, [
         {
@@ -987,7 +1104,7 @@ export class AgentLoop {
       // A cancel requested while the calls were resolved wins: the run never starts waiting.
       const claim = await tx.aiRun.updateMany({
         where: { id: run.id, status: 'RUNNING', cancelRequestedAt: null },
-        data: { status: 'AWAITING_APPROVAL' },
+        data: { status: waiting },
       });
       return claim.count > 0;
     });
@@ -999,6 +1116,13 @@ export class AgentLoop {
     }
     for (const resolution of resolutions) {
       if (resolution.kind !== 'pending') continue;
+      if (resolution.input) {
+        this.lifecycle.emit(run.id, {
+          type: 'input.required',
+          ...resolution.input,
+        });
+        continue;
+      }
       const request = toApprovalRequest(resolution.action);
       if (request) {
         this.lifecycle.emit(run.id, {
@@ -1007,10 +1131,7 @@ export class AgentLoop {
         });
       }
     }
-    this.lifecycle.emit(run.id, {
-      type: 'run.status',
-      status: 'AWAITING_APPROVAL',
-    });
+    this.lifecycle.emit(run.id, { type: 'run.status', status: waiting });
     await this.lifecycle.resumeIfDecided(run.id);
   }
 
@@ -1119,7 +1240,7 @@ export class AgentLoop {
     runId: string,
     call: ChatModelToolCall,
     tool: RegisteredAiTool,
-    status: 'EXECUTING' | 'AWAITING_APPROVAL' | 'FAILED',
+    status: 'EXECUTING' | 'AWAITING_APPROVAL' | 'AWAITING_INPUT' | 'FAILED',
   ): void {
     const args = summarizeArgs(call.input);
     this.lifecycle.emit(runId, {

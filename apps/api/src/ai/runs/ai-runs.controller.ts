@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiAcceptedResponse,
+  ApiBadRequestResponse,
   ApiConflictResponse,
   ApiForbiddenResponse,
   ApiHeader,
@@ -26,6 +27,7 @@ import type { Request, Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   AiApprovalDecisionSchema,
+  AiInputSubmissionSchema,
   AiRunAcceptedSchema,
   AiRunSchema,
   CreateAiRunSchema,
@@ -47,6 +49,7 @@ import { AiRunEventStream } from './run-event-stream';
 
 class CreateAiRunDto extends createZodDto(CreateAiRunSchema) {}
 class AiApprovalDecisionDto extends createZodDto(AiApprovalDecisionSchema) {}
+class AiInputSubmissionDto extends createZodDto(AiInputSubmissionSchema) {}
 class AiRunAcceptedDto extends createZodDto(AiRunAcceptedSchema) {}
 class AiRunDto extends createZodDto(AiRunSchema) {}
 
@@ -192,6 +195,41 @@ export class AiRunsController {
     });
   }
 
+  @Post(':id/tool-calls/:toolCallId/input')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Answer a form the assistant asked for (ai:use, the run’s own user, human session)',
+    description:
+      '`{ action: submit|skip|cancel, values?, groups? }` (#1388). `toolCallId` is the id announced by ' +
+      '`input.required`. `submit` is validated against the STORED form: unknown keys, a missing ' +
+      'required field, a wrong type, an option that was not offered or a row count out of bounds → 400 ' +
+      'INVALID_INPUT with `issues` [{ path, message }]. `skip` continues without the data; `cancel` ' +
+      'declines it (the assistant is told not to ask again). Answers `{ runId, status }`; re-subscribe to ' +
+      'the events. 409 RUN_NOT_AWAITING_INPUT (already answered, or the run is not waiting), EXPIRED (the ' +
+      'run ends EXPIRED) or AI_DISABLED; 403 FORBIDDEN for a Service Account.',
+  })
+  @ApiOkResponse({ type: AiRunAcceptedDto })
+  @ApiBadRequestResponse({ description: 'INVALID_INPUT, with issues' })
+  @ApiForbiddenResponse({ description: 'FORBIDDEN' })
+  @ApiConflictResponse({
+    description: 'RUN_NOT_AWAITING_INPUT, EXPIRED or AI_DISABLED',
+  })
+  @ApiNotFoundResponse({ description: 'Not the caller’s run or form.' })
+  submitInput(
+    @Param('id') id: string,
+    @Param('toolCallId') toolCallId: string,
+    @Body() dto: AiInputSubmissionDto,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<AiRunAccepted> {
+    return this.runs.submitInput({
+      runId: aiEntityId(id),
+      toolCallId: aiToolCallId(toolCallId),
+      identity: aiIdentityOf(principal).identity,
+      body: dto,
+    });
+  }
+
   @Get(':id/events')
   @ApiOperation({
     summary: 'The run’s event stream (ai:use, owner only) — text/event-stream',
@@ -200,7 +238,7 @@ export class AiRunsController {
       'consecutive), `event: <type>` and a JSON `data` from the versioned `AiRunEvent` union. Reconnect ' +
       'with `Last-Event-ID` to resume; a position the server no longer holds is answered with a ' +
       '`run.snapshot`. Heartbeat comments every 15 s. The stream closes after a terminal status or after ' +
-      'AWAITING_APPROVAL; re-subscribe after deciding.',
+      'AWAITING_APPROVAL or AWAITING_INPUT; re-subscribe after deciding or answering.',
   })
   @ApiHeader({ name: 'Last-Event-ID', required: false })
   @ApiProduces('text/event-stream')

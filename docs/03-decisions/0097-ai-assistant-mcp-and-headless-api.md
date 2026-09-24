@@ -160,6 +160,32 @@ The key forks only; each links its analysis.
    > → [[ai-assistant/tools-and-execution|tools]] §3, §7, §9; [[ai-assistant/security|security]] §6.1,
    > §6.9.
 
+   > Amended 2026-09-24 (#1388): **the assistant can ask for missing data with a form it builds.** The
+   > CEO: "la ia tiene que ser capaz de razonar que informacion le falta, que informacion NECESITA, cual
+   > estaria bien tener y cual es indiferente … o poder preguntarle al usuario mediante forms rapidos"; "es
+   > como si la ia desarrollara su propio form en base a lo que necesita".
+   >
+   > - **A chat-only interaction tool, `request_input`.** Class `navigate` with a new descriptor flag
+   >   `awaitsInput` (boot validation allows it on `navigate` tools only), so it is chat-only by
+   >   construction and never listed on MCP or headless. It is not a write: no approval card, no ledger
+   >   event. Its gate is `ai:use` alone (primary binding: the permission-free self-read).
+   > - **A bounded form.** Title, reason, fields (`text`, `textarea`, `number`, `date`, `select`,
+   >   `multiselect`, `checkbox`) each marked `required`, `recommended` or `optional`, and repeat groups
+   >   (one row per item); at most 20 fields, 3 groups, 50 rows, 100 options. A select's options may come
+   >   from a closed list of lazyit reference data (manufacturers, asset categories, locations, asset
+   >   models), read through the list routes as the user.
+   > - **Never a secret.** A form whose keys or text ask for a password, token, key, PIN or other
+   >   credential is refused; the web renders every model-authored string as plain text.
+   > - **A new pause, `AWAITING_INPUT`.** The run pauses like an approval (text status, validated on
+   >   write), the stream announces `input.required`, and the owner answers through
+   >   `POST /ai/runs/:id/tool-calls/:toolCallId/input` (`submit`, `skip` or `cancel`) — validated against
+   >   the stored form. The answer is the tool result, marked user-provided. Expiry, cancel and the kill
+   >   switch behave as for approvals; one form per step, never in a step that proposes a change.
+   > - **MCP elicitation is still not built** (see *Not built*): over MCP the tool does not exist.
+   >
+   > → [[ai-assistant/provider-and-runtime|provider]] §8.2; [[ai-assistant/tools-and-execution|tools]] §7;
+   > [[ai-assistant/security|security]] §6.2.
+
 4. **Interactive writes need approval on a server-built preview.** A chat write becomes a pending
    action with a deterministic before→after preview; only its owner approves, from a human session,
    once, before it expires; authorization and the target's version are re-checked at execute. Elevated
@@ -421,6 +447,13 @@ instance level, the grant exposes nothing until an admin enables it. Downgrading
 > start at 0; every grant that worked before the update keeps working, and every grant that was already
 > dead stays dead. Downgrading leaves two inert columns (an older build compares `sessionEpoch` again).
 
+> Amended 2026-09-24 (#1388, decision 3 amendment): no migration. `AWAITING_INPUT` is a new value of the
+> text status columns `ai_runs.status` and `ai_tool_invocations.status`, validated on write; existing rows
+> are untouched, and an older build reads the value as a newer build's (a run shown as FAILED, never as
+> active). The system prompt changes (a chat rule on asking for missing data), so `AI_PROMPT_VERSION` goes
+> to 4 (after #1391's 3): conversations begun on an earlier version become read-only on the next message and the user starts
+> a new one (default 7). Downgrading leaves `AWAITING_INPUT` rows an older build treats as unknown.
+
 ## Prerequisites
 
 - **#1314** — the seed must stop re-granting revoked default permissions before `ai:use` / `ai:connect`
@@ -437,7 +470,8 @@ The build follows the unified wave plan in [[ai-assistant/_synthesis|synthesis]]
 
 Click-level UI driving; conversation summarization; approve-all (other than the per-conversation
 auto-approve mode for ordinary writes, decision 4 as amended 2026-09-24) or approve-with-edits; provider
-fallback chains or per-user keys; MCP elicitation, resources, prompts or toolsets; any OIDC surface or
+fallback chains or per-user keys; MCP elicitation (the chat's input forms, decision 3 as amended
+2026-09-24 for #1388, have no MCP counterpart), resources, prompts or toolsets; any OIDC surface or
 OAuth over plain HTTP; lazyit as an MCP client; generic "call any endpoint" or file tools; admins reading
 other people's conversations; a per-request headless tool allowlist; workflow authoring over MCP or
 headless (deferred, #1344); any tool over workflow secrets. → [[ai-assistant/_synthesis|synthesis]] §9.2.

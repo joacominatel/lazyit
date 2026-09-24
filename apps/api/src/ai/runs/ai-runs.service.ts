@@ -8,6 +8,8 @@ import {
   AiRunStatusSchema,
   type AiApprovalDecision,
   type AiApprovalRequest,
+  type AiInputRequest,
+  type AiInputSubmission,
   type AiPersistedMessage,
   type AiRun as AiRunWire,
   type AiRunAccepted,
@@ -28,6 +30,8 @@ import {
 import { neutralizeTurnContext } from '../runtime/limits';
 import { AgentRunOrchestrator } from '../runtime/agent-run.orchestrator';
 import { AiApprovalService } from '../runtime/approval.service';
+import { toInputRequest } from '../runtime/input-requests';
+import { AiInputService } from '../runtime/input.service';
 import {
   AI_MESSAGE_FORMAT_MODEL,
   toApprovalRequest,
@@ -35,7 +39,8 @@ import {
 
 /**
  * `/ai/runs` (synthesis §4.4, §4.7; provider-and-runtime.md §9.1): create a run (the chat of a human, the
- * headless API of a Service Account), read it, cancel it, decide a pending write, and build the
+ * headless API of a Service Account), read it, cancel it, decide a pending write, answer an input form
+ * (#1388), and build the
  * `run.snapshot` of the event stream. Every read is OWNER ONLY through the runtime's `ownedRun` (anyone
  * else: 404, never a hint that the run exists); the runtime owns every rule about what may run.
  */
@@ -46,6 +51,7 @@ export class AiRunsService {
     private readonly orchestrator: AgentRunOrchestrator,
     private readonly approvals: AiApprovalService,
     private readonly registry: AiToolRegistry,
+    private readonly inputs: AiInputService,
   ) {}
 
   /**
@@ -222,6 +228,28 @@ export class AiRunsService {
   }
 
   /**
+   * `POST /ai/runs/:id/tool-calls/:toolCallId/input` (#1388). The runtime decides who may answer (the
+   * run's own human; anyone else 404, a Service Account 403) and validates the answer against the stored
+   * form; this answers the run's status afterwards so the client knows whether to re-subscribe.
+   */
+  async submitInput(input: {
+    runId: string;
+    toolCallId: string;
+    identity: DelegatedIdentity;
+    body: AiInputSubmission;
+  }): Promise<AiRunAccepted> {
+    const outcome = await this.inputs.submit(input);
+    if (outcome.runStatus) {
+      return { runId: input.runId, status: outcome.runStatus };
+    }
+    const run = await this.prisma.aiRun.findUnique({
+      where: { id: input.runId },
+      select: { status: true },
+    });
+    return { runId: input.runId, status: runStatusOf(run?.status) };
+  }
+
+  /**
    * The `run.snapshot` of the event stream (synthesis §4.6): the run's status, its own messages projected
    * like the conversation (the same allow-list), and its pending approvals with their stored previews.
    * `seq` is the last event the snapshot covers; the caller reads it BEFORE loading, so an event published
@@ -236,7 +264,10 @@ export class AiRunsService {
     const [messages, invocations] = await Promise.all([
       this.projectRun(current),
       this.prisma.aiToolInvocation.findMany({
-        where: { runId: run.id, status: 'AWAITING_APPROVAL' },
+        where: {
+          runId: run.id,
+          status: { in: ['AWAITING_APPROVAL', 'AWAITING_INPUT'] },
+        },
         orderBy: { createdAt: 'asc' },
       }),
     ]);
@@ -244,6 +275,10 @@ export class AiRunsService {
       .filter((row) => row.status === 'AWAITING_APPROVAL' && row.toolUseId)
       .map((row) => toApprovalRequest(toPendingAction(row)))
       .filter((request): request is AiApprovalRequest => request !== null);
+    const pendingInputs = invocations
+      .filter((row) => row.status === 'AWAITING_INPUT')
+      .map((row) => toInputRequest(row))
+      .filter((request): request is AiInputRequest => request !== null);
     const snapshot = {
       v: AI_RUN_EVENT_VERSION,
       type: 'run.snapshot' as const,
@@ -251,11 +286,17 @@ export class AiRunsService {
       status: runStatusOf(current.status),
       messages,
       pendingApprovals,
+      pendingInputs,
     };
     const valid = AiRunEventSchema.safeParse(snapshot);
     if (valid.success && valid.data.type === 'run.snapshot') return valid.data;
     // Never send an invalid frame: degrade to the status alone (the client re-reads the conversation).
-    return { ...snapshot, messages: [], pendingApprovals: [] };
+    return {
+      ...snapshot,
+      messages: [],
+      pendingApprovals: [],
+      pendingInputs: [],
+    };
   }
 
   /** The run's own messages, projected (owner already checked by the caller). */

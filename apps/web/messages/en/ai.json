@@ -85,6 +85,7 @@
       "FAILED": "Failed: {tool}",
       "DENIED": "Not allowed: {tool}",
       "AWAITING_APPROVAL": "Proposed: {tool}",
+      "AWAITING_INPUT": "Waiting for your answer: {tool}",
       "REJECTED": "Rejected: {tool}",
       "EXPIRED": "Expired: {tool}",
       "CANCELLED": "Cancelled: {tool}",
@@ -300,6 +301,7 @@
   "toolNames": {
     "lazyit_search": "Search lazyit",
     "session_context": "Session context",
+    "request_input": "Ask you for details",
     "asset_archive": "Archive an asset",
     "asset_check_in": "Check an asset in",
     "asset_check_out": "Check an asset out",
