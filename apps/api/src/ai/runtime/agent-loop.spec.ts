@@ -335,8 +335,11 @@ describe('chat writes: propose → approve → resume', () => {
         identity: HUMAN,
       });
     await decide();
-    const again = await decide();
-    expect(again.action.replayed).toBe(true);
+    const again = await refusedWith(decide());
+    expect(again).toMatchObject({
+      status: 409,
+      body: { code: 'RUN_NOT_AWAITING_APPROVAL' },
+    });
     expect(rt.tools.approved).toHaveLength(1);
     expect(rt.queue.jobs.filter((j) => j.name === 'resume')).toHaveLength(1);
   });

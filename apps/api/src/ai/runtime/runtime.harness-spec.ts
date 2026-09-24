@@ -952,6 +952,7 @@ export function buildRuntime() {
     loader as any,
     stepUp,
     lifecycle,
+    settings,
   );
   const sweeper = new AgentRunSweeper(
     p,

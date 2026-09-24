@@ -1,6 +1,8 @@
 import {
+  ConflictException,
   ForbiddenException,
   HttpException,
+  Inject,
   HttpStatus,
   Injectable,
   Logger,
@@ -11,6 +13,10 @@ import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrincipalLoaderService } from '../../auth/principal-loader.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiToolService } from '../core/ai-tool.service';
+import {
+  AI_SETTINGS_READER,
+  type AiSettingsReader,
+} from '../core/ports/ai-settings.port';
 import {
   requiresStepUp,
   toPendingAction,
@@ -76,6 +82,7 @@ export class AiApprovalService {
     private readonly loader: PrincipalLoaderService,
     private readonly stepUp: AiStepUpVerifier,
     private readonly lifecycle: AiRunLifecycle,
+    @Inject(AI_SETTINGS_READER) private readonly settings: AiSettingsReader,
   ) {}
 
   async decide(input: AiDecisionInput): Promise<AiDecisionOutcome> {
@@ -98,6 +105,25 @@ export class AiApprovalService {
       orderBy: { createdAt: 'desc' },
     });
     if (!row || row.userId !== identity.userId) throw notFound();
+    // A decision belongs to a run that is waiting for it: a finished, cancelled or already-resumed run
+    // takes none (a double click after the resume, a card left open after a cancel).
+    if (run.status !== 'AWAITING_APPROVAL') {
+      throw new ConflictException({
+        code: 'RUN_NOT_AWAITING_APPROVAL',
+        message: 'This run is not waiting for a decision',
+      });
+    }
+    // An approved write executes now: never while the assistant is switched off (§8 invariant 3).
+    if (
+      input.decision === 'approve' &&
+      !(await this.settings.resolveProviderConfig())
+    ) {
+      throw new ConflictException({
+        code: 'AI_DISABLED',
+        message:
+          'The AI assistant is turned off; this action cannot be approved',
+      });
+    }
 
     const ctx: AiExecutionContext = {
       identity,

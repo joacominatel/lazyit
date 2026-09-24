@@ -183,6 +183,25 @@ describe('password step-up', () => {
 });
 
 describe('who decides', () => {
+  it('refuses to approve while AI is turned off; the action stays pending', async () => {
+    rt.settings.config = null;
+    expect(await refusal(decide(PASSWORD))).toMatchObject({
+      status: 409,
+      body: { code: 'AI_DISABLED' },
+    });
+    expect(rt.tools.approved).toHaveLength(0);
+    expect(pendingStatus()).toBe('AWAITING_APPROVAL');
+  });
+
+  it('refuses a decision on a run that is not waiting for one', async () => {
+    await rt.orchestrator.cancel(runId, HUMAN);
+    expect(await refusal(decide(PASSWORD))).toMatchObject({
+      status: 409,
+      body: { code: 'RUN_NOT_AWAITING_APPROVAL' },
+    });
+    expect(rt.tools.approved).toHaveLength(0);
+  });
+
   it('only the run owner, from a human session', async () => {
     const other: DelegatedIdentity = {
       kind: 'human',
