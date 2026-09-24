@@ -61,7 +61,9 @@ work on an internal network too.
    ```
 
    The marketplace is named after your instance's address, so you can add several lazyit instances
-   side by side.
+   side by side. The commands always use the instance's **configured** address: if you opened lazyit
+   at a different one (an internal name or an IP), the page warns you and shows the commands for
+   review instead of as copy-ready.
 2. Start Claude Code, run `/mcp`, choose **lazyit** and sign in. Your browser opens lazyit's
    [consent screen](#the-consent-screen).
 3. **Updates are not automatic by default.** To receive new versions of the skill, open `/plugin` in
@@ -87,7 +89,10 @@ This is the only way on a plain-HTTP instance, and an alternative on HTTPS.
    unzip -o lazyit-plugin.zip -d ~/.claude/skills/lazyit
    ```
 
-   To try it for one session without installing, run `claude --plugin-dir ./lazyit-plugin.zip`.
+   Claude Code picks it up in your **next session** as the plugin `lazyit@skills-dir` — no marketplace
+   and no install step. To try it for one session without installing, run
+   `claude --plugin-dir ./lazyit-plugin.zip` instead. To update, download the plugin again and unzip it
+   over the same folder.
 3. Connect:
    - **HTTPS:** start Claude Code and run `/mcp` to sign in.
    - **Plain HTTP:** [create a personal token](/help/ai-assistant-connected-apps#personal-tokens) first.

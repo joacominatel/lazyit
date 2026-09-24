@@ -62,8 +62,9 @@ HTTPS dejan de funcionar allí, pero siguen en la lista hasta que caducan para q
 ## Bueno saber
 
 - Una conexión nunca tiene más acceso que tú: si tu rol pierde un permiso, tus apps también.
-- Las conexiones dependen de tu inicio de sesión. Cuando cambia tu contraseña, se desactiva tu cuenta o
-  —en una instancia que usa el inicio de sesión propio de lazyit— **cierras sesión** en lazyit, todas
-  las conexiones y tokens personales dejan de funcionar y desaparecen de la lista. Después vuelve a
-  conectar tus apps (o crea tokens nuevos).
+- Cerrar sesión en lazyit desde tu navegador **no** desconecta tus apps: las conexiones y los tokens
+  personales siguen funcionando. Todos dejan de funcionar —y desaparecen de la lista— cuando cambia tu
+  contraseña, cuando cierras sesión **en todas partes** (todos los dispositivos) o cuando se desactiva o
+  da de baja tu cuenta. Después vuelve a conectar tus apps (o crea tokens nuevos). Para cortar el acceso
+  a una sola app, revócala aquí.
 - Los administradores pueden ver y revocar las apps conectadas de todos los usuarios en **Ajustes → IA**.

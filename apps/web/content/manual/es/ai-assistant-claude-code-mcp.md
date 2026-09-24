@@ -60,7 +60,9 @@ desde tu máquina, así que también funcionan en una red interna.
    ```
 
    El marketplace lleva el nombre de la dirección de tu instancia, así que puedes agregar varias
-   instancias de lazyit a la vez.
+   instancias de lazyit a la vez. Los comandos siempre usan la dirección **configurada** de la
+   instancia: si abriste lazyit en otra (un nombre interno o una IP), la página te avisa y muestra los
+   comandos para revisarlos en lugar de listos para copiar.
 2. Inicia Claude Code, ejecuta `/mcp`, elige **lazyit** e inicia sesión. Tu navegador abre la pantalla de
    consentimiento de lazyit (ver más abajo).
 3. **Las actualizaciones no son automáticas por defecto.** Para recibir nuevas versiones del skill, abre
@@ -88,7 +90,10 @@ Es la única vía en una instancia HTTP sin cifrar, y una alternativa en HTTPS.
    unzip -o lazyit-plugin.zip -d ~/.claude/skills/lazyit
    ```
 
-   Para probarlo en una sola sesión sin instalarlo, ejecuta `claude --plugin-dir ./lazyit-plugin.zip`.
+   Claude Code lo detecta en tu **próxima sesión** como el plugin `lazyit@skills-dir`, sin marketplace
+   ni paso de instalación. Para probarlo en una sola sesión sin instalarlo, ejecuta
+   `claude --plugin-dir ./lazyit-plugin.zip`. Para actualizarlo, vuelve a descargar el plugin y
+   descomprímelo sobre la misma carpeta.
 3. Conéctate:
    - **HTTPS:** inicia Claude Code y ejecuta `/mcp` para iniciar sesión.
    - **HTTP sin cifrar:** primero [crea un token personal](/help/ai-assistant-connected-apps). Claude Code

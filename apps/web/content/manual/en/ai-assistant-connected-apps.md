@@ -61,8 +61,8 @@ working there, but stay listed until they expire so you can revoke them.
 ## Good to know
 
 - A connection never has more access than you: if your role loses a permission, so do your apps.
-- Connections are tied to your sign-in. When your password changes, your account is deactivated, or —
-  on an instance that uses lazyit's own sign-in — you **sign out** of lazyit, every connection and
-  personal token stops working and disappears from the list. Reconnect your apps (or create new tokens)
-  afterwards.
+- Signing out of lazyit in your browser does **not** disconnect your apps: connections and personal
+  tokens keep working. They all stop — and disappear from the list — when your password changes, when
+  you sign out **everywhere** (all devices), or when your account is deactivated or offboarded.
+  Reconnect your apps (or create new tokens) afterwards. To cut off one app, revoke it here.
 - Administrators can see and revoke every user's connected apps in **Settings → AI**.
