@@ -497,3 +497,38 @@ describe("chatReducer — input forms (#1388)", () => {
     expect(isAwaitingInput(s)).toBe(false);
   });
 });
+
+describe("chatReducer — web search sources (#1389)", () => {
+  const sources = [{ url: "https://www.easyredmine.com/docs", title: "Easy Redmine docs" }];
+
+  test("message.sources puts the sources under the message it names, once", () => {
+    let s = apply(
+      started(),
+      { type: "event", runId: RUN, eventId: at(1), event: ev("message.delta", { messageId: "m1", text: "Answer" }) },
+      { type: "event", runId: RUN, eventId: at(2), event: ev("message.completed", { messageId: "m1" }) },
+      { type: "event", runId: RUN, eventId: at(3), event: ev("message.sources", { messageId: "m1", sources }) },
+    );
+    expect(s.messages.at(-1)!.parts).toEqual([
+      { type: "text", text: "Answer" },
+      { type: "sources", sources },
+    ]);
+    // A second event for the same message replaces, never duplicates.
+    s = chatReducer(s, {
+      type: "event",
+      runId: RUN,
+      eventId: at(4),
+      event: ev("message.sources", { messageId: "m1", sources, queries: ["easy redmine"] }),
+    });
+    expect(s.messages.at(-1)!.parts.filter((p) => p.type === "sources")).toHaveLength(1);
+  });
+
+  test("sources for a message not seen yet start it", () => {
+    const s = apply(started(), {
+      type: "event",
+      runId: RUN,
+      eventId: at(1),
+      event: ev("message.sources", { messageId: "m9", sources }),
+    });
+    expect(s.messages.at(-1)).toMatchObject({ id: "m9", role: "assistant", parts: [{ type: "sources" }] });
+  });
+});

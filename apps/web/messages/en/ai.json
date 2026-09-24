@@ -84,6 +84,11 @@
     },
     "awaitingInput": "Waiting for your answer"
   },
+  "sources": {
+    "title": "Sources from the web",
+    "newTab": "(opens in a new tab)",
+    "note": "Found by the AI provider's web search. Written by others — check before relying on it."
+  },
   "tools": {
     "generic": {
       "EXECUTING": "Working: {tool}",
@@ -222,6 +227,7 @@
     "infraEdge": "Infrastructure link",
     "workflowRun": "Workflow run",
     "manualTask": "Manual task",
+    "webSearch": "Web search results",
     "unknown": "Item"
   },
   "errors": {

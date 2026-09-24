@@ -84,6 +84,11 @@
     },
     "awaitingInput": "Esperando tu respuesta"
   },
+  "sources": {
+    "title": "Fuentes de la web",
+    "newTab": "(se abre en una pestaña nueva)",
+    "note": "Encontradas por la búsqueda web del proveedor de IA. Las escribieron terceros — verificalas antes de basarte en ellas."
+  },
   "tools": {
     "generic": {
       "EXECUTING": "Trabajando: {tool}",
@@ -222,6 +227,7 @@
     "infraEdge": "Conexión de infraestructura",
     "workflowRun": "Ejecución de workflow",
     "manualTask": "Tarea manual",
+    "webSearch": "Resultados de búsqueda web",
     "unknown": "Elemento"
   },
   "errors": {

@@ -300,6 +300,28 @@ function applyEvent(state: ChatState, runId: string, event: AiRunEvent): ChatSta
         messages: withMessage(state.messages, at, { ...state.messages[at]!, streaming: false }),
       };
     }
+    case "message.sources": {
+      // The provider searched the web while writing this message (#1389): its sources go under it,
+      // replacing any the message already had (a snapshot and the live event describe the same step).
+      const part: AiMessagePart = {
+        type: "sources",
+        sources: event.sources,
+        ...(event.queries ? { queries: event.queries } : {}),
+      };
+      const at = state.messages.findIndex((m) => m.id === event.messageId);
+      if (at === -1) {
+        const message: ChatMessage = {
+          id: event.messageId,
+          role: "assistant",
+          parts: [part],
+          createdAt: new Date().toISOString(),
+        };
+        return { ...state, messages: [...state.messages, message] };
+      }
+      const message = state.messages[at]!;
+      const parts = [...message.parts.filter((p) => p.type !== "sources"), part];
+      return { ...state, messages: withMessage(state.messages, at, { ...message, parts }) };
+    }
     case "tool.call": {
       const known = updatePart(
         state.messages,
