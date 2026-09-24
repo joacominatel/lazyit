@@ -23,6 +23,7 @@
 import type { ConfigStatus } from "@lazyit/shared";
 
 import { auth } from "@/auth";
+import { hasSession } from "@/lib/auth/has-session";
 import { loginCallbackPath } from "@/lib/auth/login-callback";
 
 /**
@@ -97,7 +98,8 @@ export default auth(async (req) => {
 
   // A signed-in user implies an ADMIN already exists → the instance is configured. Skip the gate and
   // only run route protection. (Route protection itself is a no-op here since there IS a session.)
-  if (!session) {
+  // `hasSession`, not `!session`: a truthy error object is not a session (#1399, GHSA-8fpg-xm3f-6cx3).
+  if (!hasSession(session)) {
     // First-run gate. Only on top-level document navigations (not RSC/prefetch/data fetches) to avoid
     // a `GET /config/status` per sub-request — `Sec-Fetch-Mode: navigate` marks a real navigation.
     const isNavigation =

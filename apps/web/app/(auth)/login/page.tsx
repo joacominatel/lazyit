@@ -17,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getConfigStatus } from "@/lib/api/endpoints/config";
+import { hasSession } from "@/lib/auth/has-session";
 import { mayBounceSignedInVisitor } from "@/lib/auth/session-expiry";
 import { safeInternalPath } from "@/lib/utils/safe-redirect";
 
@@ -98,7 +99,8 @@ export default async function LoginPage({
   const destination = safeInternalPath(callbackUrl);
 
   // Already signed in → skip the login screen, unless the 401 handler sent the visitor here (#1307).
-  if (mayBounceSignedInVisitor(params) && (await auth())) {
+  // `hasSession`: only a real session bounces, never a truthy error object (#1399).
+  if (mayBounceSignedInVisitor(params) && hasSession(await auth())) {
     redirect(destination);
   }
 

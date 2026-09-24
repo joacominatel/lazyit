@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { hasSession } from "@/lib/auth/has-session";
 import { AuthShell } from "@/components/auth-shell";
 import { getConfigStatus } from "@/lib/api/endpoints/config";
 
@@ -22,7 +23,8 @@ export default async function ChangePasswordLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
-  if (!session) {
+  // A real session, not just a truthy value (#1399, GHSA-8fpg-xm3f-6cx3).
+  if (!hasSession(session)) {
     redirect("/login");
   }
 
