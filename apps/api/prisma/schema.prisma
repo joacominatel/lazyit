@@ -3081,8 +3081,9 @@ model AiSettings {
   mcpClientAllowlistAdded           Json      @default("[]")
   mcpClientAllowlistRemovedDefaults String[]  @default([])
   /// Accept ANY client whose redirect URIs are HTTPS (non-loopback), with a consent-screen warning.
-  /// Off by default, so the default policy is the curated list.
-  mcpAllowAnyHttpsClient            Boolean   @default(false)
+  /// On by default (ADR-0097 decision 13, amended 2026-09-24). Loopback and private-use redirects still
+  /// need an allowlist entry. A row stored before the default changed keeps its value.
+  mcpAllowAnyHttpsClient            Boolean   @default(true)
   /// The egress-disclosure acknowledgement, required before the first enable. The author is also
   /// recorded in ai_config_audit_log, which survives this row's edits.
   disclosureAcknowledgedAt          DateTime?
