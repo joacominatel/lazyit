@@ -1,4 +1,9 @@
-import { ALLOWED_ROOTS, mapData, renderTemplate } from './data-mapper';
+import {
+  ALLOWED_ROOTS,
+  mapData,
+  renderTemplate,
+  templatePaths,
+} from './data-mapper';
 import {
   freezeMappingContext,
   type WorkflowMappingContext,
@@ -236,5 +241,25 @@ describe('data-mapper — mapData', () => {
       fieldNames: [],
     });
     expect(mapData({}, ctx, 'json')).toEqual({ values: {}, fieldNames: [] });
+  });
+});
+
+describe('data-mapper — templatePaths (the parser the AI previews share)', () => {
+  it('normalizes each path exactly as renderTemplate resolves it', () => {
+    const ctx = makeCtx();
+    const template = '{{ grantee . email | lower }}-{{application.name}}-{{ }}';
+    expect(templatePaths(template)).toEqual([
+      'grantee.email',
+      'application.name',
+      '',
+    ]);
+    // What the described paths read is what is rendered.
+    expect(renderTemplate('{{ grantee . email }}', ctx, 'json')).toBe(
+      renderTemplate('{{ grantee.email }}', ctx, 'json'),
+    );
+  });
+
+  it('returns nothing for a literal', () => {
+    expect(templatePaths('plain text')).toEqual([]);
   });
 });

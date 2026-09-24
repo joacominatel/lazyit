@@ -232,7 +232,7 @@ Legend:
 | workflow-engine | definitions, connections, runs, tasks (read) | workflow:read | R | ✅ built, W2-13 (every channel) |
 | workflow-engine | retry / replay | workflow:run | W + ext | ✅ built, W2-13 (every channel; no `overrides`) |
 | workflow-engine | task submit / skip / fail | workflow:task + assignee | W + ext | ✅ built, W2-13 (every channel; the assignee guard decides) |
-| workflow-engine | definitions, versions, connections (incl. test), dry-run, enable/disable | workflow:manage (+workflow:secrets, CSEC-1) | W | planned, W2-14, `elevated`, **chat only** (MCP/headless deferred, #1344) |
+| workflow-engine | definitions, versions, connections (incl. test), dry-run, enable/disable | workflow:manage (+workflow:secrets, CSEC-1) | W | ✅ built (W2-14), `elevated`, **chat only** (MCP/headless deferred, #1344); the dry-run is embedded in the enable card (§7 W13) |
 | workflow-engine | workflow secrets | workflow:secrets | W | EXCL (the secret value would enter model context, INV-AI-5) |
 | imports (Migrator) | multi-step upload / plan / commit | import:run, human-only | W | EXCL v1 (upload; later) |
 | config | `my-permissions` | open | R | v1 `session_context` |
@@ -496,8 +496,8 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
   writes.
 
 **Workflow engine ([[0097-ai-assistant-mcp-and-headless-api]] decision 3, amended 2026-09-24).**
-The contract landed with W2-12; the operations (W1–W9) are built by W2-13, authoring (W10–W17) lands with
-W2-14, whose tool names are indicative until it pins them. Both toolsets are declared in the `access`
+The contract landed with W2-12; the operations (W1–W9) are built by W2-13, authoring (W10–W17) is built by
+W2-14. Both toolsets are declared in the `access`
 domain. W3 was folded out of W2 as its own tool, and W8 is two tools.
 
 | # | Tool | Binds (controller.method) | Permission | Class | Channels | Unit |
@@ -511,19 +511,69 @@ domain. W3 was folded out of W2 as its own tool, and W8 is two tools.
 | W7 | `workflow_run_replay` ✅ | WorkflowRunsController.replayLatest | workflow:run | write, ext | all | W2-13 |
 | W8 | `workflow_task_list` ✅ / `workflow_task_get` ✅ | ManualTasksController.findAll / .findOne | workflow:read | read | all | W2-13 |
 | W9 | `workflow_task_resolve` ✅ (submit\|skip\|fail) | ManualTasksController.submit (primary) / .skip / .fail | workflow:task + assignee | write, ext | all (an SA passes the assignee guard only on unassigned tasks) | W2-13 |
-| W10 | `workflow_create` (created disabled) | WorkflowsController.create | workflow:manage | elevated | chat | W2-14 |
-| W11 | `workflow_author_version` | WorkflowsController.authorVersion | workflow:manage | elevated | chat | W2-14 |
-| W12 | `workflow_update` (name, policy, executed-as) | WorkflowsController.update | workflow:manage | elevated | chat | W2-14 |
-| W13 | `workflow_set_enabled` (preview embeds a dry-run) | WorkflowsController.update (+ WorkflowDryRunController.run) | workflow:manage | elevated | chat | W2-14 |
-| W14 | `workflow_archive` | WorkflowsController.remove | workflow:manage | elevated·D | chat | W2-14 |
-| W15 | `workflow_connection_create` / `_update` / `_archive` | WorkflowConnectionsController.create / .update / .remove | workflow:manage (+workflow:secrets, CSEC-1) | elevated | chat | W2-14 |
-| W16 | `workflow_connection_test` | WorkflowConnectionsController.test | workflow:manage | elevated, ext | chat | W2-14 |
-| W17 | `workflow_dry_run` | WorkflowDryRunController.run | workflow:manage | read-like, bound as elevated | chat | W2-14 |
+| W10 | `workflow_create` ✅ built (W2-14) — always created disabled; the input has no `enabled` | WorkflowsController.create (+findAll, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
+| W11 | `workflow_author_version` ✅ built (W2-14) | WorkflowsController.authorVersion (+findOne, findAll, Connections findOne, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
+| W12 | `workflow_update` ✅ built (W2-14) — name, description, deprovision policy. Executed-as is **not** exposed: the route accepts only the engine Service Account, already the default (CSEC-3) | WorkflowsController.update (+findOne, findAll, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
+| W13 | `workflow_set_enabled` ✅ built (W2-14) — enabling takes `sampleAccessGrantId`; the card embeds the dry-run | WorkflowsController.update (+ WorkflowDryRunController.run, findOne, findAll, Connections findOne, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
+| W14 | `workflow_archive` ✅ built (W2-14) | WorkflowsController.remove (+findOne, findAll, Applications findAll/findOne) | workflow:manage | elevated·D | chat | W2-14 |
+| W15 | `workflow_connection_create` / `_update` / `_archive` ✅ built (W2-14) | WorkflowConnectionsController.create / .update (+ConfigController.myPermissions for the CSEC-1 pre-check) / .remove (+Workflows findAll/findOne for "used by") | workflow:manage (+workflow:secrets, CSEC-1) | elevated | chat | W2-14 |
+| W16 | `workflow_connection_test` ✅ built (W2-14) — REST only; a webhook or manual connection is refused before a card (nothing to probe) | WorkflowConnectionsController.test (+findOne, Applications findOne) | workflow:manage | elevated, ext | chat | W2-14 |
+| W17 | ~~`workflow_dry_run`~~ — **folded into W13** (W2-14): a dry-run changes nothing, so a standalone `elevated` card would carry no honest warning; its route is bound by `workflow_set_enabled` | WorkflowDryRunController.run | workflow:manage | — | chat | W2-14 |
 
 Warning rules for these tools (§9 has the step-up rule):
 - **`OUTBOUND_INTEGRATION`** — creating a connection; changing its host, URL or credential reference;
   authoring a version on an enabled workflow; enabling a workflow. The preview lists every outbound
   host and every mapped field → token, and old → new host on a re-point. No step-up by itself.
+  As built (W2-14), every connection write (create, update, test) carries it — a connection change is
+  a change to an outbound integration whatever the field — and every workflow write also carries its
+  trigger's `EXTERNAL_PROVISIONING` / `EXTERNAL_DEPROVISIONING`; archives add `SOFT_DELETE` and
+  `IRREVERSIBLE` (neither has a restore route).
+- **As built (W2-14), the authoring cards** (`workflow-authoring.tools.ts`):
+  - a plain-language `whatItDoes` line first ("Every time someone is granted access to Jira, lazyit
+    will send the person's email … to https://…"), then `outboundHosts`, `dataSent` (one
+    `host: field ← {{ token }} (words)` line per mapped field, the URL path's tokens included, and
+    whether the stored credential and which default headers go along) and `steps`; a version shows the
+    previous version's hosts and steps as `before`;
+  - URLs are shown as origin + path with query parameter **names** only; userinfo, query values, header
+    values and secret placeholders never reach a card or a result;
+  - the enable card runs the dry-run route against the named grant and lists each would-be request
+    (method, URL, body values, header names) and the end state; a failing dry-run, a workflow with no
+    steps, or a destination the egress guard would refuse shows no card;
+  - every destination is checked with the runtime egress guard (`assertUrlAllowed`, public HTTPS only)
+    before a card is shown; the guard still runs at execution;
+  - `workflow_connection_update` reads the caller's permissions (`ConfigController.myPermissions`) and
+    refuses before a card what CSEC-1 would refuse at execution (attaching a credential, or
+    re-pointing a secret-bearing connection, without `workflow:secrets`); the route enforces it again;
+  - connection `defaultHeaders` are never set by the AI (the config input omits them) and an update
+    keeps the existing ones; a re-point lists the header **names** that would follow to the new host;
+  - every card targets the **application** (the page hosting its workflows and connections; the wire
+    contract has no `workflow` entity type) and anchors its precondition on the latest of the
+    application's, the workflow's, its latest version's and the involved connections' timestamps, so any
+    change to what the card showed — the application being marked critical included — is `STALE`;
+  - each tool re-checks chat + human in `preview` and `run`, and calls `assertChannelAllows` in `run` on
+    a critical application (a no-op in the chat).
+  - review fixes (G2 review of #1354): template tokens are parsed by the runtime mapper's own parser
+    (`templatePaths`, exported from `workflow-engine/mapping/data-mapper.ts`), so `{{ grantee . email }}`
+    is described as the email; a token lazyit does not know (it would render empty) is refused, and a
+    `steps.<key>.…` token must name a step of the same graph; a URL carrying userinfo
+    (`https://user:pass@host`) is refused in the AI's connection config and for any destination a card
+    would describe; query values are masked in step paths, health-check paths and the tested
+    `probedPath`; a connection re-point lists every workflow calling the connection, what each enabled
+    one would send to the NEW host, adds their trigger warning and anchors STALE on their latest
+    versions; re-pointing a connection that carries default headers needs `workflow:secrets` (stricter
+    than the route); the enable card is refused when the sample grant's grantee was offboarded;
+    other-authored names in summaries and refusals the model reads are `untrusted()`;
+  - re-verification fixes: a re-point also lists the application's runs that can still call the
+    connection — PENDING, RUNNING, AWAITING_INPUT and FAILED (a retry resumes it) — because a run is
+    pinned to a version but reads its connections live; they add their trigger warning and their
+    `updatedAt` joins the STALE anchor (read through the run list, `workflow:read`; without it the card
+    says they could not be checked); any change to a legacy connection whose stored URL carries userinfo
+    is refused until a new, clean `config` fixes it; a `steps.<key>.<field>` token must name a MANUAL
+    step and one of its input fields (only a completed manual task fills `ctx.steps`); a GET / DELETE
+    REST step's `dataMapping` is shown as NOT sent (only POST / PUT / PATCH carry a body);
+  - references: a workflow is `{ id }` or `{ application, trigger }` (at most one live workflow per
+    application and trigger); a connection, a sample grant and a credential are taken by id only, so the
+    stored input is exactly what the card showed.
 - **`CRITICAL_APPLICATION`** — every AI write on an application with `isCritical = true`: any workflow
   write (authoring, retry, replay, task resolve) and any access grant or revoke (CEO: "Toda
   escritura"). Core requires step-up in the chat; MCP and headless refuse it (below).
@@ -695,8 +745,6 @@ leak through a tool would be a leak in the test.
   restore (v1.1), the attachments list and removal (v1.1), the `.docx` import and binary attachment
   transfer (no file tools).
 - **Follow-ups (recorded by the G2 review, not fixed here):**
-  - `loadOwned` answers 403 for another person's *published* article and 404 for their draft over HTTP —
-    a pre-existing existence signal, filed as SEC-074;
   - entity-ref labels (article titles) and author names in results are not wrapped as untrusted;
   - the folder is an entity of type `category`, which the web cannot tell apart from the other
     category kinds (no `articleFolder` entity type yet);
