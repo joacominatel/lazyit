@@ -4,6 +4,7 @@ import type { AddressCategory } from './ip-rules';
 export type EgressDenyReason =
   | 'invalid-url' // not a parseable absolute URL
   | 'scheme-not-allowed' // scheme not in the allowlist (https by default; http opt-in)
+  | 'userinfo-not-allowed' // the URL carries user:pass@ (SEC-076) — a credential outside the secret store
   | 'empty-host' // no host component
   | 'dns-resolution-failed' // the hostname did not resolve to any address
   | 'blocked-address' // a resolved address is in a denied range / private-not-allowlisted
@@ -85,10 +86,14 @@ export interface InternalTargetContext {
  *
  * Default (when omitted): deny-private-by-default.
  */
-export type InternalTargetAllowlist = (ctx: InternalTargetContext) => boolean | Promise<boolean>;
+export type InternalTargetAllowlist = (
+  ctx: InternalTargetContext,
+) => boolean | Promise<boolean>;
 
 /** Resolver abstraction (injectable for tests). Returns every address a hostname resolves to. */
-export type DnsLookup = (hostname: string) => Promise<Array<{ address: string; family: 4 | 6 }>>;
+export type DnsLookup = (
+  hostname: string,
+) => Promise<Array<{ address: string; family: 4 | 6 }>>;
 
 /** Options for {@link assertUrlAllowed}. */
 export interface EgressGuardOptions {
@@ -102,6 +107,12 @@ export interface EgressGuardOptions {
   isInternalTargetAllowed?: InternalTargetAllowlist;
   /** Resolver override (tests / custom DNS). Default: `node:dns/promises` `lookup` with `all: true`. */
   lookup?: DnsLookup;
+  /**
+   * Refuse a URL that carries userinfo (`user:pass@host`) with `userinfo-not-allowed` (SEC-076). Node's
+   * http client would send it as `Authorization: Basic …`. Opt-in so an existing caller whose stored URL
+   * legitimately embeds it (none known) is not changed silently; the workflow engine always sets it.
+   */
+  refuseUserinfo?: boolean;
 }
 
 /** A response surface the transport returns, decoupled from the body so redirects can be discarded. */
@@ -134,7 +145,10 @@ export interface EgressTransportRequest {
 }
 
 /** The pluggable transport (default: a `node:http`/`node:https` client with a pinning DNS lookup). */
-export type EgressTransport = (url: URL, req: EgressTransportRequest) => Promise<EgressTransportResponse>;
+export type EgressTransport = (
+  url: URL,
+  req: EgressTransportRequest,
+) => Promise<EgressTransportResponse>;
 
 /** Options for {@link guardedFetch} (extends the guard options). */
 export interface GuardedFetchOptions extends EgressGuardOptions {

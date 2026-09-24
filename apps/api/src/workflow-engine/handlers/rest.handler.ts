@@ -103,6 +103,8 @@ export class RestStepHandler implements StepHandler<
         {
           allowedProtocols: ['https:'],
           ...this.egressOptions,
+          // SEC-076: never send a URL's userinfo (a legacy row) — fail the step with a config reason.
+          refuseUserinfo: true,
           timeoutMs: meta.timeoutMs ?? DEFAULT_OUTBOUND_TIMEOUT_MS,
         },
       );
@@ -195,6 +197,8 @@ export class RestStepHandler implements StepHandler<
         {
           allowedProtocols: ['https:'],
           ...this.egressOptions,
+          // SEC-076: never send a URL's userinfo (a legacy row) — fail the step with a config reason.
+          refuseUserinfo: true,
           timeoutMs: ctx.meta.timeoutMs ?? DEFAULT_OUTBOUND_TIMEOUT_MS,
         },
       );

@@ -469,3 +469,30 @@ describe('RestStepHandler.testConnection', () => {
     expect(result.probedPath).toBe('/status');
   });
 });
+
+describe('RestStepHandler — SEC-076 legacy userinfo in the base URL', () => {
+  it('refuses to send a URL with user:pass@ (egress userinfo-not-allowed), and never echoes it', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 200, json: {} });
+    // A test override cannot switch the refusal off: the handler sets it after the spread.
+    handler.egressOptions = {
+      transport,
+      lookup: publicLookup,
+      refuseUserinfo: false,
+    };
+    const connection: RestConnectionConfig = {
+      kind: 'REST',
+      baseUrl: 'https://svc:hunter2@api.example.com',
+      authScheme: 'NONE',
+    };
+    const result = await handler.execute(makeCtxFor(connection, makeStep()));
+
+    expect(captured).toHaveLength(0);
+    expect(result.status).toBe('FAILED');
+    expect(result.metadata).toMatchObject({
+      errorClass: 'egress-blocked',
+      reason: 'egress guard: userinfo-not-allowed',
+    });
+    expect(JSON.stringify(result)).not.toContain('hunter2');
+  });
+});
