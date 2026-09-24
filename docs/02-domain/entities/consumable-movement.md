@@ -108,7 +108,19 @@ Two affordances, same `POST /consumables/:id/movements` endpoint:
   `useQuickAdjustStock` hook.
 - **Detailed form (be specific)** — the `Add… / Remove… / Adjust…` buttons on the detail page open
   `StockMovementDialog` for a chosen quantity, type and optional reason/notes (and an `ADJUSTMENT`
-  absolute recount). This is the secondary path, not the default.
+  absolute recount). This is the secondary path, not the default. On `Remove…` it also offers an
+  optional **Deliver to** (nobody by default · a person · an asset · a location) that turns the `OUT`
+  into a delivery ([[0098-consumable-delivery-targets]]); the quick `−1` never carries a target.
+- **Deliveries panel** — a secondary section on the [[user]], [[asset]] and [[location]] detail pages
+  over `GET /consumables/deliveries`: what that target received, an outstanding-only filter and date
+  presets, and (with `consumable:write`) **Deliver consumable** and **Return…** on an outstanding
+  returnable delivery (an `IN` with `returnOfId`). A 403 on the read hides the panel.
+- **Ledger** — the consumable's movement list shows the delivery target on `OUT` rows (flagged when the
+  target is offboarded/deleted, "(restricted)" when the caller can't read its domain) and "Return of
+  delivery #N" on return rows.
+- **Offboarding** — the user's outstanding returnable deliveries ("to return") and non-returnable
+  deliveries ("delivered") appear on the offboarding sheet and the printed Return Act; the operator can
+  switch the section off or exclude single rows before printing. Offboarding itself moves no stock.
 
 Related: [[consumable]] · [[consumable-category]] · [[user]] · [[asset]] · [[location]] ·
 [[asset-history]] · [[service-account]] · [[0098-consumable-delivery-targets]] ·
