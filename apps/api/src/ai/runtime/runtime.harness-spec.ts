@@ -660,7 +660,8 @@ export class FakeTools {
       if (
         !action.preview ||
         action.preview.elevated ||
-        requiresStepUp(action.preview)
+        requiresStepUp(action.preview) ||
+        action.preview.untrustedSources.length > 0
       ) {
         throw new ConflictException({
           code: 'AUTO_APPROVE_NOT_ELIGIBLE',

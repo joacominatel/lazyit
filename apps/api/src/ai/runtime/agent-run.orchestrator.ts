@@ -278,6 +278,12 @@ export class AgentRunOrchestrator {
             'A run is already active in this conversation',
           );
         }
+        // The pin as it is under the lock (#1373): a model change that committed between the read above
+        // and this lock is what the run will use, so the run row records exactly that.
+        const pinned = await tx.aiConversation.findUniqueOrThrow({
+          where: { id: conversation.id },
+          select: { provider: true, model: true },
+        });
         const created = await tx.aiRun.create({
           data: {
             conversationId: conversation.id,
@@ -289,8 +295,8 @@ export class AgentRunOrchestrator {
               input.channel === 'CHAT'
                 ? 'REQUIRE_APPROVAL_FOR_WRITES'
                 : 'AUTONOMOUS',
-            provider: conversation.provider,
-            model: conversation.model,
+            provider: pinned.provider,
+            model: pinned.model,
             idempotencyKey: input.idempotencyKey ?? null,
           },
         });

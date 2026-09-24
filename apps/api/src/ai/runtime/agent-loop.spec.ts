@@ -1203,6 +1203,64 @@ describe('auto-approve mode (#1376)', () => {
     ]);
   });
 
+  it('is not applied once the assistant is turned off mid-step (the kill switch)', async () => {
+    const conversationId = await autoConversation();
+    rt.model.push({
+      toolCalls: [
+        { toolCallId: 'call_w', toolName: WRITE, input: { id: 'a1' } },
+      ],
+      before: () => {
+        rt.settings.config = null;
+      },
+    });
+    await send(conversationId);
+    await rt.drain();
+    expect(rt.tools.approved).toHaveLength(0);
+  });
+
+  it('is not applied once a cancel was requested while the calls resolve', async () => {
+    const conversationId = await autoConversation();
+    const propose = rt.tools.propose.bind(rt.tools);
+    jest
+      .spyOn(rt.tools, 'propose')
+      .mockImplementation(async (name, input, ctx, options) => {
+        const run = rt.prisma.tables.aiRun.rows.find(
+          (r) => r.id === ctx.runId,
+        )!;
+        run.cancelRequestedAt = new Date();
+        return propose(name, input, ctx, options);
+      });
+    rt.model.push({
+      toolCalls: [
+        { toolCallId: 'call_w', toolName: WRITE, input: { id: 'a1' } },
+      ],
+    });
+    const { runId } = await send(conversationId);
+    await rt.drain();
+    expect(rt.tools.approved).toHaveLength(0);
+    expect(status(runId)).toBe('CANCELLED');
+  });
+
+  it('shows the card for a write after an untrusted read in the same turn', async () => {
+    const conversationId = await autoConversation();
+    rt.model.push(
+      {
+        toolCalls: [
+          { toolCallId: 'r1', toolName: UNTRUSTED_READ, input: { id: 'art1' } },
+        ],
+      },
+      {
+        toolCalls: [
+          { toolCallId: 'call_w', toolName: WRITE, input: { id: 'a1' } },
+        ],
+      },
+    );
+    const { runId } = await send(conversationId);
+    await rt.drain();
+    expect(status(runId)).toBe('AWAITING_APPROVAL');
+    expect(rt.tools.approved).toHaveLength(0);
+  });
+
   it('never applies to headless runs', async () => {
     rt.model.push(
       {
@@ -1262,6 +1320,31 @@ describe('per-conversation model (#1373)', () => {
     await rt.drain();
     expect(status(second.runId)).toBe('SUCCEEDED');
     expect(rt.model.requests[1].model.modelId).toBe('claude-haiku-5');
+  });
+
+  it('records on the run the model under the conversation lock, even if it changed just before', async () => {
+    const { id } = await rt.orchestrator.createConversation({
+      identity: HUMAN,
+      channel: 'CHAT',
+    });
+    // A PATCH that commits after submit read the conversation, before it took the lock.
+    jest.spyOn(rt.lifecycle, 'answerOpenStep').mockImplementation(() => {
+      Object.assign(rt.prisma.tables.aiConversation.rows[0], {
+        model: 'claude-haiku-5',
+        modelChosen: true,
+      });
+      return Promise.resolve(false);
+    });
+    rt.model.push({ text: 'hi' });
+    const { runId } = await rt.orchestrator.submit({
+      identity: HUMAN,
+      channel: 'CHAT',
+      text: 'hi',
+      conversationId: id,
+    });
+    expect(rt.run(runId).model).toBe('claude-haiku-5');
+    await rt.drain();
+    expect(rt.model.requests[0].model.modelId).toBe('claude-haiku-5');
   });
 
   it('a provider change still makes a chosen-model conversation read-only', async () => {

@@ -869,14 +869,17 @@ export class AgentLoop {
   }
 
   /**
-   * Whether the conversation's owner has auto-approve on NOW (#1376) — read fresh per write, so a toggle
-   * mid-run applies to the next proposal. Chat and a human only; core re-checks it before approving.
+   * Whether this write may be auto-approved NOW (#1376) — read fresh per write, so a toggle mid-run
+   * applies to the next proposal. Chat and a human only, and only while the run is not being cancelled
+   * and the assistant is on: the same kill switches a manual decision honours (`AI_DISABLED`, a run no
+   * longer running). Core re-checks the mode in the claim's transaction.
    */
   private async autoApproveOn(ctx: AiExecutionContext): Promise<boolean> {
     if (
       ctx.channel !== 'CHAT' ||
       ctx.identity.kind !== 'human' ||
-      !ctx.conversationId
+      !ctx.conversationId ||
+      !ctx.runId
     ) {
       return false;
     }
@@ -884,10 +887,20 @@ export class AgentLoop {
       where: { id: ctx.conversationId },
       select: { autoApprove: true, userId: true },
     });
-    return (
-      conversation?.autoApprove === true &&
-      conversation.userId === ctx.identity.userId
-    );
+    if (
+      conversation?.autoApprove !== true ||
+      conversation.userId !== ctx.identity.userId
+    ) {
+      return false;
+    }
+    const run = await this.prisma.aiRun.findUnique({
+      where: { id: ctx.runId },
+      select: { status: true, cancelRequestedAt: true },
+    });
+    if (!run || run.status !== 'RUNNING' || run.cancelRequestedAt) {
+      return false;
+    }
+    return (await this.settings.resolveProviderConfig()) !== null;
   }
 
   /**
