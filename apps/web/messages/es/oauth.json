@@ -1,1 +1,300 @@
-{}
+{
+  "copy": {
+    "copied": "Copiado",
+    "copiedLabel": "{label} — copiado",
+    "unavailable": "No se pudo copiar. Selecciona el texto y cópialo a mano."
+  },
+  "scopes": {
+    "read": {
+      "short": "Lectura",
+      "label": "Lectura",
+      "description": "Ver inventario, accesos a aplicaciones y la base de conocimiento: todo lo que tu rol puede ver."
+    },
+    "write": {
+      "short": "Escritura",
+      "label": "Lectura y escritura",
+      "description": "Además, crear y modificar registros, dentro de tus permisos."
+    },
+    "admin": {
+      "short": "Admin",
+      "label": "Acciones de administración",
+      "description": "Además, cambiar roles, accesos y otros ajustes sensibles que tu rol permita. Pide tu contraseña."
+    }
+  },
+  "account": {
+    "title": "IA y apps conectadas",
+    "subtitle": "Conecta Claude Code y otras apps de IA a lazyit, y revisa o revoca las apps que pueden actuar en tu nombre.",
+    "forbidden": {
+      "title": "Tu rol no puede conectar apps de IA",
+      "body": "Conectar apps de IA requiere el permiso «Conectar agentes de IA externos (MCP)» (ai:connect). Pídeselo a un administrador si lo necesitas."
+    },
+    "statusError": "No se pudo comprobar cómo se conectan las apps de IA a esta instancia. Tus apps conectadas aparecen abajo."
+  },
+  "mode": {
+    "unavailable": {
+      "title": "Las conexiones de apps de IA están desactivadas",
+      "body": "Un administrador no activó el servidor MCP (Ajustes → IA), o tu rol no permite conectar apps de IA. Las conexiones que ya tienes aparecen abajo: mientras el servidor MCP esté apagado quedan en pausa, no revocadas; revoca las que ya no quieras."
+    },
+    "oauth": {
+      "title": "Esta instancia usa inicio de sesión OAuth",
+      "body": "Se sirve por HTTPS, así que las apps de IA inician sesión desde tu navegador: lazyit muestra una pantalla de consentimiento donde eliges qué puede hacer la app. No hay ningún token que copiar.",
+      "cloudConnectors": "Los conectores en la nube (claude.ai, ChatGPT) se conectan desde los servidores del proveedor, así que solo funcionan si esta instancia es accesible desde internet por HTTPS. Las apps de escritorio y de línea de comandos (Claude Code, Cursor, VS Code) solo necesitan llegar a ella desde tu equipo.",
+      "internalCa": "Si el certificado de esta instancia lo emite una autoridad de certificación interna, indica a Claude Code (y a otras apps basadas en Node.js) que confíe en ella antes de iniciarlas: <code>export NODE_EXTRA_CA_CERTS=/ruta/a/ca-interna.pem</code>.",
+      "viewingOverHttp": "Abriste esta página por HTTP sin cifrar. Las apps de IA deben usar la dirección HTTPS de esta instancia; los comandos de abajo usan la dirección en la que estás, así que abre esta página por HTTPS antes de copiarlos."
+    },
+    "personalToken": {
+      "title": "Esta instancia usa tokens personales",
+      "plainHttp": "Se sirve por HTTP sin cifrar (modo LAN). El inicio de sesión OAuth necesita HTTPS —los códigos y tokens no deben viajar por la red sin cifrar, y las apps de IA se niegan a iniciar sesión por HTTP—, así que aquí está desactivado. En su lugar, crea un token personal abajo y dáselo a tu app de IA.",
+      "httpsNotConfigured": "Estás en HTTPS, pero la instancia no está configurada con una dirección HTTPS (un administrador la define con <code>WEB_ORIGIN</code>), así que el inicio de sesión OAuth sigue desactivado y las apps de IA se conectan con un token personal que creas abajo.",
+      "cloudConnectors": "No se pueden usar conectores en la nube (claude.ai, ChatGPT): se conectan desde los servidores del proveedor y necesitan una instancia HTTPS accesible públicamente. Las apps de escritorio y de línea de comandos de tu red sí funcionan.",
+      "handleWithCare": "Un token personal actúa en tu nombre hasta que caduca o lo revocas. Trátalo como una contraseña, dale la caducidad más corta que te sirva y no lo guardes en archivos compartidos."
+    }
+  },
+  "install": {
+    "claudeCode": {
+      "title": "Instalar en Claude Code",
+      "description": "El plugin de lazyit le da a Claude Code el skill de lazyit —qué es lazyit y cómo se usa— y lo conecta al servidor MCP de esta instancia en un solo paso.",
+      "oauth": {
+        "stepInstall": "Agrega el marketplace de plugins de esta instancia e instala el plugin:",
+        "copyInstall": "Copiar los comandos de instalación",
+        "stepSignIn": "Inicia Claude Code, ejecuta <code>/mcp</code>, elige lazyit e inicia sesión. Tu navegador abre la pantalla de consentimiento de lazyit.",
+        "stepUpdates": "Las actualizaciones no son automáticas por defecto. Para recibir nuevas versiones del skill, abre <code>/plugin</code> en Claude Code, ve a Marketplaces, selecciona <code>{marketplace}</code> y activa la actualización automática."
+      },
+      "personalToken": {
+        "noMarketplace": "La instalación con un solo comando necesita HTTPS, así que en esta instancia instala el plugin desde una descarga:"
+      },
+      "manual": {
+        "title": "Instalar desde una descarga",
+        "titleAlternative": "O instalar desde una descarga",
+        "stepDownload": "Descarga el plugin. Está generado para esta instancia y no contiene ningún token.",
+        "download": "Descargar plugin (.zip)",
+        "stepUnzip": "Descomprímelo en tu carpeta de skills de Claude Code:",
+        "copyUnzip": "Copiar los comandos para descomprimir",
+        "tryOnce": "Para probarlo en una sola sesión sin instalarlo, ejecuta <code>{command}</code> en su lugar.",
+        "stepSignInOauth": "Inicia Claude Code y ejecuta <code>/mcp</code> para iniciar sesión.",
+        "stepToken": "Crea un token personal abajo. Claude Code te lo pide al activar el plugin y lo guarda en el llavero de tu sistema; nunca se guarda en los archivos del plugin.",
+        "errors": {
+          "originUnknown": "La instancia no conoce su propia dirección, así que no se puede generar el plugin. Un administrador debe definir la dirección pública de la instancia (WEB_ORIGIN).",
+          "unavailable": "El plugin no está disponible: se desactivaron las conexiones de apps de IA.",
+          "generic": "No se pudo descargar el plugin"
+        }
+      }
+    },
+    "clients": {
+      "title": "Otros clientes MCP",
+      "descriptionOauth": "Conecta cualquier cliente MCP que admita servidores remotos por HTTP. La primera vez inicia sesión desde tu navegador.",
+      "descriptionToken": "Conecta cualquier cliente MCP que admita servidores remotos por HTTP. Reemplaza <code>{placeholder}</code> por un token personal que crees abajo.",
+      "endpoint": "Dirección del servidor MCP",
+      "copyEndpoint": "Copiar la dirección del servidor MCP",
+      "tabs": {
+        "claudeCode": "Claude Code",
+        "cursor": "Cursor",
+        "vscode": "VS Code",
+        "other": "Otro"
+      },
+      "claudeCode": {
+        "hint": "Conecta solo el servidor MCP, sin el skill. Ejecútalo en una terminal:",
+        "copy": "Copiar el comando de Claude Code"
+      },
+      "cursor": {
+        "hint": "Agrega esto a <code>~/.cursor/mcp.json</code> (o a <code>.cursor/mcp.json</code> en un proyecto):",
+        "copy": "Copiar la configuración de Cursor"
+      },
+      "vscode": {
+        "hintOauth": "Agrega esto a <code>.vscode/mcp.json</code> en tu espacio de trabajo:",
+        "hintToken": "Agrega esto a <code>.vscode/mcp.json</code> en tu espacio de trabajo. VS Code te pide el token al iniciar el servidor, así que no queda escrito en el archivo.",
+        "copy": "Copiar la configuración de VS Code"
+      },
+      "other": {
+        "hintOauth": "Apunta el cliente a la dirección del servidor MCP de arriba. Descubre por sí mismo el inicio de sesión de lazyit y abre la pantalla de consentimiento en tu navegador.",
+        "hintToken": "Apunta el cliente a la dirección del servidor MCP de arriba y haz que envíe esta cabecera en cada solicitud:",
+        "copyHeader": "Copiar la cabecera de autorización"
+      }
+    }
+  },
+  "personalTokens": {
+    "create": {
+      "title": "Crear un token personal",
+      "description": "Un token permite que una app de IA de tu red actúe en tu nombre, con tus permisos.",
+      "name": "Nombre",
+      "namePlaceholder": "p. ej. Claude Code en mi portátil",
+      "nameHint": "Para reconocerlo después en tus apps conectadas.",
+      "expiry": "Caduca a los",
+      "expiryDays": "{days, plural, one {# día} other {# días}}",
+      "expiryHint": "Todo token caduca. Elige el plazo más corto que necesites; siempre puedes crear otro.",
+      "access": "Acceso",
+      "accessOptions": {
+        "read": {
+          "label": "Solo lectura",
+          "description": "La app puede consultar, pero nunca cambiar nada."
+        },
+        "read-write": {
+          "label": "Lectura y escritura",
+          "description": "La app también puede crear y modificar registros, dentro de tus permisos."
+        }
+      },
+      "noAdmin": "Las acciones de administración nunca están disponibles para un token personal.",
+      "cancel": "Cancelar",
+      "submit": "Crear token",
+      "errors": {
+        "nameRequired": "Ponle un nombre al token.",
+        "oauthInstance": "Esta instancia usa inicio de sesión OAuth, así que no se pueden crear tokens personales. Conecta tu app de IA con su propio inicio de sesión.",
+        "aiDisabled": "Las conexiones de apps de IA están desactivadas en esta instancia.",
+        "limit": "Ya tienes 20 tokens personales activos. Revoca alguno que ya no uses primero.",
+        "forbidden": "Tu rol no permite crear tokens personales.",
+        "generic": "No se pudo crear el token. Inténtalo de nuevo."
+      }
+    },
+    "reveal": {
+      "title": "Copia tu token ahora",
+      "description": "Se creó «{name}».",
+      "warning": "Es la única vez que se muestra el token. lazyit solo guarda una huella, así que no puede volver a mostrarlo: si lo pierdes, revócalo y crea otro.",
+      "copy": "Copiar",
+      "copiedShort": "Copiado",
+      "copied": "Token copiado",
+      "copyAria": "Copiar el token personal",
+      "copyUnavailable": "No se pudo copiar. Selecciona el token y cópialo a mano, o descárgalo.",
+      "download": "Descargar",
+      "downloadAria": "Descargar el token personal como archivo de texto",
+      "next": "Pégalo donde tu app de IA lo pida; Claude Code lo pide al activar el plugin de lazyit.",
+      "acknowledge": "Guardé el token en un lugar seguro",
+      "done": "Listo"
+    }
+  },
+  "connectedApps": {
+    "title": "Apps conectadas",
+    "description": "Apps de IA que aprobaste y tokens personales que creaste. Cada una actúa en tu nombre, con tus permisos.",
+    "createToken": "Crear token",
+    "tokenCap": "Tienes el máximo de {max} tokens activos.",
+    "tokenCount": "{count, plural, one {# token personal activo} other {# tokens personales activos}} de {max}.",
+    "empty": "No hay apps conectadas a tu cuenta.",
+    "emptyTokens": "No hay apps conectadas a tu cuenta. Crea un token personal para conectar una.",
+    "pausedNote": "Apagar el servidor MCP solo pausa estas conexiones: vuelven a funcionar cuando se enciende de nuevo. Revoca una conexión para quitarle el acceso definitivamente.",
+    "error": {
+      "title": "No se pudieron cargar tus apps conectadas",
+      "description": "La lista de apps conectadas a tu cuenta no se pudo cargar."
+    },
+    "unnamedToken": "Token personal",
+    "unknownApp": "App desconocida",
+    "kind": {
+      "oauth": "App",
+      "personal": "Token personal"
+    },
+    "unverified": "Sin verificar",
+    "redirectHost": "Inicia sesión a través de",
+    "created": "Conectada",
+    "lastUsed": "Último uso",
+    "never": "Nunca",
+    "expires": "Caduca",
+    "revoke": {
+      "action": "Revocar",
+      "aria": "Revocar {name}",
+      "title": "¿Revocar «{name}»?",
+      "bodyApp": "La app pierde el acceso a lazyit en su próxima solicitud. Para volver a usarla tendrás que aprobarla de nuevo.",
+      "bodyToken": "Todo lo que use este token pierde el acceso a lazyit en su próxima solicitud. No se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Revocar",
+      "done": "Se revocó «{name}»",
+      "error": "No se pudo revocar la conexión"
+    }
+  },
+  "consent": {
+    "pageTitle": "Autorizar una app",
+    "title": "¿Permitir que «{name}» acceda a lazyit?",
+    "verified": "Verificada",
+    "verifiedHint": "lazyit confirmó quién publica esta app.",
+    "unverified": "Sin verificar",
+    "unverifiedHint": "El nombre es lo que la app dice de sí misma.",
+    "actsAsYou": "Actuará en tu nombre ({email}), con tus permisos, nunca más.",
+    "redirect": {
+      "heading": "Después de decidir, vuelves a",
+      "loopback": "Una app que se ejecuta en tu propio equipo.",
+      "statedWebsite": "Sitio web que declara la app (no comprobado):"
+    },
+    "unverifiedWarning": "lazyit no puede confirmar quién hizo esta app. Continúa solo si iniciaste esta conexión tú mismo hace un momento y reconoces {host}.",
+    "access": {
+      "legend": "Qué puede hacer",
+      "read": {
+        "label": "Solo lectura",
+        "description": "Consultar: inventario, accesos a aplicaciones y la base de conocimiento, todo lo que tu rol puede ver."
+      },
+      "write": {
+        "label": "Lectura y escritura",
+        "description": "Además, crear y modificar registros, dentro de tus permisos."
+      }
+    },
+    "password": {
+      "label": "Tu contraseña",
+      "hint": "Conceder acciones de administración requiere tu contraseña."
+    },
+    "revokeHint": "Puedes revocar el acceso en cualquier momento en Cuenta › IA y apps conectadas.",
+    "allow": "Permitir acceso",
+    "deny": "Denegar",
+    "notYou": "¿No eres tú?",
+    "signOut": "Cerrar sesión",
+    "confirmUnverified": {
+      "title": "¿Permitir una app sin verificar?",
+      "body": "lazyit no puede confirmar que «{name}» sea lo que dice. Si la permites, podrá actuar en tu nombre y lazyit te enviará a {host}. Continúa solo si iniciaste esta conexión tú mismo.",
+      "cancel": "Volver",
+      "confirm": "Permitir acceso"
+    },
+    "errors": {
+      "nothingSelected": "Elige qué puede hacer la app.",
+      "stepUpRequired": "Escribe tu contraseña para conceder acciones de administración.",
+      "stepUpFailed": "La contraseña no es correcta. Inténtalo de nuevo.",
+      "stepUpUnavailable": "Con tu método de inicio de sesión no se pueden conceder acciones de administración, así que se desmarcaron. Puedes permitir el resto.",
+      "rateLimited": "Demasiados intentos. Espera un minuto e inténtalo de nuevo."
+    },
+    "done": {
+      "approvedTitle": "Acceso concedido",
+      "deniedTitle": "Acceso denegado",
+      "body": "Te devolvemos a {name} en {host}. Si no pasa nada, vuelve a la app; puedes cerrar esta pestaña."
+    },
+    "stop": {
+      "backToLazyit": "Ir a lazyit",
+      "refusal": {
+        "AI_DISABLED": {
+          "title": "Las conexiones de apps de IA están desactivadas",
+          "body": "Un administrador no activó el servidor MCP en esta instancia, así que ahora no se puede autorizar ninguna app."
+        },
+        "FORBIDDEN": {
+          "title": "Tu cuenta no puede conectar apps de IA",
+          "body": "Autorizar una app de IA requiere el permiso «Conectar agentes de IA externos (MCP)» (ai:connect). Pídeselo a un administrador si lo necesitas."
+        },
+        "INVALID_CLIENT": {
+          "title": "Esta app no está permitida",
+          "body": "La app no está registrada en esta instancia, o tu administrador ya no la permite. Inicia la conexión de nuevo desde la app o consulta a tu administrador."
+        },
+        "INVALID_REDIRECT": {
+          "title": "No se puede confiar en esta solicitud",
+          "body": "La app pidió enviarte a una dirección que no registró. Por tu seguridad, lazyit no te enviará a ningún sitio. Inicia la conexión de nuevo desde la app."
+        }
+      },
+      "unavailable": {
+        "title": "El inicio de sesión de apps no está disponible aquí",
+        "body": "El inicio de sesión OAuth para apps de IA necesita que esta instancia se sirva por HTTPS con su dirección configurada. En una instancia HTTP sin cifrar (LAN), conecta las apps de IA con un token personal.",
+        "action": "Abrir IA y apps conectadas"
+      },
+      "invalidRequest": {
+        "title": "Este enlace de inicio de sesión está incompleto",
+        "body": "A la solicitud de autorización le falta información o tiene un formato incorrecto. Inicia la conexión de nuevo desde tu app."
+      },
+      "clientError": {
+        "title": "La app envió una solicitud no válida",
+        "body": "lazyit no puede continuar con esta solicitud. Puedes volver a la app para que te muestre el error.",
+        "code": "Error:",
+        "destination": "Te devuelve a:",
+        "action": "Volver a {host}"
+      },
+      "unsafeRedirect": {
+        "title": "Respuesta inesperada",
+        "body": "lazyit recibió una dirección de retorno que no coincide con la de la app, así que no te enviará allí. Inicia la conexión de nuevo desde la app."
+      },
+      "unknown": {
+        "title": "Algo salió mal",
+        "body": "lazyit no pudo procesar esta solicitud de autorización. Inténtalo de nuevo desde tu app.",
+        "requestId": "ID de solicitud:"
+      }
+    }
+  }
+}

@@ -1,1 +1,300 @@
-{}
+{
+  "copy": {
+    "copied": "Copied",
+    "copiedLabel": "{label} — copied",
+    "unavailable": "Couldn't copy. Select the text and copy it by hand."
+  },
+  "scopes": {
+    "read": {
+      "short": "Read",
+      "label": "Read",
+      "description": "See inventory, application access and the knowledge base — whatever your role can see."
+    },
+    "write": {
+      "short": "Write",
+      "label": "Read & write",
+      "description": "Also create and change records, within your permissions."
+    },
+    "admin": {
+      "short": "Admin",
+      "label": "Admin actions",
+      "description": "Also change roles, access grants and other sensitive settings your role allows. Asks for your password."
+    }
+  },
+  "account": {
+    "title": "AI & connected apps",
+    "subtitle": "Connect Claude Code and other AI apps to lazyit, and review or revoke the apps that can act as you.",
+    "forbidden": {
+      "title": "Your role can't connect AI apps",
+      "body": "Connecting AI apps needs the “Connect external AI agents (MCP)” permission (ai:connect). Ask an administrator if you need it."
+    },
+    "statusError": "Couldn't check how AI apps connect to this instance. Your connected apps are listed below."
+  },
+  "mode": {
+    "unavailable": {
+      "title": "Connections for AI apps are off",
+      "body": "An administrator hasn't turned on the MCP server (Settings → AI), or your role doesn't allow connecting AI apps. Connections you already have are listed below: while the MCP server is off they are paused, not revoked — revoke any you no longer want."
+    },
+    "oauth": {
+      "title": "This instance uses OAuth sign-in",
+      "body": "It is served over HTTPS, so AI apps sign in through your browser: lazyit shows a consent screen where you choose what the app may do. There is no token to copy.",
+      "cloudConnectors": "Cloud connectors (claude.ai, ChatGPT) connect from the provider's servers, so they work only if this instance is reachable from the internet over HTTPS. Desktop and command-line apps (Claude Code, Cursor, VS Code) only need to reach it from your computer.",
+      "internalCa": "If this instance's certificate comes from an internal certificate authority, tell Claude Code (and other Node.js-based apps) to trust it before starting them: <code>export NODE_EXTRA_CA_CERTS=/path/to/internal-ca.pem</code>.",
+      "viewingOverHttp": "You opened this page over plain HTTP. AI apps must use this instance's HTTPS address — the commands below use the address you're on, so open this page over HTTPS before copying them."
+    },
+    "personalToken": {
+      "title": "This instance uses personal tokens",
+      "plainHttp": "It is served over plain HTTP (LAN mode). OAuth sign-in needs HTTPS — sign-in codes and tokens must not cross the network unencrypted, and AI apps refuse to sign in over plain HTTP — so it is off here. Instead, create a personal token below and give it to your AI app.",
+      "httpsNotConfigured": "You're on HTTPS, but the instance isn't configured with an HTTPS address (an administrator sets it with <code>WEB_ORIGIN</code>), so OAuth sign-in stays off and AI apps connect with a personal token you create below.",
+      "cloudConnectors": "Cloud connectors (claude.ai, ChatGPT) can't be used: they connect from the provider's servers and need a publicly reachable HTTPS instance. Desktop and command-line apps on your network work.",
+      "handleWithCare": "A personal token acts as you until it expires or you revoke it. Treat it like a password, give it the shortest useful expiry, and keep it out of shared files."
+    }
+  },
+  "install": {
+    "claudeCode": {
+      "title": "Install in Claude Code",
+      "description": "The lazyit plugin gives Claude Code the lazyit skill — what lazyit is and how to use it — and connects it to this instance's MCP server in one step.",
+      "oauth": {
+        "stepInstall": "Add this instance's plugin marketplace and install the plugin:",
+        "copyInstall": "Copy the install commands",
+        "stepSignIn": "Start Claude Code and run <code>/mcp</code>, choose lazyit and sign in. Your browser opens lazyit's consent screen.",
+        "stepUpdates": "Updates aren't automatic by default. To receive new versions of the skill, open <code>/plugin</code> in Claude Code, go to Marketplaces, select <code>{marketplace}</code> and enable auto-update."
+      },
+      "personalToken": {
+        "noMarketplace": "The one-command install needs HTTPS, so on this instance install the plugin from a download:"
+      },
+      "manual": {
+        "title": "Install from a download",
+        "titleAlternative": "Or install from a download",
+        "stepDownload": "Download the plugin. It is built for this instance and contains no token.",
+        "download": "Download plugin (.zip)",
+        "stepUnzip": "Unzip it into your Claude Code skills folder:",
+        "copyUnzip": "Copy the unzip commands",
+        "tryOnce": "To try it for one session without installing, run <code>{command}</code> instead.",
+        "stepSignInOauth": "Start Claude Code and run <code>/mcp</code> to sign in.",
+        "stepToken": "Create a personal token below. Claude Code asks for it when you enable the plugin and keeps it in your system's keychain — it is never stored in the plugin files.",
+        "errors": {
+          "originUnknown": "The instance doesn't know its own address, so the plugin can't be built. An administrator needs to set the instance's public address (WEB_ORIGIN).",
+          "unavailable": "The plugin isn't available: connections for AI apps were turned off.",
+          "generic": "Couldn't download the plugin"
+        }
+      }
+    },
+    "clients": {
+      "title": "Other MCP clients",
+      "descriptionOauth": "Connect any MCP client that supports remote servers over HTTP. It signs in through your browser the first time.",
+      "descriptionToken": "Connect any MCP client that supports remote servers over HTTP. Replace <code>{placeholder}</code> with a personal token you create below.",
+      "endpoint": "MCP server address",
+      "copyEndpoint": "Copy the MCP server address",
+      "tabs": {
+        "claudeCode": "Claude Code",
+        "cursor": "Cursor",
+        "vscode": "VS Code",
+        "other": "Other"
+      },
+      "claudeCode": {
+        "hint": "Connects the MCP server only, without the skill. Run it in a terminal:",
+        "copy": "Copy the Claude Code command"
+      },
+      "cursor": {
+        "hint": "Add this to <code>~/.cursor/mcp.json</code> (or <code>.cursor/mcp.json</code> in a project):",
+        "copy": "Copy the Cursor configuration"
+      },
+      "vscode": {
+        "hintOauth": "Add this to <code>.vscode/mcp.json</code> in your workspace:",
+        "hintToken": "Add this to <code>.vscode/mcp.json</code> in your workspace. VS Code asks for the token when it starts the server, so it isn't written to the file.",
+        "copy": "Copy the VS Code configuration"
+      },
+      "other": {
+        "hintOauth": "Point the client at the MCP server address above. It discovers lazyit's sign-in by itself and opens the consent screen in your browser.",
+        "hintToken": "Point the client at the MCP server address above and have it send this header with every request:",
+        "copyHeader": "Copy the authorization header"
+      }
+    }
+  },
+  "personalTokens": {
+    "create": {
+      "title": "Create a personal token",
+      "description": "A token lets an AI app on your network act as you, with your permissions.",
+      "name": "Name",
+      "namePlaceholder": "e.g. Claude Code on my laptop",
+      "nameHint": "So you recognize it later in your connected apps.",
+      "expiry": "Expires after",
+      "expiryDays": "{days, plural, one {# day} other {# days}}",
+      "expiryHint": "Every token expires. Pick the shortest period you need; you can always create a new one.",
+      "access": "Access",
+      "accessOptions": {
+        "read": {
+          "label": "Read only",
+          "description": "The app can look things up but never change anything."
+        },
+        "read-write": {
+          "label": "Read & write",
+          "description": "The app can also create and change records, within your permissions."
+        }
+      },
+      "noAdmin": "Admin actions are never available to a personal token.",
+      "cancel": "Cancel",
+      "submit": "Create token",
+      "errors": {
+        "nameRequired": "Give the token a name.",
+        "oauthInstance": "This instance uses OAuth sign-in, so personal tokens can't be created. Connect your AI app with its sign-in flow instead.",
+        "aiDisabled": "Connections for AI apps are turned off on this instance.",
+        "limit": "You already have 20 active personal tokens. Revoke one you no longer use first.",
+        "forbidden": "Your role doesn't allow creating personal tokens.",
+        "generic": "Couldn't create the token. Try again."
+      }
+    },
+    "reveal": {
+      "title": "Copy your token now",
+      "description": "“{name}” was created.",
+      "warning": "This is the only time the token is shown. lazyit keeps only a fingerprint of it, so it can't be shown again — if you lose it, revoke it and create a new one.",
+      "copy": "Copy",
+      "copiedShort": "Copied",
+      "copied": "Token copied",
+      "copyAria": "Copy the personal token",
+      "copyUnavailable": "Couldn't copy. Select the token and copy it by hand, or download it.",
+      "download": "Download",
+      "downloadAria": "Download the personal token as a text file",
+      "next": "Paste it where your AI app asks for it — Claude Code asks when you enable the lazyit plugin.",
+      "acknowledge": "I've saved the token somewhere safe",
+      "done": "Done"
+    }
+  },
+  "connectedApps": {
+    "title": "Connected apps",
+    "description": "AI apps you approved and personal tokens you created. Each one acts as you, with your permissions.",
+    "createToken": "Create token",
+    "tokenCap": "You have the maximum of {max} active tokens.",
+    "tokenCount": "{count, plural, one {# active personal token} other {# active personal tokens}} of {max}.",
+    "empty": "No apps are connected to your account.",
+    "emptyTokens": "No apps are connected to your account. Create a personal token to connect one.",
+    "pausedNote": "Turning off the MCP server only pauses these connections — they work again when it is turned back on. Revoke a connection to cut its access for good.",
+    "error": {
+      "title": "Couldn't load your connected apps",
+      "description": "The list of apps connected to your account failed to load."
+    },
+    "unnamedToken": "Personal token",
+    "unknownApp": "Unknown app",
+    "kind": {
+      "oauth": "App",
+      "personal": "Personal token"
+    },
+    "unverified": "Unverified",
+    "redirectHost": "Signs in through",
+    "created": "Connected",
+    "lastUsed": "Last used",
+    "never": "Never",
+    "expires": "Expires",
+    "revoke": {
+      "action": "Revoke",
+      "aria": "Revoke {name}",
+      "title": "Revoke “{name}”?",
+      "bodyApp": "The app loses access to lazyit on its next request. To use it again you'll have to approve it again.",
+      "bodyToken": "Anything using this token loses access to lazyit on its next request. This can't be undone.",
+      "cancel": "Cancel",
+      "confirm": "Revoke",
+      "done": "“{name}” revoked",
+      "error": "Couldn't revoke the connection"
+    }
+  },
+  "consent": {
+    "pageTitle": "Authorize an app",
+    "title": "Allow “{name}” to access lazyit?",
+    "verified": "Verified",
+    "verifiedHint": "lazyit confirmed who published this app.",
+    "unverified": "Not verified",
+    "unverifiedHint": "The name is what the app says about itself.",
+    "actsAsYou": "It will act as you ({email}), with your permissions — never more.",
+    "redirect": {
+      "heading": "After you decide, you return to",
+      "loopback": "An app running on your own computer.",
+      "statedWebsite": "Website stated by the app (not checked):"
+    },
+    "unverifiedWarning": "lazyit can't confirm who made this app. Continue only if you started this connection yourself just now and you recognize {host}.",
+    "access": {
+      "legend": "What it may do",
+      "read": {
+        "label": "Read only",
+        "description": "Look things up: inventory, application access and the knowledge base — whatever your role can see."
+      },
+      "write": {
+        "label": "Read & write",
+        "description": "Also create and change records, within your permissions."
+      }
+    },
+    "password": {
+      "label": "Your password",
+      "hint": "Admin actions need your password to be granted."
+    },
+    "revokeHint": "You can revoke access any time in Account › AI & connected apps.",
+    "allow": "Allow access",
+    "deny": "Deny",
+    "notYou": "Not you?",
+    "signOut": "Sign out",
+    "confirmUnverified": {
+      "title": "Allow an unverified app?",
+      "body": "lazyit can't confirm that “{name}” is what it says. If you allow it, it can act as you and lazyit sends you to {host}. Only continue if you started this connection yourself.",
+      "cancel": "Go back",
+      "confirm": "Allow access"
+    },
+    "errors": {
+      "nothingSelected": "Choose what the app may do.",
+      "stepUpRequired": "Enter your password to grant admin actions.",
+      "stepUpFailed": "That password isn't correct. Try again.",
+      "stepUpUnavailable": "Admin actions can't be granted with your sign-in method, so they were unticked. You can allow the rest.",
+      "rateLimited": "Too many attempts. Wait a minute and try again."
+    },
+    "done": {
+      "approvedTitle": "Access granted",
+      "deniedTitle": "Access denied",
+      "body": "Returning you to {name} at {host}. If nothing happens, go back to the app — you can close this tab."
+    },
+    "stop": {
+      "backToLazyit": "Go to lazyit",
+      "refusal": {
+        "AI_DISABLED": {
+          "title": "Connections for AI apps are off",
+          "body": "An administrator hasn't turned on the MCP server on this instance, so no app can be authorized right now."
+        },
+        "FORBIDDEN": {
+          "title": "Your account can't connect AI apps",
+          "body": "Authorizing an AI app needs the “Connect external AI agents (MCP)” permission (ai:connect). Ask an administrator if you need it."
+        },
+        "INVALID_CLIENT": {
+          "title": "This app isn't allowed",
+          "body": "The app isn't registered with this instance, or your administrator no longer allows it. Start the connection again from the app, or ask your administrator."
+        },
+        "INVALID_REDIRECT": {
+          "title": "This request can't be trusted",
+          "body": "The app asked to send you to an address it didn't register. For your safety lazyit won't send you anywhere. Start the connection again from the app."
+        }
+      },
+      "unavailable": {
+        "title": "App sign-in isn't available here",
+        "body": "OAuth sign-in for AI apps needs this instance to be served over HTTPS with its address configured. On a plain-HTTP (LAN) instance, connect AI apps with a personal token instead.",
+        "action": "Open AI & connected apps"
+      },
+      "invalidRequest": {
+        "title": "This sign-in link is incomplete",
+        "body": "The authorization request is missing information or is malformed. Start the connection again from your app."
+      },
+      "clientError": {
+        "title": "The app sent an invalid request",
+        "body": "lazyit can't continue with this request. You can return to the app so it can show you the error.",
+        "code": "Error:",
+        "destination": "Returns you to:",
+        "action": "Return to {host}"
+      },
+      "unsafeRedirect": {
+        "title": "Unexpected response",
+        "body": "lazyit received a return address that doesn't match the app's, so it won't send you there. Start the connection again from the app."
+      },
+      "unknown": {
+        "title": "Something went wrong",
+        "body": "lazyit couldn't process this authorization request. Try again from your app.",
+        "requestId": "Request ID:"
+      }
+    }
+  }
+}
