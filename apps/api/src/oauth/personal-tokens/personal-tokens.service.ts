@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   HttpStatus,
@@ -9,6 +10,7 @@ import {
 import {
   OAuthScopeSchema,
   PERSONAL_TOKEN_PREFIX,
+  PERSONAL_TOKEN_SCOPES,
   type CreatePersonalToken,
   type OAuthGrant,
   type OAuthScope,
@@ -157,27 +159,44 @@ export class PersonalTokensService {
       );
     }
 
-    const now = new Date();
-    const live = await this.prisma.oAuthGrant.count({
-      where: {
-        userId: subject.id,
-        kind: 'personal',
-        deletedAt: null,
-        sessionEpoch: subject.sessionEpoch,
-        expiresAt: { gt: now },
-      },
-    });
-    if (live >= MAX_LIVE_PERSONAL_TOKENS) {
-      throw new ConflictException(
-        `You already have ${MAX_LIVE_PERSONAL_TOKENS} active personal tokens. Revoke one you no longer use first.`,
+    // Defence in depth over the contract (G3 review F7): a personal token carries only read / write —
+    // never `lazyit.admin`, never an unknown scope, never none.
+    const scopes = storedScopes(input.scopes);
+    if (
+      scopes.length === 0 ||
+      scopes.length !== input.scopes.length ||
+      scopes.some(
+        (scope) =>
+          !(PERSONAL_TOKEN_SCOPES as readonly string[]).includes(scope),
+      )
+    ) {
+      throw new BadRequestException(
+        'A personal token carries lazyit.read and/or lazyit.write only.',
       );
     }
 
+    const now = new Date();
     const expiresAt = new Date(now.getTime() + input.expiresInDays * DAY_MS);
-    const scopes = storedScopes(input.scopes);
     const minted = mintOpaqueToken(PERSONAL_TOKEN_PREFIX);
 
     const grant = await this.prisma.$transaction(async (tx) => {
+      // The cap is counted and the grant created under one per-user advisory lock (G3 review F4), so two
+      // concurrent mints cannot both see 19 and both create: the second waits for the first to commit.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'lazyit.personal_token'}), hashtext(${subject.id}))`;
+      const live = await tx.oAuthGrant.count({
+        where: {
+          userId: subject.id,
+          kind: 'personal',
+          deletedAt: null,
+          sessionEpoch: subject.sessionEpoch,
+          expiresAt: { gt: now },
+        },
+      });
+      if (live >= MAX_LIVE_PERSONAL_TOKENS) {
+        throw new ConflictException(
+          `You already have ${MAX_LIVE_PERSONAL_TOKENS} active personal tokens. Revoke one you no longer use first.`,
+        );
+      }
       const created = await tx.oAuthGrant.create({
         data: {
           userId: subject.id,

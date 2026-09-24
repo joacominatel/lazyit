@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call */
 // The generated client never loads under Jest (no DB); the services run over FakeOAuthPrisma instead.
 jest.mock('../../../generated/prisma/client', () => ({
   PrismaClient: class {},
@@ -7,6 +7,7 @@ jest.mock('../../../generated/prisma/client', () => ({
 
 import { createHash } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Logger,
@@ -56,6 +57,8 @@ beforeEach(() => {
   useLanInstance();
   h = buildHarness();
   enableMcp(h);
+  // The advisory lock the mint takes (a no-op in memory; its ORDER is asserted below).
+  (h.prisma as any).$executeRaw = jest.fn().mockResolvedValue(0);
   service = new PersonalTokensService(
     h.prisma as any,
     h.policy,
@@ -197,6 +200,64 @@ describe('mint', () => {
     );
   });
 
+  it('counts the cap under a per-user advisory lock, inside the create transaction (G3 review F4)', async () => {
+    const user = seedUser(h);
+    const order: string[] = [];
+    let inTransaction = false;
+    const db = h.prisma as any;
+    const transaction = db.$transaction.bind(db);
+    db.$transaction = async (fn: (tx: unknown) => Promise<unknown>) => {
+      inTransaction = true;
+      try {
+        return await transaction(fn);
+      } finally {
+        inTransaction = false;
+      }
+    };
+    db.$executeRaw.mockImplementation((strings: TemplateStringsArray) => {
+      order.push(`lock:${inTransaction}:${strings.join('?')}`);
+      return Promise.resolve(0);
+    });
+    db.oAuthGrant.count.mockImplementation(() => {
+      order.push(`count:${inTransaction}`);
+      return Promise.resolve(0);
+    });
+    const create = db.oAuthGrant.create.getMockImplementation();
+    db.oAuthGrant.create.mockImplementation((args: unknown) => {
+      order.push(`create:${inTransaction}`);
+      return create(args);
+    });
+    await service.create(user, input());
+    expect(order).toEqual([
+      'lock:true:SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))',
+      'count:true',
+      'create:true',
+    ]);
+    expect(db.$executeRaw.mock.calls[0].slice(1)).toEqual([
+      'lazyit.personal_token',
+      user.id,
+    ]);
+  });
+
+  it('re-asserts the scopes in the service: never lazyit.admin, never none (G3 review F7)', async () => {
+    const user = seedUser(h);
+    for (const scopes of [
+      ['lazyit.read', 'lazyit.admin'],
+      ['lazyit.admin'],
+      [],
+      ['openid'],
+    ]) {
+      await expect(
+        service.create(user, {
+          label: 'x',
+          expiresInDays: 90,
+          scopes,
+        } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    }
+    expect(h.prisma.tables.oAuthGrant).toHaveLength(0);
+  });
+
   it(`caps live personal tokens at ${MAX_LIVE_PERSONAL_TOKENS} per user`, async () => {
     const user = seedUser(h);
     for (let i = 0; i < MAX_LIVE_PERSONAL_TOKENS; i += 1) {
@@ -265,6 +326,22 @@ describe('list and revoke', () => {
       action: 'PERSONAL_TOKEN_REVOKED',
       grantId: mine.grant.id,
       ip: '10.0.0.9',
+    });
+  });
+
+  it('the admin revoke path records PERSONAL_TOKEN_REVOKED with reason admin (G3 review F8)', async () => {
+    const user = seedUser(h);
+    const admin = seedUser(h, { role: 'ADMIN' });
+    const created = await service.create(user, input());
+    await h.grants.revoke(admin, created.grant.id, '10.0.0.7');
+    expect(
+      h.prisma.tables.oAuthGrant.find((g) => g.id === created.grant.id),
+    ).toMatchObject({ revokeReason: 'admin', revokedById: admin.id });
+    expect(h.prisma.tables.oAuthAuditLog.at(-1)).toMatchObject({
+      action: 'PERSONAL_TOKEN_REVOKED',
+      userId: user.id,
+      actorId: admin.id,
+      grantId: created.grant.id,
     });
   });
 
