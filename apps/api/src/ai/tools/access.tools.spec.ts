@@ -189,6 +189,7 @@ const svcCalls: Array<{ method: string; principal?: Principal }> = [];
 function resetDomain() {
   resetWorkflows();
   resetDirectory();
+  directoryHidden = 0;
   seq = 0;
   svcCalls.length = 0;
   const app = (id: string, name: string, over: Row = {}): Row => ({
@@ -581,7 +582,23 @@ function resetDirectory() {
     }),
   };
 }
+/** Extra rows `GET /users` reports beyond the ones it returns (a partial page), for the lookup rule. */
+let directoryHidden = 0;
 const usersService = {
+  findPage: jest.fn(
+    (filters: { q?: string }, page: { limit: number; offset?: number }) => {
+      const q = filters.q?.toLowerCase() ?? '';
+      const rows = Object.values(directory).filter(
+        (u) =>
+          !u.deletedAt &&
+          [u.firstName, u.lastName, u.email].some((f) =>
+            String(f).toLowerCase().includes(q),
+          ),
+      );
+      const out = paged(rows, page);
+      return Promise.resolve({ ...out, total: out.total + directoryHidden });
+    },
+  ),
   findOneSerialized: jest.fn((id: string) => {
     const row = directory[id];
     if (!row || row.deletedAt)
@@ -1461,8 +1478,15 @@ describe('access toolset (W2-6) — applications, access grants, access requests
           { field: 'seatsPurchased', before: 10, after: null },
         ]),
       );
+      // VPN is critical: the card carries CRITICAL_APPLICATION and core requires the password.
+      expect(act.preview).toMatchObject({
+        warnings: ['CRITICAL_APPLICATION'],
+        stepUpRequired: true,
+      });
       apps.set(VPN, { ...apps.get(VPN)!, updatedAt: later(T0, 5) });
-      const stale = await tools.approve(act.id, chat(actor('MEMBER')));
+      const stale = await tools.approve(act.id, chat(actor('MEMBER')), {
+        stepUpVerified: true,
+      });
       expect(stale.status).toBe('FAILED');
       expect(stale.result).toMatchObject({
         ok: false,
@@ -1476,7 +1500,11 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         set: { vendor: 'Corp' },
       });
       expect(
-        (await tools.approve(fresh.id, chat(actor('MEMBER')))).status,
+        (
+          await tools.approve(fresh.id, chat(actor('MEMBER')), {
+            stepUpVerified: true,
+          })
+        ).status,
       ).toBe('SUCCEEDED');
       expect(applicationsService.update).toHaveBeenCalledWith(VPN, {
         vendor: 'Corp',
@@ -1532,10 +1560,12 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         'PRIVILEGE_GRANT',
         'EXTERNAL_PROVISIONING',
         'NOTIFIES_USERS',
+        'CRITICAL_APPLICATION',
       ]);
       expect(action(preview)).toBe(
         'Give Gina Doe <gina@example.com> "admin" access to VPN until 2026-12-31. ' +
-          'This triggers automatic provisioning (creating the account in VPN) after approval, through the workflow set up for VPN.',
+          'This triggers automatic provisioning (creating the account in VPN) after approval, through the workflow set up for VPN. ' +
+          'VPN is a critical application: confirm with your password.',
       );
       // The workflow is named (as untrusted, admin-authored text) — never its definition or connection.
       expect(preview.changes).toEqual(
@@ -1787,6 +1817,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
           'PRIVILEGE_GRANT',
           'EXTERNAL_PROVISIONING',
           'NOTIFIES_USERS',
+          'CRITICAL_APPLICATION',
         ],
         target: {
           type: 'accessRequest',
@@ -1800,7 +1831,8 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       });
       expect(action(act.preview)).toBe(
         'Approve the request: give Vic Doe <vic@example.com> "user" access to VPN. An access grant is created and Vic Doe <vic@example.com> is notified. ' +
-          'This triggers automatic provisioning (creating the account in VPN) after approval, through the workflow set up for VPN.',
+          'This triggers automatic provisioning (creating the account in VPN) after approval, through the workflow set up for VPN. ' +
+          'VPN is a critical application: confirm with your password.',
       );
       expect(act.preview!.changes).toEqual(
         expect.arrayContaining([
@@ -1884,6 +1916,8 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         result: { error: { code: 'INVALID_INPUT' } },
       });
 
+      // A non-critical application: denying grants nothing, so no step-up.
+      apps.set(VPN, { ...apps.get(VPN)!, isCritical: false });
       const act = await propose(actor('ADMIN'), 'access_request_decide', {
         requestId: REQ,
         decision: 'deny',
@@ -1955,7 +1989,10 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       const last = await propose(actor('ADMIN'), 'access_grant_revoke', {
         grantId: vpnGrant,
       });
-      expect(last.preview!.warnings).toEqual(['EXTERNAL_DEPROVISIONING']);
+      expect(last.preview!.warnings).toEqual([
+        'EXTERNAL_DEPROVISIONING',
+        'CRITICAL_APPLICATION',
+      ]);
       // The application's criticality is on the card (and loaded for a critical-application warning).
       expect(last.preview!.changes).toEqual(
         expect.arrayContaining([
@@ -1964,7 +2001,8 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       );
       expect(action(last.preview)).toBe(
         `Remove Gina Doe <gina@example.com>'s "developer" access to VPN. ` +
-          'This triggers automatic deprovisioning (removing the account in VPN), through the workflow set up for VPN.',
+          'This triggers automatic deprovisioning (removing the account in VPN), through the workflow set up for VPN. ' +
+          'VPN is a critical application: confirm with your password.',
       );
 
       grants.set('ck0grantvpn00000000000002', {
@@ -1975,10 +2013,11 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       const kept = await propose(actor('ADMIN'), 'access_grant_revoke', {
         grantId: vpnGrant,
       });
-      expect(kept.preview!.warnings).toEqual([]);
+      expect(kept.preview!.warnings).toEqual(['CRITICAL_APPLICATION']);
       expect(action(kept.preview)).toBe(
         `Remove Gina Doe <gina@example.com>'s "developer" access to VPN. ` +
-          'The user keeps other access to VPN, so its deprovisioning workflow does not run.',
+          'The user keeps other access to VPN, so its deprovisioning workflow does not run. ' +
+          'VPN is a critical application: confirm with your password.',
       );
 
       workflows = workflows.map((w) =>
@@ -1989,7 +2028,10 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       const each = await propose(actor('ADMIN'), 'access_grant_revoke', {
         grantId: vpnGrant,
       });
-      expect(each.preview!.warnings).toEqual(['EXTERNAL_DEPROVISIONING']);
+      expect(each.preview!.warnings).toEqual([
+        'EXTERNAL_DEPROVISIONING',
+        'CRITICAL_APPLICATION',
+      ]);
     });
 
     it('an approver deciding their own request is told so on the card', async () => {
@@ -2008,7 +2050,8 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         reason: 'Not needed after all',
       });
       expect(action(deny.preview)).toBe(
-        'You are deciding your own request. Deny your request for "user" access to VPN. You are notified with your reason.',
+        'You are deciding your own request. Deny your request for "user" access to VPN. You are notified with your reason. ' +
+          'VPN is a critical application: confirm with your password.',
       );
     });
   });
@@ -2237,6 +2280,305 @@ describe('access toolset (W2-6) — applications, access grants, access requests
   });
 
   // ─── MCP and headless ──────────────────────────────────────────────────────────────────────────
+
+  describe('critical applications (CEO decision: chat with password only)', () => {
+    const REFUSED =
+      'This application is critical; do it from the lazyit chat, where it is confirmed with your password.';
+    const vpnGrant = 'ck0grantvpn00000000000009';
+    beforeEach(() => {
+      grants.set(vpnGrant, {
+        ...grants.get(GRANT)!,
+        id: vpnGrant,
+        applicationId: VPN,
+        notes: null,
+      });
+    });
+
+    it('chat: a revoke (write class) on a critical application requires the step-up', async () => {
+      const act = await propose(actor('ADMIN'), 'access_grant_revoke', {
+        grantId: vpnGrant,
+      });
+      expect(act.preview).toMatchObject({
+        class: 'write',
+        elevated: false,
+        stepUpRequired: true,
+      });
+      expect(act.preview!.warnings).toContain('CRITICAL_APPLICATION');
+      await expect(
+        tools.approve(act.id, chat(actor('ADMIN'))),
+      ).rejects.toMatchObject({ response: { code: 'STEP_UP_REQUIRED' } });
+      expect(grantsService.revoke).not.toHaveBeenCalled();
+      const done = await tools.approve(act.id, chat(actor('ADMIN')), {
+        stepUpVerified: true,
+      });
+      expect(done.status).toBe('SUCCEEDED');
+    });
+
+    it('chat: creating a critical application, or making one critical, carries the warning and the step-up', async () => {
+      const create = await propose(actor('MEMBER'), 'application_create', {
+        name: 'Payroll',
+        isCritical: true,
+      });
+      expect(create.preview).toMatchObject({
+        warnings: ['CRITICAL_APPLICATION'],
+        stepUpRequired: true,
+      });
+      const plain = await propose(actor('MEMBER'), 'application_create', {
+        name: 'Figma',
+      });
+      expect(plain.preview).toMatchObject({
+        warnings: [],
+        stepUpRequired: false,
+      });
+      const promote = await propose(actor('MEMBER'), 'application_update', {
+        application: APP,
+        set: { isCritical: true },
+      });
+      expect(promote.preview).toMatchObject({
+        warnings: ['CRITICAL_APPLICATION'],
+        stepUpRequired: true,
+      });
+      const edit = await propose(actor('MEMBER'), 'application_update', {
+        application: APP,
+        set: { vendor: 'Atlassian Inc.' },
+      });
+      expect(edit.preview).toMatchObject({
+        warnings: [],
+        stepUpRequired: false,
+      });
+    });
+
+    it('MCP and headless: every write on a critical application is refused with the exact message, before any side effect', async () => {
+      const cases: Array<[string, Row, AiExecutionContext]> = [
+        [
+          'access_grant_create',
+          { user: ID.grantee, application: VPN },
+          mcp(actor('ADMIN'), ADMIN_SCOPE),
+        ],
+        [
+          'access_grant_create',
+          { user: ID.grantee, application: VPN },
+          headless(actor('SA granter'), ADMIN_SCOPE),
+        ],
+        [
+          'access_grant_revoke',
+          { grantId: vpnGrant },
+          mcp(actor('ADMIN'), WRITE_SCOPE),
+        ],
+        [
+          'access_grant_revoke',
+          { grantId: vpnGrant },
+          headless(actor('SA granter'), ADMIN_SCOPE),
+        ],
+        [
+          'access_request_decide',
+          { requestId: REQ, decision: 'approve' },
+          mcp(actor('ADMIN'), ADMIN_SCOPE),
+        ],
+        [
+          'access_request_decide',
+          { requestId: REQ, decision: 'deny', reason: 'No' },
+          mcp(actor('ADMIN'), ADMIN_SCOPE),
+        ],
+        [
+          'application_update',
+          { application: VPN, set: { vendor: 'X' } },
+          mcp(actor('ADMIN'), WRITE_SCOPE),
+        ],
+        [
+          'application_update',
+          { application: APP, set: { isCritical: true } },
+          headless(actor('SA granter'), ADMIN_SCOPE),
+        ],
+        [
+          'application_create',
+          { name: 'Payroll', isCritical: true },
+          mcp(actor('ADMIN'), WRITE_SCOPE),
+        ],
+      ];
+      for (const [name, input, ctx] of cases) {
+        ledger = [];
+        const result = await tools.invoke(name, input, ctx);
+        expect({ name, result }).toMatchObject({
+          name,
+          result: {
+            ok: false,
+            error: { code: 'FORBIDDEN', status: 403, message: REFUSED },
+          },
+        });
+        expect(ledger.map((e) => e.event)).toEqual(['ATTEMPTED', 'FAILED']);
+      }
+      expect(grantsService.create).not.toHaveBeenCalled();
+      expect(grantsService.revoke).not.toHaveBeenCalled();
+      expect(requestsService.approve).not.toHaveBeenCalled();
+      expect(requestsService.deny).not.toHaveBeenCalled();
+      expect(applicationsService.update).not.toHaveBeenCalled();
+      expect(applicationsService.create).not.toHaveBeenCalled();
+    });
+
+    it('MCP and headless: the same writes on a non-critical application are unchanged', async () => {
+      expect(
+        (
+          await tools.invoke(
+            'access_grant_create',
+            { user: ID.grantee, application: APP },
+            mcp(actor('ADMIN'), ADMIN_SCOPE),
+          )
+        ).ok,
+      ).toBe(true);
+      expect(
+        (
+          await tools.invoke(
+            'access_grant_revoke',
+            { grantId: GRANT },
+            headless(actor('SA granter'), ADMIN_SCOPE),
+          )
+        ).ok,
+      ).toBe(true);
+      expect(
+        (
+          await tools.invoke(
+            'application_create',
+            { name: 'Figma' },
+            mcp(actor('ADMIN'), WRITE_SCOPE),
+          )
+        ).ok,
+      ).toBe(true);
+    });
+
+    it('fails closed off the chat when the criticality cannot be read', async () => {
+      SA_GRANTS[SA.granter] = SA_GRANTS[SA.granter].filter(
+        (p) => p !== 'application:read',
+      );
+      try {
+        const result = await tools.invoke(
+          'access_grant_revoke',
+          { grantId: GRANT },
+          headless(actor('SA granter'), ADMIN_SCOPE),
+        );
+        expect(result).toMatchObject({
+          ok: false,
+          error: {
+            code: 'FORBIDDEN',
+            message:
+              'Cannot check whether this application is critical (application:read is needed); do it from the lazyit chat.',
+          },
+        });
+        expect(grantsService.revoke).not.toHaveBeenCalled();
+      } finally {
+        SA_GRANTS[SA.granter].push('application:read');
+      }
+    });
+  });
+
+  describe('user references by email or full name (through the guarded directory list)', () => {
+    it('resolves an email or an exact full name, in the preview and the run alike', async () => {
+      for (const reference of [
+        'gina@example.com',
+        'GINA@example.com',
+        'gina  doe',
+      ]) {
+        const act = await propose(actor('ADMIN'), 'access_grant_create', {
+          user: reference,
+          application: APP,
+        });
+        expect(act.preview!.impacted[0].sample[0]).toMatchObject({
+          id: ID.grantee,
+        });
+      }
+      const listed = data(
+        await tools.invoke(
+          'access_grant_list',
+          { user: 'Gina Doe' },
+          chat(actor('ADMIN')),
+        ),
+      );
+      expect(listed.total).toBe(1);
+      expect(grantsService.findPage.mock.calls.at(-1)![0]).toMatchObject({
+        userId: ID.grantee,
+      });
+      const byEmail = await tools.invoke(
+        'access_grant_create',
+        { user: 'gina@example.com', application: APP },
+        mcp(actor('ADMIN'), ADMIN_SCOPE),
+      );
+      expect(byEmail.ok).toBe(true);
+      expect(grantsService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: ID.grantee }),
+        expect.anything(),
+      );
+    });
+
+    it('unknown → NOT_FOUND; two exact matches → AMBIGUOUS with candidates', async () => {
+      expect(
+        await tools.invoke(
+          'access_grant_list',
+          { user: 'nobody@example.com' },
+          chat(actor('ADMIN')),
+        ),
+      ).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+      directory['aaaaaaaa-0000-4000-8000-000000000044'] = {
+        ...directory[ID.grantee],
+        id: 'aaaaaaaa-0000-4000-8000-000000000044',
+        email: 'gina.two@example.com',
+      };
+      const twin = await tools.invoke(
+        'access_grant_list',
+        { user: 'Gina Doe' },
+        chat(actor('ADMIN')),
+      );
+      expect(twin).toMatchObject({
+        ok: false,
+        error: { code: 'AMBIGUOUS_REFERENCE' },
+      });
+      expect((twin as { error: { hint: string } }).error.hint).toContain(
+        'gina.two@example.com',
+      );
+    });
+
+    it('a partial page never decides a name; an exact email still does', async () => {
+      directoryHidden = 500;
+      const byName = await tools.invoke(
+        'access_grant_list',
+        { user: 'Gina Doe' },
+        chat(actor('ADMIN')),
+      );
+      expect(byName).toMatchObject({
+        ok: false,
+        error: { code: 'AMBIGUOUS_REFERENCE' },
+      });
+      expect(
+        (byName as { error: { message: string } }).error.message,
+      ).toContain("use the user's id or email");
+      const byEmail = await tools.invoke(
+        'access_grant_list',
+        { user: 'gina@example.com' },
+        chat(actor('ADMIN')),
+      );
+      expect(byEmail.ok).toBe(true);
+    });
+
+    it('a caller without user:read gets the route 403 for a name, while a raw id still works', async () => {
+      const result = await tools.invoke(
+        'access_grant_list',
+        { user: 'gina@example.com' },
+        headless(actor('SA granter'), READ_ONLY),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'FORBIDDEN', status: 403 },
+      });
+      expect(
+        (
+          await tools.invoke(
+            'access_grant_list',
+            { user: ID.grantee },
+            headless(actor('SA granter'), READ_ONLY),
+          )
+        ).ok,
+      ).toBe(true);
+    });
+  });
 
   describe('MCP: the scope ceiling', () => {
     it('lazyit.write cannot run or list an elevated tool; lazyit.admin can', async () => {
