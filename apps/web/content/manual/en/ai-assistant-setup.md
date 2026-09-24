@@ -82,7 +82,9 @@ agents (MCP)** permission). This switch is independent of the assistant: it work
 configured. Turning it off disconnects every client at once; their authorizations work again when you
 turn it back on.
 
-The card shows the **MCP endpoint** — your instance's address followed by `/mcp` — and explains how
+The card shows the **MCP endpoint** — the public address in the API's `WEB_ORIGIN` followed by `/mcp`
+(when no address is pinned, the card shows the address of the page you are on and says so) — and
+explains how
 clients sign in on **this** instance. That depends on the API's `WEB_ORIGIN` setting — the public
 address lazyit is pinned to — not merely on whether the page is shown over HTTPS:
 
@@ -104,9 +106,23 @@ connected apps** (**Install in Claude Code** links there).
 
 ### Allowed clients
 
-Only allowed clients can connect. lazyit already allows the well-known ones — Claude Code, OpenAI Codex,
-OpenCode, Gemini CLI, Cursor, VS Code / GitHub Copilot, claude.ai and ChatGPT. To allow another client,
-**Add a client** by one of:
+Which clients may connect is decided by two things, both in the MCP card:
+
+- **Accept any client with an https:// callback — on by default.** Any MCP client whose sign-in
+  callback is an `https://` address may *ask* a person for access, even if it is not listed. This alone
+  grants nothing: the person still sees the consent page, which shows the client's callback host and
+  warns when a client was not listed. It never admits a loopback callback (`http://127.0.0.1/…`) or an
+  app-scheme callback such as `cursor://…` — those need an entry. **Turn it off to accept only the listed
+  clients.**
+- **The list.** lazyit ships a list of **built-in clients** — Claude Code, OpenAI Codex, OpenCode, Gemini
+  CLI, Cursor, VS Code / GitHub Copilot, claude.ai, Claude Desktop and ChatGPT — each shown with its
+  identifier and how it was checked (**Verified** from the client's own code or documentation, or
+  **Vendor docs**). **Remove** a built-in client to stop it connecting (while "any https:// client" is on,
+  a removed client with an `https://` callback can still ask for consent), and **Restore** it at any
+  time. Pi, Windsurf and Zed are not built in, because their identifiers could not be verified — add them
+  yourself if your team uses them.
+
+To allow another client, **Add a client** by one of:
 
 - its **client-metadata URL** — the `https://` URL the client uses as its client id; or
 - its **callback address** — the exact address it sends people back to after sign-in: `https://…`, a
@@ -116,10 +132,6 @@ OpenCode, Gemini CLI, Cursor, VS Code / GitHub Copilot, claude.ai and ChatGPT. T
 A client is recognized only this way — never by the name it gives itself. Plain `http://` is accepted
 only on a loopback address, an address with a user name (`…@…`) is always refused, and app schemes are
 accepted only as an explicit entry.
-
-**Also allow any client with an https:// callback** admits web-based agents that are not listed. It never
-admits loopback or app-scheme callbacks, and the consent page warns people when a client was allowed
-this way.
 
 ## Service accounts
 

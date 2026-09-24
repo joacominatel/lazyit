@@ -86,7 +86,8 @@ externos (MCP)**). Este interruptor es independiente del asistente: funciona sin
 configurado. Desactivarlo desconecta todos los clientes a la vez; sus autorizaciones vuelven a valer al
 reactivarlo.
 
-La tarjeta muestra el **endpoint MCP** — la dirección de tu instancia seguida de `/mcp` — y explica cómo
+La tarjeta muestra el **endpoint MCP** — la dirección pública de `WEB_ORIGIN` en la API seguida de `/mcp`
+(si no hay una dirección fijada, muestra la de la página en la que estás y lo indica) — y explica cómo
 inician sesión los clientes en **esta** instancia. Eso depende de la opción `WEB_ORIGIN` de la API — la
 dirección pública a la que está fijado lazyit —, no solo de si la página se muestra por HTTPS:
 
@@ -109,9 +110,23 @@ El plugin, los comandos de instalación y las aplicaciones conectadas y tokens d
 
 ### Clientes permitidos
 
-Solo los clientes permitidos pueden conectarse. lazyit ya permite los conocidos — Claude Code, OpenAI Codex,
-OpenCode, Gemini CLI, Cursor, VS Code / GitHub Copilot, claude.ai y ChatGPT. Para permitir otro cliente,
-usa **Agregar un cliente** con uno de estos datos:
+Qué clientes pueden conectarse lo deciden dos cosas, ambas en la tarjeta de MCP:
+
+- **Aceptar cualquier cliente con callback https:// — activado por defecto.** Cualquier cliente MCP cuyo
+  callback de inicio de sesión sea una dirección `https://` puede *pedirle* acceso a una persona, aunque no
+  esté en la lista. Esto por sí solo no otorga nada: la persona igual ve la página de consentimiento, que
+  muestra el host del callback del cliente y avisa cuando un cliente no estaba en la lista. Nunca admite un
+  callback de loopback (`http://127.0.0.1/…`) ni de esquema de aplicación como `cursor://…` — esos
+  necesitan una entrada. **Desactívalo para aceptar solo los clientes de la lista.**
+- **La lista.** lazyit trae una lista de **clientes incluidos** — Claude Code, OpenAI Codex, OpenCode,
+  Gemini CLI, Cursor, VS Code / GitHub Copilot, claude.ai, Claude Desktop y ChatGPT —, cada uno con su
+  identificador y cómo se comprobó (**Verificado** desde el código o la documentación del propio cliente, o
+  **Docs del proveedor**). **Quita** un cliente incluido para que deje de conectarse (mientras “cualquier
+  cliente https://” esté activado, un cliente quitado con callback `https://` todavía puede pedir
+  consentimiento), y **Restáuralo** cuando quieras. Pi, Windsurf y Zed no vienen incluidos porque sus
+  identificadores no se pudieron verificar — agrégalos tú si tu equipo los usa.
+
+Para permitir otro cliente, usa **Agregar un cliente** con uno de estos datos:
 
 - su **URL de metadatos de cliente** — la URL `https://` que el cliente usa como id de cliente; o
 - su **dirección de callback** — la dirección exacta a la que devuelve a la persona después de iniciar
@@ -121,10 +136,6 @@ usa **Agregar un cliente** con uno de estos datos:
 Un cliente solo se reconoce de esta forma — nunca por el nombre que se da a sí mismo. `http://` sin cifrar
 solo se acepta en una dirección de loopback, una dirección con usuario (`…@…`) se rechaza siempre, y los
 esquemas de aplicación solo se aceptan como entrada explícita.
-
-**Permitir además cualquier cliente con callback https://** admite agentes web que no están en la lista.
-Nunca admite callbacks de loopback ni de esquema de aplicación, y la página de consentimiento avisa cuando un
-cliente se permitió de esta forma.
 
 ## Cuentas de servicio
 

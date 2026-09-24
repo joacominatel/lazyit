@@ -30,6 +30,11 @@ parte en **Configuración → IA**:
 
 Desactivar cualquiera de los dos es inmediato y conserva la configuración para más adelante.
 
+Con MCP activado, los clientes conocidos están permitidos de entrada y — por defecto — cualquier otro
+cliente con un callback de inicio de sesión `https://` puede pedirle acceso a una persona; la persona siempre
+ve quién lo pide antes de aprobar. Un administrador puede restringirlo a una lista fija. Consulta
+[Asistente de IA — configuración](/help/ai-assistant-setup#clientes-permitidos).
+
 ## Qué sale de tu servidor
 
 Cuando alguien usa el asistente integrado, lazyit envía al proveedor que elegiste:

@@ -29,6 +29,11 @@ Nothing about AI is active on a new or upgraded instance. An administrator turns
 
 Turning either off again is immediate and keeps the configuration for later.
 
+Once MCP is on, the well-known clients are allowed out of the box, and — by default — any other client
+with an `https://` sign-in callback may ask a person for access; the person always sees who is asking
+before approving. An administrator can narrow this to a fixed list. See
+[AI assistant — setup](/help/ai-assistant-setup#allowed-clients).
+
 ## What leaves your server
 
 When someone uses the in-app assistant, lazyit sends to the provider you chose:
