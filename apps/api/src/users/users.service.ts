@@ -118,6 +118,11 @@ export interface UserFilters {
    * simply matches no row (silently ignored, never a 400). absent/undefined → no filter (default).
    */
   ids?: string[];
+  /**
+   * Activation filter (issue #1375). true → only active accounts; false → only deactivated ones.
+   * absent/undefined → both (default; no filter). Validated as exactly "true" | "false" at the controller.
+   */
+  isActive?: boolean;
 }
 
 /**
@@ -293,6 +298,7 @@ export class UsersService {
     directoryOnly,
     role,
     ids,
+    isActive,
   }: UserFilters): Prisma.UserWhereInput {
     return {
       // Token-wise match (issue #1053): each whitespace-separated token of `q` must appear in
@@ -305,6 +311,8 @@ export class UsersService {
       // ids filter (issue #961): the batch id→name resolver — scope to exactly these ids. Absent or
       // empty → no filter. Unknown ids simply match nothing (the IN clause ignores them silently).
       ...(ids && ids.length > 0 ? { id: { in: ids } } : {}),
+      // isActive filter (issue #1375): absent → no filter (active and deactivated alike).
+      ...(isActive !== undefined ? { isActive } : {}),
     };
   }
 

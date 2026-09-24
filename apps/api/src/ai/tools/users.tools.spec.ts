@@ -924,6 +924,46 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       });
     });
 
+    it('isActive filters activation in ONE call, with the same rows as GET /users?isActive= (#1375)', async () => {
+      users.set(ID.viewer, { ...users.get(ID.viewer)!, isActive: false });
+      for (const [flag, expected] of [
+        [false, [ID.viewer]],
+        [true, [ID.admin, ID.member, ID.directory].sort()],
+      ] as const) {
+        const http = await request(app.getHttpServer())
+          .get(`/users?isActive=${String(flag)}`)
+          .set('authorization', `Bearer ${ADMIN.bearer}`);
+        expect(http.status).toBe(200);
+        const routeIds = (http.body as { items: Array<{ id: string }> }).items
+          .map((u) => u.id)
+          .sort();
+        expect(routeIds).toEqual([...expected]);
+
+        const result = await tools.invoke(
+          'user_search',
+          { isActive: flag },
+          chat(ADMIN),
+        );
+        expect(result).toMatchObject({ ok: true });
+        const ids = (
+          result as { data: { items: Array<{ id: string }> } }
+        ).data.items
+          .map((u) => u.id)
+          .sort();
+        expect(ids).toEqual(routeIds);
+      }
+      // Omitted: both, exactly as before the filter existed.
+      expect(await tools.invoke('user_search', {}, chat(ADMIN))).toMatchObject({
+        ok: true,
+        data: { total: 4 },
+      });
+      // A garbage value is a clean 400 on the route.
+      const bad = await request(app.getHttpServer())
+        .get('/users?isActive=maybe')
+        .set('authorization', `Bearer ${ADMIN.bearer}`);
+      expect(bad.status).toBe(400);
+    });
+
     it('archived: true is the route’s ADMIN-only slice — a MEMBER gets the same 403', async () => {
       const admin = await tools.invoke(
         'user_search',

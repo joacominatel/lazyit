@@ -164,6 +164,13 @@ export class UsersController {
       'RBAC role filter (issue #693). Scope the list to one role (ADMIN | MEMBER | VIEWER). Unknown value → 400. Absent = all roles (default). Backs the Settings → Roles "View N members" deep-link.',
   })
   @ApiQuery({
+    name: 'isActive',
+    required: false,
+    enum: ['true', 'false'],
+    description:
+      'Activation filter (issue #1375). true = only active accounts; false = only deactivated ones; absent = both (default). Any other value → 400.',
+  })
+  @ApiQuery({
     name: 'ids',
     required: false,
     description:
@@ -183,6 +190,7 @@ export class UsersController {
     @Query('role') role?: string,
     @Query('ids') ids?: string | string[],
     @CurrentUser() user?: User,
+    @Query('isActive') isActive?: string,
   ) {
     const pageQuery = parsePageQuery({
       limit,
@@ -207,14 +215,28 @@ export class UsersController {
     // ids is optional (issue #961): absent → no filter; present → split, de-duplicated and validated
     // (each a UUID, count ≤ cap) against ResolveUserIdsSchema, so a garbage/over-cap batch is a clean 400.
     const idsFilter = ids !== undefined ? this.parseIdsQuery(ids) : undefined;
+    // isActive is optional (issue #1375): absent → both (today's behaviour); present → strictly
+    // "true" | "false" (a raw @Query is otherwise unchecked, so anything else is a clean 400).
+    const isActiveFilter =
+      isActive !== undefined ? this.parseIsActiveQuery(isActive) : undefined;
     return this.users.findPage(
       {
         q,
         directoryOnly: directoryOnlyFilter,
         role: roleFilter,
         ids: idsFilter,
+        isActive: isActiveFilter,
       },
       pageQuery,
+    );
+  }
+
+  /** Validate a raw `?isActive=` query value: exactly "true" or "false"; anything else is a clean 400. */
+  private parseIsActiveQuery(raw: string): boolean {
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    throw new BadRequestException(
+      'Invalid isActive filter: must be "true" or "false"',
     );
   }
 

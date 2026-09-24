@@ -1941,6 +1941,28 @@ describe('UsersService', () => {
       )[0][0];
       expect(call.where).not.toHaveProperty('role');
     });
+
+    // issue #1375 — the activation filter ("list the deactivated users" in one call).
+    it('isActive scopes both the findMany and the count; absent adds no clause', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        { isActive: false },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+      await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
+
+      const finds = user.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >;
+      const counts = user.count.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >;
+      expect(finds[0][0].where).toMatchObject({ isActive: false });
+      expect(counts[0][0].where).toMatchObject({ isActive: false });
+      expect(finds[1][0].where).not.toHaveProperty('isActive');
+    });
   });
 
   // issue #693 — per-role LIVE counts for the Settings → Roles cards. ONE groupBy over the live
