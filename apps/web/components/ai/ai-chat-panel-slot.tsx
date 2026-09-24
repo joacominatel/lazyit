@@ -1,11 +1,17 @@
 "use client";
 
 import { XMarkIcon } from "@heroicons/react/24/outline";
+import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { useCallback, useSyncExternalStore, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAiAssistant } from "./ai-assistant-root";
+
+/** The chat itself (W3-7), loaded on the panel's first open only. */
+const AiChatPanel = dynamic(() => import("./ai-chat-panel").then((m) => m.AiChatPanel), {
+  ssr: false,
+});
 
 /** Tailwind's `md` breakpoint (48rem): below it the panel is a modal sheet. */
 const MD_UP = "(min-width: 48rem)";
@@ -29,8 +35,7 @@ function useIsMdUp(): boolean {
  * the page stays live and clickable beside the conversation — docked in the layout's flex row at `xl`,
  * a fixed overlay with no backdrop from `md` to `xl`, and a modal full-width sheet below `md`.
  *
- * Renders nothing unless the assistant is available AND open. The panel content is a placeholder until
- * the chat itself lands in this slot.
+ * Renders nothing unless the assistant is available AND open. The content is the chat (`AiChatPanel`).
  */
 export function AiChatPanelSlot() {
   const t = useTranslations("ai");
@@ -44,11 +49,7 @@ export function AiChatPanelSlot() {
 
   if (!available || !open) return null;
 
-  const body = (
-    <div className="flex-1 overflow-y-auto p-4">
-      <p className="text-sm text-muted-foreground">{t("panel.placeholder")}</p>
-    </div>
-  );
+  const body = <AiChatPanel />;
 
   if (!isMdUp) {
     return (
