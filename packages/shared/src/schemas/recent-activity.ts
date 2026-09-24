@@ -135,6 +135,12 @@ export const RECENT_ACTIVITY_ACTIONS = [
   // lowercases the enum generically, so a verb missing from this allowlist is silently dropped from the
   // distinct-actions menu (GET /dashboard/activity/filters) and rejected as an `action` filter.
   "agent_linked",
+  // A consumable delivered to / returned from an asset (ADR-0098, #1364) — the lowercased
+  // CONSUMABLE_DELIVERED / CONSUMABLE_RETURNED AssetHistory events, which the view surfaces generically.
+  // Listed for the same reason as `agent_linked`: a verb missing here is dropped from the distinct-actions
+  // menu and rejected as an `action` filter.
+  "consumable_delivered",
+  "consumable_returned",
   "granted",
   "revoked",
   "stock_in",

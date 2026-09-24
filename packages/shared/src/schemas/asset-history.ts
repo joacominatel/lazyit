@@ -36,6 +36,13 @@ export const AssetHistoryEventTypeSchema = z.enum([
   // answers the one question a human reading a curated asset's history actually asks: *when did a
   // machine start writing to this row, and which one?*
   "AGENT_LINKED",
+  // A consumable was DELIVERED to this asset (ADR-0098, #1364) — a targeted OUT movement naming the asset
+  // (a spare disk left in a server, toner fitted to a printer). Payload
+  // `{ consumableId, consumableName, movementId, quantity, unit }`. Written in the movement's transaction.
+  "CONSUMABLE_DELIVERED",
+  // A RETURN against a returnable delivery made to this asset (ADR-0098): an IN linked via `returnOfId`.
+  // Payload: the same keys plus `returnOfId` (the delivery movement id).
+  "CONSUMABLE_RETURNED",
 ]);
 
 /** Contextual data attached to an event (e.g. `{ from, to }`, `{ userId }`). Unvalidated jsonb. */
