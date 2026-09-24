@@ -11,6 +11,7 @@ import { plainText } from "./untrusted-text";
 
 type ApprovalPart = Extract<AiMessagePart, { type: "approval" }>;
 type NoticePart = Extract<AiMessagePart, { type: "notice" }>;
+type InputPart = Extract<AiMessagePart, { type: "input" }>;
 
 export interface TranscriptLabels {
   you: string;
@@ -23,6 +24,8 @@ export interface TranscriptLabels {
    */
   approval: (part: ApprovalPart, callStatus: AiToolInvocationStatus | undefined) => string[];
   notice: (part: NoticePart) => string;
+  /** An input form (#1388) as lines: its title/state line, the form's title, then the answer if any. */
+  input: (part: InputPart) => string[];
   /** A part this build cannot show. */
   unsupported: string;
 }
@@ -60,6 +63,9 @@ function assistantBlocks(
         break;
       case "notice":
         blocks.push(quote([labels.notice(part)]));
+        break;
+      case "input":
+        blocks.push(quote(labels.input(part)));
         break;
       default:
         blocks.push(`_${labels.unsupported}_`);

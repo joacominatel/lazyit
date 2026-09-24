@@ -36,6 +36,8 @@ export function AiComposer<C>({
   running,
   stopping,
   blockedByApproval,
+  blockedByInput = false,
+  inputBanner,
   onSend,
   onStop,
   commands = [],
@@ -50,6 +52,10 @@ export function AiComposer<C>({
   stopping: boolean;
   /** The run waits for a decision on a card. */
   blockedByApproval: boolean;
+  /** The run waits for the user to answer an input form (#1388). */
+  blockedByInput?: boolean;
+  /** Shown above the box while an input form waits: what the assistant asked, and a way to reach it. */
+  inputBanner?: ReactNode;
   onSend: (text: string, context?: AiPageContext) => Promise<boolean>;
   onStop: () => void;
   /** The slash commands the palette offers. */
@@ -76,7 +82,7 @@ export function AiComposer<C>({
   const listId = useId();
 
   const context = routeContext(pathname);
-  const disabled = busy || running || blockedByApproval;
+  const disabled = busy || running || blockedByApproval || blockedByInput;
   const trimmed = text.trim();
 
   const query = onCommand ? slashQuery(text) : null;
@@ -148,6 +154,7 @@ export function AiComposer<C>({
         void submit();
       }}
     >
+      {blockedByInput && inputBanner}
       {context && contextName && (
         <div className="mb-2 flex items-center gap-1">
           {withContext ? (
@@ -230,7 +237,13 @@ export function AiComposer<C>({
       </div>
       <div className="mt-1.5 flex items-start gap-2">
         <p id={hintId} className="min-w-0 flex-1 text-xs text-muted-foreground">
-          {blockedByApproval ? t("busyApproval") : autoApprove ? t("hintAuto") : t("hint")}
+          {blockedByApproval
+            ? t("busyApproval")
+            : blockedByInput
+              ? t("busyInput")
+              : autoApprove
+                ? t("hintAuto")
+                : t("hint")}
         </p>
         {toolbar && <div className="flex shrink-0 items-center gap-1">{toolbar}</div>}
       </div>

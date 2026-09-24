@@ -4,6 +4,7 @@ import type {
   AiConversationDetail,
   AiConversationSettings,
   AiConversationSummary,
+  AiInputSubmission,
   AiModelCatalog,
   AiRunAccepted,
   AiStatus,
@@ -114,6 +115,22 @@ export function decideAiToolCall(
 ): Promise<AiRunAccepted> {
   return apiFetch<AiRunAccepted>(
     `${BASE}/runs/${enc(runId)}/tool-calls/${enc(toolCallId)}/decision`,
+    { method: "POST", body },
+  );
+}
+
+/**
+ * Answers an input form the assistant asked for (#1388): `submit` it, `skip` it or `cancel` (decline) it.
+ * `values` and `groups` are read on `submit` only, validated against the stored form. Refusals: see
+ * `inputErrorKind`.
+ */
+export function answerAiInput(
+  runId: string,
+  toolCallId: string,
+  body: AiInputSubmission,
+): Promise<AiRunAccepted> {
+  return apiFetch<AiRunAccepted>(
+    `${BASE}/runs/${enc(runId)}/tool-calls/${enc(toolCallId)}/input`,
     { method: "POST", body },
   );
 }

@@ -1115,6 +1115,40 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   as the compact `AiAutoAppliedCard` ("Applied automatically": action, target link, before → after,
   warnings, execution stamp) — never a pending card. `/copy` labels it the same. A write the server
   declines to auto-approve simply arrives as a normal card.
+- **Input forms (#1388; contract K5b).** A run paused `AWAITING_INPUT` is a **waiting** status beside
+  `AWAITING_APPROVAL` (`isWaitingRunStatus` in `lib/ai/run-events.ts`): the follower stops when the stream
+  closes after it (never a reconnect loop into "Connection lost"), and it is not terminal. The reducer
+  handles `input.required` (an `input` part after the call's tool line; a replay keeps an answered card's
+  outcome and answer), `input.resolved` (the outcome) and the snapshot's `pendingInputs` (absent from an
+  older API: `?? []`), so a reload restores a waiting form; the conversation state `awaiting-input` seeds
+  the run status `AWAITING_INPUT`. `input.resolved` carries no answer, so after a successful submit the
+  client records the normalized answer on the card (`inputAnswered`) until a re-read brings the persisted
+  one. The card is `components/ai/ai-input-card.tsx` over the pure `lib/ai/input-form.ts` (draft ↔
+  submission, issue paths ↔ fields, refusal kinds, answered-value display, issue messages localized from
+  the shared check's fixed English strings; an unknown message is shown as sent). **Every form string is
+  React text** (title, reason, labels, help, placeholders, options), `<untrusted_content>` wrappers
+  stripped. Required fields carry an asterisk (and an sr-only "required"), recommended ones a "Recommended"
+  badge, optional ones sit behind "More details" (opened automatically when one of them has an error).
+  Controls: text/textarea (`maxLength` from `AI_INPUT_LIMITS`), number (`inputMode="decimal"`, min/max),
+  date (native), select (the searchable `Combobox`), multiselect (a checkbox list up to 8 options, else
+  `EntityMultiSelect`), checkbox. Repeat groups render one small card per row with **Add a row** / remove
+  within `minRows..maxRows`; untouched extra rows are left out of the body while the rest still reach
+  `minRows`, and a row index map translates issue paths back to the rows on screen. **Send** runs the
+  shared `checkAiInputAnswer` first (focus moves to the first invalid control); a 400 `INVALID_INPUT`'s
+  `issues` land on the same fields. **Continue without** = `skip`, **Don't ask** = `cancel`. 409
+  `RUN_NOT_AWAITING_INPUT` / `EXPIRED` re-subscribe without `Last-Event-ID` for a fresh snapshot; 409
+  `AI_DISABLED` re-reads the status; every refusal has a message (`INPUT_ERROR_KINDS`, covering-set test).
+  Like the decision, the answer is sent by a direct call (never a `useMutation` variable: it can hold
+  personal data), then the run is followed again from `Last-Event-ID`. While a form waits the composer is
+  disabled and shows a banner with the form's title and **Go to the form** (scrolls to the card and focuses
+  its first control); the log says "Waiting for your answer", the live region announces the form's title
+  once, and the history badge reads "Needs your answer". Resolved, the card shows its outcome and, once
+  submitted, the answer read-only (options by label, never by id). `/copy` writes the card's state, title
+  and answer. **Deviation from the dispatch:** `optionsFrom` lists are **not** re-loaded by the web — the
+  API resolves them as the user when the form is built (a list the user cannot read refuses the call, so
+  no form with a 403 list reaches the chat) and validates a select against the **stored** options, so the
+  card renders `field.options` and names the source ("Options from lazyit: locations"). A select that
+  arrives with no options says so and leaves Continue without / Don't ask.
 - **Retry** re-sends the last user message; **read-only** replaces the composer with "Start a new chat".
 - **Known limitation — the `action` sentence (G4 review item 6, tracked by the coordinator).** The
   preview's first row is written by the backend tool and can embed strings that came from the model's

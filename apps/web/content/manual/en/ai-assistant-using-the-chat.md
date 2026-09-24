@@ -110,6 +110,42 @@ reminds you it is on.
 After you approve, the change is made with your account, like any other change you make, and the page you
 have open refreshes by itself — a new asset appears in the list you're looking at.
 
+## When the assistant asks you for details
+
+Sometimes the assistant needs information it can't find in lazyit — the site the new laptops go to, their
+serial numbers, a date. Instead of guessing, it shows a short **form** in the chat, headed **The assistant
+asks**, with a title and a line explaining why it needs the details. The assistant writes the form itself,
+so its questions change with what you asked.
+
+- Fields marked **\*** are **required**: the assistant can't go on without them.
+- Fields tagged **Recommended** would help it do a better job.
+- **Optional** fields are tucked under **More details** — open it only if you want to add them.
+- Some forms ask for a list, one **row** per item (one per laptop, say). Use **Add a row** and the
+  **trash** icon on a row, within the number of rows the form asks for.
+- Lists of sites, categories, models or manufacturers come from lazyit and only show what you can see.
+
+Then choose one of three buttons:
+
+| Button | What happens |
+| --- | --- |
+| **Send** | Your answer goes to the assistant and it carries on with it. If something is missing or doesn't fit, the field is highlighted and nothing is sent. |
+| **Continue without** | You skip the form this time. The assistant carries on without the details — it may do less, or ask you in words. |
+| **Don't ask** | You decline. The assistant is told not to ask for these details again in this chat. |
+
+While a form is waiting, the message box is paused and shows what the assistant asked, with a **Go to the
+form** button. The chat history marks the chat **Needs your answer**. You can close the chat and come back
+later — the form is still there.
+
+A form waits for the same time as a change card (30 minutes by default; the form shows **Answer by …**).
+If nobody answers in time, the form **expires** and the assistant stops; send a new message to continue.
+
+Once answered, the form stays in the conversation read-only, showing what you sent (or that you skipped or
+declined it).
+
+> [!WARNING]
+> The assistant never asks for passwords, keys or other secrets in a form, and lazyit refuses a form that
+> does. Don't type secrets into a form's text fields either.
+
 ## Links and opening pages
 
 When the assistant creates or changes something, the chat shows an **Open ‹item›** button that takes you to

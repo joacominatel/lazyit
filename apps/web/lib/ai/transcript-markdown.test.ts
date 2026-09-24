@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AiMessagePart } from "@lazyit/shared";
 import type { ChatMessage } from "./stream-reducer";
-import { approval } from "./test-fixtures";
+import { approval, inputRequest } from "./test-fixtures";
 import { conversationToMarkdown, type TranscriptLabels } from "./transcript-markdown";
 
 const labels: TranscriptLabels = {
@@ -14,6 +14,7 @@ const labels: TranscriptLabels = {
     "- Assignee: Juan",
   ],
   notice: (part) => `Notice ${part.error.code}`,
+  input: (part) => [`**Asks** · ${part.outcome ?? "pending"}`, part.request.form.title],
   unsupported: "Can't show this",
 };
 
@@ -92,5 +93,17 @@ describe("conversationToMarkdown", () => {
     expect(md).toContain("> Notice MAX_STEPS");
     expect(md).not.toContain("raw provider text");
     expect(md).toContain("_Can't show this_");
+  });
+});
+
+describe("conversationToMarkdown — input forms (#1388)", () => {
+  test("an input card is quoted with its state and title, never 'unsupported'", () => {
+    const md = conversationToMarkdown(
+      [assistant("a1", [{ type: "input", request: inputRequest("tc"), outcome: "skipped" }])],
+      labels,
+    );
+    expect(md).toContain("> **Asks** · skipped");
+    expect(md).toContain("> Details for the new laptops");
+    expect(md).not.toContain("Can't show this");
   });
 });

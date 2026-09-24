@@ -29,10 +29,19 @@ export function eventSeq(eventId: string | null | undefined, runId: string): num
   return Number(raw);
 }
 
-/** Run statuses after which the event stream closes (waiting for the user, or over). */
+/** Run statuses paused on the user: a pending approval, or a pending input form (#1388). */
+export function isWaitingRunStatus(status: string | null | undefined): boolean {
+  return status === "AWAITING_APPROVAL" || status === "AWAITING_INPUT";
+}
+
+/**
+ * Run statuses after which the event stream closes (waiting for the user, or over). The server closes the
+ * stream after `run.status AWAITING_INPUT` exactly as after `AWAITING_APPROVAL`: following it on would
+ * reconnect into an empty stream and end in "connection lost".
+ */
 export function streamClosesOn(status: string | null | undefined): boolean {
   return (
-    status === "AWAITING_APPROVAL" ||
+    isWaitingRunStatus(status) ||
     status === "SUCCEEDED" ||
     status === "FAILED" ||
     status === "CANCELLED" ||
@@ -42,7 +51,7 @@ export function streamClosesOn(status: string | null | undefined): boolean {
 
 /** Terminal run statuses. */
 export function isTerminalRunStatus(status: string | null | undefined): boolean {
-  return streamClosesOn(status) && status !== "AWAITING_APPROVAL";
+  return streamClosesOn(status) && !isWaitingRunStatus(status);
 }
 
 /**

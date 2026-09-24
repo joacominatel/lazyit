@@ -3,6 +3,8 @@ import type {
   AiApprovalRequest,
   AiConversationDetail,
   AiConversationState,
+  AiInputAnswer,
+  AiInputRequest,
   AiMessagePart,
   AiPersistedMessage,
   AiRunError,
@@ -60,6 +62,12 @@ export type ChatAction =
   | { type: "runStarted"; runId: string; status: AiRunStatus }
   | { type: "event"; runId: string; eventId: string | null; event: AiRunEvent }
   | { type: "notice"; error: AiRunError | null }
+  /**
+   * The user's answer to an input form was accepted (#1388): the stream reports only the outcome, so the
+   * card keeps the answer the user sent (normalized as the server normalizes it) until a re-read brings
+   * the persisted one.
+   */
+  | { type: "inputAnswered"; toolCallId: string; answer: AiInputAnswer }
   | { type: "navigated"; toolCallId: string };
 
 export function initialChatState(conversationId: string | null = null): ChatState {
@@ -69,15 +77,17 @@ export function initialChatState(conversationId: string | null = null): ChatStat
 /** The run status a conversation summary implies, for a conversation opened with an active run. */
 export function runStatusOfConversation(state: AiConversationState): AiRunStatus {
   if (state === "awaiting-approval") return "AWAITING_APPROVAL";
+  if (state === "awaiting-input") return "AWAITING_INPUT";
   return "RUNNING";
 }
 
 type ToolPart = Extract<AiMessagePart, { type: "tool" }>;
 type ApprovalPart = Extract<AiMessagePart, { type: "approval" }>;
+export type InputPart = Extract<AiMessagePart, { type: "input" }>;
 
 function callIdOf(part: AiMessagePart): string | null {
   if (part.type === "tool") return part.toolCallId;
-  if (part.type === "approval") return part.request.toolCallId;
+  if (part.type === "approval" || part.type === "input") return part.request.toolCallId;
   return null;
 }
 
@@ -144,6 +154,26 @@ function approvalPart(request: AiApprovalRequest): ApprovalPart {
   return { type: "approval", request, outcome: null };
 }
 
+/** Inserts a card part right after its call's tool line, or at the end of the run's message. */
+function insertAfterToolLine(
+  messages: ChatMessage[],
+  runId: string,
+  toolCallId: string,
+  card: AiMessagePart,
+): ChatMessage[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    const at = message.parts.findIndex(
+      (part) => part.type === "tool" && part.toolCallId === toolCallId,
+    );
+    if (at === -1) continue;
+    const parts = message.parts.slice();
+    parts.splice(at + 1, 0, card);
+    return withMessage(messages, i, { ...message, parts });
+  }
+  return appendPart(messages, runId, card);
+}
+
 /** Puts a pending approval on the card of its call: updates it, or inserts it after the tool line. */
 function upsertApproval(messages: ChatMessage[], runId: string, request: AiApprovalRequest): ChatMessage[] {
   const updated = updatePart(
@@ -152,17 +182,23 @@ function upsertApproval(messages: ChatMessage[], runId: string, request: AiAppro
     () => approvalPart(request),
   );
   if (updated) return updated;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i]!;
-    const at = message.parts.findIndex(
-      (part) => part.type === "tool" && part.toolCallId === request.toolCallId,
-    );
-    if (at === -1) continue;
-    const parts = message.parts.slice();
-    parts.splice(at + 1, 0, approvalPart(request));
-    return withMessage(messages, i, { ...message, parts });
-  }
-  return appendPart(messages, runId, approvalPart(request));
+  return insertAfterToolLine(messages, runId, request.toolCallId, approvalPart(request));
+}
+
+/**
+ * Puts a pending input form (#1388) on its card: a card the transcript already has keeps its outcome and
+ * answer (a replayed `input.required` never re-opens an answered form); otherwise it is inserted after
+ * the call's tool line.
+ */
+function upsertInput(messages: ChatMessage[], runId: string, request: AiInputRequest): ChatMessage[] {
+  const updated = updatePart(
+    messages,
+    (part) => part.type === "input" && part.request.toolCallId === request.toolCallId,
+    (part) => ({ ...(part as InputPart), request }),
+  );
+  if (updated) return updated;
+  const card: InputPart = { type: "input", request, outcome: null };
+  return insertAfterToolLine(messages, runId, request.toolCallId, card);
 }
 
 /**
@@ -220,6 +256,10 @@ function applyEvent(state: ChatState, runId: string, event: AiRunEvent): ChatSta
       let messages = mergeMessages(state.messages, event.messages);
       for (const request of event.pendingApprovals) {
         messages = upsertApproval(messages, runId, request);
+      }
+      // `pendingInputs` is absent from an API older than #1388.
+      for (const request of event.pendingInputs ?? []) {
+        messages = upsertInput(messages, runId, request);
       }
       if (isTerminalRunStatus(event.status)) messages = stopStreaming(messages);
       return { ...state, messages, run: { ...run, status: event.status } };
@@ -303,6 +343,20 @@ function applyEvent(state: ChatState, runId: string, event: AiRunEvent): ChatSta
         return { ...state, messages: marked ?? inserted };
       }
       return state;
+    }
+    case "input.required": {
+      const { v: _v, type: _type, ...request } = event;
+      void _v;
+      void _type;
+      return { ...state, messages: upsertInput(state.messages, runId, request) };
+    }
+    case "input.resolved": {
+      const messages = updatePart(
+        state.messages,
+        (p) => p.type === "input" && p.request.toolCallId === event.toolCallId,
+        (p) => ({ ...(p as InputPart), outcome: event.outcome }),
+      );
+      return messages ? { ...state, messages } : state;
     }
     case "tool.result": {
       const { v: _v, type: _type, ...result } = event;
@@ -404,6 +458,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     }
     case "notice":
       return { ...state, runError: action.error };
+    case "inputAnswered": {
+      const messages = updatePart(
+        state.messages,
+        (p) => p.type === "input" && p.request.toolCallId === action.toolCallId,
+        (p) => ({ ...(p as InputPart), answer: action.answer }),
+      );
+      return messages ? { ...state, messages } : state;
+    }
     case "navigated":
       return state.navigated.includes(action.toolCallId)
         ? state
@@ -422,4 +484,21 @@ export function isRunActive(state: ChatState): boolean {
 /** Whether the followed run waits for a decision. */
 export function isAwaitingApproval(state: ChatState): boolean {
   return state.run?.status === "AWAITING_APPROVAL";
+}
+
+/** Whether the followed run waits for the user to answer an input form (#1388). */
+export function isAwaitingInput(state: ChatState): boolean {
+  return state.run?.status === "AWAITING_INPUT";
+}
+
+/** The newest unanswered input form of the transcript, or null. */
+export function pendingInput(messages: readonly ChatMessage[]): InputPart | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const parts = messages[i]!.parts;
+    for (let j = parts.length - 1; j >= 0; j--) {
+      const part = parts[j]!;
+      if (part.type === "input" && part.outcome === null) return part;
+    }
+  }
+  return null;
 }

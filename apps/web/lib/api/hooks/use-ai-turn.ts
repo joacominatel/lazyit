@@ -2,6 +2,8 @@
 
 import type {
   AiApprovalDecisionValue,
+  AiInputAnswer,
+  AiInputSubmission,
   AiPageContext,
   AiRunError,
   AiRunEvent,
@@ -23,6 +25,11 @@ import {
   type DecisionErrorKind,
 } from "@/lib/ai/error-kinds";
 import {
+  inputErrorKind,
+  inputNeedsRefresh,
+  type InputErrorKind,
+} from "@/lib/ai/input-form";
+import {
   afterStreamEnded,
   eventSeq,
   isTerminalRunStatus,
@@ -39,6 +46,7 @@ import { ApiError } from "../client";
 import { handleAuthExpiry } from "../handle-auth-expiry";
 import { handlePasswordChangeRequired } from "../handle-password-change-required";
 import {
+  answerAiInput,
   cancelAiRun,
   decideAiToolCall,
   getAiConversation,
@@ -70,6 +78,8 @@ let rememberedConversationId: string | null = null;
 export type StreamConnection = "idle" | "open" | "reconnecting" | "lost";
 
 export type DecisionResult = { ok: true } | { ok: false; error: DecisionErrorKind };
+
+export type InputResult = { ok: true } | { ok: false; error: InputErrorKind };
 
 function backoffMs(failures: number): number {
   return Math.min(1000 * 2 ** (failures - 1), 8000);
@@ -434,6 +444,45 @@ export function useAiTurn() {
     [follow, queryClient],
   );
 
+  /**
+   * Answers a pending input form (#1388) — `submit` with the checked body, `skip` or `cancel` — and on
+   * success re-subscribes to the run (the server closed the stream when the run paused). Called directly,
+   * like the decision: the answer may hold personal data and has no place in the mutation cache.
+   * `answer` is the normalized answer the card keeps showing once the form is resolved.
+   */
+  const answerInput = useCallback(
+    async (
+      toolCallId: string,
+      body: AiInputSubmission,
+      answer?: AiInputAnswer,
+    ): Promise<InputResult> => {
+      const run = stateRef.current.run;
+      if (!run) return { ok: false, error: { kind: "notAwaiting" } };
+      try {
+        const accepted = await answerAiInput(run.id, toolCallId, body);
+        if (body.action === "submit" && answer) {
+          dispatch({ type: "inputAnswered", toolCallId, answer });
+        }
+        dispatch({ type: "runStarted", runId: run.id, status: accepted.status });
+        void follow(run.id, stateRef.current.run?.lastEventId ?? run.lastEventId, {
+          status: accepted.status,
+        });
+        return { ok: true };
+      } catch (error) {
+        handleAuthExpiry(error);
+        handlePasswordChangeRequired(error);
+        const kind = inputErrorKind(error);
+        if (kind.kind === "aiDisabled") {
+          void queryClient.invalidateQueries({ queryKey: aiKeys.status() });
+        }
+        // Answered elsewhere, or expired: a fresh snapshot re-renders the card from the server.
+        if (inputNeedsRefresh(kind)) void follow(run.id, null);
+        return { ok: false, error: kind };
+      }
+    },
+    [follow, queryClient],
+  );
+
   /** Reconnects after "connection lost". */
   const reconnect = useCallback(() => {
     const run = stateRef.current.run;
@@ -467,6 +516,7 @@ export function useAiTurn() {
     sendMessage,
     stop,
     decide: decideCall,
+    answerInput,
     reconnect,
     dismissNotice,
   };

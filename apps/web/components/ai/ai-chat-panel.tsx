@@ -1,7 +1,12 @@
 "use client";
 
 import type { AiMessagePart } from "@lazyit/shared";
-import { ArrowLeftIcon, ClockIcon, PlusIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowLeftIcon,
+  ChatBubbleLeftEllipsisIcon,
+  ClockIcon,
+  PlusIcon,
+} from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +27,14 @@ import {
 } from "@/lib/ai/chat-settings";
 import { presentPreview } from "@/lib/ai/preview";
 import { BUILTIN_SLASH_COMMANDS, type SlashCommand, type SlashCommandContext } from "@/lib/ai/slash-commands";
-import { isAwaitingApproval, isRunActive, type ChatMessage } from "@/lib/ai/stream-reducer";
+import {
+  isAwaitingApproval,
+  isAwaitingInput,
+  isRunActive,
+  pendingInput,
+  type ChatMessage,
+} from "@/lib/ai/stream-reducer";
+import { plainText } from "@/lib/ai/untrusted-text";
 import { conversationToMarkdown } from "@/lib/ai/transcript-markdown";
 import { aiConversationKeys, useUpdateAiConversation } from "@/lib/api/hooks/use-ai-conversations";
 import { useAiModels } from "@/lib/api/hooks/use-ai-models";
@@ -33,6 +45,7 @@ import { AiChatHelp } from "./ai-chat-help";
 import { AiChatSettings } from "./ai-chat-settings";
 import { AiComposer } from "./ai-composer";
 import { AiConversationHistory } from "./ai-conversation-history";
+import { PENDING_INPUT_ATTR } from "./ai-input-card";
 import { useToolDisplayName } from "./ai-labels";
 import { AiMessage } from "./ai-message";
 import { AiRunNotice } from "./ai-run-notice";
@@ -63,6 +76,15 @@ function pendingAction(
     }
   }
   return null;
+}
+
+/** Scrolls the pending input form into view and moves focus into it (its first control, else the card). */
+function focusPendingInput(log: HTMLElement | null) {
+  const card = log?.querySelector<HTMLElement>(`[${PENDING_INPUT_ATTR}]`);
+  if (!card) return;
+  card.scrollIntoView({ block: "nearest" });
+  const control = card.querySelector<HTMLElement>("form input, form textarea, form button");
+  (control ?? card).focus();
 }
 
 /** `window.localStorage`, or undefined where reading it throws (blocked site data, some private modes). */
@@ -199,6 +221,8 @@ export function AiChatPanel() {
 
   const running = isRunActive(state);
   const awaiting = isAwaitingApproval(state);
+  const awaitingInput = isAwaitingInput(state);
+  const inputRequest = awaitingInput ? pendingInput(state.messages) : null;
   const lastMessage = state.messages[state.messages.length - 1];
   const thinking = running && !(lastMessage?.role === "assistant" && lastMessage.streaming);
 
@@ -212,12 +236,15 @@ export function AiChatPanel() {
   // when the run finishes or starts waiting for a decision.
   const runStatus = state.run?.status;
   const action = runStatus === "AWAITING_APPROVAL" ? pendingAction(state.messages, toolName) : null;
+  const inputTitle = inputRequest ? plainText(inputRequest.request.form.title) : null;
   const announcement =
     runStatus === "SUCCEEDED"
       ? t("live.replied")
       : action
         ? t("live.approvalNeeded", { action })
-        : "";
+        : inputTitle
+          ? t("live.inputNeeded", { title: inputTitle })
+          : "";
 
   const notFound = turn.loadError instanceof ApiError && turn.loadError.status === 404;
   const retryText = lastUserText(state.messages);
@@ -322,6 +349,7 @@ export function AiChatPanel() {
                 tools={tools}
                 navigated={state.navigated}
                 onDecide={turn.decide}
+                onAnswerInput={turn.answerInput}
               />
             ))}
 
@@ -331,6 +359,7 @@ export function AiChatPanel() {
               </p>
             )}
             {awaiting && <p className="text-xs text-muted-foreground">{t("message.awaitingApproval")}</p>}
+            {awaitingInput && <p className="text-xs text-muted-foreground">{t("message.awaitingInput")}</p>}
             {turn.connection === "reconnecting" && (
               <p role="status" className="text-xs text-muted-foreground">
                 {t("connection.reconnecting")}
@@ -370,6 +399,25 @@ export function AiChatPanel() {
               running={running}
               stopping={turn.stopping}
               blockedByApproval={awaiting}
+              blockedByInput={awaitingInput}
+              inputBanner={
+                <div className="mb-2 flex items-center gap-2 rounded-sm border border-border bg-muted/50 px-2 py-1.5 text-xs">
+                  <ChatBubbleLeftEllipsisIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">
+                    {inputTitle ? t("composer.inputWaiting", { title: inputTitle }) : t("composer.inputWaitingGeneric")}
+                  </span>
+                  {inputRequest && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => focusPendingInput(logRef.current)}
+                    >
+                      {t("composer.goToForm")}
+                    </Button>
+                  )}
+                </div>
+              }
               onSend={turn.sendMessage}
               onStop={() => void turn.stop()}
               commands={BUILTIN_SLASH_COMMANDS}

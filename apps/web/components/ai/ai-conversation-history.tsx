@@ -127,6 +127,9 @@ export function AiConversationHistory({
                         {format.dateTime(new Date(c.updatedAt), { dateStyle: "medium", timeStyle: "short" })}
                       </span>
                       {c.status === "running" && <StatusBadge tone="info">{t("running")}</StatusBadge>}
+                      {c.status === "awaiting-input" && (
+                        <StatusBadge tone="warning">{t("awaitingInput")}</StatusBadge>
+                      )}
                       {c.status === "awaiting-approval" && (
                         <StatusBadge tone="warning">{t("awaiting")}</StatusBadge>
                       )}
