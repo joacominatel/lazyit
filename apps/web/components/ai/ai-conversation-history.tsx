@@ -70,7 +70,7 @@ export function AiConversationHistory({
   const titleOf = (c: AiConversationSummary) => c.title?.trim() || t("untitled");
 
   return (
-    <div className="flex-1 overflow-y-auto p-3">
+    <div className="relative min-h-0 flex-1 overflow-y-auto p-3">
       <h3 className="text-sm font-medium">{t("title")}</h3>
       <p className="mt-0.5 text-xs text-muted-foreground">
         {t("private")}{" "}
