@@ -49,7 +49,7 @@ import {
  */
 const PINNED = {
   version: 2,
-  sha256: 'f74d4e21a9d70e45c7538aa92d1cea0e80d6a9805053441be19abc717e239293',
+  sha256: '577b3e98aa44d981fde536149c62d831d8a7008224707c12764fab97d8c7d6af',
 };
 
 const tools = (...classes: AiPromptTool['class'][]): AiPromptTool[] =>

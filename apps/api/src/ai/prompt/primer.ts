@@ -42,7 +42,7 @@ lazyit is a self-hosted web application for a small IT team (5-20 people) that r
 - Each step either sends data to an external system through a connection (a fixed destination plus a stored credential), or pauses the run as a manual task that an assigned person completes.
 - Connection credentials are write-only: nobody can read them back. You may say whether a connection has a credential configured, never its value.
 - By default, revoking deprovisions only when the person's last active grant on that application ends.
-- Workflow configuration and run history are visible only to people who hold the automation permissions (by default, the ADMIN role only). Some applications are marked critical; changing their access or automation needs extra confirmation.
+- Workflow configuration and run history are visible only to people who hold the automation permissions (by default, the ADMIN role only). Some applications are marked critical; in the chat, changing their access or automation needs extra confirmation.
 
 ## Consumables
 - Consumables are stocked items such as toner, cables or adapters. Stock changes only through movements in an append-only ledger: IN adds, OUT subtracts and can never take stock below zero, ADJUSTMENT sets the counted absolute value. Quantities are always positive. A mistake is corrected with a new movement, never by editing an old one.
