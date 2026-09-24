@@ -1172,9 +1172,13 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         },
       ]);
       expect(preview.warnings.sort()).toEqual(
-        ['EXTERNAL_PROVISIONING', 'IDENTITY_CHANGE'].sort(),
+        ['EXTERNAL_PROVISIONING', 'IDENTITY_CHANGE', 'LEDGER_APPEND'].sort(),
       );
+      // A manager bundled with an identity field still needs the password.
       expect(preview.stepUpRequired).toBe(true);
+      await expect(
+        tools.approve(proposal.action.id, chat(ADMIN)),
+      ).rejects.toMatchObject({ response: { code: 'STEP_UP_REQUIRED' } });
       const approved = await tools.approve(proposal.action.id, chat(ADMIN), {
         stepUpVerified: true,
       });
@@ -1187,6 +1191,40 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         managerName: null,
         // Deactivation ends every session (the route's epoch bump).
         sessionEpoch: 2,
+      });
+    });
+
+    it('a manager-only change is not an identity change: LEDGER_APPEND, approved without step-up (CEO decision)', async () => {
+      for (const manager of [
+        { user: 'admin@example.com' },
+        { name: 'CTO' },
+        null,
+      ]) {
+        resetState();
+        const proposal = await tools.propose(
+          'user_update',
+          { user: ID.member, manager },
+          chat(ADMIN),
+        );
+        if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+        expect(proposal.action.preview).toMatchObject({
+          class: 'elevated',
+          elevated: true,
+          warnings: ['LEDGER_APPEND'],
+          stepUpRequired: false,
+        });
+        const approved = await tools.approve(proposal.action.id, chat(ADMIN));
+        expect(approved).toMatchObject({ status: 'SUCCEEDED' });
+        expect(history).toEqual([
+          expect.objectContaining({
+            eventType: 'MANAGER_CHANGED',
+            aiInvocationId: proposal.action.id,
+          }),
+        ]);
+      }
+      expect(users.get(ID.member)).toMatchObject({
+        managerId: null,
+        managerName: null,
       });
     });
 

@@ -589,9 +589,12 @@ exactly as they answer HTTP — the specs drive them through the tools, includin
     target (nothing exists yet). The input has no `password`: the route's optional temporary password is
     a credential (INV-AI-5).
   - `user_update` (`elevated`, destructive): `ROLE_CHANGE` for a role change; `IDENTITY_CHANGE` for email,
-    name, username, legajo, activation (`isActive`) or manager; `EXTERNAL_PROVISIONING` when a role, name
-    or email change is mirrored to the IdP (the account has an `externalId`). A no-op is refused before
-    any card (400).
+    name, username, legajo or activation (`isActive`); `EXTERNAL_PROVISIONING` when a role, name or email
+    change is mirrored to the IdP (the account has an `externalId`). A **manager** change is not an
+    identity change and needs no step-up (CEO decision 2026-09-24): it is local-only and the route records
+    it as an append-only `MANAGER_CHANGED` history row, so it carries the non-step-up `LEDGER_APPEND` —
+    the elevated preview still has a warning. Bundled with an identity field, `IDENTITY_CHANGE` (and so
+    step-up) still applies. A no-op is refused before any card (400).
   - `user_offboard` (`write`, destructive, ext): `SOFT_DELETE`; `CASCADE_RELEASES_ASSIGNMENTS` and
     `CASCADE_REVOKES_GRANTS` with the `impacted` assets and grants (grants warned even when the caller
     cannot count them); `EXTERNAL_DEPROVISIONING` when the IdP account is deactivated. No step-up (it

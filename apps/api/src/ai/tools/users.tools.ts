@@ -683,8 +683,11 @@ const userUpdate = defineTool({
       const before = managerText(current.manager);
       if (manager.label !== before) {
         changes.push({ field: 'manager', before, after: manager.label });
-        // Who a person reports to is a directory identity attribute of the account.
-        warnings.add('IDENTITY_CHANGE');
+        // CEO decision (2026-09-24): a manager change is NOT an identity change and needs no step-up. It
+        // is local-only (never mirrored to the IdP) and the route records it as an append-only
+        // MANAGER_CHANGED history row — LEDGER_APPEND, a non-step-up code, so the elevated preview still
+        // carries a warning. Combined with another identity field, IDENTITY_CHANGE still applies.
+        warnings.add('LEDGER_APPEND');
       }
     }
     if (changes.length === 0) {
