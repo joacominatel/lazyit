@@ -125,11 +125,12 @@ export class AiInputService {
       });
     }
 
-    const { outcome, result } = this.answer(form, input.body);
+    const { outcome, result, answer } = this.answer(form, input.body);
     const closed = await this.inputs.close(
       row.id,
       outcome === 'submitted' ? 'SUCCEEDED' : 'REJECTED',
       result,
+      answer ? { form, answer } : undefined,
     );
     if (!closed) {
       throw new ConflictException({
@@ -147,7 +148,11 @@ export class AiInputService {
   private answer(
     form: AiInputForm,
     body: AiInputSubmission,
-  ): { outcome: AiInputSubmitOutcome['outcome']; result: AiToolResult } {
+  ): {
+    outcome: AiInputSubmitOutcome['outcome'];
+    result: AiToolResult;
+    answer?: AiInputAnswer;
+  } {
     if (body.action !== 'submit') {
       const outcome = body.action === 'skip' ? 'skipped' : 'declined';
       const data: AiInputResultData = {
@@ -180,7 +185,7 @@ export class AiInputService {
     const data: AiInputResultData & { labels?: Record<string, string> } = {
       outcome: 'submitted',
       providedBy: 'user',
-      answer: checked.answer,
+      answer: forModel(form, checked.answer),
     };
     const labels = selectedLabels(form, checked.answer);
     if (Object.keys(labels).length > 0) data.labels = labels;
@@ -190,6 +195,7 @@ export class AiInputService {
         data,
         summary: 'The user answered the form',
       }),
+      answer: checked.answer,
     };
   }
 
@@ -228,6 +234,43 @@ export const INPUT_EXPIRED = {
   code: 'EXPIRED' as const,
   message: 'The user did not answer this form in time',
 };
+
+/**
+ * Option lists whose VALUES are lazyit text (the manufacturer names), not ids: a value chosen from one is
+ * other-authored content in the model's copy of the answer.
+ */
+const TEXT_VALUED_SOURCES: ReadonlySet<string> = new Set(['manufacturers']);
+
+/**
+ * The model's copy of an answer: every value the user picked from an `optionsFrom` list whose values are
+ * lazyit text is wrapped as `<untrusted_content>`; values the user typed, and ids, stay as they are.
+ */
+function forModel(form: AiInputForm, answer: AiInputAnswer): AiInputAnswer {
+  const wrap = (
+    fields: AiInputForm['fields'],
+    values: Record<string, AiInputValue>,
+  ): Record<string, AiInputValue> => {
+    const out: Record<string, AiInputValue> = { ...values };
+    for (const field of fields) {
+      if (!field.optionsFrom || !TEXT_VALUED_SOURCES.has(field.optionsFrom)) {
+        continue;
+      }
+      const value = values[field.key];
+      if (typeof value === 'string') {
+        out[field.key] = untrusted(value);
+      } else if (Array.isArray(value)) {
+        out[field.key] = value.map((item) => untrusted(item) ?? item);
+      }
+    }
+    return out;
+  };
+  const groups: AiInputAnswer['groups'] = {};
+  for (const group of form.groups) {
+    const rows = answer.groups[group.key];
+    if (rows) groups[group.key] = rows.map((row) => wrap(group.fields, row));
+  }
+  return { values: wrap(form.fields, answer.values), groups };
+}
 
 /**
  * The option labels of the chosen select values (`values.<key>` / `groups.<key>.<row>.<key>` → label), so

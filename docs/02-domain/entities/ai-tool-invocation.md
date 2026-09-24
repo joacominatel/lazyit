@@ -26,8 +26,9 @@ For MCP and headless calls it is the **metadata access log**. Its id is the `inv
   `AWAITING_APPROVAL → EXECUTING → SUCCEEDED | FAILED | OUTCOME_UNKNOWN`. `OUTCOME_UNKNOWN` is never
   retried. An **input request** (#1388, `request_input`, chat only): `AWAITING_INPUT → SUCCEEDED`
   (submitted) `| REJECTED` (skipped or declined) `| EXPIRED | CANCELLED`; its `preview` holds `{ kind:
-  "input_request", form }` (the stored form the answer is validated against), its `result` the user's
-  answer as the model receives it. Written by the runtime (`AiInputRequests`), not a write: no
+  "input_request", form, answer? }` (the stored form the answer is validated against, and the user's
+  answer as given once submitted), its `result` the answer as the model receives it (lazyit text wrapped
+  as untrusted). Written by the runtime (`AiInputRequests`), not a write: no
   [[ai-action-log]] event.
 - **What was approved is exactly what runs**: `inputHash` binds the approval to the stored input,
   `schemaHash` expires it if the tool changed, and `precondition` (`{ entity, updatedAt }`) fails a stale

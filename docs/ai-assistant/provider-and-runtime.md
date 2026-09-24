@@ -1105,8 +1105,10 @@ becomes the call's result (`kind: navigate`, `mutated: false`): `{ outcome: "sub
 select, whose values are ids; those names come from lazyit records, so each is wrapped as
 `<untrusted_content>`). `skip` → `{ outcome: "skipped", note }` (continue without it); `cancel` →
 `{ outcome: "declined", note }` (do not ask again). The answer is **user-provided**: the owner typed it
-for their own run, so it is not wrapped as `<untrusted_content>` — only the `labels` taken from lazyit
-records are. Row status `SUCCEEDED` (submitted) or
+for their own run, so it is not wrapped as `<untrusted_content>` — except lazyit text in the model's copy:
+the `labels` taken from lazyit records, and a value picked from a list whose values are names
+(`manufacturers`; ids stay plain). The row's `preview` keeps the user's answer as given (`{ kind, form,
+answer }`), which is what the transcript shows. Row status `SUCCEEDED` (submitted) or
 `REJECTED` (skipped, declined); `input.resolved { toolCallId, outcome }` and `tool.result` are emitted and
 the run resumes (`AWAITING_INPUT → QUEUED`, the same `resumeIfDecided` as an approval).
 

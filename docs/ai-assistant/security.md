@@ -492,8 +492,9 @@ the **exfiltration leg** and the **consequential-action leg**.
   ask for a password, token, key, PIN or other credential (English and Spanish), the web renders every
   string as plain text as the assistant's request, and the answer is validated against the stored form.
   The answer is the owner's own input for their own run: it reaches the model marked `providedBy: user`,
-  not as untrusted content; the option labels added from lazyit records (`labels`) are other-authored and
-  are wrapped as `<untrusted_content>`. A form never shares a step with a write, so an answer cannot be mistaken for an
+  not as untrusted content; the option labels added from lazyit records (`labels`) and any value picked
+  from a list of lazyit names (manufacturers) are other-authored and are wrapped as `<untrusted_content>`
+  in the model's copy. A form never shares a step with a write, so an answer cannot be mistaken for an
   approval ([[ai-assistant/provider-and-runtime|provider]] §8.2).
 
 ### 6.3 OAuth authorization server and MCP resource server

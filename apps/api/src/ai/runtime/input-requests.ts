@@ -51,6 +51,11 @@ export const AI_INPUT_RECORD_KIND = 'input_request';
 interface InputRecord {
   kind: typeof AI_INPUT_RECORD_KIND;
   form: AiInputForm;
+  /**
+   * The user's answer as they gave it, stored once submitted — what the transcript shows. The copy in
+   * `result` is the model's, where values taken from lazyit text are wrapped as untrusted.
+   */
+  answer?: AiInputAnswer;
 }
 
 /** The stored form of an invocation row, or null when the row is not an input request this build reads. */
@@ -109,7 +114,11 @@ export function inputOutcomeOf(row: AiToolInvocation): AiInputOutcome | null {
 export function inputAnswerOf(
   row: AiToolInvocation,
 ): AiInputAnswer | undefined {
-  const answer = AiInputAnswerSchema.safeParse(resultData(row)?.answer);
+  const record =
+    row.preview && typeof row.preview === 'object'
+      ? (row.preview as Partial<InputRecord>)
+      : null;
+  const answer = AiInputAnswerSchema.safeParse(record?.answer);
   return answer.success ? answer.data : undefined;
 }
 
@@ -169,12 +178,19 @@ export class AiInputRequests {
     });
   }
 
-  /** AWAITING_INPUT → `status` with its result, atomically. Null when it was no longer waiting. */
+  /**
+   * AWAITING_INPUT → `status` with its result, atomically. Null when it was no longer waiting. With
+   * `answered`, the user's own answer is stored next to the form (the transcript's copy).
+   */
   async close(
     id: string,
     status: AiInputClosedStatus,
     result: AiToolResult,
+    answered?: { form: AiInputForm; answer: AiInputAnswer },
   ): Promise<AiToolInvocation | null> {
+    const record: InputRecord | null = answered
+      ? { kind: AI_INPUT_RECORD_KIND, ...answered }
+      : null;
     const updated = await this.prisma.aiToolInvocation.updateMany({
       where: { id, status: 'AWAITING_INPUT' },
       data: {
@@ -182,6 +198,7 @@ export class AiInputRequests {
         decidedAt: new Date(),
         result: json(result),
         errorCode: result.ok ? null : result.error.code,
+        ...(record ? { preview: json(record) } : {}),
       },
     });
     if (updated.count === 0) return null;

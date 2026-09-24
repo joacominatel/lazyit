@@ -476,6 +476,15 @@ export const FAKE_FORM = {
       optionsFrom: 'manufacturers',
     },
     {
+      key: 'site',
+      label: 'Site',
+      kind: 'select',
+      importance: 'optional',
+      required: false,
+      options: [{ value: 'cloc0000000000000000000001', label: 'HQ' }],
+      optionsFrom: 'locations',
+    },
+    {
       key: 'notes',
       label: 'Notes',
       kind: 'textarea',
