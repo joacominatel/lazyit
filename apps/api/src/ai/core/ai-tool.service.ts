@@ -78,6 +78,26 @@ function effectiveCeiling(
   return ctx.ceiling ?? (ctx.channel === 'MCP' ? ['read'] : undefined);
 }
 
+/** Who approved a chat write and how, recorded on its APPROVED / EXECUTED / FAILED ledger events. */
+interface ApprovalProvenance {
+  approverUserId: string;
+  stepUp: boolean;
+  approvalMode: 'USER' | 'AUTO';
+  autoApproveEnabledAt: Date | null;
+}
+
+/**
+ * Whether a chat write may be approved automatically (#1376): an ordinary `write` whose preview was not
+ * escalated to elevated and needs no step-up. Elevated actions — privilege, identity, credentials,
+ * configuration and outbound integrations (security.md §6.2 T3/T4, INV-AI-15) — always wait for the user.
+ */
+function autoEligible(
+  toolClass: string,
+  preview: Pick<AiActionPreview, 'elevated' | 'stepUpRequired' | 'warnings'>,
+): boolean {
+  return toolClass === 'write' && !preview.elevated && !requiresStepUp(preview);
+}
+
 /** The error a refused decision carries, for the decision endpoint to answer as is. */
 function decisionError(code: string, message: string) {
   return { code, message };
@@ -329,6 +349,11 @@ export class AiToolService {
   ): Promise<AiPendingAction> {
     const userId = this.requireHumanSession(ctx);
     const row = await this.findOwned(invocationId, userId, ctx);
+    // Auto-approve (#1376): the conversation's mode must be on NOW; its enable time goes to the ledger.
+    const auto =
+      options.auto === true
+        ? await this.autoApproval(row, userId, options)
+        : null;
 
     const storedPreview = toPendingAction(row).preview;
     // The FRESH preview, built before the claim (tools-and-execution.md §9, step 0): step-up and "the card
@@ -372,6 +397,21 @@ export class AiToolService {
           addedWarnings: added,
         });
       }
+      if (
+        auto &&
+        (fresh?.ok !== true ||
+          !autoEligible(row.toolClass, storedPreview) ||
+          !autoEligible(row.toolClass, fresh.preview))
+      ) {
+        // Never automatic: an elevated action, or a write whose stored or fresh preview needs a step-up
+        // (or whose fresh preview cannot be built), stays pending and the runtime shows the user its card.
+        throw new ConflictException(
+          decisionError(
+            'AUTO_APPROVE_NOT_ELIGIBLE',
+            'This action needs the user’s approval',
+          ),
+        );
+      }
       if (!options.stepUpVerified && requiresStepUp(storedPreview)) {
         // Refused BEFORE the claim: the action stays pending so the user can retry with the step-up.
         throw new ForbiddenException(
@@ -383,7 +423,18 @@ export class AiToolService {
       }
     }
 
+    if (auto && row.status === 'AWAITING_APPROVAL' && !storedPreview) {
+      // An unreadable stored preview is failed closed by a USER approval; automatically, it is not taken.
+      throw new ConflictException(
+        decisionError(
+          'AUTO_APPROVE_NOT_ELIGIBLE',
+          'This action needs the user’s approval',
+        ),
+      );
+    }
+
     const now = new Date();
+    const approvalMode = auto ? 'AUTO' : 'USER';
     const claim = await this.prisma.aiToolInvocation.updateMany({
       where: {
         id: row.id,
@@ -391,20 +442,30 @@ export class AiToolService {
         userId,
         expiresAt: { gt: now },
       },
-      data: { status: 'EXECUTING', decidedAt: now },
+      data: { status: 'EXECUTING', decidedAt: now, approvalMode },
     });
     if (claim.count === 0) {
       return this.unclaimable(row.id, 'approve');
     }
 
     const stepUp = options.stepUpVerified === true;
-    const claimed = { ...row, status: 'EXECUTING', decidedAt: now };
+    const approval: ApprovalProvenance = {
+      approverUserId: userId,
+      stepUp,
+      approvalMode,
+      autoApproveEnabledAt: auto?.enabledAt ?? null,
+    };
+    const claimed = {
+      ...row,
+      status: 'EXECUTING',
+      decidedAt: now,
+      approvalMode,
+    };
     try {
       await this.actionLog.append({
         ...this.ledgerBase(claimed, ctx),
         event: 'APPROVED',
-        approverUserId: userId,
-        stepUp,
+        ...approval,
         untrustedSources: toPendingAction(claimed).preview?.untrustedSources,
       });
     } catch (err) {
@@ -432,7 +493,7 @@ export class AiToolService {
         .catch(() => undefined);
       throw err;
     }
-    return this.executeApproved(claimed, ctx, userId, stepUp, fresh);
+    return this.executeApproved(claimed, ctx, approval, fresh);
   }
 
   /**
@@ -625,11 +686,9 @@ export class AiToolService {
   private async executeApproved(
     row: AiToolInvocation,
     ctx: AiExecutionContext,
-    approverUserId: string,
-    stepUp: boolean,
+    provenance: ApprovalProvenance,
     precomputed: FreshPreview | null = null,
   ): Promise<AiPendingAction> {
-    const provenance = { approverUserId, stepUp };
     const execCtx: AiExecutionContext = {
       ...ctx,
       channel: 'CHAT',
@@ -740,10 +799,8 @@ export class AiToolService {
     status: AiToolInvocationStatus,
     result: AiToolResult,
     ctx: AiExecutionContext,
-    extra: {
+    extra: Partial<ApprovalProvenance> & {
       event?: AiActionLogEvent;
-      approverUserId?: string;
-      stepUp?: boolean;
       durationMs?: number;
     } = {},
   ): Promise<void> {
@@ -775,6 +832,8 @@ export class AiToolService {
         entityRefs: result.entityRefs,
         approverUserId: extra.approverUserId,
         stepUp: extra.stepUp,
+        approvalMode: extra.approvalMode,
+        autoApproveEnabledAt: extra.autoApproveEnabledAt,
         error: result.ok ? null : result.error,
       });
     } catch (err) {
@@ -785,6 +844,37 @@ export class AiToolService {
   }
 
   // ─── Decision helpers ──────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * The auto-approve check of `approve(…, { auto: true })` (#1376): never together with a verified
+   * step-up, and only on a chat invocation whose conversation belongs to the approver and has
+   * auto-approve on NOW. Anything else is 409 `AUTO_APPROVE_OFF` and the action stays pending.
+   */
+  private async autoApproval(
+    row: AiToolInvocation,
+    userId: string,
+    options: AiApproveOptions,
+  ): Promise<{ enabledAt: Date | null }> {
+    const off = () =>
+      new ConflictException(
+        decisionError(
+          'AUTO_APPROVE_OFF',
+          'Auto-approve is not on for this conversation',
+        ),
+      );
+    if (options.stepUpVerified || !row.conversationId) throw off();
+    const conversation = await this.prisma.aiConversation.findFirst({
+      where: {
+        id: row.conversationId,
+        userId,
+        channel: 'CHAT',
+        autoApprove: true,
+      },
+      select: { autoApproveEnabledAt: true },
+    });
+    if (!conversation) throw off();
+    return { enabledAt: conversation.autoApproveEnabledAt };
+  }
 
   /** Only a human session in the chat decides: never an MCP grant, a Service Account or a tool. */
   private requireHumanSession(ctx: AiExecutionContext): string {
