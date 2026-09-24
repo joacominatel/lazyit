@@ -120,8 +120,10 @@
       "users": "Usuarios",
       "locations": "Ubicaciones",
       "new": "Nuevo",
-      "edit": "Editar"
-    }
+      "edit": "Editar",
+      "ai": "IA"
+    },
+    "aiAndConnectedApps": "IA y apps conectadas"
   },
   "dialog": {
     "deleteTitle": "¿Eliminar {entity, select, asset {activo} application {aplicación} consumable {consumible} article {artículo} user {usuario} location {ubicación} model {modelo} category {categoría} serviceAccount {cuenta de servicio} other {elemento}}?",

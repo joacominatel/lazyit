@@ -3,6 +3,7 @@
 import {
   BellAlertIcon,
   LockOpenIcon,
+  PuzzlePieceIcon,
   QuestionMarkCircleIcon,
   UserCircleIcon,
 } from "@heroicons/react/24/outline";
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { avatarColorFor } from "@/lib/avatar-color";
+import { useAiStatus } from "@/lib/api/hooks/use-ai-status";
 import { signOutAndRevoke } from "@/lib/auth/sign-out";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
@@ -55,6 +57,12 @@ export function UserMenu() {
   const canReadSecrets = useCan("secret:read");
   const { isUnlocked, lock } = useSecretSession();
   const showLock = canReadSecrets && isUnlocked;
+  // "AI & connected apps" (ADR-0097): for holders of `ai:connect` on an API that has the assistant — a
+  // successful `GET /ai/status` (an older API answers 404, which hides the entry). Shown even while MCP
+  // is off, so existing connections stay reachable for review and revoke.
+  const canConnectAi = useCan("ai:connect");
+  const aiStatus = useAiStatus();
+  const showAiConnections = canConnectAi && aiStatus.isSuccess;
 
   const name = session?.user?.name ?? "—";
   const email = session?.user?.email ?? "";
@@ -132,6 +140,14 @@ export function UserMenu() {
             {t("chrome.notificationPreferences")}
           </Link>
         </DropdownMenuItem>
+        {showAiConnections ? (
+          <DropdownMenuItem asChild>
+            <Link href="/account/ai">
+              <PuzzlePieceIcon aria-hidden />
+              {t("chrome.aiAndConnectedApps")}
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         {/* Locale switcher (ADR-0051): a Globe sub-menu with EN / ES. */}
         <LocaleSwitcher />
