@@ -54,8 +54,33 @@ export class PrincipalLoaderService {
    * logout, password change, deactivation and admin reset bump it), an inactive account, and a
    * directory-only person (no login capability by construction).
    */
-  async loadHuman(
+  loadHuman(
     userId: string,
+    expectedEpoch: number,
+  ): Promise<PrincipalLoadResult<HumanPrincipal>> {
+    return this.loadHumanAt(userId, 'sessionEpoch', expectedEpoch);
+  }
+
+  /**
+   * {@link loadHuman} for an MCP credential (an OAuth grant or a personal MCP token): identical gates,
+   * but the revocation counter compared is `mcpCredentialEpoch` — the grant's snapshot — instead of
+   * `sessionEpoch`, so a normal web logout leaves the credential alive (ADR-0097 decision 8, amended
+   * 2026-09-24). Password change / reset, admin reset, deactivation and offboarding bump both counters.
+   */
+  loadHumanForMcpCredential(
+    userId: string,
+    expectedMcpCredentialEpoch: number,
+  ): Promise<PrincipalLoadResult<HumanPrincipal>> {
+    return this.loadHumanAt(
+      userId,
+      'mcpCredentialEpoch',
+      expectedMcpCredentialEpoch,
+    );
+  }
+
+  private async loadHumanAt(
+    userId: string,
+    counter: 'sessionEpoch' | 'mcpCredentialEpoch',
     expectedEpoch: number,
   ): Promise<PrincipalLoadResult<HumanPrincipal>> {
     // A non-uuid id must never reach the uuid column (a would-be 500); it cannot name a user anyway.
@@ -68,7 +93,7 @@ export class PrincipalLoaderService {
     if (!user) {
       return { ok: false, reason: 'not_found' };
     }
-    if (user.sessionEpoch !== expectedEpoch) {
+    if (user[counter] !== expectedEpoch) {
       return { ok: false, reason: 'session_revoked' };
     }
     if (!user.isActive) {
