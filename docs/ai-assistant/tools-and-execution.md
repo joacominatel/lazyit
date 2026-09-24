@@ -465,11 +465,11 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 29 | `consumable_create` | ConsumablesController.create | consumable:write | write | consumable created |
 | 30 | `consumable_update` | ConsumablesController.update | consumable:write | write·D | consumable updated |
 | 31 | `consumable_record_movement` | ConsumablesController.createMovement (the handler behind `POST :id/movements`) | consumable:write | write (ledger, not idempotent) | consumable updated |
-| 32 | `kb_search` | ArticlesController.findAll | article:read | read | — |
-| 33 | `kb_get_article` | ArticlesController.findBySlug / .findOne (content paged by chars) | article:read | read | — |
-| 34 | `kb_create_article` (as DRAFT) | ArticlesController.create | article:write | write | article created |
-| 35 | `kb_update_article` | ArticlesController.update | article:write | write·D (preview may escalate) | article updated |
-| 36 | `kb_set_publication` (publish\|unpublish) | ArticlesController.publish / .unpublish | article:write | write (preview may escalate) | article updated |
+| 32 | `kb_search` ✅ built (W2-8) | ArticlesController.findAll | article:read | read | — |
+| 33 | `kb_get_article` ✅ built (W2-8) | ArticlesController.findOne (primary), .findBySlug (content paged by chars) | article:read | read | — |
+| 34 | `kb_create_article` (as DRAFT) ✅ built (W2-8) | ArticlesController.create | article:write | write | article created |
+| 35 | `kb_update_article` ✅ built (W2-8; also the folder move) | ArticlesController.update | article:write | write·D (preview may escalate) | article updated |
+| 36 | `kb_set_publication` (publish\|unpublish) ✅ built (W2-8) | ArticlesController.publish / .unpublish | article:write | write (preview may escalate; idempotent) | article updated |
 | 37 | `user_search` | UsersController.findAll | user:read | read | — |
 | 38 | `user_get` | UsersController.findOne (+assignments, grants facets) | user:read (+accessGrant:read facet) | read | — |
 | 39 | `user_create` | UsersController.create | user:manage | elevated | user created |
@@ -538,6 +538,7 @@ path unit (W2-0, #1315):
   built yet);
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
+  `kb.tools.ts` (W2-8) holds the five KB tools — see *KB tools as built* below;
   `platform.tools.ts` lists the surfaces no domain owns (authentication, instance configuration, the
   Secret Manager, Service Account management, the Migrator, the workflow engine, the probes)
 - `prompt/` — domain primer and system-prompt builder (§12)
@@ -561,6 +562,42 @@ path unit (W2-0, #1315):
 - Unexposed with reasons: node/edge writes and review-tray curation (v1.1), changes / identity-matches /
   auto-confirm rules reads (v1.1), the canvas bulk reads, the fleet view, agent policy, the `@Res` list,
   `report`, the secret link and the agent binary distribution.
+
+**KB tools as built (W2-8).** `kb.tools.ts` binds only `ArticlesController` handlers; the folder ACL
+(ADR-0060, INV-9) and draft privacy (ADR-0022) stay in `ArticlesService`, and the tools neither filter
+nor widen what it returns. The spec runs the real controller, service and `FolderAccessService` over an
+in-memory Prisma, so a leak through a tool would be a leak in the test.
+- `kb_search` (`read`) — input `query`, `folderIds`, `status`, `authorId`, `mine` (people only),
+  `assetIds`, `applicationIds`, `detail`, `limit` (default 20, max 50), `offset`; returns
+  `{ total, offset, items }` (never a body; `full` adds the excerpt) with `truncated`/`nextOffset`.
+- `kb_get_article` (`read`) — input `article` (id | slug), `contentOffset`, `maxChars` (default 8,000,
+  max 15,000), `detail`; the body is paged by characters with `content.nextOffset`. A folder-hidden
+  article or someone else's draft is the route's 404, identical to a missing one.
+- `kb_create_article` (`write`) — always a `DRAFT` authored by the caller; `status` is not an input.
+  Preview: title, folder (a `category` entity value), status, excerpt, slug and the body (clipped).
+- `kb_update_article` (`write`·D) — title, slug, excerpt, the whole body, and `folderId` (a MOVE). A raw
+  id goes straight to the write handler; a slug is resolved through `findOne`/`findBySlug`, so a draft
+  the caller cannot read is `NOT_FOUND` by slug.
+- `kb_set_publication` (`write`, idempotent) — `publish` | `unpublish`.
+- Untrusted content: titles, excerpts, bodies and metadata in results are wrapped with `untrusted()`;
+  preview bodies are clipped to 4,000 characters each, before and after.
+- Preview escalation: a preview on **another person's article** (the `article:manage` bypass, T3) is
+  `elevated` and names the article in `untrustedSources`; **every folder move** is `elevated` with
+  `VISIBILITY_CHANGE`, because an ordinary author cannot tell whether the destination is more visible
+  (folder rules are readable only with `settings:manage`, [[0060-kb-folder-access-control]] §9). Neither
+  needs step-up. Other warnings: `PUBLISHES_TO_READERS` (publishing, or editing a published article),
+  `VISIBILITY_CHANGE` (unpublishing). Every write on an existing article carries a precondition on its
+  `updatedAt`.
+- Route behaviour the tools inherit, unchanged: a Service Account is admitted by the guards and refused
+  by the service (R25), so the write tools list for an SA holding `article:write` and answer 403; a
+  member without `article:manage` gets the elevated card for someone else's article and the route's 403
+  at approve; creating into a folder the caller cannot read is still unguarded at the route
+  ([[0060-kb-folder-access-control]] §9, open). Folder labels on the preview need
+  `ArticleCategoriesController.findOne`, which the reference toolset (W2-5) decides — until a KB tool can
+  bind it, the preview carries the folder id only.
+- Unexposed with reasons: versions, links, backlinks, aliases and their writes (v1.1), archive and
+  restore (v1.1), the attachments list and removal (v1.1), the `.docx` import and binary attachment
+  transfer (no file tools).
 
 ### 8.2 Descriptor
 
