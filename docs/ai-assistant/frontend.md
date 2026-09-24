@@ -820,6 +820,68 @@ Edits to existing pages (en + es):
    route and an entity ref are sent — never page content or decrypted vault data
    ([[ai-assistant/security|security]] T-39).
 
+## As built — Settings → AI and per-Service-Account AI access (W3-8, #1315)
+
+§5.3's wireframes hold; this records the concrete behaviour and the choices the build made.
+
+- **Route.** `app/(app)/settings/ai/page.tsx` prefetches `GET /config/ai` under `aiConfigKeys.single()`
+  (`["config","ai","single"]` — deliberately **not** under the chat's `["ai"]` root) and reads `?enabled=1`
+  server-side for the "AI is on" confirmation. The view is `AdminGate`d (`settings:manage`); a hub card
+  "AI" sits last in `settings/page.tsx`. Data access is `lib/api/endpoints/ai-config.ts` +
+  `lib/api/hooks/use-ai-config.ts`; a save writes the redacted answer into the cache and invalidates
+  `aiKeys.status()`.
+- **One read drives the page.** `enabled: false` → the wizard; `enabled: true` → the provider & model
+  editor and the danger zone; always → behaviour & limits and the MCP card. Every save is the wholesale
+  `PUT`, built from the last read plus the change (`settingsToUpdate` / `buildUpdate` in
+  `settings/ai/_lib/ai-settings-form.ts`, pure and `bun test`ed); the key is never part of it unless typed.
+- **Wizard.** Provider (radio cards from `AI_PROVIDER_DESCRIPTORS`) → credentials → model (+ effort; a
+  temperature for OpenAI-compatible only) → test → enable. Credentials and model each save a disabled
+  draft, so the typed key leaves the page at once and is never held in state; a saved draft reopens at the
+  first step that still needs the admin (`initialWizardStep`). The test runs against the saved
+  configuration (`POST /config/ai/test {}`); Continue stays disabled until it passes. Enable sends
+  `acknowledgeDisclosure: true` (only while none is recorded) and then **hard-reloads** to
+  `/settings/ai?enabled=1` (Fork E). The launcher shortcut is not named in the copy — the chat owns it.
+- **Editor.** A provider select plus the same credentials/model fields; **Test these settings** posts the
+  DRAFT (the typed key inline; the saved key is used by the API only for the same destination). Changing
+  the provider or base URL flips the key field to "required" (the server clears the stored key —
+  destination binding). The API re-tests a changed connection on save; its 422 renders inline with the
+  failed test.
+- **Error mapping** (`describeAiSettingsError`, one localized sentence each, request id always shown):
+  the four enable-gate 422 codes (with `test`); the **codeless 409s** told apart by their fixed server
+  sentences — missing `AI_SECRET_KEY`, `AUTH_MODE=shim`, a concurrent save ("reload and save again") —
+  with a generic fallback quoting the server; the base-URL and shape 400s by their fixed sentences; schema
+  400s; 403; 404 (an older API). Connection-test codes (`PROVIDER_AUTH`, `EGRESS_DENIED`,
+  `TOOL_CALLING_UNSUPPORTED`, …) have copy, an unknown code shows the server's text. The base-URL rules
+  that need no DNS (userinfo, query/fragment, scheme, loopback name, `http` only for OpenAI-compatible with
+  the private-network option) are also checked as the admin types. A covering-set test asserts every
+  rendered code has copy in both catalogs.
+- **Behaviour & limits** (react-hook-form with rule validation mirroring the shared bounds — `apps/web`
+  has no direct `zod` dependency): retention 7–3650, the daily budget as a switch + value (off = `null`),
+  approval expiry, output/step/context limits, and the instructions (≤ 4000). Available on and off.
+- **MCP card.** The switch saves immediately and passes no gate. The connection mode comes from
+  `/ai/status` `mcp.auth`; when the status cannot be read, it falls back to the page's own scheme and says
+  so. OAuth (HTTPS): consent in the browser, the `NODE_EXTRA_CA_CERTS` note for an internal CA, and that
+  cloud connectors (claude.ai, ChatGPT) need a publicly reachable HTTPS instance. Personal tokens (`lan`):
+  why OAuth is unavailable on plain HTTP, and that cloud connectors cannot connect. The endpoint is
+  `window.location.origin + "/mcp"` (read after hydration) with a copy button; "Install in Claude Code"
+  links to `/account/ai` (W3-9).
+- **Allowlist editor.** Lists the admin's entries (with their redirect kind), the removed curated ids
+  (restorable), an "any https client" switch, and an add form validated against `classifyMcpRedirectUri`
+  and `McpClientAllowlistEntrySchema` before the save. New ids are `admin-<slug>`, so they can never
+  collide with a curated default's id (which the API would silently ignore). **Gap:** the curated defaults
+  live only in `apps/api/src/oauth/client-allowlist.defaults.ts`; no response carries them, so the page
+  names them in copy and cannot offer "remove this default". Exposing them (a shared constant or a field on
+  `GET /config/ai`) is a backend follow-up.
+- **Per-SA AI access.** There is no Service Account detail page, so the control is an **AI access** row
+  action on Settings → Service accounts opening a dialog (`ai-access-dialog.tsx`): off / read-only /
+  read-write, and for read-write an optional cap described as "per headless run; over MCP, per rolling
+  hour" (mcp-and-oauth.md §14). Notes derived from the account's permissions (`ai-access.ts`, tested):
+  an `infra:report` account is refused whatever is chosen; a missing `ai:use` blocks headless runs; a
+  missing `ai:connect` blocks MCP. The setting is saved as chosen — the API allows it and the runtime
+  refuses.
+- **Not built here:** the admin all-users connected-apps list (R9) and the install panel — `/account/ai`
+  (W3-9) owns the shared panel; Settings → AI links to it.
+
 ## 12. Implementation units (superseded)
 
 > **Superseded** by the unified wave plan in [[ai-assistant/_synthesis|the synthesis]] §10. Kept for
