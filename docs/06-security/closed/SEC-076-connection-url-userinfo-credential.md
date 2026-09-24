@@ -2,7 +2,7 @@
 id: SEC-076
 title: Connection URLs accept userinfo (https://user:pass@host) — a plain-config credential outside the secret store and CSEC-1
 severity: low
-status: open
+status: fixed
 cwe: CWE-522
 discovered: 2026-09-24
 module: workflow-engine (connections) · shared
@@ -99,3 +99,48 @@ so the PR should say so and the Manual should tell operators to move them to a s
 
 - CWE-522, CWE-598 (credentials in a URL). RFC 3986 §3.2.1 (userinfo is deprecated for passwords).
 - `docs/ai-assistant/security.md` "Userinfo in URLs" · [[SEC-075-connection-default-headers-credential-unprotected|SEC-075]] · epic #1315, PR #1354.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `6dbbe24c` (`fix(api): refuse URL userinfo on connection write and at workflow egress (#1315)`),
+revised by the upgrade-safety follow-up commits on the same PR (run path no longer refuses legacy rows;
+`legacyUserinfo` flag + UI warning), with `8a9d6ace` (shared helpers + create refine), `cfdbd6be` (read
+masking) and `e8ba9351` (AI pre-check)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-24
+
+Write-only validation, tolerant read path (charter upgrade-safety rule): a new or edited connection can
+no longer carry userinfo; an existing one keeps working and is surfaced to the operator.
+
+### Changes
+- `packages/shared/src/schemas/workflow.ts`: `urlHasUserinfo` / `connectionConfigHasUserinfo` and a
+  write-side refine on `CreateWorkflowConnectionSchema`. The refine is on the **write** schemas rather
+  than on `publicHttpsUrl` itself: `publicHttpsUrl` feeds `WorkflowConnectionConfigSchema`, which is also
+  the run-time and dry-run parse of stored rows (the finding's `publicHttpsUrlRead` alternative).
+  `WorkflowConnectionSchema` gains the optional read field `legacyUserinfo`.
+- `apps/api/.../workflow.dto.ts`: the connection PATCH DTO refuses userinfo too.
+- `connection-redaction.ts`: reads mask the userinfo (`https://[redacted]@host`) on list/get/create/patch
+  responses and in the dry-run preview, and add `legacyUserinfo: true|false`.
+- `apps/api/src/common/egress`: an opt-in `refuseUserinfo` option (`userinfo-not-allowed`, no URL in the
+  error), used by the AI tools' pre-check of new destinations. The workflow run path and the test probe
+  do **not** set it, so a legacy row keeps sending exactly as before the upgrade.
+- `apps/web` connection form: when `legacyUserinfo` is set, a warning under the URL field (en + es) says
+  the URL carries credentials and to move them to the connection's credential. Manual updated.
+
+### Tests added
+- `packages/shared/src/schemas/workflow.test.ts` › "SEC-076": userinfo refused on create for REST and
+  WEBHOOK_OUT; the config union still parses a legacy row.
+- `workflow-connections.service.spec.ts` › "SEC-076": the PATCH DTO refuses userinfo (a rename alone
+  passes); a legacy row reads masked with `legacyUserinfo: true`, a clean row `false`.
+- `rest.handler.spec.ts` › "SEC-076 legacy userinfo (upgrade-safe)": a legacy row still sends and
+  succeeds, and the password is not in the run metadata.
+- `apps/api/src/common/egress/egress-guard.userinfo.spec.ts`: the opt-in refusal, and no change without it.
+
+### Verification
+Charter validation block green (see the PR); CI green on the PR head.
+
+### Residual risk
+- A legacy row with userinfo keeps sending `Authorization: Basic` from plain config until the operator
+  moves the credential; it is no longer readable (masked) and is flagged in the UI and the Manual. Any
+  edit of such a row must drop the userinfo (write validation). No row is migrated.

@@ -4,7 +4,11 @@ import * as net from 'node:net';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { Readable } from 'node:stream';
 
-import { classifyIp, isAllowlistableCategory, isPublicCategory } from './ip-rules';
+import {
+  classifyIp,
+  isAllowlistableCategory,
+  isPublicCategory,
+} from './ip-rules';
 import {
   EgressError,
   type DnsLookup,
@@ -64,7 +68,10 @@ const CROSS_ORIGIN_SAFE_HEADERS: ReadonlySet<string> = new Set([
 /** Default resolver: `node:dns/promises` `lookup` returning every A/AAAA record in resolver order. */
 export const defaultDnsLookup: DnsLookup = async (hostname) => {
   const records = await dnsLookup(hostname, { all: true, verbatim: true });
-  return records.map((r) => ({ address: r.address, family: r.family as 4 | 6 }));
+  return records.map((r) => ({
+    address: r.address,
+    family: r.family as 4 | 6,
+  }));
 };
 
 function stripBrackets(host: string): string {
@@ -90,19 +97,39 @@ export async function assertUrlAllowed(
   try {
     url = input instanceof URL ? input : new URL(input);
   } catch {
-    throw new EgressError('invalid-url', `Not a valid absolute URL: ${String(input)}`);
+    throw new EgressError(
+      'invalid-url',
+      `Not a valid absolute URL: ${String(input)}`,
+    );
   }
 
   // (1) Scheme allowlist by PARSED protocol — never by prefix-sniffing.
   if (!protocols.includes(url.protocol)) {
-    throw new EgressError('scheme-not-allowed', `URL scheme "${url.protocol}" is not allowed`, {
-      url: url.href,
-    });
+    throw new EgressError(
+      'scheme-not-allowed',
+      `URL scheme "${url.protocol}" is not allowed`,
+      {
+        url: url.href,
+      },
+    );
+  }
+
+  // (1b) No userinfo, when the caller asks (SEC-076 — e.g. the AI tools' pre-check of a NEW
+  // destination): Node's http client turns `user:pass@` into `Authorization: Basic …`, a credential in
+  // plain config outside the secret store. The error carries NO url (its href would echo the
+  // credential). The workflow run path does not opt in, so legacy rows keep working.
+  if (opts.refuseUserinfo && (url.username !== '' || url.password !== '')) {
+    throw new EgressError(
+      'userinfo-not-allowed',
+      'URL carries a user name or password (user:pass@host) — store the credential as a connection secret',
+    );
   }
 
   const hostname = stripBrackets(url.hostname);
   if (!hostname) {
-    throw new EgressError('empty-host', 'URL has no host component', { url: url.href });
+    throw new EgressError('empty-host', 'URL has no host component', {
+      url: url.href,
+    });
   }
   const port = url.port ? Number(url.port) : defaultPort(url.protocol);
 
@@ -116,14 +143,22 @@ export async function assertUrlAllowed(
     try {
       candidates = await lookup(hostname);
     } catch {
-      throw new EgressError('dns-resolution-failed', `Could not resolve host "${hostname}"`, {
-        url: url.href,
-      });
+      throw new EgressError(
+        'dns-resolution-failed',
+        `Could not resolve host "${hostname}"`,
+        {
+          url: url.href,
+        },
+      );
     }
     if (!candidates || candidates.length === 0) {
-      throw new EgressError('dns-resolution-failed', `Host "${hostname}" resolved to no addresses`, {
-        url: url.href,
-      });
+      throw new EgressError(
+        'dns-resolution-failed',
+        `Host "${hostname}" resolved to no addresses`,
+        {
+          url: url.href,
+        },
+      );
     }
   }
 
@@ -132,7 +167,11 @@ export async function assertUrlAllowed(
   const resolved: ResolvedAddress[] = [];
   for (const candidate of candidates) {
     const category = classifyIp(candidate.address, candidate.family);
-    resolved.push({ address: candidate.address, family: candidate.family, category });
+    resolved.push({
+      address: candidate.address,
+      family: candidate.family,
+      category,
+    });
 
     if (isPublicCategory(category)) {
       continue;
@@ -183,7 +222,10 @@ export async function assertUrlAllowed(
 }
 
 /** Convenience boolean form of {@link assertUrlAllowed} (swallows the {@link EgressError}). */
-export async function isUrlAllowed(input: string | URL, opts: EgressGuardOptions = {}): Promise<boolean> {
+export async function isUrlAllowed(
+  input: string | URL,
+  opts: EgressGuardOptions = {},
+): Promise<boolean> {
   try {
     await assertUrlAllowed(input, opts);
     return true;
@@ -206,7 +248,11 @@ export function createPinnedLookup(
 ): (
   hostname: string,
   options: unknown,
-  callback: (err: NodeJS.ErrnoException | null, address: string | Array<{ address: string; family: number }>, family?: number) => void,
+  callback: (
+    err: NodeJS.ErrnoException | null,
+    address: string | Array<{ address: string; family: number }>,
+    family?: number,
+  ) => void,
 ) => void {
   return (_hostname, options, callback) => {
     let opts = options;
@@ -254,7 +300,7 @@ export function createNodeTransport(): EgressTransport {
         {
           method: req.method,
           headers: req.headers,
-          lookup: pinnedLookup as unknown as net.LookupFunction,
+          lookup: pinnedLookup,
           signal: req.signal,
         },
         (res) => {
@@ -284,8 +330,14 @@ export function createNodeTransport(): EgressTransport {
             toResponse: () => {
               const body = NULL_BODY_STATUSES.has(status)
                 ? null
-                : (Readable.toWeb(res) as unknown as ReadableStream<Uint8Array>);
-              return new Response(body, { status, statusText: res.statusMessage, headers });
+                : (Readable.toWeb(
+                    res,
+                  ) as unknown as ReadableStream<Uint8Array>);
+              return new Response(body, {
+                status,
+                statusText: res.statusMessage,
+                headers,
+              });
             },
             discard: () => {
               clearDeadline();
@@ -299,9 +351,13 @@ export function createNodeTransport(): EgressTransport {
       // Arm the total deadline now that `request` exists (fires independently of any socket activity).
       deadlineTimer = setTimeout(() => {
         request.destroy(
-          new EgressError('deadline-exceeded', `Outbound request exceeded the total deadline of ${deadlineMs}ms`, {
-            url: url.href,
-          }),
+          new EgressError(
+            'deadline-exceeded',
+            `Outbound request exceeded the total deadline of ${deadlineMs}ms`,
+            {
+              url: url.href,
+            },
+          ),
         );
       }, deadlineMs);
       // Never let the deadline timer alone keep the event loop alive.
@@ -309,7 +365,13 @@ export function createNodeTransport(): EgressTransport {
 
       // Per-socket IDLE timeout (resets on activity) — complementary fast-fail for a stalled socket.
       request.setTimeout(timeoutMs, () => {
-        request.destroy(new EgressError('request-timeout', `Outbound request idle for ${timeoutMs}ms`, { url: url.href }));
+        request.destroy(
+          new EgressError(
+            'request-timeout',
+            `Outbound request idle for ${timeoutMs}ms`,
+            { url: url.href },
+          ),
+        );
       });
       request.once('error', (err) => {
         clearDeadline();
@@ -360,8 +422,12 @@ export async function guardedFetch(
 
   let currentUrl = input instanceof URL ? input : new URL(input);
   let method = (init.method ?? 'GET').toUpperCase();
-  let headers = normalizeHeaders(init.headers ?? undefined);
-  let body = (init.body ?? undefined) as string | Uint8Array | Buffer | undefined;
+  const headers = normalizeHeaders(init.headers ?? undefined);
+  let body = (init.body ?? undefined) as
+    | string
+    | Uint8Array
+    | Buffer
+    | undefined;
   let redirectsLeft = maxRedirects;
 
   for (;;) {
@@ -385,14 +451,22 @@ export async function guardedFetch(
     const location = res.headers.get('location');
     res.discard();
     if (!location) {
-      throw new EgressError('redirect-missing-location', `Redirect (${res.status}) without a Location header`, {
-        url: target.url.href,
-      });
+      throw new EgressError(
+        'redirect-missing-location',
+        `Redirect (${res.status}) without a Location header`,
+        {
+          url: target.url.href,
+        },
+      );
     }
     if (redirectsLeft <= 0) {
-      throw new EgressError('too-many-redirects', `Exceeded the redirect limit (${maxRedirects})`, {
-        url: target.url.href,
-      });
+      throw new EgressError(
+        'too-many-redirects',
+        `Exceeded the redirect limit (${maxRedirects})`,
+        {
+          url: target.url.href,
+        },
+      );
     }
     redirectsLeft -= 1;
 
@@ -400,13 +474,21 @@ export async function guardedFetch(
     try {
       nextUrl = new URL(location, target.url);
     } catch {
-      throw new EgressError('invalid-url', `Redirect Location is not a valid URL: ${location}`, {
-        url: target.url.href,
-      });
+      throw new EgressError(
+        'invalid-url',
+        `Redirect Location is not a valid URL: ${location}`,
+        {
+          url: target.url.href,
+        },
+      );
     }
 
     const crossOrigin = nextUrl.origin !== target.url.origin;
-    const downgradeToGet = res.status === 303 || ((res.status === 301 || res.status === 302) && method !== 'GET' && method !== 'HEAD');
+    const downgradeToGet =
+      res.status === 303 ||
+      ((res.status === 301 || res.status === 302) &&
+        method !== 'GET' &&
+        method !== 'HEAD');
     if (downgradeToGet) {
       method = 'GET';
       body = undefined;

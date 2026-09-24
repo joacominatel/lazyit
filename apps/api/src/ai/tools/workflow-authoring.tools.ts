@@ -177,6 +177,8 @@ const EGRESS_REASONS: Record<string, string> = {
   'invalid-url': 'it is not a valid URL',
   'scheme-not-allowed': 'only https:// destinations are allowed',
   'empty-host': 'it has no host',
+  'userinfo-not-allowed':
+    'it carries a user name or password (store the credential in the lazyit UI)',
   'dns-resolution-failed': 'its host name does not resolve',
   'blocked-address':
     'it points at a private, loopback, link-local or cloud-metadata address',
@@ -192,7 +194,7 @@ async function assertEgressAllowed(url: string): Promise<void> {
     throw new BadRequestException(USERINFO_REFUSAL);
   }
   try {
-    await assertUrlAllowed(url);
+    await assertUrlAllowed(url, { refuseUserinfo: true });
   } catch (err) {
     if (err instanceof EgressError) {
       throw new BadRequestException(
@@ -518,6 +520,11 @@ async function readWorkflow(
     latest,
     steps: parsed.success ? parsed.data : [],
   };
+}
+
+/** The latest version number of a read workflow (0 when none is authored) — the SEC-077 precondition. */
+function versionNumberOf(latest: Row | null): number {
+  return typeof latest?.version === 'number' ? latest.version : 0;
 }
 
 function workflowLabel(workflow: Row, app: Row): string {
@@ -1037,12 +1044,14 @@ const workflowAuthorVersion = defineTool({
     });
   },
   async run(input, rt) {
-    const { workflow, app } = await readWorkflow(rt, input.workflow);
+    const { workflow, app, latest } = await readWorkflow(rt, input.workflow);
     assertMayRun(rt, app);
+    // SEC-077: author on top of the version just read (the card's STALE anchor already pinned it); the
+    // route 409s if another version landed in between.
     const version = asRow(
       await rt.call(WorkflowsController, 'authorVersion', {
         params: { id: String(workflow.id) },
-        body: { steps: input.steps },
+        body: { steps: input.steps, baseVersion: versionNumberOf(latest) },
       }),
     );
     return {
@@ -1242,12 +1251,16 @@ const workflowSetEnabled = defineTool({
     });
   },
   async run(input, rt) {
-    const { workflow, app } = await readWorkflow(rt, input.workflow);
+    const { workflow, app, latest } = await readWorkflow(rt, input.workflow);
     assertMayRun(rt, app);
+    // SEC-077: enabling pins the version the card reviewed (re-read here, after the STALE check), so a
+    // version authored in between makes the route 409 instead of going live unseen.
     const updated = asRow(
       await rt.call(WorkflowsController, 'update', {
         params: { id: String(workflow.id) },
-        body: { enabled: input.enabled },
+        body: input.enabled
+          ? { enabled: true, expectedVersion: versionNumberOf(latest) }
+          : { enabled: false },
       }),
     );
     return {
@@ -1610,9 +1623,9 @@ const connectionUpdate = defineTool({
     if (repoint && afterEndpoint) await assertEgressAllowed(afterEndpoint);
     // CSEC-1, read before the card so a card is never shown for a change the route would refuse: attaching
     // a credential, or re-pointing a connection that bears one, also needs `workflow:secrets`. The route
-    // enforces it again at execution — this only mirrors its rule. The tool goes one step further than
-    // the route: re-pointing a connection that carries default headers needs it too, because a header
-    // value may be a pasted token and the headers follow the connection to its new host.
+    // enforces it again at execution — this only mirrors its rule, including re-pointing a connection
+    // that carries default headers (SEC-075): a header value may be a pasted token and the headers follow
+    // the connection to its new host.
     const attaching = input.secretId !== undefined && input.secretId !== null;
     const carriedHeaders = headerNames(nextConfig);
     const headersFollow = repoint && carriedHeaders.length > 0;

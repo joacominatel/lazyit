@@ -29,8 +29,9 @@ data mapping and your success/failure edges before enabling the workflow.
 
 - Pick a **Sample grant** (one of the application's active grants) whose context the requests resolve
   against. If there are no active grants, grant someone access first so there is something to sample.
-- The result shows each step's method, target, **mapped fields**, headers and body (with secrets
-  redacted), and where the run would end.
+  A revoked grant, or a grant of a person who has been offboarded, is refused as a sample.
+- The result shows each step's method, target, **mapped fields**, headers and body (with secrets and
+  default header values redacted), and where the run would end.
 - You can **simulate a step failure** to preview that step's failure edge (escalate / compensate /
   stop) without anything actually failing.
 
