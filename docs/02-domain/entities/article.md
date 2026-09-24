@@ -3,7 +3,7 @@ title: Article
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-09-24
 ---
 
 # Article
@@ -203,7 +203,10 @@ Versioning + linking ([[0042-article-versioning-and-linking]]):
   `DELETE /articles/:id/links/:linkId` — unlink; `GET /articles/:id/links` — list links.
 - `GET /assets/:id/articles` — reverse: PUBLISHED articles linked to an asset (lean list shape).
 
-For a non-author write on a **published** article the API returns `403`; on a **draft**, `404`.
+For a non-author write on a **published** article the API returns `403`; on a **draft**, `404`. A
+published article in a home folder the caller cannot read is `404` on every write path, the same as a
+missing id: the folder check runs before the authorship verdict ([[0060-kb-folder-access-control]] §4,
+INV-9, SEC-074).
 
 ## Not yet implemented (deferred)
 

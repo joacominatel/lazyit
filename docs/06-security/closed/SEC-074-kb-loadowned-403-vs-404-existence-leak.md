@@ -2,7 +2,7 @@
 id: SEC-074
 title: KB write paths leak a folder-hidden article's existence — loadOwned returns 403 (not 404) to a non-author before the folder ACL check
 severity: low
-status: open
+status: fixed
 cwe: CWE-204
 discovered: 2026-09-24
 module: articles · ai (KB tools)
@@ -118,3 +118,50 @@ still gets the same 403 as today.
 - CWE-204 (Observable Response Discrepancy), CWE-203.
 - [[INVARIANTS]] INV-9 · [[0060-kb-folder-access-control]] §4 · [[0022-draft-visibility-auth-shim]] ·
   epic #1315, PR #1342.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commits `9bf6df37` (`fix(api): run the folder ACL before the author 403 in loadOwned (SEC-074, #1315)`)
+and `b32f906b` (`fix(api): run the folder ACL before the author 403 in article restore (SEC-074, #1315)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-24
+
+### Changes
+- `apps/api/src/articles/articles.service.ts` (`loadOwned`): visibility before authorization. For any
+  non-author, the foreign-DRAFT 404 (non-manage callers) and then the folder ACL
+  (`assertFolderVisible` → 404) run **before** the authorship 403. A published article in a folder the
+  caller cannot read now answers 404 on all ten write paths, the same as a missing id. A caller who can
+  read the folder still gets the same 403 as before. The author early-return and the #877
+  `article:manage` bypass are unchanged (the manage path already ran the folder check). The doc comment
+  states the new order.
+- `apps/api/src/articles/articles.service.ts` (`restore`): the same class, not in the finding's list.
+  Soft-delete restore has its own lookup (`includeSoftDeleted`) and had the same 403-before-folder
+  order. `POST /articles/:id/restore` needs `article:delete`, which can be delegated without
+  `article:manage`, so it was reachable by a non-admin. Same reordering.
+- `docs/02-domain/entities/article.md`: the non-author write rule now names the folder-hidden 404.
+- `docs/ai-assistant/tools-and-execution.md` §8.1: removed the "follow-up" note about SEC-074.
+- ADR-0060 §4 and ADR-0022 already required 404 for a folder-hidden article; the code now conforms. No
+  ADR change.
+
+### Tests added
+- `apps/api/src/articles/articles.service.spec.ts` › "write paths hide folder-restricted articles behind
+  404 (SEC-074, INV-9)", parametrised over `update`, `remove`, `publish`, `unpublish`, `restoreVersion`,
+  `addLink`, `removeLink`, `addAlias`, `removeAlias`, `assertAttachmentWritable`, plus `restore`:
+  - "404 (not 403) for a foreign PUBLISHED article in a folder the caller cannot see": all 11 fail
+    without the fix (403 `ForbiddenException`), pass with it.
+  - "404 for a missing id": pins the other half of the indistinguishability.
+  - "still 403 for a foreign PUBLISHED article in a folder the caller CAN see": pins that the fix does
+    not widen or change the visible-folder behaviour.
+
+### Verification
+- Focused run without the fix (service change stashed): the folder-hidden case failed on every path
+  (10 for `loadOwned`, then 1 for `restore` in its own step). With the fix: 33 passed.
+- Full API suite under Node jest: 251 suites, 5334 tests passed, including
+  `apps/api/src/ai/tools/kb.tools.spec.ts` (the `kb_update_article` / `kb_set_publication` tools bind the
+  same controller routes and inherit the 404).
+- `tsc --noEmit` green for shared, api, web and agent; eslint clean on the changed api files.
+
+### Residual risk
+None known. Every KB write path that loads an existing article (`loadOwned` and `restore`) now hides a
+folder-hidden article behind 404. The upgrade has no effect on data: no schema change, no migration.
