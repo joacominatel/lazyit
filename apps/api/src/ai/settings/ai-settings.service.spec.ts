@@ -81,6 +81,8 @@ function makeRow(overrides: Row = {}): Row {
     mcpClientAllowlistAdded: [],
     mcpClientAllowlistRemovedDefaults: [],
     mcpAllowAnyHttpsClient: false,
+    webSearchEnabled: false,
+    webSearchMaxUses: 5,
     disclosureAcknowledgedAt: null,
     disclosureAcknowledgedById: null,
     verifiedAt: null,
@@ -997,6 +999,40 @@ describe('AiSettingsService — config audit', () => {
     expect(audits()[0].detail).toMatchObject({
       changes: { apiKey: 'cleared-destination-changed' },
     });
+  });
+
+  it('web search (#1389): off by default, omitted keeps the stored value, a change is audited', async () => {
+    const fresh = setup();
+    expect((await fresh.service.getSettings()).webSearchEnabled).toBe(false);
+    expect((await fresh.service.getSettings()).webSearchMaxUses).toBe(5);
+
+    const { service, audits } = setup({
+      row: enabledRow({ webSearchEnabled: true, webSearchMaxUses: 3 }),
+    });
+    // A caller written before web search existed omits both fields: the stored values stay, no audit.
+    const kept = await service.updateSettings(enabledBody(), 'a');
+    expect(kept).toMatchObject({ webSearchEnabled: true, webSearchMaxUses: 3 });
+    expect(audits()).toEqual([]);
+
+    const changed = await service.updateSettings(
+      enabledBody({ webSearchEnabled: false, webSearchMaxUses: 8 }),
+      'a',
+    );
+    expect(changed).toMatchObject({
+      webSearchEnabled: false,
+      webSearchMaxUses: 8,
+    });
+    expect(audits()[0].detail).toMatchObject({
+      changes: {
+        webSearchEnabled: { before: true, after: false },
+        webSearchMaxUses: { before: 3, after: 8 },
+      },
+    });
+  });
+
+  it('web search (#1389): a stored cap outside the range reads as the default (tolerant read)', async () => {
+    const { service } = setup({ row: makeRow({ webSearchMaxUses: 999 }) });
+    expect((await service.getSettings()).webSearchMaxUses).toBe(5);
   });
 
   it('writes nothing to the audit for a no-op save', async () => {
