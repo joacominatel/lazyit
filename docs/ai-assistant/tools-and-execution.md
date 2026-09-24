@@ -200,17 +200,19 @@ Legend:
 | articles | version restore, links / aliases writes | article:write | W | v1.1 |
 | articles | import (multipart) | article:write | W | EXCL (binary) |
 | articles | delete / restore | article:delete | D | v1.1 |
-| users | list, get, role-counts, `:id/assignments` | user:read | R | v1 |
-| users | `:id/access-grants` | accessGrant:read | R | facet |
+| users | list, get, `:id/assignments` | user:read | R | v1 `user_search`, `user_get` (built, W2-9) |
+| users | role-counts | user:read | R | not in the v1 cut (§7; `user_search` with `role` returns the count as its total) |
+| users | `:id/access-grants` | accessGrant:read | R | facet of `user_get` (built, W2-9) |
 | users | `me` | self | R | v1 `session_context` |
-| users | create / update | user:manage | W | v1 |
-| users | offboard (delete alias) | user:manage | D + ext + cascade | v1 |
-| users | restore | user:manage | W | v1 |
+| users | create / update | user:manage | W | v1 `user_create` / `user_update`, `elevated` (built, W2-9) |
+| users | offboard (delete alias) | user:manage | D + ext + cascade | v1 `user_offboard` binds `POST :id/offboard`; `DELETE :id` unexposed (built, W2-9) |
+| users | restore | user:manage | W | v1 `user_restore`, `elevated` (built, W2-9) |
 | users | clone | user:manage | W | v1.1 |
 | users | provision-local-account | user:manage | W | EXCL (returns a temporary password in cleartext, [R24]; CEO round 2) |
 | users | reset-password, provision-account, password-reset-capabilities | user:manage | W | v1.1, `elevated` with step-up — only where the response carries no credential; otherwise EXCL |
-| dashboard | summary | dashboard:read | R | v1 |
-| dashboard | activity + filters | logs:read | R | v1 `activity_list` |
+| dashboard | summary | dashboard:read | R | v1 `dashboard_summary` (built, W2-9) |
+| dashboard | activity | logs:read | R | v1 `activity_list` (built, W2-9) |
+| dashboard | activity filters (the Reports select menus) | logs:read | R | not in the v1 cut (`activity_list` filters by actor and action directly) |
 | dashboard | export | logs:read | R | EXCL |
 | audit | security audit logs (read) | logs:read | R | v1.1 |
 | audit | export | logs:read | R | EXCL |
@@ -438,8 +440,8 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 2 | `lazyit_search` | SearchController.find | search:read | read | — |
 | 3 | `navigate_to` (chat only) | the entity's get handler (existence + visibility check) | entity's read | navigate | the target (`op: navigate`) |
 | 4 | `reference_lookup` (kind: assetModel, location, assetCategory, applicationCategory, consumableCategory, articleFolder) | 6 list/get handlers | assetModel:read / location:read / category:read | read | — |
-| 5 | `dashboard_summary` | DashboardController.summary | dashboard:read | read | — |
-| 6 | `activity_list` | DashboardController.activity | logs:read | read | — |
+| 5 | `dashboard_summary` ✅ built (W2-9) | DashboardController.summary | dashboard:read | read | — |
+| 6 | `activity_list` ✅ built (W2-9) | DashboardController.activity | logs:read | read | — |
 | 7 | `asset_search` | AssetsController.findAll / .findMine | asset:read / self | read | — |
 | 8 | `asset_get` | AssetsController.findOne (+assignments, history, articles facets) | asset:read (+article:read facet) | read | — |
 | 9 | `asset_create` | AssetsController.create | asset:write | write | asset created |
@@ -470,12 +472,12 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 34 | `kb_create_article` (as DRAFT) | ArticlesController.create | article:write | write | article created |
 | 35 | `kb_update_article` | ArticlesController.update | article:write | write·D (preview may escalate) | article updated |
 | 36 | `kb_set_publication` (publish\|unpublish) | ArticlesController.publish / .unpublish | article:write | write (preview may escalate) | article updated |
-| 37 | `user_search` | UsersController.findAll | user:read | read | — |
-| 38 | `user_get` | UsersController.findOne (+assignments, grants facets) | user:read (+accessGrant:read facet) | read | — |
-| 39 | `user_create` | UsersController.create | user:manage | elevated | user created |
-| 40 | `user_update` | UsersController.update | user:manage | elevated·D (ROLE_CHANGE / email warnings) | user updated |
-| 41 | `user_offboard` | UsersController.offboard | user:manage | write·D, ext, cascade | user archived; also affects asset, accessGrant |
-| 42 | `user_restore` | UsersController.restore | user:manage | elevated (restores sign-in) | user restored |
+| 37 | `user_search` ✅ built (W2-9) | UsersController.findAll | user:read | read | — |
+| 38 | `user_get` ✅ built (W2-9) | UsersController.findOne (+assignments, grants facets) | user:read (+accessGrant:read facet) | read | — |
+| 39 | `user_create` ✅ built (W2-9) | UsersController.create | user:manage | elevated | user created |
+| 40 | `user_update` ✅ built (W2-9) | UsersController.update | user:manage | elevated·D (ROLE_CHANGE / IDENTITY_CHANGE warnings) | user updated |
+| 41 | `user_offboard` ✅ built (W2-9) | UsersController.offboard (`POST :id/offboard`) | user:manage | write·D, ext, cascade | user archived; also affects asset, accessGrant |
+| 42 | `user_restore` ✅ built (W2-9) | UsersController.restore | user:manage | elevated (restores sign-in) | user restored |
 | 43 | `infra_node_search` ✅ built (W2-10) | InfraController.listNodePage (`GET /infra/nodes/page`; not `GET /nodes`, which uses `@Res`) | infra:read | read | — |
 | 44 | `infra_node_get` ✅ built (W2-10) | InfraController.getNode (primary), .listEdges, .getImpact, .listNodePage (edge peers by `ids`) | infra:read | read | — |
 
@@ -538,6 +540,8 @@ path unit (W2-0, #1315):
   built yet);
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
+  `users.tools.ts` and `activity.tools.ts` (W2-9) hold the six `user_*` tools, `dashboard_summary` and
+  `activity_list` — see *Users and activity tools as built* below;
   `platform.tools.ts` lists the surfaces no domain owns (authentication, instance configuration, the
   Secret Manager, Service Account management, the Migrator, the workflow engine, the probes)
 - `prompt/` — domain primer and system-prompt builder (§12)
@@ -561,6 +565,47 @@ path unit (W2-0, #1315):
 - Unexposed with reasons: node/edge writes and review-tray curation (v1.1), changes / identity-matches /
   auto-confirm rules reads (v1.1), the canvas bulk reads, the fleet view, agent policy, the `@Res` list,
   `report`, the secret link and the agent binary distribution.
+
+**Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so
+the RBAC guards stay in `UsersService`, in one place: the self-role-change refusal (403), the last-admin
+guard on demotion, deactivation and offboarding (409, SEC-021) and the manager checks (400) answer a tool
+exactly as they answer HTTP — the specs drive them through the tools, including over headless and MCP.
+- **References.** A user is an id, an email, a username, a legajo or `"me"` (the human caller; a Service
+  Account asking for `"me"` gets 400). Resolution reads `GET /users` as the caller: an email through the
+  route's `q`, a username or legajo — which `q` does not search — by scanning at most 5 pages of 200.
+  `user_restore` resolves in the archived slice (`deleted=only`, ADMIN-only on the route), so a Service
+  Account restores by id. A manager (`user_create`, `user_update`) is `{ user: <reference> }` or
+  `{ name }`.
+- **Reads.** `user_search` (`query`, `role`, `directoryOnly`, `archived`, the route's `sort`, `dir`,
+  `limit` ≤ 50, `offset`) and `user_get` (`detail`; the assignments facet and the `accessGrant:read`
+  grants facet — reported `unavailable` without that permission, never a failure). `dashboard_summary`
+  (`expiringWithinDays`, `detail: full` adds the recent asset history) and `activity_list` (the feed's
+  filters; `actor` is a uuid or `"me"`; `limit` ≤ 50). Never projected: `externalId`, password and
+  session material, the raw manager columns. Wrapped with `untrusted()`: assignment and grant notes,
+  imported `directoryAttrs`, an activity row's `subjectName` (entity names, some agent-reported) and a
+  history `payload`. The feed's `summary` is a fixed server phrase and is not wrapped.
+- **Writes and warnings.** Previews leave `stepUpRequired` to core (it derives it from the warnings).
+  - `user_create` (`elevated`): always `IDENTITY_CHANGE`, plus `ROLE_CHANGE` for a role above VIEWER. No
+    target (nothing exists yet). The input has no `password`: the route's optional temporary password is
+    a credential (INV-AI-5).
+  - `user_update` (`elevated`, destructive): `ROLE_CHANGE` for a role change; `IDENTITY_CHANGE` for email,
+    name, username, legajo, activation (`isActive`) or manager; `EXTERNAL_PROVISIONING` when a role, name
+    or email change is mirrored to the IdP (the account has an `externalId`). A no-op is refused before
+    any card (400).
+  - `user_offboard` (`write`, destructive, ext): `SOFT_DELETE`; `CASCADE_RELEASES_ASSIGNMENTS` and
+    `CASCADE_REVOKES_GRANTS` with the `impacted` assets and grants (grants warned even when the caller
+    cannot count them); `EXTERNAL_DEPROVISIONING` when the IdP account is deactivated. No step-up (it
+    revokes, it grants nothing). The result reports counts only — never the Secret Manager vault names
+    the route returns as a rotation prompt (ADR-0061) — and its refs are the user (`archived`) and each
+    released asset (`updated`); the route returns no ids for the revoked grants.
+  - `user_restore` (`elevated`): `IDENTITY_CHANGE` (it restores sign-in); grants and assets are not
+    restored, and the description says so. A live user is refused before any card (400).
+- **Unexposed with reasons:** `roleCounts` and `activityFilters` (not in the v1 cut), `remove` (the
+  `DELETE` alias of offboard), `clone` (v1.1), `provisionAccount` and `passwordResetCapabilities` (v1.1,
+  `elevated`), `resetPassword` and `provisionLocalAccount` (structural exclusion), the activity CSV
+  export, the security audit logs and notifications (v1.1).
+- **Known limit.** A non-ADMIN human an operator gave `user:manage` can restore through the route but not
+  through the chat: the preview reads the archived slice, which the list route keeps ADMIN-only.
 
 ### 8.2 Descriptor
 
