@@ -23,6 +23,7 @@
 import type { ConfigStatus } from "@lazyit/shared";
 
 import { auth } from "@/auth";
+import { loginCallbackPath } from "@/lib/auth/login-callback";
 
 /**
  * API base URL for the gate's server-side `GET /config/status`. Prefers an internal URL
@@ -108,11 +109,10 @@ export default auth(async (req) => {
     }
 
     // Route protection: send unauthenticated visitors of protected routes to /login, preserving the
-    // intended destination so Auth.js can return them there after sign-in.
+    // intended destination — path AND query — so sign-in returns them there. The query matters for the
+    // OAuth consent page (`/oauth/authorize?…`), whose authorization request lives in it (#1315).
     if (!isPublicPath(pathname)) {
-      const loginUrl = new URL("/login", nextUrl.origin);
-      loginUrl.searchParams.set("callbackUrl", pathname);
-      return Response.redirect(loginUrl);
+      return Response.redirect(new URL(loginCallbackPath(nextUrl), nextUrl.origin));
     }
   }
 });

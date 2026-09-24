@@ -25,6 +25,8 @@ const KNOWN_SEGMENTS = [
   "locations",
   "new",
   "edit",
+  // `/account/ai` and `/settings/ai` (ADR-0097): the humanizer would print "Ai".
+  "ai",
 ] as const;
 const KNOWN_SEGMENT_SET = new Set<string>(KNOWN_SEGMENTS);
 
