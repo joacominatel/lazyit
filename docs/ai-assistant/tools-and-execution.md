@@ -496,11 +496,22 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 - **EXCL** (CEO round 2): SA token create/rotate, `provision-local-account`, the AI's own configuration.
 - **EXCL** (settled): Secret Manager.
 - The 44-tool v1 cut is adopted by default (CEO to confirm on review).
-- **Access tools follow-ups (W2-6, see §8.1 "Access tools as built"):** user references by email /
-  username once the users toolset binds `UsersController.findAll`; a by-id access-request read (the
-  decide preview scans the guarded list today); the `CRITICAL_APPLICATION` step-up warning (CEO decision,
-  added to shared and core by W2-12) is emitted by the grant, revoke and decide previews once it exists —
-  each already loads the application's `isCritical`.
+- **Access tools follow-ups (W2-6, see §8.1 "Access tools as built"; G2 review of #1345):**
+  - user references by email / username once the users toolset binds `UsersController.findAll`;
+  - `CRITICAL_APPLICATION` (CEO decision, added to shared and core by W2-12): the grant, revoke and
+    decide previews emit it once it exists — each already loads the application's `isCritical`;
+  - F4: the provisioning sentence is read at propose and re-read at approve, but only the precondition
+    (the application's `updatedAt`) is compared, so a workflow enabled or disabled in between leaves the
+    card's sentence stale (the action still runs, exactly as from the UI). A workflow fingerprint in the
+    precondition needs a core change (one entity per precondition);
+  - F5: "this triggers …" is said for an enabled workflow; the engine also needs a published version to
+    fire, which the header list does not show — the sentence can overstate for an enabled workflow with
+    no version;
+  - F6: `access_request_list`'s primary route is `GET /access-requests` (`accessRequest:read`), so the
+    listing hides the tool from a VIEWER even though `mine: true` (`GET /access-requests/mine`) is open to
+    every human; a separate `access_request_list_mine` (or listing by any binding) would fix it;
+  - F8: the decide preview scans the guarded request list (≤ 5 × 200 rows per slice); a
+    `GET /access-requests/:id` read would replace the scan.
 
 ## 8. Registry and execution design
 
@@ -575,8 +586,10 @@ path unit (W2-0, #1315):
 `rt.call`, so an application write passes the route's own `CreateApplicationSchema` /
 `UpdateApplicationSchema` pipe (the SEC-051 url-scheme guard), and a grant runs the service's live-checks,
 actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) unchanged.
-- **References.** An application is its id or its exact name (case-insensitive), resolved through the
-  guarded `GET /applications` list. A user is **its id or `"me"`** (the calling human; a Service Account
+- **References.** An application is its id — a strict Prisma cuid, `^c[a-z0-9]{24}$`, passed straight
+  through (so "Confluence" or "Crowdstrike" is never mistaken for an id) — or its exact name
+  (case-insensitive), resolved through the guarded `GET /applications` list; the preview and the run use
+  the same rule. A user is **its id or `"me"`** (the calling human; a Service Account
   has no "me"). Email / username resolution needs `UsersController.findAll`, which the users toolset
   (W2-9) binds — a follow-up once it lands (the boot check refuses a handler bound by one toolset and
   listed unexposed by another).
@@ -602,15 +615,23 @@ actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) un
     `EXTERNAL_PROVISIONING` per the above, + `NOTIFIES_USERS` for a critical application or an
     `admin`/`administrator` level). The preview leaves `stepUpRequired` false on purpose: **core derives
     the step-up from `PRIVILEGE_GRANT`** and the spec proves an approval without it is refused. Target
-    and precondition: the application (a change to it since the card was shown is `STALE`). It also
-    shows how many active grants the user already holds there, and says so when you grant yourself.
+    and precondition: the application (a change to it since the card was shown is `STALE`). **The card
+    names the grantee** — name, email and status, read through the guarded `GET /users/:id`
+    (`UsersController.findOne`, bound as a preview facet and removed from `users.tools.ts`'s pending list;
+    [[ai-assistant/security|security]] §6.1 chain 1): an inactive, directory-only or missing grantee fails
+    at propose (and at the approve-time re-preview), and a caller without `user:read` gets no card. It
+    also shows how many active grants the user already holds there, and says so when you grant yourself.
   - `access_grant_revoke` — `write`, `destructive`, `externalEffects`; `EXTERNAL_DEPROVISIONING` when a
-    workflow will or may run. Target and precondition: the grant (an edit since → `STALE`); an already
+    workflow will or may run. It names the user when the caller may read the directory (else by id), and
+    when it replaces the grant's notes it shows the old notes (untrusted) and lists the grant in
+    `untrustedSources`. Target and precondition: the grant (an edit since → `STALE`); an already
     revoked grant is the route's 409 `CONFLICT`, at propose and at approve.
   - `access_request_decide` — `elevated`, `externalEffects`, one input `decision: approve | deny` (a
     denial requires `reason`; an approval refuses one). Approve warns `PRIVILEGE_GRANT` (step-up) +
     `NOTIFIES_USERS` (+ `EXTERNAL_PROVISIONING`); deny warns `NOTIFIES_USERS` only — no privilege, no
-    step-up. The API has no `GET /access-requests/:id`, so the preview finds the request through the
+    step-up. The card names the requester (name, email, status, as for a grant; approving an inactive
+    requester fails at propose, denying stays possible) and lists the request in `untrustedSources`,
+    since it shows the requester's own justification. The API has no `GET /access-requests/:id`, so the preview finds the request through the
     guarded list (`accessRequest:read`: the PENDING slice, then the whole list, at most 5 × 200 rows each,
     newest first) — a follow-up is a by-id read. A pending request never changes until it is decided
     (no `updatedAt`; `createdAt` is its version), so "changed since the card" can only mean "decided by
