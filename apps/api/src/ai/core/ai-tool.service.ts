@@ -1,8 +1,48 @@
-import { Injectable } from '@nestjs/common';
-import type { AiChannel, AiToolResult, Permission } from '@lazyit/shared';
+import { randomUUID } from 'node:crypto';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
+import {
+  AI_SETTINGS_DEFAULTS,
+  type AiActionLogEvent,
+  type AiActionPreview,
+  type AiChannel,
+  type AiToolErrorCode,
+  type AiToolInvocationStatus,
+  type AiToolResult,
+  type Permission,
+} from '@lazyit/shared';
+import type {
+  AiToolInvocation,
+  Prisma,
+} from '../../../generated/prisma/client';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
 import type { Principal } from '../../auth/principal';
 import { PrincipalLoaderService } from '../../auth/principal-loader.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import {
+  actorOf,
+  AiActionLogService,
+  type AiActionLogEntry,
+} from './action-log.service';
+import { mapToolError } from './error-mapper';
+import {
+  inputHashOf,
+  mergeRefs,
+  toPendingAction,
+  type AiApproveOptions,
+  type AiPendingAction,
+  type AiProposal,
+} from './pending-action';
+import {
+  AI_SETTINGS_READER,
+  type AiSettingsReader,
+} from './ports/ai-settings.port';
 import { callKindOf, errorResult } from './result-shaper';
 import { AiToolExecutor } from './tool-executor';
 import { AiToolRegistry } from './tool-registry';
@@ -17,26 +57,50 @@ function channelPermission(channel: AiChannel): Permission {
   return channel === 'MCP' ? 'ai:connect' : 'ai:use';
 }
 
+type ToolError = {
+  code: AiToolErrorCode;
+  status?: number;
+  message: string;
+  hint?: string;
+};
+
+/** The error a refused decision carries, for the decision endpoint to answer as is. */
+function decisionError(code: string, message: string) {
+  return { code, message };
+}
+
 /**
- * The ONLY façade channels use to reach tools (synthesis §4.2). On top of the Nest pipeline every tool
- * call already runs through, it re-checks per call:
+ * The ONLY façade channels use to reach tools (synthesis §4.2; tools-and-execution.md §8.4, §9). On top
+ * of the Nest pipeline every tool call already runs through, it re-checks per call:
  *   - the principal, re-loaded from the database (a stale or revoked identity is refused);
  *   - `ai:use` (chat, headless) or `ai:connect` (MCP), held NOW;
  *   - the channel the tool allows;
  *   - the class ceiling (the MCP scope or the Service Account's AI access setting).
  *
- * Writes (`write`, `elevated`) are refused by `invoke` on every channel. In the chat a write is never
- * invoked directly — it is proposed and runs only after the user approves it, so a loop bug cannot skip
- * confirmation. Over MCP and headless a write must land in the permanent `AiActionLog` ledger (R6,
- * INV-AI-10); until that ledger-backed path is installed, `invoke` fails closed.
+ * Writes (`write`, `elevated`):
+ *   - over MCP and headless, `invoke` runs them, recorded in the permanent `AiActionLog` ledger
+ *     (`ATTEMPTED` write-ahead, then `EXECUTED` | `FAILED` | `DENIED`) and in `ai_tool_invocations`;
+ *   - in the chat, `invoke` REFUSES them. A chat write is `propose`d — stored with its server-built
+ *     preview — and runs only through `approve`, by its owner, from a human session, exactly once,
+ *     before expiry, re-authorized and version-checked at execute (INV-AI-3). A loop bug cannot skip it.
+ *
+ * Boundary with the runtime (W2-3): core owns the invocation lifecycle primitives (`propose`, `approve`,
+ * `reject`, `expire`, `expireDue`, `cancel`, `markOutcomeUnknown`) and the ledger. The runtime's
+ * approval service owns pausing and resuming the run, the SSE events, the password step-up check and
+ * the expiry sweeper that calls these primitives.
  */
 @Injectable()
 export class AiToolService {
+  private readonly logger = new Logger(AiToolService.name);
+
   constructor(
     private readonly registry: AiToolRegistry,
     private readonly executor: AiToolExecutor,
     private readonly principals: PrincipalLoaderService,
     private readonly permissions: PermissionResolverService,
+    private readonly prisma: PrismaService,
+    private readonly actionLog: AiActionLogService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   /**
@@ -69,8 +133,9 @@ export class AiToolService {
   }
 
   /**
-   * Run a tool now. Reads on every channel the tool allows; writes are refused (see the class comment).
-   * The route's own authorization runs inside the dispatch — this method never decides a route permission.
+   * Run a tool now. Reads on every channel the tool allows; writes only over MCP and headless, through
+   * the ledger (see the class comment). The route's own authorization runs inside the dispatch — this
+   * method never decides a route permission.
    */
   async invoke(
     name: string,
@@ -91,39 +156,710 @@ export class AiToolService {
         message: `${name} is not available on this channel`,
       });
     }
+    if (kind === 'mutation') {
+      if (ctx.channel === 'CHAT') {
+        return errorResult(kind, {
+          code: 'NOT_AVAILABLE',
+          message: `${name} changes data: it must be proposed and approved, not invoked`,
+        });
+      }
+      return this.invokeWrite(tool, input, ctx);
+    }
     if (ctx.ceiling && !ctx.ceiling.includes(tool.descriptor.class)) {
-      return errorResult(kind, {
-        code: 'FORBIDDEN',
-        status: 403,
-        message: `${name} is outside the access granted to this session`,
+      return errorResult(kind, this.ceilingError(name));
+    }
+    const principal = await this.loadPrincipal(ctx);
+    if (!principal) {
+      return errorResult(kind, PRINCIPAL_INVALID);
+    }
+    const gate = channelPermission(ctx.channel);
+    if (!(await this.holds(principal, [gate]))) {
+      return errorResult(kind, gateError(gate));
+    }
+    return this.executor.execute(tool, input, ctx);
+  }
+
+  /**
+   * Propose a chat write (tools-and-execution.md §9 "Propose"): validate, authorize (a card is never
+   * shown for an action the route would refuse), build the server-side preview, store the pending
+   * action with its expiry and write `PROPOSED`. Nothing is executed. A refusal answers the tool result
+   * the model receives instead.
+   */
+  async propose(
+    name: string,
+    input: unknown,
+    ctx: AiExecutionContext,
+    options: { toolUseId?: string } = {},
+  ): Promise<AiProposal> {
+    const tool = this.registry.get(name);
+    if (!tool) {
+      return refuse('mutation', {
+        code: 'NOT_AVAILABLE',
+        message: `Unknown tool: ${name}`,
       });
     }
-    if (kind === 'mutation') {
-      return errorResult(kind, {
+    const kind = callKindOf(tool.descriptor.class);
+    if (kind !== 'mutation') {
+      return refuse(kind, {
         code: 'NOT_AVAILABLE',
-        message:
-          ctx.channel === 'CHAT'
-            ? `${name} changes data: it must be proposed and approved, not invoked`
-            : `${name} changes data, and writes are not enabled on this channel`,
+        message: `${name} does not change data: invoke it`,
+      });
+    }
+    if (
+      ctx.channel !== 'CHAT' ||
+      ctx.identity.kind !== 'human' ||
+      !tool.channels.includes('CHAT')
+    ) {
+      return refuse(kind, {
+        code: 'NOT_AVAILABLE',
+        message: `${name} cannot be proposed on this channel`,
       });
     }
     const principal = await this.loadPrincipal(ctx);
     if (!principal) {
-      return errorResult(kind, {
-        code: 'FORBIDDEN',
-        status: 401,
-        message: 'The acting principal is no longer valid',
+      return refuse(kind, PRINCIPAL_INVALID);
+    }
+    const checked = this.executor.validate(tool, input);
+    if (!checked.ok) {
+      return { ok: false, result: checked.result };
+    }
+    const denial = await this.writeDenial(tool, principal, ctx, {
+      routeStatic: true,
+    });
+    if (denial) {
+      await this.recordDenied(tool, checked.input, ctx, denial);
+      return refuse(kind, denial);
+    }
+
+    let preview: AiActionPreview;
+    try {
+      // The preview only reads; its dispatches run under a throwaway invocation id (no row exists yet).
+      preview = await this.executor.preview(
+        tool,
+        checked.input,
+        ctx,
+        randomUUID(),
+      );
+    } catch (err) {
+      return refuse(kind, mapToolError(err));
+    }
+    preview = {
+      ...preview,
+      untrustedSources: mergeRefs(
+        preview.untrustedSources,
+        ctx.untrustedSources,
+      ),
+    };
+
+    const expiresAt = new Date(
+      Date.now() + (await this.approvalTtlMinutes()) * 60_000,
+    );
+    const row = await this.prisma.aiToolInvocation.create({
+      data: {
+        ...this.invocationBase(tool, checked.input, ctx),
+        toolUseId: options.toolUseId ?? null,
+        status: 'AWAITING_APPROVAL',
+        preview: json(preview),
+        ...(preview.precondition
+          ? { precondition: json(preview.precondition) }
+          : {}),
+        expiresAt,
+      },
+    });
+    await this.actionLog.append({
+      ...this.ledgerBase(row, ctx),
+      event: 'PROPOSED',
+      input: checked.input,
+      entityRefs: preview.target ? [preview.target] : [],
+      untrustedSources: preview.untrustedSources,
+    });
+    return { ok: true, action: toPendingAction(row) };
+  }
+
+  /**
+   * Approve a pending chat write and execute it (tools-and-execution.md §9 "Approve"). Only its owner,
+   * from a human session, exactly once (an atomic conditional claim), before expiry. A step-up the
+   * preview requires must have been verified by the caller. Then: `APPROVED` (write-ahead), re-check the
+   * principal, `ai:use` and the route permission, the tool's schema hash, the stored input and the
+   * target's version (`STALE`), execute through the same dispatcher and record the outcome.
+   *
+   * A second approve of a finished action returns the stored outcome (`replayed`) and executes nothing.
+   * Refusals throw Nest HTTP exceptions (`{ code, message }` bodies) for the decision endpoint.
+   */
+  async approve(
+    invocationId: string,
+    ctx: AiExecutionContext,
+    options: AiApproveOptions = {},
+  ): Promise<AiPendingAction> {
+    const userId = this.requireHumanSession(ctx);
+    const row = await this.findOwned(invocationId, userId, ctx);
+
+    if (row.status === 'AWAITING_APPROVAL' && !options.stepUpVerified) {
+      const preview = toPendingAction(row).preview;
+      if (!preview || preview.stepUpRequired) {
+        // Refused BEFORE the claim: the action stays pending so the user can retry with the step-up.
+        throw new ForbiddenException(
+          decisionError(
+            'STEP_UP_REQUIRED',
+            'This action requires your password to be confirmed',
+          ),
+        );
+      }
+    }
+
+    const now = new Date();
+    const claim = await this.prisma.aiToolInvocation.updateMany({
+      where: {
+        id: row.id,
+        status: 'AWAITING_APPROVAL',
+        userId,
+        expiresAt: { gt: now },
+      },
+      data: { status: 'EXECUTING', decidedAt: now },
+    });
+    if (claim.count === 0) {
+      return this.unclaimable(row.id, 'approve');
+    }
+
+    const stepUp = options.stepUpVerified === true;
+    const claimed = { ...row, status: 'EXECUTING', decidedAt: now };
+    try {
+      await this.actionLog.append({
+        ...this.ledgerBase(claimed, ctx),
+        event: 'APPROVED',
+        approverUserId: userId,
+        stepUp,
+        untrustedSources: toPendingAction(claimed).preview?.untrustedSources,
       });
+    } catch (err) {
+      // Write-ahead: an approval that cannot be recorded is not executed. Close the claim as FAILED so
+      // the sweeper never mistakes it for an interrupted execution.
+      this.logger.error(
+        `AI invocation ${row.id} approved but not executed: the ledger could not be written (${err instanceof Error ? err.message : String(err)})`,
+      );
+      await this.prisma.aiToolInvocation
+        .updateMany({
+          where: { id: row.id, status: 'EXECUTING' },
+          data: {
+            status: 'FAILED',
+            errorCode: 'INTERNAL',
+            result: json(
+              errorResult('mutation', {
+                code: 'INTERNAL',
+                status: 500,
+                message:
+                  'The approval could not be recorded, so the action was not executed.',
+              }),
+            ),
+          },
+        })
+        .catch(() => undefined);
+      throw err;
+    }
+    return this.executeApproved(claimed, ctx, userId, stepUp);
+  }
+
+  /**
+   * Reject a pending chat write: its owner, from a human session. Writes `REJECTED`; the stored result
+   * tells the model the user declined. Rejecting an already-rejected action answers it again.
+   */
+  async reject(
+    invocationId: string,
+    ctx: AiExecutionContext,
+    reason?: string,
+  ): Promise<AiPendingAction> {
+    const userId = this.requireHumanSession(ctx);
+    const row = await this.findOwned(invocationId, userId, ctx);
+    const result = errorResult('mutation', {
+      code: 'FORBIDDEN',
+      status: 403,
+      message: reason
+        ? `The user declined this action: ${reason.slice(0, 500)}`
+        : 'The user declined this action',
+    });
+    const now = new Date();
+    const claim = await this.prisma.aiToolInvocation.updateMany({
+      where: { id: row.id, status: 'AWAITING_APPROVAL', userId },
+      data: {
+        status: 'REJECTED',
+        decidedAt: now,
+        result: json(result),
+        errorCode: 'REJECTED',
+      },
+    });
+    if (claim.count === 0) {
+      return this.unclaimable(row.id, 'reject');
+    }
+    await this.actionLog.append({
+      ...this.ledgerBase(row, ctx),
+      event: 'REJECTED',
+      approverUserId: userId,
+    });
+    return toPendingAction(await this.reload(row.id));
+  }
+
+  /**
+   * Mark one pending action `EXPIRED` (the runtime's sweeper, and the lazy check inside `approve`).
+   * Returns the action when this call expired it, `null` when it was no longer pending. System
+   * primitive: no ownership check — never expose it to a client or a tool.
+   */
+  async expire(invocationId: string): Promise<AiPendingAction | null> {
+    return this.closePending(invocationId, 'EXPIRED', {
+      code: 'EXPIRED',
+      message: 'The approval window for this action has passed',
+    });
+  }
+
+  /** Expire every pending action whose `expiresAt` has passed (at most `limit`); returns them. */
+  async expireDue(limit = 100, now = new Date()): Promise<AiPendingAction[]> {
+    const due = await this.prisma.aiToolInvocation.findMany({
+      where: { status: 'AWAITING_APPROVAL', expiresAt: { lte: now } },
+      orderBy: { expiresAt: 'asc' },
+      take: limit,
+      select: { id: true },
+    });
+    const expired: AiPendingAction[] = [];
+    for (const { id } of due) {
+      const action = await this.expire(id);
+      if (action) expired.push(action);
+    }
+    return expired;
+  }
+
+  /**
+   * Mark one pending action `CANCELLED` (the run was cancelled or finalized). System primitive: the
+   * runtime checks the run's ownership before calling it.
+   */
+  async cancel(
+    invocationId: string,
+    reason = 'The run was cancelled',
+  ): Promise<AiPendingAction | null> {
+    return this.closePending(invocationId, 'CANCELLED', {
+      code: 'NOT_AVAILABLE',
+      message: reason.slice(0, 500),
+    });
+  }
+
+  /**
+   * Crash recovery (tools-and-execution.md §9): an invocation stuck in `EXECUTING` when the runtime's
+   * sweeper finalizes its run becomes `OUTCOME_UNKNOWN` and is NEVER retried. The ledger records
+   * `FAILED` with `UNKNOWN_OUTCOME`; the `aiInvocationId` stamp on the history rows lets an operator
+   * check whether the change committed.
+   */
+  async markOutcomeUnknown(
+    invocationId: string,
+  ): Promise<AiPendingAction | null> {
+    const error = {
+      code: 'UNKNOWN_OUTCOME' as const,
+      message:
+        'The action was interrupted; whether it took effect is unknown. It will not be retried.',
+    };
+    const updated = await this.prisma.aiToolInvocation.updateMany({
+      where: { id: invocationId, status: 'EXECUTING' },
+      data: {
+        status: 'OUTCOME_UNKNOWN',
+        result: json(errorResult('mutation', error)),
+        errorCode: error.code,
+      },
+    });
+    if (updated.count === 0) return null;
+    const row = await this.reload(invocationId);
+    await this.actionLog.append({
+      ...this.ledgerBase(row),
+      event: 'FAILED',
+      error,
+    });
+    return toPendingAction(row);
+  }
+
+  // ─── Write execution ───────────────────────────────────────────────────────────────────────────────
+
+  /** MCP and headless writes: `ATTEMPTED` (write-ahead), then exactly one of DENIED / EXECUTED / FAILED. */
+  private async invokeWrite(
+    tool: RegisteredAiTool,
+    input: unknown,
+    ctx: AiExecutionContext,
+  ): Promise<AiToolResult> {
+    const kind = callKindOf(tool.descriptor.class);
+    const principal = await this.loadPrincipal(ctx);
+    if (!principal) {
+      return errorResult(kind, PRINCIPAL_INVALID);
+    }
+    const checked = this.executor.validate(tool, input);
+    if (!checked.ok) {
+      // Nothing was attempted: the input never reached a handler.
+      return checked.result;
+    }
+    const denial = await this.writeDenial(tool, principal, ctx, {
+      routeStatic: false,
+    });
+
+    let row: AiToolInvocation;
+    try {
+      row = await this.prisma.aiToolInvocation.create({
+        data: {
+          ...this.invocationBase(tool, checked.input, ctx),
+          status: 'EXECUTING',
+        },
+      });
+      await this.actionLog.append({
+        ...this.ledgerBase(row, ctx),
+        event: 'ATTEMPTED',
+        input: checked.input,
+      });
+    } catch (err) {
+      // Write-ahead: a write that cannot be recorded is not executed.
+      this.logger.error(
+        `AI write ${tool.descriptor.name} not executed: the ledger could not be written (${err instanceof Error ? err.message : String(err)})`,
+      );
+      return errorResult(kind, {
+        code: 'INTERNAL',
+        status: 500,
+        message: 'The action could not be recorded, so it was not executed.',
+      });
+    }
+
+    if (denial) {
+      const result = errorResult(kind, denial);
+      await this.finalize(row, 'DENIED', result, ctx, { event: 'DENIED' });
+      return result;
+    }
+    const started = Date.now();
+    const result = await this.executor.execute(tool, checked.input, ctx, {
+      invocationId: row.id,
+    });
+    await this.finalize(row, result.ok ? 'SUCCEEDED' : 'FAILED', result, ctx, {
+      durationMs: Date.now() - started,
+    });
+    return result;
+  }
+
+  /** Steps 3–5 of §9 "Approve", on a row this call has claimed (`EXECUTING`). */
+  private async executeApproved(
+    row: AiToolInvocation,
+    ctx: AiExecutionContext,
+    approverUserId: string,
+    stepUp: boolean,
+  ): Promise<AiPendingAction> {
+    const provenance = { approverUserId, stepUp };
+    const execCtx: AiExecutionContext = {
+      ...ctx,
+      channel: 'CHAT',
+      conversationId: row.conversationId ?? undefined,
+      runId: row.runId ?? undefined,
+    };
+    const fail = async (
+      status: AiToolInvocationStatus,
+      error: ToolError,
+      event?: AiActionLogEvent,
+    ) => {
+      const result = errorResult('mutation', error);
+      await this.finalize(row, status, result, execCtx, {
+        ...provenance,
+        ...(event ? { event } : {}),
+      });
+      return toPendingAction(await this.reload(row.id));
+    };
+
+    const tool = this.registry.get(row.toolName);
+    if (!tool || tool.schemaHash !== row.schemaHash) {
+      return fail(
+        'EXPIRED',
+        {
+          code: 'EXPIRED',
+          message: tool
+            ? 'The tool changed since this action was proposed; propose it again'
+            : 'The tool is no longer available',
+        },
+        'EXPIRED',
+      );
+    }
+    const principal = await this.loadPrincipal(execCtx);
+    if (!principal) {
+      return fail('FAILED', PRINCIPAL_INVALID);
+    }
+    const denial = await this.writeDenial(tool, principal, execCtx, {
+      routeStatic: true,
+    });
+    if (denial) {
+      return fail('FAILED', denial);
+    }
+    const checked = this.executor.validate(tool, row.input);
+    if (!checked.ok) {
+      return fail(
+        'FAILED',
+        checked.result.ok
+          ? { code: 'INVALID_INPUT', message: 'Invalid stored input' }
+          : checked.result.error,
+      );
+    }
+    const stored = toPendingAction(row).preview;
+    if (stored?.precondition) {
+      let fresh: AiActionPreview;
+      try {
+        fresh = await this.executor.preview(
+          tool,
+          checked.input,
+          execCtx,
+          row.id,
+        );
+      } catch (err) {
+        return fail('FAILED', mapToolError(err));
+      }
+      if (
+        !fresh.precondition ||
+        fresh.precondition.entity.type !== stored.precondition.entity.type ||
+        fresh.precondition.entity.id !== stored.precondition.entity.id ||
+        fresh.precondition.updatedAt !== stored.precondition.updatedAt
+      ) {
+        return fail('FAILED', {
+          code: 'STALE',
+          status: 409,
+          message:
+            'The target changed after this action was proposed; read it again and propose a new action',
+        });
+      }
+    }
+
+    const started = Date.now();
+    const result = await this.executor.execute(tool, row.input, execCtx, {
+      invocationId: row.id,
+    });
+    await this.finalize(
+      row,
+      result.ok ? 'SUCCEEDED' : 'FAILED',
+      result,
+      execCtx,
+      { ...provenance, durationMs: Date.now() - started },
+    );
+    return toPendingAction(await this.reload(row.id));
+  }
+
+  /**
+   * Persist an outcome on the invocation row (only while it is `EXECUTING` — never overwrite a decided
+   * row) and append the matching ledger event. The side effect already happened (or was refused), so a
+   * failure here is logged, never retried and never turned into a second execution.
+   */
+  private async finalize(
+    row: AiToolInvocation,
+    status: AiToolInvocationStatus,
+    result: AiToolResult,
+    ctx: AiExecutionContext,
+    extra: {
+      event?: AiActionLogEvent;
+      approverUserId?: string;
+      stepUp?: boolean;
+      durationMs?: number;
+    } = {},
+  ): Promise<void> {
+    const event: AiActionLogEvent =
+      extra.event ?? (result.ok ? 'EXECUTED' : 'FAILED');
+    try {
+      await this.prisma.aiToolInvocation.updateMany({
+        where: { id: row.id, status: 'EXECUTING' },
+        data: {
+          status,
+          result: json(result),
+          entityRefs: json(result.entityRefs),
+          errorCode: result.ok ? null : result.error.code,
+          ...(extra.durationMs !== undefined
+            ? { durationMs: Math.min(extra.durationMs, 2_147_483_647) }
+            : {}),
+        },
+      });
+      await this.actionLog.append({
+        ...this.ledgerBase(row, ctx),
+        event,
+        entityRefs: result.entityRefs,
+        approverUserId: extra.approverUserId,
+        stepUp: extra.stepUp,
+        error: result.ok ? null : result.error,
+      });
+    } catch (err) {
+      this.logger.error(
+        `AI invocation ${row.id} (${row.toolName}) finished ${status} but its outcome could not be recorded: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // ─── Decision helpers ──────────────────────────────────────────────────────────────────────────────
+
+  /** Only a human session in the chat decides: never an MCP grant, a Service Account or a tool. */
+  private requireHumanSession(ctx: AiExecutionContext): string {
+    if (
+      ctx.identity.kind !== 'human' ||
+      ctx.channel !== 'CHAT' ||
+      ctx.mcp !== undefined
+    ) {
+      throw new ForbiddenException(
+        decisionError(
+          'FORBIDDEN',
+          'Only the requesting user, from a signed-in session, can decide this action',
+        ),
+      );
+    }
+    return ctx.identity.userId;
+  }
+
+  /**
+   * The chat invocation `id` owned by `userId` (and in `ctx.runId`'s run when given). Anything else is
+   * 404 — never a hint that someone else's action exists.
+   */
+  private async findOwned(
+    id: string,
+    userId: string,
+    ctx: AiExecutionContext,
+  ): Promise<AiToolInvocation> {
+    const row = await this.prisma.aiToolInvocation.findUnique({
+      where: { id },
+    });
+    if (
+      !row ||
+      row.channel !== 'CHAT' ||
+      row.userId !== userId ||
+      (ctx.runId !== undefined && row.runId !== ctx.runId)
+    ) {
+      throw new NotFoundException(
+        decisionError('NOT_FOUND', 'Pending action not found'),
+      );
+    }
+    return row;
+  }
+
+  /**
+   * The claim matched nothing: say why. A finished action replays its stored outcome (a double click is
+   * safe); an expired-but-still-pending one is expired now; anything else is a 409 with its status.
+   */
+  private async unclaimable(
+    id: string,
+    decision: 'approve' | 'reject',
+  ): Promise<AiPendingAction> {
+    const row = await this.reload(id);
+    const action = toPendingAction(row);
+    const replayable =
+      decision === 'approve'
+        ? ['SUCCEEDED', 'FAILED', 'OUTCOME_UNKNOWN']
+        : ['REJECTED'];
+    if (replayable.includes(action.status)) {
+      return { ...action, replayed: true };
+    }
+    if (action.status === 'AWAITING_APPROVAL') {
+      // Only an approve can miss a still-pending row, and only because it expired.
+      await this.expire(id);
+      throw new ConflictException(
+        decisionError('EXPIRED', 'This action has expired'),
+      );
+    }
+    if (action.status === 'EXECUTING') {
+      throw new ConflictException(
+        decisionError('IN_PROGRESS', 'This action is already running'),
+      );
+    }
+    throw new ConflictException(
+      decisionError(
+        action.status,
+        `This action is ${action.status.toLowerCase()}`,
+      ),
+    );
+  }
+
+  /** `AWAITING_APPROVAL` → `EXPIRED` | `CANCELLED`, atomically, with its ledger event. */
+  private async closePending(
+    id: string,
+    status: 'EXPIRED' | 'CANCELLED',
+    error: ToolError,
+  ): Promise<AiPendingAction | null> {
+    const updated = await this.prisma.aiToolInvocation.updateMany({
+      where: { id, status: 'AWAITING_APPROVAL' },
+      data: {
+        status,
+        decidedAt: new Date(),
+        result: json(errorResult('mutation', error)),
+        errorCode: status,
+      },
+    });
+    if (updated.count === 0) return null;
+    const row = await this.reload(id);
+    await this.actionLog.append({ ...this.ledgerBase(row), event: status });
+    return toPendingAction(row);
+  }
+
+  private async reload(id: string): Promise<AiToolInvocation> {
+    return this.prisma.aiToolInvocation.findUniqueOrThrow({ where: { id } });
+  }
+
+  // ─── Authorization ─────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * The AI-level refusal of a write, if any: the class ceiling, the channel gate held NOW, and — when
+   * `routeStatic` (propose and approve, where no card may be shown or executed for an action the route
+   * would refuse) — the principal kind and the route's `@RequirePermission`, the decision `RolesGuard`
+   * makes. The route's guards run again at dispatch regardless.
+   */
+  private async writeDenial(
+    tool: RegisteredAiTool,
+    principal: Principal,
+    ctx: AiExecutionContext,
+    options: { routeStatic: boolean },
+  ): Promise<ToolError | null> {
+    if (ctx.ceiling && !ctx.ceiling.includes(tool.descriptor.class)) {
+      return this.ceilingError(tool.descriptor.name);
     }
     const gate = channelPermission(ctx.channel);
     if (!(await this.holds(principal, [gate]))) {
-      return errorResult(kind, {
-        code: 'FORBIDDEN',
-        status: 403,
-        message: `The ${gate} permission is required`,
-      });
+      return gateError(gate);
     }
-    return this.executor.execute(tool, input, ctx);
+    if (options.routeStatic) {
+      if (
+        !this.admitsKind(tool, principal) ||
+        !(await this.holds(principal, tool.permissions))
+      ) {
+        return {
+          code: 'FORBIDDEN',
+          status: 403,
+          message: `You do not have permission to use ${tool.descriptor.name}`,
+        };
+      }
+    }
+    return null;
+  }
+
+  /** A write refused before anything was stored: a `DENIED` invocation row and ledger event. */
+  private async recordDenied(
+    tool: RegisteredAiTool,
+    input: unknown,
+    ctx: AiExecutionContext,
+    denial: ToolError,
+  ): Promise<void> {
+    try {
+      const result = errorResult(callKindOf(tool.descriptor.class), denial);
+      const row = await this.prisma.aiToolInvocation.create({
+        data: {
+          ...this.invocationBase(tool, input, ctx),
+          status: 'DENIED',
+          result: json(result),
+          errorCode: denial.code,
+        },
+      });
+      await this.actionLog.append({
+        ...this.ledgerBase(row, ctx),
+        event: 'DENIED',
+        input,
+        error: denial,
+      });
+    } catch (err) {
+      this.logger.error(
+        `AI write ${tool.descriptor.name} denied, but the denial could not be recorded: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private ceilingError(name: string): ToolError {
+    return {
+      code: 'FORBIDDEN',
+      status: 403,
+      message: `${name} is outside the access granted to this session`,
+    };
   }
 
   private reachable(tool: RegisteredAiTool, ctx: AiExecutionContext): boolean {
@@ -160,4 +896,92 @@ export class AiToolService {
     }
     return this.permissions.hasAll(principal.user.role, required);
   }
+
+  // ─── Rows ──────────────────────────────────────────────────────────────────────────────────────────
+
+  private invocationBase(
+    tool: RegisteredAiTool,
+    input: unknown,
+    ctx: AiExecutionContext,
+  ): Prisma.AiToolInvocationUncheckedCreateInput {
+    const actor = actorOf(ctx.identity);
+    return {
+      channel: ctx.channel,
+      conversationId: ctx.conversationId ?? null,
+      runId: ctx.runId ?? null,
+      toolName: tool.descriptor.name,
+      toolClass: tool.descriptor.class,
+      userId: actor.userId ?? null,
+      serviceAccountId: actor.serviceAccountId ?? null,
+      mcpClientId: ctx.mcp?.clientId ?? null,
+      oauthGrantId: ctx.mcp?.grantId ?? null,
+      input: json(input),
+      inputHash: inputHashOf(input),
+      schemaHash: tool.schemaHash,
+      status: 'EXECUTING',
+    };
+  }
+
+  /** The ledger columns every event of one invocation shares. The actor is the row's, never the ctx's. */
+  private ledgerBase(
+    row: AiToolInvocation,
+    ctx?: AiExecutionContext,
+  ): Omit<AiActionLogEntry, 'event'> {
+    return {
+      invocationId: row.id,
+      channel: row.channel as AiChannel,
+      toolName: row.toolName,
+      toolClass: row.toolClass as AiActionLogEntry['toolClass'],
+      actor: { userId: row.userId, serviceAccountId: row.serviceAccountId },
+      conversationId: row.conversationId,
+      runId: row.runId,
+      mcpClientId: row.mcpClientId,
+      oauthGrantId: row.oauthGrantId,
+      provider: ctx?.provenance?.provider ?? null,
+      model: ctx?.provenance?.model ?? null,
+      requestId: ctx?.provenance?.requestId ?? null,
+    };
+  }
+
+  /**
+   * `AiSettings.approvalTtlMinutes` through the settings port when the settings unit has bound it; the
+   * shared default (30) otherwise. Resolved lazily so core does not import the settings module.
+   */
+  private async approvalTtlMinutes(): Promise<number> {
+    try {
+      const reader = this.moduleRef.get<AiSettingsReader>(AI_SETTINGS_READER, {
+        strict: false,
+      });
+      const minutes = (await reader.getSettings()).approvalTtlMinutes;
+      if (Number.isInteger(minutes) && minutes >= 1) return minutes;
+    } catch {
+      // No reader bound (yet), or it failed: the documented default applies.
+    }
+    return AI_SETTINGS_DEFAULTS.approvalTtlMinutes;
+  }
+}
+
+const PRINCIPAL_INVALID: ToolError = {
+  code: 'FORBIDDEN',
+  status: 401,
+  message: 'The acting principal is no longer valid',
+};
+
+function gateError(gate: Permission): ToolError {
+  return {
+    code: 'FORBIDDEN',
+    status: 403,
+    message: `The ${gate} permission is required`,
+  };
+}
+
+function refuse(
+  kind: Parameters<typeof errorResult>[0],
+  error: ToolError,
+): AiProposal {
+  return { ok: false, result: errorResult(kind, error) };
+}
+
+function json(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
 }
