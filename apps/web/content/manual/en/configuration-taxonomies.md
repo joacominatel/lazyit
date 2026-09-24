@@ -52,3 +52,10 @@ silently break the records that reference it. If an entry is in use, fix or reas
   re-typing the same hardware details on every unit.
 
 For how models and categories drive the asset experience, see the Assets section of this manual.
+
+## With the AI assistant
+
+If the [AI assistant](/help/ai-assistant-overview) is on, you can also ask it to create, rename or edit
+asset, application and consumable categories, to archive one, and to edit, archive or restore asset models
+and locations. Each change is proposed as a card you approve, and an archive card says what still uses the
+entry before you decide. See [Approving changes](/help/ai-assistant-approvals#categories-models-and-locations).

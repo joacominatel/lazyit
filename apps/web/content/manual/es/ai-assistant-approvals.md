@@ -91,6 +91,62 @@ Otras cosas que podés ver:
 | Este cambio ya se decidió | Vos (u otra ventana tuya) ya lo aprobaste o rechazaste. |
 | Se desactivó el asistente de IA | Un administrador desactivó el asistente; el cambio no se puede aprobar desde el chat. |
 
+## Crear muchos activos a la vez
+
+Cuando le das al asistente una lista — "agregá estas 40 notebooks", una planilla pegada — propone **una
+sola tarjeta para todo el lote** (hasta 200 activos) en lugar de 40 tarjetas separadas. Aprobás o rechazás
+el lote completo.
+
+La tarjeta muestra:
+
+- **Qué va a pasar**, en una frase — por ejemplo *"Create 16 of 17 assets; 1 row skipped as requested."*
+- **Un resumen** — cuántas filas hay, cuántas se van a crear, cuántas se omiten y los **valores por
+  defecto aplicados** (ver más abajo).
+- **Una tabla**, una fila por activo: el número de fila, nombre, etiqueta, número de serie, modelo,
+  categoría, ubicación y estado, más una columna **Problemas**. La tabla se desplaza dentro de la tarjeta;
+  en el teléfono, deslizala hacia los costados. Activá **Solo filas con problemas** para ocultar las filas
+  que están bien.
+
+**Filas omitidas.** Una fila marcada **Omitida — no se aplica** se muestra para que veas qué quedó afuera y
+por qué (los motivos están en la columna **Problemas**), pero **nunca se crea** — aunque el problema se
+resuelva antes de que apruebes. El asistente solo omite una fila cuando te lo dijo; una lista en la que una
+fila todavía tiene un problema sin resolver (un modelo que aún no existe, una etiqueta duplicada) no se
+propone hasta que el asistente lo arregla u omite esa fila. Así, cada fila de la tarjeta que no está
+omitida estaba verificada y lista cuando se armó la tarjeta, y esas filas — y solo esas — se crean cuando
+aprobás.
+
+**Duplicados.** Si una etiqueta o un número de serie ya pertenece a un activo existente, la columna
+**Problemas** lo dice y enlaza a ese activo. Un valor repetido entre dos filas de la misma lista se muestra
+igual ("… también se usa en la fila 3"). Si no podés ver todos los activos, la tarjeta avisa que la
+comprobación de duplicados quedó incompleta: una fila cuya etiqueta o número de serie ya esté en uso se
+rechaza al ejecutarse, y las demás se ejecutan igual.
+
+**Estado por defecto.** Un activo nuevo que el asistente crea sin estado empieza como **En depósito**
+(stock nuevo). La tarjeta marca esos valores como **(por defecto)** y los lista en **Valores por defecto
+aplicados**. Si no es lo que querés, rechazá la tarjeta y decile al asistente qué estado usar.
+
+Cuando el lote se ejecuta, cada activo se crea por separado, igual que si lo hubieras creado a mano. Si en
+ese momento se rechaza una fila, las demás se ejecutan igual y el asistente te dice qué fila falló y por
+qué.
+
+## Categorías, modelos y ubicaciones
+
+El asistente también puede mantener ordenada tu clasificación, siempre con una tarjeta:
+
+- **Categorías** — crear, renombrar o editar categorías de activos, aplicaciones y consumibles, y archivar
+  una que ya no usás (**category_create**, **category_update**, **category_archive**). Las carpetas de la
+  base de conocimiento se manejan aparte.
+- **Modelos de activo** — editar, archivar y restaurar un modelo (**asset_model_update**,
+  **asset_model_archive**, **asset_model_restore**).
+- **Ubicaciones** — editar (incluso moverla debajo de otra), archivar y restaurar una ubicación
+  (**location_update**, **location_archive**, **location_restore**).
+
+Una tarjeta de **archivado** lleva la advertencia *"Lo archiva. Se puede restaurar después."* y dice
+qué lo sigue usando — por ejemplo *"También afecta a 12 activos"*, con algunos nombrados. Si no tenés
+permiso para ver algunos de esos registros, la fila **Usado por** de la tarjeta dice *"Unknown to you: …"*
+(desconocido para vos) en lugar de mostrar cero: el elemento puede seguir en uso por registros que no ves. Las categorías archivadas no se restauran
+desde el chat; restauralas desde **Configuración → Taxonomías**.
+
 ## Aprobación automática
 
 Si confiás en el asistente para trabajo de rutina en un chat, podés dejar que aplique los **cambios
@@ -103,7 +159,9 @@ Mientras está activada:
 - **Las ediciones básicas se aplican en el momento** — crear o actualizar un activo, un artículo, un
   consumible y similares. Se hacen con tu cuenta y tus permisos, igual que si las hubieras aprobado, y
   aparecen en el chat como un registro compacto **Aplicado automáticamente** con el elemento, un enlace a él
-  y los valores antes → después.
+  y los valores antes → después. Un [lote de activos nuevos](#crear-muchos-activos-a-la-vez) también es un
+  cambio básico: con la aprobación automática activada, toda la lista (hasta 200 activos) se crea sin
+  tarjeta, y el registro muestra su tabla.
 - **Todo lo crítico sigue mostrando una tarjeta y te espera**: roles, identidad e inicio de sesión,
   accesos, credenciales, aplicaciones marcadas como críticas, cambios sensibles (los marcados como
   *Cambio sensible*) y todo lo que necesita tu contraseña.
