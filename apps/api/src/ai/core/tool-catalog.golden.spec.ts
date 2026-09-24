@@ -246,6 +246,25 @@ const GOLDEN = {
     class: 'write',
     channels: ['CHAT', 'MCP', 'HEADLESS'],
   },
+  // ── asset tag scheme (#1394): instance configuration, human-only routes — no Service Account ──
+  asset_tag_scheme_get: {
+    route: 'GET /config/asset-tag-scheme',
+    permissions: ['settings:manage'],
+    roles: ['ADMIN'],
+    humans: true,
+    serviceAccounts: false,
+    class: 'read',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
+  asset_tag_scheme_update: {
+    route: 'PUT /config/asset-tag-scheme',
+    permissions: ['settings:manage'],
+    roles: ['ADMIN'],
+    humans: true,
+    serviceAccounts: false,
+    class: 'elevated',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
   // ── users + activity (W2-9) ──
   user_search: {
     route: 'GET /users',
