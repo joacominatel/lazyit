@@ -78,6 +78,29 @@ no:
 | Largo máximo de respuesta, pasos máximos, tamaño de conversación | — | Límites para una respuesta, para cuántas herramientas puede encadenar un pedido y para cuánto puede crecer una conversación. |
 | Instrucciones para el asistente | — | Tus propias indicaciones, agregadas a las de lazyit en cada conversación (convenciones de la casa, idioma preferido). No pueden ampliar lo que el asistente puede hacer. |
 
+## Búsqueda web
+
+**Permitir que el asistente busque en la web** deja que el chat busque en internet cuando los registros y la
+base de conocimiento de lazyit no tienen lo que necesita — por ejemplo, la documentación de un producto de
+terceros para el que alguien le pide configurar un workflow. Viene **desactivada**.
+
+- **Dónde se hace la búsqueda.** La hace el proveedor de IA en sus propios servidores; lazyit no hace ninguna
+  solicitud propia. Las consultas y el contexto de la conversación van al proveedor, y el proveedor puede
+  facturar las búsquedas aparte. Revisá tu contrato con el proveedor antes de activarla.
+- **Qué proveedores.** Anthropic, OpenAI y Google Gemini 3 o posterior. El proveedor compatible con OpenAI y
+  los modelos Gemini anteriores no tienen una búsqueda web que el asistente pueda usar junto con las
+  herramientas de lazyit; en ese caso el interruptor aparece deshabilitado y la tarjeta explica por qué.
+- **Solo el chat.** Las ejecuciones headless (cuentas de servicio) nunca buscan en la web, porque sus
+  cambios se aplican sin que nadie los apruebe.
+- **Los resultados se tratan como no confiables.** Las páginas web las escribe cualquiera. El asistente las
+  toma como información, nunca como instrucciones, y muestra debajo de su respuesta las páginas que usó. Un
+  cambio que proponga en una respuesta que buscó en la web siempre muestra su tarjeta de aprobación —
+  aunque la persona haya activado la aprobación automática.
+- **Conversaciones nuevas.** El interruptor se aplica a los chats que empiecen después del cambio. Al
+  desactivarla, los chats que la tenían pasan a ser de solo lectura; para seguir, se empieza un chat nuevo.
+- **Búsquedas por paso** (5 por defecto, de 1 a 20) es la cantidad máxima de búsquedas que el asistente puede
+  hacer en un paso, donde el proveedor admite un límite (Anthropic).
+
 ## Agentes de IA externos (MCP)
 
 **Permitir agentes de IA externos** deja que clientes MCP como Claude Code se conecten a lazyit, actuando

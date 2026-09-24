@@ -50,6 +50,11 @@ conversaciones también se guardan en tu servidor durante el período de retenci
 administrador (90 días por defecto, entre 7 y 3650), y después se borran; el registro de lo que el
 asistente realmente cambió se conserva igual.
 
+Si el administrador activa la **búsqueda web** (desactivada por defecto), el proveedor también puede buscar
+en internet para el chat: hace la búsqueda en sus propios servidores con consultas que escribe el
+asistente, así que la consulta y el contexto de la conversación van a la búsqueda del proveedor. lazyit en
+sí no hace ninguna solicitud a otros sitios. Mirá [Asistente de IA — configuración](/help/ai-assistant-setup#búsqueda-web).
+
 Los agentes externos por MCP usan su propio modelo: lo que leen de lazyit va al proveedor que use ese
 agente, bajo el control de la persona que lo ejecuta.
 

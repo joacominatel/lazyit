@@ -74,6 +74,29 @@ These apply to every conversation and can be changed at any time, whether the as
 | Max reply length, max steps, conversation size | — | Bounds on a single answer, on how many tools one request may chain, and on how long a conversation may grow. |
 | Instructions for the assistant | — | Your own guidance, added to lazyit's for every conversation (house conventions, preferred language). It cannot widen what the assistant may do. |
 
+## Web search
+
+**Allow the assistant to search the web** lets the chat look things up on the internet when lazyit's own
+records and knowledge base don't have what it needs — for example, the documentation of a third-party
+product someone asks it to set up a workflow for. It is **off** by default.
+
+- **Where the search runs.** The AI provider runs the search on its own servers; lazyit makes no request of
+  its own. The search queries and the conversation context go to the provider, and the provider may bill
+  searches separately. Check your contract with the provider before you turn it on.
+- **Which providers.** Anthropic, OpenAI, and Google Gemini 3 or later. The OpenAI-compatible provider and
+  older Gemini models have no web search the assistant can use together with lazyit's tools; the switch is
+  then disabled and the card says why.
+- **Only the chat.** Headless runs (service accounts) never search the web, because their changes run
+  without anyone approving them.
+- **Results are treated as untrusted.** Web pages are written by anyone. The assistant treats them as
+  information, never as instructions, and shows the pages it used under its answer. A change it proposes in
+  a reply that searched the web always shows its approval card — even when the person turned on
+  auto-approve.
+- **New conversations.** The switch applies to chats started after you change it. Turning it off makes
+  the chats that had it read-only; people start a new chat to go on.
+- **Searches per step** (default 5, 1–20) is the most searches the assistant may run in one step, where the
+  provider supports a limit (Anthropic).
+
 ## External AI agents (MCP)
 
 **Allow external AI agents** lets MCP clients such as Claude Code connect to lazyit, acting as the

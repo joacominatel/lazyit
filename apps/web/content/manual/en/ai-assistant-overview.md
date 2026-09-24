@@ -49,6 +49,11 @@ are also kept on your server for a retention period the administrator chooses (9
 between 7 and 3650), after which they are deleted; the record of what the assistant actually changed
 is kept regardless.
 
+If the administrator turns on **web search** (off by default), the provider can also search the internet
+for the chat: it runs the search on its own servers with queries the assistant writes, so the query and
+the conversation context go to the provider's search. lazyit itself makes no request to other websites.
+See [AI assistant — setup](/help/ai-assistant-setup#web-search).
+
 External agents over MCP use their own model: what they read from lazyit goes to whatever provider
 that agent uses, under the control of the person running it.
 

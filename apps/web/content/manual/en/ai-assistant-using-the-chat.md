@@ -155,6 +155,16 @@ unsaved changes in a form, in which case it shows the **Open** button instead so
 Links the assistant writes to other websites open in a new tab and show their full address next to them — check it before you click.
 Images in answers are never loaded.
 
+## Sources from the web
+
+If your administrator turned on **web search** (Settings → AI), the assistant can look things up on the
+internet — but only when lazyit's records and knowledge base don't have the answer. When it doesn't know a
+product or term and web search is off, it asks you for the documentation instead.
+
+When it searched, the pages it used appear under its answer as **Sources from the web**. Each one opens in a
+new tab. They were written by other people: check them before you rely on them. A change the assistant
+proposes in a reply that searched the web always needs your approval, even with auto-approve on.
+
 ## Your chat history
 
 Select **Chat history** at the top of the chat to see your previous chats, grouped by day. Only you can see
@@ -169,7 +179,8 @@ Chats are also deleted automatically after the number of days your administrator
 
 ### Read-only chats
 
-A chat becomes **read-only** when your administrator changes the AI provider, when they change the default
+A chat becomes **read-only** when your administrator changes the AI provider, when they turn off web search
+and the chat was using it, when they change the default
 model and the chat was using the default, or when the conversation grows too long for the AI to follow. A
 chat where you chose the model yourself keeps working when only the default changes. You can still read it; select **Start a new chat** to go on.
 
