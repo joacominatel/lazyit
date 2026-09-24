@@ -1183,6 +1183,9 @@ describe('ArticlesService', () => {
         'assertAttachmentWritable',
         () => service.assertAttachmentWritable('a', OTHER_PRINCIPAL),
       ],
+      // Soft-delete restore: its own lookup (includeSoftDeleted), same order as loadOwned. The route
+      // needs `article:delete`, which is delegatable without `article:manage`.
+      ['restore', () => service.restore('a', OTHER_PRINCIPAL)],
     ];
 
     it.each(writePaths)(
