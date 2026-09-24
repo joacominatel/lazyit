@@ -54,6 +54,7 @@ import {
 } from './limits';
 import { AiInputRequests, toInputRequest } from './input-requests';
 import { AiRunPrincipals, type AiRunPrincipal } from './principal-context';
+import { RepeatedFailureGuard } from './repeated-failures';
 import {
   AiRunLifecycle,
   type AppendRow,
@@ -330,6 +331,8 @@ export class AgentLoop {
     let untrusted = seeded.untrusted;
     const callIds = seeded.callIds;
     let lastInputTokens = await this.limits.lastInputTokens(conversation.id);
+    // A model repeating a failing call is told to stop (#1403); in memory, for this pass of the loop.
+    const failures = new RepeatedFailureGuard();
 
     for (;;) {
       const run = await this.prisma.aiRun.findUnique({ where: { id: runId } });
@@ -512,6 +515,7 @@ export class AgentLoop {
           pendingCount,
           inputCount,
           stepWrites,
+          failures,
         });
         toolCalls += 1;
         if (resolution.kind === 'pending') {
@@ -851,19 +855,30 @@ export class AgentLoop {
       inputCount?: number;
       /** Whether this step also calls a tool that changes data. */
       stepWrites?: boolean;
+      /** The run's repeated-failure guard (#1403). */
+      failures?: RepeatedFailureGuard;
     },
   ): Promise<CallResolution & { untrusted?: AiEntityRef[] }> {
     const runId = state.ctx.runId!;
-    const answer = (result: AiToolResult, untrusted?: AiEntityRef[]) => ({
-      kind: 'answered' as const,
-      outcome: {
-        toolCallId: call.toolCallId,
-        output: capToolOutput(result),
-        isError: !result.ok,
-      },
-      ...(untrusted ? { untrusted } : {}),
-    });
     const tool = state.toolset.byName.get(call.toolName);
+    const awaitsInput = tool?.descriptor.awaitsInput === true;
+    const answer = (result: AiToolResult, untrusted?: AiEntityRef[]) => {
+      // What the model sees: a failure it keeps repeating carries the guard's stop hint.
+      const seen = state.failures
+        ? state.failures.record(call.toolName, call.input, result, {
+            awaitsInput,
+          })
+        : result;
+      return {
+        kind: 'answered' as const,
+        outcome: {
+          toolCallId: call.toolCallId,
+          output: capToolOutput(seen),
+          isError: !seen.ok,
+        },
+        ...(untrusted ? { untrusted } : {}),
+      };
+    };
     if (!tool) {
       return answer(
         errorResult('read', {
@@ -889,6 +904,12 @@ export class AgentLoop {
         message: 'The arguments were not a valid JSON object',
         hint: 'Send the arguments as a JSON object matching the tool schema.',
       });
+    }
+    const repeated = state.failures?.check(call.toolName, call.input, {
+      awaitsInput,
+    });
+    if (repeated) {
+      return refuse(repeated);
     }
     if (state.toolCallsSoFar >= AI_MAX_TOOL_CALLS_PER_RUN) {
       return refuse({
