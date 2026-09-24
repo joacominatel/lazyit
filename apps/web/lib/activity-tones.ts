@@ -42,6 +42,10 @@ const ACTION_TONE: Record<string, StatusTone> = {
   password_reset_sent: "info",
   deleted: "danger",
   restored: "success",
+  // A consumable delivered to / returned from an asset (ADR-0098, #1364): the asset RECEIVED something
+  // (the assigned/granted shape) or gave it back (informational — the units went back on the shelf).
+  consumable_delivered: "success",
+  consumable_returned: "info",
 };
 
 /** The {@link StatusBadge} tone for an activity action verb. Falls back to `neutral`. */

@@ -19,6 +19,8 @@ import {
   type ResourceColumn,
   ResourceTable,
 } from "@/components/resource-table";
+import { ConsumableDeliveriesPanel } from "@/components/consumables/consumable-deliveries-panel";
+import type { DeliveryTargetRef } from "@/lib/consumables/deliveries";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useAssets } from "@/lib/api/hooks/use-assets";
@@ -53,6 +55,11 @@ export function LocationDetailView({ id }: { id: string }) {
     limit: MAX_PAGE_LIMIT,
   });
   const deleteLocation = useDeleteLocation();
+  // Consumables LEFT at this place (ADR-0098) — a destination, not per-location stock.
+  const deliveryTarget = useMemo<DeliveryTargetRef>(
+    () => ({ kind: "location", id }),
+    [id],
+  );
 
   const assetColumns = useMemo<ResourceColumn[]>(
     () => [
@@ -246,6 +253,12 @@ export function LocationDetailView({ id }: { id: string }) {
           </ResourceTable>
         )}
       </DetailPanel>
+
+      <ConsumableDeliveriesPanel
+        target={deliveryTarget}
+        targetName={location.name}
+        targetLive={location.deletedAt == null}
+      />
 
       <LocationFormDialog
         open={editOpen}

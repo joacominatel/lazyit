@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # Asset
@@ -22,6 +22,12 @@ concrete instance of a generic [[asset-model]].
 - **lives at** an optional [[location]] (`locationId`, nullable FK, `onDelete: SetNull`).
 - **is owned via** N [[asset-assignment]] records — 🟢 ownership over time (concurrent, multi-owner).
 - **has** N [[asset-history]] entries — 🟢 implemented; see `GET /assets/:id/history`.
+- **receives** N consumable **deliveries**: `OUT` [[consumable-movement]]s whose `targetAssetId` is this
+  asset, such as toner fitted to a printer or a spare disk left in a server. Each delivery and each
+  return appends `CONSUMABLE_DELIVERED` / `CONSUMABLE_RETURNED` to the asset's history. List them with
+  `GET /consumables/deliveries?targetAssetId=` (also needs `asset:read`). The FK is `Restrict`, so an
+  asset that received a delivery cannot be hard-deleted; a soft delete is unaffected
+  ([[0098-consumable-delivery-targets]]).
 
 ## Business rules
 

@@ -315,7 +315,9 @@
         "acknowledged": "Confirmado",
         "agentLinked": "Agente vinculado",
         "deleted": "Eliminado",
-        "restored": "Restaurado"
+        "restored": "Restaurado",
+        "consumableDelivered": "Consumible entregado",
+        "consumableReturned": "Consumible devuelto"
       },
       "details": {
         "created": "Activo creado",
@@ -326,7 +328,12 @@
         "acknowledged": "Recepción confirmada",
         "agentLinked": "Un agente comenzó a reportar a este activo",
         "deleted": "Activo eliminado",
-        "restored": "Activo restaurado"
+        "restored": "Activo restaurado",
+        "consumableDelivered": "{quantity, plural, one {Se entregó} other {Se entregaron}} {quantity} {unit} de <link>{name}</link>",
+        "consumableReturned": "{quantity, plural, one {Se devolvió} other {Se devolvieron}} {quantity} {unit} de <link>{name}</link>",
+        "consumableDeliveredFallback": "Se entregó un consumible a este activo",
+        "consumableReturnedFallback": "Se devolvió un consumible de este activo",
+        "consumableUnitFallback": "unidades"
       }
     }
   },

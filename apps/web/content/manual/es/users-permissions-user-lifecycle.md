@@ -126,6 +126,27 @@ de entrega e imprimir un **acta de baja** (con el nombre de la empresa y líneas
 papel en la entrega. Dar de baja es válido incluso cuando la persona no tiene nada — sigue valiendo como
 constancia de su salida.
 
+**Los consumibles que recibió.** La hoja de baja también lista los
+[consumibles entregados](/help/consumables-stock-movements) a la persona, en dos grupos:
+
+- **Consumibles a devolver** — ítems retornables que siguen pendientes (unos auriculares en préstamo,
+  un cargador de repuesto), con cuántas unidades siguen afuera. Es lo que hay que pedirle que devuelva.
+- **Consumibles entregados** — ítems entregados para siempre (tóner, cables), listados como registro.
+
+La baja **no mueve stock** ni cierra ninguna entrega: registra cada devolución desde la página de la
+persona a medida que el ítem vuelve. Por defecto, todo lo listado se imprime en el acta de baja.
+Desmarca una fila para dejarla fuera, o desactiva **Listar consumibles** en *Acta impresa* para dejar
+fuera toda la sección; el acta imprime exactamente lo que conservaste. Si la persona recibió más de lo
+que la hoja puede listar, indica cuántos más hay en lugar de omitirlos en silencio.
+
+## Consumibles en la página de una persona
+
+La página de una persona tiene una sección **Consumibles entregados** con lo que se le entregó, del más
+reciente al más antiguo. **Solo pendientes** muestra solo los ítems retornables que siguen afuera, y un
+filtro de fechas la acota según cuándo se entregaron. Con permiso para registrar movimientos de stock
+puedes **Entregar consumible** a esa persona o registrar una devolución con **Devolver…** desde aquí. Quienes no
+pueden ver a otros usuarios no ven esta sección.
+
 ## Encontrar usuarios por rol
 
 La lista de Usuarios tiene un **filtro de rol** junto a los filtros de estado y de directorio: elige

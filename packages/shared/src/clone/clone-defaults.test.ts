@@ -186,6 +186,13 @@ describe("cloneConsumableDefaults", () => {
   test("the result passes CreateConsumableSchema", () => {
     expect(CreateConsumableSchema.safeParse(cloneConsumableDefaults(source)).success).toBe(true);
   });
+
+  test("carries the returnable flag (ADR-0098), and tolerates an older read without it", () => {
+    const returnable = cloneConsumableDefaults({ ...source, returnable: true });
+    expect(returnable.returnable).toBe(true);
+    expect(CreateConsumableSchema.safeParse(returnable).success).toBe(true);
+    expect(cloneConsumableDefaults(source).returnable).toBeUndefined();
+  });
 });
 
 describe("cloneApplicationDefaults", () => {

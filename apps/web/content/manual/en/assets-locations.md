@@ -63,6 +63,14 @@ Open a location to see its details together with the **assets currently at that 
 inventory physically located there. This is the quick answer to "what's in this rack?" or "what's at
 the branch office?".
 
+## Consumables left at a location
+
+A location's page also has a **Consumables delivered** section: the supplies **left** there — a fire
+extinguisher on floor 2, spare cables in a comms room — newest first, with the quantity and when. Use
+**Deliver consumable** to record a new one, and **Return…** when a returnable item comes back. A
+location is a destination only: lazyit keeps one stock count per consumable, not a count per place.
+See [Stock movements](/help/consumables-stock-movements).
+
 ## Removing a location
 
 Locations are **soft-deleted**, never destroyed. Removing a location does **not** delete the assets

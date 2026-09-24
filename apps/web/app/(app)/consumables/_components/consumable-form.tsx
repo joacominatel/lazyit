@@ -18,12 +18,14 @@ import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
 import {
@@ -43,6 +45,8 @@ type ConsumableFormValues = {
   minStock?: number;
   unit: string;
   notes?: string;
+  /** Deliveries of this item are expected back (ADR-0098). */
+  returnable: boolean;
 };
 
 /**
@@ -63,6 +67,8 @@ function toFormValues(
       minStock: consumable.minStock ?? undefined,
       unit: consumable.unit,
       notes: consumable.notes ?? undefined,
+      // Nullish on an older read → false (the column default).
+      returnable: consumable.returnable ?? false,
     };
   }
   if (cloneSource) {
@@ -76,9 +82,11 @@ function toFormValues(
       minStock: d.minStock,
       unit: d.unit ?? "units",
       notes: d.notes,
+      // Returnable is a property of the item, so the clone carries it (the shared sanitizer copies it).
+      returnable: d.returnable ?? false,
     };
   }
-  return { name: "", unit: "units" };
+  return { name: "", unit: "units", returnable: false };
 }
 
 /**
@@ -121,6 +129,7 @@ export function ConsumableForm({
       minStock: values.minStock,
       unit: values.unit,
       notes: values.notes,
+      returnable: values.returnable,
     };
 
     if (consumable) {
@@ -291,6 +300,28 @@ export function ConsumableForm({
             )}
           />
         </div>
+
+        <Controller
+          control={form.control}
+          name="returnable"
+          render={({ field }) => (
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel htmlFor="returnable">
+                  {t("form.returnableLabel")}
+                </FieldLabel>
+                <FieldDescription>
+                  {t("form.returnableDescription")}
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                id="returnable"
+                checked={field.value}
+                onCheckedChange={field.onChange}
+              />
+            </Field>
+          )}
+        />
 
         <Controller
           control={form.control}

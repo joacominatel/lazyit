@@ -25,6 +25,11 @@ export const ConsumableSchema = z.object({
   // Free-form unit of measure ("units", "meters", "boxes", …). Not an enum on purpose.
   unit: z.string(),
   notes: z.string().nullable(),
+  // Returnable items (ADR-0098, #1364): a delivery of a returnable consumable stays OUTSTANDING until it
+  // is returned. `.nullish()` per the shared-package "new read field" rule — the API always sends it
+  // (a NOT NULL column, default false), but a consumer built against the older shape keeps compiling and
+  // a missing/null value reads as `false`.
+  returnable: z.boolean().nullish(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -42,6 +47,9 @@ export const CreateConsumableSchema = z.strictObject({
   minStock: int4({ min: 0, example: 5 }).optional(),
   unit: z.string().trim().min(1).max(50).default("units"),
   notes: optionalText(2000),
+  // Returnable (ADR-0098). Omitted → false (the column default). Optional rather than `.default(false)`
+  // so the inferred create type does not suddenly REQUIRE the key from every existing caller.
+  returnable: z.boolean().optional(),
 });
 
 /**
@@ -58,6 +66,8 @@ export const UpdateConsumableSchema = requireAtLeastOneKey(
       minStock: int4({ min: 0, example: 5 }),
       unit: z.string().trim().min(1).max(50),
       notes: z.string().trim().min(1).max(2000),
+      // Toggling it never rewrites the past: each delivery SNAPSHOTS the flag when it is made (ADR-0098).
+      returnable: z.boolean(),
     })
     .partial(),
 );

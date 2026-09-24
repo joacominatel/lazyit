@@ -28,6 +28,8 @@ import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-pa
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { RelatedArticlesPanel } from "@/components/related-articles-panel";
+import { ConsumableDeliveriesPanel } from "@/components/consumables/consumable-deliveries-panel";
+import type { DeliveryTargetRef } from "@/lib/consumables/deliveries";
 import { AssetDocumentsPanel } from "./asset-documents-panel";
 import { AssetLocationPath } from "./asset-location-path";
 import {
@@ -148,6 +150,11 @@ export function AssetDetailView({ id }: { id: string }) {
   const topologyNodeId = useAssetInfraNodeId(id, canReadInfra);
 
   const { data: asset, isLoading, isError, error, refetch } = useAsset(id);
+  // Consumables delivered to this asset (ADR-0098) — spare disks, toner fitted to a printer.
+  const deliveryTarget = useMemo<DeliveryTargetRef>(
+    () => ({ kind: "asset", id }),
+    [id],
+  );
   // All assignments (active + released), each with its user, for owners + history.
   const { data: assignments } = useAssetAssignments(id, false);
   // The caller — to offer the self-service "Acknowledge receipt" action on their OWN active assignment
@@ -572,6 +579,12 @@ export function AssetDetailView({ id }: { id: string }) {
       <AssetDocumentsPanel assetId={asset.id} canWrite={canWrite} />
 
       <RelatedArticlesPanel assetId={asset.id} />
+
+      <ConsumableDeliveriesPanel
+        target={deliveryTarget}
+        targetName={asset.name}
+        targetLive={asset.deletedAt == null}
+      />
 
       <DetailPanel title={t("activityTitle")}>
         <AssetHistoryTimeline assetId={asset.id} />

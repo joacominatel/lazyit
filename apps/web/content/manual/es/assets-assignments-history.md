@@ -92,10 +92,23 @@ Los eventos registrados incluyen:
 - Cambios de **Specs** — ediciones de los campos personalizados.
 - **Asignado** y **Liberado** — cambios de pertenencia, nombrando al responsable involucrado.
 - **Confirmado** — un responsable confirmó la recepción del activo entregado a él.
+- **Consumible entregado** y **Consumible devuelto** — insumos colocados o dejados en el activo (un
+  tóner en una impresora, un disco de repuesto en un servidor), con la cantidad y un enlace al
+  consumible; y unidades de un ítem retornable que se devolvieron. Consulta
+  [Movimientos de stock](/help/consumables-stock-movements).
 
 Cada entrada registra **qué cambió, cuándo y quién lo hizo** (o "Sistema" cuando lazyit actuó por su
 cuenta). Junto con el borrado lógico en todo el sistema, esto te da el rastro de auditoría de toda la
 vida de un activo sin trabajo extra.
+
+## Consumibles entregados al activo
+
+La página de un activo tiene una sección **Consumibles entregados**: cada
+consumible entregado a este activo, del más reciente al más antiguo, con la cantidad y la fecha. Un
+ítem retornable muestra lo que sigue **pendiente** y ofrece **Devolver…**; **Entregar consumible**
+registra una entrega nueva a este activo sin salir de la página. Ambas acciones requieren permiso para
+registrar movimientos de stock. La sección no aparece si no puedes ver consumibles. Consulta
+[Movimientos de stock](/help/consumables-stock-movements).
 
 ## Qué sigue
 

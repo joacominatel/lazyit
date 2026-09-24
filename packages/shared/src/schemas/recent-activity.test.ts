@@ -140,6 +140,9 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       // ADR-0093 §4 (#1198) — the lowercased AGENT_LINKED verb, emitted once when an agent-reported
       // node adopts an existing asset at its confirm gate.
       "agent_linked",
+      // ADR-0098 (#1364) — the lowercased CONSUMABLE_DELIVERED / CONSUMABLE_RETURNED verbs.
+      "consumable_delivered",
+      "consumable_returned",
       "granted",
       "revoked",
       "stock_in",

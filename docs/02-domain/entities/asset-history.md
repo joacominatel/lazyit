@@ -3,7 +3,7 @@ title: AssetHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # AssetHistory
@@ -51,7 +51,11 @@ marker is written so the re-import still leaves one audit row; [[0069-migrator-i
 `ACKNOWLEDGED` (emitted by `POST /asset-assignments/:id/acknowledge` when the assignee confirms receipt —
 ADR-0089 Part B, #1029) · `AGENT_LINKED` (an agent-reported [[infra-node]] **adopted** this asset at its
 confirm gate — [[0093-chassis-routing-and-asset-adoption]] §4, #1198; payload
-`{ nodeId, reportingSource, externalId }`).
+`{ nodeId, reportingSource, externalId }`) · `CONSUMABLE_DELIVERED` (a consumable was delivered to this
+asset: a targeted `OUT` [[consumable-movement]] — [[0098-consumable-delivery-targets]], #1364; payload
+`{ consumableId, consumableName, movementId, quantity, unit }`) · `CONSUMABLE_RETURNED` (a return
+against a returnable delivery made to this asset: an `IN` linked by `returnOfId`; the same payload plus
+`{ returnOfId }`, the delivery movement id).
 
 ## Emission
 
@@ -63,6 +67,11 @@ confirm gate — [[0093-chassis-routing-and-asset-adoption]] §4, #1198; payload
   change event fired, so a no-delta re-import still audits; [[0069-migrator-import]] #1061).
 - [[asset-assignment]] service — `ASSIGNED` (open), `RELEASED` (release) and `ACKNOWLEDGED`
   (self-service acknowledgement of receipt; payload `{ userId }` = the acknowledging owner — #1029).
+- [[consumable]] service — `CONSUMABLE_DELIVERED` (an `OUT` targeting this asset) and
+  `CONSUMABLE_RETURNED` (an `IN` returning such a delivery). Both are written through
+  `AssetHistoryService.record` on the **movement's transaction client**, with the movement's principal as
+  actor (and `aiInvocationId` when an AI tool made the call). A user or location target writes no asset
+  event ([[0098-consumable-delivery-targets]]).
 - [[infra-node]] service — `AGENT_LINKED`, and **only** that one. Emitted **exactly once**, at the moment
   a confirm adopts an existing asset instead of minting one ([[0093-chassis-routing-and-asset-adoption]]
   §3/§4, #1198). The recurring path is deliberately **silent**: `syncAssetSpecs` refreshes an adopted
@@ -85,6 +94,6 @@ is an exclusive cursor on the autoincrement id. 404 if the asset is missing or s
 - **ID:** `autoincrement()` — log entity ([[0005-id-strategy]]).
 - **Timestamps:** `createdAt` only (no `updatedAt` / `deletedAt`, [[0006-soft-delete-and-auditing]]).
 
-Related: [[asset]] · [[asset-assignment]] · [[user]] · [[service-account]] ·
+Related: [[asset]] · [[asset-assignment]] · [[consumable-movement]] · [[user]] · [[service-account]] ·
 [[0033-asset-history-event-model]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
 [[0022-draft-visibility-auth-shim]] · [[0048-service-accounts]] · [[INVARIANTS]]

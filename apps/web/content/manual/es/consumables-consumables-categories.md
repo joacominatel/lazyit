@@ -26,6 +26,10 @@ Abre **Consumibles** y elige **Nuevo consumible**. Un consumible tiene:
 - **Unidad** — la unidad de medida (*unidades*, *metros*, *cajas*…). Es una etiqueta sencilla que
   acompaña al conteo donde sea que se muestre; no cambia ningún cálculo.
 - **Descripción** y **Notas** — texto libre opcional.
+- **Retornable** — desactivado por defecto. Actívalo para ítems que prestas en lugar de entregarlos
+  para siempre: adaptadores en préstamo, auriculares, un cargador de repuesto. Una entrega de un ítem
+  retornable queda **pendiente** hasta que se devuelve. Consulta
+  [Entregas y devoluciones](/help/consumables-stock-movements).
 
 El stock **no** es un campo que escribas. Un consumible nuevo empieza en **0** disponible, y el
 conteo solo cambia mediante movimientos de stock, nunca editando el consumible. Consulta

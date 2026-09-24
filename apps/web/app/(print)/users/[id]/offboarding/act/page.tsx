@@ -2,8 +2,8 @@
 
 import { ArrowPathIcon, PrinterIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
-import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUser } from "@/lib/api/hooks/use-users";
@@ -14,11 +14,18 @@ import {
   DEFAULT_ORG_NAME,
   DEFAULT_SHOW_ACCESS,
   DEFAULT_SHOW_ASSETS,
+  DEFAULT_SHOW_CONSUMABLES,
   OFFBOARDING_MESSAGE_KEY,
   ORG_NAME_KEY,
   SHOW_ACCESS_KEY,
   SHOW_ASSETS_KEY,
+  SHOW_CONSUMABLES_KEY,
 } from "@/lib/offboarding/constants";
+import {
+  EXCLUDE_DELIVERIES_PARAM,
+  parseExcludedDeliveries,
+  selectOffboardConsumables,
+} from "@/lib/offboarding/consumables";
 import { useOffboardingData } from "@/lib/offboarding/use-offboarding-data";
 
 /**
@@ -35,6 +42,11 @@ import { useOffboardingData } from "@/lib/offboarding/use-offboarding-data";
  * Edge cases: catalog still loading → skeletons; a user with nothing held → an explicit "Nothing to
  * return"; an asset/app that doesn't resolve in the catalog → its raw id is printed with a verify
  * note (never a crash).
+ *
+ * Consumables (ADR-0098): the act prints exactly the deliveries the sheet kept — the section toggle is
+ * the app-level `SHOW_CONSUMABLES_KEY` (like the other two), and the per-row exclusions arrive in the
+ * `excludeDeliveries` query param (see `offboardingActHref` for why the URL and not storage). A section
+ * with nothing kept is omitted; rows the read did not fetch are counted, never silently dropped.
  */
 export default function OffboardingActPage() {
   const t = useTranslations("users.act");
@@ -43,9 +55,17 @@ export default function OffboardingActPage() {
   const id = params.id;
 
   const { data: user, isLoading: userLoading, isError: userError } = useUser(id);
+  const searchParams = useSearchParams();
+  const excludeParam = searchParams.get(EXCLUDE_DELIVERIES_PARAM);
+  const excluded = useMemo(
+    () => parseExcludedDeliveries(excludeParam),
+    [excludeParam],
+  );
   const {
     assets,
     grants,
+    consumables,
+    consumablesUnavailable,
     isLoading: dataLoading,
     isError: dataError,
     isEmpty,
@@ -59,6 +79,14 @@ export default function OffboardingActPage() {
   // The act lists these sections unless the operator opted out in the offboarding sheet.
   const [showAssets] = useLocalStorage(SHOW_ASSETS_KEY, DEFAULT_SHOW_ASSETS);
   const [showAccess] = useLocalStorage(SHOW_ACCESS_KEY, DEFAULT_SHOW_ACCESS);
+  const [showConsumables] = useLocalStorage(
+    SHOW_CONSUMABLES_KEY,
+    DEFAULT_SHOW_CONSUMABLES,
+  );
+  const selectedConsumables = useMemo(
+    () => selectOffboardConsumables(consumables, excluded),
+    [consumables, excluded],
+  );
   // Snapshot the issue date once so a re-render (or the print dialog) can't shift it.
   const [issuedAt] = useState(() => new Date().toISOString());
 
@@ -264,6 +292,88 @@ export default function OffboardingActPage() {
         )}
       </section>
       )}
+
+      {/* Consumables (ADR-0098) — exactly the rows the offboarding sheet kept. Omitted when the section
+          is toggled off, when the operator may not read consumables, or when nothing was kept. */}
+      {showConsumables && consumablesUnavailable && !isLoading ? (
+        <p className="mt-7 text-xs text-muted-foreground">
+          {t("consumablesUnavailable")}
+        </p>
+      ) : null}
+      {showConsumables &&
+      !consumablesUnavailable &&
+      !isLoading &&
+      (selectedConsumables.toReturn.length > 0 ||
+        selectedConsumables.delivered.length > 0 ||
+        consumables.toReturnMore > 0 ||
+        consumables.deliveredMore > 0) ? (
+        <section className="mt-7 space-y-5">
+          {/* A group also shows when only unfetched rows remain, so its "…and N more" is never lost. */}
+          {selectedConsumables.toReturn.length > 0 ||
+          consumables.toReturnMore > 0 ? (
+            <div>
+              <h2 className="text-label uppercase text-muted-foreground">
+                {t("consumablesToReturn")}
+              </h2>
+              <ul className="mt-2 divide-y divide-foreground/10">
+                {selectedConsumables.toReturn.map((row) => (
+                  <li key={row.deliveryId} className="flex items-start gap-3 py-2">
+                    <span
+                      aria-hidden
+                      className="mt-0.5 inline-block size-3.5 shrink-0 rounded-[2px] border border-foreground/50"
+                    />
+                    <div className="min-w-0">
+                      <p className="font-medium">{row.name}</p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {t("consumableOutstanding", {
+                          outstanding: row.outstanding,
+                          quantity: row.quantity,
+                          unit: row.unit,
+                          date: date(row.deliveredAt),
+                        })}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              {consumables.toReturnMore > 0 ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("consumablesMore", { count: consumables.toReturnMore })}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {selectedConsumables.delivered.length > 0 ||
+          consumables.deliveredMore > 0 ? (
+            <div>
+              <h2 className="text-label uppercase text-muted-foreground">
+                {t("consumablesDelivered")}
+              </h2>
+              <ul className="mt-2 divide-y divide-foreground/10">
+                {selectedConsumables.delivered.map((row) => (
+                  <li key={row.deliveryId} className="py-2">
+                    <p className="font-medium">{row.name}</p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {t("consumableDelivered", {
+                        quantity: row.quantity,
+                        unit: row.unit,
+                        date: date(row.deliveredAt),
+                      })}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              {consumables.deliveredMore > 0 ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("consumablesMoreDelivered", {
+                    count: consumables.deliveredMore,
+                  })}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {isEmpty ? (
         <p className="mt-6 text-muted-foreground">{t("emptyNote")}</p>

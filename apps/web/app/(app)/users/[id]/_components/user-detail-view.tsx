@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ErrorState } from "@/components/resource-table";
 import { UserAvatar } from "@/components/user-avatar";
+import { ConsumableDeliveriesPanel } from "@/components/consumables/consumable-deliveries-panel";
+import type { DeliveryTargetRef } from "@/lib/consumables/deliveries";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useApplications } from "@/lib/api/hooks/use-applications";
@@ -63,6 +65,11 @@ export function UserDetailView({ id }: { id: string }) {
   // Catalogs to resolve the lean FK ids to display labels (asset name, application name).
   const { data: assetsPage } = useAssets({ limit: MAX_PAGE_LIMIT });
   const { data: applications } = useApplications();
+  // The consumables delivered to this person (ADR-0098) — a secondary panel below the core sections.
+  const deliveryTarget = useMemo<DeliveryTargetRef>(
+    () => ({ kind: "user", id }),
+    [id],
+  );
   // Snapshot "now" once (not during render) so the expiry comparison stays pure and stable.
   const [now] = useState(() => Date.now());
 
@@ -356,6 +363,12 @@ export function UserDetailView({ id }: { id: string }) {
           </ul>
         )}
       </DetailPanel>
+
+      <ConsumableDeliveriesPanel
+        target={deliveryTarget}
+        targetName={`${user.firstName} ${user.lastName}`}
+        targetLive={user.deletedAt == null}
+      />
 
       {assignmentHistory.length > 0 && (
         <DetailPanel title={t("detail.ownershipHistory.title")}>

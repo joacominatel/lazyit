@@ -3,7 +3,7 @@ title: Location
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-09-24
 ---
 
 # Location
@@ -19,6 +19,11 @@ employee". Answers half of the core audit question "what do we have and **where 
 ## Relationships
 
 - **holds** N [[asset]]s.
+- **receives** N consumable **deliveries**: `OUT` [[consumable-movement]]s whose `targetLocationId` is
+  this place, such as a fire extinguisher on a floor. This records a **destination only, not
+  per-location stock**. List them with `GET /consumables/deliveries?targetLocationId=` (also needs
+  `location:read`). The FK is `Restrict`; a soft delete is unaffected
+  ([[0098-consumable-delivery-targets]]).
 - **nests** under an optional parent Location and **holds** N child Locations — a self-referential
   hierarchy (adjacency list via `parentId`). See _Hierarchy_ below.
 

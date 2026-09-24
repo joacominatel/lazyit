@@ -97,8 +97,8 @@ ledger is permanent. Design: [[ai-assistant/_synthesis|synthesis]].
 ## Consumables
 
 - 🟢 [[consumable-category]] — user-managed grouping of consumable types.
-- 🟢 [[consumable]] — stock-counted item (cables, mice, toner…).
-- 🟢 [[consumable-movement]] — stock in/out movement.
+- 🟢 [[consumable]] — stock-counted item (cables, mice, toner…); optionally `returnable` ([[0098-consumable-delivery-targets]]).
+- 🟢 [[consumable-movement]] — stock in/out movement; an `OUT` may be a **delivery** to a user, asset or location, and an `IN` may **return** one.
 
 ## Knowledge Base
 

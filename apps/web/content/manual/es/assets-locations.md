@@ -67,6 +67,15 @@ Abre una ubicación para ver sus datos junto con los **activos que están actual
 — el inventario físicamente ubicado ahí. Es la respuesta rápida a "¿qué hay en este rack?" o "¿qué hay
 en la sucursal?".
 
+## Consumibles dejados en una ubicación
+
+La página de una ubicación también tiene una sección **Consumibles entregados**: los insumos que
+**quedaron** ahí —un extintor en el piso 2, cables de repuesto en una sala de comunicaciones— del más
+reciente al más antiguo, con la cantidad y la fecha. Usa **Entregar consumible** para registrar uno
+nuevo y **Devolver…** cuando vuelve un ítem retornable. Una ubicación es solo un destino: lazyit lleva
+un único conteo de stock por consumible, no un conteo por lugar. Consulta
+[Movimientos de stock](/help/consumables-stock-movements).
+
 ## Quitar una ubicación
 
 Las ubicaciones se **borran de forma lógica**, nunca se destruyen. Quitar una ubicación **no** borra

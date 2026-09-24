@@ -1,20 +1,28 @@
 import {
+  BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
 import type {
+  ConsumableDeliveryTarget,
+  ConsumableDeliveryTargetKey,
   CreateConsumable,
   CreateConsumableMovement,
   PageQuery,
+  Permission,
   UpdateConsumable,
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import type { ActorAttribution } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -59,12 +67,70 @@ export interface MovementFilters {
   to?: string;
 }
 
+/** The three kinds of delivery destination (ADR-0098). */
+type TargetKind = ConsumableDeliveryTarget['type'];
+
+/** Target column → kind, and the read permission a caller needs to SEE (or list by) that kind. */
+const TARGET_KIND: Record<ConsumableDeliveryTargetKey, TargetKind> = {
+  targetUserId: 'user',
+  targetAssetId: 'asset',
+  targetLocationId: 'location',
+};
+const TARGET_READ_PERMISSION: Record<TargetKind, Permission> = {
+  user: 'user:read',
+  asset: 'asset:read',
+  location: 'location:read',
+};
+
+/** A requested delivery target: which column, which kind, which id. */
+interface TargetRef {
+  key: ConsumableDeliveryTargetKey;
+  kind: TargetKind;
+  id: string;
+}
+
+/** The delivery-related columns of a movement row, as the target resolver reads them. */
+interface TargetColumns {
+  targetUserId?: string | null;
+  targetAssetId?: string | null;
+  targetLocationId?: string | null;
+}
+
+/** Which target kinds the caller may see resolved (display fields) — ADR-0098 redaction. */
+type ReadableKinds = Record<TargetKind, boolean>;
+
+/** Filters for `GET /consumables/deliveries` (the parsed ConsumableDeliveryQuery). */
+export interface DeliveryFilters {
+  targetUserId?: string;
+  targetAssetId?: string;
+  targetLocationId?: string;
+  outstandingOnly: boolean;
+  from?: string;
+  to?: string;
+}
+
+/** The one target a create payload or a deliveries query names, or null (validated upstream). */
+function targetOf(data: TargetColumns): TargetRef | null {
+  for (const key of Object.keys(TARGET_KIND) as ConsumableDeliveryTargetKey[]) {
+    const id = data[key];
+    if (id != null) {
+      return { key, kind: TARGET_KIND[key], id };
+    }
+  }
+  return null;
+}
+
 @Injectable()
 export class ConsumablesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
     private readonly notifications: NotificationsService,
+    // The asset timeline (ADR-0033): a delivery to / return from an ASSET appends CONSUMABLE_DELIVERED /
+    // CONSUMABLE_RETURNED in the movement's own transaction (ADR-0098).
+    private readonly history: AssetHistoryService,
+    // Target redaction + the per-kind gate on the deliveries list (ADR-0098, mirroring ADR-0046 P3).
+    private readonly permissions: PermissionResolverService,
     // Best-effort search sync (ADR-0035). @Global SearchModule always provides it at runtime (no module
     // import needed); @Optional so unit suites that construct the service directly needn't wire a search
     // double, and every call site null-guards (`this.search?.`) so an absent client simply no-ops.
@@ -242,7 +308,21 @@ export class ConsumablesService {
     principal?: Principal,
   ) {
     const actor = this.actor.resolveActor(principal);
-    const { type, quantity, reason, notes } = data;
+    const { type, quantity, reason, notes, returnOfId } = data;
+    const target = targetOf(data);
+    // Defense in depth (the shared schema already rejects these with a 400 at the DTO; the service is
+    // also reachable in-process): a target only on OUT, a return only on IN (ADR-0098). The DB CHECKs are
+    // the last backstop.
+    if (target && type !== 'OUT') {
+      throw new BadRequestException(
+        'A delivery target is only allowed on an OUT movement',
+      );
+    }
+    if (returnOfId !== undefined && type !== 'IN') {
+      throw new BadRequestException(
+        'returnOfId (a return) is only allowed on an IN movement',
+      );
+    }
 
     // BEFORE-snapshot (live row only) for the low-stock crossing check (ADR-0056 §3). A light read
     // outside the tx; null when the row is missing/soft-deleted (the tx below 404s those). The crossing
@@ -253,13 +333,39 @@ export class ConsumablesService {
     });
 
     const movement = await this.prisma.$transaction(async (tx) => {
+      // A delivery must name a LIVE destination: a missing or soft-deleted user / asset / location is a
+      // client error (400), not a 500 at the FK — mirrors AssetAssignmentsService's live-row guard. The
+      // `deletedAt: null` is explicit even though User/Asset/Location are in the ADR-0032 auto-filtered set.
+      if (target) {
+        await this.assertTargetLive(tx, target);
+      }
+      // A return: lock + validate the delivery it gives back BEFORE the stock moves (race-safe).
+      const delivery =
+        returnOfId !== undefined
+          ? await this.lockReturnableDelivery(
+              tx,
+              consumableId,
+              returnOfId,
+              quantity,
+            )
+          : null;
+
+      // The consumable's name/unit, read only when an asset-history event will need them.
+      let snapshot: {
+        name: string;
+        unit: string;
+        returnable: boolean;
+      } | null = null;
+
       if (type === 'IN') {
         // Read only to enforce the int4 ceiling and a clean 404; the write itself is atomic. Scoped
         // to the LIVE row (`deletedAt: null`) so a soft-deleted consumable reads as null → 404 and is
         // never incremented — `Consumable` is not auto-filtered by the ADR-0032 extension (SEC-050).
         const consumable = await tx.consumable.findFirst({
           where: { id: consumableId, deletedAt: null },
-          select: { currentStock: true },
+          select: delivery
+            ? { currentStock: true, name: true, unit: true }
+            : { currentStock: true },
         });
         if (!consumable) {
           throw new NotFoundException(`Consumable ${consumableId} not found`);
@@ -273,6 +379,10 @@ export class ConsumablesService {
           where: { id: consumableId },
           data: { currentStock: { increment: quantity } },
         });
+        if (delivery) {
+          const named = consumable as { name: string; unit: string };
+          snapshot = { name: named.name, unit: named.unit, returnable: false };
+        }
       } else if (type === 'OUT') {
         // Guarded decrement: only succeeds while the live row still has enough stock. This is the
         // atomic check-and-act that closes the lost-update race — no row matched ⇒ 409 + rollback.
@@ -299,6 +409,18 @@ export class ConsumablesService {
             `Insufficient stock: have ${consumable.currentStock}, cannot remove ${quantity}`,
           );
         }
+        if (target) {
+          // The returnable SNAPSHOT (ADR-0098): read AFTER the guarded decrement, so this transaction
+          // already holds the consumable's row lock — a concurrent PATCH toggling `returnable` waits for
+          // us, and the flag stamped on the delivery is the one in force when the units left.
+          snapshot = await tx.consumable.findFirst({
+            where: { id: consumableId, deletedAt: null },
+            select: { name: true, unit: true, returnable: true },
+          });
+          if (!snapshot) {
+            throw new NotFoundException(`Consumable ${consumableId} not found`);
+          }
+        }
       } else {
         // ADJUSTMENT: an absolute recount. quantity is bounded to int4 by the shared schema, so no
         // overflow is possible here. A guarded `updateMany` scoped to the live row (`deletedAt: null`)
@@ -314,7 +436,7 @@ export class ConsumablesService {
         }
       }
 
-      return tx.consumableMovement.create({
+      const created = await tx.consumableMovement.create({
         data: {
           consumableId,
           type,
@@ -327,8 +449,31 @@ export class ConsumablesService {
           ...(actor.serviceAccountId != null
             ? { serviceAccountId: actor.serviceAccountId }
             : {}),
+          // Delivery (ADR-0098): the one target + the returnable snapshot (a targeted OUT only).
+          ...(target ? { [target.key]: target.id } : {}),
+          ...(target && snapshot?.returnable ? { returnable: true } : {}),
+          // Return: the delivery this IN gives back.
+          ...(delivery ? { returnOfId: delivery.id } : {}),
         },
       });
+
+      // The asset's own timeline, in THIS transaction (ADR-0033): a delivery to an asset, or a return of
+      // one. A user / location target writes no asset event (their record is the deliveries read).
+      const assetId =
+        target?.kind === 'asset' ? target.id : delivery?.targetAssetId;
+      if (assetId && snapshot) {
+        await this.recordAssetEvent(tx, {
+          assetId,
+          eventType: delivery ? 'CONSUMABLE_RETURNED' : 'CONSUMABLE_DELIVERED',
+          consumableId,
+          consumable: snapshot,
+          movementId: created.id,
+          quantity,
+          returnOfId: delivery?.id,
+          actor,
+        });
+      }
+      return created;
     });
 
     // AFTER commit, best-effort: a low-stock bell nudge on a DOWNWARD crossing (ADR-0056 §3) — NEVER
@@ -339,6 +484,126 @@ export class ConsumablesService {
     // movement, and the read/upsert are best-effort inside {@link reindex}.
     void this.reindex(consumableId);
     return movement;
+  }
+
+  /**
+   * 400 unless the delivery target is a LIVE row (ADR-0098). Runs on the transaction client. Soft-deleted
+   * rows read as null (explicit `deletedAt: null`), so a delivery to an offboarded user, a retired asset
+   * or an archived location is refused — history can still be listed, new deliveries cannot be made.
+   */
+  private async assertTargetLive(
+    tx: Prisma.TransactionClient,
+    target: TargetRef,
+  ): Promise<void> {
+    const where = { id: target.id, deletedAt: null };
+    const select = { id: true } as const;
+    const found =
+      target.kind === 'user'
+        ? await tx.user.findFirst({ where, select })
+        : target.kind === 'asset'
+          ? await tx.asset.findFirst({ where, select })
+          : await tx.location.findFirst({ where, select });
+    if (!found) {
+      throw new BadRequestException(
+        `${target.key} ${target.id} does not reference a live ${target.kind}`,
+      );
+    }
+  }
+
+  /**
+   * Validate a RETURN against the delivery it names and LOCK that delivery row (ADR-0098). The row lock
+   * (`SELECT … FOR UPDATE` on `consumable_movements`) is taken FIRST, so two concurrent returns of the same
+   * delivery serialize: the second waits for the first to commit and then sums a return set that already
+   * includes it — it can never over-return. Rules:
+   *   - the delivery must exist and belong to THIS consumable → else 400 (one message for both, so a
+   *     caller cannot probe another consumable's ledger);
+   *   - it must be a delivery (a targeted OUT) → else 400;
+   *   - it must have been returnable WHEN MADE (the snapshot, not today's flag) → else 400;
+   *   - `quantity` ≤ outstanding (delivery.quantity − SUM(its returns)) → else 409 (state, not shape).
+   * The caller's IN path then puts the units back as a normal IN (int4 ceiling included).
+   */
+  private async lockReturnableDelivery(
+    tx: Prisma.TransactionClient,
+    consumableId: string,
+    returnOfId: number,
+    quantity: number,
+  ): Promise<{ id: number; targetAssetId: string | null }> {
+    await tx.$queryRaw`SELECT "id" FROM "consumable_movements" WHERE "id" = ${returnOfId} FOR UPDATE`;
+    const delivery = await tx.consumableMovement.findFirst({
+      where: { id: returnOfId },
+      select: {
+        id: true,
+        consumableId: true,
+        type: true,
+        quantity: true,
+        returnable: true,
+        targetUserId: true,
+        targetAssetId: true,
+        targetLocationId: true,
+      },
+    });
+    if (!delivery || delivery.consumableId !== consumableId) {
+      throw new BadRequestException(
+        `returnOfId ${returnOfId} is not a delivery of this consumable`,
+      );
+    }
+    if (delivery.type !== 'OUT' || targetOf(delivery) === null) {
+      throw new BadRequestException(
+        `Movement ${returnOfId} is not a delivery (an OUT with a target); only a delivery can be returned`,
+      );
+    }
+    if (!delivery.returnable) {
+      throw new BadRequestException(
+        `Delivery ${returnOfId} was not returnable when it was made; it cannot be returned`,
+      );
+    }
+    const returned = await tx.consumableMovement.aggregate({
+      where: { returnOfId },
+      _sum: { quantity: true },
+    });
+    const outstanding = delivery.quantity - (returned._sum.quantity ?? 0);
+    if (quantity > outstanding) {
+      throw new ConflictException(
+        `Cannot return ${quantity}: only ${outstanding} outstanding on delivery ${returnOfId}`,
+      );
+    }
+    return { id: delivery.id, targetAssetId: delivery.targetAssetId };
+  }
+
+  /**
+   * Append CONSUMABLE_DELIVERED / CONSUMABLE_RETURNED to an asset's timeline on the movement's transaction
+   * client (ADR-0098 / ADR-0033). Payload `{ consumableId, consumableName, movementId, quantity, unit }`
+   * (+ `returnOfId` on a return). The actor is the movement's principal (human XOR service account), and
+   * {@link AssetHistoryService.record} stamps `aiInvocationId` when an AI tool made the call.
+   */
+  private recordAssetEvent(
+    tx: Prisma.TransactionClient,
+    event: {
+      assetId: string;
+      eventType: 'CONSUMABLE_DELIVERED' | 'CONSUMABLE_RETURNED';
+      consumableId: string;
+      consumable: { name: string; unit: string };
+      movementId: number;
+      quantity: number;
+      returnOfId?: number;
+      actor: ActorAttribution;
+    },
+  ): Promise<unknown> {
+    return this.history.record(tx, {
+      assetId: event.assetId,
+      eventType: event.eventType,
+      payload: {
+        consumableId: event.consumableId,
+        consumableName: event.consumable.name,
+        movementId: event.movementId,
+        quantity: event.quantity,
+        unit: event.consumable.unit,
+        ...(event.returnOfId !== undefined
+          ? { returnOfId: event.returnOfId }
+          : {}),
+      },
+      actor: event.actor,
+    });
   }
 
   /**
@@ -415,11 +680,19 @@ export class ConsumablesService {
     }
   }
 
-  /** A consumable's movement ledger, newest first. Optional type + createdAt-range filters. */
-  async listMovements(consumableId: string, filters: MovementFilters = {}) {
+  /**
+   * A consumable's movement ledger, newest first. Optional type + createdAt-range filters. Each row
+   * carries its resolved delivery `target` (ADR-0098) — null for an untargeted movement — redacted per
+   * the caller's read permissions on the target's domain (see {@link resolveTargets}).
+   */
+  async listMovements(
+    consumableId: string,
+    filters: MovementFilters = {},
+    principal?: Principal,
+  ) {
     await this.assertExists(consumableId);
     const { type, from, to } = filters;
-    return this.prisma.consumableMovement.findMany({
+    const rows = await this.prisma.consumableMovement.findMany({
       where: {
         consumableId,
         ...(type ? { type } : {}),
@@ -433,6 +706,302 @@ export class ConsumablesService {
           : {}),
       },
       orderBy: { id: 'desc' },
+    });
+    const targets = await this.resolveTargets(rows, principal);
+    return rows.map((row, i) => ({ ...row, target: targets[i] }));
+  }
+
+  /**
+   * The deliveries made to ONE user, asset or location (ADR-0098) — `GET /consumables/deliveries`. A page
+   * (ADR-0030) of targeted OUT movements, newest first, each with the consumable it drew from, its
+   * resolved target and its return state (`returnedQuantity`, `outstandingQuantity`).
+   *
+   *  - AUTHORIZATION: besides `consumable:read` (the route gate), the caller must hold the read
+   *    permission of the target's domain — `user:read` to list a person's deliveries (a VIEWER lacks it:
+   *    the same directory-relational rule as `GET /users/:id/assignments`, ADR-0046 P3), `asset:read`,
+   *    `location:read`. Otherwise 403.
+   *  - HISTORY NEVER VANISHES: deliveries of a since-soft-deleted consumable are included (the consumable
+   *    carries its `deletedAt`), and the target itself may be offboarded/retired/archived — this read is
+   *    exactly what the offboarding sheet / Return Act uses, so it never 404s on a soft-deleted target.
+   *  - `outstandingOnly`: returnable deliveries whose returns do not yet cover the quantity. Filtered in
+   *    SQL (a correlated SUM) so the page and its `total` stay authoritative.
+   */
+  async findDeliveries(
+    filters: DeliveryFilters,
+    page: PageQuery,
+    principal?: Principal,
+  ) {
+    const target = targetOf(filters);
+    if (!target) {
+      // Unreachable through the controller (the query schema requires exactly one target).
+      throw new BadRequestException(
+        'Exactly one of targetUserId, targetAssetId or targetLocationId is required',
+      );
+    }
+    const readable = await this.readableKinds(principal);
+    if (!readable[target.kind]) {
+      throw new ForbiddenException(
+        `Listing deliveries to a ${target.kind} requires ${TARGET_READ_PERMISSION[target.kind]}`,
+      );
+    }
+
+    const outstandingIds = filters.outstandingOnly
+      ? await this.outstandingDeliveryIds(target)
+      : undefined;
+    const where: Prisma.ConsumableMovementWhereInput = {
+      type: 'OUT',
+      [target.key]: target.id,
+      ...(outstandingIds ? { id: { in: outstandingIds } } : {}),
+      ...(filters.from || filters.to
+        ? {
+            createdAt: {
+              ...(filters.from ? { gte: new Date(filters.from) } : {}),
+              ...(filters.to ? { lte: new Date(filters.to) } : {}),
+            },
+          }
+        : {}),
+    };
+    const { take, skip } = offsetOf(page);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.consumableMovement.findMany({
+        where,
+        orderBy: { id: 'desc' },
+        take,
+        skip,
+        // `Consumable` is not auto-filtered (ADR-0032) and a nested include is never filtered anyway: a
+        // soft-deleted consumable's deliveries stay listed, flagged by its `deletedAt`.
+        include: {
+          consumable: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              unit: true,
+              deletedAt: true,
+            },
+          },
+        },
+      }),
+      this.prisma.consumableMovement.count({ where }),
+    ]);
+
+    // Returned so far, per delivery on this page (one query).
+    const returnable = rows.filter((row) => row.returnable);
+    const returned = new Map<number, number>();
+    if (returnable.length > 0) {
+      const returns = await this.prisma.consumableMovement.findMany({
+        where: { returnOfId: { in: returnable.map((row) => row.id) } },
+        select: { returnOfId: true, quantity: true },
+      });
+      for (const r of returns) {
+        if (r.returnOfId == null) continue;
+        returned.set(
+          r.returnOfId,
+          (returned.get(r.returnOfId) ?? 0) + r.quantity,
+        );
+      }
+    }
+    const targets = await this.resolveTargets(rows, principal, readable);
+    const items = rows.map((row, i) => {
+      const returnedQuantity = row.returnable ? (returned.get(row.id) ?? 0) : 0;
+      return {
+        ...row,
+        target: targets[i],
+        returnedQuantity,
+        outstandingQuantity: row.returnable
+          ? Math.max(0, row.quantity - returnedQuantity)
+          : 0,
+      };
+    });
+    return pageOf(items, total, page);
+  }
+
+  /**
+   * Ids of the OUTSTANDING returnable deliveries to one target: `returnable` OUTs whose linked returns sum
+   * to less than their quantity. One correlated query; the target column is chosen from a fixed set (no
+   * dynamic SQL) and every value is a bound parameter.
+   */
+  private async outstandingDeliveryIds(target: TargetRef): Promise<number[]> {
+    let rows: { id: number }[];
+    if (target.kind === 'user') {
+      rows = await this.prisma.$queryRaw<{ id: number }[]>`
+        SELECT d."id" FROM "consumable_movements" d
+        WHERE d."targetUserId" = ${target.id}::uuid
+          AND d."type" = 'OUT'::"ConsumableMovementType" AND d."returnable" = true
+          AND d."quantity" > COALESCE((SELECT SUM(r."quantity") FROM "consumable_movements" r
+                                       WHERE r."returnOfId" = d."id"), 0)`;
+    } else if (target.kind === 'asset') {
+      rows = await this.prisma.$queryRaw<{ id: number }[]>`
+        SELECT d."id" FROM "consumable_movements" d
+        WHERE d."targetAssetId" = ${target.id}
+          AND d."type" = 'OUT'::"ConsumableMovementType" AND d."returnable" = true
+          AND d."quantity" > COALESCE((SELECT SUM(r."quantity") FROM "consumable_movements" r
+                                       WHERE r."returnOfId" = d."id"), 0)`;
+    } else {
+      rows = await this.prisma.$queryRaw<{ id: number }[]>`
+        SELECT d."id" FROM "consumable_movements" d
+        WHERE d."targetLocationId" = ${target.id}
+          AND d."type" = 'OUT'::"ConsumableMovementType" AND d."returnable" = true
+          AND d."quantity" > COALESCE((SELECT SUM(r."quantity") FROM "consumable_movements" r
+                                       WHERE r."returnOfId" = d."id"), 0)`;
+    }
+    return rows.map((row) => Number(row.id));
+  }
+
+  /**
+   * Which target kinds the caller may see RESOLVED (ADR-0098): a kind is readable when the principal holds
+   * its domain read permission (`user:read` / `asset:read` / `location:read`), for both principal kinds
+   * (ADR-0048: a human via the RolePermission matrix, a service account via its direct grants). No
+   * principal holds nothing (fail-closed).
+   */
+  private async readableKinds(principal?: Principal): Promise<ReadableKinds> {
+    let held: ReadonlySet<Permission> = new Set<Permission>();
+    if (principal?.kind === 'service') {
+      held = principal.permissions;
+    } else if (principal?.kind === 'human') {
+      held = await this.permissions.resolve(principal.user.role);
+    }
+    return {
+      user: held.has(TARGET_READ_PERMISSION.user),
+      asset: held.has(TARGET_READ_PERMISSION.asset),
+      location: held.has(TARGET_READ_PERMISSION.location),
+    };
+  }
+
+  /**
+   * Resolve each row's delivery target into the redaction-safe descriptor (ADR-0098), in at most one
+   * query per kind (no N+1). Targets are looked up through the `includeSoftDeleted` escape hatch
+   * (ADR-0032) so an offboarded user / retired asset / archived location is FOUND and flagged, never
+   * dangling. A kind the caller cannot read (see {@link readableKinds}) is not queried at all: its
+   * descriptor keeps the id and nulls the display fields. An untargeted row → null. A target row that is
+   * genuinely gone (impossible under the Restrict FK) → null rather than a dangle.
+   */
+  private async resolveTargets(
+    rows: TargetColumns[],
+    principal?: Principal,
+    known?: ReadableKinds,
+  ): Promise<(ConsumableDeliveryTarget | null)[]> {
+    const refs = rows.map((row) => targetOf(row));
+    if (refs.every((ref) => ref === null)) {
+      return refs.map(() => null);
+    }
+    const readable = known ?? (await this.readableKinds(principal));
+    const idsOf = (kind: TargetKind) => [
+      ...new Set(
+        refs.filter((ref) => ref?.kind === kind).map((ref) => ref!.id),
+      ),
+    ];
+    const userIds = readable.user ? idsOf('user') : [];
+    const assetIds = readable.asset ? idsOf('asset') : [];
+    const locationIds = readable.location ? idsOf('location') : [];
+    const [users, assets, locations] = await Promise.all([
+      userIds.length > 0
+        ? this.prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              deletedAt: true,
+            },
+            includeSoftDeleted: true,
+          } as Prisma.UserFindManyArgs)
+        : [],
+      assetIds.length > 0
+        ? this.prisma.asset.findMany({
+            where: { id: { in: assetIds } },
+            select: {
+              id: true,
+              assetTag: true,
+              name: true,
+              serial: true,
+              deletedAt: true,
+            },
+            includeSoftDeleted: true,
+          } as Prisma.AssetFindManyArgs)
+        : [],
+      locationIds.length > 0
+        ? this.prisma.location.findMany({
+            where: { id: { in: locationIds } },
+            select: { id: true, name: true, deletedAt: true },
+            includeSoftDeleted: true,
+          } as Prisma.LocationFindManyArgs)
+        : [],
+    ]);
+    const userById = new Map(
+      (
+        users as {
+          id: string;
+          firstName: string;
+          lastName: string;
+          deletedAt: Date | null;
+        }[]
+      ).map((u) => [u.id, u]),
+    );
+    const assetById = new Map(
+      (
+        assets as {
+          id: string;
+          assetTag: string | null;
+          name: string | null;
+          serial: string | null;
+          deletedAt: Date | null;
+        }[]
+      ).map((a) => [a.id, a]),
+    );
+    const locationById = new Map(
+      (locations as { id: string; name: string; deletedAt: Date | null }[]).map(
+        (l) => [l.id, l],
+      ),
+    );
+
+    return refs.map((ref): ConsumableDeliveryTarget | null => {
+      if (!ref) return null;
+      if (ref.kind === 'user') {
+        if (!readable.user) {
+          return {
+            type: 'user',
+            id: ref.id,
+            displayName: null,
+            isOffboarded: null,
+          };
+        }
+        const u = userById.get(ref.id);
+        return u
+          ? {
+              type: 'user',
+              id: u.id,
+              displayName: `${u.firstName} ${u.lastName}`.trim(),
+              isOffboarded: u.deletedAt != null,
+            }
+          : null;
+      }
+      if (ref.kind === 'asset') {
+        if (!readable.asset) {
+          return { type: 'asset', id: ref.id, label: null, isDeleted: null };
+        }
+        const a = assetById.get(ref.id);
+        return a
+          ? {
+              type: 'asset',
+              id: a.id,
+              label: a.assetTag ?? a.name ?? a.serial ?? a.id,
+              isDeleted: a.deletedAt != null,
+            }
+          : null;
+      }
+      if (!readable.location) {
+        return { type: 'location', id: ref.id, name: null, isDeleted: null };
+      }
+      const l = locationById.get(ref.id);
+      return l
+        ? {
+            type: 'location',
+            id: l.id,
+            name: l.name,
+            isDeleted: l.deletedAt != null,
+          }
+        : null;
     });
   }
 

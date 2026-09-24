@@ -664,7 +664,8 @@ path unit (W2-0, #1315):
   `users.tools.ts` and `activity.tools.ts` (W2-9) hold the six `user_*` tools, `dashboard_summary` and
   `activity_list` — see *Users and activity tools as built* below;
   `consumables.tools.ts` (W2-7) holds the five consumables tools and leaves archive / restore unexposed
-  (v1.1) — see *Consumables tools as built* below;
+  (v1.1), as it does the deliveries read `GET /consumables/deliveries` and the delivery targets / returns
+  on the movement write (ADR-0098, #1364) — see *Consumables tools as built* below;
   `platform.tools.ts` lists the surfaces no domain owns (authentication, instance configuration, the
   Secret Manager, Service Account management, the Migrator, workflow secrets, the probes)
 - `prompt/` — domain primer and system-prompt builder (§12)
