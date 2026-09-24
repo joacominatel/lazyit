@@ -152,7 +152,8 @@ The assistant follows your instance's [asset tag scheme](/help/configuration-ass
 - It changes the **instance-wide** scheme (**Settings → Instance → Asset tag scheme**) only when you
   explicitly ask it to change the general asset tag scheme — never just to make one asset's tag fit. That
   card is a *Sensitive change* with the warning *"Changes instance-wide configuration: it applies to
-  everyone from now on."*, shows the prefix, suffix, digits, next number and next tag before → after, and
+  everyone from now on."*, shows only what changes (prefix, suffix, digits or next number) before → after, plus the
+  next tag, and
   always waits for you: [auto-approve](#auto-approve) never skips it. Existing tags are never rewritten.
 
 Only administrators can see or change the scheme; for everyone else the assistant simply lets lazyit assign
