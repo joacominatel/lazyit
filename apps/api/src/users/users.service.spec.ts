@@ -1225,6 +1225,87 @@ describe('UsersService', () => {
     });
   });
 
+  // Issue #1375: an activation flip used to change silently — no UserHistory row, so it never reached
+  // the recent_activity view (Reports → Users). Every route (web UI, API, AI tool call) lands here.
+  describe('activation + identifier audit (issue #1375)', () => {
+    const ACTOR = 'actor-uuid';
+
+    it('records DEACTIVATED with the actor when an active user is deactivated', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'MEMBER',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: false });
+
+      await service.update('uuid-1', { isActive: false }, ACTOR);
+
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'uuid-1',
+        eventType: 'DEACTIVATED',
+        actor: { userId: ACTOR },
+      });
+    });
+
+    it('records REACTIVATED when an inactive user is re-enabled', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: false,
+        role: 'MEMBER',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: true });
+
+      await service.update('uuid-1', { isActive: true }, ACTOR);
+
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ eventType: 'REACTIVATED' }),
+      );
+    });
+
+    it('records nothing when isActive is resent unchanged', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'MEMBER',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: true });
+
+      await service.update('uuid-1', { isActive: true }, ACTOR);
+
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('records UPDATED { fields } for a legajo / username change, not for a resend', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'MEMBER',
+        legajo: 'L-1',
+        username: null,
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+
+      await service.update('uuid-1', { legajo: 'L-2', username: 'ada' }, ACTOR);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'uuid-1',
+        eventType: 'UPDATED',
+        payload: { fields: ['legajo', 'username'] },
+        actor: { userId: ACTOR },
+      });
+
+      history.record.mockClear();
+      await service.update('uuid-1', { legajo: 'L-1', username: null }, ACTOR);
+      expect(history.record).not.toHaveBeenCalled();
+    });
+  });
+
   it('re-indexes the user on update (upsert with the updated row)', async () => {
     user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
     user.update.mockResolvedValue({

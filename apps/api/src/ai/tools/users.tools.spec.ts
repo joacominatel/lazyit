@@ -1273,6 +1273,69 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         // Deactivation ends every session (the route's epoch bump).
         sessionEpoch: 2,
       });
+      // Issue #1375: every audited change the AI made is in the user's history — the deactivation
+      // included — attributed to the approving human and stamped with the invocation id, so it reaches
+      // Reports → Users like the same PATCH made from the UI.
+      expect(history).toEqual([
+        expect.objectContaining({
+          userId: ID.member,
+          eventType: 'DEACTIVATED',
+          performedById: ID.admin,
+          aiInvocationId: proposal.action.id,
+        }),
+        expect.objectContaining({
+          eventType: 'MANAGER_CHANGED',
+          performedById: ID.admin,
+          aiInvocationId: proposal.action.id,
+        }),
+        expect.objectContaining({
+          eventType: 'UPDATED',
+          // The legajo was resent unchanged (Ana already holds L-100), so only the email is listed.
+          payload: { fields: ['email'] },
+          performedById: ID.admin,
+          aiInvocationId: proposal.action.id,
+        }),
+      ]);
+    });
+
+    it('a deactivation alone (the #1375 report) is recorded as DEACTIVATED, stamped, and a reactivation as REACTIVATED', async () => {
+      const off = await tools.propose(
+        'user_update',
+        { user: ID.member, isActive: false },
+        chat(ADMIN),
+      );
+      if (!off.ok) throw new Error(JSON.stringify(off.result));
+      const offRun = await tools.approve(off.action.id, chat(ADMIN), {
+        stepUpVerified: true,
+      });
+      expect(offRun.status).toBe('SUCCEEDED');
+      expect(users.get(ID.member)!.isActive).toBe(false);
+
+      const on = await tools.propose(
+        'user_update',
+        { user: ID.member, isActive: true },
+        chat(ADMIN),
+      );
+      if (!on.ok) throw new Error(JSON.stringify(on.result));
+      const onRun = await tools.approve(on.action.id, chat(ADMIN), {
+        stepUpVerified: true,
+      });
+      expect(onRun.status).toBe('SUCCEEDED');
+
+      expect(history).toEqual([
+        expect.objectContaining({
+          userId: ID.member,
+          eventType: 'DEACTIVATED',
+          performedById: ID.admin,
+          aiInvocationId: off.action.id,
+        }),
+        expect.objectContaining({
+          userId: ID.member,
+          eventType: 'REACTIVATED',
+          performedById: ID.admin,
+          aiInvocationId: on.action.id,
+        }),
+      ]);
     });
 
     it('a manager-only change is not an identity change: LEDGER_APPEND, approved without step-up (CEO decision)', async () => {
