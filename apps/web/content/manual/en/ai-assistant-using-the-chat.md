@@ -24,19 +24,47 @@ The chat only appears when an administrator has turned the assistant on and your
 - Press **Esc** or the **×** to close it. Closing the chat doesn't stop an answer that is in progress; when
   you open it again, it picks up where it was.
 
+### Make the chat wider
+
+When an answer or a change card needs more room, widen the chat:
+
+- Select **Expand** (the arrows next to **×**) to widen it; select it again to go back to the normal width.
+- Or drag the chat's left edge. With the keyboard, move to the edge with **Tab** and use **←** / **→**
+  (hold **Shift** for bigger steps), **Home** / **End** for the narrowest and widest, and **Enter** to go
+  back to the normal width. Double-clicking the edge does the same.
+
+A chat wider than normal floats **over** the page instead of squeezing it; the page underneath stays as it
+was. lazyit remembers the width you chose in this browser. On a phone the chat always fills the screen.
+
 ## Ask something
 
 Type in the box at the bottom and press **Enter** to send. **Shift+Enter** starts a new line.
 
 While the assistant works you see what it is doing, one short line per step — for example
-"Done: Asset search". Select **Show details** on a line to see what it found. The answer itself appears
-as it is written.
+"Done: Search assets". When it repeats the same lookup several times in a row, the steps share one line
+with a count, like "Done: Search users ×5". Select **Show details** on a line to see what it found. The
+answer itself appears as it is written.
 
 To stop an answer, press the **Stop** button. What was already written is kept.
 
 > [!WARNING]
 > Don't paste passwords, API keys or other secrets into the chat. What you write, and what the assistant
 > reads to answer you, is sent to the AI provider your administrator configured.
+
+### Commands
+
+Type **/** at the start of the message box to see the commands. Keep typing to filter them, move with
+**↑** / **↓**, and press **Enter** (or **Tab**) to run one; **Esc** closes the list. You can also type a
+command in full, like `/copy`, and press **Enter**.
+
+| Command | What it does |
+| --- | --- |
+| `/copy` | Copies the whole conversation to the clipboard as Markdown — your messages, the answers, the steps and the change cards. |
+| `/new` | Starts a new chat. |
+| `/help` | Shows the commands and keyboard shortcuts inside the chat. |
+
+Commands run in your browser: they are never sent to the assistant or the AI provider. If your message just
+starts with a slash but isn't a command (say, a file path), it is sent as a normal message.
 
 ### The current page
 

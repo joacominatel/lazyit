@@ -4,16 +4,22 @@ import type { AiMessagePart } from "@lazyit/shared";
 import { ArrowLeftIcon, ClockIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api/client";
 import { presentPreview } from "@/lib/ai/preview";
+import { BUILTIN_SLASH_COMMANDS, type SlashCommand, type SlashCommandContext } from "@/lib/ai/slash-commands";
 import { isAwaitingApproval, isRunActive, type ChatMessage } from "@/lib/ai/stream-reducer";
+import { conversationToMarkdown } from "@/lib/ai/transcript-markdown";
 import { useAiTurn } from "@/lib/api/hooks/use-ai-turn";
+import { AiChatHelp } from "./ai-chat-help";
 import { AiComposer } from "./ai-composer";
 import { AiConversationHistory } from "./ai-conversation-history";
+import { useToolDisplayName } from "./ai-labels";
 import { AiMessage } from "./ai-message";
 import { AiRunNotice } from "./ai-run-notice";
+import { useTranscriptLabels } from "./use-transcript-labels";
 
 type ToolPart = Extract<AiMessagePart, { type: "tool" }>;
 
@@ -27,16 +33,30 @@ function lastUserText(messages: readonly ChatMessage[]): string | null {
   return null;
 }
 
-/** The first pending approval's action sentence, for the live announcement. */
-function pendingAction(messages: readonly ChatMessage[]): string | null {
+/** The first pending approval's action sentence (else its tool's name), for the live announcement. */
+function pendingAction(
+  messages: readonly ChatMessage[],
+  toolName: (name: string) => string,
+): string | null {
   for (const m of messages) {
     for (const p of m.parts) {
       if (p.type === "approval" && p.outcome === null) {
-        return presentPreview(p.request.preview).action?.text ?? p.request.preview.toolName;
+        return presentPreview(p.request.preview).action?.text ?? toolName(p.request.preview.toolName);
       }
     }
   }
   return null;
+}
+
+/** Writes text to the clipboard; false when the browser refuses (insecure context, denied permission). */
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    if (!navigator.clipboard) return false;
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -48,8 +68,33 @@ export function AiChatPanel() {
   const t = useTranslations("ai");
   const turn = useAiTurn();
   const { state } = turn;
+  const toolName = useToolDisplayName();
+  const transcriptLabels = useTranscriptLabels();
   const [view, setView] = useState<"chat" | "history">("chat");
+  const [helpOpen, setHelpOpen] = useState(false);
   const logRef = useRef<HTMLDivElement | null>(null);
+
+  function startNewChat() {
+    turn.newChat();
+    setHelpOpen(false);
+    setView("chat");
+  }
+
+  // Slash commands (#1372): run here, in the browser — never sent to the model.
+  const commandContext: SlashCommandContext = {
+    copyConversation: async () => {
+      const markdown = conversationToMarkdown(state.messages, transcriptLabels);
+      if (markdown === "") {
+        toast(t("commands.copyEmpty"));
+        return;
+      }
+      if (await writeClipboard(markdown)) toast.success(t("commands.copied"));
+      else toast.error(t("commands.copyFailed"));
+    },
+    newChat: startNewChat,
+    showHelp: () => setHelpOpen(true),
+  };
+  const runCommand = (command: SlashCommand) => void command.run(commandContext);
 
   const tools = useMemo(() => {
     const map = new Map<string, ToolPart>();
@@ -66,12 +111,12 @@ export function AiChatPanel() {
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [state.messages, thinking]);
+  }, [state.messages, thinking, helpOpen]);
 
   // Completion-only announcements (deltas are never announced): the live region's text changes only
   // when the run finishes or starts waiting for a decision.
   const runStatus = state.run?.status;
-  const action = runStatus === "AWAITING_APPROVAL" ? pendingAction(state.messages) : null;
+  const action = runStatus === "AWAITING_APPROVAL" ? pendingAction(state.messages, toolName) : null;
   const announcement =
     runStatus === "SUCCEEDED"
       ? t("live.replied")
@@ -101,10 +146,7 @@ export function AiChatPanel() {
           variant="ghost"
           size="sm"
           className="ml-auto"
-          onClick={() => {
-            turn.newChat();
-            setView("chat");
-          }}
+          onClick={startNewChat}
         >
           <PlusIcon />
           {t("panel.newChat")}
@@ -129,7 +171,10 @@ export function AiChatPanel() {
             role="log"
             aria-busy={running}
             aria-label={t("panel.title")}
-            className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3"
+            // `relative` makes the log the containing block of its visually hidden (absolute) labels, so
+            // the scroll box clips them: otherwise they escaped it and stretched the page below the app
+            // shell (#1370).
+            className="relative min-h-0 flex-1 space-y-4 overflow-y-auto p-3"
           >
             {turn.loading && (
               <div className="space-y-2" aria-label={t("panel.loading")}>
@@ -191,6 +236,10 @@ export function AiChatPanel() {
               </p>
             )}
 
+            {helpOpen && (
+              <AiChatHelp commands={BUILTIN_SLASH_COMMANDS} onClose={() => setHelpOpen(false)} />
+            )}
+
             {state.runError && (
               <AiRunNotice
                 error={state.runError}
@@ -222,6 +271,8 @@ export function AiChatPanel() {
               blockedByApproval={awaiting}
               onSend={turn.sendMessage}
               onStop={() => void turn.stop()}
+              commands={BUILTIN_SLASH_COMMANDS}
+              onCommand={runCommand}
             />
           )}
         </>
