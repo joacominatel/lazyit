@@ -841,8 +841,10 @@ holds; this section records the concrete contracts and the few places the build 
 
 **Gates.** `OAuthPolicyService` resolves the issuer from `WEB_ORIGIN` only when it is `https:` and
 `AUTH_MODE` is not `shim` (`oauth-config.ts`); otherwise the metadata, token, register and revoke routes
-and the consent API answer **404**. The same routes answer 404 while `ai_settings.mcpEnabled` is off (an
-absent row reads as off). The settings row is read directly with a narrow `select` of the four MCP
+and the consent API answer **404**. While `ai_settings.mcpEnabled` is off (an absent row reads as off),
+the metadata, token, register and revoke routes answer **404**, but the consent API does not: `validate`
+answers **200 `{ ok: false, refusal: "AI_DISABLED" }`** and `decision` answers **403 `{ refusal:
+"AI_DISABLED" }`**, so the consent page can explain why instead of showing a bare 404. The settings row is read directly with a narrow `select` of the four MCP
 columns — the `AI_SETTINGS_READER` port does not carry the effective allowlist, and the authorization
 server must not depend on the provider configuration.
 
@@ -894,6 +896,21 @@ token check (`verifyAccessToken`) re-loads the user through `PrincipalLoaderServ
 refuses exactly what the REST guard refuses. The refresh-token row is marked `usedAt` on rotation and kept
 until its expiry — that is what reuse detection recognizes.
 
+**Redirect parsing.** Every redirect is also parsed with the WHATWG `URL` parser in `client-policy.ts`,
+independently of the shared classifier's regexes: a URI the parser rejects (an out-of-range port such as
+`:99999`), one carrying userinfo or any `@` (`http://localhost:80@evil.com/callback` is a request to
+`evil.com`), or one with a fragment is never registrable and never matches a request. Loopback is decided
+from the parsed hostname, and plain `http` is accepted only when that hostname is loopback. The decision
+builds the redirect before it writes the code row, so a redirect that cannot be built leaves no orphan
+code.
+
+**Refresh grace window, accepted trade-off.** A rotated refresh token presented again within 30 s answers
+`invalid_grant` **without** revoking the grant. This absorbs the benign concurrent-refresh race, but it
+also means a thief who replays a stolen refresh token within 30 s of the legitimate rotation (or who
+rotates first, when the victim retries within 30 s) is not detected. The thief's rotated chain stays
+alive until the next reuse outside the window, a revocation, an epoch bump or expiry. This is the
+specified default (§5.2 step 7), kept deliberately (G3 review of #1339).
+
 **For W3-2 (`/mcp`).** Import `OAuthModule` and inject `OAuthTokenService`:
 
 ```ts
@@ -927,6 +944,21 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
 - **Logging.** pino-http never logs bodies; `logging.config.ts` additionally redacts `req.body.code`,
   `code_verifier`, `refresh_token`, `access_token`, `token` and `password`.
 
-**Follow-ups.** The "new client connected" bell notification and email (security §6.3, gate G3 "Abuse")
-need a notification type outside this unit — not built here. Re-verify the ChatGPT, Cursor and VS Code
-identifiers in the W4-3 client matrix.
+**Follow-ups** (from the G3 review of #1339; not fixed in W2-4):
+
+1. **"New client connected" notification** (bell + email, security §6.3, gate G3 "Abuse"): it needs a
+   notification type outside `oauth/**`, and it **must land before W3-2** exposes `/mcp`.
+2. **`sessionEpoch` at consent:** store the epoch on the code row when the schema next opens, so a
+   password change between consent and exchange also kills the grant (today the snapshot is taken at
+   exchange, ≤ 60 s later).
+3. **Code → grant link:** record which grant a code produced, so a replayed code revokes that grant
+   (OAuth 2.1 §4.1.3 "SHOULD revoke"). Today a replay is only refused.
+4. **DCR pending-cap DoS:** the global cap of 500 pending registrations can be filled from many
+   addresses. Key the register rate limit on the IPv6 /64 instead of the full address, and evict the
+   oldest unused registration instead of refusing new ones.
+5. **Consent page (W3-9):** never auto-redirect for an unverified (DCR) client — the approve action is
+   always an explicit click — and never present `client_uri` as trusted (it is self-declared: show it,
+   if at all, as unverified text, not as a link that vouches for the client).
+6. **Runbook note:** during an incident, revoke through connected apps (Account → AI connections, or
+   the admin list). Turning MCP off only **pauses** grants: they work again when MCP is re-enabled.
+7. Re-verify the ChatGPT, Cursor and VS Code identifiers in the W4-3 client matrix.
