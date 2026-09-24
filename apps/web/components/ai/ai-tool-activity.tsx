@@ -15,9 +15,12 @@ import { useState } from "react";
 import { linkableRefs } from "@/lib/ai/entity-href";
 import { plainText } from "@/lib/ai/untrusted-text";
 import { cn } from "@/lib/utils";
-import { toolDisplayName, useEntityTypeLabel } from "./ai-labels";
+import { useEntityTypeLabel, useToolDisplayName } from "./ai-labels";
 
 type ToolPart = Extract<AiMessagePart, { type: "tool" }>;
+
+/** The `ai` translator's shape, as {@link toolLineText} uses it. */
+type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 const KNOWN_STATUSES = new Set([
   "EXECUTING",
@@ -68,24 +71,42 @@ export function AiEffectChips({ refs, opened }: { refs: readonly AiEntityRef[]; 
 }
 
 /**
- * One tool call as a ledger-tape line (frontend.md §5.2 `ToolActivity`): status, the tool, an expandable
- * summary and the "Open" chips of what it touched. Every string is escaped React text; untrusted wrappers
- * are stripped, never rendered as HTML.
+ * "Done: Search users", or "Done: Search users ×5" for a collapsed run of the same call (#1377). `t` is
+ * the `ai` namespace translator; `tool` the already-localized tool name.
  */
-export function AiToolActivity({ part, navigated }: { part: ToolPart; navigated: boolean }) {
-  const t = useTranslations("ai.tools");
-  const [open, setOpen] = useState(false);
-  const status = KNOWN_STATUSES.has(part.status) ? part.status : "unknown";
-  const tool = toolDisplayName(part.name);
+export function toolLineText(t: Translate, status: string, tool: string, count = 1): string {
+  const known = KNOWN_STATUSES.has(status) ? status : "unknown";
+  const name = count > 1 ? t("tools.repeated", { tool, count }) : tool;
+  return t(`tools.generic.${known}`, { tool: name });
+}
+
+function detailOf(part: ToolPart): string {
   const summary = part.result?.summary ? plainText(part.result.summary) : "";
   const errorMessage = part.result?.error ? plainText(part.result.error.message) : "";
-  const detail = summary || errorMessage;
+  return summary || errorMessage;
+}
+
+/**
+ * One tool call as a ledger-tape line (frontend.md §5.2 `ToolActivity`): status, the tool, an expandable
+ * summary and the "Open" chips of what it touched. Consecutive identical read calls arrive together in
+ * `parts` and share ONE line with a count; their summaries list under "Show details" (#1377). Every
+ * string is escaped React text; untrusted wrappers are stripped, never rendered as HTML.
+ */
+export function AiToolActivity({ parts, navigated }: { parts: readonly ToolPart[]; navigated: boolean }) {
+  const t = useTranslations("ai");
+  const toolName = useToolDisplayName();
+  const [open, setOpen] = useState(false);
+  const part = parts[0]!;
+  const details = parts.map(detailOf).filter((d) => d !== "");
+  const detail = details.length > 0;
 
   return (
     <div className="text-xs">
       <div className="flex items-center gap-1.5 font-mono text-muted-foreground">
         <StatusIcon status={part.status} />
-        <span className="min-w-0 truncate">{t(`generic.${status}`, { tool })}</span>
+        <span className="min-w-0 truncate">
+          {toolLineText(t, part.status, toolName(part.name), parts.length)}
+        </span>
         {detail && (
           <button
             type="button"
@@ -94,15 +115,21 @@ export function AiToolActivity({ part, navigated }: { part: ToolPart; navigated:
             onClick={() => setOpen((v) => !v)}
           >
             <ChevronRightIcon className={cn("size-3 transition-transform", open && "rotate-90")} aria-hidden />
-            {open ? t("hideDetails") : t("showDetails")}
+            {open ? t("tools.hideDetails") : t("tools.showDetails")}
           </button>
         )}
       </div>
       {open && detail && (
-        <p className="mt-1 ml-5 break-words whitespace-pre-wrap text-muted-foreground">{detail}</p>
+        <ul className="mt-1 ml-5 space-y-1 text-muted-foreground">
+          {details.map((text, index) => (
+            <li key={index} className="break-words whitespace-pre-wrap">
+              {text}
+            </li>
+          ))}
+        </ul>
       )}
       {part.status === "OUTCOME_UNKNOWN" && (
-        <p className="mt-1 ml-5 text-destructive-text">{t("outcomeUnknown")}</p>
+        <p className="mt-1 ml-5 text-destructive-text">{t("tools.outcomeUnknown")}</p>
       )}
       {part.result && part.result.status === "ok" && part.result.kind !== "read" && (
         <div className="ml-5">

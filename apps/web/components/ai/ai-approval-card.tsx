@@ -21,11 +21,11 @@ import {
   STEP_UP_WARNINGS,
   type DecisionErrorKind,
 } from "@/lib/ai/error-kinds";
-import { humanizeKey, presentPreview, type PreviewValue } from "@/lib/ai/preview";
+import { presentPreview, type PreviewValue } from "@/lib/ai/preview";
 import { plainText } from "@/lib/ai/untrusted-text";
 import type { DecisionResult } from "@/lib/api/hooks/use-ai-turn";
 import { cn } from "@/lib/utils";
-import { useEntityTypeLabel } from "./ai-labels";
+import { useEntityTypeLabel, usePreviewFieldLabel } from "./ai-labels";
 
 type ApprovalPart = Extract<AiMessagePart, { type: "approval" }>;
 
@@ -146,6 +146,7 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
   const tWarn = useTranslations("ai.approval.warnings");
   const format = useFormatter();
   const entityLabel = useEntityTypeLabel();
+  const fieldLabel = usePreviewFieldLabel();
   const titleId = useId();
   const passwordId = useId();
 
@@ -288,7 +289,7 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
           <dl className="divide-y divide-border border-y border-border">
             {model.rows.map((row, index) => (
               <div key={`${row.field}-${index}`} className="grid grid-cols-[minmax(0,2fr)_minmax(0,5fr)] gap-2 py-1.5">
-                <dt className="text-xs text-muted-foreground">{humanizeKey(row.field)}</dt>
+                <dt className="text-xs text-muted-foreground">{fieldLabel(row.field)}</dt>
                 <dd className="min-w-0 text-xs">
                   {row.before !== null && (
                     <>
