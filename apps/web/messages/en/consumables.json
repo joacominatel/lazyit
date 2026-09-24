@@ -75,7 +75,9 @@
     "createdToast": "Consumable created",
     "savedToast": "Consumable saved",
     "createError": "Couldn't create the consumable",
-    "saveError": "Couldn't save the consumable"
+    "saveError": "Couldn't save the consumable",
+    "returnableLabel": "Returnable",
+    "returnableDescription": "Deliveries of this item are expected back — e.g. loaner adapters or headsets. Units handed out stay outstanding until they are returned."
   },
   "detail": {
     "notFoundTitle": "Consumable not found",
@@ -101,9 +103,34 @@
       "qty": "Qty",
       "reason": "Reason",
       "by": "By",
-      "date": "Date"
+      "date": "Date",
+      "destination": "Delivered to"
     },
-    "system": "System"
+    "system": "System",
+    "returnableBadge": "Returnable",
+    "returnableLabel": "Returnable",
+    "returnableYes": "Yes — deliveries are expected back",
+    "returnableNo": "No",
+    "returnOf": "Return of delivery #{id}",
+    "deliveryOutstanding": "#{id} · {returned} returned, {outstanding} outstanding",
+    "deliveryReturned": "#{id} · fully returned",
+    "target": {
+      "kind": {
+        "user": "Person:",
+        "asset": "Asset:",
+        "location": "Location:"
+      },
+      "restricted": {
+        "user": "A person (restricted)",
+        "asset": "An asset (restricted)",
+        "location": "A location (restricted)"
+      },
+      "gone": {
+        "user": "Offboarded",
+        "asset": "Deleted",
+        "location": "Archived"
+      }
+    }
   },
   "stock": {
     "addCta": "Add…",
@@ -145,7 +172,88 @@
         "quantityLabel": "New stock count",
         "quantityHint": "Sets on-hand to this exact number (a physical recount). Use 1 or more.",
         "cta": "Set stock"
+      },
+      "deliveredToast": "Delivery recorded",
+      "target": {
+        "label": "Deliver to",
+        "hint": "Optional. Name who or where the units went, and the delivery shows up on that person, asset or location.",
+        "returnableHint": "This item is returnable: the recipient is expected to give the units back, and they stay outstanding until returned.",
+        "consumedHint": "Recorded as delivered. This item is not returnable, so nothing is owed back.",
+        "kinds": {
+          "none": "Nobody — just remove stock",
+          "user": "A person",
+          "asset": "An asset",
+          "location": "A location"
+        },
+        "userPlaceholder": "Select a person",
+        "userSearch": "Search people…",
+        "userEmpty": "No active people found",
+        "assetPlaceholder": "Select an asset",
+        "assetSearch": "Search assets…",
+        "assetEmpty": "No assets found",
+        "locationPlaceholder": "Select a location",
+        "locationSearch": "Search locations…",
+        "locationEmpty": "No locations found",
+        "required": {
+          "user": "Pick the person, or choose “Nobody”.",
+          "asset": "Pick the asset, or choose “Nobody”.",
+          "location": "Pick the location, or choose “Nobody”."
+        }
       }
+    }
+  },
+  "deliveries": {
+    "title": "Consumables delivered",
+    "titleCount": "Consumables delivered ({count})",
+    "deliverAction": "Deliver consumable",
+    "outstandingOnly": "Outstanding only",
+    "rangeLabel": "Date range",
+    "range": {
+      "all": "Any time",
+      "30d": "Last 30 days",
+      "90d": "Last 90 days",
+      "365d": "Last 12 months"
+    },
+    "loadError": "Couldn't load the deliveries.",
+    "empty": "No consumables delivered yet.",
+    "emptyFiltered": "No deliveries match these filters.",
+    "archived": "Archived",
+    "quantity": "{count} {unit}",
+    "by": "by {name}",
+    "outstanding": "{count} {unit} outstanding",
+    "returned": "Returned",
+    "returnAction": "Return…",
+    "picker": {
+      "option": "{name} · {count} {unit} on hand"
+    },
+    "deliverDialog": {
+      "title": "Deliver consumable",
+      "description": "Take units out of stock and record that they went to {name}.",
+      "consumableLabel": "Consumable",
+      "consumablePlaceholder": "Select a consumable",
+      "consumableSearch": "Search consumables…",
+      "consumableEmpty": "No consumables found",
+      "consumableRequired": "Pick the consumable to deliver.",
+      "onHand": "On hand now: {count} {unit}.",
+      "onHandReturnable": "On hand now: {count} {unit}. Returnable — the recipient is expected to give it back.",
+      "quantityLabel": "Quantity",
+      "exceeds": "Only {count} {unit} on hand — this will be rejected.",
+      "notesLabel": "Notes",
+      "cta": "Deliver",
+      "successToast": "Delivery to {name} recorded",
+      "errorToast": "Couldn't record the delivery"
+    },
+    "returnDialog": {
+      "title": "Return {name}",
+      "description": "{outstanding} of {quantity} {unit} still outstanding. The returned units go back into stock.",
+      "quantityLabel": "Quantity returned",
+      "quantityHint": "A partial return is fine — the rest stays outstanding.",
+      "tooMany": "Only {count} outstanding on this delivery.",
+      "notesLabel": "Notes",
+      "notesPlaceholder": "Optional — e.g. condition on return",
+      "cta": "Record return",
+      "successToast": "Return recorded",
+      "errorToast": "Couldn't record the return"
     }
   }
 }
