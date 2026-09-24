@@ -57,6 +57,7 @@ Prisma model `AiToolInvocation` → table `ai_tool_invocations`.
 | `result` / `entityRefs` | `json?` | the tool result as written (truncated once). |
 | `errorCode` | `text?` | |
 | `durationMs` | `int?` | |
+| `approvalMode` | `text?` | `USER` \| `AUTO` once a chat write is approved (auto-approve mode, #1376); null otherwise. |
 | `createdAt` / `updatedAt` | `datetime` | |
 
 Related: [[ai-action-log]] · [[ai-run]] · [[ai-conversation]] · [[oauth-grant]]

@@ -462,6 +462,23 @@ the **exfiltration leg** and the **consequential-action leg**.
 - **Confirmation fatigue** [C]. A model can split one harmful goal into many harmless-looking
   approvals. Mitigations: a per-turn cap on pending mutations; T3/T4 approvals are never
   auto-accepted; there is no "always allow" setting for T3/T4.
+- **Auto-approve mode (#1376; ADR-0097 decision 4 as amended 2026-09-24) — an accepted residual.** A
+  conversation's owner may switch on a mode in which ordinary writes (T1/T2: a `write`-class tool whose
+  stored and fresh previews are not elevated and carry no step-up warning) execute without a card. The
+  CEO: "activar el modo skip permissions por ahora es funcion y consentimiento del usuario, el sabe lo
+  que esta haciendo." What it gives up, deliberately: in that conversation **an injected instruction in
+  content the model reads (§6.1) can chain ordinary writes with no human looking at each one** — rename,
+  retire, move or edit records, post KB content, adjust stock — up to the per-run tool-call cap
+  (`AI_MAX_TOOL_CALLS_PER_RUN`) and the per-principal tool-call rate limit, all within the user's own
+  permissions. What still holds: T3/T4 (every `elevated` action) and every step-up write keep the card
+  and the password; the mode is off by default, per conversation, switchable only by the owner from a
+  human session (the toggle routes are `unexposed`, so the model cannot turn it on), and every change is
+  audited (`ai_config_audit_log`, `CONVERSATION_AUTO_APPROVE_CHANGED`); every automatic write goes
+  through the same claim, re-authorization, `STALE` check and ledger, with `approvalMode = AUTO`, the
+  owner as `approverUserId` and the enable time, so each one is attributable and can be undone from
+  history. MCP and headless are unaffected. Not built (candidates if the residual proves too wide): an
+  instance-wide admin switch, an expiry of the mode, a cap on automatic writes per turn, and excluding
+  destructive (T2) writes.
 
 ### 6.3 OAuth authorization server and MCP resource server
 
@@ -773,6 +790,10 @@ Open items recorded by the G2 review of #1354 (W2-14):
   the server-stored pending action (principal, conversation, canonical arguments hash, target
   version). It is atomic, single-use and expiring, and authorization and version are re-checked at
   execute. The model cannot approve, and approval arguments never come from the client.
+  *Amended 2026-09-24 (#1376):* in a conversation whose owner switched auto-approve on, the owner's
+  standing consent is the approval for ordinary writes (not elevated, no step-up) — still bound to the
+  stored pending action, single-use and re-checked, recorded with `approvalMode = AUTO`. Elevated and
+  step-up actions always need the per-action human approval.
 - **INV-AI-4 — Untrusted content is data, never authority.** No stored content can alter tool
   availability, approval requirements, tool metadata or the system prompt.
 - **INV-AI-5 — Secrets never enter model context.** One-time credentials (SA tokens, temporary

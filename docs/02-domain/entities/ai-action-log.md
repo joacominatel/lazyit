@@ -52,6 +52,7 @@ Prisma model `AiActionLog` → table `ai_action_log`.
 | `conversationId` / `runId` / `mcpClientId` / `oauthGrantId` | `text?` | plain strings. |
 | `input` / `entityRefs` | `json?` | redacted canonical input; entity refs. |
 | `approverUserId` / `stepUp` | `uuid?` / `bool` | approval provenance (chat). |
+| `approvalMode` / `autoApproveEnabledAt` | `text?` / `datetime?` | on the approve path's events: `USER` (a click) or `AUTO` (the owner's auto-approve mode, #1376 — `approverUserId` is that owner, `autoApproveEnabledAt` when they switched it on). Null elsewhere and on rows before the change. |
 | `untrustedSources` | `json?` | other-authored content the turn had read. |
 | `provider` / `model` / `requestId` | `text?` | |
 | `errorCode` / `errorStatus` / `errorMessage` | | |

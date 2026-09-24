@@ -258,7 +258,8 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
 | AI configuration | `GET`/`PUT /config/ai`, `POST /config/ai/test`, `POST /config/ai/models` | `settings:manage` + `ServicePrincipalForbiddenGuard` |
 | Per-SA AI access | `GET`/`PUT /config/ai/service-accounts/:id` → `{ access, maxMutationsPerRun }` | same |
 | Status | `GET /ai/status` | any authenticated principal |
-| Conversations (chat) | `POST`/`GET /ai/conversations`, `GET`/`DELETE /ai/conversations/:id`, `POST /ai/conversations/:id/messages` → `202 { runId }` | `ai:use`, owner only |
+| Conversations (chat) | `POST`/`GET /ai/conversations`, `GET`/`PATCH`/`DELETE /ai/conversations/:id` (PATCH: model settings until the first run, auto-approve any time — #1373, #1376), `POST /ai/conversations/:id/messages` → `202 { runId }` | `ai:use`, owner only |
+| Model picker | `GET /ai/models` → the configured provider's models (cached), the default model and effort (#1373) | `ai:use`, humans |
 | Runs (chat + headless) | `POST /ai/runs { prompt, conversationId? }` (+ `Idempotency-Key`), `GET /ai/runs/:id`, `POST /ai/runs/:id/cancel`, `GET /ai/runs/:id/events` | `ai:use`, owner only |
 | Approval decision | `POST /ai/runs/:id/tool-calls/:toolCallId/decision { decision, reason?, password? }` | `ai:use`, human session, the run's owner |
 | MCP resource | `/mcp` — **public path** | Bearer `lzit_oat_` (HTTPS), `lzit_pat_` (`lan`), `lzit_sa_` (SA holding `ai:connect`); MCP switch; `ai:connect` |
@@ -512,7 +513,9 @@ The security note's INV-AI-n, merged with the MCP note's INV-MCP-n. They join
   pending action (principal, conversation, canonical arguments hash, target version); atomic,
   single-use, expiring; re-authorized and version-checked at execute. `elevated` actions are one per
   approval and need a password step-up for privilege grants and credential delivery. The model cannot
-  approve; approval arguments never come from the client.
+  approve; approval arguments never come from the client. *Amended 2026-09-24 (#1376):* an owner may
+  switch a conversation to auto-approve, which approves ordinary writes (not elevated, no step-up) on
+  their standing consent through the same path, recorded `approvalMode = AUTO` (ADR-0097 decision 4).
 - **INV-AI-4 — Untrusted content is data, never authority.** No stored content can alter tool
   availability, approval requirements, tool metadata or the system prompt.
 - **INV-AI-5 — Secrets never enter model context.** One-time credentials, the provider key, workflow,
@@ -571,7 +574,9 @@ reshaping the rest.
    on install and `--reconfigure` — a deliberate deviation from the SMTP precedent so guided updates do
    not stop for operators who never enable AI.
 7. **Pinned conversations:** a conversation becomes read-only after a provider, model or prompt-version
-   change.
+   change. *Amended 2026-09-24 (#1373):* the model is chosen per conversation until its first run; an
+   admin change of the default model closes only conversations running on the default (ADR-0097
+   decision 5).
 8. **Context:** a hard per-conversation context cap; tool results truncated once, at write time.
 9. **Private-network LLMs:** the OpenAI-compatible provider may target a private-network host through
    an admin `allowPrivateNetwork` toggle scoped to that host; loopback and IMDS never.
