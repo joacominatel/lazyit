@@ -157,7 +157,9 @@ export class AiRunsController {
       'application. Answers `{ runId, status }`; re-subscribe to the events. 403 STEP_UP_REQUIRED / ' +
       'STEP_UP_FAILED / STEP_UP_UNAVAILABLE are about the password, not the session; 429 ' +
       'STEP_UP_RATE_LIMITED with retryAfterSec; 409 RUN_NOT_AWAITING_APPROVAL, AI_DISABLED, or a core ' +
-      'refusal (already decided, EXPIRED, STALE); 403 FORBIDDEN for a Service Account.',
+      'refusal (already decided, EXPIRED, STALE, PREVIEW_CHANGED); 403 FORBIDDEN for a Service Account. ' +
+      'PREVIEW_CHANGED and a STEP_UP_REQUIRED raised by a new warning carry `addedWarnings`: the card ' +
+      'changed, the action stays pending, and the user reviews it and decides again.',
   })
   @ApiOkResponse({ type: AiRunAcceptedDto })
   @ApiForbiddenResponse({
@@ -165,7 +167,8 @@ export class AiRunsController {
       'STEP_UP_REQUIRED, STEP_UP_FAILED, STEP_UP_UNAVAILABLE or FORBIDDEN',
   })
   @ApiConflictResponse({
-    description: 'RUN_NOT_AWAITING_APPROVAL, AI_DISABLED or a core refusal',
+    description:
+      'RUN_NOT_AWAITING_APPROVAL, AI_DISABLED, PREVIEW_CHANGED (with addedWarnings) or a core refusal',
   })
   @ApiTooManyRequestsResponse({ description: 'STEP_UP_RATE_LIMITED' })
   @ApiNotFoundResponse({ description: 'Not the caller’s run or action.' })

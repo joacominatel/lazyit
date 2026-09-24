@@ -17,7 +17,7 @@ jest.mock('jose', () => ({
   jwtVerify: jest.fn(),
 }));
 
-import { Logger } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Logger } from '@nestjs/common';
 import request from 'supertest';
 import { AiRunSchema } from '@lazyit/shared';
 import { CONFIG, SA_ID, TOOLS } from '../runtime/runtime.harness-spec';
@@ -351,6 +351,48 @@ describe('POST /ai/runs/:id/tool-calls/:toolCallId/decision', () => {
       expect(res.body).toMatchObject({ code: 'STEP_UP_UNAVAILABLE' });
     });
   });
+
+  it.each([
+    [
+      409,
+      'PREVIEW_CHANGED',
+      new ConflictException({
+        code: 'PREVIEW_CHANGED',
+        message: 'This action changed since it was proposed; review it again',
+        addedWarnings: ['CRITICAL_APPLICATION'],
+      }),
+    ],
+    [
+      403,
+      'STEP_UP_REQUIRED',
+      new ForbiddenException({
+        code: 'STEP_UP_REQUIRED',
+        message: 'This action now requires your password to be confirmed',
+        addedWarnings: ['PRIVILEGE_GRANT'],
+      }),
+    ],
+  ])(
+    'passes core’s %s %s through with addedWarnings; the action stays pending',
+    async (status, code, error) => {
+      const runId = await pending('write');
+      jest.spyOn(h.rt.tools, 'approve').mockRejectedValueOnce(error);
+      const res = await decide(runId, { decision: 'approve' });
+      expect(res.status).toBe(status);
+      expect(res.body).toEqual(
+        expect.objectContaining({
+          code,
+          addedWarnings: (error.getResponse() as { addedWarnings: string[] })
+            .addedWarnings,
+        }),
+      );
+      expect(h.rt.run(runId).status).toBe('AWAITING_APPROVAL');
+      expect(h.rt.prisma.tables.aiToolInvocation.rows[0].status).toBe(
+        'AWAITING_APPROVAL',
+      );
+      // The user decides again on the re-rendered card.
+      await decide(runId, { decision: 'approve' }).expect(200);
+    },
+  );
 
   it('409 RUN_NOT_AWAITING_APPROVAL on a finished run, 409 AI_DISABLED while off', async () => {
     const runId = await pending('write');
