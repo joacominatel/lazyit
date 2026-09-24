@@ -8,11 +8,16 @@ import { AiToolService } from '../ai/core/ai-tool.service';
 import { callKindOf } from '../ai/core/result-shaper';
 import type { AiToolListing } from '../ai/core/tool-descriptor';
 import { AiPromptService } from '../ai/prompt/ai-prompt.module';
+import { PrismaService } from '../prisma/prisma.service';
 import { isMcpListable, toMcpAnnotations } from './annotations';
 import { toCallToolResult, toolError } from './error-mapper';
 import { executionContextOf, type McpCaller } from './mcp-caller';
 import { McpRateLimiter } from './mcp-rate-limit';
-import { MCP_SERVER_INFO, MCP_TOOLS_LIST_TTL_MS } from './mcp.constants';
+import {
+  MCP_SA_WRITE_CAP_WINDOW_MS,
+  MCP_SERVER_INFO,
+  MCP_TOOLS_LIST_TTL_MS,
+} from './mcp.constants';
 
 /**
  * A tool's input schema as the SDK wants it, WITHOUT the SDK's own validation: `tools/list` advertises
@@ -66,6 +71,7 @@ export class McpServerFactory {
     private readonly tools: AiToolService,
     private readonly prompt: AiPromptService,
     private readonly rateLimiter: McpRateLimiter,
+    private readonly prisma: PrismaService,
   ) {}
 
   /** The tools this caller may see over MCP, in a deterministic order. */
@@ -109,6 +115,46 @@ export class McpServerFactory {
     return server;
   }
 
+  /**
+   * The per-SA `maxMutationsPerRun` cap over MCP (CTO decision, #1315 G3 review F2): MCP has no runs, so
+   * the cap bounds the writes one Service Account attempts through `/mcp` in any rolling hour, counted
+   * from the permanent invocation rows (so it holds across replicas and restarts). Soft under concurrency:
+   * calls racing past the count can overshoot by the number in flight — the runtime's budget posture.
+   */
+  private async overServiceAccountWriteCap(
+    caller: McpCaller,
+  ): Promise<boolean> {
+    const cap = caller.maxWritesPerHour;
+    if (
+      caller.identity.kind !== 'service' ||
+      typeof cap !== 'number' ||
+      !Number.isInteger(cap) ||
+      cap < 1
+    ) {
+      return false;
+    }
+    const since = new Date(Date.now() - MCP_SA_WRITE_CAP_WINDOW_MS);
+    try {
+      const writes = await this.prisma.aiToolInvocation.count({
+        where: {
+          channel: 'MCP',
+          serviceAccountId: caller.identity.serviceAccountId,
+          toolClass: { in: ['write', 'elevated'] },
+          createdAt: { gt: since },
+        },
+      });
+      return writes >= cap;
+    } catch (err) {
+      // Fail closed: a cap that cannot be checked refuses the write.
+      this.logger.error(
+        `Could not check the MCP write cap of ${caller.identity.serviceAccountId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return true;
+    }
+  }
+
   /** One `tools/call`. Never throws: every failure is an `isError` result. */
   async call(
     caller: McpCaller,
@@ -124,6 +170,15 @@ export class McpServerFactory {
           ? 'Too many changes through this connection in the last minute.'
           : 'Too many tool calls through this connection in the last minute.',
         { hint: 'Wait a minute, then retry.' },
+      );
+    }
+    if (mutation && (await this.overServiceAccountWriteCap(caller))) {
+      return toolError(
+        'RATE_LIMITED',
+        `This Service Account may make at most ${caller.maxWritesPerHour} changes per hour over MCP.`,
+        {
+          hint: 'An administrator sets this cap in the Service Account’s AI access settings.',
+        },
       );
     }
     try {

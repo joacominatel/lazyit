@@ -23,6 +23,9 @@ export const MCP_WRITE_RATE_LIMIT = { max: 60, windowMs: 60_000 };
 /** Per caller: every authenticated `/mcp` HTTP request (listings included) — a coarse HTTP backstop. */
 export const MCP_REQUEST_RATE_LIMIT = { max: 600, windowMs: 60_000 };
 
+/** The rolling window of a Service Account's `maxMutationsPerRun` cap over MCP (G3 review F2). */
+export const MCP_SA_WRITE_CAP_WINDOW_MS = 60 * 60_000;
+
 /** Per client IP: refused authentications (each costs a DB lookup). */
 export const MCP_AUTH_FAILURE_RATE_LIMIT = { max: 30, windowMs: 60_000 };
 

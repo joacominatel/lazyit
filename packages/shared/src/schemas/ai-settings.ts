@@ -436,7 +436,9 @@ export const AI_SERVICE_ACCOUNT_ACCESS_DEFAULT: AiServiceAccountAccess = "read-w
 
 /**
  * `GET` / `PUT /config/ai/service-accounts/:id` — the same shape both ways. `maxMutationsPerRun` is an
- * optional cap on executed writes per headless run; null = no cap beyond the global step limit.
+ * optional cap on executed writes per headless run; null = no cap beyond the global step limit. Over MCP,
+ * which has no runs, the same value caps the writes the Service Account attempts through `/mcp` in any
+ * rolling hour (CTO decision, #1315; mcp-and-oauth.md §13) — setting help text should say both.
  */
 export const AiServiceAccountSettingsSchema = z.strictObject({
   access: AiServiceAccountAccessSchema,
