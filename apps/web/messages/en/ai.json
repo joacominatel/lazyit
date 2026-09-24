@@ -42,7 +42,8 @@
     "cancel": "Cancel",
     "deleted": "Chat deleted.",
     "deleteInProgress": "The assistant is still answering in this chat. Stop it first, then delete it.",
-    "deleteFailed": "The chat could not be deleted."
+    "deleteFailed": "The chat could not be deleted.",
+    "awaitingInput": "Needs your answer"
   },
   "composer": {
     "label": "Message the assistant",
@@ -54,7 +55,11 @@
     "busyApproval": "Approve or reject the pending change to continue.",
     "readOnlyTitle": "This chat is read-only",
     "readOnlyBody": "It was started with an earlier AI configuration, or it grew too long. Start a new chat to continue.",
-    "hintAuto": "Type / for commands. Don't paste passwords or secrets. Auto-approve is on: basic changes apply without asking."
+    "hintAuto": "Type / for commands. Don't paste passwords or secrets. Auto-approve is on: basic changes apply without asking.",
+    "busyInput": "Answer, skip or decline the assistant's form to continue.",
+    "inputWaiting": "The assistant asked: {title}",
+    "inputWaitingGeneric": "The assistant is waiting for your answer.",
+    "goToForm": "Go to the form"
   },
   "context": {
     "label": "About: {page}",
@@ -76,7 +81,8 @@
       "one": "Which laptops are unassigned?",
       "two": "Who has access to the VPN?",
       "three": "Assign MBP-042 to Ana Ruiz"
-    }
+    },
+    "awaitingInput": "Waiting for your answer"
   },
   "tools": {
     "generic": {
@@ -239,7 +245,8 @@
   },
   "live": {
     "replied": "The assistant replied.",
-    "approvalNeeded": "Approval needed: {action}"
+    "approvalNeeded": "Approval needed: {action}",
+    "inputNeeded": "The assistant needs some details: {title}"
   },
   "markdown": {
     "imageRemoved": "[image: {alt}]",
@@ -519,6 +526,81 @@
       "invalidModel": "That model id isn't valid.",
       "notFound": "This chat no longer exists.",
       "generic": "The chat settings could not be saved. Try again."
+    }
+  },
+  "input": {
+    "kicker": "The assistant asks",
+    "states": {
+      "pending": "Waiting for you",
+      "sending": "Sending",
+      "submitted": "Answered",
+      "skipped": "Skipped",
+      "declined": "Declined",
+      "expired": "Expired",
+      "cancelled": "Cancelled"
+    },
+    "importance": {
+      "required": "required",
+      "recommended": "Recommended",
+      "optional": "Optional"
+    },
+    "requiredLegend": "Fields marked * are required.",
+    "moreDetails": "More details ({count, plural, one {# optional field} other {# optional fields}})",
+    "lessDetails": "Hide the optional fields",
+    "row": "Row {number}",
+    "addRow": "Add a row",
+    "removeRow": "Remove row {number}",
+    "rowsBetween": "Between {min} and {max} rows.",
+    "rowsExactly": "{count, plural, one {Exactly # row.} other {Exactly # rows.}}",
+    "noRows": "No rows.",
+    "choose": "Choose…",
+    "search": "Search…",
+    "noMatch": "No match.",
+    "noOptions": "lazyit has nothing to choose from for this list. Continue without it, or decline.",
+    "optionsFrom": "Options from lazyit: {source}",
+    "sources": {
+      "manufacturers": "manufacturers",
+      "assetCategories": "asset categories",
+      "locations": "locations",
+      "assetModels": "asset models"
+    },
+    "yes": "Yes",
+    "no": "No",
+    "empty": "Not answered",
+    "submit": "Send",
+    "skip": "Continue without",
+    "decline": "Don't ask",
+    "skipHint": "The assistant continues without this information.",
+    "declineHint": "The assistant is told not to ask for this again.",
+    "actionsHint": "Continue without: the assistant goes on without these details. Don't ask: it won't ask for them again.",
+    "expiresAt": "Answer by {time}",
+    "yourAnswer": "Your answer",
+    "answerSent": "Your answer was sent.",
+    "notes": {
+      "submitted": "The assistant continues with your answer.",
+      "skipped": "You skipped this form. The assistant continued without the details.",
+      "declined": "You declined. The assistant won't ask for these details again.",
+      "expired": "Time ran out before an answer, and the assistant stopped. Send a new message to continue.",
+      "cancelled": "The assistant stopped before an answer."
+    },
+    "issues": {
+      "required": "This field is required.",
+      "maxChars": "At most {max} characters.",
+      "min": "At least {min}.",
+      "max": "At most {max}.",
+      "notOffered": "Choose one of the options offered.",
+      "invalid": "This value is not valid.",
+      "rows": "Between {min} and {max} rows.",
+      "unknown": "This field is not part of the form."
+    },
+    "errors": {
+      "invalid": "Check the highlighted fields.",
+      "notAwaiting": "This form is no longer waiting for an answer: it was answered in another window, or the assistant stopped.",
+      "expired": "This form expired and the assistant stopped. Send a new message to continue.",
+      "aiDisabled": "The AI assistant was turned off.",
+      "forbidden": "You can't answer this form.",
+      "notFound": "This form no longer exists.",
+      "unknown": "Your answer could not be sent. Try again."
     }
   }
 }

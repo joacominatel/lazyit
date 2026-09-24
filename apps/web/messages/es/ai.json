@@ -42,7 +42,8 @@
     "cancel": "Cancelar",
     "deleted": "Chat eliminado.",
     "deleteInProgress": "El asistente todavía está respondiendo en este chat. Detenelo primero y después eliminalo.",
-    "deleteFailed": "No se pudo eliminar el chat."
+    "deleteFailed": "No se pudo eliminar el chat.",
+    "awaitingInput": "Espera tu respuesta"
   },
   "composer": {
     "label": "Mensaje para el asistente",
@@ -54,7 +55,11 @@
     "busyApproval": "Aprobá o rechazá el cambio pendiente para continuar.",
     "readOnlyTitle": "Este chat es de solo lectura",
     "readOnlyBody": "Se inició con una configuración de IA anterior o se volvió demasiado largo. Empezá un nuevo chat para continuar.",
-    "hintAuto": "Escribí / para ver los comandos. No pegues contraseñas ni secretos. La aprobación automática está activada: los cambios básicos se aplican sin preguntar."
+    "hintAuto": "Escribí / para ver los comandos. No pegues contraseñas ni secretos. La aprobación automática está activada: los cambios básicos se aplican sin preguntar.",
+    "busyInput": "Respondé, omití o rechazá el formulario del asistente para continuar.",
+    "inputWaiting": "El asistente preguntó: {title}",
+    "inputWaitingGeneric": "El asistente espera tu respuesta.",
+    "goToForm": "Ir al formulario"
   },
   "context": {
     "label": "Sobre: {page}",
@@ -76,7 +81,8 @@
       "one": "¿Qué laptops no están asignadas?",
       "two": "¿Quién tiene acceso a la VPN?",
       "three": "Asigná MBP-042 a Ana Ruiz"
-    }
+    },
+    "awaitingInput": "Esperando tu respuesta"
   },
   "tools": {
     "generic": {
@@ -239,7 +245,8 @@
   },
   "live": {
     "replied": "El asistente respondió.",
-    "approvalNeeded": "Se necesita aprobación: {action}"
+    "approvalNeeded": "Se necesita aprobación: {action}",
+    "inputNeeded": "El asistente necesita algunos datos: {title}"
   },
   "markdown": {
     "imageRemoved": "[imagen: {alt}]",
@@ -519,6 +526,81 @@
       "invalidModel": "Ese id de modelo no es válido.",
       "notFound": "Este chat ya no existe.",
       "generic": "No se pudieron guardar los ajustes del chat. Probá de nuevo."
+    }
+  },
+  "input": {
+    "kicker": "El asistente pregunta",
+    "states": {
+      "pending": "Espera tu respuesta",
+      "sending": "Enviando",
+      "submitted": "Respondido",
+      "skipped": "Omitido",
+      "declined": "Rechazado",
+      "expired": "Vencido",
+      "cancelled": "Cancelado"
+    },
+    "importance": {
+      "required": "obligatorio",
+      "recommended": "Recomendado",
+      "optional": "Opcional"
+    },
+    "requiredLegend": "Los campos marcados con * son obligatorios.",
+    "moreDetails": "Más detalles ({count, plural, one {# campo opcional} other {# campos opcionales}})",
+    "lessDetails": "Ocultar los campos opcionales",
+    "row": "Fila {number}",
+    "addRow": "Agregar una fila",
+    "removeRow": "Quitar la fila {number}",
+    "rowsBetween": "Entre {min} y {max} filas.",
+    "rowsExactly": "{count, plural, one {Exactamente # fila.} other {Exactamente # filas.}}",
+    "noRows": "Sin filas.",
+    "choose": "Elegí…",
+    "search": "Buscar…",
+    "noMatch": "Sin resultados.",
+    "noOptions": "lazyit no tiene opciones para esta lista. Continuá sin este dato o rechazá el formulario.",
+    "optionsFrom": "Opciones de lazyit: {source}",
+    "sources": {
+      "manufacturers": "fabricantes",
+      "assetCategories": "categorías de activos",
+      "locations": "ubicaciones",
+      "assetModels": "modelos de activo"
+    },
+    "yes": "Sí",
+    "no": "No",
+    "empty": "Sin respuesta",
+    "submit": "Enviar",
+    "skip": "Continuar sin esto",
+    "decline": "No preguntar",
+    "skipHint": "El asistente continúa sin esta información.",
+    "declineHint": "Se le indica al asistente que no vuelva a pedir esto.",
+    "actionsHint": "Continuar sin esto: el asistente sigue sin estos datos. No preguntar: no los vuelve a pedir.",
+    "expiresAt": "Respondé antes de las {time}",
+    "yourAnswer": "Tu respuesta",
+    "answerSent": "Tu respuesta se envió.",
+    "notes": {
+      "submitted": "El asistente continúa con tu respuesta.",
+      "skipped": "Omitiste este formulario. El asistente continuó sin los datos.",
+      "declined": "Lo rechazaste. El asistente no volverá a pedir estos datos.",
+      "expired": "Se terminó el tiempo sin una respuesta y el asistente se detuvo. Enviá un mensaje nuevo para continuar.",
+      "cancelled": "El asistente se detuvo antes de recibir una respuesta."
+    },
+    "issues": {
+      "required": "Este campo es obligatorio.",
+      "maxChars": "Como máximo {max} caracteres.",
+      "min": "Como mínimo {min}.",
+      "max": "Como máximo {max}.",
+      "notOffered": "Elegí una de las opciones ofrecidas.",
+      "invalid": "Este valor no es válido.",
+      "rows": "Entre {min} y {max} filas.",
+      "unknown": "Este campo no es parte del formulario."
+    },
+    "errors": {
+      "invalid": "Revisá los campos marcados.",
+      "notAwaiting": "Este formulario ya no espera una respuesta: se respondió en otra ventana o el asistente se detuvo.",
+      "expired": "Este formulario venció y el asistente se detuvo. Enviá un mensaje nuevo para continuar.",
+      "aiDisabled": "El asistente de IA fue desactivado.",
+      "forbidden": "No podés responder este formulario.",
+      "notFound": "Este formulario ya no existe.",
+      "unknown": "No se pudo enviar tu respuesta. Intentá de nuevo."
     }
   }
 }
