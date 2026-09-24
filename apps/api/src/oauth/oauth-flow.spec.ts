@@ -181,6 +181,45 @@ describe('dynamic client registration', () => {
     ).resolves.toMatchObject({ redirect_uris: [uri] });
   });
 
+  describe('any HTTPS client by default (ADR-0097 decision 13, amended 2026-09-24)', () => {
+    const httpsRedirect = 'https://agent.example.com/oauth/callback';
+
+    it('reads the toggle as on when no settings row exists', async () => {
+      h.prisma.tables.aiSettings = [];
+      await expect(h.policy.mcpSettings()).resolves.toMatchObject({
+        mcpEnabled: false,
+        allowAnyHttpsClient: true,
+      });
+    });
+
+    it('registers any HTTPS client when the row never stored the toggle', async () => {
+      enableMcp(h, { mcpAllowAnyHttpsClient: undefined });
+      await expect(
+        h.registrations.register({ redirect_uris: [httpsRedirect] }),
+      ).resolves.toMatchObject({ redirect_uris: [httpsRedirect] });
+    });
+
+    it('still refuses an unlisted HTTPS client while the stored value is false', async () => {
+      enableMcp(h, { mcpAllowAnyHttpsClient: false });
+      expect(
+        await oauthError(
+          h.registrations.register({ redirect_uris: [httpsRedirect] }),
+        ),
+      ).toMatchObject({ error: 'invalid_redirect_uri' });
+      expect(h.prisma.tables.oAuthClient).toHaveLength(0);
+    });
+
+    it.each([
+      'com.example.agent:/oauth/callback',
+      'http://agent.example.com/callback',
+    ])('still refuses %s without an explicit entry', async (uri) => {
+      enableMcp(h, { mcpAllowAnyHttpsClient: undefined });
+      expect(
+        await oauthError(h.registrations.register({ redirect_uris: [uri] })),
+      ).toMatchObject({ error: 'invalid_redirect_uri' });
+    });
+  });
+
   it('refuses a registration once the admin removed the default that listed it', async () => {
     enableMcp(h, {
       mcpClientAllowlistRemovedDefaults: ['loopback-localhost-callback'],

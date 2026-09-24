@@ -816,6 +816,18 @@ from the parsed authority, so `http://localhost:80@evil.com/` is never loopback 
 contract is `classifyMcpRedirectUri` / `isMcpRedirectUriAllowed` in `ai-settings.ts`;
 [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13 (amended).
 
+**Any HTTPS client by default (CEO, 2026-09-24: "Sí, cualquier HTTPS").** `mcpAllowAnyHttpsClient` is
+**on by default**: an absent settings row reads it as `true` (`AI_SETTINGS_DEFAULTS`) and the column
+default is `true` (migration `20260924000000_mcp_allow_any_https_client_default`), so a client whose
+redirect URIs are all HTTPS on a non-loopback host registers without an allowlist entry. The curated list
+still governs loopback and private-use redirects, and the toggle still admits nothing but HTTPS off
+loopback. An admin who wants the curated list only switches it off in Settings → AI. A row that already
+exists keeps its stored value, so an instance that saved its AI settings before this change keeps `false`
+until an admin turns it on. Consent is unchanged and always shown: the redirect host, the "self-declared,
+unverified" label and approve confirmation for a DCR client, `lazyit.admin` never preselected, and the
+new-connection notice → [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13 (amended
+2026-09-24); [[ai-assistant/security|security]] §6.3.
+
 The durable decisions (F1, F3, F4, the F8 outcome, INV-MCP-*) are recorded in
 [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] (proposed).
 
@@ -893,8 +905,8 @@ lazyit.write`; `lazyit.admin` is never implied. `decision` re-runs every check o
 
 **Client trust policy.** `client-policy.ts` applies the shared `classifyMcpRedirectUri` /
 `isMcpRedirectUriAllowed` to a whole client: **every** registered redirect must be admitted (a listed
-pattern, or `mcpAllowAnyHttpsClient` for https only), so a registration cannot carry an unlisted
-redirect next to a listed one; the allowlist is re-checked at consent, at code exchange and at every
+pattern, or `mcpAllowAnyHttpsClient` for https only — on by default since 2026-09-24, §10), so a
+registration cannot carry an unlisted redirect next to a listed one; the allowlist is re-checked at consent, at code exchange and at every
 refresh, so removing an entry cuts existing connections within an access token's hour. A client matched
 by a `cimd_url` entry (never a `dcr` row) is trusted for its own registrable redirects. The curated
 defaults are data in `@lazyit/shared` — `MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS` in

@@ -384,7 +384,8 @@ export const AI_SETTINGS_DEFAULTS = {
   allowPrivateNetwork: false,
   mcpClientAllowlistAdded: [],
   mcpClientAllowlistRemovedDefaults: [],
-  mcpAllowAnyHttpsClient: false,
+  /** On by default (ADR-0097 decision 13, amended 2026-09-24 — CEO: "Sí, cualquier HTTPS"). */
+  mcpAllowAnyHttpsClient: true,
 } as const;
 
 /**

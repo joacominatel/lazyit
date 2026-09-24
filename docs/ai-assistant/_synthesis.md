@@ -303,9 +303,11 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
   `mcpClientAllowlistAdded` (the admin's own entries) and `mcpClientAllowlistRemovedDefaults` (the ids of
   the defaults the admin removed) — so a later release can correct a default's identifier without
   undoing the admin's choices. An entry is `{ id, label, match: { kind: "cimd_url", url } | { kind:
-  "redirect_uri", pattern } }` (`ai-settings.ts`). The policy toggle `mcpAllowAnyHttpsClient` (off by
-  default) accepts any client whose redirect URIs are HTTPS and non-loopback, and the consent screen then
-  shows a warning; the default policy is the curated list.
+  "redirect_uri", pattern } }` (`ai-settings.ts`). The policy toggle `mcpAllowAnyHttpsClient` (**on
+  by default** — ADR-0097 decision 13, amended 2026-09-24, CEO: "Sí, cualquier HTTPS") accepts any client
+  whose redirect URIs are HTTPS and non-loopback, and the consent screen shows the redirect host; the
+  curated list still governs loopback and private-use redirects. An existing settings row keeps its stored
+  value.
 - **Redirect schemes** (ADR-0097 decision 13, amended 2026-09-23 — CEO: "Permitir solo en la
   allowlist"): a `redirect_uri` pattern is an exact URI that is HTTPS, loopback `http`
   (`127.0.0.1` / `localhost` / `[::1]`, port-agnostic), or a **private-use native-app scheme**
@@ -466,7 +468,7 @@ bounded per [[0036-int4-bounded-integers]].
 
 | Table (model) | Kind · ID | Holds | Lifecycle | Source |
 | --- | --- | --- | --- | --- |
-| `ai_settings` (`AiSettings`) | singleton, CHECK `id = 'singleton'` | enabled, provider, model, baseUrl, the key envelope (`apiKeyCiphertext`/`Iv`/`AuthTag`/`KeyVersion`), `allowPrivateNetwork`, effort, provider options, admin instructions, step/output/context limits, `dailyTokenLimitPerPrincipal` (2M), `retentionDays` (90, 7–3650), `approvalTtlMinutes` (30), `mcpEnabled`, the MCP client allowlist overlay (`mcpClientAllowlistAdded` jsonb `[]`, `mcpClientAllowlistRemovedDefaults` text[] `{}`) and `mcpAllowAnyHttpsClient` (false) — §4.8, the disclosure acknowledgement, `verifiedAt` | mutable config, no `deletedAt`; an absent row reads as the disabled default | provider §7 |
+| `ai_settings` (`AiSettings`) | singleton, CHECK `id = 'singleton'` | enabled, provider, model, baseUrl, the key envelope (`apiKeyCiphertext`/`Iv`/`AuthTag`/`KeyVersion`), `allowPrivateNetwork`, effort, provider options, admin instructions, step/output/context limits, `dailyTokenLimitPerPrincipal` (2M), `retentionDays` (90, 7–3650), `approvalTtlMinutes` (30), `mcpEnabled`, the MCP client allowlist overlay (`mcpClientAllowlistAdded` jsonb `[]`, `mcpClientAllowlistRemovedDefaults` text[] `{}`) and `mcpAllowAnyHttpsClient` (true since 2026-09-24) — §4.8, the disclosure acknowledgement, `verifiedAt` | mutable config, no `deletedAt`; an absent row reads as the disabled default | provider §7 |
 | `ai_conversations` (`AiConversation`) | `cuid()` | owner (exactly one of user / SA — CHECK), channel (`CHAT` \| `HEADLESS`), title, pinned provider/model/`promptVersion`/`toolsetHash`/tool names, `closedReason`, `lastActivityAt` | transcript container; **hard-deleted** by retention, by its owner, and on offboarding | provider §7, tools §11 |
 | `ai_messages` (`AiMessage`) | `BigInt` autoincrement | ordered, provider-replayable messages (`content` + `format`), `@@unique(conversationId, seq)` | append-only; cascades with its conversation | provider §7 |
 | `ai_runs` (`AiRun`) | `cuid()` | channel, acting principal (CHECK), status, approval policy, provider/model, step count, token counts, finish reason, redacted error, `idempotencyKey` (partial unique per principal, raw SQL), cancel request, timestamps | mutable lifecycle row, **no content**; conversation FK `SetNull`; kept | provider §7 |
