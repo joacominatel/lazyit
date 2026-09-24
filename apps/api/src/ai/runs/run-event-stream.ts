@@ -6,7 +6,11 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
-import { AI_RUN_TERMINAL_STATUSES, type AiRunEvent } from '@lazyit/shared';
+import {
+  AI_RUN_TERMINAL_STATUSES,
+  AI_RUN_WAITING_STATUSES,
+  type AiRunEvent,
+} from '@lazyit/shared';
 import type { Request, Response } from 'express';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import type { RunEventEnvelope } from '../core/ports/run-event-bus.port';
@@ -38,21 +42,26 @@ export interface AiRunStreamOptions {
   maxPerPrincipal?: number;
 }
 
+/** Statuses of a run paused on the user: an approval, or an input form (#1388). */
+function waiting(status: string): boolean {
+  return (AI_RUN_WAITING_STATUSES as readonly string[]).includes(status);
+}
+
 /** After these the stream closes: the run is waiting for the user, or it is over. */
 function closes(status: string): boolean {
   return (
-    status === 'AWAITING_APPROVAL' ||
+    waiting(status) ||
     (AI_RUN_TERMINAL_STATUSES as readonly string[]).includes(status)
   );
 }
 
 /**
  * A live event that ends the stream: `run.finished` (it follows the terminal `run.status` and carries the
- * usage and the error, so the stream waits for it), or `run.status AWAITING_APPROVAL`.
+ * usage and the error, so the stream waits for it), or `run.status AWAITING_APPROVAL | AWAITING_INPUT`.
  */
 function closesOn(event: AiRunEvent): boolean {
   if (event.type === 'run.finished') return true;
-  return event.type === 'run.status' && event.status === 'AWAITING_APPROVAL';
+  return event.type === 'run.status' && waiting(event.status);
 }
 
 /**
@@ -74,8 +83,8 @@ function closesOn(event: AiRunEvent): boolean {
  *      before the load. Sequence numbers are increasing, not consecutive: they are compared, never counted.
  *   5. The buffered and then live events after the last one sent, each as `id: <runId>:<seq>`,
  *      `event: <type>`, `data: <json>`.
- *   6. CLOSE after `run.finished` or `run.status AWAITING_APPROVAL` (the client re-subscribes after
- *      deciding); after a snapshot, or a replay, when the run is already terminal or waiting; after the
+ *   6. CLOSE after `run.finished` or `run.status AWAITING_APPROVAL | AWAITING_INPUT` (the client
+ *      re-subscribes after deciding or answering); after a snapshot, or a replay, when the run is already terminal or waiting; after the
  *      maximum lifetime; or when the client goes away — every path unsubscribes and clears the timers
  *      exactly once. A disconnect never affects the run: it continues and persists.
  */

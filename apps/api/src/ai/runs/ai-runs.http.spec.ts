@@ -444,3 +444,101 @@ describe('POST /ai/runs/:id/tool-calls/:toolCallId/decision', () => {
     expect(late.body).toMatchObject({ code: 'RUN_NOT_AWAITING_APPROVAL' });
   });
 });
+
+describe('POST /ai/runs/:id/tool-calls/:toolCallId/input (#1388)', () => {
+  async function waiting() {
+    h.rt.model.push(
+      {
+        toolCalls: [
+          {
+            toolCallId: 'call_ask',
+            toolName: TOOLS.input.descriptor.name,
+            input: {},
+          },
+        ],
+      },
+      { text: 'Thanks.' },
+    );
+    const { body } = await create('A');
+    await h.rt.drain();
+    expect(h.rt.run(body.runId).status).toBe('AWAITING_INPUT');
+    return body.runId as string;
+  }
+
+  function answer(runId: string, body: object, as = 'A', call = 'call_ask') {
+    return http()
+      .post(`/ai/runs/${runId}/tool-calls/${call}/input`)
+      .set('X-Test-Principal', as)
+      .send(body);
+  }
+
+  const SUBMIT = {
+    action: 'submit',
+    values: { manufacturer: 'Lenovo' },
+    groups: { models: [{ name: 'T14' }] },
+  };
+
+  it('submits the answer for the run’s own user and resumes the run', async () => {
+    const runId = await waiting();
+    const res = await answer(runId, SUBMIT);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ runId, status: 'QUEUED' });
+    await h.rt.drain();
+    expect(h.rt.run(runId).status).toBe('SUCCEEDED');
+    const run = await http()
+      .get(`/ai/runs/${runId}`)
+      .set('X-Test-Principal', 'A')
+      .expect(200);
+    expect(AiRunSchema.safeParse(run.body).success).toBe(true);
+    expect(run.body.toolCalls).toEqual([
+      expect.objectContaining({
+        toolCallId: 'call_ask',
+        class: 'navigate',
+        status: 'SUCCEEDED',
+      }),
+    ]);
+  });
+
+  it('400 INVALID_INPUT with issues for an answer that does not fit the stored form; strict body', async () => {
+    const runId = await waiting();
+    const bad = await answer(runId, {
+      action: 'submit',
+      values: { manufacturer: 'Acme' },
+      groups: { models: [{ name: 'T14' }] },
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.body).toMatchObject({
+      code: 'INVALID_INPUT',
+      issues: [
+        {
+          path: 'values.manufacturer',
+          message: 'Not one of the offered options',
+        },
+      ],
+    });
+    await answer(runId, { action: 'submit', form: {} }).expect(400);
+    await answer(runId, { action: 'maybe' }).expect(400);
+    expect(h.rt.run(runId).status).toBe('AWAITING_INPUT');
+  });
+
+  it('404s another user and an admin, 403s a Service Account — nothing answered', async () => {
+    const runId = await waiting();
+    for (const who of ['B', 'ADMIN']) {
+      const res = await answer(runId, SUBMIT, who);
+      expect(res.status).toBe(404);
+    }
+    h.rt.loader.saPermissions.add('ai:use');
+    const sa = await answer(runId, SUBMIT, 'SA');
+    expect(sa.status).toBe(403);
+    await answer(runId, SUBMIT, 'A', 'call_other').expect(404);
+    expect(h.rt.run(runId).status).toBe('AWAITING_INPUT');
+  });
+
+  it('skip resumes; a second answer is 409 RUN_NOT_AWAITING_INPUT', async () => {
+    const runId = await waiting();
+    await answer(runId, { action: 'skip' }).expect(200);
+    const again = await answer(runId, SUBMIT);
+    expect(again.status).toBe(409);
+    expect(again.body).toMatchObject({ code: 'RUN_NOT_AWAITING_INPUT' });
+  });
+});

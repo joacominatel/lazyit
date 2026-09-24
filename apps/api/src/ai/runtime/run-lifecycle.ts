@@ -1,7 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  AI_RUN_WAITING_STATUSES,
   AiRunEventSchema,
   type AiApprovalOutcome,
+  type AiInputOutcome,
   type AiConversationClosedReason,
   type AiRunError,
   type AiRunEvent,
@@ -24,6 +26,7 @@ import {
 } from '../core/ports/run-event-bus.port';
 import { callKindOf, errorResult } from '../core/result-shaper';
 import { AiToolRegistry } from '../core/tool-registry';
+import { AiInputRequests } from './input-requests';
 import { capToolOutput } from './limits';
 import {
   AI_MESSAGE_FORMAT_MODEL,
@@ -68,7 +71,7 @@ const NOT_EXECUTED: FallbackAnswer = {
 };
 
 /** Statuses of an invocation that will still change (a resume must wait for them). */
-const UNDECIDED = ['AWAITING_APPROVAL', 'EXECUTING'];
+const UNDECIDED = ['AWAITING_APPROVAL', 'AWAITING_INPUT', 'EXECUTING'];
 
 export function json(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
@@ -102,6 +105,7 @@ export class AiRunLifecycle {
     private readonly tools: AiToolService,
     private readonly registry: AiToolRegistry,
     private readonly queue: AiRunQueue,
+    private readonly inputs: AiInputRequests,
   ) {}
 
   /**
@@ -314,6 +318,30 @@ export class AiRunLifecycle {
         this.emitResolved(runId, row.toolUseId, 'cancelled');
       }
     }
+    // Input requests still waiting (#1388) end with the run; the model is answered "not available".
+    for (const row of await this.inputs.pending(runId)) {
+      const closed = await this.inputs
+        .close(
+          row.id,
+          'CANCELLED',
+          errorResult('navigate', {
+            code: 'NOT_AVAILABLE',
+            message: (options.fallback?.message ?? 'The run ended').slice(
+              0,
+              500,
+            ),
+          }),
+        )
+        .catch((err: unknown) => {
+          this.logger.error(
+            `AI run ${runId}: input request ${row.id} could not be cancelled: ${describeError(err)}`,
+          );
+          return null;
+        });
+      if (closed && row.toolUseId) {
+        this.emitInputResolved(runId, row.toolUseId, 'cancelled');
+      }
+    }
 
     const run = await this.prisma.aiRun.findUniqueOrThrow({
       where: { id: runId },
@@ -366,9 +394,9 @@ export class AiRunLifecycle {
   }
 
   /**
-   * After a decision: when no call of the run is still undecided, move it AWAITING_APPROVAL → QUEUED (a
-   * compare-and-set, so a double decision resumes once) and enqueue the resume. A lost enqueue is
-   * recovered by the sweeper. Returns the run's status afterwards.
+   * After a decision or an answered input request: when no call of the run is still undecided, move it
+   * AWAITING_APPROVAL | AWAITING_INPUT → QUEUED (a compare-and-set, so a double decision resumes once) and
+   * enqueue the resume. A lost enqueue is recovered by the sweeper. Returns the run's status afterwards.
    */
   async resumeIfDecided(
     runId: string,
@@ -379,11 +407,14 @@ export class AiRunLifecycle {
     });
     const run = await this.prisma.aiRun.findUnique({ where: { id: runId } });
     if (!run) return null;
-    if (undecided > 0 || run.status !== 'AWAITING_APPROVAL') {
+    if (
+      undecided > 0 ||
+      !(AI_RUN_WAITING_STATUSES as readonly string[]).includes(run.status)
+    ) {
       return run.status as AiRunStatus;
     }
     const claim = await this.prisma.aiRun.updateMany({
-      where: { id: runId, status: 'AWAITING_APPROVAL' },
+      where: { id: runId, status: run.status },
       data: { status: 'QUEUED' },
     });
     if (claim.count === 0) {
@@ -402,5 +433,14 @@ export class AiRunLifecycle {
     decision: AiApprovalOutcome,
   ): void {
     this.emit(runId, { type: 'tool.approval_resolved', toolCallId, decision });
+  }
+
+  /** `input.resolved` for an input request (#1388). */
+  emitInputResolved(
+    runId: string,
+    toolCallId: string,
+    outcome: AiInputOutcome,
+  ): void {
+    this.emit(runId, { type: 'input.resolved', toolCallId, outcome });
   }
 }

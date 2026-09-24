@@ -21,6 +21,11 @@ import { toPendingAction } from '../core/pending-action';
 import { callKindOf } from '../core/result-shaper';
 import { toolResultEvent } from '../runtime/agent-loop';
 import {
+  inputAnswerOf,
+  inputOutcomeOf,
+  toInputRequest,
+} from '../runtime/input-requests';
+import {
   AI_MESSAGE_FORMAT_MODEL,
   assistantMessageId,
   toApprovalRequest,
@@ -31,7 +36,8 @@ import {
  * Turns the stored transcript into the provider-neutral `AiPersistedMessage[]` the web renders. The stored
  * `AiMessage.content` is the provider-replayable message and NEVER leaves the API as is: only text, the
  * tool activity (name, class, status, the same result summary the live `tool.result` event carries), the
- * approval card with its current outcome (the STORED preview, never model prose) and run notices.
+ * approval card with its current outcome (the STORED preview, never model prose), an input form the
+ * assistant asked for (#1388) with its outcome and the user's own answer, and run notices.
  *
  * ALLOW-LIST BY FORMAT. Only rows whose `format` is exactly `aisdk-v7` are read. The runtime's own
  * records (`lazyit-system-prompt-v1`, `lazyit-run-v1`, `lazyit-step-v1`, and any `lazyit-*` a later build
@@ -143,6 +149,8 @@ export function projectTranscript(
           parts.push(slot.part);
           const approval = approvalPart(slot.row);
           if (approval) parts.push(approval);
+          const form = inputPart(slot.row);
+          if (form) parts.push(form);
         }
       }
       if (parts.length === 0) continue;
@@ -284,6 +292,22 @@ function approvalPart(
     outcome: approvalOutcome(action),
     // Applied automatically by the owner's auto-approve mode (#1376).
     ...(action.approvalMode === 'AUTO' ? { auto: true } : {}),
+  };
+}
+
+/** The form of an input request (#1388), with its outcome and — once submitted — the user's answer. */
+function inputPart(
+  row: AiToolInvocation | undefined,
+): Extract<AiMessagePart, { type: 'input' }> | null {
+  if (!row) return null;
+  const request = toInputRequest(row);
+  if (!request) return null;
+  const answer = inputAnswerOf(row);
+  return {
+    type: 'input',
+    request,
+    outcome: inputOutcomeOf(row),
+    ...(answer ? { answer } : {}),
   };
 }
 

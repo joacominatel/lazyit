@@ -32,7 +32,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * age (the MCP stale-`EXECUTING` sweep, W3-2, settles it first), and a conversation holding one is never
  * deleted — the cascade would take a pending approval or an executing write with it.
  */
-const IN_FLIGHT_INVOCATION_STATUSES = ['AWAITING_APPROVAL', 'EXECUTING'];
+const IN_FLIGHT_INVOCATION_STATUSES = [
+  'AWAITING_APPROVAL',
+  'AWAITING_INPUT',
+  'EXECUTING',
+];
 
 /** The outcome of purging a set of conversations. */
 export interface AiPurgeOutcome {
@@ -51,8 +55,8 @@ export interface AiPurgeOutcome {
  * reference either (a spec pins that).
  *
  * Every conversation delete goes through {@link purge}: it locks the candidate rows, re-checks — in new
- * statements, so it sees every committed row — that none has a QUEUED, RUNNING or AWAITING_APPROVAL run
- * or an AWAITING_APPROVAL or EXECUTING tool invocation, and deletes only what still matches the caller's guard. The runtime's submit takes the same row lock
+ * statements, so it sees every committed row — that none has an active run (QUEUED, RUNNING,
+ * AWAITING_APPROVAL or AWAITING_INPUT) or an AWAITING_APPROVAL, AWAITING_INPUT or EXECUTING tool invocation, and deletes only what still matches the caller's guard. The runtime's submit takes the same row lock
  * (it bumps `lastActivityAt`) before it creates a run, so a run can never start in a conversation that is
  * being deleted, and a conversation with an active run is never deleted (it is skipped; the next pass
  * retries).

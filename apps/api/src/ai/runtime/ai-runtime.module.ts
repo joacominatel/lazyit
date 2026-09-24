@@ -11,6 +11,8 @@ import { AgentRunOrchestrator } from './agent-run.orchestrator';
 import { AgentRunSweeper } from './agent-run.sweeper';
 import { AgentRunWorker } from './agent-run.worker';
 import { AiApprovalService } from './approval.service';
+import { AiInputRequests } from './input-requests';
+import { AiInputService } from './input.service';
 import { AiRunLimits } from './limits';
 import { AiRunPrincipals } from './principal-context';
 import { InProcessRunEventBus } from './run-event-bus';
@@ -21,7 +23,7 @@ import { AiStepUpVerifier } from './step-up.verifier';
 /**
  * The agent runtime (ADR-0097 decisions 4–6; provider-and-runtime.md §6–§8; synthesis §4.4, §4.6): the
  * loop, the orchestrator, the in-process `ai-run` BullMQ worker, the sweeper, the approval service with
- * the password step-up, the limits, and the in-process `RUN_EVENT_BUS`.
+ * the password step-up, the input-request service (#1388), the limits, and the in-process `RUN_EVENT_BUS`.
  *
  * Imports the tool core (`AiToolService`, the registry), the provider layer (`CHAT_MODEL_PORT`), the
  * settings reader (`AI_SETTINGS_READER`) and the prompt builder. `PrismaService`, the principal loader,
@@ -53,6 +55,8 @@ import { AiStepUpVerifier } from './step-up.verifier';
     AgentRunOrchestrator,
     AiStepUpVerifier,
     AiApprovalService,
+    AiInputRequests,
+    AiInputService,
     AgentRunWorker,
     AgentRunSweeper,
   ],
@@ -61,6 +65,7 @@ import { AiStepUpVerifier } from './step-up.verifier';
     InProcessRunEventBus,
     AgentRunOrchestrator,
     AiApprovalService,
+    AiInputService,
   ],
 })
 export class AiRuntimeModule {}

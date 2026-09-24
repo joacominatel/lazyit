@@ -11,6 +11,7 @@ import {
 import {
   AI_PROMPT_MAX_LENGTH,
   AI_RUN_ACTIVE_STATUSES,
+  AI_RUN_WAITING_STATUSES,
   AI_RUN_TERMINAL_STATUSES,
   type AiConversationChannel,
   type AiPageContext,
@@ -121,7 +122,7 @@ export interface SubmittedRun {
  *   toolset the principal holds now (names + definitions hash) and the system prompt text (seq 0).
  * - `submit` — one user message (chat) or one prompt (headless): guardrails, one active run per
  *   conversation, the user message with its turn context, and the start job (`{ runId }` only).
- * - `cancel` — owner only; a QUEUED or AWAITING_APPROVAL run ends now, a RUNNING one at its next step
+ * - `cancel` — owner only; a QUEUED, AWAITING_APPROVAL or AWAITING_INPUT run ends now, a RUNNING one at its next step
  *   boundary (the in-flight model call is aborted when it runs in this process).
  *
  * Refusals throw Nest HTTP exceptions with `{ code, message }` bodies (the core decision-endpoint style).
@@ -346,7 +347,7 @@ export class AgentRunOrchestrator {
       data: { cancelRequestedAt: new Date() },
     });
     const ended = await this.lifecycle.finalize(runId, 'CANCELLED', {
-      from: ['QUEUED', 'AWAITING_APPROVAL'],
+      from: ['QUEUED', ...AI_RUN_WAITING_STATUSES],
       finishReason: 'cancelled',
       error: { code: 'CANCELLED', message: 'The run was cancelled.' },
       fallback: {
