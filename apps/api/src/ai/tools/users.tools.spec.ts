@@ -512,7 +512,10 @@ const service = (label: string, id: string): Actor => ({
 const ADMIN = human('ADMIN', ID.admin);
 const MEMBER = human('MEMBER', ID.member);
 const VIEWER = human('VIEWER', ID.viewer);
-const SA_MANAGER = service('SA holding user:manage', SA.manager);
+// Route-parity fixture only: INV-SA-3 says a Service Account never holds user:manage, and a separate
+// remediation strips such grants at principal load. The matrix pins today's route behaviour; no test
+// here presents an SA running a user write as a supported path.
+const SA_MANAGER = service('SA holding user:manage (parity only)', SA.manager);
 const SA_READER = service('SA holding user:read only', SA.reader);
 const SA_BARE = service('SA with no grants', SA.bare);
 const ACTORS = [ADMIN, MEMBER, VIEWER, SA_MANAGER, SA_READER, SA_BARE];
@@ -902,13 +905,43 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       });
     });
 
+    it('a username containing "@" resolves by username, not only as an email', async () => {
+      users.set(ID.viewer, {
+        ...users.get(ID.viewer)!,
+        username: 'ops@team',
+      });
+      const result = await tools.invoke(
+        'user_get',
+        { user: 'OPS@team' },
+        chat(ADMIN),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: { user: { id: ID.viewer } },
+      });
+      // An email of one user equal to another's username is ambiguous, never a silent pick.
+      users.set(ID.viewer, {
+        ...users.get(ID.viewer)!,
+        username: 'ana@example.com',
+      });
+      const clash = await tools.invoke(
+        'user_get',
+        { user: 'ana@example.com' },
+        chat(ADMIN),
+      );
+      expect(clash).toMatchObject({
+        ok: false,
+        error: { code: 'AMBIGUOUS_REFERENCE' },
+      });
+    });
+
     it('"me" is the person the assistant acts for; a Service Account has no "me"', async () => {
       const me = await tools.invoke('user_get', { user: 'me' }, chat(MEMBER));
       expect(me).toMatchObject({ ok: true, data: { user: { id: ID.member } } });
       const sa = await tools.invoke(
         'user_get',
         { user: 'me' },
-        headless(SA_MANAGER),
+        headless(SA_READER),
       );
       expect(sa).toMatchObject({
         ok: false,
@@ -1151,7 +1184,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
           user: 'aops',
           email: 'Ana.New@Example.com',
           isActive: false,
-          manager: { user: ID.admin },
+          manager: { userId: ID.admin },
           legajo: 'L-100',
         },
         chat(ADMIN),
@@ -1195,11 +1228,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
     });
 
     it('a manager-only change is not an identity change: LEDGER_APPEND, approved without step-up (CEO decision)', async () => {
-      for (const manager of [
-        { user: 'admin@example.com' },
-        { name: 'CTO' },
-        null,
-      ]) {
+      for (const manager of [{ userId: ID.admin }, { name: 'CTO' }, null]) {
         resetState();
         const proposal = await tools.propose(
           'user_update',
@@ -1226,6 +1255,60 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         managerId: null,
         managerName: null,
       });
+    });
+
+    it('pins the manager: a lazyit-user manager is taken by id only, and naming the current one is a no-op', async () => {
+      const byEmail = await tools.propose(
+        'user_update',
+        { user: ID.member, manager: { user: 'admin@example.com' } },
+        chat(ADMIN),
+      );
+      expect(byEmail).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+      // The member's manager is the free-text "Head of IT": re-sending it changes nothing.
+      const same = await tools.propose(
+        'user_update',
+        { user: ID.member, manager: { name: 'Head of IT' } },
+        chat(ADMIN),
+      );
+      expect(same).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT', status: 400 } },
+      });
+      // A linked manager re-sent by id is a no-op too (compared by id, not by label).
+      users.set(ID.member, {
+        ...users.get(ID.member)!,
+        managerId: ID.admin,
+        managerName: null,
+      });
+      const sameUser = await tools.propose(
+        'user_update',
+        { user: ID.member, manager: { userId: ID.admin } },
+        chat(ADMIN),
+      );
+      expect(sameUser).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT', status: 400 } },
+      });
+      // The stored input carries the id the card showed, so execution sets exactly that manager.
+      const moved = await tools.propose(
+        'user_update',
+        { user: ID.member, manager: { userId: ID.viewer } },
+        chat(ADMIN),
+      );
+      if (!moved.ok) throw new Error(JSON.stringify(moved.result));
+      expect(invocations.get(moved.action.id)!.input).toMatchObject({
+        manager: { userId: ID.viewer },
+      });
+      expect(moved.action.preview!.changes).toEqual([
+        {
+          field: 'manager',
+          before: 'Admin User',
+          after: 'Viewer User <viewer@example.com>',
+        },
+      ]);
     });
 
     it('a name-only change on a local account needs no IdP warning but is still an identity change', async () => {
@@ -1348,43 +1431,38 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       ).toBe(409);
     });
 
-    it('headless: a Service Account demoting or deactivating the last ADMIN gets the route’s 409', async () => {
-      for (const change of [{ role: 'MEMBER' }, { isActive: false }]) {
-        const result = await tools.invoke(
-          'user_update',
-          { user: ID.admin, ...change },
-          headless(SA_MANAGER),
-        );
-        expect(result).toMatchObject({
-          ok: false,
-          mutated: false,
-          error: { code: 'CONFLICT', status: 409 },
-        });
-        expect(
-          await viaNetwork(SA_MANAGER, {
-            method: 'update',
-            verb: 'patch',
-            url: `/users/${ID.admin}`,
-            shape: { body: change },
-          }),
-        ).toBe(409);
-      }
+    it('MCP (lazyit.admin): deactivating the last ACTIVE admin gets the route’s 409; a second active admin unblocks it', async () => {
+      // A second admin that is INACTIVE does not count (SEC-021): ID.admin is still the last usable one.
+      users.set(
+        ID.viewer,
+        userRow(ID.viewer, 'ADMIN', {
+          email: 'second@example.com',
+          isActive: false,
+        }),
+      );
+      const refused = await tools.invoke(
+        'user_update',
+        { user: 'me', isActive: false },
+        mcp(ADMIN, ['read', 'write', 'elevated']),
+      );
+      expect(refused).toMatchObject({
+        ok: false,
+        mutated: false,
+        error: { code: 'CONFLICT', status: 409 },
+      });
       expect(users.get(ID.admin)).toMatchObject({
         role: 'ADMIN',
         isActive: true,
       });
-      // With a second active admin the same demotion goes through.
-      users.set(
-        ID.viewer,
-        userRow(ID.viewer, 'ADMIN', { email: 'second@example.com' }),
-      );
+      // Once the second admin is active, demoting it goes through (ID.admin remains).
+      users.set(ID.viewer, { ...users.get(ID.viewer)!, isActive: true });
       const ok = await tools.invoke(
         'user_update',
-        { user: ID.admin, role: 'MEMBER' },
-        headless(SA_MANAGER),
+        { user: ID.viewer, role: 'MEMBER' },
+        mcp(ADMIN, ['read', 'write', 'elevated']),
       );
       expect(ok).toMatchObject({ ok: true, mutated: true });
-      expect(users.get(ID.admin)!.role).toBe('MEMBER');
+      expect(users.get(ID.viewer)!.role).toBe('MEMBER');
     });
 
     it('MCP: a lazyit.write token cannot run it; lazyit.admin can', async () => {
@@ -1573,7 +1651,13 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         'CASCADE_RELEASES_ASSIGNMENTS',
         'CASCADE_REVOKES_GRANTS',
         'EXTERNAL_DEPROVISIONING',
+        'IRREVERSIBLE',
       ]);
+      expect(preview.changes).toContainEqual({
+        field: 'secretVaultMemberships',
+        before: 'any held',
+        after: 'dropped (not restored by user_restore)',
+      });
 
       const approved = await tools.approve(proposal.action.id, chat(ADMIN));
       expect(approved).toMatchObject({
@@ -1609,7 +1693,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       ]);
     });
 
-    it('a user with nothing to reclaim only warns SOFT_DELETE', async () => {
+    it('a user with nothing to reclaim warns SOFT_DELETE and the (uncountable) vault drop', async () => {
       const proposal = await tools.propose(
         'user_offboard',
         { user: ID.viewer },
@@ -1617,18 +1701,18 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       );
       if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
       expect(proposal.action.preview).toMatchObject({
-        warnings: ['SOFT_DELETE'],
+        warnings: ['SOFT_DELETE', 'IRREVERSIBLE'],
         impacted: [],
       });
     });
 
     it('offboarding the last active ADMIN is refused by the route’s guard (409), through every channel', async () => {
-      const headlessResult = await tools.invoke(
+      const mcpResult = await tools.invoke(
         'user_offboard',
-        { user: ID.admin },
-        headless(SA_MANAGER),
+        { user: 'me' },
+        mcp(ADMIN, ['read', 'write']),
       );
-      expect(headlessResult).toMatchObject({
+      expect(mcpResult).toMatchObject({
         ok: false,
         error: { code: 'CONFLICT', status: 409 },
       });
@@ -1645,7 +1729,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       });
       expect(users.get(ID.admin)!.deletedAt).toBeNull();
       expect(
-        await viaNetwork(SA_MANAGER, {
+        await viaNetwork(ADMIN, {
           method: 'offboard',
           verb: 'post',
           url: `/users/${ID.admin}/offboard`,
@@ -1714,24 +1798,18 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       });
     });
 
-    it('headless: a Service Account restores by id (it cannot list the archived slice, like the route)', async () => {
-      const byId = await tools.invoke(
+    it('restoring an archived ADMIN brings its powers back: ROLE_CHANGE too', async () => {
+      users.set(ID.archived, { ...users.get(ID.archived)!, role: 'ADMIN' });
+      const proposal = await tools.propose(
         'user_restore',
         { user: ID.archived },
-        headless(SA_MANAGER),
+        chat(ADMIN),
       );
-      expect(byId).toMatchObject({ ok: true, mutated: true });
-      resetState();
-      const byEmail = await tools.invoke(
-        'user_restore',
-        { user: 'gone@example.com' },
-        headless(SA_MANAGER),
-      );
-      expect(byEmail).toMatchObject({
-        ok: false,
-        error: { code: 'FORBIDDEN', status: 403 },
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      expect(proposal.action.preview).toMatchObject({
+        warnings: ['IDENTITY_CHANGE', 'ROLE_CHANGE'],
+        stepUpRequired: true,
       });
-      expect(users.get(ID.archived)!.deletedAt).not.toBeNull();
     });
   });
 });

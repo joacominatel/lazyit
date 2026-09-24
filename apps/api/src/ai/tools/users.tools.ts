@@ -88,7 +88,7 @@ const userRef = z
   .min(1)
   .max(320)
   .describe(
-    'The user: id, email, username, legajo (employee number) or "me" (the person you act for).',
+    'The user: id, email, username, legajo (employee number) or "me" (always the person you act for).',
   );
 
 /** "Ana Ops <ana@example.com>" — what a person recognizes on a card or a chip. */
@@ -171,8 +171,10 @@ type DirectorySlice = 'active' | 'only';
 
 /**
  * The users matching `reference` exactly, read through `GET /users` as the caller (so a caller without
- * `user:read`, or without ADMIN for the archived slice, gets the route's 403). An email uses the route's
- * search; a username or legajo — which the route does not search — scans a bounded number of pages.
+ * `user:read`, or without ADMIN for the archived slice, gets the route's 403). A reference with `@` is
+ * matched as an email through the route's search; every reference is ALSO matched exactly against the
+ * username and legajo — which the route does not search — by scanning a bounded number of pages (a
+ * username may itself contain `@`). Two different users matching is reported as ambiguous by the resolver.
  */
 async function lookupUsers(
   rt: AiToolRuntime,
@@ -184,15 +186,17 @@ async function lookupUsers(
     id: String(row.id),
     label: userLabel(row),
   });
+  const found: AiReferenceCandidate[] = [];
   if (reference.includes('@')) {
     const page = await rt.call(UsersController, 'findAll', {
       query: { q: reference, deleted: slice, limit: String(DIRECTORY_PAGE) },
     });
-    return asRows(page.items)
-      .filter((row) => str(row.email)?.toLowerCase() === wanted)
-      .map(candidate);
+    found.push(
+      ...asRows(page.items)
+        .filter((row) => str(row.email)?.toLowerCase() === wanted)
+        .map(candidate),
+    );
   }
-  const found: AiReferenceCandidate[] = [];
   for (let pageNo = 0; pageNo < DIRECTORY_SCAN_PAGES; pageNo += 1) {
     const offset = pageNo * DIRECTORY_PAGE;
     const page = await rt.call(UsersController, 'findAll', {
@@ -219,7 +223,10 @@ async function lookupUsers(
   return found;
 }
 
-/** Resolve a user reference; `"me"` is the human caller (a Service Account has no "me"). */
+/**
+ * Resolve a user reference. The literal `"me"` (any case) ALWAYS means the human caller and is checked
+ * first — a user whose username is "me" must be named by id or email. A Service Account has no "me".
+ */
 async function resolveUser(
   rt: AiToolRuntime,
   reference: string,
@@ -271,12 +278,17 @@ async function optionalFacet<T>(read: () => Promise<T>): Promise<T | null> {
 
 // ─── Inputs shared by create and update ───────────────────────────────────────────────────────────
 
+/**
+ * A lazyit-user manager is taken by ID only (find it with user_search first): the stored input is then
+ * exactly what the approval card showed, so an approved action cannot resolve to a different person at
+ * execute time than the one previewed.
+ */
 const managerInput = z
   .union([
     z.strictObject({
-      user: userRef.describe(
-        'The manager, a lazyit user: id, email, username or legajo.',
-      ),
+      userId: z
+        .uuid()
+        .describe('The manager, a lazyit user, by id (from user_search).'),
     }),
     z.strictObject({
       name: z
@@ -291,9 +303,8 @@ const managerInput = z
 type ManagerInput = z.output<typeof managerInput>;
 
 /**
- * The route's `manager` body for a manager input (the user reference resolved through the list). A
- * preview also wants a label a person recognizes: a manager named by raw id is read through `findOne`
- * (so a missing one fails the preview as the route's 404).
+ * The route's `manager` body for a manager input. A preview also wants a label a person recognizes: the
+ * manager is read through `findOne` (so a missing or offboarded one fails the preview as the route's 404).
  */
 async function managerBody(
   rt: AiToolRuntime,
@@ -307,17 +318,29 @@ async function managerBody(
   if ('name' in manager) {
     return { body: { managerName: manager.name }, label: manager.name };
   }
-  const resolved = await resolveUser(rt, manager.user);
-  let label = resolved.label ?? resolved.id;
-  if (options.label && resolved.label === undefined) {
+  let label = manager.userId;
+  if (options.label) {
     const row = asRow(
       await rt.call(UsersController, 'findOne', {
-        params: { id: resolved.id },
+        params: { id: manager.userId },
       }),
     );
     label = userLabel(row);
   }
-  return { body: { managerId: resolved.id }, label };
+  return { body: { managerId: manager.userId }, label };
+}
+
+/** Whether a manager body names the manager the user already has (the route's descriptor). */
+function sameManager(
+  current: unknown,
+  body: { managerId: string } | { managerName: string } | null,
+): boolean {
+  const descriptor = asRow(current);
+  if (body === null) return current === null || current === undefined;
+  if ('managerId' in body) {
+    return descriptor.type === 'user' && descriptor.id === body.managerId;
+  }
+  return descriptor.type === 'external' && descriptor.name === body.managerName;
 }
 
 const firstName = z.string().trim().min(1).max(100);
@@ -606,7 +629,8 @@ const userUpdate = defineTool({
   description:
     'Edit a user (administrators): email, first or last name, role, username, legajo, manager, or ' +
     'activation (isActive false disables sign-in and ends their sessions; true re-enables it). Send ' +
-    'only what changes; null clears username, legajo or manager. lazyit refuses to change your own ' +
+    'only what changes; null clears username, legajo or manager (a manager who is a lazyit user is given by id — find it ' +
+    'with user_search). lazyit refuses to change your own ' +
     'role and to demote or deactivate the last active administrator. Role and identity changes are ' +
     'elevated: the person you act for confirms them with their password. To offboard someone use ' +
     'user_offboard.',
@@ -681,7 +705,7 @@ const userUpdate = defineTool({
     if (input.manager !== undefined) {
       const manager = await managerBody(rt, input.manager, { label: true });
       const before = managerText(current.manager);
-      if (manager.label !== before) {
+      if (!sameManager(current.manager, manager.body)) {
         changes.push({ field: 'manager', before, after: manager.label });
         // CEO decision (2026-09-24): a manager change is NOT an identity change and needs no step-up. It
         // is local-only (never mirrored to the IdP) and the route records it as an append-only
@@ -753,7 +777,7 @@ const userOffboard = defineTool({
     'access grants are revoked, their assigned assets are released back to inventory, their Secret ' +
     'Manager vault memberships are dropped, their sessions end and, when linked, their identity-provider ' +
     'account is deactivated. It can be undone only partly: user_restore brings the account back but ' +
-    'not the grants or the assets. lazyit refuses to offboard the last active administrator.',
+    'not the grants, the assets or the vault memberships. lazyit refuses to offboard the last active administrator.',
   domain: 'users',
   class: 'write',
   destructive: true,
@@ -814,12 +838,23 @@ const userOffboard = defineTool({
       });
     }
     if (current.externalId) warnings.push('EXTERNAL_DEPROVISIONING');
+    // The route also hard-drops the user's Secret Manager vault memberships (wrapped key rows), and
+    // user_restore does not bring them back. The preview cannot count them: the Secret Manager is a
+    // structural exclusion (ADR-0061), so no tool may read it. It always warns, and the card says "any".
+    warnings.push('IRREVERSIBLE');
 
     const target = userRefOf(current, 'archived');
     return previewOf(
       {
         target,
-        changes: [{ field: 'status', before: 'active', after: 'offboarded' }],
+        changes: [
+          { field: 'status', before: 'active', after: 'offboarded' },
+          {
+            field: 'secretVaultMemberships',
+            before: 'any held',
+            after: 'dropped (not restored by user_restore)',
+          },
+        ],
         warnings,
         impacted,
         precondition: preconditionOf(target, current),
@@ -894,7 +929,7 @@ const userRestore = defineTool({
   title: 'Restore an offboarded user',
   description:
     'Bring back an offboarded user (administrators): the account exists and can sign in again. It does ' +
-    'NOT restore the access grants or asset assignments offboarding removed — re-grant and re-assign ' +
+    'NOT restore the access grants, asset assignments or vault memberships offboarding removed — re-grant and re-assign ' +
     'them deliberately. Name the user by id or email (find them with user_search archived true). ' +
     'Restoring sign-in is elevated: the person you act for confirms it with their password.',
   domain: 'users',
@@ -907,6 +942,9 @@ const userRestore = defineTool({
   async preview(input, rt) {
     const current = await readArchivedUser(rt, input.user);
     const target = userRefOf(current, 'restored');
+    const warnings: AiPreviewWarningCode[] = ['IDENTITY_CHANGE'];
+    // Bringing back an ADMIN or MEMBER brings back that role's powers: a privilege decision.
+    if (current.role !== 'VIEWER') warnings.push('ROLE_CHANGE');
     return previewOf(
       {
         target,
@@ -915,7 +953,7 @@ const userRestore = defineTool({
           // The role the account comes back with (unchanged by the restore).
           { field: 'role', after: current.role },
         ],
-        warnings: ['IDENTITY_CHANGE'],
+        warnings,
         precondition: preconditionOf(target, current),
       },
       true,
