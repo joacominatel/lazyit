@@ -27,11 +27,15 @@ import { WorkflowDryRunController } from '../../workflow-engine/dry-run/workflow
 import { WorkflowRunsController } from '../../workflow-engine/runs/workflow-runs.controller';
 import { ManualTasksController } from '../../workflow-engine/tasks/manual-tasks.controller';
 import { unexposed, type AiToolset } from '../core/tool-descriptor';
+import { AiSettingsController } from '../settings/ai-settings.controller';
+import { AiStatusController } from '../status/ai-status.controller';
 
 const SECRET_MANAGER =
   'Excluded: the Secret Manager is zero-knowledge (ADR-0061, INV-10; structural exclusion).';
 const OAUTH_SERVER =
   'Excluded: the OAuth authorization server mints and verifies credentials (INV-AI-5; structural exclusion).';
+const AI_OWN_SURFACE =
+  "Excluded: the AI's own configuration and status are never tools (INV-AI-14; structural exclusion of /config/ai and /ai).";
 const INSTANCE_CONFIG =
   'Deferred: instance configuration is elevated and comes later; secret-bearing fields are never tool inputs (tools-and-execution.md §3, INV-AI-5).';
 
@@ -112,6 +116,12 @@ export const platformToolset: AiToolset = {
       'Deferred: Service Account management is elevated with a password step-up, v1.1 (tools-and-execution.md §3).',
     ),
     unexposed(SmtpController, ['get', 'update', 'test'], INSTANCE_CONFIG),
+    unexposed(
+      AiSettingsController,
+      ['get', 'update', 'test', 'models'],
+      AI_OWN_SURFACE,
+    ),
+    unexposed(AiStatusController, ['get'], AI_OWN_SURFACE),
     unexposed(DirectoryController, ['get', 'update', 'sync'], INSTANCE_CONFIG),
     unexposed(
       AssetTagSchemeController,
