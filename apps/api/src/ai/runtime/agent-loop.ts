@@ -128,6 +128,33 @@ export function summarizeArgs(
   return out;
 }
 
+/**
+ * Every call of a run gets a non-empty id unique within the run: the id keys the step record, the
+ * pending invocation (`toolUseId`), the events and the decision endpoint. A model that sends an empty or
+ * repeated id gets a synthesized one (`lz_<runId>_<step>_<index>`) for that call. `seen` is updated.
+ */
+export function uniqueCallIds(
+  calls: readonly ChatModelToolCall[],
+  runId: string,
+  stepIndex: number,
+  seen: Set<string>,
+): ChatModelToolCall[] {
+  return calls.map((call, index) => {
+    let id =
+      typeof call.toolCallId === 'string' && call.toolCallId.trim().length > 0
+        ? call.toolCallId
+        : '';
+    if (id === '' || seen.has(id)) {
+      id = `lz_${runId}_${stepIndex}_${index}`;
+      for (let n = 1; seen.has(id); n += 1) {
+        id = `lz_${runId}_${stepIndex}_${index}_${n}`;
+      }
+    }
+    seen.add(id);
+    return id === call.toolCallId ? call : { ...call, toolCallId: id };
+  });
+}
+
 const UNTRUSTED_TAG = '<untrusted_content>';
 
 /** A tool name as the registry allows it; anything else the model sent is logged as `(invalid)`. */
@@ -276,6 +303,7 @@ export class AgentLoop {
     const seeded = await this.seedCounters(runId);
     let toolCalls = seeded.toolCalls;
     let untrusted = seeded.untrusted;
+    const callIds = seeded.callIds;
     let lastInputTokens = await this.limits.lastInputTokens(conversation.id);
 
     for (;;) {
@@ -323,6 +351,10 @@ export class AgentLoop {
       }
 
       const stepIndex = run.stepCount;
+      result = {
+        ...result,
+        toolCalls: uniqueCallIds(result.toolCalls, runId, stepIndex, callIds),
+      };
       await this.persistStep(run, scope, result, stepIndex, untrusted);
       if (result.responseMessages.length > 0) {
         this.lifecycle.emit(runId, { type: 'message.completed', messageId });
@@ -957,9 +989,11 @@ export class AgentLoop {
   }
 
   /** How many calls this run already made, and the untrusted sources it read (a resumed run). */
-  private async seedCounters(
-    runId: string,
-  ): Promise<{ toolCalls: number; untrusted: AiEntityRef[] }> {
+  private async seedCounters(runId: string): Promise<{
+    toolCalls: number;
+    untrusted: AiEntityRef[];
+    callIds: Set<string>;
+  }> {
     const rows = await this.prisma.aiMessage.findMany({
       where: { runId, format: AI_MESSAGE_FORMAT_STEP },
       orderBy: { seq: 'asc' },
@@ -971,12 +1005,14 @@ export class AgentLoop {
       if (record) latest.set(record.stepIndex, record);
     }
     let toolCalls = 0;
+    const callIds = new Set<string>();
     let untrusted: AiEntityRef[] = [];
     for (const record of latest.values()) {
       toolCalls += record.calls.length;
+      for (const call of record.calls) callIds.add(call.toolCallId);
       untrusted = mergeRefs(untrusted, record.untrustedSources);
     }
-    return { toolCalls, untrusted };
+    return { toolCalls, untrusted, callIds };
   }
 
   private emitCall(

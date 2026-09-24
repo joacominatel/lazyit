@@ -523,6 +523,46 @@ describe('every tool call is answered', () => {
   });
 });
 
+describe('tool-call ids', () => {
+  it('synthesizes a unique id for an empty or repeated one', async () => {
+    rt.model.push(
+      {
+        toolCalls: [
+          { toolCallId: '', toolName: READ, input: {} },
+          { toolCallId: 'dup', toolName: READ, input: {} },
+          { toolCallId: 'dup', toolName: WRITE, input: { id: 'a1' } },
+        ],
+      },
+      {
+        toolCalls: [
+          { toolCallId: 'dup', toolName: WRITE, input: { id: 'a2' } },
+        ],
+      },
+    );
+    const { runId, conversationId } = await chat();
+    await rt.drain();
+    const ids = rt.prisma.tables.aiToolInvocation.rows.map((r) => r.toolUseId);
+    expect(ids).toEqual([`lz_${runId}_0_2`]);
+    await rt.approvals.decide({
+      runId,
+      toolCallId: `lz_${runId}_0_2`,
+      decision: 'approve',
+      identity: HUMAN,
+    });
+    await rt.drain();
+    const [results] = toolMessages(conversationId);
+    expect(results.map((r) => r.toolCallId)).toEqual([
+      `lz_${runId}_0_0`,
+      'dup',
+      `lz_${runId}_0_2`,
+    ]);
+    // The next step's repeated id is unique within the run too.
+    expect(rt.prisma.tables.aiToolInvocation.rows[1].toolUseId).toBe(
+      `lz_${runId}_1_0`,
+    );
+  });
+});
+
 describe('refusal and provider errors', () => {
   it('a content-filter finish fails the run PROVIDER_REFUSED', async () => {
     rt.model.push({ text: '', finishReason: 'content-filter' });
