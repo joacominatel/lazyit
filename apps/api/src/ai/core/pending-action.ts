@@ -56,7 +56,8 @@ export interface AiApproveOptions {
 }
 
 /**
- * The CLOSED list of preview warnings that make an `elevated` action require a password step-up (CEO
+ * The CLOSED list of preview warnings that make a write — `write` or `elevated`, whatever the tool's
+ * class — require a password step-up (CEO
  * decision 2026-09-24, #1315, "Opción 2": step-up for privilege grants and credential delivery only —
  * ADR-0097 decision 4 — enforced by core, not left to each tool). A tool may still ask for step-up on
  * its own (`stepUpRequired: true`); it can never switch it off for these warnings.
