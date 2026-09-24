@@ -107,6 +107,15 @@ function clip(text: string, max: number): string {
     : `${text.slice(0, max)}… [${text.length - max} more characters]`;
 }
 
+/** The write limits of an article's title and excerpt (`CreateArticleSchema`), and a name bound. */
+const KB_TITLE_MAX = 200;
+const KB_EXCERPT_MAX = 280;
+const KB_NAME_MAX = 100;
+
+function clipOrNull(text: string | null, max: number): string | null {
+  return text === null ? null : clip(text, max);
+}
+
 function isHighSurrogate(code: number): boolean {
   return code >= 0xd800 && code <= 0xdbff;
 }
@@ -145,8 +154,8 @@ function author(value: unknown): Row | null {
   const row = asRow(value);
   if (Object.keys(row).length === 0) return null;
   return {
-    firstName: str(row.firstName),
-    lastName: str(row.lastName),
+    firstName: clipOrNull(str(row.firstName), KB_NAME_MAX),
+    lastName: clipOrNull(str(row.lastName), KB_NAME_MAX),
     formerMember: row.deletedAt !== null && row.deletedAt !== undefined,
   };
 }
@@ -156,7 +165,9 @@ function articleSummary(row: Row, withExcerpt: boolean): Row {
   const out: Row = {
     id: row.id,
     slug: row.slug,
-    title: untrusted(str(row.title)),
+    // Clipped to their write limits: a legacy row past them cannot eat the result budget
+    // (KB_CONTENT_SERIALIZED_BUDGET assumes these bounds).
+    title: untrusted(clipOrNull(str(row.title), KB_TITLE_MAX)),
     status: row.status,
     folderId: row.categoryId,
     authorId: row.authorId,
@@ -166,7 +177,9 @@ function articleSummary(row: Row, withExcerpt: boolean): Row {
   };
   if ('readingMinutes' in row) out.readingMinutes = row.readingMinutes;
   if ('linkCount' in row) out.linkCount = row.linkCount;
-  if (withExcerpt) out.excerpt = untrusted(str(row.excerpt));
+  if (withExcerpt) {
+    out.excerpt = untrusted(clipOrNull(str(row.excerpt), KB_EXCERPT_MAX));
+  }
   return out;
 }
 
@@ -850,6 +863,23 @@ const kbUpdateArticle = defineTool({
           valueKind: 'text',
         },
       );
+      if (published) {
+        // A published article moved is published to the destination's readers (security.md §6.1
+        // chain 4 done as a move): the card carries what they will see — the title and the WHOLE
+        // body — exactly as a publish card does, unless this edit already shows them as changes.
+        if (!changes.some((c) => c.field === 'title')) {
+          changes.push({ field: 'title', after: row.title, valueKind: 'text' });
+        }
+        if (!changes.some((c) => c.field === 'content')) {
+          const body = str(row.content) ?? '';
+          clipped = clipped || body.length > KB_PREVIEW_BODY_MAX;
+          changes.push({
+            field: 'content',
+            after: clip(body, KB_PREVIEW_BODY_MAX),
+            valueKind: 'text',
+          });
+        }
+      }
     } else if (published && edits && home) {
       // The edit goes live to the readers of the folder it is in: name them.
       changes.push({

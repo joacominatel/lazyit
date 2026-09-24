@@ -1076,6 +1076,26 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       expect(data(last).content).not.toHaveProperty('nextOffset');
     });
 
+    it('clips a legacy over-long title and excerpt to their write limits so the page budget holds', async () => {
+      const row = articles.get(A.pub)!;
+      articles.set(A.pub, {
+        ...row,
+        title: '"'.repeat(5_000),
+        excerpt: '"'.repeat(5_000),
+        content: '"'.repeat(40_000),
+      });
+      const result = await tools.invoke(
+        'kb_get_article',
+        { article: A.pub, maxChars: 15_000, detail: 'full' },
+        ctx(actor('MEMBER')),
+      );
+      expect(JSON.stringify(result).length).toBeLessThan(20_000);
+      const article = data(result).article as Record<string, string>;
+      expect(article.title).toContain('… [4800 more characters]');
+      expect(article.excerpt).toContain('… [4720 more characters]');
+      expect(data(result).content).toHaveProperty('nextOffset');
+    });
+
     it('the default page keeps a long article under the result cap', async () => {
       const result = await tools.invoke(
         'kb_get_article',
@@ -1558,13 +1578,45 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
             valueKind: 'entity',
           },
           { field: 'audience', valueKind: 'text' },
+          // What the destination's readers will see: the title and the whole body, as on a publish card.
+          { field: 'title', after: TEAM_TITLE, valueKind: 'text' },
+          {
+            field: 'content',
+            after: articles.get(A.team)!.content,
+            valueKind: 'text',
+          },
         ],
+        // The caller wrote it: nothing other-authored to flag.
+        untrustedSources: [],
       });
       const approved = await tools.approve(proposal.action.id, chat(member));
       expect(approved).toMatchObject({ status: 'SUCCEEDED' });
       expect(articles.get(A.team)!.categoryId).toBe(F.public);
       // The move lands on the version timeline (ADR-0060 §9).
       expect(versions).toHaveLength(1);
+    });
+
+    it("a published move that also edits the body shows each once; someone else's article is flagged as untrusted", async () => {
+      const proposal = await tools.propose(
+        'kb_update_article',
+        { article: A.pub, folderId: F.team, content: 'Rewritten' },
+        chat(actor('ADMIN')),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      const preview = proposal.action.preview!;
+      expect(preview.changes.map((c) => c.field)).toEqual([
+        'content',
+        'folder',
+        'audience',
+        'title',
+      ]);
+      expect(preview.changes.find((c) => c.field === 'content')!.after).toBe(
+        'Rewritten',
+      );
+      expect(preview).toMatchObject({
+        elevated: true,
+        untrustedSources: [{ type: 'article', id: A.pub }],
+      });
     });
 
     it('a move into a folder the caller cannot read is the route 400 (blind destination refused)', async () => {

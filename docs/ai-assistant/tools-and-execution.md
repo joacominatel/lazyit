@@ -585,7 +585,9 @@ leak through a tool would be a leak in the test.
   max 15,000), `detail`. The body is paged by characters **and** by serialized size (11,000 serialized
   characters per page), so JSON escaping (quotes, backslashes, control characters) never pushes a result
   past the 20,000-character cap and `content.nextOffset` and the closing delimiter always survive; a page
-  never splits a surrogate pair; `full` metadata is clipped to 1,500 characters. A folder-hidden article
+  never splits a surrogate pair; `full` metadata is clipped to 1,500 characters, and the title, excerpt
+  and author names in every KB result to their write limits (200, 280, 100), so a legacy over-long row
+  cannot eat the budget. A folder-hidden article
   or someone else's draft is the route's 404, identical to a missing one.
 - `kb_create_article` (`write`) — always a `DRAFT` authored by the caller; `status` is not an input.
 - `kb_update_article` (`write`·D) — title, slug, excerpt, the whole body, and `folderId` (a MOVE).
@@ -596,14 +598,19 @@ leak through a tool would be a leak in the test.
   A raw id goes straight to the write handler; a slug is resolved through `findOne`/`findBySlug`. A chat
   approval re-runs the preview, whose precondition must name the same article id, so a slug re-pointed
   after the card was shown is `STALE`; what remains is the core's TOCTOU window (§9).
-- **What the card shows** (security.md §6.1 chain 4, visibility laundering): the folder **by name** (a
-  `category` entity value with its path as the label) and its **audience** — summarized from the folder's
-  and its ancestors' access rules when the caller may read them (`settings:manage`, #554), from the
-  derived `hasAccessRules` flag if the API exposes it (#1299), and otherwise stated as *unknown to you* —
-  never guessed as public. A create, a publish and a move show the folder and audience; an edit of a
-  published article shows the audience it goes live to. The body is shown **whole**: a body the tool
-  writes is bounded by its input schema to 200,000 characters, the card's own limit; only a legacy body
-  past that is clipped, marked as such, and the approval is elevated.
+- **What the card shows** (security.md §6.1 chain 4, visibility laundering — "the preview shows the
+  destination folder's audience, the full body, and the untrusted-source banner"): the folder **by name**
+  (a `category` entity value with its path as the label) and its **audience** — summarized from the
+  folder's and its ancestors' access rules when the caller may read them (`settings:manage`, #554), from
+  the derived `hasAccessRules` flag if the API exposes it (#1299), and otherwise stated as *unknown to
+  you* — never guessed as public. A create, a publish and a move show the folder and audience; an edit of
+  a published article shows the audience it goes live to. Whatever becomes visible to other readers is on
+  the card **whole** — the title and body of a publish, the new values of an edit of a published article,
+  and the title and body of a **published article that is moved** (the move is the laundering path of
+  chain 4). A body the tool writes is bounded by its input schema to 200,000 characters, the card's own
+  limit; only a legacy body past that is clipped, marked as such, and the approval is elevated. Another
+  person's article is named in `untrustedSources` (the banner); the caller's own article is not, since it
+  is not other-authored.
 - **Refused before a card:** a create or a move into a missing folder (the route's own 400), a move into a
   folder the caller cannot read (the route's 400, same message), and a **create into a folder the caller
   cannot read** — `POST /articles` still accepts it ([[0060-kb-folder-access-control]] §9, open), but the
@@ -630,7 +637,11 @@ leak through a tool would be a leak in the test.
   - a member without `article:manage` gets the elevated card for someone else's published article, and
     the route's 403 at approve — the core dry-check sees only `article:write`;
   - the folder audience for a non-`settings:manage` caller stays *unknown* until the derived
-    restricted flag (#1299) lands.
+    restricted flag (#1299) lands;
+  - the audience on a card is computed at propose; the approve-time check compares only the article's
+    `updatedAt`, so a folder's access rules changed between propose and approve (by a `settings:manage`
+    holder) are not detected and the card may understate the new audience — the same TOCTOU class as §9,
+    closed only by folding the destination folder's version into the precondition.
 
 **Assets and reference tools as built (W2-5).** Eleven tools: `asset_search`, `asset_get`,
 `reference_lookup` (read); `asset_create`, `asset_update`·D, `asset_archive`·D, `asset_restore`,
