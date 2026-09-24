@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   NotFoundException,
 } from '@nestjs/common';
@@ -26,8 +27,10 @@ import {
 import {
   AiReferenceError,
   entityRefOf,
+  type AiReferenceCandidate,
   type AiResolvedReference,
 } from '../core/reference-resolver';
+import { assertChannelAllows } from '../core/pending-action';
 import { untrusted } from '../core/result-shaper';
 import {
   bind,
@@ -220,14 +223,14 @@ async function provisioningOutlook(
 
 // ─── References ──────────────────────────────────────────────────────────────────────────────────────
 
-/**
- * A user reference. v1: the user's id or `"me"` (the caller). Email / username resolution needs the
- * users directory read (`UsersController.findAll`), which the users toolset (W2-9) binds — a follow-up.
- */
+/** A user reference: an email, an exact full name, an id or `"me"` (see {@link resolveUser}). */
 const userReference = z
-  .union([z.uuid(), z.literal('me')])
+  .string()
+  .trim()
+  .min(1)
+  .max(320)
   .describe(
-    'The user: their id (a uuid; find it with lazyit_search) or "me" for yourself.',
+    'The user: their email, their exact full name ("Ana Ops"), their id, or "me" for yourself.',
   );
 
 const applicationReference = z
@@ -240,11 +243,78 @@ const applicationReference = z
   );
 
 /** Resolve `"me"` or a user id. `"me"` is the calling human; a Service Account has no person. */
-function resolveUser(
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** "Ana Ops <ana@example.com>" — how a directory row is named in a candidate list. */
+function personLabel(row: Row): string {
+  const name = [str(row.firstName), str(row.lastName)]
+    .filter((part): part is string => !!part)
+    .join(' ');
+  const email = str(row.email);
+  return (
+    [name || null, email ? `<${email}>` : null].filter(Boolean).join(' ') ||
+    String(row.id)
+  );
+}
+
+/**
+ * The users a reference names exactly — an email, or a full name ("Ana Ops") — read through the bound,
+ * guarded `GET /users` (`user:read`: a caller without it gets the route's 403, never a match). The route
+ * searches first name, last name and email by substring; the match here is exact and case-insensitive.
+ *
+ * A partial page never decides (the W2-7 rule): when the route reports more rows than the one page read
+ * holds, a match could have a twin beyond it, so the reference is refused as `AMBIGUOUS_REFERENCE`
+ * ("use the id or email") — unless the page already holds more than one exact match (reported as
+ * ambiguous with its candidates by the resolver). An exact EMAIL match stays decisive: emails are unique
+ * among live users.
+ */
+async function lookupUsers(
   rt: AiToolRuntime,
   reference: string,
-): AiResolvedReference {
-  if (reference === 'me') {
+): Promise<AiReferenceCandidate[]> {
+  const wanted = reference.trim().replace(/\s+/g, ' ').toLowerCase();
+  const byEmail = wanted.includes('@');
+  const page = asRow(
+    await rt.call(UsersController, 'findAll', {
+      query: {
+        q: byEmail ? wanted : wanted.split(' ')[0],
+        limit: String(MAX_PAGE_LIMIT),
+      },
+    }),
+  );
+  const rows = asRows(page.items);
+  const found = rows
+    .filter((row) =>
+      byEmail
+        ? str(row.email)?.toLowerCase() === wanted
+        : `${str(row.firstName) ?? ''} ${str(row.lastName) ?? ''}`
+            .trim()
+            .replace(/\s+/g, ' ')
+            .toLowerCase() === wanted,
+    )
+    .map((row) => ({ id: String(row.id), label: personLabel(row) }));
+  const total = typeof page.total === 'number' ? page.total : rows.length;
+  const partial = total > rows.length;
+  if (partial && found.length <= 1 && !(byEmail && found.length === 1)) {
+    throw new AiReferenceError(
+      'AMBIGUOUS_REFERENCE',
+      `Too many users match "${reference}" to be sure; use the user's id or email`,
+      found.map((c) => ({ type: 'user' as const, ...c })),
+    );
+  }
+  return found;
+}
+
+/**
+ * Resolve a user: `"me"` (the calling human), an id (passed straight through — the write handler is the
+ * authority), or an email / exact full name looked up through the guarded directory list. The preview and
+ * the run call this same function, so both resolve a reference the same way.
+ */
+async function resolveUser(
+  rt: AiToolRuntime,
+  reference: string,
+): Promise<AiResolvedReference> {
+  if (reference.trim().toLowerCase() === 'me') {
     const identity = rt.ctx.identity;
     if (identity.kind !== 'human') {
       throw new AiReferenceError(
@@ -254,7 +324,12 @@ function resolveUser(
     }
     return { type: 'user', id: identity.userId, label: 'me' };
   }
-  return { type: 'user', id: reference };
+  return rt.resolve({
+    type: 'user',
+    reference,
+    isId: (r) => UUID.test(r),
+    lookup: (r) => lookupUsers(rt, r),
+  });
 }
 
 /** The person a grant names, as the card shows them (G2 review F1, security.md §6.1 chain 1). */
@@ -347,6 +422,76 @@ function applicationEntity(app: Row, op: AiEntityRef['op']): AiEntityRef {
     op,
     ...(str(app.name) ? { label: str(app.name)! } : {}),
   };
+}
+
+// ─── Critical applications (ADR-0097 decision 3 as amended, CEO 2026-09-24) ──────────────────────────
+
+const CRITICAL: AiPreviewWarningCode = 'CRITICAL_APPLICATION';
+
+/**
+ * Before any side effect of a write on an application: when the application is critical, refuse the
+ * write on a channel that cannot confirm it with the password (MCP, headless — `assertChannelAllows`);
+ * in the chat the approved preview already carried `CRITICAL_APPLICATION`, so core asked for the step-up.
+ *
+ * The criticality is read through the guarded `GET /applications/:id`. When it cannot be read (the caller
+ * lacks `application:read`) a non-chat write is refused: it cannot be shown not to be critical (fail
+ * closed). A missing or archived application is left to the write route's own 400/404.
+ */
+async function assertCriticalAllowed(
+  rt: AiToolRuntime,
+  applicationId: string,
+  alsoCritical = false,
+): Promise<void> {
+  // The chat never refuses: the approved preview carried the warning and core required the step-up.
+  if (rt.ctx.channel === 'CHAT') return;
+  if (alsoCritical) {
+    assertChannelAllows(rt.ctx.channel, [CRITICAL]);
+    return;
+  }
+  let critical: boolean;
+  try {
+    critical = (await readApplication(rt, applicationId)).isCritical === true;
+  } catch (err) {
+    const status = httpStatus(err);
+    if (status === 404) return;
+    if (status === 403) throw cannotCheckCritical('application:read');
+    throw err;
+  }
+  if (critical) assertChannelAllows(rt.ctx.channel, [CRITICAL]);
+}
+
+/** The sentence a critical application's card ends with. */
+function criticalNote(critical: boolean, app: string): string {
+  return critical
+    ? ` ${app} is a critical application: confirm with your password.`
+    : '';
+}
+
+/** The fail-closed refusal of a non-chat write whose application's criticality cannot be read. */
+function cannotCheckCritical(permission: string): ForbiddenException {
+  return new ForbiddenException(
+    `Cannot check whether this application is critical (${permission} is needed); do it from the lazyit chat.`,
+  );
+}
+
+/**
+ * The application a grant or a request belongs to, read before a non-chat write to check its
+ * criticality. A missing target is left to the write route (its own 404 / 409).
+ */
+async function applicationOfTarget(
+  rt: AiToolRuntime,
+  read: () => Promise<Row>,
+  permission: string,
+): Promise<string | null> {
+  if (rt.ctx.channel === 'CHAT') return null;
+  try {
+    return String((await read()).applicationId);
+  } catch (err) {
+    const status = httpStatus(err);
+    if (status === 404 || status === 409) return null;
+    if (status === 403) throw cannotCheckCritical(permission);
+    throw err;
+  }
 }
 
 // ─── Projections ─────────────────────────────────────────────────────────────────────────────────────
@@ -626,6 +771,8 @@ const applicationCreate = defineTool({
   input: applicationCreateInput,
   bindings: [bind(ApplicationsController, 'create')],
   async run(input, rt) {
+    // Creating a CRITICAL application is a write on a critical application (chat-only, with step-up).
+    if (input.isCritical) assertChannelAllows(rt.ctx.channel, [CRITICAL]);
     const app = asRow(
       await rt.call(ApplicationsController, 'create', { body: input }),
     );
@@ -641,13 +788,17 @@ const applicationCreate = defineTool({
       changes: [
         {
           field: 'action',
-          after: `Add the application "${String(values.name)}" to the catalog.`,
+          after:
+            `Add the application "${String(values.name)}" to the catalog.` +
+            (values.isCritical === true
+              ? ' It is marked critical: every later AI change to it needs your password in the chat.'
+              : ''),
         },
         ...APPLICATION_WRITABLE.filter((f) => values[f] !== undefined).map(
           (field) => ({ field, after: values[field] }),
         ),
       ],
-      warnings: [],
+      warnings: values.isCritical === true ? [CRITICAL] : [],
       impacted: [],
       untrustedSources: [],
       elevated: false,
@@ -696,6 +847,8 @@ const applicationUpdate = defineTool({
   ],
   async run(input, rt) {
     const resolved = await resolveApplication(rt, input.application);
+    // Critical now, or made critical by this change: chat-only (with step-up).
+    await assertCriticalAllowed(rt, resolved.id, input.set.isCritical === true);
     const app = asRow(
       await rt.call(ApplicationsController, 'update', {
         params: { id: resolved.id },
@@ -718,7 +871,11 @@ const applicationUpdate = defineTool({
       changes: [
         {
           field: 'action',
-          after: `Change ${Object.keys(set).join(', ')} of the application "${String(current.name)}".`,
+          after:
+            `Change ${Object.keys(set).join(', ')} of the application "${String(current.name)}".` +
+            (current.isCritical === true || set.isCritical === true
+              ? ' It is a critical application: confirm with your password.'
+              : ''),
         },
         ...APPLICATION_WRITABLE.filter((f) => f in set).map((field) => ({
           field,
@@ -729,7 +886,10 @@ const applicationUpdate = defineTool({
           after: set[field],
         })),
       ],
-      warnings: [],
+      warnings:
+        current.isCritical === true || set.isCritical === true
+          ? [CRITICAL]
+          : [],
       impacted: [],
       untrustedSources: [],
       elevated: false,
@@ -768,11 +928,12 @@ const accessGrantList = defineTool({
   bindings: [
     bind(AccessGrantsController, 'findAll'),
     bind(ApplicationsController, 'findAll'),
+    bind(UsersController, 'findAll'),
   ],
   async run(input, rt) {
     const limit = input.limit ?? AI_TOOL_LIST_DEFAULT_LIMIT;
     const offset = input.offset ?? 0;
-    const user = input.user ? resolveUser(rt, input.user) : undefined;
+    const user = input.user ? await resolveUser(rt, input.user) : undefined;
     const application = input.application
       ? await resolveApplication(rt, input.application)
       : undefined;
@@ -821,10 +982,12 @@ const accessGrantCreate = defineTool({
     bind(AccessGrantsController, 'findAll'),
     bind(WorkflowsController, 'findAll'),
     bind(UsersController, 'findOne'),
+    bind(UsersController, 'findAll'),
   ],
   async run(input, rt) {
-    const user = resolveUser(rt, input.user);
+    const user = await resolveUser(rt, input.user);
     const application = await resolveApplication(rt, input.application);
+    await assertCriticalAllowed(rt, application.id);
     const grant = asRow(
       await rt.call(AccessGrantsController, 'create', {
         body: {
@@ -856,7 +1019,7 @@ const accessGrantCreate = defineTool({
     };
   },
   async preview(input, rt): Promise<AiToolPreview> {
-    const user = resolveUser(rt, input.user);
+    const user = await resolveUser(rt, input.user);
     const grantee = await readPerson(rt, user.id);
     assertUsable(grantee);
     const resolved = await resolveApplication(rt, input.application);
@@ -887,6 +1050,7 @@ const accessGrantCreate = defineTool({
       input.accessLevel !== undefined &&
       ADMIN_LEVELS.has(input.accessLevel.trim().toLowerCase());
     if (app.isCritical === true || adminLevel) warnings.push('NOTIFIES_USERS');
+    if (app.isCritical === true) warnings.push(CRITICAL);
     const until = input.expiresAt ? ` until ${day(input.expiresAt)}` : '';
     const self = whoId(rt, user.id) === 'you';
     const changes: AiToolPreview['changes'] = [
@@ -895,7 +1059,8 @@ const accessGrantCreate = defineTool({
         after:
           (self ? 'You are granting access to yourself. ' : '') +
           `Give ${self ? 'yourself' : grantee.display} ${accessPhrase(input.accessLevel)} to ${appName}${until}. ` +
-          outlook.sentence,
+          outlook.sentence +
+          criticalNote(app.isCritical === true, appName),
       },
       {
         field: 'user',
@@ -983,6 +1148,17 @@ const accessGrantRevoke = defineTool({
     bind(UsersController, 'findOne'),
   ],
   async run(input, rt) {
+    const ofGrant = await applicationOfTarget(
+      rt,
+      async () =>
+        asRow(
+          await rt.call(AccessGrantsController, 'findOne', {
+            params: { id: input.grantId },
+          }),
+        ),
+      'accessGrant:read',
+    );
+    if (ofGrant) await assertCriticalAllowed(rt, ofGrant);
     const grant = asRow(
       await rt.call(AccessGrantsController, 'revoke', {
         params: { id: input.grantId },
@@ -1071,7 +1247,8 @@ const accessGrantRevoke = defineTool({
         field: 'action',
         after:
           `Remove ${loser === 'you' ? 'your' : `${loser}'s`} ${accessPhrase(grant.accessLevel)} to ${name}. ` +
-          outlook.sentence,
+          outlook.sentence +
+          criticalNote(critical, name),
       },
       { field: 'user', after: loser, valueKind: 'entity' },
       ...('status' in person
@@ -1103,7 +1280,10 @@ const accessGrantRevoke = defineTool({
     return {
       target,
       changes,
-      warnings: outlook.external ? ['EXTERNAL_DEPROVISIONING'] : [],
+      warnings: [
+        ...(outlook.external ? (['EXTERNAL_DEPROVISIONING'] as const) : []),
+        ...(critical ? [CRITICAL] : []),
+      ],
       impacted: [
         {
           type: 'user',
@@ -1148,6 +1328,7 @@ const accessRequestList = defineTool({
     bind(AccessRequestsController, 'findAll'),
     bind(AccessRequestsController, 'findMine'),
     bind(ApplicationsController, 'findAll'),
+    bind(UsersController, 'findAll'),
   ],
   async run(input, rt) {
     const limit = input.limit ?? AI_TOOL_LIST_DEFAULT_LIMIT;
@@ -1160,7 +1341,7 @@ const accessRequestList = defineTool({
       return pageOutput(page, offset, requestSummary);
     }
     const requester = input.requester
-      ? resolveUser(rt, input.requester)
+      ? await resolveUser(rt, input.requester)
       : undefined;
     const application = input.application
       ? await resolveApplication(rt, input.application)
@@ -1335,6 +1516,12 @@ const accessRequestDecide = defineTool({
   ],
   async run(input, rt) {
     const params = { id: input.requestId };
+    const ofRequest = await applicationOfTarget(
+      rt,
+      () => findRequest(rt, input.requestId),
+      'accessRequest:read',
+    );
+    if (ofRequest) await assertCriticalAllowed(rt, ofRequest);
     const request = asRow(
       input.decision === 'approve'
         ? await rt.call(AccessRequestsController, 'approve', { params })
@@ -1409,9 +1596,11 @@ const accessRequestDecide = defineTool({
         after: approve
           ? `${own}Approve the request: give ${requester} ${accessPhrase(request.accessLevel)} to ${name}. ` +
             `An access grant is created and ${requester} ${requester === 'you' ? 'are' : 'is'} notified. ` +
-            outlook!.sentence
+            outlook!.sentence +
+            criticalNote(critical, name)
           : `${own}Deny ${requester === 'you' ? 'your' : `${requester}'s`} request for ${accessPhrase(request.accessLevel)} to ${name}. ` +
-            `${requester === 'you' ? 'You are' : `${requester} is`} notified with your reason.`,
+            `${requester === 'you' ? 'You are' : `${requester} is`} notified with your reason.` +
+            criticalNote(critical, name),
       },
       {
         field: 'requester',
@@ -1444,6 +1633,8 @@ const accessRequestDecide = defineTool({
       ? ['PRIVILEGE_GRANT', 'NOTIFIES_USERS']
       : ['NOTIFIES_USERS'];
     if (outlook?.external) warnings.splice(1, 0, 'EXTERNAL_PROVISIONING');
+    // Approving AND denying on a critical application need the password (CEO decision).
+    if (critical) warnings.push(CRITICAL);
     return {
       target,
       changes,
