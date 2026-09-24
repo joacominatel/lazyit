@@ -886,14 +886,17 @@ three kinds of runtime record, role `system`, never sent to the model:
   message (its calls) and again when the step pauses (the read results already known, and the pending
   invocation ids); the latest record of a step wins.
 
-The conversation projection (W3-1) reads `aisdk-v7` rows only. Records are append-only and go with the
-conversation (retention, owner delete).
+The conversation projection (W3-1) **must allow-list by format** — read `aisdk-v7` rows only, never
+filter out `lazyit-*` — and carry a test that a runtime record never reaches the wire (follow-up for W3-1).
+Records are append-only and go with the conversation (retention, owner delete).
 
 **A run.** `submit`: principal and AI checks → idempotency replay (headless `Idempotency-Key`; a unique
 violation race returns the existing run) → rate limit (30 creations per principal per minute, token
 bucket) → at most 3 active runs per principal → budget → conversation → 409 `RUN_IN_PROGRESS` when the
 conversation has an active run → the user message, prefixed with `buildTurnContext({ now, route })` (the
-route only on `CHAT`) and with any user-typed `<turn_context>` tag neutralized (`<` → `&lt;`) → one
+route only on `CHAT`) and with any user-typed turn-context tag neutralized — every `<` that opens
+something reading as `turn_context`, opening or closing, with whitespace, attributes, line breaks or no
+`>` at all, becomes `&lt;` → one
 transaction that locks the conversation row, re-checks the active run, and writes the QUEUED run, the run
 record and the user message → `run.status QUEUED` → the start job `start-<runId>`. A failed enqueue leaves
 the run QUEUED for the sweeper. Before the user message, a step left unanswered by an earlier run is
@@ -910,20 +913,28 @@ persists, in one transaction, the assistant message, its step record, an `AiUsag
 counters. `finishReason = content-filter` → FAILED `PROVIDER_REFUSED`. An `AiProviderError` is mapped by
 `code`: `CANCELLED` (our abort) → CANCELLED, `AI_DISABLED` → CANCELLED, `CONTEXT_LIMIT` and
 `CONVERSATION_READ_ONLY` close the conversation, any other code fails the run with that code (and
-`retryAfterSec`). Any other exception fails the run `INTERNAL`.
+`retryAfterSec`). Any other exception fails the run `INTERNAL`: invocations of the run still EXECUTING
+become OUTCOME_UNKNOWN and every unanswered call is answered `UNKNOWN_OUTCOME` (whether it took effect is
+not known; it is never retried).
 
-**Every call is answered.** Calls are resolved in order. A name not in the conversation's frozen tool map
+**Every call is answered.** Every call gets a non-empty id unique within the run: an empty or repeated
+id from the model is replaced by `lz_<runId>_<step>_<index>` (it keys the step record, the pending
+invocation's `toolUseId`, the events and the decision). Before any call runs, the run is re-read: if it is
+no longer RUNNING (another actor moved it during the model step) nothing is resolved, and a cancel
+requested meanwhile ends it CANCELLED. Calls are resolved in order. A name not in the conversation's frozen tool map
 (a `Map`, so `constructor` or `__proto__` never resolve) → `NOT_AVAILABLE`; arguments that arrived as the
 raw string (invalid JSON) → `INVALID_INPUT`; past 30 calls per run or the per-principal bucket (60 per
 minute) → `RATE_LIMITED`. Reads and navigation → `invoke`. Chat writes → `propose` with the tool-use id (at
 most 5 pending per step; more → `RATE_LIMITED`). Headless writes → `invoke` after the per-run mutation cap
 (attempted writes of the run in `ai_tool_invocations`; over the cap → `FORBIDDEN`). Each call's context
 carries the provenance `{ provider, model }` and the turn's untrusted sources: the entity refs of every read
-result whose data held `<untrusted_content>`, merged across the run. Outputs are capped once, at write time
+result whose data held `<untrusted_content>`, merged across the run. Every step record stores the merged
+set so far, so a resumed run rebuilds it exactly (T-03). Outputs are capped once, at write time
 (`AI_TOOL_OUTPUT_MAX_CHARS = 24 000` serialized, a `[truncated — N more characters; refine the query]`
 marker; core already truncates the data at 20 000). With no pending proposal the step's single tool message
 is appended and the loop continues. With one or more: the step record (known results + pending ids) is
-written and RUNNING → AWAITING_APPROVAL compare-and-set in one transaction, then `tool.approval_required`
+written and RUNNING → AWAITING_APPROVAL compare-and-set in one transaction — only while no cancel is
+requested (else the run ends CANCELLED and the proposals are cancelled) — then `tool.approval_required`
 is emitted for each card and `run.status AWAITING_APPROVAL`, and a decision that already landed resumes the
 run at once. No job stays in flight.
 
@@ -944,17 +955,21 @@ EXPIRED (`finishReason = approval_expired`); (2) an invocation EXECUTING for 5 m
 (the process died inside `approve`) → `markOutcomeUnknown`; (3) AWAITING_APPROVAL runs idle for 60 s:
 CANCELLED when AI is off or the principal no longer passes (`AI_DISABLED` / `FORBIDDEN`), else a lost
 resume is re-enqueued under a rotating job id; (4) QUEUED runs idle 30 s with no job → re-enqueued;
-(5) RUNNING runs idle 5 min with no job → their EXECUTING invocations `markOutcomeUnknown`, the run FAILED
+(5) RUNNING runs idle 5 min with no job, and not being driven by this process (a long model step) → their EXECUTING invocations `markOutcomeUnknown`, the run FAILED
 `ENGINE_RESTART`, the calls answered with `UNKNOWN_OUTCOME`. A crashed run is **never resumed**, so a write
 cannot run twice; BullMQ's stalled re-delivery finds it RUNNING and does nothing. When the broker cannot be
 read, (4) and (5) skip the pass.
 
 **Decisions** (`AiApprovalService.decide({ runId, toolCallId, decision, reason?, password?, identity })`,
 for the W3-1 decision endpoint): a non-human identity → 403; a run or invocation that is not the caller's
-own chat run → 404. `toolCallId` is the provider tool-use id announced in `tool.approval_required`. An
+own chat run → 404; a run not AWAITING_APPROVAL (finished, cancelled, already resumed — a double click
+after the resume) → 409 `RUN_NOT_AWAITING_APPROVAL`; an approval while AI is switched off
+(`resolveProviderConfig()` null) → 409 `AI_DISABLED`, the action stays pending (§8 invariant 3). `toolCallId` is the provider tool-use id announced in `tool.approval_required`. An
 approval whose stored preview requires step-up (core's `requiresStepUp`) needs the password: none → 403
 `STEP_UP_REQUIRED`; the user re-loaded at the session's epoch, then `LocalCredentialService.verify`
-against the current hash; wrong → 403 `STEP_UP_FAILED`; after 5 failures an exponential lock from 1 s to
+against the current hash — at most one verification in flight per user (a concurrent attempt is answered
+429 without reaching the KDF) and each attempt counted as a failure before the KDF runs (cleared by a
+success), so a burst of concurrent guesses is one guess; wrong → 403 `STEP_UP_FAILED`; after 5 failures an exponential lock from 1 s to
 15 min (the `LoginService` policy, per user, in memory) → 429 `STEP_UP_RATE_LIMITED` with
 `retryAfterSec`; outside `AUTH_MODE=local` → 403 `STEP_UP_UNAVAILABLE` (no lazyit password exists: such
 actions cannot be approved from the chat — fail closed). Only a verified password calls core's
@@ -967,7 +982,13 @@ action expired ends the run EXPIRED. It returns `{ action, runStatus }` and emit
 name the union cannot carry — is dropped and logged). `message.delta`/`message.completed` use
 `messageId = <conversationId>:<seq>` of the assistant row the step persists. Logs (`ai.run.start`,
 `ai.step.finish`, `ai.run.finish`) carry metadata only; a tool name the model invented is logged as
-`(invalid)`.
+`(invalid)`, and a caught error is logged by class and code, never its message (a Prisma message can
+carry row values).
+
+**Soft limits (follow-up).** Two limits are soft: the 3-active-runs-per-principal cap is counted outside
+the creating transaction, so simultaneous submissions to different conversations can briefly exceed it;
+and the token budget is checked before each step, so the step that crosses it completes (a run can
+overshoot by one step's tokens). Both fail closed on the next check.
 
 **Not built here.** The HTTP endpoints and the SSE controller (W3-1); per-conversation deletion and
 retention (W3-6); the MCP stale-`EXECUTING` sweep (W3-2). The sweeper's lost-resume threshold means a
@@ -1154,14 +1175,17 @@ Reasoning text is not streamed in v1.
 
 **As built (W2-3) — the in-process bus** (`runtime/run-event-bus.ts`). A ring buffer per run (2 000
 events), listeners, and replay: `replay(runId, afterSeq)` returns the events after `afterSeq`, or `null`
-when the buffer does not cover that position (evicted, an unknown run, or an id from another process).
-Sequence numbers are contiguous per run and start after a per-process base (seconds since the epoch modulo
-10⁶, × 1 000 — within int4), so a `Last-Event-ID` from before a restart answers `null` and the SSE endpoint
-sends a `run.snapshot` instead of a wrong suffix. `parseLastEventId(runId, header)` reads `<runId>:<seq>`
-for that run only; `formatRunEventId(envelope)` writes it. The concrete class adds `lastSeq(runId)` — the
-`seq` a `run.snapshot` covers (the port in `core/ports/` is frozen, so W3-1 injects `InProcessRunEventBus`
-for it). A finished run's buffer is kept 5 minutes while nobody listens; at most 500 runs are tracked. A
-failing listener never fails the run.
+when the buffer does not cover that position (evicted events, a dropped and re-created buffer, an unknown
+run, or an id from another process). Sequence numbers come from one process-wide counter starting at a
+per-process base (seconds since the epoch modulo 10⁶, × 1 000 — within int4): they increase strictly per
+run (not contiguously), and a re-created buffer starts above every earlier number, so a stale
+`Last-Event-ID` answers `null` and the SSE endpoint sends a `run.snapshot` instead of a wrong suffix.
+`parseLastEventId(runId, header)` reads `<runId>:<seq>` for that run only; `formatRunEventId(envelope)`
+writes it. The concrete class adds `lastSeq(runId)` — the `seq` a `run.snapshot` covers (the port in
+`core/ports/` is frozen, so W3-1 injects `InProcessRunEventBus` for it). Subscribing creates no buffer. A
+finished run's buffer is kept 5 minutes while nobody listens; at most 500 runs are tracked. A failing
+listener never fails the run. **The bus does no authorization:** the SSE endpoint must load the run and
+check the caller owns it before `subscribe`, `replay` or `lastSeq` — a run id is not a capability.
 
 ## 10. Configuration lifecycle, enable/disable, "reload"
 
