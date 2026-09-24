@@ -715,26 +715,27 @@ non-critical application needs no password. The MCP/headless refusal on critical
 each tool detecting `isCritical` and calling `assertChannelAllows` in `run`; the G2 review checks every
 write tool that can reach an application does. When ADR-0055's internal allowlist ships, its entries must
 be an excluded or elevated AI operation. Found while building W2-14 (a route-level gap, not an AI one):
-CSEC-1 guards only `secretId`, so a `workflow:manage`-only principal can re-point a connection whose
-`defaultHeaders` hold a pasted token (the field is documented "never a credential" but not validated) and
-the headers follow to the new host. The AI card names those headers on a re-point and the tool requires
-`workflow:secrets` for it; the route fix is a sentinel follow-up.
+CSEC-1 guarded only `secretId`, so a `workflow:manage`-only principal could re-point a connection whose
+`defaultHeaders` hold a pasted token. Closed by SEC-075: the route now requires `workflow:secrets` for
+that re-point and for any header-value change, and returns header values as `[redacted]` (the AI's
+`keptHeaders` round-trip sends the sentinel back, which keeps the stored values).
 
 Open items recorded by the G2 review of #1354 (W2-14):
 - **Userinfo in URLs.** The AI refuses `https://user:pass@host` in any connection it creates or
-  re-points and in any destination a card describes; the shared `publicHttpsUrl` schema and the route
-  still accept it (follow-up: refuse it there too, write-only, tolerant on read).
-- **Enable race.** An approval re-runs the preview (STALE / `PREVIEW_CHANGED`), but a version authored
-  in the UI between that check and the route's write is not detected: closing it needs the route to
-  take an expected version (the §9 TOCTOU follow-up).
+  re-points and in any destination a card describes. Closed at the route by SEC-076: create/patch refuse
+  it (write-only; a legacy row still reads, masked), and the egress guard refuses it at call time.
+- **Enable race.** An approval re-runs the preview (STALE / `PREVIEW_CHANGED`). Closed at the route by
+  SEC-077: `workflow_set_enabled` sends `expectedVersion` and `workflow_author_version` sends
+  `baseVersion` (the version read at run time), and the route 409s under a row lock if another version
+  landed in between.
 - **Literal credentials in templates.** A step path or mapping value may carry a pasted literal
   credential; the card shows mapping templates as written and masks only query values. The engine has
   no way to tell a literal token from ordinary text.
 - **Credential labels.** The card names an attached credential by id only: its label lives behind
   `/workflow-secrets`, a structural exclusion (INV-AI-14), so no guarded read may be bound for it.
-- **Offboarded sample grantees.** The dry-run route resolves a grant's grantee even when offboarded;
-  the enable card is refused in that case (the tool reads the grantee through `GET /users/:id`; without
-  `user:read` it cannot check and shows the card). The route itself is unchanged (follow-up).
+- **Offboarded sample grantees.** Closed at the route by SEC-078: the dry-run refuses (400) a sample
+  grant whose grantee is offboarded or that is revoked, so the card is refused even when the caller
+  lacks `user:read` (the tool's own `GET /users/:id` check stays as a second layer).
 
 **Proposed invariants** (join §7 on the W4-2 security re-review):
 - **INV-AI-15 — No unattended outbound integration.** A workflow, a workflow version or a workflow

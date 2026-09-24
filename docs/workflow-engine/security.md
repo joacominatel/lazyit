@@ -144,6 +144,14 @@ external system protects.
 4. **Secrets are decrypted only at the moment of the outbound call**, inside the executor, and never
    returned across the API boundary. The decrypted value lives only in process memory for the duration
    of the call.
+5. **Plain-config credential channels are treated as secrets (SEC-075 / SEC-076, as built).** A REST
+   connection's `defaultHeaders` are not validated against credential-like values, and a legacy URL may
+   carry `user:pass@`. So: every connection read (`GET /workflow-connections[/:id]`, the create/patch
+   responses, the dry-run preview) returns header **values** and URL userinfo as `[redacted]`; a PATCH
+   that sends `[redacted]` back keeps the stored value; adding/changing a header value, or re-pointing a
+   connection that carries default headers, requires `workflow:secrets` (CSEC-1, alongside `secretId`
+   attach and secret-bearing re-point); userinfo is refused on write and the egress guard refuses it at
+   call time (`refuseUserinfo`, §3.1). Stored rows are never rewritten.
 
 ### 2.2 Key management
 
@@ -208,6 +216,11 @@ A central guard that EVERY outbound request passes through. Defense in depth, in
 6. **Port sanity.** Optionally restrict to standard ports for external HTTPS; at minimum, do not let a
    workflow reach `:6379`/`:5432`/`:9300` etc. on a private host unless that host is an explicitly
    allowlisted target (§3.4).
+7. **No userinfo (as built, SEC-076).** Node's HTTP client turns `https://user:pass@host` into
+   `Authorization: Basic …`. The workflow handlers call the guard with `refuseUserinfo: true`, so such a
+   URL — a legacy connection row, or a relative redirect that inherits it — fails with
+   `userinfo-not-allowed` (the error carries no URL, which would echo the credential). The option is
+   opt-in so other guard consumers (the AI provider transport) are unchanged.
 
 ### 3.2 Why not "just block private IPs"
 

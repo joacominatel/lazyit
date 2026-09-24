@@ -32,6 +32,17 @@ stored encrypted, and never shown again** — afterwards you can only **Replace*
 lazyit only ever tells you whether a credential is *configured*, never its value. Holding credentials
 can be separated from building workflows (see [Permissions](/help/access-automation-permissions)).
 
+Keep tokens in the credential, never in the address or in a default header:
+
+- A URL that carries a user name or password (`https://user:pass@host`) is **refused when you save**
+  the connection. A connection saved that way before this rule still loads, shows the address as
+  `https://[redacted]@host`, and **its runs fail** with the reason `userinfo-not-allowed` — edit the
+  address to remove the user name and password, and add them as the connection's credential instead.
+- **Default headers** (set through the API) are treated like a credential: lazyit shows their names
+  but every value as `[redacted]`, and saving the connection keeps the stored values. Changing a
+  header value, or changing the address of a connection that has default headers, needs
+  `workflow:secrets`.
+
 ## 2. Add steps
 
 Choose **New workflow**, give it a name, pick its **trigger** (Access granted or Access revoked) and
@@ -89,6 +100,10 @@ straight line.
 A workflow only fires when it is **Enabled**. Toggle it on from the workflow list (or in the builder)
 when you are ready. Before you flip it on, validate it with a **dry-run** and a **Test connection** —
 see [Testing and observability](/help/access-automation-testing-observability).
+
+Enabling from the workflow list is tied to the version you are looking at: if someone saved a newer
+version of the steps in the meantime, the toggle is refused with a conflict. Reload the page, review
+the new version, and enable it again.
 
 ## Multi-grant deprovision policy
 

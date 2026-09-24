@@ -48,6 +48,24 @@ runtime-loaded).
   `secretId` reference into [[workflow-secret]] (INV-6, [[INVARIANTS]]). A REST config's `authScheme`
   says only *how* to attach the separately-stored credential at call time (`NONE` / `BEARER` / `BASIC`
   / `HEADER`).
+- **Default header values are treated as a credential** (SEC-075). `defaultHeaders` is not validated
+  against credential-like values, so an operator may have pasted a token there. Every read — list,
+  detail, the create/patch responses and the dry-run preview — returns each header **value** as
+  `[redacted]` (`WORKFLOW_REDACTED_VALUE`); names stay visible. On `PATCH`, a value equal to
+  `[redacted]` keeps the stored value (so a UI round-trip never overwrites it); a `[redacted]` value for
+  a header that is not stored is a `400`. Stored values are never rewritten.
+- **CSEC-1 separation covers every credential channel.** `workflow:manage` configures a connection;
+  `workflow:secrets` is additionally required to (a) attach/change `secretId`, (b) change the host
+  (`baseUrl` / `url`) of a connection that bears a secret **or carries default headers** (before or
+  after the patch), or (c) add or change any default-header **value**. Renaming, clearing the secret,
+  removing headers and other non-host edits stay manage-only. `403` otherwise.
+- **No userinfo in a destination URL** (SEC-076). `https://user:pass@host` would be sent as
+  `Authorization: Basic …` from plain config. It is refused on **write** (`CreateWorkflowConnectionSchema`
+  and the `PATCH` DTO, via `connectionConfigHasUserinfo`); the read/run-time `WorkflowConnectionConfigSchema`
+  stays tolerant, so a legacy row still loads (its userinfo masked as `[redacted]@` on read). At call
+  time the egress guard refuses it (`refuseUserinfo` → `userinfo-not-allowed`), so such a row fails its
+  runs and test probe with a config reason instead of sending the credential; the operator removes the
+  userinfo and attaches a secret.
 - **`config` is validated per `kind`.** A zod **discriminated union** on `kind`
   (`WorkflowConnectionConfigSchema`) validates the jsonb at the edge; on create, `config.kind` **must
   equal** the connection `kind` (a refine returns `400` otherwise). No per-kind tables
@@ -96,10 +114,11 @@ Indexes: `@@index([applicationId])`, `@@index([secretId])`.
 `apps/api/src/workflow-engine/definitions/` (`workflow-connections.controller.ts`); ADMIN-only in the
 seed ([[0046-roles-permissions-v2]]):
 
-- `GET /workflow-connections` · `GET /workflow-connections/:id` — list / detail.
-  `@RequirePermission('workflow:read')`.
-- `POST /workflow-connections` — create (`config.kind` must match `kind`). `workflow:manage`.
-- `PATCH /workflow-connections/:id` — edit. `workflow:manage`.
+- `GET /workflow-connections` · `GET /workflow-connections/:id` — list / detail, header values and URL
+  userinfo redacted. `@RequirePermission('workflow:read')`.
+- `POST /workflow-connections` — create (`config.kind` must match `kind`; no URL userinfo). `workflow:manage`.
+- `PATCH /workflow-connections/:id` — edit; `[redacted]` header values keep the stored ones.
+  `workflow:manage`, plus `workflow:secrets` for the credential moves above.
 - `DELETE /workflow-connections/:id` — soft delete. `workflow:manage`.
 
 The REST / WEBHOOK_OUT call paths are the step handlers (`handlers/rest.handler.ts`,

@@ -35,6 +35,17 @@ la credencial. lazyit únicamente te indica si una credencial está *configurada
 custodia de credenciales puede separarse de la construcción de flujos (consulta
 [Permisos](/help/access-automation-permissions)).
 
+Guarda los tokens en la credencial, nunca en la dirección ni en una cabecera por defecto:
+
+- Una URL que lleva usuario o contraseña (`https://usuario:clave@host`) se **rechaza al guardar** la
+  conexión. Una conexión guardada así antes de esta regla sigue cargando, muestra la dirección como
+  `https://[redacted]@host` y **sus ejecuciones fallan** con el motivo `userinfo-not-allowed` — edita
+  la dirección para quitar el usuario y la contraseña, y añádelos como credencial de la conexión.
+- Las **cabeceras por defecto** (configuradas por la API) se tratan como una credencial: lazyit
+  muestra sus nombres pero cada valor como `[redacted]`, y al guardar la conexión se conservan los
+  valores almacenados. Cambiar el valor de una cabecera, o la dirección de una conexión que las tiene,
+  requiere `workflow:secrets`.
+
 ## 2. Añade pasos
 
 Elige **Nuevo flujo**, dale un nombre, escoge su **disparador** (Acceso concedido o Acceso revocado)
@@ -98,6 +109,10 @@ en lugar de una línea recta ciega.
 Un flujo solo se dispara cuando está **Activado**. Actívalo desde la lista de flujos (o en el
 constructor) cuando estés listo. Antes de activarlo, valídalo con una **simulación** y con **Probar
 conexión** — consulta [Pruebas y observabilidad](/help/access-automation-testing-observability).
+
+Activar desde la lista de flujos va ligado a la versión que estás viendo: si alguien guardó una
+versión más nueva de los pasos entretanto, el interruptor se rechaza con un conflicto. Recarga la
+página, revisa la nueva versión y vuelve a activarlo.
 
 ## Política de desaprovisionamiento con varias concesiones
 
