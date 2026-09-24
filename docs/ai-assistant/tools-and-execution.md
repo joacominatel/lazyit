@@ -183,6 +183,7 @@ Legend:
 | applications | `:id/access-grants`, `:id/articles` | accessGrant:read, article:read | R | v1 facets |
 | applications | create / update | application:write | W | v1 |
 | applications | delete / restore | application:delete | D | v1.1 |
+| workflows | list (headers only) | workflow:read | R | facet of the grant / revoke / approve previews (W2-6: whether an automatic (de)provisioning workflow runs); never a tool |
 | access-grants | list / get | accessGrant:read | R | v1 `access_grant_list` |
 | access-grants | `mine` | self | R | v1 (`session_context`) |
 | access-grants | create | accessGrant:grant | W + ext | v1 |
@@ -454,26 +455,26 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 14 | `asset_check_in` ✅ built (W2-5) | AssetAssignmentsController.release (+AssetsController.findAssignments) | asset:write | write | assetAssignment updated (parent asset), asset updated, user updated |
 | 15 | `asset_model_create` ✅ built (W2-5) | AssetModelsController.create (+AssetCategoriesController.findAll) | assetModel:write | write | assetModel created |
 | 16 | `location_create` ✅ built (W2-5) | LocationsController.create (+findAll / findOne for the parent) | location:write | write | location created |
-| 17 | `application_search` | ApplicationsController.findAll | application:read | read | — |
-| 18 | `application_get` | ApplicationsController.findOne (+grants, articles facets) | application:read | read | — |
-| 19 | `application_create` | ApplicationsController.create | application:write | write | application created |
-| 20 | `application_update` | ApplicationsController.update | application:write | write·D | application updated |
-| 21 | `access_grant_list` | AccessGrantsController.findAll | accessGrant:read | read | — |
-| 22 | `access_grant_create` | AccessGrantsController.create | accessGrant:grant | elevated, ext | accessGrant created (+application, user) |
-| 23 | `access_grant_revoke` | AccessGrantsController.revoke | accessGrant:grant | write·D, ext | accessGrant updated (+application, user) |
-| 24 | `access_request_list` | AccessRequestsController.findAll / .mine | accessRequest:read / human | read | — |
-| 25 | `access_request_create` | AccessRequestsController.create | accessRequest:create, human-only | write | accessRequest created |
-| 26 | `access_request_decide` (approve\|deny) | AccessRequestsController.approve / .deny | accessGrant:grant, human-only | elevated (ext on approve) | accessRequest updated (+accessGrant) |
+| 17 | `application_search` ✅ built (W2-6) | ApplicationsController.findAll | application:read | read | — |
+| 18 | `application_get` ✅ built (W2-6) | ApplicationsController.findOne (+grants, articles facets) | application:read | read | — |
+| 19 | `application_create` ✅ built (W2-6) | ApplicationsController.create | application:write | write | application created |
+| 20 | `application_update` ✅ built (W2-6) | ApplicationsController.update | application:write | write·D | application updated |
+| 21 | `access_grant_list` ✅ built (W2-6) | AccessGrantsController.findAll | accessGrant:read | read | — |
+| 22 | `access_grant_create` ✅ built (W2-6) | AccessGrantsController.create | accessGrant:grant | elevated, ext | accessGrant created (+application, user) |
+| 23 | `access_grant_revoke` ✅ built (W2-6) | AccessGrantsController.revoke | accessGrant:grant | write·D, ext | accessGrant updated (+application, user) |
+| 24 | `access_request_list` ✅ built (W2-6) | AccessRequestsController.findAll / .mine | accessRequest:read / human | read | — |
+| 25 | `access_request_create` ✅ built (W2-6) | AccessRequestsController.create | accessRequest:create, human-only | write | accessRequest created |
+| 26 | `access_request_decide` (approve\|deny) ✅ built (W2-6) | AccessRequestsController.approve / .deny | accessGrant:grant, human-only | elevated (ext on approve) | accessRequest updated (+accessGrant) |
 | 27 | `consumable_search` ✅ built (W2-7) | ConsumablesController.findAll | consumable:read | read | — |
 | 28 | `consumable_get` ✅ built (W2-7) | ConsumablesController.findOne (primary), .findMovements, .findAll (reference lookup) | consumable:read | read | — |
 | 29 | `consumable_create` ✅ built (W2-7) | ConsumablesController.create | consumable:write | write | consumable created |
 | 30 | `consumable_update` ✅ built (W2-7) | ConsumablesController.update | consumable:write | write·D | consumable updated |
 | 31 | `consumable_record_movement` ✅ built (W2-7) | ConsumablesController.createMovement (the handler behind `POST :id/movements`) | consumable:write | write (ledger, not idempotent) | consumable updated |
-| 32 | `kb_search` | ArticlesController.findAll | article:read | read | — |
-| 33 | `kb_get_article` | ArticlesController.findBySlug / .findOne (content paged by chars) | article:read | read | — |
-| 34 | `kb_create_article` (as DRAFT) | ArticlesController.create | article:write | write | article created |
-| 35 | `kb_update_article` | ArticlesController.update | article:write | write·D (preview may escalate) | article updated |
-| 36 | `kb_set_publication` (publish\|unpublish) | ArticlesController.publish / .unpublish | article:write | write (preview may escalate) | article updated |
+| 32 | `kb_search` ✅ built (W2-8) | ArticlesController.findAll | article:read | read | — |
+| 33 | `kb_get_article` ✅ built (W2-8) | ArticlesController.findOne (primary), .findBySlug (content paged by chars) | article:read | read | — |
+| 34 | `kb_create_article` (as DRAFT) ✅ built (W2-8) | ArticlesController.create | article:write | write | article created |
+| 35 | `kb_update_article` ✅ built (W2-8; also the folder move) | ArticlesController.update | article:write | write·D (preview may escalate) | article updated |
+| 36 | `kb_set_publication` (publish\|unpublish) ✅ built (W2-8) | ArticlesController.publish / .unpublish | article:write | write (preview may escalate; idempotent) | article updated |
 | 37 | `user_search` ✅ built (W2-9) | UsersController.findAll | user:read | read | — |
 | 38 | `user_get` ✅ built (W2-9) | UsersController.findOne (+assignments, grants facets) | user:read (+accessGrant:read facet) | read | — |
 | 39 | `user_create` ✅ built (W2-9) | UsersController.create | user:manage | elevated | user created |
@@ -540,6 +541,26 @@ Warning rules for these tools (§9 has the step-up rule):
 - **EXCL** (CEO round 2): SA token create/rotate, `provision-local-account`, the AI's own configuration.
 - **EXCL** (settled): Secret Manager.
 - The 44-tool v1 cut is adopted by default (CEO to confirm on review).
+- **Access tools follow-ups (W2-6, see §8.1 "Access tools as built"; G2 review of #1345):**
+  - user references by username / legajo (email and exact full name are built);
+  - a chat approval re-checks the application's criticality only through the precondition: the grant
+    card's precondition is the application (a change → `STALE`), but a revoke's or a decision's is the
+    grant / request, so an application made critical between the card and the approval is not re-asked
+    for the password (MCP and headless always re-read it in `run`);
+  - `access_request_create` on a critical application is not treated as a critical write (it changes no
+    access; the decision that follows is);
+  - F4: the provisioning sentence is read at propose and re-read at approve, but only the precondition
+    (the application's `updatedAt`) is compared, so a workflow enabled or disabled in between leaves the
+    card's sentence stale (the action still runs, exactly as from the UI). A workflow fingerprint in the
+    precondition needs a core change (one entity per precondition);
+  - F5: "this triggers …" is said for an enabled workflow; the engine also needs a published version to
+    fire, which the header list does not show — the sentence can overstate for an enabled workflow with
+    no version;
+  - F6: `access_request_list`'s primary route is `GET /access-requests` (`accessRequest:read`), so the
+    listing hides the tool from a VIEWER even though `mine: true` (`GET /access-requests/mine`) is open to
+    every human; a separate `access_request_list_mine` (or listing by any binding) would fix it;
+  - F8: the decide preview scans the guarded request list (≤ 5 × 200 rows per slice); a
+    `GET /access-requests/:id` read would replace the scan.
 
 ## 8. Registry and execution design
 
@@ -584,6 +605,7 @@ path unit (W2-0, #1315):
   built yet);
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
+  `kb.tools.ts` (W2-8) holds the five KB tools — see *KB tools as built* below;
   `workflows.tools.ts` (W2-13) and `workflow-authoring.tools.ts` (W2-14) hold the workflow engine,
   pre-created by W2-12 with every handler pending;
   `assets.tools.ts` and `reference.tools.ts` (W2-5) hold the asset, ownership and reference-data tools —
@@ -615,6 +637,76 @@ path unit (W2-0, #1315):
 - Unexposed with reasons: node/edge writes and review-tray curation (v1.1), changes / identity-matches /
   auto-confirm rules reads (v1.1), the canvas bulk reads, the fleet view, agent policy, the `@Res` list,
   `report`, the secret link and the agent binary distribution.
+
+**KB tools as built (W2-8).** `kb.tools.ts` binds `ArticlesController` handlers and, for the folder
+shown on a card, `ArticleCategoriesController.findAll`. The folder ACL (ADR-0060, INV-9) and draft
+privacy (ADR-0022) stay in `ArticlesService`, and the tools neither filter nor widen what it returns.
+The spec runs the real controllers, services and `FolderAccessService` over an in-memory Prisma, so a
+leak through a tool would be a leak in the test.
+- `kb_search` (`read`) — input `query`, `folderIds`, `status`, `authorId`, `mine` (people only),
+  `assetIds`, `applicationIds`, `detail`, `limit` (default 20, max 50), `offset`; returns
+  `{ total, offset, items }` (never a body; `full` adds the excerpt) with `truncated`/`nextOffset`.
+- `kb_get_article` (`read`) — input `article` (id | slug), `contentOffset`, `maxChars` (default 8,000,
+  max 15,000), `detail`. The body is paged by characters **and** by serialized size (11,000 serialized
+  characters per page), so JSON escaping (quotes, backslashes, control characters) never pushes a result
+  past the 20,000-character cap and `content.nextOffset` and the closing delimiter always survive; a page
+  never splits a surrogate pair; `full` metadata is clipped to 1,500 characters, and the title, excerpt
+  and author names in every KB result to their write limits (200, 280, 100), so a legacy over-long row
+  cannot eat the budget. A folder-hidden article
+  or someone else's draft is the route's 404, identical to a missing one.
+- `kb_create_article` (`write`) — always a `DRAFT` authored by the caller; `status` is not an input.
+- `kb_update_article` (`write`·D) — title, slug, excerpt, the whole body, and `folderId` (a MOVE).
+- `kb_set_publication` (`write`, idempotent) — `publish` | `unpublish`.
+- **One reference rule.** An article reference is an id or a slug, and a cuid-shaped reference is
+  **always** an id — never retried as a slug — in the preview and in `run` alike, so the card and the
+  execution name the same article (a slug planted to equal another article's id cannot redirect a write).
+  A raw id goes straight to the write handler; a slug is resolved through `findOne`/`findBySlug`. A chat
+  approval re-runs the preview, whose precondition must name the same article id, so a slug re-pointed
+  after the card was shown is `STALE`; what remains is the core's TOCTOU window (§9).
+- **What the card shows** (security.md §6.1 chain 4, visibility laundering — "the preview shows the
+  destination folder's audience, the full body, and the untrusted-source banner"): the folder **by name**
+  (a `category` entity value with its path as the label) and its **audience** — summarized from the
+  folder's and its ancestors' access rules when the caller may read them (`settings:manage`, #554), from
+  the derived `hasAccessRules` flag if the API exposes it (#1299), and otherwise stated as *unknown to
+  you* — never guessed as public. A create, a publish and a move show the folder and audience; an edit of
+  a published article shows the audience it goes live to. Whatever becomes visible to other readers is on
+  the card **whole** — the title and body of a publish, the new values of an edit of a published article,
+  and the title and body of a **published article that is moved** (the move is the laundering path of
+  chain 4). A body the tool writes is bounded by its input schema to 200,000 characters, the card's own
+  limit; only a legacy body past that is clipped, marked as such, and the approval is elevated. Another
+  person's article is named in `untrustedSources` (the banner); the caller's own article is not, since it
+  is not other-authored.
+- **Refused before a card:** a create or a move into a missing folder (the route's own 400), a move into a
+  folder the caller cannot read (the route's 400, same message), and a **create into a folder the caller
+  cannot read** — `POST /articles` still accepts it ([[0060-kb-folder-access-control]] §9, open), but the
+  assistant does not offer that blind write: the tool refuses it on every channel with a message saying
+  why. The folder read needs `category:read` (held by every default role).
+- **Escalation to `elevated`** (none needs step-up): publishing (`PUBLISHES_TO_READERS`); editing a
+  published article (`PUBLISHES_TO_READERS`); every folder move (`VISIBILITY_CHANGE`, plus
+  `PUBLISHES_TO_READERS` for a published article), because an ordinary author cannot tell whether the
+  destination is more visible; any action on **another person's article** (the `article:manage` bypass,
+  T3), which also names it in `untrustedSources`. Unpublishing your own article is a standard card with
+  `VISIBILITY_CHANGE`. Every write on an existing article carries a precondition on its `updatedAt`.
+- Untrusted content: titles, excerpts, bodies and metadata in results are wrapped with `untrusted()`.
+- Route behaviour the tools inherit, unchanged: a Service Account is admitted by the guards and refused by
+  the service (R25), so the write tools list for an SA holding `article:write` and answer 403.
+- Unexposed with reasons: versions, links, backlinks, aliases and their writes (v1.1), archive and
+  restore (v1.1), the attachments list and removal (v1.1), the `.docx` import and binary attachment
+  transfer (no file tools).
+- **Follow-ups (recorded by the G2 review, not fixed here):**
+  - `loadOwned` answers 403 for another person's *published* article and 404 for their draft over HTTP —
+    a pre-existing existence signal, filed as SEC-074;
+  - entity-ref labels (article titles) and author names in results are not wrapped as untrusted;
+  - the folder is an entity of type `category`, which the web cannot tell apart from the other
+    category kinds (no `articleFolder` entity type yet);
+  - a member without `article:manage` gets the elevated card for someone else's published article, and
+    the route's 403 at approve — the core dry-check sees only `article:write`;
+  - the folder audience for a non-`settings:manage` caller stays *unknown* until the derived
+    restricted flag (#1299) lands;
+  - the audience on a card is computed at propose; the approve-time check compares only the article's
+    `updatedAt`, so a folder's access rules changed between propose and approve (by a `settings:manage`
+    holder) are not detected and the card may understate the new audience — the same TOCTOU class as §9,
+    closed only by folding the destination folder's version into the precondition.
 
 **Assets and reference tools as built (W2-5).** Eleven tools: `asset_search`, `asset_get`,
 `reference_lookup` (read); `asset_create`, `asset_update`·D, `asset_archive`·D, `asset_restore`,
@@ -741,7 +833,17 @@ a separate remediation, not a supported path here.
     `IRREVERSIBLE` with a `secretVaultMemberships` change row — the route hard-drops the user's Secret
     Manager vault memberships and `user_restore` does not bring them back. The preview cannot count them:
     the Secret Manager is a structural exclusion (ADR-0061), so the card says "any held". No step-up (it
-    revokes, it grants nothing). The result reports counts only — never the Secret Manager vault names
+    revokes, it grants nothing) — **unless it touches a critical application** (CEO decision 2026-09-24,
+    #1349): the route revokes every active grant, so when ANY is on an application with
+    `isCritical = true` the preview adds `CRITICAL_APPLICATION` (core then requires the password in the
+    chat) with a `criticalApplicationAccess` row naming them, and `run` calls
+    `assertChannelAllows(channel, ['CRITICAL_APPLICATION'])` before the offboard, so MCP and headless are
+    refused with the standard message and nothing is revoked. The grant list carries no `isCritical`, so
+    each distinct application is read through `GET /applications/:id` as the caller. It **fails closed**:
+    grants the caller cannot list (no `accessGrant:read`), and an application it cannot read (403) or that
+    no longer resolves (404, archived), count as critical, and the card says so. The chat's `run` does not
+    re-check: its approval already carried the step-up (a critical grant added between preview and
+    approval is the TOCTOU residual of §9). The result reports counts only — never the Secret Manager vault names
     the route returns as a rotation prompt (ADR-0061) — and its refs are the user (`archived`) and each
     released asset (`updated`); the route returns no ids for the revoked grants.
   - `user_restore` (`elevated`): `IDENTITY_CHANGE` (it restores sign-in), plus `ROLE_CHANGE` when the
@@ -759,6 +861,78 @@ a separate remediation, not a supported path here.
     pins the user row, not its holdings).
   - Person names (actor, target, user first/last names) are returned plain, as in the other toolsets;
     wrapping directory names with `untrusted()` would be a cross-toolset decision.
+
+**Access tools as built (W2-6).** Rows 17–26 of §7, in `tools/access.tools.ts`. Every call goes through
+`rt.call`, so an application write passes the route's own `CreateApplicationSchema` /
+`UpdateApplicationSchema` pipe (the SEC-051 url-scheme guard), and a grant runs the service's live-checks,
+actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) unchanged.
+- **References.** An application is its id — a strict Prisma cuid, `^c[a-z0-9]{24}$`, passed straight
+  through (so "Confluence" or "Crowdstrike" is never mistaken for an id) — or its exact name
+  (case-insensitive), resolved through the guarded `GET /applications` list; the preview and the run use
+  the same rule. A user is `"me"` (the calling human; a Service Account has no "me"), its id (a uuid,
+  passed straight through), its email or its exact full name (case-insensitive), looked up through the
+  guarded `GET /users` (`UsersController.findAll`, `user:read`). A partial page never decides a name: when
+  the route reports more rows than the page holds and the page has at most one exact match, the reference
+  is refused as `AMBIGUOUS_REFERENCE` ("use the user's id or email"); an exact email match stays decisive.
+  The preview and the run use the same resolver.
+- **Critical applications** (CEO decision, ADR-0097 decision 3 as amended). Every AI write on an
+  application with `isCritical = true` — grant, revoke, approve **and** deny a request, update, and a
+  create or update that makes it critical — carries `CRITICAL_APPLICATION` on its card, so core requires
+  the password step-up in the chat whatever the tool class (a revoke is `write`), and its `run` calls
+  `assertChannelAllows(channel, ['CRITICAL_APPLICATION'])` before any side effect: over MCP and headless it
+  is refused ("This application is critical; do it from the lazyit chat, where it is confirmed with your
+  password."). Off the chat, `run` reads the application (and, for a revoke or a decision, the grant or
+  request first); when that read is forbidden the write is refused too — it cannot be shown not to be
+  critical (fail closed).
+- **Reads.** `application_search` (page), `application_get` (the application, its grants — a facet on
+  `accessGrant:read`: a VIEWER gets `{ unavailable: "FORBIDDEN" }` instead of a failure — and, `full`, the
+  description, notes and linked articles), `access_grant_list` (user / application / active filters),
+  `access_request_list` (`mine: true` → `GET /access-requests/mine`, any human). Every grant and request
+  carries a plain-language `state` ("active until 2026-12-31", "active, but its end date has passed — it
+  is revoked automatically shortly", "revoked on … by user …", "pending: waiting for someone who can
+  grant access…", "approved by user … on …; access grant … was created", "denied by …"). Never
+  projected: an application's free-form `metadata`, any workflow definition, connection, engine Service
+  Account or secret. Descriptions, notes, justifications and denial reasons are `untrusted()`.
+- **Writes.** Every preview's first `changes` row is `action`: one sentence saying who gets or loses
+  what access on which application, and what happens outside lazyit. That last part comes from the
+  guarded `GET /workflows?applicationId=` (headers only, `workflow:read`; bound as a facet, removed from
+  `platform.tools.ts`'s unexposed list): readable → precise ("This triggers automatic provisioning … through
+  the workflow set up for VPN", with the workflow's name in a `workflow` row as untrusted text, or "No
+  automatic provisioning workflow is set up …: nothing changes outside lazyit" and no
+  `EXTERNAL_PROVISIONING`); forbidden → hedged ("may trigger … if a workflow is configured") and still
+  warned. A revoke under the default `LAST_ACTIVE_GRANT` policy says the workflow does not run when the
+  user keeps another active grant there (read through `accessGrant:read`, when the caller holds it).
+  - `access_grant_create` — `elevated`, `externalEffects`; warnings `PRIVILEGE_GRANT` (+
+    `EXTERNAL_PROVISIONING` per the above, + `NOTIFIES_USERS` for a critical application or an
+    `admin`/`administrator` level). The preview leaves `stepUpRequired` false on purpose: **core derives
+    the step-up from `PRIVILEGE_GRANT`** and the spec proves an approval without it is refused. Target
+    and precondition: the application (a change to it since the card was shown is `STALE`). **The card
+    names the grantee** — name, email and status, read through the guarded `GET /users/:id`
+    (`UsersController.findOne`, bound as a preview facet and removed from `users.tools.ts`'s pending list;
+    [[ai-assistant/security|security]] §6.1 chain 1): an inactive, directory-only or missing grantee fails
+    at propose (and at the approve-time re-preview), and a caller without `user:read` gets no card. It
+    also shows how many active grants the user already holds there, and says so when you grant yourself.
+  - `access_grant_revoke` — `write`, `destructive`, `externalEffects`; `EXTERNAL_DEPROVISIONING` when a
+    workflow will or may run. It names the user when the caller may read the directory (else by id), and
+    when it replaces the grant's notes it shows the old notes (untrusted) and lists the grant in
+    `untrustedSources`. Target and precondition: the grant (an edit since → `STALE`); an already
+    revoked grant is the route's 409 `CONFLICT`, at propose and at approve.
+  - `access_request_decide` — `elevated`, `externalEffects`, one input `decision: approve | deny` (a
+    denial requires `reason`; an approval refuses one). Approve warns `PRIVILEGE_GRANT` (step-up) +
+    `NOTIFIES_USERS` (+ `EXTERNAL_PROVISIONING`); deny warns `NOTIFIES_USERS` only — no privilege, no
+    step-up. The card names the requester (name, email, status, as for a grant; approving an inactive
+    requester fails at propose, denying stays possible) and lists the request in `untrustedSources`,
+    since it shows the requester's own justification. The API has no `GET /access-requests/:id`, so the preview finds the request through the
+    guarded list (`accessRequest:read`: the PENDING slice, then the whole list, at most 5 × 200 rows each,
+    newest first) — a follow-up is a by-id read. A pending request never changes until it is decided
+    (no `updatedAt`; `createdAt` is its version), so "changed since the card" can only mean "decided by
+    someone else": that is the route's 409 `CONFLICT`, never a second decision. An approver deciding
+    their own request (the route allows it, [[0085-access-request-flow]]) is told so in the `action`
+    sentence; there is no warning code for it.
+  - `access_request_create` — `write`, human-only (a Service Account is refused and never listed);
+    `NOTIFIES_USERS`. `application_create` / `application_update` — `write` (update `destructive`,
+    target + precondition the application); neither accepts `metadata`.
+- **Unexposed:** application archive / restore, grant batch revoke, notes and expiry (v1.1).
 
 **Consumables tools as built (W2-7).** All five admit humans and Service Accounts holding the route's
 permission (`consumable:read` for the reads, `consumable:write` for the writes; no human-only guard).
