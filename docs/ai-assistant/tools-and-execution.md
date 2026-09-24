@@ -569,13 +569,23 @@ path unit (W2-0, #1315):
 **Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so
 the RBAC guards stay in `UsersService`, in one place: the self-role-change refusal (403), the last-admin
 guard on demotion, deactivation and offboarding (409, SEC-021) and the manager checks (400) answer a tool
-exactly as they answer HTTP — the specs drive them through the tools, including over headless and MCP.
-- **References.** A user is an id, an email, a username, a legajo or `"me"` (the human caller; a Service
-  Account asking for `"me"` gets 400). Resolution reads `GET /users` as the caller: an email through the
-  route's `q`, a username or legajo — which `q` does not search — by scanning at most 5 pages of 200.
-  `user_restore` resolves in the archived slice (`deleted=only`, ADMIN-only on the route), so a Service
-  Account restores by id. A manager (`user_create`, `user_update`) is `{ user: <reference> }` or
-  `{ name }`.
+exactly as they answer HTTP — the specs drive them through the tools, over chat approval and MCP. The
+user writes are for human principals: a Service Account never holds `user:manage` (INV-SA-3). The specs
+pin the route's behaviour for one that does, for parity only; stripping such a grant at principal load is
+a separate remediation, not a supported path here.
+- **References.** A user is an id, an email, a username, a legajo or `"me"`. The literal `"me"` (any case)
+  is checked first and always means the human caller — a user whose username is "me" is named by id or
+  email; a Service Account asking for `"me"` gets 400. Resolution reads `GET /users` as the caller: a
+  reference containing `@` is matched as an email through the route's `q`, and every reference is also
+  matched exactly against username and legajo — which `q` does not search — by scanning at most 5 pages
+  of 200 (a username may contain `@`; two different matches are `AMBIGUOUS_REFERENCE`). `user_restore`
+  resolves in the archived slice (`deleted=only`, ADMIN-only on the route). The target is pinned by the
+  preview's `precondition` (a re-resolution to another user is `STALE`).
+- **Manager input (pinned).** A manager (`user_create`, `user_update`) is `{ userId }` — a lazyit user by
+  **id only**, found with `user_search` first — or `{ name }` (free text), or `null` to clear. Taking the
+  id rather than a reference keeps the stored input exactly what the card showed, so execution cannot set
+  a different person. The preview labels it through `findOne` and detects a no-op by identity (same id,
+  or same free-text name), never by comparing labels.
 - **Reads.** `user_search` (`query`, `role`, `directoryOnly`, `archived`, the route's `sort`, `dir`,
   `limit` ≤ 50, `offset`) and `user_get` (`detail`; the assignments facet and the `accessGrant:read`
   grants facet — reported `unavailable` without that permission, never a failure). `dashboard_summary`
@@ -594,21 +604,33 @@ exactly as they answer HTTP — the specs drive them through the tools, includin
     identity change and needs no step-up (CEO decision 2026-09-24): it is local-only and the route records
     it as an append-only `MANAGER_CHANGED` history row, so it carries the non-step-up `LEDGER_APPEND` —
     the elevated preview still has a warning. Bundled with an identity field, `IDENTITY_CHANGE` (and so
-    step-up) still applies. A no-op is refused before any card (400).
+    step-up) still applies. A no-op is refused before any card (400). **Residual (accepted):** the
+    manager's email feeds workflow connectors (`grantee.manager.email`, ADR-0058 §3), so a manager change
+    can redirect a future external approval or notification. The card shows the change; no password.
   - `user_offboard` (`write`, destructive, ext): `SOFT_DELETE`; `CASCADE_RELEASES_ASSIGNMENTS` and
     `CASCADE_REVOKES_GRANTS` with the `impacted` assets and grants (grants warned even when the caller
-    cannot count them); `EXTERNAL_DEPROVISIONING` when the IdP account is deactivated. No step-up (it
+    cannot count them); `EXTERNAL_DEPROVISIONING` when the IdP account is deactivated; always
+    `IRREVERSIBLE` with a `secretVaultMemberships` change row — the route hard-drops the user's Secret
+    Manager vault memberships and `user_restore` does not bring them back. The preview cannot count them:
+    the Secret Manager is a structural exclusion (ADR-0061), so the card says "any held". No step-up (it
     revokes, it grants nothing). The result reports counts only — never the Secret Manager vault names
     the route returns as a rotation prompt (ADR-0061) — and its refs are the user (`archived`) and each
     released asset (`updated`); the route returns no ids for the revoked grants.
-  - `user_restore` (`elevated`): `IDENTITY_CHANGE` (it restores sign-in); grants and assets are not
+  - `user_restore` (`elevated`): `IDENTITY_CHANGE` (it restores sign-in), plus `ROLE_CHANGE` when the
+    restored role is above VIEWER (its powers come back); grants, assets and vault memberships are not
     restored, and the description says so. A live user is refused before any card (400).
 - **Unexposed with reasons:** `roleCounts` and `activityFilters` (not in the v1 cut), `remove` (the
   `DELETE` alias of offboard), `clone` (v1.1), `provisionAccount` and `passwordResetCapabilities` (v1.1,
   `elevated`), `resetPassword` and `provisionLocalAccount` (structural exclusion), the activity CSV
   export, the security audit logs and notifications (v1.1).
-- **Known limit.** A non-ADMIN human an operator gave `user:manage` can restore through the route but not
-  through the chat: the preview reads the archived slice, which the list route keeps ADMIN-only.
+- **Known limits and follow-ups.**
+  - A non-ADMIN human an operator gave `user:manage` can restore through the route but not through the
+    chat: the preview reads the archived slice, which the list route keeps ADMIN-only.
+  - The offboarding card's asset and grant counts are taken at preview time; a check-out or grant made
+    between the preview and the approval is still reclaimed but was not on the card (the precondition
+    pins the user row, not its holdings).
+  - Person names (actor, target, user first/last names) are returned plain, as in the other toolsets;
+    wrapping directory names with `untrusted()` would be a cross-toolset decision.
 
 ### 8.2 Descriptor
 
