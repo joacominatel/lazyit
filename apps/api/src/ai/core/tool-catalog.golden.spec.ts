@@ -55,6 +55,25 @@ const GOLDEN = {
     class: 'read',
     channels: ['CHAT', 'MCP', 'HEADLESS'],
   },
+  // ── infra (W2-10) ──
+  infra_node_get: {
+    route: 'GET /infra/nodes/:id',
+    permissions: ['infra:read'],
+    roles: ['ADMIN', 'MEMBER', 'VIEWER'],
+    humans: true,
+    serviceAccounts: true,
+    class: 'read',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
+  infra_node_search: {
+    route: 'GET /infra/nodes/page',
+    permissions: ['infra:read'],
+    roles: ['ADMIN', 'MEMBER', 'VIEWER'],
+    humans: true,
+    serviceAccounts: true,
+    class: 'read',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
 } as const;
 
 /** Which roles the seed lets through the tool's route (AND semantics; ADMIN is the full catalog). */
