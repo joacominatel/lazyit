@@ -113,8 +113,8 @@ ready when the card was built, and those rows — and only those — are created
 
 **Duplicates.** If an asset tag or serial number already belongs to an existing asset, the **Problems**
 column says so and links to that asset. A value repeated between two rows of the same list is shown the
-same way ("… is also used by row 3"). If you can't read every asset, the card says the duplicate check was
-incomplete: a row whose tag or serial is already taken is then refused when it runs, and the others still
+same way ("… is also used by row 3"). If the duplicate check could not be completed — you can't read every
+asset, or a tag or serial number contains a comma and couldn't be looked up — the card says so: a row whose tag or serial is already taken is then refused when it runs, and the others still
 run.
 
 **Default status.** A new asset created by the assistant without a status starts as **In storage** (new

@@ -1113,7 +1113,7 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   record: its own scroll region (`max-h-80`, sticky header, horizontal scroll inside the card only), an
   "Only rows with problems" switch shown when any row is skipped or has a problem, and asset `status`
   values read with `assets.status.*`. Plain text only, as the rest of the card.
-- **Notices.** `duplicatesUnchecked: true` (the batch's duplicate pre-check could not run for every value)
+- **Notices.** `duplicatesUnchecked: true` (the batch's duplicate pre-check could not run for every value — no `asset:read`, or a value containing a comma)
   is a sentence on the card (`ai.approval.notices.*`), not a "Yes" row (`PREVIEW_NOTICE_FIELDS`).
 - The scalar summary rows of `asset_create_batch` (`rowCount`, `validRows`, `invalidRows`,
   `defaultsApplied`) stay ordinary field rows above the table. Manual: `ai-assistant-approvals`

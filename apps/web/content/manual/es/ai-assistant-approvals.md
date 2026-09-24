@@ -117,8 +117,9 @@ aprobás.
 
 **Duplicados.** Si una etiqueta o un número de serie ya pertenece a un activo existente, la columna
 **Problemas** lo dice y enlaza a ese activo. Un valor repetido entre dos filas de la misma lista se muestra
-igual ("… también se usa en la fila 3"). Si no podés ver todos los activos, la tarjeta avisa que la
-comprobación de duplicados quedó incompleta: una fila cuya etiqueta o número de serie ya esté en uso se
+igual ("… también se usa en la fila 3"). Si no se pudo completar la comprobación de duplicados — no podés ver
+todos los activos, o una etiqueta o número de serie contiene una coma y no se pudo buscar — la tarjeta lo
+avisa: una fila cuya etiqueta o número de serie ya esté en uso se
 rechaza al ejecutarse, y las demás se ejecutan igual.
 
 **Estado por defecto.** Un activo nuevo que el asistente crea sin estado empieza como **En depósito**
