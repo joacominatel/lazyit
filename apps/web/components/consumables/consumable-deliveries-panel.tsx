@@ -102,6 +102,21 @@ export function ConsumableDeliveriesPanel({
   );
   const userById = useUserNames(actorIds, { enabled: canReadUsers });
 
+  // A write can shrink the list under the current page (returning the last outstanding row on the
+  // final page, with "Outstanding only" on): the refetch comes back empty at an offset past the end.
+  // Step back to the last page that still has rows instead of stranding the reader on an empty one.
+  // Adjusted during render (React's "adjust state when data changes" pattern, not an effect); the
+  // `offset === data.offset` guard makes it fire once per stale page, never loop.
+  if (
+    data &&
+    data.items.length === 0 &&
+    data.offset > 0 &&
+    data.total > 0 &&
+    offset === data.offset
+  ) {
+    setOffset(Math.floor((data.total - 1) / PAGE_SIZE) * PAGE_SIZE);
+  }
+
   // No consumable:read → the read would 403; a 403 for the target domain → hide the section too.
   if (!canRead) return null;
   if (error instanceof ApiError && error.status === 403) return null;
