@@ -17,8 +17,11 @@ export const LOGOUT_TIMEOUT_MS = 3000;
  * Only a deliberate sign-out revokes. The global 401 handler (lib/api/handle-auth-expiry.ts) signs out a
  * session the API already rejected; revoking there could end every device's session over one spurious
  * 401.
+ *
+ * @param loginPath where to land afterwards — a RELATIVE `/login…` path (#1052); the OAuth consent page
+ *   passes `/login?callbackUrl=<its own URL>` so the right person can sign in and return to the request.
  */
-export async function signOutAndRevoke(): Promise<void> {
+export async function signOutAndRevoke(loginPath = "/login"): Promise<void> {
   try {
     await logout({ signal: AbortSignal.timeout(LOGOUT_TIMEOUT_MS) });
   } catch {
@@ -31,6 +34,5 @@ export async function signOutAndRevoke(): Promise<void> {
   await signOut({ redirect: false });
   // A full-page load on purpose: it discards every in-memory trace of the session (query cache, token
   // store, the unlocked secret session), which a client-side router push would keep.
-  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-  window.location.assign("/login");
+  window.location.assign(loginPath);
 }
