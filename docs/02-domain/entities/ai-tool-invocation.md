@@ -24,7 +24,11 @@ For MCP and headless calls it is the **metadata access log**. Its id is the `inv
 - **Status** (text): reads and autonomous writes `EXECUTING → SUCCEEDED | FAILED | DENIED`; interactive
   writes `AWAITING_APPROVAL → REJECTED | EXPIRED | CANCELLED`, or the atomic approve claim
   `AWAITING_APPROVAL → EXECUTING → SUCCEEDED | FAILED | OUTCOME_UNKNOWN`. `OUTCOME_UNKNOWN` is never
-  retried.
+  retried. An **input request** (#1388, `request_input`, chat only): `AWAITING_INPUT → SUCCEEDED`
+  (submitted) `| REJECTED` (skipped or declined) `| EXPIRED | CANCELLED`; its `preview` holds `{ kind:
+  "input_request", form }` (the stored form the answer is validated against), its `result` the user's
+  answer as the model receives it. Written by the runtime (`AiInputRequests`), not a write: no
+  [[ai-action-log]] event.
 - **What was approved is exactly what runs**: `inputHash` binds the approval to the stored input,
   `schemaHash` expires it if the tool changed, and `precondition` (`{ entity, updatedAt }`) fails a stale
   target with `STALE`.
@@ -33,8 +37,8 @@ For MCP and headless calls it is the **metadata access log**. Its id is the `inv
   decision). Its transitions are atomic conditional updates on `status`, so an approval executes once.
   Reads are not written here yet (the MCP/headless metadata access log belongs to the channel units).
 - **Retention-bound**: cascades with its conversation; conversation-less (MCP) rows are pruned after
-  `retentionDays` by the hourly retention pass — except a row still `AWAITING_APPROVAL` or `EXECUTING`,
-  which waits until it settles. The permanent record of a write is [[ai-action-log]].
+  `retentionDays` by the hourly retention pass — except a row still `AWAITING_APPROVAL`,
+  `AWAITING_INPUT` or `EXECUTING`, which waits until it settles. The permanent record of a write is [[ai-action-log]].
 
 ## Fields
 

@@ -451,6 +451,7 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 1 | `session_context` | UsersController.me, ConfigController.myPermissions, InstanceController.version, AccessGrants/Assets `mine` | open (self) | read | — |
 | 2 | `lazyit_search` | SearchController.find | search:read | read | — |
 | 3 | `navigate_to` (chat only) | the entity's get handler (existence + visibility check) | entity's read | navigate | the target (`op: navigate`) |
+| 3a | `request_input` ✅ built (#1388) (chat only, `awaitsInput`) — ask the user for missing data with a form the model designs; the run pauses `AWAITING_INPUT` ([[ai-assistant/provider-and-runtime\|provider]] §8.2) | UsersController.me (primary, never called) + AssetModels/AssetCategories/Locations `findAll` (for `optionsFrom`) | open (self; `ai:use`) | navigate | — |
 | 4 | `reference_lookup` ✅ built (W2-5) (kind: assetModel, location, assetCategory, applicationCategory, consumableCategory, articleFolder) | AssetModelsController.findAll (primary) and the `findAll` / `findOne` of the six controllers (12 handlers) | assetModel:read (listing); each kind's own route authorizes it | read | — |
 | 5 | `dashboard_summary` ✅ built (W2-9) | DashboardController.summary | dashboard:read | read | — |
 | 6 | `activity_list` ✅ built (W2-9) | DashboardController.activity | logs:read | read | — |
@@ -666,6 +667,10 @@ path unit (W2-0, #1315):
 - `tools/<domain>.tools.ts` — each exports an `AiToolset`: `tools` and `unexposed` (handlers + reason).
   `context.tools.ts` holds the reference tools (`session_context`, `lazyit_search`; `navigate_to` is not
   built yet);
+  `input-request.tools.ts` (#1388) holds the `interaction` toolset: `request_input`, the chat-only form
+  the assistant builds to ask for missing data (`awaitsInput: true` on a `navigate` tool — the runtime,
+  not the tool, pauses the run; [[ai-assistant/provider-and-runtime|provider]] §8.2), and lists
+  `AiRunsController.submitInput` (the user's own answer) as unexposed;
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
   `kb.tools.ts` (W2-8) holds the five KB tools — see *KB tools as built* below;

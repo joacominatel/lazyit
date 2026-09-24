@@ -21,8 +21,10 @@ redacted error. It holds **no content**.
 
 - **Exactly one acting principal** — a [[user]] or a [[service-account]] (CHECK
   `ai_runs_exactly_one_principal`). Plain columns, not FKs: the row is a durable record.
-- **Status** (text): `QUEUED → RUNNING → AWAITING_APPROVAL → … → SUCCEEDED | FAILED | CANCELLED |
-  EXPIRED`. **Approval policy**: `REQUIRE_APPROVAL_FOR_WRITES` (humans) or `AUTONOMOUS` (service
+- **Status** (text): `QUEUED → RUNNING → AWAITING_APPROVAL | AWAITING_INPUT → … → SUCCEEDED | FAILED |
+  CANCELLED | EXPIRED`. `AWAITING_INPUT` (#1388) is a chat run paused on a form the assistant asked its
+  user to fill; it expires, is cancelled and resumes like `AWAITING_APPROVAL`
+  ([[ai-assistant/provider-and-runtime|provider]] §8.2). Both waiting statuses count as active. **Approval policy**: `REQUIRE_APPROVAL_FOR_WRITES` (humans) or `AUTONOMOUS` (service
   accounts).
 - **Survives retention**: the conversation FK is `SetNull`, so budgets, usage and the ledger keep their
   reference after the transcript is gone.

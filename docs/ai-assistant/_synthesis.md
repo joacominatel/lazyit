@@ -200,8 +200,9 @@ cap (headless), and a per-principal rate limit. Each dispatch runs inside an `As
 
 ### 4.4 Runs, approvals and status sets
 
-- **Run** (`AiRun.status`): `QUEUED → RUNNING → AWAITING_APPROVAL → … → SUCCEEDED | FAILED |
-  CANCELLED | EXPIRED`; `approvalPolicy` = `REQUIRE_APPROVAL_FOR_WRITES` (humans) or `AUTONOMOUS`
+- **Run** (`AiRun.status`): `QUEUED → RUNNING → AWAITING_APPROVAL | AWAITING_INPUT → … → SUCCEEDED |
+  FAILED | CANCELLED | EXPIRED` (`AWAITING_INPUT`: a chat run paused on a form the assistant asked the
+  user to fill, #1388 — [[ai-assistant/provider-and-runtime|provider]] §8.2); `approvalPolicy` = `REQUIRE_APPROVAL_FOR_WRITES` (humans) or `AUTONOMOUS`
   (Service Accounts). One active run per conversation (409 `RUN_IN_PROGRESS`); a job carries only
   `{ runId }` and is never retried blindly; a sweeper re-enqueues lost resumes and finalizes stale runs
   ([[ai-assistant/provider-and-runtime|provider]] §8).
@@ -209,7 +210,8 @@ cap (headless), and a per-principal rate limit. Each dispatch runs inside an `As
   SUCCEEDED | FAILED | DENIED`; interactive writes `AWAITING_APPROVAL → REJECTED | EXPIRED |
   CANCELLED`, or the atomic approve claim `AWAITING_APPROVAL → EXECUTING → SUCCEEDED | FAILED |
   OUTCOME_UNKNOWN`. A precondition mismatch fails with code `STALE`; `OUTCOME_UNKNOWN` is never
-  retried.
+  retried. An input request (#1388): `AWAITING_INPUT → SUCCEEDED` (submitted) `| REJECTED` (skipped,
+  declined) `| EXPIRED | CANCELLED` — not a write, no ledger event.
 - **Ledger** (`AiActionLog.event`): `PROPOSED`, `APPROVED`, `REJECTED`, `EXPIRED`, `CANCELLED`,
   `ATTEMPTED`, `EXECUTED`, `FAILED`, `DENIED`. MCP and headless write `ATTEMPTED` → outcome.
 - **Approval:** only the run's own human, from a human session, carrying only the pending-action id
@@ -227,18 +229,20 @@ credentials. The web shell gates the launcher on it and fails closed (404 on an 
 
 `GET /ai/runs/:id/events` — `text/event-stream`, `id: <runId>:<seq>`, heartbeats every 15 s,
 `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no`. Closes after a terminal status or
-after `AWAITING_APPROVAL`; the client re-subscribes after deciding (short connections suit HTTP/1.1
+after `AWAITING_APPROVAL` / `AWAITING_INPUT`; the client re-subscribes after deciding or answering (short connections suit HTTP/1.1
 `lan`). Replays from an in-process ring buffer, or sends `run.snapshot` from Postgres. Versioned union
 (`v: 1`):
 
 | Event | Payload |
 | --- | --- |
-| `run.snapshot` | persisted state: messages since `seq`, pending approvals with previews, run status |
+| `run.snapshot` | persisted state: messages since `seq`, pending approvals with previews, pending input forms (`pendingInputs`, #1388), run status |
 | `run.status` | `{ status }` |
 | `message.delta` / `message.completed` | `{ messageId, text }` / `{ messageId }` |
 | `tool.call` | `{ toolCallId, name, kind, class, status, args? }` (`args` = flat, redacted summary) |
 | `tool.approval_required` | `{ toolCallId, preview, elevated, stepUpRequired, untrustedSources, expiresAt }` |
 | `tool.approval_resolved` | `{ toolCallId, decision: approved \| rejected \| expired \| cancelled }` |
+| `input.required` | `{ toolCallId, form, expiresAt }` (#1388) |
+| `input.resolved` | `{ toolCallId, outcome: submitted \| skipped \| declined \| expired \| cancelled }` (#1388) |
 | `tool.result` | `{ toolCallId, kind, status, summary?, mutated, entityRefs[], error?, requestId? }` |
 | `step.finished` | `{ stepIndex, usage }` |
 | `run.finished` | `{ status, finishReason, usage, error?: { code, message, retryAfterSec?, requestId? } }` |
@@ -262,6 +266,7 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
 | Model picker | `GET /ai/models` → the configured provider's models (cached), the default model and effort (#1373) | `ai:use`, humans |
 | Runs (chat + headless) | `POST /ai/runs { prompt, conversationId? }` (+ `Idempotency-Key`), `GET /ai/runs/:id`, `POST /ai/runs/:id/cancel`, `GET /ai/runs/:id/events` | `ai:use`, owner only |
 | Approval decision | `POST /ai/runs/:id/tool-calls/:toolCallId/decision { decision, reason?, password? }` | `ai:use`, human session, the run's owner |
+| Input answer (#1388) | `POST /ai/runs/:id/tool-calls/:toolCallId/input { action: submit \| skip \| cancel, values?, groups? }` | `ai:use`, human session, the run's owner |
 | MCP resource | `/mcp` — **public path** | Bearer `lzit_oat_` (HTTPS), `lzit_pat_` (`lan`), `lzit_sa_` (SA holding `ai:connect`); MCP switch; `ai:connect` |
 | OAuth metadata | `/.well-known/oauth-protected-resource[/mcp]`, `/.well-known/oauth-authorization-server` — **public path** | none; 404 when MCP is off or on `lan` |
 | OAuth protocol | `/oauth/token`, `/oauth/register`, `/oauth/revoke` — **public path** | public client; rate-limited; 404 when MCP is off or on `lan` |
