@@ -1,51 +1,1407 @@
+import {
+  ConflictException,
+  HttpException,
+  NotFoundException,
+} from '@nestjs/common';
+import { z } from 'zod';
+import {
+  AccessRequestStatusSchema,
+  CreateApplicationSchema,
+  int4,
+  MAX_PAGE_LIMIT,
+  type AiEntityRef,
+  type AiPreviewWarningCode,
+} from '@lazyit/shared';
 import { AccessGrantsController } from '../../access-grants/access-grants.controller';
 import { AccessRequestsController } from '../../access-requests/access-requests.controller';
 import { ApplicationsController } from '../../applications/applications.controller';
-import { unexposed, type AiToolset } from '../core/tool-descriptor';
-
-const PENDING = 'Pending: the access toolset (W2-6) binds or excludes it.';
+import { WorkflowsController } from '../../workflow-engine/definitions/workflows.controller';
+import { APPLICATION_SORT_ALLOWLIST } from '../../applications/applications.service';
+import {
+  AI_TOOL_LIST_DEFAULT_LIMIT,
+  AI_TOOL_LIST_MAX_LIMIT,
+} from '../ai.constants';
+import {
+  AiReferenceError,
+  entityRefOf,
+  type AiResolvedReference,
+} from '../core/reference-resolver';
+import { untrusted } from '../core/result-shaper';
+import {
+  bind,
+  defineTool,
+  unexposed,
+  type AiToolPreview,
+  type AiToolRuntime,
+  type AiToolset,
+} from '../core/tool-descriptor';
 
 /**
- * The ACCESS toolset (W2-6): applications, access grants and access requests. Pre-created by the AI core
- * unit; its unit fills `tools` and replaces the pending entries with a decision per handler. The coverage
- * test fails on any handler left undecided. `AccessGrantsController.findMine` is bound by
- * `session_context`.
+ * The ACCESS toolset (W2-6; tools-and-execution.md §7 rows 17–26): applications, access grants and
+ * access requests. Every call goes through `rt.call` — the route's own guards, pipes and controller
+ * logic, as the principal — so an application write passes the same `CreateApplicationSchema` /
+ * `UpdateApplicationSchema` pipe (the SEC-051 url-scheme guard) as the web, and a grant runs the same
+ * live-checks, actor attribution and workflow outbox (ADR-0054).
+ *
+ * Privilege: opening a grant and approving an access request GRANT ACCESS, so their previews carry
+ * `PRIVILEGE_GRANT` — core derives the password step-up from it (CEO decision 2026-09-24, "Opción 2").
+ * The previews deliberately leave `stepUpRequired` false: core, not the tool, is the authority.
+ *
+ * What never leaves this file: an application's free-form `metadata` blob (neither read nor written),
+ * any workflow definition, connection or secret (the workflow engine and the Secret Manager are
+ * structurally excluded), and any credential. Free text other people wrote (descriptions, notes,
+ * justifications, denial reasons) is wrapped as untrusted content.
  */
+
+type Row = Record<string, unknown>;
+
+function asRow(value: unknown): Row {
+  return typeof value === 'object' && value !== null ? (value as Row) : {};
+}
+
+function asRows(value: unknown): Row[] {
+  return Array.isArray(value) ? value.map(asRow) : [];
+}
+
+function str(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+/** A Prisma `Date` (in-process dispatch does not serialize) or an ISO string, as an ISO string. */
+function iso(value: unknown): string | null {
+  if (value instanceof Date) return value.toISOString();
+  return typeof value === 'string' ? value : null;
+}
+
+/** Keep only the named fields of a row, dates as ISO strings. */
+function pick(row: unknown, fields: readonly string[]): Row {
+  const source = asRow(row);
+  const out: Row = {};
+  for (const field of fields) {
+    if (field in source) {
+      const value = source[field];
+      out[field] = value instanceof Date ? value.toISOString() : value;
+    }
+  }
+  return out;
+}
+
+/** The status of an HTTP refusal a dispatched handler threw, if it was one. */
+function httpStatus(err: unknown): number | undefined {
+  return err instanceof HttpException ? err.getStatus() : undefined;
+}
+
+/**
+ * A facet read the caller may not be allowed to make (a route with another permission than the tool's
+ * primary one): its 403 becomes a marker in the result, never a failure of the whole tool.
+ */
+async function facet<T>(
+  read: () => Promise<T>,
+): Promise<T | { unavailable: 'FORBIDDEN' }> {
+  try {
+    return await read();
+  } catch (err) {
+    if (httpStatus(err) === 403) return { unavailable: 'FORBIDDEN' };
+    throw err;
+  }
+}
+
+const isCuid = (value: string) => z.cuid().safeParse(value).success;
+
+/** A person, in the words a preview or a result states: "you" or "user <id>". */
+function who(user: AiResolvedReference): string {
+  return user.label === 'me' ? 'you' : `user ${user.id}`;
+}
+
+/** A person named by id: "you" when it is the caller, else "user <id>". */
+function whoId(rt: AiToolRuntime, id: unknown): string {
+  const identity = rt.ctx.identity;
+  return identity.kind === 'human' && identity.userId === id
+    ? 'you'
+    : `user ${String(id)}`;
+}
+
+/** `"admin" access` / `access` — the access level as the application names it, when there is one. */
+function accessPhrase(level: unknown): string {
+  return typeof level === 'string' && level.length > 0
+    ? `"${level}" access`
+    : 'access';
+}
+
+/** What a grant or a revoke will do outside lazyit, in plain words (ADR-0054). */
+interface ProvisioningOutlook {
+  /** The sentence the preview's `action` row ends with. */
+  sentence: string;
+  /** Whether to warn EXTERNAL_PROVISIONING / EXTERNAL_DEPROVISIONING: it will, or may, run. */
+  external: boolean;
+  /** The enabled workflow names the caller may read, as untrusted text (admin-authored). */
+  workflows: string[];
+}
+
+/**
+ * Whether granting (`ACCESS_GRANTED`) or revoking (`ACCESS_REVOKED`) access on an application starts an
+ * automatic (de)provisioning workflow. Looked up through the guarded workflow list (`workflow:read`):
+ *   - readable → precise: the enabled workflow runs, or nothing happens outside lazyit;
+ *   - forbidden → hedged ("may … if a workflow is configured") and still warned — never a detail the
+ *     caller could not read;
+ *   - a revoke whose user keeps other active grants on the application does not deprovision under the
+ *     default LAST_ACTIVE_GRANT policy (`otherActiveGrants`, when the caller may read the access map).
+ * Only headers are read: never a definition, a connection or a secret.
+ */
+async function provisioningOutlook(
+  rt: AiToolRuntime,
+  applicationId: string,
+  appName: string,
+  trigger: 'ACCESS_GRANTED' | 'ACCESS_REVOKED',
+  otherActiveGrants?: number,
+): Promise<ProvisioningOutlook> {
+  const revoke = trigger === 'ACCESS_REVOKED';
+  const what = revoke
+    ? `automatic deprovisioning (removing the account in ${appName})`
+    : `automatic provisioning (creating the account in ${appName})`;
+  let enabled: Row[];
+  try {
+    const page = asRow(
+      await rt.call(WorkflowsController, 'findAll', {
+        query: { applicationId, limit: String(MAX_PAGE_LIMIT) },
+      }),
+    );
+    enabled = asRows(page.items).filter(
+      (w) => w.trigger === trigger && w.enabled === true,
+    );
+  } catch (err) {
+    if (httpStatus(err) !== 403) throw err;
+    return {
+      external: true,
+      workflows: [],
+      sentence: `This may trigger ${what} if a workflow is configured for this application.`,
+    };
+  }
+  if (enabled.length === 0) {
+    return {
+      external: false,
+      workflows: [],
+      sentence: `No automatic ${revoke ? 'deprovisioning' : 'provisioning'} workflow is set up for ${appName}: nothing changes outside lazyit.`,
+    };
+  }
+  const workflows = enabled.map((w) => untrusted(str(w.name)) ?? '(unnamed)');
+  if (!revoke) {
+    return {
+      external: true,
+      workflows,
+      sentence: `This triggers ${what} after approval, through the workflow set up for ${appName}.`,
+    };
+  }
+  const perGrant = enabled.some((w) => w.deprovisionPolicy === 'EACH_GRANT');
+  if (!perGrant && otherActiveGrants !== undefined && otherActiveGrants > 0) {
+    return {
+      external: false,
+      workflows,
+      sentence: `The user keeps other access to ${appName}, so its deprovisioning workflow does not run.`,
+    };
+  }
+  return {
+    external: true,
+    workflows,
+    sentence:
+      perGrant || otherActiveGrants !== undefined
+        ? `This triggers ${what}, through the workflow set up for ${appName}.`
+        : `This triggers ${what} if it is the user's last access to ${appName}, through the workflow set up for it.`,
+  };
+}
+
+// ─── References ──────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A user reference. v1: the user's id or `"me"` (the caller). Email / username resolution needs the
+ * users directory read (`UsersController.findAll`), which the users toolset (W2-9) binds — a follow-up.
+ */
+const userReference = z
+  .union([z.uuid(), z.literal('me')])
+  .describe(
+    'The user: their id (a uuid; find it with lazyit_search) or "me" for yourself.',
+  );
+
+const applicationReference = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .describe(
+    'The application: its id or its exact name (case-insensitive). Find it with application_search.',
+  );
+
+/** Resolve `"me"` or a user id. `"me"` is the calling human; a Service Account has no person. */
+function resolveUser(
+  rt: AiToolRuntime,
+  reference: string,
+): AiResolvedReference {
+  if (reference === 'me') {
+    const identity = rt.ctx.identity;
+    if (identity.kind !== 'human') {
+      throw new AiReferenceError(
+        'NOT_FOUND',
+        '"me" names a person; a Service Account has no user — pass the user id',
+      );
+    }
+    return { type: 'user', id: identity.userId, label: 'me' };
+  }
+  return { type: 'user', id: reference };
+}
+
+/**
+ * Resolve an application by id or exact name, through the bound (guarded) list route — a caller who may
+ * not read applications gets the route's 403, never a match.
+ */
+function resolveApplication(
+  rt: AiToolRuntime,
+  reference: string,
+): Promise<AiResolvedReference> {
+  return rt.resolve({
+    type: 'application',
+    reference,
+    isId: isCuid,
+    lookup: async (name) => {
+      const page = asRow(
+        await rt.call(ApplicationsController, 'findAll', {
+          query: { q: name, limit: String(MAX_PAGE_LIMIT) },
+        }),
+      );
+      const wanted = name.trim().toLowerCase();
+      return asRows(page.items)
+        .filter((row) => str(row.name)?.trim().toLowerCase() === wanted)
+        .map((row) => ({ id: String(row.id), label: String(row.name) }));
+    },
+  });
+}
+
+/** The live application row, read through its guarded route (404 when missing or archived). */
+async function readApplication(rt: AiToolRuntime, id: string): Promise<Row> {
+  return asRow(
+    await rt.call(ApplicationsController, 'findOne', { params: { id } }),
+  );
+}
+
+function applicationEntity(app: Row, op: AiEntityRef['op']): AiEntityRef {
+  return {
+    type: 'application',
+    id: String(app.id),
+    op,
+    ...(str(app.name) ? { label: str(app.name)! } : {}),
+  };
+}
+
+// ─── Projections ─────────────────────────────────────────────────────────────────────────────────────
+
+const APPLICATION_FIELDS = [
+  'id',
+  'name',
+  'vendor',
+  'url',
+  'categoryId',
+  'isCritical',
+  'seatsPurchased',
+  'seatsUsed',
+  'costPerSeat',
+  'renewalDate',
+  'updatedAt',
+] as const;
+
+function applicationSummary(row: unknown): Row {
+  return pick(row, APPLICATION_FIELDS);
+}
+
+const GRANT_FIELDS = [
+  'id',
+  'userId',
+  'applicationId',
+  'accessLevel',
+  'grantedAt',
+  'expiresAt',
+  'revokedAt',
+  'grantedById',
+  'revokedById',
+] as const;
+
+/** Only the date part of an ISO timestamp, for the plain-language states. */
+function day(value: unknown): string | null {
+  return iso(value)?.slice(0, 10) ?? null;
+}
+
+/**
+ * A grant's state in plain words, for an operator who does not read timestamps. `expiresAt` does not end
+ * a grant by itself: the expiry sweeper revokes it (access-grant.md), so a past date is still active.
+ */
+function grantState(row: Row, now: Date = new Date()): string {
+  const revokedAt = iso(row.revokedAt);
+  if (revokedAt) {
+    return row.revokedById
+      ? `revoked on ${day(revokedAt)} by user ${str(row.revokedById)}`
+      : `revoked on ${day(revokedAt)}`;
+  }
+  const expiresAt = iso(row.expiresAt);
+  if (!expiresAt) return 'active (no end date)';
+  return Date.parse(expiresAt) <= now.getTime()
+    ? `active, but its end date (${day(expiresAt)}) has passed — it is revoked automatically shortly`
+    : `active until ${day(expiresAt)}`;
+}
+
+function grantSummary(row: unknown): Row {
+  const source = asRow(row);
+  const out = pick(source, GRANT_FIELDS);
+  out.state = grantState(source);
+  out.notes = untrusted(str(source.notes));
+  return out;
+}
+
+const REQUEST_FIELDS = [
+  'id',
+  'requesterId',
+  'applicationId',
+  'accessLevel',
+  'status',
+  'decidedById',
+  'decidedAt',
+  'grantId',
+  'createdAt',
+] as const;
+
+/** A request's state in plain words: who is waiting for whom, or who decided and what came of it. */
+function requestState(row: Row): string {
+  const by = str(row.decidedById) ? ` by user ${str(row.decidedById)}` : '';
+  const on = row.decidedAt ? ` on ${day(row.decidedAt)}` : '';
+  if (row.status === 'APPROVED') {
+    return `approved${by}${on}; access grant ${String(row.grantId)} was created`;
+  }
+  if (row.status === 'DENIED') {
+    return `denied${by}${on} (see deniedReason)`;
+  }
+  return 'pending: waiting for someone who can grant access to approve or deny it';
+}
+
+function requestSummary(row: unknown): Row {
+  const source = asRow(row);
+  const out = pick(source, REQUEST_FIELDS);
+  out.state = requestState(source);
+  out.justification = untrusted(str(source.justification));
+  out.deniedReason = untrusted(str(source.deniedReason));
+  return out;
+}
+
+const pageSize = z
+  .number()
+  .int()
+  .min(1)
+  .max(AI_TOOL_LIST_MAX_LIMIT)
+  .optional()
+  .describe(
+    `Page size (default ${AI_TOOL_LIST_DEFAULT_LIMIT}, max ${AI_TOOL_LIST_MAX_LIMIT}).`,
+  );
+const pageOffset = z
+  .number()
+  .int()
+  .min(0)
+  .optional()
+  .describe('Rows to skip (default 0).');
+
+/** Shape a route page (`{ items, total }`) into the tool's page with its truncation marker. */
+function pageOutput(
+  page: unknown,
+  offset: number,
+  project: (row: unknown) => Row,
+) {
+  const source = asRow(page);
+  const items = asRows(source.items).map(project);
+  const total = typeof source.total === 'number' ? source.total : items.length;
+  const nextOffset = offset + items.length;
+  return {
+    data: { total, offset, items },
+    ...(nextOffset < total
+      ? { truncated: { shown: items.length, total, nextOffset } }
+      : {}),
+  };
+}
+
+// ─── Applications ────────────────────────────────────────────────────────────────────────────────────
+
+const SORT_FIELDS = Object.keys(APPLICATION_SORT_ALLOWLIST) as [
+  string,
+  ...string[],
+];
+
+const applicationSearch = defineTool({
+  name: 'application_search',
+  title: 'Search applications',
+  description:
+    'Search the application catalog (SaaS products, internal systems, VPNs, directory groups — anything a ' +
+    'user can be granted access to). `query` matches name, vendor, url and description. Returns a page of ' +
+    'applications with their ids, criticality and seat counts. Use it before application_get or any ' +
+    'access tool; never guess an id.',
+  domain: 'access',
+  class: 'read',
+  idempotent: true,
+  input: z.strictObject({
+    query: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe('Case-insensitive text to look for.'),
+    sort: z.enum(SORT_FIELDS).optional(),
+    dir: z.enum(['asc', 'desc']).optional(),
+    limit: pageSize,
+    offset: pageOffset,
+  }),
+  bindings: [bind(ApplicationsController, 'findAll')],
+  async run(input, rt) {
+    const limit = input.limit ?? AI_TOOL_LIST_DEFAULT_LIMIT;
+    const offset = input.offset ?? 0;
+    const page = await rt.call(ApplicationsController, 'findAll', {
+      query: {
+        q: input.query,
+        sort: input.sort,
+        dir: input.dir,
+        limit: String(limit),
+        offset: String(offset),
+      },
+    });
+    return pageOutput(page, offset, applicationSummary);
+  },
+});
+
+const applicationGet = defineTool({
+  name: 'application_get',
+  title: 'Get an application',
+  description:
+    'One application by id or exact name: what it is, its criticality and license seats, and who holds ' +
+    'access to it (active grants; needs permission to read the access map). detail "full" adds its ' +
+    'description, notes and the published knowledge-base articles linked to it.',
+  domain: 'access',
+  class: 'read',
+  idempotent: true,
+  input: z.strictObject({
+    application: applicationReference,
+    detail: z
+      .enum(['concise', 'full'])
+      .default('concise')
+      .describe('"full" adds the description, notes and linked articles.'),
+    includeRevokedGrants: z
+      .boolean()
+      .default(false)
+      .describe('Also list revoked grants (the access history).'),
+  }),
+  bindings: [
+    bind(ApplicationsController, 'findOne'),
+    bind(ApplicationsController, 'findAll'),
+    bind(ApplicationsController, 'findGrants'),
+    bind(ApplicationsController, 'findArticles'),
+  ],
+  async run(input, rt) {
+    const resolved = await resolveApplication(rt, input.application);
+    const app = await readApplication(rt, resolved.id);
+    const params = { id: resolved.id };
+    const grants = await facet(async () =>
+      asRows(
+        await rt.call(ApplicationsController, 'findGrants', {
+          params,
+          query: { activeOnly: String(!input.includeRevokedGrants) },
+        }),
+      ),
+    );
+    const data: Row = {
+      application: applicationSummary(app),
+      grants: Array.isArray(grants)
+        ? {
+            total: grants.length,
+            items: grants.slice(0, AI_TOOL_LIST_MAX_LIMIT).map(grantSummary),
+          }
+        : grants,
+    };
+    if (input.detail === 'full') {
+      (data.application as Row).description = untrusted(str(app.description));
+      (data.application as Row).notes = untrusted(str(app.notes));
+      data.articles = await facet(async () => {
+        const page = asRow(
+          await rt.call(ApplicationsController, 'findArticles', {
+            params,
+            query: { limit: String(AI_TOOL_LIST_DEFAULT_LIMIT) },
+          }),
+        );
+        return {
+          total: typeof page.total === 'number' ? page.total : 0,
+          items: asRows(page.items).map((a) =>
+            pick(a, ['id', 'slug', 'title']),
+          ),
+        };
+      });
+    }
+    return { data };
+  },
+});
+
+/** The fields a tool may set on an application — never the free-form `metadata` blob. */
+const applicationCreateInput = CreateApplicationSchema.omit({ metadata: true });
+
+const APPLICATION_WRITABLE = [
+  'name',
+  'description',
+  'url',
+  'vendor',
+  'categoryId',
+  'isCritical',
+  'notes',
+  'seatsPurchased',
+  'costPerSeat',
+  'renewalDate',
+] as const;
+
+const applicationCreate = defineTool({
+  name: 'application_create',
+  title: 'Create an application',
+  description:
+    'Add an application to the catalog so access to it can be granted and tracked. Only `name` is ' +
+    'required. `url` must be a host (vpn.corp.local, jenkins:8080) or an http(s) url. Costs are integer ' +
+    'minor units (cents). Find the category id with reference_lookup.',
+  domain: 'access',
+  class: 'write',
+  input: applicationCreateInput,
+  bindings: [bind(ApplicationsController, 'create')],
+  async run(input, rt) {
+    const app = asRow(
+      await rt.call(ApplicationsController, 'create', { body: input }),
+    );
+    return {
+      data: { application: applicationSummary(app) },
+      summary: `Added the application "${String(app.name)}" to the catalog.`,
+      entityRefs: [applicationEntity(app, 'created')],
+    };
+  },
+  preview(input) {
+    const values = input as Row;
+    return Promise.resolve({
+      changes: [
+        {
+          field: 'action',
+          after: `Add the application "${String(values.name)}" to the catalog.`,
+        },
+        ...APPLICATION_WRITABLE.filter((f) => values[f] !== undefined).map(
+          (field) => ({ field, after: values[field] }),
+        ),
+      ],
+      warnings: [],
+      impacted: [],
+      untrustedSources: [],
+      elevated: false,
+      stepUpRequired: false,
+    });
+  },
+});
+
+const applicationUpdateSet = z
+  .strictObject({
+    name: CreateApplicationSchema.shape.name.optional(),
+    description: CreateApplicationSchema.shape.description,
+    url: CreateApplicationSchema.shape.url,
+    vendor: CreateApplicationSchema.shape.vendor,
+    categoryId: CreateApplicationSchema.shape.categoryId,
+    isCritical: z.boolean().optional(),
+    notes: z.string().trim().min(1).max(2000).optional(),
+    seatsPurchased: int4({ min: 0 }).nullable().optional(),
+    costPerSeat: int4({ min: 0 }).nullable().optional(),
+    renewalDate: z.iso.datetime().nullable().optional(),
+  })
+  .refine((set) => Object.keys(set).length > 0, {
+    error: 'At least one field must be provided to update',
+  })
+  .describe(
+    'Only the fields to change. `null` clears seatsPurchased, costPerSeat or renewalDate.',
+  );
+
+const applicationUpdate = defineTool({
+  name: 'application_update',
+  title: 'Update an application',
+  description:
+    'Change fields of an application (name, vendor, url, category, criticality, notes, license seats…). ' +
+    'Pass only what changes in `set`. The preview shows each value before and after.',
+  domain: 'access',
+  class: 'write',
+  destructive: true,
+  input: z.strictObject({
+    application: applicationReference,
+    set: applicationUpdateSet,
+  }),
+  bindings: [
+    bind(ApplicationsController, 'update'),
+    bind(ApplicationsController, 'findOne'),
+    bind(ApplicationsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const resolved = await resolveApplication(rt, input.application);
+    const app = asRow(
+      await rt.call(ApplicationsController, 'update', {
+        params: { id: resolved.id },
+        body: input.set,
+      }),
+    );
+    return {
+      data: { application: applicationSummary(app) },
+      summary: `Updated the application "${String(app.name)}" (${Object.keys(input.set).join(', ')}).`,
+      entityRefs: [applicationEntity(app, 'updated')],
+    };
+  },
+  async preview(input, rt) {
+    const resolved = await resolveApplication(rt, input.application);
+    const current = await readApplication(rt, resolved.id);
+    const target = applicationEntity(current, 'updated');
+    const set = input.set as Row;
+    return {
+      target,
+      changes: [
+        {
+          field: 'action',
+          after: `Change ${Object.keys(set).join(', ')} of the application "${String(current.name)}".`,
+        },
+        ...APPLICATION_WRITABLE.filter((f) => f in set).map((field) => ({
+          field,
+          before:
+            current[field] instanceof Date
+              ? iso(current[field])
+              : (current[field] ?? null),
+          after: set[field],
+        })),
+      ],
+      warnings: [],
+      impacted: [],
+      untrustedSources: [],
+      elevated: false,
+      stepUpRequired: false,
+      precondition: { entity: target, updatedAt: iso(current.updatedAt)! },
+    };
+  },
+});
+
+// ─── Access grants ───────────────────────────────────────────────────────────────────────────────────
+
+const accessGrantList = defineTool({
+  name: 'access_grant_list',
+  title: 'List access grants',
+  description:
+    'Who has access to what: access grants, newest first, filtered by user and/or application. Active ' +
+    'grants only by default; activeOnly=false adds the revoked history. Answers "what can this person ' +
+    'access?" and "who can reach this application?".',
+  domain: 'access',
+  class: 'read',
+  idempotent: true,
+  input: z.strictObject({
+    user: userReference.optional(),
+    application: applicationReference.optional(),
+    activeOnly: z
+      .boolean()
+      .default(true)
+      .describe('false also lists revoked grants.'),
+    includeExpired: z
+      .boolean()
+      .default(true)
+      .describe('false hides active grants already past their expiry date.'),
+    limit: pageSize,
+    offset: pageOffset,
+  }),
+  bindings: [
+    bind(AccessGrantsController, 'findAll'),
+    bind(ApplicationsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const limit = input.limit ?? AI_TOOL_LIST_DEFAULT_LIMIT;
+    const offset = input.offset ?? 0;
+    const user = input.user ? resolveUser(rt, input.user) : undefined;
+    const application = input.application
+      ? await resolveApplication(rt, input.application)
+      : undefined;
+    const page = await rt.call(AccessGrantsController, 'findAll', {
+      query: {
+        userId: user?.id,
+        applicationId: application?.id,
+        activeOnly: String(input.activeOnly),
+        includeExpired: String(input.includeExpired),
+        limit: String(limit),
+        offset: String(offset),
+      },
+    });
+    return pageOutput(page, offset, grantSummary);
+  },
+});
+
+/** Access levels whose grant nudges the admins (`admin_granted`, AccessGrantsService). */
+const ADMIN_LEVELS = new Set(['admin', 'administrator']);
+
+const accessGrantCreate = defineTool({
+  name: 'access_grant_create',
+  title: 'Grant access to an application',
+  description:
+    'Give a user access to an application (open an access grant). This GRANTS PRIVILEGE: the person ' +
+    'approving confirms with their password. It may start the application’s automatic provisioning ' +
+    'workflow (creating the account in the external system). A user may hold several grants on one application at different ' +
+    'access levels. `accessLevel` is free text the application defines (admin, developer, viewer…).',
+  domain: 'access',
+  class: 'elevated',
+  externalEffects: true,
+  input: z.strictObject({
+    user: userReference,
+    application: applicationReference,
+    accessLevel: z.string().trim().min(1).max(100).optional(),
+    expiresAt: z.iso
+      .datetime()
+      .optional()
+      .describe('When the grant ends (ISO date-time); it is revoked then.'),
+    notes: z.string().trim().min(1).max(2000).optional(),
+  }),
+  bindings: [
+    bind(AccessGrantsController, 'create'),
+    bind(ApplicationsController, 'findOne'),
+    bind(ApplicationsController, 'findAll'),
+    bind(AccessGrantsController, 'findAll'),
+    bind(WorkflowsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const user = resolveUser(rt, input.user);
+    const application = await resolveApplication(rt, input.application);
+    const grant = asRow(
+      await rt.call(AccessGrantsController, 'create', {
+        body: {
+          userId: user.id,
+          applicationId: application.id,
+          ...(input.accessLevel !== undefined
+            ? { accessLevel: input.accessLevel }
+            : {}),
+          ...(input.expiresAt !== undefined
+            ? { expiresAt: input.expiresAt }
+            : {}),
+          ...(input.notes !== undefined ? { notes: input.notes } : {}),
+        },
+      }),
+    );
+    return {
+      data: { grant: grantSummary(grant) },
+      summary: `Granted ${who(user)} ${accessPhrase(grant.accessLevel)} to ${application.label ?? `application ${application.id}`}.`,
+      entityRefs: [
+        {
+          type: 'accessGrant',
+          id: String(grant.id),
+          op: 'created',
+          parent: { type: 'application', id: application.id },
+        },
+        entityRefOf(application, 'updated'),
+        entityRefOf(user, 'updated'),
+      ],
+    };
+  },
+  async preview(input, rt): Promise<AiToolPreview> {
+    const user = resolveUser(rt, input.user);
+    const resolved = await resolveApplication(rt, input.application);
+    const app = await readApplication(rt, resolved.id);
+    const target = applicationEntity(app, 'updated');
+    const existing = await facet(async () =>
+      asRow(
+        await rt.call(AccessGrantsController, 'findAll', {
+          query: {
+            userId: user.id,
+            applicationId: resolved.id,
+            activeOnly: 'true',
+            limit: '1',
+          },
+        }),
+      ),
+    );
+    const appName = str(app.name) ?? resolved.id;
+    const outlook = await provisioningOutlook(
+      rt,
+      resolved.id,
+      appName,
+      'ACCESS_GRANTED',
+    );
+    const warnings: AiPreviewWarningCode[] = ['PRIVILEGE_GRANT'];
+    if (outlook.external) warnings.push('EXTERNAL_PROVISIONING');
+    const adminLevel =
+      input.accessLevel !== undefined &&
+      ADMIN_LEVELS.has(input.accessLevel.trim().toLowerCase());
+    if (app.isCritical === true || adminLevel) warnings.push('NOTIFIES_USERS');
+    const until = input.expiresAt ? ` until ${day(input.expiresAt)}` : '';
+    const self = whoId(rt, user.id) === 'you';
+    const changes: AiToolPreview['changes'] = [
+      {
+        field: 'action',
+        after:
+          (self ? 'You are granting access to yourself. ' : '') +
+          `Give ${self ? 'yourself' : who(user)} ${accessPhrase(input.accessLevel)} to ${appName}${until}. ` +
+          outlook.sentence,
+      },
+      {
+        field: 'user',
+        after: user.label === 'me' ? `${user.id} (you)` : user.id,
+        valueKind: 'entity',
+      },
+      {
+        field: 'application',
+        after: str(app.name) ?? resolved.id,
+        valueKind: 'entity',
+      },
+      {
+        field: 'isCritical',
+        after: app.isCritical === true,
+        valueKind: 'boolean',
+      },
+      { field: 'accessLevel', after: input.accessLevel ?? null },
+      { field: 'expiresAt', after: input.expiresAt ?? null, valueKind: 'date' },
+    ];
+    if (input.notes !== undefined) {
+      changes.push({ field: 'notes', after: input.notes });
+    }
+    if (outlook.workflows.length > 0) {
+      changes.push({ field: 'workflow', after: outlook.workflows.join(', ') });
+    }
+    const total = asRow(existing).total;
+    if (typeof total === 'number') {
+      changes.push({
+        field: 'userActiveGrantsOnApplication',
+        before: total,
+        after: total + 1,
+        valueKind: 'number',
+      });
+    }
+    return {
+      target,
+      changes,
+      warnings,
+      impacted: [
+        {
+          type: 'user',
+          count: 1,
+          sample: [entityRefOf(user, 'updated')],
+        },
+      ],
+      untrustedSources: [],
+      elevated: true,
+      // Core derives the step-up from PRIVILEGE_GRANT; the tool never decides it (Opción 2).
+      stepUpRequired: false,
+      precondition: { entity: target, updatedAt: iso(app.updatedAt)! },
+    };
+  },
+});
+
+const accessGrantRevoke = defineTool({
+  name: 'access_grant_revoke',
+  title: 'Revoke an access grant',
+  description:
+    'End an active access grant (it stays in the history as revoked). It may start the application’s ' +
+    'deprovisioning workflow (removing the account in the external system) when it was the user’s last ' +
+    'active grant there. Other grants the user holds on the application are untouched. Find the grant id ' +
+    'with access_grant_list.',
+  domain: 'access',
+  class: 'write',
+  destructive: true,
+  externalEffects: true,
+  input: z.strictObject({
+    grantId: z.cuid().describe('The grant id (from access_grant_list).'),
+    notes: z
+      .string()
+      .trim()
+      .min(1)
+      .max(2000)
+      .optional()
+      .describe('Why it is revoked; replaces the grant’s notes.'),
+  }),
+  bindings: [
+    bind(AccessGrantsController, 'revoke'),
+    bind(AccessGrantsController, 'findOne'),
+    bind(ApplicationsController, 'findOne'),
+    bind(AccessGrantsController, 'findAll'),
+    bind(WorkflowsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const grant = asRow(
+      await rt.call(AccessGrantsController, 'revoke', {
+        params: { id: input.grantId },
+        body: input.notes !== undefined ? { notes: input.notes } : {},
+      }),
+    );
+    const applicationId = String(grant.applicationId);
+    return {
+      data: { grant: grantSummary(grant) },
+      summary: `Revoked ${whoId(rt, grant.userId)}'s ${accessPhrase(grant.accessLevel)} to application ${applicationId}.`,
+      entityRefs: [
+        {
+          type: 'accessGrant',
+          id: String(grant.id),
+          op: 'updated',
+          parent: { type: 'application', id: applicationId },
+        },
+        { type: 'application', id: applicationId, op: 'updated' },
+        { type: 'user', id: String(grant.userId), op: 'updated' },
+      ],
+    };
+  },
+  async preview(input, rt): Promise<AiToolPreview> {
+    const grant = asRow(
+      await rt.call(AccessGrantsController, 'findOne', {
+        params: { id: input.grantId },
+      }),
+    );
+    if (grant.revokedAt !== null && grant.revokedAt !== undefined) {
+      throw new ConflictException(
+        `AccessGrant ${input.grantId} is already revoked`,
+      );
+    }
+    const applicationId = String(grant.applicationId);
+    // The application may have been archived since the grant: the grant is still revocable.
+    let appName: string | null = null;
+    try {
+      appName = str((await readApplication(rt, applicationId)).name);
+    } catch (err) {
+      if (httpStatus(err) !== 404) throw err;
+    }
+    const target: AiEntityRef = {
+      type: 'accessGrant',
+      id: input.grantId,
+      op: 'updated',
+      label: `${appName ?? applicationId}${str(grant.accessLevel) ? ` (${str(grant.accessLevel)})` : ''}`,
+      parent: { type: 'application', id: applicationId },
+    };
+    const name = appName ?? `application ${applicationId}`;
+    // The user's active grants on the application, this one included (403 → unknown).
+    const active = await facet(async () =>
+      asRow(
+        await rt.call(AccessGrantsController, 'findAll', {
+          query: {
+            userId: String(grant.userId),
+            applicationId,
+            activeOnly: 'true',
+            limit: '1',
+          },
+        }),
+      ),
+    );
+    const activeTotal = asRow(active).total;
+    const outlook = await provisioningOutlook(
+      rt,
+      applicationId,
+      name,
+      'ACCESS_REVOKED',
+      typeof activeTotal === 'number'
+        ? Math.max(activeTotal - 1, 0)
+        : undefined,
+    );
+    const changes: AiToolPreview['changes'] = [
+      {
+        field: 'action',
+        after:
+          `Remove ${whoId(rt, grant.userId)}'s ${accessPhrase(grant.accessLevel)} to ${name}. ` +
+          outlook.sentence,
+      },
+      { field: 'user', after: String(grant.userId), valueKind: 'entity' },
+      {
+        field: 'application',
+        after: appName ?? applicationId,
+        valueKind: 'entity',
+      },
+      { field: 'accessLevel', after: grant.accessLevel ?? null },
+      { field: 'status', before: 'active', after: 'revoked' },
+    ];
+    if (input.notes !== undefined) {
+      changes.push({ field: 'notes', after: input.notes });
+    }
+    if (outlook.workflows.length > 0) {
+      changes.push({ field: 'workflow', after: outlook.workflows.join(', ') });
+    }
+    return {
+      target,
+      changes,
+      warnings: outlook.external ? ['EXTERNAL_DEPROVISIONING'] : [],
+      impacted: [
+        {
+          type: 'user',
+          count: 1,
+          sample: [{ type: 'user', id: String(grant.userId), op: 'updated' }],
+        },
+      ],
+      untrustedSources: [],
+      elevated: false,
+      stepUpRequired: false,
+      precondition: { entity: target, updatedAt: iso(grant.updatedAt)! },
+    };
+  },
+});
+
+// ─── Access requests ─────────────────────────────────────────────────────────────────────────────────
+
+const accessRequestList = defineTool({
+  name: 'access_request_list',
+  title: 'List access requests',
+  description:
+    'Self-service access requests, newest first: who asked for which application, why, and whether it ' +
+    'was approved or denied. Filter by status, application or requester. mine=true lists only your own ' +
+    'requests (any person may read their own; the estate-wide list needs permission to read requests).',
+  domain: 'access',
+  class: 'read',
+  idempotent: true,
+  input: z.strictObject({
+    mine: z
+      .boolean()
+      .default(false)
+      .describe('Only your own requests (ignores the other filters).'),
+    status: z.enum(AccessRequestStatusSchema.options).optional(),
+    application: applicationReference.optional(),
+    requester: userReference.optional(),
+    limit: pageSize,
+    offset: pageOffset,
+  }),
+  bindings: [
+    bind(AccessRequestsController, 'findAll'),
+    bind(AccessRequestsController, 'findMine'),
+    bind(ApplicationsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const limit = input.limit ?? AI_TOOL_LIST_DEFAULT_LIMIT;
+    const offset = input.offset ?? 0;
+    const window = { limit: String(limit), offset: String(offset) };
+    if (input.mine) {
+      const page = await rt.call(AccessRequestsController, 'findMine', {
+        query: window,
+      });
+      return pageOutput(page, offset, requestSummary);
+    }
+    const requester = input.requester
+      ? resolveUser(rt, input.requester)
+      : undefined;
+    const application = input.application
+      ? await resolveApplication(rt, input.application)
+      : undefined;
+    const page = await rt.call(AccessRequestsController, 'findAll', {
+      query: {
+        status: input.status,
+        applicationId: application?.id,
+        requesterId: requester?.id,
+        ...window,
+      },
+    });
+    return pageOutput(page, offset, requestSummary);
+  },
+});
+
+const accessRequestCreate = defineTool({
+  name: 'access_request_create',
+  title: 'Request access to an application',
+  description:
+    'Ask for access to an application for yourself. The people who can grant access are notified and ' +
+    'approve or deny it. One open request per application: a second one is refused while the first is ' +
+    'pending.',
+  domain: 'access',
+  class: 'write',
+  input: z.strictObject({
+    application: applicationReference,
+    accessLevel: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe(
+        'The access level asked for (the application’s own word: admin, viewer…).',
+      ),
+    justification: z.string().trim().min(1).max(2000).optional(),
+  }),
+  bindings: [
+    bind(AccessRequestsController, 'create'),
+    bind(ApplicationsController, 'findAll'),
+    bind(ApplicationsController, 'findOne'),
+  ],
+  async run(input, rt) {
+    const application = await resolveApplication(rt, input.application);
+    const request = asRow(
+      await rt.call(AccessRequestsController, 'create', {
+        body: {
+          applicationId: application.id,
+          ...(input.accessLevel !== undefined
+            ? { accessLevel: input.accessLevel }
+            : {}),
+          ...(input.justification !== undefined
+            ? { justification: input.justification }
+            : {}),
+        },
+      }),
+    );
+    return {
+      data: { request: requestSummary(request) },
+      summary: `Requested ${accessPhrase(request.accessLevel)} to ${application.label ?? `application ${application.id}`}; it now waits for an approver.`,
+      entityRefs: [
+        {
+          type: 'accessRequest',
+          id: String(request.id),
+          op: 'created',
+          parent: { type: 'application', id: application.id },
+        },
+      ],
+    };
+  },
+  async preview(input, rt): Promise<AiToolPreview> {
+    const resolved = await resolveApplication(rt, input.application);
+    const app = await readApplication(rt, resolved.id);
+    const appName = str(app.name) ?? resolved.id;
+    return {
+      changes: [
+        {
+          field: 'action',
+          after:
+            `Ask for ${accessPhrase(input.accessLevel)} to ${appName} for yourself. ` +
+            'The people who can grant access are notified and approve or deny it.',
+        },
+        { field: 'application', after: appName, valueKind: 'entity' },
+        { field: 'accessLevel', after: input.accessLevel ?? null },
+        { field: 'justification', after: input.justification ?? null },
+      ],
+      warnings: ['NOTIFIES_USERS'],
+      impacted: [],
+      untrustedSources: [],
+      elevated: false,
+      stepUpRequired: false,
+    };
+  },
+});
+
+/** Pages of the (unpaged-by-id) request list scanned to find one request: 5 × 200 per status slice. */
+const REQUEST_SCAN_PAGES = 5;
+
+/**
+ * One access request by id. The API has no `GET /access-requests/:id`, so it is found through the
+ * guarded list route (`accessRequest:read`): the PENDING slice first (the one a decision acts on), then
+ * the whole list — bounded, newest first. A decided request is the route's own 409.
+ */
+async function findRequest(rt: AiToolRuntime, id: string): Promise<Row> {
+  for (const status of ['PENDING', undefined]) {
+    for (let page = 0; page < REQUEST_SCAN_PAGES; page += 1) {
+      const result = asRow(
+        await rt.call(AccessRequestsController, 'findAll', {
+          query: {
+            status,
+            limit: String(MAX_PAGE_LIMIT),
+            offset: String(page * MAX_PAGE_LIMIT),
+          },
+        }),
+      );
+      const items = asRows(result.items);
+      const hit = items.find((row) => row.id === id);
+      if (hit) {
+        if (hit.status !== 'PENDING') {
+          throw new ConflictException(
+            `AccessRequest ${id} has already been decided (${String(hit.status)})`,
+          );
+        }
+        return hit;
+      }
+      if (items.length < MAX_PAGE_LIMIT) break;
+    }
+  }
+  throw new NotFoundException(`AccessRequest ${id} not found`);
+}
+
+const accessRequestDecide = defineTool({
+  name: 'access_request_decide',
+  title: 'Approve or deny an access request',
+  description:
+    'Decide a pending access request. "approve" GRANTS the requested access (an access grant is created; ' +
+    'the person approving confirms with their password; it may start the application’s automatic ' +
+    'provisioning workflow). ' +
+    '"deny" requires a reason, which the requester sees. Both notify the requester. Find the request id ' +
+    'with access_request_list (status PENDING).',
+  domain: 'access',
+  class: 'elevated',
+  externalEffects: true,
+  input: z
+    .strictObject({
+      requestId: z
+        .cuid()
+        .describe('The request id (from access_request_list).'),
+      decision: z.enum(['approve', 'deny']),
+      reason: z
+        .string()
+        .trim()
+        .min(1)
+        .max(2000)
+        .optional()
+        .describe(
+          'Required to deny, refused to approve; the requester sees it.',
+        ),
+    })
+    .refine((v) => (v.decision === 'deny') === (v.reason !== undefined), {
+      error: 'A denial needs a reason; an approval takes none',
+      path: ['reason'],
+    }),
+  bindings: [
+    bind(AccessRequestsController, 'approve'),
+    bind(AccessRequestsController, 'deny'),
+    bind(AccessRequestsController, 'findAll'),
+    bind(ApplicationsController, 'findOne'),
+    bind(WorkflowsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const params = { id: input.requestId };
+    const request = asRow(
+      input.decision === 'approve'
+        ? await rt.call(AccessRequestsController, 'approve', { params })
+        : await rt.call(AccessRequestsController, 'deny', {
+            params,
+            body: { reason: input.reason ?? '' },
+          }),
+    );
+    const applicationId = String(request.applicationId);
+    const refs: AiEntityRef[] = [
+      {
+        type: 'accessRequest',
+        id: input.requestId,
+        op: 'updated',
+        parent: { type: 'application', id: applicationId },
+      },
+    ];
+    if (typeof request.grantId === 'string') {
+      refs.push({
+        type: 'accessGrant',
+        id: request.grantId,
+        op: 'created',
+        parent: { type: 'application', id: applicationId },
+      });
+    }
+    const summary =
+      input.decision === 'approve'
+        ? `Approved the request: ${whoId(rt, request.requesterId)} now has ${accessPhrase(request.accessLevel)} to application ${applicationId} (grant ${String(request.grantId)}).`
+        : `Denied the request of ${whoId(rt, request.requesterId)} for application ${applicationId}; they are notified with the reason.`;
+    return {
+      data: { request: requestSummary(request) },
+      summary,
+      entityRefs: refs,
+    };
+  },
+  async preview(input, rt): Promise<AiToolPreview> {
+    const request = await findRequest(rt, input.requestId);
+    const applicationId = String(request.applicationId);
+    let appName: string | null = null;
+    let critical = false;
+    try {
+      const app = await readApplication(rt, applicationId);
+      appName = str(app.name);
+      critical = app.isCritical === true;
+    } catch (err) {
+      // An archived application: the approval itself will be refused by the route (400).
+      if (httpStatus(err) !== 404) throw err;
+    }
+    const target: AiEntityRef = {
+      type: 'accessRequest',
+      id: input.requestId,
+      op: 'updated',
+      label: `${appName ?? applicationId} — ${String(request.requesterId)}`,
+      parent: { type: 'application', id: applicationId },
+    };
+    const approve = input.decision === 'approve';
+    const name = appName ?? `application ${applicationId}`;
+    const requester = whoId(rt, request.requesterId);
+    // Nothing stops an approver deciding their own request (route behaviour, ADR-0085); say it plainly.
+    const own =
+      requester === 'you' ? 'You are deciding your own request. ' : '';
+    const outlook = approve
+      ? await provisioningOutlook(rt, applicationId, name, 'ACCESS_GRANTED')
+      : null;
+    const changes: AiToolPreview['changes'] = [
+      {
+        field: 'action',
+        after: approve
+          ? `${own}Approve the request: give ${requester} ${accessPhrase(request.accessLevel)} to ${name}. ` +
+            `An access grant is created and ${requester} ${requester === 'you' ? 'are' : 'is'} notified. ` +
+            outlook!.sentence
+          : `${own}Deny ${requester === 'you' ? 'your' : `${requester}'s`} request for ${accessPhrase(request.accessLevel)} to ${name}. ` +
+            `${requester === 'you' ? 'You are' : `${requester} is`} notified with your reason.`,
+      },
+      {
+        field: 'requester',
+        after: String(request.requesterId),
+        valueKind: 'entity',
+      },
+      {
+        field: 'application',
+        after: appName ?? applicationId,
+        valueKind: 'entity',
+      },
+      { field: 'isCritical', after: critical, valueKind: 'boolean' },
+      { field: 'accessLevel', after: request.accessLevel ?? null },
+      { field: 'justification', after: untrusted(str(request.justification)) },
+      {
+        field: 'status',
+        before: 'PENDING',
+        after: approve ? 'APPROVED' : 'DENIED',
+      },
+    ];
+    if (!approve) {
+      changes.push({ field: 'deniedReason', after: input.reason });
+    }
+    if (outlook && outlook.workflows.length > 0) {
+      changes.push({ field: 'workflow', after: outlook.workflows.join(', ') });
+    }
+    const warnings: AiPreviewWarningCode[] = approve
+      ? ['PRIVILEGE_GRANT', 'NOTIFIES_USERS']
+      : ['NOTIFIES_USERS'];
+    if (outlook?.external) warnings.splice(1, 0, 'EXTERNAL_PROVISIONING');
+    return {
+      target,
+      changes,
+      // Approving GRANTS access (PRIVILEGE_GRANT → core requires the step-up); both notify the requester.
+      warnings,
+      impacted: approve
+        ? [
+            {
+              type: 'user',
+              count: 1,
+              sample: [
+                {
+                  type: 'user',
+                  id: String(request.requesterId),
+                  op: 'updated',
+                },
+              ],
+            },
+          ]
+        : [],
+      untrustedSources: [],
+      elevated: true,
+      stepUpRequired: false,
+      // A pending request never changes until it is decided (no `updatedAt`; `createdAt` is its version).
+      // A decision in between is the route's 409 when the preview re-runs at approve.
+      precondition: { entity: target, updatedAt: iso(request.createdAt)! },
+    };
+  },
+});
+
 export const accessToolset: AiToolset = {
   domain: 'access',
-  tools: [],
+  tools: [
+    applicationSearch,
+    applicationGet,
+    applicationCreate,
+    applicationUpdate,
+    accessGrantList,
+    accessGrantCreate,
+    accessGrantRevoke,
+    accessRequestList,
+    accessRequestCreate,
+    accessRequestDecide,
+  ],
   unexposed: [
     unexposed(
       ApplicationsController,
-      [
-        'findAll',
-        'findOne',
-        'findGrants',
-        'findArticles',
-        'create',
-        'update',
-        'remove',
-        'restore',
-      ],
-      PENDING,
+      ['remove', 'restore'],
+      'Deferred to v1.1: application archive and restore (tools-and-execution.md §3, §7).',
     ),
     unexposed(
       AccessGrantsController,
-      [
-        'findAll',
-        'batchRevoke',
-        'findOne',
-        'create',
-        'revoke',
-        'updateNotes',
-        'updateExpiry',
-      ],
-      PENDING,
-    ),
-    unexposed(
-      AccessRequestsController,
-      ['create', 'findAll', 'findMine', 'approve', 'deny'],
-      PENDING,
+      ['batchRevoke', 'updateNotes', 'updateExpiry'],
+      'Deferred to v1.1: grant batch revoke (blast radius), notes and expiry edits (tools-and-execution.md §3, §7).',
     ),
   ],
 };

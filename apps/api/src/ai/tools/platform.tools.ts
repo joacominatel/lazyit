@@ -162,7 +162,9 @@ export const platformToolset: AiToolset = {
     ),
     unexposed(
       WorkflowsController,
-      ['findAll', 'findOne', 'create', 'update', 'remove', 'authorVersion'],
+      // `findAll` (headers only) is bound by the access toolset (W2-6) so a grant or revoke preview can
+      // say whether an automatic (de)provisioning workflow runs — never a tool of its own.
+      ['findOne', 'create', 'update', 'remove', 'authorVersion'],
       'Deferred: workflow authoring is elevated and needs its own design, later (tools-and-execution.md §3).',
     ),
     unexposed(
