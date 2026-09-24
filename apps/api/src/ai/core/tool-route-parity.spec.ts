@@ -75,6 +75,7 @@ import { SearchService } from '../../search/search.service';
 import { UsersController } from '../../users/users.controller';
 import { UsersService } from '../../users/users.service';
 import { contextToolset } from '../tools/context.tools';
+import { AiActionLogService } from './action-log.service';
 import { AiToolService } from './ai-tool.service';
 import { mapToolError } from './error-mapper';
 import { AiToolDispatcher } from './tool-dispatcher';
@@ -486,6 +487,7 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
         AiToolDispatcher,
         AiToolRegistry,
         AiToolExecutor,
+        AiActionLogService,
         AiToolService,
         { provide: AI_TOOLSETS, useValue: [contextToolset, fixtureToolset] },
       ],
@@ -831,21 +833,19 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
       expect(result).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
     });
 
-    it('never invokes a write: a chat write must be proposed, and MCP/headless writes stay closed', async () => {
+    it('never invokes a chat write: it must be proposed and approved (the write path is ai-tool.write-path.spec.ts)', async () => {
       const spy = jest.spyOn(dispatcher, 'dispatch');
-      for (const channel of ['CHAT', 'MCP', 'HEADLESS'] as const) {
-        const result = await tools.invoke(
-          'fixture_write',
-          { name: 'x' },
-          ctx(actor('ADMIN'), { channel }),
-        );
-        expect(result).toMatchObject({
-          ok: false,
-          kind: 'mutation',
-          mutated: false,
-          error: { code: 'NOT_AVAILABLE' },
-        });
-      }
+      const result = await tools.invoke(
+        'fixture_write',
+        { name: 'x' },
+        ctx(actor('ADMIN'), { channel: 'CHAT' }),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        kind: 'mutation',
+        mutated: false,
+        error: { code: 'NOT_AVAILABLE' },
+      });
       expect(spy).not.toHaveBeenCalled();
       spy.mockRestore();
     });

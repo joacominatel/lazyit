@@ -167,6 +167,9 @@ export type AiToolResult = z.infer<typeof AiToolResultSchema>;
 /**
  * The warning codes a server-built preview may carry (synthesis §4.3). The web localizes each code it
  * knows and renders an unknown one generically, so the preview's `warnings` stay open strings.
+ * `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT` and `CREDENTIAL_DELIVERY` are the step-up warnings:
+ * the AI core requires a password step-up for an `elevated` action carrying any of them (CEO decision
+ * 2026-09-24, #1315).
  */
 export const AI_PREVIEW_WARNING_CODES = [
   "EXTERNAL_PROVISIONING",
@@ -175,6 +178,10 @@ export const AI_PREVIEW_WARNING_CODES = [
   "CASCADE_REVOKES_GRANTS",
   "ROLE_CHANGE",
   "IDENTITY_CHANGE",
+  /** Grants access or privilege (an access grant, an approved access request). Requires step-up. */
+  "PRIVILEGE_GRANT",
+  /** Delivers a credential to someone (e.g. an invitation carrying a sign-in link). Requires step-up. */
+  "CREDENTIAL_DELIVERY",
   "LEDGER_APPEND",
   "SOFT_DELETE",
   "PUBLISHES_TO_READERS",

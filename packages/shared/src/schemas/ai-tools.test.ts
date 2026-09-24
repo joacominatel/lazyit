@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   AI_CHANNELS,
+  AI_PREVIEW_WARNING_CODES,
   AI_TOOL_CLASSES,
   AiActionPreviewSchema,
   AiEntityRefListSchema,
@@ -150,6 +151,26 @@ describe("Action preview", () => {
         impacted: [{ type: "asset", count: 6, sample }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("Preview warning codes", () => {
+  test("carry the step-up warnings (CEO decision 2026-09-24, #1315)", () => {
+    for (const code of ["ROLE_CHANGE", "IDENTITY_CHANGE", "PRIVILEGE_GRANT", "CREDENTIAL_DELIVERY"]) {
+      expect(AI_PREVIEW_WARNING_CODES).toContain(code);
+    }
+  });
+
+  test("a preview carrying the new codes parses", () => {
+    const parsed = AiActionPreviewSchema.safeParse({
+      toolName: "access_grant_create",
+      class: "elevated",
+      changes: [],
+      warnings: ["PRIVILEGE_GRANT", "CREDENTIAL_DELIVERY"],
+      elevated: true,
+      stepUpRequired: true,
+    });
+    expect(parsed.success).toBe(true);
   });
 });
 

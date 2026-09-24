@@ -10,6 +10,10 @@ import type {
   Permission,
 } from '@lazyit/shared';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
+import type {
+  AiReferenceSpec,
+  AiResolvedReference,
+} from './reference-resolver';
 
 /**
  * The AI tool registry's internal types (ADR-0097; docs/ai-assistant/_synthesis.md §4.1–§4.3, R4;
@@ -68,6 +72,16 @@ export interface AiExecutionContext {
    * setting (headless). Absent = no ceiling beyond the principal's own permissions.
    */
   ceiling?: readonly AiToolClass[];
+  /**
+   * What the ledger records about the model call that produced this tool call (security.md §6.7): the
+   * provider and model the run used, and the request id. Supplied by the runtime or `/mcp`; optional.
+   */
+  provenance?: { provider?: string; model?: string; requestId?: string };
+  /**
+   * Chat only: the other-authored content the turn had read before this call (the untrusted-source
+   * banner). `propose` merges it into the stored preview; the ledger records it.
+   */
+  untrustedSources?: readonly AiEntityRef[];
 }
 
 type HandlerResult<C, M extends keyof C> = C[M] extends (
@@ -88,6 +102,12 @@ export interface AiToolRuntime {
     method: M,
     shape?: HttpShape,
   ): Promise<HandlerResult<C, M>>;
+  /**
+   * Resolve a human-readable reference (id, tag, serial, email, slug, exact name) to exactly one entity
+   * (`reference-resolver.ts`). The spec's `lookup` must read through `call`, so the resolution is
+   * authorized like the route. Throws a tool error (`NOT_FOUND`, `AMBIGUOUS_REFERENCE`) otherwise.
+   */
+  resolve(spec: AiReferenceSpec): Promise<AiResolvedReference>;
 }
 
 /** What `run` returns; the executor wraps it into an `AiToolResult`. */
