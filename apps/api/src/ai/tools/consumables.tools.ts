@@ -422,11 +422,25 @@ const consumableCreate = defineTool({
 
 /**
  * The editable fields, taken from the route's own body schema (`UpdateConsumableSchema`, already
- * partial) so the tool cannot drift from what `PATCH /consumables/:id` accepts.
+ * partial) so the tool cannot drift from what `PATCH /consumables/:id` accepts — minus the fields the AI
+ * surface deliberately does not offer yet.
+ *
+ * `returnable` (ADR-0098, #1364) is NOT offered: the consumable-deliveries change kept the AI surface
+ * unchanged, and extending the consumables tools (returnable, delivery targets, returns) is a recorded
+ * follow-up of ADR-0098.
  */
+const AI_DEFERRED_UPDATE_FIELDS = ['returnable'] as const;
 const UPDATE_FIELDS = UpdateConsumableSchema.shape;
-type UpdateField = keyof typeof UPDATE_FIELDS;
-const UPDATE_FIELD_NAMES = Object.keys(UPDATE_FIELDS) as UpdateField[];
+type UpdateField = Exclude<
+  keyof typeof UPDATE_FIELDS,
+  (typeof AI_DEFERRED_UPDATE_FIELDS)[number]
+>;
+const UPDATE_FIELD_NAMES = (
+  Object.keys(UPDATE_FIELDS) as (keyof typeof UPDATE_FIELDS)[]
+).filter(
+  (field): field is UpdateField =>
+    !(AI_DEFERRED_UPDATE_FIELDS as readonly string[]).includes(field),
+);
 
 const consumableUpdate = defineTool({
   name: 'consumable_update',
@@ -645,6 +659,11 @@ export const consumablesToolset: AiToolset = {
       ConsumablesController,
       ['remove', 'restore'],
       'Deferred to v1.1: consumable archive and restore (tools-and-execution.md §3, §7).',
+    ),
+    unexposed(
+      ConsumablesController,
+      ['findDeliveries'],
+      'Deferred: the consumable deliveries read (ADR-0098, #1364) — the AI consumables surface was kept unchanged; extending it with delivery targets, returns and this list is a recorded ADR-0098 follow-up.',
     ),
   ],
 };

@@ -957,9 +957,12 @@ describe('consumables toolset (W2-7)', () => {
           chat(actor('MEMBER')),
         ),
       );
-      expect(consumables.listMovements).toHaveBeenCalledWith(TONER, {
-        type: 'OUT',
-      });
+      // The route forwards the principal too — it redacts delivery targets per the caller (ADR-0098).
+      expect(consumables.listMovements).toHaveBeenCalledWith(
+        TONER,
+        { type: 'OUT' },
+        expect.objectContaining({ kind: 'human' }),
+      );
       expect(result.data.movements).toEqual({
         total: 2,
         items: [expect.objectContaining({ id: 3, notes: null })],
@@ -1168,7 +1171,7 @@ describe('consumables toolset (W2-7)', () => {
       );
     });
 
-    it("consumable_update offers exactly the route's editable fields (UpdateConsumableSchema)", async () => {
+    it("consumable_update offers exactly the route's editable fields (UpdateConsumableSchema), minus the AI-deferred returnable", async () => {
       const [update] = (await tools.list(mcp(actor('ADMIN')))).filter(
         (t) => t.name === 'consumable_update',
       );
@@ -1176,8 +1179,14 @@ describe('consumables toolset (W2-7)', () => {
         (update.inputSchema as { properties: Record<string, unknown> })
           .properties,
       ).sort();
+      // `returnable` (ADR-0098) is deliberately not on the AI surface yet — a recorded follow-up.
       expect(properties).toEqual(
-        ['consumable', ...Object.keys(UpdateConsumableSchema.shape)].sort(),
+        [
+          'consumable',
+          ...Object.keys(UpdateConsumableSchema.shape).filter(
+            (field) => field !== 'returnable',
+          ),
+        ].sort(),
       );
     });
 
