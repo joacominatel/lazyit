@@ -575,7 +575,10 @@ Accounts holding the route's permission.
   exact full name or `"me"` (through `GET /users` — `user:read` — or `GET /users/me`; a username or
   legajo matches only when the route's `q`, which searches names and email, surfaced the row); a model,
   location or asset category by id or exact name. Two matches are `AMBIGUOUS_REFERENCE` with the
-  candidates. In `run` a raw id passes straight to the write handler (a Service Account with write-only
+  candidates. **A partial page never decides** (review fix F1, the rule the consumables tools apply):
+  when the route's substring search matched more rows than the one page a lookup reads (200), the
+  entity meant may sit past it, so the reference is refused as `AMBIGUOUS_REFERENCE` asking for the id —
+  unless two exact matches are already on the page, which are named as candidates. In `run` a raw id passes straight to the write handler (a Service Account with write-only
   grants still works); the preview always reads the target, to name it. An id is recognized by shape —
   a cuid (`c` + 24 lowercase alphanumerics) or a uuid.
 - **Ownership is the assignment** (asset-centric): `asset_check_out` opens an `AssetAssignment`
@@ -592,21 +595,46 @@ Accounts holding the route's permission.
   `valueKind: "entity"`. `asset_archive` warns `SOFT_DELETE` and lists the owners who still hold the
   asset (archiving does not release them). Timestamps are normalized to ISO strings — an in-process
   handler returns Prisma `Date`s.
-- **`asset_update` merges `specs`** over the current attributes (a `null` value removes a key), so an AI
-  edit never drops the reporting agent's nested host facts; the route itself replaces `specs` whole.
-- **`asset_restore`** finds the archived asset through `GET /assets?deleted=only` (ADMIN-only, like the
-  route). The list has no id filter, so a raw id scans the five newest-archived pages (1,000 assets);
-  a tag or serial is a `q` search.
+- **`asset_update` merges `specs`** over the attributes read at execute time (a `null` value removes a
+  key; only own keys are read and written). The keys a reporting agent or lazyit owns — `host` and any
+  `_`-prefixed provenance key such as `_infraAutoCreated` — are refused as input on create and update
+  (review fix F2), so a tool can neither forge nor strip them. The route replaces `specs` whole, so an
+  agent report landing between that read and the write is overwritten by it; the next report re-syncs
+  the host facts.
+- **`asset_restore`** finds the archived asset through `GET /assets?deleted=only`. That list is
+  ADMIN-only by **role** (`assertCanListDeleted`), while the restore route needs only `asset:delete` —
+  so a Service Account or a non-ADMIN role granted `asset:delete` cannot restore through the tool, though
+  it could over HTTP by id (a parity gap, follow-up F5). The list has no id filter, so a raw id scans the
+  five newest-archived pages (1,000 assets) and, when more exist, is refused as `AMBIGUOUS_REFERENCE`
+  asking for the tag or serial; a tag or serial is a `q` search.
 - **Results.** `asset_search` returns `{ total, offset, items }` (model, category, location, current
   owners; never notes or specs) with a `truncated` marker; `asset_get` concise adds notes, cost and
   book value; `full` adds specs, the ownership history (capped at 50), the last 20 history events and
   the linked KB articles — a facet the caller may not read (`article:read`) is reported
   `unavailable`, not failed. `reference_lookup` pages the unpaged taxonomies itself; KB folders never
   carry their access rules. Notes, descriptions, specs and history payloads are wrapped with
-  `untrusted()`.
+  `untrusted()`, and so are an asset's **name and serial** when a reporting agent may have written them
+  (review fix F3, mirroring the infra tools): the asset carries `specs._infraAutoCreated` (the node
+  created it from the reported hostname) or `specs.host` (agent-linked), or the row does not say — the
+  lean `asset_search` rows carry no specs, so their names and serials are always wrapped. Such an asset's
+  label (card, ref, summary, ambiguity hint) is its tag, never its name. Prisma values are normalized to
+  their wire form (`Date` → ISO, `bigint` / `Decimal` → number or exact string) before a preview or a
+  comparison (review fix F6).
 - **Entity refs** (§8.5): create/update/archive/restore → the asset (or model, location) with its op;
   check-out and check-in → the assignment (`parent` → asset), the asset and the person, all `updated`
   except the new assignment (`created`).
+- **Known gaps (follow-ups from the G2 review of #1346):**
+  - **F4 — ownership races.** The check-out and archive preconditions are the asset's `updatedAt`, and
+    opening or releasing an assignment does not bump it, so an ownership change between proposal and
+    approval is not `STALE`. Check-out still cannot double-assign (the route's 409 and partial unique
+    index), and check-in targets the assignment's own version. Folding the open-assignment set into the
+    precondition needs the precondition contract to carry more than one version (a core change).
+  - **F5 — permission parity.** A tool is listed by its PRIMARY route's permission: `reference_lookup`
+    is listed only to holders of `assetModel:read` although each kind is authorized by its own route
+    (a role with `location:read` but no `assetModel:read` does not see it); `asset_search` is listed by
+    `asset:read`, so `mine: true` (the ungated self-read) is unreachable for a role stripped of
+    `asset:read`, and a Service Account is refused `mine` by the route; `asset_restore` (above) needs the
+    ADMIN role for its lookup.
 - **Unexposed with reasons:** batch archive/restore/status and bulk receive (v1.1), the CSV export, the
   companies autocomplete, the `/asset-assignments` reads (served as facets), assignment notes (v1.1),
   acknowledge (the holder's own act, v1.1), attachments (list/remove v1.1; binary upload/content never),
