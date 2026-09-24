@@ -122,7 +122,7 @@ export const platformToolset: AiToolset = {
     unexposed(AiStatusController, ['get'], AI_OWN_SURFACE),
     unexposed(
       AiConversationsController,
-      ['create', 'list', 'detail', 'send'],
+      ['create', 'list', 'detail', 'remove', 'send'],
       AI_OWN_SURFACE,
     ),
     unexposed(

@@ -21,6 +21,7 @@ import {
 } from '../core/ports/ai-settings.port';
 import { AiToolRegistry } from '../core/tool-registry';
 import { AgentRunOrchestrator } from '../runtime/agent-run.orchestrator';
+import { AiConversationPurgeService } from '../retention/ai-conversation-purge.service';
 import { AI_MESSAGE_FORMAT_MODEL } from '../runtime/run-records';
 import { projectTranscript } from './transcript-projection';
 
@@ -41,8 +42,8 @@ export function conversationNotFound(): NotFoundException {
  *
  * Creating a conversation and sending a message go through the runtime's {@link AgentRunOrchestrator},
  * which re-authorizes the principal (`ai:use`), refuses while AI is off (409 `AI_DISABLED`) and freezes the
- * conversation. Reading stays available while AI is off: conversations are kept dormant (frontend.md §11
- * item 4) until retention removes them.
+ * conversation. Reading and deleting stay available while AI is off: conversations are kept dormant
+ * (frontend.md §11 item 4) until retention removes them.
  */
 @Injectable()
 export class AiConversationsService {
@@ -51,6 +52,7 @@ export class AiConversationsService {
     private readonly orchestrator: AgentRunOrchestrator,
     private readonly registry: AiToolRegistry,
     @Inject(AI_SETTINGS_READER) private readonly settings: AiSettingsReader,
+    private readonly purge: AiConversationPurgeService,
   ) {}
 
   create(identity: HumanIdentity, locale?: string): Promise<{ id: string }> {
@@ -151,6 +153,15 @@ export class AiConversationsService {
         classOf: (name) => this.registry.get(name)?.descriptor.class,
       }),
     };
+  }
+
+  /**
+   * Hard-delete the owner's conversation through the retention unit's purge service (W3-6), the only
+   * deleter of transcripts: 404 for anyone but the owner, 409 `RUN_IN_PROGRESS` while a run is active.
+   * Messages and invocations cascade; runs, usage and the `ai_action_log` ledger are kept.
+   */
+  remove(identity: HumanIdentity, conversationId: string): Promise<void> {
+    return this.purge.deleteOwned(identity, conversationId);
   }
 
   // ─── Internals ─────────────────────────────────────────────────────────────────────────────────

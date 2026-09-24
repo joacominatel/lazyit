@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -12,6 +13,7 @@ import {
   ApiAcceptedResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -57,12 +59,12 @@ class AiRunAcceptedDto extends createZodDto(AiRunAcceptedSchema) {}
  * the human channel only (a Service Account is refused 403 and uses `POST /ai/runs`), and OWNER ONLY:
  * another user's conversation — whoever asks, an admin included — answers 404 (ADR-0097 default 3).
  *
- * `DELETE /ai/conversations/:id` is not here yet: it will call the retention unit's purge service (W3-6),
- * the one place that hard-deletes a transcript.
+ * `DELETE /ai/conversations/:id` goes through the retention unit's purge service (W3-6), the one place
+ * that hard-deletes a transcript.
  *
  * Refusals are `{ code, message }` bodies: 409 `AI_DISABLED` (create or send while the assistant is off),
  * 409 `RUN_IN_PROGRESS`, 409 `CONVERSATION_READ_ONLY`, 429 `RATE_LIMITED` / `BUDGET_EXCEEDED`, 403
- * `FORBIDDEN`. Reads keep working while AI is off.
+ * `FORBIDDEN`. Reads and deletes keep working while AI is off.
  */
 @ApiTags('ai')
 @Controller('ai/conversations')
@@ -128,6 +130,27 @@ export class AiConversationsController {
     @CurrentPrincipal() principal?: Principal,
   ): Promise<AiConversationDetail> {
     return this.service.detail(aiHumanIdentityOf(principal), aiEntityId(id));
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Delete one of the caller’s conversations (ai:use, owner only)',
+    description:
+      'Hard-deletes the transcript (ADR-0097: conversations are not the system of record); the permanent ' +
+      'AI action ledger and the run rows are kept. 404 for anyone but the owner; 409 RUN_IN_PROGRESS ' +
+      'while a run is active (cancel it first).',
+  })
+  @ApiNoContentResponse({ description: 'Deleted.' })
+  @ApiNotFoundResponse({
+    description: 'Not the caller’s conversation, or no such conversation.',
+  })
+  @ApiConflictResponse({ description: 'RUN_IN_PROGRESS' })
+  async remove(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<void> {
+    await this.service.remove(aiHumanIdentityOf(principal), aiEntityId(id));
   }
 
   @Post(':id/messages')
