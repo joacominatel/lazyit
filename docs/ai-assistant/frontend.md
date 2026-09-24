@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # AI assistant — Frontend surfaces
@@ -488,15 +488,19 @@ Settings › AI
 **`/account/ai`**
 
 The Install in Claude Code panel:
-- **HTTPS instance** — one command pair, auto-updating (R8):
+- **HTTPS instance** — one command pair (R8):
   `claude plugin marketplace add <origin>/api/ai/claude-code/marketplace.json` then
-  `claude plugin install lazyit@lazyit`; run `/mcp` in Claude Code to sign in (a browser opens the
-  lazyit consent page).
-- **Any instance, including `lan`** — manual:
-  1. Download the plugin (`.zip`, `apiFetchBlob`) and copy its `skills/lazyit/` into `~/.claude/skills/`.
-  2. `claude mcp add --transport http lazyit <origin>/mcp --scope user`.
-  3. HTTPS: run `/mcp` to sign in. `lan`: create a personal token below and add it with
-     `--header "Authorization: Bearer lzit_pat_…"`.
+  `claude plugin install lazyit@lazyit-<host>` (the marketplace is named after the host — take the name
+  from the served `marketplace.json`, [[ai-assistant/mcp-and-oauth|MCP]] §13); run `/mcp` in Claude Code
+  to sign in (a browser opens the lazyit consent page). Updates are automatic only once the user enables
+  auto-update for the marketplace in `/plugin` → Marketplaces (off by default for third-party
+  marketplaces) — say so in the panel.
+- **Any instance, including `lan`** — manual (as built, W3-5):
+  1. Download the plugin (`GET /api/ai/claude-code/plugin.zip`, `apiFetchBlob`) and unzip the whole
+     archive into `~/.claude/skills/lazyit/` (it loads as `lazyit@skills-dir`, with its `.mcp.json`), or
+     try it for one session with `claude --plugin-dir ./lazyit-plugin.zip`.
+  2. HTTPS: run `/mcp` to sign in. `lan`: create a personal token below; Claude Code asks for it when
+     the plugin is enabled (it is stored in the OS keychain, never in the zip).
 
 A collapsed "Other MCP clients" section shows the endpoint URL and a `.mcp.json` snippet.
 
