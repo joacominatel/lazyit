@@ -21,13 +21,15 @@ import { AiDangerZone } from "./ai-danger-zone";
 import { AiLimitsEditor } from "./ai-limits-editor";
 import { AiMcpSection } from "./ai-mcp-section";
 import { AiSetupWizard } from "./ai-setup-wizard";
+import { AiWebSearchSection } from "./ai-web-search-section";
 
 /**
  * Settings → AI body (client; ADR-0097, docs/ai-assistant/frontend.md §5.1, §5.3). One read —
  * `GET /config/ai`, prefetched by the page — drives everything:
  *   - assistant OFF → the setup wizard (a saved draft resumes where it stopped);
  *   - assistant ON  → the provider & model editor and the danger zone;
- *   - always        → behaviour & limits, and the MCP card (its switch is independent of the provider).
+ *   - always        → behaviour & limits, web search (#1389), and the MCP card (its switch is
+ *                     independent of the provider).
  * `AdminGate` hides the page from callers without `settings:manage`; the API is the real gate.
  */
 export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
@@ -93,6 +95,8 @@ export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
             )}
 
             <AiLimitsEditor settings={settings} />
+
+            <AiWebSearchSection settings={settings} />
 
             <AiMcpSection settings={settings} />
 

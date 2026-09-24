@@ -26,6 +26,8 @@ import {
   mcpEndpointUrl,
   parsePositiveInt,
   parseTemperature,
+  parseWebSearchMaxUses,
+  webSearchAvailability,
   settingsToUpdate,
   switchProvider,
   toggleRemovedDefault,
@@ -53,6 +55,8 @@ const BASE: AiSettings = {
   mcpClientAllowlistAdded: [],
   mcpClientAllowlistRemovedDefaults: [],
   mcpAllowAnyHttpsClient: false,
+  webSearchEnabled: false,
+  webSearchMaxUses: AI_SETTINGS_DEFAULTS.webSearchMaxUses,
   disclosureAcknowledgedAt: null,
   verifiedAt: null,
   updatedAt: null,
@@ -539,5 +543,34 @@ describe("the curated defaults", () => {
       mcpClientAllowlistRemovedDefaults: toggleRemovedDefault([], id, true),
     });
     expect(UpdateAiSettingsSchema.safeParse(body).success).toBe(true);
+  });
+});
+
+describe("web search (#1389)", () => {
+  test("a save re-sends the web search settings as read (a PUT never switches it off by omission)", () => {
+    const update = settingsToUpdate({ ...BASE, webSearchEnabled: true, webSearchMaxUses: 7 });
+    expect(update.webSearchEnabled).toBe(true);
+    expect(update.webSearchMaxUses).toBe(7);
+  });
+
+  test("availability follows the shared provider/model rule, with a reason when absent", () => {
+    expect(webSearchAvailability({ provider: null, model: null })).toBe("noProvider");
+    expect(webSearchAvailability({ provider: "anthropic", model: "claude-opus-5" })).toBe("available");
+    expect(webSearchAvailability({ provider: "openai", model: "gpt-6-sol" })).toBe("available");
+    expect(webSearchAvailability({ provider: "google", model: "gemini-3.8-flash" })).toBe("available");
+    expect(webSearchAvailability({ provider: "google", model: "gemini-2.5-flash" })).toBe(
+      "modelUnsupported",
+    );
+    expect(webSearchAvailability({ provider: "openai-compatible", model: "llama" })).toBe(
+      "providerUnsupported",
+    );
+  });
+
+  test("the cap is a whole number from 1 to 20", () => {
+    expect(parseWebSearchMaxUses("5")).toBe(5);
+    expect(parseWebSearchMaxUses("20")).toBe(20);
+    for (const bad of ["0", "21", "", "2.5", "-1", "x"]) {
+      expect(parseWebSearchMaxUses(bad)).toBeNull();
+    }
   });
 });

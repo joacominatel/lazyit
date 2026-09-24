@@ -240,6 +240,36 @@
       }
     }
   },
+  "webSearch": {
+    "title": "Web search",
+    "on": "On",
+    "off": "Off",
+    "description": "Let the chat assistant search the internet when lazyit's records and knowledge base don't have what it needs — for example, the documentation of a third-party product. The search runs at your AI provider.",
+    "switch": {
+      "label": "Allow the assistant to search the web",
+      "description": "Applies to conversations started after the change. Turning it off makes conversations that had it read-only."
+    },
+    "savedOn": "Web search turned on",
+    "savedOff": "Web search turned off",
+    "availability": {
+      "noProvider": "Configure a provider first. Web search is available with Anthropic, OpenAI and Google Gemini 3 or later.",
+      "providerUnsupported": "The configured provider has no native web search, so the assistant can't search the web. It is available with Anthropic, OpenAI and Google Gemini 3 or later.",
+      "modelUnsupported": "The configured model can't search the web together with lazyit's tools. Choose Gemini 3 or later to use it."
+    },
+    "disclosure": {
+      "title": "What leaves lazyit",
+      "egress": "The provider runs the search on its own servers: lazyit makes no request of its own. The search queries and the conversation context go to the provider, and its search may be billed separately.",
+      "untrusted": "Search results are content written by anyone on the internet. The assistant treats them as data, never as instructions, cites the pages it used, and a change it proposes in the same reply always needs your approval — even with auto-approve on.",
+      "conversations": "The chat only. Headless runs never search the web, because their changes run without anyone approving them."
+    },
+    "maxUses": {
+      "label": "Searches per step",
+      "description": "The most searches the assistant may run in one model step, where the provider supports a limit (Anthropic).",
+      "invalid": "Enter a whole number from {min} to {max}.",
+      "save": "Save",
+      "saved": "Search limit saved"
+    }
+  },
   "mcp": {
     "title": "External AI agents (MCP)",
     "on": "On",
