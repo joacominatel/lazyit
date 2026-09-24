@@ -542,9 +542,13 @@ Warning rules for these tools (§9 has the step-up rule):
 - **EXCL** (settled): Secret Manager.
 - The 44-tool v1 cut is adopted by default (CEO to confirm on review).
 - **Access tools follow-ups (W2-6, see §8.1 "Access tools as built"; G2 review of #1345):**
-  - user references by email / username once the users toolset binds `UsersController.findAll`;
-  - `CRITICAL_APPLICATION` (CEO decision, added to shared and core by W2-12): the grant, revoke and
-    decide previews emit it once it exists — each already loads the application's `isCritical`;
+  - user references by username / legajo (email and exact full name are built);
+  - a chat approval re-checks the application's criticality only through the precondition: the grant
+    card's precondition is the application (a change → `STALE`), but a revoke's or a decision's is the
+    grant / request, so an application made critical between the card and the approval is not re-asked
+    for the password (MCP and headless always re-read it in `run`);
+  - `access_request_create` on a critical application is not treated as a critical write (it changes no
+    access; the decision that follows is);
   - F4: the provisioning sentence is read at propose and re-read at approve, but only the precondition
     (the application's `updatedAt`) is compared, so a workflow enabled or disabled in between leaves the
     card's sentence stale (the action still runs, exactly as from the UI). A workflow fingerprint in the
@@ -784,10 +788,21 @@ actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) un
 - **References.** An application is its id — a strict Prisma cuid, `^c[a-z0-9]{24}$`, passed straight
   through (so "Confluence" or "Crowdstrike" is never mistaken for an id) — or its exact name
   (case-insensitive), resolved through the guarded `GET /applications` list; the preview and the run use
-  the same rule. A user is **its id or `"me"`** (the calling human; a Service Account
-  has no "me"). Email / username resolution needs `UsersController.findAll`, which the users toolset
-  (W2-9) binds — a follow-up once it lands (the boot check refuses a handler bound by one toolset and
-  listed unexposed by another).
+  the same rule. A user is `"me"` (the calling human; a Service Account has no "me"), its id (a uuid,
+  passed straight through), its email or its exact full name (case-insensitive), looked up through the
+  guarded `GET /users` (`UsersController.findAll`, `user:read`). A partial page never decides a name: when
+  the route reports more rows than the page holds and the page has at most one exact match, the reference
+  is refused as `AMBIGUOUS_REFERENCE` ("use the user's id or email"); an exact email match stays decisive.
+  The preview and the run use the same resolver.
+- **Critical applications** (CEO decision, ADR-0097 decision 3 as amended). Every AI write on an
+  application with `isCritical = true` — grant, revoke, approve **and** deny a request, update, and a
+  create or update that makes it critical — carries `CRITICAL_APPLICATION` on its card, so core requires
+  the password step-up in the chat whatever the tool class (a revoke is `write`), and its `run` calls
+  `assertChannelAllows(channel, ['CRITICAL_APPLICATION'])` before any side effect: over MCP and headless it
+  is refused ("This application is critical; do it from the lazyit chat, where it is confirmed with your
+  password."). Off the chat, `run` reads the application (and, for a revoke or a decision, the grant or
+  request first); when that read is forbidden the write is refused too — it cannot be shown not to be
+  critical (fail closed).
 - **Reads.** `application_search` (page), `application_get` (the application, its grants — a facet on
   `accessGrant:read`: a VIEWER gets `{ unavailable: "FORBIDDEN" }` instead of a failure — and, `full`, the
   description, notes and linked articles), `access_grant_list` (user / application / active filters),
