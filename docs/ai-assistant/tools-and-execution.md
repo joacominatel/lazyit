@@ -1036,7 +1036,7 @@ never to a Service Account (headless is refused by the route).
   request to change the general / instance-wide scheme — never to make one asset's tag fit.
 - **The card** shows only the fields that change, before → after (`enabled`, `prefix`, `suffix`, `width`,
   `nextNumber`), plus the next tag before → after; a no-op is `INVALID_INPUT`. It names the scheme as its
-  target (`assetTagScheme`, id `singleton` — a new entity type, no page link) with `precondition
+  target (`assetTagScheme`, id `singleton` — a new entity type, linked to `/settings/instance`) with `precondition
   { entity, updatedAt }`: any change in between — another edit, or the counter moving because an asset
   was auto-tagged — is `STALE`. A never-configured scheme reads back with `updatedAt` = now on every
   read, so it is anchored on a fixed instant (the epoch) instead. The warning is
@@ -1048,9 +1048,10 @@ never to a Service Account (headless is refused by the route).
   refused by the route (Service Accounts only).
 - **Not exposed:** the seed suggestion (serves the settings editor) and the backfill preview / apply —
   the backfill rewrites existing tags in bulk, forward-only with no undo; it stays in the lazyit settings.
-- **Follow-up:** `asset_create` / `asset_create_batch` do not yet say "omit `assetTag` to let the scheme
-  assign it", so a non-administrator (who cannot list `asset_tag_scheme_get`) gets that guidance only
-  from `asset_create`'s existing "may be assigned automatically" sentence.
+- **Every caller gets the rule:** `asset_create` and `asset_create_batch` say it too ("omit `assetTag`
+  unless the person gives one: the instance tag scheme assigns it; never build one from a pattern"), since
+  a non-administrator cannot list `asset_tag_scheme_get`. The web links the `assetTagScheme` ref to
+  `/settings/instance` (`entity-href.ts`), where the scheme editor lives.
 
 **Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so
 the RBAC guards stay in `UsersService`, in one place: the self-role-change refusal (403), the last-admin
@@ -1449,7 +1450,8 @@ Mapping per channel:
   - the refs drive "Open ‹entity›" chips; the web builds the route from `type`/`id`/`slug` (`asset` →
     `/assets/{id}`, `article` → `/kb/{slug}`, `application` → `/applications/{id}`, `user` →
     `/users/{id}`, `location` → `/locations/{id}`, `consumable` → `/consumables/{id}`, `manualTask` →
-    `/settings/integrations/tasks/{id}`, `workflowRun` → `/applications/{parent.id}/workflows/runs/{id}`)
+    `/settings/integrations/tasks/{id}`, `assetTagScheme` → `/settings/instance` (#1394), `workflowRun` →
+    `/applications/{parent.id}/workflows/runs/{id}`)
     [R18] and validates it with `safeInternalPath`;
   - **auto-navigation** happens only for an explicit `navigate`-kind tool, and only when no
     unsaved-changes guard is active; otherwise the chip is shown.
