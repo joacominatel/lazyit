@@ -9,6 +9,11 @@ import type {
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  createBody,
+  DEFAULT_CHAT_SETTINGS,
+  type ChatSettingsDraft,
+} from "@/lib/ai/chat-settings";
 import { isOutsideAssistant, planEffects, planSnapshotEffects } from "@/lib/ai/effects";
 import {
   decisionErrorKind,
@@ -100,6 +105,12 @@ export function useAiTurn() {
   const [conversationId, setConversationId] = useState<string | null>(rememberedConversationId);
   const [state, dispatch] = useReducer(chatReducer, conversationId, initialChatState);
   const [connection, setConnection] = useState<StreamConnection>("idle");
+  // A chat not created yet keeps its settings here; they go with the create on the first message.
+  const [draft, setDraft] = useState<ChatSettingsDraft>(DEFAULT_CHAT_SETTINGS);
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
   const detail = useAiConversation(conversationId);
   const createConversation = useCreateAiConversation();
 
@@ -322,6 +333,7 @@ export function useAiTurn() {
       setConnection("idle");
       if (id) queryClient.removeQueries({ queryKey: aiConversationKeys.detail(id) });
       dispatch({ type: "reset", conversationId: id });
+      setDraft(DEFAULT_CHAT_SETTINGS);
       setConversationId(id);
     },
     [queryClient],
@@ -341,7 +353,7 @@ export function useAiTurn() {
       let id = stateRef.current.conversationId ?? conversationId;
       try {
         if (!id) {
-          const created = await createConversation.mutateAsync();
+          const created = await createConversation.mutateAsync(createBody(draftRef.current));
           id = created.id;
           // The new conversation's transcript is the one being built here: never hydrate over it.
           hydratedFor.current = id;
@@ -443,6 +455,11 @@ export function useAiTurn() {
       !detail.isError,
     loadError: detail.error,
     readOnly: detail.data?.readOnly === true || state.runError?.code === "CONVERSATION_READ_ONLY",
+    /** The server's settings of the open chat (absent from an older API, and before it is read). */
+    settings: conversationId !== null ? (detail.data?.settings ?? null) : null,
+    /** A new chat's local settings (sent with the create). */
+    draft,
+    setDraft,
     sending: createConversation.isPending || send.isPending,
     stopping: cancel.isPending,
     openConversation,

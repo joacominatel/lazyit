@@ -1,9 +1,16 @@
+import type {
+  AiConversationDetail,
+  CreateAiConversation,
+  UpdateAiConversation,
+} from "@lazyit/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { settingsErrorKey } from "@/lib/ai/chat-settings";
 import {
   createAiConversation,
   deleteAiConversation,
   getAiConversation,
   listAiConversations,
+  updateAiConversation,
 } from "../endpoints/ai";
 import { aiKeys } from "./use-ai-status";
 
@@ -51,8 +58,32 @@ export function useAiConversation(id: string | null) {
 export function useCreateAiConversation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => createAiConversation(),
+    mutationFn: (body?: CreateAiConversation) => createAiConversation(body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: aiConversationKeys.list() }),
+  });
+}
+
+/**
+ * Changes a conversation's settings (#1373, #1376): the answer replaces the `settings` of the cached
+ * detail, so the popover and the "Auto" badge follow at once without re-reading the transcript. A
+ * `CONVERSATION_SETTINGS_LOCKED` refusal marks the cached settings locked (a run started elsewhere).
+ */
+export function useUpdateAiConversation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; patch: UpdateAiConversation }) =>
+      updateAiConversation(vars.id, vars.patch),
+    onSuccess: (settings, { id }) => {
+      queryClient.setQueryData<AiConversationDetail>(aiConversationKeys.detail(id), (old) =>
+        old ? { ...old, settings } : old,
+      );
+    },
+    onError: (error, { id }) => {
+      if (settingsErrorKey(error) !== "locked") return;
+      queryClient.setQueryData<AiConversationDetail>(aiConversationKeys.detail(id), (old) =>
+        old?.settings ? { ...old, settings: { ...old.settings, modelLocked: true } } : old,
+      );
+    },
   });
 }
 
