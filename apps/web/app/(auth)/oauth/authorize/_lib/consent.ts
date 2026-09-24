@@ -250,3 +250,27 @@ export function classifyDecisionError(
   if (error.status === 429) return { kind: "rate-limited" };
   return { kind: "unknown", requestId: error.requestId };
 }
+
+/**
+ * The trust signal the consent screen shows for a redirect: the host for an `http(s)` redirect
+ * (`127.0.0.1:53682`, `claude.ai`), and the scheme WITH its host for any other scheme
+ * (`cursor:// (anysphere.cursor-mcp)`) — a custom scheme hands the code to whichever local app claims
+ * that scheme, so the scheme is the part that says where it goes. Falls back to the API's `redirectHost`
+ * when the URI cannot be parsed.
+ */
+export function redirectTrustLabel(
+  redirectUri: string,
+  redirectHost: string,
+): string {
+  let url: URL;
+  try {
+    url = new URL(redirectUri);
+  } catch {
+    return redirectHost;
+  }
+  if (url.protocol === "http:" || url.protocol === "https:") {
+    return url.host || redirectHost;
+  }
+  const host = url.host || redirectHost;
+  return host ? `${url.protocol}// (${host})` : `${url.protocol}//`;
+}

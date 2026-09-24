@@ -7,6 +7,7 @@ import {
   consentChoices,
   isRedirectToClient,
   readAuthorizeParams,
+  redirectTrustLabel,
   scopesToGrant,
 } from "./consent";
 
@@ -239,5 +240,30 @@ describe("classifyDecision", () => {
     expect(
       classifyDecisionError(new ApiError(500, "x", undefined, "r"), LOOPBACK),
     ).toEqual({ kind: "unknown", requestId: "r" });
+  });
+});
+
+describe("redirectTrustLabel", () => {
+  test("http(s): the host (with port)", () => {
+    expect(redirectTrustLabel(LOOPBACK, "127.0.0.1")).toBe("127.0.0.1:53682");
+    expect(
+      redirectTrustLabel("https://claude.ai/api/mcp/auth_callback", "claude.ai"),
+    ).toBe("claude.ai");
+  });
+
+  test("a custom scheme shows the scheme with its host", () => {
+    expect(
+      redirectTrustLabel(
+        "cursor://anysphere.cursor-mcp/oauth/callback",
+        "anysphere.cursor-mcp",
+      ),
+    ).toBe("cursor:// (anysphere.cursor-mcp)");
+    expect(redirectTrustLabel("com.example.app:/callback", "")).toBe(
+      "com.example.app://",
+    );
+  });
+
+  test("unparseable → the API's host", () => {
+    expect(redirectTrustLabel("::::", "example.org")).toBe("example.org");
   });
 });

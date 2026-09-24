@@ -12,6 +12,7 @@ import {
   classifyValidateError,
   type RawSearchParams,
   readAuthorizeParams,
+  redirectTrustLabel,
   type ValidateFailure,
 } from "./_lib/consent";
 import { ConsentForm } from "./_components/consent-form";
@@ -32,16 +33,6 @@ function selfLocation(raw: RawSearchParams): { pathname: string; search: string 
   }
   const search = query.toString();
   return { pathname: "/oauth/authorize", search: search ? `?${search}` : "" };
-}
-
-/** A printable host for a redirect target (a custom scheme has no host: show the scheme). */
-function hostOf(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return parsed.host || parsed.protocol;
-  } catch {
-    return url;
-  }
 }
 
 /**
@@ -87,7 +78,10 @@ export default async function OAuthAuthorizePage({
       case "client-error":
         return (
           <ConsentMessage
-            stop={{ ...failure, host: hostOf(failure.redirectTo) }}
+            stop={{
+              ...failure,
+              host: redirectTrustLabel(failure.redirectTo, ""),
+            }}
           />
         );
       default:
