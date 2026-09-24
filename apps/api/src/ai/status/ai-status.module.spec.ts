@@ -126,7 +126,11 @@ describe('AiSettingsModule / AiStatusModule wiring', () => {
       expect(AiStatusSchema.parse(res.body)).toEqual(res.body);
       expect(res.body).toEqual({
         chat: { available: true },
-        mcp: { available: false, auth: expect.any(String) as unknown },
+        // endpoint / marketplaceUrl depend on the test env's WEB_ORIGIN (pinned in the service spec).
+        mcp: expect.objectContaining({
+          available: false,
+          auth: expect.any(String) as unknown,
+        }) as unknown,
         configRevision: '2026-09-24T10:00:00.000Z',
         retentionDays: 30,
       });

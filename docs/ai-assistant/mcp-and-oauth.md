@@ -885,7 +885,10 @@ pattern, or `mcpAllowAnyHttpsClient` for https only), so a registration cannot c
 redirect next to a listed one; the allowlist is re-checked at consent, at code exchange and at every
 refresh, so removing an entry cuts existing connections within an access token's hour. A client matched
 by a `cimd_url` entry (never a `dcr` row) is trusted for its own registrable redirects. The curated
-defaults are `client-allowlist.defaults.ts` (stable ids, parsed by the shared schema at load):
+defaults are data in `@lazyit/shared` — `MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS` in
+`schemas/ai-settings.ts` (stable ids, parsed by the shared schema at load, each with a `verification` of
+`verified` or `vendor-docs` and a `source`, so Settings → AI can list them and offer to remove one);
+`client-allowlist.defaults.ts` projects them to plain `{ id, label, match }` entries for enforcement:
 
 | Id | Match | Source |
 | --- | --- | --- |

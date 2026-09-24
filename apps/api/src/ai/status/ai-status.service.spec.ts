@@ -14,7 +14,11 @@ jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 import type { ServiceAccount, User } from '../../../generated/prisma/client';
 import type { Principal } from '../../auth/principal';
 import type { ResolvedAiProviderConfig } from '../core/ports/ai-settings.port';
-import { AiStatusService, resolveMcpAuthMode } from './ai-status.service';
+import {
+  AiStatusService,
+  resolveMcpAuthMode,
+  resolveMcpUrls,
+} from './ai-status.service';
 
 const DISABLED: AiSettings = {
   ...AI_SETTINGS_DEFAULTS,
@@ -96,6 +100,10 @@ afterEach(() => {
 });
 
 describe('AiStatusService', () => {
+  beforeEach(() => {
+    delete process.env.WEB_ORIGIN;
+  });
+
   it('no settings row: nothing available, revision "0", and the contract holds', async () => {
     const status = await makeService(DISABLED, [
       'ai:use',
@@ -103,7 +111,12 @@ describe('AiStatusService', () => {
     ]).getStatus(human('ADMIN'));
     expect(status).toEqual({
       chat: { available: false },
-      mcp: { available: false, auth: 'personal-token' },
+      mcp: {
+        available: false,
+        auth: 'personal-token',
+        endpoint: null,
+        marketplaceUrl: null,
+      },
       configRevision: '0',
       retentionDays: null,
     });
@@ -116,7 +129,12 @@ describe('AiStatusService', () => {
     );
     expect(status).toEqual({
       chat: { available: true },
-      mcp: { available: false, auth: 'personal-token' },
+      mcp: {
+        available: false,
+        auth: 'personal-token',
+        endpoint: null,
+        marketplaceUrl: null,
+      },
       configRevision: '2026-09-24T10:00:00.000Z',
       retentionDays: 45,
     });
@@ -212,6 +230,75 @@ describe('AiStatusService', () => {
     const status = await svc.getStatus(human('ADMIN'));
     expect(status.chat.available).toBe(false);
     expect(status.mcp.available).toBe(false);
+  });
+
+  it('exposes the MCP endpoint and marketplace from the pinned origin (https, MCP on)', async () => {
+    process.env.WEB_ORIGIN = 'https://it.example.com/';
+    const status = await makeService(ENABLED, ['ai:connect']).getStatus(
+      human('MEMBER'),
+    );
+    expect(status.mcp).toEqual({
+      available: true,
+      auth: 'oauth',
+      endpoint: 'https://it.example.com/mcp',
+      marketplaceUrl:
+        'https://it.example.com/api/ai/claude-code/marketplace.json',
+    });
+    expect(AiStatusSchema.parse(status)).toEqual(status);
+  });
+
+  it('keeps the endpoint but no marketplace while MCP is off, or on a plain-http pinned origin', async () => {
+    process.env.WEB_ORIGIN = 'https://it.example.com';
+    const off = await makeService({ ...ENABLED, mcpEnabled: false }, [
+      'ai:connect',
+    ]).getStatus(human('ADMIN'));
+    expect(off.mcp).toMatchObject({
+      endpoint: 'https://it.example.com/mcp',
+      marketplaceUrl: null,
+    });
+    process.env.WEB_ORIGIN = 'http://10.0.0.5:8080';
+    const lan = await makeService(ENABLED, ['ai:connect']).getStatus(
+      human('ADMIN'),
+    );
+    expect(lan.mcp).toMatchObject({
+      auth: 'personal-token',
+      endpoint: 'http://10.0.0.5:8080/mcp',
+      marketplaceUrl: null,
+    });
+  });
+
+  it('never derives the URLs from the request: no pinned origin, a bad one, or shim → null', () => {
+    expect(resolveMcpUrls(true, { AUTH_TRUST_HOST: 'true' })).toEqual({
+      endpoint: null,
+      marketplaceUrl: null,
+    });
+    expect(resolveMcpUrls(true, { WEB_ORIGIN: 'not an origin' })).toEqual({
+      endpoint: null,
+      marketplaceUrl: null,
+    });
+    expect(
+      resolveMcpUrls(true, { WEB_ORIGIN: 'ftp://it.example.com' }),
+    ).toEqual({ endpoint: null, marketplaceUrl: null });
+    expect(
+      resolveMcpUrls(true, {
+        WEB_ORIGIN: 'https://it.example.com',
+        AUTH_MODE: 'shim',
+      }),
+    ).toEqual({ endpoint: null, marketplaceUrl: null });
+  });
+
+  it('shim mode and an anonymous caller get no URLs', async () => {
+    process.env.WEB_ORIGIN = 'https://it.example.com';
+    const svc = makeService(ENABLED, ['ai:connect']);
+    expect((await svc.getStatus(undefined)).mcp).toMatchObject({
+      endpoint: null,
+      marketplaceUrl: null,
+    });
+    process.env.AUTH_MODE = 'shim';
+    expect((await svc.getStatus(human('ADMIN'))).mcp).toMatchObject({
+      endpoint: null,
+      marketplaceUrl: null,
+    });
   });
 
   it('the MCP auth mode is oauth only on a pinned https origin', () => {
