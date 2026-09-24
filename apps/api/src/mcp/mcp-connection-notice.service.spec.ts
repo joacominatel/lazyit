@@ -30,6 +30,7 @@ const caller = (over: Partial<McpCaller> = {}): McpCaller => ({
 describe('McpConnectionNoticeService — the first-use security notice (security §6.3, G3)', () => {
   let grantCreatedAt: Date;
   let findFirst: jest.Mock;
+  let sent: jest.Mock;
   let emit: jest.Mock;
   let notices: McpConnectionNoticeService;
 
@@ -38,9 +39,13 @@ describe('McpConnectionNoticeService — the first-use security notice (security
     findFirst = jest.fn(() =>
       Promise.resolve({ createdAt: grantCreatedAt, userId: USER }),
     );
+    sent = jest.fn().mockResolvedValue(null);
     emit = jest.fn().mockResolvedValue('ckn1');
     notices = new McpConnectionNoticeService(
-      { oAuthGrant: { findFirst } } as unknown as PrismaService,
+      {
+        oAuthGrant: { findFirst },
+        notification: { findUnique: sent },
+      } as unknown as PrismaService,
       { emit } as unknown as NotificationsService,
     );
   });
@@ -71,6 +76,29 @@ describe('McpConnectionNoticeService — the first-use security notice (security
     await notices.announce(caller());
     expect(emit).toHaveBeenCalledTimes(1);
     expect(findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it('remembers a grant only once its notice exists: a failed send is retried (G3 review F5)', async () => {
+    // emit swallows a failure and answers null; no row exists → not remembered.
+    emit.mockResolvedValueOnce(null);
+    expect(await notices.announce(caller())).toBe(true);
+    expect(await notices.announce(caller())).toBe(true);
+    expect(emit).toHaveBeenCalledTimes(2);
+    // The second send succeeded: from now on the grant is remembered.
+    expect(await notices.announce(caller())).toBe(false);
+    expect(emit).toHaveBeenCalledTimes(2);
+  });
+
+  it('recognizes a notice already sent (another replica, before a restart) without emitting again', async () => {
+    sent.mockResolvedValue({ id: 'ckn0' });
+    expect(await notices.announce(caller())).toBe(false);
+    expect(sent).toHaveBeenCalledWith({
+      where: { dedupeKey: 'mcp.client_connected:ckgrant1' },
+      select: { id: true },
+    });
+    expect(emit).not.toHaveBeenCalled();
+    expect(await notices.announce(caller())).toBe(false);
+    expect(sent).toHaveBeenCalledTimes(1);
   });
 
   it('names a personal token and says read-only / admin accurately', async () => {

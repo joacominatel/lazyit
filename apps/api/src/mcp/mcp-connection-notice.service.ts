@@ -15,8 +15,10 @@ const MEMO_LIMIT = 10_000;
  * so a phished consent or a token minted from a stolen session must not go unnoticed.
  *
  * Exactly once per connection: the notification's `dedupeKey` is `mcp.client_connected:<grantId>`
- * (UNIQUE — a second emit, on any replica, is a quiet no-op), and a per-process memo spares the insert
- * attempt on every later request. The bell forgets after 90 days, so a grant is announced only while it
+ * (UNIQUE — a second emit, on any replica, is a quiet no-op), and a per-process memo — set only once the
+ * notice exists, so a failed send is retried — spares the lookups on every later request. The email copy
+ * follows the owner's per-type email opt-out like every emailable type (the allowlist has no mandatory
+ * types); the bell copy always lands. The bell forgets after 90 days, so a grant is announced only while it
  * is younger than that: an older grant's notice, if any, was already sent and may have been pruned, and
  * must not be re-sent. Service Accounts have no bell and are never announced.
  *
@@ -48,7 +50,7 @@ export class McpConnectionNoticeService {
     const grant = caller.grant;
     if (!grant || caller.identity.kind !== 'human') return false;
     if (this.announced.has(grant.id)) return false;
-    this.remember(grant.id);
+    const dedupeKey = `mcp.client_connected:${grant.id}`;
 
     const row = await this.prisma.oAuthGrant.findFirst({
       where: { id: grant.id },
@@ -58,6 +60,12 @@ export class McpConnectionNoticeService {
       !row ||
       now.getTime() - row.createdAt.getTime() >= NOTIFICATION_RETENTION_MS
     ) {
+      this.remember(grant.id);
+      return false;
+    }
+    // Already sent (by this or another replica, before a restart): remember it and stop.
+    if (await this.alreadySent(dedupeKey)) {
+      this.remember(grant.id);
       return false;
     }
 
@@ -68,9 +76,9 @@ export class McpConnectionNoticeService {
     const access = grant.scopes.includes('lazyit.write')
       ? 'read and write'
       : 'read-only';
-    await this.notifications.emit({
+    const id = await this.notifications.emit({
       type: 'mcp.client_connected',
-      dedupeKey: `mcp.client_connected:${grant.id}`,
+      dedupeKey,
       severity: 'warning',
       recipientUserId: row.userId,
       targetUserId: row.userId,
@@ -88,7 +96,21 @@ export class McpConnectionNoticeService {
         scopes: formatOAuthScopes(grant.scopes),
       },
     });
+    // Remember the grant only once the notice exists (G3 review F5): `emit` swallows its failures and
+    // answers null, so a failed send is retried on the connection's next request. A null because a
+    // concurrent request won the dedupe race is recognized by the row now existing.
+    if (id !== null || (await this.alreadySent(dedupeKey))) {
+      this.remember(grant.id);
+    }
     return true;
+  }
+
+  private async alreadySent(dedupeKey: string): Promise<boolean> {
+    const existing = await this.prisma.notification.findUnique({
+      where: { dedupeKey },
+      select: { id: true },
+    });
+    return existing !== null;
   }
 
   private remember(grantId: string): void {
