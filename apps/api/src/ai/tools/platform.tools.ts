@@ -174,7 +174,7 @@ export const platformToolset: AiToolset = {
     // The rest of the workflow engine lives in `workflows.tools.ts` (W2-13) and
     // `workflow-authoring.tools.ts` (W2-14); its secrets stay here, a structural exclusion.
     // `WorkflowsController.findAll` (headers only) is bound by the access toolset (W2-6) for the grant,
-    // revoke and approve previews.
+    // revoke and approve previews, and by the workflow operations toolset (W2-13).
     unexposed(
       WorkflowSecretsController,
       ['findAll', 'findOne', 'create', 'rotate', 'remove'],
