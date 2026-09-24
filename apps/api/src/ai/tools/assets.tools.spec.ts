@@ -35,6 +35,7 @@ import {
   actor,
   ai,
   assetsService,
+  cid,
   assignmentsService,
   bootHarness,
   ctx,
@@ -311,9 +312,10 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         items: [
           {
             id: A.laptop,
-            name: 'Laptop Ana',
+            // A list row does not say who wrote the name and serial: wrapped (as infra lean rows are).
+            name: '<untrusted_content>Laptop Ana</untrusted_content>',
             assetTag: 'LT-0001',
-            serial: 'SN-LAPTOP-1',
+            serial: '<untrusted_content>SN-LAPTOP-1</untrusted_content>',
             status: 'OPERATIONAL',
             company: null,
             purchaseDate: null,
@@ -644,7 +646,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         type: 'asset',
         id: A.laptop,
         op: 'updated',
-        label: 'Laptop Ana (LT-0001)',
+        label: 'LT-0001',
       };
       expect(action.preview).toMatchObject({
         target,
@@ -816,7 +818,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
           type: 'asset',
           id: A.archived,
           op: 'restored',
-          label: 'Old phone (OLD-0001)',
+          label: 'OLD-0001',
         },
         changes: [{ field: 'archived', before: true, after: false }],
         precondition: { updatedAt: '2026-08-01T00:00:00.000Z' },
@@ -902,7 +904,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
           type: 'asset',
           id: A.server,
           op: 'updated',
-          label: 'Server (SRV-0001)',
+          label: 'SRV-0001',
         }),
         expect.objectContaining({ type: 'user', id: ID.ana, op: 'updated' }),
       ]);
@@ -989,7 +991,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         type: 'assetAssignment',
         id: ASSIGN.sharedJuan,
         op: 'updated',
-        label: 'Shared iPad (TAB-0001) → Juan Perez <juan1@example.com>',
+        label: 'TAB-0001 → Juan Perez <juan1@example.com>',
         parent: { type: 'asset', id: A.shared },
       };
       expect(action.preview).toMatchObject({
@@ -1212,6 +1214,325 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       expect(hint('asset_check_out')).toBe(false);
       expect(hint('asset_check_in')).toBe(false);
       expect(hint('asset_restore')).toBe(false);
+    });
+  });
+
+  // ─── Review fixes (G2, #1346) ──────────────────────────────────────────────────────────────────────
+
+  /** Clone a fixture asset under a new id, tag and serial. */
+  function addAsset(key: string, over: Row): string {
+    const id = cid(key);
+    state.assets.set(id, {
+      ...state.assets.get(A.server)!,
+      id,
+      serial: null,
+      ...over,
+    });
+    return id;
+  }
+
+  let userSeq = 0;
+  function addUser(key: string, first: string, last: string): string {
+    userSeq += 1;
+    const id = `bbbbbbbb-0000-4000-8000-${String(userSeq).padStart(12, '0')}`;
+    state.users.set(id, {
+      id,
+      firstName: first,
+      lastName: last,
+      email: `${key}@example.com`,
+      username: null,
+      legajo: null,
+      role: 'MEMBER',
+      deletedAt: null,
+    });
+    return id;
+  }
+
+  describe('review fix F1: a partial lookup page never decides a reference', () => {
+    it('LT-1 resolves exactly (never LT-10) while one page holds every match…', async () => {
+      const lt1 = addAsset('lt1', { name: 'Dock', assetTag: 'LT-1' });
+      addAsset('lt10', { name: 'Dock', assetTag: 'LT-10' });
+      const result = await h.tools.invoke(
+        'asset_get',
+        { asset: 'lt-1' },
+        ctx(actor('MEMBER')),
+      );
+      expect(data(result).asset).toMatchObject({ id: lt1, assetTag: 'LT-1' });
+    });
+
+    it('…and is AMBIGUOUS_REFERENCE (ask for the id) once more rows match than one page reads', async () => {
+      const lt1 = addAsset('lt1', { name: 'Dock', assetTag: 'LT-1' });
+      for (let i = 0; i < 200; i += 1) {
+        addAsset(`lt1x${i}`, { name: 'Dock', assetTag: `LT-1${i}` });
+      }
+      // The exact match is on the first page — still refused: the page does not hold every candidate.
+      expect(state.assets.size).toBeGreaterThan(201);
+      const result = await h.tools.invoke(
+        'asset_update',
+        { asset: 'LT-1', status: 'LOST' },
+        ctx(actor('SA writer')),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'AMBIGUOUS_REFERENCE' },
+      });
+      expect((result as { error: { message: string } }).error.message).toMatch(
+        /id/,
+      );
+      expect(assetsService.update).not.toHaveBeenCalled();
+      // The id still works.
+      const byId = await h.tools.invoke(
+        'asset_update',
+        { asset: lt1, status: 'LOST' },
+        ctx(actor('SA writer')),
+      );
+      expect(byId.ok).toBe(true);
+    });
+
+    it('a person: an exact name past the page is refused, not missed (NOT_FOUND) or misread', async () => {
+      for (let i = 0; i < 200; i += 1)
+        addUser(`smithson${i}`, 'John', `Smithson${i}`);
+      const older = addUser('smith', 'John', 'Smith'); // inserted last: off the first page
+      const proposal = await h.tools.propose(
+        'asset_check_out',
+        { asset: A.server, user: 'John Smith' },
+        ctx(actor('MEMBER')),
+      );
+      expect(proposal).toMatchObject({
+        ok: false,
+        result: { error: { code: 'AMBIGUOUS_REFERENCE' } },
+      });
+      expect(ai.invocations.size).toBe(0);
+      const byEmail = await h.tools.propose(
+        'asset_check_out',
+        { asset: A.server, user: older },
+        ctx(actor('MEMBER')),
+      );
+      expect(byEmail).toMatchObject({ ok: true });
+    });
+
+    it('several exact matches on a partial page are named as candidates', async () => {
+      for (let i = 0; i < 201; i += 1)
+        addUser(`perez${i}`, 'Juan', `Perezz${i}`);
+      const proposal = await h.tools.propose(
+        'asset_check_out',
+        { asset: A.server, user: 'Juan Perez' },
+        ctx(actor('MEMBER')),
+      );
+      const hint = (proposal as { result: { error: { hint?: string } } }).result
+        .error.hint;
+      expect(hint).toContain(ID.juan1);
+      expect(hint).toContain(ID.juan2);
+    });
+
+    it('a model or location name past the page is refused too', async () => {
+      for (let i = 0; i < 201; i += 1) {
+        const id = cid(`hqannex${i}`);
+        state.locations.set(id, {
+          ...state.locations.get(L.storage)!,
+          id,
+          name: `HQ annex ${i}`,
+        });
+      }
+      const result = await h.tools.invoke(
+        'asset_create',
+        { name: 'X', status: 'IN_STORAGE', location: 'HQ' },
+        ctx(actor('SA writer')),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'AMBIGUOUS_REFERENCE' },
+      });
+      expect(assetsService.create).not.toHaveBeenCalled();
+    });
+
+    it('archived: a tag past the page, or a raw id beyond the scanned pages, is refused', async () => {
+      for (let i = 0; i < 1001; i += 1) {
+        addAsset(`gone${i}`, {
+          name: 'Gone',
+          assetTag: `OLD-0001-${i}`,
+          deletedAt: new Date('2026-09-05T00:00:00.000Z'),
+          updatedAt: new Date('2026-09-05T00:00:00.000Z'),
+        });
+      }
+      const byTag = await h.tools.propose(
+        'asset_restore',
+        { asset: 'OLD-0001' },
+        ctx(actor('ADMIN')),
+      );
+      expect(byTag).toMatchObject({
+        ok: false,
+        result: { error: { code: 'AMBIGUOUS_REFERENCE' } },
+      });
+      // The fixture's archived asset is older than the 1,000 newest-archived rows the scan reads.
+      const byId = await h.tools.propose(
+        'asset_restore',
+        { asset: A.archived },
+        ctx(actor('ADMIN')),
+      );
+      expect(byId).toMatchObject({
+        ok: false,
+        result: { error: { code: 'AMBIGUOUS_REFERENCE' } },
+      });
+      expect(
+        (byId as { result: { error: { message: string } } }).result.error
+          .message,
+      ).toMatch(/asset tag or serial/);
+    });
+  });
+
+  describe('review fix F2: agent-owned spec keys are not tool input', () => {
+    it('host and _-prefixed keys are refused on update and create, before any dispatch', async () => {
+      const spy = jest.spyOn(h.dispatcher, 'dispatch');
+      for (const [name, input] of [
+        ['asset_update', { asset: A.laptop, specs: { host: 'forged' } }],
+        ['asset_update', { asset: A.laptop, specs: { Host: null } }],
+        [
+          'asset_update',
+          { asset: A.laptop, specs: { _infraAutoCreated: null } },
+        ],
+        [
+          'asset_create',
+          { name: 'X', status: 'LOST', specs: { _infraAutoCreated: true } },
+        ],
+      ] as const) {
+        const proposal = await h.tools.propose(
+          name,
+          input,
+          ctx(actor('MEMBER')),
+        );
+        expect(proposal).toMatchObject({
+          ok: false,
+          result: { error: { code: 'INVALID_INPUT' } },
+        });
+      }
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+
+      // A `__proto__` key never becomes an own key of the parsed input (the schema drops it), so it
+      // cannot reach the merged specs: the update is left with nothing to change.
+      const proto = await h.tools.propose(
+        'asset_update',
+        {
+          asset: A.laptop,
+          specs: JSON.parse('{"__proto__": {"polluted": true}}') as Row,
+        },
+        ctx(actor('MEMBER')),
+      );
+      expect(proto).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+      expect(({} as Row).polluted).toBeUndefined();
+    });
+  });
+
+  describe('review fix F3: a name or serial a reporting agent wrote is untrusted', () => {
+    it('agent-linked (specs.host) and auto-created (_infraAutoCreated) assets: wrapped, and kept out of labels', async () => {
+      const auto = addAsset('auto1', {
+        name: INJECTION,
+        serial: 'SN-REPORTED',
+        assetTag: 'AUTO-1',
+        specs: { _infraAutoCreated: true },
+      });
+      const got = await h.tools.invoke(
+        'asset_get',
+        { asset: auto },
+        ctx(actor('MEMBER')),
+      );
+      expect(data(got).asset).toMatchObject({
+        name: WRAPPED,
+        serial: '<untrusted_content>SN-REPORTED</untrusted_content>',
+      });
+      const linked = await h.tools.invoke(
+        'asset_get',
+        { asset: A.laptop },
+        ctx(actor('MEMBER')),
+      );
+      expect(data(linked).asset).toMatchObject({
+        name: '<untrusted_content>Laptop Ana</untrusted_content>',
+      });
+      const archive = await h.tools.propose(
+        'asset_archive',
+        { asset: auto },
+        ctx(actor('ADMIN')),
+      );
+      if (!archive.ok) throw new Error('refused');
+      expect(archive.action.preview?.target?.label).toBe('AUTO-1');
+      expect(JSON.stringify(archive.action.preview)).not.toContain(INJECTION);
+    });
+
+    it('an operator-curated asset (no agent specs) keeps its plain name', async () => {
+      const got = await h.tools.invoke(
+        'asset_get',
+        { asset: A.server },
+        ctx(actor('MEMBER')),
+      );
+      expect(data(got).asset).toMatchObject({ name: 'Server', serial: null });
+    });
+  });
+
+  describe('review fix F6: own spec keys only; Decimal and bigint compared by value', () => {
+    it('a key named like an Object.prototype member has no inherited "before"', async () => {
+      const action = await propose('asset_update', {
+        asset: A.server,
+        specs: { constructor: 'x' },
+      });
+      expect(action.preview?.changes).toEqual([
+        {
+          field: 'specs.constructor',
+          before: null,
+          after: 'x',
+          valueKind: 'text',
+        },
+      ]);
+      await approve(action);
+      const [, body] = assetsService.update.mock.calls[0] as unknown as [
+        string,
+        Row,
+      ];
+      expect(Object.getPrototypeOf(body.specs)).toBe(Object.prototype);
+      expect(body.specs).toEqual({ constructor: 'x' });
+    });
+
+    it('a bigint or Decimal before-value is normalized: no false change, a JSON-safe preview', async () => {
+      state.assets.get(A.server)!.purchaseCost = BigInt(1500);
+      const same = await h.tools.propose(
+        'asset_update',
+        { asset: A.server, purchaseCost: 1500 },
+        ctx(actor('MEMBER')),
+      );
+      expect(same).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+      const changed = await propose('asset_update', {
+        asset: A.server,
+        purchaseCost: 2000,
+      });
+      expect(changed.preview?.changes).toEqual([
+        {
+          field: 'purchaseCost',
+          before: 1500,
+          after: 2000,
+          valueKind: 'number',
+        },
+      ]);
+
+      state.assets.get(A.server)!.salvageValue = {
+        toNumber: () => 100,
+        toFixed: () => '100',
+        toString: () => '100',
+      };
+      const decimal = await h.tools.propose(
+        'asset_update',
+        { asset: A.server, salvageValue: 100 },
+        ctx(actor('MEMBER')),
+      );
+      expect(decimal).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
     });
   });
 });

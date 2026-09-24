@@ -34,6 +34,7 @@ import {
   createPreview,
   detailLevel,
   entityValue,
+  exactOnPage,
   flatSpecs,
   isCuidId,
   isUuidId,
@@ -69,11 +70,43 @@ import {
 
 // ─── Labels and projections ──────────────────────────────────────────────────────────────────────────
 
-/** `Laptop (LT-0042)`: how a person recognizes an asset — its name and its tag, else its serial. */
+/**
+ * Did a reporting agent write this asset's name or serial? An infra node AUTO-CREATES its backing asset
+ * from what the host reported (the name is the hostname; `specs._infraAutoCreated` marks it), and an
+ * agent-LINKED asset has its specs (`specs.host`) and possibly its serial synced from reports — text the
+ * host chose for itself (mirrors `infra.tools.ts`). `null` when the row carries no specs at all (the lean
+ * list row), i.e. the route does not say.
+ */
+function agentWritten(asset: Row): boolean | null {
+  if (!('specs' in asset)) return null;
+  const specs = asRow(asset.specs);
+  return (
+    specs._infraAutoCreated === true ||
+    (typeof specs.host === 'object' && specs.host !== null)
+  );
+}
+
+/**
+ * `Laptop (LT-0042)`: how a person recognizes an asset — its name and its tag, else its serial. When an
+ * agent may have written the name or serial (or the row does not say), only the tag — which lazyit or an
+ * operator issued — is used, so a hostname never reaches a label, a summary or an ambiguity hint.
+ */
 function assetLabel(asset: Row): string {
+  const tag = str(asset.assetTag);
+  if (agentWritten(asset) !== false) return tag ?? `asset ${String(asset.id)}`;
   const name = str(asset.name) ?? String(asset.id);
-  const code = str(asset.assetTag) ?? str(asset.serial);
+  const code = tag ?? str(asset.serial);
   return code ? `${name} (${code})` : name;
+}
+
+/** The asset's own fields; the name and serial wrapped as untrusted unless an operator wrote them. */
+function assetCore(asset: Row, extra: readonly string[] = []): Row {
+  const out = pick(asset, [...ASSET_CORE, ...extra]);
+  if (agentWritten(asset) !== false) {
+    if ('name' in out) out.name = untrusted(str(out.name));
+    if ('serial' in out) out.serial = untrusted(str(out.serial));
+  }
+  return out;
 }
 
 function personName(user: Row): string {
@@ -116,7 +149,7 @@ function searchItem(row: Row): Row {
   const model = row.model ? asRow(row.model) : null;
   const location = row.location ? asRow(row.location) : null;
   return {
-    ...pick(row, ASSET_CORE),
+    ...assetCore(row),
     ...(row.deletedAt ? { archivedAt: iso(row.deletedAt) } : {}),
     model: model
       ? {
@@ -133,13 +166,7 @@ function searchItem(row: Row): Row {
 
 /** The lean asset a write returns. */
 function writtenAsset(row: Row): Row {
-  return pick(row, [
-    ...ASSET_CORE,
-    'modelId',
-    'locationId',
-    'updatedAt',
-    'deletedAt',
-  ]);
+  return assetCore(row, ['modelId', 'locationId', 'updatedAt', 'deletedAt']);
 }
 
 function assetRef(asset: Row, op: AiEntityRef['op']): AiEntityRef {
@@ -172,9 +199,12 @@ function resolveAsset(
       const page = await rt.call(AssetsController, 'findAll', {
         query: { q: ref, limit: RESOLVE_PAGE },
       });
-      return asRows(page.items)
-        .filter((a) => sameText(a.assetTag, ref) || sameText(a.serial, ref))
-        .map((a) => ({ id: String(a.id), label: assetLabel(a) }));
+      return exactOnPage(
+        page,
+        (a) => sameText(a.assetTag, ref) || sameText(a.serial, ref),
+        ref,
+        "give the asset's id (from asset_search)",
+      ).map((a) => ({ id: String(a.id), label: assetLabel(a) }));
     },
   });
 }
@@ -184,7 +214,8 @@ const ARCHIVED_SCAN_PAGES = 5;
 
 /**
  * An ARCHIVED asset by id, tag or serial, through `GET /assets?deleted=only` — the only read that returns
- * a soft-deleted asset (ADMIN-only, like the route). A tag or serial is a `q` search; a raw id scans the
+ * a soft-deleted asset (ADMIN-only by role, unlike the restore route — tools-and-execution.md §8.1, F5). A
+ * tag or serial is a `q` search; a raw id scans the
  * newest-archived pages, since the list has no id filter.
  */
 async function findArchived(rt: AiToolRuntime, ref: string): Promise<Row[]> {
@@ -194,8 +225,11 @@ async function findArchived(rt: AiToolRuntime, ref: string): Promise<Row[]> {
     });
   if (!isCuidId(ref)) {
     const page = await list({ q: ref });
-    return asRows(page.items).filter(
+    return exactOnPage(
+      page,
       (a) => sameText(a.assetTag, ref) || sameText(a.serial, ref),
+      ref,
+      "give the archived asset's id (from asset_search with archived: true)",
     );
   }
   const size = Number(RESOLVE_PAGE);
@@ -207,9 +241,14 @@ async function findArchived(rt: AiToolRuntime, ref: string): Promise<Row[]> {
     });
     const hit = asRows(page.items).find((a) => a.id === ref);
     if (hit) return [hit];
-    if ((i + 1) * size >= page.total) break;
+    if ((i + 1) * size >= page.total) return [];
   }
-  return [];
+  // Not among the newest-archived pages, and more archived assets exist: it cannot be confirmed either
+  // way, so ask for a reference the search can match exactly instead of answering "not found".
+  throw new AiReferenceError(
+    'AMBIGUOUS_REFERENCE',
+    `Asset ${ref} is not among the ${ARCHIVED_SCAN_PAGES * size} most recently archived assets; give its asset tag or serial`,
+  );
 }
 
 /**
@@ -238,16 +277,17 @@ function resolveUser(
         : await rt.call(UsersController, 'findAll', {
             query: { q: ref, limit: RESOLVE_PAGE },
           });
-      return asRows(page.items)
-        .filter(
-          (u) =>
-            u.id === ref ||
-            sameText(u.email, ref) ||
-            sameText(personName(u), ref) ||
-            sameText(u.username, ref) ||
-            sameText(u.legajo, ref),
-        )
-        .map((u) => ({ id: String(u.id), label: userLabel(u) }));
+      return exactOnPage(
+        page,
+        (u) =>
+          u.id === ref ||
+          sameText(u.email, ref) ||
+          sameText(personName(u), ref) ||
+          sameText(u.username, ref) ||
+          sameText(u.legajo, ref),
+        ref,
+        "give the person's email or user id",
+      ).map((u) => ({ id: String(u.id), label: userLabel(u) }));
     },
   });
 }
@@ -327,8 +367,13 @@ function scalarBody(input: Row): Row {
 
 type Change = AiActionPreview['changes'][number];
 
-function sameValue(before: unknown, after: unknown): boolean {
+function sameValue(rawBefore: unknown, after: unknown): boolean {
+  // A Decimal or bigint compares by its value, as the wire would carry it.
+  const before = iso(rawBefore);
   if (before === after) return true;
+  if (typeof before === 'string' && typeof after === 'number') {
+    return before === String(after);
+  }
   if (typeof before === 'string' && typeof after === 'string') {
     const a = Date.parse(before);
     const b = Date.parse(after);
@@ -336,6 +381,30 @@ function sameValue(before: unknown, after: unknown): boolean {
     return /^\d{4}-\d\d-\d\dT/.test(before) && !Number.isNaN(a) && a === b;
   }
   return false;
+}
+
+/**
+ * Spec keys an AI edit may not set: `host` carries the facts a reporting agent owns (it rewrites them on
+ * every report), and an `_`-prefixed key is provenance (`_infraAutoCreated`, which decides whether
+ * detaching the node soft-deletes the asset). Refused on input, so no tool can forge or strip them.
+ */
+const RESERVED_SPEC_KEY = (key: string): boolean =>
+  key.startsWith('_') || key.trim().toLowerCase() === 'host';
+
+function refuseReservedSpecKeys(
+  specs: Readonly<Record<string, unknown>> | undefined,
+  ctx: z.RefinementCtx,
+): void {
+  for (const key of Object.keys(specs ?? {})) {
+    if (RESERVED_SPEC_KEY(key)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['specs', key],
+        message:
+          'reserved: "host" and "_"-prefixed attributes belong to the reporting agent and lazyit',
+      });
+    }
+  }
 }
 
 // ─── asset_search ────────────────────────────────────────────────────────────────────────────────────
@@ -498,8 +567,7 @@ const assetGet = defineTool({
     const location = row.location ? asRow(row.location) : null;
     const data: Row = {
       asset: {
-        ...pick(row, [
-          ...ASSET_CORE,
+        ...assetCore(row, [
           'purchaseCost',
           'usefulLifeMonths',
           'salvageValue',
@@ -577,23 +645,25 @@ const assetCreate = defineTool({
     'tag scheme. To give it to someone afterwards, use asset_check_out.',
   domain: 'assets',
   class: 'write',
-  input: z.strictObject({
-    ...editableFields,
-    name: editableFields.name.describe('What it is, e.g. "Laptop — Ana".'),
-    status: editableFields.status,
-    assetTag: editableFields.assetTag.optional(),
-    serial: editableFields.serial.optional(),
-    company: editableFields.company.optional(),
-    notes: editableFields.notes.optional(),
-    purchaseDate: editableFields.purchaseDate.optional(),
-    warrantyEnd: editableFields.warrantyEnd.optional(),
-    purchaseCost: money.optional(),
-    usefulLifeMonths: months.optional(),
-    salvageValue: money.optional(),
-    model: editableFields.model.optional(),
-    location: editableFields.location.optional(),
-    specs: flatSpecs.optional(),
-  }),
+  input: z
+    .strictObject({
+      ...editableFields,
+      name: editableFields.name.describe('What it is, e.g. "Laptop — Ana".'),
+      status: editableFields.status,
+      assetTag: editableFields.assetTag.optional(),
+      serial: editableFields.serial.optional(),
+      company: editableFields.company.optional(),
+      notes: editableFields.notes.optional(),
+      purchaseDate: editableFields.purchaseDate.optional(),
+      warrantyEnd: editableFields.warrantyEnd.optional(),
+      purchaseCost: money.optional(),
+      usefulLifeMonths: months.optional(),
+      salvageValue: money.optional(),
+      model: editableFields.model.optional(),
+      location: editableFields.location.optional(),
+      specs: flatSpecs.optional(),
+    })
+    .superRefine((input, ctx) => refuseReservedSpecKeys(input.specs, ctx)),
   bindings: [
     bind(AssetsController, 'create'),
     bind(AssetModelsController, 'findAll'),
@@ -667,6 +737,7 @@ const assetUpdateInput = z
       ),
   })
   .superRefine((input, ctx) => {
+    refuseReservedSpecKeys(input.specs, ctx);
     if (Object.keys(input).every((key) => key === 'asset')) {
       ctx.addIssue({
         code: 'custom',
@@ -691,12 +762,14 @@ async function updateBody(
     body.locationId = (await resolveLocation(rt, input.location, false)).id;
   }
   if (input.specs) {
-    const merged: Row = { ...asRow((await current()).specs) };
-    for (const [key, value] of Object.entries(input.specs)) {
-      if (value === null) delete merged[key];
-      else merged[key] = value;
-    }
-    body.specs = merged;
+    // Own entries only, rebuilt with `fromEntries` (which defines each key as an own property), so no key
+    // reaches a prototype.
+    const edits = new Map(Object.entries(input.specs));
+    const kept = Object.entries(asRow((await current()).specs)).filter(
+      ([key]) => !edits.has(key),
+    );
+    const set = [...edits].filter(([, value]) => value !== null);
+    body.specs = Object.fromEntries([...kept, ...set]);
   }
   return body;
 }
@@ -786,7 +859,7 @@ const assetUpdate = defineTool({
     }
     const specs = asRow(current.specs);
     for (const [key, after] of Object.entries(input.specs ?? {})) {
-      const before = specs[key] ?? null;
+      const before = Object.hasOwn(specs, key) ? (specs[key] ?? null) : null;
       if (before === after) continue;
       changes.push({ field: `specs.${key}`, before, after, valueKind: 'text' });
     }

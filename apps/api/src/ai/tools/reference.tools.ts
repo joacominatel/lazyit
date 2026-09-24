@@ -11,7 +11,10 @@ import {
   AI_TOOL_LIST_DEFAULT_LIMIT,
   AI_TOOL_LIST_MAX_LIMIT,
 } from '../ai.constants';
-import type { AiResolvedReference } from '../core/reference-resolver';
+import {
+  AiReferenceError,
+  type AiResolvedReference,
+} from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
 import {
   bind,
@@ -60,12 +63,35 @@ export function str(value: unknown): string | null {
 }
 
 /**
- * A timestamp as the wire carries it. A handler dispatched in-process returns Prisma's `Date` objects —
- * never serialized — while the preview schema wants ISO strings, and an approval compares versions as
- * strings.
+ * A value as the wire carries it. A handler dispatched in-process returns Prisma's own objects, never
+ * serialized: a `Date` (the preview schema wants ISO strings, and an approval compares versions as
+ * strings), a `bigint` (which `JSON.stringify` throws on) or a `Decimal`. Each becomes what the HTTP
+ * response would have carried; anything else is returned as is.
  */
-export function iso<T>(value: T): T | string {
-  return value instanceof Date ? value.toISOString() : value;
+export function iso<T>(value: T): T | string | number {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'bigint') {
+    return Number.isSafeInteger(Number(value))
+      ? Number(value)
+      : value.toString();
+  }
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { toNumber?: unknown }).toNumber === 'function' &&
+    typeof (value as { toFixed?: unknown }).toFixed === 'function'
+  ) {
+    // A Prisma `Decimal` (decimal.js): serialized as its exact string, compared as a number.
+    const decimal = value as unknown as {
+      toNumber(): number;
+      toString(): string;
+    };
+    const n = decimal.toNumber();
+    return Number.isFinite(n) && String(n) === decimal.toString()
+      ? n
+      : decimal.toString();
+  }
+  return value;
 }
 
 /** Other-authored JSON (specs, a history payload), serialized, clipped and wrapped as untrusted. */
@@ -105,6 +131,32 @@ export async function orNull<T>(read: () => Promise<T>): Promise<T | null> {
 
 /** One page of a lookup: the route's own maximum, so an exact match is not missed past a short page. */
 export const RESOLVE_PAGE = '200';
+
+/**
+ * The exact matches a reference lookup found on ONE page of a substring search. A partial page never
+ * decides (same rule as the consumables tools, #1341): when the route matched more rows than the page
+ * holds, the entity meant — or a second one with the same name — may sit past it, so the reference is
+ * refused as `AMBIGUOUS_REFERENCE` and the model asks for the id. That matters most for MCP and headless
+ * writes, which have no preview card a person could catch a wrong target on. Two or more exact matches
+ * on the page are already ambiguous and are returned (the resolver names them).
+ */
+export function exactOnPage(
+  page: { items: unknown; total?: unknown },
+  isExact: (row: Row) => boolean,
+  what: string,
+  hint: string,
+): Row[] {
+  const shown = asRows(page.items);
+  const exact = shown.filter(isExact);
+  if (exact.length > 1) return exact;
+  if (typeof page.total !== 'number' || page.total > shown.length) {
+    throw new AiReferenceError(
+      'AMBIGUOUS_REFERENCE',
+      `"${what}" matches more records than one lookup reads (${String(page.total)}); ${hint}`,
+    );
+  }
+  return exact;
+}
 
 /** A list's truncation marker when more rows exist past this page (tools-and-execution.md §7). */
 export function pageTruncation(
@@ -187,9 +239,12 @@ export function resolveModel(
       const page = await rt.call(AssetModelsController, 'findAll', {
         query: { q: ref, limit: RESOLVE_PAGE },
       });
-      return asRows(page.items)
-        .filter((m) => sameText(m.name, ref))
-        .map((m) => ({ id: String(m.id), label: modelLabel(m) }));
+      return exactOnPage(
+        page,
+        (m) => sameText(m.name, ref),
+        ref,
+        "give the model's id (from reference_lookup)",
+      ).map((m) => ({ id: String(m.id), label: modelLabel(m) }));
     },
   });
 }
@@ -214,9 +269,12 @@ export function resolveLocation(
       const page = await rt.call(LocationsController, 'findAll', {
         query: { q: ref, limit: RESOLVE_PAGE },
       });
-      return asRows(page.items)
-        .filter((l) => sameText(l.name, ref))
-        .map((l) => ({ id: String(l.id), label: String(l.name) }));
+      return exactOnPage(
+        page,
+        (l) => sameText(l.name, ref),
+        ref,
+        "give the location's id (from reference_lookup)",
+      ).map((l) => ({ id: String(l.id), label: String(l.name) }));
     },
   });
 }
