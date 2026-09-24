@@ -356,6 +356,12 @@ by a service account, and no bot can accidentally become an administrator.
     the class for pre-existing rows: Layer 1 stops *new* grants; Layer 2 stops *use* of any pre-existing
     meta-verb / human-only grant. Guard tests: `apps/api/src/auth/service-principal-forbidden.guard.spec.ts`
     and the e2e block in `apps/api/src/config/config.controller.spec.ts`.
+    **Gap (open, [[SEC-073-sa-ungrantable-permissions-not-stripped-at-principal-load|SEC-073]]):** Layer 2
+    is applied per route, and routes gated on `user:manage` (`UsersController`) or `settings:manage`
+    (`PUT /article-categories/:id/access-rules`, `PUT /instance/update-settings`) do not carry it. The
+    principal loader (`resolveServiceAccountPermissions`) also does not strip the ungrantable set, so a
+    pre-2026-06-12 grant is still functional on those routes. This invariant is not fully enforced for
+    pre-existing rows until SEC-073 closes.
   - **Reserved engine-SA name (#555 / #542):** a human can neither create nor rename an account into the
     reserved `lazyit-workflow-engine` name (`EngineServiceAccountService.ENGINE_SA_NAME`) — the immutable
     principal a workflow run executes AS. `ServiceAccountsService.assertNotReservedName` 409's create()
