@@ -346,6 +346,8 @@ interface ConnectionView {
   kind: string | null;
   host: string | null;
   credentialConfigured: boolean;
+  /** Its last change: a re-pointed host or credential moves it (folded into write preconditions). */
+  updatedAt: string | null;
   missing?: true;
 }
 
@@ -365,15 +367,16 @@ function connectionView(row: Row, full: boolean): Row {
     if (kind === 'REST') {
       out.authScheme = str(config.authScheme) ?? 'NONE';
       if (str(config.authHeaderName)) {
-        out.authHeaderName = str(config.authHeaderName);
+        out.authHeaderName = untrusted(str(config.authHeaderName));
       }
       // Header VALUES are redacted: `defaultHeaders` is not validated against credential-like values.
+      // Header names are admin-typed free text: data, never instructions.
       out.defaultHeaders = Object.keys(asRow(config.defaultHeaders)).map(
-        (name) => ({ name, value: '[redacted]' }),
+        (name) => ({ name: untrusted(name), value: '[redacted]' }),
       );
     }
     if (kind === 'WEBHOOK_OUT' && str(config.signatureHeader)) {
-      out.signatureHeader = str(config.signatureHeader);
+      out.signatureHeader = untrusted(str(config.signatureHeader));
     }
     out.createdAt = iso(row.createdAt);
     out.updatedAt = iso(row.updatedAt);
@@ -401,6 +404,7 @@ async function connectionsById(
         kind: null,
         host: null,
         credentialConfigured: false,
+        updatedAt: null,
         missing: true,
       });
       continue;
@@ -412,6 +416,7 @@ async function connectionsById(
       kind: str(row.kind) ?? str(config.kind),
       host: hostOf(config.baseUrl ?? config.url),
       credentialConfigured: typeof row.secretId === 'string',
+      updatedAt: iso(row.updatedAt),
     });
   }
   return out;
@@ -439,8 +444,9 @@ function mappedFields(
   step: WorkflowStep,
 ): Array<{ field: string; from: string[] }> {
   if (step.kind === 'MANUAL' || !step.dataMapping) return [];
+  // A field name is admin-typed free text: data, never instructions.
   return Object.entries(step.dataMapping).map(([field, template]) => ({
-    field,
+    field: untrusted(field) ?? field,
     from: tokensOf(template),
   }));
 }
@@ -488,16 +494,11 @@ function outlineStep(
   let sentence: string;
   if (step.kind === 'MANUAL') {
     out.prompt = untrusted(step.prompt);
-    out.inputFields = step.inputFields.map((f) => ({
-      name: f.name,
-      label: f.label,
-      type: f.type,
-      required: f.required,
-    }));
+    out.inputFields = step.inputFields.map(formField);
     if (step.cohort) out.cohort = untrusted(step.cohort);
     sentence =
       `Step ${index + 1} (${keyText(step.key)}) pauses the run and asks a person to fill in ` +
-      `${step.inputFields.map((f) => f.name).join(', ')}.`;
+      `${step.inputFields.map((f) => untrusted(f.name) ?? f.name).join(', ')}.`;
   } else {
     const conn = connections.get(step.connectionId);
     out.destination = destinationText(step, connections);
@@ -517,6 +518,32 @@ function outlineStep(
     `${sentence} If it succeeds, ${edgeText(onSuccess, steps)}; ` +
     `if it fails, ${edgeText(onFailure, steps)}.`;
   return out;
+}
+
+/**
+ * A manual-form field as the AI sees it. Names, labels, options and suggestions are admin-typed free
+ * text, so each is wrapped as data; `name` stays usable as the submit key once unwrapped by the model.
+ */
+function formField(f: ManualInputField): Row {
+  const wrap = (v: string) => untrusted(v) ?? v;
+  return {
+    name: wrap(f.name),
+    label: wrap(f.label),
+    type: f.type,
+    required: f.required === true,
+    ...(f.options ? { options: f.options.map(wrap) } : {}),
+    ...(f.suggestions ? { suggestions: f.suggestions.map(wrap) } : {}),
+  };
+}
+
+/** The latest of several timestamps — a write's precondition covers everything its card shows. */
+function latestOf(...values: ReadonlyArray<string | null | undefined>): string {
+  const times = values
+    .filter((v): v is string => typeof v === 'string')
+    .map((v) => new Date(v).getTime())
+    .filter((t) => Number.isFinite(t));
+  if (times.length === 0) throw new Error('No timestamp for the precondition');
+  return new Date(Math.max(...times)).toISOString();
 }
 
 function parseSteps(value: unknown): WorkflowStep[] | null {
@@ -687,6 +714,7 @@ function explainRun(
   person: PersonView,
   workflowName: string | null,
   attempts: Row[],
+  replacedBy: string | null,
 ): Row {
   const status = String(run.status);
   const trigger = String(run.trigger);
@@ -717,7 +745,12 @@ function explainRun(
     out.rawError = untrusted(run.error ? JSON.stringify(run.error) : null);
   }
   const next: string[] = [];
-  if (status === 'FAILED') {
+  if (status === 'FAILED' && replacedBy) {
+    next.push(
+      `This run was already replayed as run ${replacedBy}: do not retry or replay it again (that would ` +
+        `provision twice) — read run ${replacedBy} with workflow_run_get instead.`,
+    );
+  } else if (status === 'FAILED') {
     next.push(
       'Retry (workflow_run_retry): resumes from the failed step; steps that already succeeded are not repeated. ' +
         'Use it when the cause was temporary or has been fixed outside lazyit (for example in the external system).',
@@ -905,15 +938,74 @@ function runTarget(ctx: RunContext): AiEntityRef {
     type: 'workflowRun',
     id: String(ctx.run.id),
     op: 'updated',
-    label: `Run of ${str(ctx.workflow?.name) ?? 'a workflow'} for ${ctx.person.display ?? 'a grant'} on ${appLabel(ctx.app)}`,
+    // Workflow and person names are other-authored: data on the card, never instructions.
+    label: `Run of ${untrusted(str(ctx.workflow?.name)) ?? 'a workflow'} for ${untrusted(ctx.person.display) ?? 'a grant'} on ${appLabel(ctx.app)}`,
     parent: { type: 'application', id: ctx.app.id },
   };
 }
 
-function runPrecondition(ctx: RunContext, target: AiEntityRef) {
-  const updatedAt = iso(ctx.run.updatedAt);
-  if (!updatedAt) throw new Error('Workflow run has no updatedAt');
-  return { entity: target, updatedAt };
+/**
+ * The run's precondition. Core compares only the entity and `updatedAt`, so `updatedAt` is the LATEST
+ * change among the run, the workflow the write will run (header and version) and the connections the
+ * card names: a new version, a toggled workflow or a re-pointed host after the card makes the approval
+ * `STALE` (any change after the proposal is later than everything the card read).
+ */
+function runPrecondition(
+  ctx: RunContext,
+  target: AiEntityRef,
+  workflow: Row | null = ctx.workflow,
+) {
+  return {
+    entity: target,
+    updatedAt: latestOf(
+      iso(ctx.run.updatedAt),
+      iso(workflow?.updatedAt),
+      iso(asRow(workflow?.latestVersion).createdAt),
+      ...[...ctx.connections.values()].map((c) => c.updatedAt),
+    ),
+  };
+}
+
+/**
+ * The run that already superseded this one (a replay clone), if any: a FAILED run that was replayed must
+ * not be retried or replayed again — that would provision twice. Read through the bound run list.
+ */
+async function supersededBy(
+  rt: AiToolRuntime,
+  run: Row,
+): Promise<string | null> {
+  const grantId = str(run.accessGrantId);
+  if (!grantId) return null;
+  const limit = 200;
+  for (let offset = 0; ; offset += limit) {
+    const page = asRow(
+      await rt.call(WorkflowRunsController, 'findAll', {
+        query: {
+          accessGrantId: grantId,
+          limit: String(limit),
+          offset: String(offset),
+        },
+      }),
+    );
+    const items = asRows(page.items);
+    const clone = items.find((r) => str(r.supersedesRunId) === String(run.id));
+    if (clone) return String(clone.id);
+    const total = num(page.total) ?? 0;
+    if (items.length === 0 || offset + items.length >= total) return null;
+  }
+}
+
+async function assertNotSuperseded(
+  rt: AiToolRuntime,
+  run: Row,
+  verb: string,
+): Promise<void> {
+  const clone = await supersededBy(rt, run);
+  if (clone) {
+    throw new ConflictException(
+      `This run was already replayed as run ${clone}; it cannot be ${verb} again — work on run ${clone} instead`,
+    );
+  }
 }
 
 // ─── Reads ─────────────────────────────────────────────────────────────────────────────────────────
@@ -1199,6 +1291,7 @@ const workflowRunGet = defineTool({
   }),
   bindings: [
     bind(WorkflowRunsController, 'findOne'),
+    bind(WorkflowRunsController, 'findAll'),
     bind(WorkflowsController, 'findOne'),
     bind(WorkflowConnectionsController, 'findOne'),
     bind(ApplicationsController, 'findOne'),
@@ -1207,6 +1300,8 @@ const workflowRunGet = defineTool({
   ],
   async run(input, rt) {
     const run = await readRun(rt, input.run);
+    const replacedBy =
+      run.status === 'FAILED' ? await supersededBy(rt, run) : null;
     const ctx = await runContext(rt, run);
     const attempts = asRows(run.steps);
     const names = new Map<string, string>();
@@ -1235,6 +1330,7 @@ const workflowRunGet = defineTool({
           : {}),
         replaySeq: num(run.replaySeq),
         supersedesRunId: str(run.supersedesRunId),
+        replacedByRunId: replacedBy,
         createdAt: iso(run.createdAt),
         startedAt: iso(run.startedAt),
         finishedAt: iso(run.finishedAt),
@@ -1246,6 +1342,7 @@ const workflowRunGet = defineTool({
         ctx.person,
         str(ctx.workflow?.name),
         attempts,
+        replacedBy,
       ),
       steps: shown.map((s) => stepAttemptView(s, names)),
     };
@@ -1410,14 +1507,7 @@ const workflowTaskGet = defineTool({
         ...(task.input
           ? { submittedInput: untrusted(JSON.stringify(task.input)) }
           : {}),
-        form: tc.inputFields.map((f) => ({
-          name: f.name,
-          label: f.label,
-          type: f.type,
-          required: f.required === true,
-          ...(f.options ? { options: f.options } : {}),
-          ...(f.suggestions ? { suggestions: f.suggestions } : {}),
-        })),
+        form: tc.inputFields.map(formField),
       },
       context: {
         workflow: {
@@ -1478,6 +1568,7 @@ const workflowRunRetry = defineTool({
   bindings: [
     bind(WorkflowRunsController, 'retry'),
     bind(WorkflowRunsController, 'findOne'),
+    bind(WorkflowRunsController, 'findAll'),
     bind(WorkflowsController, 'findOne'),
     bind(WorkflowConnectionsController, 'findOne'),
     bind(ApplicationsController, 'findOne'),
@@ -1485,9 +1576,13 @@ const workflowRunRetry = defineTool({
     bind(UsersController, 'findOne'),
   ],
   async run(input, rt) {
-    const applicationId = await guardApplication(rt, async () =>
-      String((await readRun(rt, input.run)).applicationId),
-    );
+    const read: { run?: Row } = {};
+    const applicationId = await guardApplication(rt, async () => {
+      read.run = await readRun(rt, input.run);
+      return String(read.run.applicationId);
+    });
+    // Over MCP and headless there is no card: refuse a run already replayed before any side effect.
+    if (read.run) await assertNotSuperseded(rt, read.run, 'retried');
     // Never the route's `overrides`: an empty body is the unchanged resume-from-failed-step retry.
     const result = asRow(
       await rt.call(WorkflowRunsController, 'retry', {
@@ -1518,9 +1613,11 @@ const workflowRunRetry = defineTool({
   async preview(input, rt) {
     const run = await readRun(rt, input.run);
     assertFailed(run, 'retried');
+    await assertNotSuperseded(rt, run, 'retried');
     const ctx = await runContext(rt, run);
-    const { stepKey } = errorOf(run);
-    let failedKey: string | null = stepKey;
+    // On an older pinned version the failed step cannot be resolved here (only the latest version is
+    // readable): the card names no step rather than one the route might refuse.
+    let failedKey: string | null = null;
     let destinations: string[];
     if (ctx.pinnedSteps) {
       failedKey = resolveFailedStepKey(run.error, ctx.pinnedSteps);
@@ -1535,14 +1632,14 @@ const workflowRunRetry = defineTool({
         ctx.connections,
       );
     } else {
-      // An older version: name the hosts this run itself recorded.
+      // An older version: name the hosts this run itself recorded (engine-recorded metadata: data).
       destinations = [
         ...new Set(
           asRows(run.steps)
             .map((s) => str(s.targetHost))
             .filter((h): h is string => h !== null),
         ),
-      ];
+      ].map((h) => `${untrusted(h) ?? h} (recorded in this run)`);
     }
     const target = runTarget(ctx);
     const trigger = String(run.trigger);
@@ -1551,7 +1648,7 @@ const workflowRunRetry = defineTool({
         field: 'action',
         after:
           `Retry the failed run of ${workflowLabel(ctx)} for ${personText(ctx.person)} on ${appLabel(ctx.app)}` +
-          ` (${TRIGGER_WORDS[trigger] ?? trigger}), resuming at step ${failedKey ? keyText(failedKey) : '?'}.` +
+          ` (${TRIGGER_WORDS[trigger] ?? trigger}), resuming at ${failedKey ? `step ${keyText(failedKey)}` : 'the step that failed'}.` +
           ' Steps that already succeeded are not repeated; the same data is sent again.',
       },
       { field: 'run', after: String(run.id) },
@@ -1564,7 +1661,9 @@ const workflowRunRetry = defineTool({
       { field: 'trigger', after: trigger },
       {
         field: 'resumesAtStep',
-        after: failedKey ? keyText(failedKey) : 'the failed step',
+        after: failedKey
+          ? keyText(failedKey)
+          : 'the step that failed (the run is on an older workflow version, not shown)',
       },
       {
         field: 'destinations',
@@ -1604,6 +1703,7 @@ const workflowRunReplay = defineTool({
   bindings: [
     bind(WorkflowRunsController, 'replayLatest'),
     bind(WorkflowRunsController, 'findOne'),
+    bind(WorkflowRunsController, 'findAll'),
     bind(WorkflowsController, 'findOne'),
     bind(WorkflowsController, 'findAll'),
     bind(WorkflowConnectionsController, 'findOne'),
@@ -1612,9 +1712,12 @@ const workflowRunReplay = defineTool({
     bind(UsersController, 'findOne'),
   ],
   async run(input, rt) {
-    const applicationId = await guardApplication(rt, async () =>
-      String((await readRun(rt, input.run)).applicationId),
-    );
+    const read: { run?: Row } = {};
+    const applicationId = await guardApplication(rt, async () => {
+      read.run = await readRun(rt, input.run);
+      return String(read.run.applicationId);
+    });
+    if (read.run) await assertNotSuperseded(rt, read.run, 'replayed');
     const result = asRow(
       await rt.call(WorkflowRunsController, 'replayLatest', {
         params: { id: input.run },
@@ -1641,6 +1744,7 @@ const workflowRunReplay = defineTool({
   async preview(input, rt) {
     const run = await readRun(rt, input.run);
     assertFailed(run, 'replayed on the latest version');
+    await assertNotSuperseded(rt, run, 'replayed');
     if (!run.accessGrantId) {
       throw new UnprocessableEntityException(
         'This run has no access grant to replay; re-grant to run the latest workflow version',
