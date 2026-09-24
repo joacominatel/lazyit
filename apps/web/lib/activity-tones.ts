@@ -6,7 +6,8 @@ import type { StatusTone } from "@/components/ui/status-badge";
  * The action verbs are the real ones the `recent_activity` view emits (see
  * `@lazyit/shared` recent-activity.ts): created, status_changed, location_changed, assigned,
  * released, granted, revoked, stock_in, stock_out, stock_adjustment, plus the UserHistory verbs
- * (DEBT-2, issue #185): updated, role_changed, password_reset_sent, deleted, restored.
+ * (DEBT-2, issue #185): updated, role_changed, password_reset_sent, deleted, restored, and the
+ * activation flips deactivated / reactivated (issue #1375).
  *
  * Tone is carried by the SOLID `StatusBadge` (its `*-foreground` is AA-verified), so a coloured
  * action chip is always readable on the bone — the hue never sits as small coloured text
@@ -46,6 +47,9 @@ const ACTION_TONE: Record<string, StatusTone> = {
   // (the assigned/granted shape) or gave it back (informational — the units went back on the shelf).
   consumable_delivered: "success",
   consumable_returned: "info",
+  // Activation flips (issue #1375): a user was disabled (access taken away) or re-enabled (it began again).
+  deactivated: "danger",
+  reactivated: "success",
 };
 
 /** The {@link StatusBadge} tone for an activity action verb. Falls back to `neutral`. */
