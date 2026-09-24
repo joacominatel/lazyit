@@ -183,6 +183,7 @@ Legend:
 | applications | `:id/access-grants`, `:id/articles` | accessGrant:read, article:read | R | v1 facets |
 | applications | create / update | application:write | W | v1 |
 | applications | delete / restore | application:delete | D | v1.1 |
+| workflows | list (headers only) | workflow:read | R | facet of the grant / revoke / approve previews (W2-6: whether an automatic (de)provisioning workflow runs); never a tool |
 | access-grants | list / get | accessGrant:read | R | v1 `access_grant_list` |
 | access-grants | `mine` | self | R | v1 (`session_context`) |
 | access-grants | create | accessGrant:grant | W + ext | v1 |
@@ -454,16 +455,16 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 14 | `asset_check_in` ✅ built (W2-5) | AssetAssignmentsController.release (+AssetsController.findAssignments) | asset:write | write | assetAssignment updated (parent asset), asset updated, user updated |
 | 15 | `asset_model_create` ✅ built (W2-5) | AssetModelsController.create (+AssetCategoriesController.findAll) | assetModel:write | write | assetModel created |
 | 16 | `location_create` ✅ built (W2-5) | LocationsController.create (+findAll / findOne for the parent) | location:write | write | location created |
-| 17 | `application_search` | ApplicationsController.findAll | application:read | read | — |
-| 18 | `application_get` | ApplicationsController.findOne (+grants, articles facets) | application:read | read | — |
-| 19 | `application_create` | ApplicationsController.create | application:write | write | application created |
-| 20 | `application_update` | ApplicationsController.update | application:write | write·D | application updated |
-| 21 | `access_grant_list` | AccessGrantsController.findAll | accessGrant:read | read | — |
-| 22 | `access_grant_create` | AccessGrantsController.create | accessGrant:grant | elevated, ext | accessGrant created (+application, user) |
-| 23 | `access_grant_revoke` | AccessGrantsController.revoke | accessGrant:grant | write·D, ext | accessGrant updated (+application, user) |
-| 24 | `access_request_list` | AccessRequestsController.findAll / .mine | accessRequest:read / human | read | — |
-| 25 | `access_request_create` | AccessRequestsController.create | accessRequest:create, human-only | write | accessRequest created |
-| 26 | `access_request_decide` (approve\|deny) | AccessRequestsController.approve / .deny | accessGrant:grant, human-only | elevated (ext on approve) | accessRequest updated (+accessGrant) |
+| 17 | `application_search` ✅ built (W2-6) | ApplicationsController.findAll | application:read | read | — |
+| 18 | `application_get` ✅ built (W2-6) | ApplicationsController.findOne (+grants, articles facets) | application:read | read | — |
+| 19 | `application_create` ✅ built (W2-6) | ApplicationsController.create | application:write | write | application created |
+| 20 | `application_update` ✅ built (W2-6) | ApplicationsController.update | application:write | write·D | application updated |
+| 21 | `access_grant_list` ✅ built (W2-6) | AccessGrantsController.findAll | accessGrant:read | read | — |
+| 22 | `access_grant_create` ✅ built (W2-6) | AccessGrantsController.create | accessGrant:grant | elevated, ext | accessGrant created (+application, user) |
+| 23 | `access_grant_revoke` ✅ built (W2-6) | AccessGrantsController.revoke | accessGrant:grant | write·D, ext | accessGrant updated (+application, user) |
+| 24 | `access_request_list` ✅ built (W2-6) | AccessRequestsController.findAll / .mine | accessRequest:read / human | read | — |
+| 25 | `access_request_create` ✅ built (W2-6) | AccessRequestsController.create | accessRequest:create, human-only | write | accessRequest created |
+| 26 | `access_request_decide` (approve\|deny) ✅ built (W2-6) | AccessRequestsController.approve / .deny | accessGrant:grant, human-only | elevated (ext on approve) | accessRequest updated (+accessGrant) |
 | 27 | `consumable_search` ✅ built (W2-7) | ConsumablesController.findAll | consumable:read | read | — |
 | 28 | `consumable_get` ✅ built (W2-7) | ConsumablesController.findOne (primary), .findMovements, .findAll (reference lookup) | consumable:read | read | — |
 | 29 | `consumable_create` ✅ built (W2-7) | ConsumablesController.create | consumable:write | write | consumable created |
@@ -540,6 +541,26 @@ Warning rules for these tools (§9 has the step-up rule):
 - **EXCL** (CEO round 2): SA token create/rotate, `provision-local-account`, the AI's own configuration.
 - **EXCL** (settled): Secret Manager.
 - The 44-tool v1 cut is adopted by default (CEO to confirm on review).
+- **Access tools follow-ups (W2-6, see §8.1 "Access tools as built"; G2 review of #1345):**
+  - user references by username / legajo (email and exact full name are built);
+  - a chat approval re-checks the application's criticality only through the precondition: the grant
+    card's precondition is the application (a change → `STALE`), but a revoke's or a decision's is the
+    grant / request, so an application made critical between the card and the approval is not re-asked
+    for the password (MCP and headless always re-read it in `run`);
+  - `access_request_create` on a critical application is not treated as a critical write (it changes no
+    access; the decision that follows is);
+  - F4: the provisioning sentence is read at propose and re-read at approve, but only the precondition
+    (the application's `updatedAt`) is compared, so a workflow enabled or disabled in between leaves the
+    card's sentence stale (the action still runs, exactly as from the UI). A workflow fingerprint in the
+    precondition needs a core change (one entity per precondition);
+  - F5: "this triggers …" is said for an enabled workflow; the engine also needs a published version to
+    fire, which the header list does not show — the sentence can overstate for an enabled workflow with
+    no version;
+  - F6: `access_request_list`'s primary route is `GET /access-requests` (`accessRequest:read`), so the
+    listing hides the tool from a VIEWER even though `mine: true` (`GET /access-requests/mine`) is open to
+    every human; a separate `access_request_list_mine` (or listing by any binding) would fix it;
+  - F8: the decide preview scans the guarded request list (≤ 5 × 200 rows per slice); a
+    `GET /access-requests/:id` read would replace the scan.
 
 ## 8. Registry and execution design
 
@@ -840,6 +861,78 @@ a separate remediation, not a supported path here.
     pins the user row, not its holdings).
   - Person names (actor, target, user first/last names) are returned plain, as in the other toolsets;
     wrapping directory names with `untrusted()` would be a cross-toolset decision.
+
+**Access tools as built (W2-6).** Rows 17–26 of §7, in `tools/access.tools.ts`. Every call goes through
+`rt.call`, so an application write passes the route's own `CreateApplicationSchema` /
+`UpdateApplicationSchema` pipe (the SEC-051 url-scheme guard), and a grant runs the service's live-checks,
+actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) unchanged.
+- **References.** An application is its id — a strict Prisma cuid, `^c[a-z0-9]{24}$`, passed straight
+  through (so "Confluence" or "Crowdstrike" is never mistaken for an id) — or its exact name
+  (case-insensitive), resolved through the guarded `GET /applications` list; the preview and the run use
+  the same rule. A user is `"me"` (the calling human; a Service Account has no "me"), its id (a uuid,
+  passed straight through), its email or its exact full name (case-insensitive), looked up through the
+  guarded `GET /users` (`UsersController.findAll`, `user:read`). A partial page never decides a name: when
+  the route reports more rows than the page holds and the page has at most one exact match, the reference
+  is refused as `AMBIGUOUS_REFERENCE` ("use the user's id or email"); an exact email match stays decisive.
+  The preview and the run use the same resolver.
+- **Critical applications** (CEO decision, ADR-0097 decision 3 as amended). Every AI write on an
+  application with `isCritical = true` — grant, revoke, approve **and** deny a request, update, and a
+  create or update that makes it critical — carries `CRITICAL_APPLICATION` on its card, so core requires
+  the password step-up in the chat whatever the tool class (a revoke is `write`), and its `run` calls
+  `assertChannelAllows(channel, ['CRITICAL_APPLICATION'])` before any side effect: over MCP and headless it
+  is refused ("This application is critical; do it from the lazyit chat, where it is confirmed with your
+  password."). Off the chat, `run` reads the application (and, for a revoke or a decision, the grant or
+  request first); when that read is forbidden the write is refused too — it cannot be shown not to be
+  critical (fail closed).
+- **Reads.** `application_search` (page), `application_get` (the application, its grants — a facet on
+  `accessGrant:read`: a VIEWER gets `{ unavailable: "FORBIDDEN" }` instead of a failure — and, `full`, the
+  description, notes and linked articles), `access_grant_list` (user / application / active filters),
+  `access_request_list` (`mine: true` → `GET /access-requests/mine`, any human). Every grant and request
+  carries a plain-language `state` ("active until 2026-12-31", "active, but its end date has passed — it
+  is revoked automatically shortly", "revoked on … by user …", "pending: waiting for someone who can
+  grant access…", "approved by user … on …; access grant … was created", "denied by …"). Never
+  projected: an application's free-form `metadata`, any workflow definition, connection, engine Service
+  Account or secret. Descriptions, notes, justifications and denial reasons are `untrusted()`.
+- **Writes.** Every preview's first `changes` row is `action`: one sentence saying who gets or loses
+  what access on which application, and what happens outside lazyit. That last part comes from the
+  guarded `GET /workflows?applicationId=` (headers only, `workflow:read`; bound as a facet, removed from
+  `platform.tools.ts`'s unexposed list): readable → precise ("This triggers automatic provisioning … through
+  the workflow set up for VPN", with the workflow's name in a `workflow` row as untrusted text, or "No
+  automatic provisioning workflow is set up …: nothing changes outside lazyit" and no
+  `EXTERNAL_PROVISIONING`); forbidden → hedged ("may trigger … if a workflow is configured") and still
+  warned. A revoke under the default `LAST_ACTIVE_GRANT` policy says the workflow does not run when the
+  user keeps another active grant there (read through `accessGrant:read`, when the caller holds it).
+  - `access_grant_create` — `elevated`, `externalEffects`; warnings `PRIVILEGE_GRANT` (+
+    `EXTERNAL_PROVISIONING` per the above, + `NOTIFIES_USERS` for a critical application or an
+    `admin`/`administrator` level). The preview leaves `stepUpRequired` false on purpose: **core derives
+    the step-up from `PRIVILEGE_GRANT`** and the spec proves an approval without it is refused. Target
+    and precondition: the application (a change to it since the card was shown is `STALE`). **The card
+    names the grantee** — name, email and status, read through the guarded `GET /users/:id`
+    (`UsersController.findOne`, bound as a preview facet and removed from `users.tools.ts`'s pending list;
+    [[ai-assistant/security|security]] §6.1 chain 1): an inactive, directory-only or missing grantee fails
+    at propose (and at the approve-time re-preview), and a caller without `user:read` gets no card. It
+    also shows how many active grants the user already holds there, and says so when you grant yourself.
+  - `access_grant_revoke` — `write`, `destructive`, `externalEffects`; `EXTERNAL_DEPROVISIONING` when a
+    workflow will or may run. It names the user when the caller may read the directory (else by id), and
+    when it replaces the grant's notes it shows the old notes (untrusted) and lists the grant in
+    `untrustedSources`. Target and precondition: the grant (an edit since → `STALE`); an already
+    revoked grant is the route's 409 `CONFLICT`, at propose and at approve.
+  - `access_request_decide` — `elevated`, `externalEffects`, one input `decision: approve | deny` (a
+    denial requires `reason`; an approval refuses one). Approve warns `PRIVILEGE_GRANT` (step-up) +
+    `NOTIFIES_USERS` (+ `EXTERNAL_PROVISIONING`); deny warns `NOTIFIES_USERS` only — no privilege, no
+    step-up. The card names the requester (name, email, status, as for a grant; approving an inactive
+    requester fails at propose, denying stays possible) and lists the request in `untrustedSources`,
+    since it shows the requester's own justification. The API has no `GET /access-requests/:id`, so the preview finds the request through the
+    guarded list (`accessRequest:read`: the PENDING slice, then the whole list, at most 5 × 200 rows each,
+    newest first) — a follow-up is a by-id read. A pending request never changes until it is decided
+    (no `updatedAt`; `createdAt` is its version), so "changed since the card" can only mean "decided by
+    someone else": that is the route's 409 `CONFLICT`, never a second decision. An approver deciding
+    their own request (the route allows it, [[0085-access-request-flow]]) is told so in the `action`
+    sentence; there is no warning code for it.
+  - `access_request_create` — `write`, human-only (a Service Account is refused and never listed);
+    `NOTIFIES_USERS`. `application_create` / `application_update` — `write` (update `destructive`,
+    target + precondition the application); neither accepts `metadata`.
+- **Unexposed:** application archive / restore, grant batch revoke, notes and expiry (v1.1).
 
 **Consumables tools as built (W2-7).** All five admit humans and Service Accounts holding the route's
 permission (`consumable:read` for the reads, `consumable:write` for the writes; no human-only guard).
