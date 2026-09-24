@@ -69,7 +69,7 @@ enforced in the shared schema, in the service and by a DB CHECK. Several targets
 
 ## Decision
 
-1. **Data model** (migration `20260924000000_consumable_deliveries`, additive only):
+1. **Data model** (migration `20260924120000_consumable_deliveries`, additive only):
    - `Consumable.returnable Boolean @default(false)`.
    - `ConsumableMovement.targetUserId uuid?` → [[user]], `targetAssetId?` → [[asset]],
      `targetLocationId?` → [[location]], all `onDelete: Restrict` and named relations
