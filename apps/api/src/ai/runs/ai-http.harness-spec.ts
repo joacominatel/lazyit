@@ -96,8 +96,8 @@ export interface HttpHarness {
 
 /**
  * The runtime's in-memory Prisma, extended with what the HTTP services query beyond the runtime: the
- * conversation list (two-key order, skip), the owner delete with its relation filter and cascades, the
- * Service Account lookup, the per-SA setting upsert and the config audit log.
+ * conversation list (two-key order, skip), the Service Account lookup, the per-SA setting upsert and the
+ * config audit log.
  */
 function extendPrisma(
   rt: Runtime,
@@ -132,29 +132,6 @@ function extendPrisma(
           .slice(skip, take === undefined ? undefined : skip + take)
           .map((r) => structuredClone(r)),
       ),
-    deleteMany: ({ where }: Row) => {
-      const active: string[] = where.runs?.none?.status?.in ?? [];
-      const victims = convs().filter(
-        (r) =>
-          matchesOwner(r, where) &&
-          !(tables.aiRun.rows as Row[]).some(
-            (run) => run.conversationId === r.id && active.includes(run.status),
-          ),
-      );
-      for (const victim of victims) {
-        tables.aiConversation.rows = convs().filter((r) => r !== victim);
-        tables.aiMessage.rows = (tables.aiMessage.rows as Row[]).filter(
-          (m) => m.conversationId !== victim.id,
-        );
-        tables.aiToolInvocation.rows = (
-          tables.aiToolInvocation.rows as Row[]
-        ).filter((i) => i.conversationId !== victim.id);
-        for (const run of tables.aiRun.rows as Row[]) {
-          if (run.conversationId === victim.id) run.conversationId = null;
-        }
-      }
-      return Promise.resolve({ count: victims.length });
-    },
   };
 
   const settingsTable = tables.aiServiceAccountSettings;

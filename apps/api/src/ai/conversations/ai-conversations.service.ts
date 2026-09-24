@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Inject,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   AI_RUN_ACTIVE_STATUSES,
   offsetOf,
@@ -46,8 +41,8 @@ export function conversationNotFound(): NotFoundException {
  *
  * Creating a conversation and sending a message go through the runtime's {@link AgentRunOrchestrator},
  * which re-authorizes the principal (`ai:use`), refuses while AI is off (409 `AI_DISABLED`) and freezes the
- * conversation. Reading and deleting stay available while AI is off: conversations are kept dormant
- * (frontend.md §11 item 4) until retention removes them.
+ * conversation. Reading stays available while AI is off: conversations are kept dormant (frontend.md §11
+ * item 4) until retention removes them.
  */
 @Injectable()
 export class AiConversationsService {
@@ -156,29 +151,6 @@ export class AiConversationsService {
         classOf: (name) => this.registry.get(name)?.descriptor.class,
       }),
     };
-  }
-
-  /**
-   * Hard-delete the owner's conversation (ADR-0097 §"Conversations are owner-only and hard-deleted";
-   * frontend.md §11 item 6): its messages and invocations cascade, its runs keep their row with the
-   * conversation set to null, and the permanent `ai_action_log` ledger is untouched. Refused with 409
-   * `RUN_IN_PROGRESS` while a run is active — its approvals and resume live in the conversation.
-   */
-  async remove(identity: HumanIdentity, conversationId: string): Promise<void> {
-    const deleted = await this.prisma.aiConversation.deleteMany({
-      where: {
-        id: conversationId,
-        userId: identity.userId,
-        channel: 'CHAT',
-        runs: { none: { status: { in: [...AI_RUN_ACTIVE_STATUSES] } } },
-      },
-    });
-    if (deleted.count > 0) return;
-    await this.owned(identity, conversationId);
-    throw new ConflictException({
-      code: 'RUN_IN_PROGRESS',
-      message: 'A run is active in this conversation; stop it first',
-    });
   }
 
   // ─── Internals ─────────────────────────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ import { TOOLS } from '../runtime/runtime.harness-spec';
 /**
  * `/ai/conversations` over HTTP (W3-1; synthesis §4.7; frontend.md K3–K4): the real controller, guard chain
  * and validation pipe over the real runtime. Owner-only isolation, the provider-neutral projection (the
- * runtime's records never reach the wire), delete semantics, and the AI-off behaviour.
+ * runtime's records never reach the wire), and the AI-off behaviour.
  */
 
 let h: HttpHarness;
@@ -286,15 +286,11 @@ describe('list', () => {
 });
 
 describe('owner-only isolation (ADR-0097 default 3)', () => {
-  it("answers 404 to another user — even an admin — on A's conversation, read, send and delete", async () => {
+  it("answers 404 to another user — even an admin — on A's conversation, read and send", async () => {
     const id = await newConversation('A');
     for (const who of ['B', 'ADMIN']) {
       await http()
         .get(`/ai/conversations/${id}`)
-        .set('X-Test-Principal', who)
-        .expect(404);
-      await http()
-        .delete(`/ai/conversations/${id}`)
         .set('X-Test-Principal', who)
         .expect(404);
     }
@@ -337,37 +333,8 @@ describe('owner-only isolation (ADR-0097 default 3)', () => {
   });
 });
 
-describe('delete', () => {
-  it('refuses while a run is active (409 RUN_IN_PROGRESS), then hard-deletes the transcript and keeps the run row', async () => {
-    const id = await newConversation();
-    h.rt.model.push({ text: 'ok' });
-    const { body } = await say(id, 'Hi');
-
-    const busy = await http()
-      .delete(`/ai/conversations/${id}`)
-      .set('X-Test-Principal', 'A');
-    expect(busy.status).toBe(409);
-    expect(busy.body).toMatchObject({ code: 'RUN_IN_PROGRESS' });
-
-    await h.rt.drain();
-    await http()
-      .delete(`/ai/conversations/${id}`)
-      .set('X-Test-Principal', 'A')
-      .expect(204);
-    expect(h.rt.messages(id)).toHaveLength(0);
-    expect(h.rt.run(body.runId)).toMatchObject({
-      conversationId: null,
-      status: 'SUCCEEDED',
-    });
-    await http()
-      .get(`/ai/conversations/${id}`)
-      .set('X-Test-Principal', 'A')
-      .expect(404);
-  });
-});
-
 describe('AI switched off', () => {
-  it('refuses to create or send (409 AI_DISABLED) but keeps conversations readable and deletable', async () => {
+  it('refuses to create or send (409 AI_DISABLED) but keeps conversations readable', async () => {
     const id = await newConversation();
     h.rt.settings.config = null;
 
@@ -388,10 +355,6 @@ describe('AI switched off', () => {
       .get('/ai/conversations')
       .set('X-Test-Principal', 'A')
       .expect(200);
-    await http()
-      .delete(`/ai/conversations/${id}`)
-      .set('X-Test-Principal', 'A')
-      .expect(204);
   });
 
   it('validates the message body (400) before anything runs', async () => {

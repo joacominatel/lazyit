@@ -7,7 +7,8 @@ import { AiConversationsService } from './ai-conversations.service';
 
 /**
  * `/ai/conversations` — the in-app chat's conversations (ADR-0097; synthesis §4.7; W3-1): create, list,
- * read (the provider-neutral projection), delete, and send a message (→ a run of the runtime).
+ * read (the provider-neutral projection), and send a message (→ a run of the runtime). The owner delete
+ * belongs to the retention unit's purge service (W3-6) and is wired once it lands.
  *
  * Imports the runtime for its orchestrator, the tool core for the registry (the class of a projected
  * call) and the settings reader. PrismaService and the auth guards are global.
