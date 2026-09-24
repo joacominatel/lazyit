@@ -25,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config-save";
+import { McpInstallPanel } from "@/app/(app)/account/ai/_components/mcp-install-panel";
 import { useAiStatus } from "@/lib/api/hooks/use-ai-status";
 import {
   buildUpdate,
@@ -54,7 +55,7 @@ function useLocationPart(part: "origin" | "protocol"): string | null {
  * not trust, and cloud connectors (claude.ai, ChatGPT) that need a publicly reachable HTTPS instance.
  * The endpoint is `/ai/status` `mcp.endpoint` (the API's pinned `WEB_ORIGIN` + `/mcp`); only when the
  * server has none is the page's own origin shown, with a note. The install panel itself lives on the
- * per-user page `/account/ai`.
+ * per-user page `/account/ai` (W3-9); the card embeds the same `McpInstallPanel` while `mcp.available`.
  */
 export function AiMcpSection({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.mcp");
@@ -173,6 +174,11 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
           </Link>
           <span className="text-muted-foreground">{t("install.description")}</span>
         </div>
+
+        {/* The shared install panel (W3-9), for the admin too — only while MCP is usable by this caller. */}
+        {status.data?.mcp?.available ? (
+          <McpInstallPanel auth={status.data.mcp.auth} />
+        ) : null}
 
         <Separator />
 

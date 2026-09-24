@@ -272,8 +272,8 @@
       "pageFallback": "The API has no pinned public address (WEB_ORIGIN), so this is the address of the page you are on. Clients on other machines may need the instance's LAN address instead."
     },
     "install": {
-      "link": "Install in Claude Code",
-      "description": "The plugin, the setup commands and each person's connected apps are on Account → AI & connected apps."
+      "link": "AI & connected apps",
+      "description": "Your connected apps and personal tokens are on Account → AI & connected apps; the install steps are below."
     },
     "allowlist": {
       "title": "Allowed clients",

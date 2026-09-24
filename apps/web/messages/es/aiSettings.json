@@ -272,8 +272,8 @@
       "pageFallback": "La API no tiene una dirección pública fijada (WEB_ORIGIN), así que esta es la dirección de la página en la que estás. Los clientes en otras máquinas pueden necesitar la dirección de la instancia en la red local."
     },
     "install": {
-      "link": "Instalar en Claude Code",
-      "description": "El plugin, los comandos de instalación y las aplicaciones conectadas de cada persona están en Cuenta → IA y aplicaciones conectadas."
+      "link": "IA y aplicaciones conectadas",
+      "description": "Tus aplicaciones conectadas y tokens personales están en Cuenta → IA y aplicaciones conectadas; los pasos de instalación están abajo."
     },
     "allowlist": {
       "title": "Clientes permitidos",
