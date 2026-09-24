@@ -299,7 +299,7 @@ export class AgentLoop {
       }
 
       const stepIndex = run.stepCount;
-      await this.persistStep(run, scope, result, stepIndex);
+      await this.persistStep(run, scope, result, stepIndex, untrusted);
       if (result.responseMessages.length > 0) {
         this.lifecycle.emit(runId, { type: 'message.completed', messageId });
       }
@@ -415,7 +415,8 @@ export class AgentLoop {
               toolName: call.toolName,
             })),
             outcomes,
-            untrustedSources: stepUntrusted,
+            // The whole turn's set, not just this step's: a resume rebuilds it from the records (T-03).
+            untrustedSources: untrusted,
           },
           resolutions,
         );
@@ -624,6 +625,7 @@ export class AgentLoop {
     scope: RunScope,
     result: ChatModelStepResult,
     stepIndex: number,
+    untrusted: AiEntityRef[],
   ): Promise<void> {
     const usage = result.usage;
     await this.prisma.$transaction(async (tx) => {
@@ -639,7 +641,7 @@ export class AgentLoop {
             toolName: call.toolName,
           })),
           outcomes: [],
-          untrustedSources: [],
+          untrustedSources: untrusted,
         };
         rows.push({
           role: AI_RUNTIME_RECORD_ROLE,

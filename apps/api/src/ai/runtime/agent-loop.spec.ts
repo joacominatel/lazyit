@@ -440,6 +440,41 @@ describe('chat writes: propose → approve → resume', () => {
     });
   });
 
+  it("keeps the turn's untrusted sources across an approval and resume (T-03)", async () => {
+    rt.model.push(
+      {
+        toolCalls: [
+          { toolCallId: 'c1', toolName: UNTRUSTED_READ, input: { id: 'art1' } },
+        ],
+      },
+      {
+        toolCalls: [{ toolCallId: 'w1', toolName: WRITE, input: { id: 'a1' } }],
+      },
+      {
+        toolCalls: [{ toolCallId: 'w2', toolName: WRITE, input: { id: 'a2' } }],
+      },
+    );
+    const { runId } = await chat();
+    await rt.drain();
+    await rt.approvals.decide({
+      runId,
+      toolCallId: 'w1',
+      decision: 'approve',
+      identity: HUMAN,
+    });
+    await rt.drain(); // resumed in a fresh loop pass: memory is gone, the records remain
+    const cards = rt
+      .events(runId)
+      .filter((e) => e.type === 'tool.approval_required');
+    expect(cards).toHaveLength(2);
+    expect(cards[1]).toMatchObject({
+      toolCallId: 'w2',
+      untrustedSources: [
+        expect.objectContaining({ type: 'article', id: 'art1' }),
+      ],
+    });
+  });
+
   it('refuses a new message while a run is awaiting approval', async () => {
     rt.model.push({
       toolCalls: [{ toolCallId: 'w', toolName: WRITE, input: { id: 'a1' } }],
