@@ -9,6 +9,7 @@ import {
   type AiEntityRef,
   type AiPreviewWarningCode,
 } from '@lazyit/shared';
+import { ApplicationsController } from '../../applications/applications.controller';
 import { UsersController } from '../../users/users.controller';
 import { USER_SORT_ALLOWLIST } from '../../users/users.service';
 import {
@@ -20,6 +21,7 @@ import {
   type AiReferenceCandidate,
   type AiResolvedReference,
 } from '../core/reference-resolver';
+import { assertChannelAllows } from '../core/pending-action';
 import { untrusted } from '../core/result-shaper';
 import {
   bind,
@@ -788,6 +790,71 @@ const userUpdate = defineTool({
   },
 });
 
+/**
+ * Whether offboarding `userId` touches a CRITICAL application (CEO decision 2026-09-24, #1349): the
+ * route revokes every active grant the person holds, so if ANY is on an application with
+ * `isCritical = true`, the offboarding is a write on a critical application — step-up in the chat,
+ * refused on MCP and headless. The grant list carries no `isCritical`, so each distinct application is
+ * read through the guarded `GET /applications/:id` as the caller. FAIL CLOSED: grants the caller cannot
+ * list (no `accessGrant:read`), and applications it cannot read (403) or that no longer resolve (404, an
+ * archived application), count as possibly critical.
+ */
+async function criticalExposure(
+  rt: AiToolRuntime,
+  userId: string,
+  grants?: Row[] | null,
+): Promise<{
+  critical: { id: string; name: string }[];
+  unknownApplications: number;
+  grantsUnreadable: boolean;
+}> {
+  const list =
+    grants !== undefined
+      ? grants
+      : await optionalFacet(async () =>
+          asRows(
+            await rt.call(UsersController, 'findAccessGrants', {
+              params: { id: userId },
+              query: { activeOnly: 'true' },
+            }),
+          ),
+        );
+  if (list === null) {
+    return { critical: [], unknownApplications: 0, grantsUnreadable: true };
+  }
+  const appIds = [...new Set(list.map((g) => String(g.applicationId)))];
+  const critical: { id: string; name: string }[] = [];
+  let unknownApplications = 0;
+  for (const id of appIds) {
+    try {
+      const app = asRow(
+        await rt.call(ApplicationsController, 'findOne', { params: { id } }),
+      );
+      if (app.isCritical === true) {
+        critical.push({ id, name: str(app.name) ?? id });
+      }
+    } catch (err) {
+      const status = err instanceof HttpException ? err.getStatus() : 0;
+      if (status === 403 || status === 404) {
+        unknownApplications += 1;
+      } else {
+        throw err;
+      }
+    }
+  }
+  return { critical, unknownApplications, grantsUnreadable: false };
+}
+
+function touchesCritical(
+  exposure: Awaited<ReturnType<typeof criticalExposure>>,
+): boolean {
+  return (
+    exposure.grantsUnreadable ||
+    exposure.critical.length > 0 ||
+    exposure.unknownApplications > 0
+  );
+}
+
 const userOffboard = defineTool({
   name: 'user_offboard',
   title: 'Offboard a user',
@@ -808,6 +875,7 @@ const userOffboard = defineTool({
     bind(UsersController, 'findAll'),
     bind(UsersController, 'findAssignments'),
     bind(UsersController, 'findAccessGrants'),
+    bind(ApplicationsController, 'findOne'),
   ],
   async preview(input, rt) {
     const current = await readUser(rt, input.user);
@@ -857,6 +925,31 @@ const userOffboard = defineTool({
       });
     }
     if (current.externalId) warnings.push('EXTERNAL_DEPROVISIONING');
+    const exposure = await criticalExposure(rt, String(current.id), grants);
+    const criticalChanges: {
+      field: string;
+      before?: unknown;
+      after: unknown;
+    }[] = [];
+    if (touchesCritical(exposure)) {
+      // Core requires the password for it in the chat; MCP and headless refuse it in `run`.
+      warnings.push('CRITICAL_APPLICATION');
+      if (exposure.critical.length > 0) {
+        criticalChanges.push({
+          field: 'criticalApplicationAccess',
+          before: exposure.critical.map((a) => a.name).join(', '),
+          after: 'revoked',
+        });
+      }
+      if (exposure.grantsUnreadable || exposure.unknownApplications > 0) {
+        criticalChanges.push({
+          field: 'criticalApplicationAccess',
+          after: exposure.grantsUnreadable
+            ? 'unknown: you cannot list this person’s grants, so they are treated as critical'
+            : `unknown for ${exposure.unknownApplications} application(s) you cannot read — treated as critical`,
+        });
+      }
+    }
     // The route also hard-drops the user's Secret Manager vault memberships (wrapped key rows), and
     // user_restore does not bring them back. The preview cannot count them: the Secret Manager is a
     // structural exclusion (ADR-0061), so no tool may read it. It always warns, and the card says "any".
@@ -873,6 +966,7 @@ const userOffboard = defineTool({
             before: 'any held',
             after: 'dropped (not restored by user_restore)',
           },
+          ...criticalChanges,
         ],
         warnings,
         impacted,
@@ -883,6 +977,16 @@ const userOffboard = defineTool({
   },
   async run(input, rt) {
     const resolved = await resolveUser(rt, input.user);
+    // MCP and headless have no card and no password: an offboarding that revokes access to a critical
+    // (or unverifiable) application is refused there, before any side effect. The chat needs no check
+    // here — its approval already required the step-up the preview's CRITICAL_APPLICATION demands.
+    if (rt.ctx.channel !== 'CHAT') {
+      const exposure = await criticalExposure(rt, resolved.id);
+      assertChannelAllows(
+        rt.ctx.channel,
+        touchesCritical(exposure) ? ['CRITICAL_APPLICATION'] : [],
+      );
+    }
     const result = asRow(
       await rt.call(UsersController, 'offboard', {
         params: { id: resolved.id },
