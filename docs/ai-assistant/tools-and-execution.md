@@ -1327,6 +1327,21 @@ Storage and display:
 token, never a tool. The request carries only the pending-action id, plus the password step-up when
 `stepUpRequired` (INV-AI-3).
 
+> **Auto-approve (#1376; ADR-0097 decision 4 as amended 2026-09-24).** When the conversation's owner has
+> switched auto-approve on (`ai_conversations.autoApprove`), the runtime calls `approve(id, ctx,
+> { auto: true })` right after `propose`, with the run's delegated human identity — the same steps below,
+> no other path. Core adds three checks before the claim: the conversation (owned by the approver, `CHAT`)
+> has `autoApprove = true` **now** (else 409 `AUTO_APPROVE_OFF`, also when combined with
+> `stepUpVerified`) — checked first, and again inside the claim's transaction under the conversation row's
+> lock (a no-op `updateMany … where autoApprove = true`); the action is a `write`-class tool whose stored
+> **and** fresh previews are not elevated, need no step-up and carry no `untrustedSources` (else 409
+> `AUTO_APPROVE_NOT_ELIGIBLE`); and the new-warnings rule of step 0 applies unchanged (`PREVIEW_CHANGED` /
+> `STEP_UP_REQUIRED`). Every refusal leaves the action
+> `AWAITING_APPROVAL`, and the runtime shows the card (reloaded, since core may have added warnings). The
+> claim records `approvalMode = 'AUTO'` on the invocation; `APPROVED`, `EXECUTED` and `FAILED` carry
+> `approvalMode` (`USER` for a click), `approverUserId` (the owner who enabled the mode) and
+> `autoApproveEnabledAt`. A `STALE` target or a revoked permission fails exactly as for a click.
+
 0. As built, before the claim: the context must be a human identity on the `CHAT` channel with no MCP
    grant (else 403 `FORBIDDEN`); the row must be a chat invocation owned by that user and, when
    `ctx.runId` is given, in that run (else **404** — never a hint that another user's action exists).

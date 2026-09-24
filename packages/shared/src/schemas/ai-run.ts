@@ -8,6 +8,11 @@ import {
   AiToolClassSchema,
   AiToolNameSchema,
 } from "./ai-tools";
+import {
+  AiEffortSchema,
+  AiProviderKindSchema,
+  AiProviderOptionsSchema,
+} from "./ai-provider";
 import { int4 } from "./primitives";
 
 /**
@@ -202,6 +207,123 @@ export type AiRunAccepted = z.infer<typeof AiRunAcceptedSchema>;
 export const AiConversationCreatedSchema = z.object({ id: z.cuid() });
 export type AiConversationCreated = z.infer<typeof AiConversationCreatedSchema>;
 
+/* ──────────────────────────────────────────────────────────────────────────────────────────────
+ * Per-conversation settings (#1373 model and reasoning, #1376 auto-approve; ADR-0097 decision 4 and
+ * decision 5 / default 7 as amended 2026-09-24)
+ * ────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A model id a USER may choose for a conversation: any model of the configured provider, listed or typed
+ * (a custom deployment id). The charset is narrower than the admin's (`UpdateAiSettingsSchema.model`)
+ * because a model id can end up in a provider URL path: letters, digits and `. _ - : / @`, no `..`
+ * segment, no whitespace, `?`, `#` or `%`. Whether the provider serves it is the provider's answer on the
+ * first step (`PROVIDER_BAD_REQUEST`).
+ */
+export const AiConversationModelIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/, "Not a valid model id")
+  .refine((value) => !value.split("/").includes(".."), "Not a valid model id");
+
+/** How a chat write was approved: by the user on its card, or automatically in auto-approve mode. */
+export const AI_APPROVAL_MODES = ["USER", "AUTO"] as const;
+export const AiApprovalModeSchema = z.enum(AI_APPROVAL_MODES);
+export type AiApprovalMode = z.infer<typeof AiApprovalModeSchema>;
+
+/**
+ * The model settings a conversation may carry. Each field is optional on write; `null` for `effort` or
+ * `providerOptions` means "the instance default" (the admin's setting at call time). The per-provider
+ * rules (`AiProviderDescriptor.supportsEffort`, `AI_PROVIDER_OPTIONS_SCHEMAS`) are checked by the API
+ * against the configured provider: 400 `EFFORT_UNSUPPORTED` / `PROVIDER_OPTIONS_UNSUPPORTED`.
+ */
+const conversationSettingsFields = {
+  /** A model of the configured provider; omitted on create = the instance default model. */
+  model: AiConversationModelIdSchema,
+  effort: AiEffortSchema.nullable(),
+  providerOptions: AiProviderOptionsSchema.nullable(),
+  /**
+   * Auto-approve mode (#1376): ordinary chat writes (`write` class, preview not elevated) whose fresh
+   * preview needs no password step-up and names no untrusted source run without a card. Elevated
+   * actions, step-up writes (`AI_STEP_UP_WARNINGS`) and writes in a turn that read other-authored
+   * content always stop for the user. Off by default.
+   */
+  autoApprove: z.boolean(),
+};
+
+/**
+ * `POST /ai/conversations` — an optional body (an empty or absent body is the instance defaults with
+ * auto-approve off).
+ */
+export const CreateAiConversationSchema = z.strictObject({
+  model: conversationSettingsFields.model.optional(),
+  effort: conversationSettingsFields.effort.optional(),
+  providerOptions: conversationSettingsFields.providerOptions.optional(),
+  autoApprove: conversationSettingsFields.autoApprove.optional(),
+});
+export type CreateAiConversation = z.infer<typeof CreateAiConversationSchema>;
+
+/**
+ * `PATCH /ai/conversations/:id` — owner only. `model`, `effort` and `providerOptions` are changeable only
+ * until the conversation's first run starts (409 `CONVERSATION_SETTINGS_LOCKED` afterwards: start a new
+ * conversation). `autoApprove` can be toggled at any time; each change is audited.
+ */
+export const UpdateAiConversationSchema = z
+  .strictObject({
+    model: conversationSettingsFields.model.optional(),
+    effort: conversationSettingsFields.effort.optional(),
+    providerOptions: conversationSettingsFields.providerOptions.optional(),
+    autoApprove: conversationSettingsFields.autoApprove.optional(),
+  })
+  .refine((value) => Object.values(value).some((field) => field !== undefined), {
+    message: "Nothing to update",
+  });
+export type UpdateAiConversation = z.infer<typeof UpdateAiConversationSchema>;
+
+/** The settings of a conversation, as `GET /ai/conversations/:id` and `PATCH` answer them. */
+export const AiConversationSettingsSchema = z.object({
+  /** The provider the conversation is pinned to. */
+  provider: z.string(),
+  /** The model the conversation runs on. */
+  model: z.string(),
+  /** Whether the user chose the model (true) or it is the instance default at creation (false). */
+  modelChosen: z.boolean(),
+  /** null = the instance default. */
+  effort: AiEffortSchema.nullable(),
+  /** null = the instance default. */
+  providerOptions: AiProviderOptionsSchema.nullable(),
+  /** True once the first run started: model, effort and options are pinned from then on. */
+  modelLocked: z.boolean(),
+  autoApprove: z.boolean(),
+  /** When auto-approve was last switched on; null while it is off. */
+  autoApproveEnabledAt: z.iso.datetime().nullable(),
+});
+export type AiConversationSettings = z.infer<typeof AiConversationSettingsSchema>;
+
+/**
+ * `GET /ai/models` (`ai:use`) — what the chat's model picker offers: the configured provider's models
+ * (listed from the provider API, cached) plus the admin's default. Free text stays allowed for a custom
+ * model id. `listed: false` with `listingError` when the provider could not be listed (the picker still
+ * offers the default and free text).
+ */
+export const AiModelCatalogSchema = z.object({
+  provider: AiProviderKindSchema,
+  /** The admin's configured model — the default of a new conversation. */
+  defaultModel: z.string(),
+  /** The admin's configured effort (null = the provider's default). */
+  defaultEffort: AiEffortSchema.nullable(),
+  /** Whether a per-conversation effort is accepted for this provider. */
+  supportsEffort: z.boolean(),
+  /** The provider option keys a conversation may set (e.g. `temperature` for OpenAI-compatible). */
+  providerOptionKeys: z.array(z.string()),
+  models: z.array(z.object({ id: z.string().min(1), label: z.string().nullable() })),
+  listed: z.boolean(),
+  /** A run error code (`PROVIDER_AUTH`, `PROVIDER_UNAVAILABLE`, …) when the listing failed. */
+  listingError: z.string().nullable(),
+});
+export type AiModelCatalog = z.infer<typeof AiModelCatalogSchema>;
+
 /** What the user decided on a pending write. */
 export const AI_APPROVAL_DECISIONS = ["approve", "reject"] as const;
 export const AiApprovalDecisionValueSchema = z.enum(AI_APPROVAL_DECISIONS);
@@ -277,6 +399,8 @@ export const AiMessagePartSchema = z.discriminatedUnion("type", [
     request: AiApprovalRequestSchema,
     /** null while the user has not decided. */
     outcome: AiApprovalOutcomeSchema.nullable(),
+    /** True when the write was approved automatically (auto-approve mode, #1376). */
+    auto: z.boolean().optional(),
   }),
   z.object({ type: z.literal("notice"), error: AiRunErrorSchema }),
 ]);
@@ -317,6 +441,8 @@ export type AiConversationSummary = z.infer<typeof AiConversationSummarySchema>;
 export const AiConversationDetailSchema = AiConversationSummarySchema.extend({
   activeRunId: z.cuid().nullable(),
   messages: z.array(AiPersistedMessageSchema),
+  /** The conversation's model and approval settings (#1373, #1376). Optional for an older API. */
+  settings: AiConversationSettingsSchema.optional(),
 });
 export type AiConversationDetail = z.infer<typeof AiConversationDetailSchema>;
 
@@ -393,6 +519,12 @@ export const AiRunEventSchema = z.discriminatedUnion("type", [
     type: z.literal("tool.approval_resolved"),
     toolCallId: z.string().min(1),
     decision: AiApprovalOutcomeSchema,
+    /**
+     * True when the write was approved automatically (auto-approve mode, #1376): no card was waited on.
+     * The web shows it as "applied automatically". Its `preview` is the server-built one that was checked.
+     */
+    auto: z.boolean().optional(),
+    preview: AiActionPreviewSchema.optional(),
   }),
   AiToolResultSummarySchema.extend({ v, type: z.literal("tool.result") }),
   z.object({

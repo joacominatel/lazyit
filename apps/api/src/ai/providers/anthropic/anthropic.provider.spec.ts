@@ -157,6 +157,27 @@ function anthropicError(status: number, type: string, message: string) {
 }
 
 describe('Anthropic provider through ChatModelPort', () => {
+  it('sends a conversation’s own model and effort (#1373) in place of the instance ones, for that call only', async () => {
+    const { fetch, requests } = scriptedFetch([
+      () => textStream(['ok']),
+      () => textStream(['ok']),
+    ]);
+    const port = chatModelFor(config, fetch);
+    await port.step(
+      stepRequest(config, {
+        model: { provider: 'anthropic', modelId: 'claude-haiku-5' },
+        effort: 'low',
+      }),
+    );
+    await port.step(stepRequest(config));
+    const [chosen, instance] = requests.map((r) => r.body!);
+    expect(chosen.model).toBe('claude-haiku-5');
+    expect(JSON.stringify(chosen)).toContain('"effort":"low"');
+    expect(JSON.stringify(chosen)).not.toContain('"effort":"high"');
+    expect(instance.model).toBe('claude-opus-5');
+    expect(JSON.stringify(instance)).toContain('"effort":"high"');
+  });
+
   it('runs a text step: streamed deltas, usage with cache reads, the key header and the request knobs', async () => {
     const { fetch, requests } = scriptedFetch([
       () => textStream(['The MacBook ', 'is assigned.']),

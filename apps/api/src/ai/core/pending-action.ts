@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 import { ForbiddenException } from '@nestjs/common';
 import {
   AiActionPreviewSchema,
+  AiApprovalModeSchema,
   AiToolInvocationStatusSchema,
   AiToolResultSchema,
   type AiActionPreview,
+  type AiApprovalMode,
   type AiChannel,
   type AiEntityRef,
   type AiPreviewWarningCode,
@@ -36,6 +38,8 @@ export interface AiPendingAction {
   decidedAt: Date | null;
   /** The tool result once the action ran, was refused at execute, or was decided. */
   result: AiToolResult | null;
+  /** How it was approved (`USER` on its card, `AUTO` in auto-approve mode); null until approved. */
+  approvalMode: AiApprovalMode | null;
   /** True when `approve` found the action already finished and returned the stored outcome. */
   replayed?: boolean;
 }
@@ -53,6 +57,15 @@ export interface AiApproveOptions {
    * when this is not set, and records the flag in the ledger.
    */
   stepUpVerified?: boolean;
+  /**
+   * Auto-approve mode (#1376; ADR-0097 decision 4 as amended 2026-09-24): the RUNTIME approves on the
+   * owner's behalf, right after propose, because the owner switched auto-approve on for the conversation.
+   * Core re-checks that the conversation's `autoApprove` is on NOW, and refuses — leaving the action
+   * pending for the user's card — unless the action is an ordinary `write` whose stored and FRESH
+   * previews are neither elevated nor need a step-up. It is never combined with `stepUpVerified`: a
+   * step-up or elevated action is never approved automatically.
+   */
+  auto?: boolean;
 }
 
 /**
@@ -203,5 +216,14 @@ export function toPendingAction(row: AiToolInvocation): AiPendingAction {
     expiresAt: row.expiresAt,
     decidedAt: row.decidedAt,
     result: row.result == null ? null : result.success ? result.data : null,
+    approvalMode: approvalModeOf(row.approvalMode),
   };
+}
+
+/** Read-tolerant: an approval mode this build does not know reads as null. */
+export function approvalModeOf(
+  value: string | null | undefined,
+): AiApprovalMode | null {
+  const parsed = AiApprovalModeSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }

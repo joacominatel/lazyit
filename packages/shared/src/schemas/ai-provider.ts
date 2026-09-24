@@ -44,6 +44,12 @@ export const AiProviderDescriptorSchema = z.object({
   suggestedModel: z.string().nullable(),
   /** Whether `POST /config/ai/models` can list models for this provider. */
   supportsModelListing: z.boolean(),
+  /**
+   * Whether the provider definition sends a reasoning effort (`AiEffort`). The OpenAI-compatible
+   * provider does not (servers differ on `reasoning_effort`), so a per-conversation effort is refused
+   * for it on write (#1373).
+   */
+  supportsEffort: z.boolean(),
 });
 export type AiProviderDescriptor = z.infer<typeof AiProviderDescriptorSchema>;
 
@@ -62,6 +68,7 @@ export const AI_PROVIDER_DESCRIPTORS: Readonly<
     defaultBaseUrl: null,
     suggestedModel: "claude-opus-5",
     supportsModelListing: true,
+    supportsEffort: true,
   },
   openai: {
     kind: "openai",
@@ -71,6 +78,7 @@ export const AI_PROVIDER_DESCRIPTORS: Readonly<
     defaultBaseUrl: null,
     suggestedModel: "gpt-6-sol",
     supportsModelListing: true,
+    supportsEffort: true,
   },
   google: {
     kind: "google",
@@ -80,6 +88,7 @@ export const AI_PROVIDER_DESCRIPTORS: Readonly<
     defaultBaseUrl: null,
     suggestedModel: "gemini-3.8-flash",
     supportsModelListing: true,
+    supportsEffort: true,
   },
   "openai-compatible": {
     kind: "openai-compatible",
@@ -89,6 +98,7 @@ export const AI_PROVIDER_DESCRIPTORS: Readonly<
     defaultBaseUrl: null,
     suggestedModel: null,
     supportsModelListing: true,
+    supportsEffort: false,
   },
 };
 

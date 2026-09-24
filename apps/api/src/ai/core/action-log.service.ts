@@ -29,6 +29,13 @@ export interface AiActionLogEntry {
   /** Chat approval provenance: the approving human and whether a password step-up was verified. */
   approverUserId?: string | null;
   stepUp?: boolean;
+  /**
+   * How the write was approved (`USER` | `AUTO`), on the approve path's events. `AUTO` (#1376): the
+   * owner's auto-approve mode approved it; `approverUserId` is that owner and `autoApproveEnabledAt`
+   * when they switched the mode on.
+   */
+  approvalMode?: 'USER' | 'AUTO' | null;
+  autoApproveEnabledAt?: Date | null;
   untrustedSources?: readonly AiEntityRef[];
   provider?: string | null;
   model?: string | null;
@@ -95,6 +102,8 @@ export class AiActionLogService {
       oauthGrantId: entry.oauthGrantId ?? null,
       approverUserId: entry.approverUserId ?? null,
       stepUp: entry.stepUp ?? false,
+      approvalMode: entry.approvalMode ?? null,
+      autoApproveEnabledAt: entry.autoApproveEnabledAt ?? null,
       provider: entry.provider ?? null,
       model: entry.model ?? null,
       requestId: entry.requestId ?? null,

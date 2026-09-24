@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
 import type {
   AiConversationChannel,
   AiProviderKind,
@@ -12,7 +12,11 @@ import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AI_PROMPT_VERSION } from '../ai.constants';
 import { AiToolService } from '../core/ai-tool.service';
-import { mergeRefs, type AiPendingAction } from '../core/pending-action';
+import {
+  mergeRefs,
+  toPendingAction,
+  type AiPendingAction,
+} from '../core/pending-action';
 import {
   AI_SETTINGS_READER,
   type AiSettingsReader,
@@ -32,6 +36,10 @@ import type {
 } from '../core/tool-descriptor';
 import { AiToolRegistry } from '../core/tool-registry';
 import { AiProviderError } from '../providers/ai-provider.error';
+import {
+  conversationCallOverrides,
+  pinnedConfigChanged,
+} from './conversation-settings';
 import {
   AiRunLimits,
   capToolOutput,
@@ -329,6 +337,7 @@ export class AgentLoop {
             provider: conversation.provider as AiProviderKind,
             modelId: conversation.model,
           },
+          ...conversationCallOverrides(conversation),
           instructions,
           messages: history,
           tools: toolset.definitions,
@@ -622,10 +631,7 @@ export class AgentLoop {
       await this.fail(run.id, who.refusal);
       return { ok: false };
     }
-    if (
-      config.provider !== conversation.provider ||
-      config.model !== conversation.model
-    ) {
+    if (pinnedConfigChanged(config, conversation)) {
       await this.lifecycle.closeConversation(conversation.id, 'CONFIG_CHANGED');
       await this.fail(run.id, READ_ONLY);
       return { ok: false };
@@ -830,11 +836,19 @@ export class AgentLoop {
         this.emitResult(runId, call.toolCallId, proposal.result);
         return answer(proposal.result);
       }
+      let pending = proposal.action;
+      if (await this.autoApproveOn(state.ctx)) {
+        const auto = await this.autoApprove(call, tool, pending, state.ctx);
+        if (auto.kind === 'executed') {
+          return answer(auto.result, untrustedRefsOf(auto.result));
+        }
+        pending = auto.action;
+      }
       this.emitCall(runId, call, tool, 'AWAITING_APPROVAL');
       return {
         kind: 'pending',
         toolCallId: call.toolCallId,
-        action: proposal.action,
+        action: pending,
       };
     }
 
@@ -852,6 +866,92 @@ export class AgentLoop {
     const result = await this.tools.invoke(name, call.input, state.ctx);
     this.emitResult(runId, call.toolCallId, result);
     return answer(result, untrustedRefsOf(result));
+  }
+
+  /**
+   * Whether this write may be auto-approved NOW (#1376) — read fresh per write, so a toggle mid-run
+   * applies to the next proposal. Chat and a human only, and only while the run is not being cancelled
+   * and the assistant is on: the same kill switches a manual decision honours (`AI_DISABLED`, a run no
+   * longer running). Core re-checks the mode in the claim's transaction.
+   */
+  private async autoApproveOn(ctx: AiExecutionContext): Promise<boolean> {
+    if (
+      ctx.channel !== 'CHAT' ||
+      ctx.identity.kind !== 'human' ||
+      !ctx.conversationId ||
+      !ctx.runId
+    ) {
+      return false;
+    }
+    const conversation = await this.prisma.aiConversation.findUnique({
+      where: { id: ctx.conversationId },
+      select: { autoApprove: true, userId: true },
+    });
+    if (
+      conversation?.autoApprove !== true ||
+      conversation.userId !== ctx.identity.userId
+    ) {
+      return false;
+    }
+    const run = await this.prisma.aiRun.findUnique({
+      where: { id: ctx.runId },
+      select: { status: true, cancelRequestedAt: true },
+    });
+    if (!run || run.status !== 'RUNNING' || run.cancelRequestedAt) {
+      return false;
+    }
+    return (await this.settings.resolveProviderConfig()) !== null;
+  }
+
+  /**
+   * Auto-approve a just-proposed chat write (#1376; ADR-0097 decision 4 as amended 2026-09-24) through
+   * core's own `approve` — the same claim, re-authorization, precondition (`STALE`) and ledger as a
+   * click, with approval provenance `AUTO`. Core refuses an elevated action, anything whose stored or
+   * fresh preview needs a step-up, or that changed since propose: the action then stays pending and the
+   * user gets its card,
+   * reloaded because core may have added warnings to it. A fault that is not a refusal propagates (the
+   * run fails and an executing write becomes OUTCOME_UNKNOWN, as for any other write).
+   */
+  private async autoApprove(
+    call: ChatModelToolCall,
+    tool: RegisteredAiTool,
+    proposed: AiPendingAction,
+    ctx: AiExecutionContext,
+  ): Promise<
+    | { kind: 'executed'; result: AiToolResult }
+    | { kind: 'pending'; action: AiPendingAction }
+  > {
+    const runId = ctx.runId!;
+    let action: AiPendingAction;
+    try {
+      action = await this.tools.approve(proposed.id, ctx, { auto: true });
+    } catch (err) {
+      if (!(err instanceof HttpException)) throw err;
+      const row = await this.prisma.aiToolInvocation.findUnique({
+        where: { id: proposed.id },
+      });
+      const now = row ? toPendingAction(row) : proposed;
+      if (now.status === 'AWAITING_APPROVAL' || !now.result) {
+        return { kind: 'pending', action: now };
+      }
+      // Closed without an approval (e.g. expired in between): answer what it holds.
+      this.emitCall(runId, call, tool, 'FAILED');
+      this.emitResult(runId, call.toolCallId, now.result);
+      return { kind: 'executed', result: now.result };
+    }
+    if (action.status === 'AWAITING_APPROVAL' || !action.result) {
+      return { kind: 'pending', action };
+    }
+    this.emitCall(runId, call, tool, 'EXECUTING');
+    this.lifecycle.emit(runId, {
+      type: 'tool.approval_resolved',
+      toolCallId: call.toolCallId,
+      decision: 'approved',
+      auto: true,
+      ...(action.preview ? { preview: action.preview } : {}),
+    });
+    this.emitResult(runId, call.toolCallId, action.result);
+    return { kind: 'executed', result: action.result };
   }
 
   /** Headless writes this run attempted (the per-run mutation cap; refusals do not count). */

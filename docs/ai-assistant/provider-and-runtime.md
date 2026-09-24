@@ -908,8 +908,9 @@ the configured provider and model, `AI_PROMPT_VERSION`, the toolset `AiToolServi
 **now** (with the headless ceiling) — `toolNames` plus `toolsetHash`, a SHA-256 over each tool's name,
 description, class and input schema — and builds the system prompt **once** from that listing's classes.
 The prompt text is stored as the conversation's first `ai_messages` row (see *Stored rows*). Before each
-submission and each step the pin is re-checked: a different provider or model closes the conversation
-`CONFIG_CHANGED`, a different prompt version or toolset hash `VERSION_CHANGED`, a last step whose input
+submission and each step the pin is re-checked: a different provider — or, for a conversation on the
+instance default model (`modelChosen = false`), a different default model — closes the conversation
+`CONFIG_CHANGED` (a model the user chose, #1373, is not affected by the admin's default), a different prompt version or toolset hash `VERSION_CHANGED`, a last step whose input
 tokens reached `contextTokenLimit` `CONTEXT_LIMIT`; a closed conversation answers 409
 `CONVERSATION_READ_ONLY`. A permission lost since creation does not close it: the call is refused at
 execution time.
@@ -1274,6 +1275,55 @@ decision made while Valkey is down resumes within about a minute of its return.
 >   (`service_account.ai_access.updated`, the acting admin, `targetServiceAccountId`, `detail { before, after
 >   }`) in the same transaction. Saving access for an account that holds `infra:report` is allowed; the
 >   runtime refuses it anyway.
+
+> **As built (#1373, #1376) — per-conversation settings.** ADR-0097 decision 4 and decision 5 / default 7
+> as amended 2026-09-24. Shared contract in `@lazyit/shared` `ai-run.ts` (additive): `CreateAiConversation`,
+> `UpdateAiConversation`, `AiConversationSettings`, `AiModelCatalog`, `AiConversationModelIdSchema`,
+> `AiApprovalMode`; `AiProviderDescriptor.supportsEffort` in `ai-provider.ts`. The runtime rules live in
+> `runtime/conversation-settings.ts`.
+>
+> - **`POST /ai/conversations`** takes an optional body `{ model?, effort?, providerOptions?, autoApprove? }`
+>   (strict; an absent body is `{}` — the pre-#1373 behaviour). `model` is any model id of the configured
+>   provider (`AiConversationModelIdSchema`: letters, digits and `. _ - : / @`, ≤ 200, no `..` segment —
+>   a model id can end up in a provider URL path); omitted = the admin's model, `modelChosen = false`.
+>   `effort` (`low|medium|high`) only where `AI_PROVIDER_DESCRIPTORS[provider].supportsEffort` (not
+>   OpenAI-compatible) → else **400 `EFFORT_UNSUPPORTED`**; `providerOptions` must pass
+>   `AI_PROVIDER_OPTIONS_SCHEMAS[provider]` → else **400 `PROVIDER_OPTIONS_UNSUPPORTED`**. `null` = the admin's
+>   setting at call time. `autoApprove: true` records `autoApproveEnabledAt` and an audit row.
+> - **`PATCH /ai/conversations/:id`** `{ model?, effort?, providerOptions?, autoApprove? }` (at least one) →
+>   200 `AiConversationSettings`. Owner only (404), human only (403). Model fields: **409
+>   `CONVERSATION_SETTINGS_LOCKED`** once the conversation has a run (the update takes the conversation row
+>   lock a submission takes, then counts runs), 409 `CONVERSATION_READ_ONLY` when closed or on another
+>   provider, 409 `AI_DISABLED` while off. `autoApprove` toggles at any time (AI on or off); each actual
+>   change appends `ai_config_audit_log` `CONVERSATION_AUTO_APPROVE_CHANGED`, actor = the owner, `detail
+>   { conversationId, before, after }`.
+> - **`GET /ai/conversations/:id`** adds `settings: AiConversationSettings` — `{ provider, model,
+>   modelChosen, effort, providerOptions, modelLocked, autoApprove, autoApproveEnabledAt }` (`modelLocked` =
+>   a run exists). `readOnly` in the list and detail follows the amended pin.
+> - **`GET /ai/models`** (`ai:use`, humans; 409 `AI_DISABLED` while off) → `AiModelCatalog`: `{ provider,
+>   defaultModel, defaultEffort, supportsEffort, providerOptionKeys, models: [{ id, label }], listed,
+>   listingError }`. The listing is `AiModelListService.listModels` over the resolved connection (the
+>   egress-guarded fetch), cached in memory 10 minutes per connection (keyed by a hash of provider, base URL,
+>   private-network flag and key — never the key itself), concurrent requests sharing one call; a failure is
+>   `listed: false` + the run error code, remembered 1 minute, and the admin's default is always in
+>   `models`. Nothing of the connection but the provider kind and model ids reaches the caller.
+> - **Runtime.** Each step sends the conversation's own `effort` / `providerOptions` (read tolerantly: a value
+>   the provider no longer takes falls back to the admin's) as `ChatModelStepRequest.effort` /
+>   `providerOptions`; `AiSdkChatModel` overlays them on the resolved configuration for that call only.
+> - **Run model under the lock.** `submit` writes the run's provider and model from the conversation row
+>   re-read inside its locking transaction, so a model change racing the first message is exactly what the
+>   run records and uses.
+> - **Auto-approve.** In `AgentLoop.resolveCall`, after a successful chat `propose`, the conversation's
+>   `autoApprove` is re-read, together with the run (still `RUNNING`, no cancel requested) and the provider
+>   configuration (the assistant still on); when all hold, `AiToolService.approve(id, ctx, { auto: true })`
+>   runs (tools §9). On
+>   success the call is answered at once — events `tool.call` (`EXECUTING`), `tool.approval_resolved
+>   { decision: "approved", auto: true, preview }`, `tool.result` — and the run does not pause. A core
+>   refusal (`AUTO_APPROVE_NOT_ELIGIBLE` — incl. a turn that read untrusted content —, `AUTO_APPROVE_OFF`,
+>   `PREVIEW_CHANGED`, `STEP_UP_REQUIRED`) leaves the
+>   action pending and the normal card path runs; any other fault propagates like any write fault. The
+>   transcript's approval part carries `auto: true` for an `AUTO` approval. `/ai/conversations` `PATCH` and
+>   `/ai/models` are listed `unexposed` (INV-AI-14): the model cannot switch the mode on.
 
 **Rate limits [C]** (DB counts, no new infrastructure):
 

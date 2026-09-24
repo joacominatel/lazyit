@@ -423,6 +423,8 @@ type InvocationRow = Record<string, unknown> & { id: string };
 let invocations: Map<string, InvocationRow>;
 let ledger: Array<Record<string, unknown>>;
 let nextId: number;
+/** The chat conversations core reads for auto-approve (#1376): id → row. */
+let conversations: Map<string, Record<string, unknown>>;
 
 type Where = Record<string, unknown>;
 function matches(row: InvocationRow, where: Where): boolean {
@@ -551,6 +553,31 @@ const prisma = {
   },
   aiToolInvocation,
   aiActionLog,
+  aiConversation: {
+    findFirst: jest.fn(({ where }: { where: Record<string, unknown> }) => {
+      const row = conversations.get(where.id as string);
+      const hit =
+        row &&
+        Object.entries(where).every(([key, value]) => row[key] === value);
+      return Promise.resolve(hit ? { ...row } : null);
+    }),
+    updateMany: jest.fn(
+      ({
+        where,
+        data,
+      }: {
+        where: Record<string, unknown>;
+        data: Record<string, unknown>;
+      }) => {
+        const row = conversations.get(where.id as string);
+        const hit =
+          row &&
+          Object.entries(where).every(([key, value]) => row[key] === value);
+        if (hit) Object.assign(row, data);
+        return Promise.resolve({ count: hit ? 1 : 0 });
+      },
+    ),
+  },
   /** An interactive transaction: all or nothing over the in-memory tables. */
   $transaction: jest.fn(
     async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
@@ -655,6 +682,18 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
     invocations = new Map();
     ledger = [];
     nextId = 0;
+    conversations = new Map([
+      [
+        'ckconversation000000000001',
+        {
+          id: 'ckconversation000000000001',
+          userId: ID.member,
+          channel: 'CHAT',
+          autoApprove: false,
+          autoApproveEnabledAt: null,
+        },
+      ],
+    ]);
     updates = 0;
     ttlMinutes = undefined;
     jest.clearAllMocks();
@@ -1597,6 +1636,234 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
         });
         expect(invocations.size).toBe(0);
       });
+    });
+  });
+
+  // ─── Auto-approve (#1376; ADR-0097 decision 4 as amended 2026-09-24) ──────────────────────────────
+
+  describe('auto-approve mode (#1376)', () => {
+    const ENABLED_AT = new Date('2026-09-24T10:00:00.000Z');
+
+    function autoOn(): void {
+      Object.assign(conversations.get('ckconversation000000000001')!, {
+        autoApprove: true,
+        autoApproveEnabledAt: ENABLED_AT,
+      });
+    }
+
+    async function proposeOk(
+      name: string,
+      input: unknown = { id: 't1', name: 'Renamed' },
+    ) {
+      const proposal = await tools.propose(
+        name,
+        input,
+        chat(human(ID.member)),
+        {
+          toolUseId: 'toolu_auto',
+        },
+      );
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      return proposal.action;
+    }
+
+    it('approves a write whose preview needs no step-up, through the same path, with provenance AUTO', async () => {
+      autoOn();
+      const action = await proposeOk('thing_rename');
+      const approved = await tools.approve(action.id, chat(human(ID.member)), {
+        auto: true,
+      });
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        approvalMode: 'AUTO',
+        result: { ok: true, mutated: true },
+      });
+      expect(updates).toBe(1);
+      expect(events(action.id)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTED']);
+      for (const event of ['APPROVED', 'EXECUTED']) {
+        expect(ledger.find((e) => e.event === event)).toMatchObject({
+          approverUserId: ID.member,
+          stepUp: false,
+          approvalMode: 'AUTO',
+          autoApproveEnabledAt: ENABLED_AT,
+        });
+      }
+      expect(invocations.get(action.id)!.approvalMode).toBe('AUTO');
+    });
+
+    it('records USER provenance on an approval from the card', async () => {
+      const action = await proposeOk('thing_rename');
+      const approved = await tools.approve(action.id, chat(human(ID.member)));
+      expect(approved.approvalMode).toBe('USER');
+      expect(ledger.find((e) => e.event === 'APPROVED')).toMatchObject({
+        approvalMode: 'USER',
+        autoApproveEnabledAt: null,
+      });
+    });
+
+    it.each(['thing_create_outbound', 'thing_notify'])(
+      '%s: an elevated action is never auto-approved, even without a step-up warning (T3/T4, INV-AI-15)',
+      async (name) => {
+        autoOn();
+        const action = await proposeOk(name);
+        expect(action.preview?.stepUpRequired).toBe(false);
+        await expect(
+          tools.approve(action.id, chat(human(ID.member)), { auto: true }),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'AUTO_APPROVE_NOT_ELIGIBLE' },
+        });
+        expect(updates).toBe(0);
+        expect(invocations.get(action.id)!.status).toBe('AWAITING_APPROVAL');
+      },
+    );
+
+    it('approves a write with a warning outside the step-up list (e.g. NOTIFIES_USERS)', async () => {
+      autoOn();
+      appState.notifies = true;
+      const action = await proposeOk('thing_app_write');
+      const approved = await tools.approve(action.id, chat(human(ID.member)), {
+        auto: true,
+      });
+      expect(approved.status).toBe('SUCCEEDED');
+    });
+
+    it.each([
+      ['thing_set_role', 'ROLE_CHANGE'],
+      ['thing_set_email', 'IDENTITY_CHANGE'],
+      ['thing_grant', 'PRIVILEGE_GRANT'],
+      ['thing_send_invite', 'CREDENTIAL_DELIVERY'],
+      ['thing_revoke_critical', 'CRITICAL_APPLICATION'],
+      ['thing_promote', 'ROLE_CHANGE (tool-declared step-up)'],
+    ])(
+      '%s (%s): never approved automatically — stays pending for the user and the password',
+      async (name) => {
+        autoOn();
+        const action = await proposeOk(name);
+        await expect(
+          tools.approve(action.id, chat(human(ID.member)), { auto: true }),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'AUTO_APPROVE_NOT_ELIGIBLE' },
+        });
+        expect(updates).toBe(0);
+        expect(invocations.get(action.id)!.status).toBe('AWAITING_APPROVAL');
+        expect(events(action.id)).toEqual(['PROPOSED']);
+      },
+    );
+
+    it('checks the FRESH preview: a step-up warning that appeared since propose stops the auto approval', async () => {
+      autoOn();
+      const action = await proposeOk('thing_app_write');
+      appState.critical = true;
+      await expect(
+        tools.approve(action.id, chat(human(ID.member)), { auto: true }),
+      ).rejects.toMatchObject({ response: { code: 'STEP_UP_REQUIRED' } });
+      expect(updates).toBe(0);
+      expect(invocations.get(action.id)!).toMatchObject({
+        status: 'AWAITING_APPROVAL',
+        preview: { warnings: ['CRITICAL_APPLICATION'], stepUpRequired: true },
+      });
+    });
+
+    it('never combines with a verified step-up', async () => {
+      autoOn();
+      const action = await proposeOk('thing_set_role');
+      await expect(
+        tools.approve(action.id, chat(human(ID.member)), {
+          auto: true,
+          stepUpVerified: true,
+        }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'AUTO_APPROVE_OFF' },
+      });
+      expect(updates).toBe(0);
+    });
+
+    it('refuses when the conversation does not have auto-approve on NOW', async () => {
+      const action = await proposeOk('thing_rename');
+      await expect(
+        tools.approve(action.id, chat(human(ID.member)), { auto: true }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'AUTO_APPROVE_OFF' },
+      });
+      expect(updates).toBe(0);
+      expect(invocations.get(action.id)!.status).toBe('AWAITING_APPROVAL');
+    });
+
+    it('re-checks the mode in the claim: switched off after the first check, nothing executes', async () => {
+      const action = await proposeOk('thing_rename');
+      // The first read still sees the mode on; by the claim, the owner has switched it off.
+      prisma.aiConversation.findFirst.mockImplementationOnce(() =>
+        Promise.resolve({ autoApproveEnabledAt: ENABLED_AT }),
+      );
+      await expect(
+        tools.approve(action.id, chat(human(ID.member)), { auto: true }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'AUTO_APPROVE_OFF' },
+      });
+      expect(updates).toBe(0);
+      expect(invocations.get(action.id)!.status).toBe('AWAITING_APPROVAL');
+      expect(events(action.id)).toEqual(['PROPOSED']);
+    });
+
+    it('shows the card for a write in a turn that read other-authored content (untrusted sources)', async () => {
+      autoOn();
+      const proposal = await tools.propose(
+        'thing_rename',
+        { id: 't1', name: 'Renamed' },
+        chat(human(ID.member), {
+          untrustedSources: [{ type: 'article', id: 'kb1', op: 'navigate' }],
+        }),
+        { toolUseId: 'toolu_untrusted' },
+      );
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      await expect(
+        tools.approve(proposal.action.id, chat(human(ID.member)), {
+          auto: true,
+        }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'AUTO_APPROVE_NOT_ELIGIBLE' },
+      });
+      expect(updates).toBe(0);
+      expect(invocations.get(proposal.action.id)!.status).toBe(
+        'AWAITING_APPROVAL',
+      );
+    });
+
+    it('keeps the precondition: a target changed since the preview fails STALE, recorded as AUTO', async () => {
+      autoOn();
+      const action = await proposeOk('thing_rename');
+      things.t1 = { ...things.t1, updatedAt: '2026-09-02T00:00:00.000Z' };
+      const approved = await tools.approve(action.id, chat(human(ID.member)), {
+        auto: true,
+      });
+      expect(approved).toMatchObject({
+        status: 'FAILED',
+        result: { ok: false, error: { code: 'STALE' } },
+      });
+      expect(updates).toBe(0);
+      expect(ledger.find((e) => e.event === 'FAILED')).toMatchObject({
+        approvalMode: 'AUTO',
+      });
+    });
+
+    it('keeps the re-authorization: a permission revoked since propose fails FORBIDDEN', async () => {
+      autoOn();
+      const action = await proposeOk('thing_rename');
+      users[ID.member] = { ...users[ID.member], role: 'VIEWER' };
+      const approved = await tools.approve(action.id, chat(human(ID.member)), {
+        auto: true,
+      });
+      expect(approved).toMatchObject({
+        status: 'FAILED',
+        result: { ok: false, error: { code: 'FORBIDDEN' } },
+      });
+      expect(updates).toBe(0);
     });
   });
 

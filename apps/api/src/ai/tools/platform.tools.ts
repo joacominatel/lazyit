@@ -25,6 +25,7 @@ import { SmtpController } from '../../smtp/smtp.controller';
 import { WorkflowSecretsController } from '../../workflow-engine/definitions/workflow-secrets.controller';
 import { PluginDistributionController } from '../../mcp/distribution/plugin-distribution.controller';
 import { AiConversationsController } from '../conversations/ai-conversations.controller';
+import { AiModelsController } from '../conversations/ai-models.controller';
 import { unexposed, type AiToolset } from '../core/tool-descriptor';
 import { AiServiceAccountAccessController } from '../headless/ai-service-account-access.controller';
 import { AiRunsController } from '../runs/ai-runs.controller';
@@ -125,9 +126,10 @@ export const platformToolset: AiToolset = {
     unexposed(AiStatusController, ['get'], AI_OWN_SURFACE),
     unexposed(
       AiConversationsController,
-      ['create', 'list', 'detail', 'remove', 'send'],
+      ['create', 'list', 'detail', 'remove', 'send', 'update'],
       AI_OWN_SURFACE,
     ),
+    unexposed(AiModelsController, ['get'], AI_OWN_SURFACE),
     unexposed(
       AiRunsController,
       ['create', 'get', 'cancel', 'decide', 'stream'],

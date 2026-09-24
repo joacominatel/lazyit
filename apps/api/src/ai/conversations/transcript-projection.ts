@@ -278,7 +278,13 @@ function approvalPart(
   if (!request || !AiApprovalRequestSchema.safeParse(request).success) {
     return null;
   }
-  return { type: 'approval', request, outcome: approvalOutcome(action) };
+  return {
+    type: 'approval',
+    request,
+    outcome: approvalOutcome(action),
+    // Applied automatically by the owner's auto-approve mode (#1376).
+    ...(action.approvalMode === 'AUTO' ? { auto: true } : {}),
+  };
 }
 
 function approvalOutcome(

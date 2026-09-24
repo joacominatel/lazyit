@@ -37,6 +37,14 @@ permanent [[ai-action-log]].
 - **Pinned** at creation to its provider, model, prompt version and tool set. A change makes it
   read-only (`closedReason` = `CONFIG_CHANGED` / `VERSION_CHANGED`); crossing the context cap closes it
   with `CONTEXT_LIMIT`.
+  - **Model per conversation** (#1373, ADR-0097 decision 5 as amended 2026-09-24): the owner may choose
+    the model (any model of the configured provider, listed or custom), a reasoning effort and provider
+    options — at creation or until the first run starts; then they are pinned. A conversation on the
+    admin's default (`modelChosen = false`) is still closed by a change of the default model; one whose
+    model was chosen is not. A provider change closes both.
+- **Auto-approve** (#1376, ADR-0097 decision 4 as amended 2026-09-24): off by default; its owner may switch
+  it on or off at any time (audited). While on, ordinary chat writes (not elevated, no step-up warning,
+  not in a turn that read other-authored content) run without a card, recorded in the [[ai-action-log]] with `approvalMode = AUTO`.
 - **One active run** at a time (409 `RUN_IN_PROGRESS`, enforced by the runtime).
 - MCP keeps **no** server-side conversation.
 
@@ -50,7 +58,10 @@ Prisma model `AiConversation` → table `ai_conversations`.
 | `channel` | `text` | `CHAT` \| `HEADLESS`. |
 | `userId` / `serviceAccountId` | `uuid?` / `cuid?` | the owner — exactly one; FK `onDelete: Cascade`. |
 | `title` | `text?` | |
-| `provider` / `model` / `promptVersion` / `toolsetHash` / `toolNames` | | pinned at creation. |
+| `provider` / `model` / `promptVersion` / `toolsetHash` / `toolNames` | | pinned at creation (the model changeable until the first run). |
+| `modelChosen` | `bool` | default `false`; `true` when the owner chose `model` (#1373). |
+| `effort` / `providerOptions` | `text?` / `json?` | the owner's reasoning effort and provider options; null = the instance setting. Validated on write, read tolerantly. |
+| `autoApprove` / `autoApproveEnabledAt` | `bool` / `datetime?` | auto-approve mode (#1376), default off; when it was last switched on. |
 | `closedReason` | `text?` | null while writable. |
 | `lastActivityAt` | `datetime` | drives retention. |
 | `createdAt` / `updatedAt` | `datetime` | no `deletedAt` (hard-deleted). |

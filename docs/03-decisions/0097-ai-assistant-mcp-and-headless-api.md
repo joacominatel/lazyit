@@ -178,12 +178,71 @@ The key forks only; each links its analysis.
    > step-up. The CEO, on the manager change: "Si deja de pedir passwd". `IDENTITY_CHANGE` stays on the
    > list for the other identity attributes (e.g. the email).
 
+   > Amended 2026-09-24 (#1376): **auto-approve mode**, per conversation, opted into by its owner. The
+   > CEO's request: "Un modo automatico, para que no pregunte sobre cambios (configurado por chat tambien)
+   > para que no pregunte de decisiones o aprobar ediciones basicas, las criticas si." On who may turn it
+   > on: "activar el modo skip permissions por ahora es funcion y consentimiento del usuario, el sabe lo
+   > que esta haciendo." — no admin gate for now.
+   >
+   > - **What it approves.** Only an ordinary chat write — a `write`-class tool whose server-built preview
+   >   is not escalated to elevated and whose stored **and fresh** previews carry no step-up warning
+   >   (`AI_STEP_UP_WARNINGS`: `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`,
+   >   `CRITICAL_APPLICATION`) and no `stepUpRequired`. Every `elevated` action (privilege, identity,
+   >   credentials, configuration, outbound integrations — security.md §6.2 T3/T4 and INV-AI-15) and every
+   >   step-up write still stops for the card and, where required, the password. A preview that changed
+   >   since propose (`PREVIEW_CHANGED`) also falls back to the card, and so does **any write in a turn
+   >   that read other-authored content** (a preview with `untrustedSources`, the untrusted-source
+   >   banner): injected text never chains an unattended write within its turn.
+   > - **Same path, no bypass.** The runtime calls core's own `approve(…, { auto: true })` right after
+   >   `propose`: the atomic claim, the re-authorization, the tool-schema and input-hash checks, the
+   >   target's version (`STALE`) and the ledger are unchanged. Core re-checks the mode inside the claim's
+   >   transaction, holding the conversation row's lock, and refuses (`AUTO_APPROVE_OFF`) unless its owner
+   >   has it on at that moment; `auto` never combines with a verified step-up. The runtime applies it only
+   >   while the run is running, not being cancelled, and the assistant is on — the kill switches a manual
+   >   decision honours.
+   > - **Provenance.** `ai_tool_invocations.approvalMode` and the `APPROVED` / `EXECUTED` / `FAILED` ledger
+   >   events carry `approvalMode` `AUTO` (a click is `USER`), `approverUserId` = the owner who enabled
+   >   the mode, and `autoApproveEnabledAt`. The stream emits `tool.approval_resolved` with `auto: true`
+   >   and the checked preview; the transcript's approval part carries `auto: true` ("applied
+   >   automatically").
+   > - **Toggling.** `POST /ai/conversations { autoApprove }` or `PATCH /ai/conversations/:id
+   >   { autoApprove }`, owner only, at any time; each change writes an `ai_config_audit_log` row
+   >   (`CONVERSATION_AUTO_APPROVE_CHANGED`, `{ conversationId, before, after }`). Off by default.
+   > - **Scope.** Chat only. MCP (the client confirms) and headless (autonomous within the SA's grants)
+   >   are unchanged. The prompt-injection residual this accepts is in security.md §6.2.
+   > - **Not in this amendment** (follow-ups if the CEO wants them): an admin switch to disable the mode
+   >   instance-wide, an expiry, and a cap on automatic writes per turn beyond the per-run tool-call cap.
+
 5. **Lazyit owns the agent loop; providers sit behind a port.** Each model step is one call through
    `ChatModelPort`, implemented over AI SDK 7 in `ai/providers/` — the only code that imports it. Adding
    a provider is a descriptor, one definition file and one registry line. Runs are BullMQ jobs carrying
    only `{ runId }`, with conversations, messages, runs and approvals in Postgres; a sweeper recovers
    lost resumes; a write is never retried blindly. Conversations are append-only and pinned to their
    provider, model and prompt version. → [[ai-assistant/provider-and-runtime|provider]] §6, §8.
+
+   > Amended 2026-09-24 (#1373): **the model is chosen per conversation.** The CEO's request: "Por chat
+   > poder elegir modelo, razonamiento y demas configuraciones. Depende los proveedores que haya
+   > conectados. Ademas, no se si es posible tomar una lista de la api del proveedor o algo asi, asi es
+   > mas sencillo. (Aunque tambien poder dejarlo en texto para que cada uno elija el que quiera, capaz
+   > tiene uno personalizado)". Scoped for v1 to the one configured provider (multi-provider stays in
+   > "Not built").
+   >
+   > - **The choice.** A conversation runs on the admin's model (the default) or on a model the user picks
+   >   — from `GET /ai/models` (`ai:use`; the provider's listing through the provider layer, cached 10
+   >   minutes per connection) or typed as a custom id (letters, digits and `. _ - : / @`, no `..`). A
+   >   reasoning effort and provider options may be set where the provider descriptor supports them
+   >   (`supportsEffort`, `AI_PROVIDER_OPTIONS_SCHEMAS`), validated on write; `null` = the admin's setting.
+   > - **When.** At creation (`POST /ai/conversations { model?, effort?, providerOptions? }`) or by
+   >   `PATCH /ai/conversations/:id` until the conversation's first run starts; then pinned (409
+   >   `CONVERSATION_SETTINGS_LOCKED`) — a different model is a new conversation.
+   > - **The pin (default 7).** A provider or prompt-version change still makes every conversation
+   >   read-only. An admin change of the **default** model makes read-only only the conversations that
+   >   run on the default (`modelChosen = false`, every conversation created before this change); a
+   >   conversation whose user chose its model keeps it.
+   > - **Budget.** Unchanged: the per-principal daily token budget applies whatever the model or effort.
+   > - **Follow-ups, not in v1:** an admin allow-list of the models users may pick and a per-model cost
+   >   view (the issue's "admin controls which models"); a provider-aware model-id rule for Google, whose
+   >   SDK puts the id in the URL path, where the shared charset still admits `/`.
 
 6. **The browser follows a run over SSE.** `POST` creates the run; the browser reads
    `GET /ai/runs/:id/events` with `fetch`, a Bearer header and `Last-Event-ID`. The event union is
@@ -316,8 +375,9 @@ The key forks only; each links its analysis.
   yearly.
 - `lan` users get MCP only through static personal tokens; cloud connectors (claude.ai, ChatGPT) need a
   publicly reachable HTTPS instance.
-- A long conversation ends at the context cap instead of being summarized; a provider or model change
-  makes old conversations read-only.
+- A long conversation ends at the context cap instead of being summarized; a provider change makes old
+  conversations read-only, and so does a change of the default model for those running on the default
+  (decision 5 as amended 2026-09-24).
 - Headless runs have no human in the loop by the CEO's choice; the blast radius is the SA's grants.
 
 **Risks**
@@ -347,6 +407,14 @@ instance level, the grant exposes nothing until an admin enables it. Downgrading
 > seed-once ledger from #1314; no data migration. This corrects the mechanism only; the decision is
 > unchanged.
 
+> Amended 2026-09-24 (#1373, #1376, decisions 4 and 5): migration `20260924180000_ai_conversation_settings`
+> adds `ai_conversations.modelChosen BOOLEAN NOT NULL DEFAULT false`, `effort TEXT`, `providerOptions JSONB`,
+> `autoApprove BOOLEAN NOT NULL DEFAULT false`, `autoApproveEnabledAt TIMESTAMP(3)`, and a nullable
+> `approvalMode` on `ai_tool_invocations` and `ai_action_log` (plus `autoApproveEnabledAt` on the ledger).
+> Existing conversations read as "the instance default model, the instance effort, auto-approve off" —
+> exactly today's behaviour; existing ledger rows keep a null approval mode. Adding a column fires no row
+> trigger, so the ledger's append-only trigger is not involved. Downgrading leaves inert columns.
+
 > Amended 2026-09-24 (#1315, decision 8 amendment): `users.mcpCredentialEpoch INTEGER NOT NULL DEFAULT 0`
 > and `oauth_grants.mcpCredentialEpoch INTEGER NOT NULL` (added with a temporary default 0, then a one-time
 > `UPDATE` sets -1 on grants already dead by `sessionEpoch`, then the default is dropped). Existing users
@@ -367,7 +435,8 @@ The build follows the unified wave plan in [[ai-assistant/_synthesis|synthesis]]
 
 ## Not built
 
-Click-level UI driving; conversation summarization; approve-all or approve-with-edits; provider
+Click-level UI driving; conversation summarization; approve-all (other than the per-conversation
+auto-approve mode for ordinary writes, decision 4 as amended 2026-09-24) or approve-with-edits; provider
 fallback chains or per-user keys; MCP elicitation, resources, prompts or toolsets; any OIDC surface or
 OAuth over plain HTTP; lazyit as an MCP client; generic "call any endpoint" or file tools; admins reading
 other people's conversations; a per-request headless tool allowlist; workflow authoring over MCP or
@@ -388,6 +457,11 @@ adopted so the design is complete. Each can be reversed without reshaping the re
 6. **`AI_SECRET_KEY`** optional and commented in `.env.prod.example`, generated by `start.sh` — a
    deviation from the SMTP precedent so guided updates do not stop.
 7. **Conversations become read-only** after a provider, model or prompt-version change.
+
+   > Amended 2026-09-24 (#1373, decision 5 amendment): the model is chosen per conversation — at creation
+   > or until its first run starts, then pinned. A provider or prompt-version change still closes every
+   > conversation; an admin change of the default model closes only the conversations running on the
+   > default.
 8. **A hard per-conversation context cap**, with write-time tool-result truncation.
 9. **Private-network LLMs:** the OpenAI-compatible provider may target a private host through an admin
    `allowPrivateNetwork` toggle scoped to that host; loopback and IMDS never.
