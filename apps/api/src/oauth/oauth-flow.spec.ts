@@ -953,3 +953,52 @@ describe('the sweeper', () => {
     );
   });
 });
+
+describe('review fixes (G3 review of #1339)', () => {
+  it('#1: refuses to register a userinfo redirect that reads as loopback, even when an admin lists it', async () => {
+    const uri = 'http://localhost:80@evil.com/callback';
+    enableMcp(h, {
+      mcpClientAllowlistAdded: [
+        {
+          id: 'smuggled',
+          label: 'smuggled',
+          match: { kind: 'redirect_uri', pattern: uri },
+        },
+      ],
+    });
+    expect(
+      await oauthError(h.registrations.register({ redirect_uris: [uri] })),
+    ).toMatchObject({ error: 'invalid_redirect_uri' });
+    expect(h.prisma.tables.oAuthClient).toHaveLength(0);
+  });
+
+  it('#7: refuses to register a redirect with an out-of-range port', async () => {
+    expect(
+      await oauthError(
+        h.registrations.register({
+          redirect_uris: ['http://localhost:99999/callback'],
+        }),
+      ),
+    ).toMatchObject({ error: 'invalid_redirect_uri' });
+  });
+
+  it('#7: a request redirect that cannot be parsed is refused with no 500 and no orphan code', async () => {
+    const user = seedUser(h);
+    const clientId = await registerClient(h, ['http://localhost/callback']);
+    const params = validParams(clientId, {
+      redirect_uri: 'http://localhost:99999/callback',
+    });
+    expect(await h.authorization.validate(human(user), params)).toEqual({
+      ok: false,
+      refusal: 'INVALID_REDIRECT',
+    });
+    await expect(
+      h.authorization.decision(human(user), {
+        params,
+        decision: 'approve',
+        scopes: ['lazyit.read'],
+      }),
+    ).rejects.toMatchObject({ refusal: 'INVALID_REDIRECT' });
+    expect(h.prisma.tables.oAuthAuthorizationCode).toHaveLength(0);
+  });
+});

@@ -25,14 +25,53 @@ export interface PolicyClient {
   redirectUris: readonly string[];
 }
 
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+/**
+ * Parse a redirect URI with the WHATWG `URL` parser, or `null` when it cannot be one: unparseable (an
+ * out-of-range port such as `:99999`), carrying userinfo (`http://localhost:80@evil.com/…` — the host
+ * is `evil.com`, whatever a regex reading the prefix concludes), or carrying a fragment. This check
+ * stands on its own: it does not rely on the shared classifier's regexes.
+ */
+function parseRedirect(uri: string): URL | null {
+  if (uri.length === 0 || uri.length > 2048 || uri.includes('#')) return null;
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return null;
+  }
+  if (url.username !== '' || url.password !== '' || uri.includes('@')) {
+    return null;
+  }
+  return url;
+}
+
+/** Whether a parsed http(s) URL points at a loopback address — decided from the PARSED hostname. */
+function isLoopbackUrl(url: URL): boolean {
+  return (
+    (url.protocol === 'http:' || url.protocol === 'https:') &&
+    LOOPBACK_HOSTNAMES.has(url.hostname.toLowerCase())
+  );
+}
+
 /**
  * Whether a redirect URI may ever be registered: an https, loopback or private-use URI
- * (`classifyMcpRedirectUri`) with no fragment (RFC 6749 §3.1.2). Plain http off loopback and every
+ * (`classifyMcpRedirectUri`) with no fragment and no userinfo (RFC 6749 §3.1.2) that the URL parser
+ * accepts. The shared classification must agree with the parsed URL: `loopback` only when the parsed
+ * hostname is loopback, and plain `http` only on a loopback hostname. Plain http off loopback and every
  * browser-interpreted scheme (`javascript:`, `data:`, `file:` …) are refused here, before any allowlist.
  */
 export function isRegistrableRedirectUri(uri: string): boolean {
-  if (uri.length === 0 || uri.length > 2048 || uri.includes('#')) return false;
-  return classifyMcpRedirectUri(uri) !== null;
+  const url = parseRedirect(uri);
+  if (!url) return false;
+  const kind = classifyMcpRedirectUri(uri);
+  if (kind === null) return false;
+  const loopback = isLoopbackUrl(url);
+  if (kind === 'loopback' && !loopback) return false;
+  if (url.protocol === 'http:' && !loopback) return false;
+  if (kind === 'https' && (url.protocol !== 'https:' || loopback)) return false;
+  return true;
 }
 
 /** Whether the client is identified by an allowlisted CIMD `client_id` URL (never a DCR client). */
@@ -101,8 +140,12 @@ export function matchesRegisteredRedirect(
   requested: string,
   registered: readonly string[],
 ): boolean {
+  // Unparseable (e.g. port 99999) or userinfo-carrying URIs never match: the request is refused before
+  // any code row is written, instead of failing later when the redirect is built.
+  const url = parseRedirect(requested);
+  if (!url) return false;
   if (registered.includes(requested)) return true;
-  if (!LOOPBACK_HTTP.test(requested)) return false;
+  if (!LOOPBACK_HTTP.test(requested) || !isLoopbackUrl(url)) return false;
   const candidate = withoutLoopbackPort(requested);
   return registered.some((uri) => withoutLoopbackPort(uri) === candidate);
 }
@@ -120,5 +163,6 @@ export function redirectHost(uri: string): string {
 
 /** Whether a redirect is a loopback address (the consent screen adds a warning). */
 export function isLoopbackRedirect(uri: string): boolean {
-  return classifyMcpRedirectUri(uri) === 'loopback';
+  const url = parseRedirect(uri);
+  return url !== null && isLoopbackUrl(url);
 }

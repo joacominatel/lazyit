@@ -161,6 +161,13 @@ export class AuthorizationService {
     }
 
     const code = mintAuthorizationCode();
+    // Build the redirect BEFORE persisting the code: a redirect that cannot be built never leaves an
+    // orphan code row behind.
+    const redirectTo = buildRedirect(redirectUri, {
+      code: code.value,
+      state,
+      iss: config.issuer,
+    });
     await this.prisma.oAuthAuthorizationCode.create({
       data: {
         codeHash: code.hash,
@@ -173,13 +180,7 @@ export class AuthorizationService {
         expiresAt: new Date(Date.now() + AUTHORIZATION_CODE_TTL_MS),
       },
     });
-    return {
-      redirectTo: buildRedirect(redirectUri, {
-        code: code.value,
-        state,
-        iss: config.issuer,
-      }),
-    };
+    return { redirectTo };
   }
 
   /**

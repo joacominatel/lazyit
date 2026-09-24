@@ -3,6 +3,7 @@ import { MCP_CLIENT_ALLOWLIST_DEFAULTS } from './client-allowlist.defaults';
 import {
   type ClientTrustPolicy,
   isClientAllowed,
+  isLoopbackRedirect,
   isRedirectAdmitted,
   isRegistrableRedirectUri,
   matchesRegisteredRedirect,
@@ -247,5 +248,56 @@ describe('matchesRegisteredRedirect — exact matching', () => {
       'anysphere.cursor-mcp',
     );
     expect(redirectHost('com.example.agent:/cb')).toBe('com.example.agent');
+  });
+});
+
+describe('review fix #1 — userinfo cannot pass as loopback (G3 review of #1339)', () => {
+  const smuggled = [
+    'http://localhost:80@evil.com/callback',
+    'http://127.0.0.1@evil.com/callback',
+    'http://localhost@evil.com/callback',
+    'https://claude.ai@evil.com/api/mcp/auth_callback',
+  ];
+  const listingThem: ClientTrustPolicy = {
+    allowlist: [
+      ...MCP_CLIENT_ALLOWLIST_DEFAULTS,
+      ...smuggled.map((pattern, index) => ({
+        id: `smuggled-${index}`,
+        label: 'smuggled',
+        match: { kind: 'redirect_uri' as const, pattern },
+      })),
+    ],
+    allowAnyHttpsClient: true,
+  };
+
+  it.each(smuggled)(
+    'refuses %s even when an allowlist entry names it',
+    (uri) => {
+      expect(isRegistrableRedirectUri(uri)).toBe(false);
+      expect(isClientAllowed(dcr(uri), listingThem)).toBe(false);
+      expect(isLoopbackRedirect(uri)).toBe(false);
+      expect(matchesRegisteredRedirect(uri, [uri])).toBe(false);
+    },
+  );
+
+  it('does not port-strip a userinfo URI into a registered loopback callback', () => {
+    expect(
+      matchesRegisteredRedirect('http://localhost:80@evil.com/callback', [
+        'http://localhost/callback',
+      ]),
+    ).toBe(false);
+  });
+});
+
+describe('review fix #7 — unparseable redirects never match', () => {
+  it.each([
+    'http://localhost:99999/callback',
+    'http://127.0.0.1:65536/callback',
+    'https://claude.ai:99999/api/mcp/auth_callback',
+  ])('refuses %s at registration and at matching', (uri) => {
+    expect(isRegistrableRedirectUri(uri)).toBe(false);
+    expect(
+      matchesRegisteredRedirect(uri, ['http://localhost/callback', uri]),
+    ).toBe(false);
   });
 });
