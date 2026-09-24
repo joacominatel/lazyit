@@ -1156,8 +1156,17 @@ decision made while Valkey is down resumes within about a minute of its return.
 **Status** — any authenticated principal:
 
 - `GET /ai/status` returns the reconciled per-caller shape `{ chat: { available }, mcp: { available,
-  auth: "oauth" | "personal-token" }, configRevision, retentionDays }` — no secrets
-  ([[ai-assistant/_synthesis|synthesis]] §4.5).
+  auth: "oauth" | "personal-token", endpoint, marketplaceUrl }, configRevision, retentionDays }` — no
+  secrets ([[ai-assistant/_synthesis|synthesis]] §4.5).
+- **Server-known MCP URLs (#1315 follow-up).** `mcp.endpoint` is `<WEB_ORIGIN>/mcp`, derived from the
+  **pinned** origin the plugin renderer and the OAuth issuer use — never from the request `Host`
+  (security.md T-30). It is present whether MCP is on or off, and null when no http(s) origin is pinned
+  (a `lan` instance without `WEB_ORIGIN`: the web falls back to its page origin) or in shim mode.
+  `mcp.marketplaceUrl` is `<origin>/api/ai/claude-code/marketplace.json`, only while the public
+  marketplace is served (MCP on, a pinned HTTPS origin, not shim), else null. Both are null for an
+  anonymous caller. The shared schema marks them optional only for tolerance of an older API; this build
+  always sends them. The web install panel and settings card use them instead of
+  `window.location.origin`.
 
 > **As built (W2-2)** — `apps/api/src/ai/status/`: `@RequirePermission()` with no arguments, so every
 > authenticated human passes. **Deliberate deviation (CTO, 2026-09-24):** a service account is
