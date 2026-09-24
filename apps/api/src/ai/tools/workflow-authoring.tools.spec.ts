@@ -75,6 +75,10 @@ import { WorkflowConnectionsController } from '../../workflow-engine/definitions
 import { WorkflowConnectionsService } from '../../workflow-engine/definitions/workflow-connections.service';
 import { WorkflowDryRunController } from '../../workflow-engine/dry-run/workflow-dry-run.controller';
 import { WorkflowDryRunService } from '../../workflow-engine/dry-run/workflow-dry-run.service';
+import { UsersController } from '../../users/users.controller';
+import { UsersService } from '../../users/users.service';
+import { AssetAssignmentsService } from '../../asset-assignments/asset-assignments.service';
+import { VaultSetupNudgeService } from '../../notifications/vault-setup-nudge.service';
 import { EngineServiceAccountService } from '../../workflow-engine/engine-service-account.service';
 import { ConnectorRegistry } from '../../workflow-engine/connectors.registry';
 import { SecretService } from '../../workflow-engine/secrets/secret.service';
@@ -166,6 +170,8 @@ let invocations: Map<string, Row>;
 let ledger: Array<Record<string, unknown>>;
 let nextId: number;
 let roleMatrix: Record<Role, readonly Permission[]>;
+/** Users the directory no longer serves (offboarded): `GET /users/:id` answers 404. */
+let offboarded: Set<string>;
 
 const REST_STEPS = [
   {
@@ -179,6 +185,7 @@ const REST_STEPS = [
 ];
 
 function fresh() {
+  offboarded = new Set();
   const user = (id: string, role: Role): Row => ({
     id,
     email: `${role.toLowerCase()}@example.com`,
@@ -669,6 +676,16 @@ const dryRun = {
   ),
 };
 
+const usersService = {
+  findOneSerialized: jest.fn((id: string) => {
+    const user = users.get(id);
+    if (!user || offboarded.has(id)) {
+      return Promise.reject(new NotFoundException(`User ${id} not found`));
+    }
+    return Promise.resolve({ ...user, manager: null });
+  }),
+};
+
 const probe = jest.fn().mockResolvedValue({
   ok: true,
   statusCode: 200,
@@ -921,6 +938,7 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         WorkflowDryRunController,
         ApplicationsController,
         ConfigController,
+        UsersController,
       ],
       providers: [
         { provide: PrismaService, useValue: prisma },
@@ -957,6 +975,9 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         { provide: ApplicationsService, useValue: applicationsService },
         { provide: AccessGrantsService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
+        { provide: UsersService, useValue: usersService },
+        { provide: AssetAssignmentsService, useValue: {} },
+        { provide: VaultSetupNudgeService, useValue: {} },
         { provide: ConfigService, useValue: {} },
         { provide: SetupCsrfService, useValue: {} },
         {
@@ -1259,7 +1280,7 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         name: 'Jira hook',
         config: {
           kind: 'WEBHOOK_OUT',
-          url: 'https://ops:hunter2@hooks.new.example/in?sig=abc123',
+          url: 'https://hooks.new.example/in?sig=abc123',
         },
       });
       expect(preview).toMatchObject({
@@ -1272,8 +1293,8 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
       expect(change(preview, 'destination')!.after).toBe(
         'https://hooks.new.example/in?sig=…',
       );
-      // Neither the URL's userinfo nor its query values reach the card.
-      expect(JSON.stringify(preview)).not.toMatch(/hunter2|abc123/);
+      // The URL's query values never reach the card.
+      expect(JSON.stringify(preview)).not.toMatch(/abc123/);
       const approved = await tools.approve(id, chat(ADMIN));
       expect(approved.status).toBe('SUCCEEDED');
       const data = (approved.result as { data: { connection: Row } }).data;
@@ -1282,7 +1303,44 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         credentialConfigured: false,
         name: '<untrusted_content>Jira hook</untrusted_content>',
       });
-      expect(JSON.stringify(approved.result)).not.toMatch(/hunter2|abc123/);
+      expect(JSON.stringify(approved.result)).not.toMatch(/abc123/);
+      // The model reads other-authored names wrapped, in summaries too.
+      expect((approved.result as { summary?: string }).summary).toContain(
+        '<untrusted_content>Jira</untrusted_content>',
+      );
+    });
+
+    it('refuses a URL carrying a user name or password (userinfo) before any card', async () => {
+      for (const url of [
+        'https://ops:hunter2@hooks.new.example/in',
+        'https://token@hooks.new.example/in',
+      ]) {
+        const error = await refused('workflow_connection_create', {
+          application: 'Jira',
+          name: 'x',
+          config: { kind: 'WEBHOOK_OUT', url },
+        });
+        expect(error.code).toBe('INVALID_INPUT');
+        expect(JSON.stringify(error)).not.toContain('hunter2');
+      }
+      // Re-pointing to one is refused as well.
+      expect(
+        await refused('workflow_connection_update', {
+          connection: CONN.hook,
+          config: { kind: 'WEBHOOK_OUT', url: 'https://a:b@hooks.new.example' },
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      // A legacy connection row carrying userinfo is refused when a version would call it.
+      connections.get(CONN.hook)!.config = {
+        kind: 'WEBHOOK_OUT',
+        url: 'https://legacy:pw@hooks.jira.example/in',
+      };
+      const legacy = await refused('workflow_author_version', {
+        workflow: { id: WF.jiraGrant },
+        steps: [{ kind: 'WEBHOOK_OUT', key: 'n', connectionId: CONN.hook }],
+      });
+      expect(legacy.message).toMatch(/user name or password/);
+      expect(invocations.size).toBe(0);
     });
 
     it('refuses before the card a destination the egress guard would refuse, and a non-https one', async () => {
@@ -1706,6 +1764,217 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
   });
 
   // ─── Update and archive ────────────────────────────────────────────────────────────────────────
+
+  // ─── Review fixes (G2 review of #1354) ─────────────────────────────────────────────────────────
+
+  describe('review fixes: the card describes exactly what is sent', () => {
+    it('tokens are parsed like the runtime mapper: `{{ grantee . email }}` is the email', async () => {
+      const { preview } = await propose('workflow_author_version', {
+        workflow: { id: WF.jiraGrant },
+        steps: [
+          {
+            kind: 'WEBHOOK_OUT',
+            key: 'notify',
+            connectionId: CONN.hook,
+            dataMapping: { who: '{{ grantee . email | lower }}' },
+          },
+        ],
+      });
+      expect(change(preview, 'dataSent')!.after).toEqual([
+        "https://hooks.jira.example: who ← {{ grantee . email | lower }} (the person's email)",
+      ]);
+      expect(String(change(preview, 'whatItDoes')!.after)).toContain(
+        "lazyit will send the person's email to",
+      );
+    });
+
+    it('refuses a token lazyit does not know (it would be sent empty) — and a step token needs that step', async () => {
+      for (const template of [
+        '{{ grantee.salary }}',
+        '{{ grantee.__proto__ }}',
+        '{{ secrets.jira }}',
+        '{{ steps.nowhere.id }}',
+        '{{ }}',
+      ]) {
+        const error = await refused('workflow_author_version', {
+          workflow: { id: WF.jiraGrant },
+          steps: [
+            {
+              kind: 'WEBHOOK_OUT',
+              key: 'notify',
+              connectionId: CONN.hook,
+              dataMapping: { x: template },
+            },
+          ],
+        });
+        expect(error.code).toBe('INVALID_INPUT');
+        expect(error.message).toContain('which lazyit does not know');
+      }
+      const { preview } = await propose('workflow_author_version', {
+        workflow: { id: WF.jiraGrant },
+        steps: [
+          { ...REST_STEPS[0], dataMapping: { email: '{{ grantee.email }}' } },
+          {
+            kind: 'WEBHOOK_OUT',
+            key: 'notify',
+            connectionId: CONN.hook,
+            dataMapping: { account: '{{ steps.create-user.id }}' },
+          },
+        ],
+      });
+      expect(change(preview, 'dataSent')!.after).toEqual(
+        expect.arrayContaining([
+          'https://hooks.jira.example: account ← {{ steps.create-user.id }} (a value returned by the earlier step "create-user")',
+        ]),
+      );
+    });
+
+    it('never shows query values of step paths, health-check paths or the probed path', async () => {
+      const { preview } = await propose('workflow_author_version', {
+        workflow: { id: WF.jiraGrant },
+        steps: [
+          {
+            ...REST_STEPS[0],
+            path: '/users?token=PASTED-PATH-TOKEN&email={{ grantee.email }}',
+          },
+        ],
+      });
+      expect(JSON.stringify(preview)).not.toContain('PASTED-PATH-TOKEN');
+      expect(change(preview, 'steps')!.after).toEqual([
+        '1. create-user: POST https://api.jira.example/rest?apikey=… + path /users?token=…&email=…, sending email, display',
+      ]);
+
+      connections.get(CONN.rest)!.config = {
+        ...(connections.get(CONN.rest)!.config as Row),
+        healthCheckPath: '/health?key=PASTED-HEALTH-TOKEN',
+      };
+      probe.mockResolvedValueOnce({
+        ok: true,
+        statusCode: 200,
+        probedPath: '/health?key=PASTED-HEALTH-TOKEN',
+      });
+      const test = await propose('workflow_connection_test', {
+        connection: CONN.rest,
+      });
+      expect(change(test.preview, 'probe')!.after).toBe(
+        'GET https://api.jira.example/rest?apikey=… + /health?key=…',
+      );
+      const approved = await tools.approve(test.id, chat(ADMIN));
+      expect(approved.result).toMatchObject({
+        data: {
+          probedPath: '<untrusted_content>/health?key=…</untrusted_content>',
+        },
+      });
+      expect(JSON.stringify([test.preview, approved.result])).not.toContain(
+        'PASTED-HEALTH-TOKEN',
+      );
+    });
+
+    it('a re-point lists the workflows using the connection and what each enabled one sends to the NEW host', async () => {
+      workflows.get(WF.jiraGrant)!.enabled = true;
+      const { id, preview } = await propose('workflow_connection_update', {
+        connection: CONN.rest,
+        config: {
+          kind: 'REST',
+          baseUrl: 'https://attacker.example/collect',
+          authScheme: 'BEARER',
+        },
+      });
+      expect(preview.warnings.sort()).toEqual(
+        ['EXTERNAL_PROVISIONING', 'OUTBOUND_INTEGRATION'].sort(),
+      );
+      expect(change(preview, 'usedBy')!.after).toEqual([
+        'Provision Jira (on access granted, enabled)',
+      ]);
+      expect(change(preview, 'dataSentToNewHost')!.after).toEqual([
+        "Provision Jira (on access granted): email ← {{ grantee.email }} (the person's email)",
+        'Provision Jira (on access granted): display ← Hello (a fixed text, no lazyit data)',
+        'Provision Jira (on access granted): with its stored credential; default headers Accept, X-Api-Token',
+      ]);
+      expectNoSecrets(preview);
+      // A new version of a workflow the card listed makes the approval STALE.
+      versions.push({
+        id: '9',
+        workflowId: WF.jiraGrant,
+        version: 2,
+        steps: REST_STEPS,
+        createdAt: new Date('2026-09-03T00:00:00.000Z'),
+      });
+      const approved = await tools.approve(id, chat(ADMIN));
+      expect(approved).toMatchObject({
+        status: 'FAILED',
+        result: { error: { code: 'STALE' } },
+      });
+      expect(connections.get(CONN.rest)!.config).toMatchObject({
+        baseUrl: `https://api.jira.example/rest?apikey=${QUERY_SECRET}`,
+      });
+    });
+
+    it('re-pointing a connection that carries default headers needs workflow:secrets, even with no credential', async () => {
+      connections.get(CONN.hook)!.config = {
+        kind: 'REST',
+        baseUrl: 'https://hooks.jira.example',
+        authScheme: 'NONE',
+        defaultHeaders: { 'X-Api-Token': HEADER_VALUE },
+      };
+      connections.get(CONN.hook)!.kind = 'REST';
+      roleMatrix = {
+        ...DEFAULT_ROLE_PERMISSIONS,
+        MEMBER: [
+          ...DEFAULT_ROLE_PERMISSIONS.MEMBER,
+          'ai:use',
+          'workflow:read',
+          'workflow:manage',
+        ],
+      };
+      resolver.invalidate();
+      const error = await refused(
+        'workflow_connection_update',
+        {
+          connection: CONN.hook,
+          config: { kind: 'REST', baseUrl: 'https://attacker.example' },
+        },
+        MEMBER,
+      );
+      expect(error).toMatchObject({ code: 'FORBIDDEN' });
+      expect(error.message).toContain('default headers (X-Api-Token)');
+      expect(error.message).not.toContain(HEADER_VALUE);
+      // Holding workflow:secrets (ADMIN), the card is shown with the header names.
+      const { preview } = await propose('workflow_connection_update', {
+        connection: CONN.hook,
+        config: { kind: 'REST', baseUrl: 'https://attacker.example' },
+      });
+      expect(change(preview, 'defaultHeadersSentToNewHost')!.after).toEqual([
+        'X-Api-Token',
+      ]);
+    });
+
+    it('refuses to dry-run over an offboarded grantee (no card built on a departed person)', async () => {
+      offboarded.add(ID.member);
+      const error = await refused('workflow_set_enabled', {
+        workflow: { id: WF.jiraGrant },
+        enabled: true,
+        sampleAccessGrantId: GRANT_ANA,
+      });
+      expect(error.code).toBe('INVALID_INPUT');
+      expect(error.message).toContain('offboarded');
+      expect(invocations.size).toBe(0);
+    });
+
+    it('wraps other-authored names in refusals the model reads', async () => {
+      const error = await refused('workflow_create', {
+        application: 'Jira',
+        trigger: 'ACCESS_GRANTED',
+        name: 'again',
+      });
+      expect(error.message).toContain(
+        '<untrusted_content>Jira</untrusted_content> already has',
+      );
+      expect(error.message).toContain(
+        '<untrusted_content>Provision Jira</untrusted_content>',
+      );
+    });
+  });
 
   describe('workflow_update and workflow_archive', () => {
     it('update: before → after, the trigger warning; `enabled` is not a field of it', async () => {

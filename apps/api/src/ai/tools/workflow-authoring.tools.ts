@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+} from '@nestjs/common';
 import { z } from 'zod';
 import {
   ManualConnectionConfigSchema,
@@ -18,6 +22,8 @@ import { ConfigController } from '../../config/config.controller';
 import { WorkflowConnectionsController } from '../../workflow-engine/definitions/workflow-connections.controller';
 import { WorkflowsController } from '../../workflow-engine/definitions/workflows.controller';
 import { WorkflowDryRunController } from '../../workflow-engine/dry-run/workflow-dry-run.controller';
+import { templatePaths } from '../../workflow-engine/mapping/data-mapper';
+import { UsersController } from '../../users/users.controller';
 import { assertChannelAllows } from '../core/pending-action';
 import type { AiResolvedReference } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
@@ -181,6 +187,9 @@ const EGRESS_REASONS: Record<string, string> = {
  * so this never replaces it.
  */
 async function assertEgressAllowed(url: string): Promise<void> {
+  if (hasUserinfo(url)) {
+    throw new BadRequestException(USERINFO_REFUSAL);
+  }
   try {
     await assertUrlAllowed(url);
   } catch (err) {
@@ -192,6 +201,20 @@ async function assertEgressAllowed(url: string): Promise<void> {
       );
     }
     throw err;
+  }
+}
+
+const USERINFO_REFUSAL =
+  'A destination URL may not carry a user name or password (https://user:pass@host): store the credential in the lazyit UI and attach it by id.';
+
+/** Whether a URL carries userinfo (`https://user[:pass]@host`) — a credential in plain sight. */
+function hasUserinfo(url: unknown): boolean {
+  if (typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.username !== '' || parsed.password !== '';
+  } catch {
+    return false;
   }
 }
 
@@ -236,16 +259,63 @@ const TOKEN_WORDS: Record<string, string> = {
   'grant.expiresAt': 'when access expires',
 };
 
-const PLACEHOLDER = /\{\{\s*([^}]*?)\s*\}\}/g;
-
-/** The context paths a template reads (filters after `|` dropped). */
+/**
+ * The context paths a template reads, parsed by the RUNTIME mapper's own parser (`templatePaths`,
+ * `mapping/data-mapper.ts`): segments trimmed, filters dropped — so `{{ grantee . email | lower }}` is
+ * described as the email, exactly what the engine sends.
+ */
 function tokensOf(template: string): string[] {
-  const out: string[] = [];
-  for (const match of template.matchAll(PLACEHOLDER)) {
-    const path = match[1].split('|')[0].trim();
-    if (path) out.push(path);
+  return templatePaths(template);
+}
+
+/** Whether the engine can resolve `path` to a known value (`steps.<key>.…` needs a step of this graph). */
+function isKnownToken(path: string, stepKeys: ReadonlySet<string>): boolean {
+  if (TOKEN_WORDS[path]) return true;
+  const [root, key, ...rest] = path.split('.');
+  return (
+    root === 'steps' &&
+    key !== undefined &&
+    stepKeys.has(key) &&
+    rest.length > 0
+  );
+}
+
+/**
+ * Refuse a template the card could not describe honestly: every `{{ … }}` must name a known value (a
+ * typo or an unknown path would render empty at run time, and the card would have to guess).
+ */
+function assertKnownTokens(steps: readonly WorkflowStep[]): void {
+  const keys = new Set(steps.map((s) => s.key));
+  for (const step of steps) {
+    if (step.kind === 'MANUAL') continue;
+    const templates = [
+      ...Object.values(step.dataMapping ?? {}),
+      ...(step.kind === 'REST' ? [step.path] : []),
+    ];
+    for (const template of templates) {
+      for (const token of tokensOf(template)) {
+        if (!isKnownToken(token, keys)) {
+          throw new BadRequestException(
+            `Step "${step.key}" reads {{ ${token} }}, which lazyit does not know (it would be sent empty). Known values: ${Object.keys(
+              TOKEN_WORDS,
+            ).join(', ')}, and steps.<step key>.<field>.`,
+          );
+        }
+      }
+    }
   }
-  return out;
+}
+
+/** A URL path for display: the query's parameter NAMES only (a value may be a pasted credential). */
+function displayPath(path: string): string {
+  const q = path.indexOf('?');
+  if (q === -1) return path;
+  const names = path
+    .slice(q + 1)
+    .split('&')
+    .map((pair) => pair.split('=')[0])
+    .filter(Boolean);
+  return `${path.slice(0, q)}${names.length > 0 ? `?${names.map((n) => `${n}=…`).join('&')}` : ''}`;
 }
 
 function tokenWords(path: string): string {
@@ -331,6 +401,11 @@ function appName(app: Row): string {
   return str(app.name) ?? String(app.id);
 }
 
+/** An application name as the MODEL reads it (summaries, refusals): other-authored, so untrusted. */
+function appForModel(app: Row): string {
+  return untrusted(appName(app)) ?? String(app.id);
+}
+
 /** The application every preview targets: the page that hosts its workflows and connections. */
 function appTarget(app: Row, label?: string): AiEntityRef {
   return {
@@ -384,7 +459,7 @@ async function readWorkflow(
     const match = asRows(page.items).find((w) => w.trigger === ref.trigger);
     if (!match) {
       throw new BadRequestException(
-        `${app.label ?? app.id} has no ${triggerLabel(ref.trigger)} workflow; create it with workflow_create.`,
+        `${untrusted(app.label ?? app.id) ?? app.id} has no ${triggerLabel(ref.trigger)} workflow; create it with workflow_create.`,
       );
     }
     id = String(match.id);
@@ -499,7 +574,7 @@ function describeGraph(
     if (endpoint) urls.push(endpoint);
     const target =
       step.kind === 'REST'
-        ? `${step.method} ${displayUrl(endpoint) ?? origin} + path ${step.path}`
+        ? `${step.method} ${displayUrl(endpoint) ?? origin} + path ${displayPath(step.path)}`
         : `POST ${displayUrl(endpoint) ?? origin} (webhook)`;
     const fields = Object.keys(step.dataMapping ?? {});
     stepLines.push(
@@ -508,7 +583,7 @@ function describeGraph(
     const lines = mappingLines(step.dataMapping);
     if (step.kind === 'REST' && tokensOf(step.path).length > 0) {
       lines.unshift(
-        `URL path ← ${step.path} (${tokensOf(step.path).map(tokenWords).join(', ')})`,
+        `URL path ← ${displayPath(step.path)} (${tokensOf(step.path).map(tokenWords).join(', ')})`,
       );
     }
     for (const line of lines) sends.push(`${origin}: ${line}`);
@@ -632,7 +707,7 @@ const workflowCreate = defineTool({
     ).find((w) => w.trigger === input.trigger);
     if (existing) {
       throw new BadRequestException(
-        `${appName(app)} already has a ${triggerLabel(input.trigger)} workflow ("${str(existing.name) ?? String(existing.id)}"); change it instead.`,
+        `${appForModel(app)} already has a ${triggerLabel(input.trigger)} workflow (${untrusted(str(existing.name)) ?? String(existing.id)}); change it instead.`,
       );
     }
     const changes: Change[] = [
@@ -685,7 +760,7 @@ const workflowCreate = defineTool({
         workflow: workflowSummary(created),
         next: 'It is disabled and has no steps: add them with workflow_author_version, then enable it with workflow_set_enabled.',
       },
-      summary: `Created the ${triggerLabel(input.trigger)} workflow of ${appName(app)} (disabled).`,
+      summary: `Created the ${triggerLabel(input.trigger)} workflow of ${appForModel(app)} (disabled).`,
       entityRefs: [appTarget(app)],
     };
   },
@@ -763,7 +838,7 @@ const workflowUpdate = defineTool({
     );
     return {
       data: { workflow: workflowSummary(updated) },
-      summary: `Updated the ${triggerLabel(workflow.trigger)} workflow of ${appName(app)}.`,
+      summary: `Updated the ${triggerLabel(workflow.trigger)} workflow of ${appForModel(app)}.`,
       entityRefs: [appTarget(app)],
     };
   },
@@ -825,7 +900,7 @@ const workflowArchive = defineTool({
     });
     return {
       data: { workflowId: workflow.id, archived: true },
-      summary: `Archived the ${triggerLabel(workflow.trigger)} workflow of ${appName(app)}.`,
+      summary: `Archived the ${triggerLabel(workflow.trigger)} workflow of ${appForModel(app)}.`,
       entityRefs: [appTarget(app)],
     };
   },
@@ -872,6 +947,7 @@ const workflowAuthorVersion = defineTool({
         );
       }
     }
+    assertKnownTokens(input.steps);
     const next = describeGraph(input.steps, connections);
     for (const url of next.urls) await assertEgressAllowed(url);
     const previousConnections = await readStepConnections(rt, state.steps);
@@ -936,7 +1012,7 @@ const workflowAuthorVersion = defineTool({
               next: 'The workflow is disabled: enable it with workflow_set_enabled (its preview dry-runs it against a sample grant).',
             }),
       },
-      summary: `Saved version ${String(version.version)} of the ${triggerLabel(workflow.trigger)} workflow of ${appName(app)}${
+      summary: `Saved version ${String(version.version)} of the ${triggerLabel(workflow.trigger)} workflow of ${appForModel(app)}${
         workflow.enabled === true ? ' (live now)' : ''
       }.`,
       entityRefs: [appTarget(app)],
@@ -975,6 +1051,32 @@ function dryRunLines(dry: Row): string[] {
     `Ends: ${String(dry.endState)}${dry.wouldPause === true ? ' (pauses for a person)' : ''}`,
   );
   return lines;
+}
+
+/**
+ * The dry-run resolves its sample grant's grantee even when that person was offboarded (the grantee is
+ * a nested read, outside the soft-delete filter). A card built on a departed person's data is not a
+ * useful preview — and shows data nobody should be handling — so it is refused. The grantee is read
+ * through the guarded user route: a 404 (offboarded) refuses; a caller without `user:read` (403) cannot
+ * check, and the card is shown as the dry-run built it.
+ */
+async function assertSampleGranteeLive(
+  rt: AiToolRuntime,
+  dry: Row,
+): Promise<void> {
+  const granteeId = str(asRow(asRow(dry.context).grantee).id);
+  if (!granteeId) return;
+  try {
+    await rt.call(UsersController, 'findOne', { params: { id: granteeId } });
+  } catch (err) {
+    const status = err instanceof HttpException ? err.getStatus() : undefined;
+    if (status === 404) {
+      throw new BadRequestException(
+        'The sample grant belongs to a person who was offboarded: pick an access grant of a current user.',
+      );
+    }
+    if (status !== 403) throw err;
+  }
 }
 
 function sampleLabel(dry: Row): string {
@@ -1021,6 +1123,7 @@ const workflowSetEnabled = defineTool({
     bind(WorkflowsController, 'findOne'),
     bind(WorkflowsController, 'findAll'),
     bind(WorkflowDryRunController, 'run'),
+    bind(UsersController, 'findOne'),
     bind(WorkflowConnectionsController, 'findOne'),
     bind(ApplicationsController, 'findAll'),
     bind(ApplicationsController, 'findOne'),
@@ -1073,6 +1176,7 @@ const workflowSetEnabled = defineTool({
         },
       }),
     );
+    await assertSampleGranteeLive(rt, dry);
     return previewOf({
       app,
       targetLabel: label,
@@ -1103,7 +1207,7 @@ const workflowSetEnabled = defineTool({
     );
     return {
       data: { workflow: workflowSummary(updated) },
-      summary: `${input.enabled ? 'Enabled' : 'Disabled'} the ${triggerLabel(workflow.trigger)} workflow of ${appName(app)}.`,
+      summary: `${input.enabled ? 'Enabled' : 'Disabled'} the ${triggerLabel(workflow.trigger)} workflow of ${appForModel(app)}.`,
       entityRefs: [appTarget(app)],
     };
   },
@@ -1122,6 +1226,9 @@ const connectionConfig = z
     WebhookOutConnectionConfigSchema,
     ManualConnectionConfigSchema,
   ])
+  .refine((config) => !hasUserinfo(endpointOf(config)), {
+    message: USERINFO_REFUSAL,
+  })
   .describe(
     'The connection settings, by kind. REST: { kind, baseUrl (https), authScheme NONE|BEARER|BASIC|HEADER, ' +
       'authHeaderName (HEADER only), healthCheckPath?, healthCheckMethod GET|HEAD? }. WEBHOOK_OUT: { kind, ' +
@@ -1220,7 +1327,7 @@ const connectionCreate = defineTool({
         connection: connectionSummary(created),
         next: 'Use its id in workflow_author_version steps. A credential, if the destination needs one, is stored by an administrator in the lazyit UI.',
       },
-      summary: `Created the ${input.config.kind} connection of ${appName(app)}${
+      summary: `Created the ${input.config.kind} connection of ${appForModel(app)}${
         endpointOf(created.config)
           ? ` to ${originOf(endpointOf(created.config))}`
           : ''
@@ -1242,6 +1349,54 @@ async function readConnectionState(
   return { connection, app };
 }
 
+/** A workflow of the application whose latest version calls a connection. */
+interface ConnectionUser {
+  workflow: Row;
+  steps: WorkflowStep[];
+  latestCreatedAt: unknown;
+}
+
+/** The application's workflows whose LATEST version calls `connectionId` (read as the caller). */
+async function workflowsUsing(
+  rt: AiToolRuntime,
+  applicationId: string,
+  connectionId: string,
+): Promise<ConnectionUser[]> {
+  const page = asRow(
+    await rt.call(WorkflowsController, 'findAll', {
+      query: { applicationId, limit: RESOLVE_PAGE },
+    }),
+  );
+  const users: ConnectionUser[] = [];
+  for (const header of asRows(page.items)) {
+    const workflow = asRow(
+      await rt.call(WorkflowsController, 'findOne', {
+        params: { id: String(header.id) },
+      }),
+    );
+    const latest = asRow(workflow.latestVersion);
+    const steps = WorkflowStepsSchema.safeParse(latest.steps);
+    if (
+      steps.success &&
+      steps.data.some(
+        (s) => s.kind !== 'MANUAL' && s.connectionId === connectionId,
+      )
+    ) {
+      users.push({
+        workflow,
+        steps: steps.data,
+        latestCreatedAt: latest.createdAt,
+      });
+    }
+  }
+  return users;
+}
+
+function usedByLine(user: ConnectionUser): string {
+  const wf = user.workflow;
+  return `${str(wf.name) ?? String(wf.id)} (${triggerLabel(wf.trigger)}, ${wf.enabled === true ? 'enabled' : 'disabled'})`;
+}
+
 const connectionUpdate = defineTool({
   name: 'workflow_connection_update',
   title: 'Change a workflow connection',
@@ -1250,7 +1405,7 @@ const connectionUpdate = defineTool({
     'its kind; the kind cannot change; default headers are kept and set only in the UI), or its ' +
     'credential reference — `secretId` attaches an EXISTING stored credential by id, null detaches it. ' +
     'You never see or set a credential’s value. Attaching a credential, or moving a connection that ' +
-    'carries one to another host, also needs the workflow:secrets permission.',
+    'carries one — or default headers — to another host, also needs the workflow:secrets permission.',
   domain: 'access',
   class: 'elevated',
   externalEffects: true,
@@ -1278,6 +1433,8 @@ const connectionUpdate = defineTool({
   bindings: [
     bind(WorkflowConnectionsController, 'update'),
     bind(WorkflowConnectionsController, 'findOne'),
+    bind(WorkflowsController, 'findAll'),
+    bind(WorkflowsController, 'findOne'),
     bind(ApplicationsController, 'findOne'),
     bind(ConfigController, 'myPermissions'),
   ],
@@ -1305,15 +1462,55 @@ const connectionUpdate = defineTool({
     if (repoint && afterEndpoint) await assertEgressAllowed(afterEndpoint);
     // CSEC-1, read before the card so a card is never shown for a change the route would refuse: attaching
     // a credential, or re-pointing a connection that bears one, also needs `workflow:secrets`. The route
-    // enforces it again at execution — this only mirrors its rule.
+    // enforces it again at execution — this only mirrors its rule. The tool goes one step further than
+    // the route: re-pointing a connection that carries default headers needs it too, because a header
+    // value may be a pasted token and the headers follow the connection to its new host.
     const attaching = input.secretId !== undefined && input.secretId !== null;
-    if (attaching || (willHaveCredential && repoint)) {
+    const carriedHeaders = headerNames(nextConfig);
+    const headersFollow = repoint && carriedHeaders.length > 0;
+    if (attaching || (willHaveCredential && repoint) || headersFollow) {
       const mine = asRow(await rt.call(ConfigController, 'myPermissions'));
       const held = Array.isArray(mine.permissions) ? mine.permissions : [];
       if (!held.includes('workflow:secrets')) {
         throw new ForbiddenException(
-          'Attaching a credential to a connection, or re-pointing the host of a secret-bearing connection, requires the workflow:secrets permission',
+          attaching || (willHaveCredential && repoint)
+            ? 'Attaching a credential to a connection, or re-pointing the host of a secret-bearing connection, requires the workflow:secrets permission'
+            : `Re-pointing this connection requires the workflow:secrets permission: its default headers (${carriedHeaders.join(', ')}) would be sent to the new host and may hold a credential. Remove them in the lazyit UI first, or ask someone who holds workflow:secrets.`,
         );
+      }
+    }
+    // Every workflow whose latest version calls this connection: the card lists them, shows what each
+    // ENABLED one would send to the new host, and anchors STALE on them.
+    const users = await workflowsUsing(
+      rt,
+      String(app.id),
+      String(connection.id),
+    );
+    const anchors: unknown[] = [app.updatedAt, connection.updatedAt];
+    const warnings = new Set<AiPreviewWarningCode>(['OUTBOUND_INTEGRATION']);
+    const sentToNewHost: string[] = [];
+    for (const user of users) {
+      anchors.push(user.workflow.updatedAt, user.latestCreatedAt);
+      if (user.workflow.enabled !== true) continue;
+      warnings.add(triggerWarning(user.workflow.trigger));
+      if (!repoint) continue;
+      const stepConnections = await readStepConnections(rt, user.steps);
+      for (const other of stepConnections.values())
+        anchors.push(other.updatedAt);
+      stepConnections.set(String(connection.id), {
+        ...connection,
+        config: nextConfig,
+        secretId: willHaveCredential
+          ? (input.secretId ?? connection.secretId)
+          : null,
+      });
+      const described = describeGraph(user.steps, stepConnections);
+      for (const line of described.sends) {
+        if (afterHost && line.startsWith(`${afterHost}: `)) {
+          sentToNewHost.push(
+            `${str(user.workflow.name) ?? String(user.workflow.id)} (${triggerLabel(user.workflow.trigger)}): ${line.slice(afterHost.length + 2)}`,
+          );
+        }
       }
     }
 
@@ -1366,10 +1563,15 @@ const connectionUpdate = defineTool({
         'signatureHeader',
       ] as const) {
         if ((currentConfig[field] ?? null) !== (nextConfig[field] ?? null)) {
+          // A path's query values may be a pasted credential: names only.
+          const shown = (value: unknown) =>
+            typeof value === 'string' && field === 'healthCheckPath'
+              ? displayPath(value)
+              : (value ?? null);
           changes.push({
             field,
-            before: currentConfig[field] ?? null,
-            after: nextConfig[field] ?? null,
+            before: shown(currentConfig[field]),
+            after: shown(nextConfig[field]),
           });
         }
       }
@@ -1396,6 +1598,15 @@ const connectionUpdate = defineTool({
         'Nothing to change: every value given already matches the connection.',
       );
     }
+    if (users.length > 0) {
+      changes.push({ field: 'usedBy', after: users.map(usedByLine) });
+    }
+    if (repoint && sentToNewHost.length > 0) {
+      changes.push({ field: 'dataSentToNewHost', after: sentToNewHost });
+      sentences.push(
+        `Enabled workflows will send their data to ${afterHost} from their next run.`,
+      );
+    }
     changes.unshift({
       field: 'whatItDoes',
       after:
@@ -1406,9 +1617,9 @@ const connectionUpdate = defineTool({
     return previewOf({
       app,
       targetLabel: `${connectionLabel(connection)} of ${appName(app)}`,
-      anchor: anchorOf(app.updatedAt, connection.updatedAt),
+      anchor: anchorOf(...anchors),
       changes,
-      warnings: ['OUTBOUND_INTEGRATION'],
+      warnings,
     });
   },
   async run(input, rt) {
@@ -1431,7 +1642,7 @@ const connectionUpdate = defineTool({
     );
     return {
       data: { connection: connectionSummary(updated) },
-      summary: `Updated the ${String(updated.kind)} connection of ${appName(app)}.`,
+      summary: `Updated the ${String(updated.kind)} connection of ${appForModel(app)}.`,
       entityRefs: [appTarget(app)],
     };
   },
@@ -1466,36 +1677,20 @@ const connectionArchive = defineTool({
   async preview(input, rt) {
     assertChatHuman(rt);
     const { connection, app } = await readConnectionState(rt, input.connection);
-    const users: string[] = [];
     const warnings: AiPreviewWarningCode[] = ['SOFT_DELETE', 'IRREVERSIBLE'];
-    const page = asRow(
-      await rt.call(WorkflowsController, 'findAll', {
-        query: { applicationId: String(app.id), limit: RESOLVE_PAGE },
-      }),
-    );
     const anchors: unknown[] = [app.updatedAt, connection.updatedAt];
-    for (const header of asRows(page.items)) {
-      const wf = asRow(
-        await rt.call(WorkflowsController, 'findOne', {
-          params: { id: String(header.id) },
-        }),
-      );
-      const steps = WorkflowStepsSchema.safeParse(
-        asRow(wf.latestVersion).steps,
-      );
-      const uses =
-        steps.success &&
-        steps.data.some(
-          (s) => s.kind !== 'MANUAL' && s.connectionId === connection.id,
-        );
-      if (uses) {
-        users.push(
-          `${str(wf.name) ?? String(wf.id)} (${triggerLabel(wf.trigger)}, ${wf.enabled === true ? 'enabled' : 'disabled'})`,
-        );
-        anchors.push(wf.updatedAt, asRow(wf.latestVersion).createdAt);
-        if (wf.enabled === true) warnings.push(triggerWarning(wf.trigger));
+    const using = await workflowsUsing(
+      rt,
+      String(app.id),
+      String(connection.id),
+    );
+    for (const user of using) {
+      anchors.push(user.workflow.updatedAt, user.latestCreatedAt);
+      if (user.workflow.enabled === true) {
+        warnings.push(triggerWarning(user.workflow.trigger));
       }
     }
+    const users = using.map(usedByLine);
     return previewOf({
       app,
       targetLabel: `${connectionLabel(connection)} of ${appName(app)}`,
@@ -1522,7 +1717,7 @@ const connectionArchive = defineTool({
     });
     return {
       data: { connectionId: connection.id, archived: true },
-      summary: `Archived the ${String(connection.kind)} connection of ${appName(app)}.`,
+      summary: `Archived the ${String(connection.kind)} connection of ${appForModel(app)}.`,
       entityRefs: [appTarget(app)],
     };
   },
@@ -1558,7 +1753,7 @@ const connectionTest = defineTool({
     }
     const baseUrl = str(config.baseUrl) ?? '';
     await assertEgressAllowed(baseUrl);
-    const path = str(config.healthCheckPath) ?? '/';
+    const path = displayPath(str(config.healthCheckPath) ?? '/');
     const method = str(config.healthCheckMethod) ?? 'GET';
     const credential = !!connection.secretId;
     return previewOf({
@@ -1596,13 +1791,19 @@ const connectionTest = defineTool({
           ? { status: outcome.status }
           : {}),
         ...(typeof outcome.probedPath === 'string'
-          ? { probedPath: outcome.probedPath }
+          ? { probedPath: untrusted(displayPath(outcome.probedPath)) }
           : {}),
         // The diagnostic may echo the remote system's words: data, never instructions.
-        message: untrusted(str(outcome.message)),
+        message: untrusted(
+          typeof outcome.probedPath === 'string'
+            ? (str(outcome.message) ?? '')
+                .split(outcome.probedPath)
+                .join(displayPath(outcome.probedPath))
+            : str(outcome.message),
+        ),
         requestId: outcome.requestId,
       },
-      summary: `Tested the connection of ${appName(app)} to ${originOf(endpointOf(connection.config)) ?? 'its host'}: ${
+      summary: `Tested the connection of ${appForModel(app)} to ${originOf(endpointOf(connection.config)) ?? 'its host'}: ${
         outcome.ok === true ? 'it answered' : 'it failed'
       }.`,
       entityRefs: [appTarget(app)],
