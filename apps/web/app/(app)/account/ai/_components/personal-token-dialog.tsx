@@ -46,8 +46,9 @@ type Access = "read" | "read-write";
  * Create a personal MCP token (plain-HTTP instances; mcp-and-oauth.md §14). Two steps in one dialog:
  * the form (name, mandatory expiry, read-only or read & write — never admin), then the one-time reveal.
  *
- * The cleartext token lives only in this dialog's state (from the mutation result, never the query
- * cache) and is dropped when the dialog closes. While it is shown and unacknowledged the dialog cannot
+ * The cleartext token lives only in this dialog's state: the mutation is reset as soon as it answers
+ * (and has `gcTime: 0`), so neither the query nor the mutation cache keeps it, and it is dropped when
+ * the dialog closes. While it is shown and unacknowledged the dialog cannot
  * be dismissed by accident (the #813 lock).
  */
 export function PersonalTokenDialog({
@@ -138,8 +139,15 @@ function CreateForm({
             : ["lazyit.read", "lazyit.write"],
       },
       {
-        onSuccess: onCreated,
-        onError: (err) => setError(createErrorMessage(err, t)),
+        onSuccess: (created) => {
+          onCreated(created);
+          // Drop the token from the mutation cache; the reveal keeps its own copy (gcTime is 0 too).
+          create.reset();
+        },
+        onError: (err) => {
+          setError(createErrorMessage(err, t));
+          create.reset();
+        },
       },
     );
   }
@@ -277,7 +285,8 @@ function TokenReveal({
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    URL.revokeObjectURL(url);
+    // Deferred: revoking synchronously can cancel the download before the browser has read the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   return (

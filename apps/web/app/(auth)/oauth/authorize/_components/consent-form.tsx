@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useOAuthConsentDecision } from "@/lib/api/hooks/use-oauth-grants";
+import { loginCallbackPath } from "@/lib/auth/login-callback";
 import { signOutAndRevoke } from "@/lib/auth/sign-out";
 import {
   type AccessLevel,
@@ -42,6 +43,7 @@ import {
   classifyDecisionSuccess,
   consentChoices,
   type DecisionOutcome,
+  redirectTrustLabel,
   scopesToGrant,
 } from "../_lib/consent";
 import { ConsentMessage, type ConsentStop } from "./consent-message";
@@ -87,6 +89,8 @@ export function ConsentForm({
   const granted = scopesToGrant(consent.scopes, level, admin);
   const busy = decision.isPending || done !== null;
   const { client, redirectHost, redirectUri } = consent;
+  // The trust signal: the host, or `scheme:// (host)` for a custom-scheme redirect.
+  const destination = redirectTrustLabel(redirectUri, redirectHost);
 
   function handleOutcome(
     outcome: DecisionOutcome,
@@ -94,6 +98,7 @@ export function ConsentForm({
   ): void {
     switch (outcome.kind) {
       case "redirect":
+        setPassword("");
         setDone(kind === "approve" ? "approved" : "denied");
         window.location.assign(outcome.redirectTo);
         return;
@@ -133,10 +138,16 @@ export function ConsentForm({
         ...(kind === "approve" && admin && password ? { password } : {}),
       },
       {
-        onSuccess: (response) =>
-          handleOutcome(classifyDecisionSuccess(response, redirectUri), kind),
-        onError: (error) =>
-          handleOutcome(classifyDecisionError(error, redirectUri), kind),
+        // Each answer is read once, then the mutation is reset (with `gcTime: 0`), so neither the
+        // password nor the code in the redirect stays in the mutation cache.
+        onSuccess: (response) => {
+          decision.reset();
+          handleOutcome(classifyDecisionSuccess(response, redirectUri), kind);
+        },
+        onError: (error) => {
+          decision.reset();
+          handleOutcome(classifyDecisionError(error, redirectUri), kind);
+        },
       },
     );
   }
@@ -172,7 +183,7 @@ export function ConsentForm({
                 {done === "approved" ? t("done.approvedTitle") : t("done.deniedTitle")}
               </CardTitle>
               <CardDescription>
-                {t("done.body", { name: client.name, host: redirectHost })}
+                {t("done.body", { name: client.name, host: destination })}
               </CardDescription>
             </div>
           </div>
@@ -213,7 +224,7 @@ export function ConsentForm({
             <h2 id="consent-redirect" className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
               {t("redirect.heading")}
             </h2>
-            <p className="font-mono text-base font-semibold break-all">{redirectHost}</p>
+            <p className="font-mono text-base font-semibold break-all">{destination}</p>
             <p className="font-mono text-xs break-all text-muted-foreground">{redirectUri}</p>
             {consent.loopbackOnly ? (
               <p className="text-xs text-muted-foreground">{t("redirect.loopback")}</p>
@@ -228,7 +239,7 @@ export function ConsentForm({
 
           {!client.verified ? (
             <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
-              {t("unverifiedWarning", { host: redirectHost })}
+              {t("unverifiedWarning", { host: destination })}
             </Callout>
           ) : null}
 
@@ -323,7 +334,8 @@ export function ConsentForm({
             <button
               type="button"
               className="underline underline-offset-2 hover:text-foreground"
-              onClick={() => void signOutAndRevoke()}
+              // Sign in as the right person and come straight back to this request.
+              onClick={() => void signOutAndRevoke(loginCallbackPath(window.location))}
               disabled={busy}
             >
               {t("signOut")}
@@ -339,7 +351,7 @@ export function ConsentForm({
             <AlertDialogDescription>
               {t("confirmUnverified.body", {
                 name: client.name,
-                host: redirectHost,
+                host: destination,
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
