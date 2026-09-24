@@ -169,6 +169,15 @@ const TYPE_META: Record<
     tone: "bg-pillar-inventory/10 text-pillar-inventory",
     href: (n) => (n.entityId ? `/assets/${n.entityId}` : "/assets"),
   },
+  // A new external AI agent connection (OAuth grant or personal MCP token) was used on the recipient's
+  // account for the first time (ADR-0097, security §6.3) — a TARGETED security notice. No entityId: it
+  // deep-links by TYPE to the user's AI connections, where it can be revoked. Destructive tone: "if this
+  // wasn't you, act now".
+  "mcp.client_connected": {
+    icon: ShieldExclamationIcon,
+    tone: "bg-destructive/10 text-destructive",
+    href: () => "/account/ai",
+  },
 };
 
 /** Fallback meta for an unknown future type (defensive — the closed enum should make this unreachable). */
