@@ -13,6 +13,7 @@ import {
   AiToolResultSchema,
   DEFAULT_ROLE_PERMISSIONS,
   pageOf,
+  UpdateConsumableSchema,
   type AiToolClass,
   type PageQuery,
   type Permission,
@@ -841,6 +842,25 @@ describe('consumables toolset (W2-7)', () => {
       expect(JSON.stringify(result.data)).not.toContain(INJECTION);
     });
 
+    it('detail "full" adds the free text, wrapped as untrusted', async () => {
+      const result = ok(
+        await tools.invoke(
+          'consumable_search',
+          { query: 'toner', detail: 'full' },
+          chat(actor('MEMBER')),
+        ),
+      );
+      const [item] = (result.data as { items: Array<Record<string, unknown>> })
+        .items;
+      expect(item).toMatchObject({
+        id: TONER,
+        lowStock: false,
+        updatedAt: T0,
+        description: `<untrusted_content>${INJECTION}</untrusted_content>`,
+        notes: '<untrusted_content>Cabinet B</untrusted_content>',
+      });
+    });
+
     it('pages with the tool size and marks truncation with nextOffset', async () => {
       const result = ok(
         await tools.invoke(
@@ -994,6 +1014,36 @@ describe('consumables toolset (W2-7)', () => {
       });
     });
 
+    it('never resolves from a partial page: more matches than one page is AMBIGUOUS, and an MCP write does not run', async () => {
+      // 250 rows match the substring; the one page read holds only the exact-looking match.
+      consumables.findPage.mockImplementationOnce(
+        (_filters: unknown, page: PageQuery) =>
+          Promise.resolve(pageOf([{ ...store.get(TONER)! }], 250, page)),
+      );
+      const result = await tools.invoke(
+        'consumable_record_movement',
+        { consumable: 'TN-26A', type: 'OUT', quantity: 1 },
+        mcp(actor('MEMBER')),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        mutated: false,
+        error: { code: 'AMBIGUOUS_REFERENCE', status: 409 },
+      });
+      expect((result as { error: { message: string } }).error.message).toMatch(
+        /use the consumable's id/,
+      );
+      expect(consumables.findPage.mock.calls[0][1]).toMatchObject({
+        limit: 200,
+      });
+      expect(consumables.createMovement).not.toHaveBeenCalled();
+      expect(movements).toHaveLength(3);
+      expect(ledger.map((e) => [e.event, e.errorCode])).toEqual([
+        ['ATTEMPTED', null],
+        ['FAILED', 'AMBIGUOUS_REFERENCE'],
+      ]);
+    });
+
     it('an ambiguous name asks which one; a substring or unknown reference is not found', async () => {
       const ambiguous = await tools.invoke(
         'consumable_get',
@@ -1115,6 +1165,19 @@ describe('consumables toolset (W2-7)', () => {
           ['consumable_get', true],
           ['consumable_search', true],
         ],
+      );
+    });
+
+    it("consumable_update offers exactly the route's editable fields (UpdateConsumableSchema)", async () => {
+      const [update] = (await tools.list(mcp(actor('ADMIN')))).filter(
+        (t) => t.name === 'consumable_update',
+      );
+      const properties = Object.keys(
+        (update.inputSchema as { properties: Record<string, unknown> })
+          .properties,
+      ).sort();
+      expect(properties).toEqual(
+        ['consumable', ...Object.keys(UpdateConsumableSchema.shape)].sort(),
       );
     });
 

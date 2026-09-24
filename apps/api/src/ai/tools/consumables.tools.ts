@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ConsumableMovementTypeSchema,
   CreateConsumableSchema,
+  UpdateConsumableSchema,
   INT4_MAX,
   int4,
   type AiEntityRef,
@@ -13,7 +14,10 @@ import {
   AI_TOOL_LIST_DEFAULT_LIMIT,
   AI_TOOL_LIST_MAX_LIMIT,
 } from '../ai.constants';
-import type { AiResolvedReference } from '../core/reference-resolver';
+import {
+  AiReferenceError,
+  type AiResolvedReference,
+} from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
 import {
   bind,
@@ -143,10 +147,18 @@ function consumableRef(
 /** A Prisma `cuid()` (v1: `c` + 24 lower-case alphanumerics) — passed straight through as an id. */
 const CUID = /^c[a-z0-9]{24}$/;
 
+/** The rows one reference lookup reads: the list route's page maximum (ADR-0030). */
+const RESOLVE_PAGE = 200;
+
 /**
  * Resolve a consumable reference (id | SKU | exact name) through the bound, guarded list route. The
  * route's `q` is a substring search; only exact (case-insensitive) SKU or name matches count, and more
  * than one is `AMBIGUOUS_REFERENCE`. The read is bounded by the route's page maximum.
+ *
+ * A PARTIAL page never decides: when more rows match the substring than one page holds, an exact match
+ * may sit past it (a second consumable with the same name, or the one meant), so the reference is
+ * refused as `AMBIGUOUS_REFERENCE` instead of resolved. That matters for MCP and headless writes, which
+ * run without a preview card a person could catch a wrong target on.
  */
 function resolveConsumable(
   rt: AiToolRuntime,
@@ -158,10 +170,17 @@ function resolveConsumable(
     isId: (r) => CUID.test(r),
     lookup: async (r) => {
       const page = await rt.call(ConsumablesController, 'findAll', {
-        query: { q: r, limit: '200' },
+        query: { q: r, limit: String(RESOLVE_PAGE) },
       });
+      const shown = asRows(page.items);
+      if (typeof page.total !== 'number' || page.total > shown.length) {
+        throw new AiReferenceError(
+          'AMBIGUOUS_REFERENCE',
+          `"${r}" matches more than ${RESOLVE_PAGE} consumables; use the consumable's id (from consumable_search)`,
+        );
+      }
       const needle = r.toLowerCase();
-      return asRows(page.items)
+      return shown
         .filter(
           (row) =>
             str(row.sku)?.toLowerCase() === needle ||
@@ -212,7 +231,8 @@ const consumableSearch = defineTool({
     'Search the stock-counted supplies (cables, adapters, toner…). `query` matches the name, SKU and ' +
     'description; `lowStock` keeps only items at or below their reorder threshold; `categoryId` restricts ' +
     'to one consumable category (find it with reference_lookup). Returns a page of consumables with their ' +
-    'ids, current stock and threshold, and the total. Archived consumables are not listed.',
+    'ids, current stock and threshold, and the total; detail "full" adds the description and notes. ' +
+    'Archived consumables are not listed.',
   domain: 'consumables',
   class: 'read',
   idempotent: true,
@@ -231,6 +251,10 @@ const consumableSearch = defineTool({
     categoryId: z.cuid().optional().describe('A consumable category id.'),
     sort: z.enum(SORT_FIELDS).optional(),
     dir: z.enum(['asc', 'desc']).optional(),
+    detail: z
+      .enum(['concise', 'full'])
+      .default('concise')
+      .describe('"full" adds the description, notes and timestamps.'),
     limit: pageSize,
     offset: z
       .number()
@@ -255,7 +279,9 @@ const consumableSearch = defineTool({
         offset: String(offset),
       },
     });
-    const items = asRows(page.items).map(consumableSummary);
+    const items = asRows(page.items).map(
+      input.detail === 'full' ? consumableDetail : consumableSummary,
+    );
     const total = typeof page.total === 'number' ? page.total : items.length;
     const nextOffset = offset + items.length;
     return {
@@ -394,16 +420,11 @@ const consumableCreate = defineTool({
   },
 });
 
-/** The editable fields, as `PATCH /consumables/:id` accepts them (`UpdateConsumableSchema`). */
-const UPDATE_FIELDS = {
-  name: z.string().trim().min(1).max(200),
-  sku: z.string().trim().min(1).max(100),
-  categoryId: z.cuid(),
-  description: z.string().trim().min(1).max(1000),
-  minStock: int4({ min: 0 }),
-  unit: z.string().trim().min(1).max(50),
-  notes: z.string().trim().min(1).max(2000),
-};
+/**
+ * The editable fields, taken from the route's own body schema (`UpdateConsumableSchema`, already
+ * partial) so the tool cannot drift from what `PATCH /consumables/:id` accepts.
+ */
+const UPDATE_FIELDS = UpdateConsumableSchema.shape;
 type UpdateField = keyof typeof UPDATE_FIELDS;
 const UPDATE_FIELD_NAMES = Object.keys(UPDATE_FIELDS) as UpdateField[];
 
@@ -421,17 +442,15 @@ const consumableUpdate = defineTool({
   input: z
     .strictObject({
       consumable: reference,
-      name: UPDATE_FIELDS.name.optional(),
-      sku: UPDATE_FIELDS.sku.optional(),
-      categoryId: UPDATE_FIELDS.categoryId
-        .optional()
-        .describe('A consumable category id.'),
-      description: UPDATE_FIELDS.description.optional(),
-      minStock: UPDATE_FIELDS.minStock
-        .optional()
-        .describe('Reorder threshold.'),
-      unit: UPDATE_FIELDS.unit.optional(),
-      notes: UPDATE_FIELDS.notes.optional(),
+      name: UPDATE_FIELDS.name,
+      sku: UPDATE_FIELDS.sku,
+      categoryId: UPDATE_FIELDS.categoryId.describe(
+        'A consumable category id.',
+      ),
+      description: UPDATE_FIELDS.description,
+      minStock: UPDATE_FIELDS.minStock.describe('Reorder threshold.'),
+      unit: UPDATE_FIELDS.unit,
+      notes: UPDATE_FIELDS.notes,
     })
     .refine((v) => UPDATE_FIELD_NAMES.some((f) => v[f] !== undefined), {
       error: 'At least one field must be provided to update',
