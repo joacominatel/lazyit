@@ -541,3 +541,51 @@ describe("AI_SETTINGS_ERROR_CODES", () => {
     ).toMatchObject({ reason: "DESTINATION_CHANGED" });
   });
 });
+
+describe("Provider-native web search settings (#1389)", () => {
+  const readBase = {
+    ...baseUpdate,
+    apiKeySet: false,
+    keyConfigured: true,
+    disclosureAcknowledgedAt: null,
+    verifiedAt: null,
+    updatedAt: null,
+  };
+
+  test("off by default, with the default cap", () => {
+    expect(AI_SETTINGS_DEFAULTS.webSearchEnabled).toBe(false);
+    expect(AI_SETTINGS_DEFAULTS.webSearchMaxUses).toBe(5);
+  });
+
+  test("a read from an API that predates web search parses as off", () => {
+    const parsed = AiSettingsSchema.parse(readBase);
+    expect(parsed.webSearchEnabled).toBe(false);
+    expect(parsed.webSearchMaxUses).toBe(5);
+  });
+
+  test("a write may omit both fields (a caller written before them keeps working)", () => {
+    const parsed = UpdateAiSettingsSchema.parse(baseUpdate);
+    expect(parsed.webSearchEnabled).toBeUndefined();
+    expect(parsed.webSearchMaxUses).toBeUndefined();
+  });
+
+  test("the cap is bounded to 1–20", () => {
+    expect(UpdateAiSettingsSchema.safeParse({ ...baseUpdate, webSearchMaxUses: 0 }).success).toBe(false);
+    expect(UpdateAiSettingsSchema.safeParse({ ...baseUpdate, webSearchMaxUses: 21 }).success).toBe(false);
+    expect(
+      UpdateAiSettingsSchema.safeParse({ ...baseUpdate, webSearchEnabled: true, webSearchMaxUses: 20 })
+        .success,
+    ).toBe(true);
+  });
+
+  test("turning it on is accepted for any provider (it only takes effect where supported)", () => {
+    expect(
+      UpdateAiSettingsSchema.safeParse({
+        ...baseUpdate,
+        provider: "openai-compatible",
+        baseUrl: "https://llm.example.com/v1",
+        webSearchEnabled: true,
+      }).success,
+    ).toBe(true);
+  });
+});

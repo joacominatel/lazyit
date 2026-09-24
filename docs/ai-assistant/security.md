@@ -368,6 +368,7 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 | Migrator imports (CSV) | whoever made the file | [R] [[0069-migrator-import]] |
 | AD/LDAP directory attributes | whoever can edit the directory | [A] [[0091-on-prem-ad-ldap-directory-source]]; not read in depth |
 | Attachments, if a tool extracts their text | uploader | [A] [[0082-attachments-storage]] |
+| Provider web search results (#1389, when the admin turns it on) | **anyone on the internet** | [R] §6.11 |
 
 **Private data** [C]: the user directory (names, emails), the access map, asset assignments,
 restricted KB folders, audit logs (for `logs:read` holders), infrastructure topology, workflow run
@@ -388,6 +389,7 @@ the **exfiltration leg** and the **consequential-action leg**.
 | Workflow `WEBHOOK_OUT` / `REST` to configured URLs [R] | no | Authoring definitions and connections is T4 elevated, **chat only**, with the `OUTBOUND_INTEGRATION` warning; secrets and the egress allowlist are never tools. Retry/replay is T2. See §6.9. |
 | Instance email (SMTP test, notification templates) | no | Templates are fixed [R: ADR-0079 §6]. SMTP settings are T4. Low residual risk. |
 | A generic HTTP fetch, web-browse or email-compose tool | yes | **Forbidden class**: none in the catalog. Adding one completes the trifecta. |
+| Provider-native web search (#1389) | the model writes the query | **Opt-in, chat only** (§6.11). The query is a residual exfiltration channel to the search, which the provider operates; it adds no destination the provider does not already receive the whole context. No lazyit-side fetch exists. |
 | MCP client's other servers | out of our control | Disclosure plus scopes (T-24, §11 E3). |
 | Headless output returned to the caller | n/a | Not an exfiltration channel: the caller already holds the SA token. |
 
@@ -790,6 +792,51 @@ Open items recorded by the G2 review of #1354 (W2-14):
   Service Account and no MCP client does it.
 - **INV-AI-16 — Workflow secrets are reference-only.** The AI never reads, sets or rotates a workflow
   secret value; it may state whether a connection has a credential configured.
+
+### 6.11 Provider-native web search (ADR-0097 decision 3, amended 2026-09-24 for #1389)
+
+The CEO chose **"Búsqueda nativa del proveedor"**: the assistant may search the web, but only through the
+LLM provider's own server-side search tool. As built:
+
+- **No new egress from lazyit.** The provider layer declares the provider's search on the model call
+  (Anthropic `web_search_20250305`, OpenAI Responses `web_search`, Gemini `google_search` on Gemini 3+);
+  the provider runs it. lazyit never executes it, never answers it, and has no URL fetch or search of its
+  own — the "generic egress tool" exclusion stands. The one outbound request is still the model call,
+  through the egress guard (INV-AI-7). The OpenAI-compatible provider has no native search: absent.
+- **Off by default, admin switch** (`AiSettings.webSearchEnabled`, audited). The Settings card discloses
+  what leaves: the query and the conversation context go to the provider's search, which may pass the
+  query on to its search backend or a search partner — the provider already
+  receives the context (§6.4 (a)); the new element is that the provider may send the **query** to its
+  search backend or a search partner, under the operator's contract with the provider.
+- **Chat only.** Headless runs never search: their writes run without a human approving them, and a
+  search result is text any attacker can publish — an injected instruction would otherwise reach an
+  unreviewed write. MCP runs no model inside lazyit.
+- **Untrusted by construction (INV-AI-4), for the rest of the conversation.** A step that searched adds
+  the `webSearch` marker to the turn's untrusted sources, and — because the results stay in the history
+  and are replayed to the model on every later turn — the runtime seeds the marker on **every** turn of a
+  conversation that has any `lazyit-web-search-v1` record (G2 review: a per-run marker let a planted
+  instruction act one turn later). So **once the assistant has searched the web in a conversation,
+  nothing in that conversation is auto-approved anymore**: every proposal carries the untrusted-source
+  banner and core refuses automatic approval for any preview naming an untrusted source. A resumed turn
+  rebuilds it the same way. The prompt tells the model results are data, never instructions, and to
+  prefer lazyit's records and KB.
+- **OpenAI `open_page`.** The Responses `web_search` tool can take `open_page` / `find_in_page` actions
+  on a URL the model chooses; neither the API nor the SDK can disable an action (only domain filters,
+  context size, location and `external_web_access`). An injected instruction could otherwise make the model
+  "open" an attacker URL carrying data in its query string, reaching a third party directly. lazyit sends
+  `external_web_access: false` (cached / indexed content only, per the AI SDK provider docs — the OpenAI
+  API page could not be fetched from the build environment), so no page is fetched live from its host; the
+  action itself remains and is disclosed on the Settings card and in the Manual. Residual: the provider's
+  own cache lookups. Anthropic `web_search_20250305` and Gemini `google_search` expose only search.
+- **Exfiltration by query.** An injected instruction (from a lazyit record or a search result) could make
+  the model put private data into a query. Residual risk, accepted with the switch: the query goes to the
+  provider, which already holds the whole context; the prompt forbids secrets and personal data in a query;
+  secrets never enter the context (INV-AI-5). Operators who cannot accept it leave the switch off.
+- **Rendering.** Sources are shown as plain-text titles with `http(s)`-only links (`AiWebSourceListSchema`
+  on the API, re-checked by the web), `target="_blank"` and `rel="noopener noreferrer"`. Model text keeps
+  its own renderer (§6.1: no images, no auto-links).
+- **Freeze.** The switch applies to conversations started while it is on; turning it off closes the
+  conversations that have it (`CONFIG_CHANGED`) — the kill switch applies at the next message or step.
 
 ---
 

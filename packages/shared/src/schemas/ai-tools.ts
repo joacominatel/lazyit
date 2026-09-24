@@ -48,6 +48,9 @@ export type AiToolName = z.infer<typeof AiToolNameSchema>;
 /**
  * The entity types a tool result may reference (tools-and-execution.md §16). The web maps each type it
  * knows to a route; the API never sends an href (R3).
+ *
+ * `webSearch` is not a lazyit record: it is the marker the runtime adds to a turn's untrusted sources when
+ * the provider searched the web in it (#1389, {@link AI_WEB_SEARCH_SOURCE_REF}). It has no page.
  */
 export const AI_ENTITY_TYPES = [
   "asset",
@@ -68,6 +71,7 @@ export const AI_ENTITY_TYPES = [
   "manualTask",
   /** The instance's single asset tag scheme (instance configuration, #1394); id `singleton`. */
   "assetTagScheme",
+  "webSearch",
 ] as const;
 export const AiEntityTypeSchema = z.enum(AI_ENTITY_TYPES);
 export type AiEntityType = z.infer<typeof AiEntityTypeSchema>;
@@ -94,6 +98,19 @@ export const AiEntityRefSchema = EntityPointerSchema.extend({
   parent: EntityPointerSchema.optional(),
 });
 export type AiEntityRef = z.infer<typeof AiEntityRefSchema>;
+
+/**
+ * The untrusted-source marker of a turn in which the provider ran a web search (#1389; ADR-0097 decision 3
+ * as amended 2026-09-24). Search results are content other people wrote, like a note or an article body:
+ * the turn counts as having read untrusted sources, so a proposal made in it shows the untrusted-source
+ * banner and is never auto-approved.
+ */
+export const AI_WEB_SEARCH_SOURCE_REF: AiEntityRef = Object.freeze({
+  type: "webSearch",
+  id: "web",
+  op: "updated",
+  label: "Web search results",
+});
 
 /**
  * The READ-TOLERANT list of entity refs used inside every read shape: each item is parsed on its own and

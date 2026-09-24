@@ -1,5 +1,8 @@
 import {
   AI_PROVIDER_DESCRIPTORS,
+  AI_WEB_SEARCH_MAX_USES_MAX,
+  AI_WEB_SEARCH_MAX_USES_MIN,
+  aiWebSearchSupported,
   type AiConnectionDraft,
   AiConnectionTestResultSchema,
   type AiConnectionTestResult,
@@ -54,6 +57,8 @@ export function settingsToUpdate(settings: AiSettings): UpdateAiSettings {
       (id) => McpClientAllowlistEntryIdSchema.safeParse(id).success,
     ),
     mcpAllowAnyHttpsClient: settings.mcpAllowAnyHttpsClient,
+    webSearchEnabled: settings.webSearchEnabled,
+    webSearchMaxUses: settings.webSearchMaxUses,
   };
 }
 
@@ -512,6 +517,41 @@ export function toggleRemovedDefault(
 ): string[] {
   const rest = removedIds.filter((removedId) => removedId !== id);
   return remove ? [...rest, id] : rest;
+}
+
+/* ─────────────────────────────── web search (#1389) ─────────────────────────────── */
+
+/**
+ * Whether the provider's native web search can work with the saved configuration, and if not, why —
+ * the key under `aiSettings.webSearch.availability`:
+ *   - `available`           — the provider and model support it;
+ *   - `noProvider`          — no provider is configured yet;
+ *   - `providerUnsupported` — the provider has no native search (OpenAI-compatible);
+ *   - `modelUnsupported`    — the provider has one, but not for this model (Gemini before 3).
+ * The API applies the same shared rule (`aiWebSearchSupported`); the switch stays usable when it is
+ * already on, so an admin can always turn it off.
+ */
+export type WebSearchAvailability =
+  | "available"
+  | "noProvider"
+  | "providerUnsupported"
+  | "modelUnsupported";
+
+export function webSearchAvailability(
+  settings: Pick<AiSettings, "provider" | "model">,
+): WebSearchAvailability {
+  const provider = settings.provider;
+  if (!provider) return "noProvider";
+  if (!AI_PROVIDER_DESCRIPTORS[provider].supportsWebSearch) return "providerUnsupported";
+  return aiWebSearchSupported(provider, settings.model ?? "") ? "available" : "modelUnsupported";
+}
+
+/** The per-call search cap typed into the field, or null when outside the shared bounds. */
+export function parseWebSearchMaxUses(raw: string): number | null {
+  const value = parsePositiveInt(raw);
+  return value !== null && value >= AI_WEB_SEARCH_MAX_USES_MIN && value <= AI_WEB_SEARCH_MAX_USES_MAX
+    ? value
+    : null;
 }
 
 /* ─────────────────────────────── numbers ─────────────────────────────── */

@@ -164,6 +164,18 @@ guardar en un formulario: en ese caso muestra el botón **Abrir** para que no pi
 Los enlaces a otros sitios que escribe el asistente se abren en una pestaña nueva y muestran su dirección
 completa al lado — revisala antes de hacer clic. Las imágenes de las respuestas nunca se cargan.
 
+## Fuentes de la web
+
+Si tu administrador activó la **búsqueda web** (Configuración → IA), el asistente puede buscar en internet —
+pero solo cuando los registros y la base de conocimiento de lazyit no tienen la respuesta. Cuando no conoce
+un producto o un término y la búsqueda web está desactivada, te pide la documentación.
+
+Cuando buscó, las páginas que usó aparecen debajo de su respuesta como **Fuentes de la web**. Cada una se
+abre en una pestaña nueva. Las escribieron terceros: revisalas antes de basarte en ellas. Una vez que el
+asistente buscó en la web en un chat, nada en ese chat se aprueba automáticamente: cada cambio que proponga
+ahí necesita tu aprobación, aunque tengas la aprobación automática activada. Empezá un chat nuevo para
+volver a usar la aprobación automática.
+
 ## Tu historial de chats
 
 Elegí **Historial de chats** arriba del chat para ver tus chats anteriores, agrupados por día. Solo vos podés
@@ -180,7 +192,8 @@ el historial lo indica.
 
 ### Chats de solo lectura
 
-Un chat pasa a ser de **solo lectura** cuando tu administrador cambia el proveedor de IA, cuando cambia el
+Un chat pasa a ser de **solo lectura** cuando tu administrador cambia el proveedor de IA, cuando desactiva la
+búsqueda web y el chat la usaba, cuando cambia el
 modelo predeterminado y el chat usaba el predeterminado, o cuando la conversación se vuelve demasiado larga
 para que la IA la siga. Un chat en el que elegiste el modelo vos sigue funcionando si solo cambia el
 predeterminado. Podés seguir leyéndolo; elegí **Empezar un

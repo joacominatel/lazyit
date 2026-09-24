@@ -1,4 +1,4 @@
-import { createAnthropic } from '@ai-sdk/anthropic';
+import { anthropic, createAnthropic } from '@ai-sdk/anthropic';
 
 import { fetchModelList, joinUrl, parseDataIdList } from '../model-listing';
 import type {
@@ -45,6 +45,10 @@ function forceNoToolUse(fetch: FetchLike): FetchLike {
  *   W1-B finding 6); thinking stays the model's default (adaptive on current models). No sampling
  *   parameters are ever sent: current models reject them with a 400.
  * - `toolChoice: 'none'` keeps the tools declared ({@link forceNoToolUse}).
+ * - Web search (#1389) is the `web_search_20250305` server tool: Anthropic runs it, `max_uses` caps it per
+ *   request. The basic version is used on purpose — the later ones (`20260209`+) run the search inside
+ *   code execution ("dynamic filtering"), which some models reject without `allowed_callers: ["direct"]`
+ *   and which adds a second server tool to the transcript.
  */
 export const anthropicProvider: LlmProviderDefinition = {
   kind: 'anthropic',
@@ -64,6 +68,13 @@ export const anthropicProvider: LlmProviderDefinition = {
     return toolChoice === 'none'
       ? { fetch: forceNoToolUse(fetch), toolChoice: 'auto' }
       : { fetch, toolChoice };
+  },
+
+  webSearchTool(maxUses) {
+    return {
+      name: 'web_search',
+      tool: anthropic.tools.webSearch_20250305({ maxUses }),
+    };
   },
 
   callSettings(config) {

@@ -30,14 +30,16 @@ import {
 import { AiToolRegistry } from '../core/tool-registry';
 import { AgentRunOrchestrator } from '../runtime/agent-run.orchestrator';
 import { AiConversationPurgeService } from '../retention/ai-conversation-purge.service';
-import { AI_MESSAGE_FORMAT_MODEL } from '../runtime/run-records';
 import {
   AI_CONVERSATION_AUTO_APPROVE_AUDIT_ACTION,
   assertModelSettingsSupported,
   conversationSettingsOf,
   pinnedConfigChanged,
 } from '../runtime/conversation-settings';
-import { projectTranscript } from './transcript-projection';
+import {
+  AI_TRANSCRIPT_FORMATS,
+  projectTranscript,
+} from './transcript-projection';
 
 type HumanIdentity = Extract<DelegatedIdentity, { kind: 'human' }>;
 
@@ -239,7 +241,10 @@ export class AiConversationsService {
     const [rows, invocations, runs, config] = await Promise.all([
       this.prisma.aiMessage.findMany({
         // The allow-list, at the query AND again in the projection.
-        where: { conversationId, format: AI_MESSAGE_FORMAT_MODEL },
+        where: {
+          conversationId,
+          format: { in: [...AI_TRANSCRIPT_FORMATS] },
+        },
         orderBy: { seq: 'asc' },
         select: {
           seq: true,

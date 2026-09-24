@@ -703,6 +703,57 @@ export const AiToolResultSummarySchema = z.object({
 export type AiToolResultSummary = z.infer<typeof AiToolResultSummarySchema>;
 
 /**
+ * WEB SEARCH SOURCES (#1389; ADR-0097 decision 3 as amended 2026-09-24). When the provider searched the web
+ * during a model step, the pages it drew on are shown under the answer. Only `http(s)` URLs are accepted
+ * (anything else — `javascript:`, `data:` — is dropped by {@link AiWebSourceListSchema}); the title is
+ * other-authored text, shown as plain text. The web still re-checks the scheme before it renders a link.
+ */
+export const AI_WEB_SOURCES_MAX = 50;
+export const AI_WEB_SOURCE_URL_MAX = 2048;
+export const AI_WEB_SOURCE_TITLE_MAX = 300;
+export const AI_WEB_SEARCH_QUERY_MAX = 300;
+export const AI_WEB_SEARCH_QUERIES_MAX = 20;
+
+/** Whether a URL is one a source may link to: an absolute `http:` or `https:` URL, nothing else. */
+export function isWebSourceUrl(value: string): boolean {
+  return (
+    value.length <= AI_WEB_SOURCE_URL_MAX &&
+    /^https?:\/\/[^\s/?#]+[^\s]*$/i.test(value) &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
+}
+
+export const AiWebSourceSchema = z.object({
+  url: z.string().refine(isWebSourceUrl, "Must be an http(s) URL"),
+  title: z.string().max(AI_WEB_SOURCE_TITLE_MAX).nullable(),
+});
+export type AiWebSource = z.infer<typeof AiWebSourceSchema>;
+
+/**
+ * READ-TOLERANT: each source is parsed on its own; one this build cannot read (another scheme, a URL too
+ * long) is dropped, duplicates (same URL) are dropped, and the list is capped.
+ */
+export const AiWebSourceListSchema = z
+  .array(z.unknown())
+  .transform((items) => {
+    const seen = new Set<string>();
+    const out: AiWebSource[] = [];
+    for (const item of items) {
+      const parsed = AiWebSourceSchema.safeParse(item);
+      if (!parsed.success || seen.has(parsed.data.url)) continue;
+      seen.add(parsed.data.url);
+      out.push(parsed.data);
+      if (out.length >= AI_WEB_SOURCES_MAX) break;
+    }
+    return out;
+  });
+
+/** The search queries the provider reports it ran (not every provider reports them). */
+const AiWebSearchQueriesSchema = z
+  .array(z.string().max(AI_WEB_SEARCH_QUERY_MAX))
+  .max(AI_WEB_SEARCH_QUERIES_MAX);
+
+/**
  * One part of a persisted assistant message (frontend.md K3: the parts use the same types as the run
  * events — text, tool activity, an approval with its current state, a notice). Discriminated on `type`.
  */
@@ -732,6 +783,15 @@ export const AiMessagePartSchema = z.discriminatedUnion("type", [
     outcome: AiInputOutcomeSchema.nullable(),
     /** The user's own answer, once submitted. */
     answer: AiInputAnswerSchema.optional(),
+  }),
+  /**
+   * The provider searched the web while writing this message (#1389): the pages it drew on and the
+   * queries it reported. Shown under the message as plain links. An older web skips an unknown part.
+   */
+  z.object({
+    type: z.literal("sources"),
+    sources: AiWebSourceListSchema,
+    queries: AiWebSearchQueriesSchema.optional(),
   }),
 ]);
 export type AiMessagePart = z.infer<typeof AiMessagePartSchema>;
@@ -840,6 +900,17 @@ export const AiRunEventSchema = z.discriminatedUnion("type", [
     text: z.string(),
   }),
   z.object({ v, type: z.literal("message.completed"), messageId: z.string().min(1) }),
+  /**
+   * The provider searched the web during the step that wrote this message (#1389): the sources to show
+   * under it. Sent after `message.completed`; an older web ignores it (the transcript has them too).
+   */
+  z.object({
+    v,
+    type: z.literal("message.sources"),
+    messageId: z.string().min(1),
+    sources: AiWebSourceListSchema,
+    queries: AiWebSearchQueriesSchema.optional(),
+  }),
   z.object({
     v,
     type: z.literal("tool.call"),

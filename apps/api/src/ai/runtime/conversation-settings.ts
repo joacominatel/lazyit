@@ -1,11 +1,16 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   AI_PROVIDER_DESCRIPTORS,
+  AI_WEB_SEARCH_MAX_USES_MAX,
+  AI_WEB_SEARCH_MAX_USES_MIN,
+  aiWebSearchSupported,
   AI_PROVIDER_OPTIONS_SCHEMAS,
   AiEffortSchema,
   AiProviderKindSchema,
   AiProviderOptionsSchema,
+  type AiConversationChannel,
   type AiConversationSettings,
+  type AiSettings,
   type AiEffort,
   type AiProviderKind,
   type AiProviderOptions,
@@ -153,6 +158,61 @@ export function conversationSettingsOf(
       ? (conversation.autoApproveEnabledAt?.toISOString() ?? null)
       : null,
   };
+}
+
+/**
+ * PROVIDER-NATIVE WEB SEARCH OF A CONVERSATION (#1389; ADR-0097 decision 3 as amended 2026-09-24).
+ *
+ * Frozen at creation like the toolset — the tools a conversation declares must stay byte-identical for its
+ * whole life (prompt cache, Anthropic preserved thinking) — so it is decided once: a CHAT conversation
+ * started while web search is on, on a provider and model that support it, carries the instance's search
+ * cap; every other one (headless, legacy rows) carries null and never searches.
+ *
+ * Headless is excluded on purpose: its writes run with no one approving them, and search results are text
+ * anyone on the web can write — the one place an injected instruction could turn into an unreviewed change.
+ */
+export function frozenWebSearchMaxUses(
+  channel: AiConversationChannel,
+  provider: AiProviderKind,
+  model: string,
+  settings: Pick<AiSettings, 'webSearchEnabled' | 'webSearchMaxUses'>,
+): number | null {
+  if (channel !== 'CHAT' || !settings.webSearchEnabled) return null;
+  return aiWebSearchSupported(provider, model)
+    ? settings.webSearchMaxUses
+    : null;
+}
+
+/**
+ * The web search a model step of this conversation carries: its frozen cap (read-tolerant — an
+ * out-of-range stored value is clamped), or undefined when it has none.
+ */
+export function conversationWebSearch(
+  conversation: Pick<AiConversation, 'channel' | 'webSearchMaxUses'>,
+): { maxUses: number } | undefined {
+  const stored = conversation.webSearchMaxUses;
+  if (typeof stored !== 'number' || conversation.channel !== 'CHAT') {
+    return undefined;
+  }
+  const maxUses = Math.min(
+    AI_WEB_SEARCH_MAX_USES_MAX,
+    Math.max(AI_WEB_SEARCH_MAX_USES_MIN, Math.trunc(stored)),
+  );
+  return { maxUses };
+}
+
+/**
+ * Whether an admin turned web search off after this conversation was started with it. Its tool list
+ * cannot change, so the conversation becomes read-only (`CONFIG_CHANGED`) — the switch applies at once.
+ */
+export function webSearchWithdrawn(
+  settings: Pick<AiSettings, 'webSearchEnabled'>,
+  conversation: Pick<AiConversation, 'webSearchMaxUses'>,
+): boolean {
+  return (
+    typeof conversation.webSearchMaxUses === 'number' &&
+    !settings.webSearchEnabled
+  );
 }
 
 /** `AiConfigAuditLog.action` for a conversation's auto-approve toggle (#1376). */

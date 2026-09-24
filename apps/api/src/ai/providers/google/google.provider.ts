@@ -1,4 +1,4 @@
-import { createGoogle } from '@ai-sdk/google';
+import { createGoogle, google } from '@ai-sdk/google';
 
 import { fetchModelList, joinUrl } from '../model-listing';
 import type {
@@ -55,6 +55,9 @@ function parseGeminiModels(body: unknown): ModelInfo[] {
  *   replay bug.
  * - The key and base URL are always explicit, so `GOOGLE_GENERATIVE_AI_API_KEY` never applies.
  * - The model list keeps only models that support `generateContent`.
+ * - Web search (#1389) is Google Search grounding, declared only for Gemini 3+ (`aiWebSearchSupported`):
+ *   on an older Gemini the SDK cannot combine it with function tools and would drop lazyit's tools. It
+ *   takes no per-call cap.
  */
 export const googleProvider: LlmProviderDefinition = {
   kind: 'google',
@@ -68,6 +71,10 @@ export const googleProvider: LlmProviderDefinition = {
       baseURL: config.baseUrl ?? GOOGLE_BASE_URL,
       fetch,
     })(modelId);
+  },
+
+  webSearchTool() {
+    return { name: 'google_search', tool: google.tools.googleSearch({}) };
   },
 
   callSettings(config) {

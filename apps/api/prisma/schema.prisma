@@ -3143,6 +3143,12 @@ model AiSettings {
   /// On by default (ADR-0097 decision 13, amended 2026-09-24). Loopback and private-use redirects still
   /// need an allowlist entry. A row stored before the default changed keeps its value.
   mcpAllowAnyHttpsClient            Boolean   @default(true)
+  /// Provider-native web search for the chat (#1389; ADR-0097 decision 3 as amended 2026-09-24): the
+  /// provider searches on its own servers, lazyit makes no request of its own. Off by default; it applies
+  /// only where the provider and model support it, and only to conversations started while it is on.
+  webSearchEnabled                  Boolean   @default(false)
+  /// Cap on searches per model call where the provider takes one (Anthropic `max_uses`; zod 1–20).
+  webSearchMaxUses                  Int       @default(5)
   /// The egress-disclosure acknowledgement, required before the first enable. The author is also
   /// recorded in ai_config_audit_log, which survives this row's edits.
   disclosureAcknowledgedAt          DateTime?
@@ -3193,6 +3199,10 @@ model AiConversation {
   autoApprove      Boolean         @default(false)
   /// When the owner last switched auto-approve on; null while it is off. Recorded on each auto approval.
   autoApproveEnabledAt DateTime?
+  /// Provider-native web search (#1389), frozen at creation like the toolset: the per-call search cap
+  /// the conversation was started with, or null = no web search (every legacy row). Turning web search
+  /// off in Settings → AI makes a conversation that has it read-only (its tool list cannot change).
+  webSearchMaxUses Int?
   /// CONTEXT_LIMIT | CONFIG_CHANGED | VERSION_CHANGED; null while the conversation is writable.
   closedReason     String?
   lastActivityAt   DateTime        @default(now())

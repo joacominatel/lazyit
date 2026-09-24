@@ -45,6 +45,14 @@ permanent [[ai-action-log]].
 - **Auto-approve** (#1376, ADR-0097 decision 4 as amended 2026-09-24): off by default; its owner may switch
   it on or off at any time (audited). While on, ordinary chat writes (not elevated, no step-up warning,
   not in a turn that read other-authored content) run without a card, recorded in the [[ai-action-log]] with `approvalMode = AUTO`.
+- **Web search** (#1389, ADR-0097 decision 3 as amended 2026-09-24): a chat conversation started while
+  [[ai-settings]] `webSearchEnabled` is on, on a provider and model that support it, is frozen with the
+  search cap (`webSearchMaxUses`) and may use the provider's own web search; its tool list then never
+  changes. Turning the setting off makes it read-only (`CONFIG_CHANGED`). Headless conversations never
+  search. A step that searched stores a `lazyit-web-search-v1` record (search count, reported queries,
+  `http(s)` sources) after its assistant message: the web shows the sources under the answer. Once such a
+  record exists, every later turn of the conversation counts as having read untrusted content, so nothing
+  in it is auto-approved anymore.
 - **One active run** at a time (409 `RUN_IN_PROGRESS`, enforced by the runtime).
 - MCP keeps **no** server-side conversation.
 
@@ -62,6 +70,7 @@ Prisma model `AiConversation` → table `ai_conversations`.
 | `modelChosen` | `bool` | default `false`; `true` when the owner chose `model` (#1373). |
 | `effort` / `providerOptions` | `text?` / `json?` | the owner's reasoning effort and provider options; null = the instance setting. Validated on write, read tolerantly. |
 | `autoApprove` / `autoApproveEnabledAt` | `bool` / `datetime?` | auto-approve mode (#1376), default off; when it was last switched on. |
+| `webSearchMaxUses` | `int?` | the web search cap the conversation was frozen with (#1389); null = no web search (every legacy and headless row). |
 | `closedReason` | `text?` | null while writable. |
 | `lastActivityAt` | `datetime` | drives retention. |
 | `createdAt` / `updatedAt` | `datetime` | no `deletedAt` (hard-deleted). |
@@ -79,7 +88,7 @@ Append-only; it cascades with its conversation.
 | `seq` | `int` | unique per conversation. |
 | `role` | `text` | `user` \| `assistant` \| `tool`. |
 | `content` | `json` | the exact provider message; projected to a neutral wire shape before it leaves the API. |
-| `format` | `text` | default `aisdk-v7` — the converter a future SDK major needs. |
+| `format` | `text` | default `aisdk-v7` — the converter a future SDK major needs. Runtime records (never sent to the model) use `lazyit-*` formats, e.g. `lazyit-web-search-v1` (#1389). |
 | `createdAt` | `datetime` | |
 
 Related: [[ai-run]] · [[ai-tool-invocation]] · [[ai-action-log]] · [[ai-settings]]

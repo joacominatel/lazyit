@@ -1,5 +1,5 @@
 import type { AiProviderKind } from '@lazyit/shared';
-import type { LanguageModel } from 'ai';
+import type { LanguageModel, Tool } from 'ai';
 
 import type { ResolvedAiProviderConfig } from '../core/ports/ai-settings.port';
 
@@ -72,6 +72,13 @@ export interface LlmProviderDefinition {
     fetch: FetchLike,
     toolChoice: ToolChoiceMode,
   ): { fetch: FetchLike; toolChoice: ToolChoiceMode };
+  /**
+   * The provider's NATIVE web search tool (#1389; ADR-0097 decision 3 as amended 2026-09-24), or absent
+   * when the provider has none. Returns the tool-set key and the provider-defined tool the SDK sends; the
+   * provider runs it server-side (no `execute`, no request from lazyit). Called only when
+   * `aiWebSearchSupported(kind, modelId)` holds.
+   */
+  webSearchTool?(maxUses: number): { name: string; tool: Tool };
   /** How this provider words the failures a status code alone does not tell apart. */
   errorPatterns: ProviderErrorPatterns;
 }

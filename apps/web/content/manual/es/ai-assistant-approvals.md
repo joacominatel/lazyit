@@ -188,6 +188,8 @@ Mientras está activada:
   *Cambio sensible*) y todo lo que necesita tu contraseña.
 - **Un cambio propuesto después de que el asistente leyó contenido escrito por otras personas** también
   sigue mostrando una tarjeta — ese contenido podría estar intentando dirigir al asistente.
+- **Una vez que el asistente buscó en la web en un chat**, nada en ese chat se aprueba automáticamente: los
+  resultados de la búsqueda quedan en la conversación.
 - Una etiqueta **Auto** arriba del chat te recuerda que el modo está activado.
 
 Se aplica **solo a ese chat** y está desactivada en cada chat nuevo. Desactivala cuando quieras con el

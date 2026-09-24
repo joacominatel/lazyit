@@ -27,7 +27,9 @@ import {
 } from '../runtime/input-requests';
 import {
   AI_MESSAGE_FORMAT_MODEL,
+  AI_MESSAGE_FORMAT_WEB_SEARCH,
   assistantMessageId,
+  readWebSearchRecord,
   toApprovalRequest,
 } from '../runtime/run-records';
 
@@ -39,7 +41,9 @@ import {
  * approval card with its current outcome (the STORED preview, never model prose), an input form the
  * assistant asked for (#1388) with its outcome and the user's own answer, and run notices.
  *
- * ALLOW-LIST BY FORMAT. Only rows whose `format` is exactly `aisdk-v7` are read. The runtime's own
+ * ALLOW-LIST BY FORMAT. Only rows whose `format` is exactly `aisdk-v7` — plus the web-search record
+ * `lazyit-web-search-v1` (#1389), read ONLY for the `sources` part it becomes under the message before
+ * it, through the shared scheme-checked source schema — are read. The runtime's own
  * records (`lazyit-system-prompt-v1`, `lazyit-run-v1`, `lazyit-step-v1`, and any `lazyit-*` a later build
  * adds) are state, not transcript — the frozen system prompt, session epochs, step ledgers — and never
  * reach the wire, whatever the query that loaded the rows asked for. Tool messages are folded into the
@@ -49,6 +53,15 @@ import {
  * Read-tolerant: a row, part or value this build cannot read is skipped, never an error — a newer build's
  * rows degrade to less detail. Every part is validated against the shared schema before it is returned.
  */
+
+/**
+ * The formats the projection reads — the query's allow-list. Never "everything but lazyit-*": the other
+ * runtime records (system prompt, session epochs, step ledgers) are state, not transcript.
+ */
+export const AI_TRANSCRIPT_FORMATS = [
+  AI_MESSAGE_FORMAT_MODEL,
+  AI_MESSAGE_FORMAT_WEB_SEARCH,
+] as const;
 
 /** The stored columns the projection reads (`ai_messages`). */
 export interface TranscriptRow {
@@ -109,12 +122,18 @@ export function projectTranscript(
 
   const rows = [...input.rows]
     // THE ALLOW-LIST. Never "everything but lazyit-*": an unknown format is not transcript.
-    .filter((row) => row.format === AI_MESSAGE_FORMAT_MODEL)
+    .filter((row) =>
+      (AI_TRANSCRIPT_FORMATS as readonly string[]).includes(row.format),
+    )
     .sort((a, b) => a.seq - b.seq);
 
   for (const row of rows) {
     const id = assistantMessageId(input.conversationId, row.seq);
     const createdAt = row.createdAt.toISOString();
+    if (row.format === AI_MESSAGE_FORMAT_WEB_SEARCH) {
+      addSources(built, row, id, createdAt);
+      continue;
+    }
     const message = readModelMessage(row.content);
     if (!message || message.role !== row.role) continue;
 
@@ -395,6 +414,37 @@ function stripType<T extends { type: string }>(event: T): Omit<T, 'type'> {
   const rest: Partial<T> = { ...event };
   delete rest.type;
   return rest as Omit<T, 'type'>;
+}
+
+// ─── Web search sources (#1389) ──────────────────────────────────────────────────────────────────
+
+/**
+ * A web-search record becomes a `sources` part under the assistant message the same step wrote (the row
+ * just before it, same run). If that message projected to nothing, the sources stand as their own
+ * assistant message. Nothing to show (no readable source) → nothing added.
+ */
+function addSources(
+  built: Building[],
+  row: TranscriptRow,
+  id: string,
+  createdAt: string,
+): void {
+  const record = readWebSearchRecord(row.content);
+  if (!record || record.sources.length === 0) return;
+  const part: AiMessagePart = {
+    type: 'sources',
+    sources: record.sources,
+    ...(record.queries.length > 0 ? { queries: record.queries } : {}),
+  };
+  const last = built[built.length - 1];
+  if (last && last.runId === row.runId && last.message.role === 'assistant') {
+    last.message.parts.push(part);
+    return;
+  }
+  built.push({
+    runId: row.runId,
+    message: { id, role: 'assistant', parts: [part], createdAt },
+  });
 }
 
 // ─── Notices and validation ──────────────────────────────────────────────────────────────────────

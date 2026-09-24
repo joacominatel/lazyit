@@ -3,8 +3,12 @@ import {
   AI_PROVIDER_DESCRIPTORS,
   AI_PROVIDER_KINDS,
   AI_PROVIDER_OPTIONS_SCHEMAS,
+  AI_WEB_SEARCH_MAX_USES_DEFAULT,
+  AI_WEB_SEARCH_MAX_USES_MAX,
+  AI_WEB_SEARCH_MAX_USES_MIN,
   AiProviderDescriptorSchema,
   AiProviderKindSchema,
+  aiWebSearchSupported,
 } from "./ai-provider";
 
 // Provider kinds and descriptors (ADR-0097 decision 5). The descriptors drive the setup wizard, so every
@@ -57,5 +61,30 @@ describe("Per-provider options", () => {
     expect(AI_PROVIDER_OPTIONS_SCHEMAS["openai-compatible"].safeParse({ temperature: 3 }).success).toBe(
       false,
     );
+  });
+});
+
+describe("Provider-native web search support (#1389)", () => {
+  test("every hosted provider has one; the OpenAI-compatible provider does not", () => {
+    expect(aiWebSearchSupported("anthropic", "claude-opus-5")).toBe(true);
+    expect(aiWebSearchSupported("openai", "gpt-6-sol")).toBe(true);
+    expect(aiWebSearchSupported("openai-compatible", "llama-4")).toBe(false);
+    for (const kind of AI_PROVIDER_KINDS) {
+      expect(AI_PROVIDER_DESCRIPTORS[kind].supportsWebSearch).toBe(kind !== "openai-compatible");
+    }
+  });
+
+  test("Gemini only from version 3 (an older one cannot combine it with lazyit's tools)", () => {
+    for (const model of ["gemini-3.8-flash", "gemini-3.1-pro-preview", "models/gemini-3.5-flash-lite"]) {
+      expect(aiWebSearchSupported("google", model)).toBe(true);
+    }
+    for (const model of ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-pro", "gemma-3"]) {
+      expect(aiWebSearchSupported("google", model)).toBe(false);
+    }
+  });
+
+  test("the admin cap range contains its default", () => {
+    expect(AI_WEB_SEARCH_MAX_USES_MIN).toBeLessThanOrEqual(AI_WEB_SEARCH_MAX_USES_DEFAULT);
+    expect(AI_WEB_SEARCH_MAX_USES_DEFAULT).toBeLessThanOrEqual(AI_WEB_SEARCH_MAX_USES_MAX);
   });
 });

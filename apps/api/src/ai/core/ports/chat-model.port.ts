@@ -41,6 +41,13 @@ export interface ChatModelStepRequest {
   /** The conversation so far, append-only. */
   messages: readonly ChatModelMessage[];
   tools: readonly ChatModelToolDefinition[];
+  /**
+   * Provider-native web search for this step (#1389; ADR-0097 decision 3 as amended 2026-09-24), when the
+   * conversation was frozen with it. The provider runs the search on its own servers — lazyit makes no
+   * request of its own — and the provider layer declares it only where the definition supports it.
+   * `maxUses` caps searches per call where the provider takes a cap (Anthropic `max_uses`).
+   */
+  webSearch?: { maxUses: number };
   /** `none` on the final forced step, so the model summarizes instead of acting. */
   toolChoice: 'auto' | 'none';
   maxOutputTokens: number;
@@ -56,12 +63,36 @@ export interface ChatModelToolCall {
   input: unknown;
 }
 
+/** A page the provider's web search drew on: an `http(s)` URL and its (other-authored) title. */
+export interface ChatModelWebSource {
+  url: string;
+  title: string | null;
+}
+
+/** What the provider's native web search did during one step (#1389). */
+export interface ChatModelWebSearch {
+  /** Searches the provider ran (its server-side tool calls). */
+  searches: number;
+  /** The queries, where the provider reports them. Content the model wrote: never logged. */
+  queries: string[];
+  /** The sources the answer cites or was grounded on, `http(s)` only, deduplicated. */
+  sources: ChatModelWebSource[];
+}
+
 export interface ChatModelStepResult {
   /** This step's messages, to append to the conversation as they are. */
   responseMessages: readonly ChatModelMessage[];
+  /** The calls lazyit must answer. Provider-executed calls (the web search) are never here. */
   toolCalls: readonly ChatModelToolCall[];
   finishReason: string;
   usage: AiUsage;
+  /** Present when the provider searched the web (or grounded the answer on sources) in this step. */
+  webSearch?: ChatModelWebSearch;
+  /**
+   * The provider paused a long server-side turn (Anthropic `pause_turn`, a web search still going): the
+   * loop continues with another step that sends the paused message back as it is.
+   */
+  paused?: boolean;
 }
 
 /** One tool call's answer, as the loop hands it back to the model. */

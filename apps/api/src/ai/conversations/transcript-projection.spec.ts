@@ -94,6 +94,100 @@ describe('the allow-list by format', () => {
   });
 });
 
+describe('web search sources (#1389)', () => {
+  it('a web-search record becomes a sources part under the message before it, http(s) links only', () => {
+    const rows = [
+      row('user', { role: 'user', content: 'What is Easy Redmine?' }),
+      row('assistant', { role: 'assistant', content: 'A project tool.' }),
+      row(
+        'system',
+        {
+          stepIndex: 0,
+          searches: 1,
+          queries: ['easy redmine'],
+          sources: [
+            { url: 'https://www.easyredmine.com', title: 'Easy Redmine' },
+            { url: 'javascript:alert(1)', title: 'evil' },
+            { url: 'data:text/html,x', title: null },
+          ],
+        },
+        'lazyit-web-search-v1',
+      ),
+    ];
+    const out = projectTranscript({
+      conversationId: CONV,
+      rows,
+      invocations: [],
+      classOf,
+    });
+    expect(out[1].parts).toEqual([
+      { type: 'text', text: 'A project tool.' },
+      {
+        type: 'sources',
+        sources: [
+          { url: 'https://www.easyredmine.com', title: 'Easy Redmine' },
+        ],
+        queries: ['easy redmine'],
+      },
+    ]);
+    expect(JSON.stringify(out)).not.toMatch(/javascript:|data:/);
+  });
+
+  it('an unreadable record, or one with no usable source, adds nothing', () => {
+    const rows = [
+      row('assistant', { role: 'assistant', content: 'Answer.' }),
+      row('system', { nope: true }, 'lazyit-web-search-v1'),
+      row(
+        'system',
+        { stepIndex: 1, sources: [{ url: 'ftp://x', title: 'x' }] },
+        'lazyit-web-search-v1',
+      ),
+    ];
+    const out = projectTranscript({
+      conversationId: CONV,
+      rows,
+      invocations: [],
+      classOf,
+    });
+    expect(out.map((m) => m.parts)).toEqual([
+      [{ type: 'text', text: 'Answer.' }],
+    ]);
+  });
+
+  it('the provider-executed search call in the assistant message is not shown as a lazyit tool', () => {
+    const rows = [
+      row('assistant', {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'srvtoolu_1',
+            toolName: 'web_search',
+            input: { query: 'x' },
+            providerExecuted: true,
+          },
+          {
+            type: 'tool-result',
+            toolCallId: 'srvtoolu_1',
+            toolName: 'web_search',
+            output: { type: 'json', value: [] },
+          },
+          { type: 'text', text: 'Found it.' },
+        ],
+      }),
+    ];
+    const out = projectTranscript({
+      conversationId: CONV,
+      rows,
+      invocations: [],
+      classOf,
+    });
+    expect(out.map((m) => m.parts)).toEqual([
+      [{ type: 'text', text: 'Found it.' }],
+    ]);
+  });
+});
+
 describe('messages and parts', () => {
   it('strips the turn context from the user text and names messages <conversationId>:<seq>', () => {
     const out = projectTranscript({

@@ -1,5 +1,6 @@
 import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  AI_WEB_SEARCH_SOURCE_REF,
   AiInputFormSchema,
   type AiConversationChannel,
   type AiInputRequest,
@@ -40,7 +41,9 @@ import { AiToolRegistry } from '../core/tool-registry';
 import { AiProviderError } from '../providers/ai-provider.error';
 import {
   conversationCallOverrides,
+  conversationWebSearch,
   pinnedConfigChanged,
+  webSearchWithdrawn,
 } from './conversation-settings';
 import {
   AiRunLimits,
@@ -61,6 +64,7 @@ import {
   AI_MESSAGE_FORMAT_RUN,
   AI_MESSAGE_FORMAT_STEP,
   AI_MESSAGE_FORMAT_SYSTEM_PROMPT,
+  AI_MESSAGE_FORMAT_WEB_SEARCH,
   AI_RUNTIME_RECORD_ROLE,
   assistantMessageId,
   readRunRecord,
@@ -70,6 +74,7 @@ import {
   toApprovalRequest,
   type StepOutcome,
   type StepRecord,
+  type WebSearchRecord,
 } from './run-records';
 import {
   AI_MAX_PENDING_PER_STEP,
@@ -320,7 +325,7 @@ export class AgentLoop {
     // A resume: answer the step the approvals were waiting on, in one tool message.
     await this.lifecycle.answerOpenStep(conversation.id, runId);
 
-    const seeded = await this.seedCounters(runId);
+    const seeded = await this.seedCounters(runId, conversation);
     let toolCalls = seeded.toolCalls;
     let untrusted = seeded.untrusted;
     const callIds = seeded.callIds;
@@ -338,6 +343,7 @@ export class AgentLoop {
         run.stepCount + 1 >= settings.maxStepsPerRun ||
         toolCalls >= AI_MAX_TOOL_CALLS_PER_RUN;
       const history = await this.history(conversation.id);
+      const webSearch = conversationWebSearch(conversation);
       const seq = await this.lifecycle.nextSeq(conversation.id);
       const messageId = assistantMessageId(conversation.id, seq);
       const started = Date.now();
@@ -350,6 +356,7 @@ export class AgentLoop {
             modelId: conversation.model,
           },
           ...conversationCallOverrides(conversation),
+          ...(webSearch ? { webSearch } : {}),
           instructions,
           messages: history,
           tools: toolset.definitions,
@@ -376,9 +383,24 @@ export class AgentLoop {
         ...result,
         toolCalls: uniqueCallIds(result.toolCalls, runId, stepIndex, callIds),
       };
+      // The provider searched the web (#1389): search results are other-authored text, so from here on
+      // the turn has read untrusted sources — a proposal shows the banner and is never auto-approved.
+      if (result.webSearch) {
+        untrusted = mergeRefs(untrusted, [AI_WEB_SEARCH_SOURCE_REF]);
+      }
       await this.persistStep(run, scope, result, stepIndex, untrusted);
       if (result.responseMessages.length > 0) {
         this.lifecycle.emit(runId, { type: 'message.completed', messageId });
+      }
+      if (result.webSearch && result.webSearch.sources.length > 0) {
+        this.lifecycle.emit(runId, {
+          type: 'message.sources',
+          messageId,
+          sources: result.webSearch.sources,
+          ...(result.webSearch.queries.length > 0
+            ? { queries: result.webSearch.queries }
+            : {}),
+        });
       }
       this.lifecycle.emit(runId, {
         type: 'step.finished',
@@ -399,6 +421,14 @@ export class AgentLoop {
         toolNames: result.toolCalls.map((call) =>
           TOOL_NAME.test(call.toolName) ? call.toolName : '(invalid)',
         ),
+        // Counts only: the queries and pages are content (ADR-0031), kept in the transcript record.
+        ...(result.webSearch
+          ? {
+              webSearches: result.webSearch.searches,
+              webSources: result.webSearch.sources.length,
+            }
+          : {}),
+        ...(result.paused ? { paused: true } : {}),
       });
       lastInputTokens = result.usage.inputTokens;
 
@@ -412,6 +442,11 @@ export class AgentLoop {
           },
         });
         return;
+      }
+      if (result.toolCalls.length === 0 && result.paused && !forced) {
+        // The provider paused a long server-side turn (a web search still going, #1389): the paused
+        // message is in the history; the next step sends it back and the provider carries on.
+        continue;
       }
       if (result.toolCalls.length === 0) {
         await this.lifecycle.finalize(runId, 'SUCCEEDED', {
@@ -667,6 +702,13 @@ export class AgentLoop {
       return { ok: false };
     }
     const settings = await this.settings.getSettings();
+    if (webSearchWithdrawn(settings, conversation)) {
+      // Web search was turned off after this conversation started with it (#1389): its tool list
+      // cannot change, so it ends here — the switch applies at once.
+      await this.lifecycle.closeConversation(conversation.id, 'CONFIG_CHANGED');
+      await this.fail(run.id, READ_ONLY);
+      return { ok: false };
+    }
     if (
       await this.limits.budgetExceeded(
         who.value.owner,
@@ -723,6 +765,21 @@ export class AgentLoop {
         role: roleOf(message),
         content: message,
       }));
+      if (result.webSearch) {
+        // Right after the step's assistant message: the sources shown under it, and the run's record
+        // that the web was searched (#1389). Never replayed to the model.
+        const record: WebSearchRecord = {
+          stepIndex,
+          searches: result.webSearch.searches,
+          queries: result.webSearch.queries,
+          sources: result.webSearch.sources,
+        };
+        rows.push({
+          role: AI_RUNTIME_RECORD_ROLE,
+          content: record,
+          format: AI_MESSAGE_FORMAT_WEB_SEARCH,
+        });
+      }
       if (result.toolCalls.length > 0) {
         const record: StepRecord = {
           stepIndex,
@@ -1210,7 +1267,10 @@ export class AgentLoop {
   }
 
   /** How many calls this run already made, and the untrusted sources it read (a resumed run). */
-  private async seedCounters(runId: string): Promise<{
+  private async seedCounters(
+    runId: string,
+    conversation: Pick<AiConversation, 'id' | 'webSearchMaxUses'>,
+  ): Promise<{
     toolCalls: number;
     untrusted: AiEntityRef[];
     callIds: Set<string>;
@@ -1233,7 +1293,28 @@ export class AgentLoop {
       for (const call of record.calls) callIds.add(call.toolCallId);
       untrusted = mergeRefs(untrusted, record.untrustedSources);
     }
+    // Web search results stay in the history and are replayed to the model on every later turn, so once
+    // the conversation has searched ANYWHERE — this run or an earlier one — every turn from then on counts
+    // as having read untrusted sources: the banner, and never an auto-approval (#1389, G2 review).
+    if (await this.conversationSearched(conversation)) {
+      untrusted = mergeRefs(untrusted, [AI_WEB_SEARCH_SOURCE_REF]);
+    }
     return { toolCalls, untrusted, callIds };
+  }
+
+  /** Whether any step of this conversation searched the web (a `lazyit-web-search-v1` record exists). */
+  private async conversationSearched(
+    conversation: Pick<AiConversation, 'id' | 'webSearchMaxUses'>,
+  ): Promise<boolean> {
+    if (typeof conversation.webSearchMaxUses !== 'number') return false;
+    const row = await this.prisma.aiMessage.findFirst({
+      where: {
+        conversationId: conversation.id,
+        format: AI_MESSAGE_FORMAT_WEB_SEARCH,
+      },
+      select: { id: true },
+    });
+    return row !== null;
   }
 
   private emitCall(

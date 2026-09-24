@@ -15,6 +15,7 @@ const labels: TranscriptLabels = {
   ],
   notice: (part) => `Notice ${part.error.code}`,
   input: (part) => [`**Asks** · ${part.outcome ?? "pending"}`, part.request.form.title],
+  sources: "Sources",
   unsupported: "Can't show this",
 };
 
@@ -104,6 +105,30 @@ describe("conversationToMarkdown — input forms (#1388)", () => {
     );
     expect(md).toContain("> **Asks** · skipped");
     expect(md).toContain("> Details for the new laptops");
+    expect(md).not.toContain("Can't show this");
+  });
+});
+
+describe("web search sources (#1389)", () => {
+  test("are listed as plain text with their http(s) URL; unsafe ones are dropped", () => {
+    const md = conversationToMarkdown(
+      [
+        assistant("a1", [
+          { type: "text", text: "Easy Redmine is a project tool." },
+          {
+            type: "sources",
+            sources: [
+              { url: "https://www.easyredmine.com/docs", title: "[Docs](javascript:x) *bold*" },
+              { url: "javascript:alert(1)", title: "evil" },
+            ],
+          },
+        ]),
+      ],
+      labels,
+    );
+    expect(md).toContain("**Sources**");
+    expect(md).toContain("- Docs(javascript:x) bold — <https://www.easyredmine.com/docs>");
+    expect(md).not.toContain("alert(1)");
     expect(md).not.toContain("Can't show this");
   });
 });

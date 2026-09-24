@@ -46,6 +46,13 @@ switch. It is **off by default** and an admin enables it through the Settings �
   any client whose redirect URIs are HTTPS and non-loopback, with the redirect host on the consent screen;
   loopback and private-use redirects still need an entry. A row stored before the default changed keeps
   its value.
+- **Provider-native web search** (#1389, [[0097-ai-assistant-mcp-and-headless-api]] decision 3 as amended
+  2026-09-24): `webSearchEnabled` (**off by default**) lets chat conversations started while it is on use
+  the provider's own server-side search, where the provider and model support it (never the
+  OpenAI-compatible provider, never Gemini before 3); lazyit makes no request of its own.
+  `webSearchMaxUses` caps searches per model call where the provider takes a cap (Anthropic). Both are
+  optional on `PUT /config/ai` (omitted keeps the stored value) and audited. Turning it off makes the
+  conversations that had it read-only.
 - **Text columns, validated on write.** `provider` and `effort` are text checked by the zod vocabularies
   in `@lazyit/shared` (`ai-provider.ts`), so a newer value degrades to "not configured" on an older build.
 - Mutable config: `createdAt` + `updatedAt`, **no `deletedAt`**.
@@ -72,6 +79,8 @@ Prisma model `AiSettings` → table `ai_settings`.
 | `mcpClientAllowlistAdded` | `json` | default `[]` — the admin's own allowlist entries. |
 | `mcpClientAllowlistRemovedDefaults` | `text[]` | default `{}` — the ids of the curated defaults the admin removed. |
 | `mcpAllowAnyHttpsClient` | `bool` | default `true` (since 2026-09-24; existing rows keep their value) — accept any HTTPS (non-loopback) client; consent shows the redirect host. |
+| `webSearchEnabled` | `bool` | default `false` — provider-native web search for the chat (#1389). |
+| `webSearchMaxUses` | `int` | default 5 (zod 1–20) — searches per model call where the provider takes a cap; an out-of-range stored value reads as 5. |
 | `disclosureAcknowledgedAt` / `disclosureAcknowledgedById` | `datetime?` / `uuid?` | the egress-disclosure acknowledgement. |
 | `verifiedAt` | `datetime?` | last passing connection test of the current connection fields. |
 | `updatedById` | `uuid?` | FK → [[user]], `onDelete: SetNull`. |

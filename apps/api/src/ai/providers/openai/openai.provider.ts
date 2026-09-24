@@ -1,4 +1,4 @@
-import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAI, openai } from '@ai-sdk/openai';
 
 import { fetchModelList, joinUrl, parseDataIdList } from '../model-listing';
 import type {
@@ -23,6 +23,10 @@ const NON_CHAT_MODEL =
  *   plain model: forcing reasoning on would break the non-reasoning models (`gpt-4.1`, …).
  * - `effort` maps to `reasoningEffort`, the one reasoning mechanism for this provider (finding 6).
  * - The key and base URL are always explicit, so `OPENAI_API_KEY` / `OPENAI_BASE_URL` never apply.
+ * - Web search (#1389) is the Responses API `web_search` tool: OpenAI runs it. It takes no per-call cap;
+ *   with `store: false` the SDK does not replay the search item, only the answer that cites it. It runs
+ *   with `external_web_access: false` (cached / indexed content only): its `open_page` action cannot be
+ *   disabled, and live access would let an injected URL reach a third party directly.
  */
 export const openaiProvider: LlmProviderDefinition = {
   kind: 'openai',
@@ -36,6 +40,17 @@ export const openaiProvider: LlmProviderDefinition = {
       baseURL: config.baseUrl ?? OPENAI_BASE_URL,
       fetch,
     })(modelId);
+  },
+
+  webSearchTool() {
+    // `externalWebAccess: false` (Responses `external_web_access`): cached / indexed results only, no live
+    // fetch. The tool has an `open_page` action the API gives no way to turn off; offline, a URL an
+    // injected instruction makes up (data in its query string) is not fetched live from its host
+    // (#1389, G2 review; security.md §6.11).
+    return {
+      name: 'web_search',
+      tool: openai.tools.webSearch({ externalWebAccess: false }),
+    };
   },
 
   callSettings(config) {

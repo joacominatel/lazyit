@@ -37,7 +37,9 @@ import { AgentLoop, frozenToolset } from './agent-loop';
 import {
   AI_CONVERSATION_AUTO_APPROVE_AUDIT_ACTION,
   assertModelSettingsSupported,
+  frozenWebSearchMaxUses,
   pinnedConfigChanged,
+  webSearchWithdrawn,
 } from './conversation-settings';
 import {
   AiRunLimits,
@@ -431,12 +433,21 @@ export class AgentRunOrchestrator {
     const tools = listing
       .map((entry) => this.registry.get(entry.name))
       .filter((tool) => tool !== undefined);
+    const model = chosen.model ?? config.model;
+    // Provider-native web search (#1389), frozen with the toolset: chat only, when on and supported.
+    const webSearchMaxUses = frozenWebSearchMaxUses(
+      who.channel,
+      config.provider,
+      model,
+      settings,
+    );
     const prompt = this.prompts.systemPrompt({
       channel: who.channel,
       principal: who.prompt,
       locale: locale ?? 'en',
       tools: tools.map((tool) => ({ class: tool.descriptor.class })),
       instructions: settings.instructions,
+      webSearch: webSearchMaxUses !== null,
     });
     return this.prisma.$transaction(async (tx) => {
       const conversation = await tx.aiConversation.create({
@@ -446,7 +457,7 @@ export class AgentRunOrchestrator {
           serviceAccountId: who.owner.serviceAccountId,
           provider: config.provider,
           // The user's model (#1373), or the instance default — which then keeps the old pin rule.
-          model: chosen.model ?? config.model,
+          model,
           modelChosen: chosen.model !== undefined,
           effort: chosen.effort ?? null,
           ...(chosen.providerOptions
@@ -457,6 +468,7 @@ export class AgentRunOrchestrator {
           promptVersion: prompt.version,
           toolsetHash: toolsetHashOf(tools),
           toolNames: tools.map((tool) => tool.descriptor.name).sort(),
+          webSearchMaxUses,
         },
       });
       if (conversation.autoApprove && who.owner.userId) {
@@ -518,7 +530,11 @@ export class AgentRunOrchestrator {
       );
     if (conversation.closedReason) throw readOnly();
     const config = await this.settings.resolveProviderConfig();
-    if (config && pinnedConfigChanged(config, conversation)) {
+    if (
+      config &&
+      (pinnedConfigChanged(config, conversation) ||
+        webSearchWithdrawn(await this.settings.getSettings(), conversation))
+    ) {
       await this.lifecycle.closeConversation(conversation.id, 'CONFIG_CHANGED');
       throw readOnly();
     }

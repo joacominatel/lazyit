@@ -240,6 +240,37 @@
       }
     }
   },
+  "webSearch": {
+    "title": "Búsqueda web",
+    "on": "Activada",
+    "off": "Desactivada",
+    "description": "Permite que el asistente del chat busque en internet cuando los registros y la base de conocimiento de lazyit no tienen lo que necesita — por ejemplo, la documentación de un producto de terceros. La búsqueda la hace tu proveedor de IA.",
+    "switch": {
+      "label": "Permitir que el asistente busque en la web",
+      "description": "Se aplica a las conversaciones que empiecen después del cambio. Al desactivarla, las conversaciones que la tenían quedan de solo lectura."
+    },
+    "savedOn": "Búsqueda web activada",
+    "savedOff": "Búsqueda web desactivada",
+    "availability": {
+      "noProvider": "Primero hay que configurar un proveedor. La búsqueda web está disponible con Anthropic, OpenAI y Google Gemini 3 o posterior.",
+      "providerUnsupported": "El proveedor configurado no tiene búsqueda web propia, así que el asistente no puede buscar en internet. Está disponible con Anthropic, OpenAI y Google Gemini 3 o posterior.",
+      "modelUnsupported": "El modelo configurado no puede buscar en la web junto con las herramientas de lazyit. Elegí Gemini 3 o posterior para usarla."
+    },
+    "disclosure": {
+      "title": "Qué sale de lazyit",
+      "egress": "El proveedor hace la búsqueda en sus propios servidores: lazyit no hace ninguna solicitud propia. Las consultas y el contexto de la conversación van al proveedor, que puede pasar las consultas a su motor de búsqueda o a un socio de búsqueda, y puede facturar las búsquedas aparte.",
+      "untrusted": "Los resultados de búsqueda son contenido escrito por cualquiera en internet. El asistente los trata como datos, nunca como instrucciones, y cita las páginas que usó. Una vez que buscó en la web en una conversación, nada en esa conversación se aprueba automáticamente — cada cambio que proponga ahí muestra su tarjeta de aprobación.",
+      "openai": "Con OpenAI, la búsqueda usa la copia en caché e indexada de la web de OpenAI, no las páginas en vivo, así que pueden faltar páginas muy recientes. La búsqueda de OpenAI también puede abrir páginas; eso no se puede desactivar, pero nunca descarga una página en vivo desde su sitio.",
+      "conversations": "Solo el chat. Las ejecuciones headless nunca buscan en la web, porque sus cambios se aplican sin que nadie los apruebe."
+    },
+    "maxUses": {
+      "label": "Búsquedas por paso",
+      "description": "La cantidad máxima de búsquedas que el asistente puede hacer en un paso del modelo, donde el proveedor admite un límite (Anthropic).",
+      "invalid": "Ingresá un número entero de {min} a {max}.",
+      "save": "Guardar",
+      "saved": "Límite de búsquedas guardado"
+    }
+  },
   "mcp": {
     "title": "Agentes de IA externos (MCP)",
     "on": "Activo",

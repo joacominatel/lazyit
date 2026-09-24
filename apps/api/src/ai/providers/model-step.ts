@@ -11,12 +11,22 @@ import {
   type ModelMessage,
   type ToolSet,
 } from 'ai';
-import type { AiUsage } from '@lazyit/shared';
+import {
+  AI_WEB_SEARCH_QUERIES_MAX,
+  AI_WEB_SEARCH_QUERY_MAX,
+  AI_WEB_SOURCE_TITLE_MAX,
+  AI_WEB_SOURCES_MAX,
+  aiWebSearchSupported,
+  isWebSourceUrl,
+  type AiUsage,
+} from '@lazyit/shared';
 
 import type {
   ChatModelStepRequest,
   ChatModelStepResult,
   ChatModelToolDefinition,
+  ChatModelWebSearch,
+  ChatModelWebSource,
 } from '../core/ports/chat-model.port';
 import {
   AiProviderError,
@@ -73,6 +83,112 @@ export function buildToolSet(
     });
   }
   return set;
+}
+
+/**
+ * The provider-native web search tool for this step (#1389), or null: only when the conversation carries
+ * it, the definition has one, and the model supports it. Its key never collides with a lazyit tool: the
+ * registry's names are checked against it, and a clash drops the search instead of a lazyit tool.
+ */
+export function webSearchToolFor(
+  definition: LlmProviderDefinition,
+  modelId: string,
+  request: Pick<ChatModelStepRequest, 'webSearch' | 'tools'>,
+): { name: string; tool: ToolSet[string] } | null {
+  if (!request.webSearch || !definition.webSearchTool) return null;
+  if (!aiWebSearchSupported(definition.kind, modelId)) return null;
+  const search = definition.webSearchTool(request.webSearch.maxUses);
+  if (request.tools.some((tool) => tool.name === search.name)) return null;
+  return search;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function cleanQuery(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const query = value.replace(/\s+/g, ' ').trim();
+  return query.length === 0 ? null : query.slice(0, AI_WEB_SEARCH_QUERY_MAX);
+}
+
+/**
+ * What the provider's web search did in one step (#1389), read defensively from the SDK's step content:
+ *   - searches — the provider-executed calls of the search tool (Anthropic `server_tool_use`, OpenAI
+ *     `web_search_call`), or for Gemini the grounding queries it reports;
+ *   - queries — `input.query` (Anthropic), `output.action.query` (OpenAI), `webSearchQueries` (Gemini);
+ *   - sources — the step's URL sources (the citations / grounding chunks), `http(s)` only, deduplicated,
+ *     capped; titles are other-authored text and are only trimmed here.
+ * Null when nothing was searched and nothing was cited.
+ */
+export function webSearchOf(
+  content: readonly unknown[],
+  sources: readonly unknown[],
+  providerMetadata: unknown,
+  searchToolName: string,
+): ChatModelWebSearch | null {
+  let searches = 0;
+  const queries: string[] = [];
+  const addQuery = (value: unknown) => {
+    const query = cleanQuery(value);
+    if (
+      query &&
+      !queries.includes(query) &&
+      queries.length < AI_WEB_SEARCH_QUERIES_MAX
+    ) {
+      queries.push(query);
+    }
+  };
+  for (const item of content) {
+    const part = asRecord(item);
+    if (!part || part.providerExecuted !== true) continue;
+    if (part.toolName !== searchToolName) continue;
+    if (part.type === 'tool-call') {
+      searches += 1;
+      addQuery(asRecord(part.input)?.query);
+    } else if (part.type === 'tool-result') {
+      addQuery(asRecord(asRecord(part.output)?.action)?.query);
+    }
+  }
+  const grounding = asRecord(
+    asRecord(asRecord(providerMetadata)?.google)?.groundingMetadata,
+  );
+  if (grounding && Array.isArray(grounding.webSearchQueries)) {
+    const reported = grounding.webSearchQueries.filter(
+      (q) => cleanQuery(q) !== null,
+    );
+    searches = Math.max(searches, reported.length);
+    reported.forEach(addQuery);
+  }
+
+  const found: ChatModelWebSource[] = [];
+  const seen = new Set<string>();
+  for (const item of sources) {
+    const source = asRecord(item);
+    if (
+      !source ||
+      source.sourceType !== 'url' ||
+      typeof source.url !== 'string'
+    )
+      continue;
+    const url = source.url.trim();
+    if (!isWebSourceUrl(url) || seen.has(url)) continue;
+    seen.add(url);
+    const title =
+      typeof source.title === 'string'
+        ? source.title
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, AI_WEB_SOURCE_TITLE_MAX)
+        : '';
+    found.push({ url, title: title.length > 0 ? title : null });
+    if (found.length >= AI_WEB_SOURCES_MAX) break;
+  }
+
+  if (searches === 0 && found.length === 0) return null;
+  return { searches, queries, sources: found };
 }
 
 /** The SDK's download hook: refuses any request (an empty batch needs nothing). */
@@ -183,6 +299,11 @@ export async function runModelStep(
   );
   const settings = definition.callSettings(config, modelId);
   const signal = request.abortSignal;
+  const tools = buildToolSet(request.tools);
+  const search = webSearchToolFor(definition, modelId, request);
+  if (search) {
+    tools[search.name] = search.tool;
+  }
 
   const result = streamText({
     model,
@@ -194,7 +315,7 @@ export async function runModelStep(
         }
       : request.instructions,
     messages: [...(request.messages as ModelMessage[])],
-    tools: buildToolSet(request.tools),
+    tools,
     toolChoice,
     maxOutputTokens: request.maxOutputTokens,
     ...(settings.temperature !== undefined
@@ -242,15 +363,30 @@ export async function runModelStep(
   }
 
   try {
-    const [responseMessages, toolCalls, finishReason, usage, warnings] =
-      await Promise.all([
-        result.responseMessages,
-        result.toolCalls,
-        result.finishReason,
-        result.usage,
-        result.warnings,
-      ]);
+    const [
+      responseMessages,
+      toolCalls,
+      finishReason,
+      usage,
+      warnings,
+      rawFinishReason,
+    ] = await Promise.all([
+      result.responseMessages,
+      result.toolCalls,
+      result.finishReason,
+      result.usage,
+      result.warnings,
+      result.rawFinishReason,
+    ]);
     logWarnings(warnings, definition.kind, modelId);
+    const webSearch = search
+      ? webSearchOf(
+          await result.content,
+          await result.sources,
+          await result.providerMetadata,
+          search.name,
+        )
+      : null;
     return {
       // Only the model's own message. For a call to an unknown tool the SDK synthesizes a `tool` message
       // with its own error text; the loop answers EVERY call itself in the one tool message it builds
@@ -258,17 +394,27 @@ export async function runModelStep(
       responseMessages: responseMessages.filter(
         (message) => message.role === 'assistant',
       ),
-      toolCalls: toolCalls.map((call) => ({
-        toolCallId: call.toolCallId,
-        toolName: call.toolName,
-        // Unvalidated by design (the executor validates it with the tool's schema). The call may be
-        // invalid: an unknown name (look it up with an own-property check — `constructor` is a name the
-        // model can send) or an input whose JSON did not parse, which arrives as the RAW STRING. Every
-        // call, invalid ones included, must be answered in the step's single tool message.
-        input: call.input as unknown,
-      })),
+      // A provider-executed call (the web search) already ran on the provider's side; lazyit never answers
+      // it — its result is part of the model's own message.
+      toolCalls: toolCalls
+        .filter(
+          (call) =>
+            (call as { providerExecuted?: boolean }).providerExecuted !== true,
+        )
+        .map((call) => ({
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          // Unvalidated by design (the executor validates it with the tool's schema). The call may be
+          // invalid: an unknown name (look it up with an own-property check — `constructor` is a name the
+          // model can send) or an input whose JSON did not parse, which arrives as the RAW STRING. Every
+          // call, invalid ones included, must be answered in the step's single tool message.
+          input: call.input as unknown,
+        })),
       finishReason,
       usage: toAiUsage(usage),
+      ...(webSearch ? { webSearch } : {}),
+      // Anthropic paused a long server-side turn (a search still going): continue it with another step.
+      ...(rawFinishReason === 'pause_turn' ? { paused: true } : {}),
     };
   } catch (err) {
     throw classifyProviderError(err, definition.errorPatterns, signal);

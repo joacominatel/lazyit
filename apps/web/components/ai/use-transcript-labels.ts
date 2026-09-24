@@ -39,6 +39,7 @@ export function useTranscriptLabels(): TranscriptLabels {
     };
     return {
       you: t("message.you"),
+      sources: t("sources.title"),
       assistant: t("message.assistant"),
       tool: (part, count) => toolLineText(t, part.status, toolName(part.name), count),
       approval: (part, callStatus) => {

@@ -12,6 +12,7 @@ import { AiInputCard, type AnswerInput } from "./ai-input-card";
 import { AiMarkdown } from "./ai-markdown";
 import { AiRunNotice } from "./ai-run-notice";
 import { AiToolActivity } from "./ai-tool-activity";
+import { AiWebSources } from "./ai-web-sources";
 
 /**
  * Streaming text re-renders at most once per animation frame (frontend.md §5.5): the markdown parse runs
@@ -130,6 +131,8 @@ export function AiMessage({
             );
           case "notice":
             return <AiRunNotice key={key} error={part.error} />;
+          case "sources":
+            return <AiWebSources key={key} part={part} />;
           default:
             return (
               <p key={key} className="text-xs text-muted-foreground italic">

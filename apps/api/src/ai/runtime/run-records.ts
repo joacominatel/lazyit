@@ -1,7 +1,11 @@
-import type {
-  AiApprovalRequest,
-  AiEntityRef,
-  AiMessageRole,
+import {
+  AI_WEB_SEARCH_QUERIES_MAX,
+  AI_WEB_SEARCH_QUERY_MAX,
+  AiWebSourceListSchema,
+  type AiApprovalRequest,
+  type AiEntityRef,
+  type AiMessageRole,
+  type AiWebSource,
 } from '@lazyit/shared';
 import type { AiPendingAction } from '../core/pending-action';
 
@@ -21,6 +25,11 @@ import type { AiPendingAction } from '../core/pending-action';
  *   — the results already known (reads) and the invocation ids still pending (writes). The latest record
  *   of a step wins. It is what lets a resume, a cancel, an expiry or a crash answer EVERY call of the step
  *   in one tool message without parsing the provider's message format.
+ * - `lazyit-web-search-v1` — what the provider's native web search did in a step (#1389)
+ *   `{ stepIndex, searches, queries, sources }`, role `system`, written right after the step's assistant
+ *   message: the sources the web shows under that message (the provider message itself does not keep
+ *   them) and the run's record that the web was searched. Other-authored content (titles, queries) — read
+ *   by the projection only through the shared, scheme-checked source schema.
  *
  * Every `lazyit-*` row is runtime state: never replayed to the model and never projected to the web (the
  * conversation projection reads `aisdk-v7` rows only). All rows are append-only and are deleted only with
@@ -30,6 +39,7 @@ export const AI_MESSAGE_FORMAT_MODEL = 'aisdk-v7';
 export const AI_MESSAGE_FORMAT_SYSTEM_PROMPT = 'lazyit-system-prompt-v1';
 export const AI_MESSAGE_FORMAT_RUN = 'lazyit-run-v1';
 export const AI_MESSAGE_FORMAT_STEP = 'lazyit-step-v1';
+export const AI_MESSAGE_FORMAT_WEB_SEARCH = 'lazyit-web-search-v1';
 
 /** The role of a runtime record row (never a provider message). */
 export const AI_RUNTIME_RECORD_ROLE = 'system';
@@ -61,6 +71,41 @@ export interface StepRecord {
   outcomes: StepOutcome[];
   /** Other-authored content the step read (the untrusted-source banner of later proposals). */
   untrustedSources: AiEntityRef[];
+}
+
+/** A step's provider-native web search (#1389): counts, the reported queries and the sources shown. */
+export interface WebSearchRecord {
+  stepIndex: number;
+  searches: number;
+  queries: string[];
+  sources: AiWebSource[];
+}
+
+/** A stored web-search record, or null when unreadable (read-tolerant: bad entries are dropped). */
+export function readWebSearchRecord(content: unknown): WebSearchRecord | null {
+  if (!content || typeof content !== 'object' || Array.isArray(content)) {
+    return null;
+  }
+  const value = content as Partial<Record<keyof WebSearchRecord, unknown>>;
+  if (typeof value.stepIndex !== 'number') return null;
+  const sources = AiWebSourceListSchema.safeParse(
+    Array.isArray(value.sources) ? value.sources : [],
+  );
+  const queries = (Array.isArray(value.queries) ? value.queries : [])
+    .filter((q): q is string => typeof q === 'string')
+    .map((q) => q.slice(0, AI_WEB_SEARCH_QUERY_MAX))
+    .slice(0, AI_WEB_SEARCH_QUERIES_MAX);
+  return {
+    stepIndex: value.stepIndex,
+    searches:
+      typeof value.searches === 'number' &&
+      Number.isInteger(value.searches) &&
+      value.searches >= 0
+        ? value.searches
+        : 0,
+    queries,
+    sources: sources.success ? sources.data : [],
+  };
 }
 
 /** The role column for a provider message; an unknown shape reads as `assistant` (a model step's output). */

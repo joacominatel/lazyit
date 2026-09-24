@@ -2,6 +2,7 @@ import type { AiMessagePart, AiToolInvocationStatus } from "@lazyit/shared";
 import type { ChatMessage } from "./stream-reducer";
 import { groupMessageParts, type ToolPart } from "./tool-groups";
 import { plainText } from "./untrusted-text";
+import { webSourceLinks } from "./web-sources";
 
 /**
  * `/copy` (issue #1372): the conversation as Markdown, for the clipboard. Pure — every localized word
@@ -26,6 +27,8 @@ export interface TranscriptLabels {
   notice: (part: NoticePart) => string;
   /** An input form (#1388) as lines: its title/state line, the form's title, then the answer if any. */
   input: (part: InputPart) => string[];
+  /** The heading of the web search sources under a message (#1389). */
+  sources: string;
   /** A part this build cannot show. */
   unsupported: string;
 }
@@ -67,6 +70,14 @@ function assistantBlocks(
       case "input":
         blocks.push(quote(labels.input(part)));
         break;
+      case "sources": {
+        // Plain text: the title is other-authored, so it is never written as Markdown link text.
+        const lines = webSourceLinks(part.sources).map(
+          (link) => `- ${plainText(link.label).replace(/[[\]<>`*_]/g, "")} — <${link.href}>`,
+        );
+        if (lines.length > 0) blocks.push([`**${labels.sources}**`, ...lines].join("\n"));
+        break;
+      }
       default:
         blocks.push(`_${labels.unsupported}_`);
     }

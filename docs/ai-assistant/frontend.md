@@ -844,8 +844,8 @@ Placed after `access-automation` in `_nav.ts`. Fourteen new files (en + es):
 | Slug | Content |
 | --- | --- |
 | `ai-assistant-overview` | what it is, off by default, what data goes to the provider, `ai:use`, `ai:connect` |
-| `ai-assistant-setup` | the admin wizard, the four providers, test, edit, turn off, retention |
-| `ai-assistant-using-the-chat` | ⌘J, page context, history, limits and errors |
+| `ai-assistant-setup` | the admin wizard, the four providers, test, edit, turn off, retention, web search (#1389) |
+| `ai-assistant-using-the-chat` | ⌘J, page context, history, limits and errors, web search sources (#1389) |
 | `ai-assistant-approvals` | preview cards, approve/reject, where executed actions are recorded |
 | `ai-assistant-claude-code-mcp` | enable MCP, install the skill, connect Claude Code and other clients, the consent screen |
 | `ai-assistant-connected-apps` | review and revoke; admin revoke |
@@ -1186,6 +1186,28 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
 - The scalar summary rows of `asset_create_batch` (`rowCount`, `validRows`, `invalidRows`,
   `defaultsApplied`) stay ordinary field rows above the table. Manual: `ai-assistant-approvals`
   ("Creating many assets at once", "Categories, models and locations") and `configuration-taxonomies`.
+
+## 11c. As built — web search (#1389; ADR-0097 decision 3 as amended 2026-09-24)
+
+- **Settings → AI card** (`app/(app)/settings/ai/_components/ai-web-search-section.tsx`), shown on and off
+  like the limits card, inside the page's `AdminGate` (`settings:manage`): a switch
+  (`webSearchEnabled`, saved through the wholesale `PUT` — `settingsToUpdate` re-sends both web search
+  fields as read, so another card's save never turns it off), a disclosure callout (the provider runs the
+  search, lazyit makes no request; the queries and context go to the provider, which may pass the queries
+  to its search backend or a partner, and may bill separately; once a conversation has searched nothing in
+  it is auto-approved; chat only; plus, for OpenAI only, the cached/indexed-web and `open_page` note), and a
+  "Searches per step" number (1–20, `parseWebSearchMaxUses`). `webSearchAvailability` (the shared
+  `aiWebSearchSupported` rule) disables the switch with its reason — no provider, a provider without
+  native search (OpenAI-compatible), or a model without it (Gemini before 3) — but never while it is on,
+  so an admin can always turn it off. Copy: `aiSettings.webSearch.*`.
+- **Sources under an answer** (`components/ai/ai-web-sources.tsx`): a `sources` message part (from the
+  transcript or the `message.sources` event, which the reducer puts under the message it names,
+  replacing — never duplicating — an earlier one) renders as a small list: plain-text title (or host),
+  the host beside it, `target="_blank"`, `rel="noopener noreferrer"`, and a note that the pages were found
+  by the provider's search and written by others. `webSourceLink` (`lib/ai/web-sources.ts`) re-checks the
+  scheme: only an absolute `http:` / `https:` URL without credentials becomes an `href`. `/copy` writes
+  the sources as plain text with the URL in angle brackets (the title is never Markdown link text).
+  Copy: `ai.sources.*`; the untrusted-source banner names the marker as `ai.entities.webSearch`.
 
 ## 12. Implementation units (superseded)
 

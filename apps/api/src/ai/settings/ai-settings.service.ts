@@ -12,6 +12,8 @@ import {
   AI_PROVIDER_DESCRIPTORS,
   AI_PROVIDER_OPTIONS_SCHEMAS,
   AI_SETTINGS_DEFAULTS,
+  AI_WEB_SEARCH_MAX_USES_MAX,
+  AI_WEB_SEARCH_MAX_USES_MIN,
   AiEffortSchema,
   AiProviderKindSchema,
   AiProviderOptionsSchema,
@@ -290,10 +292,23 @@ export class AiSettingsService implements AiSettingsReader {
    * A refused write persists NOTHING. The MCP switch and the allowlist overlay pass no gate.
    */
   async updateSettings(
-    input: UpdateAiSettings,
+    requested: UpdateAiSettings,
     actorId: string | null,
   ): Promise<AiSettings> {
     const row = await this.findRow();
+    // Web search (#1389) is optional on the wire: omitted keeps the stored value (a caller written before
+    // it keeps working). Resolved once here so the write and the audit diff see the same values.
+    const input: UpdateAiSettings = {
+      ...requested,
+      webSearchEnabled:
+        requested.webSearchEnabled ??
+        row?.webSearchEnabled ??
+        AI_SETTINGS_DEFAULTS.webSearchEnabled,
+      webSearchMaxUses:
+        requested.webSearchMaxUses ??
+        row?.webSearchMaxUses ??
+        AI_SETTINGS_DEFAULTS.webSearchMaxUses,
+    };
     assertConnectionShape(input);
 
     // (2) The key.
@@ -439,6 +454,8 @@ export class AiSettingsService implements AiSettingsReader {
       mcpClientAllowlistRemovedDefaults:
         input.mcpClientAllowlistRemovedDefaults,
       mcpAllowAnyHttpsClient: input.mcpAllowAnyHttpsClient,
+      webSearchEnabled: input.webSearchEnabled,
+      webSearchMaxUses: input.webSearchMaxUses,
       verifiedAt,
       disclosureAcknowledgedAt,
       ...(acknowledgingNow ? { disclosureAcknowledgedById: actorId } : {}),
@@ -569,6 +586,13 @@ export class AiSettingsService implements AiSettingsReader {
       mcpClientAllowlistAdded: added.success ? added.data : [],
       mcpClientAllowlistRemovedDefaults: row.mcpClientAllowlistRemovedDefaults,
       mcpAllowAnyHttpsClient: row.mcpAllowAnyHttpsClient,
+      webSearchEnabled: row.webSearchEnabled,
+      // Read-tolerant: a cap outside today's range (a hand-edited row) reads as the default.
+      webSearchMaxUses:
+        row.webSearchMaxUses >= AI_WEB_SEARCH_MAX_USES_MIN &&
+        row.webSearchMaxUses <= AI_WEB_SEARCH_MAX_USES_MAX
+          ? row.webSearchMaxUses
+          : AI_SETTINGS_DEFAULTS.webSearchMaxUses,
       disclosureAcknowledgedAt:
         row.disclosureAcknowledgedAt?.toISOString() ?? null,
       verifiedAt: row.verifiedAt?.toISOString() ?? null,
@@ -812,7 +836,15 @@ const PLAIN_AUDIT_FIELDS = [
   'mcpEnabled',
   'mcpAllowAnyHttpsClient',
   'mcpClientAllowlistRemovedDefaults',
+  'webSearchEnabled',
+  'webSearchMaxUses',
 ] as const;
+
+/** Fields a write may omit (they keep their stored value). */
+const OPTIONAL_AUDIT_FIELDS: ReadonlySet<string> = new Set([
+  'webSearchEnabled',
+  'webSearchMaxUses',
+]);
 
 /**
  * The REDACTED diff of a write, for `ai_config_audit_log.detail.changes`:
@@ -832,6 +864,8 @@ export function diffSettings(
   for (const field of PLAIN_AUDIT_FIELDS) {
     const a: unknown = before[field];
     const b: unknown = input[field];
+    // An optional field the write omitted keeps its stored value: not a change.
+    if (b === undefined && OPTIONAL_AUDIT_FIELDS.has(field)) continue;
     if (stableJson(a ?? null) !== stableJson(b ?? null)) {
       changes[field] = { before: a ?? null, after: b ?? null };
     }
