@@ -27,6 +27,7 @@ import {
   type AiToolRuntime,
   type AiToolset,
 } from '../core/tool-descriptor';
+import { searchText } from './search-text';
 import {
   asRow,
   asRows,
@@ -416,15 +417,9 @@ const SORT_FIELDS = Object.keys(ASSET_SORT_ALLOWLIST) as [
 
 const assetSearchInput = z
   .strictObject({
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe(
-        'Substring of the name, serial, asset tag, or the model name or manufacturer.',
-      ),
+    query: searchText(
+      'Substring of the name, serial, asset tag, or the model name or manufacturer.',
+    ),
     status: AssetStatusSchema.optional(),
     modelId: z
       .cuid()
@@ -459,9 +454,13 @@ const assetSearchInput = z
   })
   .superRefine((input, ctx) => {
     if (!input.mine) return;
-    const other = Object.keys(input).filter(
-      (key) => !['mine', 'limit', 'offset'].includes(key),
-    );
+    // A blank `query` is parsed to undefined (#1374): only a filter actually given counts.
+    const other = Object.entries(input)
+      .filter(
+        ([key, value]) =>
+          value !== undefined && !['mine', 'limit', 'offset'].includes(key),
+      )
+      .map(([key]) => key);
     if (other.length > 0) {
       ctx.addIssue({
         code: 'custom',
@@ -476,7 +475,8 @@ const assetSearch = defineTool({
   title: 'Search assets',
   description:
     'List assets (laptops, servers, phones, licences…) with filters: text, status, model, category, ' +
-    'location, company, owner, warranty window. `mine: true` lists the assets checked out to you. ' +
+    'location, company, owner, warranty window. Omit `query` to list by the other filters alone. ' +
+    '`mine: true` lists the assets checked out to you. ' +
     'Returns each asset with its model, location and current owners; paginate with offset.',
   domain: 'assets',
   class: 'read',

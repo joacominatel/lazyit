@@ -862,6 +862,56 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       );
     });
 
+    it('lists every administrator in ONE call with no text — an empty query is "no text filter", like the route (#1374)', async () => {
+      const second = 'bbbbbbbb-0000-4000-8000-00000000a002';
+      users.set(
+        second,
+        userRow(second, 'ADMIN', { email: 'second-admin@example.com' }),
+      );
+      const http = await request(app.getHttpServer())
+        .get('/users?role=ADMIN')
+        .set('authorization', `Bearer ${ADMIN.bearer}`);
+      expect(http.status).toBe(200);
+      const routeIds = (http.body as { items: Array<{ id: string }> }).items
+        .map((u) => u.id)
+        .sort();
+      expect(routeIds).toEqual([ID.admin, second].sort());
+
+      // What the model sent in the report ("query": "") and its variants: each one call, never a retry.
+      for (const input of [
+        { role: 'ADMIN' },
+        { query: '', role: 'ADMIN' },
+        { query: '   ', role: 'ADMIN' },
+      ]) {
+        const result = await tools.invoke('user_search', input, chat(ADMIN));
+        expect(result).toMatchObject({ ok: true, data: { total: 2 } });
+        expect(result).not.toHaveProperty('truncated');
+        const ids = (
+          result as { data: { items: Array<{ id: string }> } }
+        ).data.items
+          .map((u) => u.id)
+          .sort();
+        expect(ids).toEqual(routeIds);
+      }
+      // The route never saw a blank `q`: absent, exactly as the HTTP list above.
+      for (const call of prisma.user.findMany.mock.calls) {
+        expect(JSON.stringify(call[0])).not.toMatch(/"contains":""/);
+      }
+    });
+
+    it('a blank query with no filter lists the whole directory, bounded by the page with the partial-page marker', async () => {
+      const result = await tools.invoke(
+        'user_search',
+        { query: '', limit: 2 },
+        chat(ADMIN),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: { total: 4, offset: 0 },
+        truncated: { shown: 2, total: 4, nextOffset: 2 },
+      });
+    });
+
     it('maps its filters onto the route query', async () => {
       const result = await tools.invoke(
         'user_search',
@@ -872,6 +922,46 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         ok: true,
         data: { total: 1, items: [{ id: ID.member, username: 'aops' }] },
       });
+    });
+
+    it('isActive filters activation in ONE call, with the same rows as GET /users?isActive= (#1375)', async () => {
+      users.set(ID.viewer, { ...users.get(ID.viewer)!, isActive: false });
+      for (const [flag, expected] of [
+        [false, [ID.viewer]],
+        [true, [ID.admin, ID.member, ID.directory].sort()],
+      ] as const) {
+        const http = await request(app.getHttpServer())
+          .get(`/users?isActive=${String(flag)}`)
+          .set('authorization', `Bearer ${ADMIN.bearer}`);
+        expect(http.status).toBe(200);
+        const routeIds = (http.body as { items: Array<{ id: string }> }).items
+          .map((u) => u.id)
+          .sort();
+        expect(routeIds).toEqual([...expected]);
+
+        const result = await tools.invoke(
+          'user_search',
+          { isActive: flag },
+          chat(ADMIN),
+        );
+        expect(result).toMatchObject({ ok: true });
+        const ids = (
+          result as { data: { items: Array<{ id: string }> } }
+        ).data.items
+          .map((u) => u.id)
+          .sort();
+        expect(ids).toEqual(routeIds);
+      }
+      // Omitted: both, exactly as before the filter existed.
+      expect(await tools.invoke('user_search', {}, chat(ADMIN))).toMatchObject({
+        ok: true,
+        data: { total: 4 },
+      });
+      // A garbage value is a clean 400 on the route.
+      const bad = await request(app.getHttpServer())
+        .get('/users?isActive=maybe')
+        .set('authorization', `Bearer ${ADMIN.bearer}`);
+      expect(bad.status).toBe(400);
     });
 
     it('archived: true is the route’s ADMIN-only slice — a MEMBER gets the same 403', async () => {
@@ -1273,6 +1363,69 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         // Deactivation ends every session (the route's epoch bump).
         sessionEpoch: 2,
       });
+      // Issue #1375: every audited change the AI made is in the user's history — the deactivation
+      // included — attributed to the approving human and stamped with the invocation id, so it reaches
+      // Reports → Users like the same PATCH made from the UI.
+      expect(history).toEqual([
+        expect.objectContaining({
+          userId: ID.member,
+          eventType: 'DEACTIVATED',
+          performedById: ID.admin,
+          aiInvocationId: proposal.action.id,
+        }),
+        expect.objectContaining({
+          eventType: 'MANAGER_CHANGED',
+          performedById: ID.admin,
+          aiInvocationId: proposal.action.id,
+        }),
+        expect.objectContaining({
+          eventType: 'UPDATED',
+          // The legajo was resent unchanged (Ana already holds L-100), so only the email is listed.
+          payload: { fields: ['email'] },
+          performedById: ID.admin,
+          aiInvocationId: proposal.action.id,
+        }),
+      ]);
+    });
+
+    it('a deactivation alone (the #1375 report) is recorded as DEACTIVATED, stamped, and a reactivation as REACTIVATED', async () => {
+      const off = await tools.propose(
+        'user_update',
+        { user: ID.member, isActive: false },
+        chat(ADMIN),
+      );
+      if (!off.ok) throw new Error(JSON.stringify(off.result));
+      const offRun = await tools.approve(off.action.id, chat(ADMIN), {
+        stepUpVerified: true,
+      });
+      expect(offRun.status).toBe('SUCCEEDED');
+      expect(users.get(ID.member)!.isActive).toBe(false);
+
+      const on = await tools.propose(
+        'user_update',
+        { user: ID.member, isActive: true },
+        chat(ADMIN),
+      );
+      if (!on.ok) throw new Error(JSON.stringify(on.result));
+      const onRun = await tools.approve(on.action.id, chat(ADMIN), {
+        stepUpVerified: true,
+      });
+      expect(onRun.status).toBe('SUCCEEDED');
+
+      expect(history).toEqual([
+        expect.objectContaining({
+          userId: ID.member,
+          eventType: 'DEACTIVATED',
+          performedById: ID.admin,
+          aiInvocationId: off.action.id,
+        }),
+        expect.objectContaining({
+          userId: ID.member,
+          eventType: 'REACTIVATED',
+          performedById: ID.admin,
+          aiInvocationId: on.action.id,
+        }),
+      ]);
     });
 
     it('a manager-only change is not an identity change: LEDGER_APPEND, approved without step-up (CEO decision)', async () => {

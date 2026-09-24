@@ -4,6 +4,7 @@ import type { AiMessagePart } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import type { ChatMessage } from "@/lib/ai/stream-reducer";
+import { groupMessageParts } from "@/lib/ai/tool-groups";
 import type { DecisionResult } from "@/lib/api/hooks/use-ai-turn";
 import { AiApprovalCard } from "./ai-approval-card";
 import { AiMarkdown } from "./ai-markdown";
@@ -61,7 +62,18 @@ export function AiMessage({ message, tools, navigated, onDecide }: AiMessageProp
       <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {t("assistant")}
       </p>
-      {message.parts.map((part, index) => {
+      {groupMessageParts(message.parts).map((item) => {
+        if (item.kind === "tools") {
+          // Consecutive identical read calls share one line (#1377).
+          return (
+            <AiToolActivity
+              key={item.parts[0]!.toolCallId}
+              parts={item.parts}
+              navigated={item.parts.some((p) => navigated.includes(p.toolCallId))}
+            />
+          );
+        }
+        const { part, index } = item;
         const key = `${message.id}-${index}`;
         switch (part.type) {
           case "text":
@@ -70,14 +82,6 @@ export function AiMessage({ message, tools, navigated, onDecide }: AiMessageProp
                 key={key}
                 text={part.text}
                 streaming={message.streaming === true && index === message.parts.length - 1}
-              />
-            );
-          case "tool":
-            return (
-              <AiToolActivity
-                key={part.toolCallId}
-                part={part}
-                navigated={navigated.includes(part.toolCallId)}
               />
             );
           case "approval": {

@@ -426,6 +426,15 @@ Rejected alternatives are covered in §5.
 - Ambiguity returns `AMBIGUOUS_REFERENCE` with up to 5 candidates.
 - Lists default to 20 items (max 50, below the API's 200 [R22]). Every get/search tool takes
   `detail: 'concise'|'full'` [E1].
+- **List mode (#1374).** Every `*_search`/list tool with a free-text `query` also LISTS: `query` is
+  optional, and an absent, empty or whitespace-only one means "no text filter" — the route gets no `q`,
+  exactly as over HTTP (`ai/tools/search-text.ts`, one helper for all of them: `application_search`,
+  `asset_search`, `consumable_search`, `infra_node_search`, `kb_search`, `reference_lookup`,
+  `user_search`, `activity_list`). A filter-only request ("every administrator" = `user_search` with
+  `role: "ADMIN"`) is one call; the descriptions say to omit `query` to list. The listed JSON Schema
+  stays a plain optional string (`maxLength` 200). Result bounds and the partial-page rule are
+  unchanged. `lazyit_search` (the global full-text search) keeps a required `query` and points the model
+  to the domain tools for listing. `search-text.spec.ts` pins the set.
 - The serialized result cap is about 20k chars, with a `truncated` marker and a `nextOffset`.
 - Untrusted free text (article bodies, notes, descriptions, agent-reported facts) is wrapped in
   `<untrusted_content>` delimiters — the LLM-context extension of [R23].
@@ -475,6 +484,8 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 34 | `kb_create_article` (as DRAFT) ✅ built (W2-8) | ArticlesController.create | article:write | write | article created |
 | 35 | `kb_update_article` ✅ built (W2-8; also the folder move) | ArticlesController.update | article:write | write·D (preview may escalate) | article updated |
 | 36 | `kb_set_publication` (publish\|unpublish) ✅ built (W2-8) | ArticlesController.publish / .unpublish | article:write | write (preview may escalate; idempotent) | article updated |
+| 36a | `kb_folder_create` ✅ built (#1378, added to the v1 cut) | ArticleCategoriesController.create (+findAll for the parent and its audience) | category:write | write | category created |
+| 36b | `kb_folder_rename` ✅ built (#1378, added to the v1 cut; name only, never a move) | ArticleCategoriesController.update (+findAll) | category:write | write·D | category updated |
 | 37 | `user_search` ✅ built (W2-9) | UsersController.findAll | user:read | read | — |
 | 38 | `user_get` ✅ built (W2-9) | UsersController.findOne (+assignments, grants facets) | user:read (+accessGrant:read facet) | read | — |
 | 39 | `user_create` ✅ built (W2-9) | UsersController.create | user:manage | elevated | user created |
@@ -486,11 +497,12 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 
 - Method names in the Binds column are illustrative. The foundation unit pins them against the actual
   controllers, and the boot check (§8.3) fails on a wrong name.
-- Per-role visibility with default permissions: ADMIN 44; MEMBER ≈ 38 (no `activity_list`, no `user_*`
+- Per-role visibility with default permissions: ADMIN 46; MEMBER ≈ 40 (no `activity_list`, no `user_*`
   writes); VIEWER ≈ 16 reads + `access_request_create`.
 - If the catalog grows past about 60, adopt deferred tool loading [E8]. Do not split into multiple
   servers.
-- **v1.1:** batch asset operations, bulk receive, model/location/category update and archive,
+- **v1.1:** batch asset operations, bulk receive, model/location/category update (the KB folder
+  rename is built, #1378) and archive,
   application/consumable/article archive and restore, grant notes/expiry/batch revoke, article
   links/aliases/versions, user clone, attachments list, notifications, security audit logs, infra
   writes.
@@ -709,6 +721,25 @@ leak through a tool would be a leak in the test.
 - `kb_create_article` (`write`) — always a `DRAFT` authored by the caller; `status` is not an input.
 - `kb_update_article` (`write`·D) — title, slug, excerpt, the whole body, and `folderId` (a MOVE).
 - `kb_set_publication` (`write`, idempotent) — `publish` | `unpublish`.
+- `kb_folder_create` (`write`, #1378) — input `name` (1–100), `parentFolderId` (optional; absent = a
+  top-level folder), `description`. Bound to `POST /article-categories` (`category:write`: ADMIN and
+  MEMBER by default; a Service Account holding it too). The input has **no access rules**: a new folder
+  carries none of its own, and setting them (`PUT :id/access-rules`, `settings:manage`) stays unexposed,
+  so the assistant never sets or changes who can read a folder (INV-9). The card shows the name, the
+  parent **by name** (or "top level"), the resulting **path**, the **audience** — the parent's (a
+  restricted ancestor narrows the whole subtree, ADR-0060 §1), "everyone who can read the knowledge
+  base" at the top level, or *unknown to you* for a caller who cannot read folder rules — and a line
+  saying the folder has no rules of its own and that only an administrator can restrict it. Standard
+  (not elevated) card: an empty folder publishes no content. The **precondition is the parent's
+  `updatedAt`**: a parent whose rules (or place) changed between the card and the approval is `STALE`.
+  Refused before a card: a missing parent (the route's own 400 text) and a **parent the caller cannot
+  read** — `POST /article-categories` accepts it, but the assistant does not offer that blind write, the
+  same rule as an article create. The folder name in the result is wrapped with `untrusted()`.
+- `kb_folder_rename` (`write`·D, #1378) — input `folderId`, `name`; bound to `PATCH
+  /article-categories/:id` but sends only `name` — never `parentId` (a folder **move** changes the
+  audience of the whole subtree and stays unexposed). The card is the folder (target, precondition on its
+  `updatedAt`), the name and path before → after, and its unchanged audience. Refused before a card: a
+  no-op, a missing folder (404) and a folder the caller cannot read.
 - **One reference rule.** An article reference is an id or a slug, and a cuid-shaped reference is
   **always** an id — never retried as a slug — in the preview and in `run` alike, so the card and the
   execution name the same article (a slug planted to equal another article's id cannot redirect a write).
@@ -744,7 +775,8 @@ leak through a tool would be a leak in the test.
   the service (R25), so the write tools list for an SA holding `article:write` and answer 403.
 - Unexposed with reasons: versions, links, backlinks, aliases and their writes (v1.1), archive and
   restore (v1.1), the attachments list and removal (v1.1), the `.docx` import and binary attachment
-  transfer (no file tools).
+  transfer (no file tools); folder delete (a cascading one included) and restore (v1.1, declared in
+  `reference.tools.ts`), a folder move, and folder access rules (`elevated`, after v1).
 - **Follow-ups (recorded by the G2 review, not fixed here):**
   - entity-ref labels (article titles) and author names in results are not wrapped as untrusted;
   - the folder is an entity of type `category`, which the web cannot tell apart from the other
@@ -831,7 +863,8 @@ Accounts holding the route's permission.
 - **Unexposed with reasons:** batch archive/restore/status and bulk receive (v1.1), the CSV export, the
   companies autocomplete, the `/asset-assignments` reads (served as facets), assignment notes (v1.1),
   acknowledge (the holder's own act, v1.1), attachments (list/remove v1.1; binary upload/content never),
-  model/location/category update, archive and restore and every category create (v1.1), folder access
+  model/location/category update, archive and restore and every category create (v1.1) — except the KB
+  folder create and rename, which are `kb_folder_create` / `kb_folder_rename` (#1378) — folder access
   rules (`elevated`, after v1).
 
 **Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so
@@ -856,8 +889,10 @@ a separate remediation, not a supported path here.
   id rather than a reference keeps the stored input exactly what the card showed, so execution cannot set
   a different person. The preview labels it through `findOne` and detects a no-op by identity (same id,
   or same free-text name), never by comparing labels.
-- **Reads.** `user_search` (`query`, `role`, `directoryOnly`, `archived`, the route's `sort`, `dir`,
-  `limit` ≤ 50, `offset`) and `user_get` (`detail`; the assignments facet and the `accessGrant:read`
+- **Reads.** `user_search` (`query` — optional: omit it to list, e.g. `role: "ADMIN"` for every
+  administrator in one call (#1374) — `role`, `directoryOnly`, `isActive` (`false` lists the
+  deactivated users in one call, mapped to `GET /users?isActive=`, #1375), `archived`, the route's
+  `sort`, `dir`, `limit` ≤ 50, `offset`) and `user_get` (`detail`; the assignments facet and the `accessGrant:read`
   grants facet — reported `unavailable` without that permission, never a failure). `dashboard_summary`
   (`expiringWithinDays`, `detail: full` adds the recent asset history) and `activity_list` (the feed's
   filters; `actor` is a uuid or `"me"`; `limit` ≤ 50). Never projected: `externalId`, password and

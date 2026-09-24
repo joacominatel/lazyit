@@ -31,6 +31,7 @@ import {
   type AiToolRuntime,
   type AiToolset,
 } from '../core/tool-descriptor';
+import { searchText } from './search-text';
 
 /**
  * The USERS toolset (W2-9; tools-and-execution.md §7 rows 37–42): the directory and the user lifecycle.
@@ -393,28 +394,30 @@ const userSearch = defineTool({
   name: 'user_search',
   title: 'Search users',
   description:
-    'Search the user directory: people with a login and directory-only persons (imported, no login). ' +
-    '`query` matches first name, last name and email (every word must match). Filter by role or by ' +
-    'directory-only; `archived: true` lists offboarded users instead (administrators only). Returns a ' +
+    'Search or list the user directory: people with a login and directory-only persons (imported, no ' +
+    'login). `query` matches first name, last name and email (every word must match). To LIST, omit ' +
+    '`query` and filter: `role: "ADMIN"` is every administrator in one call. Filter by role or by ' +
+    'directory-only; `isActive: false` lists deactivated users (sign-in disabled), `isActive: true` only ' +
+    'enabled ones; `archived: true` lists offboarded users instead (administrators only). Returns a ' +
     'page with ids, roles, activation state and how many assets and application accesses each person ' +
     'holds. Use it to find a user before user_get or a user write; never guess an id.',
   domain: 'users',
   class: 'read',
   idempotent: true,
   input: z.strictObject({
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('Case-insensitive words to look for.'),
+    query: searchText('Case-insensitive words to look for.'),
     role: RoleSchema.optional(),
     directoryOnly: z
       .boolean()
       .optional()
       .describe(
         'true: only directory persons (no login); false: only accounts.',
+      ),
+    isActive: z
+      .boolean()
+      .optional()
+      .describe(
+        'false: only deactivated users (sign-in disabled); true: only enabled ones. Omit for both.',
       ),
     archived: z
       .boolean()
@@ -442,6 +445,8 @@ const userSearch = defineTool({
           input.directoryOnly === undefined
             ? undefined
             : String(input.directoryOnly),
+        isActive:
+          input.isActive === undefined ? undefined : String(input.isActive),
         deleted: input.archived ? 'only' : 'active',
         sort: input.sort,
         dir: input.dir,

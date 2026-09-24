@@ -19,7 +19,8 @@ import { pageSchema, PageQuerySchema } from "./pagination";
  *   - AccessGrant        → entityType "application" · action "granted" / "revoked"
  *   - ConsumableMovement → entityType "consumable"  · action "stock_in" / "stock_out" / "stock_adjustment"
  *   - UserHistory        → entityType "user"        · action "created" / "updated" / "role_changed" /
- *                          "deleted" / "restored" / "password_reset_sent" (DEBT-2, issue #185)
+ *                          "deleted" / "restored" / "password_reset_sent" / "deactivated" /
+ *                          "reactivated" / … (DEBT-2, issue #185; activation: issue #1375)
  *
  * Date fields are ISO-8601 strings (wire shape). The list is newest-first and **offset-paginated**
  * per ADR-0030 (default page size 20).
@@ -111,7 +112,8 @@ export type RecentActivityPage = z.infer<typeof RecentActivityPageSchema>;
  *   - AccessGrant: granted · revoked
  *   - ConsumableMovement: stock_in · stock_out · stock_adjustment
  *   - UserHistory (lowercased `UserHistoryEventType`, DEBT-2 / issue #185 + ADR-0058): created ·
- *     updated · role_changed · manager_changed · deleted · restored · password_reset_sent.
+ *     updated · role_changed · manager_changed · deleted · restored · password_reset_sent ·
+ *     deactivated · reactivated (issue #1375).
  *     `created` / `deleted` / `restored` are already in the list (shared with AssetHistory); only the
  *     user-specific verbs are added below.
  * Keep this in sync with the view if a new source verb is added.
@@ -161,6 +163,10 @@ export const RECENT_ACTIVITY_ACTIONS = [
   "password_changed",
   "password_reset_requested",
   "password_reset_completed",
+  // Activation flips (issue #1375) — the lowercased DEACTIVATED / REACTIVATED verbs the recent_activity
+  // view emits when an admin disables or re-enables a user (via the UI, the API or an AI tool call).
+  "deactivated",
+  "reactivated",
 ] as const;
 
 /** A single known activity verb. The `action` filter validates against this enum (→ 400 otherwise). */

@@ -240,7 +240,7 @@ updated: 2026-09-24
 | --- | --- | --- |
 | **A1. Header popover** (the bell pattern) | Cheapest; precedent exists | Closes on outside click; covers the very list the CEO wants to see refresh; cramped for approval cards and history. **Rejected.** |
 | **A2. Modal `Sheet`** | Vendored primitive | A modal blocks the page — the user cannot watch "the created asset appears in the open list" nor click it. **Rejected on desktop**, fine on phones. |
-| **A3. Non-modal side panel** — docked in-flow at `xl`, fixed overlay (no backdrop) at `md`–`xl`, full-screen modal `Sheet` below `md` *(chosen)* | Keeps the page live beside the conversation, which *is* the reactive-UI promise; mounted in the layout, so it survives navigation | A new layout column; responsive switching; focus management owned by us for the non-modal case. |
+| **A3. Non-modal side panel** — docked in-flow at `xl`, fixed overlay (no backdrop) at `md`–`xl`, full-screen modal `Sheet` below `md` *(chosen; amended by #1370/#1371 — resizable, and a panel wider than the docked 400px overlays the page: §11a)* | Keeps the page live beside the conversation, which *is* the reactive-UI promise; mounted in the layout, so it survives navigation | A new layout column; responsive switching; focus management owned by us for the non-modal case. |
 | **A4. Full-page `/assistant` route** | Room for history | Navigating to the chat unmounts the page it should be controlling. **Rejected for v1.** |
 
 **(C)** Docked only at `xl` (≥1280px): with the 240px rail and a ~400px panel, `lg` (1024px) leaves
@@ -341,7 +341,7 @@ app/(app)/layout.tsx  (server, SHARED CRITICAL — one edit)
    │  gating: useAiStatus() → chat.available  (fails closed; renders children only when off)
    ├─ header …  <AiChatLauncher/>           icon button + ⌘J/Ctrl+J; null unless available
    ├─ inner column (header + breadcrumb + main)  ← unchanged
-   └─ <AiChatPanelSlot/>                    xl: docked <aside> · md–xl: fixed overlay · <md: Sheet
+   └─ <AiChatPanelSlot/>                    xl: docked <aside> · md–xl: fixed overlay · <md: Sheet  (resizable: §11a)
         └─ next/dynamic(() => AiChatPanel, { ssr: false })   loaded on first open
              AiChatPanel
              ├─ PanelHeader            title · New chat · History · Close
@@ -1022,10 +1022,49 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   directly and applies the global 401 / forced-password-change reactions by hand), lives only in the card's
   state, is cleared on every attempt whatever the answer, and Enter in its field ignores key auto-repeat
   and IME composition.
-- **Labels.** Tool names are humanized (`asset_search` → "Asset search") rather than kept in a
-  per-tool `tools.<name>` catalog; preview field names are humanized from the server's keys. Warning codes,
-  entity types, run error codes, tool statuses and decision refusals are localized, with covering-set tests
-  over both catalogs.
+- **Labels (amended by #1377).** Tool names and preview field names are localized from catalogs keyed by
+  exactly what the API sends: `ai.toolNames.<tool_name>` and `ai.fields.<fieldKey>`, plus two templated
+  families for paths that carry an operator-chosen name — `input.<name>` (`ai.fieldPrefixes.input`) and
+  `specs.<key>` (`ai.fieldPrefixes.specs`); the name itself is data and is shown as is. A key this build
+  has no entry for falls back to the humanized key, so a newer API never breaks the chat
+  (`lib/ai/tool-labels.ts`, `components/ai/ai-labels.ts`). `lib/ai/tool-labels.test.ts` reads the API's
+  catalog golden and its tool sources **as text** (the web never imports the API) and fails when a
+  registered tool or a preview field has no en + es label — so a backend change that adds one needs a web
+  label in the same wave. Warning codes, entity types, run error codes, tool statuses and decision refusals
+  are localized as before, with covering-set tests over both catalogs.
+- **Server-built sentences stay as sent (#1377, backend follow-up).** Preview *values* that the tools write
+  as English sentences — the `action` row, the KB `audience` summary ("Restricted — only people matching
+  every restricted folder on the path: …"), `criticalApplicationAccess` explanations, workflow
+  when/outbound sentences, and every result `summary` behind "Show details" — are rendered as the server
+  wrote them. Localizing them needs the API to return codes + params (or to build them in the request
+  locale); the web does not parse English prose.
+- **Collapsed tool lines (#1377).** Consecutive READ calls of the same tool with the same status share one
+  line with a count ("Done: Search users ×5"; `lib/ai/tool-groups.ts`); their summaries list under "Show
+  details". A write, a different status or anything in between breaks the run.
+- **Panel placement and width (#1370, #1371).** From `md` up the panel is a `fixed` column on the right
+  edge; at `xl` a spacer in the layout's flex row reserves the default 400px, so at that width it reads as
+  docked and the page reflows beside it. It is resizable — a drag handle on its left edge (the WAI-ARIA
+  window-splitter pattern: `role="separator"`, ←/→ with Shift for larger steps, Home/End, Enter or a
+  double-click to reset) and an Expand / Restore toggle in its header — between 360px and
+  `min(1100px, viewport − 96px)`. Wider than the default it **overlays** the page (shadow, no reflow; the
+  spacer keeps 400px, so dragging never reflows the page). The width is remembered per browser in
+  `localStorage` (`lazyit.ai.panelWidth`, read/write in try/catch; the default is stored as "no
+  preference"). Below `md` it stays a full-screen modal sheet, with the primitive's `100svh − 2rem` height
+  cap removed. The message log and the history list are `relative`, so their visually hidden (absolute)
+  labels are clipped by the scroll box: before, they escaped it and stretched the document below the app
+  shell — the blank band under the chat (#1370).
+- **Slash commands (#1372).** A `/` at the very start of the composer opens a palette of commands
+  (`components/ai/ai-command-palette.tsx`) filtered as you type — name or alias prefix first, then
+  substring, then the localized label — navigable with ↑/↓, run with Enter or Tab, closed with Esc (which
+  no longer closes the panel while the palette is open). Focus stays in the textarea (`aria-controls`,
+  `aria-activedescendant`, `aria-autocomplete="list"`). A message that is exactly a command (`/copy`) runs
+  it too; a message that merely starts with a slash is sent normally. Commands run in the browser and are
+  **never sent to the model**. The registry is `BUILTIN_SLASH_COMMANDS` in `lib/ai/slash-commands.ts`;
+  a new command (`/model`, `/auto`) adds an entry, its `ai.commands.<name>.{label,description}` messages,
+  and — if it needs more of the chat — a member of `SlashCommandContext`. Built in: `/copy` (the whole
+  conversation as Markdown via `lib/ai/transcript-markdown.ts`, in the UI language, with a toast), `/new`,
+  `/help` (an in-log card with the commands, shortcuts and a Manual link). The composer also takes a
+  `toolbar` slot on its hint row for per-chat controls (the model picker and auto-approve toggle).
 - **Retry** re-sends the last user message; **read-only** replaces the composer with "Start a new chat".
 - **Known limitation — the `action` sentence (G4 review item 6, tracked by the coordinator).** The
   preview's first row is written by the backend tool and can embed strings that came from the model's

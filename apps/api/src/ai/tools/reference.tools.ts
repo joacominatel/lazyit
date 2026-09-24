@@ -24,6 +24,7 @@ import {
   type AiToolRuntime,
   type AiToolset,
 } from '../core/tool-descriptor';
+import { searchText } from './search-text';
 
 /**
  * The REFERENCE toolset (W2-5; tools-and-execution.md §7 rows 4, 15, 16): the taxonomy and places assets
@@ -437,8 +438,8 @@ const referenceLookup = defineTool({
   description:
     'Find the reference data assets and other records hang off: asset models, locations, asset / ' +
     'application / consumable categories and knowledge-base folders. Give `id` for one record, or ' +
-    '`query` (a name fragment) to list matches. Use it to find the model or location to use before ' +
-    'creating or updating an asset.',
+    '`query` (a name fragment) to list matches, or neither to list them all. Use it to find the model ' +
+    'or location to use before creating or updating an asset.',
   domain: 'reference',
   class: 'read',
   idempotent: true,
@@ -448,13 +449,7 @@ const referenceLookup = defineTool({
       .cuid()
       .optional()
       .describe('Read this one record (ignores query and paging).'),
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('A name fragment to filter by (case-insensitive).'),
+    query: searchText('A name fragment to filter by (case-insensitive).'),
     detail: detailLevel,
     limit: pageLimit,
     offset: pageOffset,
@@ -688,8 +683,10 @@ export const referenceToolset: AiToolset = {
     ),
     unexposed(
       ArticleCategoriesController,
-      ['create', 'update', 'remove', 'restore'],
-      V1_1('Knowledge-base folder writes (a cascading folder delete included)'),
+      ['remove', 'restore'],
+      V1_1(
+        'Knowledge-base folder delete (a cascading one included) and restore; create and rename are kb_folder_create / kb_folder_rename',
+      ),
     ),
     unexposed(
       ArticleCategoriesController,

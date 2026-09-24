@@ -45,8 +45,8 @@ the reverse.
 - Offboarding a user must not erase history: assignments and grants are *released*, not
   deleted (soft delete + lifecycle timestamps).
 - **Auditable lifecycle (DEBT-2, #185):** every User write emits an append-only [[user-history]] row
-  **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit,
-  `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
+  **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit (name, email,
+  legajo, username), `DEACTIVATED` / `REACTIVATED` on a real `isActive` flip (issue #1375), `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
   each side a user-id / external-name / null — [[0058-user-manager-and-clone-actions]]) on a manager
   change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when a reset link is sent to the
   subject (by the IdP in OIDC mode, or by lazyit's SMTP on the local `email` delivery),
@@ -231,7 +231,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 `apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted; accepts `?directoryOnly`
 and `?role` filters — `?role=ADMIN|MEMBER|VIEWER` scopes the list to one role, validated by
 `RoleSchema` → 400 on an unknown value; backs the Settings → Roles "View N members" deep-link, issue
-#693), `GET /users/role-counts` (per-role LIVE counts `{ ADMIN, MEMBER, VIEWER }` from one Prisma
+#693; `?isActive=true|false` scopes it to enabled or deactivated accounts — anything else → 400,
+absent = both, issue #1375), `GET /users/role-counts` (per-role LIVE counts `{ ADMIN, MEMBER, VIEWER }` from one Prisma
 `groupBy` over the active directory — the Settings → Roles card counts; declared before `:id` so the
 literal isn't parsed as a uuid; gated `user:read`), `GET /users/me`
 (the current authenticated caller, **including their role** — declared before `:id` so the literal

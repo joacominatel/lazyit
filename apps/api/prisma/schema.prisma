@@ -1149,6 +1149,11 @@ enum UserHistoryEventType {
   PASSWORD_CHANGED
   PASSWORD_RESET_REQUESTED
   PASSWORD_RESET_COMPLETED
+  // Activation flips (issue #1375): an admin (via the UI, the API or an AI tool call) set isActive
+  // true→false or false→true on PATCH /users/:id. No payload. Appended at the tail (ALTER TYPE ADD VALUE
+  // appends), so the DB enum order matches this declaration.
+  DEACTIVATED
+  REACTIVATED
 }
 
 /// A single-use, short-TTL local-mode password-reset token (ADR-0086 §F4 / SECURITY GAP #7). Created by

@@ -36,6 +36,10 @@ export const UserHistoryEventTypeSchema = z.enum([
   // The user RESET their own password via a forgot-password email token (AUTH_MODE=local, ADR-0086 §F4).
   // Distinct from PASSWORD_RESET_BY_ADMIN (an admin acted) — here the SUBJECT reset it themselves via token.
   "PASSWORD_RESET_COMPLETED",
+  // Activation flips (issue #1375): an admin set `isActive` true→false (DEACTIVATED) or false→true
+  // (REACTIVATED) on PATCH /users/:id — via the web UI, the API or an AI tool call. No payload.
+  "DEACTIVATED",
+  "REACTIVATED",
 ]);
 
 /** Contextual data attached to an event (e.g. `{ from, to }` on ROLE_CHANGED). Unvalidated jsonb. */
