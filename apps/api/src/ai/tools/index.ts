@@ -9,6 +9,7 @@ import { interactionToolset } from './input-request.tools';
 import { kbToolset } from './kb.tools';
 import { platformToolset } from './platform.tools';
 import { referenceToolset } from './reference.tools';
+import { taxonomyToolset } from './taxonomy.tools';
 import { usersToolset } from './users.tools';
 import { workflowAuthoringToolset } from './workflow-authoring.tools';
 import { workflowsToolset } from './workflows.tools';
@@ -21,6 +22,7 @@ export const ALL_TOOLSETS: readonly AiToolset[] = [
   contextToolset,
   assetsToolset,
   referenceToolset,
+  taxonomyToolset,
   accessToolset,
   workflowsToolset,
   workflowAuthoringToolset,

@@ -1001,6 +1001,40 @@ describe('AssetsService', () => {
     });
   });
 
+  it('findPage filters by exact tag and serial lists (#1387): one IN per field, ANDed', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { assetTags: ['LT-1', 'LT-2'], serials: ['SN-9'] },
+      { limit: 200, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({
+      assetTag: { in: ['LT-1', 'LT-2'] },
+      serial: { in: ['SN-9'] },
+      deletedAt: null,
+    });
+  });
+
+  it('findPage ignores empty exact-value lists', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { assetTags: [], serials: [] },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({ deletedAt: null });
+  });
+
   it('listCompanies returns the distinct, non-null company values', async () => {
     asset.findMany.mockResolvedValue([
       { company: 'Acme Inc.' },
