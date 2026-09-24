@@ -20,10 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import {
-  useAiConfigSave,
-  useAiConnectionTest,
-} from "@/lib/api/hooks/use-ai-config";
+import { useAiConfigSave, useAiConnectionTest } from "@/lib/api/hooks/use-ai-config-save";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
 import {

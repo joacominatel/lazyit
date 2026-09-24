@@ -27,10 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  useAiConfigSave,
-  useAiConnectionTest,
-} from "@/lib/api/hooks/use-ai-config";
+import { useAiConfigSave, useAiConnectionTest } from "@/lib/api/hooks/use-ai-config-save";
 import {
   buildUpdate,
   type ConnectionDraft,

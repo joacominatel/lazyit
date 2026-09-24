@@ -28,7 +28,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config";
+import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config-save";
 import { blankToNull, buildUpdate } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
 

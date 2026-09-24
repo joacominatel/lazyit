@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
-import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config";
+import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config-save";
 import {
   allowlistEntryRedirectKind,
   allowlistEntryValue,

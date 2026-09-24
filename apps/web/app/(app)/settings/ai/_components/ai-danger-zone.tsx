@@ -21,7 +21,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config";
+import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config-save";
 import { buildUpdate } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
 
