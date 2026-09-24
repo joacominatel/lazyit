@@ -1065,6 +1065,31 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   conversation as Markdown via `lib/ai/transcript-markdown.ts`, in the UI language, with a toast), `/new`,
   `/help` (an in-log card with the commands, shortcuts and a Manual link). The composer also takes a
   `toolbar` slot on its hint row for per-chat controls (the model picker and auto-approve toggle).
+- **Per-chat settings and auto-approve (#1373, #1376; backend #1383).** The composer's `toolbar` holds
+  `components/ai/ai-chat-settings.tsx`: a button showing the model the chat runs on (a lock once pinned)
+  that opens a popover with the model picker (`GET /ai/models` via `useAiModels`: the admin's **Default
+  model**, the listed models, and a **Use "‹id›"** option for any typed id that passes the shared
+  `AiConversationModelIdSchema`; `listed: false` or an unreadable catalog explains itself and keeps free
+  text), the reasoning effort (only when `supportsEffort`; "Default (‹admin's level›)" sends `null`), the
+  temperature (only when `providerOptionKeys` has it; empty = `null`) and the auto-approve switch. A chat
+  not created yet keeps a local draft in `useAiTurn` (reset by New chat / opening another chat) that rides
+  on `POST /ai/conversations` with the first message — an all-default draft sends no body, the pre-#1373
+  request. A created chat PATCHes (`useUpdateAiConversation`, which writes the answer into the cached
+  detail's `settings`); the model fields are disabled once `settings.modelLocked` or the chat has messages,
+  and a `CONVERSATION_SETTINGS_LOCKED` refusal marks the cache locked. Back to the default on a created
+  chat names the default model's id (the API has no "unset"). Refusals map through
+  `settingsErrorKey` (`lib/ai/chat-settings.ts`) to a toast. Turning auto-approve **on** asks for consent
+  (`ai-auto-approve-consent.tsx`) the first time in the browser (`localStorage`
+  `lazyit.ai.autoApproveConsent`, try/catch; blocked storage just asks again); an **Auto** badge sits in
+  the chat's top bar and the composer hint changes while it is on. `/model [id]` opens the picker or sets
+  the id; `/auto on|off` sets the mode (`/auto` toggles). Commands may now take one argument
+  (`SlashCommand.argument`, `matchSlashCommand`): an argument the command does not understand makes the
+  message a normal message. `tool.approval_resolved { auto: true, preview }` with no card on screen adds an
+  approval part with `auto: true` after the call's tool line (the reducer synthesizes the request from the
+  preview: no untrusted sources, no expiry shown); a persisted part with `auto: true` renders the same way,
+  as the compact `AiAutoAppliedCard` ("Applied automatically": action, target link, before → after,
+  warnings, execution stamp) — never a pending card. `/copy` labels it the same. A write the server
+  declines to auto-approve simply arrives as a normal card.
 - **Retry** re-sends the last user message; **read-only** replaces the composer with "Start a new chat".
 - **Known limitation — the `action` sentence (G4 review item 6, tracked by the coordinator).** The
   preview's first row is written by the backend tool and can embed strings that came from the model's

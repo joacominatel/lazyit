@@ -9,7 +9,7 @@ subcategory: approvals
 
 Every change the assistant wants to make — creating, editing, assigning, archiving, granting or revoking
 access — waits for you. It appears in the chat as a **card**, and nothing happens until you select
-**Approve**. This page explains how to read a card and what happens when you decide.
+**Approve**, unless you turned on [auto-approve](#auto-approve) for basic changes in that chat. This page explains how to read a card and what happens when you decide.
 
 ## Reading a card
 
@@ -87,6 +87,34 @@ Other things you may see:
 | This proposal expired | Too much time passed. Ask again if you still want the change. |
 | This change was already decided | You (or another window of yours) already approved or rejected it. |
 | The AI assistant was turned off | An administrator turned the assistant off; the change can't be approved from the chat. |
+
+## Auto-approve
+
+If you trust the assistant with routine work in a chat, you can let it apply **basic changes** without a
+card. Turn it on in the chat settings (the button under the message box) with **Auto-approve basic
+changes**, or type `/auto on`. The first time, lazyit explains what it does and asks you to confirm.
+
+While it is on:
+
+- **Basic edits apply right away** — creating or updating an asset, an article, a consumable and similar.
+  They run with your account and your permissions, exactly as if you had approved them, and show in the chat
+  as a compact **Applied automatically** record with the item, a link to it and the before → after values.
+- **Anything critical still shows a card and waits for you**: roles, identity and sign-in, access grants,
+  credentials, applications marked critical, sensitive changes (the ones marked *Sensitive change*) and
+  anything that needs your password.
+- **A change proposed after the assistant read content other people wrote** also still shows a card —
+  that content could be trying to steer the assistant.
+- An **Auto** tag at the top of the chat reminds you the mode is on.
+
+It applies **only to that chat** and is off in every new chat. Turn it off at any time with the same switch
+or `/auto off`; a card already waiting for you is never approved by switching it on.
+
+> [!WARNING]
+> With auto-approve on, a basic change is made without you looking at it first. Use it for chats where you
+> are doing routine edits, and check the **Applied automatically** records as they appear.
+
+Every automatic change is recorded like any other change you make — in the item's history and the activity
+log, under your name — and the AI action log notes that it was applied automatically.
 
 ## Where approved changes are recorded
 
