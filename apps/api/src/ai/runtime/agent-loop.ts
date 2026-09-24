@@ -70,7 +70,6 @@ import {
   readRunRecord,
   readStepRecord,
   readSystemPrompt,
-  readWebSearchRecord,
   roleOf,
   toApprovalRequest,
   type StepOutcome,
@@ -326,7 +325,7 @@ export class AgentLoop {
     // A resume: answer the step the approvals were waiting on, in one tool message.
     await this.lifecycle.answerOpenStep(conversation.id, runId);
 
-    const seeded = await this.seedCounters(runId);
+    const seeded = await this.seedCounters(runId, conversation);
     let toolCalls = seeded.toolCalls;
     let untrusted = seeded.untrusted;
     const callIds = seeded.callIds;
@@ -1268,26 +1267,21 @@ export class AgentLoop {
   }
 
   /** How many calls this run already made, and the untrusted sources it read (a resumed run). */
-  private async seedCounters(runId: string): Promise<{
+  private async seedCounters(
+    runId: string,
+    conversation: Pick<AiConversation, 'id' | 'webSearchMaxUses'>,
+  ): Promise<{
     toolCalls: number;
     untrusted: AiEntityRef[];
     callIds: Set<string>;
   }> {
     const rows = await this.prisma.aiMessage.findMany({
-      where: {
-        runId,
-        format: { in: [AI_MESSAGE_FORMAT_STEP, AI_MESSAGE_FORMAT_WEB_SEARCH] },
-      },
+      where: { runId, format: AI_MESSAGE_FORMAT_STEP },
       orderBy: { seq: 'asc' },
-      select: { content: true, format: true },
+      select: { content: true },
     });
     const latest = new Map<number, StepRecord>();
-    let searched = false;
     for (const row of rows) {
-      if (row.format === AI_MESSAGE_FORMAT_WEB_SEARCH) {
-        searched ||= readWebSearchRecord(row.content) !== null;
-        continue;
-      }
       const record = readStepRecord(row.content);
       if (record) latest.set(record.stepIndex, record);
     }
@@ -1299,9 +1293,28 @@ export class AgentLoop {
       for (const call of record.calls) callIds.add(call.toolCallId);
       untrusted = mergeRefs(untrusted, record.untrustedSources);
     }
-    // A resumed turn that searched the web still counts as having read untrusted sources (#1389).
-    if (searched) untrusted = mergeRefs(untrusted, [AI_WEB_SEARCH_SOURCE_REF]);
+    // Web search results stay in the history and are replayed to the model on every later turn, so once
+    // the conversation has searched ANYWHERE — this run or an earlier one — every turn from then on counts
+    // as having read untrusted sources: the banner, and never an auto-approval (#1389, G2 review).
+    if (await this.conversationSearched(conversation)) {
+      untrusted = mergeRefs(untrusted, [AI_WEB_SEARCH_SOURCE_REF]);
+    }
     return { toolCalls, untrusted, callIds };
+  }
+
+  /** Whether any step of this conversation searched the web (a `lazyit-web-search-v1` record exists). */
+  private async conversationSearched(
+    conversation: Pick<AiConversation, 'id' | 'webSearchMaxUses'>,
+  ): Promise<boolean> {
+    if (typeof conversation.webSearchMaxUses !== 'number') return false;
+    const row = await this.prisma.aiMessage.findFirst({
+      where: {
+        conversationId: conversation.id,
+        format: AI_MESSAGE_FORMAT_WEB_SEARCH,
+      },
+      select: { id: true },
+    });
+    return row !== null;
   }
 
   private emitCall(

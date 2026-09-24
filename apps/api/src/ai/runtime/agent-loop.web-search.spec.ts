@@ -230,6 +230,82 @@ describe('a step that searched the web', () => {
   });
 });
 
+describe('once a conversation has searched, nothing in it is auto-approved (G2 review)', () => {
+  it('the next turn after a search is not auto-approved: the results are still in the history', async () => {
+    enableWebSearch();
+    const { id } = await newChat({ autoApprove: true });
+    rt.model.push({ text: 'Found the docs.', webSearch: SEARCHED });
+    await send(id);
+    await rt.drain();
+
+    // Turn N+1: no search in this run, but the replayed results could carry a planted instruction.
+    rt.model.push({
+      toolCalls: [{ toolCallId: 'w1', toolName: WRITE, input: { id: 'a1' } }],
+    });
+    const next = await send(id, 'Now retire LZ-0001');
+    await rt.drain();
+    expect(rt.run(next.runId).status).toBe('AWAITING_APPROVAL');
+    expect(rt.tools.approved).toHaveLength(0);
+    const required = rt
+      .events(next.runId)
+      .find((e) => e.type === 'tool.approval_required');
+    expect(required).toMatchObject({
+      untrustedSources: [expect.objectContaining(AI_WEB_SEARCH_SOURCE_REF)],
+    });
+  });
+
+  it('a later turn resumed after an approval still carries the mark', async () => {
+    enableWebSearch();
+    const { id } = await newChat({ autoApprove: true });
+    rt.model.push({ text: 'Found the docs.', webSearch: SEARCHED });
+    await send(id);
+    await rt.drain();
+
+    rt.model.push(
+      {
+        toolCalls: [{ toolCallId: 'w1', toolName: WRITE, input: { id: 'a1' } }],
+      },
+      {
+        toolCalls: [{ toolCallId: 'w2', toolName: WRITE, input: { id: 'a2' } }],
+      },
+    );
+    const { runId } = await send(id, 'Do both changes');
+    await rt.drain();
+    await rt.approvals.decide({
+      runId,
+      toolCallId: 'w1',
+      decision: 'approve',
+      identity: HUMAN,
+    });
+    await rt.drain(); // resumed in a fresh loop pass: memory is gone, the records remain
+    const cards = rt
+      .events(runId)
+      .filter((e) => e.type === 'tool.approval_required');
+    expect(cards.map((c) => (c as { toolCallId: string }).toolCallId)).toEqual([
+      'w1',
+      'w2',
+    ]);
+    expect(cards[1]).toMatchObject({
+      untrustedSources: [expect.objectContaining(AI_WEB_SEARCH_SOURCE_REF)],
+    });
+    expect(rt.run(runId).status).toBe('AWAITING_APPROVAL');
+  });
+
+  it('a conversation that never searched keeps auto-approve', async () => {
+    enableWebSearch();
+    const { id } = await newChat({ autoApprove: true });
+    rt.model.push(
+      {
+        toolCalls: [{ toolCallId: 'w1', toolName: WRITE, input: { id: 'a1' } }],
+      },
+      { text: 'Done.' },
+    );
+    await send(id);
+    await rt.drain();
+    expect(rt.tools.approved).toHaveLength(1);
+  });
+});
+
 describe('a paused server-side turn', () => {
   it('continues with another step instead of ending the run', async () => {
     enableWebSearch();
