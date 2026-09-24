@@ -175,6 +175,27 @@ export const publicHttpsUrl = z
   );
 
 /**
+ * Whether a URL string carries userinfo (`scheme://user[:pass]@host`) — a credential in plain sight
+ * (SEC-076). Node's `https.request` turns it into `Authorization: Basic …`, outside the secret store
+ * and the CSEC-1 separation. A regex (not `new URL()`): the shared package has no `URL` global. Only
+ * the authority (up to the first `/`, `?` or `#`) is inspected, so an `@` in a path or query is fine.
+ */
+export function urlHasUserinfo(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(value.trim());
+}
+
+/** The refusal message for a connection URL that carries userinfo (SEC-076). */
+export const URL_USERINFO_REFUSAL =
+  "Must not contain credentials (user:pass@) — store them as a connection secret";
+
+/**
+ * The sentinel a connection read returns in place of every `defaultHeaders` VALUE (SEC-075), and that a
+ * PATCH may send back to KEEP the stored value (so a UI round-trip never overwrites a header it cannot
+ * see). Also used to mask the userinfo of a legacy connection URL on read.
+ */
+export const WORKFLOW_REDACTED_VALUE = "[redacted]";
+
+/**
  * A logic-less data mapping: target field name → a template string over a FROZEN, allowlisted context
  * (`grantee.email`, `application.name`, prior step outputs, manual input). By construction there is NO
  * code execution (no eval / Function / vm); the safe templating + per-destination encoding is the
@@ -256,6 +277,21 @@ export const WorkflowConnectionConfigSchema = z.discriminatedUnion("kind", [
 export type WorkflowConnectionConfig = z.infer<
   typeof WorkflowConnectionConfigSchema
 >;
+
+/**
+ * Whether a connection config's destination URL (REST `baseUrl` / WEBHOOK_OUT `url`) carries userinfo
+ * (SEC-076). Enforced on WRITE only — {@link CreateWorkflowConnectionSchema} and the api's connection
+ * PATCH refuse it — while {@link WorkflowConnectionConfigSchema} stays tolerant, because it is also the
+ * read / run-time parse of stored rows: a legacy row with userinfo still reads and parses, and the
+ * egress guard refuses to send it at call time with a clear `userinfo-not-allowed` reason.
+ */
+export function connectionConfigHasUserinfo(
+  config: WorkflowConnectionConfig,
+): boolean {
+  if (config.kind === "REST") return urlHasUserinfo(config.baseUrl);
+  if (config.kind === "WEBHOOK_OUT") return urlHasUserinfo(config.url);
+  return false;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // Step config — discriminated union on `kind` (WorkflowVersion.steps jsonb)
@@ -704,6 +740,9 @@ export const UpdateApplicationWorkflowSchema = z
     enabled: z.boolean(),
     deprovisionPolicy: WorkflowDeprovisionPolicySchema,
     executedAsServiceAccountId: z.cuid().nullable(),
+    // SEC-077: the latest version number the caller reviewed (0 = none authored yet). When present, the
+    // update is refused with 409 if a different version is now the latest. Omitted = no precondition.
+    expectedVersion: int4({ min: 0 }),
   })
   .partial();
 export type UpdateApplicationWorkflow = z.infer<
@@ -736,6 +775,11 @@ export const CreateWorkflowConnectionSchema = z
   .refine((value) => value.config.kind === value.kind, {
     error: "config.kind must match the connection kind",
     path: ["config", "kind"],
+  })
+  // SEC-076: a destination URL may not carry userinfo on write (reads of legacy rows stay tolerant).
+  .refine((value) => !connectionConfigHasUserinfo(value.config), {
+    error: URL_USERINFO_REFUSAL,
+    path: ["config"],
   });
 export type CreateWorkflowConnection = z.infer<
   typeof CreateWorkflowConnectionSchema
@@ -759,6 +803,9 @@ export type WorkflowVersion = z.infer<typeof WorkflowVersionSchema>;
 /** Author a new WorkflowVersion (the `version` number is allocated server-side, monotonically). */
 export const CreateWorkflowVersionSchema = z.strictObject({
   steps: WorkflowStepsSchema,
+  // SEC-077: the latest version number this graph was edited from (0 = none authored yet). When present,
+  // authoring is refused with 409 if another version landed since. Omitted = no precondition.
+  baseVersion: int4({ min: 0 }).optional(),
 });
 export type CreateWorkflowVersion = z.infer<typeof CreateWorkflowVersionSchema>;
 
