@@ -25,19 +25,50 @@ asistente de IA** (`ai:use`). Si no lo ves, pedíselo a un administrador — mir
 - Presioná **Esc** o la **×** para cerrarlo. Cerrar el chat no detiene una respuesta en curso; cuando lo
   volvés a abrir, sigue donde estaba.
 
+### Agrandar el chat
+
+Cuando una respuesta o una tarjeta de cambio necesita más lugar, ensanchá el chat:
+
+- Elegí **Ampliar** (las flechas al lado de la **×**) para ensancharlo; elegilo de nuevo para volver al ancho
+  normal.
+- O arrastrá el borde izquierdo del chat. Con el teclado, llegá al borde con **Tab** y usá **←** / **→**
+  (mantené **Shift** para pasos más grandes), **Inicio** / **Fin** para el más angosto y el más ancho, y
+  **Enter** para volver al ancho normal. Hacer doble clic en el borde hace lo mismo.
+
+Un chat más ancho de lo normal flota **sobre** la página en lugar de achicarla; la página de abajo queda como
+estaba. lazyit recuerda el ancho que elegiste en este navegador. En el celular el chat siempre ocupa toda la
+pantalla.
+
 ## Preguntar algo
 
 Escribí en el cuadro de abajo y presioná **Enter** para enviar. **Shift+Enter** agrega una línea nueva.
 
 Mientras el asistente trabaja, ves qué está haciendo, una línea corta por paso — por ejemplo
-"Listo: Asset search". Elegí **Ver detalles** en una línea para ver qué encontró. La respuesta aparece a
-medida que se escribe.
+"Listo: Buscar activos". Cuando repite la misma búsqueda varias veces seguidas, los pasos comparten una
+línea con la cantidad, como "Listo: Buscar usuarios ×5". Elegí **Ver detalles** en una línea para ver qué
+encontró. La respuesta aparece a medida que se escribe.
 
 Para detener una respuesta, presioná el botón **Detener**. Lo que ya se escribió se conserva.
 
 > [!WARNING]
 > No pegues contraseñas, claves de API ni otros secretos en el chat. Lo que escribís, y lo que el asistente
 > lee para responderte, se envía al proveedor de IA que configuró tu administrador.
+
+### Comandos
+
+Escribí **/** al principio del cuadro de mensaje para ver los comandos. Seguí escribiendo para filtrarlos,
+movete con **↑** / **↓** y presioná **Enter** (o **Tab**) para ejecutar uno; **Esc** cierra la lista. También
+podés escribir el comando completo, como `/copy`, y presionar **Enter**.
+
+| Comando | Qué hace |
+| --- | --- |
+| `/copy` | Copia toda la conversación al portapapeles como Markdown — tus mensajes, las respuestas, los pasos y las tarjetas de cambio. |
+| `/new` | Empieza un chat nuevo. |
+| `/help` | Muestra los comandos y los atajos de teclado dentro del chat. |
+
+Los comandos se ejecutan en tu navegador: nunca se envían al asistente ni al proveedor de IA. Si tu mensaje
+solo empieza con una barra pero no es un comando (por ejemplo, una ruta de archivo), se envía como un
+mensaje normal.
 
 ### La página actual
 
