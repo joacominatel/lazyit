@@ -644,10 +644,26 @@ Code: `apps/web/app/(app)/account/ai/**`, `apps/web/app/(auth)/oauth/authorize/*
   keeps `pathname + search` as `callbackUrl` (bun-tested; `/login` still applies `safeInternalPath`). It
   adds no OIDC-specific path (#1310).
 
-**Found while building (for the backend lane).** In local mode `POST /auth/logout` bumps the user's
-`sessionEpoch`, and grants snapshot the epoch — so a user who signs out of the web app silently loses
-every OAuth connection **and every personal token**. The Manual states it; whether a browser sign-out
-should end MCP connections is a product call.
+**Found while building — decided.** In local mode `POST /auth/logout` bumped `sessionEpoch`, which every
+grant snapshots, so a browser sign-out silently ended every MCP connection and personal token. CEO:
+"Separarlos" — a normal web sign-out no longer ends them (backend unit); they end on a password change,
+deactivation/offboarding, an explicit sign-out everywhere, or a revoke. The Manual and the UI copy say so.
+
+**G3/G4 review follow-ups (applied).**
+- OAuth-mode snippets are built from the **server-known origin** — today the `issuer` of the public
+  `/.well-known/oauth-authorization-server` (it is the pinned `WEB_ORIGIN`), to be replaced by the
+  `/ai/status` field when it lands (`resolveSnippetOrigin`, bun-tested). When it differs from the page's
+  origin, or cannot be read, the panel warns and renders the snippets without copy buttons (for review,
+  not copy-ready). Personal-token mode keeps the page's origin (host-agnostic `lan`).
+- The personal-token and consent-decision mutations use `gcTime: 0` and are `reset()` as soon as they
+  answer, so neither the token nor the password/code stays in the mutation cache.
+- A non-`http(s)` redirect shows its scheme with its host as the trust signal
+  (`cursor:// (anysphere.cursor-mcp)`; `redirectTrustLabel`).
+- Blob URLs are revoked after a delay, not synchronously after the click.
+- "Not you?" signs out and returns to `/login?callbackUrl=<the consent URL>` (`signOutAndRevoke(path)`).
+- Manual install re-verified against code.claude.com (2026-09-24): a folder under `~/.claude/skills/`
+  holding `.claude-plugin/plugin.json` loads as `<name>@skills-dir` on the next session; `--plugin-dir`
+  accepts a `.zip`. The `userConfig` prompt for a `@skills-dir` plugin is still a W4-3 re-verify item.
 
 ---
 
