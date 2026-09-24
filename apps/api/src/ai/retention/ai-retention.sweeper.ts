@@ -40,10 +40,10 @@ const SKIPPED: AiRetentionSweepResult = {
  *     with their messages and tool invocations by cascade;
  *  2. conversations of offboarded users (`User.deletedAt` set) — the offboarding purge (§14 item 2). The
  *     soft delete is the durable offboarding signal, so no hook in the users module is needed; the purge
- *     lands within one pass. A deactivation or a directory soft-offboard (no `deletedAt`) is not purged;
+ *     lands within one pass. Only `deletedAt` triggers it today (a directory soft-offboard is pending a decision);
  *  3. conversation-less MCP invocations older than the window and no longer in flight.
  *
- * A conversation with a QUEUED, RUNNING or AWAITING_APPROVAL run is skipped and retried next pass. It runs
+ * A conversation with a QUEUED, RUNNING or AWAITING_APPROVAL run, or an in-flight tool invocation, is skipped and retried next pass. It runs
  * whether or not the assistant is enabled (frontend.md §11 item 4: turning AI off keeps conversations
  * dormant and retention keeps running); with no settings row the default window applies. A failed settings
  * read skips the whole pass rather than guess a window. `AiRun`, `AiUsage` and `AiActionLog` are never

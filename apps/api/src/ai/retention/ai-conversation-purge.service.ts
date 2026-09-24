@@ -28,8 +28,9 @@ export const AI_RETENTION_TX_TIMEOUT_MS = 30_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Invocation statuses that are still in flight: an MCP row in one of these is never pruned, whatever its
- * age (the MCP stale-`EXECUTING` sweep, W3-2, settles it first).
+ * Invocation statuses that are still in flight. An MCP row in one of these is never pruned, whatever its
+ * age (the MCP stale-`EXECUTING` sweep, W3-2, settles it first), and a conversation holding one is never
+ * deleted — the cascade would take a pending approval or an executing write with it.
  */
 const IN_FLIGHT_INVOCATION_STATUSES = ['AWAITING_APPROVAL', 'EXECUTING'];
 
@@ -49,9 +50,9 @@ export interface AiPurgeOutcome {
  * `SetNull`), and `AiUsage` and the permanent `AiActionLog` ledger are never touched — this file does not
  * reference either (a spec pins that).
  *
- * Every conversation delete goes through {@link purge}: it locks the candidate rows, re-checks — in a new
- * statement, so it sees every committed run — that none has a QUEUED, RUNNING or AWAITING_APPROVAL run,
- * and deletes only what still matches the caller's guard. The runtime's submit takes the same row lock
+ * Every conversation delete goes through {@link purge}: it locks the candidate rows, re-checks — in new
+ * statements, so it sees every committed row — that none has a QUEUED, RUNNING or AWAITING_APPROVAL run
+ * or an AWAITING_APPROVAL or EXECUTING tool invocation, and deletes only what still matches the caller's guard. The runtime's submit takes the same row lock
  * (it bumps `lastActivityAt`) before it creates a run, so a run can never start in a conversation that is
  * being deleted, and a conversation with an active run is never deleted (it is skipped; the next pass
  * retries).
@@ -65,8 +66,9 @@ export class AiConversationPurgeService {
 
   /**
    * The retention window in days: `AiSettings.retentionDays`, clamped to 7–3650 on read (the write path
-   * validates the range; a value outside it — a hand-edited row — must never widen the purge). A non-integer
-   * reads as the default (90). A failed settings read throws: the caller skips the pass rather than guess.
+   * validates the range). The lower clamp keeps a hand-edited row below 7 from shortening the window; the
+   * upper clamp does shorten a hand-set value above 3650 to 3650 (it deletes earlier than that row asks) —
+   * the documented range wins. A non-integer reads as the default (90). A failed settings read throws: the caller skips the pass rather than guess.
    */
   async retentionDays(): Promise<number> {
     const { retentionDays } = await this.settings.getSettings();
@@ -147,6 +149,9 @@ export class AiConversationPurgeService {
             ...where,
             ...(after === null ? {} : { id: { gt: after } }),
             runs: { none: { status: { in: [...AI_RUN_ACTIVE_STATUSES] } } },
+            invocations: {
+              none: { status: { in: IN_FLIGHT_INVOCATION_STATUSES } },
+            },
           },
           select: { id: true },
           orderBy: { id: 'asc' },
@@ -225,7 +230,17 @@ export class AiConversationPurgeService {
           },
           select: { conversationId: true },
         });
-        const busyIds = new Set(busy.map((run) => run.conversationId));
+        const inFlight = await tx.aiToolInvocation.findMany({
+          where: {
+            conversationId: { in: lockedIds },
+            status: { in: IN_FLIGHT_INVOCATION_STATUSES },
+          },
+          select: { conversationId: true },
+        });
+        const busyIds = new Set([
+          ...busy.map((run) => run.conversationId),
+          ...inFlight.map((invocation) => invocation.conversationId),
+        ]);
         const deletable = lockedIds.filter((id) => !busyIds.has(id));
         if (deletable.length === 0) return 0;
         const { count } = await tx.aiConversation.deleteMany({

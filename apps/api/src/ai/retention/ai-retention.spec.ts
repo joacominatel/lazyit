@@ -112,6 +112,17 @@ class FakeDb {
           if (!owner || owner.deletedAt === null) return false;
           break;
         }
+        case 'invocations': {
+          const statuses = (value as { none: { status: { in: string[] } } })
+            .none.status.in;
+          if (
+            this.invocations.some(
+              (i) => i.conversationId === c.id && statuses.includes(i.status),
+            )
+          )
+            return false;
+          break;
+        }
         case 'runs': {
           const statuses = (value as { none: { status: { in: string[] } } })
             .none.status.in;
@@ -131,8 +142,14 @@ class FakeDb {
   }
 
   private invMatches(i: Inv, w: Where): boolean {
-    if ('conversationId' in w && i.conversationId !== w.conversationId)
-      return false;
+    if ('conversationId' in w) {
+      const cond = w.conversationId;
+      if (cond !== null && typeof cond === 'object') {
+        if (i.conversationId === null || !cond.in.includes(i.conversationId))
+          return false;
+      } else if (i.conversationId !== cond) return false;
+    }
+    if (w.status?.in && !w.status.in.includes(i.status)) return false;
     if (w.createdAt && !(i.createdAt < w.createdAt.lt)) return false;
     if (w.status?.notIn && w.status.notIn.includes(i.status)) return false;
     return matchId(i.id, w.id);
@@ -193,7 +210,8 @@ class FakeDb {
       },
       aiToolInvocation: {
         findMany: jest.fn(async (args: { where: Where; take: number }) => {
-          if (db.failInvocations)
+          // The MCP step's scan (conversation-less rows) is the one that fails.
+          if (db.failInvocations && args.where.conversationId === null)
             throw Object.assign(new Error('row value leaked: secret-title'), {
               code: 'P2010',
             });
@@ -201,7 +219,7 @@ class FakeDb {
             db.invocations.filter((i) => db.invMatches(i, args.where)),
           )
             .slice(0, args.take)
-            .map((i) => ({ id: i.id }));
+            .map((i) => ({ id: i.id, conversationId: i.conversationId }));
         }),
         deleteMany: jest.fn(async (args: { where: Where }) => {
           const before = db.invocations.length;
@@ -430,6 +448,65 @@ describe('active runs', () => {
       expect(db.conversations).toHaveLength(0);
     },
   );
+
+  it.each(['AWAITING_APPROVAL', 'EXECUTING'])(
+    'skips a conversation holding a %s tool invocation and purges it once the invocation settles',
+    async (status) => {
+      const { db, sweeper } = setup();
+      conv(db, 'c-inflight', ago(100 * DAY));
+      db.invocations.push({
+        id: 'inv-pending',
+        conversationId: 'c-inflight',
+        createdAt: ago(100 * DAY),
+        status,
+      });
+      expect((await sweeper.sweep(NOW)).expired).toBe(0);
+      expect(db.invocations.map((i) => i.id)).toContain('inv-pending');
+
+      db.invocations.find((i) => i.id === 'inv-pending')!.status = 'SUCCEEDED';
+      expect((await sweeper.sweep(NOW)).expired).toBe(1);
+      expect(db.conversations).toHaveLength(0);
+    },
+  );
+
+  it('re-checks invocations after the lock: one that went EXECUTING between the scan and the lock keeps the conversation', async () => {
+    const { db, purge, prisma } = setup();
+    conv(db, 'c-race', ago(100 * DAY));
+    const findMany = (
+      prisma as unknown as { aiConversation: { findMany: jest.Mock } }
+    ).aiConversation.findMany;
+    const original = findMany.getMockImplementation()!;
+    findMany.mockImplementationOnce(async (args: unknown) => {
+      const rows = await original(args);
+      db.invocations.push({
+        id: 'inv-exec',
+        conversationId: 'c-race',
+        createdAt: NOW,
+        status: 'EXECUTING',
+      });
+      return rows;
+    });
+    const outcome = await purge.purgeWhere({
+      lastActivityAt: { lt: retentionCutoff(90, NOW) },
+    });
+    expect(outcome).toEqual({ deleted: 0, skipped: 1 });
+    expect(db.conversations).toHaveLength(1);
+  });
+
+  it('refuses an owner delete while a tool invocation is in flight', async () => {
+    const { db, purge } = setup();
+    conv(db, 'c1', ago(DAY), { userId: 'u1' });
+    db.invocations.push({
+      id: 'inv-wait',
+      conversationId: 'c1',
+      createdAt: NOW,
+      status: 'AWAITING_APPROVAL',
+    });
+    await expect(
+      purge.deleteOwned({ kind: 'human', userId: 'u1', sessionEpoch: 0 }, 'c1'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(db.conversations).toHaveLength(1);
+  });
 
   it('re-checks after the lock: a run committed between the scan and the lock keeps the conversation', async () => {
     const { db, purge, prisma } = setup();
