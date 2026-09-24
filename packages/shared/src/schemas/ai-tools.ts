@@ -167,9 +167,10 @@ export type AiToolResult = z.infer<typeof AiToolResultSchema>;
 /**
  * The warning codes a server-built preview may carry (synthesis §4.3). The web localizes each code it
  * knows and renders an unknown one generically, so the preview's `warnings` stay open strings.
- * `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT` and `CREDENTIAL_DELIVERY` are the step-up warnings:
- * the AI core requires a password step-up for an `elevated` action carrying any of them (CEO decision
- * 2026-09-24, #1315).
+ * `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY` and `CRITICAL_APPLICATION`
+ * are the step-up warnings: the AI core requires a password step-up for an `elevated` action carrying any
+ * of them (CEO decisions 2026-09-24, #1315; ADR-0097 decision 3 as amended). `OUTBOUND_INTEGRATION` is
+ * deliberately NOT one.
  */
 export const AI_PREVIEW_WARNING_CODES = [
   "EXTERNAL_PROVISIONING",
@@ -188,6 +189,17 @@ export const AI_PREVIEW_WARNING_CODES = [
   "VISIBILITY_CHANGE",
   "NOTIFIES_USERS",
   "IRREVERSIBLE",
+  /**
+   * Creates or changes an outbound integration or where it sends data: a workflow connection, a
+   * connection's host or credential reference, a version authored on an enabled workflow, or enabling a
+   * workflow. No step-up by itself (CEO decision 2026-09-24).
+   */
+  "OUTBOUND_INTEGRATION",
+  /**
+   * The action touches an application marked critical (`isCritical`): any workflow write on it, or an
+   * access grant or revoke on it. Requires step-up.
+   */
+  "CRITICAL_APPLICATION",
 ] as const;
 export const AiPreviewWarningCodeSchema = z.enum(AI_PREVIEW_WARNING_CODES);
 export type AiPreviewWarningCode = z.infer<typeof AiPreviewWarningCodeSchema>;

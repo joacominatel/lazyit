@@ -161,6 +161,37 @@ describe("Preview warning codes", () => {
     }
   });
 
+  test("carry the workflow-engine warnings (ADR-0097 decision 3, amended 2026-09-24)", () => {
+    expect(AI_PREVIEW_WARNING_CODES).toContain("OUTBOUND_INTEGRATION");
+    expect(AI_PREVIEW_WARNING_CODES).toContain("CRITICAL_APPLICATION");
+    const parsed = AiActionPreviewSchema.safeParse({
+      toolName: "workflow_update",
+      class: "elevated",
+      changes: [{ field: "enabled", before: false, after: true }],
+      warnings: ["OUTBOUND_INTEGRATION", "CRITICAL_APPLICATION"],
+      elevated: true,
+      stepUpRequired: true,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("the list is additive: every earlier code is still accepted", () => {
+    for (const code of [
+      "EXTERNAL_PROVISIONING",
+      "EXTERNAL_DEPROVISIONING",
+      "CASCADE_RELEASES_ASSIGNMENTS",
+      "CASCADE_REVOKES_GRANTS",
+      "LEDGER_APPEND",
+      "SOFT_DELETE",
+      "PUBLISHES_TO_READERS",
+      "VISIBILITY_CHANGE",
+      "NOTIFIES_USERS",
+      "IRREVERSIBLE",
+    ]) {
+      expect(AI_PREVIEW_WARNING_CODES).toContain(code);
+    }
+  });
+
   test("a preview carrying the new codes parses", () => {
     const parsed = AiActionPreviewSchema.safeParse({
       toolName: "access_grant_create",
