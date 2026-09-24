@@ -3,7 +3,7 @@ title: RecentActivity
 tags: [domain, entity, view]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-23
+updated: 2026-09-24
 ---
 
 # RecentActivity
@@ -23,10 +23,10 @@ con una view"). See [[0044-recent-activity-view]] and [[0050-user-history-and-ac
 
 | Source | Maps to | `entityType` | `action`(s) |
 | --- | --- | --- | --- |
-| [[asset-history]] | the event row | `asset` | the lowercased `eventType`: `created` · `status_changed` · `assigned` · `released` · `location_changed` · `model_changed` · `specs_changed` · `deleted` · `restored` |
+| [[asset-history]] | the event row | `asset` | the lowercased `eventType`: `created` · `updated` · `status_changed` · `assigned` · `released` · `location_changed` · `model_changed` · `specs_changed` · `deleted` · `restored` · `acknowledged` · `agent_linked` · `consumable_delivered` · `consumable_returned` (a consumable delivered to / returned from the asset, [[0098-consumable-delivery-targets]]) |
 | [[asset-assignment]] | open / close | `asset` | `assigned` (`assignedAt`) · `released` (`releasedAt`) |
 | [[access-grant]] | open / close | `application` | `granted` (`grantedAt`) · `revoked` (`revokedAt`) |
-| [[consumable-movement]] | each movement | `consumable` | `stock_in` / `stock_out` / `stock_adjustment` |
+| [[consumable-movement]] | each movement | `consumable` | `stock_in` / `stock_out` / `stock_adjustment` (a delivery's target is not carried into the summary yet — deferred by [[0098-consumable-delivery-targets]]) |
 | [[user-history]] (DEBT-2, #185 / ADR-0058 / ADR-0086) | the event row | `user` | the lowercased `eventType`: `created` · `updated` · `role_changed` · `manager_changed` · `deleted` · `restored` · `password_reset_sent` · `password_reset_by_admin` (local-mode admin reset) · `password_changed` · `password_reset_completed` (local-mode self-service, ADR-0086 §F4) |
 
 The full closed verb set is the single source of truth for the `action` filter's allowlist

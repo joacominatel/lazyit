@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # User
@@ -21,6 +21,16 @@ the reverse.
 - **owns** N [[asset]]s via [[asset-assignment]] (with history).
 - **holds** N [[access-grant]]s to [[application]]s.
 - **raises** N [[access-request]]s.
+- **receives** N consumable **deliveries**: `OUT` [[consumable-movement]]s whose `targetUserId` is this
+  user. A delivery of a *returnable* consumable stays outstanding until it is returned.
+  - List them with `GET /consumables/deliveries?targetUserId=` (`outstandingOnly`, `from`/`to`, paged).
+    This also needs `user:read`, so a VIEWER gets 403, the same directory-relational rule as
+    `GET /users/:id/assignments`.
+  - **Offboarding does not move stock or close deliveries.** The offboarding sheet and the Return Act
+    list the leaver's deliveries so the team can ask for returnables back, and each return is recorded
+    as it happens.
+  - The FK is `Restrict`; a soft delete (offboarding) is unaffected
+    ([[0098-consumable-delivery-targets]]).
 - **has** an append-only [[user-history]] — its own lifecycle log (create / update / role change /
   manager change / offboard / restore / password-reset), the User counterpart of [[asset-history]]
   (DEBT-2, #185 — [[0050-user-history-and-activity-user-entity]]). A User is also the **actor** on
