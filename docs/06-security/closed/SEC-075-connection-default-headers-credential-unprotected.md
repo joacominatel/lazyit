@@ -2,7 +2,7 @@
 id: SEC-075
 title: Connection defaultHeaders hold pasted credentials but are treated as non-secret — values returned on read, and carried to a new host by a workflow:manage-only re-point
 severity: medium
-status: open
+status: fixed
 cwe: CWE-522
 discovered: 2026-09-24
 module: workflow-engine (connections)
@@ -127,3 +127,45 @@ behaviour, and the Manual page for connections should say that credentials go in
 - CWE-522 (Insufficiently Protected Credentials), CWE-200.
 - `docs/ai-assistant/security.md` "Residual risk" (the route gap found in W2-14) · ADR-0054 §4/§6 ·
   epic #1315, PR #1354.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `cfdbd6be` (`fix(api): redact connection header values and gate header changes under workflow:secrets (#1315)`),
+with `8a9d6ace` (shared `WORKFLOW_REDACTED_VALUE`), `1c84fccb` (dry-run preview), `631a1973` (web round-trip) and `e8ba9351` (AI tools)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-24
+
+Both recommended changes, API-side, no schema change:
+
+### Changes
+- `apps/api/src/workflow-engine/definitions/connection-redaction.ts` (new): the read projection (every
+  `defaultHeaders` value and a URL's userinfo → `[redacted]`) and `resolveRedactedHeaders` (a
+  `[redacted]` value on PATCH keeps the stored value; one for a header that is not stored is a 400).
+- `workflow-connections.service.ts`: `findOne` / `findPage` / `create` / `update` return the redacted
+  row; the patch merge and the test probe read the raw row (`findLive`). `assertMaySetCredentialBinding`
+  now also requires `workflow:secrets` for (a) any added or changed header value and (b) a host change on
+  a connection carrying default headers before or after the patch. Removing headers stays manage-only.
+- `workflow-dry-run.service.ts`: preview header values rendered as `[redacted]`.
+- `packages/shared` `WORKFLOW_REDACTED_VALUE`; `apps/web` connection form comment + test (the form
+  never displays header values and carries the sentinels back, so the API keeps the stored values).
+
+### Tests added
+- `workflow-connections.service.spec.ts` › "SEC-075 default headers": manage-only re-point of a
+  `secretId: null` connection with headers → 403 (sentinels or typed-back values); manage-only header
+  value change → 403; manage-only header removal → allowed; redacted round-trip persists the stored
+  values; secrets holder may re-point and rotate; sentinel for an unknown header → 400; `findOne` /
+  `findPage` never contain the token. Each fails without the fix (the gate passed / values returned).
+- `workflow-dry-run.service.spec.ts` › "SEC-075 / SEC-076 preview redaction".
+
+### Verification
+Charter validation block: shared / api / web / agent `tsc --noEmit` clean; api Jest 252 suites, 5328
+tests passed; `packages/shared` (1375) and `apps/web` (1074) `bun test` 0 fail; `apps/agent` has 2
+pre-existing failures that need `pwsh` (unrelated). Changed-file eslint (api, web) clean; manual parity OK.
+With the implementation files reverted to `origin/dev` and the new specs kept, 18 of the new tests fail.
+
+### Residual risk
+- The follow-up hardening (refusing credential-named headers on write) is not done: header values stay
+  a supported, now-protected channel. The Manual tells operators to keep tokens in the credential.
+- Existing data: stored header values are unchanged and keep being sent on runs; only the read shape
+  and the permission for a header change / re-point differ.

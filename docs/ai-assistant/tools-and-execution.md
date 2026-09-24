@@ -746,8 +746,6 @@ leak through a tool would be a leak in the test.
   restore (v1.1), the attachments list and removal (v1.1), the `.docx` import and binary attachment
   transfer (no file tools).
 - **Follow-ups (recorded by the G2 review, not fixed here):**
-  - `loadOwned` answers 403 for another person's *published* article and 404 for their draft over HTTP —
-    a pre-existing existence signal, filed as SEC-074;
   - entity-ref labels (article titles) and author names in results are not wrapped as untrusted;
   - the folder is an entity of type `category`, which the web cannot tell apart from the other
     category kinds (no `articleFolder` entity type yet);
@@ -1839,7 +1837,7 @@ export interface AiToolService {                 // the only façade channels ma
 // attachDelegatedIdentity (the dispatcher) and hasDelegatedIdentity/readDelegatedIdentity (the guard)
 // touch it, and a spec fails if any other production file value-imports the module.
 export type DelegatedIdentity =
-  | { kind: "human"; userId: string; sessionEpoch: number } // required: the chat session's or the grant's
+  | { kind: "human"; userId: string; sessionEpoch: number } // required: the chat session's, or the live one /mcp re-read
   | { kind: "service"; serviceAccountId: string };
 ```
 

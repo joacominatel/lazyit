@@ -79,6 +79,12 @@ the reverse.
   offboard** of an active person (#1308) — so reactivating or restoring a user, by hand or by the sync,
   never revives an old session. The guard also refuses an inactive, soft-deleted or `directoryOnly`
   row on every request.
+  **MCP credentials have their own counter.** `mcpCredentialEpoch` (`int`, default 0) is what every
+  [[oauth-grant]] (OAuth connection or personal MCP token) snapshots. Every lever above bumps it together
+  with `sessionEpoch` — password change or reset, admin reset (and the admin *revoke sessions* option),
+  the recovery CLI, deactivation, offboarding, the sync's soft offboard — **except sign-out**:
+  `POST /auth/logout` ends web sessions only and leaves the user's MCP connections alive
+  ([[0097-ai-assistant-mcp-and-headless-api]] decision 8, amended 2026-09-24).
 - **Authorization (Roles & Permissions v2):** the three roles stay **fixed** —
   `enum Role { ADMIN MEMBER VIEWER }` is unchanged ([[0040-rbac-roles]]) — but what each role *grants*
   is now a configurable set of **fine-grained permissions** ([[0046-roles-permissions-v2]]). A privilege

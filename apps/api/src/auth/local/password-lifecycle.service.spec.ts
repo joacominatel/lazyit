@@ -158,6 +158,8 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       expect(txUserUpdate).toHaveBeenCalledTimes(1);
       const data = firstArg<UpdateArg>(txUserUpdate).data;
       expect(data.sessionEpoch).toEqual({ increment: 1 });
+      // A password change or reset also kills every MCP credential (ADR-0097 decision 8, amended).
+      expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
       expect(data.mustChangePassword).toBe(false);
       expect(typeof data.passwordHash).toBe('string');
       expect(data.passwordHash).not.toBe(hash); // genuinely rehashed
@@ -434,6 +436,8 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       // The credential write: new hash, epoch increment, flag cleared.
       const data = firstArg<UpdateArg>(txUserUpdate).data;
       expect(data.sessionEpoch).toEqual({ increment: 1 });
+      // A password change or reset also kills every MCP credential (ADR-0097 decision 8, amended).
+      expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
       expect(data.mustChangePassword).toBe(false);
       await expect(
         credentials.verify(data.passwordHash, 'NewPass1!'),
@@ -708,6 +712,7 @@ function firstArg<T>(m: jest.Mock, call = 0): T {
 interface UpdateArg {
   data: {
     sessionEpoch: unknown;
+    mcpCredentialEpoch: unknown;
     mustChangePassword: boolean;
     passwordHash: string;
     passwordUpdatedAt?: Date;

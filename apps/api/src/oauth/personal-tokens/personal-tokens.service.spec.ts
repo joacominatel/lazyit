@@ -102,6 +102,7 @@ describe('mint', () => {
       clientRefId: null,
       resource: PERSONAL_TOKEN_RESOURCE,
       sessionEpoch: 0,
+      mcpCredentialEpoch: 0,
     });
     const [token] = h.prisma.tables.oAuthToken;
     expect(token).toMatchObject({ grantId: grant.id, kind: 'personal' });
@@ -408,9 +409,25 @@ describe('verify (the /mcp check)', () => {
     });
   });
 
-  it('dies with the user: epoch bump, deactivation, offboarding, forced password change', async () => {
+  it('survives a web logout (a sessionEpoch bump alone) and stays listed (ADR-0097 d8 amended)', async () => {
+    const user = seedUser(h);
+    const created = await service.create(user, input());
+    const row = h.prisma.tables.user.find((u) => u.id === user.id)!;
+    row.sessionEpoch += 1; // what LoginService.logout does — and nothing else
+    expect(await service.verify(created.token)).toMatchObject({ ok: true });
+    expect(await service.listMine(row as never)).toHaveLength(1);
+  });
+
+  it('dies with the user: credential-epoch bump, deactivation, offboarding, forced password change', async () => {
     const cases: Array<[string, (user: any) => void, string]> = [
-      ['sessionEpoch bump', (u) => (u.sessionEpoch += 1), 'session_revoked'],
+      [
+        'mcpCredentialEpoch bump (password change / reset, admin reset)',
+        (u) => {
+          u.sessionEpoch += 1;
+          u.mcpCredentialEpoch += 1;
+        },
+        'session_revoked',
+      ],
       ['deactivation', (u) => (u.isActive = false), 'inactive'],
       ['offboarding', (u) => (u.deletedAt = new Date()), 'not_found'],
       [

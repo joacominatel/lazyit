@@ -68,7 +68,8 @@ Snapshot of the security review. Updated each sweep. Method:
    legacy grant is inert on every route and channel.
    [[SEC-074-kb-loadowned-403-vs-404-existence-leak\|SEC-074]] (**Low**): KB write paths return 403 to a
    non-author for a folder-hidden PUBLISHED article, which confirms it exists (INV-9). The KB AI write
-   tools (#1342) will expose the same response.
+   tools (#1342) will expose the same response. **Closed 2026-09-24**: `loadOwned` and `restore` run the
+   folder ACL before the authorship 403, so a folder-hidden article is a 404 on every write path.
 
 9. **2026-09-24 — Workflow-engine route gaps from the AI authoring review (epic #1315, PR #1354).**
    Four findings on the workflow routes, found while reviewing the AI authoring tools. The AI tools
@@ -83,7 +84,10 @@ Snapshot of the security review. Updated each sweep. Method:
    expected version, so a version authored after a review goes live unseen.
    [[SEC-078-dry-run-offboarded-sample-grantee\|SEC-078]] (**Low**): the dry-run renders an offboarded
    sample grantee's details (nested include without a soft-delete filter, the SEC-040 class).
-   SEC-074 stays **open** (not affected by this change).
+   SEC-074 was not affected by this change (closed separately). **All four ✅ closed the same day** (epic
+   #1315): header values and URL userinfo redacted on read and gated under `workflow:secrets`,
+   userinfo refused on write (legacy rows keep running, flagged), `expectedVersion` / `baseVersion` 409 preconditions, and
+   the dry-run refuses offboarded or revoked samples.
 
 Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 
@@ -93,10 +97,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 1 |
-| Low | 15 |
+| Medium | 0 |
+| Low | 11 |
 | Info | 0 |
-| **Total open** | **16** |
+| **Total open** | **11** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -116,14 +120,19 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
 | [[SEC-070-health-ready-db-error-leak\|SEC-070]] | 🟡 Low | health | `GET /health/ready` leaks raw pg driver error (internal host/IP/port) to anonymous callers |
 | [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
-| [[SEC-075-connection-default-headers-credential-unprotected\|SEC-075]] | 🟠 Medium | workflow-engine | Connection `defaultHeaders` credentials returned on read and carried to a new host by a manage-only re-point (outside CSEC-1) |
-| [[SEC-074-kb-loadowned-403-vs-404-existence-leak\|SEC-074]] | 🟡 Low | articles | `loadOwned` 403-before-folder-check leaks a hidden article's existence (INV-9) |
-| [[SEC-076-connection-url-userinfo-credential\|SEC-076]] | 🟡 Low | workflow-engine · shared | Connection URLs accept userinfo, which Node sends as Basic auth (a credential in plain config) |
-| [[SEC-077-workflow-enable-version-race\|SEC-077]] | 🟡 Low | workflow-engine | Enable / version authoring take no expected version, so a version authored after a review goes live unseen |
-| [[SEC-078-dry-run-offboarded-sample-grantee\|SEC-078]] | 🟡 Low | workflow-engine | Dry-run renders an offboarded sample grantee's details (nested include without a soft-delete filter) |
 
 ## Top findings
 
+0. **SEC-075 / SEC-076 / SEC-077 / SEC-078 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24, #1315):
+   connection `defaultHeaders` values and legacy URL userinfo are redacted on every read and a
+   `[redacted]` PATCH value keeps the stored one; changing a header value or re-pointing a connection
+   that carries headers needs `workflow:secrets` (CSEC-1); userinfo is refused on write while legacy
+   rows keep running and are flagged `legacyUserinfo` for a UI warning; enable / version authoring take optional `expectedVersion` /
+   `baseVersion` checked under a row lock (409); the dry-run refuses an offboarded grantee or a
+   revoked grant. Stored rows are untouched.
+0. **SEC-074 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24): the KB write paths (`loadOwned`, and
+   the soft-delete `restore`) check the folder ACL before the authorship 403, so a published article in
+   a folder the caller cannot read is a 404, the same as a missing id (INV-9). No data change.
 0. **SEC-073 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24): `resolveServiceAccountPermissions`
    strips the SA-ungrantable set when the principal is built, so a `user:manage` / `settings:manage`
    grant written before SEC-011 is inert over HTTP, MCP and headless AI. Legacy rows are kept (no

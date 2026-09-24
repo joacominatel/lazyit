@@ -15,6 +15,7 @@ function fakeClient(user: LiveAdminCandidate | null): {
       passwordHash: string;
       passwordUpdatedAt: Date;
       sessionEpoch: { increment: number };
+      mcpCredentialEpoch: { increment: number };
     };
   }>;
 } {
@@ -24,6 +25,7 @@ function fakeClient(user: LiveAdminCandidate | null): {
       passwordHash: string;
       passwordUpdatedAt: Date;
       sessionEpoch: { increment: number };
+      mcpCredentialEpoch: { increment: number };
     };
   }> = [];
   const client: ResetAdminPasswordClient = {
@@ -110,6 +112,7 @@ describe('resetAdminPassword (F1d recovery-CLI core, #994)', () => {
     const [{ where, data }] = updates;
     expect(where).toEqual({ id: 'u-admin' });
     expect(data.sessionEpoch).toEqual({ increment: 1 });
+    expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
     expect(data.passwordUpdatedAt).toBeInstanceOf(Date);
 
     // The stored hash carries the SAME argon2id cost params the app targets (encoded PHC string) —

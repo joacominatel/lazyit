@@ -181,6 +181,45 @@ describe('dynamic client registration', () => {
     ).resolves.toMatchObject({ redirect_uris: [uri] });
   });
 
+  describe('any HTTPS client by default (ADR-0097 decision 13, amended 2026-09-24)', () => {
+    const httpsRedirect = 'https://agent.example.com/oauth/callback';
+
+    it('reads the toggle as on when no settings row exists', async () => {
+      h.prisma.tables.aiSettings = [];
+      await expect(h.policy.mcpSettings()).resolves.toMatchObject({
+        mcpEnabled: false,
+        allowAnyHttpsClient: true,
+      });
+    });
+
+    it('registers any HTTPS client when the row never stored the toggle', async () => {
+      enableMcp(h, { mcpAllowAnyHttpsClient: undefined });
+      await expect(
+        h.registrations.register({ redirect_uris: [httpsRedirect] }),
+      ).resolves.toMatchObject({ redirect_uris: [httpsRedirect] });
+    });
+
+    it('still refuses an unlisted HTTPS client while the stored value is false', async () => {
+      enableMcp(h, { mcpAllowAnyHttpsClient: false });
+      expect(
+        await oauthError(
+          h.registrations.register({ redirect_uris: [httpsRedirect] }),
+        ),
+      ).toMatchObject({ error: 'invalid_redirect_uri' });
+      expect(h.prisma.tables.oAuthClient).toHaveLength(0);
+    });
+
+    it.each([
+      'com.example.agent:/oauth/callback',
+      'http://agent.example.com/callback',
+    ])('still refuses %s without an explicit entry', async (uri) => {
+      enableMcp(h, { mcpAllowAnyHttpsClient: undefined });
+      expect(
+        await oauthError(h.registrations.register({ redirect_uris: [uri] })),
+      ).toMatchObject({ error: 'invalid_redirect_uri' });
+    });
+  });
+
   it('refuses a registration once the admin removed the default that listed it', async () => {
     enableMcp(h, {
       mcpClientAllowlistRemovedDefaults: ['loopback-localhost-callback'],
@@ -470,6 +509,7 @@ describe('token endpoint: authorization_code', () => {
         userId: user.id,
         resource: RESOURCE,
         sessionEpoch: 0,
+        mcpCredentialEpoch: 0,
         scopes: ['lazyit.read', 'lazyit.write'],
       }),
     ]);
@@ -708,10 +748,12 @@ describe('token endpoint: refresh_token', () => {
 });
 
 describe('tokens die with the user', () => {
-  it('a sessionEpoch bump kills access and refresh tokens', async () => {
+  it('an mcpCredentialEpoch bump kills access and refresh tokens', async () => {
     const user = seedUser(h);
     const { clientId, tokens } = await connect(h, user);
-    user.sessionEpoch += 1; // password change, sign out everywhere, admin reset
+    // Password change or reset, admin reset, deactivation, offboarding: both counters move.
+    user.sessionEpoch += 1;
+    user.mcpCredentialEpoch += 1;
     expect(await h.tokens.verifyAccessToken(tokens.access_token)).toMatchObject(
       { ok: false, reason: 'session_revoked', status: 401 },
     );
@@ -723,6 +765,32 @@ describe('tokens die with the user', () => {
         }),
       ),
     ).toEqual({ error: 'invalid_grant' });
+  });
+
+  it('a web logout (sessionEpoch bump alone) keeps access and refresh tokens alive (ADR-0097 d8 amended)', async () => {
+    const user = seedUser(h);
+    const { clientId, tokens } = await connect(h, user);
+    user.sessionEpoch += 1; // what LoginService.logout does — and nothing else
+    expect(await h.tokens.verifyAccessToken(tokens.access_token)).toMatchObject(
+      { ok: true },
+    );
+    const refreshed = await h.tokens.refresh({
+      refresh_token: tokens.refresh_token,
+      client_id: clientId,
+    });
+    expect(refreshed.access_token).toMatch(/^lzit_oat_/);
+    expect(
+      await h.tokens.verifyAccessToken(refreshed.access_token),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('a grant the migration marked already dead (-1) stays dead', async () => {
+    const user = seedUser(h);
+    const { tokens } = await connect(h, user);
+    h.prisma.tables.oAuthGrant[0].mcpCredentialEpoch = -1;
+    expect(await h.tokens.verifyAccessToken(tokens.access_token)).toMatchObject(
+      { ok: false, reason: 'session_revoked', status: 401 },
+    );
   });
 
   it('deactivation kills access and refresh tokens', async () => {
@@ -875,8 +943,14 @@ describe('connected apps', () => {
         scopes: ['lazyit.read', 'lazyit.write'],
       }),
     ]);
+    // A web logout leaves the list intact…
     user.sessionEpoch += 1;
+    expect(await h.grants.listMine(user)).toHaveLength(1);
+    expect(await h.grants.listForAdmin(user.id)).toHaveLength(1);
+    // …a credential event (password change, deactivation, offboarding) empties it.
+    user.mcpCredentialEpoch += 1;
     expect(await h.grants.listMine(user)).toEqual([]);
+    expect(await h.grants.listForAdmin(user.id)).toEqual([]);
   });
 
   it('lets the owner revoke, hides other users’ grants (404), and lets an admin revoke any', async () => {

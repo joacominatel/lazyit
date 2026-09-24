@@ -3,7 +3,7 @@ jest.mock('../../../generated/prisma/client', () => ({
   Prisma: {},
 }));
 
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { WorkflowsService } from './workflows.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { ActorService } from '../../common/actor.service';
@@ -128,5 +128,105 @@ describe('WorkflowsService — CSEC-3 executor pin-check', () => {
 
       expect(h.applicationWorkflow.update).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+/**
+ * SEC-077 — review-then-act preconditions. `expectedVersion` on the header PATCH and `baseVersion` on
+ * authoring are checked INSIDE a transaction that locks the workflow row; a mismatch is a 409 and
+ * nothing is written. Omitting them keeps the unconditioned write.
+ */
+describe('WorkflowsService — SEC-077 version preconditions', () => {
+  const MANUAL_STEPS = [
+    {
+      kind: 'MANUAL' as const,
+      key: 'm',
+      prompt: 'Do it',
+      inputFields: [
+        { name: 'ok', label: 'OK', type: 'boolean' as const, required: false },
+      ],
+    },
+  ];
+
+  function buildTx(latest: number | null) {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'wf1' }]),
+      workflowVersion: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(latest === null ? null : { version: latest }),
+        create: jest.fn().mockResolvedValue({ version: (latest ?? 0) + 1 }),
+      },
+      applicationWorkflow: {
+        update: jest.fn().mockResolvedValue({ id: 'wf1', enabled: true }),
+      },
+    };
+    const applicationWorkflow = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'wf1', applicationId: APP }),
+      update: jest.fn().mockResolvedValue({ id: 'wf1' }),
+    };
+    const prisma = {
+      applicationWorkflow,
+      $transaction: jest.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
+    } as unknown as PrismaService;
+    const engineSa = {
+      getOrCreate: jest.fn().mockResolvedValue(ENGINE_SA),
+    } as unknown as EngineServiceAccountService;
+    const service = new WorkflowsService(prisma, new ActorService(), engineSa);
+    return { service, tx, applicationWorkflow };
+  }
+
+  it('enable with a stale expectedVersion is a 409 and writes nothing', async () => {
+    const h = buildTx(4);
+    await expect(
+      h.service.update('wf1', { enabled: true, expectedVersion: 3 }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.$queryRaw).toHaveBeenCalledTimes(1); // the row lock was taken
+    expect(h.tx.applicationWorkflow.update).not.toHaveBeenCalled();
+    expect(h.applicationWorkflow.update).not.toHaveBeenCalled();
+  });
+
+  it('enable with the current expectedVersion writes inside the transaction', async () => {
+    const h = buildTx(3);
+    await h.service.update('wf1', { enabled: true, expectedVersion: 3 });
+    expect(h.tx.applicationWorkflow.update).toHaveBeenCalledWith({
+      where: { id: 'wf1' },
+      data: { enabled: true },
+    });
+  });
+
+  it('expectedVersion 0 matches a workflow with no version yet', async () => {
+    const h = buildTx(null);
+    await h.service.update('wf1', { enabled: false, expectedVersion: 0 });
+    expect(h.tx.applicationWorkflow.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('omitting expectedVersion keeps the unconditioned write (no transaction)', async () => {
+    const h = buildTx(9);
+    await h.service.update('wf1', { enabled: true });
+    expect(h.applicationWorkflow.update).toHaveBeenCalledTimes(1);
+    expect(h.tx.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('authoring on a stale baseVersion is a 409 and creates no version', async () => {
+    const h = buildTx(4);
+    await expect(
+      h.service.authorVersion('wf1', { steps: MANUAL_STEPS, baseVersion: 3 }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.workflowVersion.create).not.toHaveBeenCalled();
+  });
+
+  it('authoring on the current baseVersion (or none) allocates latest + 1 under the row lock', async () => {
+    const h = buildTx(4);
+    await h.service.authorVersion('wf1', {
+      steps: MANUAL_STEPS,
+      baseVersion: 4,
+    });
+    await h.service.authorVersion('wf1', { steps: MANUAL_STEPS });
+    expect(h.tx.$queryRaw).toHaveBeenCalledTimes(2);
+    const calls = h.tx.workflowVersion.create.mock.calls as Array<
+      [{ data: { version: number } }]
+    >;
+    expect(calls.map((c) => c[0].data.version)).toEqual([5, 5]);
   });
 });

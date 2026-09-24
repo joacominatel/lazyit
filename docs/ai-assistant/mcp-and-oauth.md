@@ -437,7 +437,8 @@ true`, `service_documentation` → the Manual page. **PRM** advertises `resource
    window = reuse → the whole grant is revoked (audited); inside the grace window → `invalid_grant` without
    revocation (benign concurrent-refresh race). Dead tokens always answer `invalid_grant`.
 8. Resource-server check on every `/mcp` request: token hash → grant (live, not expired) → **user reloaded**
-   (live, `isActive`, not `directoryOnly`, `!mustChangePassword`, `sessionEpoch == grant.sessionEpoch`) →
+   (live, `isActive`, not `directoryOnly`, `!mustChangePassword`,
+   `mcpCredentialEpoch == grant.mcpCredentialEpoch` — not `sessionEpoch`, so a web logout leaves it alive) →
    MCP enabled → `ai:connect` held **now** → `resource` matches. Failure → 401 with
    `WWW-Authenticate: Bearer resource_metadata="…", scope="lazyit.read lazyit.write"`. `lastUsedAt` stamped
    fire-and-forget (SA precedent).
@@ -564,7 +565,7 @@ lazyit-plugin.zip
 
 The AS depends only on "the web session resolves a human via `JwtAuthGuard`", which holds in every mode. On an
 instance still running `AUTH_MODE=oidc`, the consent page works unchanged: the Bearer is the IdP token and the
-guard resolves the `User`. `sessionEpoch` exists (default 0) and deactivation or soft-delete still kills grants.
+guard resolves the `User`. `mcpCredentialEpoch` exists (default 0) and deactivation or soft-delete still kills grants.
 **No OIDC-specific code is written**; when #1310 lands, nothing in this design changes.
 
 ---
@@ -606,7 +607,8 @@ model OAuthGrant {
   label         String?                     // personal-token name
   scopes        String[]                    // subset of lazyit.read / lazyit.write / lazyit.admin
   resource      String                      // canonical MCP URI at issuance
-  sessionEpoch  Int                         // snapshot; mismatch with User.sessionEpoch = dead (R7)
+  sessionEpoch  Int                         // snapshot, informational only since 2026-09-24
+  mcpCredentialEpoch Int                    // snapshot; mismatch with User.mcpCredentialEpoch = dead (R7)
   expiresAt     DateTime?                   // personal tokens only
   lastUsedAt    DateTime?
   revokeReason  String?                     // 'user' | 'admin' | 'refresh_reuse' | 'revocation_endpoint' | 'client_deleted'
@@ -691,8 +693,10 @@ are added to [[INVARIANTS]] only when ADR-0097 is accepted:
 - **INV-MCP-2** An MCP call's authority = the user's **current** DB permissions ∩ the grant's scope class,
   re-evaluated on **every** request (list and call), together with `ai:connect` and the instance MCP switch.
   Never a token claim (INV-1/INV-8).
-- **INV-MCP-3** A grant dies with the user: soft-delete, `isActive=false`, `directoryOnly`, `sessionEpoch` bump
-  (R7), or `mustChangePassword` (re-checked by the MCP guard because `@Public` routes skip the global wall).
+- **INV-MCP-3** A grant dies with the user: soft-delete, `isActive=false`, `directoryOnly`, an
+  `mcpCredentialEpoch` bump (R7; password change or reset, admin reset, deactivation, offboarding — **not** a web
+  logout, ADR-0097 decision 8 amended 2026-09-24), or `mustChangePassword` (re-checked by the MCP guard because
+  `@Public` routes skip the global wall).
 - **INV-MCP-4** Authorization codes are single-use, ≤60 s, PKCE-S256-bound; redirects match exactly (loopback
   port-agnostic only); refresh tokens rotate with reuse detection that revokes the grant; `iss` is returned.
 - **INV-MCP-5** The AS contains no OIDC/IdP code path (#1310).
@@ -780,6 +784,14 @@ reconciliation; [[ai-assistant/_synthesis|the synthesis]] §2 quotes them.
 6. **Q6 — Password change / "sign out everywhere" / admin reset kill MCP connections → yes**, through the
    grant's `sessionEpoch` snapshot (R7). Open PR #1313 amends ADR-0086's session expiry; if it changes
    `sessionEpoch` semantics, the grant binding follows whatever "all prior sessions die" means after it.
+
+   > **Revised 2026-09-24 (CEO decision, ADR-0097 decision 8 amended).** ADR-0086 §8 made every web sign-out
+   > a `sessionEpoch` bump, so the binding above silently killed every MCP connection on a normal logout.
+   > CEO: **"Separarlos"** — "El logout normal cierra solo la sesión web. Las conexiones MCP/tokens mueren
+   > con: cambio de contraseña, desactivación/offboarding, 'cerrar sesión en todos lados' explícito, o
+   > revocarlas en /account/ai." Grants now snapshot a separate counter, `User.mcpCredentialEpoch`, bumped
+   > (with `sessionEpoch`) by a password change or reset, an admin reset or *revoke sessions*, the recovery
+   > CLI, deactivation and offboarding — never by `POST /auth/logout`.
 7. **Q7 — Anonymous plugin marketplace → served only when MCP is enabled on an HTTPS instance**; the
    authenticated zip download is always available (R8).
 8. **Q8 — Read-only at consent → offered.** Read only / Read & write (preselected); `lazyit.admin` is
@@ -803,6 +815,18 @@ browser-interpreted scheme (`javascript`, `data`, `file`, `blob`, `about`, `view
 from the parsed authority, so `http://localhost:80@evil.com/` is never loopback (PR #1338 review F2). Matching stays exact, with only the loopback `http` port excepted. The
 contract is `classifyMcpRedirectUri` / `isMcpRedirectUriAllowed` in `ai-settings.ts`;
 [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13 (amended).
+
+**Any HTTPS client by default (CEO, 2026-09-24: "Sí, cualquier HTTPS").** `mcpAllowAnyHttpsClient` is
+**on by default**: an absent settings row reads it as `true` (`AI_SETTINGS_DEFAULTS`) and the column
+default is `true` (migration `20260924000000_mcp_allow_any_https_client_default`), so a client whose
+redirect URIs are all HTTPS on a non-loopback host registers without an allowlist entry. The curated list
+still governs loopback and private-use redirects, and the toggle still admits nothing but HTTPS off
+loopback. An admin who wants the curated list only switches it off in Settings → AI. A row that already
+exists keeps its stored value, so an instance that saved its AI settings before this change keeps `false`
+until an admin turns it on. Consent is unchanged and always shown: the redirect host, the "self-declared,
+unverified" label and approve confirmation for a DCR client, `lazyit.admin` never preselected, and the
+new-connection notice → [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13 (amended
+2026-09-24); [[ai-assistant/security|security]] §6.3.
 
 The durable decisions (F1, F3, F4, the F8 outcome, INV-MCP-*) are recorded in
 [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] (proposed).
@@ -881,11 +905,14 @@ lazyit.write`; `lazyit.admin` is never implied. `decision` re-runs every check o
 
 **Client trust policy.** `client-policy.ts` applies the shared `classifyMcpRedirectUri` /
 `isMcpRedirectUriAllowed` to a whole client: **every** registered redirect must be admitted (a listed
-pattern, or `mcpAllowAnyHttpsClient` for https only), so a registration cannot carry an unlisted
-redirect next to a listed one; the allowlist is re-checked at consent, at code exchange and at every
+pattern, or `mcpAllowAnyHttpsClient` for https only — on by default since 2026-09-24, §10), so a
+registration cannot carry an unlisted redirect next to a listed one; the allowlist is re-checked at consent, at code exchange and at every
 refresh, so removing an entry cuts existing connections within an access token's hour. A client matched
 by a `cimd_url` entry (never a `dcr` row) is trusted for its own registrable redirects. The curated
-defaults are `client-allowlist.defaults.ts` (stable ids, parsed by the shared schema at load):
+defaults are data in `@lazyit/shared` — `MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS` in
+`schemas/ai-settings.ts` (stable ids, parsed by the shared schema at load, each with a `verification` of
+`verified` or `vendor-docs` and a `source`, so Settings → AI can list them and offer to remove one);
+`client-allowlist.defaults.ts` projects them to plain `{ id, label, match }` entries for enforcement:
 
 | Id | Match | Source |
 | --- | --- | --- |
@@ -902,9 +929,11 @@ defaults are `client-allowlist.defaults.ts` (stable ids, parsed by the shared sc
 Pi's coding agent has no built-in MCP client, so its OAuth identity depends on the extension in use.
 
 **Tokens.** `oauth-crypto.ts`: 32 CSPRNG bytes, base64url, prefixed; only the SHA-256 hex is stored and
-the looked-up row's hash is re-compared in constant time. A grant snapshots `sessionEpoch`; the access
-token check (`verifyAccessToken`) re-loads the user through `PrincipalLoaderService.loadHuman`, so it
-refuses exactly what the REST guard refuses. The refresh-token row is marked `usedAt` on rotation and kept
+the looked-up row's hash is re-compared in constant time. A grant snapshots `mcpCredentialEpoch` (and
+`sessionEpoch`, informational only); the access token check (`verifyAccessToken`) and refresh re-load the
+user through `PrincipalLoaderService.loadHumanForMcpCredential` — the same gates as `loadHuman`, comparing
+`mcpCredentialEpoch` instead of `sessionEpoch` — so it refuses what the REST guard refuses except a plain web
+logout (ADR-0097 decision 8, amended 2026-09-24). The refresh-token row is marked `usedAt` on rotation and kept
 until its expiry — that is what reuse detection recognizes.
 
 **Redirect parsing.** Every redirect is also parsed with the WHATWG `URL` parser in `client-policy.ts`,
@@ -947,7 +976,7 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
 - **Code replay.** A code is consumed atomically before any other check, so a wrong verifier burns it.
   A replayed code is refused, but the grant already issued from it is not revoked: codes carry no link to
   the grant they produced (the schema is fixed for this wave).
-- **Epoch at exchange.** The grant snapshots the user's `sessionEpoch` at code exchange, not at consent;
+- **Epoch at exchange.** The grant snapshots the user's `mcpCredentialEpoch` at code exchange, not at consent;
   the window between the two is the code's 60 s.
 - **Grants while off.** See the §5.1 note: connected apps stay manageable while MCP is off and on `lan`.
 - **Soft delete.** `OAuthGrant` joined `SOFT_DELETABLE_MODELS`; relation reads (a token's `grant`) check
@@ -959,7 +988,7 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
 
 1. ~~**"New client connected" notification**~~ — **done in W3-2** (§14): the `mcp.client_connected`
    notification, sent on a connection's first use at `/mcp`.
-2. **`sessionEpoch` at consent:** store the epoch on the code row when the schema next opens, so a
+2. **`mcpCredentialEpoch` at consent:** store the epoch on the code row when the schema next opens, so a
    password change between consent and exchange also kills the grant (today the snapshot is taken at
    exchange, ≤ 60 s later).
 3. **Code → grant link:** record which grant a code produced, so a replayed code revokes that grant
@@ -1139,7 +1168,9 @@ The scope hierarchy (`scopesToCeiling`): any scope implies `read`, `lazyit.write
 `req.user` for a human (request-log attribution only).
 
 **`McpServerFactory`, per request.** Listing = `AiToolService.list` on the `MCP` channel with the
-caller's identity (the grant's `sessionEpoch` snapshot), ceiling and grant, minus `navigate`, sorted by
+caller's identity (the user's live `sessionEpoch`, re-read while verifying the credential — the credential
+itself is bound to `mcpCredentialEpoch`, so a logout at that instant can refuse only a call already in flight),
+ceiling and grant, minus `navigate`, sorted by
 name; `tools/list` carries `ttlMs: 60000`, `cacheScope: "private"`; `listChanged: false`;
 `instructions` = `buildMcpInstructions()` (the primer). The tool's JSON Schema is advertised through a
 pass-through schema, so the SDK does not validate arguments and the core's zod validation answers
@@ -1196,14 +1227,15 @@ ledger, never retried. Not started under `NODE_ENV=test`.
 | Route | Answers |
 | --- | --- |
 | `POST /oauth/personal-tokens` | `ai:connect`, human only. Body `CreatePersonalTokenSchema`: `label`, `expiresInDays` (default 90, 1–365), `scopes` (optional, `lazyit.read` / `lazyit.write`, default both; **`lazyit.admin` is refused** — by the schema and again by the service, G3 F7). 201 `PersonalTokenCreated` — the token once, `Cache-Control: no-store`. 403 `{ code: "OAUTH_INSTANCE" }` on an HTTPS instance; 403 `{ code: "AI_DISABLED" }` while MCP is off or in the shim; 409 past 20 live tokens per user — counted and created in one transaction under a per-user `pg_advisory_xact_lock` (G3 F4). |
-| `GET /oauth/personal-tokens` | `ai:connect`: the caller's live personal tokens (not revoked, unexpired, current `sessionEpoch`) as `OAuthGrant` |
+| `GET /oauth/personal-tokens` | `ai:connect`: the caller's live personal tokens (not revoked, unexpired, current `mcpCredentialEpoch`) as `OAuthGrant` |
 | `DELETE /oauth/personal-tokens/:id` | 204; the caller's own personal token only, 404 otherwise (the admin path is `DELETE /oauth/grants/:id`) |
 
 A personal token is a grant (`kind: "personal"`, `label`, `scopes`, `expiresAt`, the user's
-`sessionEpoch`, `resource: "/mcp"`) plus one `oauth_tokens` row (`kind: "personal"`, SHA-256 only, the
+`mcpCredentialEpoch` and `sessionEpoch`, `resource: "/mcp"`) plus one `oauth_tokens` row (`kind: "personal"`, SHA-256 only, the
 same expiry); `PERSONAL_TOKEN_CREATED` / `PERSONAL_TOKEN_REVOKED` are audited without the secret, and
 revocation goes through `OAuthTokenService.revokeGrant(…, { personal: true })`. `verify` is DB-first on
-every request and refuses exactly what the OAuth check refuses (revoked, expired, epoch bump,
+every request and refuses exactly what the OAuth check refuses (revoked, expired, `mcpCredentialEpoch` bump — a
+web logout is not one —
 deactivation, offboarding, directory-only, forced password change → 401; MCP off, `ai:connect`
 withdrawn → 403). List and revoke stay available whatever the mode and the switch. **Choices:**
 the audience is the route (`/mcp`), not a URL built from `Host` (a `lan` instance has no pinned

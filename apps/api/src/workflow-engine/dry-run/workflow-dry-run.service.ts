@@ -29,6 +29,10 @@ import {
   isTerminalTarget,
 } from '../run/transitions';
 import { projectGrantee } from '../run/grantee-projection';
+import {
+  redactHeaderValues,
+  redactUrlUserinfo,
+} from '../definitions/connection-redaction';
 import { MAX_WALK_STEPS } from '../run/workflow-run.constants';
 import type { TransitionTaken } from '../run/workflow-run.types';
 import {
@@ -216,6 +220,8 @@ export class WorkflowDryRunService {
             legajo: true,
             username: true,
             managerName: true,
+            // SEC-078: the nested include is NOT soft-delete scoped — select it and refuse below.
+            deletedAt: true,
             // Nested manager relation — loaded regardless of soft-delete (the read filter only scopes
             // the top-level op), so the projection can flag an offboarded manager rather than dangle.
             manager: {
@@ -238,6 +244,17 @@ export class WorkflowDryRunService {
     if (grant.applicationId !== workflow.applicationId) {
       throw new BadRequestException(
         'The sample access grant belongs to a different application than the workflow',
+      );
+    }
+    // SEC-078: never render an offboarded person's details (ADR-0058 §3), nor preview a closed grant.
+    if (grant.user.deletedAt) {
+      throw new BadRequestException(
+        "The sample grant's grantee is offboarded — pick a grant of an active user",
+      );
+    }
+    if (grant.revokedAt) {
+      throw new BadRequestException(
+        'The sample access grant is revoked — pick an active grant',
       );
     }
     return freezeMappingContext({
@@ -352,13 +369,15 @@ export class WorkflowDryRunService {
     if (step.kind === 'REST') {
       const config = conn.config as RestConnectionConfig;
       const renderedPath = renderTemplate(step.path, ctx, 'url');
-      const url = joinUrl(config.baseUrl, renderedPath);
+      // SEC-076: a legacy URL's userinfo is masked in the preview (the live call still sends it —
+      // upgrade-safe; the connection read flags it with `legacyUserinfo`).
+      const url = redactUrlUserinfo(joinUrl(config.baseUrl, renderedPath));
 
-      // Non-secret default headers first, then the auth header (a placeholder — never the credential).
-      const headers: Record<string, string> = {};
-      for (const [name, value] of Object.entries(config.defaultHeaders ?? {})) {
-        headers[name] = stripControlChars(value);
-      }
+      // Default headers first (VALUES redacted — one may be a pasted credential, SEC-075), then the auth
+      // header (a placeholder — never the credential).
+      const headers: Record<string, string> = redactHeaderValues(
+        config.defaultHeaders ?? {},
+      );
       const auth = restAuthPreview(config, conn.secretLabel);
       Object.assign(headers, auth.headers);
 
@@ -409,7 +428,7 @@ export class WorkflowDryRunService {
       request: {
         kind: 'WEBHOOK_OUT',
         method: 'POST',
-        url: config.url,
+        url: redactUrlUserinfo(config.url),
         headers,
         body: mapped.values,
         signed,
@@ -478,10 +497,4 @@ function restAuthPreview(
 /** The INV-6 placeholder a secret-backed value is shown as — never the real credential. */
 function secretPlaceholder(label: string | null): string {
   return label ? `‹secret:${label}›` : '‹secret:not-configured›';
-}
-
-/** Strip CR/LF + control chars from a previewed header value (mirrors the handler's hardening). */
-function stripControlChars(value: string): string {
-  // eslint-disable-next-line no-control-regex
-  return value.replace(/[\x00-\x1f\x7f]/g, '');
 }

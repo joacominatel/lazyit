@@ -80,3 +80,13 @@ test("an unreachable API never blocks signing out", async () => {
   await signOutAndRevoke();
   expect(calls).toEqual(["logout", "signOut", "assign /login"]);
 });
+
+test("lands on the given sign-in path (the consent page returns to its own request)", async () => {
+  fetchImpl = () => Promise.resolve(new Response(null, { status: 204 }));
+  await signOutAndRevoke("/login?callbackUrl=%2Foauth%2Fauthorize%3Fclient_id%3Dabc");
+  expect(calls).toEqual([
+    "logout",
+    "signOut",
+    "assign /login?callbackUrl=%2Foauth%2Fauthorize%3Fclient_id%3Dabc",
+  ]);
+});

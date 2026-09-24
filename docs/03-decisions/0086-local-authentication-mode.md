@@ -320,7 +320,10 @@ the CEO asked for. A per-device session table stays rejected for the reason §3 
   bumps `sessionEpoch`, conditional on the epoch the caller authenticated with, so a repeat or a
   concurrent duplicate changes nothing (a repeat with the revoked token is a `401`). Because the epoch is
   per user, **signing out ends that user's sessions on every device**. That is the epoch model's inherent
-  granularity, accepted here rather than building the session table §3 declined.
+  granularity, accepted here rather than building the session table §3 declined. It ends **web
+  sessions only**: MCP connections and personal tokens are bound to a separate counter,
+  `mcpCredentialEpoch`, which sign-out does not touch — every other lever below bumps both
+  ([[0097-ai-assistant-mcp-and-headless-api]] decision 8, amended 2026-09-24).
 - **Password change** bumps the epoch as before; the re-minted token **keeps the calling session's
   remember-me choice**, read by the guard from the verified token (never from the request body), so
   changing a password never silently shortens a session.

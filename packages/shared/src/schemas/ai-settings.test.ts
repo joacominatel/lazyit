@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AI_SETTINGS_ERROR_CODES,
+  AiSettingsErrorSchema,
+  MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS,
+  McpClientAllowlistDefaultSchema,
   AI_SERVICE_ACCOUNT_ACCESS_DEFAULT,
   AI_SETTINGS_DEFAULTS,
   AiConnectionDraftSchema,
@@ -163,6 +167,29 @@ describe("AI status", () => {
         mcp: { available: false, auth: "personal-token" },
         configRevision: "2026-09-23T00:00:00.000Z",
         retentionDays: 90,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("accepts the server-known MCP URLs, and their absence from an older API", () => {
+    const parsed = AiStatusSchema.parse({
+      chat: { available: false },
+      mcp: {
+        available: true,
+        auth: "oauth",
+        endpoint: "https://it.example.com/mcp",
+        marketplaceUrl: "https://it.example.com/api/ai/claude-code/marketplace.json",
+      },
+      configRevision: "r",
+      retentionDays: null,
+    });
+    expect(parsed.mcp.endpoint).toBe("https://it.example.com/mcp");
+    expect(
+      AiStatusSchema.safeParse({
+        chat: { available: false },
+        mcp: { available: false, auth: "personal-token", endpoint: null, marketplaceUrl: null },
+        configRevision: "r",
+        retentionDays: null,
       }).success,
     ).toBe(true);
   });
@@ -350,8 +377,17 @@ describe("MCP client allowlist (ADR-0097 decision 13)", () => {
     expect(parsed.mcpClientAllowlistAdded).toEqual([cursor]);
   });
 
-  test("the any-https-client policy is off by default", () => {
-    expect(AI_SETTINGS_DEFAULTS.mcpAllowAnyHttpsClient).toBe(false);
+  test("the any-https-client policy is on by default (CEO, 2026-09-24)", () => {
+    expect(AI_SETTINGS_DEFAULTS.mcpAllowAnyHttpsClient).toBe(true);
+  });
+
+  test("the default policy still refuses private-use and plain-http redirects without an entry", () => {
+    const allowAny = AI_SETTINGS_DEFAULTS.mcpAllowAnyHttpsClient;
+    expect(isMcpRedirectUriAllowed("https://agent.example.com/cb", [], allowAny)).toBe(true);
+    expect(isMcpRedirectUriAllowed("com.example.agent:/cb", [], allowAny)).toBe(false);
+    expect(isMcpRedirectUriAllowed("cursor://anysphere.cursor/cb", [], allowAny)).toBe(false);
+    expect(isMcpRedirectUriAllowed("http://agent.example.com/cb", [], allowAny)).toBe(false);
+    expect(isMcpRedirectUriAllowed("http://127.0.0.1:3000/cb", [], allowAny)).toBe(false);
   });
 
   test("the effective list is the defaults minus the removed ones, plus the admin's entries", () => {
@@ -435,5 +471,73 @@ describe("MCP client allowlist (ADR-0097 decision 13)", () => {
       const cimdUrl = "https://claude-code.example.com/client-metadata.json";
       expect(isMcpRedirectUriAllowed(cimdUrl, allowlist, false)).toBe(false);
     });
+  });
+});
+
+describe("MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS (the curated defaults, shared with the web)", () => {
+  const ids = MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS.map((entry) => entry.id);
+
+  test("every default parses, with its display metadata, and ids are unique", () => {
+    for (const entry of MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS) {
+      expect(McpClientAllowlistDefaultSchema.parse(entry)).toEqual(entry);
+    }
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test("ids are stable — renaming one would resurrect a default an admin removed", () => {
+    expect(ids).toEqual([
+      "claude-code-cimd",
+      "loopback-localhost-callback",
+      "loopback-127-callback",
+      "claude-ai",
+      "claude-com",
+      "chatgpt",
+      "opencode",
+      "gemini-cli",
+      "cursor",
+      "vscode-web",
+      "vscode-insiders-web",
+      "vscode-loopback-127",
+      "vscode-loopback-localhost",
+    ]);
+  });
+
+  test("the defaults admit Claude Code, Codex and OpenCode out of the box", () => {
+    for (const uri of [
+      "http://localhost:43123/callback", // Claude Code, OpenAI Codex
+      "http://127.0.0.1:51000/mcp/oauth/callback", // OpenCode
+    ]) {
+      expect(isMcpRedirectUriAllowed(uri, MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS, false)).toBe(true);
+    }
+  });
+
+  test("identifiers taken only from vendor docs are marked so", () => {
+    const byId = new Map(MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS.map((entry) => [entry.id, entry]));
+    expect(byId.get("opencode")?.verification).toBe("verified");
+    expect(byId.get("chatgpt")?.verification).toBe("vendor-docs");
+    expect(byId.get("cursor")?.verification).toBe("vendor-docs");
+  });
+
+  test("the list and its entries are frozen", () => {
+    expect(Object.isFrozen(MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS)).toBe(true);
+    expect(Object.isFrozen(MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS[0])).toBe(true);
+    expect(Object.isFrozen(MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS[0]!.match)).toBe(true);
+  });
+
+  test("the plain entry schema strips the display metadata (what the server matches on)", () => {
+    const entry = McpClientAllowlistEntrySchema.parse(MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS[0]);
+    expect(Object.keys(entry).sort()).toEqual(["id", "label", "match"]);
+  });
+});
+
+describe("AI_SETTINGS_ERROR_CODES", () => {
+  test("codes are unique and the refusal body keeps code open on read", () => {
+    expect(new Set(AI_SETTINGS_ERROR_CODES).size).toBe(AI_SETTINGS_ERROR_CODES.length);
+    expect(
+      AiSettingsErrorSchema.parse({ statusCode: 409, error: "Conflict", code: "SOMETHING_NEWER", message: "m" }),
+    ).toMatchObject({ code: "SOMETHING_NEWER" });
+    expect(
+      AiSettingsErrorSchema.parse({ code: "API_KEY_REQUIRED", message: "m", reason: "DESTINATION_CHANGED" }),
+    ).toMatchObject({ reason: "DESTINATION_CHANGED" });
   });
 });

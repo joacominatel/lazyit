@@ -336,7 +336,7 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 | T-26 | AS | S | Open redirect or code interception: loose redirect matching, missing PKCE, PKCE downgrade. | Exact match; PKCE S256 mandatory; `plain` rejected; downgrade blocked; `iss` in responses | v1 |
 | T-27 | AS | S | Consent phishing: a lookalike client ("Claude") through CIMD or DCR, or localhost-redirect impersonation. | Hostname display; "verified domain" vs "self-declared" badge; warnings; consent always shown; step-up for the `admin` scope; an admin-configurable client allowlist, pre-seeded (§11 Q-7, resolved) | v1 |
 | T-28 | AS | I, D | SSRF through a CIMD `client_id` fetch. | Egress guard with HTTPS only, **no** private allowlist, size and time caps, caching | v1 |
-| T-29 | AS | S | Refresh-token theft or replay; a persistent grant outlives the user's intent. | Rotation with reuse detection (revoke the grant); `sessionEpoch` binding; revocation UI. No absolute cap in v1 (reconciled, [[ai-assistant/_synthesis|synthesis]] §8) | v1 |
+| T-29 | AS | S | Refresh-token theft or replay; a persistent grant outlives the user's intent. | Rotation with reuse detection (revoke the grant); `mcpCredentialEpoch` binding (ADR-0097 d8, amended 2026-09-24); revocation UI. No absolute cap in v1 (reconciled, [[ai-assistant/_synthesis|synthesis]] §8) | v1 |
 | T-30 | AS | S, T | Issuer or metadata poisoning through a `Host`-derived origin (`AUTH_TRUST_HOST`) [R]. | Issuer is pinned configuration; the authorization server is disabled without a pinned HTTPS origin | v1 |
 | T-31 | AS | I | OAuth over plain HTTP (`lan` mode) [R] conflicts with "MUST HTTPS" [E]. | Decided: OAuth only on HTTPS; personal MCP tokens on `lan` (§11 E2) | v1 |
 | T-32 | AS | S | Consent or login CSRF; a cookie-authenticated endpoint on the API while CORS reflects any origin [R]. | Consent lives on the web origin with a CSRF token and `SameSite`; no cookie-authenticated API endpoint | v1 |
@@ -380,9 +380,9 @@ the **exfiltration leg** and the **consequential-action leg**.
 | Channel | Zero-click? | v1 posture [C] |
 | --- | --- | --- |
 | The LLM provider itself | yes | Inherent and disclosed (§6.4). It becomes attacker-controlled only if the base URL is; hence INV-AI-6's destination binding and T-38. |
-| Markdown image in chat | yes | **Closed** by reusing `MarkdownView`, which drops external images [R]. No new renderer. |
-| Link in chat | one click | External destination shown in full and not auto-linked, or behind an interstitial. |
-| Mermaid in chat | no | `securityLevel: 'strict'` [R]; keep it. |
+| Markdown image in chat | yes | **Closed** — as built (W3-7), the chat renders through its own sanitize-first renderer `apps/web/components/ai/ai-markdown.tsx` (the `MarkdownView` pipeline order, no KB passes): every image renders as its alt text and nothing is fetched. |
+| Link in chat | one click | As built (W3-7): bare URLs are never auto-linked; an explicit external link opens in a new tab (`noopener noreferrer nofollow`, no referrer) with its **full destination URL** shown beside the text; any scheme but http(s) and in-app paths is plain text. |
+| Mermaid in chat | no | As built (W3-7): not rendered in the chat at all — a mermaid fence is shown as code. |
 | Writes that change visibility (KB public folder, notes, `Application.url`) | no; others read later | Preview shows the full content plus the destination's visibility; SEC-051 fixed first. |
 | Identity or credential changes (email, reset link, SA token mint) | no | T3 elevated confirmation; one-time credentials never enter context (INV-AI-5). |
 | Workflow `WEBHOOK_OUT` / `REST` to configured URLs [R] | no | Authoring definitions and connections is T4 elevated, **chat only**, with the `OUTBOUND_INTEGRATION` warning; secrets and the egress allowlist are never tools. Retry/replay is T2. See §6.9. |
@@ -480,6 +480,15 @@ the **exfiltration leg** and the **consequential-action leg**.
     redirect scheme (`cursor://`, `vscode://`, reverse-domain) is accepted **only on an explicit
     allowlist entry**, never through the "allow any HTTPS client" toggle; browser-interpreted schemes
     (the SEC-051 list) and plain `http` off loopback are always refused (CEO, 2026-09-23).
+  - **Any HTTPS client is admitted by default** (CEO, 2026-09-24: "Sí, cualquier HTTPS"):
+    `mcpAllowAnyHttpsClient` defaults to on, both for an absent settings row and as the column default;
+    an existing row keeps its stored value. **Residual risk:** a wider consent-phishing surface — any
+    party can register a client with an HTTPS redirect it controls and send a user a link to the consent
+    page. Mitigations: consent is mandatory and never remembered and shows the redirect **host**; a DCR
+    client is labelled "self-declared, unverified" and never auto-approved; `lazyit.admin` is never
+    preselected and needs a password step-up; a new connection notifies the user (below). An admin who
+    wants the curated list only switches the toggle off. Loopback and private-use redirects still need an
+    explicit entry.
   - CIMD fetches go through `guardedFetch`: HTTPS only, no internal allowlist, small size cap,
     short timeout, cached.
 - **Authorize and consent.**
@@ -504,15 +513,19 @@ the **exfiltration leg** and the **consequential-action leg**.
     `lzit_ort_…`, `lzit_pat_…` — reconciled with the MCP note; the prefixes also let secret scanners
     detect them), are SHA-256 hashed at rest,
     compared in constant time, and looked up DB-first. Each token row stores the audience (the
-    canonical `/mcp` URI), client, scopes, user and the user's `sessionEpoch` at issuance.
+    canonical `/mcp` URI), client, scopes, user and the user's `mcpCredentialEpoch` at issuance (its grant row; the `sessionEpoch`
+    snapshot is kept as information only).
   - Access tokens live 1 hour. This note recommended ≤ 15 minutes; the reconciled value relies on the
     DB-first check of every request, which already makes revocation immediate (synthesis §8).
   - Refresh tokens rotate on every use. **Reusing a rotated refresh token revokes the whole grant.**
     Refresh tokens live 30 days from their last use; there is no absolute cap in v1 (reconciled —
     this note recommended an absolute 30 days).
-  - Revocation happens on: a `sessionEpoch` bump (logout-everywhere, password change,
-    deactivation), offboarding, a user revoking a client from their profile, or an admin revoking any
-    user's clients.
+  - Revocation happens on: an `mcpCredentialEpoch` bump (password change or reset, admin reset or
+    *revoke sessions*, the recovery CLI, deactivation, offboarding), a user revoking a client from their
+    profile, or an admin revoking any user's clients. **A normal web logout does not revoke them**: it
+    bumps only `sessionEpoch` and ends web sessions only (ADR-0097 decision 8, amended 2026-09-24 — CEO:
+    "Separarlos"). The trade-off: signing out of a shared browser does not disconnect the user's agents;
+    a password change or a revoke in `/account/ai` does.
   - `/mcp` accepts `lzit_oat_` access tokens whose audience is the canonical URI, `lzit_pat_` personal
     tokens on `lan` only, and `lzit_sa_` tokens only of a Service Account that holds `ai:connect`
     (R10, fail-closed). The global `JwtAuthGuard` rejects OAuth and personal tokens on every other route,
@@ -715,26 +728,27 @@ non-critical application needs no password. The MCP/headless refusal on critical
 each tool detecting `isCritical` and calling `assertChannelAllows` in `run`; the G2 review checks every
 write tool that can reach an application does. When ADR-0055's internal allowlist ships, its entries must
 be an excluded or elevated AI operation. Found while building W2-14 (a route-level gap, not an AI one):
-CSEC-1 guards only `secretId`, so a `workflow:manage`-only principal can re-point a connection whose
-`defaultHeaders` hold a pasted token (the field is documented "never a credential" but not validated) and
-the headers follow to the new host. The AI card names those headers on a re-point and the tool requires
-`workflow:secrets` for it; the route fix is a sentinel follow-up.
+CSEC-1 guarded only `secretId`, so a `workflow:manage`-only principal could re-point a connection whose
+`defaultHeaders` hold a pasted token. Closed by SEC-075: the route now requires `workflow:secrets` for
+that re-point and for any header-value change, and returns header values as `[redacted]` (the AI's
+`keptHeaders` round-trip sends the sentinel back, which keeps the stored values).
 
 Open items recorded by the G2 review of #1354 (W2-14):
 - **Userinfo in URLs.** The AI refuses `https://user:pass@host` in any connection it creates or
-  re-points and in any destination a card describes; the shared `publicHttpsUrl` schema and the route
-  still accept it (follow-up: refuse it there too, write-only, tolerant on read).
-- **Enable race.** An approval re-runs the preview (STALE / `PREVIEW_CHANGED`), but a version authored
-  in the UI between that check and the route's write is not detected: closing it needs the route to
-  take an expected version (the §9 TOCTOU follow-up).
+  re-points and in any destination a card describes. Closed at the route by SEC-076: create/patch refuse
+  it (write-only; a legacy row still reads masked, keeps running, and is flagged `legacyUserinfo`).
+- **Enable race.** An approval re-runs the preview (STALE / `PREVIEW_CHANGED`). Closed at the route by
+  SEC-077: `workflow_set_enabled` sends `expectedVersion` and `workflow_author_version` sends
+  `baseVersion` (the version read at run time), and the route 409s under a row lock if another version
+  landed in between.
 - **Literal credentials in templates.** A step path or mapping value may carry a pasted literal
   credential; the card shows mapping templates as written and masks only query values. The engine has
   no way to tell a literal token from ordinary text.
 - **Credential labels.** The card names an attached credential by id only: its label lives behind
   `/workflow-secrets`, a structural exclusion (INV-AI-14), so no guarded read may be bound for it.
-- **Offboarded sample grantees.** The dry-run route resolves a grant's grantee even when offboarded;
-  the enable card is refused in that case (the tool reads the grantee through `GET /users/:id`; without
-  `user:read` it cannot check and shows the card). The route itself is unchanged (follow-up).
+- **Offboarded sample grantees.** Closed at the route by SEC-078: the dry-run refuses (400) a sample
+  grant whose grantee is offboarded or that is revoked, so the card is refused even when the caller
+  lacks `user:read` (the tool's own `GET /users/:id` check stays as a second layer).
 
 **Proposed invariants** (join §7 on the W4-2 security re-review):
 - **INV-AI-15 — No unattended outbound integration.** A workflow, a workflow version or a workflow
@@ -775,7 +789,8 @@ Open items recorded by the G2 review of #1354 (W2-14):
   - Opaque, hashed at rest, expiring, and bound to the canonical `/mcp` resource.
   - Not accepted anywhere else. `/mcp` accepts nothing else, except personal tokens on `lan` and the
     tokens of Service Accounts that hold `ai:connect` (R10).
-  - Rotating refresh tokens with reuse detection, revoked by a `sessionEpoch` bump or offboarding.
+  - Rotating refresh tokens with reuse detection, revoked by an `mcpCredentialEpoch` bump (never by a
+    plain web logout) or offboarding.
   - PKCE S256, exact redirect match, pinned issuer; the authorization server runs over HTTPS only.
 - **INV-AI-10 — Every AI-initiated mutation is permanently audited.** Append-only, protected against
   UPDATE and DELETE, attributed human XOR SA (INV-SA-4) with channel and approval provenance.
@@ -867,8 +882,9 @@ Tests are behaviour-focused, under Jest (api) and `bun test` (web/shared), per
 16. Redirect-URI exact match, including trailing slash, case and extra query. No redirect on an
     invalid client. PKCE S256 required, `plain` rejected, PKCE downgrade (a verifier with no
     challenge) rejected. `iss` present.
-17. A refresh token reused after rotation revokes the family. A `sessionEpoch` bump or offboarding
-    invalidates access and refresh tokens.
+17. A refresh token reused after rotation revokes the family. An `mcpCredentialEpoch` bump or
+    offboarding invalidates access and refresh tokens; a web logout (a `sessionEpoch` bump alone) does
+    not.
 18. `lzit_oat_` and `lzit_pat_` tokens are 401 on every non-MCP route. A local session JWT is 401 at
     `/mcp`; an SA token is 401 at `/mcp` unless the SA holds `ai:connect`; a personal token is 401 on an
     HTTPS instance. A token whose audience is a different resource is 401.
@@ -982,8 +998,8 @@ in [[ai-assistant/_synthesis|the synthesis]] §10 places each gate on its units.
   without a pinned HTTPS origin; personal tokens exist only on `lan`.
 - **Tokens:** opaque, prefixed, hashed and constant-time; audience-bound; rejected on non-MCP routes;
   `/mcp` rejects session tokens and accepts SA tokens only when the SA holds `ai:connect`.
-- **Refresh and revocation:** refresh rotation with grant revocation on reuse; `sessionEpoch` and
-  offboarding revocation.
+- **Refresh and revocation:** refresh rotation with grant revocation on reuse; `mcpCredentialEpoch` and
+  offboarding revocation (not web logout).
 - **Transport:** `Origin` validation on `/mcp`; no token in a query string.
 - **CIMD:** fetched through the egress guard with no private allowlist.
 - **Consent:** the page shows client host, redirect host and localhost warning; the decision is
@@ -993,8 +1009,11 @@ in [[ai-assistant/_synthesis|the synthesis]] §10 places each gate on its units.
   notification.
 
 **G4 — Frontend (chat UI, preview and approval cards, consent page)**
-- Chat output renders only through `MarkdownView`: no `dangerouslySetInnerHTML`, no second markdown
-  pipeline. External images are dropped and external links are not auto-linked (EchoLeak fixtures).
+- Chat output renders only through the chat renderer `apps/web/components/ai/ai-markdown.tsx` (as built,
+  W3-7): `rehype-sanitize` first, no raw HTML, no `dangerouslySetInnerHTML`, no mermaid or KB passes,
+  `<untrusted_content>` wrappers stripped to plain text. Images are never loaded, bare URLs are never
+  auto-linked, and an explicit external link shows its full destination URL (EchoLeak-style fixtures in
+  `ai-markdown.test.tsx`). Tool summaries and preview values are plain React text.
 - Streaming uses `fetch` with headers and never puts a token in a query string.
 - Preview cards render the server's canonical diff, not model text. Elevated cards are distinct, have no
   default focus on Approve, and allow no batch approval.
