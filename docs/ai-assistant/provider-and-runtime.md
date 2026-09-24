@@ -503,6 +503,11 @@ is not an error: it comes back as the step's `finishReason` (`content-filter`) a
   `AiModelListService.listModels(config)` (exported, takes an explicit draft connection) exposes it;
   wiring `POST /config/ai/models` to it is a follow-up for the settings unit, which answers the
   descriptor's `suggestedModel` until then.
+- **Tool calls are returned unvalidated, and may be invalid** (for W2-3). A call can name a tool that is
+  not in the toolset — look the name up with an own-property check, since the model can send
+  `constructor` — and a call whose arguments are not valid JSON arrives with `input` set to the **raw
+  string**. The loop must answer every call, invalid ones included (a follow-up could surface the SDK's
+  `invalid` flag on `ChatModelToolCall`, which is a port change).
 - **Messages.** `responseMessages` is filtered to the assistant message: for a call to an unknown tool
   the SDK synthesizes its own `tool` message, and the loop must answer **every** call of a step (unknown
   and invalid ones included) in the one message `toolResultsMessage` builds, or the provider rejects the
@@ -517,6 +522,11 @@ is not an error: it comes back as the step's `finishReason` (`content-filter`) a
   `authorization` to the paths in `logging/logging.config.ts` (security.md §6.5). Upstream errors that
   echo the key (OpenAI's 401 message does) are dropped by the wrapping — the provider specs assert it
   on the thrown error and on every captured log line.
+- **No egress outside the guard, no telemetry.** `streamText` gets an `experimental_download` that
+  refuses every request (`EGRESS_DENIED`): otherwise the SDK would fetch a message's URL file part
+  itself, with the global `fetch`, when the model cannot take the URL directly (INV-AI-7). It also gets
+  `telemetry: { isEnabled: false }`, so a registered telemetry integration never receives prompts or
+  completions (ADR-0031).
 - **Environment fallbacks.** Every SDK factory gets `apiKey` and `baseURL` explicitly: the SDKs read not
   only `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` but also
   `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` when a value is omitted. A provider that requires a key and has
@@ -533,7 +543,9 @@ is not an error: it comes back as the step's `finishReason` (`content-filter`) a
   trade-off); Gemini answers a bad key with a **400** `API_KEY_INVALID`, matched by `errorPatterns.auth`;
   the compatible provider sends no `effort` (servers differ on `reasoning_effort`) and no `Authorization`
   without a key.
-- **Model listing** is a capped (2 MiB, 500 entries) GET through the guarded fetch; the upstream body is
+- **Model listing** has its own 15 s deadline (`MODEL_LIST_TIMEOUT_MS`, headers and body) instead of the
+  600 s step budget, plus an optional caller signal; a timeout is `PROVIDER_UNAVAILABLE`. It is a capped
+  (2 MiB, 500 entries) GET through the guarded fetch; the upstream body is
   read only to parse or classify, never returned. OpenAI's list drops non-chat ids; Gemini's keeps only
   `generateContent` models.
 
@@ -900,7 +912,11 @@ Invariants [C]:
 As built (W2-1, `providers/provider-fetch.ts`), also: `maxRedirects: 0` (a 3xx is refused, never
 followed); the private-host seam matches the base URL's host **and port**; an `http:` request is resolved
 once, refused unless every address is non-public, and dialed at exactly the addresses checked (no second
-resolution). The model listing and the connection test (a port step) use the same fetch.
+resolution). Every response body is capped at `PROVIDER_RESPONSE_MAX_BYTES` (32 MiB — well over 100k
+streamed output tokens of SSE framing, and 4 × 32 MiB fits the 768 MiB container at worker concurrency 4),
+2xx streams and error bodies alike: past it the body errors (`ProviderResponseTooLargeError`, classified
+`PROVIDER_UNAVAILABLE`) and the upstream is cancelled. The model listing and the connection test (a port
+step) use the same fetch.
 
 Known cost: no connection keep-alive per step (each step is a new TLS handshake) — acceptable.
 
