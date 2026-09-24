@@ -53,7 +53,8 @@
     "hint": "Escribí / para ver los comandos. No pegues contraseñas ni secretos. Cada cambio necesita tu aprobación.",
     "busyApproval": "Aprobá o rechazá el cambio pendiente para continuar.",
     "readOnlyTitle": "Este chat es de solo lectura",
-    "readOnlyBody": "Se inició con una configuración de IA anterior o se volvió demasiado largo. Empezá un nuevo chat para continuar."
+    "readOnlyBody": "Se inició con una configuración de IA anterior o se volvió demasiado largo. Empezá un nuevo chat para continuar.",
+    "hintAuto": "Escribí / para ver los comandos. No pegues contraseñas ni secretos. La aprobación automática está activada: los cambios básicos se aplican sin preguntar."
   },
   "context": {
     "label": "Sobre: {page}",
@@ -173,6 +174,10 @@
       "forbidden": "Ya no tenés permiso para hacer este cambio.",
       "notFound": "Esta propuesta ya no existe.",
       "unknown": "No se pudo enviar la decisión. Probá de nuevo."
+    },
+    "auto": {
+      "title": "Aplicado automáticamente",
+      "note": "La aprobación automática está activada en este chat. El cambio queda registrado como cualquier otro, a tu nombre."
     }
   },
   "effects": {
@@ -268,7 +273,15 @@
       "slash": "/ al principio del mensaje — comandos",
       "close": "Esc — cerrar el asistente"
     },
-    "helpManual": "Leer la página del Manual"
+    "helpManual": "Leer la página del Manual",
+    "model": {
+      "label": "Elegir el modelo",
+      "description": "Abre el selector de modelo, o lo fija: /model <id>. Solo antes del primer mensaje."
+    },
+    "auto": {
+      "label": "Aprobación automática",
+      "description": "Activa o desactiva la aprobación automática en este chat: /auto on, /auto off."
+    }
   },
   "toolNames": {
     "lazyit_search": "Búsqueda en lazyit",
@@ -435,5 +448,75 @@
   "fieldPrefixes": {
     "input": "Entrada: {name}",
     "specs": "Atributo: {name}"
+  },
+  "settings": {
+    "title": "Ajustes del chat",
+    "open": "Ajustes del chat — modelo: {model}",
+    "model": {
+      "label": "Modelo",
+      "default": "Modelo predeterminado",
+      "defaultShort": "predeterminado",
+      "search": "Buscá o escribí el id de un modelo",
+      "listed": "Modelos disponibles",
+      "customHeading": "Modelo personalizado",
+      "useCustom": "Usar “{id}”",
+      "invalid": "No es un id de modelo válido. Usá solo letras, números y . _ - : / @.",
+      "hint": "Elegí uno, o escribí el id de un modelo que sirva tu proveedor.",
+      "loading": "Cargando los modelos del proveedor…",
+      "unavailable": "La lista de modelos no está disponible ahora. Igual podés escribir el id de un modelo.",
+      "notListed": "El proveedor no devolvió sus modelos. Escribí el id de un modelo o dejá el predeterminado.",
+      "locked": "El modelo queda fijo una vez que el chat empezó. Iniciá un chat nuevo para usar otro.",
+      "lockedTitle": "Ajustes del chat — el modelo está fijo en este chat",
+      "set": "Modelo cambiado a {model}."
+    },
+    "effort": {
+      "label": "Esfuerzo de razonamiento",
+      "default": "Predeterminado",
+      "defaultIs": "Predeterminado ({level})",
+      "low": "Bajo",
+      "medium": "Medio",
+      "high": "Alto",
+      "description": "Más esfuerzo piensa más antes de responder y usa más tokens."
+    },
+    "temperature": {
+      "label": "Temperatura",
+      "placeholder": "Predeterminada",
+      "description": "De 0 a 2. Más baja es más predecible. Vacía usa la predeterminada.",
+      "invalid": "Ingresá un número de 0 a 2, o dejalo vacío."
+    },
+    "auto": {
+      "label": "Aprobar automáticamente los cambios básicos",
+      "description": "Las ediciones básicas se aplican sin tarjeta. Todo lo crítico sigue pidiendo tu aprobación.",
+      "badge": "Auto",
+      "badgeTitle": "Aprobación automática activada: los cambios básicos se aplican sin preguntar",
+      "turnedOn": "La aprobación automática está activada en este chat.",
+      "turnedOff": "La aprobación automática está desactivada. Cada cambio vuelve a pedir tu aprobación.",
+      "alreadyOn": "La aprobación automática ya está activada.",
+      "alreadyOff": "La aprobación automática ya está desactivada."
+    },
+    "consent": {
+      "title": "¿Activar la aprobación automática en este chat?",
+      "intro": "El asistente va a hacer cambios básicos sin mostrarte antes una tarjeta.",
+      "points": {
+        "basic": "Las ediciones básicas — crear o actualizar activos, artículos, consumibles y similares — se aplican en el momento, con tu cuenta y tus permisos.",
+        "critical": "Todo lo crítico sigue preguntando: roles, identidad e inicio de sesión, accesos, credenciales, aplicaciones marcadas como críticas y otros cambios sensibles.",
+        "othersContent": "Un cambio propuesto después de que el asistente leyó contenido escrito por otras personas también sigue preguntando.",
+        "logged": "Cada cambio queda registrado, a tu nombre, como aplicado automáticamente.",
+        "off": "Queda activada solo en este chat. Desactivala cuando quieras con el interruptor o con /auto off."
+      },
+      "manual": "Cómo funciona la aprobación automática",
+      "cancel": "Cancelar",
+      "confirm": "Activar"
+    },
+    "errors": {
+      "locked": "El modelo no puede cambiar una vez que el chat empezó. Iniciá un chat nuevo para usar otro.",
+      "readOnly": "Este chat es de solo lectura, así que sus ajustes no pueden cambiar.",
+      "aiDisabled": "Se desactivó el asistente de IA.",
+      "effortUnsupported": "Este proveedor de IA no admite un esfuerzo de razonamiento.",
+      "optionsUnsupported": "Este proveedor de IA no admite esa opción.",
+      "invalidModel": "Ese id de modelo no es válido.",
+      "notFound": "Este chat ya no existe.",
+      "generic": "No se pudieron guardar los ajustes del chat. Probá de nuevo."
+    }
   }
 }
