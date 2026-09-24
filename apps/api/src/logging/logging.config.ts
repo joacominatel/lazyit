@@ -10,6 +10,16 @@ const REQUEST_ID_HEADER = 'x-request-id';
 const RESPONSE_ID_HEADER = 'X-Request-Id';
 const ACTOR_HEADER = 'x-user-id';
 
+/** Request-body fields of the OAuth endpoints that carry a credential, redacted wherever logged. */
+export const OAUTH_BODY_REDACT_PATHS = [
+  'req.body.code',
+  'req.body.code_verifier',
+  'req.body.refresh_token',
+  'req.body.access_token',
+  'req.body.token',
+  'req.body.password',
+] as const;
+
 /** Honor an inbound X-Request-Id (else generate one) and echo it on the response for client-side
  *  correlation. nestjs-pino stamps the returned id on every log line of the request. */
 function resolveRequestId(req: IncomingMessage, res: ServerResponse): string {
@@ -86,6 +96,11 @@ export function buildLoggerParams(
           'req.headers.authorization',
           'req.headers.cookie',
           'req.headers["x-user-id"]',
+          // OAuth credential material (ADR-0097, INV-AI-9). pino-http's request serializer never logs
+          // bodies, so these are defense in depth for any log line that carries `req.body` — the
+          // `/oauth/token` form (code, code_verifier, refresh_token), `/oauth/revoke` (token) and the
+          // consent decision's step-up password.
+          ...OAUTH_BODY_REDACT_PATHS,
         ],
         censor: '[redacted]',
       },
