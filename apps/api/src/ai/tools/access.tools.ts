@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   HttpException,
   NotFoundException,
@@ -15,6 +16,7 @@ import {
 import { AccessGrantsController } from '../../access-grants/access-grants.controller';
 import { AccessRequestsController } from '../../access-requests/access-requests.controller';
 import { ApplicationsController } from '../../applications/applications.controller';
+import { UsersController } from '../../users/users.controller';
 import { WorkflowsController } from '../../workflow-engine/definitions/workflows.controller';
 import { APPLICATION_SORT_ALLOWLIST } from '../../applications/applications.service';
 import {
@@ -106,7 +108,13 @@ async function facet<T>(
   }
 }
 
-const isCuid = (value: string) => z.cuid().safeParse(value).success;
+/**
+ * A Prisma `cuid()` exactly: `c` + 24 lower-case base-36 characters. Deliberately stricter than
+ * `z.cuid()` (`^[cC][^\s-]{8,}$`), which takes names such as "Confluence" or "Crowdstrike" for ids. The
+ * same test runs in the preview and the run, so both resolve a reference the same way (G2 review F3).
+ */
+const STRICT_CUID = /^c[a-z0-9]{24}$/;
+const isCuid = (value: string) => STRICT_CUID.test(value);
 
 /** A person, in the words a preview or a result states: "you" or "user <id>". */
 function who(user: AiResolvedReference): string {
@@ -247,6 +255,56 @@ function resolveUser(
     return { type: 'user', id: identity.userId, label: 'me' };
   }
   return { type: 'user', id: reference };
+}
+
+/** The person a grant names, as the card shows them (G2 review F1, security.md §6.1 chain 1). */
+interface Person {
+  id: string;
+  /** "Ana Ops <ana@example.com>". */
+  display: string;
+  status: 'active' | 'inactive' | 'directory only' | 'missing';
+  usable: boolean;
+}
+
+/**
+ * Read a user through the guarded `GET /users/:id` (`user:read`), for a preview: name, email and status.
+ * A 404 is a `missing` person; any other refusal (a caller without `user:read`) propagates, so an
+ * elevated card is never shown without naming who it is for.
+ */
+async function readPerson(rt: AiToolRuntime, id: string): Promise<Person> {
+  let row: Row;
+  try {
+    row = asRow(await rt.call(UsersController, 'findOne', { params: { id } }));
+  } catch (err) {
+    if (httpStatus(err) !== 404) throw err;
+    return { id, display: `user ${id}`, status: 'missing', usable: false };
+  }
+  const name = [str(row.firstName), str(row.lastName)]
+    .filter((part): part is string => !!part)
+    .join(' ');
+  const email = str(row.email);
+  const display =
+    [name || null, email ? `<${email}>` : null].filter(Boolean).join(' ') ||
+    `user ${id}`;
+  const status =
+    row.directoryOnly === true
+      ? 'directory only'
+      : row.isActive === false
+        ? 'inactive'
+        : 'active';
+  return { id, display, status, usable: status === 'active' };
+}
+
+/** Refuse, at propose, to put access in front of a person who cannot use it (G2 review F1). */
+function assertUsable(person: Person): void {
+  if (person.status === 'missing') {
+    throw new NotFoundException(`User ${person.id} not found`);
+  }
+  if (!person.usable) {
+    throw new BadRequestException(
+      `${person.display} is ${person.status}: access can only be granted to an active user`,
+    );
+  }
 }
 
 /**
@@ -762,6 +820,7 @@ const accessGrantCreate = defineTool({
     bind(ApplicationsController, 'findAll'),
     bind(AccessGrantsController, 'findAll'),
     bind(WorkflowsController, 'findAll'),
+    bind(UsersController, 'findOne'),
   ],
   async run(input, rt) {
     const user = resolveUser(rt, input.user);
@@ -798,6 +857,8 @@ const accessGrantCreate = defineTool({
   },
   async preview(input, rt): Promise<AiToolPreview> {
     const user = resolveUser(rt, input.user);
+    const grantee = await readPerson(rt, user.id);
+    assertUsable(grantee);
     const resolved = await resolveApplication(rt, input.application);
     const app = await readApplication(rt, resolved.id);
     const target = applicationEntity(app, 'updated');
@@ -833,14 +894,16 @@ const accessGrantCreate = defineTool({
         field: 'action',
         after:
           (self ? 'You are granting access to yourself. ' : '') +
-          `Give ${self ? 'yourself' : who(user)} ${accessPhrase(input.accessLevel)} to ${appName}${until}. ` +
+          `Give ${self ? 'yourself' : grantee.display} ${accessPhrase(input.accessLevel)} to ${appName}${until}. ` +
           outlook.sentence,
       },
       {
         field: 'user',
-        after: user.label === 'me' ? `${user.id} (you)` : user.id,
+        after: self ? `${grantee.display} (you)` : grantee.display,
         valueKind: 'entity',
       },
+      { field: 'userStatus', after: grantee.status },
+      { field: 'userId', after: user.id },
       {
         field: 'application',
         after: str(app.name) ?? resolved.id,
@@ -877,7 +940,7 @@ const accessGrantCreate = defineTool({
         {
           type: 'user',
           count: 1,
-          sample: [entityRefOf(user, 'updated')],
+          sample: [{ ...entityRefOf(user, 'updated'), label: grantee.display }],
         },
       ],
       untrustedSources: [],
@@ -917,6 +980,7 @@ const accessGrantRevoke = defineTool({
     bind(ApplicationsController, 'findOne'),
     bind(AccessGrantsController, 'findAll'),
     bind(WorkflowsController, 'findAll'),
+    bind(UsersController, 'findOne'),
   ],
   async run(input, rt) {
     const grant = asRow(
@@ -971,6 +1035,14 @@ const accessGrantRevoke = defineTool({
       parent: { type: 'application', id: applicationId },
     };
     const name = appName ?? `application ${applicationId}`;
+    // Who loses access, by name when the caller may read the directory (a revoke never needs it to run).
+    const person = await facet(() => readPerson(rt, String(grant.userId)));
+    const loser =
+      whoId(rt, grant.userId) === 'you'
+        ? 'you'
+        : 'display' in person
+          ? person.display
+          : `user ${String(grant.userId)}`;
     // The user's active grants on the application, this one included (403 → unknown).
     const active = await facet(async () =>
       asRow(
@@ -998,10 +1070,14 @@ const accessGrantRevoke = defineTool({
       {
         field: 'action',
         after:
-          `Remove ${whoId(rt, grant.userId)}'s ${accessPhrase(grant.accessLevel)} to ${name}. ` +
+          `Remove ${loser === 'you' ? 'your' : `${loser}'s`} ${accessPhrase(grant.accessLevel)} to ${name}. ` +
           outlook.sentence,
       },
-      { field: 'user', after: String(grant.userId), valueKind: 'entity' },
+      { field: 'user', after: loser, valueKind: 'entity' },
+      ...('status' in person
+        ? [{ field: 'userStatus', after: person.status }]
+        : []),
+      { field: 'userId', after: String(grant.userId) },
       {
         field: 'application',
         after: appName ?? applicationId,
@@ -1011,8 +1087,15 @@ const accessGrantRevoke = defineTool({
       { field: 'isCritical', after: critical, valueKind: 'boolean' },
       { field: 'status', before: 'active', after: 'revoked' },
     ];
+    // The revoke REPLACES the grant's notes: show what is lost (other-authored → untrusted; G2 review F7).
+    const replacesNotes =
+      input.notes !== undefined && str(grant.notes) !== null;
     if (input.notes !== undefined) {
-      changes.push({ field: 'notes', after: input.notes });
+      changes.push({
+        field: 'notes',
+        before: untrusted(str(grant.notes)),
+        after: input.notes,
+      });
     }
     if (outlook.workflows.length > 0) {
       changes.push({ field: 'workflow', after: outlook.workflows.join(', ') });
@@ -1028,7 +1111,9 @@ const accessGrantRevoke = defineTool({
           sample: [{ type: 'user', id: String(grant.userId), op: 'updated' }],
         },
       ],
-      untrustedSources: [],
+      untrustedSources: replacesNotes
+        ? [{ type: 'accessGrant', id: input.grantId, op: 'updated' }]
+        : [],
       elevated: false,
       stepUpRequired: false,
       precondition: { entity: target, updatedAt: iso(grant.updatedAt)! },
@@ -1246,6 +1331,7 @@ const accessRequestDecide = defineTool({
     bind(AccessRequestsController, 'findAll'),
     bind(ApplicationsController, 'findOne'),
     bind(WorkflowsController, 'findAll'),
+    bind(UsersController, 'findOne'),
   ],
   async run(input, rt) {
     const params = { id: input.requestId };
@@ -1297,16 +1383,20 @@ const accessRequestDecide = defineTool({
       // An archived application: the approval itself will be refused by the route (400).
       if (httpStatus(err) !== 404) throw err;
     }
+    const approve = input.decision === 'approve';
+    const person = await readPerson(rt, String(request.requesterId));
+    // Approving grants access: the requester must still be an active user. Denying stays possible.
+    if (approve) assertUsable(person);
     const target: AiEntityRef = {
       type: 'accessRequest',
       id: input.requestId,
       op: 'updated',
-      label: `${appName ?? applicationId} — ${String(request.requesterId)}`,
+      label: `${appName ?? applicationId} — ${person.display}`,
       parent: { type: 'application', id: applicationId },
     };
-    const approve = input.decision === 'approve';
     const name = appName ?? `application ${applicationId}`;
-    const requester = whoId(rt, request.requesterId);
+    const requester =
+      whoId(rt, request.requesterId) === 'you' ? 'you' : person.display;
     // Nothing stops an approver deciding their own request (route behaviour, ADR-0085); say it plainly.
     const own =
       requester === 'you' ? 'You are deciding your own request. ' : '';
@@ -1325,9 +1415,11 @@ const accessRequestDecide = defineTool({
       },
       {
         field: 'requester',
-        after: String(request.requesterId),
+        after: requester === 'you' ? `${person.display} (you)` : person.display,
         valueKind: 'entity',
       },
+      { field: 'requesterStatus', after: person.status },
+      { field: 'requesterId', after: String(request.requesterId) },
       {
         field: 'application',
         after: appName ?? applicationId,
@@ -1367,12 +1459,16 @@ const accessRequestDecide = defineTool({
                   type: 'user',
                   id: String(request.requesterId),
                   op: 'updated',
+                  label: person.display,
                 },
               ],
             },
           ]
         : [],
-      untrustedSources: [],
+      // The card shows the requester's own justification: other-authored text (G2 review F2).
+      untrustedSources: [
+        { type: 'accessRequest', id: input.requestId, op: 'updated' },
+      ],
       elevated: true,
       stepUpRequired: false,
       // A pending request never changes until it is decided (no `updatedAt`; `createdAt` is its version).

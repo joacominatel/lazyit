@@ -16,7 +16,6 @@ export const usersToolset: AiToolset = {
         'findAll',
         'roleCounts',
         'passwordResetCapabilities',
-        'findOne',
         'findAssignments',
         'findAccessGrants',
         'create',
@@ -29,6 +28,8 @@ export const usersToolset: AiToolset = {
       ],
       'Pending: the users toolset (W2-9) binds or excludes it.',
     ),
+    // `findOne` is bound by the access toolset (W2-6) as a preview facet: a grant or approval card names
+    // the grantee (name, email, status). Coordinator-authorized cross-unit edit (G2 review of #1345, F1).
     unexposed(
       UsersController,
       ['resetPassword', 'provisionLocalAccount'],
