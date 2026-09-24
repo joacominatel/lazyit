@@ -992,14 +992,20 @@ answers.
 2. Transport: with a pinned `WEB_ORIGIN`, `Host` must name its host (DNS rebinding); a present `Origin`
    must name the pinned host — on `lan`, the request's own `Host` — port-agnostic, and the `null` origin
    is refused (SDK `validateOriginHeader` / `validateHostHeader`) → **403**. `access_token` or `token` in
-   the query string → **400**.
+   the query string → **400**, and the credential is treated as **compromised** before anything else is
+   checked (G3 review F1, `McpExposedTokenService`): an OAuth access or refresh token or a personal token
+   has its whole grant revoked on sight (`revokeReason: "token_exposed"`, audited `GRANT_REVOKED` /
+   `PERSONAL_TOKEN_REVOKED`), even while MCP is off; a Service Account token raises a warning event
+   `mcp.token_in_query` naming the account (never the secret) so an admin rotates it. The request log
+   never holds it: `logging.config.ts` redacts `req.query.access_token` / `token` and scrubs both from the
+   logged URL.
 3. The bearer, by prefix only (`Authorization: Bearer`, scheme case-insensitive):
 
 | Token | Accepted when | Verified by | Ceiling |
 | --- | --- | --- | --- |
 | `lzit_oat_` | the instance has an HTTPS issuer (`OAuthPolicyService.config()`) | `OAuthTokenService.verifyAccessToken` | the grant's scopes |
 | `lzit_pat_` | the instance does **not** (`resolveMcpAuthMode() !== 'oauth'`, not shim) | `PersonalTokensService.verify` | the token's scopes |
-| `lzit_sa_` | always (R10) | `ServiceAccountAuthenticator` (the SEC-073 strip applies), then `ai:connect` held, **no** `infra:report` (default 16), per-SA AI access not `off` | `read-only` → read; otherwise read + write + elevated |
+| `lzit_sa_` | always (R10) | `ServiceAccountAuthenticator` (the SEC-073 strip applies), then `ai:connect` held, **no** `infra:report` (default 16), per-SA AI access not `off` | `read-only` → read; otherwise read + write + elevated; `maxMutationsPerRun` → writes per rolling hour (below) |
 | anything else (session JWT, IdP token, `lzit_ort_`, …) | never | — | — |
 
 4. Answers. No token → **401** `Bearer resource_metadata="{issuer}/.well-known/oauth-protected-resource/mcp",
@@ -1042,11 +1048,22 @@ action succeeded and must not be repeated.
 grant or the SA): 600 authenticated HTTP requests → HTTP 429; 300 `tools/call` and, of those, 60 writes
 → `isError` `RATE_LIMITED`; 30 refused authentications per IP → HTTP 429.
 
+**The per-SA write cap over MCP** (CTO decision, G3 review F2). A Service Account's
+`maxMutationsPerRun` (Settings → AI, per SA) must hold on `/mcp` too, but MCP has no runs: there it caps
+the writes (`write` and `elevated` calls) the SA attempts through `/mcp` in any **rolling hour**, counted
+from the permanent `ai_tool_invocations` rows (`channel = MCP`), so it holds across replicas and
+restarts. Past it a write answers `isError` `RATE_LIMITED`; a count that fails refuses the write (fail
+closed). Soft under concurrency: calls racing past the count can overshoot by the number in flight (the
+runtime's budget posture).
+
 **First-use notice** (`mcp-connection-notice.service.ts`, the §12 follow-up 1; security §6.3; G3
 "Abuse"). The first authenticated `/mcp` request through an OAuth grant or a personal token emits the
 targeted notification `mcp.client_connected` to the account's owner — bell, and email when SMTP is
 configured (it is on the emailable allowlist). `dedupeKey` `mcp.client_connected:<grantId>` makes it
-once per connection across replicas and restarts; a per-process memo spares the insert. A grant older
+once per connection across replicas and restarts; a per-process memo spares the lookups and is set only
+once the notice exists (G3 review F5), so a failed send is retried on the next request. The email copy
+follows the owner's per-type email opt-out: the allowlist has no mandatory types (accepted; the bell copy
+always lands). A grant older
 than the bell's 90-day retention is not announced (its notice, if any, was sent). Service Accounts
 have no bell. **Choice:** the notice fires at first use rather than at consent or at token creation:
 the grant is created by W2-4's code exchange, and first use is when an agent really acts — a personal
@@ -1061,7 +1078,7 @@ ledger, never retried. Not started under `NODE_ENV=test`.
 
 | Route | Answers |
 | --- | --- |
-| `POST /oauth/personal-tokens` | `ai:connect`, human only. Body `CreatePersonalTokenSchema`: `label`, `expiresInDays` (default 90, 1–365), `scopes` (optional, `lazyit.read` / `lazyit.write`, default both; **`lazyit.admin` is refused**). 201 `PersonalTokenCreated` — the token once, `Cache-Control: no-store`. 403 `{ code: "OAUTH_INSTANCE" }` on an HTTPS instance; 403 `{ code: "AI_DISABLED" }` while MCP is off or in the shim; 409 past 20 live tokens per user. |
+| `POST /oauth/personal-tokens` | `ai:connect`, human only. Body `CreatePersonalTokenSchema`: `label`, `expiresInDays` (default 90, 1–365), `scopes` (optional, `lazyit.read` / `lazyit.write`, default both; **`lazyit.admin` is refused** — by the schema and again by the service, G3 F7). 201 `PersonalTokenCreated` — the token once, `Cache-Control: no-store`. 403 `{ code: "OAUTH_INSTANCE" }` on an HTTPS instance; 403 `{ code: "AI_DISABLED" }` while MCP is off or in the shim; 409 past 20 live tokens per user — counted and created in one transaction under a per-user `pg_advisory_xact_lock` (G3 F4). |
 | `GET /oauth/personal-tokens` | `ai:connect`: the caller's live personal tokens (not revoked, unexpired, current `sessionEpoch`) as `OAuthGrant` |
 | `DELETE /oauth/personal-tokens/:id` | 204; the caller's own personal token only, 404 otherwise (the admin path is `DELETE /oauth/grants/:id`) |
 
@@ -1086,6 +1103,18 @@ and the users toolset: listing × ceiling × permissions, annotations, results a
 critical-application refusal, the 2025-era leg, the route golden); unit specs for the factory,
 annotations, error mapping, rate limits, the notice and the sweeper; `personal-tokens.*.spec.ts` (the
 lifecycle, expiry bounds, hashing, never logged, the REST guard refusing `lzit_pat_`).
+
+**Accepted in the G3 review of #1358.**
+
+- **F3 — `lan` Origin check vs DNS rebinding.** On `lan` the Origin is compared with the request's own
+  `Host`, which a rebinding attacker controls. Accepted: `/mcp` authenticates only by a bearer token the
+  page cannot read (no cookie, no ambient credential), so a rebound page gains nothing.
+- **F6 — per-connection rate limits and their prune cost.** The limits are per grant or SA, not per user
+  (one user with several connections gets several budgets), and each counter prunes its map on every hit
+  (linear in the live keys). Accepted at the 5–20 person scale.
+- **F9** — accepted as recorded in the review.
+- **Admin revoke of a personal token (F8)** — `DELETE /oauth/grants/:id` already records
+  `PERSONAL_TOKEN_REVOKED` (reason `admin`); now pinned by a test.
 
 **Follow-ups.**
 
