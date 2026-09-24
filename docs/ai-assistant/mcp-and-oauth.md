@@ -495,6 +495,10 @@ opaque tokens are checked DB-first on every request, so revocation is already im
 | Rate limit | `isError: true`, `code: "RATE_LIMITED"`, retry hint |
 | Unexpected 5xx | `isError: true`, `code: "INTERNAL"`, request id ([[0031-logging-strategy]]), no internals |
 
+> **As built (W3-2, §13):** "MCP disabled" answers **404** (§5.1 wins: off means no surface), before any
+> token is read; a withdrawn `ai:connect` answers 403 `access_denied`. A tool outside the scope is not
+> listed, and calling it is refused before any handler — no per-call `scopeChallenge` is emitted.
+
 - **Rate limits**: per grant (indicative 300 calls/min, 60 writes/min); `/oauth/register` per IP (10/h) with a cap
   on unused registrations; `/oauth/token` per IP; the decision endpoint per user. Pattern:
   `SetupRateLimitGuard` / `login-rate-limit.guard.ts`.
@@ -947,8 +951,8 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
 
 **Follow-ups** (from the G3 review of #1339; not fixed in W2-4):
 
-1. **"New client connected" notification** (bell + email, security §6.3, gate G3 "Abuse"): it needs a
-   notification type outside `oauth/**`, and it **must land before W3-2** exposes `/mcp`.
+1. ~~**"New client connected" notification**~~ — **done in W3-2** (§13): the `mcp.client_connected`
+   notification, sent on a connection's first use at `/mcp`.
 2. **`sessionEpoch` at consent:** store the epoch on the code row when the schema next opens, so a
    password change between consent and exchange also kills the grant (today the snapshot is taken at
    exchange, ≤ 60 s later).
@@ -963,3 +967,130 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
 6. **Runbook note:** during an incident, revoke through connected apps (Account → AI connections, or
    the admin list). Turning MCP off only **pauses** grants: they work again when MCP is re-enabled.
 7. Re-verify the ChatGPT, Cursor and VS Code identifiers in the W4-3 client matrix.
+
+---
+
+## 13. As built — the MCP resource server and personal tokens (W3-2, W3-4, #1315)
+
+Code: `apps/api/src/mcp/` (except `distribution/`, W3-5) and `apps/api/src/oauth/personal-tokens/`.
+§5.1, §5.3 and §5.4 hold; this section records the concrete behavior and the choices the build made.
+
+**The route.** `McpController` serves `@All('mcp')` with the SDK v2 `createMcpHandler` (pinned
+`@modelcontextprotocol/server` / `node` 2.1.0) wrapped by `toNodeHandler`, inside Nest: it serves the
+2026-07-28 revision and, statelessly, 2025-era clients (`legacy: 'stateless'`), mints no
+`Mcp-Session-Id`, answers GET/DELETE with 405, and uses `responseMode: 'json'` (no streams through the
+proxy). The controller is `@Public()` towards the global session guards and `@UseGuards(McpAuthGuard)`;
+the handler refuses (401) when the guard's verified caller is missing. `mcp.controller.spec.ts` pins
+both (the §7 checklist rule). A request id from pino reaches the factory for provenance and `INTERNAL`
+answers.
+
+**`McpAuthGuard`, in order.**
+
+1. Shim, or the MCP switch off (`ai_settings.mcpEnabled`, an absent row reads as off) → **404** to
+   everyone, before any token is read. `verifyAccessToken`'s own `403 mcp_disabled` is then reachable
+   only in a race; it answers 403.
+2. Transport: with a pinned `WEB_ORIGIN`, `Host` must name its host (DNS rebinding); a present `Origin`
+   must name the pinned host — on `lan`, the request's own `Host` — port-agnostic, and the `null` origin
+   is refused (SDK `validateOriginHeader` / `validateHostHeader`) → **403**. `access_token` or `token` in
+   the query string → **400**.
+3. The bearer, by prefix only (`Authorization: Bearer`, scheme case-insensitive):
+
+| Token | Accepted when | Verified by | Ceiling |
+| --- | --- | --- | --- |
+| `lzit_oat_` | the instance has an HTTPS issuer (`OAuthPolicyService.config()`) | `OAuthTokenService.verifyAccessToken` | the grant's scopes |
+| `lzit_pat_` | the instance does **not** (`resolveMcpAuthMode() !== 'oauth'`, not shim) | `PersonalTokensService.verify` | the token's scopes |
+| `lzit_sa_` | always (R10) | `ServiceAccountAuthenticator` (the SEC-073 strip applies), then `ai:connect` held, **no** `infra:report` (default 16), per-SA AI access not `off` | `read-only` → read; otherwise read + write + elevated |
+| anything else (session JWT, IdP token, `lzit_ort_`, …) | never | — | — |
+
+4. Answers. No token → **401** `Bearer resource_metadata="{issuer}/.well-known/oauth-protected-resource/mcp",
+   scope="lazyit.read lazyit.write"` on an HTTPS instance, `Bearer realm="lazyit"` on `lan` (nothing to
+   discover). A refused token → the same challenge plus `error="invalid_token"` and a fixed
+   `error_description` that says which path the instance uses (an OAuth token on `lan`, a personal token
+   on HTTPS). A valid token whose capability is withdrawn (`ai:connect`, the SA's AI access) → **403**
+   `access_denied`, without a challenge. Refused authentications → **429** past 30/min per client IP; the
+   tokenless discovery probe is not counted.
+
+The scope hierarchy (`scopesToCeiling`): any scope implies `read`, `lazyit.write` adds `write`,
+`lazyit.admin` adds `elevated`; `lazyit.admin` alone does not imply `write`. On success the guard sets
+`req.auth` (the SDK `AuthInfo`; it carries the verified caller, never the bearer), `req.mcpCaller`, and
+`req.user` for a human (request-log attribution only).
+
+**`McpServerFactory`, per request.** Listing = `AiToolService.list` on the `MCP` channel with the
+caller's identity (the grant's `sessionEpoch` snapshot), ceiling and grant, minus `navigate`, sorted by
+name; `tools/list` carries `ttlMs: 60000`, `cacheScope: "private"`; `listChanged: false`;
+`instructions` = `buildMcpInstructions()` (the primer). The tool's JSON Schema is advertised through a
+pass-through schema, so the SDK does not validate arguments and the core's zod validation answers
+`INVALID_INPUT` exactly as on the other channels. A call outside the caller's listing never reaches a
+handler (the SDK answers a JSON-RPC error). A call = the rate limits, then `AiToolService.invoke` — core
+re-checks the principal, `ai:connect`, the channel and the ceiling, the route's guards run in the
+dispatch, writes are ledgered. The critical-application refusal comes from the tool
+(`assertChannelAllows`) as `FORBIDDEN`; `user_offboard` exercises it end to end in
+`mcp.controller.spec.ts`. A personal token records `mcpClientId = "personal"` (it has no OAuth client)
+and its grant id in the ledger.
+
+**Annotations** (`annotations.ts`) — every hint explicit: `read` → `readOnlyHint: true`,
+`destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`; `write` → the registry's
+`destructive` / `idempotent` / `externalEffects`; `elevated` → always destructive; the tool `title` too.
+
+**Results** (`error-mapper.ts`) — success → `structuredContent` `{ ok, kind, data, summary?,
+truncated?, mutated, entityRefs }` mirrored as one JSON text block; failure → `isError: true`,
+`structuredContent: { ok: false, error: { code, message, hint?, requestId? } }` (the request id on
+`INTERNAL` only). Past 100,000 serialized characters → `isError` guidance; after a write it says the
+action succeeded and must not be repeated.
+
+**Rate limits** (`mcp-rate-limit.ts`; in memory, per replica, fixed one-minute windows, keyed on the
+grant or the SA): 600 authenticated HTTP requests → HTTP 429; 300 `tools/call` and, of those, 60 writes
+→ `isError` `RATE_LIMITED`; 30 refused authentications per IP → HTTP 429.
+
+**First-use notice** (`mcp-connection-notice.service.ts`, the §12 follow-up 1; security §6.3; G3
+"Abuse"). The first authenticated `/mcp` request through an OAuth grant or a personal token emits the
+targeted notification `mcp.client_connected` to the account's owner — bell, and email when SMTP is
+configured (it is on the emailable allowlist). `dedupeKey` `mcp.client_connected:<grantId>` makes it
+once per connection across replicas and restarts; a per-process memo spares the insert. A grant older
+than the bell's 90-day retention is not announced (its notice, if any, was sent). Service Accounts
+have no bell. **Choice:** the notice fires at first use rather than at consent or at token creation:
+the grant is created by W2-4's code exchange, and first use is when an agent really acts — a personal
+token minted and never used is not announced (its creation is audited, `PERSONAL_TOKEN_CREATED`).
+
+**Interrupted MCP writes** (`mcp-invocation.sweeper.ts`, the W2-0 follow-up): every 5 minutes, MCP
+invocations (`runId` null) still `EXECUTING` 15 minutes after their last update become
+`OUTCOME_UNKNOWN` through `AiToolService.markOutcomeUnknown` — `FAILED` / `UNKNOWN_OUTCOME` in the
+ledger, never retried. Not started under `NODE_ENV=test`.
+
+**Personal tokens (W3-4)** — `PersonalTokensService`, `PersonalTokensController`, inside `OAuthModule`:
+
+| Route | Answers |
+| --- | --- |
+| `POST /oauth/personal-tokens` | `ai:connect`, human only. Body `CreatePersonalTokenSchema`: `label`, `expiresInDays` (default 90, 1–365), `scopes` (optional, `lazyit.read` / `lazyit.write`, default both; **`lazyit.admin` is refused**). 201 `PersonalTokenCreated` — the token once, `Cache-Control: no-store`. 403 `{ code: "OAUTH_INSTANCE" }` on an HTTPS instance; 403 `{ code: "AI_DISABLED" }` while MCP is off or in the shim; 409 past 20 live tokens per user. |
+| `GET /oauth/personal-tokens` | `ai:connect`: the caller's live personal tokens (not revoked, unexpired, current `sessionEpoch`) as `OAuthGrant` |
+| `DELETE /oauth/personal-tokens/:id` | 204; the caller's own personal token only, 404 otherwise (the admin path is `DELETE /oauth/grants/:id`) |
+
+A personal token is a grant (`kind: "personal"`, `label`, `scopes`, `expiresAt`, the user's
+`sessionEpoch`, `resource: "/mcp"`) plus one `oauth_tokens` row (`kind: "personal"`, SHA-256 only, the
+same expiry); `PERSONAL_TOKEN_CREATED` / `PERSONAL_TOKEN_REVOKED` are audited without the secret, and
+revocation goes through `OAuthTokenService.revokeGrant(…, { personal: true })`. `verify` is DB-first on
+every request and refuses exactly what the OAuth check refuses (revoked, expired, epoch bump,
+deactivation, offboarding, directory-only, forced password change → 401; MCP off, `ai:connect`
+withdrawn → 403). List and revoke stay available whatever the mode and the switch. **Choices:**
+the audience is the route (`/mcp`), not a URL built from `Host` (a `lan` instance has no pinned
+origin); an instance that moves from `lan` to HTTPS stops accepting its personal tokens (401 with the
+reason) while they stay listed and revocable until they expire; `lazyit.admin` is not offered on a
+personal token (a year-long credential minted without a client to show) — the `elevated` tools need
+OAuth consent with its step-up. **For the web (W3-8/W3-9):** read `GET /ai/status` `mcp.auth`
+(`"oauth"` | `"personal-token"`) to choose the UI, and show the `code` of a 403 above when minting.
+
+**Tests.** `mcp-auth.guard.spec.ts` (the matrix over the real OAuth and personal-token checks: oat / pat
+/ SA / none, wrong audience, revoked, epoch, expiry, MCP off, shim, `lan` vs HTTPS, Origin/Host, query
+token, failure rate limit, the notice once); `mcp.controller.spec.ts` (end to end over the real core
+and the users toolset: listing × ceiling × permissions, annotations, results and errors, the
+critical-application refusal, the 2025-era leg, the route golden); unit specs for the factory,
+annotations, error mapping, rate limits, the notice and the sweeper; `personal-tokens.*.spec.ts` (the
+lifecycle, expiry bounds, hashing, never logged, the REST guard refusing `lzit_pat_`).
+
+**Follow-ups.**
+
+1. Reads over MCP are not written to `ai_tool_invocations` (the metadata access log remains the channel
+   units' follow-up, tools-and-execution.md §9).
+2. The rate limits are per replica (the OAuth endpoints' posture).
+3. W4-3 validates the matrix with real clients (Claude Code, Cursor, the MCP Inspector, an SDK-v2 client
+   refused on `lan`).
