@@ -153,29 +153,30 @@ Legend:
 
 | Module (controller) | Operations | Permission | Class | AI disposition |
 | --- | --- | --- | --- | --- |
-| assets | list, get, companies, `:id/assignments`, `:id/history` | asset:read | R | v1 `asset_search`, `asset_get` |
-| assets | `GET mine` | self | R | v1 (`asset_search` `mine:true`) |
-| assets | `:id/articles` | article:read | R | v1 facet of `asset_get` |
-| assets | create / update | asset:write | W | v1 |
-| assets | delete / restore | asset:delete | D / W | v1 `asset_archive` / `asset_restore` |
+| assets | list, get, `:id/assignments`, `:id/history` | asset:read | R | v1 `asset_search`, `asset_get` (built, W2-5) |
+| assets | companies (distinct values) | asset:read | R | not exposed (the form's autocomplete; `asset_search` filters by `company`) |
+| assets | `GET mine` | self | R | v1 (`asset_search` `mine:true`; built, W2-5) |
+| assets | `:id/articles` | article:read | R | v1 facet of `asset_get` (built, W2-5) |
+| assets | create / update | asset:write | W | v1 `asset_create` / `asset_update` (built, W2-5) |
+| assets | delete / restore | asset:delete | D / W | v1 `asset_archive` / `asset_restore` (built, W2-5) |
 | assets | batch delete / restore / status | asset:delete | D | v1.1 (blast radius) |
 | assets | batch receive | asset:write | W | v1.1 |
 | assets | export CSV | asset:read | R | EXCL (bulk file; use search) |
-| asset-assignments | list / get | asset:read | R | facet of `asset_get` / `user_get` |
-| asset-assignments | create (check-out) / release (check-in) | asset:write | W | v1 |
+| asset-assignments | list / get | asset:read | R | facet of `asset_get` (through `GET /assets/:id/assignments`) / `user_get`; the `/asset-assignments` reads themselves are not exposed |
+| asset-assignments | create (check-out) / release (check-in) | asset:write | W | v1 `asset_check_out` / `asset_check_in` (built, W2-5) |
 | asset-assignments | notes | asset:write | W | v1.1 |
 | asset-assignments | acknowledge | self (human-only) | W | v1.1 |
 | asset / article attachments | list | asset:read / article:read | R | v1.1 |
 | asset / article attachments | upload, content stream | *:write / *:read | W / R | EXCL (binary, [R19]) |
-| asset-models | list / get | assetModel:read | R | v1 `reference_lookup` |
-| asset-models | create | assetModel:write | W | v1 |
+| asset-models | list / get | assetModel:read | R | v1 `reference_lookup` (built, W2-5) |
+| asset-models | create | assetModel:write | W | v1 `asset_model_create` (built, W2-5) |
 | asset-models | update | assetModel:write | W | v1.1 |
 | asset-models | delete / restore | assetModel:delete | D | v1.1 |
-| asset / application / consumable / article categories | list / get | category:read | R | v1 `reference_lookup` |
+| asset / application / consumable / article categories | list / get | category:read | R | v1 `reference_lookup` (built, W2-5) |
 | (same) | create / update / delete / restore | category:write / delete | W / D | v1.1 |
 | article-categories | `PUT :id/access-rules` | settings:manage | W | v1.1, `elevated` (authz config) |
-| locations | list / get | location:read | R | v1 `reference_lookup` |
-| locations | create | location:write | W | v1 |
+| locations | list / get | location:read | R | v1 `reference_lookup` (built, W2-5) |
+| locations | create | location:write | W | v1 `location_create` (built, W2-5) |
 | locations | update | location:write | W | v1.1 |
 | locations | delete / restore | location:delete | D | v1.1 |
 | applications | list / get | application:read | R | v1 |
@@ -437,19 +438,19 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 1 | `session_context` | UsersController.me, ConfigController.myPermissions, InstanceController.version, AccessGrants/Assets `mine` | open (self) | read | — |
 | 2 | `lazyit_search` | SearchController.find | search:read | read | — |
 | 3 | `navigate_to` (chat only) | the entity's get handler (existence + visibility check) | entity's read | navigate | the target (`op: navigate`) |
-| 4 | `reference_lookup` (kind: assetModel, location, assetCategory, applicationCategory, consumableCategory, articleFolder) | 6 list/get handlers | assetModel:read / location:read / category:read | read | — |
+| 4 | `reference_lookup` ✅ built (W2-5) (kind: assetModel, location, assetCategory, applicationCategory, consumableCategory, articleFolder) | AssetModelsController.findAll (primary) and the `findAll` / `findOne` of the six controllers (12 handlers) | assetModel:read (listing); each kind's own route authorizes it | read | — |
 | 5 | `dashboard_summary` | DashboardController.summary | dashboard:read | read | — |
 | 6 | `activity_list` | DashboardController.activity | logs:read | read | — |
-| 7 | `asset_search` | AssetsController.findAll / .findMine | asset:read / self | read | — |
-| 8 | `asset_get` | AssetsController.findOne (+assignments, history, articles facets) | asset:read (+article:read facet) | read | — |
-| 9 | `asset_create` | AssetsController.create | asset:write | write | asset created |
-| 10 | `asset_update` | AssetsController.update | asset:write | write·D | asset updated |
-| 11 | `asset_archive` | AssetsController.remove | asset:delete | write·D | asset archived |
-| 12 | `asset_restore` | AssetsController.restore | asset:delete | write | asset restored |
-| 13 | `asset_check_out` | AssetAssignmentsController.create | asset:write | write | asset updated (+user) |
-| 14 | `asset_check_in` | AssetAssignmentsController.release | asset:write | write | asset updated (+user) |
-| 15 | `asset_model_create` | AssetModelsController.create | assetModel:write | write | assetModel created |
-| 16 | `location_create` | LocationsController.create | location:write | write | location created |
+| 7 | `asset_search` ✅ built (W2-5) | AssetsController.findAll / .findMine | asset:read / self | read | — |
+| 8 | `asset_get` ✅ built (W2-5) | AssetsController.findOne (+findAssignments, findHistory, findArticles facets; findAll for tag/serial) | asset:read (+article:read facet) | read | — |
+| 9 | `asset_create` ✅ built (W2-5) | AssetsController.create (+model/location lookups) | asset:write | write | asset created |
+| 10 | `asset_update` ✅ built (W2-5) | AssetsController.update (+findOne, lookups) | asset:write | write·D | asset updated |
+| 11 | `asset_archive` ✅ built (W2-5) | AssetsController.remove | asset:delete | write·D | asset archived |
+| 12 | `asset_restore` ✅ built (W2-5) | AssetsController.restore (+findAll `deleted=only`) | asset:delete | write | asset restored |
+| 13 | `asset_check_out` ✅ built (W2-5) | AssetAssignmentsController.create (+AssetsController.findOne / findAll, UsersController.findAll / me) | asset:write | write | assetAssignment created (parent asset), asset updated, user updated |
+| 14 | `asset_check_in` ✅ built (W2-5) | AssetAssignmentsController.release (+AssetsController.findAssignments) | asset:write | write | assetAssignment updated (parent asset), asset updated, user updated |
+| 15 | `asset_model_create` ✅ built (W2-5) | AssetModelsController.create (+AssetCategoriesController.findAll) | assetModel:write | write | assetModel created |
+| 16 | `location_create` ✅ built (W2-5) | LocationsController.create (+findAll / findOne for the parent) | location:write | write | location created |
 | 17 | `application_search` | ApplicationsController.findAll | application:read | read | — |
 | 18 | `application_get` | ApplicationsController.findOne (+grants, articles facets) | application:read | read | — |
 | 19 | `application_create` | ApplicationsController.create | application:write | write | application created |
@@ -538,6 +539,8 @@ path unit (W2-0, #1315):
   built yet);
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
+  `assets.tools.ts` and `reference.tools.ts` (W2-5) hold the asset, ownership and reference-data tools —
+  see *Assets and reference tools as built* below;
   `platform.tools.ts` lists the surfaces no domain owns (authentication, instance configuration, the
   Secret Manager, Service Account management, the Migrator, the workflow engine, the probes)
 - `prompt/` — domain primer and system-prompt builder (§12)
@@ -561,6 +564,54 @@ path unit (W2-0, #1315):
 - Unexposed with reasons: node/edge writes and review-tray curation (v1.1), changes / identity-matches /
   auto-confirm rules reads (v1.1), the canvas bulk reads, the fleet view, agent policy, the `@Res` list,
   `report`, the secret link and the agent binary distribution.
+
+**Assets and reference tools as built (W2-5).** Eleven tools: `asset_search`, `asset_get`,
+`reference_lookup` (read); `asset_create`, `asset_update`·D, `asset_archive`·D, `asset_restore`,
+`asset_check_out`, `asset_check_in`, `asset_model_create`, `location_create` (write). None is `elevated`
+and none emits a step-up warning: they grant no access or privilege. All admit humans and Service
+Accounts holding the route's permission.
+- **References** (§7): an asset by id, asset tag or serial (a tag or serial through `GET /assets?q=`,
+  matched exactly and case-insensitively, so a partial tag never resolves); a person by user id, email,
+  exact full name or `"me"` (through `GET /users` — `user:read` — or `GET /users/me`; a username or
+  legajo matches only when the route's `q`, which searches names and email, surfaced the row); a model,
+  location or asset category by id or exact name. Two matches are `AMBIGUOUS_REFERENCE` with the
+  candidates. In `run` a raw id passes straight to the write handler (a Service Account with write-only
+  grants still works); the preview always reads the target, to name it. An id is recognized by shape —
+  a cuid (`c` + 24 lowercase alphanumerics) or a uuid.
+- **Ownership is the assignment** (asset-centric): `asset_check_out` opens an `AssetAssignment`
+  (`POST /asset-assignments`), `asset_check_in` releases one (`PATCH /asset-assignments/:id/release`).
+  Check-in finds the assignment among the asset's live owners (`GET /assets/:id/assignments`); with no
+  person given, the asset must have exactly one owner — several is `AMBIGUOUS_REFERENCE` naming them,
+  none is `CONFLICT`. Check-out onto an existing owner is refused at propose (`CONFLICT`), not left for
+  the route's 409 after an approval.
+- **Previews.** Creates list every provided field (`after` only) and carry no target. Every other write
+  names its target and carries `precondition { entity, updatedAt }`: the asset for update, archive,
+  restore and check-out; the assignment (with `parent` → its asset) for check-in, so a release that
+  raced the approval is `STALE`. Updates show only the fields that change (a no-op update is refused as
+  `INVALID_INPUT`); entity-valued changes (model, location, the person) are `{ type, id, label }` with
+  `valueKind: "entity"`. `asset_archive` warns `SOFT_DELETE` and lists the owners who still hold the
+  asset (archiving does not release them). Timestamps are normalized to ISO strings — an in-process
+  handler returns Prisma `Date`s.
+- **`asset_update` merges `specs`** over the current attributes (a `null` value removes a key), so an AI
+  edit never drops the reporting agent's nested host facts; the route itself replaces `specs` whole.
+- **`asset_restore`** finds the archived asset through `GET /assets?deleted=only` (ADMIN-only, like the
+  route). The list has no id filter, so a raw id scans the five newest-archived pages (1,000 assets);
+  a tag or serial is a `q` search.
+- **Results.** `asset_search` returns `{ total, offset, items }` (model, category, location, current
+  owners; never notes or specs) with a `truncated` marker; `asset_get` concise adds notes, cost and
+  book value; `full` adds specs, the ownership history (capped at 50), the last 20 history events and
+  the linked KB articles — a facet the caller may not read (`article:read`) is reported
+  `unavailable`, not failed. `reference_lookup` pages the unpaged taxonomies itself; KB folders never
+  carry their access rules. Notes, descriptions, specs and history payloads are wrapped with
+  `untrusted()`.
+- **Entity refs** (§8.5): create/update/archive/restore → the asset (or model, location) with its op;
+  check-out and check-in → the assignment (`parent` → asset), the asset and the person, all `updated`
+  except the new assignment (`created`).
+- **Unexposed with reasons:** batch archive/restore/status and bulk receive (v1.1), the CSV export, the
+  companies autocomplete, the `/asset-assignments` reads (served as facets), assignment notes (v1.1),
+  acknowledge (the holder's own act, v1.1), attachments (list/remove v1.1; binary upload/content never),
+  model/location/category update, archive and restore and every category create (v1.1), folder access
+  rules (`elevated`, after v1).
 
 ### 8.2 Descriptor
 
