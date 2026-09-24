@@ -1101,8 +1101,9 @@ export class ArticlesService {
   }
 
   /**
-   * Load an article for a write and enforce author-only: 404 if missing or a draft the caller can't
-   * see (hides existence), 403 if it's a published article owned by someone else.
+   * Load an article for a write and enforce author-only: 404 if missing, a draft the caller can't
+   * see, or (for any non-author) in a home folder the caller can't read (hides existence — SEC-074,
+   * INV-9); 403 only for a published article the caller CAN read but does not own.
    *
    * `canManageAny` (#877) is the AUTHORSHIP bypass: an ADMIN (god-mode, ADR-0060 §5) or a holder of the
    * delegatable `article:manage` verb may edit/publish/delete/restore ANY article, including another
@@ -1128,19 +1129,20 @@ export class ArticlesService {
     if (article.authorId === currentUserId) {
       return article; // the author — unchanged path
     }
-    // Not the author.
-    if (!canManageAny) {
-      // Original author-only gate: hide a foreign DRAFT's existence (404), else 403.
-      if (article.status === 'DRAFT') {
-        throw new NotFoundException(`Article ${id} not found`);
-      }
-      throw new ForbiddenException('Only the author can modify this article');
+    // Not the author. Visibility BEFORE authorization (SEC-074, INV-9): hide what the caller can't
+    // READ first — a foreign DRAFT (ADR-0022) and a folder-hidden article (ADR-0060 §4) both 404, the
+    // same as a missing id — and only then decide the authorship 403. Deciding the 403 first made the
+    // write paths an existence oracle for published articles in folders the caller cannot see.
+    if (!canManageAny && article.status === 'DRAFT') {
+      throw new NotFoundException(`Article ${id} not found`);
     }
-    // #877 authorship bypass: still enforce the folder ACL for a non-admin manage-holder so they can't
-    // reach a folder-hidden article they can't READ (ADR-0060 §4). ADMIN → 'ALL' → no-op.
+    // Applies to every non-author, including a non-admin manage-holder (#877). ADMIN → 'ALL' → no-op.
     await this.assertFolderVisible(article.categoryId, principal, () => {
       throw new NotFoundException(`Article ${id} not found`);
     });
+    if (!canManageAny) {
+      throw new ForbiddenException('Only the author can modify this article');
+    }
     return article;
   }
 
