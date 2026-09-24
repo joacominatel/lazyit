@@ -118,7 +118,8 @@ The key forks only; each links its analysis.
    tool. → [[ai-assistant/tools-and-execution|tools]] §3, §7; [[ai-assistant/_synthesis|synthesis]] §4.1.
 
    > Amended 2026-09-24 (#1315): the workflow engine is exposed to the AI. The CEO: "La ia con
-   > workflows podemos hacer todo ahora, para mi es el feature mas grande, al menos dentro de chat";
+   > workflows podemos hacer todo ahora, para mi es el feature mas grande, al menos dentro de chat y lo
+   > que dejamos pendiente en issue";
    > on the outbound-integration warning: "Na que no pida contraseña, que sea flexible, excepto que la
    > aplicacion sea critica"; on Service Accounts: "Y si las service account en workflows estoy de
    > acuerdo con tu recomendación".
@@ -143,8 +144,10 @@ The key forks only; each links its analysis.
    >   grant or revoke, on an application with `isCritical = true`. It **requires step-up**: it joins the
    >   core's closed list (`AI_STEP_UP_WARNINGS`), and core derives step-up from that list on **any**
    >   write preview, `write` or `elevated` — an access revoke (a `write` tool) on a critical application
-   >   needs the password too. Whether headless may act on a critical application at all is an open
-   >   CEO question; core carries a per-channel refusal seam (`AI_CHANNEL_REFUSED_WARNINGS`, empty).
+   >   needs the password too. Step-up is a chat control: over MCP and headless no preview is built and
+   >   nothing asks for a password, so whether MCP and headless may act on a critical application at all
+   >   is an open CEO question; core carries a per-channel refusal seam (`AI_CHANNEL_REFUSED_WARNINGS`,
+   >   empty today).
    > - **Disabled first.** A workflow the AI creates is created disabled. Enabling it is a separate
    >   approval whose preview embeds a dry-run against a named sample grant.
    >
@@ -165,6 +168,10 @@ The key forks only; each links its analysis.
    > `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY` (CEO, "Opción 2") and
    > `CRITICAL_APPLICATION` (decision 3 amendment) — on any chat write preview carrying one, whatever
    > the tool's class. `OUTBOUND_INTEGRATION` is not on it.
+   >
+   > Amended 2026-09-24 (#1315): changing a person's manager is not an identity change and needs no
+   > step-up. The CEO, on the manager change: "Si deja de pedir passwd". `IDENTITY_CHANGE` stays on the
+   > list for the other identity attributes (e.g. the email).
 
 5. **Lazyit owns the agent loop; providers sit behind a port.** Each model step is one call through
    `ChatModelPort`, implemented over AI SDK 7 in `ai/providers/` — the only code that imports it. Adding
