@@ -785,7 +785,8 @@ single-label list is kept short because RFC 8252 asks for reverse-domain names a
 scheme (`mailto`, `ms-settings`) could hand the code to an unrelated handler. `mcpAllowAnyHttpsClient`
 admits HTTPS on a non-loopback host and nothing else. Plain `http` off loopback and every
 browser-interpreted scheme (`javascript`, `data`, `file`, `blob`, `about`, `view-source`, `vbscript`,
-`filesystem`) are always refused. Matching stays exact, with only the loopback `http` port excepted. The
+`filesystem`) are always refused, as is any redirect URI with userinfo (`user@host`): the host is read
+from the parsed authority, so `http://localhost:80@evil.com/` is never loopback (PR #1338 review F2). Matching stays exact, with only the loopback `http` port excepted. The
 contract is `classifyMcpRedirectUri` / `isMcpRedirectUriAllowed` in `ai-settings.ts`;
 [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13 (amended).
 

@@ -572,7 +572,9 @@ the **exfiltration leg** and the **consequential-action leg**.
   no longer decrypts makes the assistant unavailable, not an error. The envelope binds its purpose as GCM
   additional data, and the connection test never sends the saved key to a changed provider or base URL.
   The config audit records only what happened to the key (`set` / `cleared` /
-  `cleared-destination-changed`). → [[ai-assistant/provider-and-runtime|provider]] §9.1.
+  `cleared-destination-changed`). A base URL may not carry userinfo, a query or a fragment, and the
+  save is a conditional write, so concurrent saves cannot pair the stored key with another destination
+  (review of PR #1338, F1/F5). → [[ai-assistant/provider-and-runtime|provider]] §9.1.
 
 ### 6.6 Headless SA runs
 

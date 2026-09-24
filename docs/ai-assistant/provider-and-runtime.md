@@ -808,8 +808,18 @@ Invariants [C]:
 >   inline test → 422 `CONNECTION_TEST_FAILED` with `test`. The 422 body is `{ code, message, test? }`.
 > - **Disclosure** is recorded once (`acknowledgeDisclosure: true` while none is stored), with its
 >   author on the row and a `disclosure.acknowledged` audit row.
-> - **Shape checks beyond zod:** a plain `http://` base URL only for `openai-compatible` with
->   `allowPrivateNetwork` (400 otherwise); provider options re-checked per provider.
+> - **Base URL checks beyond zod** (400, on save and on test): no userinfo, query string or fragment;
+>   `http://` only for `openai-compatible` with `allowPrivateNetwork`, and never to a public IP literal;
+>   loopback, link-local, metadata and reserved IP literals and `localhost` / `*.localhost` names are
+>   refused for every scheme; a private or ULA literal needs `allowPrivateNetwork`. A **name** cannot be
+>   classified without DNS, so it is saved and the **provider layer's egress guard enforces the
+>   resolved-address check at call time** (INV-AI-7; W2-1). Provider options are re-checked per provider.
+> - **Concurrent saves.** The save is a conditional write on the `updatedAt` it read (`updateMany`), and
+>   a first save that races another creation fails on the singleton id; either answers **409** and
+>   writes neither the row nor audit rows. The destination check that decides whether the stored key
+>   survives therefore always sees the row it replaces. No lock is held across the inline test.
+> - **Shim mode.** `POST /config/ai/test` answers 409 without a provider call, and the reader ignores a
+>   test override.
 > - **Allowlist admin surface:** the overlay (`mcpClientAllowlistAdded`, `mcpClientAllowlistRemovedDefaults`,
 >   `mcpAllowAnyHttpsClient`) is saved wholesale through `PUT /config/ai`, validated by the shared
 >   schema (the private-use-scheme amendment included), and read back read-tolerant. The curated
@@ -837,10 +847,13 @@ Invariants [C]:
   ([[ai-assistant/_synthesis|synthesis]] §4.5).
 
 > **As built (W2-2)** — `apps/api/src/ai/status/`: `@RequirePermission()` with no arguments, so every
-> authenticated human passes and a service account is refused by the RolesGuard's fail-closed rule for
-> ungated routes (INV-SA-2) — the service still computes an SA's answer from its direct grants if that
-> rule changes. `chat.available` also requires a stored key to be decryptable (`AI_SECRET_KEY` usable)
-> and a key-requiring provider to have one; both are `false` in shim mode. `auth` is `oauth` only when
+> authenticated human passes. **Deliberate deviation (CTO, 2026-09-24):** a service account is
+> refused (403) by the RolesGuard's fail-closed rule for ungated routes (INV-SA-2), although the
+> contract reads "any authenticated principal"; a headless script calls `POST /ai/runs` directly and
+> learns availability from its answer. The service still computes an SA's answer from its direct grants
+> should that decision change. `chat.available` asks the reader's `resolveProviderConfig()` — the same
+> check the runtime makes — so a stored key that no longer decrypts reads as unavailable; a
+> key-requiring provider must also have a key. Both are `false` in shim mode. `auth` is `oauth` only when
 > `WEB_ORIGIN` is pinned to `https://`, else `personal-token`. `configRevision` is the row's `updatedAt`
 > (`"0"` with no row); `retentionDays` is sent only while the chat is available to the caller.
 
