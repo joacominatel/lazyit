@@ -152,6 +152,7 @@
       "IRREVERSIBLE": "This can't be undone.",
       "OUTBOUND_INTEGRATION": "Changes an outside integration or where lazyit sends data.",
       "CRITICAL_APPLICATION": "Touches an application marked critical.",
+      "INSTANCE_CONFIGURATION": "Changes instance-wide configuration: it applies to everyone from now on.",
       "unknown": "Additional check: {code}"
     },
     "passwordRequired": "Needs your password",
@@ -227,6 +228,7 @@
     "infraEdge": "Infrastructure link",
     "workflowRun": "Workflow run",
     "manualTask": "Manual task",
+    "assetTagScheme": "Asset tag scheme",
     "webSearch": "Web search results",
     "unknown": "Item"
   },
@@ -386,7 +388,9 @@
     "asset_model_restore": "Restore an asset model",
     "location_update": "Update a location",
     "location_archive": "Archive a location",
-    "location_restore": "Restore a location"
+    "location_restore": "Restore a location",
+    "asset_tag_scheme_get": "Read the asset tag scheme",
+    "asset_tag_scheme_update": "Change the asset tag scheme"
   },
   "fields": {
     "accessLevel": "Access level",
@@ -420,6 +424,11 @@
     "duplicatesUnchecked": "Duplicate check incomplete (you cannot read every asset)",
     "email": "Email",
     "enabled": "Enabled",
+    "prefix": "Prefix",
+    "suffix": "Suffix",
+    "width": "Digits (zero-padded)",
+    "nextNumber": "Next number",
+    "nextTag": "Next tag",
     "excerpt": "Excerpt",
     "expiresAt": "Expires",
     "firstName": "First name",
@@ -575,7 +584,8 @@
       "skipped": "Skipped",
       "declined": "Declined",
       "expired": "Expired",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "sent": "Sent"
     },
     "importance": {
       "required": "required",
@@ -639,6 +649,8 @@
       "forbidden": "You can't answer this form.",
       "notFound": "This form no longer exists.",
       "unknown": "Your answer could not be sent. Try again."
-    }
+    },
+    "sentNote": "Sent. Waiting for the assistant to continue…",
+    "expiredLocally": "The time to answer this form has passed. The assistant stops shortly; send a new message to continue."
   }
 }

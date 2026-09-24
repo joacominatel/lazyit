@@ -16,7 +16,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { useFormatter, useTranslations } from "next-intl";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Combobox } from "@/components/combobox";
 import { EntityMultiSelect } from "@/components/entity-multi-select";
 import { RequestIdNote } from "@/components/request-id-note";
@@ -37,8 +37,11 @@ import {
   groupPath,
   hasNoOptions,
   initialDraft,
+  inputStage,
+  isInputExpired,
   localizeIssue,
   mapIssues,
+  msUntilExpiry,
   splitByImportance,
   type AnswerDisplay,
   type DraftValue,
@@ -57,11 +60,12 @@ const INLINE_CHOICES = 8;
 /** The attribute the composer's "Go to the form" looks for. */
 export const PENDING_INPUT_ATTR = "data-ai-input-pending";
 
-export type InputStage = "pending" | "sending" | AiInputOutcome;
+export type InputStage = "pending" | "sending" | "sent" | AiInputOutcome;
 
 const STAGE_TONE: Record<InputStage, StatusTone> = {
   pending: "warning",
   sending: "info",
+  sent: "info",
   submitted: "success",
   skipped: "neutral",
   declined: "neutral",
@@ -227,6 +231,8 @@ function FieldControl({ field, id, value, invalid, describedBy, disabled, onChan
         <Combobox
           id={id}
           aria-invalid={invalid}
+          aria-describedby={describedBy}
+          aria-required={field.required || undefined}
           disabled={disabled}
           value={text}
           items={options}
@@ -241,6 +247,10 @@ function FieldControl({ field, id, value, invalid, describedBy, disabled, onChan
       if (options.length > INLINE_CHOICES) {
         return (
           <EntityMultiSelect
+            id={id}
+            aria-invalid={invalid}
+            aria-describedby={describedBy}
+            aria-required={field.required || undefined}
             label={plainText(field.label)}
             items={options}
             selected={selected}
@@ -259,9 +269,10 @@ function FieldControl({ field, id, value, invalid, describedBy, disabled, onChan
           aria-describedby={describedBy}
           className="space-y-1"
         >
-          {options.map((option) => {
+          {options.map((option, index) => {
             const checked = selected.includes(option.value);
-            const optionId = `${id}-${option.value}`;
+            // Option values are model- or lazyit-authored: never part of an element id.
+            const optionId = `${id}-${index}`;
             return (
               <li key={option.value} className="flex items-center gap-2">
                 <Checkbox
@@ -509,7 +520,16 @@ function InputGroupRows({
  * Nothing the model wrote is Markdown or HTML here: title, reason, labels, help, placeholders and options
  * are React text. The card is presented as the assistant's request, never as a lazyit prompt.
  */
-export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: AnswerInput }) {
+export function AiInputCard({
+  part,
+  onAnswer,
+  onExpired,
+}: {
+  part: InputPart;
+  onAnswer: AnswerInput;
+  /** The form's time ran out in this browser (the chat re-reads the run once the server expired it). */
+  onExpired?: (toolCallId: string) => void;
+}) {
   const t = useTranslations("ai.input");
   const format = useFormatter();
   const titleId = useId();
@@ -522,9 +542,27 @@ export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: Ans
   const [busy, setBusy] = useState<AiInputAction | null>(null);
   const [error, setError] = useState<InputErrorKind | null>(null);
   const [showOptional, setShowOptional] = useState(false);
+  // The answer was accepted: the card stays closed until `input.resolved` (or a re-read) reports it.
+  const [sent, setSent] = useState(false);
+  const [expired, setExpired] = useState(() => isInputExpired(request.expiresAt, Date.now()));
 
   const pending = outcome === null;
-  const stage: InputStage = pending ? (busy ? "sending" : "pending") : outcome;
+  const stage: InputStage = inputStage(outcome, busy !== null, sent, expired);
+  // Nothing can be changed or sent while a request is in flight, after it was accepted, or past expiry.
+  const locked = busy !== null || sent || expired;
+
+  // Client-side expiry: past `expiresAt` the card closes itself instead of waiting for a 409.
+  useEffect(() => {
+    if (!pending || sent || expired) return;
+    const ms = msUntilExpiry(request.expiresAt, Date.now());
+    if (ms === null) return;
+    const timer = setTimeout(() => setExpired(true), ms);
+    return () => clearTimeout(timer);
+  }, [pending, sent, expired, request.expiresAt]);
+
+  useEffect(() => {
+    if (pending && expired && !sent) onExpired?.(request.toolCallId);
+  }, [pending, expired, sent, onExpired, request.toolCallId]);
   const { primary, optional } = splitByImportance(form.fields);
   const optionalHasIssue = optional.some((f) => issues[fieldPath(f.key)]);
   const optionalOpen = showOptional || optionalHasIssue;
@@ -569,7 +607,10 @@ export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: Ans
     } finally {
       setBusy(null);
     }
-    if (result.ok) return;
+    if (result.ok) {
+      setSent(true);
+      return;
+    }
     setError(result.error);
     if (result.error.kind === "invalid") {
       const mapped = mapIssues(result.error.issues, rowIndex);
@@ -587,7 +628,7 @@ export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: Ans
         path={fieldPath(field.key)}
         value={draft.values[field.key] ?? ""}
         error={issueText(issues[fieldPath(field.key)])}
-        disabled={busy !== null}
+        disabled={locked}
         onChange={(value) => setValue(field.key, value)}
       />
     ));
@@ -598,7 +639,7 @@ export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: Ans
       role="group"
       aria-labelledby={titleId}
       tabIndex={-1}
-      {...(pending ? { [PENDING_INPUT_ATTR]: "" } : {})}
+      {...(pending && !sent && !expired ? { [PENDING_INPUT_ATTR]: "" } : {})}
       className="rounded-md border border-border border-l-4 border-l-primary/60 bg-card text-card-foreground outline-none"
     >
       <header className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
@@ -625,7 +666,7 @@ export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: Ans
             className="space-y-3"
             onSubmit={(e) => {
               e.preventDefault();
-              if (busy === null) void send("submit");
+              if (!locked) void send("submit");
             }}
           >
             {hasRequired && <p className="text-xs text-muted-foreground">{t("requiredLegend")}</p>}
@@ -637,7 +678,7 @@ export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: Ans
                 rows={draft.groups[group.key] ?? []}
                 issues={issues}
                 issueText={issueText}
-                disabled={busy !== null}
+                disabled={locked}
                 onChange={(rows) => setDraft((d) => ({ ...d, groups: { ...d.groups, [group.key]: rows } }))}
               />
             ))}
@@ -672,8 +713,19 @@ export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: Ans
               </p>
             )}
 
+            {sent && (
+              <p role="status" className="text-xs text-muted-foreground">
+                {t("sentNote")}
+              </p>
+            )}
+            {expired && !sent && busy === null && (
+              <p role="status" className="text-xs text-muted-foreground">
+                {t("expiredLocally")}
+              </p>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-              {!Number.isNaN(expiresAt.getTime()) && (
+              {!expired && !sent && !Number.isNaN(expiresAt.getTime()) && (
                 <p className="text-xs text-muted-foreground">
                   {t("expiresAt", { time: format.dateTime(expiresAt, { timeStyle: "short" }) })}
                 </p>
@@ -683,7 +735,7 @@ export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: Ans
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={busy !== null}
+                  disabled={locked}
                   title={t("declineHint")}
                   onClick={() => void send("cancel")}
                 >
@@ -693,13 +745,13 @@ export function AiInputCard({ part, onAnswer }: { part: InputPart; onAnswer: Ans
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={busy !== null}
+                  disabled={locked}
                   title={t("skipHint")}
                   onClick={() => void send("skip")}
                 >
                   {t("skip")}
                 </Button>
-                <Button type="submit" size="sm" disabled={busy !== null}>
+                <Button type="submit" size="sm" disabled={locked}>
                   {t("submit")}
                 </Button>
               </div>

@@ -69,6 +69,8 @@ export const AI_ENTITY_TYPES = [
   "infraEdge",
   "workflowRun",
   "manualTask",
+  /** The instance's single asset tag scheme (instance configuration, #1394); id `singleton`. */
+  "assetTagScheme",
   "webSearch",
 ] as const;
 export const AiEntityTypeSchema = z.enum(AI_ENTITY_TYPES);
@@ -217,6 +219,11 @@ export const AI_PREVIEW_WARNING_CODES = [
    * access grant or revoke on it. Requires step-up.
    */
   "CRITICAL_APPLICATION",
+  /**
+   * Changes instance-wide configuration (e.g. the asset tag scheme, #1394): it applies to everyone from
+   * now on. Always an `elevated` card; no step-up by itself (CEO decision 2026-09-24).
+   */
+  "INSTANCE_CONFIGURATION",
 ] as const;
 export const AiPreviewWarningCodeSchema = z.enum(AI_PREVIEW_WARNING_CODES);
 export type AiPreviewWarningCode = z.infer<typeof AiPreviewWarningCodeSchema>;

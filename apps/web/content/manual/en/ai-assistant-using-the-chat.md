@@ -137,7 +137,8 @@ form** button. The chat history marks the chat **Needs your answer**. You can cl
 later — the form is still there.
 
 A form waits for the same time as a change card (30 minutes by default; the form shows **Answer by …**).
-If nobody answers in time, the form **expires** and the assistant stops; send a new message to continue.
+If nobody answers in time, the form closes as **expired** and the assistant stops; send a new message to
+continue. After you select **Send**, the form shows **Sent** until the assistant picks your answer up.
 
 Once answered, the form stays in the conversation read-only, showing what you sent (or that you skipped or
 declined it).

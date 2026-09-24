@@ -24,11 +24,15 @@ function render(part: InputPart, locale: "en" | "es" = "en"): string {
   );
 }
 
+/** A form still waiting (its expiry far ahead). */
 const pending = (form = inputForm()): InputPart => ({
   type: "input",
-  request: inputRequest("tc", form),
+  request: { ...inputRequest("tc", form), expiresAt: "2099-01-01T00:00:00.000Z" },
   outcome: null,
 });
+
+/** A form whose expiresAt has passed and no outcome arrived yet. */
+const lapsed = (): InputPart => ({ type: "input", request: inputRequest("tc"), outcome: null });
 
 describe("AiInputCard", () => {
   test("pending: title, reason, importance markers, the group's row and the three actions", () => {
@@ -79,5 +83,66 @@ describe("AiInputCard", () => {
     expect(render({ ...pending(), outcome: "declined" })).toContain(esc(en.input.notes.declined));
     expect(render({ ...pending(), outcome: "expired" }, "es")).toContain(esc(es.input.notes.expired));
     expect(render(pending(), "es")).toContain(es.input.skip);
+  });
+});
+
+describe("AiInputCard — polish (#1388 follow-up)", () => {
+  const future = pending;
+
+  test("past expiresAt the card shows itself expired, with every action disabled, without a 409", () => {
+    const html = render(lapsed());
+    expect(html).not.toContain(PENDING_INPUT_ATTR);
+    expect(html).toContain(en.input.states.expired);
+    expect(html).toContain(esc(en.input.expiredLocally));
+    const actions = [en.input.submit, esc(en.input.skip), esc(en.input.decline)].map(
+      (label) => html.match(new RegExp(`<button[^>]*>${label}</button>`))?.[0] ?? "",
+    );
+    for (const button of actions) expect(button).toContain('disabled=""');
+  });
+
+  test("before expiresAt it is pending and actionable", () => {
+    const html = render(future());
+    expect(html).toContain(PENDING_INPUT_ATTR);
+    expect(html).toContain(en.input.states.pending);
+    expect(html).not.toContain(esc(en.input.expiredLocally));
+    const submit = html.match(/<button[^>]*type="submit"[^>]*>/)?.[0] ?? "";
+    expect(submit).not.toBe("");
+    expect(submit).not.toContain('disabled=""');
+  });
+
+  test("option checkbox ids come from the option index, never its value", () => {
+    const form = inputForm();
+    form.fields = [
+      {
+        key: "tags",
+        label: "Tags",
+        kind: "multiselect",
+        importance: "required",
+        required: true,
+        options: [
+          { value: "a b\"c", label: "Weird" },
+          { value: "x", label: "X" },
+        ],
+      },
+    ];
+    const html = render(future(form));
+    expect(html).not.toContain('a b"c');
+    expect(html).not.toContain("a b&quot;c");
+    const ids = [...html.matchAll(/<button[^>]*role="checkbox"[^>]*id="([^"]+)"/g)].map((m) => m[1]!);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]!.endsWith("-0")).toBe(true);
+    expect(ids[1]!.endsWith("-1")).toBe(true);
+  });
+
+  test("a select's trigger is described by its help and marked required", () => {
+    const form = inputForm();
+    form.fields = [{ ...form.fields[0]!, help: "Where they go" }];
+    const html = render(future(form));
+    const trigger = html.match(/<button[^>]*role="combobox"[^>]*>/)?.[0] ?? "";
+    expect(trigger).toContain('aria-required="true"');
+    const describedBy = /aria-describedby="([^"]+)"/.exec(trigger)?.[1];
+    expect(describedBy).toBeTruthy();
+    expect(html).toContain(`id="${describedBy}"`);
+    expect(html).toContain("Where they go");
   });
 });

@@ -3,7 +3,7 @@ title: "ADR-0039: Auth.js v5 for frontend OIDC login"
 tags: [adr, auth, frontend, oidc]
 status: accepted
 created: 2026-05-27
-updated: 2026-09-23
+updated: 2026-09-24
 deciders: [Joaquín Minatel]
 ---
 
@@ -101,7 +101,7 @@ page, the access token is always available from the client session.
 
 ## Decision
 
-### 1. Library: Auth.js v5 (`next-auth@5.0.0-beta.31`)
+### 1. Library: Auth.js v5 (`next-auth@5.0.0-beta.32`)
 
 Auth.js v5 is installed as `next-auth@beta`. The configuration lives in `apps/web/auth.ts`
 and exports `{ handlers, auth, signIn, signOut }`.
@@ -157,6 +157,15 @@ redirected to `/login` with a `callbackUrl` query parameter. The matcher exclude
 
 The `app/(app)/layout.tsx` server component adds a belt-and-suspenders `auth()` check and
 redirects to `/login` if the session is missing.
+
+Every server-side guard (`proxy.ts`, the `(app)`, `(print)` and `change-password` layouts, the
+`/login` bounce, and the root layout's `SessionProvider` seed) tests the `auth()` result with
+`hasSession()` (`lib/auth/has-session.ts`). That helper requires a real `session.user`, so a
+truthy value alone never counts. Up to `next-auth@5.0.0-beta.31`, a server configuration error made
+`auth()` return a truthy error object, and an `if (!session)` guard let every visitor through
+(GHSA-8fpg-xm3f-6cx3, [[SEC-079-next-auth-advisories-config-error-fail-open|SEC-079]], #1399).
+beta.32 fixes that upstream, and the helper keeps the guards failing closed regardless. These guards
+protect only the UI. The API authorizes every request on its own Bearer.
 
 ### 6. Bearer token injection in `apiFetch`
 

@@ -89,7 +89,15 @@ Snapshot of the security review. Updated each sweep. Method:
    userinfo refused on write (legacy rows keep running, flagged), `expectedVersion` / `baseVersion` 409 preconditions, and
    the dry-run refuses offboarded or revoked samples.
 
-Frontend (`apps/web`) and dependency auditing remain **out of scope**.
+10. **2026-09-24 — Auth.js dependency advisories (#1399).** `bun audit` flagged `next-auth@5.0.0-beta.31`
+   for four advisories (GHSA-8fpg, GHSA-7rqj, GHSA-xmf8, GHSA-x445). Only GHSA-8fpg applies:
+   [[SEC-079-next-auth-advisories-config-error-fail-open\|SEC-079]] (**Low**). A server config error made
+   the web's `!session` guards fail open. This affected only the UI shell, because the API still
+   authorizes on its own Bearer. **✅ Closed the same day**: upgraded to beta.32, and every server-side
+   guard now requires `session.user` through `hasSession()`.
+
+Frontend (`apps/web`) and dependency auditing remain **out of scope** for the sweeps. SEC-079 is a
+one-off dependency triage.
 
 ## Counts by severity (open)
 
@@ -123,6 +131,8 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 ## Top findings
 
+0. **SEC-079 ✅ Closed.** Born closed (fixed 2026-09-24, #1399): `next-auth` upgraded to beta.32, and the
+   web session guards now require `session.user` rather than a truthy `auth()` result. No data change.
 0. **SEC-075 / SEC-076 / SEC-077 / SEC-078 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24, #1315):
    connection `defaultHeaders` values and legacy URL userinfo are redacted on every read and a
    `[redacted]` PATCH value keeps the stored one; changing a header value or re-pointing a connection

@@ -6,6 +6,7 @@ import {
   type AiInputForm,
   type AiInputGroup,
   type AiInputIssue,
+  type AiInputOutcome,
   type AiInputSubmission,
   type AiInputValue,
 } from "@lazyit/shared";
@@ -322,4 +323,44 @@ export function localizeIssue(message: string): IssueText | null {
   if (m) return { key: "rows", values: { min: Number(m[1]), max: Number(m[2]) } };
   if (/^Not a valid \w+ value$/.test(message)) return { key: "invalid" };
   return null;
+}
+
+/* ── Client-side expiry ───────────────────────────────────────────────────────────────────────── */
+
+/** The longest delay a browser timer takes (a larger one fires at once). */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
+ * Milliseconds until a form's `expiresAt`: 0 once it has passed, `null` for an unreadable timestamp
+ * (never treated as expired — the server stays the authority). Capped to what `setTimeout` accepts.
+ */
+export function msUntilExpiry(expiresAt: string, now: number): number | null {
+  const at = Date.parse(expiresAt);
+  if (Number.isNaN(at)) return null;
+  return Math.min(Math.max(at - now, 0), MAX_TIMER_MS);
+}
+
+/** Whether a form's time to answer has passed. */
+export function isInputExpired(expiresAt: string, now: number): boolean {
+  return msUntilExpiry(expiresAt, now) === 0;
+}
+
+/**
+ * How long after a form's local expiry the chat re-reads the run: the API's sweeper expires waiting
+ * forms every 30 s, and the stream is closed while the run waits, so nothing else would tell the chat.
+ */
+export const EXPIRY_RECHECK_MS = 35_000;
+
+/** What the card shows as its stamp. `sent`: the answer was accepted, `input.resolved` not yet seen. */
+export function inputStage(
+  outcome: AiInputOutcome | null,
+  busy: boolean,
+  sent: boolean,
+  expired: boolean,
+): "pending" | "sending" | "sent" | AiInputOutcome {
+  if (outcome !== null) return outcome;
+  if (sent) return "sent";
+  if (busy) return "sending";
+  if (expired) return "expired";
+  return "pending";
 }

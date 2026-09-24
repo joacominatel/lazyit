@@ -144,8 +144,9 @@ con un botón **Ir al formulario**. El historial marca el chat con **Espera tu r
 chat y volver más tarde — el formulario sigue ahí.
 
 Un formulario espera lo mismo que una tarjeta de cambio (30 minutos por defecto; el formulario muestra
-**Respondé antes de las …**). Si nadie responde a tiempo, el formulario **vence** y el asistente se detiene;
-enviá un mensaje nuevo para continuar.
+**Respondé antes de las …**). Si nadie responde a tiempo, el formulario se cierra como **vencido** y el asistente se detiene;
+enviá un mensaje nuevo para continuar. Después de elegir **Enviar**, el formulario muestra
+**Enviado** hasta que el asistente toma tu respuesta.
 
 Una vez respondido, el formulario queda en la conversación en modo de solo lectura, con lo que enviaste (o
 indicando que lo omitiste o lo rechazaste).

@@ -152,6 +152,7 @@
       "IRREVERSIBLE": "No se puede deshacer.",
       "OUTBOUND_INTEGRATION": "Cambia una integración externa o adónde envía datos lazyit.",
       "CRITICAL_APPLICATION": "Afecta a una aplicación marcada como crítica.",
+      "INSTANCE_CONFIGURATION": "Cambia la configuración de toda la instancia: se aplica a todos desde ahora.",
       "unknown": "Verificación adicional: {code}"
     },
     "passwordRequired": "Requiere tu contraseña",
@@ -227,6 +228,7 @@
     "infraEdge": "Conexión de infraestructura",
     "workflowRun": "Ejecución de workflow",
     "manualTask": "Tarea manual",
+    "assetTagScheme": "Esquema de etiquetas de activos",
     "webSearch": "Resultados de búsqueda web",
     "unknown": "Elemento"
   },
@@ -386,7 +388,9 @@
     "asset_model_restore": "Restaurar un modelo de activo",
     "location_update": "Actualizar una ubicación",
     "location_archive": "Archivar una ubicación",
-    "location_restore": "Restaurar una ubicación"
+    "location_restore": "Restaurar una ubicación",
+    "asset_tag_scheme_get": "Leer el esquema de etiquetas de activos",
+    "asset_tag_scheme_update": "Cambiar el esquema de etiquetas de activos"
   },
   "fields": {
     "accessLevel": "Nivel de acceso",
@@ -420,6 +424,11 @@
     "duplicatesUnchecked": "Comprobación de duplicados incompleta (no puedes ver todos los activos)",
     "email": "Correo electrónico",
     "enabled": "Activado",
+    "prefix": "Prefijo",
+    "suffix": "Sufijo",
+    "width": "Dígitos (con ceros)",
+    "nextNumber": "Próximo número",
+    "nextTag": "Próxima etiqueta",
     "excerpt": "Extracto",
     "expiresAt": "Vence",
     "firstName": "Nombre",
@@ -575,7 +584,8 @@
       "skipped": "Omitido",
       "declined": "Rechazado",
       "expired": "Vencido",
-      "cancelled": "Cancelado"
+      "cancelled": "Cancelado",
+      "sent": "Enviado"
     },
     "importance": {
       "required": "obligatorio",
@@ -639,6 +649,8 @@
       "forbidden": "No podés responder este formulario.",
       "notFound": "Este formulario ya no existe.",
       "unknown": "No se pudo enviar tu respuesta. Intentá de nuevo."
-    }
+    },
+    "sentNote": "Enviado. Esperando que el asistente continúe…",
+    "expiredLocally": "Se terminó el tiempo para responder este formulario. El asistente se detiene en breve; enviá un mensaje nuevo para continuar."
   }
 }

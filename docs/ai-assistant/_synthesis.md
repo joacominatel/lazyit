@@ -193,7 +193,8 @@ cap (headless), and a per-principal rate limit. Each dispatch runs inside an `As
   `CASCADE_RELEASES_ASSIGNMENTS`, `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`,
   `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`, `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
   `IRREVERSIBLE`, `OUTBOUND_INTEGRATION`, `CRITICAL_APPLICATION` — the last two added 2026-09-24 for
-  the workflow engine), `impacted[]`, `untrustedSources[]`, `elevated`, `stepUpRequired`, and a
+  the workflow engine — and `INSTANCE_CONFIGURATION`, added by #1394 for the asset tag scheme, no
+  step-up), `impacted[]`, `untrustedSources[]`, `elevated`, `stepUpRequired`, and a
   `precondition { entity, updatedAt }` checked at execute.
 - **Pagination inside tools:** `limit` default 20, max 50, with `nextOffset`; the MCP layer adds a
   ~100 KB serialized backstop.
