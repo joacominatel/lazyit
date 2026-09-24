@@ -92,46 +92,65 @@ describe('requiresStepUp', () => {
 });
 
 /**
- * The per-channel refusal seam (a CEO question on headless actions over critical applications is open,
- * #1315): empty today, so nothing is refused; one entry turns a refusal on.
+ * Per-channel refusal by warning (CEO decision 2026-09-24, #1315: MCP and headless writes on critical
+ * applications are refused — "Rechazar").
  */
 describe('channel refusal by warning', () => {
-  it('refuses nothing today, on any channel', () => {
-    for (const channel of ['CHAT', 'MCP', 'HEADLESS'] as const) {
-      expect(AI_CHANNEL_REFUSED_WARNINGS[channel]).toEqual([]);
+  it.each(['MCP', 'HEADLESS'] as const)(
+    '%s: refuses a write on a critical application with a 403 that points to the chat',
+    (channel) => {
+      expect(AI_CHANNEL_REFUSED_WARNINGS[channel]).toEqual([
+        'CRITICAL_APPLICATION',
+      ]);
       expect(
         channelRefusal(channel, [
+          'EXTERNAL_PROVISIONING',
           'CRITICAL_APPLICATION',
+        ]),
+      ).toBe('CRITICAL_APPLICATION');
+      let thrown: unknown;
+      try {
+        assertChannelAllows(channel, ['CRITICAL_APPLICATION']);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(ForbiddenException);
+      expect((thrown as ForbiddenException).getStatus()).toBe(403);
+      expect((thrown as ForbiddenException).message).toBe(
+        'This application is critical; do it from the lazyit chat, where it is confirmed with your password.',
+      );
+    },
+  );
+
+  it.each(['MCP', 'HEADLESS'] as const)(
+    '%s: allows a write on a non-critical application, outbound integration included',
+    (channel) => {
+      expect(
+        channelRefusal(channel, [
           'OUTBOUND_INTEGRATION',
+          'EXTERNAL_PROVISIONING',
         ]),
       ).toBeUndefined();
       expect(() =>
-        assertChannelAllows(channel, ['CRITICAL_APPLICATION']),
+        assertChannelAllows(channel, ['OUTBOUND_INTEGRATION']),
       ).not.toThrow();
-    }
+    },
+  );
+
+  it('the chat refuses nothing by warning: a critical application goes through step-up there', () => {
+    expect(AI_CHANNEL_REFUSED_WARNINGS.CHAT).toEqual([]);
+    expect(() =>
+      assertChannelAllows('CHAT', ['CRITICAL_APPLICATION']),
+    ).not.toThrow();
   });
 
-  it('refuses cleanly, as a 403, once a channel lists the warning', () => {
-    const refused = {
-      CHAT: [],
-      MCP: [],
-      HEADLESS: ['CRITICAL_APPLICATION'],
-    } as const;
-    expect(
-      channelRefusal(
-        'HEADLESS',
-        ['OUTBOUND_INTEGRATION', 'CRITICAL_APPLICATION'],
-        refused,
-      ),
-    ).toBe('CRITICAL_APPLICATION');
-    expect(
-      channelRefusal('CHAT', ['CRITICAL_APPLICATION'], refused),
-    ).toBeUndefined();
+  it('honours an explicit refusal map (a generic message for a code without one)', () => {
+    const refused = { CHAT: [], MCP: [], HEADLESS: ['IRREVERSIBLE'] } as const;
+    expect(() =>
+      assertChannelAllows('HEADLESS', ['IRREVERSIBLE'], refused),
+    ).toThrow(/IRREVERSIBLE.*HEADLESS/);
     expect(() =>
       assertChannelAllows('HEADLESS', ['CRITICAL_APPLICATION'], refused),
-    ).toThrow(ForbiddenException);
-    expect(() =>
-      assertChannelAllows('HEADLESS', ['OUTBOUND_INTEGRATION'], refused),
     ).not.toThrow();
   });
 });

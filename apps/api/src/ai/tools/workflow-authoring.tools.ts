@@ -22,7 +22,7 @@ const PENDING =
  *     enabled workflow, or enabling a workflow emits `OUTBOUND_INTEGRATION` (no step-up by itself); the
  *     preview lists every outbound host and every mapped field → token;
  *   - any write on an application with `isCritical = true` emits `CRITICAL_APPLICATION` (core requires
- *     step-up);
+ *     step-up; the tools are chat-only, so the MCP/headless refusal never arises here);
  *   - a workflow is created disabled; enabling is its own proposal, and its preview embeds a dry-run.
  */
 export const workflowAuthoringToolset: AiToolset = {

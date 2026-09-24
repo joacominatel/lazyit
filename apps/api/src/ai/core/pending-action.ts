@@ -93,19 +93,27 @@ export function requiresStepUp(
 }
 
 /**
- * Preview warnings whose action a channel refuses outright — the seam for a per-channel refusal (e.g. a
- * headless action on a critical application, a CEO question open on #1315). EMPTY today on every channel:
- * nothing is refused by warning yet. Over MCP and headless no preview is built, so a tool that detects
- * such a condition in `run` calls {@link assertChannelAllows} with the warnings it would have emitted;
- * enabling a refusal is then one entry here.
+ * Preview warnings whose action a channel refuses outright. CEO decision 2026-09-24 (#1315, ADR-0097
+ * decision 3 as amended), on MCP and headless writes over critical applications: "Rechazar". Step-up is
+ * a chat control, and over MCP and headless no preview is built and nothing asks for a password, so an
+ * AI write on an application with `isCritical = true` is refused there and happens only in the chat.
+ * A tool that detects such a condition in `run` calls {@link assertChannelAllows} with the warnings it
+ * would have emitted, before any side effect.
  */
 export const AI_CHANNEL_REFUSED_WARNINGS: Readonly<
   Record<AiChannel, readonly AiPreviewWarningCode[]>
 > = {
   CHAT: [],
-  MCP: [],
-  HEADLESS: [],
+  MCP: ['CRITICAL_APPLICATION'],
+  HEADLESS: ['CRITICAL_APPLICATION'],
 };
+
+/** What the refused caller (and the model) is told, per refused warning. */
+const CHANNEL_REFUSAL_MESSAGES: Partial<Record<AiPreviewWarningCode, string>> =
+  {
+    CRITICAL_APPLICATION:
+      'This application is critical; do it from the lazyit chat, where it is confirmed with your password.',
+  };
 
 /** The first warning this channel refuses, if any. */
 export function channelRefusal(
@@ -131,7 +139,8 @@ export function assertChannelAllows(
   const code = channelRefusal(channel, warnings, refused);
   if (code) {
     throw new ForbiddenException(
-      `This action (${code}) is not available on the ${channel} channel; ask a person to do it in the lazyit chat or the app.`,
+      CHANNEL_REFUSAL_MESSAGES[code] ??
+        `This action (${code}) is not available on the ${channel} channel; do it from the lazyit chat.`,
     );
   }
 }

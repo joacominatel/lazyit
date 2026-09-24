@@ -25,7 +25,7 @@ const PENDING =
  *     `EXTERNAL_DEPROVISIONING` by trigger;
  *   - over MCP and headless no preview is built: a write that detects a critical application in `run`
  *     calls `assertChannelAllows(rt.ctx.channel, ['CRITICAL_APPLICATION'])` (core/pending-action.ts)
- *     before any side effect — a no-op today, the seam for a per-channel refusal;
+ *     before any side effect — it refuses with a 403 there (CEO decision 2026-09-24, "Rechazar");
  *   - run errors, step metadata and manual-task inputs and prompts go through `untrusted()`;
  *   - connection `defaultHeaders` values are redacted.
  */
