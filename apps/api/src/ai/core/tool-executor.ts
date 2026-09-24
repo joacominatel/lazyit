@@ -45,9 +45,17 @@ export class AiToolExecutor {
 
   constructor(private readonly dispatcher: AiToolDispatcher) {}
 
-  /** Parse `rawInput` with the tool's schema; an invalid input becomes an `INVALID_INPUT` result. */
+  /**
+   * Parse `rawInput` with the tool's schema, after the tool's own `normalizeInput` when it has one; an
+   * invalid input becomes an `INVALID_INPUT` result.
+   */
   validate(tool: RegisteredAiTool, rawInput: unknown): AiToolInputCheck {
-    const parsed = tool.descriptor.input.safeParse(rawInput);
+    const { descriptor } = tool;
+    const parsed = descriptor.input.safeParse(
+      descriptor.normalizeInput
+        ? descriptor.normalizeInput(rawInput)
+        : rawInput,
+    );
     if (parsed.success) {
       return { ok: true, input: parsed.data };
     }

@@ -221,6 +221,10 @@ describe('Anthropic provider through ChatModelPort', () => {
     expect(body.tools).toEqual([
       expect.objectContaining({ name: 'lazyit_search' }),
     ]);
+    // No strict flag: only OpenAI needs one said explicitly (#1403).
+    expect(
+      (body.tools as Array<Record<string, unknown>>)[0],
+    ).not.toHaveProperty('strict');
     expect(body.tool_choice).toEqual({ type: 'auto' });
   });
 

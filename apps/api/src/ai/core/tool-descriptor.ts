@@ -151,6 +151,12 @@ export interface AiToolDescriptor<
   awaitsInput?: boolean;
   /** Validated by the executor before any dispatch; its JSON Schema (`io: "input"`) is what channels list. */
   input: S;
+  /**
+   * Optional tolerance applied to the raw model input BEFORE `input` validates it (#1403): a pure,
+   * deterministic rewrite of harmless noise (a `null` or empty value meaning "absent", a property that does
+   * not apply). It never widens what the tool accepts semantically and never touches the listed schema.
+   */
+  normalizeInput?(raw: unknown): unknown;
   /** The handlers `run`/`preview` may call. `[0]` is primary: its `@RequirePermission` is the tool's. */
   bindings: readonly [HandlerRef, ...HandlerRef[]];
   run(input: z.output<S>, rt: AiToolRuntime): Promise<AiToolRunOutput<D>>;

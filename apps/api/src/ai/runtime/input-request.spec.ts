@@ -525,3 +525,35 @@ describe('request_input: limits of the pause', () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 });
+
+describe('request_input: a repeated failing form is stopped (#1403)', () => {
+  it('the second identical failure tells the model to ask in plain text; the third is not run', async () => {
+    const bad = { secret: true };
+    rt.model.push(
+      { toolCalls: [{ toolCallId: 'c1', toolName: ASK, input: bad }] },
+      { toolCalls: [{ toolCallId: 'c2', toolName: ASK, input: bad }] },
+      { toolCalls: [{ toolCallId: 'c3', toolName: ASK, input: bad }] },
+      { text: 'Which manufacturer and model are they?' },
+    );
+    const { runId, conversationId } = await chat();
+    await rt.drain();
+
+    expect(status(runId)).toBe('SUCCEEDED');
+    expect(rt.tools.invoked.filter((i) => i.name === ASK)).toHaveLength(2);
+    const [first, second, third] = toolMessages(conversationId).map(
+      (results) => results[0],
+    );
+    expect(first.output.error.hint).toBeUndefined();
+    expect(second.output.error.hint).toBe(
+      `This has failed the same way 2 times. Stop calling ${ASK}: ask the user for the data in plain ` +
+        'text in your reply instead.',
+    );
+    expect(third).toMatchObject({ isError: true });
+    expect(third.output.error).toMatchObject({
+      code: 'INVALID_INPUT',
+      message: `Not run: this exact ${ASK} call already failed 2 times in this turn`,
+      hint: second.output.error.hint as string,
+    });
+    expect(rt.prisma.tables.aiToolInvocation.rows).toHaveLength(0);
+  });
+});

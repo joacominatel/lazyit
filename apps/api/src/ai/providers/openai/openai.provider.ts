@@ -27,12 +27,16 @@ const NON_CHAT_MODEL =
  *   with `store: false` the SDK does not replay the search item, only the answer that cites it. It runs
  *   with `external_web_access: false` (cached / indexed content only): its `open_page` action cannot be
  *   disabled, and live access would let an injected URL reach a third party directly.
+ * - Tools are sent `strict: false` (#1403). The Responses API treats an omitted `strict` as strict mode,
+ *   and strict mode makes the model fill every property of a tool's input (options, bounds and filters
+ *   that do not apply). lazyit's tool schemas are loose by design and validated server-side.
  */
 export const openaiProvider: LlmProviderDefinition = {
   kind: 'openai',
   requiresApiKey: true,
   defaultBaseUrl: OPENAI_BASE_URL,
   errorPatterns: ERROR_PATTERNS,
+  toolStrict: false,
 
   createModel(config, modelId, fetch) {
     return createOpenAI({

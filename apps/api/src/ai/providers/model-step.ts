@@ -71,15 +71,20 @@ const logger = new Logger('AiProvider');
 // metadata through the Nest logger instead, so the SDK's own printing is turned off.
 (globalThis as { AI_SDK_LOG_WARNINGS?: unknown }).AI_SDK_LOG_WARNINGS = false;
 
-/** The provider-facing tool set: name, description and JSON Schema only — never an executor. */
+/**
+ * The provider-facing tool set: name, description and JSON Schema only — never an executor. `strict`
+ * is the provider's explicit strict-mode flag, when it needs one (`LlmProviderDefinition.toolStrict`).
+ */
 export function buildToolSet(
   tools: readonly ChatModelToolDefinition[],
+  options: { strict?: boolean } = {},
 ): ToolSet {
   const set: ToolSet = {};
   for (const definition of tools) {
     set[definition.name] = tool({
       description: definition.description,
       inputSchema: jsonSchema(definition.inputSchema as JSONSchema7),
+      ...(options.strict !== undefined ? { strict: options.strict } : {}),
     });
   }
   return set;
@@ -299,7 +304,7 @@ export async function runModelStep(
   );
   const settings = definition.callSettings(config, modelId);
   const signal = request.abortSignal;
-  const tools = buildToolSet(request.tools);
+  const tools = buildToolSet(request.tools, { strict: definition.toolStrict });
   const search = webSearchToolFor(definition, modelId, request);
   if (search) {
     tools[search.name] = search.tool;

@@ -23,12 +23,14 @@ import { AssetCategoriesController } from '../../asset-categories/asset-categori
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { LocationsController } from '../../locations/locations.controller';
 import { validateToolsets } from '../core/boot-validation';
+import { AiToolExecutor } from '../core/tool-executor';
 import type { AiToolRuntime, HttpShape } from '../core/tool-descriptor';
 import { ALL_TOOLSETS } from '.';
 import {
   buildInputForm,
   interactionToolset,
   looksLikeSecretRequest,
+  normalizeRequestInput,
   requestInput,
   requestInputSchema,
 } from './input-request.tools';
@@ -574,5 +576,304 @@ describe('request_input — options from lazyit lists, read as the user', () => 
     const out = await requestInput.run(input, fakeRt(new Map()));
     expect(out.summary).toBe('Asked for 2 fields');
     expect(out.data.form.groups[0]).toMatchObject({ minRows: 1, maxRows: 5 });
+  });
+});
+
+describe('request_input — tolerant of what providers actually send (#1403)', () => {
+  const registered = validateToolsets(ALL_TOOLSETS).find(
+    (tool) => tool.descriptor.name === 'request_input',
+  )!;
+  // `validate` is the executor's own gate (normalize, then parse); it never dispatches.
+  const executor = new AiToolExecutor({} as never);
+  const validate = (input: unknown) => executor.validate(registered, input);
+  const errorOf = (input: unknown) => {
+    const checked = validate(input);
+    if (checked.ok || checked.result.ok) throw new Error('expected a refusal');
+    return checked.result.error.message;
+  };
+
+  /**
+   * The shape OpenAI's Responses API produced on the dev server (gpt-6-luna, strict tools by default):
+   * every property of every field is filled — options, optionsFrom, min and max — whatever the kind.
+   * It failed with exactly the CEO's error, six times in a row.
+   */
+  const materialized = {
+    title: 'Datos de las laptops',
+    reason: 'Necesito el fabricante, el modelo y la ubicación para crearlas.',
+    fields: [
+      {
+        key: 'notes',
+        label: 'Notas',
+        kind: 'text',
+        importance: 'optional',
+        placeholder: 'Opcional',
+        help: 'Cualquier detalle',
+        options: ['N/A'],
+        optionsFrom: 'manufacturers',
+        min: 0,
+        max: 0,
+      },
+      {
+        key: 'manufacturer',
+        label: 'Fabricante',
+        kind: 'select',
+        importance: 'required',
+        placeholder: 'Elegí uno',
+        help: 'Del catálogo',
+        options: ['Apple', 'Dell'],
+        optionsFrom: 'manufacturers',
+        min: 0,
+        max: 0,
+      },
+      {
+        key: 'site',
+        label: 'Ubicación',
+        kind: 'select',
+        importance: 'recommended',
+        placeholder: 'Elegí una',
+        help: 'Dónde quedan',
+        options: ['HQ'],
+        optionsFrom: 'locations',
+        min: 0,
+        max: 0,
+      },
+    ],
+    groups: [],
+  };
+
+  it('the raw payload is what the screenshot showed (the strict schema alone refuses it)', () => {
+    const parsed = parse(materialized);
+    expect(parsed.success).toBe(false);
+    const paths = parsed.error!.issues.map((issue) => issue.path.join('.'));
+    expect(paths).toEqual(
+      expect.arrayContaining(['fields.0', 'fields.1', 'fields.2']),
+    );
+  });
+
+  it('is accepted once normalized: what does not apply is dropped, lazyit lists win', () => {
+    const checked = validate(materialized);
+    expect(checked.ok).toBe(true);
+    const input = (checked as { input: { fields: Record<string, unknown>[] } })
+      .input;
+    expect(input.fields[0]).toEqual({
+      key: 'notes',
+      label: 'Notas',
+      kind: 'text',
+      importance: 'optional',
+      placeholder: 'Opcional',
+      help: 'Cualquier detalle',
+    });
+    expect(input.fields[1]).toMatchObject({ optionsFrom: 'manufacturers' });
+    expect(input.fields[1]).not.toHaveProperty('options');
+    expect(input.fields[1]).not.toHaveProperty('min');
+    expect(input.fields[2]).toMatchObject({ optionsFrom: 'locations' });
+    expect(input.fields[2]).not.toHaveProperty('options');
+  });
+
+  it('null, blank strings and empty lists mean absent (OpenAI nullable / empty fill-ins)', () => {
+    const checked = validate({
+      ...base,
+      fields: [
+        {
+          key: 'count',
+          label: 'How many',
+          kind: 'number',
+          importance: 'required',
+          placeholder: '',
+          help: null,
+          options: [],
+          optionsFrom: null,
+          min: 1,
+          max: null,
+        },
+        {
+          key: 'kind',
+          label: 'Kind',
+          kind: 'multiselect',
+          importance: 'optional',
+          options: ['Laptop', '', { value: '', label: '' }, 'Desktop'],
+          optionsFrom: '',
+          min: null,
+          max: null,
+        },
+        {
+          key: 'when',
+          label: 'When',
+          kind: 'date',
+          importance: 'optional',
+          options: [''],
+          optionsFrom: '',
+          placeholder: '   ',
+        },
+      ],
+      groups: [
+        {
+          key: 'models',
+          label: 'Models',
+          help: '',
+          minRows: null,
+          maxRows: 5,
+          fields: [
+            {
+              key: 'name',
+              label: 'Model',
+              kind: 'text',
+              importance: 'required',
+              options: null,
+              min: 0,
+            },
+          ],
+        },
+      ],
+    });
+    expect(checked.ok).toBe(true);
+    const input = (
+      checked as {
+        input: {
+          fields: Record<string, unknown>[];
+          groups: Record<string, unknown>[];
+        };
+      }
+    ).input;
+    expect(input.fields[0]).toEqual({
+      key: 'count',
+      label: 'How many',
+      kind: 'number',
+      importance: 'required',
+      min: 1,
+    });
+    expect(input.fields[1].options).toEqual(['Laptop', 'Desktop']);
+    expect(input.fields[2]).toEqual({
+      key: 'when',
+      label: 'When',
+      kind: 'date',
+      importance: 'optional',
+    });
+    expect(input.groups[0]).toEqual({
+      key: 'models',
+      label: 'Models',
+      maxRows: 5,
+      fields: [
+        { key: 'name', label: 'Model', kind: 'text', importance: 'required' },
+      ],
+    });
+  });
+
+  it('keeps a number field’s bounds, and still refuses inverted ones with the fix', () => {
+    expect(
+      errorOf({
+        ...base,
+        fields: [
+          {
+            key: 'n',
+            label: 'N',
+            kind: 'number',
+            importance: 'required',
+            min: 10,
+            max: 1,
+          },
+        ],
+      }),
+    ).toBe(
+      'Invalid input: fields.0: (number) `min` (10) is above `max` (1): swap them or leave one out',
+    );
+  });
+
+  it('a select left without choices still fails, and the error says how to fix the call', () => {
+    const message = errorOf({
+      ...base,
+      fields: [
+        { key: 'a', label: 'A', kind: 'text', importance: 'required' },
+        {
+          key: 'site',
+          label: 'Site',
+          kind: 'select',
+          importance: 'required',
+          options: [],
+          optionsFrom: null,
+          min: 0,
+        },
+      ],
+    });
+    expect(message).toBe(
+      'Invalid input: fields.1: (select) needs its choices: add `options` (a list of strings) or ' +
+        '`optionsFrom` (one of manufacturers, assetCategories, locations, assetModels) — or ask with ' +
+        'kind "text" instead',
+    );
+  });
+
+  it('never guesses from an unknown kind, and never fills a missing required property', () => {
+    expect(
+      errorOf({
+        ...base,
+        fields: [
+          {
+            key: 'a',
+            label: 'A',
+            kind: 'string',
+            importance: 'required',
+            options: ['x'],
+          },
+        ],
+      }),
+    ).toMatch(/^Invalid input: fields\.0\.kind: /);
+    expect(
+      errorOf({
+        ...base,
+        fields: [{ key: 'a', label: '', kind: 'text', importance: 'required' }],
+      }),
+    ).toMatch(/fields\.0\.label/);
+    expect(errorOf({ ...base, fields: null, groups: [] })).toBe(
+      'Invalid input: The form has no field: put at least one field in `fields` or in a group',
+    );
+  });
+
+  it('a select with both sources keeps optionsFrom (documented rule), and the whole call still builds', async () => {
+    const checked = validate({
+      ...base,
+      fields: [
+        {
+          key: 'site',
+          label: 'Site',
+          kind: 'select',
+          importance: 'required',
+          options: ['HQ'],
+          optionsFrom: 'locations',
+        },
+      ],
+    });
+    expect(checked.ok).toBe(true);
+    const rt = fakeRt(
+      new Map<Type<unknown>, () => unknown>([
+        [
+          LocationsController,
+          () => ({ items: [{ id: 'loc1', name: 'Main office' }], total: 1 }),
+        ],
+      ]),
+    );
+    const { form } = await buildInputForm(
+      (checked as { input: Parameters<typeof buildInputForm>[0] }).input,
+      rt,
+    );
+    expect(form.fields[0]).toMatchObject({
+      optionsFrom: 'locations',
+      options: [{ value: 'loc1', label: 'Main office' }],
+    });
+  });
+
+  it('normalizes without throwing on anything, and leaves non-objects to validation', () => {
+    for (const raw of [null, undefined, 'x', 3, [], { fields: 'x' }]) {
+      expect(() => normalizeRequestInput(raw)).not.toThrow();
+    }
+    expect(normalizeRequestInput('x')).toBe('x');
+  });
+
+  it('the listed schema tells the model which properties belong to which kind', () => {
+    const text = JSON.stringify(registered.inputSchema);
+    expect(text).toContain('select / multiselect ONLY');
+    expect(text).toContain('number ONLY');
+    expect(registered.descriptor.description).toContain(
+      'Give each field only the properties of its kind',
+    );
   });
 });
