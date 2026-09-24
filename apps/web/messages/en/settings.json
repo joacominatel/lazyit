@@ -37,6 +37,10 @@
     "instance": {
       "title": "Instance",
       "description": "Review how this lazyit instance is configured — identity provider, setup state and runtime posture."
+    },
+    "ai": {
+      "title": "AI assistant",
+      "description": "Set up the opt-in AI assistant — provider, model and key — and let external AI agents such as Claude Code connect over MCP."
     }
   },
   "instance": {
@@ -663,7 +667,8 @@
       "testIt": "How to test",
       "rotateToken": "Rotate token",
       "revoke": "Revoke",
-      "openActions": "Open actions"
+      "openActions": "Open actions",
+      "aiAccess": "AI access"
     },
     "revokeExplanation": "Its token stops authenticating immediately. You can restore it from the “Show revoked” view (rotate to mint a fresh token). Revoking suspends the token but does not remove vault access — use the vault's Members list to revoke per vault and remove key material.",
     "toast": {
@@ -750,6 +755,44 @@
       "hostNote": "Host comes from your API URL. In dev, routes are bare (e.g. /assets). Behind the reverse proxy in production, the public path is /api/* (e.g. /api/assets).",
       "openApi": "Browse the full API (OpenAPI)",
       "openApiProd": "The OpenAPI explorer is available only in development; it is not exposed publicly in production."
+    },
+    "aiAccess": {
+      "title": "AI access — {name}",
+      "description": "What this service account may do through the AI assistant's headless API and over MCP. This only narrows what its permissions already allow; it never grants one.",
+      "levelLabel": "AI access",
+      "levels": {
+        "off": {
+          "label": "Off",
+          "description": "No AI use at all: headless runs and MCP are refused for this account."
+        },
+        "read-only": {
+          "label": "Read only",
+          "description": "The assistant may only read, with the tools this account's permissions allow."
+        },
+        "read-write": {
+          "label": "Read and write",
+          "description": "The assistant may also make changes — without anyone approving them — within this account's permissions. The default for an account never configured."
+        }
+      },
+      "cap": {
+        "toggle": "Limit writes",
+        "description": "Cap the changes the assistant may make for this account: per headless run, and — since MCP has no runs — per rolling hour over MCP.",
+        "label": "Maximum writes",
+        "hint": "Per headless run; over MCP, per rolling hour.",
+        "invalid": "Enter a whole number, at least 1."
+      },
+      "notes": {
+        "infraReport": "This account holds “Report server inventory (agent)”, the agents' reporting credential. lazyit refuses AI use for such an account whatever is chosen here — create a separate account for AI.",
+        "noAiUse": "It does not hold “Use the AI assistant”, so headless AI runs are refused until you grant it (Edit).",
+        "noAiConnect": "It does not hold “Connect external AI agents (MCP)”, so MCP is refused until you grant it (Edit)."
+      },
+      "saved": "AI access saved for {name}",
+      "errors": {
+        "load": "The AI access could not be loaded.",
+        "notFound": "This account was not found — it may have been revoked, or this API does not have the AI assistant yet.",
+        "forbidden": "You no longer have permission to manage AI settings.",
+        "save": "The AI access could not be saved"
+      }
     },
     "permissionPicker": {
       "sectionAria": "{label} permissions",

@@ -37,6 +37,10 @@
     "instance": {
       "title": "Instancia",
       "description": "Revisa cómo está configurada esta instancia de lazyit — proveedor de identidad, estado de configuración y postura de ejecución."
+    },
+    "ai": {
+      "title": "Asistente de IA",
+      "description": "Configura el asistente de IA opcional — proveedor, modelo y clave — y permite que agentes de IA externos como Claude Code se conecten por MCP."
     }
   },
   "instance": {
@@ -663,7 +667,8 @@
       "testIt": "Cómo probarla",
       "rotateToken": "Rotar token",
       "revoke": "Revocar",
-      "openActions": "Abrir acciones"
+      "openActions": "Abrir acciones",
+      "aiAccess": "Acceso a IA"
     },
     "revokeExplanation": "Su token deja de autenticar de inmediato. Puedes restaurarla desde la vista «Mostrar revocadas» (rota para generar un token nuevo). Revocar suspende el token pero no elimina el acceso a las bóvedas — usa la lista de Miembros de la bóveda para revocar por bóveda y eliminar el material de clave.",
     "toast": {
@@ -750,6 +755,44 @@
       "hostNote": "El host proviene de tu URL de la API. En desarrollo, las rutas son directas (p. ej. /assets). Detrás del proxy inverso en producción, la ruta pública es /api/* (p. ej. /api/assets).",
       "openApi": "Explorar la API completa (OpenAPI)",
       "openApiProd": "El explorador OpenAPI solo está disponible en desarrollo; no se expone públicamente en producción."
+    },
+    "aiAccess": {
+      "title": "Acceso a IA — {name}",
+      "description": "Qué puede hacer esta cuenta de servicio a través de la API sin interfaz del asistente de IA y por MCP. Esto solo restringe lo que sus permisos ya permiten; nunca otorga uno.",
+      "levelLabel": "Acceso a IA",
+      "levels": {
+        "off": {
+          "label": "Desactivado",
+          "description": "Ningún uso de IA: las ejecuciones sin interfaz y MCP se rechazan para esta cuenta."
+        },
+        "read-only": {
+          "label": "Solo lectura",
+          "description": "El asistente solo puede leer, con las herramientas que permiten los permisos de esta cuenta."
+        },
+        "read-write": {
+          "label": "Lectura y escritura",
+          "description": "El asistente también puede hacer cambios — sin que nadie los apruebe — dentro de los permisos de esta cuenta. Es el valor por defecto de una cuenta nunca configurada."
+        }
+      },
+      "cap": {
+        "toggle": "Limitar escrituras",
+        "description": "Limita los cambios que el asistente puede hacer para esta cuenta: por ejecución sin interfaz y — como MCP no tiene ejecuciones — por hora móvil en MCP.",
+        "label": "Máximo de escrituras",
+        "hint": "Por ejecución sin interfaz; en MCP, por hora móvil.",
+        "invalid": "Escribe un número entero, al menos 1."
+      },
+      "notes": {
+        "infraReport": "Esta cuenta tiene “Reportar inventario de servidores (agente)”, la credencial de reporte de los agentes. lazyit rechaza el uso de IA para una cuenta así elijas lo que elijas aquí — crea una cuenta aparte para IA.",
+        "noAiUse": "No tiene “Usar el asistente de IA”, así que las ejecuciones de IA sin interfaz se rechazan hasta que se lo otorgues (Editar).",
+        "noAiConnect": "No tiene “Conectar agentes de IA externos (MCP)”, así que MCP se rechaza hasta que se lo otorgues (Editar)."
+      },
+      "saved": "Acceso a IA guardado para {name}",
+      "errors": {
+        "load": "No se pudo cargar el acceso a IA.",
+        "notFound": "No se encontró esta cuenta — puede haber sido revocada, o esta API todavía no tiene el asistente de IA.",
+        "forbidden": "Ya no tienes permiso para administrar la configuración de IA.",
+        "save": "No se pudo guardar el acceso a IA"
+      }
     },
     "permissionPicker": {
       "sectionAria": "Permisos de {label}",
