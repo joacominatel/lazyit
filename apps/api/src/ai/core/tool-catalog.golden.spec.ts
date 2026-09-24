@@ -274,6 +274,55 @@ const GOLDEN = {
     class: 'write',
     channels: ['CHAT', 'MCP', 'HEADLESS'],
   },
+  // ── kb (W2-8) ──
+  // The article write routes admit a Service Account at the guard (no HumanOnlyGuard) and the service
+  // refuses it with 403 (an article author is a human, R25): listed for an SA holding article:write,
+  // refused on call — exactly the route's behaviour.
+  kb_create_article: {
+    route: 'POST /articles',
+    permissions: ['article:write'],
+    roles: ['ADMIN', 'MEMBER'],
+    humans: true,
+    serviceAccounts: true,
+    class: 'write',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
+  kb_get_article: {
+    route: 'GET /articles/:id',
+    permissions: ['article:read'],
+    roles: ['ADMIN', 'MEMBER', 'VIEWER'],
+    humans: true,
+    serviceAccounts: true,
+    class: 'read',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
+  kb_search: {
+    route: 'GET /articles',
+    permissions: ['article:read'],
+    roles: ['ADMIN', 'MEMBER', 'VIEWER'],
+    humans: true,
+    serviceAccounts: true,
+    class: 'read',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
+  kb_set_publication: {
+    route: 'POST /articles/:id/publish',
+    permissions: ['article:write'],
+    roles: ['ADMIN', 'MEMBER'],
+    humans: true,
+    serviceAccounts: true,
+    class: 'write',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
+  kb_update_article: {
+    route: 'PATCH /articles/:id',
+    permissions: ['article:write'],
+    roles: ['ADMIN', 'MEMBER'],
+    humans: true,
+    serviceAccounts: true,
+    class: 'write',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
   // ── infra (W2-10) ──
   infra_node_get: {
     route: 'GET /infra/nodes/:id',
