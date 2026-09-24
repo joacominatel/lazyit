@@ -6,6 +6,8 @@ import { approval } from "@/lib/ai/test-fixtures";
 import en from "@/messages/en/ai.json";
 import es from "@/messages/es/ai.json";
 import shared from "@/messages/en/shared.json";
+import assetsEn from "@/messages/en/assets.json";
+import assetsEs from "@/messages/es/assets.json";
 import { AiApprovalCard, approvalStage, isPasswordSubmitKey } from "./ai-approval-card";
 
 type ApprovalPart = Extract<AiMessagePart, { type: "approval" }>;
@@ -14,7 +16,7 @@ function render(part: ApprovalPart, locale: "en" | "es" = "en", callStatus?: str
   return renderToStaticMarkup(
     <NextIntlClientProvider
       locale={locale}
-      messages={{ ai: locale === "en" ? en : es, shared }}
+      messages={{ ai: locale === "en" ? en : es, shared, assets: locale === "en" ? assetsEn : assetsEs }}
       timeZone="UTC"
     >
       <AiApprovalCard
@@ -94,6 +96,50 @@ describe("AiApprovalCard", () => {
     const html = render({ type: "approval", request: req, outcome: null });
     expect(html).not.toContain("hunter2");
     expect(html).toContain(en.approval.redacted);
+  });
+
+  test("a batch's rows render as a table: labelled columns, skipped rows, linked duplicates, flat defaults", () => {
+    const req = approval("b1", { preview: {
+      ...approval("b1").preview,
+      toolName: "asset_create_batch",
+      target: undefined,
+      warnings: [],
+      changes: [
+        { field: "action", after: "Create 1 of 2 assets; 1 row skipped as requested." },
+        { field: "defaultsApplied", after: ["status: IN_STORAGE (1 of 1 rows)"], valueKind: "text" },
+        { field: "duplicatesUnchecked", after: true, valueKind: "boolean" },
+        {
+          field: "rows",
+          valueKind: "text",
+          after: [
+            { row: 1, name: "MBP-01", assetTag: "LZ-1", serial: null, status: "IN_STORAGE", statusDefaulted: true,
+              model: null, category: null, location: { type: "location", id: "l1", label: "HQ" },
+              skipped: false, valid: true, errors: [], duplicates: [] },
+            { row: 2, name: "<b>MBP-02</b>", assetTag: "LZ-9", serial: null, status: "OPERATIONAL",
+              model: null, category: null, location: null, skipped: true, valid: false,
+              errors: ['assetTag "LZ-9" already belongs to LZ-9'],
+              duplicates: [{ field: "assetTag", value: "LZ-9", existing: { type: "asset", id: "a9", label: "LZ-9" } }] },
+          ],
+        },
+      ],
+    } });
+    for (const [locale, catalog] of [["en", en], ["es", es]] as const) {
+      const html = render({ type: "approval", request: req, outcome: null }, locale);
+      expect(html).toContain("<table");
+      expect(html).toContain(`>${catalog.fields.assetTag}</th>`);
+      expect(html).toContain(`>${catalog.approval.table.problems}</th>`);
+      expect(html).toContain(catalog.approval.table.willBeSkipped.replace(/'/g, "&#x27;"));
+      expect(html).toContain(catalog.approval.table.onlyProblems.replace("{count}", "1"));
+      expect(html).toContain(catalog.approval.notices.duplicatesUnchecked.replace(/'/g, "&#x27;"));
+    }
+    const html = render({ type: "approval", request: req, outcome: null });
+    expect(html).toContain('href="/assets/a9"');
+    expect(html).toContain('href="/locations/l1"');
+    expect(html).toContain("&lt;b&gt;MBP-02&lt;/b&gt;");
+    expect(html).toContain(`${assetsEn.status.IN_STORAGE}</span><span class="ml-1 text-muted-foreground">(default)`);
+    expect(html).toContain("status: IN_STORAGE (1 of 1 rows)");
+    // The duplicate sentence is not repeated under its structured, linked form.
+    expect(html).not.toContain("already belongs to LZ-9");
   });
 
   test("decided cards have no buttons", () => {

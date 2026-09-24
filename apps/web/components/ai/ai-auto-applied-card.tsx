@@ -1,7 +1,7 @@
 "use client";
 
 import type { AiMessagePart, AiToolInvocationStatus } from "@lazyit/shared";
-import { BoltIcon } from "@heroicons/react/24/outline";
+import { BoltIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
@@ -13,6 +13,7 @@ import { plainText } from "@/lib/ai/untrusted-text";
 import { cn } from "@/lib/utils";
 import { ApprovalValue, approvalStage, type ApprovalStage } from "./ai-approval-card";
 import { useEntityTypeLabel, usePreviewFieldLabel } from "./ai-labels";
+import { AiPreviewTable } from "./ai-preview-table";
 
 type ApprovalPart = Extract<AiMessagePart, { type: "approval" }>;
 
@@ -46,6 +47,9 @@ export function AiAutoAppliedCard({
 
   const preview = part.request.preview;
   const model = presentPreview(preview);
+  // A list of records (a batch's rows, #1387) is a table below the field rows, not a field row.
+  const fieldRows = model.rows.filter((row) => row.records === undefined);
+  const tableRows = model.rows.filter((row) => row.records !== undefined);
   const stage = approvalStage(part.outcome, callStatus, null);
   const target = preview.target;
   const targetHref = target ? entityHref(target) : null;
@@ -81,9 +85,9 @@ export function AiAutoAppliedCard({
             )}
           </p>
         )}
-        {model.rows.length > 0 && (
+        {fieldRows.length > 0 && (
           <dl className="divide-y divide-border border-y border-border">
-            {model.rows.map((row, index) => (
+            {fieldRows.map((row, index) => (
               <div key={`${row.field}-${index}`} className="grid grid-cols-[minmax(0,2fr)_minmax(0,5fr)] gap-2 py-1">
                 <dt className="text-muted-foreground">{fieldLabel(row.field)}</dt>
                 <dd className="min-w-0">
@@ -103,6 +107,17 @@ export function AiAutoAppliedCard({
             ))}
           </dl>
         )}
+
+        {model.notices.map((notice) => (
+          <p key={notice} role="note" className="flex items-start gap-1.5 rounded-sm bg-muted/50 px-1.5 py-1 text-xs">
+            <ExclamationTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-warning-text" aria-hidden />
+            {t(`notices.${notice}`)}
+          </p>
+        ))}
+
+        {tableRows.map((row, index) => (
+          <AiPreviewTable key={`${row.field}-${index}`} field={row.field} records={row.records!} />
+        ))}
         {preview.warnings.length > 0 && (
           <ul className="space-y-0.5 text-muted-foreground">
             {preview.warnings.map((code) => (

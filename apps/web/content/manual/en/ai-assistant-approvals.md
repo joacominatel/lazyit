@@ -88,6 +88,60 @@ Other things you may see:
 | This change was already decided | You (or another window of yours) already approved or rejected it. |
 | The AI assistant was turned off | An administrator turned the assistant off; the change can't be approved from the chat. |
 
+## Creating many assets at once
+
+When you give the assistant a list — "add these 40 laptops", a pasted spreadsheet — it proposes **one card
+for the whole batch** (up to 200 assets) instead of 40 separate cards. You approve or reject the batch as a
+whole.
+
+The card shows:
+
+- **What will happen**, in one sentence — for example *"Create 16 of 17 assets; 1 row skipped as
+  requested."*
+- **A summary** — how many rows there are, how many will be created, how many are skipped, and any
+  **defaults applied** (see below).
+- **A table**, one row per asset: the row number, name, asset tag, serial number, model, category,
+  location and status, plus a **Problems** column. The table scrolls inside the card; on a phone, swipe it
+  sideways. Turn on **Only rows with problems** to hide the rows that are fine.
+
+**Skipped rows.** A row marked **Skipped — won't be applied** is shown so you can see what was left out and
+why (its reasons are in the **Problems** column), but it is **never created** — not even if the problem goes
+away before you approve. The assistant only skips a row when it has told you so; a list where a row still
+has an unresolved problem (a model that doesn't exist yet, a duplicate tag) is not proposed at all until
+the assistant fixes it or skips that row. So every row on the card that is not skipped was checked and
+ready when the card was built, and those rows — and only those — are created when you approve.
+
+**Duplicates.** If an asset tag or serial number already belongs to an existing asset, the **Problems**
+column says so and links to that asset. A value repeated between two rows of the same list is shown the
+same way ("… is also used by row 3"). If the duplicate check could not be completed — you can't read every
+asset, or a tag or serial number contains a comma and couldn't be looked up — the card says so: a row whose tag or serial is already taken is then refused when it runs, and the others still
+run.
+
+**Default status.** A new asset created by the assistant without a status starts as **In storage** (new
+stock). The card marks such values **(default)** and lists them under **Defaults applied**. If that's not
+what you want, reject the card and tell the assistant the status to use.
+
+When the batch runs, each asset is created on its own, exactly as if you had created it by hand. If one row
+is refused at that point, the others still run and the assistant tells you which row failed and why.
+
+## Categories, models and locations
+
+The assistant can also keep your classification tidy, always through a card:
+
+- **Categories** — create, rename or edit asset, application and consumable categories, and archive one
+  you no longer use (**category_create**, **category_update**, **category_archive**). Knowledge-base
+  folders are handled separately.
+- **Asset models** — edit, archive and restore a model (**asset_model_update**, **asset_model_archive**,
+  **asset_model_restore**).
+- **Locations** — edit (including moving one under another parent), archive and restore a location
+  (**location_update**, **location_archive**, **location_restore**).
+
+An **archive** card carries the *"Archives it. It can be restored later."* warning and says what still uses
+the item — for example *"Also affects 12 assets"*, with a few of them named. If you're not allowed to see
+some of those records, the card's **Used by** row says *"Unknown to you: …"* for them instead of showing zero: the item may
+still be in use by records you can't see. Archived categories can't be restored from the chat; restore
+them from **Settings → Taxonomies**.
+
 ## Auto-approve
 
 If you trust the assistant with routine work in a chat, you can let it apply **basic changes** without a
@@ -99,6 +153,8 @@ While it is on:
 - **Basic edits apply right away** — creating or updating an asset, an article, a consumable and similar.
   They run with your account and your permissions, exactly as if you had approved them, and show in the chat
   as a compact **Applied automatically** record with the item, a link to it and the before → after values.
+  A [batch of new assets](#creating-many-assets-at-once) is a basic change too: with auto-approve on, the
+  whole list (up to 200 assets) is created without a card, and the record shows its table.
 - **Anything critical still shows a card and waits for you**: roles, identity and sign-in, access grants,
   credentials, applications marked critical, sensitive changes (the ones marked *Sensitive change*) and
   anything that needs your password.
