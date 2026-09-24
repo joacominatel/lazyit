@@ -19,7 +19,6 @@ export const accessToolset: AiToolset = {
       ApplicationsController,
       [
         'findAll',
-        'findOne',
         'findGrants',
         'findArticles',
         'create',
