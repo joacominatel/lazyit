@@ -169,7 +169,7 @@ export function AiCredentialsFields({
                 ? t("apiKey.placeholderRequired")
                 : t("apiKey.placeholderOptional")
           }
-          autoComplete="new-password"
+          autoComplete="off"
           spellCheck={false}
         />
         <FieldDescription>

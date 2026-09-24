@@ -21,8 +21,8 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
-  useTestAiConnection,
-  useUpdateAiConfig,
+  useAiConfigSave,
+  useAiConnectionTest,
 } from "@/lib/api/hooks/use-ai-config";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
@@ -62,19 +62,20 @@ export function AiSetupWizard({ settings }: { settings: AiSettings }) {
   const [step, setStep] = useState<AiWizardStep>(() => initialWizardStep(settings));
   const [draft, setDraft] = useState<ConnectionDraft>(() => draftFromSettings(settings));
   const [acknowledged, setAcknowledged] = useState(false);
-  const save = useUpdateAiConfig();
-  const test = useTestAiConnection();
+  const save = useAiConfigSave();
+  const test = useAiConnectionTest();
 
   const index = AI_WIZARD_STEPS.indexOf(step);
   const descriptor = AI_PROVIDER_DESCRIPTORS[draft.provider];
   const disclosureDone = settings.disclosureAcknowledgedAt !== null;
 
   function go(next: AiWizardStep) {
-    save.reset();
+    save.clearError();
     setStep(next);
   }
 
   function update(patch: Partial<ConnectionDraft>) {
+    save.clearError();
     setDraft((current) =>
       patch.provider ? switchProvider(current, patch.provider, settings) : { ...current, ...patch },
     );
@@ -82,24 +83,22 @@ export function AiSetupWizard({ settings }: { settings: AiSettings }) {
 
   /** Save the draft connection as a disabled configuration, then move on. The typed key is dropped. */
   function saveDraft(next: AiWizardStep) {
-    save.mutate(buildUpdate(settings, { ...draftToPatch(draft), enabled: false }), {
-      onSuccess: () => {
-        setDraft((current) => ({ ...current, apiKey: "" }));
-        test.reset();
-        setStep(next);
-      },
+    save.save(buildUpdate(settings, { ...draftToPatch(draft), enabled: false }), () => {
+      setDraft((current) => ({ ...current, apiKey: "" }));
+      test.clear();
+      setStep(next);
     });
   }
 
   function enable() {
-    save.mutate(
+    save.save(
       buildUpdate(settings, {
         enabled: true,
         acknowledgeDisclosure: disclosureDone ? undefined : true,
       }),
       // A HARD reload on purpose (frontend.md Fork E): it resets every client state, the chat included.
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      { onSuccess: () => window.location.assign(ENABLED_URL) },
+      () => window.location.assign(ENABLED_URL),
     );
   }
 
@@ -168,13 +167,13 @@ export function AiSetupWizard({ settings }: { settings: AiSettings }) {
             <Button
               type="button"
               variant="outline"
-              onClick={() => test.mutate({})}
+              onClick={() => test.run({})}
               disabled={test.isPending}
             >
               {test.isPending ? <ArrowPathIcon className="animate-spin" /> : <BeakerIcon />}
-              {test.data ? t("test.again") : t("test.run")}
+              {test.result ? t("test.again") : t("test.run")}
             </Button>
-            {test.data ? <AiTestResult result={test.data} /> : null}
+            {test.result ? <AiTestResult result={test.result} /> : null}
             <AiErrorNotice error={test.error} />
           </div>
         ) : null}
@@ -274,8 +273,8 @@ export function AiSetupWizard({ settings }: { settings: AiSettings }) {
           <Button
             type="button"
             onClick={() => go("enable")}
-            disabled={!test.data?.ok}
-            title={test.data?.ok ? undefined : t("test.continueHint")}
+            disabled={!test.result?.ok}
+            title={test.result?.ok ? undefined : t("test.continueHint")}
           >
             {t("next")}
           </Button>

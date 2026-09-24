@@ -21,7 +21,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { useUpdateAiConfig } from "@/lib/api/hooks/use-ai-config";
+import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config";
 import { buildUpdate } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
 
@@ -34,14 +34,15 @@ import { AiErrorNotice } from "./ai-error-notice";
 export function AiDangerZone({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.danger");
   const [open, setOpen] = useState(false);
-  const save = useUpdateAiConfig();
+  const save = useAiConfigSave();
 
   function turnOff() {
-    save.mutate(buildUpdate(settings, { enabled: false }), {
+    save.save(
+      buildUpdate(settings, { enabled: false }),
       // A HARD reload on purpose (frontend.md Fork E): it resets every client state, the chat included.
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      onSuccess: () => window.location.assign("/settings/ai"),
-    });
+      () => window.location.assign("/settings/ai"),
+    );
   }
 
   return (

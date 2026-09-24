@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import type {
   AiConnectionDraft,
+  AiConnectionTestResult,
   AiServiceAccountSettings,
   UpdateAiSettings,
 } from "@lazyit/shared";
@@ -44,6 +46,8 @@ export function useUpdateAiConfig() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: UpdateAiSettings) => updateAiConfig(body),
+    // The body may carry the provider key: drop the finished mutation from the cache at once.
+    gcTime: 0,
     onSuccess: (saved) => {
       queryClient.setQueryData(aiConfigKeys.single(), saved);
       void queryClient.invalidateQueries({ queryKey: aiKeys.status() });
@@ -55,6 +59,8 @@ export function useUpdateAiConfig() {
 export function useTestAiConnection() {
   return useMutation({
     mutationFn: (draft: AiConnectionDraft) => testAiConnection(draft),
+    // The draft may carry a typed provider key: never keep it in the mutation cache.
+    gcTime: 0,
   });
 }
 
@@ -90,4 +96,58 @@ export function useUpdateAiServiceAccountSettings(serviceAccountId: string) {
       );
     },
   });
+}
+
+/**
+ * Key hygiene for the forms that may send the provider key (G4 review F1). A TanStack mutation keeps its
+ * `variables` — the request body, key included — until it is reset and garbage-collected. These wrappers
+ * copy what the UI needs (the error, the test result) into component state and `reset()` the mutation as
+ * soon as it settles, so with `gcTime: 0` the body is dropped from memory right after the request.
+ */
+export function useAiConfigSave() {
+  const mutation = useUpdateAiConfig();
+  const { mutate, reset } = mutation;
+  const [error, setError] = useState<unknown>(null);
+
+  const save = useCallback(
+    (body: UpdateAiSettings, onSuccess?: () => void) => {
+      setError(null);
+      mutate(body, {
+        onSuccess: () => onSuccess?.(),
+        onError: (err) => setError(err),
+        onSettled: () => reset(),
+      });
+    },
+    [mutate, reset],
+  );
+  const clearError = useCallback(() => setError(null), []);
+
+  return { save, isPending: mutation.isPending, error, clearError };
+}
+
+/** {@link useAiConfigSave}'s counterpart for `POST /config/ai/test`. */
+export function useAiConnectionTest() {
+  const mutation = useTestAiConnection();
+  const { mutate, reset } = mutation;
+  const [result, setResult] = useState<AiConnectionTestResult | null>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  const run = useCallback(
+    (draft: AiConnectionDraft) => {
+      setResult(null);
+      setError(null);
+      mutate(draft, {
+        onSuccess: (data) => setResult(data),
+        onError: (err) => setError(err),
+        onSettled: () => reset(),
+      });
+    },
+    [mutate, reset],
+  );
+  const clear = useCallback(() => {
+    setResult(null);
+    setError(null);
+  }, []);
+
+  return { run, isPending: mutation.isPending, result, error, clear };
 }

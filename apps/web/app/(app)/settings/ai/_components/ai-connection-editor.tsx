@@ -28,8 +28,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  useTestAiConnection,
-  useUpdateAiConfig,
+  useAiConfigSave,
+  useAiConnectionTest,
 } from "@/lib/api/hooks/use-ai-config";
 import {
   buildUpdate,
@@ -58,8 +58,8 @@ export function AiConnectionEditor({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.editor.connection");
   const id = useId();
   const [draft, setDraft] = useState<ConnectionDraft>(() => draftFromSettings(settings));
-  const save = useUpdateAiConfig();
-  const test = useTestAiConnection();
+  const save = useAiConfigSave();
+  const test = useAiConnectionTest();
 
   // Re-seed from the persisted truth after every save (and when another admin's change is read) —
   // adjusted during render, React's pattern for state derived from a changed prop.
@@ -75,18 +75,17 @@ export function AiConnectionEditor({ settings }: { settings: AiSettings }) {
       JSON.stringify(draftToPatch(draftFromSettings(settings)));
 
   function update(patch: Partial<ConnectionDraft>) {
-    test.reset();
+    test.clear();
+    save.clearError();
     setDraft((current) =>
       patch.provider ? switchProvider(current, patch.provider, settings) : { ...current, ...patch },
     );
   }
 
   function onSave() {
-    save.mutate(buildUpdate(settings, { ...draftToPatch(draft), enabled: true }), {
-      onSuccess: () => {
-        test.reset();
-        toast.success(t("saved"));
-      },
+    save.save(buildUpdate(settings, { ...draftToPatch(draft), enabled: true }), () => {
+      test.clear();
+      toast.success(t("saved"));
     });
   }
 
@@ -120,14 +119,14 @@ export function AiConnectionEditor({ settings }: { settings: AiSettings }) {
         </Field>
         <AiCredentialsFields settings={settings} draft={draft} onChange={update} />
         <AiModelFields draft={draft} onChange={update} />
-        {test.data ? <AiTestResult result={test.data} /> : null}
+        {test.result ? <AiTestResult result={test.result} /> : null}
         <AiErrorNotice error={test.error ?? save.error} />
       </CardContent>
       <CardFooter className="flex flex-wrap justify-end gap-2">
         <Button
           type="button"
           variant="outline"
-          onClick={() => test.mutate(draftToTest(draft))}
+          onClick={() => test.run(draftToTest(draft))}
           disabled={test.isPending || !isDraftSavable(settings, draft, { requireModel: true })}
         >
           {test.isPending ? <ArrowPathIcon className="animate-spin" /> : <BeakerIcon />}
