@@ -83,6 +83,12 @@ describe("isRecordArray / presentPreview", () => {
     expect(model.notices).toEqual([]);
   });
 
+  test("a redacted list of records is never a table", () => {
+    const model = presentPreview({ changes: [{ field: "rows", after: batchRows, valueKind: "redacted" }] });
+    expect(model.rows[0]!.records).toBeUndefined();
+    expect(model.rows[0]!.after).toEqual({ kind: "redacted" });
+  });
+
   test("duplicatesUnchecked: true is a notice, not a field row; false says nothing", () => {
     const on = presentPreview({ changes: [{ field: "duplicatesUnchecked", after: true, valueKind: "boolean" }] });
     expect(on.notices).toEqual(["duplicatesUnchecked"]);

@@ -127,7 +127,8 @@ export function presentPreview(preview: Pick<AiActionPreview, "changes">): Previ
       before:
         change.before === undefined ? null : formatPreviewValue(change.before, change.valueKind),
       after: formatPreviewValue(change.after, change.valueKind),
-      ...(isRecordArray(change.after) ? { records: change.after } : {}),
+      // A redacted value never reaches the table: its records are dropped with it.
+      ...(change.valueKind !== "redacted" && isRecordArray(change.after) ? { records: change.after } : {}),
     });
   }
   return { action, rows, notices };
