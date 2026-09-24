@@ -3,6 +3,7 @@ import { Injectable, Logger, type Type } from '@nestjs/common';
 import type { AiActionPreview, AiToolResult } from '@lazyit/shared';
 import { mapToolError } from './error-mapper';
 import { runInAiInvocation } from './invocation-context';
+import { resolveReference } from './reference-resolver';
 import { callKindOf, errorResult, successResult } from './result-shaper';
 import { AiToolDispatcher } from './tool-dispatcher';
 import type {
@@ -124,7 +125,13 @@ export class AiToolExecutor {
       },
       () => descriptor.preview!(input, rt),
     );
-    return { ...preview, toolName: descriptor.name, class: toolClass };
+    // The class is a floor (synthesis §4.1): a preview may escalate to `elevated`, never below the class.
+    return {
+      ...preview,
+      toolName: descriptor.name,
+      class: toolClass,
+      elevated: preview.elevated || toolClass === 'elevated',
+    };
   }
 
   private runtime(
@@ -154,6 +161,7 @@ export class AiToolExecutor {
         }
         return dispatcher.dispatch(ref, ctx.identity, shape) as never;
       },
+      resolve: resolveReference,
     };
   }
 
