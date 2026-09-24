@@ -6,6 +6,8 @@ import {
 import { buildMcpInstructions } from '../../ai/prompt/system-prompt';
 import {
   PluginRenderError,
+  assertNoPreprocessedSequences,
+  marketplaceName,
   type PluginToolEntry,
   renderMarketplace,
   renderPluginArchive,
@@ -230,7 +232,7 @@ describe('Claude Code plugin renderer', () => {
       ['a plugin-root substitution', 'Reads ${CLAUDE_PLUGIN_ROOT}.'],
       ['a skill argument placeholder', 'Uses $ARGUMENTS.'],
       ['a positional placeholder', 'Uses $1 here.'],
-      ['shell injection', 'Runs !`id` on load.'],
+      ['inline shell injection', 'Runs !`id` on load.'],
     ])('refuses to render %s in the tool index', (_label, description) => {
       expect(() =>
         renderPluginFiles({
@@ -242,7 +244,45 @@ describe('Claude Code plugin renderer', () => {
     });
   });
 
+  describe('fail-closed content guard — fenced shell blocks', () => {
+    // A multi-line block only reaches the output through a template (tool text is flattened to one line),
+    // so the guard itself is exercised on rendered files.
+    it.each([
+      ['a fenced block', 'Intro.\n```!\nid\n```\n'],
+      ['an indented, longer fence', 'Intro.\n  ````!\nid\n````\n'],
+    ])('refuses %s opened with ```!', (_label, content) => {
+      expect(() =>
+        assertNoPreprocessedSequences([
+          { path: 'skills/lazyit/SKILL.md', content },
+        ]),
+      ).toThrow(PluginRenderError);
+    });
+
+    it('accepts an ordinary fenced code block', () => {
+      expect(() =>
+        assertNoPreprocessedSequences([
+          { path: 'skills/lazyit/SKILL.md', content: '```json\n{}\n```\n' },
+        ]),
+      ).not.toThrow();
+    });
+  });
+
   describe('tool index', () => {
+    it('keeps every row on one line, whatever whitespace a title or description carries', () => {
+      const index = renderToolIndex([
+        {
+          ...TOOLS[0],
+          title: 'Search\nassets',
+          description: 'Search the\r\ninventory.\n\n| Not a row |',
+        },
+      ]);
+      const rows = index.split('\n').filter((line) => line.startsWith('| `'));
+      expect(rows).toEqual([
+        '| `search_assets` | read | `asset:read` | Search assets: Search the inventory. |',
+      ]);
+      expect(index).not.toMatch(/^\| Not a row/m);
+    });
+
     it('lists MCP tools only, by name, with class and permission, pipes escaped', () => {
       const index = renderToolIndex(TOOLS);
       expect(index).not.toContain('`navigate`');
@@ -324,11 +364,20 @@ describe('Claude Code plugin renderer', () => {
   });
 
   describe('marketplace', () => {
+    it('is named after the host, so two instances never replace each other', () => {
+      expect(marketplaceName(HTTPS)).toBe('lazyit-lazyit-example-com');
+      expect(marketplaceName('https://Staging.Lazyit.example.com:8443')).toBe(
+        'lazyit-staging-lazyit-example-com-8443',
+      );
+      expect(marketplaceName(LAN)).toBe('lazyit-192-168-1-20-8080');
+      expect(marketplaceName(HTTPS)).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    });
+
     it('is a URL marketplace with one archive-sourced plugin pinned by digest, and no version anywhere', () => {
       const sha = 'a'.repeat(64);
       const marketplace = renderMarketplace(HTTPS, sha);
       expect(marketplace).toEqual({
-        name: 'lazyit',
+        name: 'lazyit-lazyit-example-com',
         owner: { name: 'lazyit (lazyit.example.com)' },
         description: expect.any(String) as unknown,
         plugins: [

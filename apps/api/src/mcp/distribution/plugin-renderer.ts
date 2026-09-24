@@ -67,10 +67,11 @@ const FIXED_ENTRY_DATE = new Date(Date.UTC(1980, 0, 1, 0, 0, 0));
 /**
  * Sequences Claude Code pre-processes in plugin files (plugins-reference: `${…}` substitution, including
  * sensitive `${user_config.*}` values, in skill markdown and MCP configs; skills: `$ARGUMENTS`/`$N`
- * placeholders and `` !`…` `` shell injection). None may appear in a skill file; in `.mcp.json` only the
+ * placeholders, and shell injection in both forms: inline `` !`…` `` and a fenced block opened with
+ * ```` ```! ````). None may appear in a skill file; in `.mcp.json` only the
  * one header placeholder the renderer writes itself is allowed.
  */
-const PREPROCESSED_SEQUENCE = /\$\{|\$ARGUMENTS|\$\d|!`/;
+const PREPROCESSED_SEQUENCE = /\$\{|\$ARGUMENTS|\$\d|!`|^\s*`{3,}!/m;
 
 export class PluginRenderError extends Error {}
 
@@ -111,8 +112,9 @@ function oneLiner(description: string): string {
   return sentence.length > 200 ? `${sentence.slice(0, 197)}...` : sentence;
 }
 
+/** A table cell: one line, pipes escaped. */
 function cell(value: string): string {
-  return value.replace(/\|/g, '\\|');
+  return value.replace(/\s+/g, ' ').replace(/\|/g, '\\|');
 }
 
 /** `reference/tools.md`, from the registry: MCP-listed tools only, ordered by name. */
@@ -228,7 +230,9 @@ export function renderPluginFiles(input: PluginRenderInput): PluginFile[] {
 }
 
 /** Fail closed: no file may carry a sequence Claude Code would substitute or execute (see above). */
-function assertNoPreprocessedSequences(files: readonly PluginFile[]): void {
+export function assertNoPreprocessedSequences(
+  files: readonly PluginFile[],
+): void {
   const allowedHeader = `\${user_config.${PERSONAL_TOKEN_CONFIG_KEY}}`;
   for (const file of files) {
     const text =
@@ -274,6 +278,19 @@ export async function renderPluginArchive(
 }
 
 /**
+ * The marketplace name: `lazyit-<host>` in kebab-case. Claude Code keys added marketplaces by name, and a
+ * second marketplace with an existing name REPLACES the first — naming it after the host lets one user add
+ * several instances (staging, production) side by side.
+ */
+export function marketplaceName(origin: string): string {
+  const slug = new URL(normalizeOrigin(origin)).host
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug ? `${PLUGIN_NAME}-${slug}` : PLUGIN_NAME;
+}
+
+/**
  * The URL marketplace (`claude plugin marketplace add <origin>/api/ai/claude-code/marketplace.json`).
  * One plugin, an `archive` source (HTTPS only in Claude Code) pinned by SHA-256 and with no `version`, so
  * the digest is the update signal.
@@ -284,7 +301,7 @@ export function renderMarketplace(
 ): Record<string, unknown> {
   const normalized = normalizeOrigin(origin);
   return {
-    name: PLUGIN_NAME,
+    name: marketplaceName(normalized),
     owner: { name: displayName(normalized) },
     description: PLUGIN_DESCRIPTION,
     plugins: [

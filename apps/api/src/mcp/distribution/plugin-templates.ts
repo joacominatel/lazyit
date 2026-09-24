@@ -15,7 +15,10 @@
 /** Part of the render key: the template text's own version. */
 export const PLUGIN_TEMPLATE_VERSION = 1;
 
-/** The plugin, marketplace and skill identifier (`claude plugin install lazyit@lazyit`, `/lazyit:lazyit`). */
+/**
+ * The plugin and skill identifier (`/lazyit:lazyit`). The marketplace is named after the host
+ * (`marketplaceName`), so the install is `claude plugin install lazyit@lazyit-<host>`.
+ */
 export const PLUGIN_NAME = 'lazyit';
 
 /** The MCP server's key in `.mcp.json` — its tools surface in Claude Code as `mcp__…lazyit__<tool>`. */
