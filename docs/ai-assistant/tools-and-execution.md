@@ -1525,7 +1525,9 @@ model AiActionLog {
     invocations);
   - conversation-less (MCP) invocations older than N.
   `N` is read from `AiSettings.retentionDays` (default 90, range 7–3650). **`AiActionLog`
-  is never pruned.** This is an explicit, ADR-recorded exception to "never hard-delete", justified as in
+  is never pruned.** As built (W3-6) the sweep is hourly, never deletes a conversation with an active
+  run or an in-flight (`AWAITING_APPROVAL` / `EXECUTING`) invocation, keeps MCP rows still `AWAITING_APPROVAL` or `EXECUTING`, and also purges offboarded users'
+  conversations — [[ai-assistant/provider-and-runtime|runtime]] §7 "As built". This is an explicit, ADR-recorded exception to "never hard-delete", justified as in
   [[0056-in-app-notification-bell]]: conversations are not the system of record.
 
 ## 12. System prompt and domain primer

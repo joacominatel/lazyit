@@ -624,7 +624,9 @@ the **exfiltration leg** and the **consequential-action leg**.
   purges message content with a **real deletion**. Conversations are not domain data; the
   never-hard-delete rule protects the domain and the audit trail, not chat transcripts. The permanent
   audit is unaffected. On offboarding, the user's conversations are purged (adopted by default, §11
-  Q-5).
+  Q-5). As built (W3-6): an hourly pass deletes offboarded users' conversations
+  (the soft delete is the signal) and never a conversation with an active run —
+  [[ai-assistant/provider-and-runtime|runtime]] §7 "As built".
 - **Visibility.** A conversation is visible only to its owner, and other users get 404. Admin access
   to other people's conversations: none, adopted by default (§11 Q-5), with the
   audit log serving oversight.
