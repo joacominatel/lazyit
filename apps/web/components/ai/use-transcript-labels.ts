@@ -3,7 +3,9 @@
 import { useFormatter, useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { runErrorKind } from "@/lib/ai/error-kinds";
+import { displayAnswer, type AnswerDisplay } from "@/lib/ai/input-form";
 import { presentPreview, type PreviewValue } from "@/lib/ai/preview";
+import { plainText } from "@/lib/ai/untrusted-text";
 import type { TranscriptLabels } from "@/lib/ai/transcript-markdown";
 import { approvalStage } from "./ai-approval-card";
 import { usePreviewFieldLabel, useToolDisplayName } from "./ai-labels";
@@ -55,6 +57,44 @@ export function useTranscriptLabels(): TranscriptLabels {
           const after = value(row.after);
           const shown = row.before !== null ? `${value(row.before)} → ${after}` : after;
           lines.push(`- ${fieldLabel(row.field)}: ${shown}`);
+        }
+        return lines;
+      },
+      input: (part) => {
+        const answered = (v: AnswerDisplay): string => {
+          switch (v.kind) {
+            case "empty":
+              return t("input.empty");
+            case "boolean":
+              return v.value ? t("input.yes") : t("input.no");
+            case "number":
+              return format.number(v.value);
+            case "date":
+              return format.dateTime(new Date(`${v.day}T00:00:00Z`), { dateStyle: "medium", timeZone: "UTC" });
+            case "list":
+              return v.items.map(plainText).join(", ");
+            case "text":
+              return plainText(v.text).replace(/\s+/g, " ");
+          }
+        };
+        const { form } = part.request;
+        const lines = [
+          `**${t("input.kicker")}** · ${t(`input.states.${part.outcome ?? "pending"}`)}`,
+          plainText(form.title),
+        ];
+        const answer = part.outcome === "submitted" ? part.answer : undefined;
+        if (answer) {
+          for (const field of form.fields) {
+            lines.push(`- ${plainText(field.label)}: ${answered(displayAnswer(field, answer.values[field.key]))}`);
+          }
+          for (const group of form.groups) {
+            (answer.groups[group.key] ?? []).forEach((row, index) => {
+              const cells = group.fields.map(
+                (field) => `${plainText(field.label)}: ${answered(displayAnswer(field, row[field.key]))}`,
+              );
+              lines.push(`- ${plainText(group.label)} ${index + 1}: ${cells.join("; ")}`);
+            });
+          }
         }
         return lines;
       },

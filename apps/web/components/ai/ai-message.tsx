@@ -8,6 +8,7 @@ import { groupMessageParts } from "@/lib/ai/tool-groups";
 import type { DecisionResult } from "@/lib/api/hooks/use-ai-turn";
 import { AiApprovalCard } from "./ai-approval-card";
 import { AiAutoAppliedCard } from "./ai-auto-applied-card";
+import { AiInputCard, type AnswerInput } from "./ai-input-card";
 import { AiMarkdown } from "./ai-markdown";
 import { AiRunNotice } from "./ai-run-notice";
 import { AiToolActivity } from "./ai-tool-activity";
@@ -39,9 +40,11 @@ interface AiMessageProps {
   tools: ReadonlyMap<string, ToolPart>;
   navigated: readonly string[];
   onDecide: (toolCallId: string, decision: "approve" | "reject", password?: string) => Promise<DecisionResult>;
+  /** Answers an input form the assistant asked for (#1388). */
+  onAnswerInput: AnswerInput;
 }
 
-export function AiMessage({ message, tools, navigated, onDecide }: AiMessageProps) {
+export function AiMessage({ message, tools, navigated, onDecide, onAnswerInput }: AiMessageProps) {
   const t = useTranslations("ai.message");
 
   if (message.role === "user") {
@@ -107,6 +110,14 @@ export function AiMessage({ message, tools, navigated, onDecide }: AiMessageProp
               />
             );
           }
+          case "input":
+            return (
+              <AiInputCard
+                key={`input-${part.request.toolCallId}`}
+                part={part}
+                onAnswer={onAnswerInput}
+              />
+            );
           case "notice":
             return <AiRunNotice key={key} error={part.error} />;
           default:
