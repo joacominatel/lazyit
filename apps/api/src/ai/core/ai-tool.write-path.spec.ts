@@ -295,6 +295,20 @@ const writeToolset: AiToolset = {
       warnings: ['NOTIFIES_USERS'],
       elevated: true,
     }),
+    // ADR-0097 decision 3 as amended 2026-09-24: a workflow write on a critical application needs step-up,
+    // an outbound integration on a non-critical one does not.
+    previewFixture('thing_enable_critical_workflow', 'elevated', {
+      warnings: ['OUTBOUND_INTEGRATION', 'CRITICAL_APPLICATION'],
+      elevated: true,
+    }),
+    previewFixture('thing_create_outbound', 'elevated', {
+      warnings: ['OUTBOUND_INTEGRATION'],
+      elevated: true,
+    }),
+    // A `write`-class tool (like an access revoke) on a critical application: step-up without escalating.
+    previewFixture('thing_revoke_critical', 'write', {
+      warnings: ['EXTERNAL_DEPROVISIONING', 'CRITICAL_APPLICATION'],
+    }),
     previewFixture('thing_unclassified', 'elevated', {
       warnings: [],
       elevated: true,
@@ -1351,8 +1365,10 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
         'thing_set_email',
         'thing_grant',
         'thing_send_invite',
+        'thing_enable_critical_workflow',
+        'thing_revoke_critical',
       ])(
-        '%s: a role/identity change, privilege grant or credential delivery requires step-up though the tool did not ask',
+        '%s: a role/identity change, privilege grant, credential delivery or critical-application action requires step-up though the tool did not ask',
         async (name) => {
           const action = await proposeOk(name);
           expect(action.preview?.stepUpRequired).toBe(true);
@@ -1375,12 +1391,18 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
         },
       );
 
-      it('an elevated action with a warning outside the list needs no step-up', async () => {
-        const action = await proposeOk('thing_notify');
-        expect(action.preview?.stepUpRequired).toBe(false);
-        const approved = await tools.approve(action.id, chat(human(ID.member)));
-        expect(approved.status).toBe('SUCCEEDED');
-      });
+      it.each(['thing_notify', 'thing_create_outbound'])(
+        '%s: an elevated action with a warning outside the list (incl. OUTBOUND_INTEGRATION) needs no step-up',
+        async (name) => {
+          const action = await proposeOk(name);
+          expect(action.preview?.stepUpRequired).toBe(false);
+          const approved = await tools.approve(
+            action.id,
+            chat(human(ID.member)),
+          );
+          expect(approved.status).toBe('SUCCEEDED');
+        },
+      );
 
       it('refuses an elevated preview that carries no warning (unclassified)', async () => {
         const proposal = await tools.propose(
