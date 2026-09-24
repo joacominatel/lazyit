@@ -1098,6 +1098,27 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   and warnings are the authoritative description; a backend follow-up should mark or quote model-supplied
   values inside the sentence.
 
+## 11b. As built — batch previews as a table (#1387)
+
+- **Generic.** A preview change whose `after` is a non-empty array of objects is a table, not a field row:
+  `presentPreview` (`lib/ai/preview.ts`) keeps the raw `records`, and `buildPreviewTable`
+  (`lib/ai/preview-table.ts`, `bun test`ed) shapes it. Columns are the keys the rows carry — `name`,
+  `title`, `assetTag`, `serial`, `model`, `category`, `location`, `status` first, the rest in first-seen
+  order — labelled like field rows (`ai.fields.*`, humanized fallback). Row-state keys are never columns:
+  `row` (the number), `skipped: true` / `valid: false` (the row is **not applied**, marked "Skipped —
+  won't be applied"), `errors` and `duplicates` (the **Problems** column), `<key>Defaulted: true` (the
+  cell is marked "(default)"). A duplicate's `existing: { type, id }` links through `entityHref`; its
+  server sentence is not repeated. Arrays of scalars keep the flat, capped text.
+- **Component.** `components/ai/ai-preview-table.tsx`, used by the approval card and the auto-applied
+  record: its own scroll region (`max-h-80`, sticky header, horizontal scroll inside the card only), an
+  "Only rows with problems" switch shown when any row is skipped or has a problem, and asset `status`
+  values read with `assets.status.*`. Plain text only, as the rest of the card.
+- **Notices.** `duplicatesUnchecked: true` (the batch's duplicate pre-check could not run for every value)
+  is a sentence on the card (`ai.approval.notices.*`), not a "Yes" row (`PREVIEW_NOTICE_FIELDS`).
+- The scalar summary rows of `asset_create_batch` (`rowCount`, `validRows`, `invalidRows`,
+  `defaultsApplied`) stay ordinary field rows above the table. Manual: `ai-assistant-approvals`
+  ("Creating many assets at once", "Categories, models and locations") and `configuration-taxonomies`.
+
 ## 12. Implementation units (superseded)
 
 > **Superseded** by the unified wave plan in [[ai-assistant/_synthesis|the synthesis]] §10. Kept for
