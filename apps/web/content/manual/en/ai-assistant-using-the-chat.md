@@ -163,8 +163,9 @@ internet — but only when lazyit's records and knowledge base don't have the an
 product or term and web search is off, it asks you for the documentation instead.
 
 When it searched, the pages it used appear under its answer as **Sources from the web**. Each one opens in a
-new tab. They were written by other people: check them before you rely on them. A change the assistant
-proposes in a reply that searched the web always needs your approval, even with auto-approve on.
+new tab. They were written by other people: check them before you rely on them. Once the assistant has
+searched the web in a chat, nothing in that chat is auto-approved anymore: every change it proposes there
+needs your approval, even with auto-approve on. Start a new chat to use auto-approve again.
 
 ## Your chat history
 

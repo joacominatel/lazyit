@@ -177,6 +177,8 @@ While it is on:
   anything that needs your password.
 - **A change proposed after the assistant read content other people wrote** also still shows a card —
   that content could be trying to steer the assistant.
+- **Once the assistant has searched the web in a chat**, nothing in that chat is auto-approved anymore:
+  the search results stay in the conversation.
 - An **Auto** tag at the top of the chat reminds you the mode is on.
 
 It applies **only to that chat** and is off in every new chat. Turn it off at any time with the same switch

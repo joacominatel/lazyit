@@ -1193,8 +1193,9 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   like the limits card, inside the page's `AdminGate` (`settings:manage`): a switch
   (`webSearchEnabled`, saved through the wholesale `PUT` — `settingsToUpdate` re-sends both web search
   fields as read, so another card's save never turns it off), a disclosure callout (the provider runs the
-  search, lazyit makes no request; the queries and context go to the provider and may be billed
-  separately; results are untrusted and a proposal in that reply always needs approval; chat only), and a
+  search, lazyit makes no request; the queries and context go to the provider, which may pass the queries
+  to its search backend or a partner, and may bill separately; once a conversation has searched nothing in
+  it is auto-approved; chat only; plus, for OpenAI only, the cached/indexed-web and `open_page` note), and a
   "Searches per step" number (1–20, `parseWebSearchMaxUses`). `webSearchAvailability` (the shared
   `aiWebSearchSupported` rule) disables the switch with its reason — no provider, a provider without
   native search (OpenAI-compatible), or a model without it (Gemini before 3) — but never while it is on,

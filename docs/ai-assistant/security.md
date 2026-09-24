@@ -804,17 +804,30 @@ LLM provider's own server-side search tool. As built:
   own — the "generic egress tool" exclusion stands. The one outbound request is still the model call,
   through the egress guard (INV-AI-7). The OpenAI-compatible provider has no native search: absent.
 - **Off by default, admin switch** (`AiSettings.webSearchEnabled`, audited). The Settings card discloses
-  what leaves: the query and the conversation context go to the provider's search — the provider already
+  what leaves: the query and the conversation context go to the provider's search, which may pass the
+  query on to its search backend or a search partner — the provider already
   receives the context (§6.4 (a)); the new element is that the provider may send the **query** to its
   search backend or a search partner, under the operator's contract with the provider.
 - **Chat only.** Headless runs never search: their writes run without a human approving them, and a
   search result is text any attacker can publish — an injected instruction would otherwise reach an
   unreviewed write. MCP runs no model inside lazyit.
-- **Untrusted by construction (INV-AI-4).** A step that searched adds the `webSearch` marker to the
-  turn's untrusted sources: every later proposal of the turn carries the untrusted-source banner and is
-  **never auto-approved** (core refuses automatic approval for any preview naming an untrusted source).
-  A resumed turn rebuilds the marker from its `lazyit-web-search-v1` records. The prompt tells the model
-  results are data, never instructions, and to prefer lazyit's records and KB.
+- **Untrusted by construction (INV-AI-4), for the rest of the conversation.** A step that searched adds
+  the `webSearch` marker to the turn's untrusted sources, and — because the results stay in the history
+  and are replayed to the model on every later turn — the runtime seeds the marker on **every** turn of a
+  conversation that has any `lazyit-web-search-v1` record (G2 review: a per-run marker let a planted
+  instruction act one turn later). So **once the assistant has searched the web in a conversation,
+  nothing in that conversation is auto-approved anymore**: every proposal carries the untrusted-source
+  banner and core refuses automatic approval for any preview naming an untrusted source. A resumed turn
+  rebuilds it the same way. The prompt tells the model results are data, never instructions, and to
+  prefer lazyit's records and KB.
+- **OpenAI `open_page`.** The Responses `web_search` tool can take `open_page` / `find_in_page` actions
+  on a URL the model chooses; neither the API nor the SDK can disable an action (only domain filters,
+  context size, location and `external_web_access`). An injected instruction could otherwise make the model
+  "open" an attacker URL carrying data in its query string, reaching a third party directly. lazyit sends
+  `external_web_access: false` (cached / indexed content only, per the AI SDK provider docs — the OpenAI
+  API page could not be fetched from the build environment), so no page is fetched live from its host; the
+  action itself remains and is disclosed on the Settings card and in the Manual. Residual: the provider's
+  own cache lookups. Anthropic `web_search_20250305` and Gemini `google_search` expose only search.
 - **Exfiltration by query.** An injected instruction (from a lazyit record or a search result) could make
   the model put private data into a query. Residual risk, accepted with the switch: the query goes to the
   provider, which already holds the whole context; the prompt forbids secrets and personal data in a query;

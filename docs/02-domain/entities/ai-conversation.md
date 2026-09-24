@@ -50,7 +50,9 @@ permanent [[ai-action-log]].
   search cap (`webSearchMaxUses`) and may use the provider's own web search; its tool list then never
   changes. Turning the setting off makes it read-only (`CONFIG_CHANGED`). Headless conversations never
   search. A step that searched stores a `lazyit-web-search-v1` record (search count, reported queries,
-  `http(s)` sources) after its assistant message: the web shows the sources under the answer.
+  `http(s)` sources) after its assistant message: the web shows the sources under the answer. Once such a
+  record exists, every later turn of the conversation counts as having read untrusted content, so nothing
+  in it is auto-approved anymore.
 - **One active run** at a time (409 `RUN_IN_PROGRESS`, enforced by the runtime).
 - MCP keeps **no** server-side conversation.
 

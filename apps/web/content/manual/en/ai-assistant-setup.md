@@ -81,17 +81,22 @@ records and knowledge base don't have what it needs — for example, the documen
 product someone asks it to set up a workflow for. It is **off** by default.
 
 - **Where the search runs.** The AI provider runs the search on its own servers; lazyit makes no request of
-  its own. The search queries and the conversation context go to the provider, and the provider may bill
-  searches separately. Check your contract with the provider before you turn it on.
+  its own. The search queries and the conversation context go to the provider, which may pass the queries
+  on to its search backend or a search partner, and may bill searches separately. Check your contract with
+  the provider before you turn it on.
 - **Which providers.** Anthropic, OpenAI, and Google Gemini 3 or later. The OpenAI-compatible provider and
   older Gemini models have no web search the assistant can use together with lazyit's tools; the switch is
   then disabled and the card says why.
 - **Only the chat.** Headless runs (service accounts) never search the web, because their changes run
   without anyone approving them.
 - **Results are treated as untrusted.** Web pages are written by anyone. The assistant treats them as
-  information, never as instructions, and shows the pages it used under its answer. A change it proposes in
-  a reply that searched the web always shows its approval card — even when the person turned on
-  auto-approve.
+  information, never as instructions, and shows the pages it used under its answer. **Once it has searched
+  the web in a conversation, nothing in that conversation is auto-approved anymore**: every change it
+  proposes there shows its approval card, even when the person turned on auto-approve — the results stay
+  in the conversation.
+- **OpenAI.** lazyit runs OpenAI's search on its cached and indexed copy of the web, not on live pages, so
+  very recent pages may be missing. OpenAI's search can also open pages; that can't be turned off, but it
+  never fetches a page live from its site.
 - **New conversations.** The switch applies to chats started after you change it. Turning it off makes
   the chats that had it read-only; people start a new chat to go on.
 - **Searches per step** (default 5, 1–20) is the most searches the assistant may run in one step, where the

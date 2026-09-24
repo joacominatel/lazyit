@@ -171,9 +171,10 @@ pero solo cuando los registros y la base de conocimiento de lazyit no tienen la 
 un producto o un término y la búsqueda web está desactivada, te pide la documentación.
 
 Cuando buscó, las páginas que usó aparecen debajo de su respuesta como **Fuentes de la web**. Cada una se
-abre en una pestaña nueva. Las escribieron terceros: revisalas antes de basarte en ellas. Un cambio que el
-asistente proponga en una respuesta que buscó en la web siempre necesita tu aprobación, aunque tengas la
-aprobación automática activada.
+abre en una pestaña nueva. Las escribieron terceros: revisalas antes de basarte en ellas. Una vez que el
+asistente buscó en la web en un chat, nada en ese chat se aprueba automáticamente: cada cambio que proponga
+ahí necesita tu aprobación, aunque tengas la aprobación automática activada. Empezá un chat nuevo para
+volver a usar la aprobación automática.
 
 ## Tu historial de chats
 

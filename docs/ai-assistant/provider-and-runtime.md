@@ -569,8 +569,10 @@ is not an error: it comes back as the step's `finishReason` (`content-filter`) a
     `allowed_callers: ["direct"]` (the SDK exposes no such option) and which adds a second server tool to
     the transcript. The server tool, its results (`encrypted_content`) and the cited text blocks stay in
     the assistant message and are replayed byte for byte, as Anthropic requires.
-  - OpenAI — Responses `web_search` (no per-call cap). With `store: false` the SDK does not replay the
-    `web_search_call` item, only the answer; the SDK adds `include: web_search_call.action.sources`.
+  - OpenAI — Responses `web_search` (no per-call cap) with `externalWebAccess: false` (cached / indexed
+    content, no live fetch): the tool's `open_page` action cannot be disabled, and live access would let
+    an injected URL reach a third party (security.md §6.11). With `store: false` the SDK does not replay
+    the `web_search_call` item, only the answer; the SDK adds `include: web_search_call.action.sources`.
   - Google — `google_search` grounding, **Gemini 3+ only**: on an older Gemini the SDK cannot combine a
     provider tool with function declarations and would drop lazyit's tools (it only warns). The
     Gemini-3 rule mirrors the SDK's own model detection.
@@ -700,7 +702,9 @@ Rules [C]:
   lazyit. A step whose result carries `webSearch`:
   - merges the `webSearch` untrusted-source marker (`AI_WEB_SEARCH_SOURCE_REF`) into the turn's
     untrusted sources **before** its calls resolve, so a proposal in that step or later in the turn shows
-    the banner and is never auto-approved; `seedCounters` restores it on resume from the records;
+    the banner and is never auto-approved. `seedCounters` seeds the marker at the start of **every** run
+    of a conversation that has any `lazyit-web-search-v1` record (the results stay in the replayed
+    history): once a conversation has searched, nothing in it is auto-approved again (G2 review);
   - persists a `lazyit-web-search-v1` record `{ stepIndex, searches, queries, sources }` right after its
     assistant message (same transaction), never replayed to the model; the transcript projection turns
     it into a `sources` part under that message;
