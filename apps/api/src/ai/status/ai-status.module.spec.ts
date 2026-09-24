@@ -85,13 +85,16 @@ describe('AiSettingsModule / AiStatusModule wiring', () => {
   it('GET /ai/status reflects an enabled configuration', async () => {
     const previous = process.env.AI_SECRET_KEY;
     process.env.AI_SECRET_KEY = 'a'.repeat(64);
-    prisma.aiSettings.findUnique.mockResolvedValueOnce({
+    const enabledRow = {
       id: 'singleton',
       enabled: true,
       provider: 'openai-compatible',
       model: 'llama',
       baseUrl: 'https://llm.example/v1',
       apiKeyCiphertext: null,
+      apiKeyIv: null,
+      apiKeyAuthTag: null,
+      apiKeyKeyVersion: null,
       allowPrivateNetwork: false,
       effort: null,
       providerOptions: null,
@@ -109,7 +112,11 @@ describe('AiSettingsModule / AiStatusModule wiring', () => {
       disclosureAcknowledgedAt: new Date(),
       verifiedAt: new Date(),
       updatedAt: new Date('2026-09-24T10:00:00Z'),
-    });
+    };
+    // Read twice: the redacted settings, then the provider check the runtime also makes.
+    prisma.aiSettings.findUnique
+      .mockResolvedValueOnce(enabledRow)
+      .mockResolvedValueOnce(enabledRow);
     try {
       const res = await request(
         app.getHttpServer() as Parameters<typeof request>[0],

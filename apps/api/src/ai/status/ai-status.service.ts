@@ -31,8 +31,9 @@ export function resolveMcpAuthMode(
 
 /**
  * `GET /ai/status` (synthesis §4.5) — per caller, no secrets:
- *   - `chat.available` = enabled ∧ provider configured (provider and model; a stored key must be usable
- *     under `AI_SECRET_KEY`, and a provider that needs a key must have one) ∧ the caller holds `ai:use`;
+ *   - `chat.available` = enabled ∧ the caller holds `ai:use` ∧ the provider is usable — the reader's
+ *     `resolveProviderConfig()` resolves (known provider, a model, a stored key that DECRYPTS) and a
+ *     provider that needs a key has one;
  *   - `mcp.available`  = the MCP switch ∧ the caller holds `ai:connect`;
  *   - neither is ever available in shim mode (security.md §12 G1);
  *   - `configRevision` = the settings row's `updatedAt` (`"0"` while none exists), so other shells notice
@@ -61,15 +62,8 @@ export class AiStatusService {
     }
 
     const held = await this.heldPermissions(principal);
-    const provider = settings.provider;
-    const providerConfigured =
-      provider !== null &&
-      settings.model !== null &&
-      (settings.apiKeySet
-        ? settings.keyConfigured
-        : !AI_PROVIDER_DESCRIPTORS[provider].requiresApiKey);
     const chatAvailable =
-      settings.enabled && providerConfigured && held.has('ai:use');
+      settings.enabled && held.has('ai:use') && (await this.providerUsable());
     const mcpAvailable = settings.mcpEnabled && held.has('ai:connect');
 
     return {
@@ -78,6 +72,20 @@ export class AiStatusService {
       configRevision,
       retentionDays: chatAvailable ? settings.retentionDays : null,
     };
+  }
+
+  /**
+   * The same check the runtime's model call makes (review F4): `resolveProviderConfig()` is null when the
+   * stored key does not decrypt (AI_SECRET_KEY changed or removed), the provider is unknown, or the model
+   * is missing; a provider that needs a key must also have one.
+   */
+  private async providerUsable(): Promise<boolean> {
+    const config = await this.settings.resolveProviderConfig();
+    if (!config) return false;
+    return (
+      config.apiKey !== null ||
+      !AI_PROVIDER_DESCRIPTORS[config.provider].requiresApiKey
+    );
   }
 
   private async heldPermissions(

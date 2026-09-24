@@ -13,6 +13,7 @@ jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 
 import type { ServiceAccount, User } from '../../../generated/prisma/client';
 import type { Principal } from '../../auth/principal';
+import type { ResolvedAiProviderConfig } from '../core/ports/ai-settings.port';
 import { AiStatusService, resolveMcpAuthMode } from './ai-status.service';
 
 const DISABLED: AiSettings = {
@@ -56,10 +57,32 @@ const service = (perms: Permission[]): Principal => ({
   permissions: new Set(perms),
 });
 
-function makeService(settings: AiSettings, rolePerms: Permission[] = []) {
+/**
+ * What the real reader's `resolveProviderConfig()` answers for `settings`: null when disabled or
+ * unconfigured, or when the stored key cannot be decrypted (modelled as `keyConfigured: false`).
+ */
+function resolvedFrom(settings: AiSettings): ResolvedAiProviderConfig | null {
+  if (!settings.enabled || !settings.provider || !settings.model) return null;
+  if (settings.apiKeySet && !settings.keyConfigured) return null;
+  return {
+    provider: settings.provider,
+    model: settings.model,
+    baseUrl: settings.baseUrl,
+    apiKey: settings.apiKeySet ? 'decrypted' : null,
+    allowPrivateNetwork: settings.allowPrivateNetwork,
+    effort: settings.effort,
+    providerOptions: settings.providerOptions,
+  };
+}
+
+function makeService(
+  settings: AiSettings,
+  rolePerms: Permission[] = [],
+  resolved: ResolvedAiProviderConfig | null = resolvedFrom(settings),
+) {
   const reader = {
     getSettings: jest.fn(() => Promise.resolve(settings)),
-    resolveProviderConfig: jest.fn(),
+    resolveProviderConfig: jest.fn(() => Promise.resolve(resolved)),
   };
   const resolver = {
     resolve: jest.fn(() => Promise.resolve(new Set(rolePerms))),
@@ -139,6 +162,16 @@ describe('AiStatusService', () => {
       human('ADMIN'),
     );
     expect(status.chat.available).toBe(false);
+  });
+
+  it('chat is unavailable when the stored key does not decrypt, even though the row says it is set (review F4)', async () => {
+    // The read shape says a key is stored and AI_SECRET_KEY is present — but it is a DIFFERENT key, so
+    // the reader cannot decrypt and resolves null. Status must agree with the runtime, not the row.
+    const status = await makeService(ENABLED, ['ai:use'], null).getStatus(
+      human('ADMIN'),
+    );
+    expect(status.chat.available).toBe(false);
+    expect(status.retentionDays).toBeNull();
   });
 
   it('a keyless OpenAI-compatible provider is configured without a stored key', async () => {
