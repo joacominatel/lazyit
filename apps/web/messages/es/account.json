@@ -64,6 +64,10 @@
     "asset_assignment_acknowledged": {
       "label": "Recepción confirmada",
       "description": "Alguien confirmó la recepción de un activo que le asignaste."
+    },
+    "mcp_client_connected": {
+      "label": "Nuevo agente de IA conectado",
+      "description": "Un agente de IA externo (MCP) se conectó a tu cuenta por primera vez."
     }
   }
 }

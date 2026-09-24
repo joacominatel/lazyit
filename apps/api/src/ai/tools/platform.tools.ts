@@ -8,7 +8,9 @@ import { ImportController } from '../../import/import.controller';
 import { UpdateController } from '../../instance/update.controller';
 import { AuthorizeController } from '../../oauth/authorize.controller';
 import { GrantsController } from '../../oauth/grants.controller';
+import { McpController } from '../../mcp/mcp.controller';
 import { MetadataController } from '../../oauth/metadata.controller';
+import { PersonalTokensController } from '../../oauth/personal-tokens/personal-tokens.controller';
 import { RegisterController } from '../../oauth/register.controller';
 import { RevokeController } from '../../oauth/revoke.controller';
 import { TokenController } from '../../oauth/token.controller';
@@ -197,6 +199,18 @@ export const platformToolset: AiToolset = {
       GrantsController,
       ['listMine', 'list', 'revoke'],
       'Excluded: connected apps govern the access of external agents, i.e. the AI configuration (structural exclusion).',
+    ),
+    // Personal MCP tokens (W3-4) mint a credential; `/mcp` itself (W3-2) is the channel tools are served
+    // through, never a tool (ADR-0097 decision 9; INV-AI-5, INV-AI-14).
+    unexposed(
+      PersonalTokensController,
+      ['create', 'list', 'revoke'],
+      'Excluded: personal MCP tokens are credentials that govern the access of external agents (INV-AI-5; structural exclusion).',
+    ),
+    unexposed(
+      McpController,
+      ['handle'],
+      'Not applicable: /mcp is the channel the tools are served through, not a tool.',
     ),
     // The Claude Code plugin distribution (W3-5): a file download for installing a client, not data.
     unexposed(

@@ -113,6 +113,33 @@ describe("Personal tokens (lan only)", () => {
     );
   });
 
+  test("scopes default to read & write and parse to catalog order, de-duplicated", () => {
+    expect(CreatePersonalTokenSchema.parse({ label: "laptop" }).scopes).toEqual([
+      "lazyit.read",
+      "lazyit.write",
+    ]);
+    expect(
+      CreatePersonalTokenSchema.parse({ label: "x", scopes: ["lazyit.read", "lazyit.read"] }).scopes,
+    ).toEqual(["lazyit.read"]);
+    expect(
+      CreatePersonalTokenSchema.parse({ label: "x", scopes: ["lazyit.write", "lazyit.read"] })
+        .scopes,
+    ).toEqual(["lazyit.read", "lazyit.write"]);
+  });
+
+  test("a personal token never carries lazyit.admin, and an empty scope list is refused", () => {
+    expect(
+      CreatePersonalTokenSchema.safeParse({ label: "x", scopes: ["lazyit.admin"] }).success,
+    ).toBe(false);
+    expect(
+      CreatePersonalTokenSchema.safeParse({
+        label: "x",
+        scopes: ["lazyit.read", "lazyit.admin"],
+      }).success,
+    ).toBe(false);
+    expect(CreatePersonalTokenSchema.safeParse({ label: "x", scopes: [] }).success).toBe(false);
+  });
+
   test("the minted token carries the personal prefix", () => {
     const grant = {
       id: "ckgrant000000000000000000",

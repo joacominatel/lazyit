@@ -1138,8 +1138,8 @@ In addition:
      retried. The row update and the outcome's ledger event are written **independently**, so a failed
      row update never costs the permanent record; a failure of either is logged, never re-executed. A
      row left `EXECUTING` that way is finalized by the runtime's sweeper for chat and headless runs; an
-     MCP row has no run, so its stale-`EXECUTING` sweep (`markOutcomeUnknown`) is a follow-up for the MCP
-     unit (W3-2).
+     MCP row has no run, so `McpInvocationSweeper` (W3-2, [[ai-assistant/mcp-and-oauth|MCP]] §14) marks
+     it `OUTCOME_UNKNOWN` (`markOutcomeUnknown`) 15 minutes after its last update.
   So every MCP or headless write past authentication and validation leaves exactly `ATTEMPTED` and one
   outcome. Reads are not yet written to `ai_tool_invocations` (the MCP/headless metadata access log is
   the channel units' follow-up).

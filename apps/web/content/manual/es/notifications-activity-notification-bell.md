@@ -50,6 +50,7 @@ una manguera:
 | **Garantía por vencer** | La garantía de un activo está dentro de su ventana de anticipación (los últimos 90 días antes de terminar) y todavía no venció. Un aviso por activo, para que puedas renovar o reemplazar antes de la fecha límite en lugar de enterarte después. Enlaza al activo. |
 | **Acceso por vencer** | Una concesión de acceso activa está a menos de dos semanas de su fecha de vencimiento y se revocará automáticamente cuando pase. Un aviso por concesión para que puedas volver a otorgar el acceso antes de que un contratista o temporal lo pierda en silencio. Enlaza a la aplicación. |
 | **Recepción confirmada** | (Dirigida) Alguien confirmó la recepción de un activo que le asignaste. Llega a tu campana — y a tu correo, salvo que lo desactives — para que sepas que la entrega se completó sin tener que preguntar. Enlaza al activo. |
+| **Nuevo agente de IA conectado** | (Dirigida, de seguridad) Un agente de IA externo —Claude Code, Cursor u otro cliente MCP, o un token MCP personal— se usó en tu cuenta por primera vez. Una por conexión. Aparece en tu campana —y en tu correo, salvo que lo desactives—. Si no fuiste tú, revoca la conexión en tus conexiones de IA y cambia tu contraseña. |
 
 Las notificaciones se emiten **después** de que la acción que las origina se completa, y son **de mejor
 esfuerzo**: una notificación que no se logra enviar nunca bloquea ni deshace el cambio subyacente. Los
