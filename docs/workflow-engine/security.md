@@ -268,7 +268,7 @@ convention:
 | `workflow:manage` | Create / edit / delete / enable workflow **definitions** (the automation logic, incl. the outbound URL + mapping) | **ADMIN-only**, configurable (⚠ "admin-level" delegation, like the existing coarse verbs) |
 | `workflow:secrets` | Configure / enter / rotate per-app connector **credentials** | **ADMIN-only**, configurable — **kept distinct from `workflow:manage`** to allow separation of duties (who writes the logic ≠ who holds the Jira token) |
 | `workflow:run` | Retry a failed run / replay it on the latest version (runs start only from grant events) | **ADMIN-only**, configurable |
-| `workflow:task` | Claim / complete a **manual task** step | **ADMIN-only** by default, but expected to be delegated to MEMBERs who do operational provisioning (§6) |
+| `workflow:task` | Resolve a **manual task** step: submit, skip or fail | **ADMIN-only** by default, but expected to be delegated to MEMBERs who do operational provisioning (§6) |
 
 > Corrected 2026-09-24 (#1315): this note first named the manual-task verb `workflow:action`; it shipped
 > as `workflow:task` (`packages/shared/src/schemas/permission.ts`), and the note now uses that name.

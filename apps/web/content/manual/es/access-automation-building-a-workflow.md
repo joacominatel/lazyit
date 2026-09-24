@@ -61,8 +61,10 @@ origen:
 
 - **Evento disparador**, **Beneficiario** (correo, nombre, apellido, id, legajo, nombre de usuario,
   y el nombre y correo de su responsable), **Aplicación**, **Concesión** y las salidas de pasos
-  anteriores. Los tokens del responsable quedan vacíos cuando la persona no tiene responsable o
-  cuando su responsable fue desvinculado.
+  anteriores. Un token queda vacío cuando lazyit no tiene el dato: el legajo y el nombre de usuario
+  cuando nunca se cargaron, los dos tokens del responsable cuando la persona no tiene responsable o
+  su responsable fue desvinculado, y el correo del responsable cuando el responsable es solo un
+  nombre en texto libre.
 
 Mapeas eligiendo un campo de contexto, componiéndolo, o — mediante **Avanzado** — editando
 directamente el JSON del mapeo. Los tokens se escriben así: `{{ grantee.email }}`. El mapeo es **solo
