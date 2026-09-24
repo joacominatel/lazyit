@@ -835,9 +835,10 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
 - **Chat renderer.** A separate `components/ai/ai-markdown.tsx` rather than a prop on `MarkdownView`
   (shared by the KB and the Manual): the same sanitize-first pipeline, no images (alt text only), no
   mermaid or KB passes, `<untrusted_content>` wrappers stripped before parsing, and links through
-  `classifyLink` — in-app paths use the router, explicit http(s) links open in a new tab with
-  `noopener noreferrer nofollow` and show their host, **bare URLs are never linked** (synthesis §4.10 wins
-  over §5.5 here), any other scheme is text.
+  `classifyLink` — in-app paths use the router with `prefetch={false}`, explicit http(s) links open in a
+  new tab with `noopener noreferrer nofollow` and show their **full destination URL** beside the text
+  (security.md §6.1 "Link in chat"), **bare URLs are never linked** (synthesis §4.10 wins over §5.5 here),
+  any other scheme is text. Model prose sits under a visible "Assistant" label.
 - **Snapshot merge.** A `run.snapshot`'s messages are inserted where the first message they replace was (the
   optimistic user message, a live assistant message), and a call the snapshot carries is removed from the
   live message that held it — a live `tool.call` has no message id and lands on the last assistant message.
@@ -853,13 +854,30 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   yet applied invalidates once (a reconnect the ring buffer could not cover) and never navigates. "Open"
   chips render for mutation and navigate results, not for reads.
 - **Reconnects.** Exponential back-off (1 s → 8 s), five attempts, then "Connection lost" with
-  **Reconnect** and a re-read of `GET /ai/conversations/:id` as the fallback. A 4xx other than 429 ends the
-  follow with a notice.
+  **Reconnect** and a re-read of `GET /ai/conversations/:id` as the fallback. A connection that closes
+  having delivered no event backs off like a failure (never a hot loop); the loop's run status is seeded
+  from the chat state (or the decision's answer) so an empty close of a waiting run stops. A 401 goes to the
+  app-wide sign-out handling (`handleAuthExpiry`); another 4xx other than 429 ends the follow with a
+  notice. A manual **Reconnect** never auto-navigates from replayed navigate results.
+- **Freshness on reopen.** The conversation read is `refetchOnMount: "always"` and the chat hydrates only
+  from a read made after the panel mounted (`isFetchedAfterMount`), so reopening never rebuilds from a
+  cached copy that misses a pending approval or an active run. The cached copy is also marked stale when a
+  run finishes and when the panel closes.
+- **The step-up password** is never a `useMutation` variable (the decision calls `decideAiToolCall`
+  directly and applies the global 401 / forced-password-change reactions by hand), lives only in the card's
+  state, is cleared on every attempt whatever the answer, and Enter in its field ignores key auto-repeat
+  and IME composition.
 - **Labels.** Tool names are humanized (`asset_search` → "Asset search") rather than kept in a
   per-tool `tools.<name>` catalog; preview field names are humanized from the server's keys. Warning codes,
   entity types, run error codes, tool statuses and decision refusals are localized, with covering-set tests
   over both catalogs.
 - **Retry** re-sends the last user message; **read-only** replaces the composer with "Start a new chat".
+- **Known limitation — the `action` sentence (G4 review item 6, tracked by the coordinator).** The
+  preview's first row is written by the backend tool and can embed strings that came from the model's
+  tool input (a name, a label, a free-text reason). The web shows it as plain, escaped text — never
+  markup, never a link — but cannot tell which words the model chose. The card's structured rows, target
+  and warnings are the authoritative description; a backend follow-up should mark or quote model-supplied
+  values inside the sentence.
 
 ## 12. Implementation units (superseded)
 
