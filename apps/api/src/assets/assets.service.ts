@@ -90,6 +90,10 @@ export interface AssetFilters {
    * `expired` = warranty end already passed. Assets with no `warrantyEnd` match neither.
    */
   warranty?: AssetWarrantyFilter;
+  /** Exact, case-sensitive asset tags (#1387): the assets holding any of them. */
+  assetTags?: string[];
+  /** Exact, case-sensitive serials (#1387): the assets holding any of them. */
+  serials?: string[];
 }
 
 /**
@@ -309,9 +313,17 @@ export class AssetsService {
     assignedToUserId,
     ownership,
     warranty,
+    assetTags,
+    serials,
   }: AssetFilters): Prisma.AssetWhereInput {
     return {
       ...(locationId ? { locationId } : {}),
+      // Exact-value lists (#1387, the AI batch create's duplicate check): which of these tags / serials
+      // live assets already hold — one indexed `IN` per field instead of one substring search per value.
+      ...(assetTags && assetTags.length > 0
+        ? { assetTag: { in: assetTags } }
+        : {}),
+      ...(serials && serials.length > 0 ? { serial: { in: serials } } : {}),
       ...(status ? { status } : {}),
       // Warranty window (#955): `expiring90d` mirrors the dashboard tile's (now, now + N days]
       // look-ahead (assets whose warranty hasn't lapsed but ends soon); `expired` = warranty end

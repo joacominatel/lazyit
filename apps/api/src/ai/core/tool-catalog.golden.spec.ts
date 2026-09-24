@@ -92,6 +92,15 @@ const GOLDEN = {
     class: 'write',
     channels: ['CHAT', 'MCP', 'HEADLESS'],
   },
+  asset_create_batch: {
+    route: 'POST /assets',
+    permissions: ['asset:write'],
+    roles: ['ADMIN', 'MEMBER'],
+    humans: true,
+    serviceAccounts: true,
+    class: 'write',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
   asset_get: {
     route: 'GET /assets/:id',
     permissions: ['asset:read'],
