@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -395,6 +395,10 @@ default means no new anonymous surface. **On a `lan` instance** (plain HTTP, `Ho
 authorization server, both metadata documents and the public marketplace answer 404; `/mcp` accepts only
 personal tokens (and SA tokens), and its 401 carries a plain `Bearer` challenge without `resource_metadata`
 (CEO, round 2; §5.4).
+
+> **As built (W2-4):** the connected-apps endpoints (`/oauth/grants…`) are the one exception to "404 while
+> MCP is off": they stay reachable while the switch is off and on `lan`, so a user or an admin can always
+> revoke — during an incident, or after turning MCP off — and personal tokens share the list. §12.
 
 **AS metadata** advertises: `issuer`, `authorization_endpoint`, `token_endpoint`, `registration_endpoint`,
 `revocation_endpoint`, `response_types_supported: ["code"]`, `grant_types_supported:
@@ -827,3 +831,102 @@ critical list, but all five AI slices add models, so migrations must be serializ
   reachable test instance; SDK-v2 client refusal on `lan`;
 - sentinel review of `apps/api/src/oauth/**` before merge. U1, U3 and U7 touch authentication, so the CEO
   merges them.
+
+---
+
+## 12. As built — the authorization server core (W2-4, #1315)
+
+Code: `apps/api/src/oauth/` (`cimd/` and `personal-tokens/` belong to W3-3 and W3-4). Everything in §5.1–5.2
+holds; this section records the concrete contracts and the few places the build had to choose.
+
+**Gates.** `OAuthPolicyService` resolves the issuer from `WEB_ORIGIN` only when it is `https:` and
+`AUTH_MODE` is not `shim` (`oauth-config.ts`); otherwise the metadata, token, register and revoke routes
+and the consent API answer **404**. The same routes answer 404 while `ai_settings.mcpEnabled` is off (an
+absent row reads as off). The settings row is read directly with a narrow `select` of the four MCP
+columns — the `AI_SETTINGS_READER` port does not carry the effective allowlist, and the authorization
+server must not depend on the provider configuration.
+
+**Endpoints and responses.**
+
+| Route | Answers |
+| --- | --- |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 document: the §5.1 fields plus `response_modes_supported: ["query"]` and `revocation_endpoint_auth_methods_supported: ["none"]`. `client_id_metadata_document_supported` is **absent until W3-3** ships CIMD (Claude Code would otherwise pick CIMD and fail). |
+| `GET /.well-known/oauth-protected-resource[/mcp]` | RFC 9728 document for `{issuer}/mcp` |
+| `POST /oauth/register` | 201 RFC 7591 response, public client (`token_endpoint_auth_method: "none"`, no secret); `invalid_redirect_uri` / `invalid_client_metadata`; 429 per IP (10/h) or past 500 pending registrations |
+| `POST /oauth/token` | form-encoded (JSON tolerated); `authorization_code` and `refresh_token` only; `Cache-Control: no-store` on every answer; errors are exactly `{ error, error_description? }`; a repeated parameter is `invalid_request`; 429 past 60/min per IP |
+| `POST /oauth/revoke` | 200, empty, whether or not the token was known; revoking either token revokes the grant |
+| `POST /oauth/authorize/validate` | 200 `OAuthAuthorizeValidation`; **400 `{ error, redirectTo }`** for a request error that belongs to the client (the page sends the browser to `redirectTo`, which carries `error`, `state`, `iss`) |
+| `POST /oauth/authorize/decision` | 200 `OAuthAuthorizeRedirect`; 403 `{ refusal }`; 403 `{ code: "STEP_UP_REQUIRED" \| "STEP_UP_FAILED" \| "STEP_UP_UNAVAILABLE" }` for `lazyit.admin`; 400 for scopes outside the request; the same 400 `{ error, redirectTo }`; 429 past 10/min per user |
+| `GET /oauth/grants/mine` · `GET /oauth/grants?userId=` · `DELETE /oauth/grants/:id` | `ai:connect` / `settings:manage` (the admin items add `userId` to the shared `OAuthGrant`); DELETE: the owner always, otherwise `settings:manage`, otherwise 404; service accounts refused |
+
+`validate` refuses (never redirects) in this order: no human session or no `ai:connect` → `FORBIDDEN`; MCP
+off → `AI_DISABLED`; unknown client or a client the allowlist no longer admits → `INVALID_CLIENT`; a
+`redirect_uri` not registered exactly, or not admitted → `INVALID_REDIRECT`. Only then do
+`unsupported_response_type`, `invalid_request` (PKCE missing, `plain`, malformed challenge),
+`invalid_scope` and `invalid_target` redirect. A request without `scope` asks for `lazyit.read
+lazyit.write`; `lazyit.admin` is never implied. `decision` re-runs every check on the raw parameters.
+
+**Client trust policy.** `client-policy.ts` applies the shared `classifyMcpRedirectUri` /
+`isMcpRedirectUriAllowed` to a whole client: **every** registered redirect must be admitted (a listed
+pattern, or `mcpAllowAnyHttpsClient` for https only), so a registration cannot carry an unlisted
+redirect next to a listed one; the allowlist is re-checked at consent, at code exchange and at every
+refresh, so removing an entry cuts existing connections within an access token's hour. A client matched
+by a `cimd_url` entry (never a `dcr` row) is trusted for its own registrable redirects. The curated
+defaults are `client-allowlist.defaults.ts` (stable ids, parsed by the shared schema at load):
+
+| Id | Match | Source |
+| --- | --- | --- |
+| `claude-code-cimd` | CIMD `https://claude.ai/oauth/claude-code-client-metadata` | Claude connector docs (§3) |
+| `loopback-localhost-callback`, `loopback-127-callback` | `http://localhost/callback`, `http://127.0.0.1/callback` (any port) | Claude Code (§3); OpenAI Codex `rmcp-client` (shared `/callback` when the AS advertises `iss`) |
+| `claude-ai`, `claude-com` | `https://claude.ai/api/mcp/auth_callback`, `https://claude.com/api/mcp/auth_callback` | Claude connector docs |
+| `chatgpt` | `https://chatgpt.com/connector_platform_oauth_redirect` | OpenAI developer-mode docs — **re-verify in W4-3** |
+| `opencode` | `http://127.0.0.1/mcp/oauth/callback` | `sst/opencode` `mcp/oauth-provider.ts` |
+| `gemini-cli` | `http://localhost/oauth/callback` | `google-gemini/gemini-cli` `utils/oauth-flow.ts` |
+| `cursor` | `cursor://anysphere.cursor-mcp/oauth/callback` | Cursor docs — **re-verify in W4-3** |
+| `vscode-web`, `vscode-insiders-web`, `vscode-loopback-127`, `vscode-loopback-localhost` | `https://vscode.dev/redirect`, `https://insiders.vscode.dev/redirect`, `http://127.0.0.1/`, `http://localhost/` | VS Code's DCR registration — **re-verify in W4-3** |
+
+**Not seeded** (identifier not verifiable at build time; an admin adds them): Windsurf, Zed and Pi —
+Pi's coding agent has no built-in MCP client, so its OAuth identity depends on the extension in use.
+
+**Tokens.** `oauth-crypto.ts`: 32 CSPRNG bytes, base64url, prefixed; only the SHA-256 hex is stored and
+the looked-up row's hash is re-compared in constant time. A grant snapshots `sessionEpoch`; the access
+token check (`verifyAccessToken`) re-loads the user through `PrincipalLoaderService.loadHuman`, so it
+refuses exactly what the REST guard refuses. The refresh-token row is marked `usedAt` on rotation and kept
+until its expiry — that is what reuse detection recognizes.
+
+**For W3-2 (`/mcp`).** Import `OAuthModule` and inject `OAuthTokenService`:
+
+```ts
+verifyAccessToken(token: string): Promise<
+  | { ok: true; principal: HumanPrincipal; grant: { id; clientId; clientName; scopes: OAuthScope[] };
+      resource: string; expiresAt: Date }
+  | { ok: false; reason: AccessTokenFailureReason; status: 401 | 403 }>
+```
+
+It handles `lzit_oat_` only; `status` is the HTTP answer (401 for anything about the token or its user —
+including `session_revoked`, `inactive`, `password_change_required`, `wrong_audience`; 403 for
+`mcp_disabled` and a withdrawn `ai:connect`). The scope hierarchy (`write` ⊇ `read`) is applied by the
+tool listing, not stored: a grant holds exactly the scopes the user ticked. `lastUsedAt` is stamped
+fire-and-forget, at most once a minute. `OAuthPolicyService.config()` gives the issuer and canonical
+resource for the `WWW-Authenticate` challenge. `revokeGrant(id, reason, actorId, audit)` is the one
+revocation path (W3-4 reuses it for personal tokens with `personal: true`).
+
+**Choices the design left open.**
+
+- **Refresh scope.** A refresh may not widen the scope, and a narrower `scope` is refused too
+  (`invalid_scope`): tokens carry no scope of their own, and RFC 6749 §6 keeps the rotated refresh token's
+  scope identical to the presented one's. A client re-authorizes to change scope.
+- **Code replay.** A code is consumed atomically before any other check, so a wrong verifier burns it.
+  A replayed code is refused, but the grant already issued from it is not revoked: codes carry no link to
+  the grant they produced (the schema is fixed for this wave).
+- **Epoch at exchange.** The grant snapshots the user's `sessionEpoch` at code exchange, not at consent;
+  the window between the two is the code's 60 s.
+- **Grants while off.** See the §5.1 note: connected apps stay manageable while MCP is off and on `lan`.
+- **Soft delete.** `OAuthGrant` joined `SOFT_DELETABLE_MODELS`; relation reads (a token's `grant`) check
+  `deletedAt` explicitly.
+- **Logging.** pino-http never logs bodies; `logging.config.ts` additionally redacts `req.body.code`,
+  `code_verifier`, `refresh_token`, `access_token`, `token` and `password`.
+
+**Follow-ups.** The "new client connected" bell notification and email (security §6.3, gate G3 "Abuse")
+need a notification type outside this unit — not built here. Re-verify the ChatGPT, Cursor and VS Code
+identifiers in the W4-3 client matrix.

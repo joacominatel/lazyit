@@ -3,12 +3,12 @@ title: OAuthGrant
 tags: [domain, entity, ai-assistant, mcp, oauth, security]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # OAuthGrant
 
-> 🟢 implemented (schema) · Area: AI assistant — MCP · see [[0097-ai-assistant-mcp-and-headless-api]]
+> 🟢 implemented (schema + authorization server, W2-4) · Area: AI assistant — MCP · see [[0097-ai-assistant-mcp-and-headless-api]]
 > decisions 8–9 · [[ai-assistant/mcp-and-oauth|MCP]] §5–6
 
 ## Purpose
@@ -21,8 +21,13 @@ plain-HTTP `lan` instance. It is what the user sees and revokes under "Connected
 
 - **Soft delete = revoked** ([[0006-soft-delete-and-auditing]], [[0032-soft-delete-middleware]]).
   `revokeReason`: `user` \| `admin` \| `refresh_reuse` \| `revocation_endpoint` \| `client_deleted`.
-  The model joins `SOFT_DELETABLE_MODELS` (the soft-delete extension) with the first code that reads
-  grants — the OAuth authorization-server unit; until then nothing reads the table.
+  The model is in `SOFT_DELETABLE_MODELS` (the soft-delete extension), so reads hide revoked grants;
+  relation reads (a token's `grant`) check `deletedAt` explicitly. Revoking hard-deletes the grant's
+  token rows in the same transaction and writes `GRANT_REVOKED` (or `PERSONAL_TOKEN_REVOKED`).
+- **Who revokes**: the owner (`user`), an admin holding `settings:manage` (`admin`), refresh-token reuse
+  (`refresh_reuse`), or the client through RFC 7009 (`revocation_endpoint`).
+- **Scopes are exactly what the user ticked** at consent (a subset of the request); a refresh never
+  changes them. The scope hierarchy (`write` ⊇ `read`) is applied when tools are listed.
 - **Dies with the user's session epoch**: `sessionEpoch` is a snapshot of [[user]]`.sessionEpoch`; a
   password change, "sign out everywhere" or an admin reset bumps it and every grant stops working.
   Deactivation, `directoryOnly` and `mustChangePassword` also refuse it.

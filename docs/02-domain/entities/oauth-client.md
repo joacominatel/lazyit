@@ -3,12 +3,12 @@ title: OAuthClient
 tags: [domain, entity, ai-assistant, mcp, oauth, security]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # OAuthClient
 
-> 🟢 implemented (schema) · Area: AI assistant — MCP · see [[0097-ai-assistant-mcp-and-headless-api]]
+> 🟢 implemented (schema + DCR, W2-4) · Area: AI assistant — MCP · see [[0097-ai-assistant-mcp-and-headless-api]]
 > decision 8 · [[ai-assistant/mcp-and-oauth|MCP]] §6
 
 ## Purpose
@@ -26,7 +26,13 @@ Metadata Document (CIMD), or bundled with lazyit.
 - Protocol state, not domain data: unused DCR clients without grants are **hard-deleted** after 24 h.
 - Which clients may connect is the admin-configurable allowlist of
   [[0097-ai-assistant-mcp-and-headless-api]] decision 13, matched on the CIMD URL or a redirect-URI
-  pattern, never on `name`.
+  pattern, never on `name`. **Every** registered redirect must be admitted, and the
+  check is repeated at consent, code exchange and refresh. The curated defaults live in
+  `apps/api/src/oauth/client-allowlist.defaults.ts` ([[ai-assistant/mcp-and-oauth|MCP]] §12).
+- A DCR `name` is stripped of control and bidi characters and capped at 120 characters; `logoUri` is
+  not accepted from a registration; `clientUri` is kept only when it is https.
+- `lastUsedAt` is stamped at the first code exchange, which is what keeps a used registration from
+  the 24 h garbage collection.
 
 ## Fields
 
