@@ -253,6 +253,30 @@ async function refusal(fn: () => Promise<unknown>) {
   throw new Error('expected a refusal');
 }
 
+/**
+ * Asserts a refusal's class AND its stable machine `code` (provider-and-runtime.md §9.1), plus any other
+ * body fields given — the web matches the code, never the sentence.
+ */
+async function expectRefusal(
+  promise: Promise<unknown>,
+  type: new (...args: never[]) => Error,
+  code: string,
+  extra: Record<string, unknown> = {},
+) {
+  const err = await promise.then(
+    () => {
+      throw new Error('expected a refusal');
+    },
+    (e: unknown) => e as Error & { getResponse: () => unknown },
+  );
+  expect(err).toBeInstanceOf(type);
+  expect(err.getResponse()).toMatchObject({
+    code,
+    message: expect.any(String) as unknown,
+    ...extra,
+  });
+}
+
 const originalAuthMode = process.env.AUTH_MODE;
 afterEach(() => {
   if (originalAuthMode === undefined) delete process.env.AUTH_MODE;
@@ -480,9 +504,12 @@ describe('AiSettingsService — concurrent saves (review F1)', () => {
           updatedAt: new Date('2026-09-23T12:00:00Z'),
         }),
     });
-    await expect(
+    await expectRefusal(
       service.updateSettings(enabledBody({ retentionDays: 30 }), 'admin-a'),
-    ).rejects.toBeInstanceOf(ConflictException);
+      ConflictException,
+      'AI_SETTINGS_CONCURRENT_SAVE',
+      { statusCode: 409 },
+    );
     expect(audits()).toEqual([]);
     expect(current()).toMatchObject({
       baseUrl: 'https://attacker.example/v1',
@@ -497,9 +524,11 @@ describe('AiSettingsService — concurrent saves (review F1)', () => {
       beforeWrite: () =>
         makeRow({ updatedAt: new Date('2026-09-23T12:00:00Z') }),
     });
-    await expect(
+    await expectRefusal(
       service.updateSettings(body({ mcpEnabled: true }), 'a'),
-    ).rejects.toBeInstanceOf(ConflictException);
+      ConflictException,
+      'AI_SETTINGS_CONCURRENT_SAVE',
+    );
     expect(audits()).toEqual([]);
   });
 
@@ -600,9 +629,11 @@ describe('AiSettingsService — the enable gate', () => {
       row: readyRow(),
       key: undefined,
     });
-    await expect(
+    await expectRefusal(
       service.updateSettings(enabledBody(), 'a'),
-    ).rejects.toBeInstanceOf(ConflictException);
+      ConflictException,
+      'AI_SECRET_KEY_MISSING',
+    );
     expect(tester.test).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -633,9 +664,11 @@ describe('AiSettingsService — the enable gate', () => {
   it('refuses (409) in shim mode', async () => {
     process.env.AUTH_MODE = 'shim';
     const { service } = setup({ row: readyRow() });
-    await expect(
+    await expectRefusal(
       service.updateSettings(enabledBody(), 'a'),
-    ).rejects.toBeInstanceOf(ConflictException);
+      ConflictException,
+      'AI_SHIM_MODE',
+    );
   });
 
   it('refuses without a provider or model, or a base URL where required', async () => {
@@ -664,8 +697,27 @@ describe('AiSettingsService — the enable gate', () => {
         'a',
       ),
     );
-    expect(err.getResponse?.()).toMatchObject({ code: 'API_KEY_REQUIRED' });
+    expect(err.getResponse?.()).toMatchObject({
+      code: 'API_KEY_REQUIRED',
+      reason: 'DESTINATION_CHANGED',
+    });
     expect(tester.test).not.toHaveBeenCalled();
+  });
+
+  it('API_KEY_REQUIRED carries no reason when there simply never was a key', async () => {
+    const { service } = setup({
+      row: readyRow({
+        apiKeyCiphertext: null,
+        apiKeyIv: null,
+        apiKeyAuthTag: null,
+        apiKeyKeyVersion: null,
+      }),
+    });
+    const err = await refusal(() => service.updateSettings(enabledBody(), 'a'));
+    expect(err).toBeInstanceOf(UnprocessableEntityException);
+    const response = err.getResponse?.() as Record<string, unknown>;
+    expect(response.code).toBe('API_KEY_REQUIRED');
+    expect(response).not.toHaveProperty('reason');
   });
 
   it('skips the test when re-saving an enabled, verified, unchanged connection', async () => {
@@ -713,7 +765,7 @@ describe('AiSettingsService — the enable gate', () => {
 describe('AiSettingsService — shape checks', () => {
   it('refuses a plain http base URL outside the private-network OpenAI-compatible case', async () => {
     const { service } = setup();
-    await expect(
+    await expectRefusal(
       service.updateSettings(
         body({
           provider: 'openai-compatible',
@@ -722,7 +774,10 @@ describe('AiSettingsService — shape checks', () => {
         }),
         'a',
       ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      BadRequestException,
+      'BASE_URL_HTTP_NOT_ALLOWED',
+      { statusCode: 400 },
+    );
     await expect(
       service.updateSettings(
         body({
@@ -747,50 +802,106 @@ describe('AiSettingsService — base URL checks (review F3, F5)', () => {
     });
 
   it.each([
-    ['userinfo', 'https://user:secret@llm.example/v1'],
-    ['a bare username', 'https://token@llm.example/v1'],
-    ['a query string', 'https://llm.example/v1?api_key=abc'],
-    ['an empty query', 'https://llm.example/v1?'],
-    ['a fragment', 'https://llm.example/v1#x'],
+    ['userinfo', 'https://user:secret@llm.example/v1', 'BASE_URL_CREDENTIALS'],
+    ['a bare username', 'https://token@llm.example/v1', 'BASE_URL_CREDENTIALS'],
+    [
+      'a query string',
+      'https://llm.example/v1?api_key=abc',
+      'BASE_URL_QUERY_OR_FRAGMENT',
+    ],
+    ['an empty query', 'https://llm.example/v1?', 'BASE_URL_QUERY_OR_FRAGMENT'],
+    ['a fragment', 'https://llm.example/v1#x', 'BASE_URL_QUERY_OR_FRAGMENT'],
   ])(
     'refuses a base URL with %s, on save and on test',
-    async (_label, baseUrl) => {
+    async (_label, baseUrl, code) => {
       const { service, tester, prisma } = setup();
-      await expect(
+      await expectRefusal(
         service.updateSettings(compatible(baseUrl), 'a'),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      await expect(
+        BadRequestException,
+        code,
+      );
+      await expectRefusal(
         service.testConnection({
           provider: 'openai-compatible',
           model: 'm',
           baseUrl,
         }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+        BadRequestException,
+        code,
+      );
       expect(tester.test).not.toHaveBeenCalled();
       expect(prisma.$transaction).not.toHaveBeenCalled();
     },
   );
 
   it.each([
-    ['plain http to a public literal', 'http://8.8.8.8/v1'],
-    ['a loopback literal', 'https://127.0.0.1:11434/v1'],
-    ['an IPv6 loopback literal', 'http://[::1]:11434/v1'],
-    ['localhost', 'http://localhost:11434/v1'],
-    ['a *.localhost name', 'https://ollama.localhost/v1'],
-    ['the metadata address', 'http://169.254.169.254/latest'],
-    ['a link-local literal', 'http://169.254.10.10/v1'],
-  ])('refuses %s', async (_label, baseUrl) => {
+    [
+      'plain http to a public literal',
+      'http://8.8.8.8/v1',
+      'BASE_URL_HTTP_PUBLIC',
+    ],
+    [
+      'a loopback literal',
+      'https://127.0.0.1:11434/v1',
+      'BASE_URL_UNREACHABLE_RANGE',
+    ],
+    [
+      'an IPv6 loopback literal',
+      'http://[::1]:11434/v1',
+      'BASE_URL_UNREACHABLE_RANGE',
+    ],
+    ['localhost', 'http://localhost:11434/v1', 'BASE_URL_LOOPBACK'],
+    ['a *.localhost name', 'https://ollama.localhost/v1', 'BASE_URL_LOOPBACK'],
+    [
+      'the metadata address',
+      'http://169.254.169.254/latest',
+      'BASE_URL_UNREACHABLE_RANGE',
+    ],
+    [
+      'a link-local literal',
+      'http://169.254.10.10/v1',
+      'BASE_URL_UNREACHABLE_RANGE',
+    ],
+    ['an unparseable value', 'not a url', 'BASE_URL_INVALID'],
+    ['a non-http scheme', 'ftp://llm.example/v1', 'BASE_URL_SCHEME'],
+  ])('refuses %s', async (_label, baseUrl, code) => {
     const { service } = setup();
-    await expect(
+    await expectRefusal(
       service.updateSettings(compatible(baseUrl), 'a'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      BadRequestException,
+      code,
+    );
+  });
+
+  it('refuses the private-network option or provider options that do not fit the provider', async () => {
+    const { service } = setup();
+    await expectRefusal(
+      service.testConnection({
+        provider: 'anthropic',
+        model: 'm',
+        allowPrivateNetwork: true,
+      }),
+      BadRequestException,
+      'PRIVATE_NETWORK_PROVIDER_MISMATCH',
+    );
+    await expectRefusal(
+      service.testConnection({
+        provider: 'anthropic',
+        model: 'm',
+        providerOptions: { notAnOption: true } as never,
+      }),
+      BadRequestException,
+      'PROVIDER_OPTIONS_UNSUPPORTED',
+    );
   });
 
   it('refuses a private literal without the private-network option', async () => {
     const { service } = setup();
-    await expect(
+    await expectRefusal(
       service.updateSettings(compatible('https://10.0.0.5/v1', false), 'a'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      BadRequestException,
+      'BASE_URL_PRIVATE_NOT_ALLOWED',
+    );
   });
 
   it.each([
@@ -813,8 +924,10 @@ describe('AiSettingsService — shim mode (review F6)', () => {
   it('the connection test makes no provider call', async () => {
     process.env.AUTH_MODE = 'shim';
     const { service, tester } = setup({ row: enabledRow() });
-    await expect(service.testConnection({})).rejects.toBeInstanceOf(
+    await expectRefusal(
+      service.testConnection({}),
       ConflictException,
+      'AI_SHIM_MODE',
     );
     expect(tester.test).not.toHaveBeenCalled();
   });
@@ -996,8 +1109,10 @@ describe('AiSettingsService — connection test (draft)', () => {
 
   it('400s without a provider and a model', async () => {
     const { service } = setup();
-    await expect(service.testConnection({})).rejects.toBeInstanceOf(
+    await expectRefusal(
+      service.testConnection({}),
       BadRequestException,
+      'PROVIDER_NOT_CONFIGURED',
     );
   });
 

@@ -434,6 +434,46 @@ export const AiSettingsSchema = z.object({
 });
 export type AiSettings = z.infer<typeof AiSettingsSchema>;
 
+/**
+ * The stable machine codes of every `/config/ai` refusal (provider-and-runtime.md §9.1). Each refusal
+ * body carries `code` next to its human `message`, so the web matches the code, never the sentence.
+ *   409 — `AI_SETTINGS_CONCURRENT_SAVE` (reload and save again), `AI_SECRET_KEY_MISSING` (a key write,
+ *         or enabling a key-bearing provider, without a usable `AI_SECRET_KEY`), `AI_SHIM_MODE` (test or
+ *         enable while `AUTH_MODE=shim`);
+ *   400 — the base-URL rules (`BASE_URL_*`), `PRIVATE_NETWORK_PROVIDER_MISMATCH`,
+ *         `PROVIDER_OPTIONS_UNSUPPORTED`, and `PROVIDER_NOT_CONFIGURED` for a test without a provider or
+ *         model;
+ *   422 — the enable gate: `DISCLOSURE_REQUIRED`, `PROVIDER_NOT_CONFIGURED`, `API_KEY_REQUIRED` (with
+ *         `reason: "DESTINATION_CHANGED"` when the stored key was just cleared because the provider or
+ *         base URL changed), `CONNECTION_TEST_FAILED` (with `test`).
+ * The list only grows; a web treats an unknown code as a generic refusal and shows `message`.
+ */
+export const AI_SETTINGS_ERROR_CODES = [
+  "AI_SETTINGS_CONCURRENT_SAVE",
+  "AI_SECRET_KEY_MISSING",
+  "AI_SHIM_MODE",
+  "BASE_URL_INVALID",
+  "BASE_URL_CREDENTIALS",
+  "BASE_URL_QUERY_OR_FRAGMENT",
+  "BASE_URL_SCHEME",
+  "BASE_URL_HTTP_NOT_ALLOWED",
+  "BASE_URL_LOOPBACK",
+  "BASE_URL_HTTP_PUBLIC",
+  "BASE_URL_UNREACHABLE_RANGE",
+  "BASE_URL_PRIVATE_NOT_ALLOWED",
+  "PRIVATE_NETWORK_PROVIDER_MISMATCH",
+  "PROVIDER_OPTIONS_UNSUPPORTED",
+  "DISCLOSURE_REQUIRED",
+  "PROVIDER_NOT_CONFIGURED",
+  "API_KEY_REQUIRED",
+  "CONNECTION_TEST_FAILED",
+] as const;
+export type AiSettingsErrorCode = (typeof AI_SETTINGS_ERROR_CODES)[number];
+
+/** Why `API_KEY_REQUIRED` fired, when there is more to say than "no key". */
+export const AI_API_KEY_REQUIRED_REASONS = ["DESTINATION_CHANGED"] as const;
+export type AiApiKeyRequiredReason = (typeof AI_API_KEY_REQUIRED_REASONS)[number];
+
 const aiModelId = z.string().trim().min(1).max(200);
 const aiBaseUrl = z
   .url()
@@ -538,6 +578,18 @@ export const AiModelListSchema = z.object({
   models: z.array(z.object({ id: z.string().min(1), label: z.string().nullable() })),
 });
 export type AiModelList = z.infer<typeof AiModelListSchema>;
+
+/**
+ * The body of a `/config/ai` refusal. `code` is kept an open string on read so an older web renders a
+ * newer code generically; the 400/409 bodies also carry Nest's `statusCode` and `error`.
+ */
+export const AiSettingsErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  reason: z.string().optional(),
+  test: AiConnectionTestResultSchema.optional(),
+});
+export type AiSettingsError = z.infer<typeof AiSettingsErrorSchema>;
 
 /**
  * How `/mcp` authenticates on this instance: OAuth 2.1 on an HTTPS instance, personal tokens on a

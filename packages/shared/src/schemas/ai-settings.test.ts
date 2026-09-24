@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AI_SETTINGS_ERROR_CODES,
+  AiSettingsErrorSchema,
   MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS,
   McpClientAllowlistDefaultSchema,
   AI_SERVICE_ACCOUNT_ACCESS_DEFAULT,
@@ -493,5 +495,17 @@ describe("MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS (the curated defaults, shared wi
   test("the plain entry schema strips the display metadata (what the server matches on)", () => {
     const entry = McpClientAllowlistEntrySchema.parse(MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS[0]);
     expect(Object.keys(entry).sort()).toEqual(["id", "label", "match"]);
+  });
+});
+
+describe("AI_SETTINGS_ERROR_CODES", () => {
+  test("codes are unique and the refusal body keeps code open on read", () => {
+    expect(new Set(AI_SETTINGS_ERROR_CODES).size).toBe(AI_SETTINGS_ERROR_CODES.length);
+    expect(
+      AiSettingsErrorSchema.parse({ statusCode: 409, error: "Conflict", code: "SOMETHING_NEWER", message: "m" }),
+    ).toMatchObject({ code: "SOMETHING_NEWER" });
+    expect(
+      AiSettingsErrorSchema.parse({ code: "API_KEY_REQUIRED", message: "m", reason: "DESTINATION_CHANGED" }),
+    ).toMatchObject({ reason: "DESTINATION_CHANGED" });
   });
 });
