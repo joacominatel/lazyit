@@ -153,29 +153,30 @@ Legend:
 
 | Module (controller) | Operations | Permission | Class | AI disposition |
 | --- | --- | --- | --- | --- |
-| assets | list, get, companies, `:id/assignments`, `:id/history` | asset:read | R | v1 `asset_search`, `asset_get` |
-| assets | `GET mine` | self | R | v1 (`asset_search` `mine:true`) |
-| assets | `:id/articles` | article:read | R | v1 facet of `asset_get` |
-| assets | create / update | asset:write | W | v1 |
-| assets | delete / restore | asset:delete | D / W | v1 `asset_archive` / `asset_restore` |
+| assets | list, get, `:id/assignments`, `:id/history` | asset:read | R | v1 `asset_search`, `asset_get` (built, W2-5) |
+| assets | companies (distinct values) | asset:read | R | not exposed (the form's autocomplete; `asset_search` filters by `company`) |
+| assets | `GET mine` | self | R | v1 (`asset_search` `mine:true`; built, W2-5) |
+| assets | `:id/articles` | article:read | R | v1 facet of `asset_get` (built, W2-5) |
+| assets | create / update | asset:write | W | v1 `asset_create` / `asset_update` (built, W2-5) |
+| assets | delete / restore | asset:delete | D / W | v1 `asset_archive` / `asset_restore` (built, W2-5) |
 | assets | batch delete / restore / status | asset:delete | D | v1.1 (blast radius) |
 | assets | batch receive | asset:write | W | v1.1 |
 | assets | export CSV | asset:read | R | EXCL (bulk file; use search) |
-| asset-assignments | list / get | asset:read | R | facet of `asset_get` / `user_get` |
-| asset-assignments | create (check-out) / release (check-in) | asset:write | W | v1 |
+| asset-assignments | list / get | asset:read | R | facet of `asset_get` (through `GET /assets/:id/assignments`) / `user_get`; the `/asset-assignments` reads themselves are not exposed |
+| asset-assignments | create (check-out) / release (check-in) | asset:write | W | v1 `asset_check_out` / `asset_check_in` (built, W2-5) |
 | asset-assignments | notes | asset:write | W | v1.1 |
 | asset-assignments | acknowledge | self (human-only) | W | v1.1 |
 | asset / article attachments | list | asset:read / article:read | R | v1.1 |
 | asset / article attachments | upload, content stream | *:write / *:read | W / R | EXCL (binary, [R19]) |
-| asset-models | list / get | assetModel:read | R | v1 `reference_lookup` |
-| asset-models | create | assetModel:write | W | v1 |
+| asset-models | list / get | assetModel:read | R | v1 `reference_lookup` (built, W2-5) |
+| asset-models | create | assetModel:write | W | v1 `asset_model_create` (built, W2-5) |
 | asset-models | update | assetModel:write | W | v1.1 |
 | asset-models | delete / restore | assetModel:delete | D | v1.1 |
-| asset / application / consumable / article categories | list / get | category:read | R | v1 `reference_lookup` |
+| asset / application / consumable / article categories | list / get | category:read | R | v1 `reference_lookup` (built, W2-5) |
 | (same) | create / update / delete / restore | category:write / delete | W / D | v1.1 |
 | article-categories | `PUT :id/access-rules` | settings:manage | W | v1.1, `elevated` (authz config) |
-| locations | list / get | location:read | R | v1 `reference_lookup` |
-| locations | create | location:write | W | v1 |
+| locations | list / get | location:read | R | v1 `reference_lookup` (built, W2-5) |
+| locations | create | location:write | W | v1 `location_create` (built, W2-5) |
 | locations | update | location:write | W | v1.1 |
 | locations | delete / restore | location:delete | D | v1.1 |
 | applications | list / get | application:read | R | v1 |
@@ -200,17 +201,19 @@ Legend:
 | articles | version restore, links / aliases writes | article:write | W | v1.1 |
 | articles | import (multipart) | article:write | W | EXCL (binary) |
 | articles | delete / restore | article:delete | D | v1.1 |
-| users | list, get, role-counts, `:id/assignments` | user:read | R | v1 |
-| users | `:id/access-grants` | accessGrant:read | R | facet |
+| users | list, get, `:id/assignments` | user:read | R | v1 `user_search`, `user_get` (built, W2-9) |
+| users | role-counts | user:read | R | not in the v1 cut (§7; `user_search` with `role` returns the count as its total) |
+| users | `:id/access-grants` | accessGrant:read | R | facet of `user_get` (built, W2-9) |
 | users | `me` | self | R | v1 `session_context` |
-| users | create / update | user:manage | W | v1 |
-| users | offboard (delete alias) | user:manage | D + ext + cascade | v1 |
-| users | restore | user:manage | W | v1 |
+| users | create / update | user:manage | W | v1 `user_create` / `user_update`, `elevated` (built, W2-9) |
+| users | offboard (delete alias) | user:manage | D + ext + cascade | v1 `user_offboard` binds `POST :id/offboard`; `DELETE :id` unexposed (built, W2-9) |
+| users | restore | user:manage | W | v1 `user_restore`, `elevated` (built, W2-9) |
 | users | clone | user:manage | W | v1.1 |
 | users | provision-local-account | user:manage | W | EXCL (returns a temporary password in cleartext, [R24]; CEO round 2) |
 | users | reset-password, provision-account, password-reset-capabilities | user:manage | W | v1.1, `elevated` with step-up — only where the response carries no credential; otherwise EXCL |
-| dashboard | summary | dashboard:read | R | v1 |
-| dashboard | activity + filters | logs:read | R | v1 `activity_list` |
+| dashboard | summary | dashboard:read | R | v1 `dashboard_summary` (built, W2-9) |
+| dashboard | activity | logs:read | R | v1 `activity_list` (built, W2-9) |
+| dashboard | activity filters (the Reports select menus) | logs:read | R | not in the v1 cut (`activity_list` filters by actor and action directly) |
 | dashboard | export | logs:read | R | EXCL |
 | audit | security audit logs (read) | logs:read | R | v1.1 |
 | audit | export | logs:read | R | EXCL |
@@ -438,19 +441,19 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 1 | `session_context` | UsersController.me, ConfigController.myPermissions, InstanceController.version, AccessGrants/Assets `mine` | open (self) | read | — |
 | 2 | `lazyit_search` | SearchController.find | search:read | read | — |
 | 3 | `navigate_to` (chat only) | the entity's get handler (existence + visibility check) | entity's read | navigate | the target (`op: navigate`) |
-| 4 | `reference_lookup` (kind: assetModel, location, assetCategory, applicationCategory, consumableCategory, articleFolder) | 6 list/get handlers | assetModel:read / location:read / category:read | read | — |
-| 5 | `dashboard_summary` | DashboardController.summary | dashboard:read | read | — |
-| 6 | `activity_list` | DashboardController.activity | logs:read | read | — |
-| 7 | `asset_search` | AssetsController.findAll / .findMine | asset:read / self | read | — |
-| 8 | `asset_get` | AssetsController.findOne (+assignments, history, articles facets) | asset:read (+article:read facet) | read | — |
-| 9 | `asset_create` | AssetsController.create | asset:write | write | asset created |
-| 10 | `asset_update` | AssetsController.update | asset:write | write·D | asset updated |
-| 11 | `asset_archive` | AssetsController.remove | asset:delete | write·D | asset archived |
-| 12 | `asset_restore` | AssetsController.restore | asset:delete | write | asset restored |
-| 13 | `asset_check_out` | AssetAssignmentsController.create | asset:write | write | asset updated (+user) |
-| 14 | `asset_check_in` | AssetAssignmentsController.release | asset:write | write | asset updated (+user) |
-| 15 | `asset_model_create` | AssetModelsController.create | assetModel:write | write | assetModel created |
-| 16 | `location_create` | LocationsController.create | location:write | write | location created |
+| 4 | `reference_lookup` ✅ built (W2-5) (kind: assetModel, location, assetCategory, applicationCategory, consumableCategory, articleFolder) | AssetModelsController.findAll (primary) and the `findAll` / `findOne` of the six controllers (12 handlers) | assetModel:read (listing); each kind's own route authorizes it | read | — |
+| 5 | `dashboard_summary` ✅ built (W2-9) | DashboardController.summary | dashboard:read | read | — |
+| 6 | `activity_list` ✅ built (W2-9) | DashboardController.activity | logs:read | read | — |
+| 7 | `asset_search` ✅ built (W2-5) | AssetsController.findAll / .findMine | asset:read / self | read | — |
+| 8 | `asset_get` ✅ built (W2-5) | AssetsController.findOne (+findAssignments, findHistory, findArticles facets; findAll for tag/serial) | asset:read (+article:read facet) | read | — |
+| 9 | `asset_create` ✅ built (W2-5) | AssetsController.create (+model/location lookups) | asset:write | write | asset created |
+| 10 | `asset_update` ✅ built (W2-5) | AssetsController.update (+findOne, lookups) | asset:write | write·D | asset updated |
+| 11 | `asset_archive` ✅ built (W2-5) | AssetsController.remove | asset:delete | write·D | asset archived |
+| 12 | `asset_restore` ✅ built (W2-5) | AssetsController.restore (+findAll `deleted=only`) | asset:delete | write | asset restored |
+| 13 | `asset_check_out` ✅ built (W2-5) | AssetAssignmentsController.create (+AssetsController.findOne / findAll, UsersController.findAll / me) | asset:write | write | assetAssignment created (parent asset), asset updated, user updated |
+| 14 | `asset_check_in` ✅ built (W2-5) | AssetAssignmentsController.release (+AssetsController.findAssignments) | asset:write | write | assetAssignment updated (parent asset), asset updated, user updated |
+| 15 | `asset_model_create` ✅ built (W2-5) | AssetModelsController.create (+AssetCategoriesController.findAll) | assetModel:write | write | assetModel created |
+| 16 | `location_create` ✅ built (W2-5) | LocationsController.create (+findAll / findOne for the parent) | location:write | write | location created |
 | 17 | `application_search` | ApplicationsController.findAll | application:read | read | — |
 | 18 | `application_get` | ApplicationsController.findOne (+grants, articles facets) | application:read | read | — |
 | 19 | `application_create` | ApplicationsController.create | application:write | write | application created |
@@ -471,12 +474,12 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 34 | `kb_create_article` (as DRAFT) ✅ built (W2-8) | ArticlesController.create | article:write | write | article created |
 | 35 | `kb_update_article` ✅ built (W2-8; also the folder move) | ArticlesController.update | article:write | write·D (preview may escalate) | article updated |
 | 36 | `kb_set_publication` (publish\|unpublish) ✅ built (W2-8) | ArticlesController.publish / .unpublish | article:write | write (preview may escalate; idempotent) | article updated |
-| 37 | `user_search` | UsersController.findAll | user:read | read | — |
-| 38 | `user_get` | UsersController.findOne (+assignments, grants facets) | user:read (+accessGrant:read facet) | read | — |
-| 39 | `user_create` | UsersController.create | user:manage | elevated | user created |
-| 40 | `user_update` | UsersController.update | user:manage | elevated·D (ROLE_CHANGE / email warnings) | user updated |
-| 41 | `user_offboard` | UsersController.offboard | user:manage | write·D, ext, cascade | user archived; also affects asset, accessGrant |
-| 42 | `user_restore` | UsersController.restore | user:manage | elevated (restores sign-in) | user restored |
+| 37 | `user_search` ✅ built (W2-9) | UsersController.findAll | user:read | read | — |
+| 38 | `user_get` ✅ built (W2-9) | UsersController.findOne (+assignments, grants facets) | user:read (+accessGrant:read facet) | read | — |
+| 39 | `user_create` ✅ built (W2-9) | UsersController.create | user:manage | elevated | user created |
+| 40 | `user_update` ✅ built (W2-9) | UsersController.update | user:manage | elevated·D (ROLE_CHANGE / IDENTITY_CHANGE warnings) | user updated |
+| 41 | `user_offboard` ✅ built (W2-9) | UsersController.offboard (`POST :id/offboard`) | user:manage | write·D, ext, cascade | user archived; also affects asset, accessGrant |
+| 42 | `user_restore` ✅ built (W2-9) | UsersController.restore | user:manage | elevated (restores sign-in) | user restored |
 | 43 | `infra_node_search` ✅ built (W2-10) | InfraController.listNodePage (`GET /infra/nodes/page`; not `GET /nodes`, which uses `@Res`) | infra:read | read | — |
 | 44 | `infra_node_get` ✅ built (W2-10) | InfraController.getNode (primary), .listEdges, .getImpact, .listNodePage (edge peers by `ids`) | infra:read | read | — |
 
@@ -540,6 +543,10 @@ path unit (W2-0, #1315):
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
   `kb.tools.ts` (W2-8) holds the five KB tools — see *KB tools as built* below;
+  `assets.tools.ts` and `reference.tools.ts` (W2-5) hold the asset, ownership and reference-data tools —
+  see *Assets and reference tools as built* below;
+  `users.tools.ts` and `activity.tools.ts` (W2-9) hold the six `user_*` tools, `dashboard_summary` and
+  `activity_list` — see *Users and activity tools as built* below;
   `consumables.tools.ts` (W2-7) holds the five consumables tools and leaves archive / restore unexposed
   (v1.1) — see *Consumables tools as built* below;
   `platform.tools.ts` lists the surfaces no domain owns (authentication, instance configuration, the
@@ -624,6 +631,150 @@ leak through a tool would be a leak in the test.
     the route's 403 at approve — the core dry-check sees only `article:write`;
   - the folder audience for a non-`settings:manage` caller stays *unknown* until the derived
     restricted flag (#1299) lands.
+
+**Assets and reference tools as built (W2-5).** Eleven tools: `asset_search`, `asset_get`,
+`reference_lookup` (read); `asset_create`, `asset_update`·D, `asset_archive`·D, `asset_restore`,
+`asset_check_out`, `asset_check_in`, `asset_model_create`, `location_create` (write). None is `elevated`
+and none emits a step-up warning: they grant no access or privilege. All admit humans and Service
+Accounts holding the route's permission.
+- **References** (§7): an asset by id, asset tag or serial (a tag or serial through `GET /assets?q=`,
+  matched exactly and case-insensitively, so a partial tag never resolves); a person by user id, email,
+  exact full name or `"me"` (through `GET /users` — `user:read` — or `GET /users/me`; a username or
+  legajo matches only when the route's `q`, which searches names and email, surfaced the row); a model,
+  location or asset category by id or exact name. Two matches are `AMBIGUOUS_REFERENCE` with the
+  candidates. **A partial page never decides** (review fix F1, the rule the consumables tools apply):
+  when the route's substring search matched more rows than the one page a lookup reads (200), the
+  entity meant may sit past it, so the reference is refused as `AMBIGUOUS_REFERENCE` asking for the id —
+  unless two exact matches are already on the page, which are named as candidates. In `run` a raw id passes straight to the write handler (a Service Account with write-only
+  grants still works); the preview always reads the target, to name it. An id is recognized by shape —
+  a cuid (`c` + 24 lowercase alphanumerics) or a uuid.
+- **Ownership is the assignment** (asset-centric): `asset_check_out` opens an `AssetAssignment`
+  (`POST /asset-assignments`), `asset_check_in` releases one (`PATCH /asset-assignments/:id/release`).
+  Check-in finds the assignment among the asset's live owners (`GET /assets/:id/assignments`); with no
+  person given, the asset must have exactly one owner — several is `AMBIGUOUS_REFERENCE` naming them,
+  none is `CONFLICT`. Check-out onto an existing owner is refused at propose (`CONFLICT`), not left for
+  the route's 409 after an approval.
+- **Previews.** Creates list every provided field (`after` only) and carry no target. Every other write
+  names its target and carries `precondition { entity, updatedAt }`: the asset for update, archive,
+  restore and check-out; the assignment (with `parent` → its asset) for check-in, so a release that
+  raced the approval is `STALE`. Updates show only the fields that change (a no-op update is refused as
+  `INVALID_INPUT`); entity-valued changes (model, location, the person) are `{ type, id, label }` with
+  `valueKind: "entity"`. `asset_archive` warns `SOFT_DELETE` and lists the owners who still hold the
+  asset (archiving does not release them). Timestamps are normalized to ISO strings — an in-process
+  handler returns Prisma `Date`s.
+- **`asset_update` merges `specs`** over the attributes read at execute time (a `null` value removes a
+  key; only own keys are read and written). The keys a reporting agent or lazyit owns — `host` and any
+  `_`-prefixed provenance key such as `_infraAutoCreated` — are refused as input on create and update
+  (review fix F2), so a tool can neither forge nor strip them. The route replaces `specs` whole, so an
+  agent report landing between that read and the write is overwritten by it; the next report re-syncs
+  the host facts.
+- **`asset_restore`** finds the archived asset through `GET /assets?deleted=only`. That list is
+  ADMIN-only by **role** (`assertCanListDeleted`), while the restore route needs only `asset:delete` —
+  so a Service Account or a non-ADMIN role granted `asset:delete` cannot restore through the tool, though
+  it could over HTTP by id (a parity gap, follow-up F5). The list has no id filter, so a raw id scans the
+  five newest-archived pages (1,000 assets) and, when more exist, is refused as `AMBIGUOUS_REFERENCE`
+  asking for the tag or serial; a tag or serial is a `q` search.
+- **Results.** `asset_search` returns `{ total, offset, items }` (model, category, location, current
+  owners; never notes or specs) with a `truncated` marker; `asset_get` concise adds notes, cost and
+  book value; `full` adds specs, the ownership history (capped at 50), the last 20 history events and
+  the linked KB articles — a facet the caller may not read (`article:read`) is reported
+  `unavailable`, not failed. `reference_lookup` pages the unpaged taxonomies itself; KB folders never
+  carry their access rules. Notes, descriptions, specs and history payloads are wrapped with
+  `untrusted()`, and so are an asset's **name and serial** when a reporting agent may have written them
+  (review fix F3, mirroring the infra tools): the asset carries `specs._infraAutoCreated` (the node
+  created it from the reported hostname) or `specs.host` (agent-linked), or the row does not say — the
+  lean `asset_search` rows carry no specs, so their names and serials are always wrapped. Such an asset's
+  label (card, ref, summary, ambiguity hint) is its tag, never its name. Prisma values are normalized to
+  their wire form (`Date` → ISO, `bigint` / `Decimal` → number or exact string) before a preview or a
+  comparison (review fix F6).
+- **Entity refs** (§8.5): create/update/archive/restore → the asset (or model, location) with its op;
+  check-out and check-in → the assignment (`parent` → asset), the asset and the person, all `updated`
+  except the new assignment (`created`).
+- **Known gaps (follow-ups from the G2 review of #1346):**
+  - **F4 — ownership races.** The check-out and archive preconditions are the asset's `updatedAt`, and
+    opening or releasing an assignment does not bump it, so an ownership change between proposal and
+    approval is not `STALE`. Check-out still cannot double-assign (the route's 409 and partial unique
+    index), and check-in targets the assignment's own version. Folding the open-assignment set into the
+    precondition needs the precondition contract to carry more than one version (a core change).
+  - **F5 — permission parity.** A tool is listed by its PRIMARY route's permission: `reference_lookup`
+    is listed only to holders of `assetModel:read` although each kind is authorized by its own route
+    (a role with `location:read` but no `assetModel:read` does not see it); `asset_search` is listed by
+    `asset:read`, so `mine: true` (the ungated self-read) is unreachable for a role stripped of
+    `asset:read`, and a Service Account is refused `mine` by the route; `asset_restore` (above) needs the
+    ADMIN role for its lookup.
+- **Unexposed with reasons:** batch archive/restore/status and bulk receive (v1.1), the CSV export, the
+  companies autocomplete, the `/asset-assignments` reads (served as facets), assignment notes (v1.1),
+  acknowledge (the holder's own act, v1.1), attachments (list/remove v1.1; binary upload/content never),
+  model/location/category update, archive and restore and every category create (v1.1), folder access
+  rules (`elevated`, after v1).
+
+**Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so
+the RBAC guards stay in `UsersService`, in one place: the self-role-change refusal (403), the last-admin
+guard on demotion, deactivation and offboarding (409, SEC-021) and the manager checks (400) answer a tool
+exactly as they answer HTTP — the specs drive them through the tools, over chat approval and MCP. The
+user writes are for human principals: a Service Account never holds `user:manage` (INV-SA-3). The specs
+pin the route's behaviour for one that does, for parity only; stripping such a grant at principal load is
+a separate remediation, not a supported path here.
+- **References.** A user is an id, an email, a username, a legajo or `"me"`. The literal `"me"` (any case)
+  is checked first and always means the human caller — a user whose username is "me" is named by id or
+  email; a Service Account asking for `"me"` gets 400. Resolution reads `GET /users` as the caller: a
+  reference containing `@` is matched as an email through the route's `q`, and every reference is also
+  matched exactly against username and legajo — which `q` does not search — by scanning at most 5 pages
+  of 200 (a username may contain `@`; two different matches are `AMBIGUOUS_REFERENCE`). A partial scan
+  never decides (the W2-7 rule): on a directory larger than the scan, a username or legajo reference is
+  refused as `AMBIGUOUS_REFERENCE` ("use the id or email"); an exact email match stays decisive. `user_restore`
+  resolves in the archived slice (`deleted=only`, ADMIN-only on the route). The target is pinned by the
+  preview's `precondition` (a re-resolution to another user is `STALE`).
+- **Manager input (pinned).** A manager (`user_create`, `user_update`) is `{ userId }` — a lazyit user by
+  **id only**, found with `user_search` first — or `{ name }` (free text), or `null` to clear. Taking the
+  id rather than a reference keeps the stored input exactly what the card showed, so execution cannot set
+  a different person. The preview labels it through `findOne` and detects a no-op by identity (same id,
+  or same free-text name), never by comparing labels.
+- **Reads.** `user_search` (`query`, `role`, `directoryOnly`, `archived`, the route's `sort`, `dir`,
+  `limit` ≤ 50, `offset`) and `user_get` (`detail`; the assignments facet and the `accessGrant:read`
+  grants facet — reported `unavailable` without that permission, never a failure). `dashboard_summary`
+  (`expiringWithinDays`, `detail: full` adds the recent asset history) and `activity_list` (the feed's
+  filters; `actor` is a uuid or `"me"`; `limit` ≤ 50). Never projected: `externalId`, password and
+  session material, the raw manager columns. Wrapped with `untrusted()`: assignment and grant notes,
+  imported `directoryAttrs`, an activity row's `subjectName` (entity names, some agent-reported) and a
+  history `payload`. The feed's `summary` is a fixed server phrase and is not wrapped.
+- **Writes and warnings.** Previews leave `stepUpRequired` to core (it derives it from the warnings).
+  - `user_create` (`elevated`): always `IDENTITY_CHANGE`, plus `ROLE_CHANGE` for a role above VIEWER. No
+    target (nothing exists yet). The input has no `password`: the route's optional temporary password is
+    a credential (INV-AI-5).
+  - `user_update` (`elevated`, destructive): `ROLE_CHANGE` for a role change; `IDENTITY_CHANGE` for email,
+    name, username, legajo or activation (`isActive`); `EXTERNAL_PROVISIONING` when a role, name or email
+    change is mirrored to the IdP (the account has an `externalId`). A **manager** change is not an
+    identity change and needs no step-up (CEO decision 2026-09-24): it is local-only and the route records
+    it as an append-only `MANAGER_CHANGED` history row, so it carries the non-step-up `LEDGER_APPEND` —
+    the elevated preview still has a warning. Bundled with an identity field, `IDENTITY_CHANGE` (and so
+    step-up) still applies. A no-op is refused before any card (400). **Residual (accepted):** the
+    manager's email feeds workflow connectors (`grantee.manager.email`, ADR-0058 §3), so a manager change
+    can redirect a future external approval or notification. The card shows the change; no password.
+  - `user_offboard` (`write`, destructive, ext): `SOFT_DELETE`; `CASCADE_RELEASES_ASSIGNMENTS` and
+    `CASCADE_REVOKES_GRANTS` with the `impacted` assets and grants (grants warned even when the caller
+    cannot count them); `EXTERNAL_DEPROVISIONING` when the IdP account is deactivated; always
+    `IRREVERSIBLE` with a `secretVaultMemberships` change row — the route hard-drops the user's Secret
+    Manager vault memberships and `user_restore` does not bring them back. The preview cannot count them:
+    the Secret Manager is a structural exclusion (ADR-0061), so the card says "any held". No step-up (it
+    revokes, it grants nothing). The result reports counts only — never the Secret Manager vault names
+    the route returns as a rotation prompt (ADR-0061) — and its refs are the user (`archived`) and each
+    released asset (`updated`); the route returns no ids for the revoked grants.
+  - `user_restore` (`elevated`): `IDENTITY_CHANGE` (it restores sign-in), plus `ROLE_CHANGE` when the
+    restored role is above VIEWER (its powers come back); grants, assets and vault memberships are not
+    restored, and the description says so. A live user is refused before any card (400).
+- **Unexposed with reasons:** `roleCounts` and `activityFilters` (not in the v1 cut), `remove` (the
+  `DELETE` alias of offboard), `clone` (v1.1), `provisionAccount` and `passwordResetCapabilities` (v1.1,
+  `elevated`), `resetPassword` and `provisionLocalAccount` (structural exclusion), the activity CSV
+  export, the security audit logs and notifications (v1.1).
+- **Known limits and follow-ups.**
+  - A non-ADMIN human an operator gave `user:manage` can restore through the route but not through the
+    chat: the preview reads the archived slice, which the list route keeps ADMIN-only.
+  - The offboarding card's asset and grant counts are taken at preview time; a check-out or grant made
+    between the preview and the approval is still reclaimed but was not on the card (the precondition
+    pins the user row, not its holdings).
+  - Person names (actor, target, user first/last names) are returned plain, as in the other toolsets;
+    wrapping directory names with `untrusted()` would be a cross-toolset decision.
 
 **Consumables tools as built (W2-7).** All five admit humans and Service Accounts holding the route's
 permission (`consumable:read` for the reads, `consumable:write` for the writes; no human-only guard).

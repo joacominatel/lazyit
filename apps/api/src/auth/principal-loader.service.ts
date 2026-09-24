@@ -1,11 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type {
   Prisma,
   ServiceAccount,
   User,
 } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveServiceAccountPermissions } from '../service-accounts/service-account-permissions';
+import {
+  resolveServiceAccountPermissions,
+  ungrantableServiceAccountGrants,
+} from '../service-accounts/service-account-permissions';
 import type { HumanPrincipal, ServicePrincipal } from './principal';
 
 const UUID_REGEX =
@@ -36,6 +39,13 @@ export type PrincipalLoadResult<P> =
  */
 @Injectable()
 export class PrincipalLoaderService {
+  private readonly logger = new Logger(PrincipalLoaderService.name);
+  /**
+   * Service accounts already reported as carrying inert SA-ungrantable grants, so the warning is logged
+   * once per account per process. Only the log is de-duplicated: authorization stays DB-first (INV-1).
+   */
+  private readonly warnedInertGrants = new Set<string>();
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -122,6 +132,7 @@ export class PrincipalLoaderService {
       where: { serviceAccountId: account.id },
       select: { permission: true },
     });
+    this.warnInertGrants(account, grantRows);
     return {
       ok: true,
       principal: {
@@ -130,5 +141,25 @@ export class PrincipalLoaderService {
         permissions: resolveServiceAccountPermissions(grantRows),
       },
     };
+  }
+
+  /**
+   * SEC-073: a grant row for an SA-ungrantable verb (INV-SA-3) persisted before the SEC-011 write-time
+   * refinement is stripped by the resolver and confers nothing. It is not deleted (audit trail intact);
+   * the next admin save of the grant set drops it. Tell the operator once, naming the account and the
+   * verbs only.
+   */
+  private warnInertGrants(
+    account: ServiceAccount,
+    grantRows: readonly { permission: string }[],
+  ): void {
+    if (this.warnedInertGrants.has(account.id)) return;
+    const inert = ungrantableServiceAccountGrants(grantRows);
+    if (inert.length === 0) return;
+    this.warnedInertGrants.add(account.id);
+    this.logger.warn(
+      `Service account ${account.id} ("${account.name}") carries SA-ungrantable grants that are ignored: ` +
+        `${inert.join(', ')}. Re-save its permissions to remove them (SEC-073).`,
+    );
   }
 }
