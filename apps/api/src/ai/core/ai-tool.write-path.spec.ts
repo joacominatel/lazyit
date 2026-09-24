@@ -283,6 +283,14 @@ const writeToolset: AiToolset = {
       warnings: ['IDENTITY_CHANGE'],
       elevated: true,
     }),
+    previewFixture('thing_grant', 'elevated', {
+      warnings: ['PRIVILEGE_GRANT', 'EXTERNAL_PROVISIONING'],
+      elevated: true,
+    }),
+    previewFixture('thing_send_invite', 'elevated', {
+      warnings: ['CREDENTIAL_DELIVERY'],
+      elevated: true,
+    }),
     previewFixture('thing_notify', 'elevated', {
       warnings: ['NOTIFIES_USERS'],
       elevated: true,
@@ -1338,8 +1346,13 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
     });
 
     describe('step-up derived by core (CEO decision 2026-09-24)', () => {
-      it.each(['thing_set_role', 'thing_set_email'])(
-        '%s: a role or identity change requires step-up though the tool did not ask',
+      it.each([
+        'thing_set_role',
+        'thing_set_email',
+        'thing_grant',
+        'thing_send_invite',
+      ])(
+        '%s: a role/identity change, privilege grant or credential delivery requires step-up though the tool did not ask',
         async (name) => {
           const action = await proposeOk(name);
           expect(action.preview?.stepUpRequired).toBe(true);
