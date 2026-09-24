@@ -6,6 +6,232 @@
   "panel": {
     "title": "Asistente de IA",
     "close": "Cerrar",
-    "placeholder": "El asistente todavía no está disponible en esta versión."
+    "newChat": "Nuevo chat",
+    "history": "Historial de chats",
+    "backToChat": "Volver al chat",
+    "loading": "Cargando la conversación…",
+    "loadError": "No se pudo cargar esta conversación.",
+    "conversationGone": "Esta conversación ya no existe."
+  },
+  "history": {
+    "title": "Tus chats",
+    "empty": "Todavía no tenés chats. Preguntá algo para empezar uno.",
+    "retention": "Los chats se eliminan automáticamente después de {days, plural, one {# día} other {# días}}.",
+    "retentionNone": "Los chats se guardan hasta que los elimines.",
+    "private": "Solo vos podés ver tus chats.",
+    "groups": {
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "week": "Últimos 7 días",
+      "older": "Anteriores"
+    },
+    "untitled": "Nuevo chat",
+    "readOnly": "Solo lectura",
+    "running": "Respondiendo",
+    "awaiting": "Necesita tu aprobación",
+    "loadError": "No se pudieron cargar tus chats.",
+    "delete": "Eliminar el chat \"{title}\"",
+    "deleteTitle": "¿Eliminar este chat?",
+    "deleteBody": "La conversación \"{title}\" se elimina de forma permanente. Los cambios que hizo el asistente siguen registrados en el registro de actividad.",
+    "deleteConfirm": "Eliminar",
+    "cancel": "Cancelar",
+    "deleted": "Chat eliminado.",
+    "deleteInProgress": "El asistente todavía está respondiendo en este chat. Detenelo primero y después eliminalo.",
+    "deleteFailed": "No se pudo eliminar el chat."
+  },
+  "composer": {
+    "label": "Mensaje para el asistente",
+    "placeholder": "Preguntale a lazyit… (Enter para enviar, Shift+Enter para una nueva línea)",
+    "send": "Enviar",
+    "stop": "Detener",
+    "stopping": "Deteniendo…",
+    "hint": "No pegues contraseñas ni secretos. Cada cambio necesita tu aprobación.",
+    "busyApproval": "Aprobá o rechazá el cambio pendiente para continuar.",
+    "readOnlyTitle": "Este chat es de solo lectura",
+    "readOnlyBody": "Se inició con una configuración de IA anterior o se volvió demasiado largo. Empezá un nuevo chat para continuar."
+  },
+  "context": {
+    "label": "Sobre: {page}",
+    "remove": "No enviar la página actual",
+    "add": "Enviar la página actual",
+    "entity": "{type} de esta página",
+    "route": "esta página"
+  },
+  "message": {
+    "you": "Vos",
+    "assistant": "Asistente",
+    "thinking": "Pensando…",
+    "awaitingApproval": "Esperando tu aprobación",
+    "stopped": "Detenido.",
+    "unsupported": "Esta parte de la conversación no se puede mostrar en esta versión.",
+    "emptyTitle": "¿En qué te puedo ayudar?",
+    "emptyBody": "Preguntá por tu inventario, los accesos o la base de conocimiento, o pedí un cambio. Vos aprobás cada cambio antes de que se haga.",
+    "examples": {
+      "one": "¿Qué laptops no están asignadas?",
+      "two": "¿Quién tiene acceso a la VPN?",
+      "three": "Asigná MBP-042 a Ana Ruiz"
+    }
+  },
+  "tools": {
+    "generic": {
+      "EXECUTING": "Trabajando: {tool}",
+      "SUCCEEDED": "Listo: {tool}",
+      "FAILED": "Falló: {tool}",
+      "DENIED": "No permitido: {tool}",
+      "AWAITING_APPROVAL": "Propuesto: {tool}",
+      "REJECTED": "Rechazado: {tool}",
+      "EXPIRED": "Vencido: {tool}",
+      "CANCELLED": "Cancelado: {tool}",
+      "OUTCOME_UNKNOWN": "Resultado desconocido: {tool}",
+      "unknown": "{tool}"
+    },
+    "showDetails": "Ver detalles",
+    "hideDetails": "Ocultar detalles",
+    "outcomeUnknown": "lazyit no pudo confirmar si este cambio se aplicó. Revisá el elemento antes de volver a intentarlo."
+  },
+  "approval": {
+    "classes": {
+      "write": "Cambio propuesto",
+      "elevated": "Cambio sensible"
+    },
+    "states": {
+      "pending": "Pendiente",
+      "approving": "Aprobando",
+      "rejecting": "Rechazando",
+      "executed": "Hecho",
+      "failed": "Falló",
+      "approved": "Aprobado",
+      "rejected": "Rechazado",
+      "expired": "Vencido",
+      "cancelled": "Cancelado"
+    },
+    "noAction": "El asistente propone este cambio.",
+    "target": "Se aplica a",
+    "field": "Campo",
+    "before": "Antes",
+    "after": "Después",
+    "empty": "—",
+    "redacted": "Oculto",
+    "yes": "Sí",
+    "no": "No",
+    "quoted": "Escrito por otra persona; se muestra como texto plano.",
+    "warningsTitle": "Antes de aprobar",
+    "warnings": {
+      "EXTERNAL_PROVISIONING": "Crea un acceso en un sistema externo mediante una automatización.",
+      "EXTERNAL_DEPROVISIONING": "Quita un acceso en un sistema externo mediante una automatización.",
+      "CASCADE_RELEASES_ASSIGNMENTS": "También termina las asignaciones actuales de este elemento.",
+      "CASCADE_REVOKES_GRANTS": "También revoca los accesos vinculados.",
+      "ROLE_CHANGE": "Cambia el rol de alguien en lazyit.",
+      "IDENTITY_CHANGE": "Cambia la identidad de alguien en lazyit (nombre, email o inicio de sesión).",
+      "PRIVILEGE_GRANT": "Le da a alguien acceso o privilegios.",
+      "CREDENTIAL_DELIVERY": "Le envía a alguien una forma de iniciar sesión.",
+      "LEDGER_APPEND": "Agrega un registro permanente que no se puede editar después.",
+      "SOFT_DELETE": "Lo archiva. Se puede restaurar después.",
+      "PUBLISHES_TO_READERS": "Hace visible el contenido para sus lectores.",
+      "VISIBILITY_CHANGE": "Cambia quién puede verlo.",
+      "NOTIFIES_USERS": "Envía notificaciones a personas.",
+      "IRREVERSIBLE": "No se puede deshacer.",
+      "OUTBOUND_INTEGRATION": "Cambia una integración externa o adónde envía datos lazyit.",
+      "CRITICAL_APPLICATION": "Afecta a una aplicación marcada como crítica.",
+      "unknown": "Verificación adicional: {code}"
+    },
+    "passwordRequired": "Requiere tu contraseña",
+    "newWarning": "Nuevo",
+    "changed": "Este cambio se actualizó después de proponerse. Revisá los puntos resaltados y decidí de nuevo.",
+    "impacted": "También afecta a {count, plural, one {# {type}} other {# {type}}}",
+    "untrustedTitle": "Basado en contenido escrito por otras personas",
+    "untrustedBody": "El asistente leyó contenido que escribieron otras personas antes de proponer esto. Verificá que el cambio sea lo que pediste.",
+    "elevatedNote": "Es un cambio sensible. Leelo con atención antes de aprobarlo.",
+    "expiresAt": "Te espera hasta las {time}.",
+    "password": "Tu contraseña de lazyit",
+    "passwordHint": "Los cambios sensibles necesitan tu contraseña para confirmar que sos vos.",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "executedNote": "El cambio se aplicó.",
+    "failedNote": "El cambio no se aplicó: {message}",
+    "rejectedNote": "Rechazaste este cambio. No se modificó nada.",
+    "expiredNote": "Esta propuesta venció. Pedila de nuevo si todavía querés el cambio.",
+    "cancelledNote": "Esta propuesta se canceló. No se modificó nada.",
+    "errors": {
+      "stepUpRequired": "Ingresá tu contraseña para aprobar este cambio.",
+      "stepUpFailed": "Esa contraseña no es correcta.",
+      "stepUpUnavailable": "La confirmación con contraseña no está disponible con tu forma de iniciar sesión, así que este cambio no se puede aprobar desde el chat. Hacelo desde su página.",
+      "stepUpRateLimited": "Demasiadas contraseñas incorrectas. Probá de nuevo en {seconds, plural, one {# segundo} other {# segundos}}.",
+      "stepUpRateLimitedNoTime": "Demasiadas contraseñas incorrectas. Esperá un momento y probá de nuevo.",
+      "previewChanged": "Este cambio se actualizó después de proponerse. Revisalo y decidí de nuevo.",
+      "notAwaiting": "Este cambio ya no está esperando una decisión.",
+      "aiDisabled": "Se desactivó el asistente de IA, así que este cambio no se puede aprobar.",
+      "stale": "El elemento cambió después de la propuesta. No se aplicó nada; el asistente lo va a revisar de nuevo.",
+      "expired": "Esta propuesta venció. Pedila de nuevo si todavía querés el cambio.",
+      "alreadyDecided": "Este cambio ya se decidió, quizás en otra ventana.",
+      "forbidden": "Ya no tenés permiso para hacer este cambio.",
+      "notFound": "Esta propuesta ya no existe.",
+      "unknown": "No se pudo enviar la decisión. Probá de nuevo."
+    }
+  },
+  "effects": {
+    "open": "Abrir {label}",
+    "opened": "Se abrió {label}"
+  },
+  "entities": {
+    "asset": "Activo",
+    "assetAssignment": "Asignación",
+    "assetModel": "Modelo",
+    "location": "Ubicación",
+    "category": "Categoría",
+    "application": "Aplicación",
+    "accessGrant": "Acceso otorgado",
+    "accessRequest": "Solicitud de acceso",
+    "consumable": "Consumible",
+    "consumableMovement": "Movimiento de stock",
+    "article": "Artículo",
+    "user": "Usuario",
+    "infraNode": "Nodo de infraestructura",
+    "infraEdge": "Conexión de infraestructura",
+    "workflowRun": "Ejecución de workflow",
+    "manualTask": "Tarea manual",
+    "unknown": "Elemento"
+  },
+  "errors": {
+    "run": {
+      "AI_DISABLED": "Se desactivó el asistente de IA.",
+      "FORBIDDEN": "Ya no tenés acceso al asistente.",
+      "PROVIDER_AUTH": "El proveedor de IA rechazó las credenciales. Un administrador tiene que revisar Configuración → IA.",
+      "PROVIDER_RATE_LIMIT": "El proveedor de IA está ocupado.",
+      "PROVIDER_UNAVAILABLE": "El proveedor de IA no responde en este momento.",
+      "PROVIDER_BAD_REQUEST": "El proveedor de IA no pudo procesar este pedido.",
+      "PROVIDER_REFUSED": "El proveedor de IA se negó a responder esto.",
+      "EGRESS_DENIED": "lazyit no tiene permitido conectarse con el proveedor de IA. Un administrador tiene que revisar la configuración de red.",
+      "BUDGET_EXCEEDED": "Se alcanzó el presupuesto diario de IA. Probá de nuevo mañana.",
+      "CONTEXT_LIMIT": "Esta conversación es demasiado larga para continuar.",
+      "MAX_STEPS": "El asistente se detuvo después de demasiados pasos. Probá con un pedido más simple.",
+      "CANCELLED": "Detenido.",
+      "ENGINE_RESTART": "La respuesta se interrumpió por un reinicio.",
+      "RUN_IN_PROGRESS": "Otra ventana ya está respondiendo en este chat. Se muestra esa respuesta.",
+      "CONVERSATION_READ_ONLY": "Este chat usó una configuración de IA anterior y es de solo lectura.",
+      "STEP_UP_REQUIRED": "Un cambio necesita tu contraseña.",
+      "NETWORK": "Se perdió la conexión.",
+      "RATE_LIMITED": "Demasiados pedidos.",
+      "EXPIRED": "Un cambio propuesto venció antes de que se decidiera.",
+      "generic": "Algo salió mal."
+    },
+    "retryIn": "Probá de nuevo en {seconds, plural, one {# segundo} other {# segundos}}.",
+    "retry": "Reintentar",
+    "newChat": "Empezar un nuevo chat",
+    "reconnect": "Reconectar",
+    "dismiss": "Descartar"
+  },
+  "connection": {
+    "reconnecting": "Reconectando…",
+    "lost": "Se perdió la conexión. La respuesta sigue en el servidor."
+  },
+  "live": {
+    "replied": "El asistente respondió.",
+    "approvalNeeded": "Se necesita aprobación: {action}"
+  },
+  "markdown": {
+    "imageRemoved": "[imagen: {alt}]",
+    "imageRemovedNoAlt": "[imagen eliminada]",
+    "externalLink": "abre {host} en una pestaña nueva"
   }
 }

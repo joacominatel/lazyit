@@ -6,6 +6,232 @@
   "panel": {
     "title": "AI assistant",
     "close": "Close",
-    "placeholder": "The assistant is not available in this version yet."
+    "newChat": "New chat",
+    "history": "Chat history",
+    "backToChat": "Back to the chat",
+    "loading": "Loading the conversation…",
+    "loadError": "This conversation could not be loaded.",
+    "conversationGone": "This conversation no longer exists."
+  },
+  "history": {
+    "title": "Your chats",
+    "empty": "No chats yet. Ask something to start one.",
+    "retention": "Chats are deleted automatically after {days, plural, one {# day} other {# days}}.",
+    "retentionNone": "Chats are kept until you delete them.",
+    "private": "Only you can see your chats.",
+    "groups": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "week": "Previous 7 days",
+      "older": "Older"
+    },
+    "untitled": "New chat",
+    "readOnly": "Read-only",
+    "running": "Answering",
+    "awaiting": "Needs your approval",
+    "loadError": "Your chats could not be loaded.",
+    "delete": "Delete chat \"{title}\"",
+    "deleteTitle": "Delete this chat?",
+    "deleteBody": "The conversation \"{title}\" is deleted permanently. Changes the assistant made stay recorded in the activity log.",
+    "deleteConfirm": "Delete",
+    "cancel": "Cancel",
+    "deleted": "Chat deleted.",
+    "deleteInProgress": "The assistant is still answering in this chat. Stop it first, then delete it.",
+    "deleteFailed": "The chat could not be deleted."
+  },
+  "composer": {
+    "label": "Message the assistant",
+    "placeholder": "Ask lazyit… (Enter to send, Shift+Enter for a new line)",
+    "send": "Send",
+    "stop": "Stop",
+    "stopping": "Stopping…",
+    "hint": "Don't paste passwords or secrets. Every change needs your approval.",
+    "busyApproval": "Approve or reject the pending change to continue.",
+    "readOnlyTitle": "This chat is read-only",
+    "readOnlyBody": "It was started with an earlier AI configuration, or it grew too long. Start a new chat to continue."
+  },
+  "context": {
+    "label": "About: {page}",
+    "remove": "Don't send the current page",
+    "add": "Send the current page",
+    "entity": "{type} on this page",
+    "route": "this page"
+  },
+  "message": {
+    "you": "You",
+    "assistant": "Assistant",
+    "thinking": "Thinking…",
+    "awaitingApproval": "Waiting for your approval",
+    "stopped": "Stopped.",
+    "unsupported": "This part of the conversation can't be shown in this version.",
+    "emptyTitle": "What can I help you with?",
+    "emptyBody": "Ask about your inventory, access or knowledge base, or ask for a change. You approve every change before it happens.",
+    "examples": {
+      "one": "Which laptops are unassigned?",
+      "two": "Who has access to the VPN?",
+      "three": "Assign MBP-042 to Ana Ruiz"
+    }
+  },
+  "tools": {
+    "generic": {
+      "EXECUTING": "Working: {tool}",
+      "SUCCEEDED": "Done: {tool}",
+      "FAILED": "Failed: {tool}",
+      "DENIED": "Not allowed: {tool}",
+      "AWAITING_APPROVAL": "Proposed: {tool}",
+      "REJECTED": "Rejected: {tool}",
+      "EXPIRED": "Expired: {tool}",
+      "CANCELLED": "Cancelled: {tool}",
+      "OUTCOME_UNKNOWN": "Unknown outcome: {tool}",
+      "unknown": "{tool}"
+    },
+    "showDetails": "Show details",
+    "hideDetails": "Hide details",
+    "outcomeUnknown": "lazyit could not confirm whether this change was applied. Check the item before trying again."
+  },
+  "approval": {
+    "classes": {
+      "write": "Proposed change",
+      "elevated": "Sensitive change"
+    },
+    "states": {
+      "pending": "Pending",
+      "approving": "Approving",
+      "rejecting": "Rejecting",
+      "executed": "Done",
+      "failed": "Failed",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "expired": "Expired",
+      "cancelled": "Cancelled"
+    },
+    "noAction": "The assistant proposes this change.",
+    "target": "Applies to",
+    "field": "Field",
+    "before": "Before",
+    "after": "After",
+    "empty": "—",
+    "redacted": "Hidden",
+    "yes": "Yes",
+    "no": "No",
+    "quoted": "Written by someone else — shown as plain text.",
+    "warningsTitle": "Before you approve",
+    "warnings": {
+      "EXTERNAL_PROVISIONING": "Creates access in an outside system through an automation.",
+      "EXTERNAL_DEPROVISIONING": "Removes access in an outside system through an automation.",
+      "CASCADE_RELEASES_ASSIGNMENTS": "Also ends the current assignments of this item.",
+      "CASCADE_REVOKES_GRANTS": "Also revokes the access grants tied to it.",
+      "ROLE_CHANGE": "Changes someone's role in lazyit.",
+      "IDENTITY_CHANGE": "Changes someone's identity in lazyit (name, email or sign-in).",
+      "PRIVILEGE_GRANT": "Gives someone access or privileges.",
+      "CREDENTIAL_DELIVERY": "Sends someone a way to sign in.",
+      "LEDGER_APPEND": "Adds a permanent record that can't be edited later.",
+      "SOFT_DELETE": "Archives it. It can be restored later.",
+      "PUBLISHES_TO_READERS": "Makes the content visible to its readers.",
+      "VISIBILITY_CHANGE": "Changes who can see it.",
+      "NOTIFIES_USERS": "Sends notifications to people.",
+      "IRREVERSIBLE": "This can't be undone.",
+      "OUTBOUND_INTEGRATION": "Changes an outside integration or where lazyit sends data.",
+      "CRITICAL_APPLICATION": "Touches an application marked critical.",
+      "unknown": "Additional check: {code}"
+    },
+    "passwordRequired": "Needs your password",
+    "newWarning": "New",
+    "changed": "This change was updated since it was proposed. Review the highlighted points and decide again.",
+    "impacted": "Also affects {count, plural, one {# {type}} other {# {type}}}",
+    "untrustedTitle": "Based on content written by others",
+    "untrustedBody": "The assistant read content other people wrote before proposing this. Check that the change is what you asked for.",
+    "elevatedNote": "This is a sensitive change. Read it carefully before approving.",
+    "expiresAt": "Waits for you until {time}.",
+    "password": "Your lazyit password",
+    "passwordHint": "Sensitive changes need your password to confirm it's you.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "executedNote": "The change was applied.",
+    "failedNote": "The change was not applied: {message}",
+    "rejectedNote": "You rejected this change. Nothing was changed.",
+    "expiredNote": "This proposal expired. Ask again if you still want the change.",
+    "cancelledNote": "This proposal was cancelled. Nothing was changed.",
+    "errors": {
+      "stepUpRequired": "Enter your password to approve this change.",
+      "stepUpFailed": "That password is not correct.",
+      "stepUpUnavailable": "Password confirmation isn't available with your sign-in method, so this change can't be approved from the chat. Make it from its page instead.",
+      "stepUpRateLimited": "Too many wrong passwords. Try again in {seconds, plural, one {# second} other {# seconds}}.",
+      "stepUpRateLimitedNoTime": "Too many wrong passwords. Wait a moment and try again.",
+      "previewChanged": "This change was updated since it was proposed. Review it and decide again.",
+      "notAwaiting": "This change is no longer waiting for a decision.",
+      "aiDisabled": "The AI assistant was turned off, so this change can't be approved.",
+      "stale": "The item changed since this was proposed. Nothing was applied; the assistant will check it again.",
+      "expired": "This proposal expired. Ask again if you still want the change.",
+      "alreadyDecided": "This change was already decided, maybe in another window.",
+      "forbidden": "You're no longer allowed to make this change.",
+      "notFound": "This proposal no longer exists.",
+      "unknown": "The decision could not be sent. Try again."
+    }
+  },
+  "effects": {
+    "open": "Open {label}",
+    "opened": "Opened {label}"
+  },
+  "entities": {
+    "asset": "Asset",
+    "assetAssignment": "Assignment",
+    "assetModel": "Model",
+    "location": "Location",
+    "category": "Category",
+    "application": "Application",
+    "accessGrant": "Access grant",
+    "accessRequest": "Access request",
+    "consumable": "Consumable",
+    "consumableMovement": "Stock movement",
+    "article": "Article",
+    "user": "User",
+    "infraNode": "Infrastructure node",
+    "infraEdge": "Infrastructure link",
+    "workflowRun": "Workflow run",
+    "manualTask": "Manual task",
+    "unknown": "Item"
+  },
+  "errors": {
+    "run": {
+      "AI_DISABLED": "The AI assistant was turned off.",
+      "FORBIDDEN": "You no longer have access to the assistant.",
+      "PROVIDER_AUTH": "The AI provider rejected the credentials. An administrator needs to check Settings → AI.",
+      "PROVIDER_RATE_LIMIT": "The AI provider is busy.",
+      "PROVIDER_UNAVAILABLE": "The AI provider isn't responding right now.",
+      "PROVIDER_BAD_REQUEST": "The AI provider couldn't process this request.",
+      "PROVIDER_REFUSED": "The AI provider declined to answer this.",
+      "EGRESS_DENIED": "lazyit isn't allowed to reach the AI provider. An administrator needs to check the network settings.",
+      "BUDGET_EXCEEDED": "The daily AI budget has been reached. Try again tomorrow.",
+      "CONTEXT_LIMIT": "This conversation is too long to continue.",
+      "MAX_STEPS": "The assistant stopped after too many steps. Try a simpler request.",
+      "CANCELLED": "Stopped.",
+      "ENGINE_RESTART": "The answer was interrupted by a restart.",
+      "RUN_IN_PROGRESS": "Another window is already answering in this chat. Showing that answer.",
+      "CONVERSATION_READ_ONLY": "This chat used an earlier AI configuration and is read-only.",
+      "STEP_UP_REQUIRED": "A change needs your password.",
+      "NETWORK": "Connection lost.",
+      "RATE_LIMITED": "Too many requests.",
+      "EXPIRED": "A proposed change expired before it was decided.",
+      "generic": "Something went wrong."
+    },
+    "retryIn": "Try again in {seconds, plural, one {# second} other {# seconds}}.",
+    "retry": "Try again",
+    "newChat": "Start a new chat",
+    "reconnect": "Reconnect",
+    "dismiss": "Dismiss"
+  },
+  "connection": {
+    "reconnecting": "Reconnecting…",
+    "lost": "Connection lost. The answer continues on the server."
+  },
+  "live": {
+    "replied": "The assistant replied.",
+    "approvalNeeded": "Approval needed: {action}"
+  },
+  "markdown": {
+    "imageRemoved": "[image: {alt}]",
+    "imageRemovedNoAlt": "[image removed]",
+    "externalLink": "opens {host} in a new tab"
   }
 }
