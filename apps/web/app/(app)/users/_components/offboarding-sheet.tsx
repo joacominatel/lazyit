@@ -3,6 +3,7 @@
 import {
   ArrowPathIcon,
   ComputerDesktopIcon,
+  CubeIcon,
   KeyIcon,
   LockClosedIcon,
   PrinterIcon,
@@ -13,6 +14,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -38,11 +40,17 @@ import {
   DEFAULT_ORG_NAME,
   DEFAULT_SHOW_ACCESS,
   DEFAULT_SHOW_ASSETS,
+  DEFAULT_SHOW_CONSUMABLES,
   OFFBOARDING_MESSAGE_KEY,
   ORG_NAME_KEY,
   SHOW_ACCESS_KEY,
   SHOW_ASSETS_KEY,
+  SHOW_CONSUMABLES_KEY,
 } from "@/lib/offboarding/constants";
+import {
+  type OffboardConsumableRow,
+  offboardingActHref,
+} from "@/lib/offboarding/consumables";
 import {
   type OffboardAssetRow,
   type OffboardGrantRow,
@@ -171,6 +179,71 @@ function GrantLine({ grant }: { grant: OffboardGrantRow }) {
   );
 }
 
+/**
+ * One consumable delivery (ADR-0098) with its "include on the Return Act" checkbox (default on). A
+ * to-return row shows what is still owed back; a delivered row, what was handed out. Offboarding moves
+ * no stock — the list only tells the team what to ask for.
+ */
+function ConsumableLine({
+  row,
+  mode,
+  included,
+  onIncludedChange,
+  disabled,
+}: {
+  row: OffboardConsumableRow;
+  mode: "toReturn" | "delivered";
+  included: boolean;
+  onIncludedChange: (included: boolean) => void;
+  disabled: boolean;
+}) {
+  const t = useTranslations("users.offboarding.consumables");
+  const { date } = useFormatters();
+  const checkboxId = `offboarding-consumable-${row.deliveryId}`;
+  return (
+    <li className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+      <PillarChip pillar="inventory">
+        <CubeIcon className="size-5" />
+      </PillarChip>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <label
+            htmlFor={checkboxId}
+            className="truncate font-medium text-foreground"
+          >
+            {row.name}
+          </label>
+          {row.archived ? (
+            <StatusBadge tone="neutral">{t("archived")}</StatusBadge>
+          ) : null}
+        </div>
+        <p className="truncate text-xs text-muted-foreground tabular-nums">
+          {mode === "toReturn"
+            ? t("outstandingLine", {
+                outstanding: row.outstanding,
+                quantity: row.quantity,
+                unit: row.unit,
+                date: date(row.deliveredAt),
+              })
+            : t("deliveredLine", {
+                quantity: row.quantity,
+                unit: row.unit,
+                date: date(row.deliveredAt),
+              })}
+        </p>
+      </div>
+      <Checkbox
+        id={checkboxId}
+        checked={included}
+        onCheckedChange={(checked) => onIncludedChange(checked === true)}
+        disabled={disabled}
+        aria-label={t("includeAria", { name: row.name })}
+        title={t("includeTitle")}
+      />
+    </li>
+  );
+}
+
 /** Skeleton rows while the catalog resolves — keeps the sheet from flashing empty. */
 function ListSkeleton() {
   return (
@@ -276,6 +349,98 @@ function DoneState({
   );
 }
 
+/**
+ * The sheet's consumables block (ADR-0098): two groups — returnable deliveries still outstanding, then
+ * the non-returnable ones for the record — each row with an include checkbox for the act. A 403 on the
+ * read omits the lists with a note (never fails the sheet); a truncated read says how many were left out.
+ */
+function ConsumablesSection({
+  isLoading,
+  unavailable,
+  consumables,
+  excluded,
+  onIncludedChange,
+  printing,
+}: {
+  isLoading: boolean;
+  unavailable: boolean;
+  consumables: ReturnType<typeof useOffboardingData>["consumables"];
+  excluded: ReadonlySet<number>;
+  onIncludedChange: (deliveryId: number, included: boolean) => void;
+  /** The act's consumables section is on — the per-row checkboxes only matter then. */
+  printing: boolean;
+}) {
+  const t = useTranslations("users.offboarding.consumables");
+  const { toReturn, delivered, toReturnMore, deliveredMore } = consumables;
+  const nothing =
+    toReturn.length === 0 &&
+    delivered.length === 0 &&
+    toReturnMore === 0 &&
+    deliveredMore === 0;
+
+  const lines = (rows: OffboardConsumableRow[], mode: "toReturn" | "delivered") => (
+    <ul className="divide-y">
+      {rows.map((row) => (
+        <ConsumableLine
+          key={row.deliveryId}
+          row={row}
+          mode={mode}
+          included={!excluded.has(row.deliveryId)}
+          onIncludedChange={(included) => onIncludedChange(row.deliveryId, included)}
+          disabled={!printing}
+        />
+      ))}
+    </ul>
+  );
+
+  return (
+    <>
+      <section className="space-y-2">
+        <h3 className="text-label uppercase text-muted-foreground">
+          {t("toReturnTitle")}
+        </h3>
+        {isLoading ? (
+          <ListSkeleton />
+        ) : unavailable ? (
+          <p className="text-sm text-muted-foreground">{t("unavailable")}</p>
+        ) : toReturn.length === 0 && toReturnMore === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {nothing ? t("none") : t("nothingOutstanding")}
+          </p>
+        ) : (
+          <>
+            {lines(toReturn, "toReturn")}
+            {toReturnMore > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {t("moreToReturn", { count: toReturnMore })}
+              </p>
+            ) : null}
+          </>
+        )}
+      </section>
+
+      {/* Non-returnable deliveries — informational, only when there are any. */}
+      {!isLoading && !unavailable && (delivered.length > 0 || deliveredMore > 0) ? (
+        <section className="space-y-2">
+          <h3 className="text-label uppercase text-muted-foreground">
+            {t("deliveredTitle")}
+          </h3>
+          {lines(delivered, "delivered")}
+          {deliveredMore > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t("moreDelivered", { count: deliveredMore })}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {!isLoading && !unavailable && !nothing ? (
+        <p className="text-xs text-muted-foreground">{t("help")}</p>
+      ) : null}
+    </>
+  );
+}
+
 export function OffboardingSheet({
   open,
   onOpenChange,
@@ -285,8 +450,16 @@ export function OffboardingSheet({
   const tc = useTranslations("common");
   const router = useRouter();
   const offboard = useOffboardUser();
-  const { assets, grants, isLoading, isError, isEmpty, refetch } =
-    useOffboardingData(user.id, open);
+  const {
+    assets,
+    grants,
+    consumables,
+    consumablesUnavailable,
+    isLoading,
+    isError,
+    isEmpty,
+    refetch,
+  } = useOffboardingData(user.id, open);
   // App-level reusable handover template (not per-user); SSR-safe so it never trips hydration.
   const [message, setMessage, mounted] = useLocalStorage(
     OFFBOARDING_MESSAGE_KEY,
@@ -305,6 +478,15 @@ export function OffboardingSheet({
     SHOW_ACCESS_KEY,
     DEFAULT_SHOW_ACCESS,
   );
+  const [showConsumables, setShowConsumables] = useLocalStorage(
+    SHOW_CONSUMABLES_KEY,
+    DEFAULT_SHOW_CONSUMABLES,
+  );
+  // Consumable deliveries the operator left OFF this act (per act, default: every row included). Handed
+  // to the act in its URL — see `offboardingActHref` for why not storage.
+  const [excludedDeliveries, setExcludedDeliveries] = useState<
+    ReadonlySet<number>
+  >(() => new Set());
   const [done, setDone] = useState(false);
   // The Secret-vaults the offboarded person could read, from the offboard RESULT (issue #869) — a
   // rotation prompt shown in the success state. Empty unless they held vault memberships.
@@ -316,15 +498,25 @@ export function OffboardingSheet({
 
   function openAct() {
     window.open(
-      `/users/${user.id}/offboarding/act`,
+      offboardingActHref(user.id, excludedDeliveries),
       "_blank",
       "noopener,noreferrer",
     );
   }
 
+  function setDeliveryIncluded(deliveryId: number, included: boolean) {
+    setExcludedDeliveries((current) => {
+      const next = new Set(current);
+      if (included) next.delete(deliveryId);
+      else next.add(deliveryId);
+      return next;
+    });
+  }
+
   function finish() {
     setDone(false);
     setRotationVaults([]);
+    setExcludedDeliveries(new Set());
     onOpenChange(false);
     router.push("/users");
   }
@@ -351,6 +543,7 @@ export function OffboardingSheet({
     if (!next) {
       setDone(false);
       setRotationVaults([]);
+      setExcludedDeliveries(new Set());
     }
     onOpenChange(next);
   }
@@ -482,6 +675,17 @@ export function OffboardingSheet({
                     )}
                   </section>
 
+                  {/* Consumables delivered to the person (ADR-0098) — what to ask back, and what they
+                      received. Offboarding moves no stock; each row can be left off the printed act. */}
+                  <ConsumablesSection
+                    isLoading={isLoading}
+                    unavailable={consumablesUnavailable}
+                    consumables={consumables}
+                    excluded={excludedDeliveries}
+                    onIncludedChange={setDeliveryIncluded}
+                    printing={showConsumables}
+                  />
+
                   {isEmpty ? (
                     <p className="text-sm text-muted-foreground">
                       {t("emptyNote")}
@@ -549,6 +753,19 @@ export function OffboardingSheet({
                     id="offboarding-show-access"
                     checked={showAccess}
                     onCheckedChange={setShowAccess}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <Label
+                    htmlFor="offboarding-show-consumables"
+                    className="font-normal text-foreground"
+                  >
+                    {t("listConsumables")}
+                  </Label>
+                  <Switch
+                    id="offboarding-show-consumables"
+                    checked={showConsumables}
+                    onCheckedChange={setShowConsumables}
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">

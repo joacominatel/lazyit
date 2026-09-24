@@ -446,10 +446,10 @@
     "loadError": {
       "impact": "Impact unavailable — couldn't load.",
       "title": "Couldn't load what to return",
-      "body": "We couldn't load this person's assets and access, so we can't show what to return or revoke. This is not an empty list — don't offboard or print the act until it loads.",
+      "body": "We couldn't load this person's assets, access and consumables, so we can't show what to return or revoke. This is not an empty list — don't offboard or print the act until it loads.",
       "retry": "Retry"
     },
-    "emptyNote": "This person holds no assets and has no active access. The act is still valid as a record of their departure.",
+    "emptyNote": "This person holds no assets, has no active access and received no consumables. The act is still valid as a record of their departure.",
     "handoverNote": "Handover note",
     "handoverPlaceholder": "A short note printed on the return act…",
     "handoverHelp": "Saved for next time — this note pre-fills every act.",
@@ -468,6 +468,22 @@
     "toast": {
       "archived": "User archived — access revoked, history is safe.",
       "error": "Couldn't offboard user"
+    },
+    "listConsumables": "List consumables",
+    "consumables": {
+      "toReturnTitle": "Consumables to return",
+      "deliveredTitle": "Consumables delivered",
+      "outstandingLine": "{outstanding} of {quantity} {unit} outstanding · delivered {date}",
+      "deliveredLine": "{quantity} {unit} · delivered {date}",
+      "archived": "Archived",
+      "includeAria": "Include {name} on the printed act",
+      "includeTitle": "Include on the printed act",
+      "none": "No consumables were delivered to this person.",
+      "nothingOutstanding": "Nothing outstanding.",
+      "moreToReturn": "…and {count, plural, =1 {# more outstanding delivery} other {# more outstanding deliveries}} not listed here — check the person's page.",
+      "moreDelivered": "…and {count, plural, =1 {# older delivery} other {# older deliveries}} not listed here.",
+      "unavailable": "Consumables are not shown — you don't have permission to view them.",
+      "help": "Offboarding doesn't move stock. Record returns from the person's page as items come back. Untick a row to leave it off the printed act."
     }
   },
   "act": {
@@ -475,7 +491,7 @@
     "loadError": "This user could not be loaded — they may have been removed, or the API is unreachable.",
     "dataError": {
       "title": "Return Act unavailable",
-      "body": "We couldn't load this person's assets and access, so this act can't be issued. It is not blank — printing it now could under-report what's owed. Retry, and only print once it loads.",
+      "body": "We couldn't load this person's assets, access and consumables, so this act can't be issued. It is not blank — printing it now could under-report what's owed. Retry, and only print once it loads.",
       "retry": "Retry"
     },
     "print": "Print",
@@ -493,12 +509,18 @@
     "applicationFallback": "Application",
     "critical": "Critical",
     "expires": "expires {date}",
-    "emptyNote": "This person held no assets and had no active access. This act stands as a record of their departure.",
+    "emptyNote": "This person held no assets, had no active access and received no consumables. This act stands as a record of their departure.",
     "note": "Note",
     "signatureEmployee": "Employee",
     "signatureIt": "IT",
     "signatureLine": "{who} signature",
     "signatureDate": "Date",
-    "statusCaption": "Pending — to be completed at handover."
+    "statusCaption": "Pending — to be completed at handover.",
+    "consumablesToReturn": "Consumables to return",
+    "consumablesDelivered": "Consumables delivered",
+    "consumableOutstanding": "{outstanding} of {quantity} {unit} to return · delivered {date}",
+    "consumableDelivered": "{quantity} {unit} · delivered {date}",
+    "consumablesMore": "…and {count, plural, =1 {# more outstanding delivery} other {# more outstanding deliveries}} not listed on this act.",
+    "consumablesMoreDelivered": "…and {count, plural, =1 {# older delivery} other {# older deliveries}} not listed on this act."
   }
 }

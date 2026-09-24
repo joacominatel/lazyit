@@ -446,10 +446,10 @@
     "loadError": {
       "impact": "Impacto no disponible — no se pudo cargar.",
       "title": "No se pudo cargar qué devolver",
-      "body": "No pudimos cargar los activos y accesos de esta persona, así que no podemos mostrar qué devolver ni revocar. Esto no es una lista vacía — no des de baja ni imprimas el acta hasta que cargue.",
+      "body": "No pudimos cargar los activos, accesos y consumibles de esta persona, así que no podemos mostrar qué devolver ni revocar. Esto no es una lista vacía — no des de baja ni imprimas el acta hasta que cargue.",
       "retry": "Reintentar"
     },
-    "emptyNote": "Esta persona no tiene activos en posesión ni accesos activos. El acta sigue siendo válida como registro de su baja.",
+    "emptyNote": "Esta persona no tiene activos en posesión, no tiene accesos activos y no recibió consumibles. El acta sigue siendo válida como registro de su baja.",
     "handoverNote": "Nota de entrega",
     "handoverPlaceholder": "Una nota breve que se imprime en el acta de devolución…",
     "handoverHelp": "Guardada para la próxima vez — esta nota se completa por defecto en cada acta.",
@@ -468,6 +468,22 @@
     "toast": {
       "archived": "Usuario archivado — acceso revocado, el historial está a salvo.",
       "error": "No se pudo dar de baja al usuario"
+    },
+    "listConsumables": "Listar consumibles",
+    "consumables": {
+      "toReturnTitle": "Consumibles a devolver",
+      "deliveredTitle": "Consumibles entregados",
+      "outstandingLine": "{outstanding} de {quantity} {unit} pendientes · entregado el {date}",
+      "deliveredLine": "{quantity} {unit} · entregado el {date}",
+      "archived": "Archivado",
+      "includeAria": "Incluir {name} en el acta impresa",
+      "includeTitle": "Incluir en el acta impresa",
+      "none": "No se entregaron consumibles a esta persona.",
+      "nothingOutstanding": "Nada pendiente.",
+      "moreToReturn": "…y {count, plural, =1 {# entrega pendiente más} other {# entregas pendientes más}} que no se listan aquí — revisa la página de la persona.",
+      "moreDelivered": "…y {count, plural, =1 {# entrega anterior} other {# entregas anteriores}} que no se listan aquí.",
+      "unavailable": "No se muestran los consumibles: no tienes permiso para verlos.",
+      "help": "La baja no mueve stock. Registra las devoluciones desde la página de la persona a medida que se devuelven. Desmarca una fila para dejarla fuera del acta impresa."
     }
   },
   "act": {
@@ -475,7 +491,7 @@
     "loadError": "No se pudo cargar este usuario — es posible que haya sido eliminado, o que la API no esté disponible.",
     "dataError": {
       "title": "Acta de devolución no disponible",
-      "body": "No pudimos cargar los activos y accesos de esta persona, así que esta acta no puede emitirse. No está en blanco — imprimirla ahora podría subreportar lo pendiente. Reintenta e imprime solo cuando cargue.",
+      "body": "No pudimos cargar los activos, accesos y consumibles de esta persona, así que esta acta no puede emitirse. No está en blanco — imprimirla ahora podría subreportar lo pendiente. Reintenta e imprime solo cuando cargue.",
       "retry": "Reintentar"
     },
     "print": "Imprimir",
@@ -493,12 +509,18 @@
     "applicationFallback": "Aplicación",
     "critical": "Crítica",
     "expires": "expira {date}",
-    "emptyNote": "Esta persona no tenía activos en posesión ni accesos activos. Esta acta queda como registro de su baja.",
+    "emptyNote": "Esta persona no tenía activos en posesión, no tenía accesos activos y no recibió consumibles. Esta acta queda como registro de su baja.",
     "note": "Nota",
     "signatureEmployee": "Empleado",
     "signatureIt": "TI",
     "signatureLine": "Firma de {who}",
     "signatureDate": "Fecha",
-    "statusCaption": "Pendiente — a completar en la entrega."
+    "statusCaption": "Pendiente — a completar en la entrega.",
+    "consumablesToReturn": "Consumibles a devolver",
+    "consumablesDelivered": "Consumibles entregados",
+    "consumableOutstanding": "{outstanding} de {quantity} {unit} a devolver · entregado el {date}",
+    "consumableDelivered": "{quantity} {unit} · entregado el {date}",
+    "consumablesMore": "…y {count, plural, =1 {# entrega pendiente más} other {# entregas pendientes más}} que no se listan en esta acta.",
+    "consumablesMoreDelivered": "…y {count, plural, =1 {# entrega anterior} other {# entregas anteriores}} que no se listan en esta acta."
   }
 }
