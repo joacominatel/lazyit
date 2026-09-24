@@ -1,4 +1,6 @@
-import { buildLoggerParams } from './logging.config';
+import { Writable } from 'node:stream';
+import pino from 'pino';
+import { OAUTH_BODY_REDACT_PATHS, buildLoggerParams } from './logging.config';
 
 // The pinoHttp options are a union (Options | stream | tuple) upstream; narrow to the shape we
 // assert on. Mock request/response param types are intentionally minimal.
@@ -115,6 +117,60 @@ describe('buildLoggerParams', () => {
 
     it('actor is null when neither request.user nor the header is present', () => {
       expect(http().customProps({ headers: {} })).toEqual({ actor: null });
+    });
+  });
+
+  describe('OAuth credential redaction (ADR-0097, INV-AI-9)', () => {
+    it('lists the /oauth/token and /oauth/revoke body fields', () => {
+      expect(http().redact.paths).toEqual(
+        expect.arrayContaining([
+          'req.body.code',
+          'req.body.code_verifier',
+          'req.body.refresh_token',
+          'req.body.token',
+        ]),
+      );
+    });
+
+    it('never writes a token, code, verifier or password to the log output', () => {
+      const secrets = {
+        code: 'the-authorization-code-0123456789',
+        code_verifier: 'the-pkce-verifier-0123456789abcdefghijklmnopq',
+        refresh_token: 'lzit_ort_refresh-secret-0123456789',
+        token: 'lzit_oat_access-secret-0123456789',
+        password: 'step-up password 0123456789',
+      };
+      let output = '';
+      const sink = new Writable({
+        write(chunk: Buffer, _encoding, done) {
+          output += chunk.toString();
+          done();
+        },
+      });
+      const logger = pino({ redact: http().redact }, sink);
+      logger.info(
+        {
+          req: {
+            method: 'POST',
+            url: '/oauth/token',
+            headers: { authorization: 'Bearer lzit_oat_header-secret' },
+            body: {
+              grant_type: 'refresh_token',
+              client_id: 'lzc_x',
+              ...secrets,
+            },
+          },
+        },
+        'request',
+      );
+      expect(output).toContain('lzc_x');
+      for (const secret of [
+        ...Object.values(secrets),
+        'lzit_oat_header-secret',
+      ]) {
+        expect(output).not.toContain(secret);
+      }
+      expect(OAUTH_BODY_REDACT_PATHS.length).toBeGreaterThan(0);
     });
   });
 
