@@ -41,7 +41,7 @@ export const PERMISSION_DOMAINS = [
   "search",
   "logs", // the estate-wide activity history (Reports/Informes); read is ADMIN-only by default
   "settings",
-  "workflow", // the Applications Workflow Engine (epic #248) — pre-provisioned RBAC; NO routes yet
+  "workflow", // the Applications Workflow Engine (epic #248, ADR-0054) — workflows, connections, secrets, runs, tasks
   "notification", // the in-app notification bell (ADR-0056) — operational nudges; read is ADMIN-only
   "secret", // the human Secret Manager (ADR-0061) — zero-knowledge vaults; read/manage ADMIN-only by
   // default, plus the machine-only `secret:fetch` for programmatic retrieval by a service account (ADR-0080)
@@ -68,17 +68,18 @@ export type PermissionBaseAction = (typeof PERMISSION_BASE_ACTIONS)[number];
  *   - `user:manage`       — user administration: create / update (incl. role) / offboard / restore.
  *   - `settings:manage`   — instance configuration (the `settings`/config admin surface).
  *
- * The `workflow` domain (Applications Workflow Engine, epic #248) is pre-provisioned here as
- * catalog-as-code ONLY — there are no engine routes/entities yet. Its verbs are deliberately split by
- * sensitivity (synthesis §5 / security.md §4): a plain `:read` plus four coarse verbs, with
+ * The `workflow` domain (Applications Workflow Engine, epic #248, ADR-0054) guards the engine's routes
+ * (`/workflows`, `/workflow-connections`, `/workflow-secrets`, `/workflow-runs`, `/workflow-tasks`). Its
+ * verbs are deliberately split by sensitivity (synthesis §5 / security.md §4): a plain `:read` plus four coarse verbs, with
  * `workflow:secrets` kept DISTINCT from `workflow:manage` so credential-holding can be a separate
  * duty from authoring the automation logic (who writes the workflow ≠ who holds the Jira token):
  *   - `workflow:read`    — view workflow definitions, run history and the manual-task inbox
  *     (sensitive — run history reveals who-gets-provisioned-where; treated like `logs:read`, ADMIN-only).
  *   - `workflow:manage`  — configure the engine + connections (create/edit/delete/enable definitions).
- *   - `workflow:run`     — manually trigger / re-run / retry a run.
+ *   - `workflow:run`     — retry a failed run or replay it on the latest version (runs start only from
+ *     grant events; there is no manual trigger route).
  *   - `workflow:task`    — complete a manual task step (permission alone is not enough; the completer
- *     must also be a valid assignee — the engine's IDOR guard, enforced server-side when the engine ships).
+ *     must also be a valid assignee — the engine's IDOR guard, enforced server-side).
  *   - `workflow:secrets` — configure / enter / rotate per-app connector credentials (separation of duties).
  *
  * Read-only domains (`dashboard`, `search`) expose only `:read`; they have no mutation surface today.
