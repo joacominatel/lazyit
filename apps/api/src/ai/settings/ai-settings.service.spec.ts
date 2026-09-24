@@ -152,32 +152,64 @@ function enabledBody(overrides: Partial<UpdateAiSettings> = {}) {
   });
 }
 
-function setup(opts: { row?: Row | null; key?: string | undefined } = {}) {
+function setup(
+  opts: {
+    row?: Row | null;
+    key?: string | undefined;
+    /** Runs inside the write transaction, before the write — a concurrent save landing meanwhile. */
+    beforeWrite?: (stored: Row | null) => Row | null;
+  } = {},
+) {
   const env: NodeJS.ProcessEnv = {
     AI_SECRET_KEY: 'key' in opts ? opts.key : KEY,
   };
   let row: Row | null = opts.row ?? null;
+  let writes = 0;
+  let lastWrite: Row | undefined;
+  /** Apply a write the way Postgres + Prisma would: merge, and bump `updatedAt`. */
+  const apply = (data: Row): Row => {
+    lastWrite = data;
+    writes += 1;
+    row = makeRow({
+      ...(row ?? {}),
+      ...data,
+      providerOptions:
+        data.providerOptions === 'DbNull' ? null : data.providerOptions,
+      updatedAt: new Date(Date.UTC(2026, 8, 24, 0, 0, writes)),
+    });
+    return row;
+  };
   const aiSettings = {
     findUnique: jest.fn(() => Promise.resolve(row)),
-    upsert: jest.fn((args: { create: Row; update: Row }) => {
-      const data = row ? args.update : args.create;
-      row = makeRow({
-        ...(row ?? {}),
-        ...data,
-        providerOptions:
-          data.providerOptions === 'DbNull' ? null : data.providerOptions,
-        updatedAt: new Date('2026-09-24T00:00:00Z'),
-      });
-      return Promise.resolve(row);
+    findUniqueOrThrow: jest.fn(() => Promise.resolve(row)),
+    // The conditional write: only when the row is still the version the caller read.
+    updateMany: jest.fn((args: { where: { updatedAt: Date }; data: Row }) => {
+      const current = row?.updatedAt as Date | undefined;
+      if (!current || current.getTime() !== args.where.updatedAt.getTime()) {
+        return Promise.resolve({ count: 0 });
+      }
+      apply(args.data);
+      return Promise.resolve({ count: 1 });
+    }),
+    create: jest.fn((args: { data: Row }) => {
+      if (row) {
+        return Promise.reject(
+          Object.assign(new Error('unique'), { code: 'P2002' }),
+        );
+      }
+      return Promise.resolve(apply(args.data));
     }),
   };
   const aiConfigAuditLog = {
     create: jest.fn((args: unknown) => Promise.resolve(args)),
   };
+  const tx = { aiSettings, aiConfigAuditLog };
   const prisma = {
-    aiSettings,
-    aiConfigAuditLog,
-    $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    ...tx,
+    $transaction: jest.fn((fn: (client: typeof tx) => Promise<unknown>) => {
+      if (opts.beforeWrite) row = opts.beforeWrite(row);
+      return fn(tx);
+    }),
   };
   const tester = { test: jest.fn(() => Promise.resolve(PASS)) };
   const cipher = new EnvelopeCipher(
@@ -196,11 +228,9 @@ function setup(opts: { row?: Row | null; key?: string | undefined } = {}) {
     tester,
     env,
     current: () => row,
-    upsertData: (): Row => {
-      const call = aiSettings.upsert.mock.calls.at(-1) as unknown as [
-        { update: Row; create: Row },
-      ];
-      return call[0].update;
+    writtenData: (): Row => {
+      if (!lastWrite) throw new Error('nothing was written');
+      return lastWrite;
     },
     audits: (): Array<{
       action: string;
@@ -241,7 +271,8 @@ describe('AiSettingsService — read', () => {
       keyConfigured: true,
       updatedAt: null,
     });
-    expect(prisma.aiSettings.upsert).not.toHaveBeenCalled();
+    expect(prisma.aiSettings.create).not.toHaveBeenCalled();
+    expect(prisma.aiSettings.updateMany).not.toHaveBeenCalled();
   });
 
   it('keyConfigured reflects AI_SECRET_KEY', async () => {
@@ -337,7 +368,7 @@ describe('AiSettingsService — resolveProviderConfig (the reader port)', () => 
 
 describe('AiSettingsService — the write-only key', () => {
   it('encrypts a new key and never stores or returns the plaintext', async () => {
-    const { service, upsertData, current } = setup();
+    const { service, writtenData, current } = setup();
     const saved = await service.updateSettings(
       body({
         provider: 'anthropic',
@@ -348,7 +379,7 @@ describe('AiSettingsService — the write-only key', () => {
     );
     expect(saved.apiKeySet).toBe(true);
     expect(JSON.stringify(saved)).not.toContain(PROVIDER_KEY);
-    expect(JSON.stringify(upsertData())).not.toContain(PROVIDER_KEY);
+    expect(JSON.stringify(writtenData())).not.toContain(PROVIDER_KEY);
     expect(current()?.apiKeyCiphertext).toEqual(expect.any(String));
   });
 
@@ -364,22 +395,22 @@ describe('AiSettingsService — the write-only key', () => {
   });
 
   it('keeps the stored key when the key is omitted and the destination is unchanged', async () => {
-    const { service, upsertData } = setup({ row: enabledRow() });
+    const { service, writtenData } = setup({ row: enabledRow() });
     const saved = await service.updateSettings(
       enabledBody({ model: 'claude-sonnet-5' }),
       'a',
     );
-    expect(upsertData()).not.toHaveProperty('apiKeyCiphertext');
+    expect(writtenData()).not.toHaveProperty('apiKeyCiphertext');
     expect(saved.apiKeySet).toBe(true);
   });
 
   it('clears the stored key on null', async () => {
-    const { service, upsertData } = setup({ row: enabledRow() });
+    const { service, writtenData } = setup({ row: enabledRow() });
     const saved = await service.updateSettings(
       body({ provider: 'anthropic', model: 'claude-opus-5', apiKey: null }),
       'a',
     );
-    expect(upsertData()).toMatchObject({
+    expect(writtenData()).toMatchObject({
       apiKeyCiphertext: null,
       apiKeyIv: null,
     });
@@ -387,12 +418,12 @@ describe('AiSettingsService — the write-only key', () => {
   });
 
   it('clears the stored key when the provider changes (destination binding)', async () => {
-    const { service, upsertData } = setup({ row: enabledRow() });
+    const { service, writtenData } = setup({ row: enabledRow() });
     const saved = await service.updateSettings(
       body({ provider: 'openai', model: 'gpt-6-sol' }),
       'a',
     );
-    expect(upsertData()).toMatchObject({
+    expect(writtenData()).toMatchObject({
       apiKeyCiphertext: null,
       apiKeyIv: null,
       apiKeyAuthTag: null,
@@ -402,7 +433,7 @@ describe('AiSettingsService — the write-only key', () => {
   });
 
   it('clears the stored key when the base URL changes (destination binding)', async () => {
-    const { service, upsertData } = setup({
+    const { service, writtenData } = setup({
       row: enabledRow({
         provider: 'openai-compatible',
         model: 'llama',
@@ -417,7 +448,7 @@ describe('AiSettingsService — the write-only key', () => {
       }),
       'a',
     );
-    expect(upsertData()).toMatchObject({ apiKeyCiphertext: null });
+    expect(writtenData()).toMatchObject({ apiKeyCiphertext: null });
   });
 
   it('a new key sent with the destination change is stored', async () => {
@@ -427,6 +458,60 @@ describe('AiSettingsService — the write-only key', () => {
       'a',
     );
     expect(saved.apiKeySet).toBe(true);
+  });
+});
+
+describe('AiSettingsService — concurrent saves (review F1)', () => {
+  it('refuses (409) when the row changed between the read and the write, writing nothing', async () => {
+    // Admin A read the Anthropic row with its key. Meanwhile admin B moved the base URL (and B's save
+    // cleared the key). A's save of the OLD destination must not land on B's row and keep a key.
+    const { service, audits, current } = setup({
+      row: enabledRow(),
+      beforeWrite: (stored) =>
+        makeRow({
+          ...stored,
+          provider: 'openai-compatible',
+          model: 'llama',
+          baseUrl: 'https://attacker.example/v1',
+          apiKeyCiphertext: null,
+          apiKeyIv: null,
+          apiKeyAuthTag: null,
+          apiKeyKeyVersion: null,
+          updatedAt: new Date('2026-09-23T12:00:00Z'),
+        }),
+    });
+    await expect(
+      service.updateSettings(enabledBody({ retentionDays: 30 }), 'admin-a'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(audits()).toEqual([]);
+    expect(current()).toMatchObject({
+      baseUrl: 'https://attacker.example/v1',
+      apiKeyCiphertext: null,
+      retentionDays: 90,
+    });
+  });
+
+  it('refuses (409) a first save racing another first save', async () => {
+    const { service, audits } = setup({
+      row: null,
+      beforeWrite: () =>
+        makeRow({ updatedAt: new Date('2026-09-23T12:00:00Z') }),
+    });
+    await expect(
+      service.updateSettings(body({ mcpEnabled: true }), 'a'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(audits()).toEqual([]);
+  });
+
+  it('writes conditionally on the updatedAt it read', async () => {
+    const read = enabledRow();
+    const { service, prisma } = setup({ row: read });
+    await service.updateSettings(enabledBody({ retentionDays: 30 }), 'a');
+    expect(prisma.aiSettings.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'singleton', updatedAt: read.updatedAt },
+      }),
+    );
   });
 });
 
@@ -479,7 +564,7 @@ describe('AiSettingsService — the enable gate', () => {
   });
 
   it('accepts the acknowledgement in the same request, recording its author once', async () => {
-    const { service, audits, upsertData } = setup({
+    const { service, audits, writtenData } = setup({
       row: readyRow({ disclosureAcknowledgedAt: null }),
     });
     const saved = await service.updateSettings(
@@ -487,7 +572,7 @@ describe('AiSettingsService — the enable gate', () => {
       'admin-1',
     );
     expect(saved.disclosureAcknowledgedAt).not.toBeNull();
-    expect(upsertData()).toMatchObject({
+    expect(writtenData()).toMatchObject({
       disclosureAcknowledgedById: 'admin-1',
     });
     const ack = audits().filter(
@@ -497,12 +582,12 @@ describe('AiSettingsService — the enable gate', () => {
   });
 
   it('does not re-record an acknowledgement that already exists', async () => {
-    const { service, audits, upsertData } = setup({ row: enabledRow() });
+    const { service, audits, writtenData } = setup({ row: enabledRow() });
     await service.updateSettings(
       enabledBody({ acknowledgeDisclosure: true }),
       'b',
     );
-    expect(upsertData()).not.toHaveProperty('disclosureAcknowledgedById');
+    expect(writtenData()).not.toHaveProperty('disclosureAcknowledgedById');
     expect(
       audits().some(
         (a) => a.action === AI_CONFIG_AUDIT_ACTIONS.disclosureAcknowledged,

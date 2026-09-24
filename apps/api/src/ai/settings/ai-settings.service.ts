@@ -231,7 +231,8 @@ export class AiSettingsService implements AiSettingsReader {
    *      provider + model (+ base URL where required) (422), `AI_SECRET_KEY` usable whenever the provider
    *      takes a key or one is stored (409), the key itself when the provider needs one (422), and —
    *      when never verified or the connection changed — a passing inline connection test (422);
-   *   6. one transaction: the upsert plus the redacted audit rows.
+   *   6. one transaction: a CONDITIONAL write of the row as it was read (a concurrent save → 409) plus
+   *      the redacted audit rows.
    * A refused write persists NOTHING. The MCP switch and the allowlist overlay pass no gate.
    */
   async updateSettings(
@@ -407,16 +408,37 @@ export class AiSettingsService implements AiSettingsReader {
       });
     }
 
-    const [saved] = await this.prisma.$transaction([
-      this.prisma.aiSettings.upsert({
+    // A CONDITIONAL write (review F1): the row is written only if it is still the one read above, so the
+    // destination check (which decides whether the stored key survives) and the write see the same row.
+    // A concurrent save in between → 409 and nothing persisted; the admin reloads and saves again. No row
+    // lock is held across the inline connection test, which can take up to a minute.
+    const saved = await this.prisma.$transaction(async (tx) => {
+      if (row) {
+        const { count } = await tx.aiSettings.updateMany({
+          where: { id: AI_SETTINGS_SINGLETON_ID, updatedAt: row.updatedAt },
+          data,
+        });
+        if (count !== 1) throw concurrentSave();
+      } else {
+        try {
+          await tx.aiSettings.create({
+            data: { id: AI_SETTINGS_SINGLETON_ID, ...data },
+          });
+        } catch (err) {
+          // Another first save created the singleton meanwhile (unique violation on the id).
+          if ((err as { code?: unknown }).code === 'P2002') {
+            throw concurrentSave();
+          }
+          throw err;
+        }
+      }
+      for (const audit of audits) {
+        await tx.aiConfigAuditLog.create({ data: audit });
+      }
+      return tx.aiSettings.findUniqueOrThrow({
         where: { id: AI_SETTINGS_SINGLETON_ID },
-        create: { id: AI_SETTINGS_SINGLETON_ID, ...data },
-        update: data,
-      }),
-      ...audits.map((audit) =>
-        this.prisma.aiConfigAuditLog.create({ data: audit }),
-      ),
-    ]);
+      });
+    });
     return this.toWire(saved);
   }
 
@@ -497,6 +519,12 @@ export class AiSettingsService implements AiSettingsReader {
 }
 
 /* ─────────────────────────────── pure helpers ─────────────────────────────── */
+
+function concurrentSave(): ConflictException {
+  return new ConflictException(
+    'The AI settings were changed by someone else meanwhile — reload them and save again.',
+  );
+}
 
 function refuse(body: AiEnableRefusal): UnprocessableEntityException {
   return new UnprocessableEntityException(body);
