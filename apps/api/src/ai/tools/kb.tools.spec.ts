@@ -55,7 +55,7 @@ import { AiToolDispatcher } from '../core/tool-dispatcher';
 import { AiToolExecutor } from '../core/tool-executor';
 import { bind, type AiExecutionContext } from '../core/tool-descriptor';
 import { AI_TOOLSETS, AiToolRegistry } from '../core/tool-registry';
-import { KB_PREVIEW_TEXT_MAX, kbToolset } from './kb.tools';
+import { KB_PREVIEW_BODY_MAX, kbToolset } from './kb.tools';
 
 /**
  * The KB toolset (W2-8) against the REAL `ArticlesController` → `ArticlesService` → `FolderAccessService`
@@ -1073,6 +1073,61 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       expect(result).toMatchObject({ truncated: { nextOffset: 8000 } });
     });
 
+    it.each([
+      ['quotes', '"'],
+      ['backslashes', '\\'],
+      ['control characters', '\u0001'],
+    ])(
+      'a body of %s is paged by serialized size: the page keeps its nextOffset and closing delimiter under the cap',
+      async (_label, ch) => {
+        const row = articles.get(A.pub)!;
+        const body = ch.repeat(40_000);
+        articles.set(A.pub, { ...row, content: body });
+        let offset = 0;
+        let pages = 0;
+        while (offset < body.length) {
+          const result = await tools.invoke(
+            'kb_get_article',
+            {
+              article: A.pub,
+              contentOffset: offset,
+              maxChars: 15_000,
+              detail: 'full',
+            },
+            ctx(actor('MEMBER')),
+          );
+          const serialized = JSON.stringify(result);
+          expect(serialized.length).toBeLessThan(20_000);
+          // Never cut by the executor's backstop: the data is still an object, not a string prefix.
+          expect(typeof data(result)).toBe('object');
+          const content = data(result).content as Record<string, unknown>;
+          expect(
+            (content.text as string).endsWith('</untrusted_content>'),
+          ).toBe(true);
+          expect(content.offset).toBe(offset);
+          const length = content.length as number;
+          expect(length).toBeGreaterThan(0);
+          offset += length;
+          if (offset < body.length) expect(content.nextOffset).toBe(offset);
+          else expect(content).not.toHaveProperty('nextOffset');
+          pages += 1;
+        }
+        expect(pages).toBeGreaterThan(3);
+      },
+    );
+
+    it('never splits a surrogate pair across pages', async () => {
+      const row = articles.get(A.pub)!;
+      const body = `a${'😀'.repeat(10)}`;
+      articles.set(A.pub, { ...row, content: body });
+      const result = await tools.invoke(
+        'kb_get_article',
+        { article: A.pub, maxChars: 4 },
+        ctx(actor('MEMBER')),
+      );
+      expect(data(result).content).toMatchObject({ length: 3, nextOffset: 3 });
+    });
+
     it('rejects invalid input before anything is dispatched', async () => {
       const spy = jest.spyOn(dispatcher, 'dispatch');
       for (const bad of [
@@ -1091,6 +1146,73 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
   });
 
   // ─── Writes ──────────────────────────────────────────────────────────────────────────────────────
+
+  describe('one resolution rule: a cuid-shaped reference is always an id', () => {
+    /** A published article whose SLUG is another person's private draft id — planted by a member. */
+    const PLANTED = cid('aplanted');
+    beforeEach(() => {
+      articles.set(
+        PLANTED,
+        article({
+          id: PLANTED,
+          slug: A.draftOther,
+          title: 'Planted article',
+          authorId: ID.member,
+        }),
+      );
+    });
+
+    it('a read by that string is the draft by id — never the planted article', async () => {
+      const admin = await tools.invoke(
+        'kb_get_article',
+        { article: A.draftOther },
+        ctx(actor('ADMIN')),
+      );
+      expect(admin).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+      expect(JSON.stringify(admin)).not.toContain('Planted');
+      const author = await tools.invoke(
+        'kb_get_article',
+        { article: A.draftOther },
+        ctx(actor('OTHER MEMBER')),
+      );
+      expect((data(author).article as { id: string }).id).toBe(A.draftOther);
+    });
+
+    it('no card shows the planted article for a write that would hit the draft', async () => {
+      const admin = actor('ADMIN');
+      for (const [name, input] of [
+        ['kb_set_publication', { article: A.draftOther, action: 'publish' }],
+        ['kb_update_article', { article: A.draftOther, title: 'Overwritten' }],
+      ] as const) {
+        const proposal = await tools.propose(name, input, chat(admin));
+        expect(proposal).toMatchObject({
+          ok: false,
+          result: { error: { code: 'NOT_FOUND' } },
+        });
+      }
+      expect(invocations.size).toBe(0);
+      expect(prisma.article.update).not.toHaveBeenCalled();
+    });
+
+    it('the card and the execution name the same article', async () => {
+      const other = actor('OTHER MEMBER');
+      const proposal = await tools.propose(
+        'kb_update_article',
+        { article: A.draftOther, title: 'My own edit' },
+        chat(other),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      expect(proposal.action.preview!.target).toMatchObject({
+        id: A.draftOther,
+      });
+      const approved = await tools.approve(proposal.action.id, chat(other));
+      expect(approved.result?.entityRefs).toEqual([
+        expect.objectContaining({ id: A.draftOther }),
+      ]);
+      expect(articles.get(A.draftOther)!.title).toBe('My own edit');
+      expect(articles.get(PLANTED)!.title).toBe('Planted article');
+    });
+  });
 
   describe('kb_create_article', () => {
     const input = {
@@ -1238,7 +1360,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
   });
 
   describe('kb_update_article', () => {
-    it('own published article: standard card with the before → after diff and the version precondition; approve applies it once', async () => {
+    it('own published article: elevated card (it goes live to readers) with the full before → after diff and the version precondition; approve applies it once', async () => {
       const member = actor('MEMBER');
       const proposal = await tools.propose(
         'kb_update_article',
@@ -1250,7 +1372,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       expect(AiActionPreviewSchema.safeParse(preview).success).toBe(true);
       expect(preview).toMatchObject({
         class: 'write',
-        elevated: false,
+        elevated: true,
         stepUpRequired: false,
         warnings: ['PUBLISHES_TO_READERS'],
         untrustedSources: [],
@@ -1330,7 +1452,8 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         class: 'write',
         elevated: true,
         stepUpRequired: false,
-        warnings: ['VISIBILITY_CHANGE'],
+        // A published article moved to another folder goes live to that folder's readers.
+        warnings: ['PUBLISHES_TO_READERS', 'VISIBILITY_CHANGE'],
         changes: [
           {
             field: 'folder',
@@ -1421,19 +1544,31 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       expect(articles.get(A.draftOther)!.title).toBe('Reviewed plan');
     });
 
-    it('clips a long body on the card', async () => {
+    it('shows the whole new body on the card, never an excerpt (visibility laundering, security.md §6.1)', async () => {
+      const body = `${'y'.repeat(50_000)}TAIL`;
       const proposal = await tools.propose(
         'kb_update_article',
-        { article: A.team, content: 'y'.repeat(KB_PREVIEW_TEXT_MAX + 50) },
+        { article: A.team, content: body },
         chat(actor('MEMBER')),
       );
       if (!proposal.ok) throw new Error('proposal refused');
       const change = proposal.action.preview!.changes.find(
         (c) => c.field === 'content',
       )!;
-      expect(change.after).toBe(
-        `${'y'.repeat(KB_PREVIEW_TEXT_MAX)}… [50 more characters]`,
-      );
+      expect(change.after).toBe(body);
+    });
+
+    it('refuses a body past the card limit as invalid input — the card can always show it whole', async () => {
+      expect(
+        await tools.propose(
+          'kb_update_article',
+          { article: A.team, content: 'y'.repeat(KB_PREVIEW_BODY_MAX + 1) },
+          chat(actor('MEMBER')),
+        ),
+      ).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
     });
 
     it('rejects an update that changes nothing, before anything is dispatched', async () => {
@@ -1456,7 +1591,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
   });
 
   describe('kb_set_publication', () => {
-    it('publish your draft: PUBLISHES_TO_READERS, standard card; approve publishes and indexes it', async () => {
+    it('publish your draft: elevated, PUBLISHES_TO_READERS, the title and the whole body on the card; approve publishes and indexes it', async () => {
       const member = actor('MEMBER');
       const proposal = await tools.propose(
         'kb_set_publication',
@@ -1465,9 +1600,14 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       );
       if (!proposal.ok) throw new Error('proposal refused');
       expect(proposal.action.preview).toMatchObject({
-        elevated: false,
+        elevated: true,
+        stepUpRequired: false,
         warnings: ['PUBLISHES_TO_READERS'],
-        changes: [{ field: 'status', before: 'DRAFT', after: 'PUBLISHED' }],
+        changes: [
+          { field: 'status', before: 'DRAFT', after: 'PUBLISHED' },
+          { field: 'title', after: 'My draft' },
+          { field: 'content', after: articles.get(A.draftMine)!.content },
+        ],
         precondition: { entity: { type: 'article', id: A.draftMine } },
       });
       const approved = await tools.approve(proposal.action.id, chat(member));
@@ -1479,6 +1619,27 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         'APPROVED',
         'EXECUTED',
       ]);
+    });
+
+    it('a legacy body past the card limit is clipped on the card, which says so, and the approval is elevated', async () => {
+      const row = articles.get(A.draftMine)!;
+      articles.set(A.draftMine, {
+        ...row,
+        content: 'z'.repeat(KB_PREVIEW_BODY_MAX + 10),
+      });
+      const proposal = await tools.propose(
+        'kb_set_publication',
+        { article: A.draftMine, action: 'publish' },
+        chat(actor('MEMBER')),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      const change = proposal.action.preview!.changes.find(
+        (c) => c.field === 'content',
+      )!;
+      expect(String(change.after).endsWith('… [10 more characters]')).toBe(
+        true,
+      );
+      expect(proposal.action.preview!.elevated).toBe(true);
     });
 
     it("unpublish someone else's article as admin: elevated, VISIBILITY_CHANGE; approve takes it off the index", async () => {
