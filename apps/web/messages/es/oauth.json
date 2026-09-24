@@ -111,7 +111,7 @@
         "copyHeader": "Copiar la cabecera de autorización"
       }
     },
-    "originMismatch": "Abriste lazyit en <code>{page}</code>, pero esta instancia está configurada como <code>{server}</code>. Las apps de IA inician sesión contra la dirección configurada, así que los comandos de abajo usan <code>{server}</code>. Comprueba que tu equipo llega a esa dirección antes de usarlos, o abre lazyit en <code>{server}</code> para obtener comandos listos para copiar.",
+    "originMismatch": "Abriste lazyit en <code>{page}</code>, pero esta instancia está configurada como <code>{server}</code>. Las apps de IA deben usar la dirección configurada, así que los comandos de abajo usan <code>{server}</code>. Comprueba que tu equipo llega a esa dirección antes de usarlos, o abre lazyit en <code>{server}</code> para obtener comandos listos para copiar.",
     "originUnverified": "No se pudo confirmar la dirección configurada de esta instancia, así que los comandos de abajo usan la dirección en la que estás (<code>{page}</code>) y podrían no funcionar. Revísalos antes de usarlos o pide a un administrador la dirección HTTPS de la instancia."
   },
   "personalTokens": {

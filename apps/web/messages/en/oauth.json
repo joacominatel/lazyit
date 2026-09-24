@@ -111,7 +111,7 @@
         "copyHeader": "Copy the authorization header"
       }
     },
-    "originMismatch": "You opened lazyit at <code>{page}</code>, but this instance is configured as <code>{server}</code>. AI apps sign in against the configured address, so the commands below use <code>{server}</code>. Check that your computer can reach that address before using them — or open lazyit at <code>{server}</code> to get copy-ready commands.",
+    "originMismatch": "You opened lazyit at <code>{page}</code>, but this instance is configured as <code>{server}</code>. AI apps must use the configured address, so the commands below use <code>{server}</code>. Check that your computer can reach that address before using them — or open lazyit at <code>{server}</code> to get copy-ready commands.",
     "originUnverified": "Couldn't confirm this instance's configured address, so the commands below use the address you're on (<code>{page}</code>) and may not work. Review them before use, or ask an administrator for the instance's HTTPS address."
   },
   "personalTokens": {
