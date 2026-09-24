@@ -231,7 +231,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 `apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted; accepts `?directoryOnly`
 and `?role` filters — `?role=ADMIN|MEMBER|VIEWER` scopes the list to one role, validated by
 `RoleSchema` → 400 on an unknown value; backs the Settings → Roles "View N members" deep-link, issue
-#693), `GET /users/role-counts` (per-role LIVE counts `{ ADMIN, MEMBER, VIEWER }` from one Prisma
+#693; `?isActive=true|false` scopes it to enabled or deactivated accounts — anything else → 400,
+absent = both, issue #1375), `GET /users/role-counts` (per-role LIVE counts `{ ADMIN, MEMBER, VIEWER }` from one Prisma
 `groupBy` over the active directory — the Settings → Roles card counts; declared before `:id` so the
 literal isn't parsed as a uuid; gated `user:read`), `GET /users/me`
 (the current authenticated caller, **including their role** — declared before `:id` so the literal
