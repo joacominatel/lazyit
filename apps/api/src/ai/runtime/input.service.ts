@@ -23,7 +23,7 @@ import {
   AI_SETTINGS_READER,
   type AiSettingsReader,
 } from '../core/ports/ai-settings.port';
-import { errorResult, successResult } from '../core/result-shaper';
+import { errorResult, successResult, untrusted } from '../core/result-shaper';
 import { toolResultEvent } from './agent-loop';
 import {
   AiInputRequests,
@@ -69,7 +69,8 @@ const NOTES = {
  *      once), `input.resolved` and `tool.result` are emitted, and the run resumes.
  *
  * The answer reaches the model as the tool result, marked `providedBy: "user"`: the owner typed it for
- * their own run, so it is not wrapped as other-authored (untrusted) content.
+ * their own run, so it is not wrapped as other-authored (untrusted) content. The option labels added for an
+ * `optionsFrom` select (`labels`) are lazyit records' names, other-authored: they are wrapped as untrusted.
  */
 @Injectable()
 export class AiInputService {
@@ -230,7 +231,8 @@ export const INPUT_EXPIRED = {
 
 /**
  * The option labels of the chosen select values (`values.<key>` / `groups.<key>.<row>.<key>` → label), so
- * the model can name what was chosen when the value is an id.
+ * the model can name what was chosen when the value is an id. The labels are lazyit records' names —
+ * other-authored text — so each is wrapped as `<untrusted_content>`; the user's own values are not.
  */
 function selectedLabels(
   form: AiInputForm,
@@ -253,7 +255,8 @@ function selectedLabels(
       const names = chosen
         .map((v) => field.options!.find((o) => o.value === v)?.label)
         .filter((label): label is string => typeof label === 'string');
-      if (names.length > 0) out[`${prefix}.${field.key}`] = names.join(', ');
+      const wrapped = untrusted(names.join(', '));
+      if (wrapped) out[`${prefix}.${field.key}`] = wrapped;
     }
   };
   add(form.fields, answer.values, 'values');

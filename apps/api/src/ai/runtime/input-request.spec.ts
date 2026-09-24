@@ -185,11 +185,14 @@ describe('request_input: pause AWAITING_INPUT → answer → resume', () => {
           values: { manufacturer: 'Dell', notes: 'for the new hires' },
           groups: { models: [{ name: 'Latitude 5450', count: 4 }] },
         },
-        labels: { 'values.manufacturer': 'Dell' },
+        // A lazyit record's name is other-authored: wrapped as untrusted.
+        labels: {
+          'values.manufacturer': '<untrusted_content>Dell</untrusted_content>',
+        },
       },
     });
     // The user's own answer is not other-authored content: never wrapped as untrusted.
-    expect(JSON.stringify(results[1].output)).not.toContain(
+    expect(JSON.stringify(results[1].output.data.answer)).not.toContain(
       '<untrusted_content>',
     );
   });
