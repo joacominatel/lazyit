@@ -196,8 +196,19 @@ The migration is purely additive and applies with `prisma migrate deploy` over a
 - **The recent-activity summary.** The `recent_activity` view still summarizes a movement as
   `stock_out` / `stock_in` without its target. Carrying the destination into the feed means rewriting
   the view, which is deliberately not done here.
-- **The web** (user detail, asset and location detail, the delivery and return dialogs, the offboarding
-  sheet and the Return Act), plus the Manual pages, ship in the frontend half of #1364.
+- **The web** shipped in the frontend half of #1364, with the Manual pages:
+  - the consumable's **Remove…** dialog gains an optional *Deliver to* (none / person / asset /
+    location, one live-only picker); the quick −1/+1 stays untargeted;
+  - a returnable switch on the consumable form, and the ledger shows each delivery's destination and
+    return state and each return's delivery;
+  - one deliveries panel on the user, asset and location detail pages (deliver, return, outstanding and
+    date filters). A 403 from the read hides it;
+  - the offboarding sheet and the Return Act list the outstanding returnables (read with
+    `outstandingOnly`, so an old loaner is never lost behind newer deliveries) and the non-returnable
+    deliveries. The operator can drop the section (an app-level toggle, like the other act sections) or
+    single rows. The per-row exclusions reach the act in its **URL** (`?excludeDeliveries=`), because
+    the act opens in a `noopener` tab, which starts with an empty `sessionStorage`. A consumables read
+    failure still blocks the act (#601); only a 403 degrades to an omitted section.
 
 Related: [[consumable]] · [[consumable-movement]] · [[asset-history]] · [[user]] · [[asset]] ·
 [[location]] · [[0034-consumables-design]] · [[0008-consumables-vs-assets]] ·
