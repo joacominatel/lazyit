@@ -677,6 +677,12 @@ is always `window.location.origin + "/mcp"`.
   warning codes added). The web re-reads the pending card (re-subscribe → `run.snapshot`, or
   `GET /ai/conversations/:id`), highlights the added warnings, and lets the user decide again (with the
   password field when step-up is now required). It is not an error state and not a logout.
+- **A password is no guarantee.** A decision sent WITH the password can still answer `403
+  STEP_UP_REQUIRED` + `addedWarnings`: the password is only checked when the stored card asked for it,
+  and a step-up warning that appeared since (say, the application became critical) is found by core
+  afterwards. Re-render the card with the added warnings and let the user retry with the password.
+- `POST /ai/runs` with an `Idempotency-Key` reused for another prompt or conversation answers `422
+  IDEMPOTENCY_KEY_MISMATCH` — use a new key per request.
 
 **K6 — Stop** `POST /ai/runs/:id/cancel` → the run is cancelled at the next step boundary; partial
 output is persisted.

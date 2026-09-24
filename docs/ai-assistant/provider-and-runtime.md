@@ -1161,7 +1161,11 @@ decision made while Valkey is down resumes within about a minute of its return.
 >   create and send answer **409 `AI_DISABLED`**.
 > - **`POST /ai/runs`** → 202 `{ runId, status }`; an `Idempotency-Key` (1–255 printable ASCII, else 400)
 >   returns the earlier run for the same principal and key, with the response header
->   `Idempotent-Replayed: true`. **`GET /ai/runs/:id`** → `AiRun`: `finalText` is the last assistant text of
+>   `Idempotent-Replayed: true`. The key names one request: reused with another prompt or another
+>   `conversationId` it answers **422 `IDEMPOTENCY_KEY_MISMATCH`**. There is no body-hash column (a schema
+>   change would be needed), so the earlier run's first user message — without the turn context — and its
+>   conversation are compared; a run whose conversation was deleted replays uncompared, and two first
+>   submissions racing on one key are resolved by the runtime (one run). **`GET /ai/runs/:id`** → `AiRun`: `finalText` is the last assistant text of
 >   the run, `toolCalls` the calls of the run's own projected messages. **`POST /ai/runs/:id/cancel`** → 200
 >   `{ runId, status }`, idempotent.
 > - **`POST /ai/runs/:id/tool-calls/:toolCallId/decision`** → 200 `{ runId, status }` (the run's status
@@ -1255,7 +1259,8 @@ listener never fails the run. **The bus does no authorization:** the SSE endpoin
 check the caller owns it before `subscribe`, `replay` or `lastSeq` — a run id is not a capability.
 
 **As built (W3-1) — the endpoint** (`runs/run-event-stream.ts`). In order: the owner check (404, the bus
-untouched); a cap of **8 open streams per principal** (429 `RATE_LIMITED`); the headers above plus
+untouched); a client that went away during that load is dropped before anything is attached (its `close`
+already fired, so nothing would release a slot or a listener); a cap of **8 open streams per principal** (429 `RATE_LIMITED`); the headers above plus
 `Connection: keep-alive`, flushed at once, then `: connected`. It **subscribes before** building the replay
 or the snapshot, holding what arrives meanwhile, so nothing is lost. A `Last-Event-ID` the buffer covers is
 replayed (sequence numbers are compared, never counted); otherwise — no header, another run's id, a stale or
@@ -1266,7 +1271,9 @@ their stored previews, and its status. Then the held and live events follow, eac
 `event: <type>`. **Closing:** live, on `run.finished` (it follows the terminal `run.status` and carries usage
 and error, so the stream waits for it) or on `run.status AWAITING_APPROVAL`; a snapshot whose status is
 terminal or `AWAITING_APPROVAL` closes after it; a replay is sent whole — it may cross a pause that is
-already over — and the run's current status then decides. Heartbeat `: heartbeat` every 15 s; a stream is
+already over — and the run's current status then decides. Heartbeat `: heartbeat` every 15 s, and each heartbeat re-checks the caller (`runs/stream-principal-check.ts`:
+the human re-loaded at the stream's `sessionEpoch`, or the Service Account not revoked, inactive or expired,
+and `ai:use` still held) — a stream the caller could no longer open is closed; a stream is
 closed after **15 minutes** whatever the run does (the client resumes with `Last-Event-ID`). A client that
 goes away unsubscribes the listener, clears the timers and frees its slot, exactly once; the run is
 unaffected. Caddy leaves `/api/ai/runs/*/events` unencoded (#1328).
