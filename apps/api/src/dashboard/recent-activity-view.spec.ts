@@ -140,12 +140,13 @@ describe('recent_activity view — UserHistory CASE completeness (regression gua
     );
   });
 
-  it('the canonical migration is the expected 20260703030000_password_reset_requested (update if view is re-issued)', () => {
+  it('the canonical migration is the expected 20260924140000_user_activation_history (update if view is re-issued)', () => {
     // This assertion is intentionally explicit: if someone re-issues the view in a NEW migration
     // the test still passes (the guard auto-upgrades), but this test will FAIL to remind you to
     // update this name. Delete or re-pin this case when the canonical migration changes.
     // Re-pinned in issue #1006 (ADR-0086 §F4): the password_reset_requested migration re-issues the view to
     // add the PASSWORD_RESET_REQUESTED summary branch (superseding 20260703020000_password_lifecycle).
-    expect(migrationName).toBe('20260703030000_password_reset_requested');
+    // Re-pinned in issue #1375: user_activation_history re-issues it to add DEACTIVATED / REACTIVATED.
+    expect(migrationName).toBe('20260924140000_user_activation_history');
   });
 });

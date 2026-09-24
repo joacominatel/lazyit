@@ -72,7 +72,9 @@
       "deleted": "Deleted",
       "restored": "Restored",
       "consumable_delivered": "Consumable delivered",
-      "consumable_returned": "Consumable returned"
+      "consumable_returned": "Consumable returned",
+      "deactivated": "Deactivated",
+      "reactivated": "Reactivated"
     }
   },
   "empty": {},

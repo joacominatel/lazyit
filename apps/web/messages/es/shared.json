@@ -72,7 +72,9 @@
       "deleted": "Eliminado",
       "restored": "Restaurado",
       "consumable_delivered": "Consumible entregado",
-      "consumable_returned": "Consumible devuelto"
+      "consumable_returned": "Consumible devuelto",
+      "deactivated": "Desactivado",
+      "reactivated": "Reactivado"
     }
   },
   "empty": {},

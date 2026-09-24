@@ -890,9 +890,9 @@ a separate remediation, not a supported path here.
   a different person. The preview labels it through `findOne` and detects a no-op by identity (same id,
   or same free-text name), never by comparing labels.
 - **Reads.** `user_search` (`query` — optional: omit it to list, e.g. `role: "ADMIN"` for every
-  administrator in one call (#1374) — `role`, `directoryOnly`, `archived`, the route's `sort`, `dir`,
-  `limit` ≤ 50, `offset`; `GET /users` has no activation filter, so "inactive users" is not a filter
-  yet — the rows carry `isActive`) and `user_get` (`detail`; the assignments facet and the `accessGrant:read`
+  administrator in one call (#1374) — `role`, `directoryOnly`, `isActive` (`false` lists the
+  deactivated users in one call, mapped to `GET /users?isActive=`, #1375), `archived`, the route's
+  `sort`, `dir`, `limit` ≤ 50, `offset`) and `user_get` (`detail`; the assignments facet and the `accessGrant:read`
   grants facet — reported `unavailable` without that permission, never a failure). `dashboard_summary`
   (`expiringWithinDays`, `detail: full` adds the recent asset history) and `activity_list` (the feed's
   filters; `actor` is a uuid or `"me"`; `limit` ≤ 50). Never projected: `externalId`, password and

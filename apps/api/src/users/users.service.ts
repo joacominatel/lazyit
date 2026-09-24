@@ -118,6 +118,11 @@ export interface UserFilters {
    * simply matches no row (silently ignored, never a 400). absent/undefined → no filter (default).
    */
   ids?: string[];
+  /**
+   * Activation filter (issue #1375). true → only active accounts; false → only deactivated ones.
+   * absent/undefined → both (default; no filter). Validated as exactly "true" | "false" at the controller.
+   */
+  isActive?: boolean;
 }
 
 /**
@@ -293,6 +298,7 @@ export class UsersService {
     directoryOnly,
     role,
     ids,
+    isActive,
   }: UserFilters): Prisma.UserWhereInput {
     return {
       // Token-wise match (issue #1053): each whitespace-separated token of `q` must appear in
@@ -305,6 +311,8 @@ export class UsersService {
       // ids filter (issue #961): the batch id→name resolver — scope to exactly these ids. Absent or
       // empty → no filter. Unknown ids simply match nothing (the IN clause ignores them silently).
       ...(ids && ids.length > 0 ? { id: { in: ids } } : {}),
+      // isActive filter (issue #1375): absent → no filter (active and deactivated alike).
+      ...(isActive !== undefined ? { isActive } : {}),
     };
   }
 
@@ -1008,6 +1016,18 @@ export class UsersService {
     const emailChanged =
       data.email !== undefined && data.email !== current.email;
     const profileChanged = nameChanged || emailChanged;
+    // Activation (issue #1375): a real flip of `isActive` is its own audited event — DEACTIVATED /
+    // REACTIVATED — so it surfaces in Reports → Users with its actor. A PATCH that resends the stored
+    // value is not a change and logs nothing. `deactivating` (above) is the true→false half.
+    const reactivating = data.isActive === true && !current.isActive;
+    // legajo / username (ADR-0058) are local-only directory identifiers: never mirrored to the IdP, but
+    // an edit is still a profile change the log records (issue #1375 — they used to change silently).
+    // `null` clears; a string is already normalized by the schema.
+    const legajoChanged =
+      data.legajo !== undefined && data.legajo !== (current.legajo ?? null);
+    const usernameChanged =
+      data.username !== undefined &&
+      data.username !== (current.username ?? null);
 
     // Resolve the manager either/or → DB columns (ADR-0058): validates the FK is live, rejects a
     // self-manager and a CYCLE (DFS up the chain, with `id` as the subject). `undefined` when manager
@@ -1140,13 +1160,40 @@ export class UsersService {
     }
 
     // Emit UserHistory (DEBT-2, issue #185) only on the SUCCESS path — after any IdP mirror has
-    // committed, so a reverted update never produces a misleading log row. A role change, a manager
-    // change and a profile edit can all happen in one PATCH, so emit each that fired (a ROLE_CHANGED
-    // carries { from, to }; a MANAGER_CHANGED carries { from, to } where each side is a user-id |
-    // external-name | null; an UPDATED carries which fields changed). Atomic in one transaction with the
-    // durable final state (ADR-0033).
-    if (roleChanged || managerChanged || profileChanged) {
+    // committed, so a reverted update never produces a misleading log row. An activation flip, a role
+    // change, a manager change and a profile edit can all happen in one PATCH, so emit each that fired (a
+    // DEACTIVATED / REACTIVATED has no payload; a ROLE_CHANGED carries { from, to }; a MANAGER_CHANGED
+    // carries { from, to } where each side is a user-id | external-name | null; an UPDATED carries which
+    // fields changed — name / email / legajo / username). Atomic in one transaction with the durable final
+    // state (ADR-0033). Every route into here — the web UI, the API and an AI tool call (which dispatches
+    // to this same PATCH route) — lands on this one emitter, so the AI path is stamped with its
+    // `aiInvocationId` by UserHistoryService (ADR-0097 decision 11).
+    // Activation and the local identifiers (legajo / username) are recorded the same way (issue #1375).
+    const identifierFields = [
+      ...(legajoChanged ? (['legajo'] as const) : []),
+      ...(usernameChanged ? (['username'] as const) : []),
+    ];
+    const updatedFields = [
+      ...(nameChanged ? (['name'] as const) : []),
+      ...(emailChanged ? (['email'] as const) : []),
+      ...identifierFields,
+    ];
+    if (
+      roleChanged ||
+      managerChanged ||
+      updatedFields.length > 0 ||
+      deactivating ||
+      reactivating
+    ) {
       await this.prisma.$transaction(async (tx) => {
+        if (deactivating || reactivating) {
+          await this.recordHistory(
+            tx,
+            id,
+            deactivating ? 'DEACTIVATED' : 'REACTIVATED',
+            actorId,
+          );
+        }
         if (roleChanged) {
           await this.recordHistory(tx, id, 'ROLE_CHANGED', actorId, {
             from: current.role,
@@ -1160,14 +1207,11 @@ export class UsersService {
             to: managerWrite.managerId ?? managerWrite.managerName ?? null,
           });
         }
-        if (profileChanged) {
+        if (updatedFields.length > 0) {
           await this.recordHistory(tx, id, 'UPDATED', actorId, {
             // WHICH fields changed (never the old/new values — the email is not a secret, but keep the
             // log shape consistent with the IdP write-back audit line: field names only).
-            fields: [
-              ...(nameChanged ? (['name'] as const) : []),
-              ...(emailChanged ? (['email'] as const) : []),
-            ],
+            fields: updatedFields,
           });
         }
       });
