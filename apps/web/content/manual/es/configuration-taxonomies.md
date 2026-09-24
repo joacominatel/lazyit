@@ -57,3 +57,11 @@ reasigna los registros.
 
 Para ver cómo los modelos y las categorías impulsan la experiencia de activos, consulta la sección
 Activos de este manual.
+
+## Con el asistente de IA
+
+Si el [asistente de IA](/help/ai-assistant-overview) está activado, también puedes pedirle que cree,
+renombre o edite categorías de activos, aplicaciones y consumibles, que archive una, y que edite, archive o
+restaure modelos de activo y ubicaciones. Cada cambio se propone como una tarjeta que apruebas, y una
+tarjeta de archivado indica qué sigue usando la entrada antes de que decidas. Consulta
+[Aprobar cambios](/help/ai-assistant-approvals#categorías-modelos-y-ubicaciones).

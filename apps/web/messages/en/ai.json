@@ -159,6 +159,20 @@
     "failedNote": "The change was not applied: {message}",
     "rejectedNote": "You rejected this change. Nothing was changed.",
     "expiredNote": "This proposal expired. Ask again if you still want the change.",
+    "notices": {
+      "duplicatesUnchecked": "The duplicate check could not be completed — you can't read every asset, or a tag or serial number contains a comma and couldn't be looked up. A row whose tag or serial is already taken will be refused when it runs, and the others still run."
+    },
+    "table": {
+      "rowNumber": "#",
+      "problems": "Problems",
+      "noProblems": "—",
+      "showing": "{shown, plural, one {# row} other {# rows}} of {total}",
+      "onlyProblems": "Only rows with problems ({count})",
+      "willBeSkipped": "Skipped — won't be applied",
+      "defaulted": "default",
+      "duplicateExisting": "{field} “{value}” already belongs to",
+      "duplicateRow": "{field} “{value}” is also used by row {row}"
+    },
     "cancelledNote": "This proposal was cancelled. Nothing was changed.",
     "errors": {
       "stepUpRequired": "Enter your password to approve this change.",

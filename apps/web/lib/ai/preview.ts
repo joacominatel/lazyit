@@ -16,16 +16,36 @@ export type PreviewValue =
   | { kind: "boolean"; value: boolean }
   | { kind: "redacted" };
 
+export type PreviewRecord = Record<string, unknown>;
+
 export interface PreviewRow {
   field: string;
   before: PreviewValue | null;
   after: PreviewValue;
+  /**
+   * Set when `after` is an array of objects (a batch's rows, #1387): the raw records, which the card
+   * renders as a table (`preview-table.ts`) instead of the flat `after` text.
+   */
+  records?: PreviewRecord[];
 }
 
 export interface PreviewModel {
   /** The plain-language sentence of the `action` row, shown first. */
   action: { text: string; untrusted: boolean } | null;
   rows: PreviewRow[];
+  /** Flags the card states as a notice rather than a field row (see {@link PREVIEW_NOTICE_FIELDS}). */
+  notices: PreviewNotice[];
+}
+
+/**
+ * Boolean preview fields that, when `true`, are a sentence on the card instead of a "Yes" row:
+ * `duplicatesUnchecked` — a batch whose duplicate pre-check could not run for every value (#1387).
+ */
+export const PREVIEW_NOTICE_FIELDS = ["duplicatesUnchecked"] as const;
+export type PreviewNotice = (typeof PREVIEW_NOTICE_FIELDS)[number];
+
+function isNoticeField(field: string): field is PreviewNotice {
+  return (PREVIEW_NOTICE_FIELDS as readonly string[]).includes(field);
 }
 
 const MAX_TEXT = 500;
@@ -78,11 +98,25 @@ export function formatPreviewValue(value: unknown, kind?: AiPreviewValueKind): P
   return textValue(String(value));
 }
 
+/** True when a preview value is a non-empty array whose every item is a (non-array) object. */
+export function isRecordArray(value: unknown): value is PreviewRecord[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => typeof item === "object" && item !== null && !Array.isArray(item))
+  );
+}
+
 /** Splits the preview into its `action` sentence (the first row by convention) and the field rows. */
 export function presentPreview(preview: Pick<AiActionPreview, "changes">): PreviewModel {
   let action: PreviewModel["action"] = null;
   const rows: PreviewRow[] = [];
+  const notices: PreviewNotice[] = [];
   for (const change of preview.changes) {
+    if (isNoticeField(change.field) && typeof change.after === "boolean") {
+      if (change.after && !notices.includes(change.field)) notices.push(change.field);
+      continue;
+    }
     if (change.field === "action" && action === null && typeof change.after === "string") {
       const clean = stripUntrusted(change.after);
       action = { text: clean.text, untrusted: clean.untrusted };
@@ -93,9 +127,11 @@ export function presentPreview(preview: Pick<AiActionPreview, "changes">): Previ
       before:
         change.before === undefined ? null : formatPreviewValue(change.before, change.valueKind),
       after: formatPreviewValue(change.after, change.valueKind),
+      // A redacted value never reaches the table: its records are dropped with it.
+      ...(change.valueKind !== "redacted" && isRecordArray(change.after) ? { records: change.after } : {}),
     });
   }
-  return { action, rows };
+  return { action, rows, notices };
 }
 
 /** `assignedTo` / `access_level` → "Assigned to" / "Access level" — the fallback field label. */

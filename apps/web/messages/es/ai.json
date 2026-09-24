@@ -159,6 +159,20 @@
     "failedNote": "El cambio no se aplicó: {message}",
     "rejectedNote": "Rechazaste este cambio. No se modificó nada.",
     "expiredNote": "Esta propuesta venció. Pedila de nuevo si todavía querés el cambio.",
+    "notices": {
+      "duplicatesUnchecked": "No se pudo completar la comprobación de duplicados — no podés ver todos los activos, o una etiqueta o número de serie contiene una coma y no se pudo buscar. Una fila cuya etiqueta o número de serie ya esté en uso se rechaza al ejecutarse, y las demás se ejecutan igual."
+    },
+    "table": {
+      "rowNumber": "#",
+      "problems": "Problemas",
+      "noProblems": "—",
+      "showing": "{shown, plural, one {# fila} other {# filas}} de {total}",
+      "onlyProblems": "Solo filas con problemas ({count})",
+      "willBeSkipped": "Omitida — no se aplica",
+      "defaulted": "por defecto",
+      "duplicateExisting": "{field} “{value}” ya pertenece a",
+      "duplicateRow": "{field} “{value}” también se usa en la fila {row}"
+    },
     "cancelledNote": "Esta propuesta se canceló. No se modificó nada.",
     "errors": {
       "stepUpRequired": "Ingresá tu contraseña para aprobar este cambio.",
