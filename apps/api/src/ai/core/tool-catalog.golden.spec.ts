@@ -523,6 +523,7 @@ const GOLDEN = {
     serviceAccounts: true,
     class: 'write',
     channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
   // ── workflow authoring (W2-14): chat only — a route admits an SA, the channel never does ──
   workflow_archive: {
     route: 'DELETE /workflows/:id',
