@@ -7,6 +7,7 @@ import {
   type AiEntityRef,
   type AiPreviewWarningCode,
 } from '@lazyit/shared';
+import { ArticleCategoriesController } from '../../article-categories/article-categories.controller';
 import { ArticlesController } from '../../articles/articles.controller';
 import { ArticleAttachmentsController } from '../../attachments/article-attachments.controller';
 import {
@@ -267,6 +268,143 @@ async function writeTargetId(
   return resolved.id;
 }
 
+/**
+ * A KB folder as a preview card shows it: its name, whether the CALLER can read it, and a summary of who
+ * can read it (its audience) — security.md §6.1 chain 4: the card of a write that makes content visible
+ * names the destination and its audience.
+ */
+interface FolderView {
+  id: string;
+  name: string;
+  /** The caller passes the folder ACL for this folder (ADR-0060 §4). */
+  readable: boolean;
+  visibility: 'public' | 'restricted' | 'unknown';
+  audience: string;
+}
+
+function ruleSummary(rule: Row): string {
+  switch (rule.kind) {
+    case 'role':
+      return `the ${String(rule.role)} role`;
+    case 'users': {
+      const n = Array.isArray(rule.userIds) ? rule.userIds.length : 0;
+      return n === 1 ? '1 named person' : `${n} named people`;
+    }
+    case 'appGrant':
+      return `people with access to application ${String(rule.applicationId)}`;
+    case 'assetAssignment':
+      return `people assigned asset ${String(rule.assetId)}`;
+    default:
+      return 'an unrecognized rule (matches nobody)';
+  }
+}
+
+/**
+ * Describe one folder from the folder list, read AS THE CALLER through the guarded
+ * `GET /article-categories` handler:
+ *   - readability is the route's own ACL decision: `articleCount` is null exactly for a folder the caller
+ *     cannot read (ADR-0060 §4, #1106);
+ *   - the audience comes from `accessRules` (returned only to `settings:manage` holders, #554) or, where
+ *     the API exposes it, the derived `hasAccessRules` flag (#1299), over the folder and its ancestors
+ *     (a restricted ancestor narrows the whole subtree, §1). Without either, the audience is stated as
+ *     unknown to the caller — never guessed as public.
+ * Returns undefined for a folder that is not live.
+ */
+async function folderView(
+  rt: AiToolRuntime,
+  id: string,
+): Promise<FolderView | undefined> {
+  const rows = asRows(await rt.call(ArticleCategoriesController, 'findAll'));
+  const byId = new Map(rows.map((r) => [String(r.id), r]));
+  const row = byId.get(id);
+  if (!row) return undefined;
+  const path: Row[] = [];
+  const seen = new Set<string>();
+  for (let cur: Row | undefined = row; cur; ) {
+    const curId = String(cur.id);
+    if (seen.has(curId)) break;
+    seen.add(curId);
+    path.push(cur);
+    cur = typeof cur.parentId === 'string' ? byId.get(cur.parentId) : undefined;
+  }
+  const name = path
+    .map((f) => str(f.name) ?? String(f.id))
+    .reverse()
+    .join(' › ');
+  const readable = typeof row.articleCount === 'number';
+
+  let visibility: FolderView['visibility'] = 'unknown';
+  let audience =
+    'Unknown to you: folder access rules are shown only to settings:manage holders';
+  if (path.every((f) => 'accessRules' in f)) {
+    const restricted = path.filter(
+      (f) => Array.isArray(f.accessRules) && f.accessRules.length > 0,
+    );
+    const malformed = path.some(
+      (f) =>
+        f.accessRules !== null &&
+        f.accessRules !== undefined &&
+        !Array.isArray(f.accessRules),
+    );
+    if (restricted.length === 0 && !malformed) {
+      visibility = 'public';
+      audience = 'Everyone who can read the knowledge base';
+    } else {
+      visibility = 'restricted';
+      audience =
+        'Restricted — only people matching every restricted folder on the path: ' +
+        restricted
+          .map(
+            (f) =>
+              `${str(f.name) ?? String(f.id)}: ${asRows(f.accessRules)
+                .map(ruleSummary)
+                .join(' or ')}`,
+          )
+          .join('; ') +
+        (malformed ? '; a folder with unreadable rules (matches nobody)' : '');
+    }
+  } else if (path.every((f) => typeof f.hasAccessRules === 'boolean')) {
+    const restricted = path.some((f) => f.hasAccessRules === true);
+    visibility = restricted ? 'restricted' : 'public';
+    audience = restricted
+      ? 'Restricted by folder access rules'
+      : 'Everyone who can read the knowledge base';
+  }
+  return { id, name, readable, visibility, audience };
+}
+
+function folderEntity(folder: FolderView): Row {
+  return { type: 'category', id: folder.id, label: folder.name };
+}
+
+/** The 400 the article routes answer for an unusable folder — the same text, so nothing new is revealed. */
+function unusableFolder(id: string): BadRequestException {
+  return new BadRequestException(
+    `categoryId ${id} does not reference a live category`,
+  );
+}
+
+/**
+ * The folder a NEW article goes into: live (else the route's own 400, before any card) and readable by
+ * the caller. Creating into a folder the caller cannot read is still allowed by `POST /articles`
+ * (ADR-0060 §9, open), but it is a blind write the assistant does not offer: refused here, on every
+ * channel, with a message that says why.
+ */
+async function assertCreatableFolder(
+  rt: AiToolRuntime,
+  id: string,
+): Promise<FolderView> {
+  const folder = await folderView(rt, id);
+  if (!folder) throw unusableFolder(id);
+  if (!folder.readable) {
+    throw new BadRequestException(
+      `You cannot read folder ${id}; the assistant does not create articles in a folder you cannot ` +
+        'read. Choose a folder you can open.',
+    );
+  }
+  return folder;
+}
+
 /** The caller's user id, or null for a Service Account (which the article write routes refuse). */
 function callerUserId(rt: AiToolRuntime): string | null {
   const identity = rt.ctx.identity;
@@ -521,8 +659,12 @@ const kbCreateArticle = defineTool({
   domain: 'kb',
   class: 'write',
   input: createInput,
-  bindings: [bind(ArticlesController, 'create')],
+  bindings: [
+    bind(ArticlesController, 'create'),
+    bind(ArticleCategoriesController, 'findAll'),
+  ],
   async run(input, rt) {
+    await assertCreatableFolder(rt, input.folderId);
     const created = asRow(
       await rt.call(ArticlesController, 'create', {
         body: {
@@ -541,14 +683,21 @@ const kbCreateArticle = defineTool({
       entityRefs: [articleRef(created, 'created')],
     };
   },
-  preview(input) {
-    return Promise.resolve({
+  async preview(input, rt) {
+    const folder = await assertCreatableFolder(rt, input.folderId);
+    return {
       changes: [
         { field: 'title', after: input.title, valueKind: 'text' as const },
         {
           field: 'folder',
-          after: { type: 'category', id: input.folderId },
+          after: folderEntity(folder),
           valueKind: 'entity' as const,
+        },
+        // Who will read it once it is published (it is created as a private draft).
+        {
+          field: 'audience',
+          after: folder.audience,
+          valueKind: 'text' as const,
         },
         { field: 'status', after: 'DRAFT', valueKind: 'text' as const },
         ...(input.slug !== undefined
@@ -571,7 +720,7 @@ const kbCreateArticle = defineTool({
       untrustedSources: [],
       elevated: false,
       stepUpRequired: false,
-    });
+    };
   },
 });
 
@@ -620,6 +769,7 @@ const kbUpdateArticle = defineTool({
     bind(ArticlesController, 'update'),
     bind(ArticlesController, 'findOne'),
     bind(ArticlesController, 'findBySlug'),
+    bind(ArticleCategoriesController, 'findAll'),
   ],
   async run(input, rt) {
     const id = await writeTargetId(rt, input.article);
@@ -675,18 +825,41 @@ const kbUpdateArticle = defineTool({
     }
     const moves =
       input.folderId !== undefined && input.folderId !== row.categoryId;
+    const published = row.status === 'PUBLISHED';
+    const edits = changes.length > 0;
+    const home = await folderView(rt, String(row.categoryId));
     if (moves) {
+      // No card for a move the route refuses: a missing or unreadable destination is its own 400.
+      const destination = await folderView(rt, input.folderId!);
+      if (!destination || !destination.readable) {
+        throw unusableFolder(input.folderId!);
+      }
+      changes.push(
+        {
+          field: 'folder',
+          before: home
+            ? folderEntity(home)
+            : { type: 'category', id: row.categoryId },
+          after: folderEntity(destination),
+          valueKind: 'entity',
+        },
+        {
+          field: 'audience',
+          before: home?.audience ?? null,
+          after: destination.audience,
+          valueKind: 'text',
+        },
+      );
+    } else if (published && edits && home) {
+      // The edit goes live to the readers of the folder it is in: name them.
       changes.push({
-        field: 'folder',
-        before: { type: 'category', id: row.categoryId },
-        after: { type: 'category', id: input.folderId },
-        valueKind: 'entity',
+        field: 'audience',
+        after: `${home.name}: ${home.audience}`,
+        valueKind: 'text',
       });
     }
 
     const foreign = row.authorId !== callerUserId(rt);
-    const published = row.status === 'PUBLISHED';
-    const edits = changes.some((c) => c.field !== 'folder');
     const warnings: AiPreviewWarningCode[] = [];
     // An edit of a published article goes live to its readers at once, and a published article moved
     // to another folder goes live to that folder's readers (another author's included — a foreign
@@ -732,6 +905,7 @@ const kbSetPublication = defineTool({
     bind(ArticlesController, 'unpublish'),
     bind(ArticlesController, 'findOne'),
     bind(ArticlesController, 'findBySlug'),
+    bind(ArticleCategoriesController, 'findAll'),
   ],
   async run(input, rt) {
     const id = await writeTargetId(rt, input.article);
@@ -756,9 +930,25 @@ const kbSetPublication = defineTool({
       },
     ];
     if (publish) {
-      // What becomes visible to every reader of the folder: the title and the WHOLE body.
+      // What becomes visible, and to whom: the folder by name, its audience, the title and the WHOLE
+      // body (security.md §6.1 chain 4).
       const body = str(row.content) ?? '';
+      const folder = await folderView(rt, String(row.categoryId));
       changes.push(
+        {
+          field: 'folder',
+          after: folder
+            ? folderEntity(folder)
+            : { type: 'category', id: row.categoryId },
+          valueKind: 'entity',
+        },
+        {
+          field: 'audience',
+          after:
+            folder?.audience ??
+            'Unknown to you: folder access rules are shown only to settings:manage holders',
+          valueKind: 'text',
+        },
         { field: 'title', after: row.title, valueKind: 'text' },
         {
           field: 'content',

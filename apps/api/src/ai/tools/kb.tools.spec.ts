@@ -44,6 +44,8 @@ import { mintToken } from '../../service-accounts/service-account-token';
 import { ActorService } from '../../common/actor.service';
 import { SearchService } from '../../search/search.service';
 import { FolderAccessService } from '../../article-categories/folder-access.service';
+import { ArticleCategoriesController } from '../../article-categories/article-categories.controller';
+import { ArticleCategoriesService } from '../../article-categories/article-categories.service';
 import { ArticlesController } from '../../articles/articles.controller';
 import { ArticlesService } from '../../articles/articles.service';
 import { ArticleImportService } from '../../articles/import/article-import.service';
@@ -388,7 +390,18 @@ const prisma = {
     ),
   },
   articleCategory: {
-    findMany: jest.fn(() => Promise.resolve(folders.map((f) => ({ ...f })))),
+    /** Honours the `select` the two real callers pass: the ACL evaluator and the folder list. */
+    findMany: jest.fn(({ select }: { select: Record<string, unknown> }) =>
+      Promise.resolve(
+        folders.map((f) => ({
+          id: f.id,
+          parentId: f.parentId,
+          ...(select.name ? { name: f.name } : {}),
+          ...(select.accessRules ? { accessRules: f.accessRules } : {}),
+          ...(select._count ? { _count: { articles: 0 } } : {}),
+        })),
+      ),
+    ),
     findFirst: jest.fn(({ where }: { where: { id: string } }) => {
       const f = folders.find((x) => x.id === where.id);
       return Promise.resolve(f ? { id: f.id } : null);
@@ -671,7 +684,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
   beforeAll(async () => {
     process.env.AUTH_MODE = 'local';
     const moduleRef = await Test.createTestingModule({
-      controllers: [ArticlesController],
+      controllers: [ArticlesController, ArticleCategoriesController],
       providers: [
         { provide: PrismaService, useValue: prisma },
         {
@@ -695,6 +708,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
         ArticlesService,
+        ArticleCategoriesService,
         ActorService,
         FolderAccessService,
         { provide: SearchService, useValue: search },
@@ -1249,10 +1263,14 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
           expect.objectContaining({ field: 'status', after: 'DRAFT' }),
           expect.objectContaining({
             field: 'folder',
-            after: { type: 'category', id: F.public },
+            after: { type: 'category', id: F.public, label: 'IT' },
           }),
         ]),
       );
+      // A member cannot see folder rules (#554): the audience is stated as unknown, never guessed.
+      expect(
+        String(preview.changes.find((c) => c.field === 'audience')?.after),
+      ).toMatch(/^Unknown to you/);
       expect(prisma.article.create).not.toHaveBeenCalled();
 
       const approved = await tools.approve(proposal.action.id, chat(member));
@@ -1329,6 +1347,78 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       expect(prisma.article.create).not.toHaveBeenCalled();
     });
 
+    it('a missing folder is the route 400 before any card', async () => {
+      const proposal = await tools.propose(
+        'kb_create_article',
+        { ...input, folderId: cid('fmissing') },
+        chat(actor('MEMBER')),
+      );
+      expect(proposal).toMatchObject({
+        ok: false,
+        result: {
+          error: {
+            code: 'INVALID_INPUT',
+            status: 400,
+            message: `categoryId ${cid('fmissing')} does not reference a live category`,
+          },
+        },
+      });
+      expect(invocations.size).toBe(0);
+    });
+
+    it('a folder the caller cannot read gets no card and no create, on any channel (ADR-0060 §9 blind write)', async () => {
+      const member = actor('MEMBER');
+      const blind = { ...input, folderId: F.admins };
+      const proposal = await tools.propose(
+        'kb_create_article',
+        blind,
+        chat(member),
+      );
+      expect(proposal).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+      expect(JSON.stringify(proposal)).toContain('You cannot read folder');
+      expect(invocations.size).toBe(0);
+      const viaMcp = await tools.invoke(
+        'kb_create_article',
+        blind,
+        mcp(member),
+      );
+      expect(viaMcp).toMatchObject({
+        ok: false,
+        error: { code: 'INVALID_INPUT' },
+      });
+      expect(prisma.article.create).not.toHaveBeenCalled();
+      // The route itself still accepts it (the open ADR question) — the refusal is the tool's.
+      expect(
+        await viaNetwork(member, {
+          method: 'create',
+          http: 'post',
+          url: '/articles',
+          shape: { body: { title: 'x', content: 'x', categoryId: F.admins } },
+        }),
+      ).toBe('ok');
+    });
+
+    it("an admin's card names the folder and summarizes its access rules", async () => {
+      const proposal = await tools.propose(
+        'kb_create_article',
+        { ...input, folderId: F.team },
+        chat(actor('ADMIN')),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      const changes = proposal.action.preview!.changes;
+      expect(changes.find((c) => c.field === 'folder')!.after).toEqual({
+        type: 'category',
+        id: F.team,
+        label: 'Team',
+      });
+      expect(changes.find((c) => c.field === 'audience')!.after).toBe(
+        'Restricted — only people matching every restricted folder on the path: Team: 1 named person',
+      );
+    });
+
     it('a viewer is refused at propose (DENIED), no card', async () => {
       const proposal = await tools.propose(
         'kb_create_article',
@@ -1400,6 +1490,12 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
           after: 'New body',
           valueKind: 'text',
         },
+        {
+          field: 'audience',
+          after:
+            'Team: Unknown to you: folder access rules are shown only to settings:manage holders',
+          valueKind: 'text',
+        },
       ]);
 
       const approved = await tools.approve(proposal.action.id, chat(member));
@@ -1457,10 +1553,11 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         changes: [
           {
             field: 'folder',
-            before: { type: 'category', id: F.team },
-            after: { type: 'category', id: F.public },
+            before: { type: 'category', id: F.team, label: 'Team' },
+            after: { type: 'category', id: F.public, label: 'IT' },
             valueKind: 'entity',
           },
+          { field: 'audience', valueKind: 'text' },
         ],
       });
       const approved = await tools.approve(proposal.action.id, chat(member));
@@ -1487,6 +1584,26 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       });
       expect(articles.get(A.pub)!.categoryId).toBe(F.public);
       expect(ledger.map((e) => e.event)).toEqual(['ATTEMPTED', 'FAILED']);
+    });
+
+    it('no card for a move the route would refuse: an unreadable or missing destination', async () => {
+      for (const folderId of [F.admins, cid('fmissing')]) {
+        const proposal = await tools.propose(
+          'kb_update_article',
+          { article: A.pub, folderId },
+          chat(actor('OTHER MEMBER')),
+        );
+        expect(proposal).toMatchObject({
+          ok: false,
+          result: {
+            error: {
+              code: 'INVALID_INPUT',
+              message: `categoryId ${folderId} does not reference a live category`,
+            },
+          },
+        });
+      }
+      expect(invocations.size).toBe(0);
     });
 
     it("another author's article: the admin gets an elevated card naming it as an untrusted source", async () => {
@@ -1605,6 +1722,11 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         warnings: ['PUBLISHES_TO_READERS'],
         changes: [
           { field: 'status', before: 'DRAFT', after: 'PUBLISHED' },
+          {
+            field: 'folder',
+            after: { type: 'category', id: F.public, label: 'IT' },
+          },
+          { field: 'audience' },
           { field: 'title', after: 'My draft' },
           { field: 'content', after: articles.get(A.draftMine)!.content },
         ],
@@ -1640,6 +1762,21 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         true,
       );
       expect(proposal.action.preview!.elevated).toBe(true);
+    });
+
+    it('an admin publishing into a public folder is told everyone can read it', async () => {
+      const row = articles.get(A.draftMine)!;
+      articles.set(A.draftMine, { ...row, authorId: ID.admin });
+      const proposal = await tools.propose(
+        'kb_set_publication',
+        { article: A.draftMine, action: 'publish' },
+        chat(actor('ADMIN')),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      expect(
+        proposal.action.preview!.changes.find((c) => c.field === 'audience')!
+          .after,
+      ).toBe('Everyone who can read the knowledge base');
     });
 
     it("unpublish someone else's article as admin: elevated, VISIBILITY_CHANGE; approve takes it off the index", async () => {
