@@ -229,9 +229,9 @@ Legend:
 | infra | agent-policy | settings:manage | W | later, `elevated` (instance config) |
 | infra | report | infra:report | W | N/A (agent ingestion) |
 | infra | node secret link | infra:manage + secret:read | W | EXCL (Secret Manager adjacency) |
-| workflow-engine | definitions, connections, runs, tasks (read) | workflow:read | R | planned, W2-13 (every channel) |
-| workflow-engine | retry / replay | workflow:run | W + ext | planned, W2-13 (every channel; no `overrides`) |
-| workflow-engine | task submit / skip / fail | workflow:task + assignee | W | planned, W2-13 (every channel; the assignee guard decides) |
+| workflow-engine | definitions, connections, runs, tasks (read) | workflow:read | R | ✅ built, W2-13 (every channel) |
+| workflow-engine | retry / replay | workflow:run | W + ext | ✅ built, W2-13 (every channel; no `overrides`) |
+| workflow-engine | task submit / skip / fail | workflow:task + assignee | W + ext | ✅ built, W2-13 (every channel; the assignee guard decides) |
 | workflow-engine | definitions, versions, connections (incl. test), dry-run, enable/disable | workflow:manage (+workflow:secrets, CSEC-1) | W | planned, W2-14, `elevated`, **chat only** (MCP/headless deferred, #1344) |
 | workflow-engine | workflow secrets | workflow:secrets | W | EXCL (the secret value would enter model context, INV-AI-5) |
 | imports (Migrator) | multi-step upload / plan / commit | import:run, human-only | W | EXCL v1 (upload; later) |
@@ -495,21 +495,22 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
   links/aliases/versions, user clone, attachments list, notifications, security audit logs, infra
   writes.
 
-**Workflow engine (planned; [[0097-ai-assistant-mcp-and-headless-api]] decision 3, amended 2026-09-24).**
-The contract landed with W2-12; the tools land with W2-13 and W2-14. Tool names are indicative — the
-units pin them. Both toolsets are declared in the `access` domain.
+**Workflow engine ([[0097-ai-assistant-mcp-and-headless-api]] decision 3, amended 2026-09-24).**
+The contract landed with W2-12; the operations (W1–W9) are built by W2-13, authoring (W10–W17) lands with
+W2-14, whose tool names are indicative until it pins them. Both toolsets are declared in the `access`
+domain. W3 was folded out of W2 as its own tool, and W8 is two tools.
 
 | # | Tool | Binds (controller.method) | Permission | Class | Channels | Unit |
 | --- | --- | --- | --- | --- | --- | --- |
-| W1 | `workflow_search` | WorkflowsController.findAll | workflow:read | read | all | W2-13 |
-| W2 | `workflow_get` | WorkflowsController.findOne (+ connections facet: host, credential configured yes/no, header values redacted; a server-built outline of the step graph) | workflow:read | read | all | W2-13 |
-| W3 | `workflow_connection_list` (may fold into W2) | WorkflowConnectionsController.findAll / .findOne | workflow:read | read | all | W2-13 |
-| W4 | `workflow_run_list` | WorkflowRunsController.findAll | workflow:read | read | all | W2-13 |
-| W5 | `workflow_run_get` | WorkflowRunsController.findOne | workflow:read | read | all | W2-13 |
-| W6 | `workflow_run_retry` (no `overrides`) | WorkflowRunsController.retry | workflow:run | write, ext | all | W2-13 |
-| W7 | `workflow_run_replay` | WorkflowRunsController.replayLatest | workflow:run | write, ext | all | W2-13 |
-| W8 | `workflow_task_list` / `_get` | ManualTasksController.findAll / .findOne | workflow:read | read | all | W2-13 |
-| W9 | `workflow_task_resolve` (submit\|skip\|fail) | ManualTasksController.submit / .skip / .fail | workflow:task + assignee | write, ext | all (an SA passes the assignee guard only on unassigned tasks) | W2-13 |
+| W1 | `workflow_search` ✅ | WorkflowsController.findAll (+Applications findAll/findOne for the name) | workflow:read | read | all | W2-13 |
+| W2 | `workflow_get` ✅ | WorkflowsController.findOne (+findAll for application + trigger; WorkflowConnectionsController.findOne per step connection: host, credential configured yes/no; a server-built outline and explanation of the step graph) | workflow:read | read | all | W2-13 |
+| W3 | `workflow_connection_list` ✅ | WorkflowConnectionsController.findAll (host, credential yes/no; `full`: auth scheme, header names, values redacted) | workflow:read | read | all | W2-13 |
+| W4 | `workflow_run_list` ✅ | WorkflowRunsController.findAll | workflow:read | read | all | W2-13 |
+| W5 | `workflow_run_get` ✅ | WorkflowRunsController.findOne (+workflow, application, grant → person facets; a server-built explanation) | workflow:read | read | all | W2-13 |
+| W6 | `workflow_run_retry` ✅ (no `overrides`) | WorkflowRunsController.retry | workflow:run | write, ext | all | W2-13 |
+| W7 | `workflow_run_replay` ✅ | WorkflowRunsController.replayLatest | workflow:run | write, ext | all | W2-13 |
+| W8 | `workflow_task_list` ✅ / `workflow_task_get` ✅ | ManualTasksController.findAll / .findOne | workflow:read | read | all | W2-13 |
+| W9 | `workflow_task_resolve` ✅ (submit\|skip\|fail) | ManualTasksController.submit (primary) / .skip / .fail | workflow:task + assignee | write, ext | all (an SA passes the assignee guard only on unassigned tasks) | W2-13 |
 | W10 | `workflow_create` (created disabled) | WorkflowsController.create | workflow:manage | elevated | chat | W2-14 |
 | W11 | `workflow_author_version` | WorkflowsController.authorVersion | workflow:manage | elevated | chat | W2-14 |
 | W12 | `workflow_update` (name, policy, executed-as) | WorkflowsController.update | workflow:manage | elevated | chat | W2-14 |
@@ -606,8 +607,8 @@ path unit (W2-0, #1315):
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
   `kb.tools.ts` (W2-8) holds the five KB tools — see *KB tools as built* below;
-  `workflows.tools.ts` (W2-13) and `workflow-authoring.tools.ts` (W2-14) hold the workflow engine,
-  pre-created by W2-12 with every handler pending;
+  `workflows.tools.ts` (W2-13) holds the ten workflow operation tools — see *Workflow operations tools
+  as built* below; `workflow-authoring.tools.ts` (W2-14) holds authoring, pre-created by W2-12;
   `assets.tools.ts` and `reference.tools.ts` (W2-5) hold the asset, ownership and reference-data tools —
   see *Assets and reference tools as built* below;
   `users.tools.ts` and `activity.tools.ts` (W2-9) hold the six `user_*` tools, `dashboard_summary` and
@@ -982,6 +983,78 @@ person could catch a wrong target. A category is taken by id (`categoryId`, from
     today and signals the bell with `NOTIFIES_USERS` on the card only;
   - the TOCTOU window between the approve-time precondition and the handler's write (§9, step 3) stays
     until the consumable write handlers accept an expected `updatedAt`.
+
+**Workflow operations tools as built (W2-13).** Ten tools in `workflows.tools.ts`, domain `access`, every
+channel: seven reads (`workflow_search`, `workflow_get`, `workflow_connection_list`, `workflow_run_list`,
+`workflow_run_get`, `workflow_task_list`, `workflow_task_get`) and three `write`, `externalEffects` tools
+(`workflow_run_retry`, `workflow_run_replay`, `workflow_task_resolve`). Every `workflow:*` verb is
+ADMIN-only by default, so a MEMBER or VIEWER lists none of them; a Service Account holding the verbs lists
+them. Every call goes through `rt.call` on the real route, so the FAILED-only retry, the replay
+double-provision guard (ADR-0057) and the manual-task assignee guard are the production code. Besides
+their primary route they bind, as facets, `ApplicationsController.findAll` / `.findOne` (the name, and
+`isCritical`), `AccessGrantsController.findOne` and `UsersController.findOne` (whose access a run is
+about); a facet the caller may not read is omitted, never a failure.
+- **Explain, deterministically.** `workflow_get` returns a server-built `explanation` and a `steps`
+  outline: the trigger, ON/OFF, the deprovision policy, then each step in order with its destination
+  host, the mapped **field names and the context tokens they read** (`email (from grantee.email)`, `team
+  (a fixed value)`), and its effective success and failure edges (`resolveStepTransitions`, so implicit
+  linear edges and legacy `onError` are explicit). `workflow_run_get` explains the run: why it started
+  (who, which application), its status in words, the failed step and a plain-language cause from the
+  bounded error class and status code, and `whatYouCanDo` — retry vs replay, re-grant for a compensated
+  run, the task to complete for a paused one, and always that a failed run never undoes the grant (or
+  gives back a revoked access). Same inputs, same text.
+- **What is never shown.** No workflow secret is bound (a structural exclusion); a connection shows its
+  **host only** (never the full URL, whose query may carry a credential) and `credentialConfigured` from
+  its `secretId`; `defaultHeaders` show names with the value `[redacted]` (not validated against
+  credential-like values); a mapping never shows its literal text (an admin may have typed a constant
+  there), a step never shows its path. Other-authored or external text goes through `untrusted()`:
+  workflow and step names, descriptions, connection names, mapped field names (also inside the
+  `explanation`), manual-form field names, labels, options and suggestions, header names
+  (`authHeaderName`, `defaultHeaders` keys, `signatureHeader`), manual-task prompts and submitted input,
+  the run `error`, step metadata (`targetHost`, `externalCorrelationId`), and the workflow and person
+  names in card labels. A step key is shown raw only when it looks like an identifier.
+- **Writes and previews.** Retry sends an **empty body — never the route's `overrides`** (the input is
+  `{ run }`, strict). Every preview refuses what the route would refuse, so no card is shown for it: a run
+  that is not FAILED (409), a failed step that cannot be resolved (422), a replay the double-provision
+  guard blocks or with no enabled version or no grant (422), a task that is not pending (409), assigned
+  to someone else (403), or whose form rejects the input (400, `validateManualInput`). The preview names
+  the run or task, the workflow, the application, the person and the trigger, and **every outbound host
+  that may be called**: from the failed step onward for a retry, from the entry step of the version the
+  replay will run (the live enabled workflow for the application and trigger, as the route selects it),
+  and from the task's continuation for a resolve; submitted form values are shown field by field.
+  A failed run that was **already replayed** (a run of the same grant has `supersedesRunId` = its id,
+  read through `WorkflowRunsController.findAll`) is refused for retry and replay with the clone named
+  (409), in the preview and in `run` over MCP and headless; `workflow_run_get` says so in
+  `whatYouCanDo` and returns `replacedByRunId`. Precondition: for the task, its `updatedAt`; for a run,
+  the **latest** `updatedAt` among the run, the workflow the write will run (its header and the latest
+  version's `createdAt`) and every connection the card names — core compares only the entity and
+  `updatedAt`, and any change after the proposal is later than everything the card read, so a new
+  version, a toggled workflow or a re-pointed host between the card and the approval is `STALE`. Refs: `workflowRun updated` (replay adds `workflowRun created`) with `parent: application`,
+  and `manualTask updated`.
+- **Warnings and critical applications.** `EXTERNAL_PROVISIONING` or `EXTERNAL_DEPROVISIONING` by the
+  run's trigger on all three writes (a task resolve's input flows into later outbound steps), plus
+  `CRITICAL_APPLICATION` when the application is critical — core then requires step-up in the chat.
+  Over MCP and headless `run` reads the run (or task → run) and the application **before any side
+  effect** and calls `assertChannelAllows`, refusing a critical application with the 403 of §9. **The
+  check fails closed**: an application the caller cannot read, or that no longer exists, is treated as
+  critical — refused over MCP and headless, step-up in the chat. A Service Account that operates runs or
+  tasks headless therefore also needs `workflow:read` and `application:read`; without them its writes
+  are refused ("Cannot verify that the application is not critical").
+- **Service Accounts** get the reads, retry/replay and task resolution; the route's assignee guard lets
+  them resolve only unassigned tasks (an assigned one answers the route's 403). `workflow_task_list` and
+  `_get` say whether the caller may resolve each task (`youMayResolve`).
+- **Tests** (`workflows.tools.spec.ts`): the route-parity matrix over six principals (ok/400/403/404/409/
+  422), listing per role, SA and MCP ceiling, the explanations (exact and repeatable), the redaction of
+  URL credentials, query strings, header values, mapping literals and the secret id, propose → approve
+  once with replay, `STALE`, the critical-application step-up in the chat and the refusal over MCP and
+  headless, the fail-closed refusal, and the SA assignee limit.
+- **Older pinned versions.** The workflow read answers only the latest version, so when a run is pinned
+  to an older one the retry card names no step (never one the route might refuse with 422) and lists the
+  hosts the run itself recorded, marked as such; a task preview does not show the next step. A version
+  read route would close both (follow-up). A soft-deleted connection drops out of the precondition
+  (its read 404s); a step on it fails at execute anyway. The TOCTOU window between
+  the approve-time precondition and the handler's write (§9, step 3) stays until the run and task
+  handlers accept an expected `updatedAt`.
 
 ### 8.2 Descriptor
 
