@@ -93,3 +93,23 @@ export function createPersonalToken(
 export function downloadClaudeCodePlugin(): Promise<Blob> {
   return apiFetchBlob("/ai/claude-code/plugin.zip");
 }
+
+/**
+ * The address the server knows for itself: the `issuer` of its OAuth metadata
+ * (`GET /.well-known/oauth-authorization-server`, public, served at the bare origin — not under `/api`).
+ * It exists only on an HTTPS instance with MCP on, and the issuer is the configured `WEB_ORIGIN`.
+ * Resolves to the raw `issuer` value, or null when the document is missing or unreadable.
+ */
+export async function getOAuthIssuer(): Promise<unknown> {
+  try {
+    const res = await fetch("/.well-known/oauth-authorization-server", {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { issuer?: unknown };
+    return body.issuer ?? null;
+  } catch {
+    return null;
+  }
+}

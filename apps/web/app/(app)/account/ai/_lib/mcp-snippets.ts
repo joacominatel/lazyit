@@ -201,3 +201,44 @@ export function detectMcpConnectMode(
     notes: overHttps ? ["https-not-configured"] : ["plain-http"],
   };
 }
+
+/** Whether the snippets can be offered as copy-ready, and from which origin they are built. */
+export type SnippetOrigin =
+  /** The server's configured address equals the page's: copy-ready. */
+  | { origin: string; check: "match" }
+  /** The page was reached at another address than the one the server knows: warn, not copy-ready. */
+  | { origin: string; check: "mismatch"; pageOrigin: string }
+  /** The server's address could not be read: built from the page, warn, not copy-ready. */
+  | { origin: string; check: "unverified" };
+
+/**
+ * Parse the address the server knows for itself (the OAuth issuer, an `https:` origin). Anything else —
+ * absent, not a URL, not `https:` — is null.
+ */
+export function parseServerOrigin(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The origin OAuth-mode snippets are built from. An OAuth client must use the instance's configured
+ * HTTPS address — the issuer the tokens are bound to — not whatever address this page happened to be
+ * opened at (an internal hostname, an IP, a second DNS name). So the snippets use the server's origin,
+ * and are copy-ready only when it matches the page's; otherwise the panel warns first.
+ */
+export function resolveSnippetOrigin(
+  pageOrigin: string,
+  serverOrigin: string | null,
+): SnippetOrigin {
+  const page = normalizeOrigin(pageOrigin);
+  if (serverOrigin === null) return { origin: page, check: "unverified" };
+  const server = normalizeOrigin(serverOrigin);
+  return server === page
+    ? { origin: server, check: "match" }
+    : { origin: server, check: "mismatch", pageOrigin: page };
+}

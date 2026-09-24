@@ -6,6 +6,8 @@ import {
   marketplaceName,
   marketplaceUrl,
   mcpEndpointUrl,
+  parseServerOrigin,
+  resolveSnippetOrigin,
   TOKEN_PLACEHOLDER,
 } from "./mcp-snippets";
 
@@ -156,5 +158,40 @@ describe("detectMcpConnectMode", () => {
         "https:",
       ),
     ).toEqual({ kind: "personal-token", notes: ["https-not-configured"] });
+  });
+});
+
+describe("server origin", () => {
+  test("parseServerOrigin keeps only an https origin", () => {
+    expect(parseServerOrigin("https://it.acme.io")).toBe("https://it.acme.io");
+    expect(parseServerOrigin("https://it.acme.io/")).toBe("https://it.acme.io");
+    expect(parseServerOrigin("http://it.acme.io")).toBeNull();
+    expect(parseServerOrigin("nope")).toBeNull();
+    expect(parseServerOrigin(undefined)).toBeNull();
+    expect(parseServerOrigin("")).toBeNull();
+  });
+
+  test("same address → copy-ready, built from the server's origin", () => {
+    expect(resolveSnippetOrigin("https://it.acme.io", "https://it.acme.io")).toEqual({
+      origin: "https://it.acme.io",
+      check: "match",
+    });
+  });
+
+  test("another address → built from the server's origin, flagged", () => {
+    expect(
+      resolveSnippetOrigin("https://10.0.0.5:8443", "https://it.acme.io"),
+    ).toEqual({
+      origin: "https://it.acme.io",
+      check: "mismatch",
+      pageOrigin: "https://10.0.0.5:8443",
+    });
+  });
+
+  test("unknown server address → the page's origin, unverified", () => {
+    expect(resolveSnippetOrigin("https://it.acme.io", null)).toEqual({
+      origin: "https://it.acme.io",
+      check: "unverified",
+    });
   });
 });

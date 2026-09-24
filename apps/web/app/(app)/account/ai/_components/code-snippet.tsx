@@ -17,8 +17,14 @@ export function CodeSnippet({
   code,
   label,
   className,
+  copyable = true,
 }: {
   code: string;
+  /**
+   * False when the snippet may not be right for the reader (the instance's configured address could
+   * not be confirmed): it renders without a copy button, as text to review, never as copy-ready.
+   */
+  copyable?: boolean;
   /** What is being copied, for the button's accessible name ("Copy the Claude Code command"). */
   label: string;
   className?: string;
@@ -49,12 +55,14 @@ export function CodeSnippet({
     <div
       className={cn(
         "group relative rounded-md border bg-muted/50",
+        !copyable && "border-dashed opacity-80",
         className,
       )}
     >
       <pre className="overflow-x-auto p-3 pr-12 font-mono text-xs leading-relaxed whitespace-pre select-all">
         <code>{code}</code>
       </pre>
+      {copyable ? (
       <Button
         type="button"
         variant="ghost"
@@ -70,6 +78,7 @@ export function CodeSnippet({
           <ClipboardIcon aria-hidden />
         )}
       </Button>
+      ) : null}
     </div>
   );
 }
