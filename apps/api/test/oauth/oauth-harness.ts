@@ -121,6 +121,7 @@ export function seedUser(
     directoryOnly: false,
     mustChangePassword: false,
     sessionEpoch: 0,
+    mcpCredentialEpoch: 0,
     passwordHash: 'argon2-hash',
     deletedAt: null,
     ...overrides,

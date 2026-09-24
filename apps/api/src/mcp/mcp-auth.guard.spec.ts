@@ -327,7 +327,10 @@ describe('/mcp authentication matrix', () => {
 
     it.each([
       ['a revoked grant', 'revoked'],
-      ['a sessionEpoch bump (password change, sign out everywhere)', 'epoch'],
+      [
+        'an mcpCredentialEpoch bump (password change or reset, admin reset, offboarding)',
+        'epoch',
+      ],
       ['a deactivated user', 'inactive'],
       ['a forced password change', 'mustChange'],
       ['the wrong audience', 'audience'],
@@ -343,6 +346,7 @@ describe('/mcp authentication matrix', () => {
           await h.tokens.revokeGrant(grant.id, 'user', user.id);
         } else if (kind === 'epoch') {
           row.sessionEpoch += 1;
+          row.mcpCredentialEpoch += 1;
         } else if (kind === 'inactive') {
           row.isActive = false;
         } else if (kind === 'mustChange') {
@@ -364,6 +368,17 @@ describe('/mcp authentication matrix', () => {
         expect(tools.list).not.toHaveBeenCalled();
       },
     );
+
+    it('keeps accepting the OAuth token after a web logout, delegating at the live sessionEpoch (ADR-0097 d8 amended)', async () => {
+      const user = seedUser(h);
+      const token = await oauthAccessToken(user);
+      const row = h.prisma.tables.user.find((u) => u.id === user.id)!;
+      row.sessionEpoch += 1; // what LoginService.logout does — and nothing else
+      await list(token).expect(200);
+      expect(listedWith()).toMatchObject({
+        identity: { kind: 'human', userId: user.id, sessionEpoch: 1 },
+      });
+    });
 
     it('answers 403 (no challenge) when a valid token meets a withdrawn ai:connect', async () => {
       const user = seedUser(h);
@@ -546,11 +561,22 @@ describe('/mcp authentication matrix', () => {
         const grant = h.prisma.tables.oAuthGrant[0];
         const row = h.prisma.tables.user.find((u) => u.id === user.id)!;
         if (kind === 'revoked') await personal.revokeMine(user, grant.id);
-        if (kind === 'epoch') row.sessionEpoch += 1;
+        if (kind === 'epoch') {
+          row.sessionEpoch += 1;
+          row.mcpCredentialEpoch += 1;
+        }
         if (kind === 'offboarded') row.deletedAt = new Date();
         await list(pat).expect(401);
       },
     );
+
+    it('keeps accepting a personal token after a web logout (ADR-0097 d8 amended)', async () => {
+      const user = seedUser(h);
+      const pat = await personalToken(user);
+      const row = h.prisma.tables.user.find((u) => u.id === user.id)!;
+      row.sessionEpoch += 1; // what LoginService.logout does — and nothing else
+      await list(pat).expect(200);
+    });
   });
 
   describe('Service Accounts (R10: fail-closed, ai:connect)', () => {

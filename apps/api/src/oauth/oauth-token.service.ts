@@ -102,8 +102,9 @@ function storedScopes(values: readonly string[]): OAuthScope[] {
  *
  * Tokens are opaque (`lzit_oat_` / `lzit_ort_` + 256 random bits) and only their SHA-256 is stored; the
  * cleartext exists in exactly one response and is never logged. A grant snapshots the user's
- * `sessionEpoch`, so a password change, "sign out everywhere", an admin reset or a deactivation kills
- * every token it owns.
+ * `mcpCredentialEpoch`, so a password change or reset, an admin reset, a deactivation or an offboarding
+ * kills every token it owns — while a normal web logout (a `sessionEpoch` bump only) does not (ADR-0097
+ * decision 8, amended 2026-09-24).
  */
 @Injectable()
 export class OAuthTokenService {
@@ -191,6 +192,7 @@ export class OAuthTokenService {
           scopes,
           resource: config.resource,
           sessionEpoch: user.sessionEpoch,
+          mcpCredentialEpoch: user.mcpCredentialEpoch,
           lastUsedAt: now,
         },
       });
@@ -325,7 +327,7 @@ export class OAuthTokenService {
       throw new OAuthProtocolError('unauthorized_client');
     }
     const user = await this.subjects.loadEligible(grant.userId);
-    if (!user || user.sessionEpoch !== grant.sessionEpoch) {
+    if (!user || user.mcpCredentialEpoch !== grant.mcpCredentialEpoch) {
       throw invalidGrant();
     }
 
@@ -457,8 +459,8 @@ export class OAuthTokenService {
   /**
    * Verify an OAuth access token presented at `/mcp` — DB-first, on every request (INV-AI-9):
    * token hash → access row (unexpired) → grant (live, OAuth kind, audience = this instance's canonical
-   * `/mcp` URI) → user re-loaded (live, active, not directory-only, `sessionEpoch` equal to the grant's
-   * snapshot, no forced password change) → MCP switch → `ai:connect` held NOW.
+   * `/mcp` URI) → user re-loaded (live, active, not directory-only, `mcpCredentialEpoch` equal to the
+   * grant's snapshot, no forced password change) → MCP switch → `ai:connect` held NOW.
    *
    * Failures carry the HTTP status the resource server should answer: 401 for anything wrong with the
    * token or its subject (the client re-authorizes), 403 when a valid token meets a withdrawn capability
@@ -493,9 +495,9 @@ export class OAuthTokenService {
     if (grant.kind !== 'oauth') return fail('invalid');
     if (grant.resource !== config.resource) return fail('wrong_audience');
 
-    const loaded = await this.principals.loadHuman(
+    const loaded = await this.principals.loadHumanForMcpCredential(
       grant.userId,
-      grant.sessionEpoch,
+      grant.mcpCredentialEpoch,
     );
     if (!loaded.ok) return fail(loaded.reason);
     const { user } = loaded.principal;

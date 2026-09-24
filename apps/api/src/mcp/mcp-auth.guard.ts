@@ -75,7 +75,8 @@ const TOKEN_REFUSED = 'The access token is invalid, expired or revoked.';
  *       `infra:report` (ADR-0097 default 16), whose per-SA AI access is not `off` (`read-only` caps it at
  *       read tools). The SEC-073 strip of SA-ungrantable grants applies (it is the shared authenticator).
  *     Every human check is DB-first on every request: user live, active, not directory-only, no forced
- *     password change, `sessionEpoch` equal to the grant's snapshot, `ai:connect` held now.
+ *     password change, `mcpCredentialEpoch` equal to the grant's snapshot (a web logout does not move it:
+ *     ADR-0097 decision 8, amended 2026-09-24), `ai:connect` held now.
  *  4. **Answers.** A missing or refused token → **401** with the RFC 6750 challenge: on an HTTPS
  *     instance `Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp", scope="…"` (RFC
  *     9728 discovery); on `lan` a plain `Bearer realm="lazyit"` (no authorization server to discover). A
@@ -189,6 +190,9 @@ export class McpAuthGuard implements CanActivate {
       const result = await this.oauthTokens.verifyAccessToken(bearer);
       if (!result.ok) throw refusalFor(result.status, result.reason);
       const { user } = result.principal;
+      // The delegated identity carries the LIVE `sessionEpoch` just re-read: the tool calls of THIS request
+      // re-load the user at it, while the credential itself is bound to `mcpCredentialEpoch` (checked above),
+      // so a web logout never kills the connection — at most a tool call already in flight at that instant.
       return {
         caller: {
           kind: 'oauth',

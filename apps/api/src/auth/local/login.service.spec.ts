@@ -176,6 +176,16 @@ describe('LoginService', () => {
       });
     });
 
+    it('never touches mcpCredentialEpoch: MCP connections survive a web logout (ADR-0097 d8 amended)', async () => {
+      process.env.AUTH_MODE = 'local';
+      await service.logout(makeUser({ sessionEpoch: 5 }) as never);
+      for (const [arg] of updateMany.mock.calls as Array<
+        [{ data: Record<string, unknown> }]
+      >) {
+        expect(arg.data).not.toHaveProperty('mcpCredentialEpoch');
+      }
+    });
+
     it('is a no-op outside local mode (no lazyit-minted session to revoke)', async () => {
       process.env.AUTH_MODE = 'oidc';
       await service.logout(makeUser() as never);

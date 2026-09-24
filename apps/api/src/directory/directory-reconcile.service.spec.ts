@@ -34,9 +34,10 @@ import type { UserHistoryService } from '../user-history/user-history.service';
 
 /**
  * The keys the reconcile may NEVER write onto a matched/reactivated person (mass-assignment / escalation /
- * credentials). `sessionEpoch` is deliberately listed: the sync's ONE sanctioned epoch write is the revoking
- * bump on an active→offboarded transition (#1308, ADR-0086 §8), so the offboard assertions use
- * {@link FORBIDDEN_OFFBOARD_KEYS} and check the bump explicitly instead.
+ * credentials). `sessionEpoch` and `mcpCredentialEpoch` are deliberately listed: the sync's ONE sanctioned
+ * epoch write is the revoking bump of both on an active→offboarded transition (#1308, ADR-0086 §8; ADR-0097
+ * decision 8 as amended), so the offboard assertions use {@link FORBIDDEN_OFFBOARD_KEYS} and check the bumps
+ * explicitly instead.
  */
 const FORBIDDEN_WRITE_KEYS = [
   'role',
@@ -44,11 +45,12 @@ const FORBIDDEN_WRITE_KEYS = [
   'passwordHash',
   'directoryOnly',
   'sessionEpoch',
+  'mcpCredentialEpoch',
   'mustChangePassword',
 ];
-/** The offboard path's guard: everything above except `sessionEpoch`, which it may only ever increment. */
+/** The offboard path's guard: everything above except the two epochs, which it may only ever increment. */
 const FORBIDDEN_OFFBOARD_KEYS = FORBIDDEN_WRITE_KEYS.filter(
-  (key) => key !== 'sessionEpoch',
+  (key) => key !== 'sessionEpoch' && key !== 'mcpCredentialEpoch',
 );
 
 interface LocalPerson {
@@ -342,7 +344,7 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     expect(event.payload.reason).toBe('offboarded');
   });
 
-  it('offboarding an ACTIVE person revokes their local sessions (sessionEpoch +1, #1308)', async () => {
+  it('offboarding an ACTIVE person revokes their local sessions and MCP credentials (both epochs +1)', async () => {
     const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const { service, txUserUpdate } = makeService({
       graceDays: 7,
@@ -363,6 +365,7 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     expect(txUserUpdate).toHaveBeenCalledTimes(1);
     const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
     expect(data.sessionEpoch).toEqual({ increment: 1 });
+    expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
   });
 
   it('offboarding an ALREADY-INACTIVE person does not bump sessionEpoch (revoked at deactivation)', async () => {

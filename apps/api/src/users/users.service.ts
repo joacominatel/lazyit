@@ -1032,7 +1032,13 @@ export class UsersService {
       data: {
         ...scalarData,
         ...(managerWrite ?? {}),
-        ...(deactivating ? { sessionEpoch: { increment: 1 } } : {}),
+        // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+        ...(deactivating
+          ? {
+              sessionEpoch: { increment: 1 },
+              mcpCredentialEpoch: { increment: 1 },
+            }
+          : {}),
       },
     });
 
@@ -1245,7 +1251,12 @@ export class UsersService {
       // surviving session would be holding a credential that no longer exists. Revocation is unconditional.
       await this.prisma.user.update({
         where: { id },
-        data: { ...credential, sessionEpoch: { increment: 1 } },
+        data: {
+          ...credential,
+          sessionEpoch: { increment: 1 },
+          // The MCP connections die with the replaced credential too (ADR-0097 decision 8, amended).
+          mcpCredentialEpoch: { increment: 1 },
+        },
       });
       this.auditWriteBack('resetPasswordByAdmin', actorId, id, { local: true });
       // Append-only audit (ADR-0086 §5 / decision G): PASSWORD_RESET_BY_ADMIN, actor + subject. No
@@ -1341,7 +1352,12 @@ export class UsersService {
     if (sessionsRevoked) {
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { sessionEpoch: { increment: 1 } },
+        // A deliberate "this account may be compromised" act: the MCP connections go too (ADR-0097
+        // decision 8, amended 2026-09-24).
+        data: {
+          sessionEpoch: { increment: 1 },
+          mcpCredentialEpoch: { increment: 1 },
+        },
       });
     }
 
@@ -1575,7 +1591,12 @@ export class UsersService {
       // before the offboarding — including a "keep me signed in" token that never expires by time.
       await tx.user.update({
         where: { id },
-        data: { deletedAt: now, sessionEpoch: { increment: 1 } },
+        // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+        data: {
+          deletedAt: now,
+          sessionEpoch: { increment: 1 },
+          mcpCredentialEpoch: { increment: 1 },
+        },
       });
 
       // 4. Append the DELETED history row (DEBT-2, issue #185) inside the SAME transaction, atomic with

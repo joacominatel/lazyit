@@ -470,6 +470,7 @@ describe('token endpoint: authorization_code', () => {
         userId: user.id,
         resource: RESOURCE,
         sessionEpoch: 0,
+        mcpCredentialEpoch: 0,
         scopes: ['lazyit.read', 'lazyit.write'],
       }),
     ]);
@@ -708,10 +709,12 @@ describe('token endpoint: refresh_token', () => {
 });
 
 describe('tokens die with the user', () => {
-  it('a sessionEpoch bump kills access and refresh tokens', async () => {
+  it('an mcpCredentialEpoch bump kills access and refresh tokens', async () => {
     const user = seedUser(h);
     const { clientId, tokens } = await connect(h, user);
-    user.sessionEpoch += 1; // password change, sign out everywhere, admin reset
+    // Password change or reset, admin reset, deactivation, offboarding: both counters move.
+    user.sessionEpoch += 1;
+    user.mcpCredentialEpoch += 1;
     expect(await h.tokens.verifyAccessToken(tokens.access_token)).toMatchObject(
       { ok: false, reason: 'session_revoked', status: 401 },
     );
@@ -723,6 +726,32 @@ describe('tokens die with the user', () => {
         }),
       ),
     ).toEqual({ error: 'invalid_grant' });
+  });
+
+  it('a web logout (sessionEpoch bump alone) keeps access and refresh tokens alive (ADR-0097 d8 amended)', async () => {
+    const user = seedUser(h);
+    const { clientId, tokens } = await connect(h, user);
+    user.sessionEpoch += 1; // what LoginService.logout does — and nothing else
+    expect(await h.tokens.verifyAccessToken(tokens.access_token)).toMatchObject(
+      { ok: true },
+    );
+    const refreshed = await h.tokens.refresh({
+      refresh_token: tokens.refresh_token,
+      client_id: clientId,
+    });
+    expect(refreshed.access_token).toMatch(/^lzit_oat_/);
+    expect(
+      await h.tokens.verifyAccessToken(refreshed.access_token),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('a grant the migration marked already dead (-1) stays dead', async () => {
+    const user = seedUser(h);
+    const { tokens } = await connect(h, user);
+    h.prisma.tables.oAuthGrant[0].mcpCredentialEpoch = -1;
+    expect(await h.tokens.verifyAccessToken(tokens.access_token)).toMatchObject(
+      { ok: false, reason: 'session_revoked', status: 401 },
+    );
   });
 
   it('deactivation kills access and refresh tokens', async () => {
@@ -875,8 +904,14 @@ describe('connected apps', () => {
         scopes: ['lazyit.read', 'lazyit.write'],
       }),
     ]);
+    // A web logout leaves the list intact…
     user.sessionEpoch += 1;
+    expect(await h.grants.listMine(user)).toHaveLength(1);
+    expect(await h.grants.listForAdmin(user.id)).toHaveLength(1);
+    // …a credential event (password change, deactivation, offboarding) empties it.
+    user.mcpCredentialEpoch += 1;
     expect(await h.grants.listMine(user)).toEqual([]);
+    expect(await h.grants.listForAdmin(user.id)).toEqual([]);
   });
 
   it('lets the owner revoke, hides other users’ grants (404), and lets an admin revoke any', async () => {

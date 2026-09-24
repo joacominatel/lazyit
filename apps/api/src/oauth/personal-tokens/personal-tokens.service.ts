@@ -105,9 +105,9 @@ function storedScopes(values: readonly string[]): OAuthScope[] {
  *     connected-apps list and the same one revocation path ({@link OAuthTokenService.revokeGrant});
  *   - 32 CSPRNG bytes, only the SHA-256 is stored, the cleartext appears in exactly one response and is
  *     never logged; the expiry is mandatory (90 days by default, 365 at most);
- *   - it dies with the user exactly like an OAuth grant: the grant snapshots `sessionEpoch`, and the
- *     `/mcp` check re-loads the user DB-first (deactivation, offboarding, password change, sign out
- *     everywhere, forced password change) and re-reads `ai:connect` and the MCP switch on every request;
+ *   - it dies with the user exactly like an OAuth grant: the grant snapshots `mcpCredentialEpoch`, and
+ *     the `/mcp` check re-loads the user DB-first (deactivation, offboarding, password change or reset,
+ *     admin reset, forced password change — but NOT a normal web logout, ADR-0097 decision 8 amended) and re-reads `ai:connect` and the MCP switch on every request;
  *   - it is accepted ONLY on `/mcp` (the REST guard refuses it by construction — no JWT, no SA shape).
  */
 @Injectable()
@@ -188,7 +188,7 @@ export class PersonalTokensService {
           userId: subject.id,
           kind: 'personal',
           deletedAt: null,
-          sessionEpoch: subject.sessionEpoch,
+          mcpCredentialEpoch: subject.mcpCredentialEpoch,
           expiresAt: { gt: now },
         },
       });
@@ -206,6 +206,7 @@ export class PersonalTokensService {
           scopes,
           resource: PERSONAL_TOKEN_RESOURCE,
           sessionEpoch: subject.sessionEpoch,
+          mcpCredentialEpoch: subject.mcpCredentialEpoch,
           expiresAt,
         },
       });
@@ -243,7 +244,7 @@ export class PersonalTokensService {
   }
 
   /**
-   * The caller's live personal tokens (not revoked, not expired, bound to the current `sessionEpoch`).
+   * The caller's live personal tokens (not revoked, not expired, bound to the current `mcpCredentialEpoch`).
    * Available whatever the instance mode and switch, so a user can always see and revoke what exists.
    */
   async listMine(user: User): Promise<OAuthGrant[]> {
@@ -252,7 +253,7 @@ export class PersonalTokensService {
         userId: user.id,
         kind: 'personal',
         deletedAt: null,
-        sessionEpoch: user.sessionEpoch,
+        mcpCredentialEpoch: user.mcpCredentialEpoch,
         expiresAt: { gt: new Date() },
       },
       include: { client: true },
@@ -290,7 +291,7 @@ export class PersonalTokensService {
   /**
    * Verify a personal token presented at `/mcp`, DB-first on every request: token hash → personal token
    * row (unexpired) → grant (live, personal, audience, unexpired) → user re-loaded (live, active, not
-   * directory-only, `sessionEpoch` equal to the grant's snapshot, no forced password change) → MCP switch
+   * directory-only, `mcpCredentialEpoch` equal to the grant's snapshot, no forced password change) → MCP switch
    * → `ai:connect` held NOW. On an HTTPS OAuth instance a personal token is refused outright
    * (`unavailable`): OAuth is the only path there (CEO, round 2).
    */
@@ -330,9 +331,9 @@ export class PersonalTokensService {
       return fail('wrong_audience');
     }
 
-    const loaded = await this.principals.loadHuman(
+    const loaded = await this.principals.loadHumanForMcpCredential(
       grant.userId,
-      grant.sessionEpoch,
+      grant.mcpCredentialEpoch,
     );
     if (!loaded.ok) return fail(loaded.reason);
     const { user } = loaded.principal;
