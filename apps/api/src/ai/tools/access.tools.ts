@@ -18,8 +18,7 @@ export const accessToolset: AiToolset = {
     unexposed(
       ApplicationsController,
       [
-        'findAll',
-        'findOne',
+        // `findAll` / `findOne` are bound by the workflow authoring toolset (W2-14) for its previews.
         'findGrants',
         'findArticles',
         'create',

@@ -1,5 +1,4 @@
 import { WorkflowConnectionsController } from '../../workflow-engine/definitions/workflow-connections.controller';
-import { WorkflowsController } from '../../workflow-engine/definitions/workflows.controller';
 import { WorkflowRunsController } from '../../workflow-engine/runs/workflow-runs.controller';
 import { ManualTasksController } from '../../workflow-engine/tasks/manual-tasks.controller';
 import { unexposed, type AiToolset } from '../core/tool-descriptor';
@@ -33,9 +32,9 @@ export const workflowsToolset: AiToolset = {
   domain: 'access',
   tools: [],
   unexposed: [
-    // `findAll` is bound by the access toolset (W2-6) for grant/revoke previews; W2-13 may bind it too.
-    unexposed(WorkflowsController, ['findOne'], PENDING),
-    unexposed(WorkflowConnectionsController, ['findAll', 'findOne'], PENDING),
+    // `WorkflowsController.findAll` / `.findOne` and `WorkflowConnectionsController.findOne` are bound by
+    // the workflow authoring toolset (W2-14) for its previews; W2-13 may bind them too.
+    unexposed(WorkflowConnectionsController, ['findAll'], PENDING),
     unexposed(
       WorkflowRunsController,
       ['findAll', 'findOne', 'retry', 'replayLatest'],

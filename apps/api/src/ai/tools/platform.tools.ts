@@ -21,7 +21,6 @@ import { ServiceAccountsController } from '../../service-accounts/service-accoun
 import { NotificationPreferencesController } from '../../smtp/notification-preferences.controller';
 import { SmtpController } from '../../smtp/smtp.controller';
 import { WorkflowSecretsController } from '../../workflow-engine/definitions/workflow-secrets.controller';
-import { WorkflowsController } from '../../workflow-engine/definitions/workflows.controller';
 import { unexposed, type AiToolset } from '../core/tool-descriptor';
 import { AiSettingsController } from '../settings/ai-settings.controller';
 import { AiStatusController } from '../status/ai-status.controller';
@@ -156,13 +155,6 @@ export const platformToolset: AiToolset = {
     ),
     // The rest of the workflow engine lives in `workflows.tools.ts` (W2-13) and
     // `workflow-authoring.tools.ts` (W2-14); its secrets stay here, a structural exclusion.
-    // Transitional: `WorkflowsController.findAll` is bound by the access toolset (W2-6, #1345) for the
-    // grant/revoke previews. Whichever of #1345 and W2-12 merges second drops this entry.
-    unexposed(
-      WorkflowsController,
-      ['findAll'],
-      'Pending: bound by the access toolset (W2-6) for grant and revoke previews.',
-    ),
     unexposed(
       WorkflowSecretsController,
       ['findAll', 'findOne', 'create', 'rotate', 'remove'],
