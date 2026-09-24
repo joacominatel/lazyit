@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { consumableKeys } from "./use-consumables";
-import { patchCachedStock } from "./use-consumable-movement-mutations";
+import {
+  patchCachedStock,
+  touchesAssetHistory,
+} from "./use-consumable-movement-mutations";
 
 /**
  * Regression for #221: the quick-adjust optimistic patch must bump the detail/list `currentStock`
@@ -96,4 +99,23 @@ test("quick-adjust patches the matching row in the list ENVELOPE without crashin
     limit: 20,
     offset: 0,
   });
+});
+
+// ── Deliveries (ADR-0098, #1364) ────────────────────────────────────────────────────────────────────
+
+test("a movement write refreshes every deliveries list (they nest under consumableKeys.all)", async () => {
+  const qc = new QueryClient();
+  const key = consumableKeys.deliveryList({ targetUserId: "u1", outstandingOnly: true });
+  qc.setQueryData(key, { items: [], total: 0, limit: 50, offset: 0 });
+
+  await qc.invalidateQueries({ queryKey: consumableKeys.all });
+
+  expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+});
+
+test("asset history is refreshed after a delivery to an asset or any return, not a plain movement", () => {
+  expect(touchesAssetHistory({ type: "OUT", quantity: 1, targetAssetId: "ckasset000000000000000001" })).toBe(true);
+  expect(touchesAssetHistory({ type: "IN", quantity: 1, returnOfId: 9 })).toBe(true);
+  expect(touchesAssetHistory({ type: "OUT", quantity: 1, targetUserId: "11111111-1111-4111-8111-111111111111" })).toBe(false);
+  expect(touchesAssetHistory({ type: "OUT", quantity: 1 })).toBe(false);
 });

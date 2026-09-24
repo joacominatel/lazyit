@@ -1,5 +1,7 @@
 import type {
   Consumable,
+  ConsumableDeliveryPage,
+  ConsumableDeliveryTargetKey,
   ConsumableListPage,
   ConsumableMovement,
   ConsumableMovementQuery,
@@ -113,5 +115,43 @@ export function createConsumableMovement(
   return apiFetch<ConsumableMovement>(`${BASE}/${consumableId}/movements`, {
     method: "POST",
     body: data,
+  });
+}
+
+/**
+ * Filters for `GET /consumables/deliveries` (ADR-0098). EXACTLY ONE target key is set — the API rejects
+ * zero or two (400). `outstandingOnly` keeps returnable deliveries with units still out; `from`/`to` are
+ * inclusive ISO datetimes on `createdAt`. `limit`/`offset` are the ADR-0030 window.
+ */
+export type ConsumableDeliveryParams = Partial<
+  Record<ConsumableDeliveryTargetKey, string>
+> & {
+  outstandingOnly?: boolean;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+};
+
+/**
+ * The deliveries made to ONE user, asset or location, newest first (a `Page` envelope). Needs
+ * `consumable:read` AND the target domain's read permission (`user:read` / `asset:read` /
+ * `location:read`) — otherwise 403, which the callers treat as "hide this section".
+ */
+export function getConsumableDeliveries(
+  params: ConsumableDeliveryParams,
+  signal?: AbortSignal,
+): Promise<ConsumableDeliveryPage> {
+  const qs = new URLSearchParams();
+  if (params.targetUserId) qs.set("targetUserId", params.targetUserId);
+  if (params.targetAssetId) qs.set("targetAssetId", params.targetAssetId);
+  if (params.targetLocationId) qs.set("targetLocationId", params.targetLocationId);
+  if (params.outstandingOnly) qs.set("outstandingOnly", "true");
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  return apiFetch<ConsumableDeliveryPage>(`${BASE}/deliveries?${qs}`, {
+    signal,
   });
 }
