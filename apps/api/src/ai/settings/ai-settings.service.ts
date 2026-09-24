@@ -2,6 +2,7 @@ import { isIP } from 'node:net';
 import {
   BadRequestException,
   ConflictException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -15,6 +16,7 @@ import {
   AiProviderKindSchema,
   AiProviderOptionsSchema,
   McpClientAllowlistAddedReadSchema,
+  type AiApiKeyRequiredReason,
   type AiConnectionDraft,
   type AiConnectionTestResult,
   type AiEffort,
@@ -22,6 +24,7 @@ import {
   type AiProviderKind,
   type AiProviderOptions,
   type AiSettings,
+  type AiSettingsErrorCode,
   type McpClientAllowlistEntry,
   type UpdateAiSettings,
 } from '@lazyit/shared';
@@ -79,7 +82,37 @@ export interface AiEnableRefusal {
     | 'PROVIDER_NOT_CONFIGURED'
     | 'API_KEY_REQUIRED'
     | 'CONNECTION_TEST_FAILED';
+  /** `API_KEY_REQUIRED` only: the stored key was cleared because the provider or base URL changed. */
+  reason?: AiApiKeyRequiredReason;
   test?: AiConnectionTestResult;
+}
+
+/**
+ * A 400 / 409 refusal with a stable machine `code` next to Nest's usual `{ statusCode, error, message }`
+ * body, so the web matches the code and never the sentence (provider-and-runtime.md §9.1).
+ */
+export function badRequest(
+  code: AiSettingsErrorCode,
+  message: string,
+): BadRequestException {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    message,
+    code,
+  });
+}
+
+export function conflict(
+  code: AiSettingsErrorCode,
+  message: string,
+): ConflictException {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    message,
+    code,
+  });
 }
 
 /** True when auth is disabled (`AUTH_MODE=shim`): the assistant is never available there (security §12 G1). */
@@ -182,7 +215,8 @@ export class AiSettingsService implements AiSettingsReader {
   ): Promise<AiConnectionTestResult> {
     if (isShimMode()) {
       // No real provider call while authentication is disabled (review F6).
-      throw new ConflictException(
+      throw conflict(
+        'AI_SHIM_MODE',
         'The AI assistant is unavailable while authentication is disabled (AUTH_MODE=shim).',
       );
     }
@@ -190,7 +224,8 @@ export class AiSettingsService implements AiSettingsReader {
     const provider = draft.provider ?? parseProvider(row?.provider ?? null);
     const model = draft.model ?? row?.model ?? null;
     if (!provider || !model) {
-      throw new BadRequestException(
+      throw badRequest(
+        'PROVIDER_NOT_CONFIGURED',
         'Choose a provider and a model before testing the connection.',
       );
     }
@@ -311,7 +346,8 @@ export class AiSettingsService implements AiSettingsReader {
     // (5) The enable gate.
     if (input.enabled) {
       if (isShimMode()) {
-        throw new ConflictException(
+        throw conflict(
+          'AI_SHIM_MODE',
           'The AI assistant cannot be enabled while authentication is disabled (AUTH_MODE=shim).',
         );
       }
@@ -340,7 +376,8 @@ export class AiSettingsService implements AiSettingsReader {
         (AI_PROVIDER_DESCRIPTORS[provider].requiresApiKey || keyStoredAfter) &&
         !this.cipher.isConfigured()
       ) {
-        throw new ConflictException(
+        throw conflict(
+          'AI_SECRET_KEY_MISSING',
           'AI_SECRET_KEY is not set — set a 32-byte key (openssl rand -hex 32) before enabling this provider.',
         );
       }
@@ -351,6 +388,9 @@ export class AiSettingsService implements AiSettingsReader {
           throw refuse({
             code: 'API_KEY_REQUIRED',
             message: 'This provider needs an API key before it can be enabled.',
+            ...(keyAction === 'cleared-destination-changed'
+              ? { reason: 'DESTINATION_CHANGED' as const }
+              : {}),
           });
         }
         const test = await this.tester.test({
@@ -540,7 +580,8 @@ export class AiSettingsService implements AiSettingsReader {
 /* ─────────────────────────────── pure helpers ─────────────────────────────── */
 
 function concurrentSave(): ConflictException {
-  return new ConflictException(
+  return conflict(
+    'AI_SETTINGS_CONCURRENT_SAVE',
     'The AI settings were changed by someone else meanwhile — reload them and save again.',
   );
 }
@@ -643,7 +684,8 @@ function assertConnectionShape(value: {
 }): void {
   if (value.baseUrl) assertBaseUrl(value.baseUrl, value);
   if (value.allowPrivateNetwork && value.provider !== 'openai-compatible') {
-    throw new BadRequestException(
+    throw badRequest(
+      'PRIVATE_NETWORK_PROVIDER_MISMATCH',
       'A private-network host is allowed only for the OpenAI-compatible provider.',
     );
   }
@@ -654,7 +696,8 @@ function assertConnectionShape(value: {
         value.providerOptions,
       ).success)
   ) {
-    throw new BadRequestException(
+    throw badRequest(
+      'PROVIDER_OPTIONS_UNSUPPORTED',
       'These options are not supported by the selected provider.',
     );
   }
@@ -680,32 +723,39 @@ function assertBaseUrl(
   try {
     url = new URL(raw.trim());
   } catch {
-    throw new BadRequestException('The base URL is not a valid URL.');
+    throw badRequest('BASE_URL_INVALID', 'The base URL is not a valid URL.');
   }
   if (url.username || url.password) {
-    throw new BadRequestException(
+    throw badRequest(
+      'BASE_URL_CREDENTIALS',
       'The base URL may not carry credentials — put the key in the API key field.',
     );
   }
   if (url.search || url.hash || /[?#]/.test(raw)) {
-    throw new BadRequestException(
+    throw badRequest(
+      'BASE_URL_QUERY_OR_FRAGMENT',
       'The base URL may not carry a query string or a fragment.',
     );
   }
   const isHttp = url.protocol === 'http:';
   if (url.protocol !== 'https:' && !isHttp) {
-    throw new BadRequestException('The base URL must be http:// or https://.');
+    throw badRequest(
+      'BASE_URL_SCHEME',
+      'The base URL must be http:// or https://.',
+    );
   }
   const privateAllowed =
     value.provider === 'openai-compatible' && value.allowPrivateNetwork;
   if (isHttp && !privateAllowed) {
-    throw new BadRequestException(
+    throw badRequest(
+      'BASE_URL_HTTP_NOT_ALLOWED',
       'A plain http:// base URL is allowed only for the OpenAI-compatible provider on a private network (enable the private-network option).',
     );
   }
   const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (host === 'localhost' || host.endsWith('.localhost')) {
-    throw new BadRequestException(
+    throw badRequest(
+      'BASE_URL_LOOPBACK',
       "A loopback base URL is never allowed; use the host's LAN address.",
     );
   }
@@ -713,19 +763,22 @@ function assertBaseUrl(
   const category = classifyIp(host);
   if (isPublicCategory(category)) {
     if (isHttp) {
-      throw new BadRequestException(
+      throw badRequest(
+        'BASE_URL_HTTP_PUBLIC',
         'A plain http:// base URL must point at a private-network address, never a public one.',
       );
     }
     return;
   }
   if (!isAllowlistableCategory(category)) {
-    throw new BadRequestException(
+    throw badRequest(
+      'BASE_URL_UNREACHABLE_RANGE',
       'This address range is never reachable (loopback, link-local, metadata or reserved).',
     );
   }
   if (!privateAllowed) {
-    throw new BadRequestException(
+    throw badRequest(
+      'BASE_URL_PRIVATE_NOT_ALLOWED',
       'A private-network base URL needs the OpenAI-compatible provider with the private-network option on.',
     );
   }

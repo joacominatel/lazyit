@@ -92,6 +92,11 @@ export function mcpUrl(origin: string): string {
   return `${origin}/mcp`;
 }
 
+/** The public URL marketplace (`claude plugin marketplace add <this>`); served only on a pinned-HTTPS instance. */
+export function marketplaceUrl(origin: string): string {
+  return `${origin}/api/ai/claude-code/marketplace.json`;
+}
+
 /** The public archive URL (`/api` is stripped by Caddy; the API route is `/ai/claude-code/…`). */
 export function publicArchiveUrl(origin: string): string {
   return `${origin}/api/ai/claude-code/lazyit-plugin.zip`;

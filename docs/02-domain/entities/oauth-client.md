@@ -27,7 +27,8 @@ Metadata Document (CIMD), or bundled with lazyit.
 - Which clients may connect is the admin-configurable allowlist of
   [[0097-ai-assistant-mcp-and-headless-api]] decision 13, matched on the CIMD URL or a redirect-URI
   pattern, never on `name`. **Every** registered redirect must be admitted, and the
-  check is repeated at consent, code exchange and refresh. The curated defaults live in
+  check is repeated at consent, code exchange and refresh. The curated defaults are data in
+  `@lazyit/shared` (`MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS`), enforced through
   `apps/api/src/oauth/client-allowlist.defaults.ts` ([[ai-assistant/mcp-and-oauth|MCP]] §12).
 - A DCR `name` is stripped of control and bidi characters and capped at 120 characters; `logoUri` is
   not accepted from a registration; `clientUri` is kept only when it is https.

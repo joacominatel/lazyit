@@ -380,9 +380,9 @@ the **exfiltration leg** and the **consequential-action leg**.
 | Channel | Zero-click? | v1 posture [C] |
 | --- | --- | --- |
 | The LLM provider itself | yes | Inherent and disclosed (§6.4). It becomes attacker-controlled only if the base URL is; hence INV-AI-6's destination binding and T-38. |
-| Markdown image in chat | yes | **Closed** by reusing `MarkdownView`, which drops external images [R]. No new renderer. |
-| Link in chat | one click | External destination shown in full and not auto-linked, or behind an interstitial. |
-| Mermaid in chat | no | `securityLevel: 'strict'` [R]; keep it. |
+| Markdown image in chat | yes | **Closed** — as built (W3-7), the chat renders through its own sanitize-first renderer `apps/web/components/ai/ai-markdown.tsx` (the `MarkdownView` pipeline order, no KB passes): every image renders as its alt text and nothing is fetched. |
+| Link in chat | one click | As built (W3-7): bare URLs are never auto-linked; an explicit external link opens in a new tab (`noopener noreferrer nofollow`, no referrer) with its **full destination URL** shown beside the text; any scheme but http(s) and in-app paths is plain text. |
+| Mermaid in chat | no | As built (W3-7): not rendered in the chat at all — a mermaid fence is shown as code. |
 | Writes that change visibility (KB public folder, notes, `Application.url`) | no; others read later | Preview shows the full content plus the destination's visibility; SEC-051 fixed first. |
 | Identity or credential changes (email, reset link, SA token mint) | no | T3 elevated confirmation; one-time credentials never enter context (INV-AI-5). |
 | Workflow `WEBHOOK_OUT` / `REST` to configured URLs [R] | no | Authoring definitions and connections is T4 elevated, **chat only**, with the `OUTBOUND_INTEGRATION` warning; secrets and the egress allowlist are never tools. Retry/replay is T2. See §6.9. |
@@ -993,8 +993,11 @@ in [[ai-assistant/_synthesis|the synthesis]] §10 places each gate on its units.
   notification.
 
 **G4 — Frontend (chat UI, preview and approval cards, consent page)**
-- Chat output renders only through `MarkdownView`: no `dangerouslySetInnerHTML`, no second markdown
-  pipeline. External images are dropped and external links are not auto-linked (EchoLeak fixtures).
+- Chat output renders only through the chat renderer `apps/web/components/ai/ai-markdown.tsx` (as built,
+  W3-7): `rehype-sanitize` first, no raw HTML, no `dangerouslySetInnerHTML`, no mermaid or KB passes,
+  `<untrusted_content>` wrappers stripped to plain text. Images are never loaded, bare URLs are never
+  auto-linked, and an explicit external link shows its full destination URL (EchoLeak-style fixtures in
+  `ai-markdown.test.tsx`). Tool summaries and preview values are plain React text.
 - Streaming uses `fetch` with headers and never puts a token in a query string.
 - Preview cards render the server's canonical diff, not model text. Elevated cards are distinct, have no
   default focus on Approve, and allow no batch approval.
