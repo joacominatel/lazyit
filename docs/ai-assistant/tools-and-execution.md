@@ -551,6 +551,17 @@ Warning rules for these tools (§9 has the step-up rule):
     change to what the card showed — the application being marked critical included — is `STALE`;
   - each tool re-checks chat + human in `preview` and `run`, and calls `assertChannelAllows` in `run` on
     a critical application (a no-op in the chat).
+  - review fixes (G2 review of #1354): template tokens are parsed by the runtime mapper's own parser
+    (`templatePaths`, exported from `workflow-engine/mapping/data-mapper.ts`), so `{{ grantee . email }}`
+    is described as the email; a token lazyit does not know (it would render empty) is refused, and a
+    `steps.<key>.…` token must name a step of the same graph; a URL carrying userinfo
+    (`https://user:pass@host`) is refused in the AI's connection config and for any destination a card
+    would describe; query values are masked in step paths, health-check paths and the tested
+    `probedPath`; a connection re-point lists every workflow calling the connection, what each enabled
+    one would send to the NEW host, adds their trigger warning and anchors STALE on their latest
+    versions; re-pointing a connection that carries default headers needs `workflow:secrets` (stricter
+    than the route); the enable card is refused when the sample grant's grantee was offboarded;
+    other-authored names in summaries and refusals the model reads are `untrusted()`;
   - references: a workflow is `{ id }` or `{ application, trigger }` (at most one live workflow per
     application and trigger); a connection, a sample grant and a credential are taken by id only, so the
     stored input is exactly what the card showed.
