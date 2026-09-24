@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import {
   AiActionPreviewSchema,
   AiToolResultSchema,
@@ -26,6 +27,7 @@ import type { AiPendingAction } from '../core/pending-action';
 import {
   A,
   ACTORS,
+  C,
   ASSIGN,
   ID,
   INJECTION,
@@ -43,6 +45,7 @@ import {
   historyRows,
   matrix,
   mcp,
+  modelsService,
   resetAll,
   state,
   touch,
@@ -633,6 +636,328 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
     });
   });
 
+  describe('asset_create: sensible default status (#1386)', () => {
+    it('no status → IN_STORAGE, stated on the card as a default; the route still receives it', async () => {
+      const action = await propose('asset_create', { name: 'Spare laptop' });
+      expect(action.preview?.changes).toEqual(
+        expect.arrayContaining([
+          { field: 'status', after: 'IN_STORAGE', valueKind: 'text' },
+          {
+            field: 'defaultsApplied',
+            after: ['status: IN_STORAGE'],
+            valueKind: 'text',
+          },
+        ]),
+      );
+      await approve(action);
+      expect(assetsService.create.mock.calls[0][0]).toEqual({
+        name: 'Spare laptop',
+        status: 'IN_STORAGE',
+      });
+    });
+
+    it('an explicit status wins and no default is claimed', async () => {
+      const action = await propose('asset_create', {
+        name: 'Loaner',
+        status: 'OPERATIONAL',
+      });
+      const fields = action.preview!.changes.map((c) => c.field);
+      expect(fields).not.toContain('defaultsApplied');
+      expect(action.preview!.changes).toContainEqual({
+        field: 'status',
+        after: 'OPERATIONAL',
+        valueKind: 'text',
+      });
+    });
+  });
+
+  describe('asset_create_batch (#1387)', () => {
+    /** The 17 laptops of the CEO's paste: a name and a serial each, one model, no status. */
+    const PASTE = Array.from({ length: 17 }, (_, i) => ({
+      name: `Laptop Pro ${String(i + 1).padStart(2, '0')}`,
+      serial: `PRO14-${String(1000 + i)}`,
+    }));
+
+    const change = (action: AiPendingAction, field: string) =>
+      action.preview!.changes.find((c) => c.field === field)?.after;
+    const rowsOf = (action: AiPendingAction) =>
+      change(action, 'rows') as Array<Row & { errors: string[] }>;
+
+    it('17 pasted rows: ONE card counting exactly 17, each row resolved; one approval creates 17, each audited with the shared id', async () => {
+      const action = await propose('asset_create_batch', {
+        rows: PASTE,
+        common: { model: 'Latitude 7440', location: 'Storage Room' },
+      });
+      expect(ai.invocations.size).toBe(1);
+      expect(change(action, 'action')).toBe('Create 17 of 17 assets.');
+      expect(change(action, 'rowCount')).toBe(17);
+      expect(change(action, 'validRows')).toBe(17);
+      expect(change(action, 'invalidRows')).toBe(0);
+      expect(change(action, 'defaultsApplied')).toEqual([
+        'status: IN_STORAGE (17 of 17 rows)',
+      ]);
+      const rows = rowsOf(action);
+      expect(rows).toHaveLength(17);
+      expect(rows[16]).toEqual({
+        row: 17,
+        name: 'Laptop Pro 17',
+        assetTag: null,
+        serial: 'PRO14-1016',
+        status: 'IN_STORAGE',
+        statusDefaulted: true,
+        model: {
+          type: 'assetModel',
+          id: M.latitude,
+          label: 'Latitude 7440 (Dell)',
+        },
+        category: { type: 'category', id: C.laptops, label: 'Laptops' },
+        location: { type: 'location', id: L.storage, label: 'Storage Room' },
+        valid: true,
+        errors: [],
+        duplicates: [],
+      });
+      // One model resolved once, not once per row.
+      expect(modelsService.findOne).toHaveBeenCalledTimes(1);
+      // The referenced entity that changed last is the version the approval is checked against.
+      expect(action.preview!.precondition).toEqual({
+        entity: expect.objectContaining({
+          type: 'assetModel',
+          id: M.latitude,
+        }) as unknown,
+        updatedAt: T0.toISOString(),
+      });
+      expect(state.mutations).toBe(0);
+
+      const approved = await approve(action);
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: {
+          ok: true,
+          mutated: true,
+          summary: 'Created 17 of 17 assets.',
+        },
+      });
+      expect(state.mutations).toBe(17);
+      expect(assetsService.create.mock.calls[0][0]).toEqual({
+        name: 'Laptop Pro 01',
+        serial: 'PRO14-1000',
+        status: 'IN_STORAGE',
+        modelId: M.latitude,
+        locationId: L.storage,
+      });
+      // Every row is audited in its asset's history, all stamped with the one invocation (the batch id)…
+      const history = historyRows();
+      expect(history).toHaveLength(17);
+      for (const row of history) {
+        expect(row).toMatchObject({
+          eventType: 'CREATED',
+          aiInvocationId: action.id,
+        });
+      }
+      // …and the ledger's single EXECUTED event names every created asset.
+      expect(events(action.id)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTED']);
+      const executed = ai.ledger.find((e) => e.event === 'EXECUTED')!;
+      expect(executed.entityRefs).toHaveLength(17);
+      expect(approved.result?.entityRefs).toHaveLength(17);
+      expect(data(approved.result!)).toMatchObject({
+        requested: 17,
+        created: 17,
+        notCreated: 0,
+        problems: [],
+      });
+    });
+
+    it('flags duplicates (an existing serial, a tag repeated inside the batch) and an unknown model per row; only valid rows run', async () => {
+      const action = await propose('asset_create_batch', {
+        rows: [
+          { name: 'Ok one', assetTag: 'NEW-1', model: 'Latitude 7440' },
+          { name: 'Existing serial', serial: 'SN-LAPTOP-1' },
+          { name: 'Same tag again', assetTag: 'NEW-1' },
+          { name: 'Unknown model', model: 'Pro 14', status: 'OPERATIONAL' },
+          { name: 'Ok two', status: 'OPERATIONAL' },
+        ],
+      });
+      expect(change(action, 'rowCount')).toBe(5);
+      expect(change(action, 'validRows')).toBe(2);
+      expect(change(action, 'invalidRows')).toBe(3);
+      expect(change(action, 'action')).toBe(
+        'Create 2 of 5 assets; 3 rows with problems will be skipped.',
+      );
+      expect(change(action, 'defaultsApplied')).toEqual([
+        'status: IN_STORAGE (3 of 5 rows)',
+      ]);
+      const rows = rowsOf(action);
+      expect(rows.map((r) => r.valid)).toEqual([
+        true,
+        false,
+        false,
+        false,
+        true,
+      ]);
+      expect(rows[1].duplicates).toEqual([
+        {
+          field: 'serial',
+          value: 'SN-LAPTOP-1',
+          existing: {
+            type: 'asset',
+            id: A.laptop,
+            label: 'LT-0001',
+          },
+        },
+      ]);
+      expect(rows[2].duplicates).toEqual([
+        { field: 'assetTag', value: 'NEW-1', row: 1 },
+      ]);
+      expect(rows[2].errors).toEqual([
+        'assetTag "NEW-1" is also used by row 1',
+      ]);
+      expect(rows[3].errors[0]).toContain('No assetModel matches "Pro 14"');
+      expect(rows[3].errors[0]).toContain('asset_model_create');
+      expect(rows[3].model).toBeNull();
+
+      const approved = await approve(action);
+      expect(approved.status).toBe('SUCCEEDED');
+      expect(assetsService.create).toHaveBeenCalledTimes(2);
+      expect(assetsService.create.mock.calls.map((c) => c[0].name)).toEqual([
+        'Ok one',
+        'Ok two',
+      ]);
+      expect(data(approved.result!)).toMatchObject({
+        requested: 5,
+        created: 2,
+        notCreated: 3,
+        createdAssets: [
+          expect.objectContaining({ row: 1, assetTag: 'NEW-1' }),
+          expect.objectContaining({ row: 5 }),
+        ],
+        problems: [
+          expect.objectContaining({ row: 2, skipped: true }),
+          expect.objectContaining({ row: 3, skipped: true }),
+          expect.objectContaining({ row: 4, skipped: true }),
+        ],
+      });
+      expect(approved.result).toMatchObject({
+        summary: 'Created 2 of 5 assets; 3 not created (see problems).',
+      });
+    });
+
+    it('a row the route refuses at execution is reported; the rest are still created', async () => {
+      const original = assetsService.create.getMockImplementation()!;
+      assetsService.create
+        .mockImplementationOnce(original)
+        .mockImplementationOnce(() =>
+          Promise.reject(new ConflictException('Asset tag already exists')),
+        );
+      const result = await h.tools.invoke(
+        'asset_create_batch',
+        { rows: PASTE.slice(0, 3), common: { status: 'IN_STORAGE' } },
+        ctx(actor('SA writer')),
+      );
+      expect(result).toMatchObject({ ok: true, mutated: true });
+      expect(data(result)).toMatchObject({
+        requested: 3,
+        created: 2,
+        notCreated: 1,
+        problems: [{ row: 2, errors: ['Asset tag already exists'] }],
+      });
+      expect(result.entityRefs).toHaveLength(2);
+    });
+
+    it('no valid row: no card, a refusal naming the rows and the way out; nothing stored', async () => {
+      const proposal = await h.tools.propose(
+        'asset_create_batch',
+        { rows: PASTE, common: { model: 'Pro 14' } },
+        ctx(actor('MEMBER')),
+      );
+      expect(proposal).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+      const message = (proposal as { result: { error: { message: string } } })
+        .result.error.message;
+      expect(message).toContain('row 1: No assetModel matches "Pro 14"');
+      expect(message).toContain('asset_model_create');
+      expect(message).toContain('…and 12 more rows');
+      expect(ai.invocations.size).toBe(0);
+      expect(state.mutations).toBe(0);
+    });
+
+    it('STALE when a referenced model changed, or a model the rows name appeared, before the approval', async () => {
+      const edited = await propose('asset_create_batch', {
+        rows: PASTE.slice(0, 2),
+        common: { model: 'Latitude 7440' },
+      });
+      touch(state.models.get(M.latitude)!);
+      expect(await approve(edited)).toMatchObject({
+        status: 'FAILED',
+        result: { ok: false, error: { code: 'STALE', status: 409 } },
+      });
+
+      resetAll(h);
+      const partial = await propose('asset_create_batch', {
+        rows: [
+          { name: 'Known', model: 'Latitude 7440' },
+          { name: 'Not yet', model: 'Pro 14' },
+        ],
+      });
+      expect(change(partial, 'validRows')).toBe(1);
+      state.models.set(cid('pro14'), {
+        ...state.models.get(M.thinkpad)!,
+        id: cid('pro14'),
+        name: 'Pro 14',
+        updatedAt: new Date(T0.getTime() + 120_000),
+      });
+      expect(await approve(partial)).toMatchObject({
+        status: 'FAILED',
+        result: { ok: false, error: { code: 'STALE' } },
+      });
+      expect(assetsService.create).not.toHaveBeenCalled();
+    });
+
+    it('bounded: more than 200 rows, or a reserved spec key in common, is refused before any dispatch', async () => {
+      const tooMany = await h.tools.propose(
+        'asset_create_batch',
+        {
+          rows: Array.from({ length: 201 }, (_, i) => ({ name: `A${i}` })),
+        },
+        ctx(actor('MEMBER')),
+      );
+      expect(tooMany).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+      const reserved = await h.tools.propose(
+        'asset_create_batch',
+        { rows: [{ name: 'A' }], common: { specs: { host: 'x' } } },
+        ctx(actor('MEMBER')),
+      );
+      expect(reserved).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+      expect(assetsService.findPage).not.toHaveBeenCalled();
+    });
+
+    it('same permission as a single create: a VIEWER is DENIED, an SA without asset:write gets the route 403', async () => {
+      const viewer = await h.tools.propose(
+        'asset_create_batch',
+        { rows: [{ name: 'A' }] },
+        ctx(actor('VIEWER')),
+      );
+      expect(viewer).toMatchObject({
+        ok: false,
+        result: { error: { code: 'FORBIDDEN' } },
+      });
+      const sa = await h.tools.invoke(
+        'asset_create_batch',
+        { rows: [{ name: 'A' }, { name: 'B' }] },
+        ctx(actor('SA reader')),
+      );
+      expect(sa).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+      expect(state.mutations).toBe(0);
+    });
+  });
+
   describe('asset_update', () => {
     it('previews before → after with the version as precondition, and executes once', async () => {
       const action = await propose('asset_update', {
@@ -1168,6 +1493,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         'asset_check_in',
         'asset_check_out',
         'asset_create',
+        'asset_create_batch',
         'asset_get',
         'asset_model_create',
         'asset_restore',
@@ -1178,6 +1504,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         'asset_check_in',
         'asset_check_out',
         'asset_create',
+        'asset_create_batch',
         'asset_get',
         'asset_model_create',
         'asset_search',
@@ -1211,6 +1538,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       expect(hint('asset_update')).toBe(true);
       expect(hint('asset_archive')).toBe(true);
       expect(hint('asset_create')).toBe(false);
+      expect(hint('asset_create_batch')).toBe(false);
       expect(hint('asset_check_out')).toBe(false);
       expect(hint('asset_check_in')).toBe(false);
       expect(hint('asset_restore')).toBe(false);

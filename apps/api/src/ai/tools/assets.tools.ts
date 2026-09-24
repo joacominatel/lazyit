@@ -1,4 +1,8 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+} from '@nestjs/common';
 import { z } from 'zod';
 import {
   AssetStatusSchema,
@@ -7,6 +11,7 @@ import {
   type AiEntityRef,
 } from '@lazyit/shared';
 import { AssetAssignmentsController } from '../../asset-assignments/asset-assignments.controller';
+import { AssetCategoriesController } from '../../asset-categories/asset-categories.controller';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { AssetsController } from '../../assets/assets.controller';
 import { ASSET_SORT_ALLOWLIST } from '../../assets/assets.service';
@@ -19,6 +24,7 @@ import {
   AI_AMBIGUITY_SAMPLE,
   type AiResolvedReference,
 } from '../core/reference-resolver';
+import { mapToolError } from '../core/error-mapper';
 import { untrusted } from '../core/result-shaper';
 import {
   bind,
@@ -636,20 +642,35 @@ const assetGet = defineTool({
 
 // ─── asset_create ────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The status a new asset gets when none is given (#1386): new stock goes to storage until someone checks
+ * it out. The ROUTE still requires a status (every asset is classified — asset.md); the tool fills it in
+ * and the card says so (`defaultsApplied`), so the person can override it before approving.
+ */
+export const DEFAULT_NEW_ASSET_STATUS = 'IN_STORAGE' as const;
+
+const defaultedStatus = editableFields.status
+  .optional()
+  .describe(
+    `Default ${DEFAULT_NEW_ASSET_STATUS} (new stock), shown on the card as a default the person can override.`,
+  );
+
 const assetCreate = defineTool({
   name: 'asset_create',
   title: 'Create an asset',
   description:
-    'Register a new asset. name and status are required; give its model and location by id or exact ' +
-    'name (see reference_lookup). An asset tag may be assigned automatically when the instance uses a ' +
-    'tag scheme. To give it to someone afterwards, use asset_check_out.',
+    'Register ONE new asset (for several, use asset_create_batch). name is required; status defaults to ' +
+    `${DEFAULT_NEW_ASSET_STATUS}. Give its model and location by id or exact name (see reference_lookup); ` +
+    'a missing model or location can be created first with asset_model_create / location_create. An ' +
+    'asset tag may be assigned automatically when the instance uses a tag scheme. To give it to someone ' +
+    'afterwards, use asset_check_out.',
   domain: 'assets',
   class: 'write',
   input: z
     .strictObject({
       ...editableFields,
       name: editableFields.name.describe('What it is, e.g. "Laptop — Ana".'),
-      status: editableFields.status,
+      status: defaultedStatus,
       assetTag: editableFields.assetTag.optional(),
       serial: editableFields.serial.optional(),
       company: editableFields.company.optional(),
@@ -672,7 +693,10 @@ const assetCreate = defineTool({
     bind(LocationsController, 'findOne'),
   ],
   async run(input, rt) {
-    const body = scalarBody(input);
+    const body = scalarBody({
+      ...input,
+      status: input.status ?? DEFAULT_NEW_ASSET_STATUS,
+    });
     if (input.specs) body.specs = input.specs;
     if (input.model) {
       body.modelId = (await resolveModel(rt, input.model, false)).id;
@@ -689,7 +713,18 @@ const assetCreate = defineTool({
   },
   async preview(input, rt) {
     const { model, location, ...fields } = input;
-    const changes = createdFields(fields, { ...VALUE_KINDS, specs: 'text' });
+    const defaulted = fields.status === undefined;
+    const changes = createdFields(
+      { ...fields, status: fields.status ?? DEFAULT_NEW_ASSET_STATUS },
+      { ...VALUE_KINDS, specs: 'text' },
+    );
+    if (defaulted) {
+      changes.push({
+        field: 'defaultsApplied',
+        after: [`status: ${DEFAULT_NEW_ASSET_STATUS}`],
+        valueKind: 'text',
+      });
+    }
     if (model) {
       changes.push({
         field: 'model',
@@ -705,6 +740,508 @@ const assetCreate = defineTool({
       });
     }
     return createPreview(changes);
+  },
+});
+
+// ─── asset_create_batch ──────────────────────────────────────────────────────────────────────────────
+
+/** The most rows one batch proposal carries (#1387): one reviewable card, bounded work per approval. */
+export const ASSET_BATCH_MAX_ROWS = 200;
+
+/** The values a batch may set once for every row (a row's own value wins). */
+const batchSharedFields = {
+  status: defaultedStatus,
+  company: editableFields.company.optional(),
+  notes: editableFields.notes.optional(),
+  purchaseDate: editableFields.purchaseDate.optional(),
+  warrantyEnd: editableFields.warrantyEnd.optional(),
+  purchaseCost: money.optional(),
+  usefulLifeMonths: months.optional(),
+  salvageValue: money.optional(),
+  model: editableFields.model.optional(),
+  location: editableFields.location.optional(),
+  specs: flatSpecs.optional(),
+};
+
+const batchRowInput = z
+  .strictObject({
+    ...batchSharedFields,
+    name: editableFields.name.describe('What it is, e.g. "Laptop Pro 14 #3".'),
+    assetTag: editableFields.assetTag.optional(),
+    serial: editableFields.serial.optional(),
+  })
+  .superRefine((row, ctx) => refuseReservedSpecKeys(row.specs, ctx));
+
+const assetCreateBatchInput = z.strictObject({
+  rows: z
+    .array(batchRowInput)
+    .min(1)
+    .max(ASSET_BATCH_MAX_ROWS)
+    .describe(
+      `One entry per asset to create, in the order the user gave them (1–${ASSET_BATCH_MAX_ROWS}). ` +
+        'Pass every row the user gave: the card counts them, so never summarize or drop rows.',
+    ),
+  common: z
+    .strictObject(batchSharedFields)
+    .superRefine((shared, ctx) => refuseReservedSpecKeys(shared.specs, ctx))
+    .optional()
+    .describe(
+      'Values shared by every row (status, model, location, company, dates, cost, specs…); a row’s own ' +
+        'value overrides it, and specs are merged.',
+    ),
+});
+
+type AssetCreateBatchInput = z.output<typeof assetCreateBatchInput>;
+type BatchRowInput = AssetCreateBatchInput['rows'][number];
+
+/** A referenced model, location or category as a batch row names it, with its version. */
+interface BatchReference {
+  ref: { type: AiResolvedReference['type']; id: string; label?: string };
+  updatedAt: string | null;
+}
+
+/** One row of a batch, resolved and checked: the route body, or why it is skipped. */
+interface BatchRowPlan {
+  /** 1-based, in the order the user gave the rows. */
+  row: number;
+  name: string;
+  assetTag: string | null;
+  serial: string | null;
+  status: string;
+  statusDefaulted: boolean;
+  model: BatchReference | null;
+  category: BatchReference | null;
+  location: BatchReference | null;
+  /** Existing live assets, or earlier rows, holding this row's tag or serial. */
+  duplicates: Row[];
+  errors: string[];
+  body: Row;
+}
+
+/** A reference resolved once per distinct spelling, or the reason it did not resolve. */
+type Lookup<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/**
+ * A reference that does not resolve (no match, several matches, a 404 or a 400) is that row's error, not
+ * the whole batch's; anything else — a 403 above all — propagates, as the route would answer it.
+ */
+async function lookup<T>(
+  read: () => Promise<T>,
+  hint: string,
+): Promise<Lookup<T>> {
+  try {
+    return { ok: true, value: await read() };
+  } catch (err) {
+    const status =
+      err instanceof AiReferenceError
+        ? 404
+        : err instanceof HttpException
+          ? err.getStatus()
+          : 0;
+    if (status === 404 || status === 400 || status === 409) {
+      const mapped = mapToolError(err);
+      return { ok: false, error: `${mapped.message}${hint}` };
+    }
+    throw err;
+  }
+}
+
+const versionOf = (row: Row): string | null => {
+  const value = iso(row.updatedAt);
+  return typeof value === 'string' ? value : null;
+};
+
+const referenceKey = (reference: string): string =>
+  reference.trim().toLowerCase();
+
+/**
+ * Resolve and check every row of a batch (#1387), the same way for the preview and the execution:
+ *   - the model and location of each row (its own, else `common`'s), each distinct spelling resolved
+ *     once through the same resolvers `asset_create` uses; the model's category is read from the
+ *     category list (a caller without `category:read` sees no category, not an error);
+ *   - duplicates: a tag or serial an existing LIVE asset already holds (the route's uniqueness — an exact
+ *     match through `GET /assets?q=`), or one an earlier row of the same batch uses;
+ *   - the status: the row's, else `common`'s, else {@link DEFAULT_NEW_ASSET_STATUS} (flagged).
+ * A row with an error is skipped at execution; the others are created one by one.
+ */
+async function planBatch(
+  input: AssetCreateBatchInput,
+  rt: AiToolRuntime,
+): Promise<BatchRowPlan[]> {
+  const common = input.common ?? {};
+  const rows = input.rows.map((row) => ({
+    ...common,
+    ...row,
+    ...(common.specs || row.specs
+      ? { specs: { ...common.specs, ...row.specs } }
+      : {}),
+  })) as BatchRowInput[];
+
+  const models = new Map<
+    string,
+    Lookup<Row & { resolved: AiResolvedReference }>
+  >();
+  const locations = new Map<string, Lookup<BatchReference>>();
+  for (const row of rows) {
+    if (row.model && !models.has(referenceKey(row.model))) {
+      const reference = row.model;
+      models.set(
+        referenceKey(reference),
+        await lookup(async () => {
+          const resolved = await resolveModel(rt, reference, true);
+          const model = asRow(
+            await rt.call(AssetModelsController, 'findOne', {
+              params: { id: resolved.id },
+            }),
+          );
+          return { ...model, resolved };
+        }, ' — create the model first (asset_model_create) or use an existing one'),
+      );
+    }
+    if (row.location && !locations.has(referenceKey(row.location))) {
+      const reference = row.location;
+      locations.set(
+        referenceKey(reference),
+        await lookup(async () => {
+          const resolved = await resolveLocation(rt, reference, true);
+          const location = asRow(
+            await rt.call(LocationsController, 'findOne', {
+              params: { id: resolved.id },
+            }),
+          );
+          return { ref: entityValue(resolved), updatedAt: versionOf(location) };
+        }, ' — create the location first (location_create) or use an existing one'),
+      );
+    }
+  }
+
+  // The models' categories, read once. A caller who may not read categories still gets the batch.
+  const categories = new Map<string, Row>();
+  const needsCategories = [...models.values()].some(
+    (m) => m.ok && typeof m.value.categoryId === 'string',
+  );
+  if (needsCategories) {
+    const list = await facet(() =>
+      rt.call(AssetCategoriesController, 'findAll'),
+    );
+    if (!('unavailable' in list)) {
+      for (const category of asRows(list)) {
+        categories.set(String(category.id), category);
+      }
+    }
+  }
+
+  // Existing live assets holding a tag or serial a row uses, one exact lookup per distinct value.
+  const holders = new Map<string, Row[]>();
+  const values = new Set(
+    rows.flatMap((r) => [r.assetTag, r.serial]).filter((v) => v !== undefined),
+  );
+  for (const value of values) {
+    const page = await rt.call(AssetsController, 'findAll', {
+      query: { q: value, limit: RESOLVE_PAGE },
+    });
+    holders.set(
+      value,
+      asRows(page.items).filter(
+        (a) => a.assetTag === value || a.serial === value,
+      ),
+    );
+  }
+
+  const seen = new Map<string, number>();
+  return rows.map((row, index): BatchRowPlan => {
+    const number = index + 1;
+    const errors: string[] = [];
+    const duplicates: Row[] = [];
+    for (const field of ['assetTag', 'serial'] as const) {
+      const value = row[field];
+      if (value === undefined) continue;
+      for (const asset of holders.get(value) ?? []) {
+        if (asset[field] !== value) continue;
+        duplicates.push({
+          field,
+          value,
+          existing: {
+            type: 'asset',
+            id: String(asset.id),
+            label: assetLabel(asset),
+          },
+        });
+        errors.push(
+          `${field} "${value}" already belongs to ${assetLabel(asset)}`,
+        );
+      }
+      const key = `${field}:${value}`;
+      const earlier = seen.get(key);
+      if (earlier !== undefined) {
+        duplicates.push({ field, value, row: earlier });
+        errors.push(`${field} "${value}" is also used by row ${earlier}`);
+      } else {
+        seen.set(key, number);
+      }
+    }
+
+    let model: BatchReference | null = null;
+    let category: BatchReference | null = null;
+    if (row.model) {
+      const found = models.get(referenceKey(row.model))!;
+      if (found.ok) {
+        const { resolved, ...modelRow } = found.value;
+        model = { ref: entityValue(resolved), updatedAt: versionOf(modelRow) };
+        const cat =
+          typeof modelRow.categoryId === 'string'
+            ? categories.get(modelRow.categoryId)
+            : undefined;
+        if (cat) {
+          category = {
+            ref: {
+              type: 'category',
+              id: String(cat.id),
+              label: String(cat.name),
+            },
+            updatedAt: versionOf(cat),
+          };
+        }
+      } else {
+        errors.push(found.error);
+      }
+    }
+    let location: BatchReference | null = null;
+    if (row.location) {
+      const found = locations.get(referenceKey(row.location))!;
+      if (found.ok) location = found.value;
+      else errors.push(found.error);
+    }
+
+    const status = row.status ?? DEFAULT_NEW_ASSET_STATUS;
+    const body = scalarBody({ ...row, status });
+    if (row.specs && Object.keys(row.specs).length > 0) body.specs = row.specs;
+    if (model) body.modelId = model.ref.id;
+    if (location) body.locationId = location.ref.id;
+    return {
+      row: number,
+      name: row.name,
+      assetTag: row.assetTag ?? null,
+      serial: row.serial ?? null,
+      status,
+      statusDefaulted: row.status === undefined,
+      model,
+      category,
+      location,
+      duplicates,
+      errors,
+      body,
+    };
+  });
+}
+
+/** One row as the card's table shows it. */
+function batchRowView(plan: BatchRowPlan): Row {
+  const { row, name, assetTag, serial, status, statusDefaulted, errors } = plan;
+  const extra = pick(plan.body, [
+    'company',
+    'notes',
+    'purchaseDate',
+    'warrantyEnd',
+    'purchaseCost',
+    'usefulLifeMonths',
+    'salvageValue',
+    'specs',
+  ]);
+  return {
+    row,
+    name,
+    assetTag,
+    serial,
+    status,
+    ...(statusDefaulted ? { statusDefaulted: true } : {}),
+    model: plan.model?.ref ?? null,
+    category: plan.category?.ref ?? null,
+    location: plan.location?.ref ?? null,
+    ...extra,
+    valid: errors.length === 0,
+    errors,
+    duplicates: plan.duplicates,
+  };
+}
+
+/**
+ * The version a batch is approved against. The precondition contract carries ONE `{ entity, updatedAt }`,
+ * so the batch pins the most recently changed entity its rows reference (a model, its category or a
+ * location): any referenced entity edited — or a reference that now resolves differently, e.g. a model
+ * created meanwhile — changes which entity is newest or its version, and the approval is `STALE` rather
+ * than creating rows the card did not show. A batch that references nothing has no precondition, like a
+ * single create.
+ */
+function batchPrecondition(
+  plans: readonly BatchRowPlan[],
+): AiActionPreview['precondition'] {
+  const refs = new Map<string, BatchReference>();
+  for (const plan of plans) {
+    for (const r of [plan.model, plan.category, plan.location]) {
+      if (r?.updatedAt) refs.set(`${r.ref.type}:${r.ref.id}`, r);
+    }
+  }
+  const newest = [...refs.values()].sort(
+    (a, b) =>
+      b.updatedAt!.localeCompare(a.updatedAt!) ||
+      `${a.ref.type}:${a.ref.id}`.localeCompare(`${b.ref.type}:${b.ref.id}`),
+  )[0];
+  if (!newest) return undefined;
+  return {
+    entity: {
+      type: newest.ref.type,
+      id: newest.ref.id,
+      op: 'updated',
+      ...(newest.ref.label !== undefined ? { label: newest.ref.label } : {}),
+    },
+    updatedAt: newest.updatedAt!,
+  };
+}
+
+/** The first few row errors, for a refusal message. */
+function rowErrors(plans: readonly BatchRowPlan[], max = 5): string {
+  const bad = plans.filter((p) => p.errors.length > 0);
+  const shown = bad
+    .slice(0, max)
+    .map((p) => `row ${p.row}: ${p.errors.join('; ')}`)
+    .join(' | ');
+  return bad.length > max
+    ? `${shown} | …and ${bad.length - max} more rows`
+    : shown;
+}
+
+/** An authorization failure will not change from one row to the next: stop instead of repeating it. */
+const STOP_STATUSES = new Set([401, 403]);
+
+const assetCreateBatch = defineTool({
+  name: 'asset_create_batch',
+  title: 'Create several assets',
+  description:
+    `Register several assets at once (up to ${ASSET_BATCH_MAX_ROWS}; e.g. rows pasted from a spreadsheet) as ONE ` +
+    'proposal with one approval. Put shared values in `common` and per-asset values in `rows`; status ' +
+    `defaults to ${DEFAULT_NEW_ASSET_STATUS}. Every row is checked first: its model and location must ` +
+    'exist (create a missing one first with asset_model_create / location_create), and a tag or serial ' +
+    'an existing asset or another row already has is flagged. Rows with a problem are skipped; the ' +
+    'others are created one by one and the result lists what was created and what was not.',
+  domain: 'assets',
+  class: 'write',
+  input: assetCreateBatchInput,
+  bindings: [
+    bind(AssetsController, 'create'),
+    bind(AssetsController, 'findAll'),
+    bind(AssetModelsController, 'findAll'),
+    bind(AssetModelsController, 'findOne'),
+    bind(LocationsController, 'findAll'),
+    bind(LocationsController, 'findOne'),
+    bind(AssetCategoriesController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const plans = await planBatch(input, rt);
+    const ready = plans.filter((p) => p.errors.length === 0);
+    if (ready.length === 0) {
+      throw new BadRequestException(
+        `No row can be created: ${rowErrors(plans)}`,
+      );
+    }
+    const created: Row[] = [];
+    const problems: Row[] = plans
+      .filter((p) => p.errors.length > 0)
+      .map((p) => ({ row: p.row, skipped: true, errors: p.errors }));
+    const entityRefs: AiEntityRef[] = [];
+    let stoppedAt: number | null = null;
+    for (const plan of ready) {
+      try {
+        const asset = asRow(
+          await rt.call(AssetsController, 'create', { body: plan.body }),
+        );
+        created.push({
+          row: plan.row,
+          id: asset.id,
+          assetTag: asset.assetTag ?? null,
+        });
+        entityRefs.push(assetRef(asset, 'created'));
+      } catch (err) {
+        const mapped = mapToolError(err);
+        if (created.length === 0 && STOP_STATUSES.has(mapped.status ?? 0)) {
+          throw err;
+        }
+        problems.push({ row: plan.row, errors: [mapped.message] });
+        if (STOP_STATUSES.has(mapped.status ?? 0)) {
+          stoppedAt = plan.row;
+          break;
+        }
+      }
+    }
+    problems.sort((a, b) => Number(a.row) - Number(b.row));
+    const notAttempted =
+      stoppedAt === null ? 0 : ready.filter((p) => p.row > stoppedAt).length;
+    const failed = problems.length;
+    return {
+      data: {
+        requested: plans.length,
+        created: created.length,
+        notCreated: plans.length - created.length,
+        ...(notAttempted > 0 ? { stoppedAtRow: stoppedAt, notAttempted } : {}),
+        createdAssets: created,
+        problems,
+      },
+      summary:
+        `Created ${created.length} of ${plans.length} assets` +
+        (failed + notAttempted > 0
+          ? `; ${plans.length - created.length} not created (see problems).`
+          : '.'),
+      entityRefs,
+    };
+  },
+  async preview(input, rt) {
+    const plans = await planBatch(input, rt);
+    const ready = plans.filter((p) => p.errors.length === 0).length;
+    if (ready === 0) {
+      throw new BadRequestException(
+        `No row can be created: ${rowErrors(plans)}`,
+      );
+    }
+    const skipped = plans.length - ready;
+    const defaulted = plans.filter((p) => p.statusDefaulted).length;
+    const changes: Change[] = [
+      {
+        field: 'action',
+        after:
+          `Create ${ready} of ${plans.length} assets` +
+          (skipped > 0
+            ? `; ${skipped} ${skipped === 1 ? 'row' : 'rows'} with problems will be skipped.`
+            : '.'),
+        valueKind: 'text',
+      },
+      { field: 'rowCount', after: plans.length, valueKind: 'number' },
+      { field: 'validRows', after: ready, valueKind: 'number' },
+      { field: 'invalidRows', after: skipped, valueKind: 'number' },
+    ];
+    if (defaulted > 0) {
+      changes.push({
+        field: 'defaultsApplied',
+        after: [
+          `status: ${DEFAULT_NEW_ASSET_STATUS} (${defaulted} of ${plans.length} rows)`,
+        ],
+        valueKind: 'text',
+      });
+    }
+    changes.push({
+      field: 'rows',
+      after: plans.map(batchRowView),
+      valueKind: 'text',
+    });
+    const precondition = batchPrecondition(plans);
+    return {
+      changes,
+      warnings: [],
+      impacted: [],
+      untrustedSources: [],
+      elevated: false,
+      stepUpRequired: false,
+      ...(precondition ? { precondition } : {}),
+    };
   },
 });
 
@@ -1346,6 +1883,7 @@ export const assetsToolset: AiToolset = {
     assetSearch,
     assetGet,
     assetCreate,
+    assetCreateBatch,
     assetUpdate,
     assetArchive,
     assetRestore,
