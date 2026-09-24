@@ -21,6 +21,7 @@ import { ServiceAccountsController } from '../../service-accounts/service-accoun
 import { NotificationPreferencesController } from '../../smtp/notification-preferences.controller';
 import { SmtpController } from '../../smtp/smtp.controller';
 import { WorkflowSecretsController } from '../../workflow-engine/definitions/workflow-secrets.controller';
+import { PluginDistributionController } from '../../mcp/distribution/plugin-distribution.controller';
 import { unexposed, type AiToolset } from '../core/tool-descriptor';
 import { AiSettingsController } from '../settings/ai-settings.controller';
 import { AiStatusController } from '../status/ai-status.controller';
@@ -178,6 +179,12 @@ export const platformToolset: AiToolset = {
       GrantsController,
       ['listMine', 'list', 'revoke'],
       'Excluded: connected apps govern the access of external agents, i.e. the AI configuration (structural exclusion).',
+    ),
+    // The Claude Code plugin distribution (W3-5): a file download for installing a client, not data.
+    unexposed(
+      PluginDistributionController,
+      ['download', 'marketplace', 'publicArchive'],
+      "Excluded: the Claude Code plugin download and marketplace distribute the AI's own client configuration (structural exclusion, INV-AI-14).",
     ),
   ],
 };
