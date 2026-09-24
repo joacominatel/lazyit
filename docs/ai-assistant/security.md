@@ -677,14 +677,23 @@ secret-bearing connection or attaching a secret needs `workflow:secrets` on top 
   grant or revoke, workflow or connection authoring, retry, replay, manual-task resolve — CEO: "Toda
   escritura"); core requires step-up in the chat, and **MCP and headless refuse it** (CEO: "Rechazar";
   `AI_CHANNEL_REFUSED_WARNINGS`, a 403 pointing to the chat), because neither channel has a password
-  step-up.
+  step-up. **Unknown criticality counts as critical** (fail closed, W2-13): when the caller cannot read
+  the application (no `application:read`, or no `workflow:read` to reach it from the run or task) or it
+  no longer exists, the write needs step-up in the chat and is refused over MCP and headless. A Service
+  Account that retries, replays or resolves tasks headless therefore needs `workflow:read` and
+  `application:read` on top of `workflow:run` / `workflow:task`.
 - **Disabled first.** A workflow the AI creates is disabled; enabling is a separate approval whose
   preview embeds a dry-run against a named sample grant.
 - **Secrets are reference-only.** No tool reads, creates, rotates or deletes a workflow secret; a
   connection read reports "credential configured: yes/no" from `secretId`. Header values
   (`defaultHeaders`, not validated against credential-like values) are redacted in reads.
 - **No `overrides` on retry** through the AI (they change the outbound payload).
-- Run errors, step metadata and manual-task inputs and prompts are wrapped as untrusted content.
+- **No second provisioning from one failed run.** A failed run that was already replayed (another run
+  has `supersedesRunId` = its id) is refused for retry and replay, in the preview and in `run` over MCP
+  and headless.
+- Run errors, step metadata and manual-task inputs and prompts are wrapped as untrusted content, and so
+  are admin-typed names the model reads: workflow, step and connection names, mapped field names,
+  manual-form field names, labels, options and suggestions, and header names.
 - The behaviour rules tell the model never to propose sending data to a destination the user did not
   name (primer, `AI_PROMPT_VERSION` 2).
 

@@ -1008,9 +1008,11 @@ about); a facet the caller may not read is omitted, never a failure.
   its `secretId`; `defaultHeaders` show names with the value `[redacted]` (not validated against
   credential-like values); a mapping never shows its literal text (an admin may have typed a constant
   there), a step never shows its path. Other-authored or external text goes through `untrusted()`:
-  workflow and step names, descriptions, connection names, manual-task prompts and submitted input, the
-  run `error`, and step metadata (`targetHost`, `externalCorrelationId`). A step key is shown raw only
-  when it looks like an identifier.
+  workflow and step names, descriptions, connection names, mapped field names (also inside the
+  `explanation`), manual-form field names, labels, options and suggestions, header names
+  (`authHeaderName`, `defaultHeaders` keys, `signatureHeader`), manual-task prompts and submitted input,
+  the run `error`, step metadata (`targetHost`, `externalCorrelationId`), and the workflow and person
+  names in card labels. A step key is shown raw only when it looks like an identifier.
 - **Writes and previews.** Retry sends an **empty body — never the route's `overrides`** (the input is
   `{ run }`, strict). Every preview refuses what the route would refuse, so no card is shown for it: a run
   that is not FAILED (409), a failed step that cannot be resolved (422), a replay the double-provision
@@ -1020,8 +1022,14 @@ about); a facet the caller may not read is omitted, never a failure.
   that may be called**: from the failed step onward for a retry, from the entry step of the version the
   replay will run (the live enabled workflow for the application and trigger, as the route selects it),
   and from the task's continuation for a resolve; submitted form values are shown field by field.
-  Precondition: the run's or the task's `updatedAt`, so a run or task that moved since the card is
-  `STALE`. Refs: `workflowRun updated` (replay adds `workflowRun created`) with `parent: application`,
+  A failed run that was **already replayed** (a run of the same grant has `supersedesRunId` = its id,
+  read through `WorkflowRunsController.findAll`) is refused for retry and replay with the clone named
+  (409), in the preview and in `run` over MCP and headless; `workflow_run_get` says so in
+  `whatYouCanDo` and returns `replacedByRunId`. Precondition: for the task, its `updatedAt`; for a run,
+  the **latest** `updatedAt` among the run, the workflow the write will run (its header and the latest
+  version's `createdAt`) and every connection the card names — core compares only the entity and
+  `updatedAt`, and any change after the proposal is later than everything the card read, so a new
+  version, a toggled workflow or a re-pointed host between the card and the approval is `STALE`. Refs: `workflowRun updated` (replay adds `workflowRun created`) with `parent: application`,
   and `manualTask updated`.
 - **Warnings and critical applications.** `EXTERNAL_PROVISIONING` or `EXTERNAL_DEPROVISIONING` by the
   run's trigger on all three writes (a task resolve's input flows into later outbound steps), plus
@@ -1040,9 +1048,11 @@ about); a facet the caller may not read is omitted, never a failure.
   URL credentials, query strings, header values, mapping literals and the secret id, propose → approve
   once with replay, `STALE`, the critical-application step-up in the chat and the refusal over MCP and
   headless, the fail-closed refusal, and the SA assignee limit.
-- Follow-ups: when a run's pinned version is not the latest, a retry preview names the hosts recorded
-  in the run instead of the pinned graph (the workflow read answers only the latest version), and a task
-  preview does not show the next step; a version read route would close both. The TOCTOU window between
+- **Older pinned versions.** The workflow read answers only the latest version, so when a run is pinned
+  to an older one the retry card names no step (never one the route might refuse with 422) and lists the
+  hosts the run itself recorded, marked as such; a task preview does not show the next step. A version
+  read route would close both (follow-up). A soft-deleted connection drops out of the precondition
+  (its read 404s); a step on it fails at execute anyway. The TOCTOU window between
   the approve-time precondition and the handler's write (§9, step 3) stays until the run and task
   handlers accept an expected `updatedAt`.
 
