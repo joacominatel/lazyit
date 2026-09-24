@@ -18,8 +18,8 @@ export const accessToolset: AiToolset = {
     unexposed(
       ApplicationsController,
       [
-        'findAll',
-        'findOne',
+        // `findAll` and `findOne` are bound by the workflow operations toolset (W2-13) for application
+        // names and criticality; W2-6 binds them too (several tools may bind one handler).
         'findGrants',
         'findArticles',
         'create',
@@ -34,7 +34,7 @@ export const accessToolset: AiToolset = {
       [
         'findAll',
         'batchRevoke',
-        'findOne',
+        // `findOne` is bound by the workflow operations toolset (W2-13): whose grant a run is about.
         'create',
         'revoke',
         'updateNotes',
