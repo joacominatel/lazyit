@@ -1836,7 +1836,7 @@ export interface AiToolService {                 // the only façade channels ma
 // attachDelegatedIdentity (the dispatcher) and hasDelegatedIdentity/readDelegatedIdentity (the guard)
 // touch it, and a spec fails if any other production file value-imports the module.
 export type DelegatedIdentity =
-  | { kind: "human"; userId: string; sessionEpoch: number } // required: the chat session's or the grant's
+  | { kind: "human"; userId: string; sessionEpoch: number } // required: the chat session's, or the live one /mcp re-read
   | { kind: "service"; serviceAccountId: string };
 ```
 

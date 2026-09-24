@@ -377,8 +377,17 @@ describe("MCP client allowlist (ADR-0097 decision 13)", () => {
     expect(parsed.mcpClientAllowlistAdded).toEqual([cursor]);
   });
 
-  test("the any-https-client policy is off by default", () => {
-    expect(AI_SETTINGS_DEFAULTS.mcpAllowAnyHttpsClient).toBe(false);
+  test("the any-https-client policy is on by default (CEO, 2026-09-24)", () => {
+    expect(AI_SETTINGS_DEFAULTS.mcpAllowAnyHttpsClient).toBe(true);
+  });
+
+  test("the default policy still refuses private-use and plain-http redirects without an entry", () => {
+    const allowAny = AI_SETTINGS_DEFAULTS.mcpAllowAnyHttpsClient;
+    expect(isMcpRedirectUriAllowed("https://agent.example.com/cb", [], allowAny)).toBe(true);
+    expect(isMcpRedirectUriAllowed("com.example.agent:/cb", [], allowAny)).toBe(false);
+    expect(isMcpRedirectUriAllowed("cursor://anysphere.cursor/cb", [], allowAny)).toBe(false);
+    expect(isMcpRedirectUriAllowed("http://agent.example.com/cb", [], allowAny)).toBe(false);
+    expect(isMcpRedirectUriAllowed("http://127.0.0.1:3000/cb", [], allowAny)).toBe(false);
   });
 
   test("the effective list is the defaults minus the removed ones, plus the admin's entries", () => {

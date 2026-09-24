@@ -1027,6 +1027,7 @@ describe('AiSettingsService — config audit', () => {
         updatedAt: null,
         mcpClientAllowlistAdded: [],
         mcpClientAllowlistRemovedDefaults: [],
+        mcpAllowAnyHttpsClient: false,
       }),
     };
     const changes = diffSettings(

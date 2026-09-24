@@ -402,7 +402,13 @@ export class DirectoryReconcileService {
         data: {
           isActive: false,
           directoryOffboardedAt: at,
-          ...(person.isActive ? { sessionEpoch: { increment: 1 } } : {}),
+          // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+          ...(person.isActive
+            ? {
+                sessionEpoch: { increment: 1 },
+                mcpCredentialEpoch: { increment: 1 },
+              }
+            : {}),
         },
       });
       await this.history.record(tx, {

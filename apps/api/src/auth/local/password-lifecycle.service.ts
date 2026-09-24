@@ -153,6 +153,9 @@ export class PasswordLifecycleService {
           passwordUpdatedAt: new Date(),
           mustChangePassword: false,
           sessionEpoch: { increment: 1 },
+          // A password change or reset also kills every MCP connection and personal token — the one
+          // credential event a web logout is not (ADR-0097 decision 8, amended 2026-09-24).
+          mcpCredentialEpoch: { increment: 1 },
         },
       });
       // Any outstanding (unused) reset token is now stale — a self-service change supersedes it. Delete
@@ -527,6 +530,9 @@ export class PasswordLifecycleService {
           passwordUpdatedAt: new Date(),
           mustChangePassword: false,
           sessionEpoch: { increment: 1 },
+          // A password change or reset also kills every MCP connection and personal token — the one
+          // credential event a web logout is not (ADR-0097 decision 8, amended 2026-09-24).
+          mcpCredentialEpoch: { increment: 1 },
         },
       });
 

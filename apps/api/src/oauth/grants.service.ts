@@ -46,7 +46,8 @@ export function toOAuthGrantWire(grant: GrantWithClient): OAuthGrant {
 /**
  * "Connected apps" (R9): a user's own delegations and, for admins, everyone's — with revoke. Only LIVE
  * grants are listed: not revoked (soft-deleted), not expired, and still bound to the user's current
- * `sessionEpoch` (a grant from before a password change is already dead and would only confuse).
+ * `mcpCredentialEpoch` (a grant from before a password change is already dead and would only confuse; a
+ * web logout does not move that counter, so it leaves the list intact — ADR-0097 decision 8, amended).
  *
  * These endpoints stay available while MCP is switched off and on `lan`, so an admin can always revoke
  * during an incident and personal tokens (W3-4) share the same list.
@@ -64,7 +65,7 @@ export class GrantsService {
       where: {
         userId: user.id,
         deletedAt: null,
-        sessionEpoch: user.sessionEpoch,
+        mcpCredentialEpoch: user.mcpCredentialEpoch,
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
       include: { client: true },
@@ -81,11 +82,11 @@ export class GrantsService {
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
         user: { deletedAt: null },
       },
-      include: { client: true, user: { select: { sessionEpoch: true } } },
+      include: { client: true, user: { select: { mcpCredentialEpoch: true } } },
       orderBy: { createdAt: 'desc' },
     });
     return rows
-      .filter((row) => row.sessionEpoch === row.user.sessionEpoch)
+      .filter((row) => row.mcpCredentialEpoch === row.user.mcpCredentialEpoch)
       .map((row) => ({ ...toOAuthGrantWire(row), userId: row.userId }));
   }
 

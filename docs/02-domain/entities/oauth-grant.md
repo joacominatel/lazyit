@@ -28,9 +28,12 @@ plain-HTTP `lan` instance. It is what the user sees and revokes under "Connected
   (`refresh_reuse`), or the client through RFC 7009 (`revocation_endpoint`).
 - **Scopes are exactly what the user ticked** at consent (a subset of the request); a refresh never
   changes them. The scope hierarchy (`write` ⊇ `read`) is applied when tools are listed.
-- **Dies with the user's session epoch**: `sessionEpoch` is a snapshot of [[user]]`.sessionEpoch`; a
-  password change, "sign out everywhere" or an admin reset bumps it and every grant stops working.
-  Deactivation, `directoryOnly` and `mustChangePassword` also refuse it.
+- **Dies with the user's MCP-credential epoch**: `mcpCredentialEpoch` is a snapshot of
+  [[user]]`.mcpCredentialEpoch`; a password change or reset, an admin reset or *revoke sessions*, the
+  recovery CLI, a deactivation or an offboarding bumps it and every grant stops working (and leaves the
+  connected-apps lists). **A normal web logout does not**: it bumps only `sessionEpoch`, so the grant
+  survives it ([[0097-ai-assistant-mcp-and-headless-api]] decision 8, amended 2026-09-24). Deactivation,
+  `directoryOnly` and `mustChangePassword` also refuse it.
 - **Authority** = the user's current permissions ∩ the scope class (`lazyit.read` → `read` tools,
   `lazyit.write` → `write`, `lazyit.admin` → `elevated`), re-checked on every call with `ai:connect` and
   the MCP switch.
@@ -50,7 +53,8 @@ Prisma model `OAuthGrant` → table `oauth_grants`.
 | `label` | `text?` | the personal token's name. |
 | `scopes` | `text[]` | subset of `lazyit.read` / `lazyit.write` / `lazyit.admin`. |
 | `resource` | `text` | the canonical MCP URI at issuance (RFC 8707). |
-| `sessionEpoch` | `int` | the user's epoch at issuance. |
+| `sessionEpoch` | `int` | the user's `sessionEpoch` at issuance — informational only since 2026-09-24. |
+| `mcpCredentialEpoch` | `int` | the user's `mcpCredentialEpoch` at issuance; a mismatch means dead. Grants that predate the column were set to 0 when alive and -1 (never matches) when already dead. |
 | `expiresAt` / `lastUsedAt` | `datetime?` | expiry is mandatory for personal tokens. |
 | `revokeReason` / `revokedById` | `text?` / `uuid?` | |
 | `createdAt` / `updatedAt` / `deletedAt` | `datetime` | soft delete = revoked. |

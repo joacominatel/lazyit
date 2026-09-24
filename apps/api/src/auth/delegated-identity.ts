@@ -25,9 +25,10 @@ export type DelegatedIdentity =
       kind: 'human';
       userId: string;
       /**
-       * The `sessionEpoch` the delegation was granted under (the chat session's, or the MCP grant's
-       * snapshot). Any bump since — logout, password change, deactivation, "sign out everywhere" —
-       * refuses the call, exactly as it revokes a local session token.
+       * The `sessionEpoch` the delegation was granted under: the chat session's, or — for an MCP
+       * request — the live value `/mcp` re-read when it verified the credential (the credential itself is
+       * bound to `mcpCredentialEpoch`, ADR-0097 decision 8 as amended). Any bump since — logout, password
+       * change, deactivation — refuses the call, exactly as it revokes a local session token.
        */
       sessionEpoch: number;
     }

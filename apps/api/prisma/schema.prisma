@@ -105,6 +105,12 @@ model User {
   passwordHash      String?
   passwordUpdatedAt DateTime?
   sessionEpoch      Int       @default(0)
+  // The MCP-credential counter (ADR-0097 decision 8, amended 2026-09-24): every OAuth grant and personal MCP
+  // token snapshots it, and a mismatch means the credential is dead. It is SEPARATE from `sessionEpoch` so a
+  // normal web logout (which bumps only `sessionEpoch`) leaves the user's MCP connections alive. Password
+  // change / reset, admin reset, the recovery CLI, deactivation, offboarding and an admin "revoke sessions"
+  // bump BOTH. NOT NULL with a default: existing rows get 0 on update.
+  mcpCredentialEpoch Int      @default(0)
   // One-time-credential flag (ADR-0086 §5, F1c). Set true when an admin PROVISIONS or RESETS a local
   // credential (create with a temp password / admin reset) so the user is a temp secret holder, not the
   // owner of their final password. F1c only STORES it; ENFORCEMENT (forcing the change at next login) is
@@ -3081,8 +3087,9 @@ model AiSettings {
   mcpClientAllowlistAdded           Json      @default("[]")
   mcpClientAllowlistRemovedDefaults String[]  @default([])
   /// Accept ANY client whose redirect URIs are HTTPS (non-loopback), with a consent-screen warning.
-  /// Off by default, so the default policy is the curated list.
-  mcpAllowAnyHttpsClient            Boolean   @default(false)
+  /// On by default (ADR-0097 decision 13, amended 2026-09-24). Loopback and private-use redirects still
+  /// need an allowlist entry. A row stored before the default changed keeps its value.
+  mcpAllowAnyHttpsClient            Boolean   @default(true)
   /// The egress-disclosure acknowledgement, required before the first enable. The author is also
   /// recorded in ai_config_audit_log, which survives this row's edits.
   disclosureAcknowledgedAt          DateTime?
@@ -3395,8 +3402,9 @@ model OAuthClient {
 }
 
 /// A "connected app": one user's delegation to one client, or a personal MCP token (`lan` only).
-/// SOFT DELETE = REVOKED (ADR-0006/0032). Bound to the user's `sessionEpoch` at issuance: a password
-/// change, "sign out everywhere" or an admin reset kills it.
+/// SOFT DELETE = REVOKED (ADR-0006/0032). Bound to the user's `mcpCredentialEpoch` at issuance: a password
+/// change or reset, an admin reset, a deactivation or an offboarding kills it; a normal web logout does not
+/// (ADR-0097 decision 8, amended 2026-09-24).
 /// See docs/02-domain/entities/oauth-grant.md
 model OAuthGrant {
   id           String       @id @default(cuid())
@@ -3413,8 +3421,13 @@ model OAuthGrant {
   scopes       String[]
   /// The canonical MCP resource URI at issuance (RFC 8707).
   resource     String
-  /// Snapshot of User.sessionEpoch; a mismatch means the grant is dead (R7).
+  /// Snapshot of User.sessionEpoch at issuance. Informational only since 2026-09-24: liveness is decided by
+  /// `mcpCredentialEpoch`, so a web logout no longer kills the grant.
   sessionEpoch Int
+  /// Snapshot of User.mcpCredentialEpoch; a mismatch means the grant is dead (R7). Grants that predate the
+  /// column were set by the migration to 0 when alive (matching the user's new 0) and to -1 when already
+  /// dead (never matches: the counter only grows from 0).
+  mcpCredentialEpoch Int
   /// Personal tokens only — mandatory there.
   expiresAt    DateTime?
   lastUsedAt   DateTime?
