@@ -578,7 +578,8 @@
       "skipped": "Skipped",
       "declined": "Declined",
       "expired": "Expired",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "sent": "Sent"
     },
     "importance": {
       "required": "required",
@@ -642,6 +643,8 @@
       "forbidden": "You can't answer this form.",
       "notFound": "This form no longer exists.",
       "unknown": "Your answer could not be sent. Try again."
-    }
+    },
+    "sentNote": "Sent. Waiting for the assistant to continue…",
+    "expiredLocally": "The time to answer this form has passed. The assistant stops shortly; send a new message to continue."
   }
 }

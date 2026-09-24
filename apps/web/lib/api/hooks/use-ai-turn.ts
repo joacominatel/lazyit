@@ -25,6 +25,7 @@ import {
   type DecisionErrorKind,
 } from "@/lib/ai/error-kinds";
 import {
+  EXPIRY_RECHECK_MS,
   inputErrorKind,
   inputNeedsRefresh,
   type InputErrorKind,
@@ -483,6 +484,34 @@ export function useAiTurn() {
     [follow, queryClient],
   );
 
+  /**
+   * A form's time ran out in this browser. The stream is closed while the run waits, so nothing else
+   * would report that the server expired it: re-read the run (a fresh snapshot) once the API's sweeper has
+   * had time to end it, and again a couple of times if it still waits. Idempotent per wait.
+   */
+  const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputExpired = useCallback(() => {
+    if (expiryTimer.current !== null) return;
+    let attempts = 0;
+    const recheck = () => {
+      const run = stateRef.current.run;
+      if (!run || run.status !== "AWAITING_INPUT") {
+        expiryTimer.current = null;
+        return;
+      }
+      if (!followRef.current) void follow(run.id, null);
+      attempts += 1;
+      expiryTimer.current = attempts < 3 ? setTimeout(recheck, EXPIRY_RECHECK_MS) : null;
+    };
+    expiryTimer.current = setTimeout(recheck, EXPIRY_RECHECK_MS);
+  }, [follow]);
+  useEffect(
+    () => () => {
+      if (expiryTimer.current !== null) clearTimeout(expiryTimer.current);
+    },
+    [],
+  );
+
   /** Reconnects after "connection lost". */
   const reconnect = useCallback(() => {
     const run = stateRef.current.run;
@@ -517,6 +546,7 @@ export function useAiTurn() {
     stop,
     decide: decideCall,
     answerInput,
+    inputExpired,
     reconnect,
     dismissNotice,
   };

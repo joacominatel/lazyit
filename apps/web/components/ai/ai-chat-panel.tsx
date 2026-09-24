@@ -350,6 +350,7 @@ export function AiChatPanel() {
                 navigated={state.navigated}
                 onDecide={turn.decide}
                 onAnswerInput={turn.answerInput}
+                onInputExpired={turn.inputExpired}
               />
             ))}
 

@@ -10,6 +10,9 @@ import {
   hasNoOptions,
   initialDraft,
   inputErrorKind,
+  inputStage,
+  isInputExpired,
+  msUntilExpiry,
   inputNeedsRefresh,
   INPUT_ERROR_KINDS,
   localizeIssue,
@@ -203,5 +206,30 @@ describe("localizeIssue", () => {
     expect(localizeIssue("Not one of the offered options")).toEqual({ key: "notOffered" });
     expect(localizeIssue("Unknown group")).toEqual({ key: "unknown" });
     expect(localizeIssue("Something new")).toBeNull();
+  });
+});
+
+describe("client-side expiry and stage", () => {
+  const at = Date.parse("2026-09-24T10:30:00.000Z");
+
+  test("time left until expiresAt, 0 once past, null when unreadable", () => {
+    expect(msUntilExpiry("2026-09-24T10:30:00.000Z", at - 5000)).toBe(5000);
+    expect(msUntilExpiry("2026-09-24T10:30:00.000Z", at + 1)).toBe(0);
+    expect(msUntilExpiry("not a date", at)).toBeNull();
+    expect(msUntilExpiry("2099-01-01T00:00:00.000Z", at)).toBe(2_147_483_647);
+    expect(isInputExpired("2026-09-24T10:30:00.000Z", at)).toBe(true);
+    expect(isInputExpired("2026-09-24T10:30:00.000Z", at - 1)).toBe(false);
+    expect(isInputExpired("garbage", at)).toBe(false);
+  });
+
+  test("the server outcome wins; an accepted answer stays sent until it arrives; expiry closes the card", () => {
+    expect(inputStage(null, false, false, false)).toBe("pending");
+    expect(inputStage(null, true, false, false)).toBe("sending");
+    expect(inputStage(null, false, true, false)).toBe("sent");
+    // Sent just before the deadline: still sent, not expired.
+    expect(inputStage(null, false, true, true)).toBe("sent");
+    expect(inputStage(null, false, false, true)).toBe("expired");
+    expect(inputStage("submitted", false, true, true)).toBe("submitted");
+    expect(inputStage("expired", false, false, false)).toBe("expired");
   });
 });

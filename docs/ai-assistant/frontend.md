@@ -1149,6 +1149,15 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   no form with a 403 list reaches the chat) and validates a select against the **stored** options, so the
   card renders `field.options` and names the source ("Options from lazyit: locations"). A select that
   arrives with no options says so and leaves Continue without / Don't ask.
+  **Polish (#1388 follow-up).** After a successful POST the card keeps a local **Sent** state (every
+  control and action disabled, "Waiting for the assistant to continue…") until `input.resolved` or a
+  re-read reports the outcome, so it never looks answerable again in between. Past `expiresAt` the card
+  closes itself client-side (stamp **Expired**, actions disabled, no Go-to-form target) without waiting
+  for a 409; since the stream is closed while the run waits, the chat then re-reads the run
+  (`run.snapshot`) 35 s later — after the API's 30 s sweep — and up to twice more while it still reads
+  `AWAITING_INPUT`. The select and multiselect pickers carry `aria-describedby` (help and error text)
+  and `aria-required` on their triggers (additive optional props on `Combobox` and `EntityMultiSelect`),
+  and an inline option checkbox's id comes from the option's index, never its model-authored value.
 - **Retry** re-sends the last user message; **read-only** replaces the composer with "Start a new chat".
 - **Known limitation — the `action` sentence (G4 review item 6, tracked by the coordinator).** The
   preview's first row is written by the backend tool and can embed strings that came from the model's
