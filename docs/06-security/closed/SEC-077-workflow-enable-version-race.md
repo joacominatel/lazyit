@@ -2,7 +2,7 @@
 id: SEC-077
 title: Enabling a workflow or authoring a version takes no expected-version precondition — a version authored after a reviewer's look goes live unseen
 severity: low
-status: open
+status: fixed
 cwe: CWE-367
 discovered: 2026-09-24
 module: workflow-engine (definitions)
@@ -81,3 +81,40 @@ refuses with 409 on mismatch. Add a spec: enable with a stale `expectedVersion` 
 
 - CWE-367 (TOCTOU), CWE-362.
 - `docs/ai-assistant/security.md` "Enable race" · ADR-0054 · epic #1315, PR #1354.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `24ab4201` (`fix(api): honour expectedVersion on workflow update and baseVersion on authoring (#1315)`),
+with `8a9d6ace` (shared fields), `e8ba9351` (AI tools) and `631a1973` (web list toggle)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-24
+
+### Changes
+- `packages/shared`: optional `expectedVersion` (int ≥ 0) on `UpdateApplicationWorkflowSchema`,
+  optional `baseVersion` on `CreateWorkflowVersionSchema`. `0` means "no version authored yet".
+- `workflows.service.ts`: with `expectedVersion`, the header update runs in a transaction that takes
+  `SELECT … FOR UPDATE` on the `application_workflows` row, re-reads the latest version and throws 409 on
+  mismatch. `authorVersion` always takes the same row lock (so it serializes with a checked enable) and
+  409s on a stale `baseVersion`. Omitting either field keeps the previous behaviour.
+- AI `workflow_set_enabled` sends `expectedVersion`, `workflow_author_version` sends `baseVersion` (the
+  version read at run time, after the card's STALE check). The web workflow-list enable toggle sends
+  `expectedVersion` from the row's loaded detail.
+
+### Tests added
+- `workflows.service.spec.ts` › "SEC-077 version preconditions": stale `expectedVersion` → 409, no
+  write; current / `0` → write inside the tx; omitted → unconditioned write; stale `baseVersion` → 409,
+  no version; current / omitted → `latest + 1` under the lock. Fails without the fix (no 409).
+- `workflow-authoring.tools.spec.ts`: enabling through the AI takes the version-checked path.
+
+### Verification
+Charter validation block: shared / api / web / agent `tsc --noEmit` clean; api Jest 252 suites, 5328
+tests passed; `packages/shared` (1375) and `apps/web` (1074) `bun test` 0 fail; `apps/agent` has 2
+pre-existing failures that need `pwsh` (unrelated). Changed-file eslint (api, web) clean; manual parity OK.
+With the implementation files reverted to `origin/dev` and the new specs kept, 18 of the new tests fail.
+
+### Residual risk
+- The web **builder** does not send `baseVersion` / `expectedVersion`: it authors its own version on
+  every save (last writer wins, as before). Adding it needs the builder to track the loaded version
+  across re-saves — a follow-up if four-eyes review in the builder matters.
+- A new version on an already-enabled workflow still takes effect with no second review (by design).

@@ -2,7 +2,7 @@
 id: SEC-076
 title: Connection URLs accept userinfo (https://user:pass@host) — a plain-config credential outside the secret store and CSEC-1
 severity: low
-status: open
+status: fixed
 cwe: CWE-522
 discovered: 2026-09-24
 module: workflow-engine (connections) · shared
@@ -99,3 +99,43 @@ so the PR should say so and the Manual should tell operators to move them to a s
 
 - CWE-522, CWE-598 (credentials in a URL). RFC 3986 §3.2.1 (userinfo is deprecated for passwords).
 - `docs/ai-assistant/security.md` "Userinfo in URLs" · [[SEC-075-connection-default-headers-credential-unprotected|SEC-075]] · epic #1315, PR #1354.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `6dbbe24c` (`fix(api): refuse URL userinfo on connection write and at workflow egress (#1315)`),
+with `8a9d6ace` (shared helpers + create refine), `cfdbd6be` (read masking) and `e8ba9351` (AI pre-check)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-24
+
+### Changes
+- `packages/shared/src/schemas/workflow.ts`: `urlHasUserinfo` / `connectionConfigHasUserinfo` and a
+  write-side refine on `CreateWorkflowConnectionSchema`. The refine is on the **write** schemas rather
+  than on `publicHttpsUrl` itself: `publicHttpsUrl` feeds `WorkflowConnectionConfigSchema`, which is
+  also the run-time and dry-run parse of stored rows, and refining it would turn a legacy row into an
+  opaque "invalid connection config". This is the finding's `publicHttpsUrlRead` alternative.
+- `apps/api/.../workflow.dto.ts`: the connection PATCH DTO refuses userinfo too.
+- `apps/api/src/common/egress`: new opt-in `refuseUserinfo` option → `EgressError('userinfo-not-allowed')`,
+  carrying no URL. The REST (run + probe) and WEBHOOK_OUT handlers always set it (after the options
+  spread, so it cannot be overridden). Opt-in keeps the AI provider transport unchanged.
+- Reads mask the userinfo (`https://[redacted]@host`) on list/get and in the dry-run preview.
+
+### Tests added
+- `packages/shared/src/schemas/workflow.test.ts` › "SEC-076": `https://u:p@host` and `https://u@host`
+  refused on create for REST and WEBHOOK_OUT; the config union still parses a legacy row.
+- `apps/api/src/common/egress/egress-guard.userinfo.spec.ts`: refused with `userinfo-not-allowed`, no
+  URL in the error; admitted without userinfo; unchanged without the option.
+- `rest.handler.spec.ts` › "SEC-076 legacy userinfo": the step fails `egress-blocked` /
+  `egress guard: userinfo-not-allowed`, nothing is sent, and the password is not in the result.
+
+### Verification
+Charter validation block: shared / api / web / agent `tsc --noEmit` clean; api Jest 252 suites, 5328
+tests passed; `packages/shared` (1375) and `apps/web` (1074) `bun test` 0 fail; `apps/agent` has 2
+pre-existing failures that need `pwsh` (unrelated). Changed-file eslint (api, web) clean; manual parity OK.
+With the implementation files reverted to `origin/dev` and the new specs kept, 18 of the new tests fail.
+
+### Residual risk
+- Behaviour change for legacy rows (stated in the PR and the Manual): a connection whose URL carries
+  userinfo keeps loading but its runs and test probe now fail with `userinfo-not-allowed` until the
+  operator removes it and attaches a secret. Any edit of such a row must also drop the userinfo (write
+  validation). No row is migrated.
