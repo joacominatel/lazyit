@@ -52,9 +52,28 @@ export function redactConnectionConfig(config: unknown): unknown {
   return out;
 }
 
-/** A connection row with its `config` redacted (every other column untouched). */
-export function redactConnection<T extends { config: unknown }>(row: T): T {
-  return { ...row, config: redactConnectionConfig(row.config) };
+/** Whether a stored config's destination URL carries userinfo (a pre-SEC-076 legacy row). */
+export function configHasLegacyUserinfo(config: unknown): boolean {
+  if (!isRecord(config)) return false;
+  return (['baseUrl', 'url'] as const).some(
+    (key) => typeof config[key] === 'string' && urlHasUserinfo(config[key]),
+  );
+}
+
+/**
+ * A connection row with its `config` redacted (every other column untouched), plus the additive
+ * `legacyUserinfo` flag: `true` when the stored URL carries `user:pass@` (saved before SEC-076 refused
+ * it on write). Such a row keeps working at run time (upgrade-safe); the flag lets the UI warn the
+ * operator to move the credential into the secret store.
+ */
+export function redactConnection<T extends { config: unknown }>(
+  row: T,
+): T & { legacyUserinfo: boolean } {
+  return {
+    ...row,
+    config: redactConnectionConfig(row.config),
+    legacyUserinfo: configHasLegacyUserinfo(row.config),
+  };
 }
 
 /**

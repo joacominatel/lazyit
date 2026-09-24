@@ -5,6 +5,7 @@ jest.mock('../../../generated/prisma/client', () => ({
 
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { WorkflowConnectionsService } from './workflow-connections.service';
+import { UpdateWorkflowConnectionApiSchema } from './workflow.dto';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { Principal } from '../../auth/principal';
@@ -367,6 +368,8 @@ describe('WorkflowConnectionsService — SEC-075 default headers', () => {
     });
     expect(JSON.stringify(one)).not.toContain('sk_live');
     expect(JSON.stringify(one)).not.toContain('hunter2');
+    // SEC-076: the legacy row is flagged (additive) so the UI can warn; it is not rewritten.
+    expect(one.legacyUserinfo).toBe(true);
 
     const prisma = h.workflowConnection as unknown as {
       findMany: jest.Mock;
@@ -385,5 +388,31 @@ describe('WorkflowConnectionsService — SEC-075 default headers', () => {
     } as never);
     expect(JSON.stringify(page)).not.toContain('sk_live');
     expect(JSON.stringify(page)).not.toContain('hunter2');
+  });
+});
+
+describe('SEC-076 — userinfo is refused on edit (write-only), a clean row is not flagged', () => {
+  it('the PATCH DTO refuses a config whose URL carries userinfo', () => {
+    expect(
+      UpdateWorkflowConnectionApiSchema.safeParse({
+        config: REST('https://u:p@jira.example.com'),
+      }).success,
+    ).toBe(false);
+    expect(
+      UpdateWorkflowConnectionApiSchema.safeParse({
+        config: REST('https://jira.example.com'),
+      }).success,
+    ).toBe(true);
+    // A rename alone never trips the check.
+    expect(
+      UpdateWorkflowConnectionApiSchema.safeParse({ name: 'x' }).success,
+    ).toBe(true);
+  });
+
+  it('a connection without userinfo reads legacyUserinfo: false', async () => {
+    const h = build();
+    h.workflowConnection.findFirst.mockResolvedValue(noSecret);
+    const one = await h.service.findOne('c1');
+    expect(one.legacyUserinfo).toBe(false);
   });
 });

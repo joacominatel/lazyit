@@ -282,8 +282,8 @@ export type WorkflowConnectionConfig = z.infer<
  * Whether a connection config's destination URL (REST `baseUrl` / WEBHOOK_OUT `url`) carries userinfo
  * (SEC-076). Enforced on WRITE only — {@link CreateWorkflowConnectionSchema} and the api's connection
  * PATCH refuse it — while {@link WorkflowConnectionConfigSchema} stays tolerant, because it is also the
- * read / run-time parse of stored rows: a legacy row with userinfo still reads and parses, and the
- * egress guard refuses to send it at call time with a clear `userinfo-not-allowed` reason.
+ * read / run-time parse of stored rows: a legacy row with userinfo still reads, parses and RUNS
+ * (upgrade-safe); its read is masked and flagged `legacyUserinfo: true` so the UI can warn.
  */
 export function connectionConfigHasUserinfo(
   config: WorkflowConnectionConfig,
@@ -758,6 +758,10 @@ export const WorkflowConnectionSchema = z.object({
   config: WorkflowConnectionConfigSchema,
   // Whether a credential is configured (the redacted secret descriptor — NEVER the secret itself).
   secretId: z.cuid().nullable(),
+  // SEC-076: `true` when the stored destination URL carries `user:pass@` (a row saved before write
+  // validation refused it). It still runs; the UI warns to move the credential into a secret. Additive
+  // and optional on read, so an older API response without it still parses.
+  legacyUserinfo: z.boolean().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
