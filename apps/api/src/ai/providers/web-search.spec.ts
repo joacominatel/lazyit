@@ -121,10 +121,14 @@ describe('webSearchToolFor — the tool is declared only when carried and suppor
     });
   });
 
-  it('OpenAI: the Responses web_search tool', () => {
+  it('OpenAI: the Responses web_search tool, offline (no live fetch: open_page cannot be disabled)', () => {
     expect(
       webSearchToolFor(openaiProvider, 'gpt-6-sol', request)?.tool,
-    ).toMatchObject({ type: 'provider', id: 'openai.web_search' });
+    ).toMatchObject({
+      type: 'provider',
+      id: 'openai.web_search',
+      args: { externalWebAccess: false },
+    });
   });
 
   it('Google: google_search grounding on Gemini 3, never on an older Gemini', () => {
