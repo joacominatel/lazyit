@@ -65,10 +65,35 @@ podés escribir el comando completo, como `/copy`, y presionar **Enter**.
 | `/copy` | Copia toda la conversación al portapapeles como Markdown — tus mensajes, las respuestas, los pasos y las tarjetas de cambio. |
 | `/new` | Empieza un chat nuevo. |
 | `/help` | Muestra los comandos y los atajos de teclado dentro del chat. |
+| `/model` | Abre el selector de modelo. `/model <id>` fija el modelo directamente — por ejemplo `/model gpt-4o-mini`. Solo antes del primer mensaje del chat. |
+| `/auto on` · `/auto off` | Activa o desactiva la [aprobación automática](/help/ai-assistant-approvals) en este chat. `/auto` solo la alterna. |
 
 Los comandos se ejecutan en tu navegador: nunca se envían al asistente ni al proveedor de IA. Si tu mensaje
 solo empieza con una barra pero no es un comando (por ejemplo, una ruta de archivo), se envía como un
-mensaje normal.
+mensaje normal — y lo mismo pasa con un comando seguido de palabras que no entiende, como `/auto quizás`.
+
+### Elegir el modelo
+
+Cada chat puede usar su propio modelo. Elegí el botón de **ajustes** a la derecha, debajo del cuadro de
+mensaje — muestra el modelo que usa el chat — para abrir los ajustes del chat:
+
+- **Modelo** — los modelos que ofrece tu proveedor de IA y el **Modelo predeterminado** que eligió tu
+  administrador. Para usar un modelo que no está en la lista (por ejemplo, un despliegue propio), escribí
+  su id en el buscador y elegí **Usar "‹id›"**. Si el proveedor no devuelve su lista, igual podés escribir
+  un id o dejar el predeterminado.
+- **Esfuerzo de razonamiento** — *Bajo*, *Medio* o *Alto*, cuando tu proveedor lo admite. Más esfuerzo
+  piensa más y usa más tokens. **Predeterminado** usa el ajuste de tu administrador.
+- **Temperatura** — de 0 a 2, solo para los proveedores que la aceptan (un servidor propio compatible con
+  OpenAI). Dejala vacía para usar la predeterminada.
+- **Aprobar automáticamente los cambios básicos** — mirá
+  [Aprobación automática](/help/ai-assistant-approvals).
+
+Elegí todo esto **antes de tu primer mensaje**. Una vez que el chat empezó, el modelo, el esfuerzo y la
+temperatura quedan fijos para ese chat — el botón muestra un **candado** — y para usar otro tenés que
+empezar un chat nuevo. La aprobación automática se puede cambiar en cualquier momento.
+
+Si el proveedor no sirve el modelo que escribiste, el chat te lo dice cuando mandás el primer mensaje;
+empezá un chat nuevo y elegí otro.
 
 ### La página actual
 
@@ -82,6 +107,10 @@ que hay en pantalla. Elegí la **×** del chip para no incluirlo en tu próximo 
 El asistente nunca cambia nada por su cuenta. Cuando quiere crear, editar, asignar, archivar u otorgar algo,
 muestra una **tarjeta** que describe exactamente qué va a pasar y espera que lo **Apruebes** o lo
 **Rechaces**. Mirá [Aprobar cambios](/help/ai-assistant-approvals).
+
+Si activás la **aprobación automática** en un chat, los cambios básicos se aplican sin tarjeta y aparecen
+como **Aplicado automáticamente**; todo lo crítico sigue esperándote. Una etiqueta **Auto** arriba del chat
+te recuerda que está activada.
 
 Cuando aprobás, el cambio se hace con tu cuenta, como cualquier otro cambio tuyo, y la página que tenés
 abierta se actualiza sola — un activo nuevo aparece en la lista que estás mirando.
@@ -111,8 +140,10 @@ el historial lo indica.
 
 ### Chats de solo lectura
 
-Un chat pasa a ser de **solo lectura** cuando tu administrador cambia el proveedor o el modelo de IA, o cuando
-la conversación se vuelve demasiado larga para que la IA la siga. Podés seguir leyéndolo; elegí **Empezar un
+Un chat pasa a ser de **solo lectura** cuando tu administrador cambia el proveedor de IA, cuando cambia el
+modelo predeterminado y el chat usaba el predeterminado, o cuando la conversación se vuelve demasiado larga
+para que la IA la siga. Un chat en el que elegiste el modelo vos sigue funcionando si solo cambia el
+predeterminado. Podés seguir leyéndolo; elegí **Empezar un
 nuevo chat** para continuar.
 
 ## Cuando algo sale mal

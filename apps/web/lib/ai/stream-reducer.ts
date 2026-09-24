@@ -1,4 +1,5 @@
 import type {
+  AiActionPreview,
   AiApprovalRequest,
   AiConversationDetail,
   AiConversationState,
@@ -121,6 +122,22 @@ function appendPart(messages: ChatMessage[], runId: string, part: AiMessagePart)
   const [next, index] = lastAssistant(messages, runId);
   const message = next[index]!;
   return withMessage(next, index, { ...message, parts: [...message.parts, part] });
+}
+
+/**
+ * The approval request an automatically approved write stands for: only its server-built preview is
+ * known. It never waited, so it has no expiry of its own (the epoch stands in; the auto record never
+ * shows it) and no untrusted source (a write after an untrusted read is never auto-approved).
+ */
+function autoRequest(toolCallId: string, preview: AiActionPreview): AiApprovalRequest {
+  return {
+    toolCallId,
+    preview,
+    elevated: preview.elevated,
+    stepUpRequired: preview.stepUpRequired,
+    untrustedSources: [],
+    expiresAt: new Date(0).toISOString(),
+  };
 }
 
 function approvalPart(request: AiApprovalRequest): ApprovalPart {
@@ -266,12 +283,26 @@ function applyEvent(state: ChatState, runId: string, event: AiRunEvent): ChatSta
       return { ...state, messages: upsertApproval(state.messages, runId, request) };
     }
     case "tool.approval_resolved": {
+      const auto = event.auto === true;
       const messages = updatePart(
         state.messages,
         (p) => p.type === "approval" && p.request.toolCallId === event.toolCallId,
-        (p) => ({ ...(p as ApprovalPart), outcome: event.decision }),
+        (p) => ({ ...(p as ApprovalPart), outcome: event.decision, ...(auto ? { auto: true } : {}) }),
       );
-      return messages ? { ...state, messages } : state;
+      if (messages) return { ...state, messages };
+      // Auto-approve mode (#1376): no card was ever shown, so the event brings the checked preview and
+      // the chat adds an "applied automatically" record after the call's tool line.
+      if (auto && event.preview) {
+        const request = autoRequest(event.toolCallId, event.preview);
+        const inserted = upsertApproval(state.messages, runId, request);
+        const marked = updatePart(
+          inserted,
+          (p) => p.type === "approval" && p.request.toolCallId === event.toolCallId,
+          (p) => ({ ...(p as ApprovalPart), outcome: event.decision, auto: true }),
+        );
+        return { ...state, messages: marked ?? inserted };
+      }
+      return state;
     }
     case "tool.result": {
       const { v: _v, type: _type, ...result } = event;

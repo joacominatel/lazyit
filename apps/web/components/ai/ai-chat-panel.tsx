@@ -3,17 +3,34 @@
 import type { AiMessagePart } from "@lazyit/shared";
 import { ArrowLeftIcon, ClockIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api/client";
+import {
+  hasAutoApproveConsent,
+  rememberAutoApproveConsent,
+  settingsErrorKey,
+  settingsPatch,
+  shortModelName,
+  viewOfDraft,
+  viewOfSettings,
+  type ChatSettingsDraft,
+} from "@/lib/ai/chat-settings";
 import { presentPreview } from "@/lib/ai/preview";
 import { BUILTIN_SLASH_COMMANDS, type SlashCommand, type SlashCommandContext } from "@/lib/ai/slash-commands";
 import { isAwaitingApproval, isRunActive, type ChatMessage } from "@/lib/ai/stream-reducer";
 import { conversationToMarkdown } from "@/lib/ai/transcript-markdown";
+import { aiConversationKeys, useUpdateAiConversation } from "@/lib/api/hooks/use-ai-conversations";
+import { useAiModels } from "@/lib/api/hooks/use-ai-models";
+import { aiKeys } from "@/lib/api/hooks/use-ai-status";
 import { useAiTurn } from "@/lib/api/hooks/use-ai-turn";
+import { AiAutoApproveConsent } from "./ai-auto-approve-consent";
 import { AiChatHelp } from "./ai-chat-help";
+import { AiChatSettings } from "./ai-chat-settings";
 import { AiComposer } from "./ai-composer";
 import { AiConversationHistory } from "./ai-conversation-history";
 import { useToolDisplayName } from "./ai-labels";
@@ -48,6 +65,15 @@ function pendingAction(
   return null;
 }
 
+/** `window.localStorage`, or undefined where reading it throws (blocked site data, some private modes). */
+function browserStorage(): Storage | undefined {
+  try {
+    return typeof window === "undefined" ? undefined : window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Writes text to the clipboard; false when the browser refuses (insecure context, denied permission). */
 async function writeClipboard(text: string): Promise<boolean> {
   try {
@@ -73,6 +99,72 @@ export function AiChatPanel() {
   const [view, setView] = useState<"chat" | "history">("chat");
   const [helpOpen, setHelpOpen] = useState(false);
   const logRef = useRef<HTMLDivElement | null>(null);
+  const queryClient = useQueryClient();
+  const catalogQuery = useAiModels();
+  const catalog = catalogQuery.data;
+  const updateSettings = useUpdateAiConversation();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [consentOpen, setConsentOpen] = useState(false);
+
+  // The chat's settings (#1373, #1376): the server's for a created chat, the local draft for a new one.
+  // A chat with messages has a run, so its model is pinned even if the copy of its settings is older.
+  const started = state.messages.length > 0 || state.run !== null;
+  const settingsView = turn.settings
+    ? viewOfSettings(turn.settings, { started })
+    : { ...viewOfDraft(turn.draft, catalog), locked: turn.conversationId !== null && started };
+
+  /** Applies a settings change: to the draft of a new chat, else with PATCH. False when refused. */
+  async function applySettings(change: Partial<ChatSettingsDraft>): Promise<boolean> {
+    const id = turn.conversationId;
+    if (id === null) {
+      turn.setDraft((draft) => ({ ...draft, ...change }));
+      return true;
+    }
+    const patch = settingsPatch(settingsView, change, catalog?.defaultModel ?? null);
+    if (patch === null) return true;
+    try {
+      await updateSettings.mutateAsync({ id, patch });
+      return true;
+    } catch (error) {
+      const key = settingsErrorKey(error);
+      toast.error(t(`settings.errors.${key}`));
+      if (key === "aiDisabled") void queryClient.invalidateQueries({ queryKey: aiKeys.status() });
+      if (key === "readOnly") void queryClient.invalidateQueries({ queryKey: aiConversationKeys.detail(id) });
+      return false;
+    }
+  }
+
+  async function setAutoApprove(on: boolean) {
+    if (await applySettings({ autoApprove: on })) {
+      toast(on ? t("settings.auto.turnedOn") : t("settings.auto.turnedOff"));
+    }
+  }
+
+  /** The switch or `/auto`: turning it on asks for consent the first time in this browser. */
+  function requestAutoApprove(on: boolean) {
+    if (on === settingsView.autoApprove) {
+      toast(on ? t("settings.auto.alreadyOn") : t("settings.auto.alreadyOff"));
+      return;
+    }
+    if (on && !hasAutoApproveConsent(browserStorage())) {
+      setSettingsOpen(false);
+      setConsentOpen(true);
+      return;
+    }
+    void setAutoApprove(on);
+  }
+
+  async function chooseModel(id: string | null) {
+    if (id === null) {
+      setSettingsOpen(true);
+      return;
+    }
+    if (settingsView.locked) {
+      toast.error(t("settings.errors.locked"));
+      return;
+    }
+    if (await applySettings({ model: id })) toast(t("settings.model.set", { model: shortModelName(id) }));
+  }
 
   function startNewChat() {
     turn.newChat();
@@ -93,8 +185,11 @@ export function AiChatPanel() {
     },
     newChat: startNewChat,
     showHelp: () => setHelpOpen(true),
+    chooseModel: (id) => void chooseModel(id),
+    setAutoApprove: (on) => requestAutoApprove(on ?? !settingsView.autoApprove),
   };
-  const runCommand = (command: SlashCommand) => void command.run(commandContext);
+  const runCommand = (command: SlashCommand, argument: string | null) =>
+    void command.run(commandContext, argument);
 
   const tools = useMemo(() => {
     const map = new Map<string, ToolPart>();
@@ -141,11 +236,17 @@ export function AiChatPanel() {
             {t("panel.history")}
           </Button>
         )}
+        {settingsView.autoApprove && (
+          <StatusBadge tone="warning" className="ml-auto" title={t("settings.auto.badgeTitle")}>
+            {t("settings.auto.badge")}
+            <span className="sr-only">: {t("settings.auto.badgeTitle")}</span>
+          </StatusBadge>
+        )}
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="ml-auto"
+          className={settingsView.autoApprove ? undefined : "ml-auto"}
           onClick={startNewChat}
         >
           <PlusIcon />
@@ -273,8 +374,30 @@ export function AiChatPanel() {
               onStop={() => void turn.stop()}
               commands={BUILTIN_SLASH_COMMANDS}
               onCommand={runCommand}
+              autoApprove={settingsView.autoApprove}
+              toolbar={
+                <AiChatSettings
+                  catalog={catalog}
+                  catalogLoading={catalogQuery.isPending}
+                  view={settingsView}
+                  saving={updateSettings.isPending}
+                  open={settingsOpen}
+                  onOpenChange={setSettingsOpen}
+                  onChange={(change) => void applySettings(change)}
+                  onAutoApproveChange={requestAutoApprove}
+                />
+              }
             />
           )}
+          <AiAutoApproveConsent
+            open={consentOpen}
+            onCancel={() => setConsentOpen(false)}
+            onConfirm={() => {
+              rememberAutoApproveConsent(browserStorage());
+              setConsentOpen(false);
+              void setAutoApprove(true);
+            }}
+          />
         </>
       )}
     </div>

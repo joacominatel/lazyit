@@ -37,7 +37,10 @@ export function AiChatHelp<C>({
       <dl className="mt-2 space-y-1">
         {commands.map((command) => (
           <div key={command.name} className="grid grid-cols-[minmax(0,1fr)_minmax(0,3fr)] gap-2">
-            <dt className="font-mono text-muted-foreground">/{command.name}</dt>
+            <dt className="font-mono text-muted-foreground">
+              /{command.name}
+              {command.argument && <span className="opacity-70"> {command.argument.hint}</span>}
+            </dt>
             <dd>
               <span className="font-medium">{t(`${command.name}.label`)}</span>
               <span className="text-muted-foreground"> — {t(`${command.name}.description`)}</span>

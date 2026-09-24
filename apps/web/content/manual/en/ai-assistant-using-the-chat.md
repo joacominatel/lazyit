@@ -62,9 +62,33 @@ command in full, like `/copy`, and press **Enter**.
 | `/copy` | Copies the whole conversation to the clipboard as Markdown — your messages, the answers, the steps and the change cards. |
 | `/new` | Starts a new chat. |
 | `/help` | Shows the commands and keyboard shortcuts inside the chat. |
+| `/model` | Opens the model picker. `/model <id>` sets the model directly — for example `/model gpt-4o-mini`. Only before the chat's first message. |
+| `/auto on` · `/auto off` | Turns [auto-approve](/help/ai-assistant-approvals) on or off for this chat. `/auto` alone switches it. |
 
 Commands run in your browser: they are never sent to the assistant or the AI provider. If your message just
-starts with a slash but isn't a command (say, a file path), it is sent as a normal message.
+starts with a slash but isn't a command (say, a file path), it is sent as a normal message — and so is a
+command followed by words it doesn't understand, like `/auto maybe`.
+
+### Choose the model
+
+Each chat can use its own model. Select the **settings** button on the right under the message box — it
+shows the model the chat uses — to open the chat settings:
+
+- **Model** — the models your AI provider offers, and the **Default model** your administrator chose. To
+  use a model that isn't listed (a custom deployment, say), type its id in the search box and select
+  **Use "‹id›"**. If the provider doesn't return its list, you can still type an id or keep the default.
+- **Reasoning effort** — *Low*, *Medium* or *High*, when your provider supports it. Higher effort thinks
+  longer and uses more tokens. **Default** uses your administrator's setting.
+- **Temperature** — from 0 to 2, only for providers that take it (a self-hosted, OpenAI-compatible
+  server). Leave it empty for the default.
+- **Auto-approve basic changes** — see [Auto-approve](/help/ai-assistant-approvals).
+
+Choose these **before your first message**. Once the chat has started, the model, effort and temperature
+are fixed for that chat — the button shows a **lock** — and you start a new chat to use a different one.
+Auto-approve can be switched at any time.
+
+If the provider doesn't serve the model you typed, the chat tells you when you send the first message;
+start a new chat and pick another.
 
 ### The current page
 
@@ -78,6 +102,10 @@ chip to leave it out of your next message.
 The assistant never changes anything on its own. When it wants to create, edit, assign, archive or grant
 something, it shows a **card** describing exactly what will happen, and waits for you to **Approve** or
 **Reject** it. See [Approving changes](/help/ai-assistant-approvals).
+
+If you turn on **auto-approve** in a chat, basic changes are applied without a card and show as
+**Applied automatically**; anything critical still waits for you. An **Auto** tag at the top of the chat
+reminds you it is on.
 
 After you approve, the change is made with your account, like any other change you make, and the page you
 have open refreshes by itself — a new asset appears in the list you're looking at.
@@ -105,8 +133,9 @@ Chats are also deleted automatically after the number of days your administrator
 
 ### Read-only chats
 
-A chat becomes **read-only** when your administrator changes the AI provider or model, or when the
-conversation grows too long for the AI to follow. You can still read it; select **Start a new chat** to go on.
+A chat becomes **read-only** when your administrator changes the AI provider, when they change the default
+model and the chat was using the default, or when the conversation grows too long for the AI to follow. A
+chat where you chose the model yourself keeps working when only the default changes. You can still read it; select **Start a new chat** to go on.
 
 ## When something goes wrong
 

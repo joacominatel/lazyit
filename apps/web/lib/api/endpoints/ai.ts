@@ -2,11 +2,15 @@ import type {
   AiApprovalDecision,
   AiConversationCreated,
   AiConversationDetail,
+  AiConversationSettings,
   AiConversationSummary,
+  AiModelCatalog,
   AiRunAccepted,
   AiStatus,
+  CreateAiConversation,
   Page,
   SendAiMessage,
+  UpdateAiConversation,
 } from "@lazyit/shared";
 import type { SseMessage } from "../../ai/sse-parser";
 import { apiFetch, apiFetchStream } from "../client";
@@ -46,9 +50,39 @@ export function getAiConversation(id: string): Promise<AiConversationDetail> {
   return apiFetch<AiConversationDetail>(`${BASE}/conversations/${enc(id)}`);
 }
 
-/** Starts a conversation (409 `AI_DISABLED` while the assistant is off). */
-export function createAiConversation(): Promise<AiConversationCreated> {
-  return apiFetch<AiConversationCreated>(`${BASE}/conversations`, { method: "POST" });
+/**
+ * Starts a conversation (409 `AI_DISABLED` while the assistant is off). The optional body carries the
+ * chat's own model, effort, provider options and auto-approve (#1373, #1376); without one it is the
+ * instance defaults with auto-approve off. 400 `EFFORT_UNSUPPORTED` / `PROVIDER_OPTIONS_UNSUPPORTED`.
+ */
+export function createAiConversation(body?: CreateAiConversation): Promise<AiConversationCreated> {
+  return apiFetch<AiConversationCreated>(`${BASE}/conversations`, {
+    method: "POST",
+    ...(body ? { body } : {}),
+  });
+}
+
+/**
+ * Changes a conversation's settings (owner only). The model fields only until its first run (409
+ * `CONVERSATION_SETTINGS_LOCKED` afterwards); auto-approve at any time. See `settingsErrorKey`.
+ */
+export function updateAiConversation(
+  id: string,
+  body: UpdateAiConversation,
+): Promise<AiConversationSettings> {
+  return apiFetch<AiConversationSettings>(`${BASE}/conversations/${enc(id)}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+/**
+ * What the chat's model picker offers (`GET /ai/models`, `ai:use`): the configured provider's models, the
+ * admin's defaults and which knobs the provider takes. `listed: false` when the provider could not be
+ * listed — free text stays allowed. 409 `AI_DISABLED` while the assistant is off.
+ */
+export function getAiModels(): Promise<AiModelCatalog> {
+  return apiFetch<AiModelCatalog>(`${BASE}/models`);
 }
 
 /** Hard-deletes the transcript; the action ledger survives. 409 `RUN_IN_PROGRESS` while a run is active. */

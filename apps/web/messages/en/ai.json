@@ -53,7 +53,8 @@
     "hint": "Type / for commands. Don't paste passwords or secrets. Every change needs your approval.",
     "busyApproval": "Approve or reject the pending change to continue.",
     "readOnlyTitle": "This chat is read-only",
-    "readOnlyBody": "It was started with an earlier AI configuration, or it grew too long. Start a new chat to continue."
+    "readOnlyBody": "It was started with an earlier AI configuration, or it grew too long. Start a new chat to continue.",
+    "hintAuto": "Type / for commands. Don't paste passwords or secrets. Auto-approve is on: basic changes apply without asking."
   },
   "context": {
     "label": "About: {page}",
@@ -173,6 +174,10 @@
       "forbidden": "You're no longer allowed to make this change.",
       "notFound": "This proposal no longer exists.",
       "unknown": "The decision could not be sent. Try again."
+    },
+    "auto": {
+      "title": "Applied automatically",
+      "note": "Auto-approve is on in this chat. The change is recorded like any other, under your name."
     }
   },
   "effects": {
@@ -268,7 +273,15 @@
       "slash": "/ at the start of the message — commands",
       "close": "Esc — close the assistant"
     },
-    "helpManual": "Read the Manual page"
+    "helpManual": "Read the Manual page",
+    "model": {
+      "label": "Choose the model",
+      "description": "Open the model picker, or set it: /model <id>. Only before the first message."
+    },
+    "auto": {
+      "label": "Auto-approve",
+      "description": "Turn auto-approve on or off for this chat: /auto on, /auto off."
+    }
   },
   "toolNames": {
     "lazyit_search": "Search lazyit",
@@ -435,5 +448,75 @@
   "fieldPrefixes": {
     "input": "Input: {name}",
     "specs": "Attribute: {name}"
+  },
+  "settings": {
+    "title": "Chat settings",
+    "open": "Chat settings — model: {model}",
+    "model": {
+      "label": "Model",
+      "default": "Default model",
+      "defaultShort": "default",
+      "search": "Search or type a model id",
+      "listed": "Available models",
+      "customHeading": "Custom model",
+      "useCustom": "Use “{id}”",
+      "invalid": "Not a valid model id. Use letters, digits and . _ - : / @ only.",
+      "hint": "Pick one, or type the id of a model your provider serves.",
+      "loading": "Loading the provider's models…",
+      "unavailable": "The model list isn't available right now. You can still type a model id.",
+      "notListed": "The provider didn't return its models. Type a model id, or keep the default.",
+      "locked": "The model is fixed once the chat has started. Start a new chat to use a different one.",
+      "lockedTitle": "Chat settings — the model is fixed for this chat",
+      "set": "Model set to {model}."
+    },
+    "effort": {
+      "label": "Reasoning effort",
+      "default": "Default",
+      "defaultIs": "Default ({level})",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "description": "Higher effort thinks longer before answering and uses more tokens."
+    },
+    "temperature": {
+      "label": "Temperature",
+      "placeholder": "Default",
+      "description": "From 0 to 2. Lower is more predictable. Empty uses the default.",
+      "invalid": "Enter a number from 0 to 2, or leave it empty."
+    },
+    "auto": {
+      "label": "Auto-approve basic changes",
+      "description": "Basic edits apply without a card. Anything critical still asks for your approval.",
+      "badge": "Auto",
+      "badgeTitle": "Auto-approve is on: basic changes apply without asking",
+      "turnedOn": "Auto-approve is on for this chat.",
+      "turnedOff": "Auto-approve is off. Every change asks for your approval again.",
+      "alreadyOn": "Auto-approve is already on.",
+      "alreadyOff": "Auto-approve is already off."
+    },
+    "consent": {
+      "title": "Turn on auto-approve for this chat?",
+      "intro": "The assistant will make basic changes without showing you a card first.",
+      "points": {
+        "basic": "Basic edits — creating or updating assets, articles, consumables and similar — are applied right away, with your account and your permissions.",
+        "critical": "Anything critical still asks: roles, identity and sign-in, access grants, credentials, applications marked critical, and other sensitive changes.",
+        "othersContent": "A change proposed after the assistant read content written by other people also still asks.",
+        "logged": "Every change is recorded, under your name, as applied automatically.",
+        "off": "It stays on only in this chat. Turn it off at any time with the switch or /auto off."
+      },
+      "manual": "How auto-approve works",
+      "cancel": "Cancel",
+      "confirm": "Turn on"
+    },
+    "errors": {
+      "locked": "The model can't change once the chat has started. Start a new chat to use a different one.",
+      "readOnly": "This chat is read-only, so its settings can't change.",
+      "aiDisabled": "The AI assistant was turned off.",
+      "effortUnsupported": "This AI provider doesn't support a reasoning effort.",
+      "optionsUnsupported": "This AI provider doesn't support that option.",
+      "invalidModel": "That model id isn't valid.",
+      "notFound": "This chat no longer exists.",
+      "generic": "The chat settings could not be saved. Try again."
+    }
   }
 }

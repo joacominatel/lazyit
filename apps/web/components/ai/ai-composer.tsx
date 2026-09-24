@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { routeContext } from "@/lib/ai/route-context";
 import {
-  exactSlashCommand,
   filterSlashCommands,
+  matchSlashCommand,
   moveHighlight,
   slashQuery,
   type SlashCommand,
@@ -26,7 +26,8 @@ import { useEntityTypeLabel } from "./ai-labels";
  *
  * Slash commands (issue #1372): a `/` at the very start opens the command palette over the box, filtered
  * as you type; ↑/↓ move, Enter or Tab runs the highlighted command, Esc closes the palette. A message
- * that is exactly a command (`/copy`) runs it too. A command is run in the browser and NEVER sent to the
+ * that is exactly a command (`/copy`), or a command with an argument it understands (`/model gpt-4o`,
+ * `/auto on`), runs it too. A command is run in the browser and NEVER sent to the
  * model. `commands` is the registry (`lib/ai/slash-commands.ts`); `toolbar` is a slot beside the hint for
  * per-chat controls (e.g. a model picker).
  */
@@ -40,6 +41,7 @@ export function AiComposer<C>({
   commands = [],
   onCommand,
   toolbar,
+  autoApprove = false,
 }: {
   /** A send is in flight. */
   busy: boolean;
@@ -52,10 +54,12 @@ export function AiComposer<C>({
   onStop: () => void;
   /** The slash commands the palette offers. */
   commands?: readonly SlashCommand<C>[];
-  /** Runs a picked command (the composer clears itself first). */
-  onCommand?: (command: SlashCommand<C>) => void;
+  /** Runs a picked command with its argument, if typed (the composer clears itself first). */
+  onCommand?: (command: SlashCommand<C>, argument: string | null) => void;
   /** Controls shown on the hint row, e.g. chat settings. */
   toolbar?: ReactNode;
+  /** Auto-approve is on in this chat: the hint says basic changes apply without asking. */
+  autoApprove?: boolean;
 }) {
   const t = useTranslations("ai.composer");
   const tCommands = useTranslations("ai.commands");
@@ -82,18 +86,18 @@ export function AiComposer<C>({
     : [];
   const active = matches.length === 0 ? -1 : Math.min(highlight, matches.length - 1);
 
-  function runCommand(command: SlashCommand<C>) {
+  function runCommand(command: SlashCommand<C>, argument: string | null = null) {
     setText("");
     setHighlight(0);
     setDismissedFor(null);
-    onCommand?.(command);
+    onCommand?.(command, argument);
   }
 
   async function submit() {
     // A message that names a command exactly runs it: a command never reaches the model.
-    const command = onCommand ? exactSlashCommand(commands, trimmed) : null;
-    if (command) {
-      runCommand(command);
+    const matched = onCommand ? matchSlashCommand(commands, trimmed) : null;
+    if (matched) {
+      runCommand(matched.command, matched.argument);
       return;
     }
     if (disabled || trimmed.length === 0) return;
@@ -174,7 +178,7 @@ export function AiComposer<C>({
           listId={listId}
           commands={matches}
           highlighted={active}
-          onPick={runCommand}
+          onPick={(command) => runCommand(command)}
           onHighlight={setHighlight}
         />
       )}
@@ -226,7 +230,7 @@ export function AiComposer<C>({
       </div>
       <div className="mt-1.5 flex items-start gap-2">
         <p id={hintId} className="min-w-0 flex-1 text-xs text-muted-foreground">
-          {blockedByApproval ? t("busyApproval") : t("hint")}
+          {blockedByApproval ? t("busyApproval") : autoApprove ? t("hintAuto") : t("hint")}
         </p>
         {toolbar && <div className="flex shrink-0 items-center gap-1">{toolbar}</div>}
       </div>

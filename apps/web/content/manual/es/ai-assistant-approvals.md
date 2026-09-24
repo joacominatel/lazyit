@@ -8,8 +8,9 @@ subcategory: approvals
 # Aprobar cambios
 
 Cada cambio que el asistente quiere hacer — crear, editar, asignar, archivar, otorgar o revocar accesos —
-espera por vos. Aparece en el chat como una **tarjeta**, y no pasa nada hasta que elegís **Aprobar**. Esta
-página explica cómo leer una tarjeta y qué pasa cuando decidís.
+espera por vos. Aparece en el chat como una **tarjeta**, y no pasa nada hasta que elegís **Aprobar**, salvo
+que hayas activado la aprobación automática de cambios básicos en ese chat (ver más abajo). Esta página
+explica cómo leer una tarjeta y qué pasa cuando decidís.
 
 ## Leer una tarjeta
 
@@ -89,6 +90,38 @@ Otras cosas que podés ver:
 | Esta propuesta venció | Pasó demasiado tiempo. Pedila de nuevo si todavía querés el cambio. |
 | Este cambio ya se decidió | Vos (u otra ventana tuya) ya lo aprobaste o rechazaste. |
 | Se desactivó el asistente de IA | Un administrador desactivó el asistente; el cambio no se puede aprobar desde el chat. |
+
+## Aprobación automática
+
+Si confiás en el asistente para trabajo de rutina en un chat, podés dejar que aplique los **cambios
+básicos** sin tarjeta. Activala en los ajustes del chat (el botón debajo del cuadro de mensaje) con
+**Aprobar automáticamente los cambios básicos**, o escribí `/auto on`. La primera vez, lazyit te explica qué
+hace y te pide que confirmes.
+
+Mientras está activada:
+
+- **Las ediciones básicas se aplican en el momento** — crear o actualizar un activo, un artículo, un
+  consumible y similares. Se hacen con tu cuenta y tus permisos, igual que si las hubieras aprobado, y
+  aparecen en el chat como un registro compacto **Aplicado automáticamente** con el elemento, un enlace a él
+  y los valores antes → después.
+- **Todo lo crítico sigue mostrando una tarjeta y te espera**: roles, identidad e inicio de sesión,
+  accesos, credenciales, aplicaciones marcadas como críticas, cambios sensibles (los marcados como
+  *Cambio sensible*) y todo lo que necesita tu contraseña.
+- **Un cambio propuesto después de que el asistente leyó contenido escrito por otras personas** también
+  sigue mostrando una tarjeta — ese contenido podría estar intentando dirigir al asistente.
+- Una etiqueta **Auto** arriba del chat te recuerda que el modo está activado.
+
+Se aplica **solo a ese chat** y está desactivada en cada chat nuevo. Desactivala cuando quieras con el
+mismo interruptor o con `/auto off`; una tarjeta que ya te está esperando nunca se aprueba por activarla.
+
+> [!WARNING]
+> Con la aprobación automática activada, un cambio básico se hace sin que lo mires antes. Usala en chats
+> donde hacés ediciones de rutina, y revisá los registros **Aplicado automáticamente** a medida que
+> aparecen.
+
+Cada cambio automático queda registrado como cualquier otro cambio tuyo — en el historial del elemento y en
+el registro de actividad, a tu nombre — y el registro de acciones de IA anota que se aplicó
+automáticamente.
 
 ## Dónde quedan registrados los cambios aprobados
 
