@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { McpDistributionModule } from './distribution/mcp-distribution.module';
 
 /**
  * The MCP resource server at `/mcp` and the Claude Code skill/plugin distribution (ADR-0097;
@@ -8,5 +9,5 @@ import { Module } from '@nestjs/common';
  * Pre-created empty by the AI core unit (synthesis §10) so its units (W3-2, W3-5) fill it without touching
  * `app.module.ts`. It registers no route until then.
  */
-@Module({})
+@Module({ imports: [McpDistributionModule] })
 export class McpModule {}
