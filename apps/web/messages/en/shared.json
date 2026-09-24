@@ -70,7 +70,9 @@
       "role_changed": "Role changed",
       "password_reset_sent": "Password reset sent",
       "deleted": "Deleted",
-      "restored": "Restored"
+      "restored": "Restored",
+      "consumable_delivered": "Consumable delivered",
+      "consumable_returned": "Consumable returned"
     }
   },
   "empty": {},
