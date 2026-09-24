@@ -216,7 +216,10 @@ Legend:
 | audit | export | logs:read | R | EXCL |
 | search | `GET /search` | search:read | R | v1 `lazyit_search` |
 | notifications | list, unread-count, mark read | self (service-scoped) | R / W | v1.1 |
-| infra | nodes (paged), graph, node, edges, impact, changes, identity-matches, fleet, auto-confirm rules | infra:read | R | v1 `infra_node_search` / `infra_node_get` |
+| infra | nodes (paged), node, edges, impact | infra:read | R | v1 `infra_node_search` / `infra_node_get` (built, W2-10) |
+| infra | changes, identity-matches, auto-confirm rules | infra:read | R | v1.1 (with the curation surface they serve) |
+| infra | graph nodes / edges (canvas bulk reads) | infra:read | R | EXCL (unpaged, up to 10,000 rows; the two v1 tools are the paged equivalents) |
+| infra | agent fleet | infra:read (+settings:manage for the credential inventory) | R | not in v1 (carries the agent credential inventory) |
 | infra | node / edge writes | infra:manage (+asset:write) | W / D | v1.1 |
 | infra | confirm / merge / rules | infra:manage, human-only | W | v1.1 |
 | infra | agent-policy | settings:manage | W | later, `elevated` (instance config) |
@@ -473,8 +476,8 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 40 | `user_update` | UsersController.update | user:manage | elevated·D (ROLE_CHANGE / email warnings) | user updated |
 | 41 | `user_offboard` | UsersController.offboard | user:manage | write·D, ext, cascade | user archived; also affects asset, accessGrant |
 | 42 | `user_restore` | UsersController.restore | user:manage | elevated (restores sign-in) | user restored |
-| 43 | `infra_node_search` | InfraController.nodesPage (the handler behind `GET /infra/nodes/page`; not `GET /nodes`, which uses `@Res`) | infra:read | read | — |
-| 44 | `infra_node_get` | InfraController node, edges and impact handlers | infra:read | read | — |
+| 43 | `infra_node_search` ✅ built (W2-10) | InfraController.listNodePage (`GET /infra/nodes/page`; not `GET /nodes`, which uses `@Res`) | infra:read | read | — |
+| 44 | `infra_node_get` ✅ built (W2-10) | InfraController.getNode (primary), .listEdges, .getImpact, .listNodePage (edge peers by `ids`) | infra:read | read | — |
 
 - Method names in the Binds column are illustrative. The foundation unit pins them against the actual
   controllers, and the boot check (§8.3) fails on a wrong name.
@@ -521,12 +524,31 @@ All under `apps/api/src/ai/` (backend lane). As built by the core unit (W1-C, #1
 - `tools/<domain>.tools.ts` — each exports an `AiToolset`: `tools` and `unexposed` (handlers + reason).
   `context.tools.ts` holds the reference tools (`session_context`, `lazyit_search`; `navigate_to` is not
   built yet);
+  `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
+  `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
   `platform.tools.ts` lists the surfaces no domain owns (authentication, instance configuration, the
   Secret Manager, Service Account management, the Migrator, the workflow engine, the probes)
 - `prompt/` — domain primer and system-prompt builder (§12)
 - channel surfaces — reconciled in [[ai-assistant/_synthesis|the synthesis]] §5 (R5): chat and headless
   live in `ai/conversations/` and `ai/runs/`; MCP is its own module at `apps/api/src/mcp/`, and the OAuth
   authorization server at `apps/api/src/oauth/`.
+
+**Infra tools as built (W2-10).** Both are `read`, admit humans and Service Accounts holding
+`infra:read` (the routes carry no human-only guard), and return no entity refs (a read has no `op`).
+- `infra_node_search` — input `query`, `kind`, `status`, `state`, `source`, `role`, `assetIds` (≤ 50),
+  `sort` (the route's allowlist), `dir`, `limit` (default 20, max 50), `offset`; returns
+  `{ total, offset, items }` and a `truncated` marker with `nextOffset` when more rows exist.
+- `infra_node_get` — input `id`, `detail` (`concise` | `full`), `includeClosedEdges`. Concise: the node
+  summary with owners, children, edges (direction + the peer resolved through `listNodePage?ids=`) and
+  the blast-radius size; full adds the affected nodes with hop depth, linked KB articles, IP-conflict
+  peers and a few reported host facts. Lists inside it are capped at 50 with their totals.
+- Never projected: `secretRefs` (Secret Manager adjacency, even handles), the raw `specs` blob
+  (software list, identifiers, serial, NICs), `reportingSource` / `externalId`, and any agent credential
+  data. The label and inventory name of an agent-reported node, the label of any lean row whose
+  provenance the route does not state, and the reported host facts are wrapped with `untrusted()`.
+- Unexposed with reasons: node/edge writes and review-tray curation (v1.1), changes / identity-matches /
+  auto-confirm rules reads (v1.1), the canvas bulk reads, the fleet view, agent policy, the `@Res` list,
+  `report`, the secret link and the agent binary distribution.
 
 ### 8.2 Descriptor
 
