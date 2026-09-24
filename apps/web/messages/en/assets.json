@@ -315,7 +315,9 @@
         "acknowledged": "Acknowledged",
         "agentLinked": "Agent linked",
         "deleted": "Deleted",
-        "restored": "Restored"
+        "restored": "Restored",
+        "consumableDelivered": "Consumable delivered",
+        "consumableReturned": "Consumable returned"
       },
       "details": {
         "created": "Asset created",
@@ -326,7 +328,12 @@
         "acknowledged": "Confirmed receipt",
         "agentLinked": "An agent started reporting to this asset",
         "deleted": "Asset deleted",
-        "restored": "Asset restored"
+        "restored": "Asset restored",
+        "consumableDelivered": "{quantity} {unit} of <link>{name}</link> delivered",
+        "consumableReturned": "{quantity} {unit} of <link>{name}</link> returned",
+        "consumableDeliveredFallback": "A consumable was delivered to this asset",
+        "consumableReturnedFallback": "A consumable was returned from this asset",
+        "consumableUnitFallback": "units"
       }
     }
   },
