@@ -60,6 +60,15 @@ describe("AiWebSearchSection", () => {
     expect(html).toContain(esc(messages.webSearch.off));
   });
 
+  test("says once searched, nothing in the conversation is auto-approved; OpenAI gets its own note", () => {
+    const html = render({});
+    expect(html).toContain(esc(messages.webSearch.disclosure.untrusted));
+    expect(html).not.toContain(esc(messages.webSearch.disclosure.openai));
+    expect(render({ provider: "openai", model: "gpt-6-sol" })).toContain(
+      esc(messages.webSearch.disclosure.openai),
+    );
+  });
+
   test("on reads as on", () => {
     const toggle = switchOf(render({ webSearchEnabled: true }));
     expect(toggle).toContain('aria-checked="true"');

@@ -104,6 +104,7 @@ export function AiWebSearchSection({ settings }: { settings: AiSettings }) {
             <p className="font-medium">{t("disclosure.title")}</p>
             <p>{t("disclosure.egress")}</p>
             <p>{t("disclosure.untrusted")}</p>
+            {settings.provider === "openai" ? <p>{t("disclosure.openai")}</p> : null}
             <p>{t("disclosure.conversations")}</p>
           </div>
         </Callout>

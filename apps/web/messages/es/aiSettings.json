@@ -258,8 +258,9 @@
     },
     "disclosure": {
       "title": "Qué sale de lazyit",
-      "egress": "El proveedor hace la búsqueda en sus propios servidores: lazyit no hace ninguna solicitud propia. Las consultas y el contexto de la conversación van al proveedor, y su búsqueda puede facturarse aparte.",
-      "untrusted": "Los resultados de búsqueda son contenido escrito por cualquiera en internet. El asistente los trata como datos, nunca como instrucciones, cita las páginas que usó, y un cambio que proponga en la misma respuesta siempre necesita tu aprobación — aunque la aprobación automática esté activada.",
+      "egress": "El proveedor hace la búsqueda en sus propios servidores: lazyit no hace ninguna solicitud propia. Las consultas y el contexto de la conversación van al proveedor, que puede pasar las consultas a su motor de búsqueda o a un socio de búsqueda, y puede facturar las búsquedas aparte.",
+      "untrusted": "Los resultados de búsqueda son contenido escrito por cualquiera en internet. El asistente los trata como datos, nunca como instrucciones, y cita las páginas que usó. Una vez que buscó en la web en una conversación, nada en esa conversación se aprueba automáticamente — cada cambio que proponga ahí muestra su tarjeta de aprobación.",
+      "openai": "Con OpenAI, la búsqueda usa la copia en caché e indexada de la web de OpenAI, no las páginas en vivo, así que pueden faltar páginas muy recientes. La búsqueda de OpenAI también puede abrir páginas; eso no se puede desactivar, pero nunca descarga una página en vivo desde su sitio.",
       "conversations": "Solo el chat. Las ejecuciones headless nunca buscan en la web, porque sus cambios se aplican sin que nadie los apruebe."
     },
     "maxUses": {

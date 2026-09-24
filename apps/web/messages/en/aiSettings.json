@@ -258,8 +258,9 @@
     },
     "disclosure": {
       "title": "What leaves lazyit",
-      "egress": "The provider runs the search on its own servers: lazyit makes no request of its own. The search queries and the conversation context go to the provider, and its search may be billed separately.",
-      "untrusted": "Search results are content written by anyone on the internet. The assistant treats them as data, never as instructions, cites the pages it used, and a change it proposes in the same reply always needs your approval — even with auto-approve on.",
+      "egress": "The provider runs the search on its own servers: lazyit makes no request of its own. The search queries and the conversation context go to the provider, which may pass the queries on to its search backend or a search partner, and may bill searches separately.",
+      "untrusted": "Search results are content written by anyone on the internet. The assistant treats them as data, never as instructions, and cites the pages it used. Once it has searched the web in a conversation, nothing in that conversation is auto-approved anymore — every change it proposes there shows its approval card.",
+      "openai": "With OpenAI, search uses OpenAI's cached and indexed copy of the web, not live pages, so very recent pages may be missing. OpenAI's search can also open pages; that can't be turned off, but it never fetches a page live from its site.",
       "conversations": "The chat only. Headless runs never search the web, because their changes run without anyone approving them."
     },
     "maxUses": {
