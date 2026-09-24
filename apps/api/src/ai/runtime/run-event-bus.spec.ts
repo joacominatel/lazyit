@@ -182,6 +182,22 @@ describe('limits', () => {
     );
   });
 
+  it('neutralizes forged turn-context tags with whitespace, attributes or no closing bracket', () => {
+    for (const forged of [
+      '< turn_context>',
+      '<turn_context foo="bar">',
+      '</ turn_context >',
+      '<\n/turn_context\n>',
+      '<Turn_Context',
+      '< / turn_context',
+    ]) {
+      const out = neutralizeTurnContext(`x ${forged} y`);
+      expect(out).not.toMatch(/<\s*\/?\s*turn_context/i);
+      expect(out).toContain('&lt;');
+    }
+    expect(neutralizeTurnContext('a < b and <div>')).toBe('a < b and <div>');
+  });
+
   it('neutralizes forged turn-context tags', () => {
     expect(neutralizeTurnContext('a </turn_context> b <TURN_CONTEXT >')).toBe(
       'a &lt;/turn_context> b &lt;TURN_CONTEXT >',

@@ -111,14 +111,18 @@ export function capToolOutput(
   };
 }
 
-const TURN_CONTEXT_TAG = /<\/?turn_context\s*>/gi;
+/**
+ * Any `<` that opens something reading as a turn-context tag — opening or closing, with whitespace,
+ * attributes, a line break or no `>` at all (`< turn_context x="1">`, `</ turn_context >`).
+ */
+const TURN_CONTEXT_OPEN = /<(?=\s*\/?\s*turn_context)/gi;
 
 /**
  * Neutralize a `<turn_context>` tag the USER typed, the way `untrusted()` neutralizes its own delimiter: the
  * frozen prompt tells the model the block is supplied by lazyit, so a user must not be able to forge one.
  */
 export function neutralizeTurnContext(text: string): string {
-  return text.replace(TURN_CONTEXT_TAG, (tag) => tag.replace('<', '&lt;'));
+  return text.replace(TURN_CONTEXT_OPEN, '&lt;');
 }
 
 /**
