@@ -769,6 +769,13 @@ const batchRowInput = z
     name: editableFields.name.describe('What it is, e.g. "Laptop Pro 14 #3".'),
     assetTag: editableFields.assetTag.optional(),
     serial: editableFields.serial.optional(),
+    skip: z
+      .boolean()
+      .optional()
+      .describe(
+        'true = leave this row out: the card lists it as skipped and it is never created. Use it for a ' +
+          'row the check refused when the user wants the others created without it.',
+      ),
   })
   .superRefine((row, ctx) => refuseReservedSpecKeys(row.specs, ctx));
 
@@ -800,10 +807,12 @@ interface BatchReference {
   updatedAt: string | null;
 }
 
-/** One row of a batch, resolved and checked: the route body, or why it is skipped. */
+/** One row of a batch, resolved and checked: the route body, or why it cannot be created. */
 interface BatchRowPlan {
   /** 1-based, in the order the user gave the rows. */
   row: number;
+  /** Marked `skip` in the input: shown, never created. */
+  skip: boolean;
   name: string;
   assetTag: string | null;
   serial: string | null;
@@ -812,10 +821,20 @@ interface BatchRowPlan {
   model: BatchReference | null;
   category: BatchReference | null;
   location: BatchReference | null;
-  /** Existing live assets, or earlier rows, holding this row's tag or serial. */
+  /** Existing live assets, or earlier (not skipped) rows, holding this row's tag or serial. */
   duplicates: Row[];
   errors: string[];
   body: Row;
+}
+
+interface BatchPlan {
+  rows: BatchRowPlan[];
+  /**
+   * False when the duplicate pre-check could not run for every value: the caller may not read assets
+   * (`asset:read`), or a value contains a comma (the exact-values filter's separator). The route's own
+   * uniqueness (409 at create) still decides; the card says the check is incomplete.
+   */
+  duplicatesChecked: boolean;
 }
 
 /** A reference resolved once per distinct spelling, or the reason it did not resolve. */
@@ -854,20 +873,44 @@ const versionOf = (row: Row): string | null => {
 const referenceKey = (reference: string): string =>
   reference.trim().toLowerCase();
 
+const DUPLICATE_FIELDS = [
+  { field: 'assetTag', filter: 'assetTags' },
+  { field: 'serial', filter: 'serials' },
+] as const;
+
+/**
+ * The live assets holding any of these exact values, through ONE `GET /assets?<filter>=a,b,c` (the
+ * exact-values list filter, ≤ 200 values — tags and serials are unique among live assets, so every match
+ * fits one page). Read through {@link facet}: a caller without `asset:read` gets `null` ("unknown to
+ * you") instead of a failed batch.
+ */
+async function liveHolders(
+  rt: AiToolRuntime,
+  filter: 'assetTags' | 'serials',
+  values: readonly string[],
+): Promise<Row[] | null> {
+  if (values.length === 0) return [];
+  const page = await facet(() =>
+    rt.call(AssetsController, 'findAll', {
+      query: { [filter]: values.join(','), limit: RESOLVE_PAGE },
+    }),
+  );
+  return 'unavailable' in page ? null : asRows(page.items);
+}
+
 /**
  * Resolve and check every row of a batch (#1387), the same way for the preview and the execution:
- *   - the model and location of each row (its own, else `common`'s), each distinct spelling resolved
- *     once through the same resolvers `asset_create` uses; the model's category is read from the
- *     category list (a caller without `category:read` sees no category, not an error);
- *   - duplicates: a tag or serial an existing LIVE asset already holds (the route's uniqueness — an exact
- *     match through `GET /assets?q=`), or one an earlier row of the same batch uses;
+ *   - the model and location of each row (its own, else `common`'s): each distinct spelling resolved ONCE
+ *     per plan through the single create's resolvers; the model's category from the category list (a
+ *     caller without `category:read` sees no category, not an error);
+ *   - duplicates: one exact-values lookup per field for the whole batch (a tag or serial a LIVE asset
+ *     already holds), and a value an earlier, not skipped, row uses;
  *   - the status: the row's, else `common`'s, else {@link DEFAULT_NEW_ASSET_STATUS} (flagged).
- * A row with an error is skipped at execution; the others are created one by one.
  */
 async function planBatch(
   input: AssetCreateBatchInput,
   rt: AiToolRuntime,
-): Promise<BatchRowPlan[]> {
+): Promise<BatchPlan> {
   const common = input.common ?? {};
   const rows = input.rows.map((row) => ({
     ...common,
@@ -931,33 +974,39 @@ async function planBatch(
     }
   }
 
-  // Existing live assets holding a tag or serial a row uses, one exact lookup per distinct value.
+  // Existing live assets holding a tag or serial a row uses: one exact lookup per field.
+  let duplicatesChecked = true;
   const holders = new Map<string, Row[]>();
-  const values = new Set(
-    rows.flatMap((r) => [r.assetTag, r.serial]).filter((v) => v !== undefined),
-  );
-  for (const value of values) {
-    const page = await rt.call(AssetsController, 'findAll', {
-      query: { q: value, limit: RESOLVE_PAGE },
-    });
-    holders.set(
-      value,
-      asRows(page.items).filter(
-        (a) => a.assetTag === value || a.serial === value,
-      ),
-    );
+  for (const { field, filter } of DUPLICATE_FIELDS) {
+    const all = [
+      ...new Set(rows.map((r) => r[field]).filter((v) => v !== undefined)),
+    ];
+    const checkable = all.filter((v) => !v.includes(','));
+    if (checkable.length < all.length) duplicatesChecked = false;
+    const found = await liveHolders(rt, filter, checkable);
+    if (found === null) {
+      duplicatesChecked = false;
+      continue;
+    }
+    for (const asset of found) {
+      const value = asset[field];
+      if (typeof value !== 'string' || !checkable.includes(value)) continue;
+      const key = `${field}:${value}`;
+      holders.set(key, [...(holders.get(key) ?? []), asset]);
+    }
   }
 
   const seen = new Map<string, number>();
-  return rows.map((row, index): BatchRowPlan => {
+  const plans = rows.map((row, index): BatchRowPlan => {
     const number = index + 1;
+    const skip = row.skip === true;
     const errors: string[] = [];
     const duplicates: Row[] = [];
-    for (const field of ['assetTag', 'serial'] as const) {
+    for (const { field } of DUPLICATE_FIELDS) {
       const value = row[field];
       if (value === undefined) continue;
-      for (const asset of holders.get(value) ?? []) {
-        if (asset[field] !== value) continue;
+      const key = `${field}:${value}`;
+      for (const asset of holders.get(key) ?? []) {
         duplicates.push({
           field,
           value,
@@ -971,7 +1020,8 @@ async function planBatch(
           `${field} "${value}" already belongs to ${assetLabel(asset)}`,
         );
       }
-      const key = `${field}:${value}`;
+      // A skipped row never claims a value: it is not created.
+      if (skip) continue;
       const earlier = seen.get(key);
       if (earlier !== undefined) {
         duplicates.push({ field, value, row: earlier });
@@ -1020,6 +1070,7 @@ async function planBatch(
     if (location) body.locationId = location.ref.id;
     return {
       row: number,
+      skip,
       name: row.name,
       assetTag: row.assetTag ?? null,
       serial: row.serial ?? null,
@@ -1033,6 +1084,7 @@ async function planBatch(
       body,
     };
   });
+  return { rows: plans, duplicatesChecked };
 }
 
 /** One row as the card's table shows it. */
@@ -1059,25 +1111,31 @@ function batchRowView(plan: BatchRowPlan): Row {
     category: plan.category?.ref ?? null,
     location: plan.location?.ref ?? null,
     ...extra,
-    valid: errors.length === 0,
+    skipped: plan.skip,
+    valid: !plan.skip && errors.length === 0,
     errors,
     duplicates: plan.duplicates,
   };
 }
 
 /**
- * The version a batch is approved against. The precondition contract carries ONE `{ entity, updatedAt }`,
- * so the batch pins the most recently changed entity its rows reference (a model, its category or a
- * location): any referenced entity edited — or a reference that now resolves differently, e.g. a model
- * created meanwhile — changes which entity is newest or its version, and the approval is `STALE` rather
- * than creating rows the card did not show. A batch that references nothing has no precondition, like a
- * single create.
+ * The version a batch is approved against (see tools-and-execution.md, "asset_create_batch"). A card only
+ * ever holds rows that were valid when it was built (the preview refuses any other unless it is marked
+ * `skip`, and a skipped row never runs), so what can diverge at approval is the entities the rows to
+ * create reference. The precondition contract carries ONE `{ entity, updatedAt }`, so the batch pins the
+ * most recently changed of them (a model, its category or a location — ties broken by type and id). An
+ * entity that starts matching a row's name after the proposal (created, renamed or restored) has a newer
+ * `updatedAt` than anything the card saw, and an edited one changes its own: either way the newest entity
+ * or its version changes and the approval is `STALE`. An entity that stops matching makes that row fail
+ * (the approval-time preview refuses the batch). A batch whose rows reference nothing has no
+ * precondition, like a single create.
  */
 function batchPrecondition(
   plans: readonly BatchRowPlan[],
 ): AiActionPreview['precondition'] {
   const refs = new Map<string, BatchReference>();
   for (const plan of plans) {
+    if (plan.skip) continue;
     for (const r of [plan.model, plan.category, plan.location]) {
       if (r?.updatedAt) refs.set(`${r.ref.type}:${r.ref.id}`, r);
     }
@@ -1099,17 +1157,28 @@ function batchPrecondition(
   };
 }
 
-/** The first few row errors, for a refusal message. */
-function rowErrors(plans: readonly BatchRowPlan[], max = 5): string {
-  const bad = plans.filter((p) => p.errors.length > 0);
-  const shown = bad
+/** The rows' errors for a refusal message: rows with the same problem grouped, capped at `max` groups. */
+function rowErrors(bad: readonly BatchRowPlan[], max: number): string {
+  const groups = new Map<string, number[]>();
+  for (const plan of bad) {
+    const key = plan.errors.join('; ');
+    groups.set(key, [...(groups.get(key) ?? []), plan.row]);
+  }
+  const entries = [...groups];
+  const shown = entries
     .slice(0, max)
-    .map((p) => `row ${p.row}: ${p.errors.join('; ')}`)
+    .map(
+      ([message, rows]) =>
+        `${rows.length === 1 ? 'row' : 'rows'} ${rows.join(', ')}: ${message}`,
+    )
     .join(' | ');
-  return bad.length > max
-    ? `${shown} | …and ${bad.length - max} more rows`
+  return entries.length > max
+    ? `${shown} | …and ${entries.length - max} more problems`
     : shown;
 }
+
+const plural = (n: number, one: string, many: string): string =>
+  `${n} ${n === 1 ? one : many}`;
 
 /** An authorization failure will not change from one row to the next: stop instead of repeating it. */
 const STOP_STATUSES = new Set([401, 403]);
@@ -1122,8 +1191,9 @@ const assetCreateBatch = defineTool({
     'proposal with one approval. Put shared values in `common` and per-asset values in `rows`; status ' +
     `defaults to ${DEFAULT_NEW_ASSET_STATUS}. Every row is checked first: its model and location must ` +
     'exist (create a missing one first with asset_model_create / location_create), and a tag or serial ' +
-    'an existing asset or another row already has is flagged. Rows with a problem are skipped; the ' +
-    'others are created one by one and the result lists what was created and what was not.',
+    'an existing asset or another row already has is refused. A proposal with a refused row is not ' +
+    'shown: fix the row, or mark it `skip: true` to create the others without it. The result lists ' +
+    'what was created and what was not.',
   domain: 'assets',
   class: 'write',
   input: assetCreateBatchInput,
@@ -1137,17 +1207,27 @@ const assetCreateBatch = defineTool({
     bind(AssetCategoriesController, 'findAll'),
   ],
   async run(input, rt) {
-    const plans = await planBatch(input, rt);
-    const ready = plans.filter((p) => p.errors.length === 0);
+    const { rows: plans } = await planBatch(input, rt);
+    // Rows marked `skip` are never created, whatever their state now. A row to create that fails its
+    // check here (headless and MCP have no card; in the chat the approval-time preview already refused
+    // it) is reported, not created.
+    const ready = plans.filter((p) => !p.skip && p.errors.length === 0);
     if (ready.length === 0) {
+      const bad = plans.filter((p) => !p.skip);
       throw new BadRequestException(
-        `No row can be created: ${rowErrors(plans)}`,
+        bad.length === 0
+          ? 'Every row is marked skip: nothing to create'
+          : `No row can be created: ${rowErrors(bad, 5)}`,
       );
     }
     const created: Row[] = [];
     const problems: Row[] = plans
-      .filter((p) => p.errors.length > 0)
-      .map((p) => ({ row: p.row, skipped: true, errors: p.errors }));
+      .filter((p) => p.skip || p.errors.length > 0)
+      .map((p) => ({
+        row: p.row,
+        ...(p.skip ? { skipped: true } : {}),
+        errors: p.errors,
+      }));
     const entityRefs: AiEntityRef[] = [];
     let stoppedAt: number | null = null;
     for (const plan of ready) {
@@ -1176,55 +1256,70 @@ const assetCreateBatch = defineTool({
     problems.sort((a, b) => Number(a.row) - Number(b.row));
     const notAttempted =
       stoppedAt === null ? 0 : ready.filter((p) => p.row > stoppedAt).length;
-    const failed = problems.length;
+    const notCreated = plans.length - created.length;
     return {
       data: {
         requested: plans.length,
         created: created.length,
-        notCreated: plans.length - created.length,
+        notCreated,
         ...(notAttempted > 0 ? { stoppedAtRow: stoppedAt, notAttempted } : {}),
         createdAssets: created,
         problems,
       },
       summary:
         `Created ${created.length} of ${plans.length} assets` +
-        (failed + notAttempted > 0
-          ? `; ${plans.length - created.length} not created (see problems).`
-          : '.'),
+        (notCreated > 0 ? `; ${notCreated} not created (see problems).` : '.'),
       entityRefs,
     };
   },
   async preview(input, rt) {
-    const plans = await planBatch(input, rt);
-    const ready = plans.filter((p) => p.errors.length === 0).length;
-    if (ready === 0) {
+    const { rows: plans, duplicatesChecked } = await planBatch(input, rt);
+    const toCreate = plans.filter((p) => !p.skip);
+    if (toCreate.length === 0) {
       throw new BadRequestException(
-        `No row can be created: ${rowErrors(plans)}`,
+        'Every row is marked skip: nothing to create',
       );
     }
-    const skipped = plans.length - ready;
-    const defaulted = plans.filter((p) => p.statusDefaulted).length;
+    // A card never shows a row it would not create as shown: a row to create that fails its check
+    // refuses the whole proposal, with every reason, until it is fixed or marked `skip`.
+    const refused = toCreate.filter((p) => p.errors.length > 0);
+    if (refused.length > 0) {
+      throw new BadRequestException(
+        `${plural(refused.length, 'row', 'rows')} of ${plans.length} cannot be created as given: ` +
+          `${rowErrors(refused, 20)}. Fix them (e.g. create the missing model first), or mark them ` +
+          'skip: true to create the others without them, and propose again.',
+      );
+    }
+    const skipped = plans.length - toCreate.length;
+    const defaulted = toCreate.filter((p) => p.statusDefaulted).length;
     const changes: Change[] = [
       {
         field: 'action',
         after:
-          `Create ${ready} of ${plans.length} assets` +
+          `Create ${toCreate.length} of ${plans.length} assets` +
           (skipped > 0
-            ? `; ${skipped} ${skipped === 1 ? 'row' : 'rows'} with problems will be skipped.`
+            ? `; ${plural(skipped, 'row', 'rows')} skipped as requested.`
             : '.'),
         valueKind: 'text',
       },
       { field: 'rowCount', after: plans.length, valueKind: 'number' },
-      { field: 'validRows', after: ready, valueKind: 'number' },
+      { field: 'validRows', after: toCreate.length, valueKind: 'number' },
       { field: 'invalidRows', after: skipped, valueKind: 'number' },
     ];
     if (defaulted > 0) {
       changes.push({
         field: 'defaultsApplied',
         after: [
-          `status: ${DEFAULT_NEW_ASSET_STATUS} (${defaulted} of ${plans.length} rows)`,
+          `status: ${DEFAULT_NEW_ASSET_STATUS} (${defaulted} of ${toCreate.length} rows)`,
         ],
         valueKind: 'text',
+      });
+    }
+    if (!duplicatesChecked) {
+      changes.push({
+        field: 'duplicatesUnchecked',
+        after: true,
+        valueKind: 'boolean',
       });
     }
     changes.push({

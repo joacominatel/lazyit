@@ -84,6 +84,26 @@ const ROUTES: RouteCase[] = [
   },
   {
     controller: 'assets',
+    method: 'findAll',
+    http: 'get',
+    url: '/assets?assetTags=LT-0001,SRV-0001&serials=SN-LAPTOP-1',
+    shape: {
+      query: { assetTags: 'LT-0001,SRV-0001', serials: 'SN-LAPTOP-1' },
+    },
+  },
+  {
+    controller: 'assets',
+    method: 'findAll',
+    http: 'get',
+    url: `/assets?serials=${Array.from({ length: 201 }, (_, i) => `S${i}`).join(',')}`,
+    shape: {
+      query: {
+        serials: Array.from({ length: 201 }, (_, i) => `S${i}`).join(','),
+      },
+    },
+  },
+  {
+    controller: 'assets',
     method: 'findMine',
     http: 'get',
     url: '/assets/mine',
@@ -682,6 +702,14 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       action.preview!.changes.find((c) => c.field === field)?.after;
     const rowsOf = (action: AiPendingAction) =>
       change(action, 'rows') as Array<Row & { errors: string[] }>;
+    const refusal = (proposal: unknown) =>
+      (proposal as { result: { error: { code: string; message: string } } })
+        .result.error;
+    /** The `GET /assets` calls one plan made with an exact-values filter. */
+    const exactLookups = () =>
+      (assetsService.findPage.mock.calls as unknown as Array<[Row]>).filter(
+        ([filters]) => filters.assetTags || filters.serials,
+      );
 
     it('17 pasted rows: ONE card counting exactly 17, each row resolved; one approval creates 17, each audited with the shared id', async () => {
       const action = await propose('asset_create_batch', {
@@ -696,6 +724,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       expect(change(action, 'defaultsApplied')).toEqual([
         'status: IN_STORAGE (17 of 17 rows)',
       ]);
+      expect(change(action, 'duplicatesUnchecked')).toBeUndefined();
       const rows = rowsOf(action);
       expect(rows).toHaveLength(17);
       expect(rows[16]).toEqual({
@@ -712,12 +741,16 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         },
         category: { type: 'category', id: C.laptops, label: 'Laptops' },
         location: { type: 'location', id: L.storage, label: 'Storage Room' },
+        skipped: false,
         valid: true,
         errors: [],
         duplicates: [],
       });
-      // One model resolved once, not once per row.
+      // One model resolved once, and ONE exact-values lookup for all 17 serials (no per-row search).
       expect(modelsService.findOne).toHaveBeenCalledTimes(1);
+      expect(exactLookups()).toEqual([
+        [{ serials: PASTE.map((r) => r.serial) }, expect.anything()],
+      ]);
       // The referenced entity that changed last is the version the approval is checked against.
       expect(action.preview!.precondition).toEqual({
         entity: expect.objectContaining({
@@ -767,57 +800,77 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       });
     });
 
-    it('flags duplicates (an existing serial, a tag repeated inside the batch) and an unknown model per row; only valid rows run', async () => {
+    const MIXED = [
+      { name: 'Ok one', assetTag: 'NEW-1', model: 'Latitude 7440' },
+      { name: 'Existing serial', serial: 'SN-LAPTOP-1' },
+      { name: 'Same tag again', assetTag: 'NEW-1' },
+      {
+        name: 'Unknown model',
+        model: 'Pro 14',
+        status: 'OPERATIONAL' as const,
+      },
+      { name: 'Ok two', status: 'OPERATIONAL' as const },
+    ];
+
+    it('a row that cannot be created refuses the proposal with EVERY reason; no card, nothing stored', async () => {
+      const proposal = await h.tools.propose(
+        'asset_create_batch',
+        { rows: MIXED },
+        ctx(actor('MEMBER')),
+      );
+      expect(proposal.ok).toBe(false);
+      const error = refusal(proposal);
+      expect(error.code).toBe('INVALID_INPUT');
+      expect(error.message).toContain('3 rows of 5 cannot be created as given');
+      expect(error.message).toContain(
+        'row 2: serial "SN-LAPTOP-1" already belongs to LT-0001',
+      );
+      expect(error.message).toContain(
+        'row 3: assetTag "NEW-1" is also used by row 1',
+      );
+      expect(error.message).toContain('row 4: No assetModel matches "Pro 14"');
+      expect(error.message).toContain('asset_model_create');
+      expect(error.message).toContain('skip: true');
+      expect(ai.invocations.size).toBe(0);
+    });
+
+    it('rows marked skip are shown with their reasons and never run; only the rest are created', async () => {
       const action = await propose('asset_create_batch', {
-        rows: [
-          { name: 'Ok one', assetTag: 'NEW-1', model: 'Latitude 7440' },
-          { name: 'Existing serial', serial: 'SN-LAPTOP-1' },
-          { name: 'Same tag again', assetTag: 'NEW-1' },
-          { name: 'Unknown model', model: 'Pro 14', status: 'OPERATIONAL' },
-          { name: 'Ok two', status: 'OPERATIONAL' },
-        ],
+        rows: MIXED.map((r, i) =>
+          i >= 1 && i <= 3 ? { ...r, skip: true } : r,
+        ),
       });
       expect(change(action, 'rowCount')).toBe(5);
       expect(change(action, 'validRows')).toBe(2);
       expect(change(action, 'invalidRows')).toBe(3);
       expect(change(action, 'action')).toBe(
-        'Create 2 of 5 assets; 3 rows with problems will be skipped.',
+        'Create 2 of 5 assets; 3 rows skipped as requested.',
       );
       expect(change(action, 'defaultsApplied')).toEqual([
-        'status: IN_STORAGE (3 of 5 rows)',
+        'status: IN_STORAGE (1 of 2 rows)',
       ]);
       const rows = rowsOf(action);
-      expect(rows.map((r) => r.valid)).toEqual([
-        true,
-        false,
-        false,
-        false,
-        true,
+      expect(rows.map((r) => [r.skipped, r.valid])).toEqual([
+        [false, true],
+        [true, false],
+        [true, false],
+        [true, false],
+        [false, true],
       ]);
       expect(rows[1].duplicates).toEqual([
         {
           field: 'serial',
           value: 'SN-LAPTOP-1',
-          existing: {
-            type: 'asset',
-            id: A.laptop,
-            label: 'LT-0001',
-          },
+          existing: { type: 'asset', id: A.laptop, label: 'LT-0001' },
         },
       ]);
-      expect(rows[2].duplicates).toEqual([
-        { field: 'assetTag', value: 'NEW-1', row: 1 },
-      ]);
-      expect(rows[2].errors).toEqual([
-        'assetTag "NEW-1" is also used by row 1',
-      ]);
+      // A skipped row takes no value (it is never created), so row 3 is not flagged against row 1.
+      expect(rows[2].errors).toEqual([]);
       expect(rows[3].errors[0]).toContain('No assetModel matches "Pro 14"');
-      expect(rows[3].errors[0]).toContain('asset_model_create');
       expect(rows[3].model).toBeNull();
 
       const approved = await approve(action);
       expect(approved.status).toBe('SUCCEEDED');
-      expect(assetsService.create).toHaveBeenCalledTimes(2);
       expect(assetsService.create.mock.calls.map((c) => c[0].name)).toEqual([
         'Ok one',
         'Ok two',
@@ -841,7 +894,114 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       });
     });
 
-    it('a row the route refuses at execution is reported; the rest are still created', async () => {
+    it('review H1: a row skipped for an unknown model is not created after the model appears (no precondition case)', async () => {
+      const action = await propose('asset_create_batch', {
+        rows: [
+          { name: 'Plain' },
+          { name: 'Needs X1', model: 'X1', skip: true },
+        ],
+      });
+      // Nothing the rows to create reference: no precondition, like a single create.
+      expect(action.preview!.precondition).toBeUndefined();
+      state.models.set(cid('x1'), {
+        ...state.models.get(M.thinkpad)!,
+        id: cid('x1'),
+        name: 'X1',
+        updatedAt: new Date(T0.getTime() + 120_000),
+      });
+      const approved = await approve(action);
+      expect(approved.status).toBe('SUCCEEDED');
+      expect(assetsService.create.mock.calls.map((c) => c[0].name)).toEqual([
+        'Plain',
+      ]);
+      expect(data(approved.result!)).toMatchObject({
+        created: 1,
+        problems: [expect.objectContaining({ row: 2, skipped: true })],
+      });
+    });
+
+    it('review H1: a row skipped as a duplicate is not created after the holder is archived', async () => {
+      const action = await propose('asset_create_batch', {
+        rows: [
+          { name: 'Fresh', model: 'Latitude 7440' },
+          { name: 'Dup', serial: 'SN-LAPTOP-1', skip: true },
+        ],
+      });
+      const holder = state.assets.get(A.laptop)!;
+      holder.deletedAt = new Date('2026-09-10T00:00:00.000Z');
+      touch(holder);
+      const approved = await approve(action);
+      expect(approved.status).toBe('SUCCEEDED');
+      expect(assetsService.create.mock.calls.map((c) => c[0].name)).toEqual([
+        'Fresh',
+      ]);
+    });
+
+    it('review H1: a reference that now resolves to another record is STALE; one that became ambiguous fails; nothing runs', async () => {
+      // The model the card showed was renamed away and another record now carries its name.
+      const renamed = await propose('asset_create_batch', {
+        rows: [{ name: 'A', model: 'Latitude 7440', location: 'HQ' }],
+      });
+      const original = state.models.get(M.latitude)!;
+      original.name = 'Latitude 7440 (old)';
+      touch(original);
+      const thinkpad = state.models.get(M.thinkpad)!;
+      thinkpad.name = 'Latitude 7440';
+      touch(thinkpad);
+      expect(await approve(renamed)).toMatchObject({
+        status: 'FAILED',
+        result: { ok: false, error: { code: 'STALE', status: 409 } },
+      });
+
+      // A second record with the same name appears: the row can no longer be created as shown.
+      resetAll(h);
+      const clash = await propose('asset_create_batch', {
+        rows: [{ name: 'B', model: 'Latitude 7440' }],
+      });
+      state.models.set(cid('clash'), {
+        ...state.models.get(M.latitude)!,
+        id: cid('clash'),
+        updatedAt: new Date(T0.getTime() + 120_000),
+      });
+      const failed = await approve(clash);
+      expect(failed.status).toBe('FAILED');
+      expect(failed.result).toMatchObject({ ok: false });
+      expect(assetsService.create).not.toHaveBeenCalled();
+    });
+
+    it('STALE when a referenced model changed before the approval', async () => {
+      const edited = await propose('asset_create_batch', {
+        rows: PASTE.slice(0, 2),
+        common: { model: 'Latitude 7440' },
+      });
+      touch(state.models.get(M.latitude)!);
+      expect(await approve(edited)).toMatchObject({
+        status: 'FAILED',
+        result: { ok: false, error: { code: 'STALE', status: 409 } },
+      });
+      expect(assetsService.create).not.toHaveBeenCalled();
+    });
+
+    it('without asset:read the duplicate check is "unknown to you", not a failure; the route still decides', async () => {
+      matrix.current = {
+        ...matrix.current,
+        MEMBER: matrix.current.MEMBER.filter((p) => p !== 'asset:read'),
+      };
+      h.resolver.invalidate();
+      const action = await propose('asset_create_batch', {
+        rows: [
+          { name: 'One', serial: 'SN-NEW-1' },
+          { name: 'Two', serial: 'SN-NEW-2' },
+        ],
+      });
+      expect(change(action, 'duplicatesUnchecked')).toBe(true);
+      expect(change(action, 'validRows')).toBe(2);
+      const approved = await approve(action);
+      expect(approved.status).toBe('SUCCEEDED');
+      expect(assetsService.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('a row the route refuses at execution is reported; the rest are still created (headless)', async () => {
       const original = assetsService.create.getMockImplementation()!;
       assetsService.create
         .mockImplementationOnce(original)
@@ -863,55 +1023,50 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       expect(result.entityRefs).toHaveLength(2);
     });
 
-    it('no valid row: no card, a refusal naming the rows and the way out; nothing stored', async () => {
-      const proposal = await h.tools.propose(
+    it('headless (no card): a row that fails its check is reported and not created, the others run', async () => {
+      const result = await h.tools.invoke(
+        'asset_create_batch',
+        {
+          rows: [
+            { name: 'Good' },
+            { name: 'Bad', model: 'Pro 14' },
+            { name: 'Skipped', skip: true },
+          ],
+        },
+        ctx(actor('SA writer')),
+      );
+      expect(data(result)).toMatchObject({
+        requested: 3,
+        created: 1,
+        problems: [
+          { row: 2, errors: [expect.stringContaining('Pro 14')] },
+          { row: 3, skipped: true, errors: [] },
+        ],
+      });
+      expect(assetsService.create.mock.calls.map((c) => c[0].name)).toEqual([
+        'Good',
+      ]);
+    });
+
+    it('no row to create: refused, nothing stored', async () => {
+      const allSkipped = await h.tools.propose(
+        'asset_create_batch',
+        { rows: [{ name: 'A', skip: true }] },
+        ctx(actor('MEMBER')),
+      );
+      expect(refusal(allSkipped).message).toBe(
+        'Every row is marked skip: nothing to create',
+      );
+      const allBad = await h.tools.propose(
         'asset_create_batch',
         { rows: PASTE, common: { model: 'Pro 14' } },
         ctx(actor('MEMBER')),
       );
-      expect(proposal).toMatchObject({
-        ok: false,
-        result: { error: { code: 'INVALID_INPUT' } },
-      });
-      const message = (proposal as { result: { error: { message: string } } })
-        .result.error.message;
-      expect(message).toContain('row 1: No assetModel matches "Pro 14"');
-      expect(message).toContain('asset_model_create');
-      expect(message).toContain('…and 12 more rows');
+      expect(refusal(allBad).message).toContain(
+        `17 rows of 17 cannot be created as given: rows ${PASTE.map((_, i) => i + 1).join(', ')}: No assetModel matches "Pro 14"`,
+      );
       expect(ai.invocations.size).toBe(0);
       expect(state.mutations).toBe(0);
-    });
-
-    it('STALE when a referenced model changed, or a model the rows name appeared, before the approval', async () => {
-      const edited = await propose('asset_create_batch', {
-        rows: PASTE.slice(0, 2),
-        common: { model: 'Latitude 7440' },
-      });
-      touch(state.models.get(M.latitude)!);
-      expect(await approve(edited)).toMatchObject({
-        status: 'FAILED',
-        result: { ok: false, error: { code: 'STALE', status: 409 } },
-      });
-
-      resetAll(h);
-      const partial = await propose('asset_create_batch', {
-        rows: [
-          { name: 'Known', model: 'Latitude 7440' },
-          { name: 'Not yet', model: 'Pro 14' },
-        ],
-      });
-      expect(change(partial, 'validRows')).toBe(1);
-      state.models.set(cid('pro14'), {
-        ...state.models.get(M.thinkpad)!,
-        id: cid('pro14'),
-        name: 'Pro 14',
-        updatedAt: new Date(T0.getTime() + 120_000),
-      });
-      expect(await approve(partial)).toMatchObject({
-        status: 'FAILED',
-        result: { ok: false, error: { code: 'STALE' } },
-      });
-      expect(assetsService.create).not.toHaveBeenCalled();
     });
 
     it('bounded: more than 200 rows, or a reserved spec key in common, is refused before any dispatch', async () => {

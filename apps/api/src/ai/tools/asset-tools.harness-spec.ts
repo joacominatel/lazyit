@@ -503,6 +503,11 @@ export const assetsService = {
       );
     }
     if (filters.status) rows = rows.filter((a) => a.status === filters.status);
+    const tags = filters.assetTags as string[] | undefined;
+    if (tags) rows = rows.filter((a) => tags.includes(a.assetTag as string));
+    const serials = filters.serials as string[] | undefined;
+    if (serials)
+      rows = rows.filter((a) => serials.includes(a.serial as string));
     if (filters.assignedToUserId) {
       rows = rows.filter((a) =>
         activeOf(String(a.id)).some(
