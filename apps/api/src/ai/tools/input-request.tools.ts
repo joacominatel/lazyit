@@ -1,7 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { z } from 'zod';
 import {
+  AI_INPUT_FIELD_KINDS,
   AI_INPUT_LIMITS,
+  AI_INPUT_OPTION_SOURCES,
   AiInputFieldKindSchema,
   AiInputFormSchema,
   AiInputImportanceSchema,
@@ -37,6 +39,11 @@ import {
  *
  * The form never collects a secret: a field, group, title or reason that looks like it asks for a
  * password, token, key or PIN refuses the whole call with a clear error for the model.
+ *
+ * The model's input is normalized before it is validated (#1403, {@link normalizeRequestInput}): `null`
+ * and empty values mean "absent", a property that does not apply to the field's kind is dropped, and a
+ * select given both `options` and `optionsFrom` keeps `optionsFrom`. What remains is checked strictly,
+ * with errors that say how to fix the call. The stored `AiInputForm` stays strict.
  */
 
 /** The name the runtime keys its pause on. */
@@ -59,7 +66,11 @@ const fieldInput = z.strictObject({
   label: text(AI_INPUT_LIMITS.labelLength).describe(
     'What the user sees, in their language.',
   ),
-  kind: AiInputFieldKindSchema,
+  kind: AiInputFieldKindSchema.describe(
+    'text, textarea, date, checkbox: no extra property. number: may add `min` / `max`. select, ' +
+      'multiselect: add exactly one of `options` or `optionsFrom`. Leave out every property that does ' +
+      'not apply to the kind.',
+  ),
   importance: AiInputImportanceSchema.describe(
     '`required`: you cannot continue without it. `recommended`: it would help. `optional`: nice to have.',
   ),
@@ -71,14 +82,23 @@ const fieldInput = z.strictObject({
     .max(AI_INPUT_LIMITS.options)
     .optional()
     .describe(
-      'select / multiselect: the choices (a string, or { value, label }). Omit when using optionsFrom.',
+      'select / multiselect ONLY: the choices (a string, or { value, label }). Leave out when using ' +
+        '`optionsFrom`, and on every other kind.',
     ),
   optionsFrom: AiInputOptionSourceSchema.optional().describe(
-    'select / multiselect: take the choices from this lazyit list instead of `options` (values are ids, ' +
-      'manufacturers are names).',
+    'select / multiselect ONLY: take the choices from this lazyit list instead of `options` (values are ' +
+      'ids, manufacturers are names). Leave out on every other kind.',
   ),
-  min: z.number().finite().optional().describe('number only.'),
-  max: z.number().finite().optional().describe('number only.'),
+  min: z
+    .number()
+    .finite()
+    .optional()
+    .describe('number ONLY: the lowest value. Leave out on other kinds.'),
+  max: z
+    .number()
+    .finite()
+    .optional()
+    .describe('number ONLY: the highest value. Leave out on other kinds.'),
 });
 type FieldInput = z.infer<typeof fieldInput>;
 
@@ -93,6 +113,111 @@ const groupInput = z.strictObject({
 type GroupInput = z.infer<typeof groupInput>;
 
 const SELECTS = new Set(['select', 'multiselect']);
+const KINDS = new Set<string>(AI_INPUT_FIELD_KINDS);
+const SOURCES = AI_INPUT_OPTION_SOURCES.join(', ');
+
+// ─── Tolerance: what the model sends, normalized before validation (#1403) ───────────────────────
+
+type Loose = Record<string, unknown>;
+
+function isRecord(value: unknown): value is Loose {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** `null`, `undefined`, a blank string or an empty list: the model meant "not set". */
+function isBlank(value: unknown): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    (typeof value === 'string' && value.trim().length === 0) ||
+    (Array.isArray(value) && value.length === 0)
+  );
+}
+
+/** The optional properties of a field, a group and the form, where a blank value means absent. */
+const FIELD_OPTIONAL = new Set([
+  'placeholder',
+  'help',
+  'options',
+  'optionsFrom',
+  'min',
+  'max',
+]);
+const GROUP_OPTIONAL = new Set(['help', 'minRows']);
+const FORM_OPTIONAL = new Set(['fields', 'groups']);
+
+function dropBlank(value: Loose, optional: Set<string>): Loose {
+  const out: Loose = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (optional.has(key) && isBlank(entry)) continue;
+    out[key] = entry;
+  }
+  return out;
+}
+
+/** Blank choices (`""`, `null`, `{ value: "", label: "" }`) are dropped; the rest is validated as sent. */
+function dropBlankOptions(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.filter(
+    (option) =>
+      !isBlank(option) &&
+      !(isRecord(option) && isBlank(option.value) && isBlank(option.label)),
+  );
+}
+
+function normalizeField(raw: unknown): unknown {
+  if (!isRecord(raw)) return raw;
+  const field = dropBlank(
+    'options' in raw ? { ...raw, options: dropBlankOptions(raw.options) } : raw,
+    FIELD_OPTIONAL,
+  );
+  const kind = field.kind;
+  // An unknown kind is left as sent: validation names it, and nothing is guessed from it.
+  if (typeof kind !== 'string' || !KINDS.has(kind)) return field;
+  if (!SELECTS.has(kind)) {
+    delete field.options;
+    delete field.optionsFrom;
+  } else if (field.options !== undefined && field.optionsFrom !== undefined) {
+    // Both sources: lazyit's own list wins — it is current, complete and its values are the ids the
+    // next tool call needs; the model's copy of it may be partial or stale.
+    delete field.options;
+  }
+  if (kind !== 'number') {
+    delete field.min;
+    delete field.max;
+  }
+  return field;
+}
+
+function normalizeFields(value: unknown): unknown {
+  return Array.isArray(value) ? value.map(normalizeField) : value;
+}
+
+/**
+ * Make the model's form easy to get right (#1403): harmless noise is normalized away BEFORE the strict
+ * checks, so only a real mistake fails the call. Pure and total (never throws):
+ *   - `null`, a blank string or an empty list on an optional property means absent (blank choices are
+ *     dropped from `options` first);
+ *   - a property that does not apply to the field's kind is dropped: `options` / `optionsFrom` on
+ *     anything but a select or multiselect, `min` / `max` on anything but a number;
+ *   - a select with both `options` and `optionsFrom` keeps `optionsFrom`.
+ * A select left with neither still fails — its choices are never invented — as does an unknown kind, a
+ * missing required property or anything out of bounds.
+ */
+export function normalizeRequestInput(raw: unknown): unknown {
+  if (!isRecord(raw)) return raw;
+  const form = dropBlank(raw, FORM_OPTIONAL);
+  if (form.fields !== undefined) form.fields = normalizeFields(form.fields);
+  if (Array.isArray(form.groups)) {
+    form.groups = form.groups.map((group) => {
+      if (!isRecord(group)) return group as unknown;
+      const out = dropBlank(group, GROUP_OPTIONAL);
+      if (out.fields !== undefined) out.fields = normalizeFields(out.fields);
+      return out;
+    });
+  }
+  return form;
+}
 
 export const requestInputSchema = z
   .strictObject({
@@ -121,7 +246,11 @@ export const requestInputSchema = z
     const total =
       fields.length + groups.reduce((n, group) => n + group.fields.length, 0);
     if (total === 0) {
-      ctx.addIssue({ code: 'custom', message: 'The form has no field' });
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'The form has no field: put at least one field in `fields` or in a group',
+      });
     }
     if (total > AI_INPUT_LIMITS.fields) {
       ctx.addIssue({
@@ -136,22 +265,33 @@ export const requestInputSchema = z
         message: 'Field and group keys must be unique',
       });
     }
+    // The tool path normalizes first (`normalizeRequestInput`), so only a select without choices and
+    // inverted bounds reach these from the model; the other checks guard the schema used on its own.
     const check = (field: FieldInput, path: (string | number)[]) => {
       const select = SELECTS.has(field.kind);
       const sources =
         (field.options ? 1 : 0) + (field.optionsFrom !== undefined ? 1 : 0);
-      if (select && sources !== 1) {
+      if (select && sources === 0) {
         ctx.addIssue({
           code: 'custom',
           path,
-          message: 'A select needs exactly one of options or optionsFrom',
+          message:
+            `(${field.kind}) needs its choices: add \`options\` (a list of strings) or \`optionsFrom\` ` +
+            `(one of ${SOURCES}) — or ask with kind "text" instead`,
+        });
+      }
+      if (select && sources === 2) {
+        ctx.addIssue({
+          code: 'custom',
+          path,
+          message: `(${field.kind}) give either \`options\` or \`optionsFrom\`, not both`,
         });
       }
       if (!select && sources > 0) {
         ctx.addIssue({
           code: 'custom',
           path,
-          message: 'Only a select or multiselect takes options',
+          message: `(${field.kind}) only a select or multiselect takes \`options\` / \`optionsFrom\`: leave them out`,
         });
       }
       if (
@@ -161,7 +301,7 @@ export const requestInputSchema = z
         ctx.addIssue({
           code: 'custom',
           path,
-          message: 'Only a number takes min and max',
+          message: `(${field.kind}) only a number takes \`min\` / \`max\`: leave them out`,
         });
       }
       if (
@@ -169,7 +309,11 @@ export const requestInputSchema = z
         field.max !== undefined &&
         field.min > field.max
       ) {
-        ctx.addIssue({ code: 'custom', path, message: 'min is above max' });
+        ctx.addIssue({
+          code: 'custom',
+          path,
+          message: `(number) \`min\` (${field.min}) is above \`max\` (${field.max}): swap them or leave one out`,
+        });
       }
     };
     fields.forEach((field, i) => check(field, ['fields', i]));
@@ -186,7 +330,7 @@ export const requestInputSchema = z
         ctx.addIssue({
           code: 'custom',
           path: ['groups', g],
-          message: 'minRows is above maxRows',
+          message: '`minRows` is above `maxRows`',
         });
       }
       group.fields.forEach((field, i) =>
@@ -506,7 +650,9 @@ export const requestInput = defineTool({
     'design: a title, why you need it, and the fields — each marked required, recommended or optional. ' +
     'Use select options (or `optionsFrom` a lazyit list: manufacturers, assetCategories, locations, ' +
     'assetModels) when the answer is one of known values, and a repeat group when the same questions ' +
-    'apply to several items (one row per model). Ask only for what is missing, in one form, before ' +
+    'apply to several items (one row per model). Give each field only the properties of its kind: ' +
+    '`options` or `optionsFrom` on a select or multiselect (exactly one), `min` / `max` on a number, ' +
+    'nothing extra on the other kinds. Ask only for what is missing, in one form, before ' +
     'proposing changes; never for passwords, tokens, keys or other secrets. The run waits for the ' +
     'answer; the result is what the person submitted (or that they skipped or declined).',
   domain: 'interaction',
@@ -514,6 +660,7 @@ export const requestInput = defineTool({
   awaitsInput: true,
   channels: ['CHAT'],
   input: requestInputSchema,
+  normalizeInput: normalizeRequestInput,
   // `[0]` is the permission-free self-read (no gate beyond `ai:use`); the lists resolve `optionsFrom`.
   bindings: [
     bind(UsersController, 'me'),
