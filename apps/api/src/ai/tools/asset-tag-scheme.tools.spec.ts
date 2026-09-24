@@ -52,6 +52,7 @@ import { AiToolExecutor } from '../core/tool-executor';
 import type { AiExecutionContext } from '../core/tool-descriptor';
 import { AI_TOOLSETS, AiToolRegistry } from '../core/tool-registry';
 import { assetTagSchemeToolset } from './asset-tag-scheme.tools';
+import { assetsToolset } from './assets.tools';
 
 /**
  * The ASSET TAG SCHEME tools (#1394) against the REAL `AssetTagSchemeController` (settings:manage,
@@ -489,6 +490,18 @@ describe('asset tag scheme toolset (#1394)', () => {
     expect(update.description).toMatch(/ONLY/);
     expect(update.description).toMatch(/existing asset tags are never/);
   });
+
+  it.each(['asset_create', 'asset_create_batch'])(
+    '%s tells every caller to leave the tag to the scheme (the read tool is admin-only)',
+    (name) => {
+      const tool = assetsToolset.tools.find((t) => t.name === name)!;
+      expect(tool.description).toMatch(
+        /Omit (a row's )?assetTag unless the person gives one/,
+      );
+      expect(tool.description).toMatch(/the instance tag scheme assigns it/);
+      expect(tool.description).toMatch(/never build one from a pattern/);
+    },
+  );
 
   // ─── asset_tag_scheme_get ──────────────────────────────────────────────────────────────────────
 

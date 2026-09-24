@@ -661,9 +661,9 @@ const assetCreate = defineTool({
   description:
     'Register ONE new asset (for several, use asset_create_batch). name is required; status defaults to ' +
     `${DEFAULT_NEW_ASSET_STATUS}. Give its model and location by id or exact name (see reference_lookup); ` +
-    'a missing model or location can be created first with asset_model_create / location_create. An ' +
-    'asset tag may be assigned automatically when the instance uses a tag scheme. To give it to someone ' +
-    'afterwards, use asset_check_out.',
+    'a missing model or location can be created first with asset_model_create / location_create. Omit ' +
+    'assetTag unless the person gives one: the instance tag scheme assigns it; never build one from a ' +
+    'pattern. To give it to someone afterwards, use asset_check_out.',
   domain: 'assets',
   class: 'write',
   input: z
@@ -1192,8 +1192,9 @@ const assetCreateBatch = defineTool({
     `defaults to ${DEFAULT_NEW_ASSET_STATUS}. Every row is checked first: its model and location must ` +
     'exist (create a missing one first with asset_model_create / location_create), and a tag or serial ' +
     'an existing asset or another row already has is refused. A proposal with a refused row is not ' +
-    'shown: fix the row, or mark it `skip: true` to create the others without it. The result lists ' +
-    'what was created and what was not.',
+    "shown: fix the row, or mark it `skip: true` to create the others without it. Omit a row's " +
+    'assetTag unless the person gives one: the instance tag scheme assigns it; never build one from a ' +
+    'pattern. The result lists what was created and what was not.',
   domain: 'assets',
   class: 'write',
   input: assetCreateBatchInput,
