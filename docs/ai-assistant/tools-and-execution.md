@@ -741,7 +741,17 @@ a separate remediation, not a supported path here.
     `IRREVERSIBLE` with a `secretVaultMemberships` change row — the route hard-drops the user's Secret
     Manager vault memberships and `user_restore` does not bring them back. The preview cannot count them:
     the Secret Manager is a structural exclusion (ADR-0061), so the card says "any held". No step-up (it
-    revokes, it grants nothing). The result reports counts only — never the Secret Manager vault names
+    revokes, it grants nothing) — **unless it touches a critical application** (CEO decision 2026-09-24,
+    #1349): the route revokes every active grant, so when ANY is on an application with
+    `isCritical = true` the preview adds `CRITICAL_APPLICATION` (core then requires the password in the
+    chat) with a `criticalApplicationAccess` row naming them, and `run` calls
+    `assertChannelAllows(channel, ['CRITICAL_APPLICATION'])` before the offboard, so MCP and headless are
+    refused with the standard message and nothing is revoked. The grant list carries no `isCritical`, so
+    each distinct application is read through `GET /applications/:id` as the caller. It **fails closed**:
+    grants the caller cannot list (no `accessGrant:read`), and an application it cannot read (403) or that
+    no longer resolves (404, archived), count as critical, and the card says so. The chat's `run` does not
+    re-check: its approval already carried the step-up (a critical grant added between preview and
+    approval is the TOCTOU residual of §9). The result reports counts only — never the Secret Manager vault names
     the route returns as a rotation prompt (ADR-0061) — and its refs are the user (`archived`) and each
     released asset (`updated`); the route returns no ids for the revoked grants.
   - `user_restore` (`elevated`): `IDENTITY_CHANGE` (it restores sign-in), plus `ROLE_CHANGE` when the
