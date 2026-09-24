@@ -650,11 +650,13 @@ grant snapshots, so a browser sign-out silently ended every MCP connection and p
 deactivation/offboarding, an explicit sign-out everywhere, or a revoke. The Manual and the UI copy say so.
 
 **G3/G4 review follow-ups (applied).**
-- OAuth-mode snippets are built from the **server-known origin** — today the `issuer` of the public
-  `/.well-known/oauth-authorization-server` (it is the pinned `WEB_ORIGIN`), to be replaced by the
-  `/ai/status` field when it lands (`resolveSnippetOrigin`, bun-tested). When it differs from the page's
-  origin, or cannot be read, the panel warns and renders the snippets without copy buttons (for review,
-  not copy-ready). Personal-token mode keeps the page's origin (host-agnostic `lan`).
+- Snippets are built from the **server-known origin**: `GET /ai/status` `mcp.endpoint` (`<WEB_ORIGIN>/mcp`,
+  #1366); in OAuth mode on an API without it, the `issuer` of the public
+  `/.well-known/oauth-authorization-server`; on a host-agnostic `lan` instance (no pinned origin) the
+  page's origin. The marketplace command uses `mcp.marketplaceUrl` when the status reports it
+  (`resolveSnippetOrigin`, `claudePluginCommands`, bun-tested). When the server origin differs from the
+  page's, or cannot be read in OAuth mode, the panel warns and renders the snippets without copy buttons
+  (for review, not copy-ready).
 - The personal-token and consent-decision mutations use `gcTime: 0` and are `reset()` as soon as they
   answer, so neither the token nor the password/code stays in the mutation cache.
 - A non-`http(s)` redirect shows its scheme with its host as the trust signal
