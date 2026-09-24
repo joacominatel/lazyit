@@ -115,7 +115,11 @@ async function paused() {
 
 const VALID = {
   action: 'submit' as const,
-  values: { manufacturer: 'Dell', notes: '  for the new hires  ' },
+  values: {
+    manufacturer: 'Dell',
+    site: 'cloc0000000000000000000001',
+    notes: '  for the new hires  ',
+  },
   groups: { models: [{ name: 'Latitude 5450', count: '4' }] },
 };
 
@@ -181,20 +185,29 @@ describe('request_input: pause AWAITING_INPUT → answer → resume', () => {
         outcome: 'submitted',
         providedBy: 'user',
         answer: {
-          // Normalized: text trimmed, a number sent as text parsed.
-          values: { manufacturer: 'Dell', notes: 'for the new hires' },
+          // Normalized: text trimmed, a number sent as text parsed. A value picked from a lazyit list
+          // of names (manufacturers) is lazyit text: wrapped as untrusted in the model's copy. An id
+          // (locations) and what the user typed stay plain.
+          values: {
+            manufacturer: '<untrusted_content>Dell</untrusted_content>',
+            site: 'cloc0000000000000000000001',
+            notes: 'for the new hires',
+          },
           groups: { models: [{ name: 'Latitude 5450', count: 4 }] },
         },
         // A lazyit record's name is other-authored: wrapped as untrusted.
         labels: {
           'values.manufacturer': '<untrusted_content>Dell</untrusted_content>',
+          'values.site': '<untrusted_content>HQ</untrusted_content>',
         },
       },
     });
-    // The user's own answer is not other-authored content: never wrapped as untrusted.
-    expect(JSON.stringify(results[1].output.data.answer)).not.toContain(
-      '<untrusted_content>',
-    );
+    // The transcript keeps the user's answer as given (no wrapper).
+    expect(inputRow().preview.answer.values).toEqual({
+      manufacturer: 'Dell',
+      site: 'cloc0000000000000000000001',
+      notes: 'for the new hires',
+    });
   });
 
   it('projects the form into the transcript with its outcome and the answer', async () => {

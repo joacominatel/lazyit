@@ -451,7 +451,7 @@ instance level, the grant exposes nothing until an admin enables it. Downgrading
 > text status columns `ai_runs.status` and `ai_tool_invocations.status`, validated on write; existing rows
 > are untouched, and an older build reads the value as a newer build's (a run shown as FAILED, never as
 > active). The system prompt changes (a chat rule on asking for missing data), so `AI_PROMPT_VERSION` goes
-> to 3: conversations begun on an earlier version become read-only on the next message and the user starts
+> to 4 (after #1391's 3): conversations begun on an earlier version become read-only on the next message and the user starts
 > a new one (default 7). Downgrading leaves `AWAITING_INPUT` rows an older build treats as unknown.
 
 ## Prerequisites
