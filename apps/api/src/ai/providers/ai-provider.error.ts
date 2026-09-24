@@ -65,3 +65,12 @@ export class AiProviderError extends Error {
     Object.setPrototypeOf(this, AiProviderError.prototype);
   }
 }
+
+/** Thrown when the SDK tries to download a message's file URL (see `experimental_download` below). */
+export class ProviderDownloadRefusedError extends Error {
+  constructor() {
+    super('The provider layer never downloads URLs referenced by a message');
+    this.name = 'ProviderDownloadRefusedError';
+    Object.setPrototypeOf(this, ProviderDownloadRefusedError.prototype);
+  }
+}

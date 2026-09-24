@@ -2,7 +2,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { Test } from '@nestjs/testing';
 import { Module } from '@nestjs/common';
-import { simulateReadableStream, type ModelMessage } from 'ai';
+import {
+  registerTelemetry,
+  simulateReadableStream,
+  type ModelMessage,
+} from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 
 import { AI_SETTINGS_READER } from '../core/ports/ai-settings.port';
@@ -152,6 +156,47 @@ describe('AiSdkChatModel (ChatModelPort)', () => {
       role: 'system',
       content: 'frozen system prompt',
     });
+  });
+
+  it('reports invalid calls as they are: a raw-string input and a name that is not an own tool', async () => {
+    // The contract W2-3 relies on: every call comes back, unvalidated. The input of a call whose JSON
+    // does not parse is the raw string, and a name such as `constructor` must be looked up with an
+    // own-property check. The loop answers every one of them in its single tool message.
+    useModel(
+      mockModel([
+        [
+          {
+            type: 'tool-call',
+            toolCallId: 'c1',
+            toolName: 'lazyit_search',
+            input: '{bad',
+          },
+          {
+            type: 'tool-call',
+            toolCallId: 'c2',
+            toolName: 'constructor',
+            input: '{}',
+          },
+          {
+            type: 'finish',
+            finishReason: { unified: 'tool-calls', raw: 'x' },
+            usage,
+          },
+        ],
+      ]),
+    );
+
+    const result = await chatModelFor(config, scriptedFetch([]).fetch).step(
+      stepRequest(config),
+    );
+
+    expect(result.toolCalls).toEqual([
+      { toolCallId: 'c1', toolName: 'lazyit_search', input: '{bad' },
+      { toolCallId: 'c2', toolName: 'constructor', input: {} },
+    ]);
+    expect(
+      (result.responseMessages as ModelMessage[]).map((m) => m.role),
+    ).toEqual(['assistant']);
   });
 
   it('replays persisted messages and the tool-result message it built, through a JSON round trip', async () => {
@@ -439,6 +484,57 @@ describe('AiSdkChatModel (ChatModelPort)', () => {
     await expect(
       chatModelFor(unknown, scriptedFetch([]).fetch).step(stepRequest(unknown)),
     ).rejects.toMatchObject({ code: 'AI_DISABLED' });
+  });
+
+  it('never lets the SDK download a file URL from a message (it would bypass the egress guard)', async () => {
+    const model = mockModel([textParts('never')]);
+    useModel(model);
+    const globalFetch = jest.spyOn(globalThis, 'fetch');
+
+    try {
+      await expect(
+        chatModelFor(config, scriptedFetch([]).fetch).step(
+          stepRequest(config, {
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'file',
+                    data: new URL('http://169.254.169.254/latest/meta-data'),
+                    mediaType: 'image/png',
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: 'EGRESS_DENIED' });
+      expect(globalFetch).not.toHaveBeenCalled();
+      expect(model.doStreamCalls).toHaveLength(0);
+    } finally {
+      globalFetch.mockRestore();
+    }
+  });
+
+  it('keeps telemetry off even when an integration is registered (ADR-0031: no prompts to APM)', async () => {
+    useModel(mockModel([textParts('ok')]));
+    const integration = {
+      onStart: jest.fn(),
+      onStepStart: jest.fn(),
+      onLanguageModelCallStart: jest.fn(),
+      onLanguageModelCallEnd: jest.fn(),
+      onFinish: jest.fn(),
+    };
+    registerTelemetry(integration);
+
+    await chatModelFor(config, scriptedFetch([]).fetch).step(
+      stepRequest(config),
+    );
+
+    for (const hook of Object.values(integration)) {
+      expect(hook).not.toHaveBeenCalled();
+    }
   });
 
   it('logs SDK warnings as metadata only', async () => {

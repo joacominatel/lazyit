@@ -18,7 +18,10 @@ import type {
   ChatModelStepResult,
   ChatModelToolDefinition,
 } from '../core/ports/chat-model.port';
-import { AiProviderError } from './ai-provider.error';
+import {
+  AiProviderError,
+  ProviderDownloadRefusedError,
+} from './ai-provider.error';
 import { classifyProviderError } from './provider-errors';
 import {
   createProviderFetch,
@@ -46,6 +49,8 @@ export interface AiProviderLayerOptions {
   fetchFactory?: ProviderFetchFactory;
   /** SDK retries of a transient failure (§6.4: 2). A write is never retried: tools never run here. */
   maxRetries?: number;
+  /** Deadline of a model listing (default `MODEL_LIST_TIMEOUT_MS`). */
+  modelListTimeoutMs?: number;
 }
 
 export const DEFAULT_PROVIDER_MAX_RETRIES = 2;
@@ -68,6 +73,16 @@ export function buildToolSet(
     });
   }
   return set;
+}
+
+/** The SDK's download hook: refuses any request (an empty batch needs nothing). */
+function refuseDownload(
+  requested: ReadonlyArray<{ url: URL }>,
+): PromiseLike<never[]> {
+  if (requested.length > 0) {
+    return Promise.reject(new ProviderDownloadRefusedError());
+  }
+  return Promise.resolve([]);
 }
 
 /** SDK usage → the lazyit `AiUsage` wire shape (absent counters are 0 / omitted). */
@@ -192,6 +207,11 @@ export async function runModelStep(
     // Errors are read from the stream below and re-thrown classified. The SDK's default handler would
     // console.error the raw error, whose request body is the whole prompt (ADR-0031: no bodies in logs).
     onError: () => undefined,
+    // INV-AI-7: the SDK would fetch a URL file part itself (global fetch, outside the egress guard) when
+    // the model cannot take the URL directly. Refuse every such download instead.
+    experimental_download: refuseDownload,
+    // ADR-0031: prompts and completions never go to a telemetry integration, even if one is registered.
+    telemetry: { isEnabled: false, recordInputs: false, recordOutputs: false },
   });
 
   let failure: unknown;
@@ -241,7 +261,10 @@ export async function runModelStep(
       toolCalls: toolCalls.map((call) => ({
         toolCallId: call.toolCallId,
         toolName: call.toolName,
-        // Unvalidated by design: the executor validates it with the tool's schema.
+        // Unvalidated by design (the executor validates it with the tool's schema). The call may be
+        // invalid: an unknown name (look it up with an own-property check — `constructor` is a name the
+        // model can send) or an input whose JSON did not parse, which arrives as the RAW STRING. Every
+        // call, invalid ones included, must be answered in the step's single tool message.
         input: call.input as unknown,
       })),
       finishReason,
