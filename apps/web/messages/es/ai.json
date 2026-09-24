@@ -85,6 +85,7 @@
       "FAILED": "Falló: {tool}",
       "DENIED": "No permitido: {tool}",
       "AWAITING_APPROVAL": "Propuesto: {tool}",
+      "AWAITING_INPUT": "Esperando tu respuesta: {tool}",
       "REJECTED": "Rechazado: {tool}",
       "EXPIRED": "Vencido: {tool}",
       "CANCELLED": "Cancelado: {tool}",
@@ -286,6 +287,7 @@
   "toolNames": {
     "lazyit_search": "Búsqueda en lazyit",
     "session_context": "Contexto de la sesión",
+    "request_input": "Pedirte datos",
     "asset_archive": "Archivar un activo",
     "asset_check_in": "Devolver un activo",
     "asset_check_out": "Asignar un activo",
