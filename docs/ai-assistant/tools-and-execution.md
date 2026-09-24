@@ -708,9 +708,11 @@ skip classification). The preview carries:
 - `target` ref;
 - `changes[] {field, before, after}`;
 - `warnings[]` codes: `EXTERNAL_PROVISIONING`, `EXTERNAL_DEPROVISIONING`, `CASCADE_RELEASES_ASSIGNMENTS`,
-  `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`, `LEDGER_APPEND`, `SOFT_DELETE`,
-  `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`, `IRREVERSIBLE` (the last four merge the
-  frontend's `notes` vocabulary and the security note's destination-visibility requirement);
+  `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`,
+  `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
+  `IRREVERSIBLE` (the last four merge the frontend's `notes` vocabulary and the security note's
+  destination-visibility requirement; `PRIVILEGE_GRANT` and `CREDENTIAL_DELIVERY` were added by W2-0 for
+  the step-up rule below);
 - `impacted[]` — entity type and count, with a short sample, for cascading or bulk effects;
 - `elevated` and `stepUpRequired` — `elevated` is the tool's class or an escalation decided here.
   **`stepUpRequired` is derived by core** (CEO decision 2026-09-24, #1315, "Opción 2"): step-up only for
@@ -718,10 +720,11 @@ skip classification). The preview carries:
   but enforced by core, not left to each tool. An `elevated` preview carrying any warning of the closed
   list `AI_STEP_UP_WARNINGS` (`core/pending-action.ts`) requires step-up whatever the tool said; the
   tool may add step-up, never remove it. It is derived at propose and **re-derived at approve** from the
-  stored preview. The list is `ROLE_CHANGE`, `IDENTITY_CHANGE` today; the access-grant / privilege-grant
-  and credential-delivery cases have no warning code in the shared vocabulary yet (escalated), so until
-  they do those tools must set `stepUpRequired` themselves. An elevated action with only other warnings
-  (e.g. `NOTIFIES_USERS`) needs no step-up;
+  stored preview. The list is the CEO's closed list: `ROLE_CHANGE`, `IDENTITY_CHANGE`,
+  `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`. **Tool units granting access or privilege (access grants,
+  approving an access request, …) MUST emit `PRIVILEGE_GRANT`; tools delivering a credential MUST emit
+  `CREDENTIAL_DELIVERY`** — that is what makes core require the step-up. An elevated action with only
+  other warnings (e.g. `NOTIFIES_USERS`) needs no step-up;
 - `untrustedSources[]` — refs of the other-authored content read in this turn (the banner source);
 - `precondition {entity, updatedAt}`.
 

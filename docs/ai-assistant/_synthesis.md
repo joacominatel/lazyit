@@ -181,7 +181,7 @@ cap (headless), and a per-principal rate limit. Each dispatch runs inside an `As
 - **Preview** (server-built, never model prose): `target`, `changes[] { field, before, after,
   valueKind }`, `warnings[]` (codes: `EXTERNAL_PROVISIONING`, `EXTERNAL_DEPROVISIONING`,
   `CASCADE_RELEASES_ASSIGNMENTS`, `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`,
-  `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
+  `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`, `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
   `IRREVERSIBLE`), `impacted[]`, `untrustedSources[]`, `elevated`, `stepUpRequired`, and a
   `precondition { entity, updatedAt }` checked at execute.
 - **Pagination inside tools:** `limit` default 20, max 50, with `nextOffset`; the MCP layer adds a
