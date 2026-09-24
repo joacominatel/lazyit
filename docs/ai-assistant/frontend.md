@@ -855,10 +855,12 @@ Edits to existing pages (en + es):
   destination binding). The API re-tests a changed connection on save; its 422 renders inline with the
   failed test.
 - **Error mapping** (`describeAiSettingsError`, one localized sentence each, request id always shown):
-  the four enable-gate 422 codes (with `test`); the **codeless 409s** told apart by their fixed server
-  sentences — missing `AI_SECRET_KEY`, `AUTH_MODE=shim`, a concurrent save ("reload and save again") —
-  with a generic fallback quoting the server; the base-URL and shape 400s by their fixed sentences; schema
-  400s; 403; 404 (an older API). Connection-test codes (`PROVIDER_AUTH`, `EGRESS_DENIED`,
+  by the stable `code` of the body (`AI_SETTINGS_ERROR_CODES`, provider-and-runtime.md §9.1) through a map
+  typed over the whole shared list, so a new code fails the build until it has copy —
+  `PROVIDER_NOT_CONFIGURED` by status (400 test vs 422 enable gate), `API_KEY_REQUIRED` with
+  `reason: "DESTINATION_CHANGED"` as its own sentence, `CONNECTION_TEST_FAILED` with its `test`. An unknown
+  code is a generic refusal quoting the server. Only a **code-less** body (an older API, the zod pipe's
+  400) falls back to matching the fixed server sentences, then schema 400s, 403, 404. Connection-test codes (`PROVIDER_AUTH`, `EGRESS_DENIED`,
   `TOOL_CALLING_UNSUPPORTED`, …) have copy, an unknown code shows the server's text. The base-URL rules
   that need no DNS (userinfo, query/fragment, scheme, loopback name, `http` only for OpenAI-compatible with
   the private-network option) are also checked as the admin types. A covering-set test asserts every
@@ -875,15 +877,19 @@ Edits to existing pages (en + es):
   back to the page's own scheme, and say so. OAuth (HTTPS): consent in the browser, the `NODE_EXTRA_CA_CERTS` note for an internal CA, and that
   cloud connectors (claude.ai, ChatGPT) need a publicly reachable HTTPS instance. Personal tokens (`lan`):
   why OAuth is unavailable on plain HTTP, and that cloud connectors cannot connect. The endpoint is
-  `window.location.origin + "/mcp"` (read after hydration) with a copy button; "Install in Claude Code"
-  links to `/account/ai` (W3-9).
-- **Allowlist editor.** Lists the admin's entries (with their redirect kind), the removed curated ids
-  (restorable), an "any https client" switch, and an add form validated against `classifyMcpRedirectUri`
-  and `McpClientAllowlistEntrySchema` before the save. New ids are `admin-<slug>`, so they can never
-  collide with a curated default's id (which the API would silently ignore). **Gap:** the curated defaults
-  live only in `apps/api/src/oauth/client-allowlist.defaults.ts`; no response carries them, so the page
-  names them in copy and cannot offer "remove this default". Exposing them (a shared constant or a field on
-  `GET /config/ai`) is a backend follow-up.
+  `/ai/status` `mcp.endpoint` (the pinned `WEB_ORIGIN` + `/mcp`); only when that is null (no pinned
+  origin, an older API, a failed read) is `window.location.origin + "/mcp"` shown, with a note. Copy
+  button; "Install in Claude Code" links to `/account/ai` (W3-9).
+- **Allowlist editor.** Lists the curated defaults from `MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS` (label,
+  identifier, redirect kind, and a **Verified** / **Vendor docs** badge from `verification`, `source` as
+  its tooltip) with **Remove** (adds the id to `mcpClientAllowlistRemovedDefaults`) and **Restore** (drops
+  it); a removed id the shared list no longer carries stays listed for restore. Then the admin's own
+  entries and an add form validated against `classifyMcpRedirectUri` and `McpClientAllowlistEntrySchema`
+  before the save; new ids are `admin-<slug>`, so they can never collide with a curated id (which the API
+  would silently ignore). The "accept any https:// client" switch is presented as **on by default** (CEO,
+  "Sí, cualquier HTTPS"): any client with an https redirect may ask for consent, the consent page shows
+  the host and warns when a client was not listed, private-use schemes still need an entry, and turning
+  it off restricts to the list. Pi, Windsurf and Zed are named as not seeded (unverifiable identifiers).
 - **Per-SA AI access.** There is no Service Account detail page, so the control is an **AI access** row
   action on Settings → Service accounts opening a dialog (`ai-access-dialog.tsx`): off / read-only /
   read-write, and for read-write an optional cap described as "per headless run; over MCP, per rolling
