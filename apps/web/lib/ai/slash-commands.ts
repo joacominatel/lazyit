@@ -1,10 +1,16 @@
+import { parseAutoArgument, validModelId } from "./chat-settings";
+
 /**
  * Slash commands for the AI chat composer (issue #1372). Typing `/` at the start of the composer opens a
  * palette of these; picking one runs it in the browser. A command is NEVER sent to the model.
  *
- * The registry is a plain array so later commands (`/model`, `/auto`) plug in by adding an entry and, if
- * they need more from the chat, a member of {@link SlashCommandContext}. Labels and descriptions are
- * localized under `ai.commands.<name>.{label,description}`; this module only holds the pure rules.
+ * The registry is a plain array: a command plugs in by adding an entry and, if it needs more from the
+ * chat, a member of {@link SlashCommandContext}. Labels and descriptions are localized under
+ * `ai.commands.<name>.{label,description}`; this module only holds the pure rules.
+ *
+ * A command may take ONE argument (`/model gpt-4o`, `/auto on`): it declares `argument`, which says
+ * whether a given word is one it understands. A message whose argument the command does not understand is
+ * not a command — it is sent as a normal message, like any other text that merely starts with a slash.
  */
 
 /** What a command can do to the chat. Extend it when a new command needs more. */
@@ -15,6 +21,10 @@ export interface SlashCommandContext {
   newChat: () => void;
   /** Show the list of commands and shortcuts. */
   showHelp: () => void;
+  /** `/model`: open the model picker (no id), or set the chat's model to `id`. */
+  chooseModel: (id: string | null) => void;
+  /** `/auto`: turn auto-approve on or off; `null` toggles it. */
+  setAutoApprove: (on: boolean | null) => void;
 }
 
 export interface SlashCommand<C = SlashCommandContext> {
@@ -24,7 +34,13 @@ export interface SlashCommand<C = SlashCommandContext> {
   aliases?: readonly string[];
   /** Whether it can run right now (e.g. `/copy` needs messages). Omitted means always. */
   enabled?: (ctx: C) => boolean;
-  run: (ctx: C) => void | Promise<void>;
+  /**
+   * The one argument this command accepts: `hint` is shown after the name (`[id]`, `on|off`) and
+   * `accepts` checks a word. Without it the command takes no argument.
+   */
+  argument?: { hint: string; accepts: (value: string) => boolean };
+  /** `argument` is the word after the name, or null when none was given. */
+  run: (ctx: C, argument: string | null) => void | Promise<void>;
 }
 
 /** The built-in commands, in palette order. */
@@ -32,6 +48,17 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "copy", aliases: ["copiar"], run: (ctx) => ctx.copyConversation() },
   { name: "new", aliases: ["nuevo", "clear"], run: (ctx) => ctx.newChat() },
   { name: "help", aliases: ["ayuda"], run: (ctx) => ctx.showHelp() },
+  {
+    name: "model",
+    aliases: ["modelo"],
+    argument: { hint: "[id]", accepts: (value) => validModelId(value) !== null },
+    run: (ctx, argument) => ctx.chooseModel(argument === null ? null : validModelId(argument)),
+  },
+  {
+    name: "auto",
+    argument: { hint: "on|off", accepts: (value) => parseAutoArgument(value) !== null },
+    run: (ctx, argument) => ctx.setAutoApprove(argument === null ? null : parseAutoArgument(argument)),
+  },
 ];
 
 /**
@@ -74,18 +101,39 @@ export function filterSlashCommands<C>(
   return ranked.map((r) => r.command);
 }
 
+function byName<C>(commands: readonly SlashCommand<C>[], raw: string): SlashCommand<C> | null {
+  const name = fold(raw);
+  return (
+    commands.find((c) => fold(c.name) === name || (c.aliases ?? []).some((a) => fold(a) === name)) ??
+    null
+  );
+}
+
 /** The command a whole message names exactly (`/copy`, `/COPY `, an alias), or null. */
 export function exactSlashCommand<C>(
   commands: readonly SlashCommand<C>[],
   text: string,
 ): SlashCommand<C> | null {
   const match = /^\/(\S+)$/.exec(text.trim());
+  return match ? byName(commands, match[1]!) : null;
+}
+
+/**
+ * The command a whole message runs, with its argument: `/copy` → copy with none, `/model gpt-4o` → model
+ * with `"gpt-4o"`. An argument the command does not take or does not understand — or more than one word —
+ * is no command at all: the message is sent as typed.
+ */
+export function matchSlashCommand<C>(
+  commands: readonly SlashCommand<C>[],
+  text: string,
+): { command: SlashCommand<C>; argument: string | null } | null {
+  const match = /^\/(\S+)(?:\s+(\S+))?$/.exec(text.trim());
   if (!match) return null;
-  const name = fold(match[1]!);
-  return (
-    commands.find((c) => fold(c.name) === name || (c.aliases ?? []).some((a) => fold(a) === name)) ??
-    null
-  );
+  const command = byName(commands, match[1]!);
+  if (!command) return null;
+  const argument = match[2] ?? null;
+  if (argument === null) return { command, argument };
+  return command.argument?.accepts(argument) ? { command, argument } : null;
 }
 
 /** Moves the palette's highlighted row with wrap-around; an empty list has no row (-1). */
