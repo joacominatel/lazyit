@@ -347,6 +347,9 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 | T-37 | ALL | E | AI in `AUTH_MODE=shim`, where identity is forgeable [R]. | Hard-disabled | v1 |
 | T-38 | ALL | E, I | The AI changes AI configuration (provider, base URL, key, budgets, retention) and creates a persistent exfiltration channel. | Exclude AI configuration from tools (§11 E1-b) | v1 |
 | T-39 | CH | I | Secret Manager plaintext decrypted in the browser leaks into chat context (e.g. "current page" context). | INV-AI-5: the client never sends decrypted vault content or DOM snapshots | v1 |
+| T-40 | CH | I | Injection steers the AI to author a persistent exfiltration integration: a `WEBHOOK_OUT`/`REST` connection to an attacker host plus an enabled workflow mapping grantee identity, which leaks on every future grant and outlives the conversation (§6.9). | Authoring is chat-only and `elevated`; `OUTBOUND_INTEGRATION` preview listing every host and mapped field; created disabled, enabling is its own approval with an embedded dry-run; `CRITICAL_APPLICATION` step-up; no SA authoring (ADR-0097 decision 3, amended) | v1 |
+| T-41 | CH | I | Credential exfiltration by re-pointing a secret-bearing connection to another host. | CSEC-1 (`workflow:secrets` to re-point or attach) runs through the route; the preview shows old → new host; secrets are reference-only, never read (§6.9) | v1 |
+| T-42 | HL, MCP | T, E | No-human authoring or enabling of an outbound integration by an SA or an MCP client, or any unconfirmed write on a critical application. | Authoring tools declare `channels: ['CHAT']`; MCP/headless authoring deferred (#1344); MCP and headless refuse writes on critical applications (`AI_CHANNEL_REFUSED_WARNINGS`) | v1 |
 
 ---
 
@@ -382,7 +385,7 @@ the **exfiltration leg** and the **consequential-action leg**.
 | Mermaid in chat | no | `securityLevel: 'strict'` [R]; keep it. |
 | Writes that change visibility (KB public folder, notes, `Application.url`) | no; others read later | Preview shows the full content plus the destination's visibility; SEC-051 fixed first. |
 | Identity or credential changes (email, reset link, SA token mint) | no | T3 elevated confirmation; one-time credentials never enter context (INV-AI-5). |
-| Workflow `WEBHOOK_OUT` / `REST` to configured URLs [R] | no | Authoring definitions, connections, secrets or the egress allowlist is T4 elevated. Triggering a run is T2. |
+| Workflow `WEBHOOK_OUT` / `REST` to configured URLs [R] | no | Authoring definitions and connections is T4 elevated, **chat only**, with the `OUTBOUND_INTEGRATION` warning; secrets and the egress allowlist are never tools. Retry/replay is T2. See §6.9. |
 | Instance email (SMTP test, notification templates) | no | Templates are fixed [R: ADR-0079 §6]. SMTP settings are T4. Low residual risk. |
 | A generic HTTP fetch, web-browse or email-compose tool | yes | **Forbidden class**: none in the catalog. Adding one completes the trifecta. |
 | MCP client's other servers | out of our control | Disclosure plus scopes (T-24, §11 E3). |
@@ -442,7 +445,9 @@ the **exfiltration leg** and the **consequential-action leg**.
     articles. These get **elevated confirmation**: a visually distinct card, a full diff, no default
     focus on Approve, **one action per approval** (no batching), the untrusted-source banner, and
     **step-up re-authentication** (password re-entry) for anything that grants privilege or
-    delivers a credential.
+    delivers a credential — and, since the ADR-0097 decision 3 amendment (2026-09-24), for any write on
+    a critical application (`CRITICAL_APPLICATION`, derived by core on `write` and `elevated` previews
+    alike).
   - **T4** configuration and egress: SMTP, asset-tag scheme, workflow definitions, connections,
     secrets and egress allowlist, permission defaults. Same handling as T3. **AI configuration is
     excluded** (§11 E1-b).
@@ -638,6 +643,64 @@ These are recommended defaults; the numbers are tunable.
 - Streaming uses deadlines from the egress guard.
 - The in-memory limiter is per replica [R] and that is accepted. **Budgets must be persisted**, since
   spend has to survive a restart.
+
+### 6.9 The workflow engine through the AI (ADR-0097 decision 3, amended 2026-09-24)
+
+The CEO opened the workflow engine to the AI (#1315): reads, run operations and manual tasks on every
+channel; authoring (workflows, versions, connections, the connection test, dry-run, enable/disable)
+in the **chat only** for v1. Workflow secrets stay structurally excluded.
+
+**The headline risk (T-40): AI-authored exfiltration through REST/webhook.** Other-authored text (an
+access-request justification, a KB article, asset notes) steers the model to create a connection to
+`https://attacker.example` and an `ACCESS_GRANTED` workflow mapping `{{ grantee.email }}`,
+`{{ grantee.manager.email }}` and the grant, then enable it. Every future grant then leaks the grantee's
+identity, outside the chat renderer's defences, long after the conversation. The payload is bounded to
+the mapper's roots (`event`, `grantee`, `application`, `grant`, `steps`; `mapping/data-mapper.ts`), but
+`steps.*` can carry responses from earlier REST calls, so data from a legitimate target system can be
+chained into a second outbound step.
+
+**Controls already in the engine** [R]: the host is fixed by the connection and a path cannot change
+it (`rest.handler.ts`); v1 accepts public HTTPS only and the egress guard pins the IP and denies
+private, loopback, link-local and IMDS targets (no SSRF beyond what an admin already has); re-pointing a
+secret-bearing connection or attaching a secret needs `workflow:secrets` on top of `workflow:manage`
+(CSEC-1); replay refuses a non-idempotent create that already succeeded.
+
+**AI-level mitigations (the amendment):**
+- Authoring tools are `elevated` and `channels: ['CHAT']`: one action per approval, the untrusted-source
+  banner, no default focus. No Service Account and no MCP client authors, connects or enables (T-42;
+  MCP/headless authoring deferred, #1344).
+- **`OUTBOUND_INTEGRATION`** on any proposal that creates a connection, changes its host, URL or
+  credential reference, authors a version on an enabled workflow, or enables a workflow. The preview
+  lists every outbound host and every mapped field → token ("what leaves lazyit"), and old → new host
+  on a re-point (T-41). No step-up by itself (CEO: flexible, unless the application is critical).
+- **`CRITICAL_APPLICATION`** on every AI write on an application with `isCritical = true` (access
+  grant or revoke, workflow or connection authoring, retry, replay, manual-task resolve — CEO: "Toda
+  escritura"); core requires step-up in the chat, and **MCP and headless refuse it** (CEO: "Rechazar";
+  `AI_CHANNEL_REFUSED_WARNINGS`, a 403 pointing to the chat), because neither channel has a password
+  step-up.
+- **Disabled first.** A workflow the AI creates is disabled; enabling is a separate approval whose
+  preview embeds a dry-run against a named sample grant.
+- **Secrets are reference-only.** No tool reads, creates, rotates or deletes a workflow secret; a
+  connection read reports "credential configured: yes/no" from `secretId`. Header values
+  (`defaultHeaders`, not validated against credential-like values) are redacted in reads.
+- **No `overrides` on retry** through the AI (they change the outbound payload).
+- Run errors, step metadata and manual-task inputs and prompts are wrapped as untrusted content.
+- The behaviour rules tell the model never to propose sending data to a destination the user did not
+  name (primer, `AI_PROMPT_VERSION` 2).
+
+**Residual risk.** An admin who approves an injected proposal without reading the host list still
+creates the channel; the controls make it visible, not impossible. An `ACCESS_GRANTED` workflow on a
+non-critical application needs no password. The MCP/headless refusal on critical applications depends on
+each tool detecting `isCritical` and calling `assertChannelAllows` in `run`; the G2 review checks every
+write tool that can reach an application does. When ADR-0055's internal allowlist ships, its entries must
+be an excluded or elevated AI operation.
+
+**Proposed invariants** (join §7 on the W4-2 security re-review):
+- **INV-AI-15 — No unattended outbound integration.** A workflow, a workflow version or a workflow
+  connection is created, changed or enabled by the AI only through a chat approval by a human; no
+  Service Account and no MCP client does it.
+- **INV-AI-16 — Workflow secrets are reference-only.** The AI never reads, sets or rotates a workflow
+  secret value; it may state whether a connection has a credential configured.
 
 ---
 
@@ -861,7 +924,9 @@ in [[ai-assistant/_synthesis|the synthesis]] §10 places each gate on its units.
   human sessions.
 - **Tool classes:** the `elevated` classification is complete. Review the catalog against §6.2,
   especially identity attributes (email), credential delivery, access grants, folder rules and workflow
-  authoring. AI configuration and cleartext-credential operations are absent. No generic egress tool
+  authoring (§6.9: chat-only channels, `OUTBOUND_INTEGRATION` and `CRITICAL_APPLICATION` emitted where
+  due, `assertChannelAllows` called on MCP/headless for critical applications, secrets absent, no retry
+  `overrides`). AI configuration and cleartext-credential operations are absent. No generic egress tool
   exists.
 - **Headless:** the per-SA AI access setting is enforced (off / read-only / read-write), the mutation cap
   works, and `infra:report` SAs are refused.
