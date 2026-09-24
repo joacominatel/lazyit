@@ -16,6 +16,8 @@ import {
 import { OAuthSubjectService } from './oauth-subject.service';
 import { OAuthTokenService } from './oauth-token.service';
 import { OAuthSweeper } from './oauth.sweeper';
+import { PersonalTokensController } from './personal-tokens/personal-tokens.controller';
+import { PersonalTokensService } from './personal-tokens/personal-tokens.service';
 import { RegisterController } from './register.controller';
 import { RevokeController } from './revoke.controller';
 import { TokenController } from './token.controller';
@@ -28,8 +30,8 @@ import { TokenController } from './token.controller';
  *
  * Exported for the MCP resource server (W3-2) and the sibling units: {@link OAuthTokenService}
  * (`verifyAccessToken`, `revokeGrant`), {@link OAuthPolicyService} (issuer, MCP switch, client
- * allowlist) and {@link OAuthAuditService}. CIMD (`cimd/`, W3-3) and personal tokens
- * (`personal-tokens/`, W3-4) join this module.
+ * allowlist), {@link OAuthAuditService} and {@link PersonalTokensService} (`verify`, the `lan` personal
+ * tokens of `personal-tokens/`, W3-4). CIMD (`cimd/`, W3-3) joins this module.
  *
  * `PrismaService`, `PermissionResolverService`, `LocalCredentialService` and `PrincipalLoaderService`
  * come from the global Prisma and Auth modules.
@@ -42,6 +44,7 @@ import { TokenController } from './token.controller';
     RegisterController,
     RevokeController,
     GrantsController,
+    PersonalTokensController,
   ],
   providers: [
     OAuthPolicyService,
@@ -56,7 +59,13 @@ import { TokenController } from './token.controller';
     TokenRateLimitGuard,
     RevokeRateLimitGuard,
     ConsentDecisionRateLimitGuard,
+    PersonalTokensService,
   ],
-  exports: [OAuthTokenService, OAuthPolicyService, OAuthAuditService],
+  exports: [
+    OAuthTokenService,
+    OAuthPolicyService,
+    OAuthAuditService,
+    PersonalTokensService,
+  ],
 })
 export class OAuthModule {}

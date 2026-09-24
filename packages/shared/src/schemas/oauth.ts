@@ -59,13 +59,17 @@ export const OAUTH_TOKEN_KINDS = ["access", "refresh", "personal"] as const;
 export const OAuthTokenKindSchema = z.enum(OAUTH_TOKEN_KINDS);
 export type OAuthTokenKind = z.infer<typeof OAuthTokenKindSchema>;
 
-/** Why a grant was revoked (`OAuthGrant.revokeReason`). */
+/**
+ * Why a grant was revoked (`OAuthGrant.revokeReason`). `token_exposed`: one of its tokens was presented in
+ * a URL query string at `/mcp` — treated as compromised and revoked on sight (#1315 G3 review F1).
+ */
 export const OAUTH_GRANT_REVOKE_REASONS = [
   "user",
   "admin",
   "refresh_reuse",
   "revocation_endpoint",
   "client_deleted",
+  "token_exposed",
 ] as const;
 export const OAuthGrantRevokeReasonSchema = z.enum(OAUTH_GRANT_REVOKE_REASONS);
 export type OAuthGrantRevokeReason = z.infer<typeof OAuthGrantRevokeReasonSchema>;
@@ -108,12 +112,36 @@ export type OAuthGrant = z.infer<typeof OAuthGrantSchema>;
 export const PERSONAL_TOKEN_DEFAULT_EXPIRY_DAYS = 90;
 export const PERSONAL_TOKEN_MAX_EXPIRY_DAYS = 365;
 
-/** `POST /oauth/personal-tokens` (`lan` instances only). */
+/**
+ * The scopes a personal token may carry: "Read only" or "Read & write", like the consent screen's two
+ * everyday choices. `lazyit.admin` is not offered: a personal token is long-lived (up to a year) and
+ * minted without a client to show, so the `elevated` tools stay behind OAuth consent with a step-up.
+ */
+export const PERSONAL_TOKEN_SCOPES = ["lazyit.read", "lazyit.write"] as const;
+export const PersonalTokenScopeSchema = z.enum(PERSONAL_TOKEN_SCOPES);
+
+/** What a personal token carries when the request names no scopes (the consent screen's preselection). */
+export const PERSONAL_TOKEN_DEFAULT_SCOPES: readonly OAuthScope[] = ["lazyit.read", "lazyit.write"];
+
+/**
+ * `POST /oauth/personal-tokens` (`lan` instances only). `scopes` is optional (absent = read & write) and
+ * parses to a de-duplicated list in catalog order.
+ */
 export const CreatePersonalTokenSchema = z.strictObject({
   label: z.string().trim().min(1).max(120),
   expiresInDays: int4({ min: 1, max: PERSONAL_TOKEN_MAX_EXPIRY_DAYS }).default(
     PERSONAL_TOKEN_DEFAULT_EXPIRY_DAYS,
   ),
+  scopes: z
+    .array(PersonalTokenScopeSchema)
+    .min(1)
+    .max(PERSONAL_TOKEN_SCOPES.length * 2)
+    .optional()
+    .transform((scopes): OAuthScope[] =>
+      scopes === undefined
+        ? [...PERSONAL_TOKEN_DEFAULT_SCOPES]
+        : OAUTH_SCOPES.filter((scope) => (scopes as readonly string[]).includes(scope)),
+    ),
 });
 export type CreatePersonalToken = z.infer<typeof CreatePersonalTokenSchema>;
 

@@ -50,6 +50,10 @@ describe("Notification type catalog (catalog-as-code)", () => {
     expect(NOTIFICATION_TYPES).toContain("asset_assignment.acknowledged");
   });
 
+  test("the new-MCP-connection security notice type is present (ADR-0097, security §6.3 G3)", () => {
+    expect(NOTIFICATION_TYPES).toContain("mcp.client_connected");
+  });
+
   test("rejects an unknown type literal", () => {
     expect(NotificationTypeSchema.safeParse("nope").success).toBe(false);
     expect(NotificationTypeSchema.safeParse("workflow.unknown").success).toBe(

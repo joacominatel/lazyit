@@ -64,6 +64,10 @@
     "asset_assignment_acknowledged": {
       "label": "Receipt acknowledged",
       "description": "Someone confirmed receipt of an asset you assigned to them."
+    },
+    "mcp_client_connected": {
+      "label": "New AI agent connected",
+      "description": "An external AI agent (MCP) was connected to your account for the first time."
     }
   }
 }
