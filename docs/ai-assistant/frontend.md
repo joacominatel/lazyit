@@ -817,6 +817,47 @@ Edits to existing pages (en + es):
    route and an entity ref are sent — never page content or decrypted vault data
    ([[ai-assistant/security|security]] T-39).
 
+## 11a. As built — the chat (W3-7, #1315)
+
+The chat follows §5.2 and K3–K6. Where it settled a detail this note left open, or departed from it:
+
+- **Modules.** `lib/ai/` holds the pure, `bun test`ed logic: `sse-parser.ts` (W1-D), `run-events.ts`
+  (frame → event with `safeParse`, `eventSeq` for `<runId>:<seq>` ids — compared, never counted),
+  `stream-reducer.ts`, `effects.ts`, `entity-href.ts`, `route-context.ts`, `unsaved-changes.ts`,
+  `error-kinds.ts`, `history-groups.ts`, `preview.ts`, `untrusted-text.ts`, `chat-links.ts`. The data layer
+  is `lib/api/endpoints/ai.ts`, `lib/api/hooks/use-ai-conversations.ts` and `use-ai-turn.ts` (the one
+  stream follower and its `AbortController`). The UI is `components/ai/ai-chat-panel.tsx` and its parts,
+  mounted through W1-D's slot with one edit: the slot's placeholder body became a `next/dynamic` import of
+  `AiChatPanel` (loaded on first open).
+- **Chat renderer.** A separate `components/ai/ai-markdown.tsx` rather than a prop on `MarkdownView`
+  (shared by the KB and the Manual): the same sanitize-first pipeline, no images (alt text only), no
+  mermaid or KB passes, `<untrusted_content>` wrappers stripped before parsing, and links through
+  `classifyLink` — in-app paths use the router, explicit http(s) links open in a new tab with
+  `noopener noreferrer nofollow` and show their host, **bare URLs are never linked** (synthesis §4.10 wins
+  over §5.5 here), any other scheme is text.
+- **Snapshot merge.** A `run.snapshot`'s messages are inserted where the first message they replace was (the
+  optimistic user message, a live assistant message), and a call the snapshot carries is removed from the
+  live message that held it — a live `tool.call` has no message id and lands on the last assistant message.
+- **Stop** calls `POST /ai/runs/:id/cancel` and keeps reading the stream until the server reports the run
+  cancelled (instead of aborting at once), so the partial output and the final status arrive.
+- **Re-reading a changed card.** The stored preview's update (`PREVIEW_CHANGED`, `STEP_UP_REQUIRED` with
+  `addedWarnings`) is not an event, so replaying from `Last-Event-ID` would not show it: after a decision
+  refusal that changes or settles the card (`PREVIEW_CHANGED`, `STEP_UP_REQUIRED` + `addedWarnings`,
+  `RUN_NOT_AWAITING_APPROVAL`, `STALE`, `EXPIRED`, already decided) the client re-subscribes **without**
+  `Last-Event-ID` and gets a fresh `run.snapshot`. The card keeps the added warnings highlighted ("New") and
+  opens the password field. After a successful decision it resumes from `Last-Event-ID`.
+- **Effects.** Invalidation is applied once per call id; a snapshot that carries an executed mutation not
+  yet applied invalidates once (a reconnect the ring buffer could not cover) and never navigates. "Open"
+  chips render for mutation and navigate results, not for reads.
+- **Reconnects.** Exponential back-off (1 s → 8 s), five attempts, then "Connection lost" with
+  **Reconnect** and a re-read of `GET /ai/conversations/:id` as the fallback. A 4xx other than 429 ends the
+  follow with a notice.
+- **Labels.** Tool names are humanized (`asset_search` → "Asset search") rather than kept in a
+  per-tool `tools.<name>` catalog; preview field names are humanized from the server's keys. Warning codes,
+  entity types, run error codes, tool statuses and decision refusals are localized, with covering-set tests
+  over both catalogs.
+- **Retry** re-sends the last user message; **read-only** replaces the composer with "Start a new chat".
+
 ## 12. Implementation units (superseded)
 
 > **Superseded** by the unified wave plan in [[ai-assistant/_synthesis|the synthesis]] §10. Kept for
