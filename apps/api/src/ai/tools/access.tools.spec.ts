@@ -1895,6 +1895,12 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         grantId: vpnGrant,
       });
       expect(last.preview!.warnings).toEqual(['EXTERNAL_DEPROVISIONING']);
+      // The application's criticality is on the card (and loaded for a critical-application warning).
+      expect(last.preview!.changes).toEqual(
+        expect.arrayContaining([
+          { field: 'isCritical', after: true, valueKind: 'boolean' },
+        ]),
+      );
       expect(action(last.preview)).toBe(
         `Remove user ${ID.grantee}'s "developer" access to VPN. ` +
           'This triggers automatic deprovisioning (removing the account in VPN), through the workflow set up for VPN.',

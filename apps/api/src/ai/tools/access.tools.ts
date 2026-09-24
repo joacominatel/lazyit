@@ -955,8 +955,11 @@ const accessGrantRevoke = defineTool({
     const applicationId = String(grant.applicationId);
     // The application may have been archived since the grant: the grant is still revocable.
     let appName: string | null = null;
+    let critical = false;
     try {
-      appName = str((await readApplication(rt, applicationId)).name);
+      const app = await readApplication(rt, applicationId);
+      appName = str(app.name);
+      critical = app.isCritical === true;
     } catch (err) {
       if (httpStatus(err) !== 404) throw err;
     }
@@ -1005,6 +1008,7 @@ const accessGrantRevoke = defineTool({
         valueKind: 'entity',
       },
       { field: 'accessLevel', after: grant.accessLevel ?? null },
+      { field: 'isCritical', after: critical, valueKind: 'boolean' },
       { field: 'status', before: 'active', after: 'revoked' },
     ];
     if (input.notes !== undefined) {
