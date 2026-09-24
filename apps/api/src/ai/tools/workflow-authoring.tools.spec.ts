@@ -587,6 +587,8 @@ const prisma = {
     if (Array.isArray(arg)) return Promise.all(arg);
     return (arg as (tx: unknown) => Promise<unknown>)(prisma);
   }),
+  // The SEC-077 workflow row lock (`SELECT … FOR UPDATE`) — a no-op in this in-memory fake.
+  $queryRaw: jest.fn().mockResolvedValue([]),
 };
 
 // ─── Stubbed services ────────────────────────────────────────────────────────────────────────────
@@ -1711,9 +1713,12 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         expect.any(String),
       );
 
+      prisma.$queryRaw.mockClear();
       const approved = await tools.approve(id, chat(ADMIN));
       expect(approved.status).toBe('SUCCEEDED');
       expect(workflows.get(WF.jiraGrant)!.enabled).toBe(true);
+      // SEC-077: the enable carried the reviewed version, so the route took the version-checked path.
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
       expect(events(id)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTED']);
       expectNoSecrets(approved.result);
       expectNoSecrets(ledger);
