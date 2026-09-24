@@ -3,7 +3,7 @@ title: "AI Assistant — Provider layer, agent runtime, configuration lifecycle,
 tags: [design, ai-assistant, backend, llm, providers, agent-loop, bullmq, sse, infra, security]
 status: draft
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # AI Assistant — Provider layer, agent runtime, configuration lifecycle, infrastructure
@@ -422,11 +422,17 @@ apps/api/src/ai/
 ├── status/
 │   └── ai-status.controller.ts       # GET /ai/status (any authenticated principal)
 ├── providers/                        # THE EXTENSION POINT — only place that imports `ai` / `@ai-sdk/*`
-│   ├── provider.types.ts             # LlmProviderDefinition, ResolvedAiConfig, ModelInfo, AiErrorClass
+│   ├── ai-providers.module.ts        # (as built, W2-1) imports AiSettingsModule; exports CHAT_MODEL_PORT, AiModelListService
+│   ├── provider.types.ts             # LlmProviderDefinition, ProviderCallSettings, ProviderErrorPatterns, ModelInfo
 │   ├── provider.registry.ts          # static map kind → definition (one line per provider)
-│   ├── chat-model.port.ts            # ChatModelPort (what the runtime depends on)
-│   ├── aisdk-chat-model.ts           # ChatModelPort over streamText (one step per call)
-│   ├── provider-fetch.ts             # guardedFetch → FetchLike adapter with LLM timeouts + allowlist seam
+│   ├── aisdk-chat-model.ts           # ChatModelPort over streamText (the port itself is core/ports/chat-model.port.ts)
+│   ├── model-step.ts                 # one step: streamText, tool set without execute, usage mapping
+│   ├── ai-model-list.service.ts      # listModels of an explicit (draft) connection, for POST /config/ai/models
+│   ├── ai-provider.error.ts          # AiProviderError { code: run error code } — no SDK import
+│   ├── provider-errors.ts            # classifyProviderError: SDK / egress / abort → AiProviderError
+│   ├── provider-fetch.ts             # guardedFetch → FetchLike with LLM timeouts + the private-host seam
+│   ├── model-listing.ts              # capped GET + parse for listModels
+│   ├── sdk-import-boundary.spec.ts   # fails if anything outside providers/ imports the SDK
 │   ├── anthropic/anthropic.provider.ts          (+ .spec.ts)
 │   ├── openai/openai.provider.ts                (+ .spec.ts)
 │   ├── google/google.provider.ts                (+ .spec.ts)
@@ -470,6 +476,66 @@ export interface LlmProviderDefinition {
   classifyError(err: unknown): AiErrorClass;               // auth | rate_limited | unavailable | bad_request | refused | egress_denied
 }
 ```
+
+**As built (W2-1, #1315).** The definition is
+`{ kind, requiresApiKey, defaultBaseUrl, createModel(config, modelId, fetch), callSettings(config, modelId),
+listModels(config, fetch), errorPatterns: { contextLimit, auth? }, adaptCall?(fetch, toolChoice) }` in
+`providers/provider.types.ts`. Classification is shared (`provider-errors.ts`): the definition contributes
+only the wording a status code cannot tell apart. Failures are thrown as `AiProviderError` (`code` is an
+`AI_RUN_ERROR_CODES` value: `AI_DISABLED`, `PROVIDER_AUTH`, `PROVIDER_RATE_LIMIT` with `retryAfterSec`,
+`PROVIDER_UNAVAILABLE`, `PROVIDER_BAD_REQUEST`, `CONTEXT_LIMIT`, `EGRESS_DENIED`, `CANCELLED`,
+`CONVERSATION_READ_ONLY`), with a fixed message and no `cause`; it lives in `ai-provider.error.ts`, which
+imports nothing from the SDK, so the runtime can catch it without pulling `ai` into its graph. A refusal
+is not an error: it comes back as the step's `finishReason` (`content-filter`) and the runtime decides.
+
+- **`ChatModelPort.step`** reads `AI_SETTINGS_READER.resolveProviderConfig()` on **every** call and never
+  caches it: the settings unit's connection tester runs a step inside an `AsyncLocalStorage` override that
+  answers its draft for that call only. `AiProvidersModule` imports `AiSettingsModule` for the reader
+  (injected `@Optional()`, so the module boots before a reader is bound); the settings module does not
+  import this one — its tester resolves `CHAT_MODEL_PORT` lazily. With no reader, or a `null` config, the
+  step fails `AI_DISABLED`. A config whose provider differs from the request's pinned provider fails
+  `CONVERSATION_READ_ONLY` before any I/O, so the stored key never goes to another provider. The model id
+  is the request's. The SDK retries a transient failure twice (§6.4), so a failing connection test can
+  take the retry back-off before it answers.
+- **The connection test goes through the port** (no separate probe): one `step` with a single tool.
+  Every failure carries a `code` from `AI_RUN_ERROR_CODES`, which the tester maps onto its checks.
+- **Model listing** is **not** on the port. The definitions implement `listModels` and
+  `AiModelListService.listModels(config)` (exported, takes an explicit draft connection) exposes it;
+  wiring `POST /config/ai/models` to it is a follow-up for the settings unit, which answers the
+  descriptor's `suggestedModel` until then.
+- **Messages.** `responseMessages` is filtered to the assistant message: for a call to an unknown tool
+  the SDK synthesizes its own `tool` message, and the loop must answer **every** call of a step (unknown
+  and invalid ones included) in the one message `toolResultsMessage` builds, or the provider rejects the
+  next request. `toolResultsMessage` emits `json` / `error-json` (or `text` / `error-text` for a string
+  output); `userMessage` emits `{ role: 'user', content: text }`.
+- **Log hygiene.** `streamText` gets `onError: () => undefined`: the SDK's default prints the raw error,
+  whose `requestBodyValues` is the whole prompt. `AI_SDK_LOG_WARNINGS` is set to `false` and SDK call
+  warnings are logged through the Nest logger as `ai.provider.warning` metadata (Gemini's
+  `skip_thought_signature_validator` shows up there — finding 5). Nothing in the layer logs a key, a
+  prompt, a header or a body, so no outbound request shape reaches pino and no new redact path was
+  needed; a later change that logs one must add `x-api-key`, `x-goog-api-key`, `api-key` and
+  `authorization` to the paths in `logging/logging.config.ts` (security.md §6.5). Upstream errors that
+  echo the key (OpenAI's 401 message does) are dropped by the wrapping — the provider specs assert it
+  on the thrown error and on every captured log line.
+- **Environment fallbacks.** Every SDK factory gets `apiKey` and `baseURL` explicitly: the SDKs read not
+  only `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` but also
+  `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` when a value is omitted. A provider that requires a key and has
+  none fails `PROVIDER_AUTH` before any I/O.
+- **Anthropic `toolChoice: 'none'`.** The Anthropic SDK drops the whole `tools` array for `none`. The
+  forced final step would then be rejected once the history holds `tool_use` blocks, and the frozen tools
+  prefix would change. The definition's `adaptCall` hands the SDK `auto` and rewrites the request body to
+  Anthropic's native `tool_choice: { type: 'none' }`, tools kept. OpenAI, Gemini (`mode: NONE`) and the
+  compatible provider keep the tools on their own.
+- **Per provider**, beyond the notes below: Anthropic caching is a `cacheControl` breakpoint on the system
+  message plus the request-level automatic breakpoint (which follows the last message); OpenAI sends
+  `store: false` and does **not** force `forceReasoning` — an id the SDK does not recognise as a reasoning
+  model is sent as a plain model, because forcing it would break non-reasoning models (finding 4's
+  trade-off); Gemini answers a bad key with a **400** `API_KEY_INVALID`, matched by `errorPatterns.auth`;
+  the compatible provider sends no `effort` (servers differ on `reasoning_effort`) and no `Authorization`
+  without a key.
+- **Model listing** is a capped (2 MiB, 500 entries) GET through the guarded fetch; the upstream body is
+  read only to parse or classify, never returned. OpenAI's list drops non-chat ids; Gemini's keeps only
+  `generateContent` models.
 
 Shared descriptors drive the setup wizard generically:
 `{ kind, label, requiresApiKey, requiresBaseUrl, defaultBaseUrl, suggestedModel, supportsModelListing }`.
@@ -831,6 +897,11 @@ Invariants [C]:
 - `isInternalTargetAllowed`: `true` only when `allowPrivateNetwork` is set **and** the host equals
   the configured base-URL host.
 
+As built (W2-1, `providers/provider-fetch.ts`), also: `maxRedirects: 0` (a 3xx is refused, never
+followed); the private-host seam matches the base URL's host **and port**; an `http:` request is resolved
+once, refused unless every address is non-public, and dialed at exactly the addresses checked (no second
+resolution). The model listing and the connection test (a port step) use the same fetch.
+
 Known cost: no connection keep-alive per step (each step is a new TLS handshake) — acceptable.
 
 ### 9.3 SSE event contract (zod discriminated union in `packages/shared/src/schemas/ai-run.ts`, versioned `v: 1`)
@@ -900,7 +971,8 @@ Reasoning text is not streamed in v1.
     `latencyMs`, `ttftMs`, usage, `finishReason`, tool names;
   - **never** prompt text, tool inputs or outputs, or keys.
   The error classes are the `AiErrorClass` vocabulary plus `budget_exceeded`, `max_steps`,
-  `context_limit`, `cancelled` and `engine_restart`.
+  `context_limit`, `cancelled` and `engine_restart` — as built, the shared `AI_RUN_ERROR_CODES`, which
+  the provider layer throws as `AiProviderError.code` (§6.3).
 - **Health.** `/health/ready` is unaffected. There are no metrics endpoints (none exist today).
 - **Security posture this slice must state** (the threat model lives in its sibling note):
   - The key is write-only and never logged.
