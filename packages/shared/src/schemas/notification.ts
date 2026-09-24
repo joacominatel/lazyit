@@ -105,6 +105,13 @@ import { pageSchema } from "./pagination";
  *     is a known human (a null / service-account assigner has no bell). De-duped per assignment
  *     (`asset_assignment.acknowledged:<assignmentId>`; an assignment acknowledges exactly once). Deep-links
  *     to the asset (`entityType: 'asset'`). Metadata is REDACTED (asset name/tag + assignee name/ids only).
+ *   - `mcp.client_connected` — a TARGETED security notice (ADR-0097; docs/ai-assistant/security.md §6.3,
+ *     gate G3 "Abuse"): a new external AI agent connection (an OAuth grant or a personal MCP token) was
+ *     used on the recipient's account for the first time. Delivered targeted (`recipientUserId` = the
+ *     account's owner) and emailed (opt-out-able), because local mode has no MFA and a phished consent
+ *     would otherwise go unnoticed. No `entityType` (it deep-links by TYPE to the user's AI connections).
+ *     De-duped per connection (`mcp.client_connected:<grantId>`). Metadata is REDACTED (client name or
+ *     token label, the connection kind and its scopes — never a token).
  */
 export const NOTIFICATION_TYPES = [
   "critical_app_access",
@@ -122,6 +129,7 @@ export const NOTIFICATION_TYPES = [
   "warranty_expiring",
   "access_grant_expiring",
   "asset_assignment.acknowledged",
+  "mcp.client_connected",
 ] as const;
 
 /** A single known notification type. The wire shape validates against this enum (→ 400 otherwise). */
