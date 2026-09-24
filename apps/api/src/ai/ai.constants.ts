@@ -16,7 +16,7 @@ export const AI_RUN_JOB_RESUME = 'resume';
  * a conversation pinned to another version becomes read-only. Bump it whenever the primer or the
  * system-prompt builder changes what the model is told.
  */
-export const AI_PROMPT_VERSION = 1;
+export const AI_PROMPT_VERSION = 2;
 
 /** A tool result is truncated once, at write time, past this many serialized characters (§4.3). */
 export const AI_TOOL_RESULT_MAX_CHARS = 20_000;

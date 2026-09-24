@@ -57,9 +57,10 @@ caída pasajera produce un reintento, no una cuenta duplicada.
 La automatización de accesos es **aprovisionamiento de acceso a aplicaciones** — nada más. No es un
 sistema de RR. HH. ni de incorporación, no es un subsistema de gobierno de identidades o de revisión
 de accesos, y no es un constructor de flujos genérico para lógica de negocio arbitraria. Los datos
-que un flujo puede enviar hacia fuera se limitan a los datos básicos de la persona (correo, nombre,
-apellido, id), la aplicación y el contexto de la concesión. No hay campos de rol, equipo o
-responsable que mapear — por diseño.
+que un flujo puede enviar hacia fuera se limitan a los datos de identidad de la persona (correo,
+nombre, apellido, id, legajo, nombre de usuario, y el nombre y correo de su responsable), la
+aplicación, el contexto de la concesión y los resultados de pasos anteriores. No hay campos de rol ni
+de equipo que mapear — por diseño.
 
 ## A dónde ir después
 

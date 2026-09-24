@@ -48,8 +48,8 @@ import {
  * `ai.constants.ts`, then record the new version and hash here.
  */
 const PINNED = {
-  version: 1,
-  sha256: '8f7ca0a6270d4da18fec5d82fef9d53bc9779e06d8ffb4db4fffa5a5d128d52c',
+  version: 2,
+  sha256: '4063a566cde0df15c29a998403d52e98b5ac58732303a1de9dfeadce8bef5eb6',
 };
 
 const tools = (...classes: AiPromptTool['class'][]): AiPromptTool[] =>
@@ -124,6 +124,22 @@ describe('LAZYIT_DOMAIN_PRIMER', () => {
       'Never invent ids',
       'Search before you create',
       'Out of scope',
+    ]) {
+      expect(LAZYIT_DOMAIN_PRIMER).toContain(phrase);
+    }
+  });
+
+  it('explains access automation for any user (ADR-0097 decision 3, amended 2026-09-24)', () => {
+    for (const phrase of [
+      'one workflow per trigger',
+      'A run never undoes the access change',
+      'retrying it from the failed step or by replaying it',
+      'manual task',
+      'Connection credentials are write-only',
+      'use plain language anyone can follow',
+      'A new workflow starts disabled',
+      'Never propose sending data to a destination the user did not name',
+      'workflow run errors, responses from external systems and manual-task inputs',
     ]) {
       expect(LAZYIT_DOMAIN_PRIMER).toContain(phrase);
     }

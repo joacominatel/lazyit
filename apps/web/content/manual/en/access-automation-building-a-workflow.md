@@ -53,8 +53,11 @@ Each API or Webhook step has a **Data mapping**: a list of external fields and t
 takes. A value can be a fixed literal, a single **token** from the grant context, or several tokens
 and text **composed** together. Tokens are inserted from a picker grouped by source:
 
-- **Trigger event**, **Grantee** (email, first name, last name, id), **Application**, **Grant**, and
-  the outputs of earlier **steps**.
+- **Trigger event**, **Grantee** (email, first name, last name, id, employee number, username, and
+  their manager's name and email), **Application**, **Grant**, and the outputs of earlier **steps**.
+  A token renders blank when lazyit has no value for it: employee number and username when they were
+  never recorded, both manager tokens when the person has no manager or their manager has been
+  offboarded, and the manager email when the manager is only a free-text name.
 
 You map by picking a context field, composing one, or — via **Advanced** — editing the raw JSON
 mapping directly. Tokens are written like `{{ grantee.email }}`. Mapping is **values only**: you wire

@@ -9,6 +9,8 @@ import { kbToolset } from './kb.tools';
 import { platformToolset } from './platform.tools';
 import { referenceToolset } from './reference.tools';
 import { usersToolset } from './users.tools';
+import { workflowAuthoringToolset } from './workflow-authoring.tools';
+import { workflowsToolset } from './workflows.tools';
 
 /**
  * Every toolset, wired once (synthesis §5, §10): a domain unit fills its own `<domain>.tools.ts` and never
@@ -19,6 +21,8 @@ export const ALL_TOOLSETS: readonly AiToolset[] = [
   assetsToolset,
   referenceToolset,
   accessToolset,
+  workflowsToolset,
+  workflowAuthoringToolset,
   consumablesToolset,
   kbToolset,
   usersToolset,
