@@ -843,7 +843,7 @@ Edits to existing pages (en + es):
 - **Key hygiene (G4 F1) — what is actually true.** A typed key lives in the form's React state (the
   `apiKey` field of the draft) from the keystroke until the save or test that sends it; it is never
   pre-filled, never read back, never written to storage or the URL. The key-bearing requests go through
-  `useAiConfigSave` / `useAiConnectionTest` (`use-ai-config.ts`): the underlying mutations have
+  `useAiConfigSave` / `useAiConnectionTest` (`use-ai-config-save.ts`, a client module so the page can still import the query keys from `use-ai-config.ts`): the underlying mutations have
   `gcTime: 0`, and the wrappers copy only the error or the test result into component state and `reset()`
   the mutation as soon as it settles, so the request body (which carries the key) does not stay in the
   TanStack mutation cache. After a successful save the draft's `apiKey` is cleared (the wizard's steps and
