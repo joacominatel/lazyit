@@ -1,16 +1,24 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AI_RUN_ACTIVE_STATUSES,
   offsetOf,
   type AiConversationDetail,
+  type AiConversationSettings,
   type AiConversationState,
   type AiConversationSummary,
   type AiRunAccepted,
   type Page,
   type PageQuery,
+  type CreateAiConversation,
   type SendAiMessage,
+  type UpdateAiConversation,
 } from '@lazyit/shared';
-import type { AiConversation } from '../../../generated/prisma/client';
+import { Prisma, type AiConversation } from '../../../generated/prisma/client';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AI_PROMPT_VERSION } from '../ai.constants';
@@ -23,6 +31,12 @@ import { AiToolRegistry } from '../core/tool-registry';
 import { AgentRunOrchestrator } from '../runtime/agent-run.orchestrator';
 import { AiConversationPurgeService } from '../retention/ai-conversation-purge.service';
 import { AI_MESSAGE_FORMAT_MODEL } from '../runtime/run-records';
+import {
+  AI_CONVERSATION_AUTO_APPROVE_AUDIT_ACTION,
+  assertModelSettingsSupported,
+  conversationSettingsOf,
+  pinnedConfigChanged,
+} from '../runtime/conversation-settings';
 import { projectTranscript } from './transcript-projection';
 
 type HumanIdentity = Extract<DelegatedIdentity, { kind: 'human' }>;
@@ -55,12 +69,126 @@ export class AiConversationsService {
     private readonly purge: AiConversationPurgeService,
   ) {}
 
-  create(identity: HumanIdentity, locale?: string): Promise<{ id: string }> {
+  create(
+    identity: HumanIdentity,
+    locale?: string,
+    settings: CreateAiConversation = {},
+  ): Promise<{ id: string }> {
     return this.orchestrator.createConversation({
       identity,
       channel: 'CHAT',
       ...(locale ? { locale } : {}),
+      settings,
     });
+  }
+
+  /**
+   * `PATCH /ai/conversations/:id` (#1373, #1376), owner only (404 otherwise).
+   *
+   * - `model`, `effort`, `providerOptions`: only until the first run starts (ADR-0097 default 7 as
+   *   amended) — afterwards 409 `CONVERSATION_SETTINGS_LOCKED`; a closed conversation 409
+   *   `CONVERSATION_READ_ONLY`; the assistant off 409 `AI_DISABLED` (the provider rules need the
+   *   configuration). The lock is a conditional update on "no run yet", so a message racing the change
+   *   either sees the new model or the change is refused.
+   * - `autoApprove`: any time, AI on or off; takes effect at the next proposed write. Each change writes
+   *   an `ai_config_audit_log` row (actor = the owner, `{ conversationId, before, after }`).
+   */
+  async update(
+    identity: HumanIdentity,
+    conversationId: string,
+    patch: UpdateAiConversation,
+  ): Promise<AiConversationSettings> {
+    const conversation = await this.owned(identity, conversationId);
+    const modelFields =
+      patch.model !== undefined ||
+      patch.effort !== undefined ||
+      patch.providerOptions !== undefined;
+
+    const data: Prisma.AiConversationUpdateManyMutationInput = {};
+    if (modelFields) {
+      if (conversation.closedReason !== null) {
+        throw new ConflictException({
+          code: 'CONVERSATION_READ_ONLY',
+          message: 'This conversation is read-only; start a new conversation',
+        });
+      }
+      const config = await this.settings.resolveProviderConfig();
+      if (!config) {
+        throw new ConflictException({
+          code: 'AI_DISABLED',
+          message: 'The AI assistant is not available',
+        });
+      }
+      if (config.provider !== conversation.provider) {
+        throw new ConflictException({
+          code: 'CONVERSATION_READ_ONLY',
+          message: 'This conversation is read-only; start a new conversation',
+        });
+      }
+      assertModelSettingsSupported(config.provider, patch);
+      if (patch.model !== undefined) {
+        data.model = patch.model;
+        data.modelChosen = true;
+      }
+      if (patch.effort !== undefined) data.effort = patch.effort;
+      if (patch.providerOptions !== undefined) {
+        data.providerOptions =
+          patch.providerOptions === null
+            ? Prisma.DbNull
+            : patch.providerOptions;
+      }
+    }
+    const toggled =
+      patch.autoApprove !== undefined &&
+      patch.autoApprove !== conversation.autoApprove;
+    if (toggled) {
+      data.autoApprove = patch.autoApprove;
+      data.autoApproveEnabledAt = patch.autoApprove ? new Date() : null;
+    }
+
+    if (Object.keys(data).length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        // The update takes the conversation row's lock — the same lock a submission takes before it
+        // creates a run — so the run count read after it is settled.
+        const updated = await tx.aiConversation.updateMany({
+          where: {
+            id: conversation.id,
+            userId: identity.userId,
+            channel: 'CHAT',
+            ...(modelFields ? { closedReason: null } : {}),
+          },
+          data,
+        });
+        if (
+          updated.count === 0 ||
+          (modelFields &&
+            (await tx.aiRun.count({
+              where: { conversationId: conversation.id },
+            })) > 0)
+        ) {
+          throw new ConflictException({
+            code: 'CONVERSATION_SETTINGS_LOCKED',
+            message:
+              'The model of a conversation is fixed once it has started; start a new conversation',
+          });
+        }
+        if (toggled) {
+          await tx.aiConfigAuditLog.create({
+            data: {
+              action: AI_CONVERSATION_AUTO_APPROVE_AUDIT_ACTION,
+              actorId: identity.userId,
+              detail: {
+                conversationId: conversation.id,
+                before: conversation.autoApprove,
+                after: patch.autoApprove === true,
+              },
+            },
+          });
+        }
+      });
+    }
+    const now = await this.owned(identity, conversationId);
+    return conversationSettingsOf(now, await this.hasRun(now.id));
   }
 
   async send(
@@ -145,6 +273,7 @@ export class AiConversationsService {
     return {
       ...this.summary(conversation, stateOf(active?.status), config),
       activeRunId: active?.id ?? null,
+      settings: conversationSettingsOf(conversation, runs.length > 0),
       messages: projectTranscript({
         conversationId,
         rows,
@@ -175,6 +304,10 @@ export class AiConversationsService {
     });
     if (!conversation) throw conversationNotFound();
     return conversation;
+  }
+
+  private async hasRun(conversationId: string): Promise<boolean> {
+    return (await this.prisma.aiRun.count({ where: { conversationId } })) > 0;
   }
 
   private async states(
@@ -229,8 +362,5 @@ function readOnly(
 ): boolean {
   if (row.closedReason !== null) return true;
   if (row.promptVersion !== AI_PROMPT_VERSION) return true;
-  return (
-    config !== null &&
-    (config.provider !== row.provider || config.model !== row.model)
-  );
+  return config !== null && pinnedConfigChanged(config, row);
 }

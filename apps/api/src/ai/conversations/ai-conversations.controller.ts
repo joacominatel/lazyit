@@ -6,11 +6,13 @@ import {
   Headers,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import {
   ApiAcceptedResponse,
+  ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
@@ -26,10 +28,14 @@ import {
   AiConversationCreatedSchema,
   AiConversationDetailSchema,
   AiConversationSummarySchema,
+  AiConversationSettingsSchema,
   AiRunAcceptedSchema,
+  CreateAiConversationSchema,
   SendAiMessageSchema,
+  UpdateAiConversationSchema,
   pageSchema,
   type AiConversationDetail,
+  type AiConversationSettings,
   type AiConversationSummary,
   type AiRunAccepted,
   type Page,
@@ -53,6 +59,16 @@ class AiConversationPageDto extends createZodDto(
   pageSchema(AiConversationSummarySchema),
 ) {}
 class AiRunAcceptedDto extends createZodDto(AiRunAcceptedSchema) {}
+/** The body is optional: an absent body (every client before #1373) is the instance defaults. */
+class CreateAiConversationDto extends createZodDto(
+  CreateAiConversationSchema.default({}),
+) {}
+class UpdateAiConversationDto extends createZodDto(
+  UpdateAiConversationSchema,
+) {}
+class AiConversationSettingsDto extends createZodDto(
+  AiConversationSettingsSchema,
+) {}
 
 /**
  * The in-app chat's conversations (ADR-0097; synthesis §4.7; frontend.md K3–K4). `ai:use` on every route,
@@ -76,19 +92,62 @@ export class AiConversationsController {
   @ApiOperation({
     summary: 'Start a conversation with the assistant (ai:use)',
     description:
-      'Creates and freezes a conversation: the configured provider and model, the prompt version and the ' +
-      'toolset the caller holds now. The interface locale is taken from Accept-Language. 409 AI_DISABLED while ' +
-      'the assistant is off.',
+      'Creates and freezes a conversation: the configured provider, the model (the optional body’s `model` — ' +
+      'any model of the configured provider — or the instance default), the prompt version and the toolset ' +
+      'the caller holds now. Optional body `{ model?, effort?, providerOptions?, autoApprove? }` (#1373, #1376). ' +
+      'The interface locale is taken from Accept-Language. 400 EFFORT_UNSUPPORTED / ' +
+      'PROVIDER_OPTIONS_UNSUPPORTED; 409 AI_DISABLED while the assistant is off.',
   })
   @ApiCreatedResponse({ type: AiConversationCreatedDto })
+  @ApiBadRequestResponse({
+    description:
+      'EFFORT_UNSUPPORTED, PROVIDER_OPTIONS_UNSUPPORTED, or an invalid body',
+  })
   @ApiConflictResponse({ description: 'AI_DISABLED' })
   create(
+    @Body() dto: CreateAiConversationDto,
     @CurrentPrincipal() principal?: Principal,
     @Headers('accept-language') acceptLanguage?: string,
   ): Promise<{ id: string }> {
     return this.service.create(
       aiHumanIdentityOf(principal),
       localeOf(acceptLanguage),
+      dto,
+    );
+  }
+
+  @Patch(':id')
+  @ApiOperation({
+    summary:
+      'Change a conversation’s model or auto-approve mode (ai:use, owner only)',
+    description:
+      '`{ model?, effort?, providerOptions?, autoApprove? }` → the conversation’s settings. The model, effort and ' +
+      'options change only until the first run starts (409 CONVERSATION_SETTINGS_LOCKED afterwards — start a ' +
+      'new conversation). Auto-approve toggles at any time and is audited: while on, ordinary writes whose preview ' +
+      'needs no password step-up are applied without a card; elevated and step-up actions still ask. 404 for ' +
+      'anyone but the owner.',
+  })
+  @ApiOkResponse({ type: AiConversationSettingsDto })
+  @ApiBadRequestResponse({
+    description:
+      'EFFORT_UNSUPPORTED, PROVIDER_OPTIONS_UNSUPPORTED, or an invalid body',
+  })
+  @ApiNotFoundResponse({
+    description: 'Not the caller’s conversation, or no such conversation.',
+  })
+  @ApiConflictResponse({
+    description:
+      'CONVERSATION_SETTINGS_LOCKED, CONVERSATION_READ_ONLY or AI_DISABLED',
+  })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateAiConversationDto,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<AiConversationSettings> {
+    return this.service.update(
+      aiHumanIdentityOf(principal),
+      aiEntityId(id),
+      dto,
     );
   }
 

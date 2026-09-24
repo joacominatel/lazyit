@@ -27,6 +27,9 @@ import { RolesGuard } from '../../auth/roles.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiConversationsController } from '../conversations/ai-conversations.controller';
 import { AiConversationsService } from '../conversations/ai-conversations.service';
+import { AiModelCatalogService } from '../conversations/ai-model-catalog.service';
+import { AiModelsController } from '../conversations/ai-models.controller';
+import { AiModelListService } from '../providers/ai-model-list.service';
 import { AI_SETTINGS_READER } from '../core/ports/ai-settings.port';
 import { AiToolRegistry } from '../core/tool-registry';
 import { AiServiceAccountAccessController } from '../headless/ai-service-account-access.controller';
@@ -154,6 +157,12 @@ export interface HttpHarness {
   /** Live, non-revoked Service Accounts (`serviceAccount.findUnique` sees only these). */
   serviceAccounts: Set<string>;
   auditRows: Row[];
+  /** The provider model listing behind `GET /ai/models` (#1373): scripted, and counted. */
+  models: {
+    calls: number;
+    next: () => Promise<Array<{ id: string; label: string | null }>>;
+  };
+  catalog: AiModelCatalogService;
   close(): Promise<void>;
 }
 
@@ -302,15 +311,33 @@ export async function buildHttp(
       ),
   };
 
+  const models: HttpHarness['models'] = {
+    calls: 0,
+    next: () =>
+      Promise.resolve([
+        { id: 'claude-opus-5', label: 'Claude Opus 5' },
+        { id: 'claude-haiku-5', label: null },
+      ]),
+  };
+  const lister = {
+    listModels: () => {
+      models.calls += 1;
+      return models.next();
+    },
+  };
+
   const moduleRef = await Test.createTestingModule({
     controllers: [
       AiConversationsController,
+      AiModelsController,
       AiRunsController,
       AiServiceAccountAccessController,
     ],
     providers: [
       Reflector,
       AiConversationsService,
+      AiModelCatalogService,
+      { provide: AiModelListService, useValue: lister },
       AiRunsService,
       AiRunEventStream,
       AiServiceAccountAccessService,
@@ -343,6 +370,8 @@ export async function buildHttp(
     stream: moduleRef.get(AiRunEventStream),
     serviceAccounts,
     auditRows,
+    models,
+    catalog: moduleRef.get(AiModelCatalogService),
     close: () => app.close(),
   };
 }

@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AiCoreModule } from '../core/ai-core.module';
+import { AiProvidersModule } from '../providers/ai-providers.module';
 import { AiRetentionModule } from '../retention/ai-retention.module';
 import { AiRuntimeModule } from '../runtime/ai-runtime.module';
 import { AiSettingsModule } from '../settings/ai-settings.module';
 import { AiConversationsController } from './ai-conversations.controller';
 import { AiConversationsService } from './ai-conversations.service';
+import { AiModelCatalogService } from './ai-model-catalog.service';
+import { AiModelsController } from './ai-models.controller';
 
 /**
  * `/ai/conversations` — the in-app chat's conversations (ADR-0097; synthesis §4.7; W3-1): create, list,
@@ -15,8 +18,14 @@ import { AiConversationsService } from './ai-conversations.service';
  * call), the settings reader and the retention module for the purge service. PrismaService and the auth guards are global.
  */
 @Module({
-  imports: [AiRuntimeModule, AiCoreModule, AiSettingsModule, AiRetentionModule],
-  controllers: [AiConversationsController],
-  providers: [AiConversationsService],
+  imports: [
+    AiRuntimeModule,
+    AiCoreModule,
+    AiSettingsModule,
+    AiRetentionModule,
+    AiProvidersModule,
+  ],
+  controllers: [AiConversationsController, AiModelsController],
+  providers: [AiConversationsService, AiModelCatalogService],
 })
 export class AiConversationsModule {}
