@@ -668,8 +668,25 @@ is always `window.location.origin + "/mcp"`.
 "approve"|"reject", reason?, password? }`:
 - Human sessions only; bound to the caller and the exact pending tool input; single-use; TTL-bound.
   `password` is the step-up for `elevated` actions.
-- Returns JSON; the client re-subscribes to the run's events. `409` = already decided; `410` =
-  expired; `403 STEP_UP_REQUIRED` when the step-up is missing or wrong.
+- Returns JSON `{ runId, status }`; the client re-subscribes to the run's events. As built (W3-1):
+  `409 RUN_NOT_AWAITING_APPROVAL` = the run no longer waits (already decided and resumed, cancelled,
+  finished); core's `409` refusals (already decided, `EXPIRED`, `STALE`) pass through; `409 AI_DISABLED`;
+  `403 STEP_UP_REQUIRED` (no password), `403 STEP_UP_FAILED` (wrong password), `403 STEP_UP_UNAVAILABLE`
+  (no lazyit password in this sign-in mode), `429 STEP_UP_RATE_LIMITED` with `retryAfterSec`. **None of
+  these 403s means the session ended — the web must not treat them as a logout.**
+- **The card can change under the user** (#1357): core re-runs the preview at approve time. When a
+  warning appeared since the proposal (say, the application became critical), the stored preview gains
+  it, nothing executes, the action stays pending, and the decision answers `409 PREVIEW_CHANGED` — or
+  `403 STEP_UP_REQUIRED` when the new warning needs the password — with `addedWarnings: string[]` (the
+  warning codes added). The web re-reads the pending card (re-subscribe → `run.snapshot`, or
+  `GET /ai/conversations/:id`), highlights the added warnings, and lets the user decide again (with the
+  password field when step-up is now required). It is not an error state and not a logout.
+- **A password is no guarantee.** A decision sent WITH the password can still answer `403
+  STEP_UP_REQUIRED` + `addedWarnings`: the password is only checked when the stored card asked for it,
+  and a step-up warning that appeared since (say, the application became critical) is found by core
+  afterwards. Re-render the card with the added warnings and let the user retry with the password.
+- `POST /ai/runs` with an `Idempotency-Key` reused for another prompt or conversation answers `422
+  IDEMPOTENCY_KEY_MISMATCH` — use a new key per request.
 
 **K6 — Stop** `POST /ai/runs/:id/cancel` → the run is cancelled at the next step boundary; partial
 output is persisted.

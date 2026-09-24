@@ -268,6 +268,16 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
 | Connected apps | `GET /oauth/grants/mine`, `DELETE /oauth/grants/:id`; admin `GET /oauth/grants?userId=`; `POST /oauth/personal-tokens` (`lan` only) | `ai:connect` (own) / `settings:manage` (all) |
 | Skill / plugin | `GET /ai/claude-code/plugin.zip` (authenticated); `GET /ai/claude-code/marketplace.json` + `…/lazyit-plugin.zip` (public, HTTPS + MCP on only) | `ai:connect` / none |
 
+> **As built (W3-1, #1315)** — the conversations, runs, event stream, decision and per-SA rows above:
+> [[ai-assistant/provider-and-runtime|provider]] §9.1 and §9.3 *As built (W3-1)*. In short: every route
+> is owner-only with a 404 for anyone else (admins included); the channel follows the principal (a human's
+> `POST /ai/runs` is `CHAT`, a Service Account's `HEADLESS`); `/ai/conversations` is human-only (a Service
+> Account gets 403 and uses `POST /ai/runs`); `DELETE /ai/conversations/:id` answers 204 through W3-6's
+> purge service (404 non-owner, 409 `RUN_IN_PROGRESS`); the decision answers `{ runId, status }` and its `STEP_UP_*` 403s
+> (`REQUIRED`, `FAILED`, `UNAVAILABLE`) are about the password, **never a logout signal for the web**; 429
+> `STEP_UP_RATE_LIMITED` carries `retryAfterSec`; per-SA changes are audited in `ai_config_audit_log`
+> (`service_account.ai_access.updated`).
+
 ### 4.8 OAuth and MCP tokens (R7)
 
 - **Authorization server:** hand-written in `apps/api/src/oauth/`, on the existing web session; code +

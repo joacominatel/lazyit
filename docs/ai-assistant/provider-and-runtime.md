@@ -926,7 +926,8 @@ three kinds of runtime record, role `system`, never sent to the model:
   invocation ids); the latest record of a step wins.
 
 The conversation projection (W3-1) **must allow-list by format** — read `aisdk-v7` rows only, never
-filter out `lazyit-*` — and carry a test that a runtime record never reaches the wire (follow-up for W3-1).
+filter out `lazyit-*` — and carry a test that a runtime record never reaches the wire (done: §9.1 *As built
+(W3-1)*, `conversations/transcript-projection.spec.ts`).
 Records are append-only and go with the conversation (retention, owner delete).
 
 **A run.** `submit`: principal and AI checks → idempotency replay (headless `Idempotency-Key`; a unique
@@ -1029,8 +1030,8 @@ the creating transaction, so simultaneous submissions to different conversations
 and the token budget is checked before each step, so the step that crosses it completes (a run can
 overshoot by one step's tokens). Both fail closed on the next check.
 
-**Not built here.** The HTTP endpoints and the SSE controller (W3-1); per-conversation deletion and
-retention (W3-6, §7 "As built"); the MCP stale-`EXECUTING` sweep (W3-2). The sweeper's lost-resume threshold means a
+**Not built here.** The HTTP endpoints and the SSE controller (W3-1, as built in §9.1 and §9.3);
+per-conversation deletion and retention (W3-6, §7 "As built"); the MCP stale-`EXECUTING` sweep (W3-2). The sweeper's lost-resume threshold means a
 decision made while Valkey is down resumes within about a minute of its return.
 
 ## 9. HTTP surfaces and the stream contract
@@ -1148,11 +1149,82 @@ decision made while Valkey is down resumes within about a minute of its return.
   — human sessions only; `password` is the step-up for `elevated` tools. It returns JSON; the client
   re-subscribes to the event stream.
 
+- `GET /ai/runs/:id/events` is the SSE stream (§9.3).
+
 **Per-SA AI access** — `settings:manage` + `ServicePrincipalForbiddenGuard`:
 
 - `GET|PUT /config/ai/service-accounts/:id` → `{ access: "off" | "read-only" | "read-write",
   maxMutationsPerRun: number | null }`.
-- `GET /ai/runs/:id/events` is the SSE stream.
+
+> **As built (W3-1, #1315)** — `apps/api/src/ai/conversations/`, `ai/runs/`, `ai/headless/`. Thin controllers
+> over the runtime's `AgentRunOrchestrator`, `AiApprovalService` and `InProcessRunEventBus` (§8.1); every
+> refusal is a `{ code, message, retryAfterSec? }` body. All three controllers are listed `unexposed` in
+> `ai/tools/platform.tools.ts` — the AI's own surfaces are never tools (INV-AI-14).
+>
+> - **Identity.** Derived only from the principal the global `JwtAuthGuard` loaded
+>   (`conversations/ai-request-identity.ts`): a human acts with the `sessionEpoch` of the row the guard just
+>   re-read (so a logout or password change refuses the run's later steps), a Service Account by its id; no
+>   principal (shim) → 403. **The channel follows the principal:** a human's `POST /ai/runs` is `CHAT`
+>   (writes wait for approval), a Service Account's is `HEADLESS` (autonomous).
+> - **Gates.** `ai:use` at class level on `/ai/conversations` and `/ai/runs` (a Service Account through its
+>   direct grants, fail-closed). `/ai/conversations` is the human channel: a Service Account is refused 403
+>   `FORBIDDEN` there and uses `POST /ai/runs` (it can still continue its own headless conversation with
+>   `conversationId`). The per-SA routes carry the `/config/ai` gate. The runtime re-checks the principal,
+>   the per-SA setting and `infra:report` before every step; a Service Account whose access is `off` or that
+>   holds `infra:report` is refused **403 `FORBIDDEN`** at creation; `read-only` freezes a conversation
+>   without write tools.
+> - **Owner only, 404 for everyone else** — another user, an admin (ADR-0097 default 3) or a Service
+>   Account — on a conversation (read, send, delete), a run (read, cancel, events) and a decision. A
+>   malformed id is the same 404. The SSE endpoint checks ownership **before** `subscribe`, `replay` or
+>   `lastSeq`.
+> - **`POST /ai/conversations`** → 201 `{ id }` (the frozen prompt's locale is the first tag of
+>   `Accept-Language`). **`GET /ai/conversations`** → `Page<AiConversationSummary>` of the caller's `CHAT`
+>   conversations by `lastActivityAt` desc (`updatedAt` on the wire is `lastActivityAt`); `status` from the
+>   active run; `readOnly` when closed, or pinned to another prompt version, provider or model (the toolset
+>   pin is checked by the runtime at the next submission). **`GET /ai/conversations/:id`** →
+>   `AiConversationDetail`. **`POST /ai/conversations/:id/messages`** → 202 `{ runId, status }`.
+> - **The projection** (`conversations/transcript-projection.ts`) reads `format = 'aisdk-v7'` rows only —
+>   at the query and again in code, so a `lazyit-*` or unknown format never reaches the wire — and a row
+>   whose stored role disagrees with its message is dropped. A user message is its text without the
+>   runtime's `<turn_context>` prefix; an assistant message keeps text and tool calls (reasoning, provider
+>   options and raw inputs are dropped); a tool message is folded into the calls it answers as the same
+>   summary `tool.result` carries (never the result data). A chat proposal (an invocation with the tool-use
+>   id) adds an `approval` part with the STORED preview and its outcome (`null` while pending; `approved`
+>   once decided and executed). A run's redacted error becomes a `notice` part after its last message.
+>   Message ids are `<conversationId>:<seq>` — the `messageId` of `message.delta`. Every part is validated
+>   against the shared schema; what fails is dropped (read-tolerant).
+> - **`DELETE /ai/conversations/:id`** → 204, through the retention unit's purge service (W3-6,
+>   `AiConversationPurgeService.deleteOwned`, the only deleter of transcripts): 404 for anyone but the owner,
+>   **409 `RUN_IN_PROGRESS`** while a run is active; messages and invocations cascade, run rows stay with
+>   `conversationId = null`, `ai_action_log` is untouched. A Service Account is refused 403 before it. Reads
+>   and deletes keep working while AI is off (conversations stay dormant,
+>   [[ai-assistant/frontend|frontend]] §11 item 4); create and send answer **409 `AI_DISABLED`**.
+> - **`POST /ai/runs`** → 202 `{ runId, status }`; an `Idempotency-Key` (1–255 printable ASCII, else 400)
+>   returns the earlier run for the same principal and key, with the response header
+>   `Idempotent-Replayed: true`. The key names one request: reused with another prompt or another
+>   `conversationId` it answers **422 `IDEMPOTENCY_KEY_MISMATCH`**. There is no body-hash column (a schema
+>   change would be needed), so the earlier run's first user message — without the turn context — and its
+>   conversation are compared; a run whose conversation was deleted replays uncompared, and two first
+>   submissions racing on one key are resolved by the runtime (one run). **`GET /ai/runs/:id`** → `AiRun`: `finalText` is the last assistant text of
+>   the run, `toolCalls` the calls of the run's own projected messages. **`POST /ai/runs/:id/cancel`** → 200
+>   `{ runId, status }`, idempotent.
+> - **`POST /ai/runs/:id/tool-calls/:toolCallId/decision`** → 200 `{ runId, status }` (the run's status
+>   afterwards: `QUEUED` when this decision resumed it). The body is the strict `AiApprovalDecisionSchema`
+>   — any other field (arguments) is a 400. Errors: 404 not the caller's run or call; 403 `FORBIDDEN` for a
+>   Service Account; 409 `RUN_NOT_AWAITING_APPROVAL`; 409 `AI_DISABLED` (an approval while off; the action
+>   stays pending); **403 `STEP_UP_REQUIRED` / `STEP_UP_FAILED` / `STEP_UP_UNAVAILABLE`** and **429
+>   `STEP_UP_RATE_LIMITED` + `retryAfterSec`**; core's own refusals pass through (409 `EXPIRED`, `STALE`, an
+>   already-decided action), including **409 `PREVIEW_CHANGED`** and a `STEP_UP_REQUIRED` raised by a new
+>   warning, both with **`addedWarnings`** (#1357: the fresh preview gained warnings, the stored card was
+>   updated, nothing executed, the action stays pending for a new decision). **The `STEP_UP_*` 403s are about the password confirmation, never the session:
+>   the web must not treat them as a logout** (nor any 403 from this endpoint).
+> - **Per-SA AI access** (`headless/`): the account must be live (a revoked or unknown one is 404). No row
+>   reads `read-write` with no cap; a stored value this build does not know reads `read-only`, a malformed
+>   cap as none (the runtime's reading). `PUT` validates with the strict shared schema, writes nothing when
+>   unchanged, and otherwise upserts the row and appends one `ai_config_audit_log` row
+>   (`service_account.ai_access.updated`, the acting admin, `targetServiceAccountId`, `detail { before, after
+>   }`) in the same transaction. Saving access for an account that holds `infra:report` is allowed; the
+>   runtime refuses it anyway.
 
 **Rate limits [C]** (DB counts, no new infrastructure):
 
@@ -1225,6 +1297,26 @@ writes it. The concrete class adds `lastSeq(runId)` — the `seq` a `run.snapsho
 finished run's buffer is kept 5 minutes while nobody listens; at most 500 runs are tracked. A failing
 listener never fails the run. **The bus does no authorization:** the SSE endpoint must load the run and
 check the caller owns it before `subscribe`, `replay` or `lastSeq` — a run id is not a capability.
+
+**As built (W3-1) — the endpoint** (`runs/run-event-stream.ts`). In order: the owner check (404, the bus
+untouched); a client that went away during that load is dropped before anything is attached (its `close`
+already fired, so nothing would release a slot or a listener); a cap of **8 open streams per principal** (429 `RATE_LIMITED`); the headers above plus
+`Connection: keep-alive`, flushed at once, then `: connected`. It **subscribes before** building the replay
+or the snapshot, holding what arrives meanwhile, so nothing is lost. A `Last-Event-ID` the buffer covers is
+replayed (sequence numbers are compared, never counted); otherwise — no header, another run's id, a stale or
+foreign position — a `run.snapshot` whose `seq` is `lastSeq(runId)` read **before** the database load, so an
+event published during the load is sent again rather than lost (the reducer tolerates the duplicate). The
+snapshot carries the run's own messages (the §9.1 projection limited to the run), its pending approvals with
+their stored previews, and its status. Then the held and live events follow, each `id: <runId>:<seq>`,
+`event: <type>`. **Closing:** live, on `run.finished` (it follows the terminal `run.status` and carries usage
+and error, so the stream waits for it) or on `run.status AWAITING_APPROVAL`; a snapshot whose status is
+terminal or `AWAITING_APPROVAL` closes after it; a replay is sent whole — it may cross a pause that is
+already over — and the run's current status then decides. Heartbeat `: heartbeat` every 15 s, and each heartbeat re-checks the caller (`runs/stream-principal-check.ts`:
+the human re-loaded at the stream's `sessionEpoch`, or the Service Account not revoked, inactive or expired,
+and `ai:use` still held) — a stream the caller could no longer open is closed; a stream is
+closed after **15 minutes** whatever the run does (the client resumes with `Last-Event-ID`). A client that
+goes away unsubscribes the listener, clears the timers and frees its slot, exactly once; the run is
+unaffected. Caddy leaves `/api/ai/runs/*/events` unencoded (#1328).
 
 ## 10. Configuration lifecycle, enable/disable, "reload"
 
