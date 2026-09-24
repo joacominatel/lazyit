@@ -1,4 +1,7 @@
-import type { McpClientAllowlistEntry } from '@lazyit/shared';
+import {
+  MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS,
+  type McpClientAllowlistEntry,
+} from '@lazyit/shared';
 import { MCP_CLIENT_ALLOWLIST_DEFAULTS } from './client-allowlist.defaults';
 import {
   type ClientTrustPolicy,
@@ -27,6 +30,19 @@ describe('client trust policy — the MCP client allowlist (ADR-0097 decision 13
     expect(ids).toEqual(
       expect.arrayContaining(['claude-code-cimd', 'claude-ai', 'cursor']),
     );
+  });
+
+  it('enforces exactly the shared curated list, without its display metadata', () => {
+    expect(MCP_CLIENT_ALLOWLIST_DEFAULTS).toEqual(
+      MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS.map(({ id, label, match }) => ({
+        id,
+        label,
+        match,
+      })),
+    );
+    for (const entry of MCP_CLIENT_ALLOWLIST_DEFAULTS) {
+      expect(Object.keys(entry).sort()).toEqual(['id', 'label', 'match']);
+    }
   });
 
   describe('redirect-URI pattern hit', () => {

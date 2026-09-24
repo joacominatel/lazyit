@@ -200,6 +200,147 @@ export function resolveMcpClientAllowlist(
   return effective;
 }
 
+/**
+ * How far a curated default's identifier has been checked:
+ *   - `verified`    — taken from the client's own source code or its vendor's authoritative
+ *                     documentation, and not flagged for re-verification;
+ *   - `vendor-docs` — taken from vendor documentation only; it is re-verified before general
+ *                     availability (docs/ai-assistant/mcp-and-oauth.md §12).
+ */
+export const MCP_CLIENT_ALLOWLIST_VERIFICATIONS = ["verified", "vendor-docs"] as const;
+export const McpClientAllowlistVerificationSchema = z.enum(MCP_CLIENT_ALLOWLIST_VERIFICATIONS);
+export type McpClientAllowlistVerification = z.infer<typeof McpClientAllowlistVerificationSchema>;
+
+/**
+ * A CURATED DEFAULT: an allowlist entry plus where its identifier comes from. `verification` and
+ * `source` are display metadata for Settings → AI; they never take part in matching.
+ */
+export const McpClientAllowlistDefaultSchema = McpClientAllowlistEntrySchema.extend({
+  verification: McpClientAllowlistVerificationSchema,
+  source: z.string().min(1).max(200),
+});
+export type McpClientAllowlistDefault = z.infer<typeof McpClientAllowlistDefaultSchema>;
+
+/**
+ * The CURATED DEFAULT MCP client allowlist (ADR-0097 decision 13) — data only, shared so the
+ * authorization server enforces it and Settings → AI lists it (and offers "remove this built-in
+ * client", which writes its id to `mcpClientAllowlistRemovedDefaults`). `ai_settings` stores only the
+ * overlay, so a later release can correct an identifier here without undoing the admin's choices. Ids
+ * are STABLE: renaming one would resurrect a default an admin removed.
+ *
+ * Matching is on the CIMD `client_id` URL or an exact redirect URI (loopback `http` port-agnostic),
+ * NEVER on `client_name`. Where several clients share a loopback callback the label names them all.
+ * Where a client's identifier could not be verified (Windsurf, Zed, Pi) it is deliberately NOT seeded —
+ * an admin adds it, and docs/ai-assistant/mcp-and-oauth.md §12 tracks the verification.
+ *
+ * A loopback entry admits any local program that uses that callback path. That is inherent to native
+ * OAuth clients (RFC 8252 §8.3) and why the consent screen always shows the redirect host with a
+ * loopback warning.
+ */
+const CURATED_DEFAULTS: McpClientAllowlistDefault[] = [
+  {
+    id: "claude-code-cimd",
+    label: "Claude Code (client metadata document)",
+    match: { kind: "cimd_url", url: "https://claude.ai/oauth/claude-code-client-metadata" },
+    verification: "verified",
+    source: "Claude connector documentation",
+  },
+  {
+    id: "loopback-localhost-callback",
+    label: "Claude Code, OpenAI Codex (http://localhost/callback)",
+    match: { kind: "redirect_uri", pattern: "http://localhost/callback" },
+    verification: "verified",
+    source: "Claude Code; OpenAI Codex rmcp-client source",
+  },
+  {
+    id: "loopback-127-callback",
+    label: "Claude Code, OpenAI Codex (http://127.0.0.1/callback)",
+    match: { kind: "redirect_uri", pattern: "http://127.0.0.1/callback" },
+    verification: "verified",
+    source: "Claude Code; OpenAI Codex rmcp-client source",
+  },
+  {
+    id: "claude-ai",
+    label: "Claude (claude.ai, Claude Desktop, Cowork)",
+    match: { kind: "redirect_uri", pattern: "https://claude.ai/api/mcp/auth_callback" },
+    verification: "verified",
+    source: "Claude connector documentation",
+  },
+  {
+    id: "claude-com",
+    label: "Claude (claude.com callback)",
+    match: { kind: "redirect_uri", pattern: "https://claude.com/api/mcp/auth_callback" },
+    verification: "verified",
+    source: "Claude connector documentation",
+  },
+  {
+    id: "chatgpt",
+    label: "ChatGPT (developer mode connectors)",
+    match: { kind: "redirect_uri", pattern: "https://chatgpt.com/connector_platform_oauth_redirect" },
+    verification: "vendor-docs",
+    source: "OpenAI developer-mode documentation",
+  },
+  {
+    id: "opencode",
+    label: "OpenCode",
+    match: { kind: "redirect_uri", pattern: "http://127.0.0.1/mcp/oauth/callback" },
+    verification: "verified",
+    source: "sst/opencode source (mcp/oauth-provider.ts)",
+  },
+  {
+    id: "gemini-cli",
+    label: "Gemini CLI",
+    match: { kind: "redirect_uri", pattern: "http://localhost/oauth/callback" },
+    verification: "verified",
+    source: "google-gemini/gemini-cli source (utils/oauth-flow.ts)",
+  },
+  {
+    id: "cursor",
+    label: "Cursor",
+    match: { kind: "redirect_uri", pattern: "cursor://anysphere.cursor-mcp/oauth/callback" },
+    verification: "vendor-docs",
+    source: "Cursor documentation",
+  },
+  {
+    id: "vscode-web",
+    label: "VS Code / GitHub Copilot (vscode.dev)",
+    match: { kind: "redirect_uri", pattern: "https://vscode.dev/redirect" },
+    verification: "vendor-docs",
+    source: "VS Code dynamic client registration",
+  },
+  {
+    id: "vscode-insiders-web",
+    label: "VS Code Insiders (insiders.vscode.dev)",
+    match: { kind: "redirect_uri", pattern: "https://insiders.vscode.dev/redirect" },
+    verification: "vendor-docs",
+    source: "VS Code dynamic client registration",
+  },
+  {
+    id: "vscode-loopback-127",
+    label: "VS Code / GitHub Copilot (http://127.0.0.1/)",
+    match: { kind: "redirect_uri", pattern: "http://127.0.0.1/" },
+    verification: "vendor-docs",
+    source: "VS Code dynamic client registration",
+  },
+  {
+    id: "vscode-loopback-localhost",
+    label: "VS Code / GitHub Copilot (http://localhost/)",
+    match: { kind: "redirect_uri", pattern: "http://localhost/" },
+    verification: "vendor-docs",
+    source: "VS Code dynamic client registration",
+  },
+];
+
+/** Parsed through the schema at load, so a malformed default fails the first test run; deep-frozen. */
+export const MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS: readonly McpClientAllowlistDefault[] =
+  Object.freeze(
+    CURATED_DEFAULTS.map((entry) => {
+      const parsed = McpClientAllowlistDefaultSchema.parse(entry);
+      Object.freeze(parsed.match);
+      return Object.freeze(parsed);
+    }),
+  );
+
 /** Loopback http redirects match on any port (RFC 8252 §7.3); every other part matches exactly. */
 const LOOPBACK_HTTP_PORT = /^(http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])):\d+(?=\/|$)/i;
 const withoutLoopbackPort = (uri: string) => uri.replace(LOOPBACK_HTTP_PORT, "$1");
