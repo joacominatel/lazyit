@@ -3,12 +3,12 @@ title: AiToolInvocation
 tags: [domain, entity, ai-assistant, retention]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # AiToolInvocation
 
-> 🟢 implemented (schema) · Area: AI assistant · see [[0097-ai-assistant-mcp-and-headless-api]] ·
+> 🟢 implemented (schema; written by the AI core for writes and chat proposals) · Area: AI assistant · see [[0097-ai-assistant-mcp-and-headless-api]] ·
 > [[ai-assistant/_synthesis|synthesis]] §4.2–4.4, §6
 
 ## Purpose
@@ -28,6 +28,10 @@ For MCP and headless calls it is the **metadata access log**. Its id is the `inv
 - **What was approved is exactly what runs**: `inputHash` binds the approval to the stored input,
   `schemaHash` expires it if the tool changed, and `precondition` (`{ entity, updatedAt }`) fails a stale
   target with `STALE`.
+- **Written by the AI core** (`AiToolService`, [[ai-assistant/tools-and-execution|tools]] §8.4, §9):
+  every MCP or headless write (`EXECUTING` → outcome) and every chat proposal (`AWAITING_APPROVAL` →
+  decision). Its transitions are atomic conditional updates on `status`, so an approval executes once.
+  Reads are not written here yet (the MCP/headless metadata access log belongs to the channel units).
 - **Retention-bound**: cascades with its conversation; conversation-less (MCP) rows are pruned after
   `retentionDays`. The permanent record of a write is [[ai-action-log]].
 

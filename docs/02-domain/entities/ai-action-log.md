@@ -3,12 +3,12 @@ title: AiActionLog
 tags: [domain, entity, ai-assistant, audit]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # AiActionLog
 
-> 🟢 implemented (schema) · Area: AI assistant · see [[0097-ai-assistant-mcp-and-headless-api]]
+> 🟢 implemented (schema; written by the AI core's `AiActionLogService`) · Area: AI assistant · see [[0097-ai-assistant-mcp-and-headless-api]]
 > decision 11 · [[ai-assistant/_synthesis|synthesis]] §6, INV-AI-10
 
 ## Purpose
@@ -33,6 +33,10 @@ change, for whom, and who approved it".
   write `ATTEMPTED` → outcome.
 - **Reads are not here** — they live in the retention-bound [[ai-tool-invocation]].
 - The input is **redacted**; no secret is ever recorded.
+- **One writer.** `apps/api/src/ai/core/action-log.service.ts` (`AiActionLogService.append`) is the only
+  application code that touches the table, and it only inserts; it redacts the input itself
+  (credential-looking keys at any depth). The event sequences per channel are in
+  [[ai-assistant/tools-and-execution|tools]] §10.
 
 ## Fields
 
