@@ -62,10 +62,11 @@ runtime-loaded).
 - **No userinfo in a destination URL** (SEC-076). `https://user:pass@host` would be sent as
   `Authorization: Basic …` from plain config. It is refused on **write** (`CreateWorkflowConnectionSchema`
   and the `PATCH` DTO, via `connectionConfigHasUserinfo`); the read/run-time `WorkflowConnectionConfigSchema`
-  stays tolerant, so a legacy row still loads (its userinfo masked as `[redacted]@` on read). At call
-  time the egress guard refuses it (`refuseUserinfo` → `userinfo-not-allowed`), so such a row fails its
-  runs and test probe with a config reason instead of sending the credential; the operator removes the
-  userinfo and attaches a secret.
+  stays tolerant, so a legacy row still loads **and keeps running** after an in-place upgrade
+  (write-only validation). Its read masks the userinfo as `[redacted]@` and carries the additive flag
+  `legacyUserinfo: true`, which the web connection form shows as a warning to move the credential into
+  a secret. Editing such a row requires removing the userinfo. (The egress guard has an opt-in
+  `refuseUserinfo`; the run path does not use it.)
 - **`config` is validated per `kind`.** A zod **discriminated union** on `kind`
   (`WorkflowConnectionConfigSchema`) validates the jsonb at the edge; on create, `config.kind` **must
   equal** the connection `kind` (a refine returns `400` otherwise). No per-kind tables
@@ -115,7 +116,7 @@ Indexes: `@@index([applicationId])`, `@@index([secretId])`.
 seed ([[0046-roles-permissions-v2]]):
 
 - `GET /workflow-connections` · `GET /workflow-connections/:id` — list / detail, header values and URL
-  userinfo redacted. `@RequirePermission('workflow:read')`.
+  userinfo redacted, plus `legacyUserinfo` (boolean). `@RequirePermission('workflow:read')`.
 - `POST /workflow-connections` — create (`config.kind` must match `kind`; no URL userinfo). `workflow:manage`.
 - `PATCH /workflow-connections/:id` — edit; `[redacted]` header values keep the stored ones.
   `workflow:manage`, plus `workflow:secrets` for the credential moves above.

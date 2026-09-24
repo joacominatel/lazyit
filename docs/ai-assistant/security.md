@@ -723,7 +723,7 @@ that re-point and for any header-value change, and returns header values as `[re
 Open items recorded by the G2 review of #1354 (W2-14):
 - **Userinfo in URLs.** The AI refuses `https://user:pass@host` in any connection it creates or
   re-points and in any destination a card describes. Closed at the route by SEC-076: create/patch refuse
-  it (write-only; a legacy row still reads, masked), and the egress guard refuses it at call time.
+  it (write-only; a legacy row still reads masked, keeps running, and is flagged `legacyUserinfo`).
 - **Enable race.** An approval re-runs the preview (STALE / `PREVIEW_CHANGED`). Closed at the route by
   SEC-077: `workflow_set_enabled` sends `expectedVersion` and `workflow_author_version` sends
   `baseVersion` (the version read at run time), and the route 409s under a row lock if another version

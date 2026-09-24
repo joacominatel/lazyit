@@ -38,9 +38,10 @@ custodia de credenciales puede separarse de la construcción de flujos (consulta
 Guarda los tokens en la credencial, nunca en la dirección ni en una cabecera por defecto:
 
 - Una URL que lleva usuario o contraseña (`https://usuario:clave@host`) se **rechaza al guardar** la
-  conexión. Una conexión guardada así antes de esta regla sigue cargando, muestra la dirección como
-  `https://[redacted]@host` y **sus ejecuciones fallan** con el motivo `userinfo-not-allowed` — edita
-  la dirección para quitar el usuario y la contraseña, y añádelos como credencial de la conexión.
+  conexión. Una conexión guardada así antes de esta regla **sigue funcionando**, pero muestra la
+  dirección como `https://[redacted]@host` y el formulario de la conexión avisa de que la URL lleva
+  credenciales. Muévelas: quita el usuario y la contraseña de la dirección (es obligatorio para
+  guardar) y añádelos como credencial de la conexión.
 - Las **cabeceras por defecto** (configuradas por la API) se tratan como una credencial: lazyit
   muestra sus nombres pero cada valor como `[redacted]`, y al guardar la conexión se conservan los
   valores almacenados. Cambiar el valor de una cabecera, o la dirección de una conexión que las tiene,

@@ -35,9 +35,10 @@ can be separated from building workflows (see [Permissions](/help/access-automat
 Keep tokens in the credential, never in the address or in a default header:
 
 - A URL that carries a user name or password (`https://user:pass@host`) is **refused when you save**
-  the connection. A connection saved that way before this rule still loads, shows the address as
-  `https://[redacted]@host`, and **its runs fail** with the reason `userinfo-not-allowed` — edit the
-  address to remove the user name and password, and add them as the connection's credential instead.
+  the connection. A connection saved that way before this rule **keeps working**, but it shows the
+  address as `https://[redacted]@host` and the connection form warns that the URL carries credentials.
+  Move them: remove the user name and password from the address (saving requires it) and add them as
+  the connection's credential instead.
 - **Default headers** (set through the API) are treated like a credential: lazyit shows their names
   but every value as `[redacted]`, and saving the connection keeps the stored values. Changing a
   header value, or changing the address of a connection that has default headers, needs

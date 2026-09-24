@@ -86,7 +86,7 @@ Snapshot of the security review. Updated each sweep. Method:
    sample grantee's details (nested include without a soft-delete filter, the SEC-040 class).
    SEC-074 was not affected by this change (closed separately). **All four ✅ closed the same day** (epic
    #1315): header values and URL userinfo redacted on read and gated under `workflow:secrets`,
-   userinfo refused on write and at egress, `expectedVersion` / `baseVersion` 409 preconditions, and
+   userinfo refused on write (legacy rows keep running, flagged), `expectedVersion` / `baseVersion` 409 preconditions, and
    the dry-run refuses offboarded or revoked samples.
 
 Frontend (`apps/web`) and dependency auditing remain **out of scope**.
@@ -126,8 +126,8 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 0. **SEC-075 / SEC-076 / SEC-077 / SEC-078 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24, #1315):
    connection `defaultHeaders` values and legacy URL userinfo are redacted on every read and a
    `[redacted]` PATCH value keeps the stored one; changing a header value or re-pointing a connection
-   that carries headers needs `workflow:secrets` (CSEC-1); userinfo is refused on write and by the
-   egress guard at call time; enable / version authoring take optional `expectedVersion` /
+   that carries headers needs `workflow:secrets` (CSEC-1); userinfo is refused on write while legacy
+   rows keep running and are flagged `legacyUserinfo` for a UI warning; enable / version authoring take optional `expectedVersion` /
    `baseVersion` checked under a row lock (409); the dry-run refuses an offboarded grantee or a
    revoked grant. Stored rows are untouched.
 0. **SEC-074 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24): the KB write paths (`loadOwned`, and
