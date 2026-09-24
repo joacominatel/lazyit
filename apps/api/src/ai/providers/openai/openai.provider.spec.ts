@@ -205,6 +205,20 @@ describe('OpenAI provider through ChatModelPort', () => {
     ]);
   });
 
+  it('sends every lazyit tool with strict: false — the Responses API default is strict (#1403)', async () => {
+    // Omitted, OpenAI runs the tool strict and the model fills EVERY property of its input (a form's
+    // options, optionsFrom, min and max on every field, whatever its kind): the request_input failures.
+    const { fetch, requests } = scriptedFetch([() => textStream(['Done.'])]);
+
+    await chatModelFor(config, fetch).step(stepRequest(config));
+
+    const tools = requests[0].body!.tools as Array<Record<string, unknown>>;
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(tool).toMatchObject({ type: 'function', strict: false });
+    }
+  });
+
   it.each([
     [
       'PROVIDER_AUTH',

@@ -81,4 +81,11 @@ export interface LlmProviderDefinition {
   webSearchTool?(maxUses: number): { name: string; tool: Tool };
   /** How this provider words the failures a status code alone does not tell apart. */
   errorPatterns: ProviderErrorPatterns;
+  /**
+   * The `strict` flag sent on every lazyit function tool, when the provider needs one said explicitly
+   * (#1403). Absent = not sent (the provider's default). OpenAI's Responses API treats an omitted flag as
+   * strict, which makes the model fill EVERY property of a tool's input — lazyit's schemas are loose by
+   * design (optional properties, validated server-side), so OpenAI sends `false`.
+   */
+  toolStrict?: boolean;
 }

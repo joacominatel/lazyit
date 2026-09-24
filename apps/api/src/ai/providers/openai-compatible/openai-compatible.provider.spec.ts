@@ -100,6 +100,10 @@ describe('OpenAI-compatible provider through ChatModelPort', () => {
       tool_choice: 'auto',
     });
     expect(body).not.toHaveProperty('reasoning_effort');
+    // Chat Completions tools are loose by default, and a local server may reject an unknown flag (#1403).
+    const [tool] = body.tools as Array<{ function: Record<string, unknown> }>;
+    expect(tool.function).toMatchObject({ name: 'lazyit_search' });
+    expect(tool.function).not.toHaveProperty('strict');
     expect((body.messages as Array<{ role: string }>)[0]).toMatchObject({
       role: 'system',
       content: 'frozen system prompt',
