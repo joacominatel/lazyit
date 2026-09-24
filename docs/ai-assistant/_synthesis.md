@@ -265,7 +265,7 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
 | OAuth metadata | `/.well-known/oauth-protected-resource[/mcp]`, `/.well-known/oauth-authorization-server` — **public path** | none; 404 when MCP is off or on `lan` |
 | OAuth protocol | `/oauth/token`, `/oauth/register`, `/oauth/revoke` — **public path** | public client; rate-limited; 404 when MCP is off or on `lan` |
 | Consent | web page `/oauth/authorize` ((auth) group) → API `POST /oauth/authorize/validate`, `POST /oauth/authorize/decision` | web session (Bearer) + `ai:connect` |
-| Connected apps | `GET /oauth/grants/mine`, `DELETE /oauth/grants/:id`; admin `GET /oauth/grants?userId=`; `POST /oauth/personal-tokens` (`lan` only) | `ai:connect` (own) / `settings:manage` (all) |
+| Connected apps | `GET /oauth/grants/mine`, `DELETE /oauth/grants/:id`; admin `GET /oauth/grants?userId=`; `POST`/`GET /oauth/personal-tokens`, `DELETE /oauth/personal-tokens/:id` (mint on `lan` only) | `ai:connect` (own) / `settings:manage` (all) |
 | Skill / plugin | `GET /ai/claude-code/plugin.zip` (authenticated); `GET /ai/claude-code/marketplace.json` + `…/lazyit-plugin.zip` (public, HTTPS + MCP on only) | `ai:connect` / none |
 
 > **As built (W3-1, #1315)** — the conversations, runs, event stream, decision and per-SA rows above:
@@ -420,7 +420,9 @@ apps/api/
         ├── mcp.module.ts                      (stub in W1-C)
         ├── mcp.controller.ts                  @All('mcp') → createMcpHandler (SDK v2, stateless)
         ├── mcp-auth.guard.ts                  oat / pat / sa verification, RFC 6750/9728 challenge
-        ├── mcp-server.factory.ts · annotations.ts · error-mapper.ts · mcp-rate-limit.ts
+        ├── mcp-server.factory.ts · annotations.ts · error-mapper.ts · mcp-rate-limit.ts · mcp-caller.ts
+        ├── mcp-connection-notice.service.ts    the first-use "new AI agent connected" notice (as built)
+        ├── mcp-invocation.sweeper.ts          interrupted MCP writes → OUTCOME_UNKNOWN (as built)
         └── distribution/                      plugin templates, marketplace + archive, authenticated download
 
 apps/web/

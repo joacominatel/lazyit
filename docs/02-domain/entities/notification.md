@@ -3,7 +3,7 @@ title: Notification
 tags: [domain, entity, notifications, rbac, frontend]
 status: accepted
 created: 2026-06-09
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # Notification
@@ -71,7 +71,9 @@ every `notification:read` holder. It **upserts the caller's read join**: a missi
 **`secret.vault_setup`** (the targeted login nudge, #453) · **`permission_widened`** + **`infra.agent_offline`**
 (the two sensitive-audit / liveness alerts, #852 — [[0056-in-app-notification-bell]] amendment 2026-06-30) ·
 **`infra.identity_conflict`** (two hosts reporting one machine-id — [[0074-server-reporting-agent]] §3
-amendment, #1141; bell-only, not emailed).
+amendment, #1141; bell-only, not emailed) · **`mcp.client_connected`** (a new external AI agent
+connection used on the recipient's account — [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]],
+targeted, emailed).
 Catalog-as-code: a typo can't mint a type, and `api` (emit) + `web` (render a closed set of icons/copy) agree
 by construction. Adding a type later is an additive shared-package change (and a web exhaustive-map
 re-typecheck — `TYPE_META` is keyed on the enum).
@@ -122,6 +124,15 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   Metadata = both node ids + the peer's label + the
   reported hostname + the discriminator (the new node's own label *is* that hostname). This is the ONLY automatic action the collision detection takes: the
   report is still accepted and nothing is auto-merged or auto-split.
+
+- **The first `/mcp` request through a connection** (`McpConnectionNoticeService`,
+  [[ai-assistant/mcp-and-oauth|MCP]] §14; security §6.3) → **`mcp.client_connected`**, a **targeted**
+  security notice to the account's owner (`recipientUserId` = `targetUserId` = the user) when an OAuth
+  grant or a personal MCP token is used for the first time — local mode has no MFA, so a phished consent
+  must not go unnoticed. Emailed (on the allowlist). No `entityType`: the bell deep-links by type to
+  `/account/ai`. Dedupe `mcp.client_connected:<grantId>` (one per connection); a grant older than the
+  90-day retention is never announced. Metadata = grant id, kind (`oauth` | `personal`), client name or
+  token label, scopes — never a token. Fire-and-forget: it never delays or fails the MCP request.
 
 ## API (poll) — read-path authZ (the auth contract)
 

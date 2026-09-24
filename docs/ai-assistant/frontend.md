@@ -707,7 +707,10 @@ while MCP is enabled. On an HTTPS instance with MCP enabled, the public
 - `GET /oauth/grants/mine` → `Page<{ id, kind: "oauth"|"personal", client?: { name, verified },
   label?, redirectHost?, scopes, createdAt, lastUsedAt, expiresAt? }>`; `DELETE /oauth/grants/:id`
   (own).
-- `POST /oauth/personal-tokens { label, expiresInDays }` → the token, shown once (`lan` only).
+- `POST /oauth/personal-tokens { label, expiresInDays, scopes? }` → the token, shown once (`lan` only;
+  `scopes` ⊆ `lazyit.read`/`lazyit.write`, default both). 403 `{ code: "OAUTH_INSTANCE" | "AI_DISABLED" }`
+  explains why it cannot be minted; `GET /oauth/personal-tokens` lists them, `DELETE
+  /oauth/personal-tokens/:id` revokes one ([[ai-assistant/mcp-and-oauth|MCP]] §14).
 - Admin: `GET /oauth/grants?userId=` and `DELETE /oauth/grants/:id` (`settings:manage`, R9).
 - `Scope` is a closed enum — `lazyit.read`, `lazyit.write`, `lazyit.admin` — localized by the web.
 

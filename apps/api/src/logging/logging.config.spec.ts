@@ -1,6 +1,10 @@
 import { Writable } from 'node:stream';
 import pino from 'pino';
-import { OAUTH_BODY_REDACT_PATHS, buildLoggerParams } from './logging.config';
+import {
+  OAUTH_BODY_REDACT_PATHS,
+  buildLoggerParams,
+  scrubUrlCredentials,
+} from './logging.config';
 
 // The pinoHttp options are a union (Options | stream | tuple) upstream; narrow to the shape we
 // assert on. Mock request/response param types are intentionally minimal.
@@ -21,6 +25,7 @@ interface LoggerHttpOptions {
     err?: Error,
   ) => string;
   redact: { paths: string[] };
+  serializers: { req: (req: { url?: string }) => { url?: string } };
 }
 
 function http(nodeEnv?: string): LoggerHttpOptions {
@@ -171,6 +176,54 @@ describe('buildLoggerParams', () => {
         expect(output).not.toContain(secret);
       }
       expect(OAUTH_BODY_REDACT_PATHS.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('a credential in a query string (#1315 G3 review F1)', () => {
+    it('scrubs access_token and token from a URL, keeping everything else', () => {
+      expect(
+        scrubUrlCredentials('/mcp?access_token=lzit_oat_s3cret&x=1#frag'),
+      ).toBe('/mcp?access_token=[redacted]&x=1#frag');
+      expect(scrubUrlCredentials('/mcp?a=1&TOKEN=lzit_pat_s3cret')).toBe(
+        '/mcp?a=1&TOKEN=[redacted]',
+      );
+      expect(scrubUrlCredentials('/mcp?to%6Ben=lzit_pat_s3cret')).toBe(
+        '/mcp?to%6Ben=[redacted]',
+      );
+      expect(scrubUrlCredentials('/mcp')).toBe('/mcp');
+      expect(scrubUrlCredentials('/assets?q=token')).toBe('/assets?q=token');
+    });
+
+    it('never writes the token to the log output (URL and parsed query)', () => {
+      let output = '';
+      const sink = new Writable({
+        write(chunk: Buffer, _encoding, done) {
+          output += chunk.toString();
+          done();
+        },
+      });
+      const options = http();
+      const logger = pino(
+        { redact: options.redact, serializers: options.serializers },
+        sink,
+      );
+      logger.info(
+        {
+          req: {
+            method: 'POST',
+            url: '/mcp?access_token=lzit_oat_query-secret&keep=me',
+            query: {
+              access_token: 'lzit_oat_query-secret',
+              token: 'lzit_pat_query-secret',
+              keep: 'me',
+            },
+          },
+        },
+        'request',
+      );
+      expect(output).toContain('keep=me');
+      expect(output).not.toContain('lzit_oat_query-secret');
+      expect(output).not.toContain('lzit_pat_query-secret');
     });
   });
 

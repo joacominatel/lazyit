@@ -699,12 +699,42 @@ secret-bearing connection or attaching a secret needs `workflow:secrets` on top 
 - The behaviour rules tell the model never to propose sending data to a destination the user did not
   name (primer, `AI_PROMPT_VERSION` 2).
 
+**As built (W2-14, `ai/tools/workflow-authoring.tools.ts`).** Nine chat-only `elevated` tools
+(tools-and-execution §7 W10–W16; the standalone dry-run is folded into the enable card). On top of the
+mitigations above: every destination is checked with the runtime egress guard before a card is shown;
+`workflow_connection_update` refuses before the card what CSEC-1 refuses at execution; the AI cannot
+set connection `defaultHeaders` and an update keeps the existing ones; URLs on cards and results show
+origin + path and query parameter names only (no userinfo, no query values, no header values, no secret
+placeholders); every card's precondition is anchored on the application, the workflow, its latest version
+and the connections it describes, so any change in between — the application turning critical included
+— ends the approval as `STALE`.
+
 **Residual risk.** An admin who approves an injected proposal without reading the host list still
 creates the channel; the controls make it visible, not impossible. An `ACCESS_GRANTED` workflow on a
 non-critical application needs no password. The MCP/headless refusal on critical applications depends on
 each tool detecting `isCritical` and calling `assertChannelAllows` in `run`; the G2 review checks every
 write tool that can reach an application does. When ADR-0055's internal allowlist ships, its entries must
-be an excluded or elevated AI operation.
+be an excluded or elevated AI operation. Found while building W2-14 (a route-level gap, not an AI one):
+CSEC-1 guards only `secretId`, so a `workflow:manage`-only principal can re-point a connection whose
+`defaultHeaders` hold a pasted token (the field is documented "never a credential" but not validated) and
+the headers follow to the new host. The AI card names those headers on a re-point and the tool requires
+`workflow:secrets` for it; the route fix is a sentinel follow-up.
+
+Open items recorded by the G2 review of #1354 (W2-14):
+- **Userinfo in URLs.** The AI refuses `https://user:pass@host` in any connection it creates or
+  re-points and in any destination a card describes; the shared `publicHttpsUrl` schema and the route
+  still accept it (follow-up: refuse it there too, write-only, tolerant on read).
+- **Enable race.** An approval re-runs the preview (STALE / `PREVIEW_CHANGED`), but a version authored
+  in the UI between that check and the route's write is not detected: closing it needs the route to
+  take an expected version (the §9 TOCTOU follow-up).
+- **Literal credentials in templates.** A step path or mapping value may carry a pasted literal
+  credential; the card shows mapping templates as written and masks only query values. The engine has
+  no way to tell a literal token from ordinary text.
+- **Credential labels.** The card names an attached credential by id only: its label lives behind
+  `/workflow-secrets`, a structural exclusion (INV-AI-14), so no guarded read may be bound for it.
+- **Offboarded sample grantees.** The dry-run route resolves a grant's grantee even when offboarded;
+  the enable card is refused in that case (the tool reads the grantee through `GET /users/:id`; without
+  `user:read` it cannot check and shows the card). The route itself is unchanged (follow-up).
 
 **Proposed invariants** (join §7 on the W4-2 security re-review):
 - **INV-AI-15 — No unattended outbound integration.** A workflow, a workflow version or a workflow
