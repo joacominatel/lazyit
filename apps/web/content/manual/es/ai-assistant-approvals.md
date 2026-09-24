@@ -148,6 +148,26 @@ permiso para ver algunos de esos registros, la fila **Usado por** de la tarjeta 
 (desconocido para vos) en lugar de mostrar cero: el elemento puede seguir en uso por registros que no ves. Las categorías archivadas no se restauran
 desde el chat; restauralas desde **Configuración → Taxonomías**.
 
+## Etiquetas de activos
+
+El asistente sigue el [esquema de etiquetas de activos](/help/configuration-asset-tag-scheme) de tu
+instancia:
+
+- Cuando crea activos, deja la etiqueta vacía salvo que vos le des una, así lazyit asigna la siguiente
+  etiqueta del esquema — igual que cuando creás un activo a mano. Nunca inventa una etiqueta a partir del
+  patrón.
+- Puede cambiar la etiqueta de **un activo** cuando se lo pedís, con la tarjeta de siempre.
+- Cambia el esquema **de toda la instancia** (**Configuración → Instancia → Esquema de etiquetas de
+  activos**) solo cuando le pedís explícitamente que cambie el esquema general de etiquetas — nunca solo
+  para que encaje la etiqueta de un activo. Esa tarjeta es un *Cambio sensible* con la advertencia
+  *"Cambia la configuración de toda la instancia: se aplica a todos desde ahora."*, muestra solo lo
+  que cambia (prefijo, sufijo, dígitos o próximo número) antes → después, además de la próxima etiqueta, y siempre te espera: la
+  [aprobación automática](#aprobación-automática) nunca la saltea. Las etiquetas existentes nunca se
+  reescriben.
+
+Solo los administradores pueden ver o cambiar el esquema; para el resto, el asistente simplemente deja que
+lazyit asigne la etiqueta.
+
 ## Aprobación automática
 
 Si confiás en el asistente para trabajo de rutina en un chat, podés dejar que aplique los **cambios

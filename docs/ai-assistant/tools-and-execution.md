@@ -242,7 +242,10 @@ Legend:
 | config | status / csrf / setup | @Public | — | N/A |
 | service-accounts | create / rotate | settings:manage, human-only | W | EXCL (returns the token in cleartext; CEO round 2) |
 | service-accounts | read / update / grants / revoke | settings:manage, human-only | R / W | v1.1 (reads `read`; writes `elevated` with step-up) |
-| asset-tag-scheme, smtp, directory, instance update | config | settings:manage (+human-only) | W | later, `elevated`; secret-bearing fields (SMTP password, directory bind password) are never tool inputs (INV-AI-5) |
+| asset-tag-scheme | read / next-tag preview | settings:manage, human-only | R | v1 `asset_tag_scheme_get` (built, #1394) |
+| asset-tag-scheme | update | settings:manage, human-only | W | v1 `asset_tag_scheme_update`, `elevated` (built, #1394; only on an explicit request to change the general scheme) |
+| asset-tag-scheme | seed suggestion / backfill preview / backfill apply | settings:manage, human-only | R / W | not exposed: the backfill rewrites existing tags in bulk, the seed suggestion only serves the settings editor (CEO, #1394) |
+| smtp, directory, instance update | config | settings:manage (+human-only) | W | later, `elevated`; secret-bearing fields (SMTP password, directory bind password) are never tool inputs (INV-AI-5) |
 | AI settings (`/config/ai`, per-SA AI access) | config | settings:manage | R / W | EXCL (the AI's own configuration; CEO round 2, [[ai-assistant/security|security]] T-38) |
 | instance | version | open | R | v1 (`session_context`) |
 | instance | update-status | settings:read | R | v1.1 |
@@ -477,6 +480,8 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 16g | `location_update` ✅ built (#1390; also the move under another parent) | LocationsController.update (+findOne / findAll) | location:write | write·D | location updated |
 | 16h | `location_archive` ✅ built (#1390) | LocationsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | location:delete | write·D | location archived |
 | 16i | `location_restore` ✅ built (#1390) | LocationsController.restore (+findAll `deleted=only`) | location:delete | write (idempotent) | location restored |
+| 16j | `asset_tag_scheme_get` ✅ built (#1394) | AssetTagSchemeController.get (primary), .previewNextTag | settings:manage, human-only | read | — |
+| 16k | `asset_tag_scheme_update` ✅ built (#1394; only on an explicit request to change the general scheme) | AssetTagSchemeController.update (primary), .get, .previewNextTag | settings:manage, human-only | elevated·D (`INSTANCE_CONFIGURATION`) | assetTagScheme updated |
 | 17 | `application_search` ✅ built (W2-6) | ApplicationsController.findAll | application:read | read | — |
 | 18 | `application_get` ✅ built (W2-6) | ApplicationsController.findOne (+grants, articles facets) | application:read | read | — |
 | 19 | `application_create` ✅ built (W2-6) | ApplicationsController.create | application:write | write | application created |
@@ -614,7 +619,8 @@ Warning rules for these tools (§9 has the step-up rule):
   lazyit chat, where it is confirmed with your password."), per the CEO's "Rechazar"; in the chat it is a
   no-op, and step-up applies instead.
 - **`elevated`, after v1** (CEO round 2): permission matrix, folder access rules, SA update/grants,
-  password reset, instance configuration.
+  password reset, instance configuration — except the asset tag scheme, built in v1 as
+  `asset_tag_scheme_get` / `asset_tag_scheme_update` (#1394, see *Asset tag scheme tools as built*).
 - **EXCL** (CEO round 2): SA token create/rotate, `provision-local-account`, the AI's own configuration.
 - **EXCL** (settled): Secret Manager.
 - The 44-tool v1 cut is adopted by default (CEO to confirm on review).
@@ -692,7 +698,9 @@ path unit (W2-0, #1315):
   `assets.tools.ts` and `reference.tools.ts` (W2-5) hold the asset, ownership and reference-data tools —
   see *Assets and reference tools as built* below; `taxonomy.tools.ts` (#1390) holds the category,
   model and location update / archive / restore tools and `category_create` — see *Taxonomy tools as
-  built* below;
+  built* below; `asset-tag-scheme.tools.ts` (#1394, domain `platform`) holds `asset_tag_scheme_get` and
+  `asset_tag_scheme_update` and lists the seed suggestion and the backfill as unexposed — see *Asset tag
+  scheme tools as built* below;
   `users.tools.ts` and `activity.tools.ts` (W2-9) hold the six `user_*` tools, `dashboard_summary` and
   `activity_list` — see *Users and activity tools as built* below;
   `consumables.tools.ts` (W2-7) holds the five consumables tools and leaves archive / restore unexposed
@@ -1001,11 +1009,54 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   `detail: "full"` (wrapped as untrusted); `category_create` / `category_update` set or replace it — a
   non-destructive change (no stored attribute is touched). Application and consumable categories expose
   their `order`. Nothing else is taxonomy configuration: location types are a fixed enum; the asset tag
-  scheme is instance configuration (platform toolset, deferred — its backfill rewrites tags); KB folder
+  scheme is instance configuration (its own tools, #1394 — see below; its backfill stays unexposed); KB folder
   access rules are authorization configuration (`elevated`, after v1).
 - **Untrusted content:** descriptions, notes, attribute dictionaries and model specs in results, and the
   names in summaries, are wrapped with `untrusted()`; entity-ref labels are not (the follow-up already
   recorded for the KB tools).
+
+**Asset tag scheme tools as built (#1394).** CEO decision (2026-09-24, #1394, verbatim): *"na que solo
+pueda leerlo, la idea es seguir el tag de la instancia, si puede modifcar el de activos, pero no el de
+settings. Excepto que especificamente se le pida que modifique el asset tag general"* — the assistant
+reads the instance's scheme so it follows it; it may set an individual asset's tag, but it changes the
+instance-wide scheme only when explicitly asked to change the general asset tag scheme.
+`asset-tag-scheme.tools.ts` (domain `platform`) holds two tools; both routes need `settings:manage` and
+are human-only (`ServicePrincipalForbiddenGuard`), so the tools are listed to administrators only and
+never to a Service Account (headless is refused by the route).
+- **`asset_tag_scheme_get`** (read) — the scheme (`enabled`, prefix, suffix, zero-pad width, next number,
+  `updatedAt`) and the tag the next asset created without `assetTag` would get, from the route's own
+  skip-existing preview (`GET /config/asset-tag-scheme/next-tag`, so a preview and an allocation cannot
+  disagree). Its description and result carry the rule the model follows: when the scheme is on, **omit
+  `assetTag`** on asset creation unless the person gives a specific tag — the server allocates the next
+  free tag (`AssetTagSchemeService.allocateTag`, also per unit in bulk receive) — and **never compose a
+  tag** from the pattern (a composed tag bypasses the counter); when it is off, an asset created without
+  `assetTag` gets no tag. A caller the route refuses (403) gets `{ visible: false }` with the same
+  guidance instead of an error. Affixes and the rendered tag are wrapped with `untrusted()`.
+- **`asset_tag_scheme_update`** (`elevated`·D) — only the fields given change: `enabled`, `prefix` /
+  `suffix` (`null` removes one), `width` (`0`/`null` = no padding), `startNumber` (re-seeds the counter;
+  numbers on live assets are still skipped). The route's `PUT` replaces affixes wholesale, so the tool
+  merges the input over the scheme read at that moment and validates the full body with the route's own
+  `UpdateAssetTagSchemeSchema` before any card; a stored value that schema no longer accepts is reported
+  (`INVALID_INPUT`), never silently rewritten. Its description says to use it only on an explicit
+  request to change the general / instance-wide scheme — never to make one asset's tag fit.
+- **The card** shows only the fields that change, before → after (`enabled`, `prefix`, `suffix`, `width`,
+  `nextNumber`), plus the next tag before → after; a no-op is `INVALID_INPUT`. It names the scheme as its
+  target (`assetTagScheme`, id `singleton` — a new entity type, linked to `/settings/instance`) with `precondition
+  { entity, updatedAt }`: any change in between — another edit, or the counter moving because an asset
+  was auto-tagged — is `STALE`. A never-configured scheme reads back with `updatedAt` = now on every
+  read, so it is anchored on a fixed instant (the epoch) instead. The warning is
+  **`INSTANCE_CONFIGURATION`** (new, additive): instance-wide configuration that applies to the tags
+  assigned from now on — existing tags are never rewritten. It is **not** a step-up warning (CEO: a
+  password only for critical applications), and the `elevated` class alone keeps it out of auto-approve
+  (`autoEligible` accepts `write` only).
+- **Channels:** chat (card), MCP only with the `lazyit.admin` scope (the `elevated` ceiling), headless
+  refused by the route (Service Accounts only).
+- **Not exposed:** the seed suggestion (serves the settings editor) and the backfill preview / apply —
+  the backfill rewrites existing tags in bulk, forward-only with no undo; it stays in the lazyit settings.
+- **Every caller gets the rule:** `asset_create` and `asset_create_batch` say it too ("omit `assetTag`
+  unless the person gives one: the instance tag scheme assigns it; never build one from a pattern"), since
+  a non-administrator cannot list `asset_tag_scheme_get`. The web links the `assetTagScheme` ref to
+  `/settings/instance` (`entity-href.ts`), where the scheme editor lives.
 
 **Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so
 the RBAC guards stay in `UsersService`, in one place: the self-role-change refusal (403), the last-admin
@@ -1404,7 +1455,8 @@ Mapping per channel:
   - the refs drive "Open ‹entity›" chips; the web builds the route from `type`/`id`/`slug` (`asset` →
     `/assets/{id}`, `article` → `/kb/{slug}`, `application` → `/applications/{id}`, `user` →
     `/users/{id}`, `location` → `/locations/{id}`, `consumable` → `/consumables/{id}`, `manualTask` →
-    `/settings/integrations/tasks/{id}`, `workflowRun` → `/applications/{parent.id}/workflows/runs/{id}`)
+    `/settings/integrations/tasks/{id}`, `assetTagScheme` → `/settings/instance` (#1394), `workflowRun` →
+    `/applications/{parent.id}/workflows/runs/{id}`)
     [R18] and validates it with `safeInternalPath`;
   - **auto-navigation** happens only for an explicit `navigate`-kind tool, and only when no
     unsaved-changes guard is active; otherwise the chip is shown.
@@ -1428,10 +1480,11 @@ skip classification). The preview carries:
 - `warnings[]` codes: `EXTERNAL_PROVISIONING`, `EXTERNAL_DEPROVISIONING`, `CASCADE_RELEASES_ASSIGNMENTS`,
   `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`,
   `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
-  `IRREVERSIBLE`, `OUTBOUND_INTEGRATION`, `CRITICAL_APPLICATION` (`PUBLISHES_TO_READERS` …
+  `IRREVERSIBLE`, `OUTBOUND_INTEGRATION`, `CRITICAL_APPLICATION`, `INSTANCE_CONFIGURATION` (`PUBLISHES_TO_READERS` …
   `IRREVERSIBLE` merge the frontend's `notes` vocabulary and the security note's destination-visibility
   requirement; `PRIVILEGE_GRANT` and `CREDENTIAL_DELIVERY` were added by W2-0 for the step-up rule below;
-  the last two by W2-12 for the workflow engine, §7);
+  the last two by W2-12 for the workflow engine, §7; `INSTANCE_CONFIGURATION` by #1394 for the asset
+  tag scheme — no step-up);
 - `impacted[]` — entity type and count, with a short sample, for cascading or bulk effects;
 - `elevated` and `stepUpRequired` — `elevated` is the tool's class or an escalation decided here.
   **`stepUpRequired` is derived by core** (CEO decision 2026-09-24, #1315, "Opción 2"): step-up only for
@@ -1931,7 +1984,7 @@ export const AI_TOOL_CLASSES = ["read", "write", "elevated", "navigate"] as cons
 export const AI_CALL_KINDS = ["read", "mutation", "navigate"] as const;              // R3
 export const AI_ENTITY_TYPES = ["asset","assetAssignment","assetModel","location","category",
   "application","accessGrant","accessRequest","consumable","consumableMovement","article","user",
-  "infraNode","infraEdge","workflowRun","manualTask"] as const;
+  "infraNode","infraEdge","workflowRun","manualTask","assetTagScheme"] as const;
 export const AI_ENTITY_OPS = ["created","updated","archived","restored","navigate"] as const;
 
 const Ref = z.object({ type: z.enum(AI_ENTITY_TYPES), id: z.string().min(1), slug: z.string().optional() });

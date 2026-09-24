@@ -1,5 +1,4 @@
 import { AppController } from '../../app.controller';
-import { AssetTagSchemeController } from '../../asset-tag-scheme/asset-tag-scheme.controller';
 import { LocalAuthController } from '../../auth/local/local-auth.controller';
 import { PasswordLifecycleController } from '../../auth/local/password-lifecycle.controller';
 import { DirectoryController } from '../../directory/directory.controller';
@@ -141,18 +140,8 @@ export const platformToolset: AiToolset = {
       AI_OWN_SURFACE,
     ),
     unexposed(DirectoryController, ['get', 'update', 'sync'], INSTANCE_CONFIG),
-    unexposed(
-      AssetTagSchemeController,
-      [
-        'get',
-        'update',
-        'seedSuggestion',
-        'previewNextTag',
-        'backfillPreview',
-        'backfillApply',
-      ],
-      INSTANCE_CONFIG,
-    ),
+    // The asset tag scheme is `asset-tag-scheme.tools.ts` (#1394): read and update are tools, the seed
+    // suggestion and the backfill are listed unexposed there.
     unexposed(
       UpdateController,
       ['getStatus', 'getSettings', 'updateSettings', 'enqueue', 'cancel'],

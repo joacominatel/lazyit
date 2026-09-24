@@ -1,6 +1,7 @@
 import type { AiToolset } from '../core/tool-descriptor';
 import { accessToolset } from './access.tools';
 import { activityToolset } from './activity.tools';
+import { assetTagSchemeToolset } from './asset-tag-scheme.tools';
 import { assetsToolset } from './assets.tools';
 import { consumablesToolset } from './consumables.tools';
 import { contextToolset } from './context.tools';
@@ -31,6 +32,7 @@ export const ALL_TOOLSETS: readonly AiToolset[] = [
   usersToolset,
   activityToolset,
   infraToolset,
+  assetTagSchemeToolset,
   platformToolset,
   interactionToolset,
 ];
