@@ -22,6 +22,7 @@ import { ConfigController } from '../../config/config.controller';
 import { WorkflowConnectionsController } from '../../workflow-engine/definitions/workflow-connections.controller';
 import { WorkflowsController } from '../../workflow-engine/definitions/workflows.controller';
 import { WorkflowDryRunController } from '../../workflow-engine/dry-run/workflow-dry-run.controller';
+import { WorkflowRunsController } from '../../workflow-engine/runs/workflow-runs.controller';
 import { templatePaths } from '../../workflow-engine/mapping/data-mapper';
 import { UsersController } from '../../users/users.controller';
 import { assertChannelAllows } from '../core/pending-action';
@@ -269,15 +270,38 @@ function tokensOf(template: string): string[] {
 }
 
 /** Whether the engine can resolve `path` to a known value (`steps.<key>.…` needs a step of this graph). */
-function isKnownToken(path: string, stepKeys: ReadonlySet<string>): boolean {
+/**
+ * Whether the engine can resolve `path` to a known value. Only a COMPLETED MANUAL step fills
+ * `ctx.steps` (`run/run-context.ts`: the typed input of the task), so `steps.<key>.<field>` must name a
+ * MANUAL step of this graph and one of its input fields; a REST or webhook step's response is never in
+ * the context and would render empty.
+ */
+function isKnownToken(
+  path: string,
+  manualFields: ReadonlyMap<string, ReadonlySet<string>>,
+): boolean {
   if (TOKEN_WORDS[path]) return true;
-  const [root, key, ...rest] = path.split('.');
+  const [root, key, field, ...rest] = path.split('.');
   return (
     root === 'steps' &&
     key !== undefined &&
-    stepKeys.has(key) &&
-    rest.length > 0
+    field !== undefined &&
+    rest.length === 0 &&
+    manualFields.get(key)?.has(field) === true
   );
+}
+
+/** The MANUAL steps of a graph and the input fields a person fills in each. */
+function manualFieldsOf(
+  steps: readonly WorkflowStep[],
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const step of steps) {
+    if (step.kind === 'MANUAL') {
+      out.set(step.key, new Set(step.inputFields.map((f) => f.name)));
+    }
+  }
+  return out;
 }
 
 /**
@@ -285,7 +309,7 @@ function isKnownToken(path: string, stepKeys: ReadonlySet<string>): boolean {
  * typo or an unknown path would render empty at run time, and the card would have to guess).
  */
 function assertKnownTokens(steps: readonly WorkflowStep[]): void {
-  const keys = new Set(steps.map((s) => s.key));
+  const keys = manualFieldsOf(steps);
   for (const step of steps) {
     if (step.kind === 'MANUAL') continue;
     const templates = [
@@ -298,7 +322,9 @@ function assertKnownTokens(steps: readonly WorkflowStep[]): void {
           throw new BadRequestException(
             `Step "${step.key}" reads {{ ${token} }}, which lazyit does not know (it would be sent empty). Known values: ${Object.keys(
               TOKEN_WORDS,
-            ).join(', ')}, and steps.<step key>.<field>.`,
+            ).join(
+              ', ',
+            )}, and steps.<manual step key>.<one of its input fields> (only a manual step's typed input is available to later steps).`,
           );
         }
       }
@@ -321,8 +347,8 @@ function displayPath(path: string): string {
 function tokenWords(path: string): string {
   if (TOKEN_WORDS[path]) return TOKEN_WORDS[path];
   if (path.startsWith('steps.')) {
-    const [, step] = path.split('.');
-    return `a value returned by the earlier step "${step ?? '?'}"`;
+    const [, step, field] = path.split('.');
+    return `the "${field ?? '?'}" a person typed in the manual step "${step ?? '?'}"`;
   }
   return 'an unknown value (renders empty)';
 }
@@ -340,12 +366,24 @@ function mappingLines(mapping: Record<string, string> | undefined): string[] {
 }
 
 /** The distinct lazyit data a set of steps sends out, in words. */
+/**
+ * Whether a step's `dataMapping` is actually sent: a webhook always posts it; a REST step sends a JSON
+ * body only for POST / PUT / PATCH (`rest.handler.ts`) — a GET or DELETE mapping is never sent.
+ */
+function sendsBody(step: WorkflowStep): boolean {
+  if (step.kind === 'WEBHOOK_OUT') return true;
+  return (
+    step.kind === 'REST' &&
+    (step.method === 'POST' || step.method === 'PUT' || step.method === 'PATCH')
+  );
+}
+
 function dataSentWords(steps: readonly WorkflowStep[]): string[] {
   const words = new Set<string>();
   for (const step of steps) {
     if (step.kind === 'MANUAL') continue;
     const templates = [
-      ...Object.values(step.dataMapping ?? {}),
+      ...(sendsBody(step) ? Object.values(step.dataMapping ?? {}) : []),
       ...(step.kind === 'REST' ? [step.path] : []),
     ];
     for (const template of templates) {
@@ -576,11 +614,18 @@ function describeGraph(
       step.kind === 'REST'
         ? `${step.method} ${displayUrl(endpoint) ?? origin} + path ${displayPath(step.path)}`
         : `POST ${displayUrl(endpoint) ?? origin} (webhook)`;
+    const body = sendsBody(step);
     const fields = Object.keys(step.dataMapping ?? {});
     stepLines.push(
-      `${n}: ${target}${fields.length > 0 ? `, sending ${fields.join(', ')}` : ''}`,
+      `${n}: ${target}${
+        fields.length === 0
+          ? ''
+          : body
+            ? `, sending ${fields.join(', ')}`
+            : ` (its mapped fields ${fields.join(', ')} are NOT sent: a ${step.kind === 'REST' ? step.method : ''} request has no body)`
+      }`,
     );
-    const lines = mappingLines(step.dataMapping);
+    const lines = body ? mappingLines(step.dataMapping) : [];
     if (step.kind === 'REST' && tokensOf(step.path).length > 0) {
       lines.unshift(
         `URL path ← ${displayPath(step.path)} (${tokensOf(step.path).map(tokenWords).join(', ')})`,
@@ -1349,6 +1394,100 @@ async function readConnectionState(
   return { connection, app };
 }
 
+/**
+ * Runs that can still call a connection: a run is pinned to a version but reads each step's connection
+ * LIVE, so a run in flight (PENDING / RUNNING), paused on a person (AWAITING_INPUT) or FAILED (a retry
+ * resumes it) sends its remaining steps to wherever the connection points when they execute.
+ */
+const ACTIVE_RUN_STATUSES = [
+  ['PENDING', 'about to start'],
+  ['RUNNING', 'running'],
+  ['AWAITING_INPUT', 'waiting for a person'],
+  ['FAILED', 'failed — a retry resumes it'],
+] as const;
+
+interface ActiveRuns {
+  /** "Provision Jira: 1 running, 2 waiting for a person" per workflow; null when it could not be read. */
+  lines: string[] | null;
+  total: number;
+  /** The workflows (by id) with an active run. */
+  workflowIds: Set<string>;
+  /** The triggers of the live workflows with an active run (their provisioning warning). */
+  triggers: Set<string>;
+  anchors: unknown[];
+}
+
+/**
+ * The application's active runs, through the guarded run list (`workflow:read`). A caller without it
+ * (403) gets `lines: null`: the card says the runs could not be checked. Runs of ANY workflow of the
+ * application are counted — a run's pinned version cannot be read through a route, and connections
+ * belong to one application — so the card says they "may" call the connection.
+ */
+async function activeRunsOf(
+  rt: AiToolRuntime,
+  applicationId: string,
+): Promise<ActiveRuns> {
+  const perWorkflow = new Map<string, string[]>();
+  const workflowIds = new Set<string>();
+  const anchors: unknown[] = [];
+  let total = 0;
+  try {
+    for (const [status, words] of ACTIVE_RUN_STATUSES) {
+      const page = asRow(
+        await rt.call(WorkflowRunsController, 'findAll', {
+          query: { applicationId, status, limit: RESOLVE_PAGE },
+        }),
+      );
+      const items = asRows(page.items);
+      const count = typeof page.total === 'number' ? page.total : items.length;
+      total += count;
+      const byWorkflow = new Map<string, number>();
+      for (const run of items) {
+        const id = String(run.workflowId);
+        byWorkflow.set(id, (byWorkflow.get(id) ?? 0) + 1);
+        workflowIds.add(id);
+        anchors.push(run.updatedAt);
+      }
+      for (const [id, n] of byWorkflow) {
+        perWorkflow.set(id, [...(perWorkflow.get(id) ?? []), `${n} ${words}`]);
+      }
+      if (count > items.length) {
+        perWorkflow.set('…', [
+          ...(perWorkflow.get('…') ?? []),
+          `${count - items.length} more ${words}`,
+        ]);
+      }
+    }
+  } catch (err) {
+    if (err instanceof HttpException && err.getStatus() === 403) {
+      return {
+        lines: null,
+        total: 0,
+        workflowIds,
+        triggers: new Set(),
+        anchors,
+      };
+    }
+    throw err;
+  }
+  const names = new Map<string, string>();
+  const page = asRow(
+    await rt.call(WorkflowsController, 'findAll', {
+      query: { applicationId, limit: RESOLVE_PAGE },
+    }),
+  );
+  const triggers = new Set<string>();
+  for (const wf of asRows(page.items)) {
+    names.set(String(wf.id), str(wf.name) ?? String(wf.id));
+    if (workflowIds.has(String(wf.id))) triggers.add(String(wf.trigger));
+  }
+  const lines = [...perWorkflow].map(
+    ([id, parts]) =>
+      `${id === '…' ? 'Other runs' : (names.get(id) ?? `workflow ${id} (archived)`)}: ${parts.join(', ')}`,
+  );
+  return { lines, total, workflowIds, triggers, anchors };
+}
+
 /** A workflow of the application whose latest version calls a connection. */
 interface ConnectionUser {
   workflow: Row;
@@ -1433,6 +1572,7 @@ const connectionUpdate = defineTool({
   bindings: [
     bind(WorkflowConnectionsController, 'update'),
     bind(WorkflowConnectionsController, 'findOne'),
+    bind(WorkflowRunsController, 'findAll'),
     bind(WorkflowsController, 'findAll'),
     bind(WorkflowsController, 'findOne'),
     bind(ApplicationsController, 'findOne'),
@@ -1457,6 +1597,14 @@ const connectionUpdate = defineTool({
     const afterEndpoint = endpointOf(nextConfig);
     const beforeHost = originOf(beforeEndpoint);
     const afterHost = originOf(afterEndpoint);
+    // A legacy row whose stored destination carries a user name or password: any change to it (even a
+    // rename or a credential attach) would approve a connection that sends a credential in plain sight.
+    // The URL is fixed first, by sending a new `config` without it.
+    if (hasUserinfo(beforeEndpoint) && hasUserinfo(afterEndpoint)) {
+      throw new BadRequestException(
+        `This connection's stored destination (${beforeHost ?? 'its URL'}) carries a user name or password in the URL. Fix the URL first: send a new config without it (store the credential in the lazyit UI and attach it by id).`,
+      );
+    }
     const repoint =
       input.config !== undefined && beforeEndpoint !== afterEndpoint;
     if (repoint && afterEndpoint) await assertEgressAllowed(afterEndpoint);
@@ -1489,6 +1637,13 @@ const connectionUpdate = defineTool({
     const anchors: unknown[] = [app.updatedAt, connection.updatedAt];
     const warnings = new Set<AiPreviewWarningCode>(['OUTBOUND_INTEGRATION']);
     const sentToNewHost: string[] = [];
+    const active = repoint ? await activeRunsOf(rt, String(app.id)) : null;
+    if (active) {
+      anchors.push(...active.anchors);
+      for (const trigger of active.triggers) {
+        warnings.add(triggerWarning(trigger));
+      }
+    }
     for (const user of users) {
       anchors.push(user.workflow.updatedAt, user.latestCreatedAt);
       if (user.workflow.enabled !== true) continue;
@@ -1603,8 +1758,21 @@ const connectionUpdate = defineTool({
     }
     if (repoint && sentToNewHost.length > 0) {
       changes.push({ field: 'dataSentToNewHost', after: sentToNewHost });
+    }
+    if (active) {
+      if (active.lines === null) {
+        changes.push({
+          field: 'runsInFlight',
+          after:
+            'Could not be checked (needs the workflow:read permission): runs already started may send to the new host.',
+        });
+      } else if (active.total > 0) {
+        changes.push({ field: 'runsInFlight', after: active.lines });
+      }
+    }
+    if (repoint && (sentToNewHost.length > 0 || (active?.total ?? 0) > 0)) {
       sentences.push(
-        `Enabled workflows will send their data to ${afterHost} from their next run.`,
+        `From the next step that calls it — including in ${active?.total ?? 0} run(s) already in flight, waiting for a person or failed and retryable — workflows will send their data to ${afterHost}.`,
       );
     }
     changes.unshift({

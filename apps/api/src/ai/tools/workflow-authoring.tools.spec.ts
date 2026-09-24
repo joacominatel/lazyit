@@ -76,6 +76,8 @@ import { WorkflowConnectionsService } from '../../workflow-engine/definitions/wo
 import { WorkflowDryRunController } from '../../workflow-engine/dry-run/workflow-dry-run.controller';
 import { WorkflowDryRunService } from '../../workflow-engine/dry-run/workflow-dry-run.service';
 import { UsersController } from '../../users/users.controller';
+import { WorkflowRunsController } from '../../workflow-engine/runs/workflow-runs.controller';
+import { WorkflowRunsService } from '../../workflow-engine/runs/workflow-runs.service';
 import { UsersService } from '../../users/users.service';
 import { AssetAssignmentsService } from '../../asset-assignments/asset-assignments.service';
 import { VaultSetupNudgeService } from '../../notifications/vault-setup-nudge.service';
@@ -172,6 +174,8 @@ let nextId: number;
 let roleMatrix: Record<Role, readonly Permission[]>;
 /** Users the directory no longer serves (offboarded): `GET /users/:id` answers 404. */
 let offboarded: Set<string>;
+/** Workflow runs (the run list route's rows). */
+let runs: Row[];
 
 const REST_STEPS = [
   {
@@ -186,6 +190,7 @@ const REST_STEPS = [
 
 function fresh() {
   offboarded = new Set();
+  runs = [];
   const user = (id: string, role: Role): Row => ({
     id,
     email: `${role.toLowerCase()}@example.com`,
@@ -686,6 +691,22 @@ const usersService = {
   }),
 };
 
+const runsService = {
+  findPage: jest.fn((filters: { applicationId?: string; status?: string }) => {
+    const items = runs.filter(
+      (r) =>
+        (!filters.applicationId || r.applicationId === filters.applicationId) &&
+        (!filters.status || r.status === filters.status),
+    );
+    return Promise.resolve({
+      items: items.map((r) => ({ ...r })),
+      total: items.length,
+      limit: 200,
+      offset: 0,
+    });
+  }),
+};
+
 const probe = jest.fn().mockResolvedValue({
   ok: true,
   statusCode: 200,
@@ -939,6 +960,7 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         ApplicationsController,
         ConfigController,
         UsersController,
+        WorkflowRunsController,
       ],
       providers: [
         { provide: PrismaService, useValue: prisma },
@@ -976,6 +998,7 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         { provide: AccessGrantsService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
         { provide: UsersService, useValue: usersService },
+        { provide: WorkflowRunsService, useValue: runsService },
         { provide: AssetAssignmentsService, useValue: {} },
         { provide: VaultSetupNudgeService, useValue: {} },
         { provide: ConfigService, useValue: {} },
@@ -1794,6 +1817,8 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         '{{ grantee.__proto__ }}',
         '{{ secrets.jira }}',
         '{{ steps.nowhere.id }}',
+        // A REST / webhook step's response never reaches the context: it would render empty.
+        '{{ steps.create-user.id }}',
         '{{ }}',
       ]) {
         const error = await refused('workflow_author_version', {
@@ -1813,20 +1838,49 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
       const { preview } = await propose('workflow_author_version', {
         workflow: { id: WF.jiraGrant },
         steps: [
-          { ...REST_STEPS[0], dataMapping: { email: '{{ grantee.email }}' } },
+          {
+            ...REST_STEPS[0],
+            dataMapping: { email: '{{ grantee.email }}' },
+          },
+          {
+            kind: 'MANUAL',
+            key: 'pick-team',
+            prompt: 'Which team?',
+            inputFields: [{ name: 'team', label: 'Team', type: 'text' }],
+          },
           {
             kind: 'WEBHOOK_OUT',
             key: 'notify',
             connectionId: CONN.hook,
-            dataMapping: { account: '{{ steps.create-user.id }}' },
+            dataMapping: { team: '{{ steps.pick-team.team }}' },
           },
         ],
       });
       expect(change(preview, 'dataSent')!.after).toEqual(
         expect.arrayContaining([
-          'https://hooks.jira.example: account ← {{ steps.create-user.id }} (a value returned by the earlier step "create-user")',
+          'https://hooks.jira.example: team ← {{ steps.pick-team.team }} (the "team" a person typed in the manual step "pick-team")',
         ]),
       );
+      // A field the manual step does not ask for would render empty: refused.
+      expect(
+        await refused('workflow_author_version', {
+          workflow: { id: WF.jiraGrant },
+          steps: [
+            {
+              kind: 'MANUAL',
+              key: 'pick-team',
+              prompt: 'Which team?',
+              inputFields: [{ name: 'team', label: 'Team', type: 'text' }],
+            },
+            {
+              kind: 'WEBHOOK_OUT',
+              key: 'notify',
+              connectionId: CONN.hook,
+              dataMapping: { x: '{{ steps.pick-team.salary }}' },
+            },
+          ],
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
     });
 
     it('never shows query values of step paths, health-check paths or the probed path', async () => {
@@ -1959,6 +2013,107 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
       expect(error.code).toBe('INVALID_INPUT');
       expect(error.message).toContain('offboarded');
       expect(invocations.size).toBe(0);
+    });
+
+    it('a re-point lists the runs already in flight, waiting or retryable — they send to the new host too', async () => {
+      const run = (
+        id: string,
+        status: string,
+        workflowId = WF.jiraGrant,
+      ): Row => ({
+        id,
+        workflowId,
+        applicationId: APP.jira,
+        status,
+        trigger: 'ACCESS_GRANTED',
+        createdAt: T0,
+        updatedAt: T0,
+      });
+      runs = [
+        run('ckrun1', 'RUNNING'),
+        run('ckrun2', 'AWAITING_INPUT'),
+        run('ckrun3', 'AWAITING_INPUT'),
+        run('ckrun4', 'FAILED'),
+        run('ckrun5', 'SUCCEEDED'),
+        { ...run('ckrun6', 'RUNNING'), applicationId: APP.other },
+      ];
+      // The workflow itself is disabled now: its in-flight runs still call the connection.
+      const { id, preview } = await propose('workflow_connection_update', {
+        connection: CONN.rest,
+        config: {
+          kind: 'REST',
+          baseUrl: 'https://attacker.example/collect',
+          authScheme: 'BEARER',
+        },
+      });
+      expect(change(preview, 'runsInFlight')!.after).toEqual([
+        'Provision Jira: 1 running, 2 waiting for a person, 1 failed — a retry resumes it',
+      ]);
+      expect(preview.warnings.sort()).toEqual(
+        ['EXTERNAL_PROVISIONING', 'OUTBOUND_INTEGRATION'].sort(),
+      );
+      expect(String(change(preview, 'whatItDoes')!.after)).toContain(
+        'including in 4 run(s) already in flight, waiting for a person or failed and retryable',
+      );
+      expect(String(change(preview, 'whatItDoes')!.after)).not.toContain(
+        'next run',
+      );
+      // A run moving on before approval changes what the card counted: STALE.
+      runs[0].updatedAt = new Date('2026-09-05T00:00:00.000Z');
+      const approved = await tools.approve(id, chat(ADMIN));
+      expect(approved).toMatchObject({
+        status: 'FAILED',
+        result: { error: { code: 'STALE' } },
+      });
+    });
+
+    it('a metadata-only change on a legacy connection whose URL carries userinfo is refused until the URL is fixed', async () => {
+      connections.get(CONN.hook)!.config = {
+        kind: 'WEBHOOK_OUT',
+        url: 'https://legacy:hunter2@hooks.jira.example/in',
+      };
+      for (const input of [
+        { connection: CONN.hook, name: 'Renamed' },
+        { connection: CONN.hook, secretId: SECRET.jira2 },
+      ]) {
+        const error = await refused('workflow_connection_update', input);
+        expect(error.code).toBe('INVALID_INPUT');
+        expect(error.message).toContain('carries a user name or password');
+        expect(error.message).not.toContain('hunter2');
+      }
+      // Fixing the URL is allowed (and shows the clean destination).
+      const { preview } = await propose('workflow_connection_update', {
+        connection: CONN.hook,
+        config: { kind: 'WEBHOOK_OUT', url: 'https://hooks.jira.example/in' },
+      });
+      expect(JSON.stringify(preview)).not.toContain('hunter2');
+    });
+
+    it('a GET or DELETE step’s mapped fields are not listed as sent (there is no body)', async () => {
+      const { preview } = await propose('workflow_author_version', {
+        workflow: { id: WF.jiraGrant },
+        steps: [
+          {
+            ...REST_STEPS[0],
+            method: 'GET',
+            path: '/users/{{ grantee.username }}',
+            dataMapping: { email: '{{ grantee.email }}' },
+          },
+        ],
+      });
+      expect(change(preview, 'dataSent')!.after).toEqual([
+        "https://api.jira.example: URL path ← /users/{{ grantee.username }} (the person's username)",
+        'https://api.jira.example: with its stored credential; default headers Accept, X-Api-Token',
+      ]);
+      expect(change(preview, 'steps')!.after).toEqual([
+        '1. create-user: GET https://api.jira.example/rest?apikey=… + path /users/{{ grantee.username }} (its mapped fields email are NOT sent: a GET request has no body)',
+      ]);
+      expect(String(change(preview, 'whatItDoes')!.after)).toContain(
+        "lazyit will send the person's username to",
+      );
+      expect(String(change(preview, 'whatItDoes')!.after)).not.toContain(
+        "person's email",
+      );
     });
 
     it('wraps other-authored names in refusals the model reads', async () => {
