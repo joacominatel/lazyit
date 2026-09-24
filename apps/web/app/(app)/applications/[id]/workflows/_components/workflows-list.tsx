@@ -109,8 +109,14 @@ function WorkflowRow({
   const lastRun = runs?.items[0];
 
   function toggleEnabled(enabled: boolean) {
+    // SEC-077: enabling pins the version this row shows; if another version was authored since, the
+    // API answers 409 instead of making an unseen version live.
+    const data =
+      enabled && detail
+        ? { enabled, expectedVersion: detail.latestVersion?.version ?? 0 }
+        : { enabled };
     update.mutate(
-      { id: workflow.id, data: { enabled } },
+      { id: workflow.id, data },
       {
         onSuccess: () =>
           toast.success(

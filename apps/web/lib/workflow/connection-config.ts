@@ -17,6 +17,12 @@ import type {
  * but unrelated keys like `defaultHeaders` survive the round-trip. On a create there is no `existing`
  * and the result is exactly the form's fields.
  *
+ * REDACTED VALUES (SEC-075): the API returns every `defaultHeaders` VALUE as
+ * `WORKFLOW_REDACTED_VALUE` (`"[redacted]"`) — a header may hold a pasted credential — so the carried
+ * map holds sentinels, not real values. That is intended: the PATCH sends them back unchanged and the
+ * API keeps the stored value for each sentinel (write-only, like the SMTP password). The form never
+ * displays or edits header values; a real new value is only ever typed, never read back.
+ *
  * Pure + framework-agnostic so it is unit-testable in `connection-config.test.ts` (the area had no
  * test before; this closes the latent data-loss bug under test).
  */
