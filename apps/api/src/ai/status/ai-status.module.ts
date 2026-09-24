@@ -1,10 +1,16 @@
 import { Module } from '@nestjs/common';
+import { AiSettingsModule } from '../settings/ai-settings.module';
+import { AiStatusController } from './ai-status.controller';
+import { AiStatusService } from './ai-status.service';
 
 /**
- * `GET /ai/status` — what the web shell gates the chat launcher on.
- *
- * Pre-created empty by the AI core unit (ADR-0097; docs/ai-assistant/_synthesis.md §5, §10) so the unit
- * that owns it — W2-2 — fills it without touching `ai.module.ts` or `app.module.ts`.
+ * `GET /ai/status` — what the web shell gates the chat launcher on (synthesis §4.5). Reads the settings
+ * through `AI_SETTINGS_READER` (AiSettingsModule); PermissionResolverService comes from the global
+ * AuthModule.
  */
-@Module({})
+@Module({
+  imports: [AiSettingsModule],
+  controllers: [AiStatusController],
+  providers: [AiStatusService],
+})
 export class AiStatusModule {}
