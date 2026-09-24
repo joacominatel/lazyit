@@ -234,16 +234,35 @@ export class AgentLoop {
       this.logger.error(
         `AI run ${runId} failed unexpectedly: ${describeError(err)}`,
       );
-      await this.lifecycle
-        .finalize(runId, 'FAILED', {
-          from: ['RUNNING'],
-          finishReason: 'error',
-          error: { code: 'INTERNAL', message: 'The run failed unexpectedly.' },
-        })
-        .catch(() => undefined);
+      await this.failUnexpectedly(runId).catch(() => undefined);
     } finally {
       this.controllers.delete(runId);
     }
+  }
+
+  /**
+   * An unexpected fault mid-run: whatever call was executing may or may not have taken effect. Its
+   * invocation becomes OUTCOME_UNKNOWN (never retried), and every unanswered call of the step is answered
+   * `UNKNOWN_OUTCOME` — not "not executed", which could be false.
+   */
+  private async failUnexpectedly(runId: string): Promise<void> {
+    const executing = await this.prisma.aiToolInvocation.findMany({
+      where: { runId, status: 'EXECUTING' },
+      select: { id: true },
+    });
+    for (const row of executing) {
+      await this.tools.markOutcomeUnknown(row.id).catch(() => null);
+    }
+    await this.lifecycle.finalize(runId, 'FAILED', {
+      from: ['RUNNING'],
+      finishReason: 'error',
+      error: { code: 'INTERNAL', message: 'The run failed unexpectedly.' },
+      fallback: {
+        code: 'UNKNOWN_OUTCOME',
+        message:
+          'The run failed while this call was pending; whether it took effect is unknown. It will not be retried.',
+      },
+    });
   }
 
   private async drive(runId: string, signal: AbortSignal): Promise<void> {

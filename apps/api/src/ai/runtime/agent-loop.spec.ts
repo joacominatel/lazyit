@@ -582,6 +582,38 @@ describe('refusal and provider errors', () => {
     });
   });
 
+  it('an unexpected fault inside a write answers UNKNOWN_OUTCOME and marks the write', async () => {
+    rt.model.push({
+      toolCalls: [{ toolCallId: 'w', toolName: WRITE, input: { id: 'a1' } }],
+    });
+    const { runId, conversationId } = await headless();
+    rt.tools.invoke = () => {
+      rt.prisma.tables.aiToolInvocation.create({
+        data: {
+          channel: 'HEADLESS',
+          runId,
+          toolName: WRITE,
+          toolClass: 'write',
+          input: {},
+          inputHash: 'h',
+          schemaHash: 'x',
+          status: 'EXECUTING',
+        },
+      });
+      return Promise.reject(new Error('connection reset mid-write'));
+    };
+    await rt.drain();
+    expect(rt.run(runId)).toMatchObject({
+      status: 'FAILED',
+      error: { code: 'INTERNAL' },
+    });
+    expect(rt.prisma.tables.aiToolInvocation.rows[0].status).toBe(
+      'OUTCOME_UNKNOWN',
+    );
+    const [results] = toolMessages(conversationId);
+    expect(results[0].output.error.code).toBe('UNKNOWN_OUTCOME');
+  });
+
   it('an unexpected fault fails the run and answers the open step', async () => {
     rt.model.push(
       { toolCalls: [{ toolCallId: 'c1', toolName: READ, input: {} }] },
