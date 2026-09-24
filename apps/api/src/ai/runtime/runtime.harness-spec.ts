@@ -357,6 +357,10 @@ export interface ScriptedStep {
   error?: unknown;
   /** Run before answering (e.g. request a cancel mid-step). */
   before?: (request: ChatModelStepRequest) => void | Promise<void>;
+  /** The provider's native web search in this step (#1389). */
+  webSearch?: ChatModelStepResult['webSearch'];
+  /** The provider paused a server-side turn (#1389). */
+  paused?: boolean;
 }
 
 export class ScriptedModel implements ChatModelPort {
@@ -391,6 +395,8 @@ export class ScriptedModel implements ChatModelPort {
       toolCalls: calls,
       finishReason: next.finishReason ?? (calls.length ? 'tool-calls' : 'stop'),
       usage: next.usage ?? { inputTokens: 100, outputTokens: 20 },
+      ...(next.webSearch ? { webSearch: next.webSearch } : {}),
+      ...(next.paused ? { paused: true } : {}),
     };
   }
 

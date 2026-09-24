@@ -24,6 +24,7 @@ import { toPendingAction } from '../core/pending-action';
 import { AiToolRegistry } from '../core/tool-registry';
 import { ownerWhere } from '../conversations/ai-request-identity';
 import {
+  AI_TRANSCRIPT_FORMATS,
   projectTranscript,
   storedUserText,
 } from '../conversations/transcript-projection';
@@ -308,7 +309,7 @@ export class AiRunsService {
         where: {
           conversationId,
           runId: run.id,
-          format: AI_MESSAGE_FORMAT_MODEL,
+          format: { in: [...AI_TRANSCRIPT_FORMATS] },
         },
         orderBy: { seq: 'asc' },
         select: {
