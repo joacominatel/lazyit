@@ -336,7 +336,7 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 | T-26 | AS | S | Open redirect or code interception: loose redirect matching, missing PKCE, PKCE downgrade. | Exact match; PKCE S256 mandatory; `plain` rejected; downgrade blocked; `iss` in responses | v1 |
 | T-27 | AS | S | Consent phishing: a lookalike client ("Claude") through CIMD or DCR, or localhost-redirect impersonation. | Hostname display; "verified domain" vs "self-declared" badge; warnings; consent always shown; step-up for the `admin` scope; an admin-configurable client allowlist, pre-seeded (§11 Q-7, resolved) | v1 |
 | T-28 | AS | I, D | SSRF through a CIMD `client_id` fetch. | Egress guard with HTTPS only, **no** private allowlist, size and time caps, caching | v1 |
-| T-29 | AS | S | Refresh-token theft or replay; a persistent grant outlives the user's intent. | Rotation with reuse detection (revoke the grant); `sessionEpoch` binding; revocation UI. No absolute cap in v1 (reconciled, [[ai-assistant/_synthesis|synthesis]] §8) | v1 |
+| T-29 | AS | S | Refresh-token theft or replay; a persistent grant outlives the user's intent. | Rotation with reuse detection (revoke the grant); `mcpCredentialEpoch` binding (ADR-0097 d8, amended 2026-09-24); revocation UI. No absolute cap in v1 (reconciled, [[ai-assistant/_synthesis|synthesis]] §8) | v1 |
 | T-30 | AS | S, T | Issuer or metadata poisoning through a `Host`-derived origin (`AUTH_TRUST_HOST`) [R]. | Issuer is pinned configuration; the authorization server is disabled without a pinned HTTPS origin | v1 |
 | T-31 | AS | I | OAuth over plain HTTP (`lan` mode) [R] conflicts with "MUST HTTPS" [E]. | Decided: OAuth only on HTTPS; personal MCP tokens on `lan` (§11 E2) | v1 |
 | T-32 | AS | S | Consent or login CSRF; a cookie-authenticated endpoint on the API while CORS reflects any origin [R]. | Consent lives on the web origin with a CSRF token and `SameSite`; no cookie-authenticated API endpoint | v1 |
@@ -504,15 +504,19 @@ the **exfiltration leg** and the **consequential-action leg**.
     `lzit_ort_…`, `lzit_pat_…` — reconciled with the MCP note; the prefixes also let secret scanners
     detect them), are SHA-256 hashed at rest,
     compared in constant time, and looked up DB-first. Each token row stores the audience (the
-    canonical `/mcp` URI), client, scopes, user and the user's `sessionEpoch` at issuance.
+    canonical `/mcp` URI), client, scopes, user and the user's `mcpCredentialEpoch` at issuance (its grant row; the `sessionEpoch`
+    snapshot is kept as information only).
   - Access tokens live 1 hour. This note recommended ≤ 15 minutes; the reconciled value relies on the
     DB-first check of every request, which already makes revocation immediate (synthesis §8).
   - Refresh tokens rotate on every use. **Reusing a rotated refresh token revokes the whole grant.**
     Refresh tokens live 30 days from their last use; there is no absolute cap in v1 (reconciled —
     this note recommended an absolute 30 days).
-  - Revocation happens on: a `sessionEpoch` bump (logout-everywhere, password change,
-    deactivation), offboarding, a user revoking a client from their profile, or an admin revoking any
-    user's clients.
+  - Revocation happens on: an `mcpCredentialEpoch` bump (password change or reset, admin reset or
+    *revoke sessions*, the recovery CLI, deactivation, offboarding), a user revoking a client from their
+    profile, or an admin revoking any user's clients. **A normal web logout does not revoke them**: it
+    bumps only `sessionEpoch` and ends web sessions only (ADR-0097 decision 8, amended 2026-09-24 — CEO:
+    "Separarlos"). The trade-off: signing out of a shared browser does not disconnect the user's agents;
+    a password change or a revoke in `/account/ai` does.
   - `/mcp` accepts `lzit_oat_` access tokens whose audience is the canonical URI, `lzit_pat_` personal
     tokens on `lan` only, and `lzit_sa_` tokens only of a Service Account that holds `ai:connect`
     (R10, fail-closed). The global `JwtAuthGuard` rejects OAuth and personal tokens on every other route,
@@ -775,7 +779,8 @@ Open items recorded by the G2 review of #1354 (W2-14):
   - Opaque, hashed at rest, expiring, and bound to the canonical `/mcp` resource.
   - Not accepted anywhere else. `/mcp` accepts nothing else, except personal tokens on `lan` and the
     tokens of Service Accounts that hold `ai:connect` (R10).
-  - Rotating refresh tokens with reuse detection, revoked by a `sessionEpoch` bump or offboarding.
+  - Rotating refresh tokens with reuse detection, revoked by an `mcpCredentialEpoch` bump (never by a
+    plain web logout) or offboarding.
   - PKCE S256, exact redirect match, pinned issuer; the authorization server runs over HTTPS only.
 - **INV-AI-10 — Every AI-initiated mutation is permanently audited.** Append-only, protected against
   UPDATE and DELETE, attributed human XOR SA (INV-SA-4) with channel and approval provenance.
@@ -867,8 +872,9 @@ Tests are behaviour-focused, under Jest (api) and `bun test` (web/shared), per
 16. Redirect-URI exact match, including trailing slash, case and extra query. No redirect on an
     invalid client. PKCE S256 required, `plain` rejected, PKCE downgrade (a verifier with no
     challenge) rejected. `iss` present.
-17. A refresh token reused after rotation revokes the family. A `sessionEpoch` bump or offboarding
-    invalidates access and refresh tokens.
+17. A refresh token reused after rotation revokes the family. An `mcpCredentialEpoch` bump or
+    offboarding invalidates access and refresh tokens; a web logout (a `sessionEpoch` bump alone) does
+    not.
 18. `lzit_oat_` and `lzit_pat_` tokens are 401 on every non-MCP route. A local session JWT is 401 at
     `/mcp`; an SA token is 401 at `/mcp` unless the SA holds `ai:connect`; a personal token is 401 on an
     HTTPS instance. A token whose audience is a different resource is 401.
@@ -982,8 +988,8 @@ in [[ai-assistant/_synthesis|the synthesis]] §10 places each gate on its units.
   without a pinned HTTPS origin; personal tokens exist only on `lan`.
 - **Tokens:** opaque, prefixed, hashed and constant-time; audience-bound; rejected on non-MCP routes;
   `/mcp` rejects session tokens and accepts SA tokens only when the SA holds `ai:connect`.
-- **Refresh and revocation:** refresh rotation with grant revocation on reuse; `sessionEpoch` and
-  offboarding revocation.
+- **Refresh and revocation:** refresh rotation with grant revocation on reuse; `mcpCredentialEpoch` and
+  offboarding revocation (not web logout).
 - **Transport:** `Origin` validation on `/mcp`; no token in a query string.
 - **CIMD:** fetched through the egress guard with no private allowlist.
 - **Consent:** the page shows client host, redirect host and localhost warning; the decision is

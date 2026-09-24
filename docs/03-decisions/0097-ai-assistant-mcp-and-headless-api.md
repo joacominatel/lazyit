@@ -207,6 +207,35 @@ The key forks only; each links its analysis.
    `sessionEpoch`. The issuer is pinned configuration, so the authorization server exists only on
    HTTPS instances. → [[ai-assistant/mcp-and-oauth|MCP]] §5.1–5.2, §6.
 
+   > Amended 2026-09-24 (#1315, CEO decision): MCP credentials no longer die with `sessionEpoch`. Since
+   > [[0086-local-authentication-mode]] §8 made a web sign-out a `sessionEpoch` bump that ends every web
+   > session, binding grants to that counter meant a normal logout silently revoked every MCP connection
+   > and personal token. The CEO, asked whether it should stay that way: **"Separarlos"** — "El logout
+   > normal cierra solo la sesión web. Las conexiones MCP/tokens mueren con: cambio de contraseña,
+   > desactivación/offboarding, 'cerrar sesión en todos lados' explícito, o revocarlas en /account/ai.
+   > Requiere un cambio chico de backend (un contador propio para credenciales MCP) y enmendar ADR-0097."
+   >
+   > - **A counter of their own.** `User.mcpCredentialEpoch` (`Int`, default 0). Every OAuth grant and
+   >   personal token snapshots it (`OAuthGrant.mcpCredentialEpoch`); `/mcp` verification, refresh and the
+   >   connected-apps lists compare it instead of `sessionEpoch`. The grant keeps its `sessionEpoch`
+   >   snapshot as information only.
+   > - **What bumps it** (always together with `sessionEpoch`): a self-service password change, a
+   >   password reset by emailed link, an admin reset (temporary password), the admin "reset link" with
+   >   *revoke sessions* on, the recovery CLI, a deactivation, an offboarding (manual or by directory
+   >   sync). lazyit has no user-facing "sign out everywhere" route; the admin *revoke sessions* option is
+   >   that explicit act. Revoking a connection in `/account/ai` (or Settings → AI) is unchanged.
+   > - **What does not**: `POST /auth/logout`. It still bumps `sessionEpoch`, so every web session of the
+   >   user ends, as ADR-0086 §8 says.
+   > - **In-flight tool calls.** An MCP request delegates at the live `sessionEpoch` it re-read while
+   >   verifying the credential, so a logout at that instant can refuse a tool call already running; the
+   >   next request is accepted.
+   >
+   > Migration `20260807000000_mcp_credential_epoch` adds both columns and, in one data step, keeps every
+   > existing grant exactly as live as it was: 0 when its `sessionEpoch` snapshot still matched the user's,
+   > -1 (never matches) when it was already dead.
+   > → [[ai-assistant/mcp-and-oauth|MCP]] §5.2, §6, §10 Q6, §12, §14; [[ai-assistant/security|security]]
+   > §6.3.
+
 9. **The MCP server is stateless and per-caller.** `/mcp` runs the official SDK v2 handler inside Nest,
    lists only the tools the caller may use under the granted scope, re-checks everything on each call,
    and derives annotations from the tool class. It accepts OAuth tokens on HTTPS, revocable personal
@@ -303,6 +332,12 @@ instance level, the grant exposes nothing until an admin enables it. Downgrading
 > Amended 2026-09-23 (#1315, PR #1332): default grants for `ai:use` / `ai:connect` are applied by the
 > seed-once ledger from #1314; no data migration. This corrects the mechanism only; the decision is
 > unchanged.
+
+> Amended 2026-09-24 (#1315, decision 8 amendment): `users.mcpCredentialEpoch INTEGER NOT NULL DEFAULT 0`
+> and `oauth_grants.mcpCredentialEpoch INTEGER NOT NULL` (added with a temporary default 0, then a one-time
+> `UPDATE` sets -1 on grants already dead by `sessionEpoch`, then the default is dropped). Existing users
+> start at 0; every grant that worked before the update keeps working, and every grant that was already
+> dead stays dead. Downgrading leaves two inert columns (an older build compares `sessionEpoch` again).
 
 ## Prerequisites
 

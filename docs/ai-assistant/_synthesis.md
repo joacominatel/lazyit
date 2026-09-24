@@ -127,7 +127,7 @@ notes.
 | **R4** | **Tool descriptor.** One registry in `apps/api/src/ai/`. Names match `^[a-z][a-z0-9_]{0,39}$`. Fields at least: name, title, description, zod input schema (JSON Schema via zod v4, `io: "input"`), permission, class (`read` \| `write` \| `elevated` \| `navigate`), a server-resolved preview builder for writes, and UI effects. MCP annotations derive from the class. | The tools note's `R/W/D` classes, the security note's `T0–T4` (now mapped onto the four classes), the MCP note's `effect` enum and the provider note's `read\|write` effect and 64-char name rule. |
 | **R5** | **Module layout.** `apps/api/src/ai/` (providers, runtime, tools core + per-domain files, settings, status, conversations/runs, prompt, retention); `apps/api/src/oauth/` (the authorization server, its own module); `apps/api/src/mcp/` (the resource server + skill/plugin distribution). One unified tree (§5). | The per-slice trees, including `ai/chat`, `ai/mcp`, `ai/headless` as stub channel modules inside `ai/`. |
 | **R6** | **Audit.** `AiActionLog` is the **single** permanent, append-only AI mutation ledger. The provider note's write-class `AiToolCall` rows collapse into it; the per-call approval row is `AiToolInvocation` (retention-bound). MCP writes use the same writer with channel `MCP`. Additive nullable `aiInvocationId` on `asset_history` and `user_history`. | The provider note's `AiToolCall` as the approval unit **and** the ledger. |
-| **R7** | **OAuth.** Scopes `lazyit.read`, `lazyit.write`, and `lazyit.admin` (only `elevated`-class tools; never preselected at consent; password step-up). Consent offers read-only. Opaque, hashed, audience-bound tokens; refresh rotation with reuse detection; DCR **and** CIMD; consent always shown; a password change or "sign out everywhere" revokes grants. | The security note's colon-named scopes, its "do not ship DCR", its remembered consent; the MCP note's two-scope set. |
+| **R7** | **OAuth.** Scopes `lazyit.read`, `lazyit.write`, and `lazyit.admin` (only `elevated`-class tools; never preselected at consent; password step-up). Consent offers read-only. Opaque, hashed, audience-bound tokens; refresh rotation with reuse detection; DCR **and** CIMD; consent always shown; a password change or "sign out everywhere" revokes grants (a normal web logout does not — ADR-0097 decision 8, amended 2026-09-24). | The security note's colon-named scopes, its "do not ship DCR", its remembered consent; the MCP note's two-scope set. |
 | **R8** | **Skill.** An authenticated zip download is always available; the public plugin-marketplace URL is served only when MCP is enabled on an HTTPS instance (Claude Code's `archive` source is HTTPS-only). | The frontend note's "marketplace later" and the MCP note's "anonymous marketplace everywhere". |
 | **R9** | **Per-user surface.** `/account/ai` (install + connected apps + personal tokens) for holders of `ai:connect`; Settings → AI for admins (provider wizard, MCP switch, retention, budgets, every user's grants). | The frontend note's `ai:use`-gated install panel. |
 | **R10** | **SA tokens on `/mcp`** are accepted only if the SA holds `ai:connect`, fail-closed. Adopted by default (§8). | The security note's "`/mcp` rejects SA tokens". |
@@ -290,12 +290,12 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
   `lzit_pat_` (personal, `lan` only, 90 days by default, 365 max, mandatory expiry). Codes are
   single-use and live 60 s. Accepted **only** on `/mcp`; session JWTs are never accepted there.
 - **Every `/mcp` request:** token → grant (live, unexpired) → user re-loaded (active, not
-  `directoryOnly`, not `mustChangePassword`, `sessionEpoch` equal to the grant's snapshot) → MCP switch
+  `directoryOnly`, not `mustChangePassword`, `mcpCredentialEpoch` equal to the grant's snapshot) → MCP switch
   → `ai:connect` now → resource matches. Authority = the user's current permissions ∩ the scope class.
-- **Revocation:** user or admin revoke, refresh reuse, the revocation endpoint, and any `sessionEpoch`
-  bump (password change, sign-out-everywhere, admin reset), deactivation, offboarding. Open PR #1313
-  amends ADR-0086's session expiry; the grant binding follows whatever "all prior sessions die" means
-  after it.
+- **Revocation:** user or admin revoke, refresh reuse, the revocation endpoint, and any
+  `mcpCredentialEpoch` bump (password change or reset, admin reset or *revoke sessions*, deactivation,
+  offboarding). A normal web logout bumps only `sessionEpoch` and does **not** revoke MCP credentials
+  (ADR-0097 decision 8, amended 2026-09-24 — CEO: "Separarlos").
 - **Client allowlist** ([[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13): every OAuth
   client is checked against an admin-configurable allowlist, matched on its CIMD `client_id` URL or a
   redirect-URI pattern, **never on `client_name`**. The curated defaults (the usual clients) live in code
@@ -476,7 +476,7 @@ bounded per [[0036-int4-bounded-integers]].
 | `ai_service_account_settings` (`AiServiceAccountSettings`) | PK = `serviceAccountId` | `access` (`off` \| `read-only` \| `read-write`), `maxMutationsPerRun` | mutable config; an absent row reads as `read-write` | §2 decision 13 (editorial, §8.2) |
 | `ai_config_audit_log` (`AiConfigAuditLog`) | `Int` autoincrement | who changed AI settings or a per-SA setting, what (redacted), the disclosure acknowledgement | append-only | security §6.4–6.5 (editorial, §8.2) |
 | `oauth_clients` (`OAuthClient`) | `cuid()` | DCR / CIMD / known clients, redirect URIs, sanitized metadata | mutable; unused DCR clients without grants hard-deleted after 24 h | MCP §6 |
-| `oauth_grants` (`OAuthGrant`) | `cuid()` | one user's delegation to one client, or a personal token: kind, scopes, resource, `sessionEpoch` snapshot, expiry, revoke reason | **soft delete = revoked** (joins `SOFT_DELETABLE_MODELS`) | MCP §6 |
+| `oauth_grants` (`OAuthGrant`) | `cuid()` | one user's delegation to one client, or a personal token: kind, scopes, resource, `mcpCredentialEpoch` snapshot (and an informational `sessionEpoch` one), expiry, revoke reason | **soft delete = revoked** (joins `SOFT_DELETABLE_MODELS`) | MCP §6 |
 | `oauth_authorization_codes` (`OAuthAuthorizationCode`) | `cuid()` | code hash, PKCE challenge, redirect, scopes, resource, expiry, use | credential material — hard-deleted by the sweeper (`PasswordResetToken` precedent) | MCP §6 |
 | `oauth_tokens` (`OAuthToken`) | `cuid()` | access / refresh / personal token hashes, expiry, rotation use | credential material — hard-deleted on expiry or revocation | MCP §6 |
 | `oauth_audit_log` (`OAuthAuditLog`) | `Int` autoincrement | client registered, grant created, consent denied, grant revoked, refresh reuse, personal token created/revoked | append-only; ADR-0081 source `oauth` | MCP §6 |
@@ -530,7 +530,7 @@ The security note's INV-AI-n, merged with the MCP note's INV-MCP-n. They join
   and the tokens of SAs holding `ai:connect`. Codes are single-use, ≤ 60 s, PKCE-S256-bound; redirects
   match exactly (loopback port-agnostic only); refresh tokens rotate with reuse detection; `iss` is
   returned; the issuer is pinned. A grant dies with the user: soft delete, `isActive = false`,
-  `directoryOnly`, a `sessionEpoch` bump, or `mustChangePassword`.
+  `directoryOnly`, an `mcpCredentialEpoch` bump (not a plain web logout), or `mustChangePassword`.
 - **INV-AI-10 — Every AI-initiated mutation is permanently audited.** In `AiActionLog`, the single
   ledger for all channels (R6): append-only, blocked against `UPDATE`/`DELETE` at the database,
   attributed human XOR SA (INV-SA-4) with channel and approval provenance, independent of conversation
@@ -758,8 +758,9 @@ cross-cutting pages and the edits to existing ones.
 1. ~~**Client trust policy**~~ — **resolved** (CEO, 2026-09-23): an admin-configurable allowlist in
    Settings → AI, pre-seeded with the well-known clients, matched on the CIMD URL or redirect-URI
    pattern, never `client_name`. → [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13.
-2. **Session semantics after PR #1313** — the grant's `sessionEpoch` binding follows ADR-0086 as amended;
-   re-check when #1313 merges.
+2. ~~**Session semantics after PR #1313**~~ — **resolved** (CEO, 2026-09-24): grants bind to their own
+   `mcpCredentialEpoch`, so a web logout no longer revokes them. → [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]]
+   decision 8 (amended).
 3. **External facts to verify during the build** (not decisions): Claude Code's behavior against an
    `http://` MCP URL; Cursor's redirect URI and CIMD behavior; whether Claude Code honors
    `NODE_EXTRA_CA_CERTS`; Caddy `encode` with SSE on the pinned image; whether Auth.js keeps a long
