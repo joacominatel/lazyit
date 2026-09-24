@@ -333,6 +333,70 @@ describe('owner-only isolation (ADR-0097 default 3)', () => {
   });
 });
 
+describe('delete (through the W3-6 purge service)', () => {
+  it('refuses while a run is active (409 RUN_IN_PROGRESS), then hard-deletes and keeps the run row', async () => {
+    const id = await newConversation();
+    h.rt.model.push({ text: 'ok' });
+    const { body } = await say(id, 'Hi');
+
+    const busy = await http()
+      .delete(`/ai/conversations/${id}`)
+      .set('X-Test-Principal', 'A');
+    expect(busy.status).toBe(409);
+    expect(busy.body).toMatchObject({ code: 'RUN_IN_PROGRESS' });
+
+    await h.rt.drain();
+    await http()
+      .delete(`/ai/conversations/${id}`)
+      .set('X-Test-Principal', 'A')
+      .expect(204);
+    expect(h.purge.calls[1]).toEqual({
+      identity: {
+        kind: 'human',
+        userId: h.rt.run(body.runId).userId,
+        sessionEpoch: 3,
+      },
+      conversationId: id,
+    });
+    expect(h.rt.messages(id)).toHaveLength(0);
+    expect(h.rt.run(body.runId)).toMatchObject({
+      conversationId: null,
+      status: 'SUCCEEDED',
+    });
+    await http()
+      .get(`/ai/conversations/${id}`)
+      .set('X-Test-Principal', 'A')
+      .expect(404);
+  });
+
+  it('404s another user and an admin, 403s a Service Account before the purge, and still deletes while AI is off', async () => {
+    const id = await newConversation();
+    for (const who of ['B', 'ADMIN']) {
+      const res = await http()
+        .delete(`/ai/conversations/${id}`)
+        .set('X-Test-Principal', who);
+      expect(res.status).toBe(404);
+      expect(res.body).toMatchObject({ code: 'NOT_FOUND' });
+    }
+    h.rt.loader.saPermissions.add('ai:use');
+    await http()
+      .delete(`/ai/conversations/${id}`)
+      .set('X-Test-Principal', 'SA')
+      .expect(403);
+    expect(h.purge.calls.map((c) => c.identity.kind)).toEqual([
+      'human',
+      'human',
+    ]);
+    expect(h.rt.prisma.tables.aiConversation.rows).toHaveLength(1);
+
+    h.rt.settings.config = null;
+    await http()
+      .delete(`/ai/conversations/${id}`)
+      .set('X-Test-Principal', 'A')
+      .expect(204);
+  });
+});
+
 describe('AI switched off', () => {
   it('refuses to create or send (409 AI_DISABLED) but keeps conversations readable', async () => {
     const id = await newConversation();

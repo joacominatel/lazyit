@@ -9,6 +9,8 @@
  * The importing spec must mock the generated Prisma client first (see `jest.mock` in each spec).
  */
 import {
+  ConflictException,
+  NotFoundException,
   type CanActivate,
   type ExecutionContext,
   type INestApplication,
@@ -29,6 +31,7 @@ import { AI_SETTINGS_READER } from '../core/ports/ai-settings.port';
 import { AiToolRegistry } from '../core/tool-registry';
 import { AiServiceAccountAccessController } from '../headless/ai-service-account-access.controller';
 import { AiServiceAccountAccessService } from '../headless/ai-service-account-access.service';
+import { AiConversationPurgeService } from '../retention/ai-conversation-purge.service';
 import { AgentRunOrchestrator } from '../runtime/agent-run.orchestrator';
 import { AiApprovalService } from '../runtime/approval.service';
 import { InProcessRunEventBus } from '../runtime/run-event-bus';
@@ -85,7 +88,65 @@ const USERS: Record<string, Row> = {
   },
 };
 
+/**
+ * The retention unit's purge service (W3-6), faked over the in-memory tables with its contract: owner
+ * only (404), 409 `RUN_IN_PROGRESS` while a run is active, cascade of messages and invocations, runs
+ * kept with a null conversation. Its own SQL is covered by `ai-retention.spec.ts`.
+ */
+function fakePurge(rt: Runtime) {
+  const tables = rt.prisma.tables;
+  return {
+    calls: [] as Array<{ identity: Row; conversationId: string }>,
+    deleteOwned(identity: Row, conversationId: string): Promise<void> {
+      this.calls.push({ identity, conversationId });
+      const conv = (tables.aiConversation.rows as Row[]).find(
+        (r) =>
+          r.id === conversationId &&
+          (identity.kind === 'human'
+            ? r.userId === identity.userId
+            : r.serviceAccountId === identity.serviceAccountId),
+      );
+      if (!conv) {
+        return Promise.reject(
+          new NotFoundException({
+            code: 'NOT_FOUND',
+            message: 'Conversation not found',
+          }),
+        );
+      }
+      const active = (tables.aiRun.rows as Row[]).some(
+        (run) =>
+          run.conversationId === conversationId &&
+          ['QUEUED', 'RUNNING', 'AWAITING_APPROVAL'].includes(run.status),
+      );
+      if (active) {
+        return Promise.reject(
+          new ConflictException({
+            code: 'RUN_IN_PROGRESS',
+            message:
+              'A run is active in this conversation; cancel it before deleting',
+          }),
+        );
+      }
+      tables.aiConversation.rows = (tables.aiConversation.rows as Row[]).filter(
+        (r) => r !== conv,
+      );
+      tables.aiMessage.rows = (tables.aiMessage.rows as Row[]).filter(
+        (m) => m.conversationId !== conversationId,
+      );
+      tables.aiToolInvocation.rows = (
+        tables.aiToolInvocation.rows as Row[]
+      ).filter((i) => i.conversationId !== conversationId);
+      for (const run of tables.aiRun.rows as Row[]) {
+        if (run.conversationId === conversationId) run.conversationId = null;
+      }
+      return Promise.resolve();
+    },
+  };
+}
+
 export interface HttpHarness {
+  purge: ReturnType<typeof fakePurge>;
   app: INestApplication;
   rt: Runtime;
   prisma: Row;
@@ -213,6 +274,7 @@ export async function buildHttp(
   const serviceAccounts = new Set([SA_ID, OTHER_SA_ID]);
   const auditRows: Row[] = [];
   const prisma = extendPrisma(rt, serviceAccounts, auditRows);
+  const purge = fakePurge(rt);
 
   // The runtime's loader knows one user; teach it B too, so B's own requests pass the runtime and only
   // ownership decides what B sees of A's.
@@ -253,6 +315,7 @@ export async function buildHttp(
       AiRunEventStream,
       AiServiceAccountAccessService,
       AiStreamPrincipalCheck,
+      { provide: AiConversationPurgeService, useValue: purge },
       { provide: PrincipalLoaderService, useValue: rt.loader },
       {
         provide: AI_RUN_STREAM_OPTIONS,
@@ -276,6 +339,7 @@ export async function buildHttp(
     app,
     rt,
     prisma,
+    purge,
     stream: moduleRef.get(AiRunEventStream),
     serviceAccounts,
     auditRows,
