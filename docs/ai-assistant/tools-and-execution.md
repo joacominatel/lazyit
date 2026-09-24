@@ -570,11 +570,14 @@ permission (`consumable:read` for the reads, `consumable:write` for the writes; 
 A consumable reference is its id (a Prisma cuid, passed straight through — so a Service Account with
 `consumable:write` but no `consumable:read` can still write by id), or its SKU or exact name,
 case-insensitive, looked up through the bound list route (`GET /consumables?q=…&limit=200`; only exact
-matches count, more than one is `AMBIGUOUS_REFERENCE`). A category is taken by id (`categoryId`, from
-`reference_lookup`).
+matches count, more than one is `AMBIGUOUS_REFERENCE`). **A partial page never decides**: when more rows
+match the substring than the one page read holds, the reference is refused as `AMBIGUOUS_REFERENCE`
+("use the consumable's id") instead of resolved — an MCP or headless write has no preview card on which a
+person could catch a wrong target. A category is taken by id (`categoryId`, from `reference_lookup`).
 - `consumable_search` (read) — input `query`, `lowStock`, `categoryId`, `sort` (the route's allowlist),
-  `dir`, `limit` (default 20, max 50), `offset`; returns `{ total, offset, items }` with identifiers,
-  stock, threshold and a computed `lowStock`, never free text. The archived slice (`deleted=only`) is not
+  `dir`, `detail`, `limit` (default 20, max 50), `offset`; returns `{ total, offset, items }` with
+  identifiers, stock, threshold and a computed `lowStock`; `full` adds the timestamps and the description
+  and notes (untrusted). The archived slice (`deleted=only`) is not
   offered (it belongs with archive / restore, v1.1).
 - `consumable_get` (read) — input `consumable`, `detail`, `movementType`, `from`, `to`, `movementLimit`
   (default 20, max 50, `0` = none); returns the consumable (description and notes untrusted) and the
@@ -584,7 +587,8 @@ matches count, more than one is `AMBIGUOUS_REFERENCE`). A category is taken by i
   preview has no target (nothing exists yet), so no precondition; it lists the fields and
   `currentStock: 0`. Ref: `consumable created`.
 - `consumable_update` (write·D) — `consumable` plus any of name, sku, categoryId, description, minStock,
-  unit, notes (at least one; never the stock). Preview: target + `before → after` per sent field,
+  unit, notes (at least one; never the stock) — the fields are taken from the route's own
+  `UpdateConsumableSchema`, so they cannot drift. Preview: target + `before → after` per sent field,
   precondition `{ consumable, updatedAt }`. Ref: `consumable updated`.
 - `consumable_record_movement` (write, not idempotent) — `consumable`, `type` (`IN` | `OUT` |
   `ADJUSTMENT`), `quantity` (positive int4), `reason`, `notes`. The preview shows `currentStock`
@@ -598,6 +602,17 @@ matches count, more than one is `AMBIGUOUS_REFERENCE`). A category is taken by i
   new stock (best effort: skipped when the caller lacks `consumable:read`). Refs: `consumable updated`
   and `consumableMovement created` with `parent: consumable` (§8.5).
 - Unexposed: `remove` / `restore` (archive and restore, v1.1).
+- Follow-ups (G2 review of #1341):
+  - the update preview's `before` values of `description` / `notes` are other-authored text and are not
+    `untrusted()`-wrapped (the card renders them to the person). The runtime (W2-3) must wrap preview
+    free text when it projects a pending action back to the model;
+  - `consumable_get` loads the whole movement ledger through the unpaged `GET /consumables/:id/movements`
+    and slices it in the tool; a paged movements route (or a `limit` on the existing one) would bound it;
+  - whether an in-app notification (the low-stock bell a movement can ring) counts as an external effect
+    (`externalEffects` → MCP `openWorldHint`) is undecided; `consumable_record_movement` does not set it
+    today and signals the bell with `NOTIFIES_USERS` on the card only;
+  - the TOCTOU window between the approve-time precondition and the handler's write (§9, step 3) stays
+    until the consumable write handlers accept an expected `updatedAt`.
 
 ### 8.2 Descriptor
 
