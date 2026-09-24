@@ -1,1 +1,357 @@
-{}
+{
+  "page": {
+    "title": "AI assistant",
+    "subtitle": "Set up the in-app assistant and let external AI agents (Claude Code and others) work with lazyit over MCP. Off until an administrator turns it on.",
+    "breadcrumb": "AI",
+    "statusOn": "On",
+    "statusOff": "Off",
+    "loadError": "The AI settings could not be loaded",
+    "enabled": {
+      "title": "The AI assistant is on",
+      "body": "People with the “Use the AI assistant” permission now see the assistant in the top bar. Everyone else picks it up within a minute, or when they reload."
+    },
+    "secretKey": {
+      "title": "The server has no AI_SECRET_KEY",
+      "body": "Provider API keys are stored encrypted with the AI_SECRET_KEY environment variable of the API. Until an operator sets it (a 32-byte key, for example from openssl rand -hex 32) and restarts the API, no key can be saved and only a keyless OpenAI-compatible server can be used. MCP does not need it."
+    },
+    "serviceAccounts": {
+      "body": "Service accounts use the assistant without a person approving each change. Choose what each one may do — off, read-only or read and write, with an optional cap on writes — from its row menu in",
+      "link": "Settings → Service accounts."
+    }
+  },
+  "provider": {
+    "label": "AI provider",
+    "descriptions": {
+      "anthropic": "Claude models, through the Anthropic API.",
+      "openai": "GPT models, through the OpenAI API.",
+      "google": "Gemini models, through the Google Gemini API.",
+      "openai-compatible": "Any server that speaks the OpenAI API — a self-hosted model on your network, a gateway, or another cloud. You give its base URL."
+    }
+  },
+  "credentials": {
+    "baseUrl": {
+      "label": "Base URL",
+      "placeholder": "https://llm.example.com/v1",
+      "description": "The server's OpenAI-compatible endpoint, usually ending in /v1. No user name, password, query string or fragment — the key goes in the API key field.",
+      "problems": {
+        "required": "This provider needs a base URL.",
+        "invalid": "This is not a valid URL.",
+        "scheme": "The base URL must start with https:// (or http:// on a private network).",
+        "credentials": "Remove the user name or password from the URL — put the key in the API key field.",
+        "queryFragment": "Remove the query string (?…) or fragment (#…) from the URL.",
+        "httpNeedsPrivate": "A plain http:// address is only allowed for a server on your private network: turn on “Server on a private network” below.",
+        "loopback": "localhost is never reachable from the API container. Use the server's address on your network."
+      }
+    },
+    "privateNetwork": {
+      "label": "Server on a private network",
+      "description": "Allow this one host on a private address (10.x, 172.16–31.x, 192.168.x, or an internal name that resolves to one), plain http:// included. Loopback, link-local and cloud-metadata addresses are always refused."
+    },
+    "apiKey": {
+      "label": "{provider} API key",
+      "placeholderKeep": "A key is stored — leave blank to keep it",
+      "placeholderRequired": "Paste the API key",
+      "placeholderOptional": "Optional — leave blank if the server needs no key",
+      "hintKeep": "Type a new key only to replace the stored one.",
+      "hintReplaced": "Changing the provider or the base URL discards the stored key, so type the key for the new destination.",
+      "hintRequired": "This provider needs a key.",
+      "hintOptional": "A self-hosted server often needs no key.",
+      "writeOnly": "It is stored encrypted and never shown again — not even to administrators."
+    },
+    "secretKeyMissing": "This key cannot be saved yet: the API has no AI_SECRET_KEY. Ask the operator to set it and restart the API."
+  },
+  "model": {
+    "label": "Model",
+    "placeholder": "Model id, e.g. claude-opus-5",
+    "description": "The provider's model id. Pick a suggestion or type any id the provider accepts; the test below checks it.",
+    "effort": {
+      "label": "Reasoning effort",
+      "default": "Provider default",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "description": "Higher effort answers harder requests better, but is slower and uses more tokens."
+    },
+    "temperature": {
+      "label": "Temperature",
+      "placeholder": "Server default",
+      "invalid": "Enter a number between 0 and 2.",
+      "description": "Between 0 and 2. Leave blank for the server's default."
+    }
+  },
+  "wizard": {
+    "title": "Set up the AI assistant",
+    "stepOf": "Step {current} of {total}",
+    "subtitle": "Choose a provider, give its key, pick a model and test it. Everything can be changed later.",
+    "steps": {
+      "provider": "Provider",
+      "credentials": "Credentials",
+      "model": "Model",
+      "test": "Test",
+      "enable": "Enable"
+    },
+    "provider": {
+      "intro": "The assistant sends what it reads to this provider to answer people. Pick the one your organization already trusts."
+    },
+    "test": {
+      "intro": "Check that {provider} accepts the key, knows the model {model} and can call tools — the assistant cannot work without tool calling.",
+      "run": "Run the test",
+      "again": "Test again",
+      "continueHint": "The test must pass before you can continue."
+    },
+    "review": {
+      "provider": "Provider",
+      "model": "Model",
+      "baseUrl": "Base URL",
+      "key": "API key",
+      "keyStored": "Stored, encrypted",
+      "keyNone": "None"
+    },
+    "disclosure": {
+      "title": "What leaves this server",
+      "body": "When someone uses the assistant, lazyit sends to {provider}:",
+      "sent": "the messages they type, the page they are on (its address and the record it shows), and the records the assistant reads to answer — assets, people, applications, access, stock and knowledge-base articles, limited to what that person may see;",
+      "notSent": "never vault secrets, passwords or the provider key itself, and nothing from pages the person did not ask about;",
+      "retention": "conversations are also stored on this server for the retention you choose below, and the provider's own data policy applies to what it receives.",
+      "alreadyAcknowledged": "Acknowledged on {when}.",
+      "checkbox": "I understand that this data is sent to {provider}, and I am allowed to send it there."
+    },
+    "back": "Back",
+    "next": "Continue",
+    "saveContinue": "Save & continue",
+    "enable": "Turn on the AI assistant"
+  },
+  "test": {
+    "passed": "Passed",
+    "failed": "Failed",
+    "latency": "{ms} ms",
+    "checks": {
+      "auth": "The provider accepts the key",
+      "model": "The model exists and answers",
+      "toolCalling": "The model can call tools"
+    },
+    "state": {
+      "passed": "OK",
+      "failed": "Failed",
+      "skipped": "Not run"
+    },
+    "codes": {
+      "PROVIDER_AUTH": "The provider rejected the key. Check that it is correct, active, and allowed to use this model.",
+      "PROVIDER_RATE_LIMIT": "The provider is rate-limiting this key. Wait a moment and test again.",
+      "PROVIDER_UNAVAILABLE": "The provider could not be reached or did not answer in time. Check the network path from the API server and try again.",
+      "PROVIDER_BAD_REQUEST": "The provider refused the request — usually an unknown model id or a setting this model does not support.",
+      "PROVIDER_REFUSED": "The provider refused to answer the test request.",
+      "EGRESS_DENIED": "lazyit refused to connect to this address: it is not a public host, or it is on your private network without “Server on a private network” turned on.",
+      "TOOL_CALLING_UNSUPPORTED": "The model answered but did not call a tool, so it cannot drive the assistant. Choose a model with tool calling.",
+      "PROVIDER_LAYER_UNAVAILABLE": "This build of lazyit cannot reach AI providers. Update the instance."
+    }
+  },
+  "errors": {
+    "network": "The API could not be reached. Check your connection and try again.",
+    "gate": {
+      "DISCLOSURE_REQUIRED": "Acknowledge what leaves this server before turning the assistant on.",
+      "PROVIDER_NOT_CONFIGURED": "Choose a provider and a model (and a base URL for an OpenAI-compatible server) before turning the assistant on.",
+      "API_KEY_REQUIRED": "This provider needs an API key before the assistant can be turned on.",
+      "CONNECTION_TEST_FAILED": "The connection test failed, so nothing was changed. Fix the problem below and try again.",
+      "API_KEY_REQUIRED_DESTINATION_CHANGED": "Changing the provider or the base URL discarded the stored key, so the assistant cannot be turned on without the key for the new destination. Type it and save again."
+    },
+    "secretKeyMissing": "The API has no usable AI_SECRET_KEY, so the key cannot be stored and a keyed provider cannot be turned on. Ask the operator to set a 32-byte key (openssl rand -hex 32) and restart the API.",
+    "shimMode": "This instance runs with authentication disabled (AUTH_MODE=shim), where the AI assistant is never available.",
+    "concurrentSave": "Someone else changed the AI settings meanwhile. Reload the page and save again.",
+    "conflict": "The API refused the change: {message}",
+    "baseUrl": {
+      "credentials": "The base URL may not contain a user name or password — put the key in the API key field.",
+      "queryFragment": "The base URL may not contain a query string or a fragment.",
+      "scheme": "The base URL must be http:// or https://.",
+      "httpNeedsPrivate": "A plain http:// base URL is only allowed for an OpenAI-compatible server on your private network, with “Server on a private network” turned on.",
+      "httpPublic": "A plain http:// base URL must point at a private-network address, never a public one. Use https://.",
+      "loopback": "A loopback address (localhost) is never allowed. Use the server's address on your network.",
+      "unreachable": "This address range is never allowed (loopback, link-local, cloud metadata or reserved).",
+      "privateNeedsOption": "This is a private-network address: choose the OpenAI-compatible provider and turn on “Server on a private network”.",
+      "invalid": "The base URL is not a valid URL."
+    },
+    "privateNetworkProviderOnly": "A private-network server is only allowed for the OpenAI-compatible provider.",
+    "providerOptions": "These extra settings are not supported by the selected provider.",
+    "providerAndModelFirst": "Choose a provider and a model before testing the connection.",
+    "validation": "Some values are out of range. Check the highlighted fields and try again.",
+    "badRequest": "The API refused the change: {message}",
+    "forbidden": "You no longer have permission to manage the AI settings.",
+    "notFound": "This API does not have the AI settings. The instance may need an update.",
+    "generic": "The change could not be saved: {message}"
+  },
+  "editor": {
+    "connection": {
+      "title": "Provider & model",
+      "description": "Changing the provider, the base URL, the model or the key is tested again before it is saved; a failure changes nothing.",
+      "provider": "Provider",
+      "test": "Test these settings",
+      "save": "Save",
+      "saved": "AI provider settings saved"
+    }
+  },
+  "limits": {
+    "title": "Behaviour & limits",
+    "description": "How long conversations are kept, how much each person may use, and how the assistant behaves. Changes apply to new requests.",
+    "saved": "AI limits saved",
+    "save": "Save",
+    "units": {
+      "days": "days",
+      "minutes": "minutes",
+      "tokensPerDay": "tokens per 24 h"
+    },
+    "fields": {
+      "retentionDays": {
+        "label": "Keep conversations for",
+        "description": "Older conversations are deleted automatically. The record of executed actions is kept regardless.",
+        "invalid": "Enter a whole number of days between 7 and 3650."
+      },
+      "approvalTtlMinutes": {
+        "label": "Approval cards expire after",
+        "description": "A proposed change that nobody approves in this time can no longer be approved.",
+        "invalid": "Enter a whole number of minutes, at least 1."
+      },
+      "budget": {
+        "label": "Daily token budget per person",
+        "description": "Limit how many tokens one person or service account can use in any 24 hours. Off means no budget."
+      },
+      "dailyTokenLimitPerPrincipal": {
+        "label": "Budget",
+        "invalid": "Enter a whole number of tokens, at least 1."
+      },
+      "maxOutputTokens": {
+        "label": "Max reply length (tokens)",
+        "description": "The longest single answer.",
+        "invalid": "Enter a whole number, at least 1."
+      },
+      "maxStepsPerRun": {
+        "label": "Max steps per request",
+        "description": "How many tool calls one request may chain.",
+        "invalid": "Enter a whole number, at least 1."
+      },
+      "contextTokenLimit": {
+        "label": "Conversation size limit (tokens)",
+        "description": "Past this, the person starts a new chat.",
+        "invalid": "Enter a whole number, at least 1."
+      },
+      "instructions": {
+        "label": "Instructions for the assistant",
+        "placeholder": "For example: our asset tags start with ACME-. Answer in Spanish unless asked otherwise.",
+        "description": "Added to lazyit's own instructions for every conversation. They cannot widen what the assistant may do. {count} / {max} characters."
+      }
+    }
+  },
+  "mcp": {
+    "title": "External AI agents (MCP)",
+    "on": "On",
+    "off": "Off",
+    "description": "Let AI agents that run outside lazyit — Claude Code, Codex, Cursor, OpenCode and others — read and change lazyit as the person who connects them, with that person's permissions. Independent of the assistant above: it works with no provider configured.",
+    "switch": {
+      "label": "Allow external AI agents",
+      "description": "People also need the “Connect external AI agents (MCP)” permission. Turning this off disconnects every client at once; their authorizations come back when you turn it on again."
+    },
+    "mode": {
+      "oauth": {
+        "title": "This instance's public address is https://: clients sign in with OAuth",
+        "body": "When a person adds lazyit to their client, the client opens a lazyit page in the browser where they review the access and approve it. Nothing to copy by hand, and each connection can be revoked from Account → AI & connected apps. (OAuth is available because the API's WEB_ORIGIN setting is an https:// address.)",
+        "internalCa": "If your certificate comes from an internal certificate authority, Claude Code (and other Node.js clients) will not trust it until they are started with the authority's certificate:",
+        "cloud": "Cloud connectors — claude.ai, Claude Desktop connectors and ChatGPT — connect from the provider's servers, not from the person's computer. They only work if this instance is reachable from the internet over HTTPS with a publicly trusted certificate."
+      },
+      "personalToken": {
+        "title": "This instance has no https:// public address: clients use personal tokens",
+        "body": "Each person creates a personal MCP token in Account → AI & connected apps and gives it to their client (Claude Code asks for it when the lazyit plugin is enabled). Tokens expire and can be revoked there at any time.",
+        "whyNoOauth": "OAuth sign-in needs HTTPS and a fixed public address, so the API offers it only when its WEB_ORIGIN setting is an https:// address. A TLS proxy in front of lazyit is not enough on its own: set WEB_ORIGIN to the https:// address people use and restart the API to switch to OAuth.",
+        "cloud": "Cloud connectors (claude.ai, ChatGPT) cannot connect to this instance: they need a publicly reachable HTTPS address."
+      },
+      "detectedFromBrowser": "The server's answer was not available, so this was guessed from the address in your browser. The real mode depends on the API's WEB_ORIGIN setting.",
+      "loading": "Checking how clients connect to this instance…"
+    },
+    "endpoint": {
+      "label": "MCP endpoint",
+      "copy": "Copy the MCP endpoint",
+      "description": "The address to give an MCP client that is set up by hand.",
+      "pageFallback": "The API has no pinned public address (WEB_ORIGIN), so this is the address of the page you are on. Clients on other machines may need the instance's LAN address instead."
+    },
+    "install": {
+      "link": "AI & connected apps",
+      "description": "Your connected apps and personal tokens are on Account → AI & connected apps; the install steps are below."
+    },
+    "allowlist": {
+      "title": "Allowed clients",
+      "description": "Only these clients can connect. A client is recognized by its client-metadata URL or by the exact address it sends people back to after sign-in — never by the name it gives itself.",
+      "anyHttps": {
+        "label": "Accept any client with an https:// callback (on by default)",
+        "description": "Any MCP client whose sign-in callback is an https:// address may ask a person for access, even if it is not listed here. Nothing is granted by this alone: the person still sees the consent page, which shows the client's callback host and warns that the client was not listed. Clients with a loopback or app-scheme callback (such as cursor://) still need an entry. Turn this off to accept only the clients listed below."
+      },
+      "added": {
+        "title": "Clients you added",
+        "empty": "None yet.",
+        "remove": "Remove {label}"
+      },
+      "kinds": {
+        "cimd_url": "Client-metadata URL",
+        "redirect_uri": "Callback address"
+      },
+      "redirectKinds": {
+        "https": "HTTPS callback",
+        "loopback": "Loopback callback",
+        "private-use": "App-scheme callback"
+      },
+      "removed": {
+        "title": "Removed clients no longer in the built-in list",
+        "description": "You removed these built-in clients, but this version of lazyit no longer ships them. Restoring only clears the removal.",
+        "restore": "Restore"
+      },
+      "add": {
+        "title": "Add a client",
+        "label": "Name",
+        "labelPlaceholder": "e.g. Zed",
+        "kind": "Recognize it by",
+        "cimdLabel": "Client-metadata URL",
+        "redirectLabel": "Callback address",
+        "cimdPlaceholder": "https://example.com/oauth/client-metadata.json",
+        "redirectPlaceholder": "http://127.0.0.1/callback",
+        "cimdHint": "The https:// URL the client uses as its client id.",
+        "redirectHint": "The exact address: https://…, http://127.0.0.1/… or http://localhost/… (any port), or an app scheme such as com.example.app:/callback or cursor://…",
+        "submit": "Add client",
+        "full": "The list is full ({max} clients). Remove one to add another."
+      },
+      "addedToast": "{label} can now connect",
+      "errors": {
+        "labelRequired": "Give the client a name.",
+        "valueRequired": "Enter the address.",
+        "cimdHttps": "A client-metadata URL must start with https://.",
+        "userinfo": "The address may not contain a user name (…@…) — it could send people somewhere else.",
+        "httpNotLoopback": "Plain http:// is only allowed on 127.0.0.1, localhost or [::1]. Use https:// for any other host.",
+        "browserScheme": "This kind of address can never be a callback.",
+        "redirectInvalid": "Use https://, a loopback http:// address, or an app scheme in reverse-domain form (com.example.app:) or a known editor scheme (cursor, vscode, vscode-insiders, windsurf)."
+      },
+      "notSeeded": "Pi, Windsurf and Zed are not in the built-in list because their identifiers could not be verified — add them below if your team uses them.",
+      "builtIn": {
+        "title": "Built-in clients",
+        "description": "The well-known clients lazyit allows out of the box. Remove one to stop it connecting (it is then only accepted if “any https:// client” admits it); restore it at any time.",
+        "remove": "Remove {label}",
+        "restore": "Restore",
+        "restoreAria": "Restore {label}"
+      },
+      "verification": {
+        "verified": "Verified",
+        "vendor-docs": "Vendor docs"
+      }
+    }
+  },
+  "danger": {
+    "title": "Turn off the AI assistant",
+    "description": "Hides the assistant for everyone. The configuration and the key are kept, so turning it back on is one step.",
+    "turnOff": "Turn off the assistant",
+    "confirm": {
+      "title": "Turn off the AI assistant?",
+      "description": "This happens immediately for everyone:",
+      "chat": "the assistant disappears from the top bar and new requests are refused;",
+      "dormant": "conversations are kept (and still deleted when their retention ends); changes waiting for approval cannot be approved while it is off;",
+      "kept": "the provider, the model and the encrypted key are kept for when you turn it back on;",
+      "mcp": "external AI agents (MCP) are not affected — they have their own switch.",
+      "cancel": "Cancel",
+      "action": "Turn off"
+    }
+  }
+}

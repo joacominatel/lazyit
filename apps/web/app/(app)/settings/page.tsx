@@ -8,6 +8,7 @@ import {
   MapPinIcon,
   ServerStackIcon,
   SignalIcon,
+  SparklesIcon,
   TagIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -31,7 +32,8 @@ interface SettingsSection {
     | "serviceAccounts"
     | "agents"
     | "instance"
-    | "integrations";
+    | "integrations"
+    | "ai";
   icon: ComponentType<{ className?: string }>;
   /**
    * Render only for callers holding this fine-grained permission (RBAC v2). The page itself is already
@@ -69,6 +71,8 @@ const SECTIONS: SettingsSection[] = [
     icon: BoltIcon,
   },
   { href: "/settings/instance", key: "instance", icon: ServerStackIcon },
+  // The opt-in AI assistant and external agents over MCP (ADR-0097) — off until an admin sets it up.
+  { href: "/settings/ai", key: "ai", icon: SparklesIcon },
 ];
 
 // ponytail: skipped from the ADR-0067 server-prefetch rollout — a pure link hub with no list/record

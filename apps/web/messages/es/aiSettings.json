@@ -1,1 +1,357 @@
-{}
+{
+  "page": {
+    "title": "Asistente de IA",
+    "subtitle": "Configura el asistente integrado y permite que agentes de IA externos (Claude Code y otros) trabajen con lazyit por MCP. Desactivado hasta que un administrador lo active.",
+    "breadcrumb": "IA",
+    "statusOn": "Activo",
+    "statusOff": "Inactivo",
+    "loadError": "No se pudo cargar la configuración de IA",
+    "enabled": {
+      "title": "El asistente de IA está activo",
+      "body": "Las personas con el permiso “Usar el asistente de IA” ya ven el asistente en la barra superior. El resto lo verá en menos de un minuto, o al recargar."
+    },
+    "secretKey": {
+      "title": "El servidor no tiene AI_SECRET_KEY",
+      "body": "Las claves de API de los proveedores se guardan cifradas con la variable de entorno AI_SECRET_KEY de la API. Hasta que un operador la defina (una clave de 32 bytes, por ejemplo de openssl rand -hex 32) y reinicie la API, no se puede guardar ninguna clave y solo se puede usar un servidor compatible con OpenAI sin clave. MCP no la necesita."
+    },
+    "serviceAccounts": {
+      "body": "Las cuentas de servicio usan el asistente sin que una persona apruebe cada cambio. Elige qué puede hacer cada una — nada, solo lectura o lectura y escritura, con un límite opcional de escrituras — desde el menú de su fila en",
+      "link": "Configuración → Cuentas de servicio."
+    }
+  },
+  "provider": {
+    "label": "Proveedor de IA",
+    "descriptions": {
+      "anthropic": "Modelos Claude, a través de la API de Anthropic.",
+      "openai": "Modelos GPT, a través de la API de OpenAI.",
+      "google": "Modelos Gemini, a través de la API de Google Gemini.",
+      "openai-compatible": "Cualquier servidor que hable la API de OpenAI — un modelo propio en tu red, un gateway u otra nube. Indicas su URL base."
+    }
+  },
+  "credentials": {
+    "baseUrl": {
+      "label": "URL base",
+      "placeholder": "https://llm.example.com/v1",
+      "description": "El endpoint compatible con OpenAI del servidor, normalmente terminado en /v1. Sin usuario, contraseña, query string ni fragmento — la clave va en el campo de clave de API.",
+      "problems": {
+        "required": "Este proveedor necesita una URL base.",
+        "invalid": "No es una URL válida.",
+        "scheme": "La URL base debe empezar por https:// (o http:// en una red privada).",
+        "credentials": "Quita el usuario o la contraseña de la URL — pon la clave en el campo de clave de API.",
+        "queryFragment": "Quita la query string (?…) o el fragmento (#…) de la URL.",
+        "httpNeedsPrivate": "Una dirección http:// sin cifrar solo se permite para un servidor en tu red privada: activa “Servidor en una red privada” más abajo.",
+        "loopback": "localhost nunca es alcanzable desde el contenedor de la API. Usa la dirección del servidor en tu red."
+      }
+    },
+    "privateNetwork": {
+      "label": "Servidor en una red privada",
+      "description": "Permite este único host en una dirección privada (10.x, 172.16–31.x, 192.168.x, o un nombre interno que resuelva a una), incluso con http://. Las direcciones de loopback, link-local y de metadatos de la nube se rechazan siempre."
+    },
+    "apiKey": {
+      "label": "Clave de API de {provider}",
+      "placeholderKeep": "Hay una clave guardada — deja en blanco para mantenerla",
+      "placeholderRequired": "Pega la clave de API",
+      "placeholderOptional": "Opcional — deja en blanco si el servidor no necesita clave",
+      "hintKeep": "Escribe una clave nueva solo para reemplazar la guardada.",
+      "hintReplaced": "Cambiar el proveedor o la URL base descarta la clave guardada, así que escribe la clave del nuevo destino.",
+      "hintRequired": "Este proveedor necesita una clave.",
+      "hintOptional": "Un servidor propio muchas veces no necesita clave.",
+      "writeOnly": "Se guarda cifrada y no se vuelve a mostrar — ni siquiera a los administradores."
+    },
+    "secretKeyMissing": "Esta clave todavía no se puede guardar: la API no tiene AI_SECRET_KEY. Pide al operador que la defina y reinicie la API."
+  },
+  "model": {
+    "label": "Modelo",
+    "placeholder": "Id del modelo, p. ej. claude-opus-5",
+    "description": "El id del modelo en el proveedor. Elige una sugerencia o escribe cualquier id que el proveedor acepte; la prueba lo verifica.",
+    "effort": {
+      "label": "Esfuerzo de razonamiento",
+      "default": "El del proveedor",
+      "low": "Bajo",
+      "medium": "Medio",
+      "high": "Alto",
+      "description": "Más esfuerzo responde mejor los pedidos difíciles, pero es más lento y usa más tokens."
+    },
+    "temperature": {
+      "label": "Temperatura",
+      "placeholder": "La del servidor",
+      "invalid": "Escribe un número entre 0 y 2.",
+      "description": "Entre 0 y 2. Déjala en blanco para usar la del servidor."
+    }
+  },
+  "wizard": {
+    "title": "Configurar el asistente de IA",
+    "stepOf": "Paso {current} de {total}",
+    "subtitle": "Elige un proveedor, indica su clave, elige un modelo y pruébalo. Todo se puede cambiar después.",
+    "steps": {
+      "provider": "Proveedor",
+      "credentials": "Credenciales",
+      "model": "Modelo",
+      "test": "Prueba",
+      "enable": "Activar"
+    },
+    "provider": {
+      "intro": "El asistente envía lo que lee a este proveedor para responder. Elige uno en el que tu organización ya confíe."
+    },
+    "test": {
+      "intro": "Comprueba que {provider} acepta la clave, conoce el modelo {model} y puede llamar herramientas — el asistente no funciona sin llamadas a herramientas.",
+      "run": "Ejecutar la prueba",
+      "again": "Probar de nuevo",
+      "continueHint": "La prueba debe pasar antes de continuar."
+    },
+    "review": {
+      "provider": "Proveedor",
+      "model": "Modelo",
+      "baseUrl": "URL base",
+      "key": "Clave de API",
+      "keyStored": "Guardada, cifrada",
+      "keyNone": "Ninguna"
+    },
+    "disclosure": {
+      "title": "Qué sale de este servidor",
+      "body": "Cuando alguien usa el asistente, lazyit envía a {provider}:",
+      "sent": "los mensajes que escribe, la página en la que está (su dirección y el registro que muestra) y los registros que el asistente lee para responder — activos, personas, aplicaciones, accesos, stock y artículos de la base de conocimiento, limitados a lo que esa persona puede ver;",
+      "notSent": "nunca secretos de las bóvedas, contraseñas ni la propia clave del proveedor, ni nada de páginas por las que la persona no preguntó;",
+      "retention": "las conversaciones también se guardan en este servidor durante la retención que elijas más abajo, y a lo que recibe el proveedor se le aplica su propia política de datos.",
+      "alreadyAcknowledged": "Aceptado el {when}.",
+      "checkbox": "Entiendo que estos datos se envían a {provider} y estoy autorizado a enviarlos allí."
+    },
+    "back": "Atrás",
+    "next": "Continuar",
+    "saveContinue": "Guardar y continuar",
+    "enable": "Activar el asistente de IA"
+  },
+  "test": {
+    "passed": "Pasó",
+    "failed": "Falló",
+    "latency": "{ms} ms",
+    "checks": {
+      "auth": "El proveedor acepta la clave",
+      "model": "El modelo existe y responde",
+      "toolCalling": "El modelo puede llamar herramientas"
+    },
+    "state": {
+      "passed": "OK",
+      "failed": "Falló",
+      "skipped": "No se ejecutó"
+    },
+    "codes": {
+      "PROVIDER_AUTH": "El proveedor rechazó la clave. Comprueba que sea correcta, esté activa y pueda usar este modelo.",
+      "PROVIDER_RATE_LIMIT": "El proveedor está limitando esta clave. Espera un momento y vuelve a probar.",
+      "PROVIDER_UNAVAILABLE": "No se pudo contactar al proveedor o no respondió a tiempo. Revisa la salida de red del servidor de la API e inténtalo de nuevo.",
+      "PROVIDER_BAD_REQUEST": "El proveedor rechazó el pedido — normalmente un id de modelo desconocido o una opción que este modelo no admite.",
+      "PROVIDER_REFUSED": "El proveedor se negó a responder el pedido de prueba.",
+      "EGRESS_DENIED": "lazyit se negó a conectarse a esta dirección: no es un host público, o está en tu red privada sin “Servidor en una red privada” activado.",
+      "TOOL_CALLING_UNSUPPORTED": "El modelo respondió pero no llamó a ninguna herramienta, así que no puede manejar el asistente. Elige un modelo con llamadas a herramientas.",
+      "PROVIDER_LAYER_UNAVAILABLE": "Esta versión de lazyit no puede contactar proveedores de IA. Actualiza la instancia."
+    }
+  },
+  "errors": {
+    "network": "No se pudo contactar la API. Revisa tu conexión e inténtalo de nuevo.",
+    "gate": {
+      "DISCLOSURE_REQUIRED": "Acepta qué sale de este servidor antes de activar el asistente.",
+      "PROVIDER_NOT_CONFIGURED": "Elige un proveedor y un modelo (y una URL base para un servidor compatible con OpenAI) antes de activar el asistente.",
+      "API_KEY_REQUIRED": "Este proveedor necesita una clave de API antes de poder activar el asistente.",
+      "CONNECTION_TEST_FAILED": "La prueba de conexión falló, así que no se cambió nada. Corrige el problema de abajo e inténtalo de nuevo.",
+      "API_KEY_REQUIRED_DESTINATION_CHANGED": "Al cambiar el proveedor o la URL base se descartó la clave guardada, así que el asistente no se puede activar sin la clave del nuevo destino. Escríbela y guarda de nuevo."
+    },
+    "secretKeyMissing": "La API no tiene una AI_SECRET_KEY usable, así que no se puede guardar la clave ni activar un proveedor con clave. Pide al operador que defina una clave de 32 bytes (openssl rand -hex 32) y reinicie la API.",
+    "shimMode": "Esta instancia funciona con la autenticación desactivada (AUTH_MODE=shim), y ahí el asistente de IA nunca está disponible.",
+    "concurrentSave": "Otra persona cambió la configuración de IA mientras tanto. Recarga la página y guarda de nuevo.",
+    "conflict": "La API rechazó el cambio: {message}",
+    "baseUrl": {
+      "credentials": "La URL base no puede contener usuario ni contraseña — pon la clave en el campo de clave de API.",
+      "queryFragment": "La URL base no puede contener query string ni fragmento.",
+      "scheme": "La URL base debe ser http:// o https://.",
+      "httpNeedsPrivate": "Una URL base http:// sin cifrar solo se permite para un servidor compatible con OpenAI en tu red privada, con “Servidor en una red privada” activado.",
+      "httpPublic": "Una URL base http:// sin cifrar debe apuntar a una dirección de red privada, nunca a una pública. Usa https://.",
+      "loopback": "Una dirección de loopback (localhost) nunca se permite. Usa la dirección del servidor en tu red.",
+      "unreachable": "Este rango de direcciones nunca se permite (loopback, link-local, metadatos de la nube o reservado).",
+      "privateNeedsOption": "Es una dirección de red privada: elige el proveedor compatible con OpenAI y activa “Servidor en una red privada”.",
+      "invalid": "La URL base no es una URL válida."
+    },
+    "privateNetworkProviderOnly": "Un servidor en red privada solo se permite con el proveedor compatible con OpenAI.",
+    "providerOptions": "El proveedor elegido no admite estas opciones adicionales.",
+    "providerAndModelFirst": "Elige un proveedor y un modelo antes de probar la conexión.",
+    "validation": "Algunos valores están fuera de rango. Revisa los campos marcados e inténtalo de nuevo.",
+    "badRequest": "La API rechazó el cambio: {message}",
+    "forbidden": "Ya no tienes permiso para administrar la configuración de IA.",
+    "notFound": "Esta API no tiene la configuración de IA. Puede que la instancia necesite una actualización.",
+    "generic": "No se pudo guardar el cambio: {message}"
+  },
+  "editor": {
+    "connection": {
+      "title": "Proveedor y modelo",
+      "description": "Si cambias el proveedor, la URL base, el modelo o la clave, se vuelve a probar antes de guardar; si falla, no cambia nada.",
+      "provider": "Proveedor",
+      "test": "Probar esta configuración",
+      "save": "Guardar",
+      "saved": "Configuración del proveedor de IA guardada"
+    }
+  },
+  "limits": {
+    "title": "Comportamiento y límites",
+    "description": "Cuánto tiempo se guardan las conversaciones, cuánto puede usar cada persona y cómo se comporta el asistente. Los cambios se aplican a los pedidos nuevos.",
+    "saved": "Límites de IA guardados",
+    "save": "Guardar",
+    "units": {
+      "days": "días",
+      "minutes": "minutos",
+      "tokensPerDay": "tokens cada 24 h"
+    },
+    "fields": {
+      "retentionDays": {
+        "label": "Guardar las conversaciones durante",
+        "description": "Las conversaciones más antiguas se borran automáticamente. El registro de las acciones ejecutadas se conserva igual.",
+        "invalid": "Escribe un número entero de días entre 7 y 3650."
+      },
+      "approvalTtlMinutes": {
+        "label": "Las tarjetas de aprobación vencen a los",
+        "description": "Un cambio propuesto que nadie aprueba en este tiempo ya no se puede aprobar.",
+        "invalid": "Escribe un número entero de minutos, al menos 1."
+      },
+      "budget": {
+        "label": "Presupuesto diario de tokens por persona",
+        "description": "Limita cuántos tokens puede usar una persona o cuenta de servicio en cualquier período de 24 horas. Desactivado significa sin presupuesto."
+      },
+      "dailyTokenLimitPerPrincipal": {
+        "label": "Presupuesto",
+        "invalid": "Escribe un número entero de tokens, al menos 1."
+      },
+      "maxOutputTokens": {
+        "label": "Largo máximo de respuesta (tokens)",
+        "description": "La respuesta individual más larga.",
+        "invalid": "Escribe un número entero, al menos 1."
+      },
+      "maxStepsPerRun": {
+        "label": "Pasos máximos por pedido",
+        "description": "Cuántas llamadas a herramientas puede encadenar un pedido.",
+        "invalid": "Escribe un número entero, al menos 1."
+      },
+      "contextTokenLimit": {
+        "label": "Tamaño máximo de conversación (tokens)",
+        "description": "Al superarlo, la persona empieza un chat nuevo.",
+        "invalid": "Escribe un número entero, al menos 1."
+      },
+      "instructions": {
+        "label": "Instrucciones para el asistente",
+        "placeholder": "Por ejemplo: nuestras etiquetas de activo empiezan por ACME-. Responde en español salvo que se pida otra cosa.",
+        "description": "Se agregan a las instrucciones propias de lazyit en cada conversación. No pueden ampliar lo que el asistente puede hacer. {count} / {max} caracteres."
+      }
+    }
+  },
+  "mcp": {
+    "title": "Agentes de IA externos (MCP)",
+    "on": "Activo",
+    "off": "Inactivo",
+    "description": "Permite que agentes de IA que corren fuera de lazyit — Claude Code, Codex, Cursor, OpenCode y otros — lean y modifiquen lazyit como la persona que los conecta, con sus permisos. Independiente del asistente de arriba: funciona sin ningún proveedor configurado.",
+    "switch": {
+      "label": "Permitir agentes de IA externos",
+      "description": "Las personas también necesitan el permiso “Conectar agentes de IA externos (MCP)”. Desactivarlo desconecta todos los clientes a la vez; sus autorizaciones vuelven a valer al reactivarlo."
+    },
+    "mode": {
+      "oauth": {
+        "title": "La dirección pública de esta instancia es https://: los clientes inician sesión con OAuth",
+        "body": "Cuando una persona agrega lazyit a su cliente, el cliente abre una página de lazyit en el navegador donde revisa el acceso y lo aprueba. No hay nada que copiar a mano, y cada conexión se puede revocar en Cuenta → IA y aplicaciones conectadas. (OAuth está disponible porque la opción WEB_ORIGIN de la API es una dirección https://.)",
+        "internalCa": "Si tu certificado lo emite una autoridad de certificación interna, Claude Code (y otros clientes Node.js) no confiarán en él hasta que se inicien con el certificado de esa autoridad:",
+        "cloud": "Los conectores en la nube — claude.ai, los conectores de Claude Desktop y ChatGPT — se conectan desde los servidores del proveedor, no desde la computadora de la persona. Solo funcionan si esta instancia es alcanzable desde internet por HTTPS con un certificado de confianza pública."
+      },
+      "personalToken": {
+        "title": "Esta instancia no tiene una dirección pública https://: los clientes usan tokens personales",
+        "body": "Cada persona crea un token MCP personal en Cuenta → IA y aplicaciones conectadas y se lo da a su cliente (Claude Code lo pide al activar el plugin de lazyit). Los tokens vencen y se pueden revocar allí en cualquier momento.",
+        "whyNoOauth": "El inicio de sesión con OAuth necesita HTTPS y una dirección pública fija, así que la API lo ofrece solo cuando su opción WEB_ORIGIN es una dirección https://. Un proxy TLS delante de lazyit no alcanza por sí solo: define WEB_ORIGIN con la dirección https:// que usan las personas y reinicia la API para pasar a OAuth.",
+        "cloud": "Los conectores en la nube (claude.ai, ChatGPT) no pueden conectarse a esta instancia: necesitan una dirección HTTPS alcanzable públicamente."
+      },
+      "detectedFromBrowser": "La respuesta del servidor no estaba disponible, así que esto se dedujo de la dirección en tu navegador. El modo real depende de la opción WEB_ORIGIN de la API.",
+      "loading": "Comprobando cómo se conectan los clientes a esta instancia…"
+    },
+    "endpoint": {
+      "label": "Endpoint MCP",
+      "copy": "Copiar el endpoint MCP",
+      "description": "La dirección que se le da a un cliente MCP que se configura a mano.",
+      "pageFallback": "La API no tiene una dirección pública fijada (WEB_ORIGIN), así que esta es la dirección de la página en la que estás. Los clientes en otras máquinas pueden necesitar la dirección de la instancia en la red local."
+    },
+    "install": {
+      "link": "IA y aplicaciones conectadas",
+      "description": "Tus aplicaciones conectadas y tokens personales están en Cuenta → IA y aplicaciones conectadas; los pasos de instalación están abajo."
+    },
+    "allowlist": {
+      "title": "Clientes permitidos",
+      "description": "Solo estos clientes pueden conectarse. Un cliente se reconoce por su URL de metadatos de cliente o por la dirección exacta a la que devuelve a la persona después de iniciar sesión — nunca por el nombre que se da a sí mismo.",
+      "anyHttps": {
+        "label": "Aceptar cualquier cliente con callback https:// (activado por defecto)",
+        "description": "Cualquier cliente MCP cuyo callback de inicio de sesión sea una dirección https:// puede pedirle acceso a una persona, aunque no esté en esta lista. Esto por sí solo no otorga nada: la persona igual ve la página de consentimiento, que muestra el host del callback del cliente y avisa que el cliente no estaba en la lista. Los clientes con callback de loopback o de esquema de aplicación (como cursor://) igual necesitan una entrada. Desactívalo para aceptar solo los clientes de la lista."
+      },
+      "added": {
+        "title": "Clientes que agregaste",
+        "empty": "Ninguno todavía.",
+        "remove": "Quitar {label}"
+      },
+      "kinds": {
+        "cimd_url": "URL de metadatos de cliente",
+        "redirect_uri": "Dirección de callback"
+      },
+      "redirectKinds": {
+        "https": "Callback HTTPS",
+        "loopback": "Callback de loopback",
+        "private-use": "Callback de esquema de aplicación"
+      },
+      "removed": {
+        "title": "Clientes quitados que ya no están en la lista incluida",
+        "description": "Quitaste estos clientes incluidos, pero esta versión de lazyit ya no los trae. Restaurar solo borra la eliminación.",
+        "restore": "Restaurar"
+      },
+      "add": {
+        "title": "Agregar un cliente",
+        "label": "Nombre",
+        "labelPlaceholder": "p. ej. Zed",
+        "kind": "Reconocerlo por",
+        "cimdLabel": "URL de metadatos de cliente",
+        "redirectLabel": "Dirección de callback",
+        "cimdPlaceholder": "https://example.com/oauth/client-metadata.json",
+        "redirectPlaceholder": "http://127.0.0.1/callback",
+        "cimdHint": "La URL https:// que el cliente usa como id de cliente.",
+        "redirectHint": "La dirección exacta: https://…, http://127.0.0.1/… o http://localhost/… (cualquier puerto), o un esquema de aplicación como com.example.app:/callback o cursor://…",
+        "submit": "Agregar cliente",
+        "full": "La lista está llena ({max} clientes). Quita uno para agregar otro."
+      },
+      "addedToast": "{label} ya puede conectarse",
+      "errors": {
+        "labelRequired": "Dale un nombre al cliente.",
+        "valueRequired": "Escribe la dirección.",
+        "cimdHttps": "Una URL de metadatos de cliente debe empezar por https://.",
+        "userinfo": "La dirección no puede contener un usuario (…@…) — podría enviar a las personas a otro lugar.",
+        "httpNotLoopback": "http:// sin cifrar solo se permite en 127.0.0.1, localhost o [::1]. Usa https:// para cualquier otro host.",
+        "browserScheme": "Este tipo de dirección nunca puede ser un callback.",
+        "redirectInvalid": "Usa https://, una dirección http:// de loopback, o un esquema de aplicación en forma de dominio invertido (com.example.app:) o un esquema de editor conocido (cursor, vscode, vscode-insiders, windsurf)."
+      },
+      "notSeeded": "Pi, Windsurf y Zed no están en la lista incluida porque sus identificadores no se pudieron verificar — agrégalos abajo si tu equipo los usa.",
+      "builtIn": {
+        "title": "Clientes incluidos",
+        "description": "Los clientes conocidos que lazyit permite de entrada. Quita uno para que deje de conectarse (entonces solo se acepta si “cualquier cliente https://” lo admite); puedes restaurarlo cuando quieras.",
+        "remove": "Quitar {label}",
+        "restore": "Restaurar",
+        "restoreAria": "Restaurar {label}"
+      },
+      "verification": {
+        "verified": "Verificado",
+        "vendor-docs": "Docs del proveedor"
+      }
+    }
+  },
+  "danger": {
+    "title": "Desactivar el asistente de IA",
+    "description": "Oculta el asistente para todos. La configuración y la clave se conservan, así que reactivarlo es un solo paso.",
+    "turnOff": "Desactivar el asistente",
+    "confirm": {
+      "title": "¿Desactivar el asistente de IA?",
+      "description": "Esto ocurre de inmediato para todos:",
+      "chat": "el asistente desaparece de la barra superior y los pedidos nuevos se rechazan;",
+      "dormant": "las conversaciones se conservan (y se siguen borrando al vencer su retención); los cambios que esperan aprobación no se pueden aprobar mientras esté desactivado;",
+      "kept": "el proveedor, el modelo y la clave cifrada se conservan para cuando lo reactives;",
+      "mcp": "los agentes de IA externos (MCP) no se ven afectados — tienen su propio interruptor.",
+      "cancel": "Cancelar",
+      "action": "Desactivar"
+    }
+  }
+}
