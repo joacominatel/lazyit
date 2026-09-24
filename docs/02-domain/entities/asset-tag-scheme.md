@@ -111,6 +111,12 @@ are forbidden to service principals.
 - `POST /config/asset-tag-scheme/backfill/apply` — deliberate bulk retag; body
   `{ mode, excludeIds?, modelId? }`; returns `{ tagged, skipped }`.
 
+**AI assistant (#1394).** The assistant reads the scheme (`asset_tag_scheme_get`: the scheme and the next
+tag) so it follows it — it omits `assetTag` on create and lets the allocator assign the tag — and changes
+it only when explicitly asked to change the general scheme (`asset_tag_scheme_update`, an `elevated`
+approval card). The seed suggestion and the backfill are not AI tools. →
+[[ai-assistant/tools-and-execution|tools-and-execution]] *Asset tag scheme tools as built*.
+
 Related: [[asset]] · [[asset-history]] · [[0063-configurable-asset-tag-scheme]] ·
 [[0068-asset-tag-existing-estate-awareness]] · [[0005-id-strategy]] · [[0006-soft-delete-and-auditing]] ·
 [[0041-soft-delete-reuse-and-restore]]
