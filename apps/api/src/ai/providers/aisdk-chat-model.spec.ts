@@ -1,3 +1,13 @@
+// The real settings module pulls the generated Prisma client, which this unit spec does not need: the
+// module tests below override it with a fake that binds (or not) AI_SETTINGS_READER.
+jest.mock('../settings/ai-settings.module', () => {
+  const { Module } =
+    jest.requireActual<typeof import('@nestjs/common')>('@nestjs/common');
+  class AiSettingsModule {}
+  Module({})(AiSettingsModule);
+  return { AiSettingsModule };
+});
+
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { Test } from '@nestjs/testing';
