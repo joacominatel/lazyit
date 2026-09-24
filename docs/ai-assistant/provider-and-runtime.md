@@ -452,8 +452,10 @@ apps/api/src/ai/
 │   └── run-event-bus.ts              # RunEventBus port + InProcessRunEventBus (ring buffer)
 ├── conversations/
 │   ├── conversations.controller.ts   # /ai/conversations (in-app)
-│   ├── conversations.service.ts
-│   └── ai-retention.sweeper.ts       # + ai-conversation-purge.service.ts (W3-6, §7)
+│   └── conversations.service.ts
+├── retention/                        # W3-6, §7 "As built"
+│   ├── ai-retention.sweeper.ts       # the hourly pass
+│   └── ai-conversation-purge.service.ts # the only deleter of conversations
 └── runs/
     ├── runs.controller.ts            # /ai/runs (headless create/get/cancel), approvals
     ├── run-events.controller.ts      # SSE
@@ -785,8 +787,8 @@ recorded in the ADR.
 
 - **One deleter.** `AiConversationPurgeService` is the only code that deletes a conversation. Every
   delete locks the candidate rows (`SELECT … FOR UPDATE`, with `SKIP LOCKED` for the sweeper), re-reads
-  their runs in a new statement, drops any conversation with a `QUEUED`, `RUNNING` or
-  `AWAITING_APPROVAL` run, and deletes what still matches the caller's guard (the age cut-off, the
+  their runs and invocations in new statements, drops any conversation with a `QUEUED`, `RUNNING` or
+  `AWAITING_APPROVAL` run or an `AWAITING_APPROVAL` or `EXECUTING` tool invocation, and deletes what still matches the caller's guard (the age cut-off, the
   owner, the offboarded owner). The runtime's submit takes the same row lock (it bumps
   `lastActivityAt`) before it creates a run, so a run never starts in a conversation being deleted and a
   conversation with an active run is never deleted. Transactions carry a 30 s timeout.
@@ -798,8 +800,10 @@ recorded in the ADR.
   `EXECUTING`. Batches of 100, at most 20 batches per step per pass; whatever is left, and anything
   skipped, waits for the next pass. The log line carries counts only; an error is logged by class and
   code.
-- **The window** is `AiSettings.retentionDays` through `AI_SETTINGS_READER`, clamped to 7–3650 on read
-  (a hand-edited row can never widen the purge; a non-integer reads as 90). With no settings row the
+- **The window** is `AiSettings.retentionDays` through `AI_SETTINGS_READER`, clamped to 7–3650 on read:
+  a hand-edited value below 7 reads as 7 (it can never shorten the window below the floor), and one above
+  3650 reads as 3650 (that does delete earlier than the row asks — the documented range wins); a
+  non-integer reads as 90. With no settings row the
   default 90 applies. A failed settings read skips the whole pass.
 - **AI off.** The sweeper keeps running while the assistant is disabled (frontend §11 item 4: dormant
   conversations, retention keeps running).
@@ -808,10 +812,11 @@ recorded in the ADR.
   lock, so it waits for a concurrent submit and then refuses.
 - **Offboarding.** Offboarding soft-deletes the user and bumps `sessionEpoch`; the users module has no
   event or hook, and the soft delete is the durable signal, so the sweeper's offboarded-owner step is
-  the purge — it needs no change to the users module. A directory reconcile's soft offboarding
-  (`isActive = false` + `directoryOffboardedAt`, no `deletedAt`) and a plain deactivation are **not**
-  offboarding here: those conversations stay until retention (an open question for the CEO). A run still active at offboarding ends at its next step (the epoch bump) or by approval
-  expiry, and its conversation goes on the following pass. `purgeForUser(userId)` is exported for a
+  the purge — it needs no change to the users module. Today only `User.deletedAt` triggers the
+  offboarding purge; a plain deactivation does not. Whether a directory reconcile's soft offboarding
+  (`isActive = false` + `directoryOffboardedAt`, no `deletedAt`) should also trigger it is pending a
+  decision; until then those conversations follow retention. A run still active at offboarding ends at
+  its next step (the epoch bump) or by approval expiry, and its conversation goes on the following pass. `purgeForUser(userId)` is exported for a
   synchronous caller should one be wired. A user restored before the pass keeps their conversations.
   Service-account conversations follow retention only; revoking an SA does not purge them.
 

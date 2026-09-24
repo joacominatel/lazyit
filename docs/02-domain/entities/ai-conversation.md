@@ -27,9 +27,9 @@ permanent [[ai-action-log]].
   transcripts; the ledgers are never pruned.
   - **As built (W3-6)**: `AiConversationPurgeService` (`apps/api/src/ai/retention/`) is the only deleter.
     An hourly pass deletes conversations whose `lastActivityAt` is older than `retentionDays` (clamped
-    to 7–3650 on read) and every conversation of an offboarded user (`User.deletedAt` set), in batches of
+    to 7–3650 on read, so a hand-set value above 3650 reads as 3650) and every conversation of an offboarded user (`User.deletedAt` set), in batches of
     100 with at most 20 batches per reason per pass. A conversation with a `QUEUED`, `RUNNING` or
-    `AWAITING_APPROVAL` run is **never** deleted: the pass skips it and retries next hour; an owner's
+    `AWAITING_APPROVAL` run, or an `AWAITING_APPROVAL` or `EXECUTING` tool invocation, is **never** deleted: the pass skips it and retries next hour; an owner's
     delete answers 409 `RUN_IN_PROGRESS`. Each batch locks its rows and re-checks runs and the guard
     before deleting, so a run cannot start in a conversation being deleted.
   - The pass runs whether or not the assistant is enabled (turning AI off keeps conversations dormant;
