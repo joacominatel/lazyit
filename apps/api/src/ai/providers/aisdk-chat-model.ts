@@ -77,7 +77,18 @@ export class AiSdkChatModel implements ChatModelPort {
       // was pinned to. The conversation is read-only after a provider change (ADR-0097, default 7).
       throw new AiProviderError('CONVERSATION_READ_ONLY');
     }
-    return runModelStep(config, request, this.options);
+    // The conversation's own effort and options (#1373) replace the instance ones for this call only.
+    return runModelStep(
+      {
+        ...config,
+        ...(request.effort !== undefined ? { effort: request.effort } : {}),
+        ...(request.providerOptions !== undefined
+          ? { providerOptions: request.providerOptions }
+          : {}),
+      },
+      request,
+      this.options,
+    );
   }
 
   toolResultsMessage(

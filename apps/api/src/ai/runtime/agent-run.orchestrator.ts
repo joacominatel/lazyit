@@ -14,6 +14,7 @@ import {
   AI_RUN_TERMINAL_STATUSES,
   type AiConversationChannel,
   type AiPageContext,
+  type CreateAiConversation,
   type AiRunStatus,
 } from '@lazyit/shared';
 import type { AiConversation, AiRun } from '../../../generated/prisma/client';
@@ -32,6 +33,11 @@ import {
 import { AiToolRegistry } from '../core/tool-registry';
 import { AiPromptService } from '../prompt/ai-prompt.module';
 import { AgentLoop, frozenToolset } from './agent-loop';
+import {
+  AI_CONVERSATION_AUTO_APPROVE_AUDIT_ACTION,
+  assertModelSettingsSupported,
+  pinnedConfigChanged,
+} from './conversation-settings';
 import {
   AiRunLimits,
   neutralizeTurnContext,
@@ -77,6 +83,11 @@ export interface CreateConversationInput {
   channel: AiConversationChannel;
   /** The interface locale for the frozen prompt (BCP 47; anything else becomes `en`). */
   locale?: string;
+  /**
+   * Chat only: the user's model and approval settings (#1373, #1376), validated by the shared schema;
+   * the per-provider rules are checked here against the configured provider.
+   */
+  settings?: CreateAiConversation;
 }
 
 export interface SubmitRunInput {
@@ -138,7 +149,11 @@ export class AgentRunOrchestrator {
     input: CreateConversationInput,
   ): Promise<{ id: string }> {
     const who = await this.authorize(input.identity, input.channel);
-    const conversation = await this.freezeConversation(who, input.locale);
+    const conversation = await this.freezeConversation(
+      who,
+      input.locale,
+      input.channel === 'CHAT' ? input.settings : undefined,
+    );
     return { id: conversation.id };
   }
 
@@ -389,6 +404,7 @@ export class AgentRunOrchestrator {
   private async freezeConversation(
     who: AiRunPrincipal,
     locale: string | undefined,
+    chosen: CreateAiConversation = {},
   ): Promise<AiConversation> {
     const config = await this.settings.resolveProviderConfig();
     if (!config) {
@@ -398,6 +414,7 @@ export class AgentRunOrchestrator {
         'The AI assistant is not available',
       );
     }
+    assertModelSettingsSupported(config.provider, chosen);
     const settings = await this.settings.getSettings();
     const listing = await this.tools.list({
       identity: who.identity,
@@ -421,12 +438,34 @@ export class AgentRunOrchestrator {
           userId: who.owner.userId,
           serviceAccountId: who.owner.serviceAccountId,
           provider: config.provider,
-          model: config.model,
+          // The user's model (#1373), or the instance default — which then keeps the old pin rule.
+          model: chosen.model ?? config.model,
+          modelChosen: chosen.model !== undefined,
+          effort: chosen.effort ?? null,
+          ...(chosen.providerOptions
+            ? { providerOptions: chosen.providerOptions }
+            : {}),
+          autoApprove: chosen.autoApprove === true,
+          autoApproveEnabledAt: chosen.autoApprove === true ? new Date() : null,
           promptVersion: prompt.version,
           toolsetHash: toolsetHashOf(tools),
           toolNames: tools.map((tool) => tool.descriptor.name).sort(),
         },
       });
+      if (conversation.autoApprove && who.owner.userId) {
+        // Switching auto-approve on is audited, at creation as on a later toggle (#1376).
+        await tx.aiConfigAuditLog.create({
+          data: {
+            action: AI_CONVERSATION_AUTO_APPROVE_AUDIT_ACTION,
+            actorId: who.owner.userId,
+            detail: {
+              conversationId: conversation.id,
+              before: false,
+              after: true,
+            },
+          },
+        });
+      }
       await this.lifecycle.append(tx, conversation.id, null, [
         {
           role: AI_RUNTIME_RECORD_ROLE,
@@ -472,11 +511,7 @@ export class AgentRunOrchestrator {
       );
     if (conversation.closedReason) throw readOnly();
     const config = await this.settings.resolveProviderConfig();
-    if (
-      config &&
-      (config.provider !== conversation.provider ||
-        config.model !== conversation.model)
-    ) {
+    if (config && pinnedConfigChanged(config, conversation)) {
       await this.lifecycle.closeConversation(conversation.id, 'CONFIG_CHANGED');
       throw readOnly();
     }

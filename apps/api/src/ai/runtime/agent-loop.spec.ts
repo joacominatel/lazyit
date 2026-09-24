@@ -17,7 +17,7 @@ jest.mock('jose', () => ({
   jwtVerify: jest.fn(),
 }));
 
-import { HttpException, Logger } from '@nestjs/common';
+import { ConflictException, HttpException, Logger } from '@nestjs/common';
 import { AiRunEventSchema } from '@lazyit/shared';
 import { AiProviderError } from '../providers/ai-provider.error';
 import {
@@ -1026,5 +1026,303 @@ describe('disabled', () => {
       status: 409,
       body: { code: 'AI_DISABLED' },
     });
+  });
+});
+
+describe('auto-approve mode (#1376)', () => {
+  const ELEVATED = TOOLS.elevated.descriptor.name;
+
+  async function autoConversation(): Promise<string> {
+    const { id } = await rt.orchestrator.createConversation({
+      identity: HUMAN,
+      channel: 'CHAT',
+      settings: { autoApprove: true },
+    });
+    return id;
+  }
+
+  function send(conversationId: string, text = 'Retire LZ-0001') {
+    return rt.orchestrator.submit({
+      identity: HUMAN,
+      channel: 'CHAT',
+      text,
+      conversationId,
+    });
+  }
+
+  it('applies a write whose preview needs no step-up without waiting for a card, and says so on the stream', async () => {
+    const conversationId = await autoConversation();
+    rt.model.push(
+      {
+        toolCalls: [
+          { toolCallId: 'call_w', toolName: WRITE, input: { id: 'a1' } },
+        ],
+      },
+      { text: 'Done.' },
+    );
+    const { runId } = await send(conversationId);
+    await rt.drain();
+
+    expect(status(runId)).toBe('SUCCEEDED');
+    expect(rt.tools.approved).toEqual([
+      { id: expect.any(String), stepUpVerified: false, auto: true },
+    ]);
+    const events = rt.events(runId);
+    expect(events.map((e) => e.type)).not.toContain('tool.approval_required');
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: 'run.status',
+        status: 'AWAITING_APPROVAL',
+      }),
+    );
+    const resolved = events.find((e) => e.type === 'tool.approval_resolved');
+    expect(resolved).toMatchObject({
+      toolCallId: 'call_w',
+      decision: 'approved',
+      auto: true,
+      preview: { toolName: WRITE },
+    });
+    expect(AiRunEventSchema.safeParse({ v: 1, ...resolved }).success).toBe(
+      true,
+    );
+    expect(
+      events.find((e) => e.type === 'tool.result' && e.toolCallId === 'call_w'),
+    ).toMatchObject({ status: 'ok', mutated: true });
+    const [results] = toolMessages(conversationId);
+    expect(results[0]).toMatchObject({
+      toolCallId: 'call_w',
+      output: { ok: true, mutated: true },
+    });
+    expect(rt.prisma.tables.aiToolInvocation.rows[0].approvalMode).toBe('AUTO');
+  });
+
+  it('still stops on a step-up write: the card, then the password', async () => {
+    const savedMode = process.env.AUTH_MODE;
+    process.env.AUTH_MODE = 'local';
+    const conversationId = await autoConversation();
+    rt.model.push(
+      {
+        toolCalls: [
+          { toolCallId: 'call_e', toolName: ELEVATED, input: { id: 'a1' } },
+        ],
+      },
+      { text: 'Granted.' },
+    );
+    const { runId } = await send(conversationId, 'Grant access');
+    await rt.drain();
+
+    expect(status(runId)).toBe('AWAITING_APPROVAL');
+    expect(rt.tools.approved).toHaveLength(0);
+    expect(
+      rt.events(runId).find((e) => e.type === 'tool.approval_required'),
+    ).toMatchObject({ toolCallId: 'call_e', stepUpRequired: true });
+
+    const refused = await refusedWith(
+      rt.approvals.decide({
+        runId,
+        toolCallId: 'call_e',
+        decision: 'approve',
+        identity: HUMAN,
+      }),
+    );
+    expect(refused.body.code).toBe('STEP_UP_REQUIRED');
+    await rt.approvals.decide({
+      runId,
+      toolCallId: 'call_e',
+      decision: 'approve',
+      password: 'correct horse',
+      identity: HUMAN,
+    });
+    expect(rt.tools.approved).toEqual([
+      { id: expect.any(String), stepUpVerified: true },
+    ]);
+    await rt.drain();
+    expect(status(runId)).toBe('SUCCEEDED');
+    process.env.AUTH_MODE = savedMode;
+  });
+
+  it('falls back to the card when core refuses the automatic approval', async () => {
+    const conversationId = await autoConversation();
+    rt.tools.approveError = new ConflictException({
+      code: 'PREVIEW_CHANGED',
+      message: 'changed',
+    });
+    rt.model.push({
+      toolCalls: [
+        { toolCallId: 'call_w', toolName: WRITE, input: { id: 'a1' } },
+      ],
+    });
+    const { runId } = await send(conversationId);
+    await rt.drain();
+    expect(status(runId)).toBe('AWAITING_APPROVAL');
+    expect(
+      rt.events(runId).find((e) => e.type === 'tool.approval_required'),
+    ).toMatchObject({ toolCallId: 'call_w' });
+  });
+
+  it('is off by default, and a toggle applies to the next proposal', async () => {
+    rt.model.push({
+      toolCalls: [
+        { toolCallId: 'call_w', toolName: WRITE, input: { id: 'a1' } },
+      ],
+    });
+    const { runId, conversationId } = await chat('Retire LZ-0001');
+    await rt.drain();
+    expect(status(runId)).toBe('AWAITING_APPROVAL');
+    expect(rt.tools.approved).toHaveLength(0);
+
+    // Switched on (by the owner) while waiting: the pending card is not approved behind the user's back.
+    rt.prisma.tables.aiConversation.rows[0].autoApprove = true;
+    expect(rt.tools.approved).toHaveLength(0);
+    await rt.approvals.decide({
+      runId,
+      toolCallId: 'call_w',
+      decision: 'reject',
+      identity: HUMAN,
+    });
+    rt.model.push(
+      { text: 'Understood.' },
+      {
+        toolCalls: [
+          { toolCallId: 'call_w2', toolName: WRITE, input: { id: 'a1' } },
+        ],
+      },
+      { text: 'Done.' },
+    );
+    await rt.drain();
+    const next = await rt.orchestrator.submit({
+      identity: HUMAN,
+      channel: 'CHAT',
+      text: 'Do it now',
+      conversationId,
+    });
+    await rt.drain();
+    expect(status(next.runId)).toBe('SUCCEEDED');
+    expect(rt.tools.approved).toEqual([
+      { id: expect.any(String), stepUpVerified: false, auto: true },
+    ]);
+  });
+
+  it('never applies to headless runs', async () => {
+    rt.model.push(
+      {
+        toolCalls: [{ toolCallId: 'h1', toolName: WRITE, input: { id: 'a1' } }],
+      },
+      { text: 'ok' },
+    );
+    await headless();
+    await rt.drain();
+    expect(rt.tools.approved).toHaveLength(0);
+  });
+
+  it('audits switching it on at creation', async () => {
+    const conversationId = await autoConversation();
+    expect(rt.prisma.tables.aiConfigAuditLog.rows).toEqual([
+      expect.objectContaining({
+        action: 'CONVERSATION_AUTO_APPROVE_CHANGED',
+        actorId: HUMAN.kind === 'human' ? HUMAN.userId : null,
+        detail: { conversationId, before: false, after: true },
+      }),
+    ]);
+    expect(rt.prisma.tables.aiConversation.rows[0].autoApprove).toBe(true);
+    expect(
+      rt.prisma.tables.aiConversation.rows[0].autoApproveEnabledAt,
+    ).not.toBeNull();
+  });
+});
+
+describe('per-conversation model (#1373)', () => {
+  it('runs on the chosen model with the chosen effort, and an admin default change leaves it writable', async () => {
+    const { id } = await rt.orchestrator.createConversation({
+      identity: HUMAN,
+      channel: 'CHAT',
+      settings: { model: 'claude-haiku-5', effort: 'high' },
+    });
+    rt.model.push({ text: 'one' }, { text: 'two' });
+    await rt.orchestrator.submit({
+      identity: HUMAN,
+      channel: 'CHAT',
+      text: 'hi',
+      conversationId: id,
+    });
+    await rt.drain();
+    expect(rt.model.requests[0]).toMatchObject({
+      model: { provider: 'anthropic', modelId: 'claude-haiku-5' },
+      effort: 'high',
+    });
+    expect(rt.model.requests[0]).not.toHaveProperty('providerOptions');
+
+    rt.settings.config = { ...rt.settings.config!, model: 'claude-sonnet-5' };
+    const second = await rt.orchestrator.submit({
+      identity: HUMAN,
+      channel: 'CHAT',
+      text: 'again',
+      conversationId: id,
+    });
+    await rt.drain();
+    expect(status(second.runId)).toBe('SUCCEEDED');
+    expect(rt.model.requests[1].model.modelId).toBe('claude-haiku-5');
+  });
+
+  it('a provider change still makes a chosen-model conversation read-only', async () => {
+    const { id } = await rt.orchestrator.createConversation({
+      identity: HUMAN,
+      channel: 'CHAT',
+      settings: { model: 'claude-haiku-5' },
+    });
+    rt.settings.config = {
+      ...rt.settings.config!,
+      provider: 'openai',
+      model: 'gpt-6-sol',
+    };
+    const refused = await refusedWith(
+      rt.orchestrator.submit({
+        identity: HUMAN,
+        channel: 'CHAT',
+        text: 'hi',
+        conversationId: id,
+      }),
+    );
+    expect(refused.body.code).toBe('CONVERSATION_READ_ONLY');
+  });
+
+  it('sends no override for a conversation on the instance defaults', async () => {
+    rt.model.push({ text: 'hi' });
+    await chat();
+    await rt.drain();
+    expect(rt.model.requests[0]).not.toHaveProperty('effort');
+    expect(rt.model.requests[0]).not.toHaveProperty('providerOptions');
+  });
+
+  it('refuses an effort or options the configured provider does not take', async () => {
+    rt.settings.config = {
+      ...rt.settings.config!,
+      provider: 'openai-compatible',
+      model: 'llama',
+    };
+    const effort = await refusedWith(
+      rt.orchestrator.createConversation({
+        identity: HUMAN,
+        channel: 'CHAT',
+        settings: { effort: 'low' },
+      }),
+    );
+    expect(effort).toMatchObject({
+      status: 400,
+      body: { code: 'EFFORT_UNSUPPORTED' },
+    });
+    rt.settings.config = { ...rt.settings.config, provider: 'anthropic' };
+    const options = await refusedWith(
+      rt.orchestrator.createConversation({
+        identity: HUMAN,
+        channel: 'CHAT',
+        settings: { providerOptions: { temperature: 1 } },
+      }),
+    );
+    expect(options).toMatchObject({
+      status: 400,
+      body: { code: 'PROVIDER_OPTIONS_UNSUPPORTED' },
+    });
+    expect(rt.prisma.tables.aiConversation.rows).toHaveLength(0);
   });
 });

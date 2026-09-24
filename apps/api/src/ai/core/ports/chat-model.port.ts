@@ -1,4 +1,9 @@
-import type { AiProviderKind, AiUsage } from '@lazyit/shared';
+import type {
+  AiEffort,
+  AiProviderKind,
+  AiProviderOptions,
+  AiUsage,
+} from '@lazyit/shared';
 
 /**
  * THE MODEL-CALL PORT (provider-and-runtime.md §6.1–§6.4). The runtime's agent loop depends on this, and
@@ -25,6 +30,12 @@ export type ChatModelMessage = unknown;
 export interface ChatModelStepRequest {
   /** The provider and model the conversation is pinned to. */
   model: { provider: AiProviderKind; modelId: string };
+  /**
+   * The conversation's own reasoning effort and provider options (#1373), when it set them; absent =
+   * the instance settings. Already validated for the provider the conversation is pinned to.
+   */
+  effort?: AiEffort;
+  providerOptions?: AiProviderOptions;
   /** The frozen system prompt. */
   instructions: string;
   /** The conversation so far, append-only. */

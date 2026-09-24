@@ -249,9 +249,15 @@ export class FakePrisma {
         closedReason: null,
         lastActivityAt: new Date(),
         toolNames: [],
+        modelChosen: false,
+        effort: null,
+        providerOptions: null,
+        autoApprove: false,
+        autoApproveEnabledAt: null,
       }),
       'cuid',
     ),
+    aiConfigAuditLog: new FakeTable(() => ({ detail: null }), 'int'),
     aiMessage: new FakeTable(
       () => ({ runId: null, format: 'aisdk-v7' }),
       'int',
@@ -301,6 +307,7 @@ export class FakePrisma {
         entityRefs: null,
         errorCode: null,
         durationMs: null,
+        approvalMode: null,
       }),
       'cuid',
     ),
@@ -314,6 +321,7 @@ export class FakePrisma {
   readonly aiMessage = asyncTable(this.tables.aiMessage);
   readonly aiRun = asyncTable(this.tables.aiRun);
   readonly aiUsage = asyncTable(this.tables.aiUsage);
+  readonly aiConfigAuditLog = asyncTable(this.tables.aiConfigAuditLog);
   readonly aiToolInvocation = asyncTable(this.tables.aiToolInvocation);
   readonly aiServiceAccountSettings = asyncTable(
     this.tables.aiServiceAccountSettings,
@@ -499,7 +507,13 @@ export class FakeTools {
     input: unknown;
     ctx: AiExecutionContext;
   }> = [];
-  readonly approved: Array<{ id: string; stepUpVerified: boolean }> = [];
+  readonly approved: Array<{
+    id: string;
+    stepUpVerified: boolean;
+    auto?: true;
+  }> = [];
+  /** When set, the next approval throws this (e.g. a core refusal or an unexpected fault). */
+  approveError: unknown = null;
   /** When set, a headless write is left EXECUTING and never returns (the process died mid-execution). */
   hangOnWrite = false;
   ttlMs = 30 * 60 * 1000;
@@ -616,7 +630,7 @@ export class FakeTools {
   async approve(
     id: string,
     ctx: AiExecutionContext,
-    options: { stepUpVerified?: boolean } = {},
+    options: { stepUpVerified?: boolean; auto?: boolean } = {},
   ): Promise<AiPendingAction> {
     const row = await this.prisma.aiToolInvocation.findUniqueOrThrow({
       where: { id },
@@ -624,9 +638,36 @@ export class FakeTools {
     if (ctx.identity.kind !== 'human' || row.userId !== ctx.identity.userId) {
       throw new ForbiddenException({ code: 'FORBIDDEN', message: 'no' });
     }
+    if (this.approveError) {
+      const err = this.approveError;
+      this.approveError = null;
+      throw err;
+    }
     const action = toPendingAction(row as never);
     if (action.status !== 'AWAITING_APPROVAL')
       return { ...action, replayed: true };
+    if (options.auto) {
+      // Core's rules, as the runtime sees them: the mode must be on, and never a step-up write.
+      const conversation = this.prisma.tables.aiConversation.rows.find(
+        (c) => c.id === row.conversationId,
+      );
+      if (!conversation?.autoApprove || options.stepUpVerified) {
+        throw new ConflictException({
+          code: 'AUTO_APPROVE_OFF',
+          message: 'off',
+        });
+      }
+      if (
+        !action.preview ||
+        action.preview.elevated ||
+        requiresStepUp(action.preview)
+      ) {
+        throw new ConflictException({
+          code: 'AUTO_APPROVE_NOT_ELIGIBLE',
+          message: 'needs the user',
+        });
+      }
+    }
     if (
       action.preview &&
       requiresStepUp(action.preview) &&
@@ -641,7 +682,11 @@ export class FakeTools {
       await this.expire(id);
       throw new ConflictException({ code: 'EXPIRED', message: 'expired' });
     }
-    this.approved.push({ id, stepUpVerified: options.stepUpVerified === true });
+    this.approved.push({
+      id,
+      stepUpVerified: options.stepUpVerified === true,
+      ...(options.auto ? { auto: true as const } : {}),
+    });
     const result: AiToolResult = {
       ok: true,
       kind: 'mutation',
@@ -652,7 +697,12 @@ export class FakeTools {
     };
     await this.prisma.aiToolInvocation.update({
       where: { id },
-      data: { status: 'SUCCEEDED', result, decidedAt: new Date() },
+      data: {
+        status: 'SUCCEEDED',
+        result,
+        decidedAt: new Date(),
+        approvalMode: options.auto ? 'AUTO' : 'USER',
+      },
     });
     return toPendingAction(
       (await this.prisma.aiToolInvocation.findUniqueOrThrow({
