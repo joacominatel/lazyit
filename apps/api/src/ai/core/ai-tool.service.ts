@@ -88,14 +88,34 @@ interface ApprovalProvenance {
 
 /**
  * Whether a chat write may be approved automatically (#1376): an ordinary `write` whose preview was not
- * escalated to elevated and needs no step-up. Elevated actions — privilege, identity, credentials,
- * configuration and outbound integrations (security.md §6.2 T3/T4, INV-AI-15) — always wait for the user.
+ * escalated to elevated, needs no step-up and names no untrusted source. Elevated actions — privilege,
+ * identity, credentials, configuration and outbound integrations (security.md §6.2 T3/T4, INV-AI-15) —
+ * always wait for the user, and so does any write in a turn that read other-authored content: injected
+ * text never chains an unattended write (security.md §6.1, §6.2).
  */
 function autoEligible(
   toolClass: string,
-  preview: Pick<AiActionPreview, 'elevated' | 'stepUpRequired' | 'warnings'>,
+  preview: Pick<
+    AiActionPreview,
+    'elevated' | 'stepUpRequired' | 'warnings' | 'untrustedSources'
+  >,
 ): boolean {
-  return toolClass === 'write' && !preview.elevated && !requiresStepUp(preview);
+  return (
+    toolClass === 'write' &&
+    !preview.elevated &&
+    !requiresStepUp(preview) &&
+    preview.untrustedSources.length === 0
+  );
+}
+
+/** 409 `AUTO_APPROVE_OFF`: the conversation's auto-approve is not on (now). The action stays pending. */
+function autoApproveOff(): ConflictException {
+  return new ConflictException(
+    decisionError(
+      'AUTO_APPROVE_OFF',
+      'Auto-approve is not on for this conversation',
+    ),
+  );
 }
 
 /** The error a refused decision carries, for the decision endpoint to answer as is. */
@@ -435,7 +455,7 @@ export class AiToolService {
 
     const now = new Date();
     const approvalMode = auto ? 'AUTO' : 'USER';
-    const claim = await this.prisma.aiToolInvocation.updateMany({
+    const claimArgs = {
       where: {
         id: row.id,
         status: 'AWAITING_APPROVAL',
@@ -443,7 +463,25 @@ export class AiToolService {
         expiresAt: { gt: now },
       },
       data: { status: 'EXECUTING', decidedAt: now, approvalMode },
-    });
+    };
+    const claim = auto
+      ? await this.prisma.$transaction(async (tx) => {
+          // Auto-approve is re-checked IN the claim's transaction, holding the conversation row's lock
+          // (the lock a toggle takes): a switch-off that committed first refuses, one that commits later
+          // is ordered after this approval.
+          const on = await tx.aiConversation.updateMany({
+            where: {
+              id: row.conversationId ?? '',
+              userId,
+              channel: 'CHAT',
+              autoApprove: true,
+            },
+            data: { autoApprove: true },
+          });
+          if (on.count === 0) throw autoApproveOff();
+          return tx.aiToolInvocation.updateMany(claimArgs);
+        })
+      : await this.prisma.aiToolInvocation.updateMany(claimArgs);
     if (claim.count === 0) {
       return this.unclaimable(row.id, 'approve');
     }
@@ -855,13 +893,7 @@ export class AiToolService {
     userId: string,
     options: AiApproveOptions,
   ): Promise<{ enabledAt: Date | null }> {
-    const off = () =>
-      new ConflictException(
-        decisionError(
-          'AUTO_APPROVE_OFF',
-          'Auto-approve is not on for this conversation',
-        ),
-      );
+    const off = autoApproveOff;
     if (options.stepUpVerified || !row.conversationId) throw off();
     const conversation = await this.prisma.aiConversation.findFirst({
       where: {

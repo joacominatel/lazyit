@@ -561,6 +561,22 @@ const prisma = {
         Object.entries(where).every(([key, value]) => row[key] === value);
       return Promise.resolve(hit ? { ...row } : null);
     }),
+    updateMany: jest.fn(
+      ({
+        where,
+        data,
+      }: {
+        where: Record<string, unknown>;
+        data: Record<string, unknown>;
+      }) => {
+        const row = conversations.get(where.id as string);
+        const hit =
+          row &&
+          Object.entries(where).every(([key, value]) => row[key] === value);
+        if (hit) Object.assign(row, data);
+        return Promise.resolve({ count: hit ? 1 : 0 });
+      },
+    ),
   },
   /** An interactive transaction: all or nothing over the in-memory tables. */
   $transaction: jest.fn(
@@ -1775,6 +1791,48 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
       });
       expect(updates).toBe(0);
       expect(invocations.get(action.id)!.status).toBe('AWAITING_APPROVAL');
+    });
+
+    it('re-checks the mode in the claim: switched off after the first check, nothing executes', async () => {
+      const action = await proposeOk('thing_rename');
+      // The first read still sees the mode on; by the claim, the owner has switched it off.
+      prisma.aiConversation.findFirst.mockImplementationOnce(() =>
+        Promise.resolve({ autoApproveEnabledAt: ENABLED_AT }),
+      );
+      await expect(
+        tools.approve(action.id, chat(human(ID.member)), { auto: true }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'AUTO_APPROVE_OFF' },
+      });
+      expect(updates).toBe(0);
+      expect(invocations.get(action.id)!.status).toBe('AWAITING_APPROVAL');
+      expect(events(action.id)).toEqual(['PROPOSED']);
+    });
+
+    it('shows the card for a write in a turn that read other-authored content (untrusted sources)', async () => {
+      autoOn();
+      const proposal = await tools.propose(
+        'thing_rename',
+        { id: 't1', name: 'Renamed' },
+        chat(human(ID.member), {
+          untrustedSources: [{ type: 'article', id: 'kb1', op: 'navigate' }],
+        }),
+        { toolUseId: 'toolu_untrusted' },
+      );
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      await expect(
+        tools.approve(proposal.action.id, chat(human(ID.member)), {
+          auto: true,
+        }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'AUTO_APPROVE_NOT_ELIGIBLE' },
+      });
+      expect(updates).toBe(0);
+      expect(invocations.get(proposal.action.id)!.status).toBe(
+        'AWAITING_APPROVAL',
+      );
     });
 
     it('keeps the precondition: a target changed since the preview fails STALE, recorded as AUTO', async () => {
