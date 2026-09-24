@@ -1156,6 +1156,84 @@ describe('ArticlesService', () => {
     });
   });
 
+  describe('write paths hide folder-restricted articles behind 404 (SEC-074, INV-9)', () => {
+    // A plain article:write MEMBER (hasAll → false) who is NOT the author. The article is PUBLISHED, so
+    // only the folder ACL can hide it. Before SEC-074 loadOwned returned the authorship 403 before any
+    // folder check, so a hidden article answered 403 while a missing id answered 404 — an oracle.
+    const writePaths: Array<[string, () => Promise<unknown>]> = [
+      ['update', () => service.update('a', { title: 'x' }, OTHER_PRINCIPAL)],
+      ['remove', () => service.remove('a', OTHER_PRINCIPAL)],
+      ['publish', () => service.publish('a', OTHER_PRINCIPAL)],
+      ['unpublish', () => service.unpublish('a', OTHER_PRINCIPAL)],
+      ['restoreVersion', () => service.restoreVersion('a', 1, OTHER_PRINCIPAL)],
+      [
+        'addLink',
+        () => service.addLink('a', { assetId: 'as1' }, OTHER_PRINCIPAL),
+      ],
+      ['removeLink', () => service.removeLink('a', 'link1', OTHER_PRINCIPAL)],
+      [
+        'addAlias',
+        () => service.addAlias('a', { folderId: 'other' }, OTHER_PRINCIPAL),
+      ],
+      [
+        'removeAlias',
+        () => service.removeAlias('a', 'alias1', OTHER_PRINCIPAL),
+      ],
+      [
+        'assertAttachmentWritable',
+        () => service.assertAttachmentWritable('a', OTHER_PRINCIPAL),
+      ],
+      // Soft-delete restore: its own lookup (includeSoftDeleted), same order as loadOwned. The route
+      // needs `article:delete`, which is delegatable without `article:manage`.
+      ['restore', () => service.restore('a', OTHER_PRINCIPAL)],
+    ];
+
+    it.each(writePaths)(
+      '%s: 404 (not 403) for a foreign PUBLISHED article in a folder the caller cannot see',
+      async (_name, call) => {
+        folderAccess.visibleFolderIds.mockResolvedValue(
+          new Set(['public-folder']),
+        );
+        article.findFirst.mockResolvedValue({
+          id: 'a',
+          status: 'PUBLISHED',
+          authorId: AUTHOR,
+          categoryId: 'secret-folder',
+        });
+        await expect(call()).rejects.toBeInstanceOf(NotFoundException);
+        expect(article.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(writePaths)(
+      '%s: 404 for a missing id — indistinguishable from the folder-hidden case',
+      async (_name, call) => {
+        folderAccess.visibleFolderIds.mockResolvedValue(
+          new Set(['public-folder']),
+        );
+        article.findFirst.mockResolvedValue(null);
+        await expect(call()).rejects.toBeInstanceOf(NotFoundException);
+      },
+    );
+
+    it.each(writePaths)(
+      '%s: still 403 for a foreign PUBLISHED article in a folder the caller CAN see',
+      async (_name, call) => {
+        folderAccess.visibleFolderIds.mockResolvedValue(
+          new Set(['public-folder']),
+        );
+        article.findFirst.mockResolvedValue({
+          id: 'a',
+          status: 'PUBLISHED',
+          authorId: AUTHOR,
+          categoryId: 'public-folder',
+        });
+        await expect(call()).rejects.toBeInstanceOf(ForbiddenException);
+        expect(article.update).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   // --- publish / unpublish -------------------------------------------------
 
   describe('publish / unpublish', () => {
