@@ -981,7 +981,10 @@ export function buildRuntime() {
 
   /** Every event published for a run, in order. */
   function events(runId: string): AiRunEvent[] {
-    return (bus.replay(runId, 0) ?? []).map((e: RunEventEnvelope) => e.event);
+    const buffer = (
+      bus as unknown as { runs: Map<string, { events: RunEventEnvelope[] }> }
+    ).runs.get(runId);
+    return (buffer?.events ?? []).map((e) => e.event);
   }
 
   function run(runId: string): Row {

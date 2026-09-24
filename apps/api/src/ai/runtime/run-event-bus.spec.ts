@@ -48,7 +48,7 @@ const finished: AiRunEvent = {
 };
 
 describe('InProcessRunEventBus', () => {
-  it('assigns contiguous per-run sequence numbers after the base and delivers in order', () => {
+  it('numbers events from one process-wide counter, increasing per run, and delivers in order', () => {
     const bus = new InProcessRunEventBus({ base: 1000 });
     const seen: number[] = [];
     bus.subscribe('r1', (e) => seen.push(e.seq));
@@ -56,11 +56,40 @@ describe('InProcessRunEventBus', () => {
     const b = bus.publish('r1', delta('Hel'));
     bus.publish('r2', status('QUEUED'));
     const c = bus.publish('r1', delta('lo'));
-    expect([a.seq, b.seq, c.seq]).toEqual([1001, 1002, 1003]);
-    expect(seen).toEqual([1001, 1002, 1003]);
-    expect(formatRunEventId(c)).toBe('r1:1003');
-    expect(bus.lastSeq('r1')).toBe(1003);
-    expect(bus.lastSeq('unknown')).toBe(1000);
+    expect([a.seq, b.seq, c.seq]).toEqual([1001, 1002, 1004]);
+    expect(seen).toEqual([1001, 1002, 1004]);
+    expect(formatRunEventId(c)).toBe('r1:1004');
+    expect(bus.lastSeq('r1')).toBe(1004);
+    expect(bus.lastSeq('unknown')).toBe(1004);
+    // A replay across the gap left by another run is still exact.
+    expect(bus.replay('r1', 1002)!.map((e) => e.seq)).toEqual([1004]);
+  });
+
+  it('creates no buffer when subscribing to an unknown run', () => {
+    const bus = new InProcessRunEventBus({ base: 0, maxRuns: 1 });
+    const off = bus.subscribe('ghost', () => undefined);
+    expect(bus.replay('ghost', 0)).toBeNull();
+    bus.publish('real', status('QUEUED'));
+    expect(bus.replay('real', 0)).toHaveLength(1);
+    off();
+  });
+
+  it('never replays a wrong suffix after a buffer is dropped and re-created', () => {
+    let now = 0;
+    const bus = new InProcessRunEventBus({
+      base: 0,
+      retainMs: 10,
+      now: () => now,
+    });
+    bus.publish('r1', status('QUEUED'));
+    const last = bus.publish('r1', finished);
+    now = 100;
+    bus.publish('other', status('QUEUED')); // prunes r1
+    now = 101;
+    bus.publish('r1', status('RUNNING')); // the run publishes again (a resume)
+    expect(bus.replay('r1', last.seq)).toBeNull(); // → snapshot
+    expect(bus.replay('r1', 0)).toBeNull();
+    expect(bus.replay('r1', bus.lastSeq('r1') - 1)).toHaveLength(1);
   });
 
   it('replays from a Last-Event-ID', () => {
@@ -128,7 +157,7 @@ describe('InProcessRunEventBus', () => {
     now = 2000;
     bus.publish('r2', status('RUNNING'));
     expect(bus.replay('r1', 0)).toBeNull();
-    expect(bus.replay('r2', 0)).toHaveLength(2);
+    expect(bus.replay('r2', 1)).toHaveLength(2);
   });
 
   it('bounds the number of tracked runs, dropping finished ones first', () => {
@@ -137,8 +166,8 @@ describe('InProcessRunEventBus', () => {
     bus.publish('live1', status('RUNNING'));
     bus.publish('live2', status('RUNNING'));
     expect(bus.replay('done', 0)).toBeNull();
-    expect(bus.replay('live1', 0)).not.toBeNull();
-    expect(bus.replay('live2', 0)).not.toBeNull();
+    expect(bus.replay('live1', 1)).toHaveLength(1);
+    expect(bus.replay('live2', 2)).toHaveLength(1);
   });
 
   it('starts every process at a different base within int4', () => {

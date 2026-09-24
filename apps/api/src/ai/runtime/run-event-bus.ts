@@ -23,20 +23,27 @@ export interface InProcessRunEventBusOptions {
 }
 
 interface RunBuffer {
-  /** The last sequence number issued (the base before the first event). */
+  /**
+   * Replay covers positions `>= floor`: the process-wide sequence value when the buffer was created, then
+   * the seq of the newest event evicted from it. A position below it answers `null` (→ snapshot).
+   */
+  floor: number;
+  /** The last sequence number issued to this run (`floor` before its first event here). */
   lastSeq: number;
   events: RunEventEnvelope[];
-  listeners: Set<(envelope: RunEventEnvelope) => void>;
   /** When `run.finished` was published; the buffer is dropped `retainMs` later when nobody listens. */
   finishedAt: number | null;
   touchedAt: number;
 }
 
+type Listener = (envelope: RunEventEnvelope) => void;
+
 /**
- * The per-process base every run's sequence starts from: seconds since the epoch, modulo a million, times
- * a thousand — below the int4 bound of `run.snapshot.seq` and different after every restart. A client
- * whose `Last-Event-ID` came from a previous process names a position this buffer never issued, so
- * `replay` answers `null` and the caller sends a `run.snapshot` instead of a wrong suffix.
+ * The per-process start of the sequence counter: seconds since the epoch, modulo a million, times a
+ * thousand — at most ~10⁹, leaving ~1.1 × 10⁹ events per process below the int4 bound of
+ * `run.snapshot.seq`, and different after every restart. A client whose `Last-Event-ID` came from a
+ * previous process names a position this process's buffers do not cover, so `replay` answers `null` and
+ * the caller sends a `run.snapshot` instead of a wrong suffix.
  */
 export function runEventSequenceBase(now: number = Date.now()): number {
   return (Math.floor(now / 1000) % 1_000_000) * 1000;
@@ -69,43 +76,65 @@ export function parseLastEventId(
  * THE IN-PROCESS `RunEventBus` (provider-and-runtime.md Fork B, §9.3; synthesis §4.6). The `ai-run` worker
  * runs in the API container (ADR-0053), so the worker and the SSE endpoint share this process: a ring
  * buffer per run replays by `Last-Event-ID`, and listeners follow new events. Postgres stays the system of
- * record — a position the buffer no longer covers (evicted, or issued by another process) replays as
- * `null`, and the SSE endpoint answers with a `run.snapshot` built from the database.
+ * record — a position the buffer does not cover (evicted events, a dropped buffer, or an id issued by
+ * another process) replays as `null`, and the SSE endpoint answers with a `run.snapshot` from the database.
  *
- * Sequence numbers are per run, strictly increasing and contiguous within one process, starting after
- * {@link runEventSequenceBase}. Listener failures are contained: a broken subscriber never fails the run.
+ * Sequence numbers come from ONE process-wide counter that starts at {@link runEventSequenceBase}: they
+ * increase strictly within a run (not contiguously), and a buffer re-created after it was dropped starts
+ * above every number issued before, so a stale `Last-Event-ID` can never replay a wrong suffix.
+ *
+ * AUTHORIZATION IS THE CALLER'S. The bus has no notion of ownership: the SSE endpoint (W3-1) must load
+ * the run and check that the caller owns it BEFORE `subscribe`, `replay` or `lastSeq` — a run id is not a
+ * capability. Subscribing to a run creates no buffer; listener failures are contained.
  */
 @Injectable()
 export class InProcessRunEventBus implements RunEventBus {
   private readonly logger = new Logger(InProcessRunEventBus.name);
   private readonly runs = new Map<string, RunBuffer>();
+  private readonly listeners = new Map<string, Set<Listener>>();
   private readonly capacity: number;
   private readonly retainMs: number;
   private readonly maxRuns: number;
-  private readonly base: number;
   private readonly now: () => number;
+  /** The last sequence number issued in this process, across all runs. */
+  private cursor: number;
 
   constructor(options: InProcessRunEventBusOptions = {}) {
     this.capacity = options.capacity ?? RUN_EVENT_BUFFER_CAPACITY;
     this.retainMs = options.retainMs ?? RUN_EVENT_RETAIN_MS;
     this.maxRuns = options.maxRuns ?? RUN_EVENT_MAX_RUNS;
     this.now = options.now ?? Date.now;
-    this.base = options.base ?? runEventSequenceBase(this.now());
+    this.cursor = options.base ?? runEventSequenceBase(this.now());
   }
 
   publish(runId: string, event: AiRunEvent): RunEventEnvelope {
-    const buffer = this.buffer(runId);
-    buffer.lastSeq += 1;
-    const envelope: RunEventEnvelope = { runId, seq: buffer.lastSeq, event };
+    let buffer = this.runs.get(runId);
+    if (!buffer) {
+      buffer = {
+        floor: this.cursor,
+        lastSeq: this.cursor,
+        events: [],
+        finishedAt: null,
+        touchedAt: this.now(),
+      };
+      this.runs.set(runId, buffer);
+    }
+    this.cursor += 1;
+    buffer.lastSeq = this.cursor;
+    const envelope: RunEventEnvelope = { runId, seq: this.cursor, event };
     buffer.events.push(envelope);
     if (buffer.events.length > this.capacity) {
-      buffer.events.splice(0, buffer.events.length - this.capacity);
+      const evicted = buffer.events.splice(
+        0,
+        buffer.events.length - this.capacity,
+      );
+      buffer.floor = evicted[evicted.length - 1].seq;
     }
     buffer.touchedAt = this.now();
     if (event.type === 'run.finished') {
       buffer.finishedAt = buffer.touchedAt;
     }
-    for (const listener of [...buffer.listeners]) {
+    for (const listener of [...(this.listeners.get(runId) ?? [])]) {
       try {
         listener(envelope);
       } catch (err) {
@@ -121,45 +150,38 @@ export class InProcessRunEventBus implements RunEventBus {
   replay(runId: string, afterSeq: number): RunEventEnvelope[] | null {
     const buffer = this.runs.get(runId);
     if (!buffer || !Number.isInteger(afterSeq)) return null;
-    if (afterSeq > buffer.lastSeq) return null; // a position this process never issued
-    const oldest = buffer.events[0]?.seq ?? buffer.lastSeq + 1;
-    if (afterSeq < oldest - 1) return null; // evicted, or before this process's base
+    // Not a position this buffer issued or still covers: evicted, dropped and re-created, or another
+    // process's id.
+    if (afterSeq > buffer.lastSeq || afterSeq < buffer.floor) return null;
     return buffer.events.filter((envelope) => envelope.seq > afterSeq);
   }
 
-  subscribe(
-    runId: string,
-    listener: (envelope: RunEventEnvelope) => void,
-  ): () => void {
-    const buffer = this.buffer(runId);
-    buffer.listeners.add(listener);
+  subscribe(runId: string, listener: Listener): () => void {
+    let set = this.listeners.get(runId);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(runId, set);
+    }
+    set.add(listener);
     return () => {
-      buffer.listeners.delete(listener);
+      const current = this.listeners.get(runId);
+      if (!current) return;
+      current.delete(listener);
+      if (current.size === 0) this.listeners.delete(runId);
     };
   }
 
   /**
-   * The last sequence number issued for a run — the `seq` a `run.snapshot` covers, so a replay after it
-   * continues without a gap. The process base when the run has published nothing here yet.
-   * (Not on the port: `RunEventBus` is frozen in `core/ports/`; the SSE endpoint may inject this class.)
+   * The sequence a `run.snapshot` covers: the run's last event here, or — for a run with no buffer — the
+   * process-wide cursor, so every later event of the run is numbered above it. (Not on the port:
+   * `RunEventBus` is frozen in `core/ports/`; the SSE endpoint may inject this class.)
    */
   lastSeq(runId: string): number {
-    return this.runs.get(runId)?.lastSeq ?? this.base;
+    return this.runs.get(runId)?.lastSeq ?? this.cursor;
   }
 
-  private buffer(runId: string): RunBuffer {
-    let buffer = this.runs.get(runId);
-    if (!buffer) {
-      buffer = {
-        lastSeq: this.base,
-        events: [],
-        listeners: new Set(),
-        finishedAt: null,
-        touchedAt: this.now(),
-      };
-      this.runs.set(runId, buffer);
-    }
-    return buffer;
+  private hasListeners(runId: string): boolean {
+    return (this.listeners.get(runId)?.size ?? 0) > 0;
   }
 
   /** Drop finished, idle buffers past retention; past `maxRuns`, drop the stalest idle buffers. */
@@ -168,7 +190,7 @@ export class InProcessRunEventBus implements RunEventBus {
     for (const [runId, buffer] of this.runs) {
       if (
         buffer.finishedAt !== null &&
-        buffer.listeners.size === 0 &&
+        !this.hasListeners(runId) &&
         now - buffer.finishedAt > this.retainMs
       ) {
         this.runs.delete(runId);
@@ -176,7 +198,7 @@ export class InProcessRunEventBus implements RunEventBus {
     }
     if (this.runs.size <= this.maxRuns) return;
     const idle = [...this.runs.entries()]
-      .filter(([, buffer]) => buffer.listeners.size === 0)
+      .filter(([runId]) => !this.hasListeners(runId))
       .sort(
         ([, a], [, b]) =>
           (a.finishedAt === null ? 1 : 0) - (b.finishedAt === null ? 1 : 0) ||
