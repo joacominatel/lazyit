@@ -348,7 +348,12 @@ export class ServiceAccountsService {
       isActive: row.isActive,
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
       lastUsedAt: row.lastUsedAt ? row.lastUsedAt.toISOString() : null,
-      permissions: this.sortedCatalog(row.permissions.map((p) => p.permission)),
+      // cleanPermissions, not sortedCatalog: a legacy SA-ungrantable row is inert (the principal loader
+      // strips it — SEC-073), so the read shape must not show a power the account does not hold. Saving
+      // this set back then drops the row through the audited PERMISSION_CHANGE path.
+      permissions: this.cleanPermissions(
+        row.permissions.map((p) => p.permission),
+      ),
       // System-managed = the engine-owned singleton (#304). The UI gates its row controls off this.
       systemManaged: ServiceAccountsService.isSystemManaged(row),
       createdById: row.createdById,
@@ -418,9 +423,9 @@ export class ServiceAccountsService {
   private cleanPermissions(perms: readonly string[]): Permission[] {
     return this.sortedCatalog(perms).filter(
       (p) =>
-        !(SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS as readonly string[]).includes(
-          p,
-        ),
+        !(
+          SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS as readonly string[]
+        ).includes(p),
     );
   }
 

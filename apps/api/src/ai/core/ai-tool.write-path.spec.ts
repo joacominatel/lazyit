@@ -85,6 +85,7 @@ const ID = {
 const SA = {
   writer: 'ckwritersa0000000000000001',
   noAi: 'cknoaisa00000000000000002',
+  legacy: 'cklegacysa0000000000000003',
 };
 
 const ROLE_GRANTS: Record<Role, Permission[]> = {
@@ -95,6 +96,8 @@ const ROLE_GRANTS: Record<Role, Permission[]> = {
 const SA_GRANTS: Record<string, Permission[]> = {
   [SA.writer]: ['ai:use', 'asset:read', 'asset:write'],
   [SA.noAi]: ['asset:read', 'asset:write'],
+  // SEC-073: `user:manage` granted before SEC-011 and never re-saved — must be inert at principal load.
+  [SA.legacy]: ['ai:use', 'asset:read', 'asset:write', 'user:manage'],
 };
 
 type UserRow = {
@@ -191,6 +194,16 @@ class ThingsController {
     });
     return { ...things[id] };
   }
+
+  /** A `user:manage` write (the shape of `POST /users` with `role: ADMIN`), for SEC-073. */
+  @Patch(':id/admin')
+  @RequirePermission('user:manage')
+  makeAdmin(@Param('id') id: string): Thing {
+    const thing = things[id];
+    if (!thing) throw new NotFoundException('Thing not found');
+    updates += 1;
+    return { ...thing };
+  }
 }
 
 const thingInput = z.strictObject({
@@ -261,6 +274,31 @@ const writeToolset: AiToolset = {
           data: await rt.call(ThingsController, 'update', {
             params: { id: input.id },
             body: { name: input.name },
+          }),
+        };
+      },
+      preview: () =>
+        Promise.resolve({
+          changes: [],
+          warnings: ['ROLE_CHANGE'],
+          impacted: [],
+          untrustedSources: [],
+          elevated: true,
+          stepUpRequired: true,
+        }),
+    }),
+    defineTool({
+      name: 'thing_make_admin',
+      title: 'Make a thing an admin',
+      description: 'An elevated fixture write gated by user:manage (SEC-073).',
+      domain: 'platform',
+      class: 'elevated',
+      input: z.strictObject({ id: z.string().min(1) }),
+      bindings: [bind(ThingsController, 'makeAdmin')],
+      async run(input, rt) {
+        return {
+          data: await rt.call(ThingsController, 'makeAdmin', {
+            params: { id: input.id },
           }),
         };
       },
@@ -756,6 +794,30 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
         'DENIED',
         'DENIED',
       ]);
+    });
+
+    it('refuses a headless user:manage write by an SA holding only a legacy (pre-SEC-011) grant (SEC-073)', async () => {
+      const result = await tools.invoke(
+        'thing_make_admin',
+        { id: 't1' },
+        {
+          identity: service(SA.legacy),
+          channel: 'HEADLESS',
+          runId: 'ckheadlessrun00000000000002',
+        },
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'FORBIDDEN', status: 403 },
+      });
+      expect(updates).toBe(0);
+      // The same SA still runs a grantable headless write: only the ungrantable verb was stripped.
+      const allowed = await tools.invoke(
+        'thing_rename',
+        { id: 't1', name: 'Still works' },
+        { identity: service(SA.legacy), channel: 'HEADLESS' },
+      );
+      expect(allowed).toMatchObject({ ok: true, mutated: true });
     });
 
     it('writes nothing for an invalid input or an invalid principal (nothing was attempted)', async () => {
