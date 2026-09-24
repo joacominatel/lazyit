@@ -20,6 +20,7 @@ import {
   unexposed,
   type AiToolset,
 } from '../core/tool-descriptor';
+import { searchText } from './search-text';
 
 /**
  * The INFRA toolset (W2-10; tools-and-execution.md §7 rows 43–44): the topology graph, READ ONLY in v1.
@@ -148,19 +149,14 @@ const infraNodeSearch = defineTool({
     'Search the infrastructure topology (servers, VMs, containers, network devices, storage…). ' +
     'Filter by kind, status (ONLINE/OFFLINE/UNKNOWN), state (CONFIRMED on the map, PENDING in the review ' +
     'tray), source (MANUAL or AGENT-reported), role (HOST or CHILD) or the Assets that back them; `query` ' +
-    "matches the label, IP address, the linked Asset's name and its owners. Returns a page of nodes with " +
+    "matches the label, IP address, the linked Asset's name and its owners; omit it to list by the " +
+    'filters alone. Returns a page of nodes with ' +
     'their ids and the total. Use it to find a node before calling infra_node_get; never guess an id.',
   domain: 'infra',
   class: 'read',
   idempotent: true,
   input: z.strictObject({
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('Case-insensitive text to look for.'),
+    query: searchText('Case-insensitive text to look for.'),
     kind: z.enum(InfraNodeKindSchema.options).optional(),
     status: z.enum(InfraNodeStatusSchema.options).optional(),
     state: z.enum(InfraNodeStateSchema.options).optional(),

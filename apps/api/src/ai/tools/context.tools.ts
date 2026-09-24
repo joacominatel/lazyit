@@ -112,7 +112,9 @@ const lazyitSearch = defineTool({
   description:
     'Full-text search across assets, knowledge-base articles, users, locations, applications, ' +
     'infrastructure nodes and consumables. Returns, per entity, the total and the best hits with their ' +
-    'ids. Use it to find an entity before reading or changing it; never guess an id.',
+    'ids. Use it to find an entity before reading or changing it; never guess an id. It needs text: to ' +
+    "LIST records by a filter (every administrator, every low-stock item) use that domain's own search " +
+    'tool without a `query` (user_search, asset_search, consumable_search, kb_search…).',
   domain: 'context',
   class: 'read',
   idempotent: true,

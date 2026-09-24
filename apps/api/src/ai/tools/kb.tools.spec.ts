@@ -184,6 +184,8 @@ let folders: Array<{
   parentId: string | null;
   accessRules: unknown;
   name: string;
+  description?: string | null;
+  updatedAt: Date;
 }>;
 let articles: Map<string, ArticleRow>;
 let versions: Array<Record<string, unknown>>;
@@ -219,18 +221,26 @@ function resetFixtures() {
     [ID.viewer]: user(ID.viewer, 'VIEWER', 'Vic'),
   };
   folders = [
-    { id: F.public, parentId: null, accessRules: null, name: 'IT' },
+    {
+      id: F.public,
+      parentId: null,
+      accessRules: null,
+      name: 'IT',
+      updatedAt: T0,
+    },
     {
       id: F.admins,
       parentId: null,
       accessRules: [{ kind: 'role', role: 'ADMIN' }],
       name: 'Admins',
+      updatedAt: T0,
     },
     {
       id: F.team,
       parentId: null,
       accessRules: [{ kind: 'users', userIds: [ID.member] }],
       name: 'Team',
+      updatedAt: T0,
     },
   ];
   articles = new Map(
@@ -397,6 +407,7 @@ const prisma = {
           id: f.id,
           parentId: f.parentId,
           ...(select.name ? { name: f.name } : {}),
+          ...(select.updatedAt ? { updatedAt: f.updatedAt } : {}),
           ...(select.accessRules ? { accessRules: f.accessRules } : {}),
           ...(select._count ? { _count: { articles: 0 } } : {}),
         })),
@@ -406,6 +417,37 @@ const prisma = {
       const f = folders.find((x) => x.id === where.id);
       return Promise.resolve(f ? { id: f.id } : null);
     }),
+    /** The folder writes (#1378): a new folder never carries access rules unless the admin route sets them. */
+    create: jest.fn(
+      ({
+        data,
+      }: {
+        data: { name: string; parentId?: string; description?: string };
+      }) => {
+        seq += 1;
+        const row = {
+          id: cid(`fnew${seq}`),
+          parentId: data.parentId ?? null,
+          accessRules: null,
+          name: data.name,
+          description: data.description ?? null,
+          updatedAt: new Date(T0.getTime() + seq * 60_000),
+        };
+        folders.push(row);
+        return Promise.resolve({ ...row });
+      },
+    ),
+    update: jest.fn(
+      ({ where, data }: { where: { id: string }; data: { name?: string } }) => {
+        const i = folders.findIndex((x) => x.id === where.id);
+        folders[i] = {
+          ...folders[i],
+          ...data,
+          updatedAt: new Date(folders[i].updatedAt.getTime() + 1000),
+        };
+        return Promise.resolve({ ...folders[i] });
+      },
+    ),
   },
   accessGrant: { findMany: jest.fn().mockResolvedValue([]) },
   assetAssignment: { findMany: jest.fn().mockResolvedValue([]) },
@@ -1870,8 +1912,310 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
     });
   });
 
+  describe('kb_folder_create (#1378)', () => {
+    it('chat: a member creates a top-level folder — standard card with the audience and no rules of its own; approve creates it once', async () => {
+      const member = actor('MEMBER');
+      const input = { name: 'Tech', description: 'Engineering notes' };
+      expect(
+        await tools.invoke('kb_folder_create', input, chat(member)),
+      ).toMatchObject({ ok: false, error: { code: 'NOT_AVAILABLE' } });
+
+      const proposal = await tools.propose(
+        'kb_folder_create',
+        input,
+        chat(member),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      const preview = proposal.action.preview!;
+      expect(AiActionPreviewSchema.safeParse(preview).success).toBe(true);
+      expect(preview).toMatchObject({
+        toolName: 'kb_folder_create',
+        class: 'write',
+        elevated: false,
+        stepUpRequired: false,
+        warnings: [],
+      });
+      // A top-level folder has no parent to version: no precondition.
+      expect(preview.precondition).toBeUndefined();
+      const field = (name: string) =>
+        preview.changes.find((c) => c.field === name)?.after;
+      expect(field('name')).toBe('Tech');
+      expect(field('parent folder')).toBe('None (top level)');
+      expect(field('path')).toBe('Tech');
+      expect(field('audience')).toBe(
+        'Everyone who can read the knowledge base',
+      );
+      expect(String(field('access rules'))).toMatch(
+        /^None of its own.*never sets them\.$/,
+      );
+      expect(field('description')).toBe('Engineering notes');
+      expect(prisma.articleCategory.create).not.toHaveBeenCalled();
+
+      const approved = await tools.approve(proposal.action.id, chat(member));
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: { ok: true, kind: 'mutation', mutated: true },
+      });
+      expect(prisma.articleCategory.create).toHaveBeenCalledTimes(1);
+      expect(prisma.articleCategory.create).toHaveBeenCalledWith({
+        data: { name: 'Tech', description: 'Engineering notes' },
+      });
+      const created = folders.find((f) => f.name === 'Tech')!;
+      expect(created).toMatchObject({ parentId: null, accessRules: null });
+      expect(approved.result?.entityRefs).toEqual([
+        { type: 'category', id: created.id, op: 'created', label: 'Tech' },
+      ]);
+      expect(events(proposal.action.id)).toEqual([
+        'PROPOSED',
+        'APPROVED',
+        'EXECUTED',
+      ]);
+      const again = await tools.approve(proposal.action.id, chat(member));
+      expect(again).toMatchObject({ replayed: true });
+      expect(prisma.articleCategory.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("inside a restricted folder: the card shows the parent path and the parent's audience; the precondition is the parent", async () => {
+      const admin = actor('ADMIN');
+      const proposal = await tools.propose(
+        'kb_folder_create',
+        { name: 'Runbooks', parentFolderId: F.team },
+        chat(admin),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      const preview = proposal.action.preview!;
+      const field = (name: string) =>
+        preview.changes.find((c) => c.field === name)?.after;
+      expect(field('parent folder')).toEqual({
+        type: 'category',
+        id: F.team,
+        label: 'Team',
+      });
+      expect(field('path')).toBe('Team › Runbooks');
+      expect(field('audience')).toBe(
+        'Restricted — only people matching every restricted folder on the path: Team: 1 named person',
+      );
+      expect(preview.precondition).toEqual({
+        entity: { type: 'category', id: F.team, op: 'updated', label: 'Team' },
+        updatedAt: T0.toISOString(),
+      });
+      const approved = await tools.approve(proposal.action.id, chat(admin));
+      expect(approved).toMatchObject({ status: 'SUCCEEDED' });
+      expect(prisma.articleCategory.create).toHaveBeenCalledWith({
+        data: { name: 'Runbooks', parentId: F.team },
+      });
+      // The folder has no rules of its own: the parent's restriction narrows it (ADR-0060 §1).
+      expect(folders.find((f) => f.name === 'Runbooks')).toMatchObject({
+        parentId: F.team,
+        accessRules: null,
+      });
+    });
+
+    it('the parent changed since the card (e.g. its access rules) is STALE and nothing is created', async () => {
+      const admin = actor('ADMIN');
+      const proposal = await tools.propose(
+        'kb_folder_create',
+        { name: 'Runbooks', parentFolderId: F.public },
+        chat(admin),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      const i = folders.findIndex((f) => f.id === F.public);
+      folders[i] = {
+        ...folders[i],
+        accessRules: [{ kind: 'role', role: 'ADMIN' }],
+        updatedAt: new Date('2026-09-02'),
+      };
+      const approved = await tools.approve(proposal.action.id, chat(admin));
+      expect(approved).toMatchObject({
+        status: 'FAILED',
+        result: { ok: false, error: { code: 'STALE', status: 409 } },
+      });
+      expect(prisma.articleCategory.create).not.toHaveBeenCalled();
+    });
+
+    it('a parent the caller cannot read gets no card and no create, on any channel (blind write refused)', async () => {
+      const member = actor('MEMBER');
+      const blind = { name: 'Hidden', parentFolderId: F.admins };
+      const proposal = await tools.propose(
+        'kb_folder_create',
+        blind,
+        chat(member),
+      );
+      expect(proposal).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+      expect(JSON.stringify(proposal)).toContain('You cannot read folder');
+      expect(invocations.size).toBe(0);
+      expect(
+        await tools.invoke('kb_folder_create', blind, mcp(member)),
+      ).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+      expect(prisma.articleCategory.create).not.toHaveBeenCalled();
+      // The route itself accepts it — the refusal is the tool's.
+      expect(
+        await viaNetwork(member, {
+          method: 'create',
+          http: 'post',
+          url: '/article-categories',
+          shape: { body: { name: 'Hidden', parentId: F.admins } },
+        }),
+      ).toBe('ok');
+    });
+
+    it("a missing parent is the route's own 400 before any card", async () => {
+      const member = actor('MEMBER');
+      const missing = cid('fmissing');
+      const proposal = await tools.propose(
+        'kb_folder_create',
+        { name: 'X', parentFolderId: missing },
+        chat(member),
+      );
+      expect(proposal).toMatchObject({
+        ok: false,
+        result: {
+          error: {
+            code: 'INVALID_INPUT',
+            status: 400,
+            message: `parentId ${missing} does not reference a live folder`,
+          },
+        },
+      });
+      expect(invocations.size).toBe(0);
+      expect(
+        await viaNetwork(member, {
+          method: 'create',
+          http: 'post',
+          url: '/article-categories',
+          shape: { body: { name: 'X', parentId: missing } },
+        }),
+      ).toBe(400);
+    });
+
+    it('never takes access rules; a viewer (no category:write) is DENIED like the route', async () => {
+      for (const bad of [
+        { name: 'Open', accessRules: null },
+        { name: 'Open', accessRules: [{ kind: 'role', role: 'MEMBER' }] },
+        { name: '   ' },
+        { name: 'x'.repeat(101) },
+      ]) {
+        expect(
+          await tools.propose('kb_folder_create', bad, chat(actor('ADMIN'))),
+        ).toMatchObject({
+          ok: false,
+          result: { error: { code: 'INVALID_INPUT' } },
+        });
+      }
+      const viewer = await tools.propose(
+        'kb_folder_create',
+        { name: 'Open' },
+        chat(actor('VIEWER')),
+      );
+      expect(viewer).toMatchObject({
+        ok: false,
+        result: { error: { code: 'FORBIDDEN', status: 403 } },
+      });
+      expect(
+        await viaNetwork(actor('VIEWER'), {
+          method: 'create',
+          http: 'post',
+          url: '/article-categories',
+          shape: { body: { name: 'Open' } },
+        }),
+      ).toBe(403);
+      expect(prisma.articleCategory.create).not.toHaveBeenCalled();
+    });
+
+    it('MCP: the result wraps the folder name as untrusted content', async () => {
+      const result = await tools.invoke(
+        'kb_folder_create',
+        { name: INJECTION.slice(0, 60) },
+        mcp(actor('MEMBER')),
+      );
+      expect(result).toMatchObject({ ok: true, mutated: true });
+      const name = String(data(result).name);
+      expect(name).toMatch(/^<untrusted_content/);
+      expect(name).not.toContain('</untrusted_content> and');
+    });
+  });
+
+  describe('kb_folder_rename (#1378)', () => {
+    it('renames a readable folder: target and version precondition, the name and path before → after, the unchanged audience', async () => {
+      const member = actor('MEMBER');
+      const proposal = await tools.propose(
+        'kb_folder_rename',
+        { folderId: F.public, name: 'IT Ops' },
+        chat(member),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      const preview = proposal.action.preview!;
+      expect(preview).toMatchObject({
+        class: 'write',
+        elevated: false,
+        target: { type: 'category', id: F.public },
+        precondition: { updatedAt: T0.toISOString() },
+      });
+      expect(preview.changes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: 'name',
+            before: 'IT',
+            after: 'IT Ops',
+          }),
+          expect.objectContaining({
+            field: 'path',
+            before: 'IT',
+            after: 'IT Ops',
+          }),
+          expect.objectContaining({ field: 'audience' }),
+        ]),
+      );
+      const approved = await tools.approve(proposal.action.id, chat(member));
+      expect(approved).toMatchObject({ status: 'SUCCEEDED' });
+      expect(prisma.articleCategory.update).toHaveBeenCalledTimes(1);
+      expect(prisma.articleCategory.update).toHaveBeenCalledWith({
+        where: { id: F.public },
+        data: { name: 'IT Ops' },
+      });
+      expect(folders.find((f) => f.id === F.public)).toMatchObject({
+        name: 'IT Ops',
+        parentId: null,
+        accessRules: null,
+      });
+    });
+
+    it('a folder changed since the card is STALE; a no-op, an unreadable or a missing folder gets no card', async () => {
+      const member = actor('MEMBER');
+      const proposal = await tools.propose(
+        'kb_folder_rename',
+        { folderId: F.team, name: 'Team 2' },
+        chat(member),
+      );
+      if (!proposal.ok) throw new Error('proposal refused');
+      const i = folders.findIndex((f) => f.id === F.team);
+      folders[i] = { ...folders[i], updatedAt: new Date('2026-09-02') };
+      expect(
+        await tools.approve(proposal.action.id, chat(member)),
+      ).toMatchObject({
+        status: 'FAILED',
+        result: { error: { code: 'STALE' } },
+      });
+
+      for (const [input, code] of [
+        [{ folderId: F.public, name: 'IT' }, 'INVALID_INPUT'],
+        [{ folderId: F.admins, name: 'Mine now' }, 'INVALID_INPUT'],
+        [{ folderId: cid('fmissing'), name: 'Nope' }, 'NOT_FOUND'],
+        [{ folderId: F.public, name: 'x', parentId: null }, 'INVALID_INPUT'],
+      ] as const) {
+        expect(
+          await tools.propose('kb_folder_rename', input, chat(member)),
+        ).toMatchObject({ ok: false, result: { error: { code } } });
+      }
+      expect(prisma.articleCategory.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('who may call them: the route decides', () => {
-    it('lists the reads to a viewer, all five to a member, and only the reads under a read-only ceiling', async () => {
+    it('lists the reads to a viewer, all seven to a member, and only the reads under a read-only ceiling', async () => {
       const names = async (c: AiExecutionContext) =>
         (await tools.list(c)).map((t) => [t.name, t.class]);
       expect(await names(ctx(actor('VIEWER')))).toEqual([
@@ -1880,6 +2224,8 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       ]);
       expect(await names(mcp(actor('MEMBER')))).toEqual([
         ['kb_create_article', 'write'],
+        ['kb_folder_create', 'write'],
+        ['kb_folder_rename', 'write'],
         ['kb_get_article', 'read'],
         ['kb_search', 'read'],
         ['kb_set_publication', 'write'],

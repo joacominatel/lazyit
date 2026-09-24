@@ -40,6 +40,7 @@ import {
   type AiToolRuntime,
   type AiToolset,
 } from '../core/tool-descriptor';
+import { searchText } from './search-text';
 
 /**
  * The ACCESS toolset (W2-6; tools-and-execution.md §7 rows 17–26): applications, access grants and
@@ -637,20 +638,15 @@ const applicationSearch = defineTool({
   title: 'Search applications',
   description:
     'Search the application catalog (SaaS products, internal systems, VPNs, directory groups — anything a ' +
-    'user can be granted access to). `query` matches name, vendor, url and description. Returns a page of ' +
+    'user can be granted access to). `query` matches name, vendor, url and description; omit it to list ' +
+    'the whole catalog. Returns a page of ' +
     'applications with their ids, criticality and seat counts. Use it before application_get or any ' +
     'access tool; never guess an id.',
   domain: 'access',
   class: 'read',
   idempotent: true,
   input: z.strictObject({
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .optional()
-      .describe('Case-insensitive text to look for.'),
+    query: searchText('Case-insensitive text to look for.'),
     sort: z.enum(SORT_FIELDS).optional(),
     dir: z.enum(['asc', 'desc']).optional(),
     limit: pageSize,
