@@ -961,7 +961,15 @@ export function buildRuntime() {
     principals,
     lifecycle,
     queue as unknown as AiRunQueue,
+    loop,
   );
+
+  /** Simulate a process restart: forget the runs this "process" was driving (their promises never settle). */
+  function restart(): void {
+    (
+      loop as unknown as { controllers: Map<string, unknown> }
+    ).controllers.clear();
+  }
 
   /** Play the worker: run every queued job, in order, until none is left. */
   async function drain(): Promise<void> {
@@ -1013,6 +1021,7 @@ export function buildRuntime() {
     sweeper,
     stepUp,
     drain,
+    restart,
     events,
     run,
     messages,

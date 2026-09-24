@@ -188,6 +188,11 @@ export class AgentLoop {
     private readonly lifecycle: AiRunLifecycle,
   ) {}
 
+  /** Whether this process is driving the run right now (the sweeper never finalizes such a run). */
+  isRunning(runId: string): boolean {
+    return this.controllers.has(runId);
+  }
+
   /** Abort the in-flight model call of a run executing in this process (cancel). */
   abort(runId: string): boolean {
     const controller = this.controllers.get(runId);
@@ -356,7 +361,14 @@ export class AgentLoop {
         });
         return;
       }
-      if (await this.cancelRequested(runId)) {
+      // The step boundary: before any call runs, the run must still be ours and not cancelled (the
+      // sweeper or a cancel may have moved it while the model was answering).
+      const now = await this.prisma.aiRun.findUnique({
+        where: { id: runId },
+        select: { status: true, cancelRequestedAt: true },
+      });
+      if (!now || now.status !== 'RUNNING') return;
+      if (now.cancelRequestedAt) {
         await this.finalizeCancelled(runId);
         return;
       }
@@ -821,13 +833,19 @@ export class AgentLoop {
           format: AI_MESSAGE_FORMAT_STEP,
         },
       ]);
+      // A cancel requested while the calls were resolved wins: the run never starts waiting.
       const claim = await tx.aiRun.updateMany({
-        where: { id: run.id, status: 'RUNNING' },
+        where: { id: run.id, status: 'RUNNING', cancelRequestedAt: null },
         data: { status: 'AWAITING_APPROVAL' },
       });
       return claim.count > 0;
     });
-    if (!paused) return;
+    if (!paused) {
+      // The step record above holds the answers known so far; finalizing cancels the proposals.
+      if (await this.cancelRequested(run.id))
+        await this.finalizeCancelled(run.id);
+      return;
+    }
     for (const resolution of resolutions) {
       if (resolution.kind !== 'pending') continue;
       const request = toApprovalRequest(resolution.action);

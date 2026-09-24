@@ -760,6 +760,46 @@ describe('cancel', () => {
     expect(rt.tools.invoked).toHaveLength(0);
   });
 
+  it('a cancel requested while the calls resolve prevents the pause', async () => {
+    rt.model.push({
+      toolCalls: [
+        { toolCallId: 'r', toolName: READ, input: {} },
+        { toolCallId: 'w', toolName: WRITE, input: { id: 'a1' } },
+      ],
+    });
+    const { runId, conversationId } = await chat();
+    const invoke = rt.tools.invoke.bind(rt.tools);
+    rt.tools.invoke = async (...args: Parameters<typeof invoke>) => {
+      const result = await invoke(...args);
+      await rt.orchestrator.cancel(runId, HUMAN); // lands between the step boundary and the pause
+      return result;
+    };
+    await rt.drain();
+    expect(status(runId)).toBe('CANCELLED');
+    expect(rt.events(runId).map((e) => e.type)).not.toContain(
+      'tool.approval_required',
+    );
+    expect(rt.prisma.tables.aiToolInvocation.rows[0].status).toBe('CANCELLED');
+    const [results] = toolMessages(conversationId);
+    expect(results.map((r) => [r.toolCallId, r.isError])).toEqual([
+      ['r', false],
+      ['w', true],
+    ]);
+  });
+
+  it('does not resolve calls when the run was moved during the model step', async () => {
+    let runId = '';
+    rt.model.push({
+      toolCalls: [{ toolCallId: 'r', toolName: READ, input: {} }],
+      before: () => {
+        rt.run(runId).status = 'FAILED'; // e.g. finalized by another actor
+      },
+    });
+    ({ runId } = await chat());
+    await rt.drain();
+    expect(rt.tools.invoked).toHaveLength(0);
+  });
+
   it('cancels a run awaiting approval: pending actions cancelled, calls answered', async () => {
     rt.model.push({
       toolCalls: [{ toolCallId: 'w', toolName: WRITE, input: { id: 'a1' } }],

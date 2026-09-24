@@ -13,6 +13,7 @@ import {
   AI_SETTINGS_READER,
   type AiSettingsReader,
 } from '../core/ports/ai-settings.port';
+import { AgentLoop } from './agent-loop';
 import { AiRunPrincipals } from './principal-context';
 import { AiRunLifecycle } from './run-lifecycle';
 import { AiRunQueue } from './run-queue';
@@ -85,6 +86,7 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
     private readonly principals: AiRunPrincipals,
     private readonly lifecycle: AiRunLifecycle,
     private readonly queue: AiRunQueue,
+    private readonly loop: AgentLoop,
   ) {}
 
   onModuleInit(): void {
@@ -182,7 +184,8 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
         select: { status: true },
       });
       // A RUNNING run's executions are reconciler 5's (only once its job is gone).
-      if (run?.status === 'RUNNING') continue;
+      if (run?.status === 'RUNNING' || this.loop.isRunning(row.runId!))
+        continue;
       if (await this.tools.markOutcomeUnknown(row.id)) marked += 1;
     }
     return marked;
@@ -257,7 +260,8 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
     });
     let failed = 0;
     for (const run of runs) {
-      if (inFlight.has(run.id)) continue;
+      // A job still owns it, or this very process is driving it (a long model step): not stranded.
+      if (inFlight.has(run.id) || this.loop.isRunning(run.id)) continue;
       const executing = await this.prisma.aiToolInvocation.findMany({
         where: { runId: run.id, status: 'EXECUTING' },
         select: { id: true },

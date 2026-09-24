@@ -171,6 +171,14 @@ describe('crash recovery', () => {
     expect(rt.prisma.tables.aiToolInvocation.rows[0].status).toBe('EXECUTING');
     expect(rt.tools.invoked).toHaveLength(1);
 
+    // Still alive in this process (a slow write): the sweeper never touches it, job or no job.
+    rt.queue.inFlight = new Set();
+    expect(
+      (await rt.sweeper.sweep(new Date(Date.now() + 6 * MIN))).failedStale,
+    ).toBe(0);
+    expect(rt.run(runId).status).toBe('RUNNING');
+
+    rt.restart();
     // After the restart BullMQ re-delivers the stalled job: the run is not QUEUED, nothing runs.
     await rt.loop.advance(runId);
     expect(rt.tools.invoked).toHaveLength(1);
@@ -213,6 +221,7 @@ describe('crash recovery', () => {
     rt.queue.jobs.length = 0;
     void rt.loop.advance(runId);
     await settle();
+    rt.restart();
     rt.queue.inFlight = null;
     const swept = await rt.sweeper.sweep(new Date(Date.now() + 6 * MIN));
     expect(swept.failedStale).toBe(0);
