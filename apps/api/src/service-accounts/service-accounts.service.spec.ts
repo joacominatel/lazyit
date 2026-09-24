@@ -539,31 +539,65 @@ describe('ServiceAccountsService (ADR-0048)', () => {
   // The schema refinement (Layer 1) rejects new grants at the DTO edge. cleanPermissions is the
   // persistence-time backstop: it must silently drop ungrantable verbs for any non-DTO internal path
   // (e.g. a direct service call in tests or a future admin command) so they are never persisted.
+  // SEC-073 — a legacy (pre-SEC-011) row for an SA-ungrantable verb is never deleted by an upgrade: the
+  // read shape hides it (the account does not hold it — the principal loader strips it too), and the next
+  // admin save of the grant set removes the row through the normal audited PERMISSION_CHANGE path.
+  describe('legacy SA-ungrantable grant (SEC-073)', () => {
+    it('hides the inert verb on read and drops the row on the next permission save', async () => {
+      const created = await service.create(
+        { name: 'ci-bot', permissions: ['asset:read'] },
+        ADMIN,
+      );
+      // Simulate the pre-SEC-011 row the refinement now refuses on write.
+      prisma.perms.push({
+        serviceAccountId: created.id,
+        permission: 'user:manage',
+      });
+
+      const read = await service.findOne(created.id);
+      expect(read.permissions).toEqual(['asset:read']);
+
+      // The admin saves the set the UI shows: the legacy row is removed and audited, nothing else moves.
+      await service.update(
+        created.id,
+        { permissions: read.permissions },
+        ADMIN,
+      );
+      expect(prisma.perms.map((p) => p.permission)).toEqual(['asset:read']);
+      expect(prisma.audit).toContainEqual(
+        expect.objectContaining({
+          action: 'PERMISSION_CHANGE',
+          detail: { added: [], removed: ['user:manage'] },
+        }),
+      );
+    });
+  });
+
   describe('cleanPermissions — INV-SA-3 defensive strip (SEC-011)', () => {
-    it('strips settings:manage from a permission set before persisting', async () => {
+    it('strips settings:manage from a permission set before persisting', () => {
       // Bypass the schema by calling create with a raw payload that includes the ungrantable verb.
       // In production the DTO would reject it; here we confirm the service itself never persists it.
-      const res = await (service as unknown as { cleanPermissions: (p: string[]) => string[] })['cleanPermissions'](
-        ['asset:read', 'settings:manage', 'asset:write'],
-      );
+      const res = (
+        service as unknown as { cleanPermissions: (p: string[]) => string[] }
+      )['cleanPermissions'](['asset:read', 'settings:manage', 'asset:write']);
       expect(res).not.toContain('settings:manage');
       expect(res).toContain('asset:read');
       expect(res).toContain('asset:write');
     });
 
-    it('strips user:manage from a permission set before persisting', async () => {
-      const res = await (service as unknown as { cleanPermissions: (p: string[]) => string[] })['cleanPermissions'](
-        ['user:manage', 'asset:read'],
-      );
+    it('strips user:manage from a permission set before persisting', () => {
+      const res = (
+        service as unknown as { cleanPermissions: (p: string[]) => string[] }
+      )['cleanPermissions'](['user:manage', 'asset:read']);
       expect(res).not.toContain('user:manage');
       expect(res).toContain('asset:read');
     });
 
-    it('returns a clean set unchanged (no false-positive strips)', async () => {
+    it('returns a clean set unchanged (no false-positive strips)', () => {
       const input = ['asset:read', 'asset:write', 'asset:delete'];
-      const res = await (service as unknown as { cleanPermissions: (p: string[]) => string[] })['cleanPermissions'](
-        input,
-      );
+      const res = (
+        service as unknown as { cleanPermissions: (p: string[]) => string[] }
+      )['cleanPermissions'](input);
       expect(res).toContain('asset:read');
       expect(res).toContain('asset:write');
       expect(res).toContain('asset:delete');
