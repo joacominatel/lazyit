@@ -171,6 +171,29 @@ describe("AI status", () => {
     ).toBe(true);
   });
 
+  test("accepts the server-known MCP URLs, and their absence from an older API", () => {
+    const parsed = AiStatusSchema.parse({
+      chat: { available: false },
+      mcp: {
+        available: true,
+        auth: "oauth",
+        endpoint: "https://it.example.com/mcp",
+        marketplaceUrl: "https://it.example.com/api/ai/claude-code/marketplace.json",
+      },
+      configRevision: "r",
+      retentionDays: null,
+    });
+    expect(parsed.mcp.endpoint).toBe("https://it.example.com/mcp");
+    expect(
+      AiStatusSchema.safeParse({
+        chat: { available: false },
+        mcp: { available: false, auth: "personal-token", endpoint: null, marketplaceUrl: null },
+        configRevision: "r",
+        retentionDays: null,
+      }).success,
+    ).toBe(true);
+  });
+
   test("rejects an unknown MCP auth mode", () => {
     expect(
       AiStatusSchema.safeParse({

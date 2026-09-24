@@ -602,12 +602,27 @@ export type AiMcpAuthMode = z.infer<typeof AiMcpAuthModeSchema>;
 /**
  * `GET /ai/status` — per caller, for any authenticated principal (synthesis §4.5). No secrets and no
  * provider credentials. `chat.available` = enabled ∧ provider configured ∧ `ai:use`;
- * `mcp.available` = MCP switch ∧ `ai:connect`. `configRevision` changes whenever the settings change,
+ * `mcp.available` = MCP switch ∧ `ai:connect`; `mcp.endpoint` / `mcp.marketplaceUrl` are the server-known
+ * URLs from the pinned origin. `configRevision` changes whenever the settings change,
  * so other shells notice an enable or disable. The web treats a 404 or any error as "off".
  */
 export const AiStatusSchema = z.object({
   chat: z.object({ available: z.boolean() }),
-  mcp: z.object({ available: z.boolean(), auth: AiMcpAuthModeSchema }),
+  mcp: z.object({
+    available: z.boolean(),
+    auth: AiMcpAuthModeSchema,
+    /**
+     * `<WEB_ORIGIN>/mcp` from the server's PINNED origin (never the request `Host`); null when no origin is
+     * pinned (a `lan` instance without `WEB_ORIGIN` — fall back to the page origin) or in shim mode. Present
+     * whether or not MCP is on. Optional only for tolerance of an older API.
+     */
+    endpoint: z.string().nullable().optional(),
+    /**
+     * The public Claude Code URL marketplace (`claude plugin marketplace add <this>`), only while it is
+     * served: MCP on and a pinned HTTPS origin. Null otherwise. Optional only for an older API.
+     */
+    marketplaceUrl: z.string().nullable().optional(),
+  }),
   configRevision: z.string(),
   retentionDays: int4({ min: 0 }).nullable(),
 });
