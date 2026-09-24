@@ -40,7 +40,7 @@
       "body": "It is served over HTTPS, so AI apps sign in through your browser: lazyit shows a consent screen where you choose what the app may do. There is no token to copy.",
       "cloudConnectors": "Cloud connectors (claude.ai, ChatGPT) connect from the provider's servers, so they work only if this instance is reachable from the internet over HTTPS. Desktop and command-line apps (Claude Code, Cursor, VS Code) only need to reach it from your computer.",
       "internalCa": "If this instance's certificate comes from an internal certificate authority, tell Claude Code (and other Node.js-based apps) to trust it before starting them: <code>export NODE_EXTRA_CA_CERTS=/path/to/internal-ca.pem</code>.",
-      "viewingOverHttp": "You opened this page over plain HTTP. AI apps must use this instance's HTTPS address — the commands below use the address you're on, so open this page over HTTPS before copying them."
+      "viewingOverHttp": "You opened this page over plain HTTP. AI apps must use this instance's HTTPS address."
     },
     "personalToken": {
       "title": "This instance uses personal tokens",
@@ -68,7 +68,7 @@
         "titleAlternative": "Or install from a download",
         "stepDownload": "Download the plugin. It is built for this instance and contains no token.",
         "download": "Download plugin (.zip)",
-        "stepUnzip": "Unzip it into your Claude Code skills folder:",
+        "stepUnzip": "Unzip it into your Claude Code skills folder. Claude Code loads it as the plugin lazyit@skills-dir in your next session:",
         "copyUnzip": "Copy the unzip commands",
         "tryOnce": "To try it for one session without installing, run <code>{command}</code> instead.",
         "stepSignInOauth": "Start Claude Code and run <code>/mcp</code> to sign in.",
@@ -110,7 +110,9 @@
         "hintToken": "Point the client at the MCP server address above and have it send this header with every request:",
         "copyHeader": "Copy the authorization header"
       }
-    }
+    },
+    "originMismatch": "You opened lazyit at <code>{page}</code>, but this instance is configured as <code>{server}</code>. AI apps sign in against the configured address, so the commands below use <code>{server}</code>. Check that your computer can reach that address before using them — or open lazyit at <code>{server}</code> to get copy-ready commands.",
+    "originUnverified": "Couldn't confirm this instance's configured address, so the commands below use the address you're on (<code>{page}</code>) and may not work. Review them before use, or ask an administrator for the instance's HTTPS address."
   },
   "personalTokens": {
     "create": {
@@ -231,7 +233,7 @@
     "allow": "Allow access",
     "deny": "Deny",
     "notYou": "Not you?",
-    "signOut": "Sign out",
+    "signOut": "Sign in with another account",
     "confirmUnverified": {
       "title": "Allow an unverified app?",
       "body": "lazyit can't confirm that “{name}” is what it says. If you allow it, it can act as you and lazyit sends you to {host}. Only continue if you started this connection yourself.",

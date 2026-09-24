@@ -40,7 +40,7 @@
       "body": "Se sirve por HTTPS, así que las apps de IA inician sesión desde tu navegador: lazyit muestra una pantalla de consentimiento donde eliges qué puede hacer la app. No hay ningún token que copiar.",
       "cloudConnectors": "Los conectores en la nube (claude.ai, ChatGPT) se conectan desde los servidores del proveedor, así que solo funcionan si esta instancia es accesible desde internet por HTTPS. Las apps de escritorio y de línea de comandos (Claude Code, Cursor, VS Code) solo necesitan llegar a ella desde tu equipo.",
       "internalCa": "Si el certificado de esta instancia lo emite una autoridad de certificación interna, indica a Claude Code (y a otras apps basadas en Node.js) que confíe en ella antes de iniciarlas: <code>export NODE_EXTRA_CA_CERTS=/ruta/a/ca-interna.pem</code>.",
-      "viewingOverHttp": "Abriste esta página por HTTP sin cifrar. Las apps de IA deben usar la dirección HTTPS de esta instancia; los comandos de abajo usan la dirección en la que estás, así que abre esta página por HTTPS antes de copiarlos."
+      "viewingOverHttp": "Abriste esta página por HTTP sin cifrar. Las apps de IA deben usar la dirección HTTPS de esta instancia."
     },
     "personalToken": {
       "title": "Esta instancia usa tokens personales",
@@ -68,7 +68,7 @@
         "titleAlternative": "O instalar desde una descarga",
         "stepDownload": "Descarga el plugin. Está generado para esta instancia y no contiene ningún token.",
         "download": "Descargar plugin (.zip)",
-        "stepUnzip": "Descomprímelo en tu carpeta de skills de Claude Code:",
+        "stepUnzip": "Descomprímelo en tu carpeta de skills de Claude Code. Claude Code lo carga como el plugin lazyit@skills-dir en tu próxima sesión:",
         "copyUnzip": "Copiar los comandos para descomprimir",
         "tryOnce": "Para probarlo en una sola sesión sin instalarlo, ejecuta <code>{command}</code> en su lugar.",
         "stepSignInOauth": "Inicia Claude Code y ejecuta <code>/mcp</code> para iniciar sesión.",
@@ -110,7 +110,9 @@
         "hintToken": "Apunta el cliente a la dirección del servidor MCP de arriba y haz que envíe esta cabecera en cada solicitud:",
         "copyHeader": "Copiar la cabecera de autorización"
       }
-    }
+    },
+    "originMismatch": "Abriste lazyit en <code>{page}</code>, pero esta instancia está configurada como <code>{server}</code>. Las apps de IA inician sesión contra la dirección configurada, así que los comandos de abajo usan <code>{server}</code>. Comprueba que tu equipo llega a esa dirección antes de usarlos, o abre lazyit en <code>{server}</code> para obtener comandos listos para copiar.",
+    "originUnverified": "No se pudo confirmar la dirección configurada de esta instancia, así que los comandos de abajo usan la dirección en la que estás (<code>{page}</code>) y podrían no funcionar. Revísalos antes de usarlos o pide a un administrador la dirección HTTPS de la instancia."
   },
   "personalTokens": {
     "create": {
@@ -231,7 +233,7 @@
     "allow": "Permitir acceso",
     "deny": "Denegar",
     "notYou": "¿No eres tú?",
-    "signOut": "Cerrar sesión",
+    "signOut": "Inicia sesión con otra cuenta",
     "confirmUnverified": {
       "title": "¿Permitir una app sin verificar?",
       "body": "lazyit no puede confirmar que «{name}» sea lo que dice. Si la permites, podrá actuar en tu nombre y lazyit te enviará a {host}. Continúa solo si iniciaste esta conexión tú mismo.",
