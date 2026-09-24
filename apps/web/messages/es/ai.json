@@ -347,7 +347,16 @@
     "workflow_set_enabled": "Activar o desactivar un flujo",
     "workflow_update": "Actualizar un flujo",
     "kb_folder_create": "Crear una carpeta de la base de conocimiento",
-    "kb_folder_rename": "Renombrar una carpeta de la base de conocimiento"
+    "kb_folder_rename": "Renombrar una carpeta de la base de conocimiento",
+    "category_create": "Crear una categoría",
+    "category_update": "Actualizar una categoría",
+    "category_archive": "Archivar una categoría",
+    "asset_model_update": "Actualizar un modelo de activo",
+    "asset_model_archive": "Archivar un modelo de activo",
+    "asset_model_restore": "Restaurar un modelo de activo",
+    "location_update": "Actualizar una ubicación",
+    "location_archive": "Archivar una ubicación",
+    "location_restore": "Restaurar una ubicación"
   },
   "fields": {
     "accessLevel": "Nivel de acceso",
@@ -397,6 +406,7 @@
     "model": "Modelo",
     "name": "Nombre",
     "notes": "Notas",
+    "order": "Orden",
     "outboundHost": "Host de salida",
     "outboundHosts": "Hosts de salida",
     "owners": "Responsables",
@@ -424,6 +434,7 @@
     "sku": "SKU",
     "slug": "Slug de la URL",
     "specs": "Atributos",
+    "specsSchema": "Diccionario de atributos",
     "status": "Estado",
     "steps": "Pasos",
     "task": "Tarea",
