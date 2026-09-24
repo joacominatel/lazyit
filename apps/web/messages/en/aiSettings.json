@@ -152,7 +152,8 @@
       "DISCLOSURE_REQUIRED": "Acknowledge what leaves this server before turning the assistant on.",
       "PROVIDER_NOT_CONFIGURED": "Choose a provider and a model (and a base URL for an OpenAI-compatible server) before turning the assistant on.",
       "API_KEY_REQUIRED": "This provider needs an API key before the assistant can be turned on.",
-      "CONNECTION_TEST_FAILED": "The connection test failed, so nothing was changed. Fix the problem below and try again."
+      "CONNECTION_TEST_FAILED": "The connection test failed, so nothing was changed. Fix the problem below and try again.",
+      "API_KEY_REQUIRED_DESTINATION_CHANGED": "Changing the provider or the base URL discarded the stored key, so the assistant cannot be turned on without the key for the new destination. Type it and save again."
     },
     "secretKeyMissing": "The API has no usable AI_SECRET_KEY, so the key cannot be stored and a keyed provider cannot be turned on. Ask the operator to set a 32-byte key (openssl rand -hex 32) and restart the API.",
     "shimMode": "This instance runs with authentication disabled (AUTH_MODE=shim), where the AI assistant is never available.",
@@ -267,7 +268,8 @@
     "endpoint": {
       "label": "MCP endpoint",
       "copy": "Copy the MCP endpoint",
-      "description": "The address to give an MCP client that is set up by hand."
+      "description": "The address to give an MCP client that is set up by hand.",
+      "pageFallback": "The API has no pinned public address (WEB_ORIGIN), so this is the address of the page you are on. Clients on other machines may need the instance's LAN address instead."
     },
     "install": {
       "link": "Install in Claude Code",
@@ -276,10 +278,9 @@
     "allowlist": {
       "title": "Allowed clients",
       "description": "Only these clients can connect. A client is recognized by its client-metadata URL or by the exact address it sends people back to after sign-in — never by the name it gives itself.",
-      "defaults": "lazyit already allows the well-known clients: Claude Code, OpenAI Codex, OpenCode, Gemini CLI, Cursor, VS Code / GitHub Copilot, claude.ai and ChatGPT. Add any other client below.",
       "anyHttps": {
-        "label": "Also allow any client with an https:// callback",
-        "description": "Useful for web-based agents not listed here. Clients using a loopback or app-scheme callback still need an entry. The consent page warns people when a client was allowed this way."
+        "label": "Accept any client with an https:// callback (on by default)",
+        "description": "Any MCP client whose sign-in callback is an https:// address may ask a person for access, even if it is not listed here. Nothing is granted by this alone: the person still sees the consent page, which shows the client's callback host and warns that the client was not listed. Clients with a loopback or app-scheme callback (such as cursor://) still need an entry. Turn this off to accept only the clients listed below."
       },
       "added": {
         "title": "Clients you added",
@@ -296,8 +297,8 @@
         "private-use": "App-scheme callback"
       },
       "removed": {
-        "title": "Built-in clients you removed",
-        "description": "These well-known clients can no longer connect. Restore one to allow it again.",
+        "title": "Removed clients no longer in the built-in list",
+        "description": "You removed these built-in clients, but this version of lazyit no longer ships them. Restoring only clears the removal.",
         "restore": "Restore"
       },
       "add": {
@@ -323,6 +324,18 @@
         "httpNotLoopback": "Plain http:// is only allowed on 127.0.0.1, localhost or [::1]. Use https:// for any other host.",
         "browserScheme": "This kind of address can never be a callback.",
         "redirectInvalid": "Use https://, a loopback http:// address, or an app scheme in reverse-domain form (com.example.app:) or a known editor scheme (cursor, vscode, vscode-insiders, windsurf)."
+      },
+      "notSeeded": "Pi, Windsurf and Zed are not in the built-in list because their identifiers could not be verified — add them below if your team uses them.",
+      "builtIn": {
+        "title": "Built-in clients",
+        "description": "The well-known clients lazyit allows out of the box. Remove one to stop it connecting (it is then only accepted if “any https:// client” admits it); restore it at any time.",
+        "remove": "Remove {label}",
+        "restore": "Restore",
+        "restoreAria": "Restore {label}"
+      },
+      "verification": {
+        "verified": "Verified",
+        "vendor-docs": "Vendor docs"
       }
     }
   },

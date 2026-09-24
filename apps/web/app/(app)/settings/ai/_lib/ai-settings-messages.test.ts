@@ -3,12 +3,17 @@ import {
   AI_EFFORT_LEVELS,
   AI_PROVIDER_KINDS,
   AI_SERVICE_ACCOUNT_ACCESS_LEVELS,
+  MCP_CLIENT_ALLOWLIST_VERIFICATIONS,
 } from "@lazyit/shared";
 import enAi from "@/messages/en/aiSettings.json";
 import esAi from "@/messages/es/aiSettings.json";
 import enSettings from "@/messages/en/settings.json";
 import esSettings from "@/messages/es/settings.json";
-import { AI_TEST_ERROR_CODES, AI_WIZARD_STEPS } from "./ai-settings-form";
+import {
+  AI_SETTINGS_ERROR_KEYS,
+  AI_TEST_ERROR_CODES,
+  AI_WIZARD_STEPS,
+} from "./ai-settings-form";
 
 /**
  * A covering set (frontend.md §8.1): every code, kind and problem the page can render has copy in BOTH
@@ -26,34 +31,7 @@ function at(catalog: unknown, path: string): unknown {
     );
 }
 
-const ERROR_KEYS = [
-  "network",
-  "gate.DISCLOSURE_REQUIRED",
-  "gate.PROVIDER_NOT_CONFIGURED",
-  "gate.API_KEY_REQUIRED",
-  "gate.CONNECTION_TEST_FAILED",
-  "secretKeyMissing",
-  "shimMode",
-  "concurrentSave",
-  "conflict",
-  "baseUrl.credentials",
-  "baseUrl.queryFragment",
-  "baseUrl.scheme",
-  "baseUrl.httpNeedsPrivate",
-  "baseUrl.httpPublic",
-  "baseUrl.loopback",
-  "baseUrl.unreachable",
-  "baseUrl.privateNeedsOption",
-  "baseUrl.invalid",
-  "privateNetworkProviderOnly",
-  "providerOptions",
-  "providerAndModelFirst",
-  "validation",
-  "badRequest",
-  "forbidden",
-  "notFound",
-  "generic",
-];
+const ERROR_KEYS = AI_SETTINGS_ERROR_KEYS;
 
 const AI_PATHS = [
   ...ERROR_KEYS.map((key) => `errors.${key}`),
@@ -80,6 +58,9 @@ const AI_PATHS = [
     "redirectInvalid",
   ].map((problem) => `mcp.allowlist.errors.${problem}`),
   ...["https", "loopback", "private-use"].map((kind) => `mcp.allowlist.redirectKinds.${kind}`),
+  ...MCP_CLIENT_ALLOWLIST_VERIFICATIONS.map(
+    (verification) => `mcp.allowlist.verification.${verification}`,
+  ),
 ];
 
 const SETTINGS_PATHS = [

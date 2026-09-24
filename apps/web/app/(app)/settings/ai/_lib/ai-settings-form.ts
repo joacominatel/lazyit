@@ -8,9 +8,11 @@ import {
   type AiProviderKind,
   type AiProviderOptions,
   type AiSettings,
+  type AiSettingsErrorCode,
   classifyMcpRedirectUri,
   McpClientAllowlistEntryIdSchema,
   McpClientAllowlistEntrySchema,
+  type McpClientAllowlistDefault,
   type McpClientAllowlistEntry,
   type UpdateAiSettings,
 } from "@lazyit/shared";
@@ -193,16 +195,52 @@ export interface AiSettingsErrorInfo {
   requestId?: string;
 }
 
-const ENABLE_GATE_CODES = new Set([
-  "DISCLOSURE_REQUIRED",
-  "PROVIDER_NOT_CONFIGURED",
-  "API_KEY_REQUIRED",
-  "CONNECTION_TEST_FAILED",
-]);
+/**
+ * The stable `code` of a `/config/ai` refusal (`AI_SETTINGS_ERROR_CODES`, provider-and-runtime.md §9.1)
+ * → its key under `aiSettings.errors`. Typed over the whole shared list, so a code added there fails the
+ * build here until it has copy. `PROVIDER_NOT_CONFIGURED` depends on the status (400: a test without a
+ * provider or model; 422: the enable gate) and is resolved in {@link describeAiSettingsError}.
+ */
+const CODE_KEYS: Record<Exclude<AiSettingsErrorCode, "PROVIDER_NOT_CONFIGURED">, string> = {
+  AI_SETTINGS_CONCURRENT_SAVE: "concurrentSave",
+  AI_SECRET_KEY_MISSING: "secretKeyMissing",
+  AI_SHIM_MODE: "shimMode",
+  BASE_URL_INVALID: "baseUrl.invalid",
+  BASE_URL_CREDENTIALS: "baseUrl.credentials",
+  BASE_URL_QUERY_OR_FRAGMENT: "baseUrl.queryFragment",
+  BASE_URL_SCHEME: "baseUrl.scheme",
+  BASE_URL_HTTP_NOT_ALLOWED: "baseUrl.httpNeedsPrivate",
+  BASE_URL_LOOPBACK: "baseUrl.loopback",
+  BASE_URL_HTTP_PUBLIC: "baseUrl.httpPublic",
+  BASE_URL_UNREACHABLE_RANGE: "baseUrl.unreachable",
+  BASE_URL_PRIVATE_NOT_ALLOWED: "baseUrl.privateNeedsOption",
+  PRIVATE_NETWORK_PROVIDER_MISMATCH: "privateNetworkProviderOnly",
+  PROVIDER_OPTIONS_UNSUPPORTED: "providerOptions",
+  DISCLOSURE_REQUIRED: "gate.DISCLOSURE_REQUIRED",
+  API_KEY_REQUIRED: "gate.API_KEY_REQUIRED",
+  CONNECTION_TEST_FAILED: "gate.CONNECTION_TEST_FAILED",
+};
+
+/** Every `aiSettings.errors` key {@link describeAiSettingsError} can return (the covering-set test). */
+export const AI_SETTINGS_ERROR_KEYS: readonly string[] = [
+  ...new Set([
+    ...Object.values(CODE_KEYS),
+    "gate.PROVIDER_NOT_CONFIGURED",
+    "gate.API_KEY_REQUIRED_DESTINATION_CHANGED",
+    "providerAndModelFirst",
+    "network",
+    "conflict",
+    "validation",
+    "badRequest",
+    "forbidden",
+    "notFound",
+    "generic",
+  ]),
+];
 
 /**
- * The 409s of `/config/ai` carry no code (plain `ConflictException`s), so they are told apart by their
- * fixed server sentences. An unrecognized 409 still gets a generic "conflict" with the server's text.
+ * FALLBACK for a code-less body only (an API older than the stable codes, or the zod pipe's 400): the
+ * 409s and 400s told apart by their fixed server sentences.
  */
 const CONFLICT_PATTERNS: readonly [RegExp, string][] = [
   [/AI_SECRET_KEY/, "secretKeyMissing"],
@@ -210,7 +248,6 @@ const CONFLICT_PATTERNS: readonly [RegExp, string][] = [
   [/changed by someone else|reload them and save again/i, "concurrentSave"],
 ];
 
-/** The 400s of `/config/ai` beyond schema validation — the base-URL and shape rules. */
 const BAD_REQUEST_PATTERNS: readonly [RegExp, string][] = [
   [/may not carry credentials/i, "baseUrl.credentials"],
   [/query string or a fragment/i, "baseUrl.queryFragment"],
@@ -232,10 +269,22 @@ function bodyOf(error: ApiError): Record<string, unknown> {
     : {};
 }
 
+/** The key for a stable `code`, or null when this build does not know it. */
+function keyForCode(code: string, status: number, reason: unknown): string | null {
+  if (code === "PROVIDER_NOT_CONFIGURED") {
+    return status === 422 ? "gate.PROVIDER_NOT_CONFIGURED" : "providerAndModelFirst";
+  }
+  if (code === "API_KEY_REQUIRED" && reason === "DESTINATION_CHANGED") {
+    return "gate.API_KEY_REQUIRED_DESTINATION_CHANGED";
+  }
+  return Object.hasOwn(CODE_KEYS, code) ? CODE_KEYS[code as keyof typeof CODE_KEYS] : null;
+}
+
 /**
- * Explain a failed `/config/ai` call: the enable gate's 422 codes (with the failed test), every 409
- * (missing `AI_SECRET_KEY`, shim mode, a concurrent save), the base-URL and shape 400s, schema 400s, 403
- * and 404. Anything else is a generic failure that keeps the request id.
+ * Explain a failed `/config/ai` call. The stable `code` decides (`AI_SETTINGS_ERROR_CODES`); the failed
+ * connection test rides along on `CONNECTION_TEST_FAILED`. An unknown code (a newer API) is a generic
+ * refusal showing the server's message. A code-less body falls back to the sentence matching, then to
+ * schema 400s, 403, 404 and a generic failure — the request id is kept throughout.
  */
 export function describeAiSettingsError(error: unknown): AiSettingsErrorInfo {
   if (!(error instanceof ApiError)) return { key: "network" };
@@ -244,13 +293,12 @@ export function describeAiSettingsError(error: unknown): AiSettingsErrorInfo {
   const serverMessage =
     typeof body.message === "string" ? body.message : error.message;
 
-  if (error.status === 422 && typeof body.code === "string" && ENABLE_GATE_CODES.has(body.code)) {
-    const test = AiConnectionTestResultSchema.safeParse(body.test);
-    return {
-      key: `gate.${body.code}`,
-      test: test.success ? test.data : undefined,
-      requestId,
-    };
+  if (typeof body.code === "string") {
+    const key = keyForCode(body.code, error.status, body.reason);
+    if (key) {
+      const test = AiConnectionTestResultSchema.safeParse(body.test);
+      return { key, test: test.success ? test.data : undefined, requestId };
+    }
   }
   if (error.status === 409) {
     const match = CONFLICT_PATTERNS.find(([pattern]) => pattern.test(serverMessage));
@@ -259,7 +307,10 @@ export function describeAiSettingsError(error: unknown): AiSettingsErrorInfo {
       : { key: "conflict", message: serverMessage, requestId };
   }
   if (error.status === 400) {
-    const match = BAD_REQUEST_PATTERNS.find(([pattern]) => pattern.test(serverMessage));
+    const match =
+      typeof body.code === "string"
+        ? undefined
+        : BAD_REQUEST_PATTERNS.find(([pattern]) => pattern.test(serverMessage));
     if (match) return { key: match[1], requestId };
     if (Array.isArray(body.errors) || Array.isArray(body.issues)) {
       return { key: "validation", requestId };
@@ -290,9 +341,26 @@ export function testErrorKey(code: string | null | undefined): string | null {
 
 /* ─────────────────────────────── MCP ─────────────────────────────── */
 
-/** The MCP endpoint external clients connect to — always the instance's own origin (frontend.md K1). */
+/** `<origin>/mcp` — the page-origin fallback for the MCP endpoint. */
 export function mcpEndpointUrl(origin: string): string {
   return `${origin.replace(/\/+$/, "")}/mcp`;
+}
+
+/**
+ * The MCP endpoint to show. `/ai/status` `mcp.endpoint` is authoritative: it comes from the API's PINNED
+ * public origin (`WEB_ORIGIN`), never from the address this page happens to be open on. Only when the
+ * server has none (no pinned origin — typically a `lan` instance — or an older API, or a failed read) is
+ * the page's own origin shown, marked `page` so the card can say so. `null` while the status loads.
+ */
+export function mcpEndpoint(
+  status: { state: "pending" | "error" | "success"; endpoint?: unknown },
+  origin: string | null,
+): { url: string; source: "server" | "page" } | null {
+  if (status.state === "pending") return null;
+  if (status.state === "success" && typeof status.endpoint === "string" && status.endpoint !== "") {
+    return { url: status.endpoint, source: "server" };
+  }
+  return origin ? { url: mcpEndpointUrl(origin), source: "page" } : null;
 }
 
 /**
@@ -414,6 +482,36 @@ export function allowlistEntryRedirectKind(entry: McpClientAllowlistEntry) {
   return entry.match.kind === "redirect_uri"
     ? classifyMcpRedirectUri(entry.match.pattern)
     : null;
+}
+
+/**
+ * The curated defaults as the editor lists them: each with whether the admin removed it, plus removed
+ * ids this build does not know (a default a newer release dropped or renamed) so they can still be
+ * restored.
+ */
+export function curatedAllowlistView(
+  defaults: readonly McpClientAllowlistDefault[],
+  removedIds: readonly string[],
+): {
+  defaults: { entry: McpClientAllowlistDefault; removed: boolean }[];
+  unknownRemoved: string[];
+} {
+  const removed = new Set(removedIds);
+  const known = new Set(defaults.map((entry) => entry.id));
+  return {
+    defaults: defaults.map((entry) => ({ entry, removed: removed.has(entry.id) })),
+    unknownRemoved: [...removed].filter((id) => !known.has(id)),
+  };
+}
+
+/** The removed-default ids after removing (`true`) or restoring (`false`) one built-in client. */
+export function toggleRemovedDefault(
+  removedIds: readonly string[],
+  id: string,
+  remove: boolean,
+): string[] {
+  const rest = removedIds.filter((removedId) => removedId !== id);
+  return remove ? [...rest, id] : rest;
 }
 
 /* ─────────────────────────────── numbers ─────────────────────────────── */

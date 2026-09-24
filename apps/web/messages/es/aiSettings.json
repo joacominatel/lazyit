@@ -152,7 +152,8 @@
       "DISCLOSURE_REQUIRED": "Acepta qué sale de este servidor antes de activar el asistente.",
       "PROVIDER_NOT_CONFIGURED": "Elige un proveedor y un modelo (y una URL base para un servidor compatible con OpenAI) antes de activar el asistente.",
       "API_KEY_REQUIRED": "Este proveedor necesita una clave de API antes de poder activar el asistente.",
-      "CONNECTION_TEST_FAILED": "La prueba de conexión falló, así que no se cambió nada. Corrige el problema de abajo e inténtalo de nuevo."
+      "CONNECTION_TEST_FAILED": "La prueba de conexión falló, así que no se cambió nada. Corrige el problema de abajo e inténtalo de nuevo.",
+      "API_KEY_REQUIRED_DESTINATION_CHANGED": "Al cambiar el proveedor o la URL base se descartó la clave guardada, así que el asistente no se puede activar sin la clave del nuevo destino. Escríbela y guarda de nuevo."
     },
     "secretKeyMissing": "La API no tiene una AI_SECRET_KEY usable, así que no se puede guardar la clave ni activar un proveedor con clave. Pide al operador que defina una clave de 32 bytes (openssl rand -hex 32) y reinicie la API.",
     "shimMode": "Esta instancia funciona con la autenticación desactivada (AUTH_MODE=shim), y ahí el asistente de IA nunca está disponible.",
@@ -267,7 +268,8 @@
     "endpoint": {
       "label": "Endpoint MCP",
       "copy": "Copiar el endpoint MCP",
-      "description": "La dirección que se le da a un cliente MCP que se configura a mano."
+      "description": "La dirección que se le da a un cliente MCP que se configura a mano.",
+      "pageFallback": "La API no tiene una dirección pública fijada (WEB_ORIGIN), así que esta es la dirección de la página en la que estás. Los clientes en otras máquinas pueden necesitar la dirección de la instancia en la red local."
     },
     "install": {
       "link": "Instalar en Claude Code",
@@ -276,10 +278,9 @@
     "allowlist": {
       "title": "Clientes permitidos",
       "description": "Solo estos clientes pueden conectarse. Un cliente se reconoce por su URL de metadatos de cliente o por la dirección exacta a la que devuelve a la persona después de iniciar sesión — nunca por el nombre que se da a sí mismo.",
-      "defaults": "lazyit ya permite los clientes conocidos: Claude Code, OpenAI Codex, OpenCode, Gemini CLI, Cursor, VS Code / GitHub Copilot, claude.ai y ChatGPT. Agrega cualquier otro cliente abajo.",
       "anyHttps": {
-        "label": "Permitir además cualquier cliente con callback https://",
-        "description": "Útil para agentes web que no están en la lista. Los clientes con callback de loopback o de esquema de aplicación igual necesitan una entrada. La página de consentimiento avisa cuando un cliente se permitió de esta forma."
+        "label": "Aceptar cualquier cliente con callback https:// (activado por defecto)",
+        "description": "Cualquier cliente MCP cuyo callback de inicio de sesión sea una dirección https:// puede pedirle acceso a una persona, aunque no esté en esta lista. Esto por sí solo no otorga nada: la persona igual ve la página de consentimiento, que muestra el host del callback del cliente y avisa que el cliente no estaba en la lista. Los clientes con callback de loopback o de esquema de aplicación (como cursor://) igual necesitan una entrada. Desactívalo para aceptar solo los clientes de la lista."
       },
       "added": {
         "title": "Clientes que agregaste",
@@ -296,8 +297,8 @@
         "private-use": "Callback de esquema de aplicación"
       },
       "removed": {
-        "title": "Clientes incluidos que quitaste",
-        "description": "Estos clientes conocidos ya no pueden conectarse. Restaura uno para volver a permitirlo.",
+        "title": "Clientes quitados que ya no están en la lista incluida",
+        "description": "Quitaste estos clientes incluidos, pero esta versión de lazyit ya no los trae. Restaurar solo borra la eliminación.",
         "restore": "Restaurar"
       },
       "add": {
@@ -323,6 +324,18 @@
         "httpNotLoopback": "http:// sin cifrar solo se permite en 127.0.0.1, localhost o [::1]. Usa https:// para cualquier otro host.",
         "browserScheme": "Este tipo de dirección nunca puede ser un callback.",
         "redirectInvalid": "Usa https://, una dirección http:// de loopback, o un esquema de aplicación en forma de dominio invertido (com.example.app:) o un esquema de editor conocido (cursor, vscode, vscode-insiders, windsurf)."
+      },
+      "notSeeded": "Pi, Windsurf y Zed no están en la lista incluida porque sus identificadores no se pudieron verificar — agrégalos abajo si tu equipo los usa.",
+      "builtIn": {
+        "title": "Clientes incluidos",
+        "description": "Los clientes conocidos que lazyit permite de entrada. Quita uno para que deje de conectarse (entonces solo se acepta si “cualquier cliente https://” lo admite); puedes restaurarlo cuando quieras.",
+        "remove": "Quitar {label}",
+        "restore": "Restaurar",
+        "restoreAria": "Restaurar {label}"
+      },
+      "verification": {
+        "verified": "Verificado",
+        "vendor-docs": "Docs del proveedor"
       }
     }
   },

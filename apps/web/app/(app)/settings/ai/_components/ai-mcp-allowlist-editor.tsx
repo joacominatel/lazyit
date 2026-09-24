@@ -3,6 +3,7 @@
 import { ArrowPathIcon, PlusIcon, TrashIcon, ArrowUturnLeftIcon } from "@heroicons/react/24/outline";
 import {
   type AiSettings,
+  MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS,
   MCP_CLIENT_ALLOWLIST_MAX_ENTRIES,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
@@ -26,6 +27,7 @@ import {
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config-save";
+import { cn } from "@/lib/utils";
 import {
   allowlistEntryRedirectKind,
   allowlistEntryValue,
@@ -33,15 +35,19 @@ import {
   type AllowlistValueProblem,
   buildAllowlistEntry,
   buildUpdate,
+  curatedAllowlistView,
+  toggleRemovedDefault,
 } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
 
 /**
  * The MCP client allowlist (ADR-0097 decision 13): which OAuth clients may connect. lazyit ships a
- * curated list of the well-known clients, and the instance stores only an overlay on it — the admin's
- * own entries and the curated ids the admin removed. A client is recognized by its CIMD client-id URL
+ * curated list of the well-known clients (`MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS`, listed here with how
+ * each identifier was verified), and the instance stores only an overlay on it — the admin's own
+ * entries and the curated ids the admin removed ("remove" writes the id, "restore" drops it). A client is recognized by its CIMD client-id URL
  * or an exact redirect URI, never by the name it declares. Private-use redirect schemes (`cursor://`,
- * `com.example.app:`) are accepted only on an explicit entry; "any HTTPS client" never admits them.
+ * `com.example.app:`) are accepted only on an explicit entry; "any HTTPS client" (on by default, CEO
+ * decision) never admits them.
  *
  * Every change saves immediately (the wholesale `PUT`, the rest re-sent as read).
  */
@@ -84,20 +90,23 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
     );
   }
 
-  function onRestore(defaultId: string) {
+  /** Remove (`true`) or restore (`false`) one built-in client: its id in the removed-defaults overlay. */
+  function setDefaultRemoved(defaultId: string, remove: boolean) {
     save.save(
       buildUpdate(settings, {
-        mcpClientAllowlistRemovedDefaults: removed.filter((removedId) => removedId !== defaultId),
+        mcpClientAllowlistRemovedDefaults: toggleRemovedDefault(removed, defaultId, remove),
       }),
     );
   }
+
+  const curated = curatedAllowlistView(MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS, removed);
 
   return (
     <div className="space-y-4">
       <div className="space-y-1">
         <p className="text-sm font-medium">{t("title")}</p>
         <p className="text-sm text-muted-foreground">{t("description")}</p>
-        <p className="text-sm text-muted-foreground">{t("defaults")}</p>
+        <p className="text-sm text-muted-foreground">{t("notSeeded")}</p>
       </div>
 
       <Field orientation="horizontal" className="rounded-lg border bg-muted/20 p-3">
@@ -116,6 +125,71 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
           }
         />
       </Field>
+
+      <div className="space-y-2">
+        <p className="text-sm font-medium">{t("builtIn.title")}</p>
+        <p className="text-sm text-muted-foreground">{t("builtIn.description")}</p>
+        <ul className="divide-y rounded-lg border">
+          {curated.defaults.map(({ entry, removed: isRemoved }) => {
+            const redirectKind = allowlistEntryRedirectKind(entry);
+            return (
+              <li
+                key={entry.id}
+                className={cn("flex flex-wrap items-center gap-3 p-3", isRemoved && "bg-muted/30")}
+              >
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p
+                    className={cn(
+                      "text-sm font-medium",
+                      isRemoved && "text-muted-foreground line-through",
+                    )}
+                  >
+                    {entry.label}
+                  </p>
+                  <p className="font-mono text-xs break-all text-muted-foreground">
+                    {allowlistEntryValue(entry)}
+                  </p>
+                </div>
+                <StatusBadge
+                  tone={entry.verification === "verified" ? "success" : "neutral"}
+                  title={entry.source}
+                >
+                  {t(`verification.${entry.verification}`)}
+                </StatusBadge>
+                <StatusBadge tone="neutral">
+                  {entry.match.kind === "cimd_url"
+                    ? t("kinds.cimd_url")
+                    : t(`redirectKinds.${redirectKind ?? "https"}`)}
+                </StatusBadge>
+                {isRemoved ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setDefaultRemoved(entry.id, false)}
+                    disabled={save.isPending}
+                    aria-label={t("builtIn.restoreAria", { label: entry.label })}
+                  >
+                    <ArrowUturnLeftIcon />
+                    {t("builtIn.restore")}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setDefaultRemoved(entry.id, true)}
+                    disabled={save.isPending}
+                    aria-label={t("builtIn.remove", { label: entry.label })}
+                  >
+                    <TrashIcon />
+                  </Button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
 
       <div className="space-y-2">
         <p className="text-sm font-medium">{t("added.title")}</p>
@@ -155,19 +229,19 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
         )}
       </div>
 
-      {removed.length > 0 ? (
+      {curated.unknownRemoved.length > 0 ? (
         <div className="space-y-2">
           <p className="text-sm font-medium">{t("removed.title")}</p>
           <p className="text-sm text-muted-foreground">{t("removed.description")}</p>
           <ul className="divide-y rounded-lg border">
-            {removed.map((defaultId) => (
+            {curated.unknownRemoved.map((defaultId) => (
               <li key={defaultId} className="flex items-center gap-3 p-3">
                 <code className="flex-1 font-mono text-xs">{defaultId}</code>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => onRestore(defaultId)}
+                  onClick={() => setDefaultRemoved(defaultId, false)}
                   disabled={save.isPending}
                 >
                   <ArrowUturnLeftIcon />

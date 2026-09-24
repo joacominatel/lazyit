@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   AI_SETTINGS_DEFAULTS,
+  AI_SETTINGS_ERROR_CODES,
+  MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS,
   type AiSettings,
   UpdateAiSettingsSchema,
 } from "@lazyit/shared";
@@ -11,6 +13,7 @@ import {
   baseUrlProblem,
   buildAllowlistEntry,
   buildUpdate,
+  curatedAllowlistView,
   describeAiSettingsError,
   draftFromSettings,
   draftToPatch,
@@ -19,11 +22,13 @@ import {
   isDestinationChange,
   keyFieldState,
   mcpConnectionMode,
+  mcpEndpoint,
   mcpEndpointUrl,
   parsePositiveInt,
   parseTemperature,
   settingsToUpdate,
   switchProvider,
+  toggleRemovedDefault,
   testErrorKey,
 } from "./ai-settings-form";
 
@@ -165,7 +170,63 @@ describe("initialWizardStep", () => {
   });
 });
 
-describe("describeAiSettingsError", () => {
+describe("describeAiSettingsError — stable codes", () => {
+  const statusOf = (code: string) =>
+    ["AI_SETTINGS_CONCURRENT_SAVE", "AI_SECRET_KEY_MISSING", "AI_SHIM_MODE"].includes(code)
+      ? 409
+      : ["DISCLOSURE_REQUIRED", "API_KEY_REQUIRED", "CONNECTION_TEST_FAILED"].includes(code)
+        ? 422
+        : 400;
+
+  test("every shared code maps to its own copy, never to a generic fallback", () => {
+    for (const code of AI_SETTINGS_ERROR_CODES) {
+      const key = describeAiSettingsError(
+        apiError(statusOf(code), { code, message: "server text" }),
+      ).key;
+      expect({ code, generic: ["conflict", "badRequest", "generic"].includes(key) }).toEqual({
+        code,
+        generic: false,
+      });
+    }
+  });
+
+  test("the code decides, not the sentence", () => {
+    expect(
+      describeAiSettingsError(
+        apiError(409, { code: "AI_SETTINGS_CONCURRENT_SAVE", message: "anything at all" }),
+      ).key,
+    ).toBe("concurrentSave");
+    expect(
+      describeAiSettingsError(apiError(400, { code: "BASE_URL_HTTP_PUBLIC", message: "x" })).key,
+    ).toBe("baseUrl.httpPublic");
+  });
+
+  test("PROVIDER_NOT_CONFIGURED depends on the status", () => {
+    expect(
+      describeAiSettingsError(apiError(400, { code: "PROVIDER_NOT_CONFIGURED", message: "x" })).key,
+    ).toBe("providerAndModelFirst");
+    expect(
+      describeAiSettingsError(apiError(422, { code: "PROVIDER_NOT_CONFIGURED", message: "x" })).key,
+    ).toBe("gate.PROVIDER_NOT_CONFIGURED");
+  });
+
+  test("API_KEY_REQUIRED explains a destination change", () => {
+    expect(
+      describeAiSettingsError(
+        apiError(422, { code: "API_KEY_REQUIRED", message: "x", reason: "DESTINATION_CHANGED" }),
+      ).key,
+    ).toBe("gate.API_KEY_REQUIRED_DESTINATION_CHANGED");
+  });
+
+  test("an unknown code is a generic refusal quoting the server", () => {
+    const info = describeAiSettingsError(
+      apiError(400, { code: "SOMETHING_NEWER", message: "Newer rule" }),
+    );
+    expect(info).toMatchObject({ key: "badRequest", message: "Newer rule" });
+  });
+});
+
+describe("describeAiSettingsError — code-less fallback", () => {
   test("maps every enable-gate 422 code and keeps the failed test", () => {
     for (const code of [
       "DISCLOSURE_REQUIRED",
@@ -261,6 +322,22 @@ describe("testErrorKey", () => {
 });
 
 describe("MCP", () => {
+  test("the endpoint comes from the server's pinned origin; the page origin is only the fallback", () => {
+    expect(mcpEndpoint({ state: "pending" }, "http://10.0.0.4")).toBeNull();
+    expect(
+      mcpEndpoint({ state: "success", endpoint: "https://it.acme.io/mcp" }, "http://10.0.0.4"),
+    ).toEqual({ url: "https://it.acme.io/mcp", source: "server" });
+    expect(mcpEndpoint({ state: "success", endpoint: null }, "http://10.0.0.4")).toEqual({
+      url: "http://10.0.0.4/mcp",
+      source: "page",
+    });
+    expect(mcpEndpoint({ state: "error" }, "http://10.0.0.4")).toEqual({
+      url: "http://10.0.0.4/mcp",
+      source: "page",
+    });
+    expect(mcpEndpoint({ state: "error" }, null)).toBeNull();
+  });
+
   test("the endpoint is the instance origin + /mcp", () => {
     expect(mcpEndpointUrl("https://lazyit.acme.io")).toBe("https://lazyit.acme.io/mcp");
     expect(mcpEndpointUrl("http://10.0.0.4/")).toBe("http://10.0.0.4/mcp");
@@ -434,5 +511,33 @@ describe("the connection draft", () => {
     expect(parseTemperature("0.7")).toBe(0.7);
     expect(Number.isNaN(parseTemperature("3"))).toBe(true);
     expect(Number.isNaN(parseTemperature("abc"))).toBe(true);
+  });
+});
+
+describe("the curated defaults", () => {
+  test("each default is listed with its removed state; unknown removed ids stay restorable", () => {
+    const first = MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS[0]!;
+    const view = curatedAllowlistView(MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS, [
+      first.id,
+      "gone-default",
+    ]);
+    expect(view.defaults).toHaveLength(MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS.length);
+    expect(view.defaults[0]).toEqual({ entry: first, removed: true });
+    expect(view.defaults.filter((item) => item.removed)).toHaveLength(1);
+    expect(view.unknownRemoved).toEqual(["gone-default"]);
+  });
+
+  test("remove adds the id once; restore drops it", () => {
+    expect(toggleRemovedDefault(["a"], "b", true)).toEqual(["a", "b"]);
+    expect(toggleRemovedDefault(["a", "b"], "b", true)).toEqual(["a", "b"]);
+    expect(toggleRemovedDefault(["a", "b"], "a", false)).toEqual(["b"]);
+  });
+
+  test("a re-save carrying a removed default passes the shared PUT schema", () => {
+    const id = MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS[0]!.id;
+    const body = buildUpdate(BASE, {
+      mcpClientAllowlistRemovedDefaults: toggleRemovedDefault([], id, true),
+    });
+    expect(UpdateAiSettingsSchema.safeParse(body).success).toBe(true);
   });
 });

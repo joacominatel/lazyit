@@ -29,7 +29,7 @@ import { useAiStatus } from "@/lib/api/hooks/use-ai-status";
 import {
   buildUpdate,
   mcpConnectionMode,
-  mcpEndpointUrl,
+  mcpEndpoint,
 } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
 import { AiMcpAllowlistEditor } from "./ai-mcp-allowlist-editor";
@@ -52,7 +52,9 @@ function useLocationPart(part: "origin" | "protocol"): string | null {
  * words: OAuth sign-in on an HTTPS instance; personal tokens on a plain-HTTP `lan` instance, where OAuth
  * cannot work. It also names the two traps operators hit: an internal CA that Claude Code (Node.js) does
  * not trust, and cloud connectors (claude.ai, ChatGPT) that need a publicly reachable HTTPS instance.
- * The install panel itself lives on the per-user page `/account/ai`.
+ * The endpoint is `/ai/status` `mcp.endpoint` (the API's pinned `WEB_ORIGIN` + `/mcp`); only when the
+ * server has none is the page's own origin shown, with a note. The install panel itself lives on the
+ * per-user page `/account/ai`.
  */
 export function AiMcpSection({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.mcp");
@@ -65,7 +67,10 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
     { state: status.status, auth: status.data?.mcp?.auth },
     protocol,
   );
-  const endpoint = origin ? mcpEndpointUrl(origin) : null;
+  const endpoint = mcpEndpoint(
+    { state: status.status, endpoint: status.data?.mcp?.endpoint },
+    origin,
+  );
 
   return (
     <Card>
@@ -147,10 +152,15 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
         <div className="space-y-2">
           <p className="text-sm font-medium">{t("endpoint.label")}</p>
           <div className="flex items-center gap-2 rounded-lg border px-3 py-2">
-            <code className="min-w-0 flex-1 font-mono text-sm break-all">{endpoint ?? "…"}</code>
-            {endpoint ? <CopyButton value={endpoint} label={t("endpoint.copy")} /> : null}
+            <code className="min-w-0 flex-1 font-mono text-sm break-all">
+              {endpoint?.url ?? "…"}
+            </code>
+            {endpoint ? <CopyButton value={endpoint.url} label={t("endpoint.copy")} /> : null}
           </div>
           <p className="text-sm text-muted-foreground">{t("endpoint.description")}</p>
+          {endpoint?.source === "page" ? (
+            <p className="text-sm text-muted-foreground">{t("endpoint.pageFallback")}</p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-sm">
