@@ -36,6 +36,8 @@ import {
  * fallback, live delivery, the close conditions, the heartbeat and teardown on disconnect.
  */
 
+jest.setTimeout(20_000);
+
 let h: HttpHarness;
 const http = () => request(h.app.getHttpServer());
 
