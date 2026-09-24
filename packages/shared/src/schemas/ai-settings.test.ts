@@ -295,6 +295,37 @@ describe("MCP client allowlist (ADR-0097 decision 13)", () => {
     }
   });
 
+  test("userinfo can never smuggle a host past the loopback check (review F2)", () => {
+    for (const pattern of [
+      "http://localhost:80@evil.com/cb",
+      "http://127.0.0.1:1@evil.com/",
+      "https://localhost:1@evil.com/",
+      "http://[::1]@evil.com/cb",
+      "https://user:pass@example.com/cb",
+      "https://evil.com@good.example/cb",
+      "com.example.app://user@host/cb",
+      "http://localhost\\@evil.com/cb",
+      "https:///no-host",
+      "http://localhost:99999/cb",
+    ]) {
+      expect(classifyMcpRedirectUri(pattern)).toBeNull();
+      expect(McpClientAllowlistMatchSchema.safeParse({ kind: "redirect_uri", pattern }).success).toBe(
+        false,
+      );
+      expect(isMcpRedirectUriAllowed(pattern, [], true)).toBe(false);
+    }
+  });
+
+  test("the host is read from the authority, not the whole string", () => {
+    expect(classifyMcpRedirectUri("http://localhost:8080/cb")).toBe("loopback");
+    expect(classifyMcpRedirectUri("http://LOCALHOST/cb")).toBe("loopback");
+    expect(classifyMcpRedirectUri("https://[::1]:3000/cb")).toBe("loopback");
+    expect(classifyMcpRedirectUri("http://127.0.0.1.evil.com/cb")).toBeNull();
+    expect(classifyMcpRedirectUri("https://127.0.0.1.evil.com/cb")).toBe("https");
+    expect(classifyMcpRedirectUri("https://app.example.com/cb?x=@y")).toBe("https");
+    expect(classifyMcpRedirectUri("https://app.example.com")).toBe("https");
+  });
+
   test("the admin's entries have unique ids and are bounded", () => {
     expect(McpClientAllowlistAddedSchema.safeParse([claudeCode, cursor]).success).toBe(true);
     expect(McpClientAllowlistAddedSchema.safeParse([cursor, cursor]).success).toBe(false);
