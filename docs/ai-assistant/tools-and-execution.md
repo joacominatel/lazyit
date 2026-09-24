@@ -563,6 +563,14 @@ Warning rules for these tools (§9 has the step-up rule):
     versions; re-pointing a connection that carries default headers needs `workflow:secrets` (stricter
     than the route); the enable card is refused when the sample grant's grantee was offboarded;
     other-authored names in summaries and refusals the model reads are `untrusted()`;
+  - re-verification fixes: a re-point also lists the application's runs that can still call the
+    connection — PENDING, RUNNING, AWAITING_INPUT and FAILED (a retry resumes it) — because a run is
+    pinned to a version but reads its connections live; they add their trigger warning and their
+    `updatedAt` joins the STALE anchor (read through the run list, `workflow:read`; without it the card
+    says they could not be checked); any change to a legacy connection whose stored URL carries userinfo
+    is refused until a new, clean `config` fixes it; a `steps.<key>.<field>` token must name a MANUAL
+    step and one of its input fields (only a completed manual task fills `ctx.steps`); a GET / DELETE
+    REST step's `dataMapping` is shown as NOT sent (only POST / PUT / PATCH carry a body);
   - references: a workflow is `{ id }` or `{ application, trigger }` (at most one live workflow per
     application and trigger); a connection, a sample grant and a credential are taken by id only, so the
     stored input is exactly what the card showed.
