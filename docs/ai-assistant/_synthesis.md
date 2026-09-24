@@ -317,6 +317,8 @@ download is always available while MCP is enabled — on `lan` it declares `user
 personal token. On an HTTPS instance with MCP enabled, a public `marketplace.json` (no `version`; the
 archive's `sha256` is the update signal) enables `claude plugin marketplace add … && claude plugin
 install lazyit@lazyit` and auto-update. The MCP server's `instructions` carry the same primer.
+As built (W3-5): the public archive omits the generated tool index, which ships only in the
+authenticated download — [[ai-assistant/mcp-and-oauth|MCP]] §13 records what is public and why.
 
 ### 4.10 Surfaces in the web (R9)
 
@@ -748,9 +750,11 @@ cross-cutting pages and the edits to existing ones.
    re-check when #1313 merges.
 3. **External facts to verify during the build** (not decisions): Claude Code's behavior against an
    `http://` MCP URL; Cursor's redirect URI and CIMD behavior; whether Claude Code honors
-   `NODE_EXTRA_CA_CERTS`; whether `${user_config.*}` substitutes inside MCP `headers`; whether
-   `claude plugin marketplace add` accepts the instance URL; Caddy `encode` with SSE on the pinned image;
-   whether Auth.js keeps a long `callbackUrl` query.
+   `NODE_EXTRA_CA_CERTS`; Caddy `encode` with SSE on the pinned image; whether Auth.js keeps a long
+   `callbackUrl` query. **Verified in W3-5** ([[ai-assistant/mcp-and-oauth|MCP]] §13): `${user_config.*}`
+   substitutes inside MCP `headers` (and in skill markdown — hence a content guard); `claude plugin
+   marketplace add` accepts a direct `https://` URL to the instance's `marketplace.json` (`http://` is
+   refused), and third-party marketplaces do not auto-update until the user enables it.
 
 ---
 
