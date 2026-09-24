@@ -58,7 +58,9 @@ export function AiMessage({ message, tools, navigated, onDecide }: AiMessageProp
 
   return (
     <div className="space-y-2">
-      <span className="sr-only">{t("assistant")}:</span>
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {t("assistant")}
+      </p>
       {message.parts.map((part, index) => {
         const key = `${message.id}-${index}`;
         switch (part.type) {

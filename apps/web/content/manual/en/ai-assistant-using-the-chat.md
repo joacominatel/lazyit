@@ -60,7 +60,7 @@ When the assistant creates or changes something, the chat shows an **Open ‹ite
 it. If you ask it to take you somewhere ("open Ana's laptop"), it opens that page for you — unless you have
 unsaved changes in a form, in which case it shows the **Open** button instead so nothing you typed is lost.
 
-Links the assistant writes to other websites open in a new tab and show the site's address next to them.
+Links the assistant writes to other websites open in a new tab and show their full address next to them — check it before you click.
 Images in answers are never loaded.
 
 ## Your chat history

@@ -61,8 +61,8 @@ Cuando el asistente crea o cambia algo, el chat muestra un botón **Abrir ‹ele
 pedís que te lleve a algún lado ("abrí la laptop de Ana"), te abre esa página — salvo que tengas cambios sin
 guardar en un formulario: en ese caso muestra el botón **Abrir** para que no pierdas lo que escribiste.
 
-Los enlaces a otros sitios que escribe el asistente se abren en una pestaña nueva y muestran la dirección del
-sitio al lado. Las imágenes de las respuestas nunca se cargan.
+Los enlaces a otros sitios que escribe el asistente se abren en una pestaña nueva y muestran su dirección
+completa al lado — revisala antes de hacer clic. Las imágenes de las respuestas nunca se cargan.
 
 ## Tu historial de chats
 

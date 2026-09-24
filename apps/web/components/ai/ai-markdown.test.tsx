@@ -47,12 +47,17 @@ describe("AiMarkdown", () => {
     expect(html).toContain("https://evil.example/?q=secret");
   });
 
-  test("an explicit external link opens safely and shows its host", () => {
-    const html = render("[the docs](https://docs.example.com/page)");
-    expect(html).toContain('href="https://docs.example.com/page"');
+  test("an explicit external link opens safely and shows its FULL destination", () => {
+    const html = render("[the docs](https://docs.example.com/page?leak=secret)");
+    expect(html).toContain('href="https://docs.example.com/page?leak=secret"');
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer nofollow"');
-    expect(html).toContain("(docs.example.com)");
+    expect(html).toContain("(https://docs.example.com/page?leak=secret)");
+  });
+
+  test("a link whose text claims another destination still shows the real one", () => {
+    const html = render("[https://lazyit.example/help](https://evil.example/x?d=1)");
+    expect(html).toContain("(https://evil.example/x?d=1)");
   });
 
   test("in-app links stay in the app; protocol-relative ones are text", () => {
