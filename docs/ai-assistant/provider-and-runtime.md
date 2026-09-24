@@ -812,10 +812,10 @@ recorded in the ADR.
   lock, so it waits for a concurrent submit and then refuses.
 - **Offboarding.** Offboarding soft-deletes the user and bumps `sessionEpoch`; the users module has no
   event or hook, and the soft delete is the durable signal, so the sweeper's offboarded-owner step is
-  the purge — it needs no change to the users module. Today only `User.deletedAt` triggers the
-  offboarding purge; a plain deactivation does not. Whether a directory reconcile's soft offboarding
-  (`isActive = false` + `directoryOffboardedAt`, no `deletedAt`) should also trigger it is pending a
-  decision; until then those conversations follow retention. A run still active at offboarding ends at
+  the purge — it needs no change to the users module. Only `User.deletedAt` triggers the offboarding
+  purge; a plain deactivation does not, and a directory reconcile's soft offboarding
+  (`isActive = false` + `directoryOffboardedAt`, no `deletedAt`) does not either — those conversations
+  follow normal retention (CEO decision 2026-09-24). A run still active at offboarding ends at
   its next step (the epoch bump) or by approval expiry, and its conversation goes on the following pass. `purgeForUser(userId)` is exported for a
   synchronous caller should one be wired. A user restored before the pass keeps their conversations.
   Service-account conversations follow retention only; revoking an SA does not purge them.

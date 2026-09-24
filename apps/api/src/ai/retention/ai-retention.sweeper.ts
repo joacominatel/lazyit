@@ -40,7 +40,8 @@ const SKIPPED: AiRetentionSweepResult = {
  *     with their messages and tool invocations by cascade;
  *  2. conversations of offboarded users (`User.deletedAt` set) — the offboarding purge (§14 item 2). The
  *     soft delete is the durable offboarding signal, so no hook in the users module is needed; the purge
- *     lands within one pass. Only `deletedAt` triggers it today (a directory soft-offboard is pending a decision);
+ *     lands within one pass. Only `deletedAt` triggers it: a deactivation or a directory soft-offboard
+ *     (`isActive = false` + `directoryOffboardedAt`) follows normal retention (CEO decision 2026-09-24);
  *  3. conversation-less MCP invocations older than the window and no longer in flight.
  *
  * A conversation with a QUEUED, RUNNING or AWAITING_APPROVAL run, or an in-flight tool invocation, is skipped and retried next pass. It runs
