@@ -119,6 +119,27 @@ handover note and print a **return act** (with company name and signature lines)
 hand-off. Offboarding is valid even when the person holds nothing — it still stands as a record of
 their departure.
 
+**Consumables they received.** The offboarding sheet also lists the
+[consumables delivered](/help/consumables-stock-movements) to the person, in two groups:
+
+- **Consumables to return** — returnable items still outstanding (a loaner headset, a spare charger),
+  with how many units are still out. These are what to ask back.
+- **Consumables delivered** — items that were handed out for good (toner, cables), listed for the
+  record.
+
+Offboarding **does not move stock** and closes no delivery: record each return from the person's page
+as the item comes back. By default everything listed is printed on the return act. Untick a row to
+leave it off, or turn off **List consumables** under *Printed act* to leave the whole section off; the
+act then prints exactly what you kept. If the person received more than the sheet can list, it says
+how many more there are rather than leaving them out silently.
+
+## Consumables on a person's page
+
+A person's page has a **Consumables delivered** section listing what was delivered to them, newest
+first. **Outstanding only** shows just the returnable items still out, and a date filter narrows it by
+when they were delivered. With permission to record stock movements you can **Deliver consumable** to
+them or record a **Return…** from here. People who cannot view other users do not see this section.
+
 ## Find users by role
 
 The Users list has a **role filter** alongside the status and directory filters: pick **Admin**,

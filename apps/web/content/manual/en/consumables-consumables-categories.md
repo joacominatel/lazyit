@@ -25,6 +25,9 @@ Open **Consumables** and choose **New consumable**. A consumable has:
 - **Unit** — the unit of measure (*units*, *meters*, *boxes*…). It is a plain label that rides along
   with the count everywhere it is shown; it does not change any maths.
 - **Description** and **Notes** — optional free text.
+- **Returnable** — off by default. Turn it on for items you lend rather than hand out for good —
+  loaner adapters, headsets, a spare charger. A delivery of a returnable item stays **outstanding**
+  until it comes back. See [Deliveries and returns](/help/consumables-stock-movements#deliveries-to-a-person-an-asset-or-a-location).
 
 Stock does **not** start as a field you type. A new consumable begins at **0** on hand, and the
 count only ever moves through stock movements — never by editing the consumable. See
