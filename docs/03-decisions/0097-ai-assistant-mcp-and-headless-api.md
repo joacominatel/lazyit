@@ -3,7 +3,7 @@ title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 deciders: [Joaquín Minatel]
 ---
 
@@ -117,6 +117,41 @@ The key forks only; each links its analysis.
    (SA token create/rotate, temporary passwords), the AI's own configuration, and any generic egress
    tool. → [[ai-assistant/tools-and-execution|tools]] §3, §7; [[ai-assistant/_synthesis|synthesis]] §4.1.
 
+   > Amended 2026-09-24 (#1315): the workflow engine is exposed to the AI. The CEO: "La ia con
+   > workflows podemos hacer todo ahora, para mi es el feature mas grande, al menos dentro de chat";
+   > on the outbound-integration warning: "Na que no pida contraseña, que sea flexible, excepto que la
+   > aplicacion sea critica"; on Service Accounts: "Y si las service account en workflows estoy de
+   > acuerdo con tu recomendación".
+   >
+   > - **Operations, every channel** (chat, MCP, headless): reading workflows, their connections, runs
+   >   and manual tasks; retrying a failed run (never with the route's one-shot `overrides`) and
+   >   replaying it on the latest version; resolving manual tasks (submit, skip, fail) through the same
+   >   assignee guard as the route. A Service Account gets exactly these — reads, retry/replay, and the
+   >   manual tasks its assignee guard admits (in practice, unassigned ones).
+   > - **Authoring, chat only in v1**: workflows and their versions, connections (incl. the connection
+   >   test), the dry-run, and enabling or disabling a workflow. Every authoring tool is `elevated` and
+   >   declares `channels: ['CHAT']`. MCP and headless authoring are deferred (#1344). A Service Account
+   >   never authors, connects or enables a workflow.
+   > - **Workflow secrets stay structurally excluded** (INV-AI-5, INV-AI-14): the AI never reads, creates,
+   >   rotates or deletes one. It may report "credential configured: yes/no" from a connection's
+   >   `secretId`, never a value.
+   > - **Two new preview warnings.** `OUTBOUND_INTEGRATION`: the action creates or changes an outbound
+   >   integration or its destination (creates a connection; changes its host, URL or credential
+   >   reference; authors a version on an enabled workflow; enables a workflow). The preview lists every
+   >   outbound host and every mapped field → token. It needs **no step-up** by itself.
+   >   `CRITICAL_APPLICATION`: the action is a workflow write — authoring or operations — or an access
+   >   grant or revoke, on an application with `isCritical = true`. It **requires step-up**: it joins the
+   >   core's closed list (`AI_STEP_UP_WARNINGS`), and core derives step-up from that list on **any**
+   >   write preview, `write` or `elevated` — an access revoke (a `write` tool) on a critical application
+   >   needs the password too. Whether headless may act on a critical application at all is an open
+   >   CEO question; core carries a per-channel refusal seam (`AI_CHANNEL_REFUSED_WARNINGS`, empty).
+   > - **Disabled first.** A workflow the AI creates is created disabled. Enabling it is a separate
+   >   approval whose preview embeds a dry-run against a named sample grant.
+   >
+   > Decision 4's step-up list grows by `CRITICAL_APPLICATION`; nothing else in decisions 1–13 changes.
+   > → [[ai-assistant/tools-and-execution|tools]] §3, §7, §9; [[ai-assistant/security|security]] §6.1,
+   > §6.9.
+
 4. **Interactive writes need approval on a server-built preview.** A chat write becomes a pending
    action with a deterministic before→after preview; only its owner approves, from a human session,
    once, before it expires; authorization and the target's version are re-checked at execute. Elevated
@@ -125,6 +160,11 @@ The key forks only; each links its analysis.
    runs are autonomous within the SA's grants and its per-SA AI access setting (off / read-only /
    read-write, optional mutation cap). → [[ai-assistant/tools-and-execution|tools]] §9;
    [[ai-assistant/security|security]] §6.2, §6.6.
+
+   > Amended 2026-09-24 (#1315): step-up is derived by core from a closed list of preview warnings —
+   > `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY` (CEO, "Opción 2") and
+   > `CRITICAL_APPLICATION` (decision 3 amendment) — on any chat write preview carrying one, whatever
+   > the tool's class. `OUTBOUND_INTEGRATION` is not on it.
 
 5. **Lazyit owns the agent loop; providers sit behind a port.** Each model step is one call through
    `ChatModelPort`, implemented over AI SDK 7 in `ai/providers/` — the only code that imports it. Adding
@@ -269,8 +309,8 @@ The build follows the unified wave plan in [[ai-assistant/_synthesis|synthesis]]
 Click-level UI driving; conversation summarization; approve-all or approve-with-edits; provider
 fallback chains or per-user keys; MCP elicitation, resources, prompts or toolsets; any OIDC surface or
 OAuth over plain HTTP; lazyit as an MCP client; generic "call any endpoint" or file tools; admins reading
-other people's conversations; a per-request headless tool allowlist. →
-[[ai-assistant/_synthesis|synthesis]] §9.2.
+other people's conversations; a per-request headless tool allowlist; workflow authoring over MCP or
+headless (deferred, #1344); any tool over workflow secrets. → [[ai-assistant/_synthesis|synthesis]] §9.2.
 
 ## Adopted by default — CEO to confirm on review
 

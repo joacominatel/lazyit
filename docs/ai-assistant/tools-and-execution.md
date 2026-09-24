@@ -225,10 +225,10 @@ Legend:
 | infra | agent-policy | settings:manage | W | later, `elevated` (instance config) |
 | infra | report | infra:report | W | N/A (agent ingestion) |
 | infra | node secret link | infra:manage + secret:read | W | EXCL (Secret Manager adjacency) |
-| workflow-engine | runs / tasks / definitions (read) | workflow:read | R | v1.1 |
-| workflow-engine | retry / replay | workflow:run | W + ext | v1.1 |
-| workflow-engine | task submit / skip / fail | workflow:task | W | v1.1 |
-| workflow-engine | definitions, connections, dry-run | workflow:manage | W | later, `elevated` (needs design) |
+| workflow-engine | definitions, connections, runs, tasks (read) | workflow:read | R | planned, W2-13 (every channel) |
+| workflow-engine | retry / replay | workflow:run | W + ext | planned, W2-13 (every channel; no `overrides`) |
+| workflow-engine | task submit / skip / fail | workflow:task + assignee | W | planned, W2-13 (every channel; the assignee guard decides) |
+| workflow-engine | definitions, versions, connections (incl. test), dry-run, enable/disable | workflow:manage (+workflow:secrets, CSEC-1) | W | planned, W2-14, `elevated`, **chat only** (MCP/headless deferred, #1344) |
 | workflow-engine | workflow secrets | workflow:secrets | W | EXCL (the secret value would enter model context, INV-AI-5) |
 | imports (Migrator) | multi-step upload / plan / commit | import:run, human-only | W | EXCL v1 (upload; later) |
 | config | `my-permissions` | open | R | v1 `session_context` |
@@ -488,7 +488,47 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 - **v1.1:** batch asset operations, bulk receive, model/location/category update and archive,
   application/consumable/article archive and restore, grant notes/expiry/batch revoke, article
   links/aliases/versions, user clone, attachments list, notifications, security audit logs, infra
-  writes, workflow runs/tasks.
+  writes.
+
+**Workflow engine (planned; [[0097-ai-assistant-mcp-and-headless-api]] decision 3, amended 2026-09-24).**
+The contract landed with W2-12; the tools land with W2-13 and W2-14. Tool names are indicative — the
+units pin them. Both toolsets are declared in the `access` domain.
+
+| # | Tool | Binds (controller.method) | Permission | Class | Channels | Unit |
+| --- | --- | --- | --- | --- | --- | --- |
+| W1 | `workflow_search` | WorkflowsController.findAll | workflow:read | read | all | W2-13 |
+| W2 | `workflow_get` | WorkflowsController.findOne (+ connections facet: host, credential configured yes/no, header values redacted; a server-built outline of the step graph) | workflow:read | read | all | W2-13 |
+| W3 | `workflow_connection_list` (may fold into W2) | WorkflowConnectionsController.findAll / .findOne | workflow:read | read | all | W2-13 |
+| W4 | `workflow_run_list` | WorkflowRunsController.findAll | workflow:read | read | all | W2-13 |
+| W5 | `workflow_run_get` | WorkflowRunsController.findOne | workflow:read | read | all | W2-13 |
+| W6 | `workflow_run_retry` (no `overrides`) | WorkflowRunsController.retry | workflow:run | write, ext | all | W2-13 |
+| W7 | `workflow_run_replay` | WorkflowRunsController.replayLatest | workflow:run | write, ext | all | W2-13 |
+| W8 | `workflow_task_list` / `_get` | ManualTasksController.findAll / .findOne | workflow:read | read | all | W2-13 |
+| W9 | `workflow_task_resolve` (submit\|skip\|fail) | ManualTasksController.submit / .skip / .fail | workflow:task + assignee | write, ext | all (an SA passes the assignee guard only on unassigned tasks) | W2-13 |
+| W10 | `workflow_create` (created disabled) | WorkflowsController.create | workflow:manage | elevated | chat | W2-14 |
+| W11 | `workflow_author_version` | WorkflowsController.authorVersion | workflow:manage | elevated | chat | W2-14 |
+| W12 | `workflow_update` (name, policy, executed-as) | WorkflowsController.update | workflow:manage | elevated | chat | W2-14 |
+| W13 | `workflow_set_enabled` (preview embeds a dry-run) | WorkflowsController.update (+ WorkflowDryRunController.run) | workflow:manage | elevated | chat | W2-14 |
+| W14 | `workflow_archive` | WorkflowsController.remove | workflow:manage | elevated·D | chat | W2-14 |
+| W15 | `workflow_connection_create` / `_update` / `_archive` | WorkflowConnectionsController.create / .update / .remove | workflow:manage (+workflow:secrets, CSEC-1) | elevated | chat | W2-14 |
+| W16 | `workflow_connection_test` | WorkflowConnectionsController.test | workflow:manage | elevated, ext | chat | W2-14 |
+| W17 | `workflow_dry_run` | WorkflowDryRunController.run | workflow:manage | read-like, bound as elevated | chat | W2-14 |
+
+Warning rules for these tools (§9 has the step-up rule):
+- **`OUTBOUND_INTEGRATION`** — creating a connection; changing its host, URL or credential reference;
+  authoring a version on an enabled workflow; enabling a workflow. The preview lists every outbound
+  host and every mapped field → token, and old → new host on a re-point. No step-up by itself.
+- **`CRITICAL_APPLICATION`** — any workflow write (authoring, retry, replay, task resolve) and any access
+  grant or revoke on an application with `isCritical = true`. Core requires step-up.
+- `EXTERNAL_PROVISIONING` / `EXTERNAL_DEPROVISIONING` on retry, replay and task resolve, by the
+  workflow's trigger.
+- Run errors, step metadata, manual-task inputs and prompts go through `untrusted()`. Workflow secrets
+  are never bound (structural exclusion); a connection read says only whether a credential is
+  configured.
+- Over MCP and headless no preview is built: a write that detects a critical application in `run` calls
+  `assertChannelAllows(rt.ctx.channel, ['CRITICAL_APPLICATION'])` (`core/pending-action.ts`) before any
+  side effect. It refuses nothing today; it is the seam for the open CEO question on headless actions
+  over critical applications.
 - **`elevated`, after v1** (CEO round 2): permission matrix, folder access rules, SA update/grants,
   password reset, instance configuration.
 - **EXCL** (CEO round 2): SA token create/rotate, `provision-local-account`, the AI's own configuration.
@@ -538,8 +578,10 @@ path unit (W2-0, #1315):
   built yet);
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
+  `workflows.tools.ts` (W2-13) and `workflow-authoring.tools.ts` (W2-14) hold the workflow engine,
+  pre-created by W2-12 with every handler pending;
   `platform.tools.ts` lists the surfaces no domain owns (authentication, instance configuration, the
-  Secret Manager, Service Account management, the Migrator, the workflow engine, the probes)
+  Secret Manager, Service Account management, the Migrator, workflow secrets, the probes)
 - `prompt/` — domain primer and system-prompt builder (§12)
 - channel surfaces — reconciled in [[ai-assistant/_synthesis|the synthesis]] §5 (R5): chat and headless
   live in `ai/conversations/` and `ai/runs/`; MCP is its own module at `apps/api/src/mcp/`, and the OAuth
@@ -710,21 +752,25 @@ skip classification). The preview carries:
 - `warnings[]` codes: `EXTERNAL_PROVISIONING`, `EXTERNAL_DEPROVISIONING`, `CASCADE_RELEASES_ASSIGNMENTS`,
   `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`,
   `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
-  `IRREVERSIBLE` (the last four merge the frontend's `notes` vocabulary and the security note's
-  destination-visibility requirement; `PRIVILEGE_GRANT` and `CREDENTIAL_DELIVERY` were added by W2-0 for
-  the step-up rule below);
+  `IRREVERSIBLE`, `OUTBOUND_INTEGRATION`, `CRITICAL_APPLICATION` (`PUBLISHES_TO_READERS` …
+  `IRREVERSIBLE` merge the frontend's `notes` vocabulary and the security note's destination-visibility
+  requirement; `PRIVILEGE_GRANT` and `CREDENTIAL_DELIVERY` were added by W2-0 for the step-up rule below;
+  the last two by W2-12 for the workflow engine, §7);
 - `impacted[]` — entity type and count, with a short sample, for cascading or bulk effects;
 - `elevated` and `stepUpRequired` — `elevated` is the tool's class or an escalation decided here.
   **`stepUpRequired` is derived by core** (CEO decision 2026-09-24, #1315, "Opción 2"): step-up only for
   privilege grants and credential delivery, per [[0097-ai-assistant-mcp-and-headless-api]] decision 4 —
-  but enforced by core, not left to each tool. An `elevated` preview carrying any warning of the closed
-  list `AI_STEP_UP_WARNINGS` (`core/pending-action.ts`) requires step-up whatever the tool said; the
-  tool may add step-up, never remove it. It is derived at propose and **re-derived at approve** from the
-  stored preview. The list is the CEO's closed list: `ROLE_CHANGE`, `IDENTITY_CHANGE`,
-  `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`. **Tool units granting access or privilege (access grants,
-  approving an access request, …) MUST emit `PRIVILEGE_GRANT`; tools delivering a credential MUST emit
-  `CREDENTIAL_DELIVERY`** — that is what makes core require the step-up. An elevated action with only
-  other warnings (e.g. `NOTIFIES_USERS`) needs no step-up;
+  but enforced by core, not left to each tool. A write preview (`write` or `elevated` — widened by
+  W2-12) carrying any warning of the closed list `AI_STEP_UP_WARNINGS` (`core/pending-action.ts`)
+  requires step-up whatever the tool said; the tool may add step-up, never remove it. It is derived at
+  propose and **re-derived at approve** from the stored preview. The list is the CEO's closed list:
+  `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`, and — since the ADR-0097
+  decision 3 amendment (2026-09-24) — `CRITICAL_APPLICATION`. **Tool units granting access or privilege
+  (access grants, approving an access request, …) MUST emit `PRIVILEGE_GRANT`; tools delivering a
+  credential MUST emit `CREDENTIAL_DELIVERY`; a workflow write, access grant or access revoke on an
+  application with `isCritical = true` MUST emit `CRITICAL_APPLICATION`** — that is what makes core
+  require the step-up. An action with only other warnings (e.g. `NOTIFIES_USERS`,
+  `OUTBOUND_INTEGRATION`) needs no step-up;
 - `untrustedSources[]` — refs of the other-authored content read in this turn (the banner source);
 - `precondition {entity, updatedAt}`.
 
@@ -1014,6 +1060,13 @@ model AiActionLog {
   - asset-centric model (assignments are timestamped check-out/check-in, never a column);
   - archive = soft delete, restorable;
   - the access pillar (application → grant → possible external provisioning; access requests);
+  - access automation (added by W2-12, `AI_PROMPT_VERSION` 2): one workflow per trigger, off until
+    enabled, latest version live; runs after the grant, once per event, never undoing it; retry from the
+    failed step vs replay on the latest version; connection steps vs manual tasks; credentials
+    write-only ("configured: yes/no" only); deprovision on the last active grant by default;
+    admin-only visibility by default; critical applications need extra confirmation — plus the rules to
+    explain workflows in plain language, never propose an unnamed destination, and treat run errors,
+    external responses and manual-task inputs as untrusted;
   - consumable ledger rules (OUT cannot go negative; movements are append-only);
   - KB (folders restrict visibility, drafts are private to the author);
   - locations tree;
@@ -1060,7 +1113,7 @@ model AiActionLog {
   or instance data enters the prompt (security.md T-14).
 - `ai-prompt.module.ts` exports `AiPromptService` (stateless DI face of the three builders) for the
   runtime and `/mcp`.
-- **Budgets** (enforced by the spec, in characters): primer ≤ 8 000 (today ≈ 5.5k), MCP instructions
+- **Budgets** (enforced by the spec, in characters): primer ≤ 8 000 (today ≈ 7k after W2-12), MCP instructions
   ≤ 10 000, system prompt ≤ 20 000 in the worst case (a 10k-char name, every permission, 240 tools, a
   9k-char addendum). The typical system prompt is ≈ 7k chars (≈ 2k tokens).
 - **Version pin.** `system-prompt.spec.ts` hashes every output for fixed inputs and pins the hash to
@@ -1116,8 +1169,9 @@ the full diff, one action per approval, the untrusted-source banner, and passwor
 grants and credential delivery. §3 carries the new dispositions.
 
 **Q2 — v1 cut → the 44-tool cut is adopted by default** (CEO to confirm on review). Batch operations,
-secondary archive/restore, infra writes, workflows and the `elevated` configuration surfaces follow in
-v1.1 or later.
+secondary archive/restore, infra writes and the `elevated` configuration surfaces follow in v1.1 or
+later. The workflow engine was pulled forward on 2026-09-24 (ADR-0097 decision 3 amendment; §7
+"Workflow engine").
 
 **Q3 — Seed re-grant defect → prerequisite #1314.** It is fixed before `ai:use` ships; each new
 permission's default rows are applied by the seed-once ledger, with no data migration.
