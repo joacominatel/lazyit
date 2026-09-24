@@ -59,13 +59,17 @@ export const OAUTH_TOKEN_KINDS = ["access", "refresh", "personal"] as const;
 export const OAuthTokenKindSchema = z.enum(OAUTH_TOKEN_KINDS);
 export type OAuthTokenKind = z.infer<typeof OAuthTokenKindSchema>;
 
-/** Why a grant was revoked (`OAuthGrant.revokeReason`). */
+/**
+ * Why a grant was revoked (`OAuthGrant.revokeReason`). `token_exposed`: one of its tokens was presented in
+ * a URL query string at `/mcp` — treated as compromised and revoked on sight (#1315 G3 review F1).
+ */
 export const OAUTH_GRANT_REVOKE_REASONS = [
   "user",
   "admin",
   "refresh_reuse",
   "revocation_endpoint",
   "client_deleted",
+  "token_exposed",
 ] as const;
 export const OAuthGrantRevokeReasonSchema = z.enum(OAUTH_GRANT_REVOKE_REASONS);
 export type OAuthGrantRevokeReason = z.infer<typeof OAuthGrantRevokeReasonSchema>;

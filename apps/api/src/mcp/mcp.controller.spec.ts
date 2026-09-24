@@ -74,6 +74,7 @@ import { UsersController } from '../users/users.controller';
 import { UsersService } from '../users/users.service';
 import { McpAuthGuard } from './mcp-auth.guard';
 import { McpConnectionNoticeService } from './mcp-connection-notice.service';
+import { McpExposedTokenService } from './mcp-exposed-token.service';
 import { McpRateLimiter } from './mcp-rate-limit';
 import { McpServerFactory } from './mcp-server.factory';
 import { McpController } from './mcp.controller';
@@ -308,6 +309,7 @@ describe('/mcp end to end — listing, calls, errors and the critical-applicatio
         McpServerFactory,
         McpRateLimiter,
         { provide: McpConnectionNoticeService, useValue: notices },
+        { provide: McpExposedTokenService, useValue: { handle: jest.fn() } },
         {
           provide: OAuthPolicyService,
           useValue: {

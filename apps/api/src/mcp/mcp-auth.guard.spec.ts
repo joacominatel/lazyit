@@ -13,7 +13,11 @@ jest.mock('jose', () => ({
   jwtVerify: jest.fn(),
 }));
 
-import { UnauthorizedException, type INestApplication } from '@nestjs/common';
+import {
+  Logger,
+  UnauthorizedException,
+  type INestApplication,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { App } from 'supertest/types';
@@ -40,6 +44,7 @@ import { PersonalTokensService } from '../oauth/personal-tokens/personal-tokens.
 import { PrismaService } from '../prisma/prisma.service';
 import { McpAuthGuard } from './mcp-auth.guard';
 import { McpConnectionNoticeService } from './mcp-connection-notice.service';
+import { McpExposedTokenService } from './mcp-exposed-token.service';
 import { McpRateLimiter } from './mcp-rate-limit';
 import { McpServerFactory } from './mcp-server.factory';
 import { McpController } from './mcp.controller';
@@ -84,7 +89,7 @@ const WHOAMI = {
 /** Service Accounts the stubbed authenticator knows: bearer → permissions and AI access. */
 const SERVICE_ACCOUNTS: Record<
   string,
-  { id: string; permissions: string[]; access: string }
+  { id: string; permissions: string[]; access: string; cap?: number }
 > = {
   lzit_sa_connect_x: {
     id: 'sa-connect',
@@ -95,6 +100,12 @@ const SERVICE_ACCOUNTS: Record<
     id: 'sa-readonly',
     permissions: ['ai:connect'],
     access: 'read-only',
+  },
+  lzit_sa_capped_x: {
+    id: 'sa-capped',
+    permissions: ['ai:connect'],
+    access: 'read-write',
+    cap: 3,
   },
   lzit_sa_off_x: { id: 'sa-off', permissions: ['ai:connect'], access: 'off' },
   lzit_sa_noconnect_x: {
@@ -125,6 +136,9 @@ describe('/mcp authentication matrix', () => {
     h = buildHarness();
     enableMcp(h);
     const db = h.prisma as any;
+    db.$executeRaw = jest.fn().mockResolvedValue(0);
+    db.notification = { findUnique: jest.fn().mockResolvedValue(null) };
+    db.aiToolInvocation = { count: jest.fn().mockResolvedValue(0) };
     personal = new PersonalTokensService(
       db,
       h.policy,
@@ -152,6 +166,7 @@ describe('/mcp authentication matrix', () => {
         McpServerFactory,
         McpRateLimiter,
         McpConnectionNoticeService,
+        McpExposedTokenService,
         AiPromptService,
         { provide: PrismaService, useValue: db },
         { provide: OAuthPolicyService, useValue: h.policy },
@@ -186,7 +201,9 @@ describe('/mcp authentication matrix', () => {
                 access: Object.values(SERVICE_ACCOUNTS).find(
                   (sa) => sa.id === id,
                 )!.access,
-                maxMutationsPerRun: null,
+                maxMutationsPerRun:
+                  Object.values(SERVICE_ACCOUNTS).find((sa) => sa.id === id)!
+                    .cap ?? null,
               }),
           },
         },
@@ -378,16 +395,69 @@ describe('/mcp authentication matrix', () => {
       expect(res.body.error_description).toMatch(/uses OAuth/);
     });
 
-    it('never reads a token from the query string', async () => {
+    function withQuery(query: string, token?: string) {
+      const rpc = toolsList();
+      const req = request(app.getHttpServer())
+        .post(`/mcp?${query}`)
+        .set('host', HOST)
+        .set(rpc.headers);
+      if (token) req.set('authorization', `Bearer ${token}`);
+      return req.send(rpc.body);
+    }
+
+    it('never reads a token from the query string — and revokes it on sight (G3 review F1)', async () => {
       const user = seedUser(h);
       const token = await oauthAccessToken(user);
-      const rpc = toolsList();
-      await request(app.getHttpServer())
-        .post(`/mcp?access_token=${token}`)
-        .set('host', HOST)
-        .set(rpc.headers)
-        .send(rpc.body)
-        .expect(400);
+      await withQuery(`access_token=${token}`).expect(400);
+      const grant = h.prisma.tables.oAuthGrant[0];
+      expect(grant).toMatchObject({ revokeReason: 'token_exposed' });
+      expect(grant.deletedAt).not.toBeNull();
+      expect(h.prisma.tables.oAuthAuditLog.at(-1)).toMatchObject({
+        action: 'GRANT_REVOKED',
+        grantId: grant.id,
+        detail: { reason: 'token_exposed' },
+      });
+      // The exposed token is dead, even presented properly afterwards.
+      await list(token).expect(401);
+    });
+
+    it('revokes an exposed refresh token’s grant too, even alongside a valid header token', async () => {
+      const user = seedUser(h);
+      const { tokens } = await connect(h, user);
+      const other = await oauthAccessToken(seedUser(h));
+      await withQuery(`token=${tokens.refresh_token}`, other).expect(400);
+      expect(
+        h.prisma.tables.oAuthGrant.find((g) => g.userId === user.id),
+      ).toMatchObject({ revokeReason: 'token_exposed' });
+    });
+
+    it('revokes an exposed personal token (PERSONAL_TOKEN_REVOKED), even while MCP is off', async () => {
+      useLan();
+      const user = seedUser(h);
+      const pat = await personalToken(user);
+      enableMcp(h, { mcpEnabled: false });
+      await withQuery(`token=${pat}`).expect(404);
+      expect(h.prisma.tables.oAuthGrant[0]).toMatchObject({
+        kind: 'personal',
+        revokeReason: 'token_exposed',
+      });
+      expect(h.prisma.tables.oAuthAuditLog.at(-1)).toMatchObject({
+        action: 'PERSONAL_TOKEN_REVOKED',
+      });
+    });
+
+    it('only warns (never the secret) for an exposed Service Account token, and ignores junk', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      await withQuery('access_token=lzit_sa_abc123_s3cretvalue').expect(400);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'mcp.token_in_query',
+          kind: 'service_account',
+        }),
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('s3cretvalue');
+      await withQuery('token=not-a-token').expect(400);
+      warn.mockRestore();
     });
 
     it('accepts the Bearer scheme case-insensitively', async () => {
@@ -499,6 +569,40 @@ describe('/mcp authentication matrix', () => {
         expect(listedWith().mcp).toBeUndefined();
       },
     );
+
+    it('carries the per-SA maxMutationsPerRun cap to /mcp as writes per rolling hour (G3 review F2)', async () => {
+      const WRITE = {
+        ...WHOAMI,
+        name: 'poke',
+        class: 'write' as const,
+        annotations: { ...WHOAMI.annotations, readOnlyHint: false },
+      };
+      tools.list.mockResolvedValue([WHOAMI, WRITE]);
+      const count = (h.prisma as any).aiToolInvocation.count as jest.Mock;
+      const call = () => {
+        const rpc = toolsCall('poke', {});
+        return request(app.getHttpServer())
+          .post('/mcp')
+          .set('host', HOST)
+          .set(rpc.headers)
+          .set('authorization', 'Bearer lzit_sa_capped_x')
+          .send(rpc.body)
+          .expect(200);
+      };
+      count.mockResolvedValue(2);
+      expect(payloadOf(await call()).result.isError).toBeFalsy();
+      count.mockResolvedValue(3);
+      expect(payloadOf(await call()).result).toMatchObject({
+        isError: true,
+        structuredContent: { error: { code: 'RATE_LIMITED' } },
+      });
+      expect(count).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ serviceAccountId: 'sa-capped' }),
+        }),
+      );
+      expect(tools.invoke).toHaveBeenCalledTimes(1);
+    });
 
     it('caps a read-only SA at read tools', async () => {
       await list('lzit_sa_readonly_x').expect(200);

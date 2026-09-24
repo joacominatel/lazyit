@@ -26,7 +26,9 @@ import type { OAuthServerConfig } from '../oauth/oauth-config';
 import { OAuthPolicyService } from '../oauth/oauth-policy.service';
 import { OAuthTokenService } from '../oauth/oauth-token.service';
 import { PersonalTokensService } from '../oauth/personal-tokens/personal-tokens.service';
+import { QUERY_CREDENTIAL_PARAMS } from '../logging/logging.config';
 import { McpConnectionNoticeService } from './mcp-connection-notice.service';
+import { McpExposedTokenService } from './mcp-exposed-token.service';
 import { scopesToCeiling, toAuthInfo, type McpCaller } from './mcp-caller';
 import { McpRateLimiter } from './mcp-rate-limit';
 
@@ -63,7 +65,8 @@ const TOKEN_REFUSED = 'The access token is invalid, expired or revoked.';
  *     means no new anonymous surface (INV-AI-12).
  *  2. **Transport.** A present `Origin` whose host is not this instance's is refused (403, the spec's
  *     DNS-rebinding MUST); with a pinned origin (`WEB_ORIGIN`) the `Host` must name it too. A token in
- *     the query string is refused (400) — tokens travel only in the `Authorization` header.
+ *     the query string is refused (400) — tokens travel only in the `Authorization` header — and, being
+ *     compromised, is revoked on sight before anything else ({@link McpExposedTokenService}; G3 F1).
  *  3. **The bearer**, by prefix — and nothing else. A local session JWT, an IdP token or any other value
  *     is refused (no token passthrough):
  *     - `lzit_oat_` — only on an HTTPS instance (the pinned issuer); {@link OAuthTokenService.verifyAccessToken}.
@@ -94,12 +97,18 @@ export class McpAuthGuard implements CanActivate {
     private readonly runPrincipals: AiRunPrincipals,
     private readonly rateLimiter: McpRateLimiter,
     private readonly notices: McpConnectionNoticeService,
+    private readonly exposed: McpExposedTokenService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const http = context.switchToHttp();
     const req = http.getRequest<McpRequest>();
     const res = http.getResponse<Response>();
+
+    // 0 — a credential in the URL is compromised whatever happens next: revoke it on sight (G3 F1).
+    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+    const queryTokens = queryTokensOf(req);
+    if (queryTokens.length > 0) await this.exposed.handle(queryTokens, ip);
 
     // 1 — the capability exists at all.
     if (process.env.AUTH_MODE === 'shim') throw new NotFoundException();
@@ -108,7 +117,7 @@ export class McpAuthGuard implements CanActivate {
 
     // 2 — transport.
     this.checkOriginAndHost(req);
-    if (hasQueryToken(req)) {
+    if (queryTokens.length > 0) {
       throw new HttpException(
         {
           error: 'invalid_request',
@@ -120,7 +129,6 @@ export class McpAuthGuard implements CanActivate {
     }
 
     const config = this.policy.config();
-    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     if (this.rateLimiter.authBlocked(ip)) throw tooManyRequests();
 
     // 3 — the bearer.
@@ -275,6 +283,7 @@ export class McpAuthGuard implements CanActivate {
           identity: { kind: 'service', serviceAccountId: serviceAccount.id },
           ceiling,
           rateKey: `sa:${serviceAccount.id}`,
+          maxWritesPerHour: access.maxMutationsPerRun,
         },
         ...(serviceAccount.expiresAt
           ? { expiresAt: serviceAccount.expiresAt }
@@ -344,9 +353,22 @@ function extractBearer(req: Request): string | null {
   return match ? match[1] : null;
 }
 
-function hasQueryToken(req: Request): boolean {
+/** Every value of an `access_token` / `token` query parameter (case-insensitive name). */
+function queryTokensOf(req: Request): string[] {
   const query = (req.query ?? {}) as Record<string, unknown>;
-  return 'access_token' in query || 'token' in query;
+  const values: string[] = [];
+  for (const [key, value] of Object.entries(query)) {
+    if (
+      !(QUERY_CREDENTIAL_PARAMS as readonly string[]).includes(
+        key.toLowerCase(),
+      )
+    ) {
+      continue;
+    }
+    const list = Array.isArray(value) ? value : [value];
+    for (const item of list) values.push(typeof item === 'string' ? item : '');
+  }
+  return values;
 }
 
 /** The hostname a `Host` header names (brackets kept for IPv6), or null when it is absent or unparsable. */

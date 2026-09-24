@@ -6,6 +6,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { OAuthModule } from '../oauth/oauth.module';
 import { McpAuthGuard } from './mcp-auth.guard';
 import { McpConnectionNoticeService } from './mcp-connection-notice.service';
+import { McpExposedTokenService } from './mcp-exposed-token.service';
 import { McpInvocationSweeper } from './mcp-invocation.sweeper';
 import { McpRateLimiter } from './mcp-rate-limit';
 import { McpServerFactory } from './mcp-server.factory';
@@ -34,6 +35,7 @@ import { McpController } from './mcp.controller';
     McpServerFactory,
     McpRateLimiter,
     McpConnectionNoticeService,
+    McpExposedTokenService,
     McpInvocationSweeper,
     AiRunPrincipals,
   ],
