@@ -3,7 +3,7 @@ title: AiConversation
 tags: [domain, entity, ai-assistant, retention]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # AiConversation
@@ -25,6 +25,15 @@ permanent [[ai-action-log]].
   [[0056-in-app-notification-bell]] §7 precedent): by the retention sweep after `retentionDays` of
   inactivity, by its owner, and on offboarding. The exception to "never hard-delete" is scoped to
   transcripts; the ledgers are never pruned.
+  - **As built (W3-6)**: `AiConversationPurgeService` (`apps/api/src/ai/retention/`) is the only deleter.
+    An hourly pass deletes conversations whose `lastActivityAt` is older than `retentionDays` (clamped
+    to 7–3650 on read) and every conversation of an offboarded user (`User.deletedAt` set), in batches of
+    100 with at most 20 batches per reason per pass. A conversation with a `QUEUED`, `RUNNING` or
+    `AWAITING_APPROVAL` run is **never** deleted: the pass skips it and retries next hour; an owner's
+    delete answers 409 `RUN_IN_PROGRESS`. Each batch locks its rows and re-checks runs and the guard
+    before deleting, so a run cannot start in a conversation being deleted.
+  - The pass runs whether or not the assistant is enabled (turning AI off keeps conversations dormant;
+    retention keeps running).
 - **Pinned** at creation to its provider, model, prompt version and tool set. A change makes it
   read-only (`closedReason` = `CONFIG_CHANGED` / `VERSION_CHANGED`); crossing the context cap closes it
   with `CONTEXT_LIMIT`.
