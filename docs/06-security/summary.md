@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # Security summary
@@ -58,6 +58,17 @@ Snapshot of the security review. Updated each sweep. Method:
    (added to `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS`), **reserved the engine service-account
    name**, and **generalised the parity test** so the ungrantable set stays enforced.
 
+8. **2026-09-24 — AI assistant pre-merge review (epic #1315).** Two findings, both found while checking
+   the AI tool PRs against the current `dev` code:
+   [[SEC-073-sa-ungrantable-permissions-not-stripped-at-principal-load\|SEC-073]] (**Medium**): a
+   service account granted `user:manage`/`settings:manage` before the SEC-011 fix still holds that
+   permission, because the principal loader filters grants by catalog only and `UsersController` has no
+   Layer-2 guard. Such an account can still mint an ADMIN over HTTP, and headless via `user_create` once
+   #1343 lands.
+   [[SEC-074-kb-loadowned-403-vs-404-existence-leak\|SEC-074]] (**Low**): KB write paths return 403 to a
+   non-author for a folder-hidden PUBLISHED article, which confirms it exists (INV-9). The KB AI write
+   tools (#1342) will expose the same response.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 
 ## Counts by severity (open)
@@ -66,10 +77,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 0 |
-| Low | 11 |
+| Medium | 1 |
+| Low | 12 |
 | Info | 0 |
-| **Total open** | **11** |
+| **Total open** | **13** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -89,9 +100,15 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
 | [[SEC-070-health-ready-db-error-leak\|SEC-070]] | 🟡 Low | health | `GET /health/ready` leaks raw pg driver error (internal host/IP/port) to anonymous callers |
 | [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
+| [[SEC-073-sa-ungrantable-permissions-not-stripped-at-principal-load\|SEC-073]] | 🟠 Medium | auth / service-accounts | SA keeps pre-SEC-011 `user:manage`/`settings:manage` grants at principal load; `UsersController` unguarded (ADMIN mint; headless AI vector) |
+| [[SEC-074-kb-loadowned-403-vs-404-existence-leak\|SEC-074]] | 🟡 Low | articles | `loadOwned` 403-before-folder-check leaks a hidden article's existence (INV-9) |
 
 ## Top findings
 
+0. **SEC-073 — open, Medium (the only open finding above Low).** A service account that was granted
+   `user:manage` / `settings:manage` before SEC-011 still exercises it: the principal loader does not
+   strip SA-ungrantable permissions, and `UsersController` has no Layer-2 guard. Close it before the AI
+   user tools (#1343) ship. The fix is a read-time strip in `resolveServiceAccountPermissions`.
 1. **SEC-020 ✅ Closed.** Moved to `closed/` (fixed: JIT email-link now checks `email_verified`).
 2. **SEC-051 ✅ Closed.** Moved to `closed/` (fixed 2026-09-23, #1320): the `host:port` carve-out in
    `isSafeApplicationUrl` no longer reads a browser-interpreted scheme (`javascript`, `vbscript`,
