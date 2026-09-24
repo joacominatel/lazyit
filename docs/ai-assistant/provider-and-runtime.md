@@ -1174,7 +1174,7 @@ decision made while Valkey is down resumes within about a minute of its return.
 >   holds `infra:report` is refused **403 `FORBIDDEN`** at creation; `read-only` freezes a conversation
 >   without write tools.
 > - **Owner only, 404 for everyone else** — another user, an admin (ADR-0097 default 3) or a Service
->   Account — on a conversation (read, send), a run (read, cancel, events) and a decision. A
+>   Account — on a conversation (read, send, delete), a run (read, cancel, events) and a decision. A
 >   malformed id is the same 404. The SSE endpoint checks ownership **before** `subscribe`, `replay` or
 >   `lastSeq`.
 > - **`POST /ai/conversations`** → 201 `{ id }` (the frozen prompt's locale is the first tag of
@@ -1193,11 +1193,12 @@ decision made while Valkey is down resumes within about a minute of its return.
 >   once decided and executed). A run's redacted error becomes a `notice` part after its last message.
 >   Message ids are `<conversationId>:<seq>` — the `messageId` of `message.delta`. Every part is validated
 >   against the shared schema; what fails is dropped (read-tolerant).
-> - **`DELETE /ai/conversations/:id` is not exposed yet (follow-up).** It will call the retention unit's
->   purge service (W3-6, `AiConversationPurgeService.deleteOwned`: 404 for non-owners, 409
->   `RUN_IN_PROGRESS` while a run is active), the one place that hard-deletes a transcript. Reads keep
->   working while AI is off (conversations stay dormant, [[ai-assistant/frontend|frontend]] §11 item 4);
->   create and send answer **409 `AI_DISABLED`**.
+> - **`DELETE /ai/conversations/:id`** → 204, through the retention unit's purge service (W3-6,
+>   `AiConversationPurgeService.deleteOwned`, the only deleter of transcripts): 404 for anyone but the owner,
+>   **409 `RUN_IN_PROGRESS`** while a run is active; messages and invocations cascade, run rows stay with
+>   `conversationId = null`, `ai_action_log` is untouched. A Service Account is refused 403 before it. Reads
+>   and deletes keep working while AI is off (conversations stay dormant,
+>   [[ai-assistant/frontend|frontend]] §11 item 4); create and send answer **409 `AI_DISABLED`**.
 > - **`POST /ai/runs`** → 202 `{ runId, status }`; an `Idempotency-Key` (1–255 printable ASCII, else 400)
 >   returns the earlier run for the same principal and key, with the response header
 >   `Idempotent-Replayed: true`. The key names one request: reused with another prompt or another
