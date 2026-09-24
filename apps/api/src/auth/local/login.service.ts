@@ -145,6 +145,11 @@ export class LoginService {
    * Mandatory now that a "keep me signed in" token never expires by time: dropping the web cookie alone
    * would leave a live bearer behind.
    *
+   * It does NOT touch `mcpCredentialEpoch`: signing out of the web ends web sessions only, and the user's
+   * MCP connections and personal tokens stay alive (ADR-0097 decision 8, amended 2026-09-24 — CEO
+   * decision). They die with a password change, a deactivation or offboarding, an admin reset or
+   * "revoke sessions", or an explicit revoke in /account/ai.
+   *
    * IDEMPOTENT. The bump is conditional on the epoch the guard just validated, so two concurrent sign-outs
    * with the same token advance the epoch once; a repeat with the now-revoked token never reaches here (the
    * guard 401s it). Outside local mode there is no lazyit-minted session to revoke, so it is a no-op.

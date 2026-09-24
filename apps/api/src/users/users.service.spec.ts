@@ -986,6 +986,10 @@ describe('UsersService', () => {
     expect(updateCalls[0][0].data).toHaveProperty('sessionEpoch', {
       increment: 1,
     });
+    // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+    expect(updateCalls[0][0].data).toHaveProperty('mcpCredentialEpoch', {
+      increment: 1,
+    });
 
     // Active grants are revoked inline (revokedAt + actor + audit note).
     const grantCalls = tx.accessGrant.updateMany.mock.calls as Array<
@@ -1177,7 +1181,7 @@ describe('UsersService', () => {
   describe('session revocation on deactivation (ADR-0086 §8)', () => {
     type UpdateCall = [{ data: Record<string, unknown> }];
 
-    it('bumps sessionEpoch when an active user is deactivated', async () => {
+    it('bumps sessionEpoch and mcpCredentialEpoch when an active user is deactivated', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
         isActive: true,
@@ -1191,6 +1195,7 @@ describe('UsersService', () => {
       expect(arg.data).toMatchObject({
         isActive: false,
         sessionEpoch: { increment: 1 },
+        mcpCredentialEpoch: { increment: 1 },
       });
     });
 
@@ -1215,6 +1220,7 @@ describe('UsersService', () => {
 
       for (const [arg] of user.update.mock.calls as UpdateCall[]) {
         expect(arg.data).not.toHaveProperty('sessionEpoch');
+        expect(arg.data).not.toHaveProperty('mcpCredentialEpoch');
       }
     });
   });
@@ -2548,6 +2554,7 @@ describe('UsersService', () => {
             passwordUpdatedAt: new Date('2026-07-03T00:00:00.000Z'),
             mustChangePassword: true,
             sessionEpoch: { increment: 1 },
+            mcpCredentialEpoch: { increment: 1 },
           },
         });
         // The plaintext is returned to the admin ONCE. Issue #1268 widened this into the delivery
@@ -2682,7 +2689,10 @@ describe('UsersService', () => {
 
           expect(user.update).toHaveBeenCalledWith({
             where: { id: 'user-1' },
-            data: { sessionEpoch: { increment: 1 } },
+            data: {
+              sessionEpoch: { increment: 1 },
+              mcpCredentialEpoch: { increment: 1 },
+            },
           });
           expect(result).toMatchObject({ sessionsRevoked: true });
         });
