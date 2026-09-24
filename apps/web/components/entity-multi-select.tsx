@@ -78,6 +78,14 @@ export interface EntityMultiSelectProps {
   emptyText?: string;
   disabled?: boolean;
   className?: string;
+  /** Forwarded to the trigger (for a label association from outside). */
+  id?: string;
+  /** Forwarded to the trigger: ids of the help and error text that describe the field. */
+  "aria-describedby"?: string;
+  /** Forwarded to the trigger when at least one entity must be picked. */
+  "aria-required"?: boolean;
+  /** Forwarded to the trigger so a validation error rings it. */
+  "aria-invalid"?: boolean;
   /**
    * Server-search mode switch: when provided, cmdk's built-in filter is disabled and the debounced
    * query is handed back here for a `q`-driven paged hook. Omit it for client-filter mode.
@@ -110,6 +118,10 @@ export function EntityMultiSelect({
   emptyText,
   disabled,
   className,
+  id,
+  "aria-describedby": ariaDescribedBy,
+  "aria-required": ariaRequired,
+  "aria-invalid": ariaInvalid,
   onSearchChange,
   loading = false,
   debounceMs = 250,
@@ -176,8 +188,12 @@ export function EntityMultiSelect({
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         type="button"
+        id={id}
         role="combobox"
         aria-expanded={open}
+        aria-describedby={ariaDescribedBy}
+        aria-required={ariaRequired || undefined}
+        aria-invalid={ariaInvalid || undefined}
         disabled={disabled}
         aria-label={
           count > 0
@@ -185,7 +201,7 @@ export function EntityMultiSelect({
             : label
         }
         className={cn(
-          "flex h-8 w-full items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50",
+          "flex h-8 w-full items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
           className,
         )}
       >
