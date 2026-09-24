@@ -3170,12 +3170,24 @@ model AiConversation {
   serviceAccountId String?
   serviceAccount   ServiceAccount? @relation("AiConversationSaOwner", fields: [serviceAccountId], references: [id], onDelete: Cascade)
   title            String?
-  /// Pinned at creation (synthesis §8.1 item 7).
+  /// Pinned at creation (synthesis §8.1 item 7). The model is the user's choice or the instance default
+  /// (#1373); it can change only until the first run starts.
   provider         String
   model            String
   promptVersion    Int
   toolsetHash      String
   toolNames        String[]
+  /// True when the user chose `model` (#1373): an admin change of the default model then leaves the
+  /// conversation writable. False (every legacy row) = the instance default, read-only after it changes.
+  modelChosen      Boolean         @default(false)
+  /// low | medium | high (AiEffort); null = the instance setting at call time. Validated on write.
+  effort           String?
+  /// Per-provider extras (AI_PROVIDER_OPTIONS_SCHEMAS); null = the instance setting at call time.
+  providerOptions  Json?
+  /// Auto-approve mode (#1376): chat writes whose fresh preview needs no step-up run without a card.
+  autoApprove      Boolean         @default(false)
+  /// When the owner last switched auto-approve on; null while it is off. Recorded on each auto approval.
+  autoApproveEnabledAt DateTime?
   /// CONTEXT_LIMIT | CONFIG_CHANGED | VERSION_CHANGED; null while the conversation is writable.
   closedReason     String?
   lastActivityAt   DateTime        @default(now())
@@ -3302,6 +3314,8 @@ model AiToolInvocation {
   entityRefs       Json?
   errorCode        String?
   durationMs       Int?
+  /// USER | AUTO (AiApprovalMode) once a chat write is approved; null otherwise and on legacy rows.
+  approvalMode     String?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
@@ -3343,6 +3357,11 @@ model AiActionLog {
   /// Approval provenance (chat): the approving human and whether a password step-up was verified.
   approverUserId   String?         @db.Uuid
   stepUp           Boolean         @default(false)
+  /// USER | AUTO (AiApprovalMode) on the approve path's events; null elsewhere and on legacy rows. AUTO:
+  /// approved by the owner's auto-approve mode (#1376) — `approverUserId` is the owner who enabled it.
+  approvalMode     String?
+  /// AUTO only: when the owner switched auto-approve on for the conversation.
+  autoApproveEnabledAt DateTime?
   /// Refs of the other-authored content the turn had read (the untrusted-source banner).
   untrustedSources Json?
   provider         String?
