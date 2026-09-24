@@ -644,10 +644,11 @@ Code: `apps/web/app/(app)/account/ai/**`, `apps/web/app/(auth)/oauth/authorize/*
   keeps `pathname + search` as `callbackUrl` (bun-tested; `/login` still applies `safeInternalPath`). It
   adds no OIDC-specific path (#1310).
 
-**Found while building — decided.** In local mode `POST /auth/logout` bumped `sessionEpoch`, which every
-grant snapshots, so a browser sign-out silently ended every MCP connection and personal token. CEO:
-"Separarlos" — a normal web sign-out no longer ends them (backend unit); they end on a password change,
-deactivation/offboarding, an explicit sign-out everywhere, or a revoke. The Manual and the UI copy say so.
+**Found while building — resolved by #1367.** In local mode `POST /auth/logout` bumped `sessionEpoch`,
+which every grant snapshots, so a browser sign-out silently ended every MCP connection and personal token.
+CEO: "Separarlos" — #1367 decouples them: connections are tied to the account, not the browser session.
+They end on a password change or admin reset, deactivation/offboarding, or a revoke. The Manual and the
+UI copy say so.
 
 **G3/G4 review follow-ups (applied).**
 - Snippets are built from the **server-known origin**: `GET /ai/status` `mcp.endpoint` (`<WEB_ORIGIN>/mcp`,
