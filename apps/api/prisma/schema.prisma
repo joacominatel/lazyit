@@ -176,6 +176,9 @@ model User {
 
   // Consumable stock movements this user performed (ConsumableMovement.performedById). SetNull.
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
+  // Consumable deliveries made TO this user (ConsumableMovement.targetUserId, ADR-0098). Restrict: a
+  // delivery is history; offboarding is a soft delete and never touches these rows or the stock.
+  consumableDeliveries ConsumableMovement[] @relation("ConsumableDeliveryTargetUser")
 
   // Auto-confirm rules this user authored (ADR-0074 §1 amendment, #1145). SetNull: the rule is
   // instance policy, so losing its author leaves it running and visibly unattributed rather than
@@ -516,6 +519,9 @@ model Location {
   deletedAt   DateTime?
 
   assets Asset[]
+  // Consumables left at this place (ConsumableMovement.targetLocationId, ADR-0098) — a destination, NOT
+  // per-location stock. Restrict.
+  consumableDeliveries ConsumableMovement[] @relation("ConsumableDeliveryTargetLocation")
 
   @@index([parentId])
   @@map("locations")
@@ -632,6 +638,8 @@ model Asset {
   // Infra topology (ADR-0070): nodes on the CMDB canvas backed by this asset (owner/KB/secrets/warranty
   // flow through here). SetNull on the node's assetId — deleting an asset detaches, never deletes, a node.
   infraNodes   InfraNode[]
+  // Consumables delivered to this asset (ConsumableMovement.targetAssetId, ADR-0098). Restrict.
+  consumableDeliveries ConsumableMovement[] @relation("ConsumableDeliveryTargetAsset")
 
   @@index([modelId])
   @@index([locationId])
@@ -1067,6 +1075,14 @@ enum AssetHistoryEventType {
   // per refresh at a 5-minute cadence would bury every human edit the row ever received. What MOVED is
   // audited on the node (InfraNodeFactChange, #1143) instead.
   AGENT_LINKED
+  // A consumable was DELIVERED to this asset (ADR-0098, #1364): a targeted OUT movement whose target is
+  // this asset — a spare disk left in a server, toner fitted to a printer. Payload
+  // { consumableId, consumableName, movementId, quantity, unit }. Written in the SAME transaction as the
+  // movement. The asset does not "own" the units — a consumable stays a counted quantity (ADR-0008).
+  CONSUMABLE_DELIVERED
+  // A RETURN against a returnable delivery made to this asset (ADR-0098): an IN movement linked to the
+  // delivery via returnOfId. Same payload plus { returnOfId } (the delivery movement id).
+  CONSUMABLE_RETURNED
 }
 
 /// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's
@@ -1643,6 +1659,11 @@ model Consumable {
   // Free-form unit of measure ("units", "meters", "boxes", …). Not an enum on purpose.
   unit         String              @default("units")
   notes        String?
+  // Returnable items (ADR-0098, #1364): a delivery of a returnable consumable (a loaner headset, a
+  // projector remote) stays OUTSTANDING until it is returned. Default false — every existing consumable
+  // reads as non-returnable. Each targeted OUT SNAPSHOTS this flag onto the movement, so toggling it later
+  // never rewrites what a past delivery meant.
+  returnable   Boolean             @default(false)
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
   deletedAt    DateTime?
@@ -1675,10 +1696,37 @@ model ConsumableMovement {
   serviceAccountId String?
   serviceAccount   ServiceAccount?        @relation("ConsumableMovementSaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
   notes            String?
+
+  // ── Delivery target (ADR-0098, #1364) ──────────────────────────────────────────────────────────
+  // An OUT may name WHERE the units went: exactly ONE of a user, an asset or a location (or none — the
+  // quick −1 and every pre-existing row). A destination, NOT an ownership join and NOT per-location
+  // stock: the consumable stays a counted quantity (ADR-0008). Restrict on all three — a delivery is
+  // history-bearing (mirrors ADR-0019); soft deletes are UPDATEs and never fire onDelete.
+  // DB CHECKs (raw SQL in the migration — no PSL syntax): at most one target; targets only on OUT;
+  // `returnable` only on a targeted OUT; `returnOfId` only on IN.
+  targetUserId     String?                @db.Uuid
+  targetUser       User?                  @relation("ConsumableDeliveryTargetUser", fields: [targetUserId], references: [id], onDelete: Restrict)
+  targetAssetId    String?
+  targetAsset      Asset?                 @relation("ConsumableDeliveryTargetAsset", fields: [targetAssetId], references: [id], onDelete: Restrict)
+  targetLocationId String?
+  targetLocation   Location?              @relation("ConsumableDeliveryTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
+  // SNAPSHOT of Consumable.returnable taken when a targeted OUT is written (inside the movement tx), so a
+  // later toggle on the consumable never changes whether a past delivery is outstanding.
+  returnable       Boolean                @default(false)
+  // A RETURN: this IN gives back (part of) the delivery `returnOfId` points at. Outstanding on a
+  // delivery = quantity − SUM(its returns). Restrict: a delivery with returns can never be hard-deleted.
+  returnOfId       Int?
+  returnOf         ConsumableMovement?    @relation("ConsumableMovementReturn", fields: [returnOfId], references: [id], onDelete: Restrict)
+  returns          ConsumableMovement[]   @relation("ConsumableMovementReturn")
   createdAt        DateTime               @default(now())
 
-  // No updatedAt / deletedAt: append-only (ADR-0006). (consumableId, id) serves the ledger query.
+  // No updatedAt / deletedAt: append-only (ADR-0006). (consumableId, id) serves the ledger query; the
+  // four single-column indexes serve the deliveries reads (by target) and the per-delivery return SUM.
   @@index([consumableId, id])
+  @@index([targetUserId])
+  @@index([targetAssetId])
+  @@index([targetLocationId])
+  @@index([returnOfId])
   @@map("consumable_movements")
 }
 
