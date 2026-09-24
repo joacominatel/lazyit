@@ -30,7 +30,8 @@ import { searchText } from './search-text';
  * The REFERENCE toolset (W2-5; tools-and-execution.md §7 rows 4, 15, 16): the taxonomy and places assets
  * hang off — asset models, the four category taxonomies (article categories are the KB folders) and
  * locations. One read tool (`reference_lookup`) and two creates (`asset_model_create`,
- * `location_create`); every other write on these controllers is v1.1 and listed as unexposed.
+ * `location_create`). The rest of their lifecycle — category create, update and archive, model and
+ * location update, archive and restore — is `taxonomy.tools.ts` (#1390).
  *
  * It also exports the reference helpers the assets toolset shares (a model or a location named by id or
  * exact name). Every lookup reads through `rt.call` on a handler the calling tool binds, so a resolution
@@ -281,7 +282,7 @@ export function resolveLocation(
 }
 
 /** An asset category by id or exact name, through `AssetCategoriesController.findAll` (unpaged). */
-function resolveAssetCategory(
+export function resolveAssetCategory(
   rt: AiToolRuntime,
   reference: string,
   withLabel: boolean,
@@ -379,8 +380,17 @@ function projectReference(kind: ReferenceKind, row: Row, full: boolean): Row {
       if (full) out.description = untrusted(str(row.description));
       return out;
     }
-    default: {
+    case 'assetCategory': {
       const out = pick(row, CATEGORY_FIELDS);
+      if (full) {
+        out.description = untrusted(str(row.description));
+        // The advisory attribute dictionary (ADR-0007 amendment, #851): taxonomy configuration.
+        out.specsSchema = untrustedJson(row.specsSchema);
+      }
+      return out;
+    }
+    default: {
+      const out = pick(row, [...CATEGORY_FIELDS, 'order']);
       if (full) out.description = untrusted(str(row.description));
       return out;
     }
@@ -439,7 +449,8 @@ const referenceLookup = defineTool({
     'Find the reference data assets and other records hang off: asset models, locations, asset / ' +
     'application / consumable categories and knowledge-base folders. Give `id` for one record, or ' +
     '`query` (a name fragment) to list matches, or neither to list them all. Use it to find the model ' +
-    'or location to use before creating or updating an asset.',
+    'or location to use before creating or updating an asset. `detail: "full"` on an asset category ' +
+    "also returns its attribute dictionary (`specsSchema`, advisory hints for its assets' attributes).",
   domain: 'reference',
   class: 'read',
   idempotent: true,
@@ -527,8 +538,10 @@ const assetModelCreate = defineTool({
   title: 'Create an asset model',
   description:
     'Create an asset model (a make and model, e.g. "Latitude 7440" by Dell) that assets are instances ' +
-    'of. Optionally file it under an asset category (by id or exact name). Check with reference_lookup ' +
-    'that it does not exist yet.',
+    'of. The manufacturer is free text (there is no separate manufacturer record to create). Optionally ' +
+    'file it under an asset category (by id or exact name): pick the closest existing one from ' +
+    'reference_lookup kind "assetCategory", or create a missing one first with category_create. Check ' +
+    'with reference_lookup that the model does not exist yet.',
   domain: 'reference',
   class: 'write',
   input: z.strictObject({
@@ -649,44 +662,20 @@ const locationCreate = defineTool({
   },
 });
 
-const V1_1 = (what: string) =>
-  `${what}: v1.1 (tools-and-execution.md §7 — model / location / category update and archive).`;
+const NO_ARCHIVED_LIST =
+  'Category restore: no route lists archived categories, so a card could not name or version the one restored (#1390); restore it from the lazyit UI.';
 
 export const referenceToolset: AiToolset = {
   domain: 'reference',
   tools: [referenceLookup, assetModelCreate, locationCreate],
   unexposed: [
-    unexposed(
-      AssetModelsController,
-      ['update', 'remove', 'restore'],
-      V1_1('Asset model update, archive and restore'),
-    ),
-    unexposed(
-      LocationsController,
-      ['update', 'remove', 'restore'],
-      V1_1('Location update, archive and restore'),
-    ),
-    unexposed(
-      AssetCategoriesController,
-      ['create', 'update', 'remove', 'restore'],
-      V1_1('Asset category writes'),
-    ),
-    unexposed(
-      ApplicationCategoriesController,
-      ['create', 'update', 'remove', 'restore'],
-      V1_1('Application category writes'),
-    ),
-    unexposed(
-      ConsumableCategoriesController,
-      ['create', 'update', 'remove', 'restore'],
-      V1_1('Consumable category writes'),
-    ),
+    unexposed(AssetCategoriesController, ['restore'], NO_ARCHIVED_LIST),
+    unexposed(ApplicationCategoriesController, ['restore'], NO_ARCHIVED_LIST),
+    unexposed(ConsumableCategoriesController, ['restore'], NO_ARCHIVED_LIST),
     unexposed(
       ArticleCategoriesController,
       ['remove', 'restore'],
-      V1_1(
-        'Knowledge-base folder delete (a cascading one included) and restore; create and rename are kb_folder_create / kb_folder_rename',
-      ),
+      'Knowledge-base folder delete (a cascading one included) and restore: v1.1 (tools-and-execution.md §7); create and rename are kb_folder_create / kb_folder_rename.',
     ),
     unexposed(
       ArticleCategoriesController,
