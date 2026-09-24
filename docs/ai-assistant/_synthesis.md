@@ -166,9 +166,10 @@ Secret Manager, cleartext-credential operations, the AI's own configuration, and
 > (`workflows.tools.ts`, W2-13); authoring — workflows, versions, connections, connection test, dry-run,
 > enable/disable — is `elevated` and **chat only** (`channels: ['CHAT']`, `workflow-authoring.tools.ts`,
 > W2-14); MCP and headless authoring are deferred (#1344), and a Service Account never authors,
-> connects or enables. Workflow secrets stay a structural exclusion. The `elevated` step-up list gains
-> **actions on a critical application** (`CRITICAL_APPLICATION`), and core derives step-up from the
-> closed list on any write preview, `write` or `elevated`.
+> connects or enables. Workflow secrets stay a structural exclusion. The step-up list gains **every
+> write on a critical application** (`CRITICAL_APPLICATION`), and core derives step-up from the closed
+> list on any write preview, `write` or `elevated`; MCP and headless refuse writes on critical
+> applications (no step-up exists there).
 
 ### 4.2 Execution (R1)
 

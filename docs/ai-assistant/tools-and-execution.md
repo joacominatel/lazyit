@@ -519,8 +519,9 @@ Warning rules for these tools (§9 has the step-up rule):
 - **`OUTBOUND_INTEGRATION`** — creating a connection; changing its host, URL or credential reference;
   authoring a version on an enabled workflow; enabling a workflow. The preview lists every outbound
   host and every mapped field → token, and old → new host on a re-point. No step-up by itself.
-- **`CRITICAL_APPLICATION`** — any workflow write (authoring, retry, replay, task resolve) and any access
-  grant or revoke on an application with `isCritical = true`. Core requires step-up.
+- **`CRITICAL_APPLICATION`** — every AI write on an application with `isCritical = true`: any workflow
+  write (authoring, retry, replay, task resolve) and any access grant or revoke (CEO: "Toda
+  escritura"). Core requires step-up in the chat; MCP and headless refuse it (below).
 - `EXTERNAL_PROVISIONING` / `EXTERNAL_DEPROVISIONING` on retry, replay and task resolve, by the
   workflow's trigger.
 - Run errors, step metadata, manual-task inputs and prompts go through `untrusted()`. Workflow secrets
@@ -528,8 +529,9 @@ Warning rules for these tools (§9 has the step-up rule):
   configured.
 - Over MCP and headless no preview is built: a write that detects a critical application in `run` calls
   `assertChannelAllows(rt.ctx.channel, ['CRITICAL_APPLICATION'])` (`core/pending-action.ts`) before any
-  side effect. It refuses nothing today; it is the seam for the open CEO question on headless actions
-  over critical applications.
+  side effect. On MCP and headless it throws a 403 ("This application is critical; do it from the
+  lazyit chat, where it is confirmed with your password."), per the CEO's "Rechazar"; in the chat it is a
+  no-op, and step-up applies instead.
 - **`elevated`, after v1** (CEO round 2): permission matrix, folder access rules, SA update/grants,
   password reset, instance configuration.
 - **EXCL** (CEO round 2): SA token create/rotate, `provision-local-account`, the AI's own configuration.
@@ -822,7 +824,9 @@ skip classification). The preview carries:
   credential MUST emit `CREDENTIAL_DELIVERY`; a workflow write, access grant or access revoke on an
   application with `isCritical = true` MUST emit `CRITICAL_APPLICATION`** — that is what makes core
   require the step-up. An action with only other warnings (e.g. `NOTIFIES_USERS`,
-  `OUTBOUND_INTEGRATION`) needs no step-up;
+  `OUTBOUND_INTEGRATION`) needs no step-up. Step-up is chat-only: over MCP and headless a write carrying
+  `CRITICAL_APPLICATION` is **refused** instead (`AI_CHANNEL_REFUSED_WARNINGS`, `assertChannelAllows`,
+  CEO decision 2026-09-24, "Rechazar");
 - `untrustedSources[]` — refs of the other-authored content read in this turn (the banner source);
 - `precondition {entity, updatedAt}`.
 

@@ -349,7 +349,7 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 | T-39 | CH | I | Secret Manager plaintext decrypted in the browser leaks into chat context (e.g. "current page" context). | INV-AI-5: the client never sends decrypted vault content or DOM snapshots | v1 |
 | T-40 | CH | I | Injection steers the AI to author a persistent exfiltration integration: a `WEBHOOK_OUT`/`REST` connection to an attacker host plus an enabled workflow mapping grantee identity, which leaks on every future grant and outlives the conversation (§6.9). | Authoring is chat-only and `elevated`; `OUTBOUND_INTEGRATION` preview listing every host and mapped field; created disabled, enabling is its own approval with an embedded dry-run; `CRITICAL_APPLICATION` step-up; no SA authoring (ADR-0097 decision 3, amended) | v1 |
 | T-41 | CH | I | Credential exfiltration by re-pointing a secret-bearing connection to another host. | CSEC-1 (`workflow:secrets` to re-point or attach) runs through the route; the preview shows old → new host; secrets are reference-only, never read (§6.9) | v1 |
-| T-42 | HL, MCP | T, E | No-human authoring or enabling of an outbound integration by an SA or an MCP client. | Authoring tools declare `channels: ['CHAT']`; MCP/headless authoring deferred (#1344) | v1 |
+| T-42 | HL, MCP | T, E | No-human authoring or enabling of an outbound integration by an SA or an MCP client, or any unconfirmed write on a critical application. | Authoring tools declare `channels: ['CHAT']`; MCP/headless authoring deferred (#1344); MCP and headless refuse writes on critical applications (`AI_CHANNEL_REFUSED_WARNINGS`) | v1 |
 
 ---
 
@@ -671,8 +671,11 @@ secret-bearing connection or attaching a secret needs `workflow:secrets` on top 
   credential reference, authors a version on an enabled workflow, or enables a workflow. The preview
   lists every outbound host and every mapped field → token ("what leaves lazyit"), and old → new host
   on a re-point (T-41). No step-up by itself (CEO: flexible, unless the application is critical).
-- **`CRITICAL_APPLICATION`** on any workflow write, access grant or revoke on an application with
-  `isCritical = true`; core requires step-up.
+- **`CRITICAL_APPLICATION`** on every AI write on an application with `isCritical = true` (access
+  grant or revoke, workflow or connection authoring, retry, replay, manual-task resolve — CEO: "Toda
+  escritura"); core requires step-up in the chat, and **MCP and headless refuse it** (CEO: "Rechazar";
+  `AI_CHANNEL_REFUSED_WARNINGS`, a 403 pointing to the chat), because neither channel has a password
+  step-up.
 - **Disabled first.** A workflow the AI creates is disabled; enabling is a separate approval whose
   preview embeds a dry-run against a named sample grant.
 - **Secrets are reference-only.** No tool reads, creates, rotates or deletes a workflow secret; a
@@ -685,7 +688,9 @@ secret-bearing connection or attaching a secret needs `workflow:secrets` on top 
 
 **Residual risk.** An admin who approves an injected proposal without reading the host list still
 creates the channel; the controls make it visible, not impossible. An `ACCESS_GRANTED` workflow on a
-non-critical application needs no password. When ADR-0055's internal allowlist ships, its entries must
+non-critical application needs no password. The MCP/headless refusal on critical applications depends on
+each tool detecting `isCritical` and calling `assertChannelAllows` in `run`; the G2 review checks every
+write tool that can reach an application does. When ADR-0055's internal allowlist ships, its entries must
 be an excluded or elevated AI operation.
 
 **Proposed invariants** (join §7 on the W4-2 security re-review):
@@ -918,7 +923,8 @@ in [[ai-assistant/_synthesis|the synthesis]] §10 places each gate on its units.
 - **Tool classes:** the `elevated` classification is complete. Review the catalog against §6.2,
   especially identity attributes (email), credential delivery, access grants, folder rules and workflow
   authoring (§6.9: chat-only channels, `OUTBOUND_INTEGRATION` and `CRITICAL_APPLICATION` emitted where
-  due, secrets absent, no retry `overrides`). AI configuration and cleartext-credential operations are absent. No generic egress tool
+  due, `assertChannelAllows` called on MCP/headless for critical applications, secrets absent, no retry
+  `overrides`). AI configuration and cleartext-credential operations are absent. No generic egress tool
   exists.
 - **Headless:** the per-SA AI access setting is enforced (off / read-only / read-write), the mutation cap
   works, and `infra:report` SAs are refused.

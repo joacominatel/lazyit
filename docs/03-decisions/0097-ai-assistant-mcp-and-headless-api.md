@@ -140,18 +140,23 @@ The key forks only; each links its analysis.
    >   integration or its destination (creates a connection; changes its host, URL or credential
    >   reference; authors a version on an enabled workflow; enables a workflow). The preview lists every
    >   outbound host and every mapped field → token. It needs **no step-up** by itself.
-   >   `CRITICAL_APPLICATION`: the action is a workflow write — authoring or operations — or an access
-   >   grant or revoke, on an application with `isCritical = true`. It **requires step-up**: it joins the
-   >   core's closed list (`AI_STEP_UP_WARNINGS`), and core derives step-up from that list on **any**
-   >   write preview, `write` or `elevated` — an access revoke (a `write` tool) on a critical application
-   >   needs the password too. Step-up is a chat control: over MCP and headless no preview is built and
-   >   nothing asks for a password, so whether MCP and headless may act on a critical application at all
-   >   is an open CEO question; core carries a per-channel refusal seam (`AI_CHANNEL_REFUSED_WARNINGS`,
-   >   empty today).
+   >   `CRITICAL_APPLICATION`: **every** AI write on an application with `isCritical = true` — access
+   >   grant or revoke, workflow or connection authoring, run retry or replay, manual-task resolve. The
+   >   CEO, asked which AI actions on a critical application need the password in the chat: "Toda
+   >   escritura". It **requires step-up**: it joins the core's closed list (`AI_STEP_UP_WARNINGS`), and
+   >   core derives step-up from that list on **any** write preview, `write` or `elevated`.
+   > - **MCP and headless refuse writes on critical applications.** Step-up is a chat control: over MCP
+   >   and headless no preview is built and nothing asks for a password. The CEO, asked whether MCP and
+   >   headless may write on a critical application: "Rechazar". Core lists `CRITICAL_APPLICATION` as
+   >   refused on both channels (`AI_CHANNEL_REFUSED_WARNINGS`); a tool detecting a critical application
+   >   calls `assertChannelAllows` before any side effect and the call ends as a 403 pointing the user to
+   >   the lazyit chat. Reads stay available on every channel.
    > - **Disabled first.** A workflow the AI creates is created disabled. Enabling it is a separate
    >   approval whose preview embeds a dry-run against a named sample grant.
    >
-   > Decision 4's step-up list grows by `CRITICAL_APPLICATION`; nothing else in decisions 1–13 changes.
+   > Decision 4 changes with this amendment: its step-up list grows by `CRITICAL_APPLICATION`, and step-up
+   > is now **class-independent** — derived from the closed warning list on any chat write, `write` or
+   > `elevated`, not only on elevated actions (see the note under decision 4).
    > → [[ai-assistant/tools-and-execution|tools]] §3, §7, §9; [[ai-assistant/security|security]] §6.1,
    > §6.9.
 
