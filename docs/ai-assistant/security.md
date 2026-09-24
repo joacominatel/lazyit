@@ -586,7 +586,9 @@ the **exfiltration leg** and the **consequential-action leg**.
 ### 6.6 Headless SA runs
 
 - **Principal.** The SA. It is fail-closed and INV-SA-3 applies, so the ungrantable set already
-  denies it `settings:manage`, `user:manage` and `secret:*` [R]. `ai:use` must be **explicitly
+  denies it `settings:manage`, `user:manage` and `secret:*` [R]. This holds for grants written before
+  SEC-011 too: the principal loader strips the ungrantable set when it re-loads the SA for a run, so a
+  legacy row confers nothing (SEC-073). `ai:use` must be **explicitly
   granted** to the SA; there is no default.
 - **Blast radius today** [C]: whatever the SA holds. That can include `accessGrant:grant`,
   `workflow:run` and `workflow:manage` [R]. Injection from content the run reads can drive those verbs

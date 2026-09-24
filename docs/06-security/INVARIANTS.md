@@ -339,7 +339,7 @@ by a service account, and no bot can accidentally become an administrator.
   authorization source is `ServiceAccountPermission`, never `Role`/`RolePermission`.
 - `apps/api/src/auth/principal.ts` + `roles.guard.ts` — a service principal is authorized by its grant
   Set; the role resolver (`PermissionResolverService`) is **never** consulted for it.
-- **(Code-enforced from 2026-06-12, SEC-011 — two complementary layers):**
+- **(Code-enforced from 2026-06-12, SEC-011, and 2026-09-24, SEC-073 — three complementary layers):**
   - **Layer 1 — schema ceiling (source of truth):** `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` (exported
     from `packages/shared/src/schemas/service-account.ts`) names the verbs a service account may **never**
     hold — either ADMIN-equivalent (`settings:manage`, `user:manage`) or HUMAN-ONLY by construction
@@ -352,16 +352,24 @@ by a service account, and no bot can accidentally become an administrator.
     is true. Applied at the **class level** of `ServiceAccountsController` (every management route) and
     at the **method level** of `GET /config/permissions` and `PUT /config/permissions`. The Secret
     Manager mirrors this with `HumanOnlyGuard` (`apps/api/src/secret-manager/human-only.guard.ts`) at the
-    class level of every Secret-Manager controller, and the import wizard with its own guard. This closes
-    the class for pre-existing rows: Layer 1 stops *new* grants; Layer 2 stops *use* of any pre-existing
-    meta-verb / human-only grant. Guard tests: `apps/api/src/auth/service-principal-forbidden.guard.spec.ts`
+    class level of every Secret-Manager controller, and the import wizard with its own guard. Layer 1
+    stops *new* grants; Layer 2 is defense in depth on the routes it guards (Layer 0 below is what makes
+    a pre-existing grant inert everywhere). Guard tests: `apps/api/src/auth/service-principal-forbidden.guard.spec.ts`
     and the e2e block in `apps/api/src/config/config.controller.spec.ts`.
-    **Gap (open, [[SEC-073-sa-ungrantable-permissions-not-stripped-at-principal-load|SEC-073]]):** Layer 2
-    is applied per route, and routes gated on `user:manage` (`UsersController`) or `settings:manage`
-    (`PUT /article-categories/:id/access-rules`, `PUT /instance/update-settings`) do not carry it. The
-    principal loader (`resolveServiceAccountPermissions`) also does not strip the ungrantable set, so a
-    pre-2026-06-12 grant is still functional on those routes. This invariant is not fully enforced for
-    pre-existing rows until SEC-073 closes.
+    Layer 2 is applied per route, so on its own it misses routes gated on `user:manage`
+    (`UsersController`) or `settings:manage` (`PUT /article-categories/:id/access-rules`,
+    `PUT /instance/update-settings`) — that gap was
+    [[SEC-073-sa-ungrantable-permissions-not-stripped-at-principal-load|SEC-073]].
+  - **Layer 0 — principal-load strip (root, from 2026-09-24, SEC-073):** `resolveServiceAccountPermissions`
+    (`apps/api/src/service-accounts/service-account-permissions.ts`) drops every
+    `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` literal when the principal is built, DB-first on every
+    request (INV-1). A grant row persisted before 2026-06-12 is therefore **inert on every route and
+    channel** (HTTP, MCP, headless AI) regardless of which guards a controller carries. The row is not
+    deleted: the service-account read shape hides it, the principal loader logs once per account that it
+    carries inert grants, and the next admin save of the grant set removes it through the audited
+    `PERMISSION_CHANGE` path. Tests: `service-account-permissions.spec.ts` (parity with the shared list),
+    `apps/api/src/users/users.sa-ungrantable.authz.spec.ts` (403 on `POST /users` and a role change),
+    `ai-tool.write-path.spec.ts` (a headless `user:manage` tool is refused).
   - **Reserved engine-SA name (#555 / #542):** a human can neither create nor rename an account into the
     reserved `lazyit-workflow-engine` name (`EngineServiceAccountService.ENGINE_SA_NAME`) — the immutable
     principal a workflow run executes AS. `ServiceAccountsService.assertNotReservedName` 409's create()
