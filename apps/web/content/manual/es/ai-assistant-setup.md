@@ -105,8 +105,9 @@ dirección pública a la que está fijado lazyit —, no solo de si la página s
   los servidores del proveedor, no desde la computadora de la persona, así que solo funcionan si tu
   instancia es alcanzable desde internet por HTTPS con un certificado de confianza pública.
 
-El plugin, los comandos de instalación y las aplicaciones conectadas y tokens de cada persona están en
-**Cuenta → IA y aplicaciones conectadas** (el enlace **Instalar en Claude Code** lleva allí).
+Con MCP activado, la tarjeta también muestra los pasos de **Instalar en Claude Code** (los mismos que en
+**Cuenta → IA y aplicaciones conectadas**). Las aplicaciones conectadas y los tokens personales de cada
+persona están en esa página de la cuenta.
 
 ### Clientes permitidos
 

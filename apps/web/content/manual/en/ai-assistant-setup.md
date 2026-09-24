@@ -101,8 +101,8 @@ address lazyit is pinned to — not merely on whether the page is shown over HTT
   servers, not from the person's computer, so they only work when your instance is reachable from the
   internet over HTTPS with a publicly trusted certificate.
 
-The plugin, the install commands and each person's connected apps and tokens are on **Account → AI &
-connected apps** (**Install in Claude Code** links there).
+While MCP is on, the card also shows the **Install in Claude Code** steps (the same as on **Account → AI &
+connected apps**). Each person's connected apps and personal tokens are on that Account page.
 
 ### Allowed clients
 

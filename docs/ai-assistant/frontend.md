@@ -952,7 +952,8 @@ Edits to existing pages (en + es):
   why OAuth is unavailable on plain HTTP, and that cloud connectors cannot connect. The endpoint is
   `/ai/status` `mcp.endpoint` (the pinned `WEB_ORIGIN` + `/mcp`); only when that is null (no pinned
   origin, an older API, a failed read) is `window.location.origin + "/mcp"` shown, with a note. Copy
-  button; "Install in Claude Code" links to `/account/ai` (W3-9).
+  button. While `mcp.available`, the card embeds W3-9's `McpInstallPanel` (the same panel as `/account/ai`)
+  and links to `/account/ai` for the caller's connected apps and personal tokens.
 - **Allowlist editor.** Lists the curated defaults from `MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS` (label,
   identifier, redirect kind, and a **Verified** / **Vendor docs** badge from `verification`, `source` as
   its tooltip) with **Remove** (adds the id to `mcpClientAllowlistRemovedDefaults`) and **Restore** (drops
@@ -971,8 +972,8 @@ Edits to existing pages (en + es):
   an `infra:report` account is refused whatever is chosen; a missing `ai:use` blocks headless runs; a
   missing `ai:connect` blocks MCP. The setting is saved as chosen — the API allows it and the runtime
   refuses.
-- **Not built here:** the admin all-users connected-apps list (R9) and the install panel — `/account/ai`
-  (W3-9) owns the shared panel; Settings → AI links to it.
+- **Not built here:** the admin all-users connected-apps list (R9). The install panel is W3-9's
+  `McpInstallPanel`, embedded in the MCP card.
 
 ## 11a. As built — the chat (W3-7, #1315)
 
